@@ -658,3 +658,25 @@ fn selected_fonts_are_captured_and_short_runs_fit_their_ink_boxes() {
         }
     }
 }
+
+/// Generated procedures hold the systemdict operators captured at load, so a
+/// later user redefinition of `exec`, `pop` and friends (even a faithful
+/// wrapper, which `load` would return as a procedure and the generated code
+/// would then push as data) cannot change how curry, compose, dip or a
+/// traversal runs. Found in review (PR #923); gs agrees.
+#[test]
+fn generated_procedures_ignore_later_operator_redefinitions() {
+    assert_eq!(
+        eval(
+            "/exec {exec} bind def /pop {pop} bind def /aload {aload} bind def
+             /begin {begin} bind def /repeat {repeat} bind def
+             3 10 {add} fp-curry exec
+             3 {1 add} {2 mul} fp-compose exec
+             [1 2 3] {dup mul} fp-map
+             [1 2 3] 0 {add} fp-fold
+             2 /kept {1 add} fp-dip pop
+             4 {2 mul} {exec 1 add} aop-around exec"
+        ),
+        ["13", "8", "[1 4 9]", "6", "3", "9"]
+    );
+}

@@ -72,8 +72,8 @@ pushed as data, even when it is a name or a procedure.
 3 {1 add} {2 mul} fp-compose exec ==        % 8: (3 + 1) * 2
 ```
 
-These procedures return a new procedure; call it with `exec`, or store it
-with `def` and call it by name. To pass a procedure you have already
+`fp-compose` and `fp-curry` return a new procedure; call it with `exec`, or
+store it with `def` and call it by name. `fp-dip` runs at once. To pass a procedure you have already
 defined, use `/name load`: a bare `name` runs it.
 
 ## A worked example

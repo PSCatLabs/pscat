@@ -19,6 +19,14 @@
 % { [] 0 [] fp-fold } /fp-quotation-required (fold quotation) mustguard
 % { [] [] fp-each } /fp-quotation-required (each quotation) mustguard
 %%EndSelfTest
+% The native operators generated procedures contain, taken from systemdict
+% at load: `/exec load` at call time would pick up a user redefinition
+% (`/pop {pop} bind def` made curry push a procedure as data).
+% Order: exec aload pop begin repeat.
+% @internal
+/fp--ops [ systemdict /exec get systemdict /aload get systemdict /pop get
+  systemdict /begin get systemdict /repeat get ] def
+
 % @internal
 /fp--array {
   dup type dup /arraytype eq exch /packedarraytype eq or not
@@ -41,7 +49,7 @@
   //fp--quote exec exch //fp--quote exec exch
   2 dict begin
   /fp.q exch def /fp.p exch def
-  [ /fp.p load /exec load /fp.q load /exec load ] cvx
+  [ /fp.p load //fp--ops 0 get /fp.q load //fp--ops 0 get ] cvx
   end
 } bind def
 
@@ -54,8 +62,8 @@
   //fp--quote exec
   2 dict begin
   /fp.q exch def /fp.value exch def
-  [ /fp.value load 1 array astore /aload load /pop load
-    /fp.q load /exec load ] cvx
+  [ /fp.value load 1 array astore //fp--ops 1 get //fp--ops 2 get
+    /fp.q load //fp--ops 0 get ] cvx
   end
 } bind def
 
@@ -121,11 +129,11 @@
   /fp.out fp.mode /map eq fp.mode /filter eq or
     { fp.seq length array } { null } ifelse def
   [ fp.seq length [
-      currentdict /begin load //fp--prepare /exec load
-      /fp.q load /exec load
-      currentdict /begin load //fp--collect /exec load
-    ] cvx /repeat load
-    currentdict /begin load //fp--finish /exec load
+      currentdict //fp--ops 3 get //fp--prepare //fp--ops 0 get
+      /fp.q load //fp--ops 0 get
+      currentdict //fp--ops 3 get //fp--collect //fp--ops 0 get
+    ] cvx //fp--ops 4 get
+    currentdict //fp--ops 3 get //fp--finish //fp--ops 0 get
   ] cvx
   end exec
 } bind def

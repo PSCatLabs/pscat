@@ -22,6 +22,15 @@ What shipped:
 
 Changed in review:
 
+- Generated procedures (curry, compose, dip, the traversal loop) looked up
+  `exec`, `aload`, `pop`, `begin` and `repeat` with `load` when built, not at
+  library load as the API promised. After even a faithful user wrapper such as
+  `/pop {pop} bind def`, curry pushed the wrapper as data and failed with
+  `typecheck` (gs too). They now come from systemdict once, at load
+  (`fp--ops`); a regression test covers every constructor. Codex found it.
+- Doc fixes: AOP.md's around example printed 7, not 9; the guide no longer
+  implies `fp-dip` returns a procedure.
+
 - CI failed because `check_functional_docs.py` hashed every `src/**/*.rs`,
   `Cargo.toml`, `Cargo.lock`, `build.rs` and `lib/artkit.ps` against the
   committed studio bundle, and `tests/functional.rs` compared renders with

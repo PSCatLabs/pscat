@@ -26,7 +26,7 @@ no hidden global instrumentation state.
 ```postscript
 (lib/functional.ps) run
 (lib/aspect.ps) run
-3 {2 mul} {exec 1 add} aop-around exec == % 9
+3 {2 mul} {exec 1 add} aop-around exec == % 7
 3 {2 mul} {dup fp-dip exec} aop-around exec == % 12, proceeds twice
 3 {undefined_target} {pop 4 add} aop-around exec == % 7, skips target
 ```
