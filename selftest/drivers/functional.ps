@@ -1,0 +1,9 @@
+%!PS-Adobe-3.0
+%%SelfTestPage: 200x200
+%%Pages: 1
+(lib/functional.ps) run
+(lib/aspect.ps) run
+/c << /Calls 0 >> def
+/draw { gsave dup 20 mul 50 translate 0 0 10 0 360 arc fill grestore pop } c aop-count def
+[1 2 3 4 5] {1 add} fp-map {draw} fp-each
+showpage

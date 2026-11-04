@@ -25,3 +25,5 @@ lib/typewriter.ps
 lib/released.ps
 lib/etching.ps
 lib/qr.ps
+lib/functional.ps
+lib/aspect.ps

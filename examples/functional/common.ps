@@ -1,0 +1,136 @@
+%!PS-Adobe-3.0
+%%Title: Chromatic Bloom — shared drawing vocabulary
+%%EndComments
+% Shared by both drivers; these procedures do not depend on functional.ps.
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+/Style where {pop} {/Style 0 def} ifelse
+/Seed where {pop} {/Seed 314159 def} ifelse
+/Layer where {pop} {/Layer 3 def} ifelse
+Style type /integertype ne {demo-style-integer-required} if
+Style 0 lt Style 2 gt or {demo-style-0-to-2-required} if
+
+% background, linework, two petals, foliage, paper, accent
+/df-palettes [
+  [[0.065 0.035 0.16] [0.97 0.83 0.57] [0.99 0.22 0.42]
+   [0.56 0.30 0.94] [0.20 0.70 0.60] [0.99 0.93 0.74] [0.99 0.62 0.16]]
+  [[0.96 0.87 0.67] [0.22 0.13 0.16] [0.88 0.24 0.12]
+   [0.97 0.59 0.16] [0.20 0.40 0.31] [1 0.96 0.84] [0.44 0.30 0.62]]
+  [[0.025 0.12 0.19] [0.66 0.90 0.91] [0.22 0.61 0.76]
+   [0.21 0.34 0.63] [0.25 0.62 0.59] [0.88 0.96 0.87] [0.98 0.57 0.40]]
+] def
+/df-palette df-palettes Style get def
+/df-color {get aload pop setrgbcolor} bind def
+
+% ( index -- record ), record = [x y radius angle color-index].
+% Deterministic geometry; the 24th record is the large central flower.
+/df-site {
+  5 dict begin /i exch def
+  i 24 eq { [360 495 118 15 0] } {
+    /a i 15 mul 7 add def
+    [360 a cos 235 mul add 476 a sin 172 mul add
+     31 i 13 mul 24 mod add a 90 add i 2 mod]
+  } ifelse
+  end
+} bind def
+/df-visible { 4 get 0 eq } bind def
+/df-weight { 2 get add } bind def
+
+/df-petal {
+  newpath 0 10 moveto
+  20 29 27 67 0 100 curveto
+  -27 67 -20 29 0 10 curveto closepath
+} bind def
+
+% ( record palette -- ). Native loops suit the small fixed petal count.
+/df-flower {
+  8 dict begin /pal exch def /rec exch def
+  gsave
+    rec 0 get rec 1 get translate rec 3 get rotate
+    rec 2 get 100 div dup scale
+    1.3 setlinewidth 1 setlinejoin
+    0 1 11 {
+      /k exch def gsave k 30 mul rotate
+        df-petal pal k 2 mod 2 add df-color
+        gsave fill grestore pal 1 df-color stroke
+        newpath 0 28 moveto 8 43 8 61 0 85 curveto
+        0.8 setlinewidth stroke
+      grestore
+    } for
+    gsave 15 rotate 0.63 dup scale
+      0 1 11 {
+        /k exch def gsave k 30 mul rotate
+          df-petal pal k 2 mod 2 add df-color
+          gsave fill grestore pal 1 df-color stroke
+        grestore
+      } for
+    grestore
+    newpath 0 0 24 0 360 arc pal 6 df-color fill
+    newpath 0 0 19 0 360 arc pal 0 df-color fill
+    0 1 11 {
+      /k exch def gsave k 30 mul rotate
+        newpath 0 13 1.5 0 360 arc pal 1 df-color fill
+      grestore
+    } for
+    newpath 0 0 9 4 8 star pal 5 df-color fill
+  grestore
+  end
+} bind def
+
+% ( record palette -- ). PaintKit inks the same curved spine in each style.
+/df-stem {
+  4 dict begin /pal exch def /rec exch def
+  gsave
+    pal 4 df-color
+    newpath 360 206 moveto
+    rec 0 get 350 rec 0 get 80 sub rec 1 get 100 sub
+    rec 0 get rec 1 get curveto
+    << /Width 3.2 /Pitch 6 /StartTaper 0 /EndTaper 0.2 >> pkribbon
+  grestore
+  end
+} bind def
+
+/df-ground {
+  gsave
+    df-palette 0 df-color 0 0 720 960 rectfill
+    % Engraved orbital contours behind the garden.
+    0 1 19 {
+      /ring exch def
+      newpath 360 476 90 ring 13 mul add 0 360 arc
+      df-palette 3 df-color 0.5 setlinewidth stroke
+    } for
+    Seed srand
+    0 1 359 {
+      pop rand 640 mod 40 add rand 866 mod 48 add
+      newpath 0.55 0 360 arc df-palette 1 df-color fill
+    } for
+    df-palette 1 df-color 0.8 setlinewidth
+    28 28 664 904 rectstroke 34 34 652 892 rectstroke
+    % Small corner devices use artkit's existing star path builder.
+    57 57 10 4 8 star fill 663 57 10 4 8 star fill
+    57 903 10 4 8 star fill 663 903 10 4 8 star fill
+  grestore
+} bind def
+
+/df-type {
+  gsave
+    df-palette 1 df-color
+    /Helvetica findfont 10 scalefont setfont
+    (ARTCOLONY PRESENTS  /  GENERATIVE SESSIONS No. 001) 360 905 showctr
+    /Helvetica-Bold findfont 65 scalefont setfont
+    (CHROMATIC) 360 826 showctr
+    /Helvetica-Bold findfont 103 scalefont setfont
+    (BLOOM) 360 731 showctr
+    /Helvetica findfont 12 scalefont setfont
+    (A GARDEN OF SOUND) 360 695 showctr
+    130 174 moveto 590 174 lineto 0.8 setlinewidth stroke
+    /Helvetica-Bold findfont 18 scalefont setfont
+    (THE INFINITE PETALS) 360 143 showctr
+    /Helvetica findfont 12 scalefont setfont
+    (WITH  THE QUOTATIONS  +  SOFT MACHINES) 360 119 showctr
+    /Helvetica findfont 10 scalefont setfont
+    (SOLSTICE NIGHT  /  DOORS AT DUSK  /  THE GLASSHOUSE) 360 77 showctr
+    /Courier findfont 8 scalefont setfont
+    (A DETERMINISTIC FLIGHT OF FANCY) 360 49 showctr
+  grestore
+} bind def

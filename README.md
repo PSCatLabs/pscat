@@ -134,6 +134,7 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 - [Lettering, headlines and apparel](docs/guides/lettering.md)
 - [Charts and plots](docs/guides/charts.md)
 - [QR codes](docs/guides/qr-codes.md): encode a URL or other text as a QR symbol, drawn as vector geometry
+- [Functional PostScript](docs/guides/functional.md): map, filter, fold and composed procedures for art built from lists of records
 
 ## For AI agents
 

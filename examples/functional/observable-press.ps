@@ -1,0 +1,137 @@
+%!PS-Adobe-3.0
+%%Title: The Observable Press — before, after and around a glyph
+%%BoundingBox: 0 0 1280 960
+%%Pages: 1
+%%EndComments
+(examples/functional/type-common.ps) run
+/ty.max-height 170 def
+/Inspect where {pop} {/Inspect true def} ifelse
+/InjectFault where {pop} {/InjectFault true def} ifelse
+/ProofText where {pop} {/ProofText (SIGNAL) def} ifelse
+/obs.metrics << /Calls 0 /Completed 0 /Rejected 0 >> def
+/obs.fault /none def
+
+/obs-contract { % record -- same-record, or exact named guard
+  dup 3 get type dup /integertype eq exch /realtype eq or not
+    { obs-font-size-must-be-number } if
+  dup 3 get 0 le { obs-font-size-must-be-positive } if
+} bind def
+/obs-return { % metrics -- ; a zero-effect after hook
+  dup /Completed 2 copy get 1 add put pop
+} bind def
+/obs-box { % record -- ; optional diagnostic overlay, never an artistic style
+  4 dict begin /obs.rec exch def /obs.b obs.rec ty-bounds def
+  gsave
+    0.22 0.79 0.72 setrgbcolor 1 setlinewidth
+    obs.b aload pop exch 3 index sub exch 2 index sub rectstroke
+    obs.rec 5 get findfont obs.rec 3 get scalefont setfont
+    /obs.advance obs.rec 0 get stringwidth pop def
+    newpath obs.rec 1 get obs.rec 2 get 14 sub moveto
+    obs.advance 0 rlineto stroke
+    newpath obs.rec 1 get obs.rec 2 get 3 0 360 arc fill
+    /Courier findfont 10 scalefont setfont
+    obs.rec 1 get obs.rec 2 get 32 sub moveto
+    (#) show obs.rec 4 get 8 string cvs show
+    ( / ) show obs.advance round cvi 8 string cvs show
+  grestore
+  end
+} bind def
+/obs-around { % record proceed inspect --
+  { 1 index {exec} fp-dip obs-box } { exec } ifelse
+} bind def
+
+% Before validates the actual input; after counts only normal returns.
+% Around hides a copy of the record on the execution stack while proceeding.
+% The original target still sees exactly (record --), in the caller's scope.
+/obs.mark {ty-flat-letter}
+  {obs-contract} aop-before
+  obs.metrics {obs-return} fp-curry aop-after
+  Inspect {obs-around} fp-curry aop-around
+  obs.metrics aop-count def
+
+/obs.plain ProofText 60 553 764 ty-layout def
+/obs.proof ProofText 60 280 764 ty-layout def
+/obs.run {
+  obs.proof /obs.mark load fp-each
+  % An explicit, isolated fault probe. The contract leaves its original
+  % record on failure. Catch exactly that known fixture, discard the record,
+  % and retain the real error command for the visible failure readout.
+  InjectFault {
+  { [(X) 0 0 (huge) 99 TypeFont] obs.mark } stopped {
+    pop
+    $error /command get dup /obs-font-size-must-be-number ne
+      { unexpected-observable-press-error } if
+    /obs.fault exch def
+    obs.metrics /Rejected 1 put
+  } { observable-press-fault-was-not-rejected } ifelse
+  } if
+} (proof) aop-trace def
+
+0.055 0.075 0.105 setrgbcolor 0 0 1280 960 rectfill
+0.95 0.90 0.78 setrgbcolor
+/Helvetica-Bold findfont 55 scalefont setfont
+60 849 moveto (THE OBSERVABLE PRESS) show
+/Courier findfont 12 scalefont setfont
+60 903 moveto (ARTCOLONY  /  FUNCTIONAL TYPE STUDY 03) show
+60 809 moveto (SAME GLYPH. EXTRA EVIDENCE. NO REWRITE OF THE DRAWING PROCEDURE.) show
+0.28 0.34 0.38 setrgbcolor 0.8 setlinewidth
+60 782 moveto 1220 782 lineto stroke
+
+0.95 0.90 0.78 setrgbcolor
+/Courier findfont 12 scalefont setfont
+60 744 moveto (01 / ORIGINAL TARGET) show
+obs.plain /ty-flat-letter load fp-each
+60 471 moveto (02 / CONTRACT + COUNTER + RETURN HOOK + OPTIONAL INK-BOUNDS OVERLAY) show
+obs.run
+
+% The panel is drawn from the actual counters after execution, never mock data.
+gsave
+  0.11 0.16 0.19 setrgbcolor 899 215 321 531 rectfill
+  0.22 0.79 0.72 setrgbcolor
+  /Courier findfont 11 scalefont setfont
+  925 715 moveto (ACTUAL EXECUTION / AUDIT) show
+  /Helvetica-Bold findfont 72 scalefont setfont
+  925 627 moveto obs.metrics /Calls get 12 string cvs show
+  /Courier findfont 12 scalefont setfont
+  925 600 moveto (ATTEMPTED ENTRIES) show
+  /Helvetica-Bold findfont 72 scalefont setfont
+  925 512 moveto obs.metrics /Completed get 12 string cvs show
+  /Courier findfont 12 scalefont setfont
+  925 485 moveto (NORMAL RETURNS) show
+  1 0.47 0.31 setrgbcolor
+  /Helvetica-Bold findfont 72 scalefont setfont
+  925 397 moveto obs.metrics /Rejected get 12 string cvs show
+  /Courier findfont 12 scalefont setfont
+  925 370 moveto (CONTRACT REJECTION) show
+  /Courier findfont 10 scalefont setfont
+  925 316 moveto InjectFault {(Fault probe: size = \(huge\))} {(Fault probe disabled.)} ifelse show
+  925 296 moveto InjectFault {(Rejected before drawing.)} {(All inputs are valid.)} ifelse show
+  925 276 moveto InjectFault {(After hook did not run.)} {(Every target returned.)} ifelse show
+  925 246 moveto (No timer. No fabricated samples.) show
+
+grestore
+
+% Six actual completed entries make six paired event marks; the rejected
+% attempt is a separate red marker. Text-length changes update this strip.
+0 1 obs.metrics /Completed get 1 sub {
+  /obs.i exch def
+  0.22 0.79 0.72 setrgbcolor
+  60 obs.i 30 mul add 178 8 22 rectfill
+  72 obs.i 30 mul add 178 8 22 rectfill
+} for
+1 0.47 0.31 setrgbcolor
+obs.metrics /Rejected get 0 gt {
+  60 obs.metrics /Completed get 30 mul add 178 20 22 rectfill
+} if
+/Courier findfont 11 scalefont setfont
+60 151 moveto (ENTER + RETURN PAIRS / FINAL MARK = REJECTED ATTEMPT) show
+60 128 moveto (ERROR: ) show /obs.fault load 80 string cvs show
+0.95 0.90 0.78 setrgbcolor
+60 78 moveto (BEFORE CHECKS. AFTER COUNTS SUCCESS. AROUND ADDS INSPECTION.) show
+60 55 moveto (THE LIBRARY DOES NOT GLOBALLY REPLACE A SINGLE OPERATOR.) show
+
+(attempted=) print obs.metrics /Calls get =
+(completed=) print obs.metrics /Completed get =
+(rejected=) print obs.metrics /Rejected get =
+(fault=) print /obs.fault load =
+showpage

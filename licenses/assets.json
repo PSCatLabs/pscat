@@ -4,6 +4,33 @@
   "package_license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
   "entries": [
     {
+      "id": "functional-studio-wasm",
+      "paths": [
+        "docs/functional-postscript/assets/pscat-studio-runtime.js"
+      ],
+      "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
+      "copyright": "PSCat contributors; embedded fonts and dependency authors as recorded in THIRD_PARTY_NOTICES.md and wasm-dependency-licenses.html",
+      "ships_in": [
+        "repo-only"
+      ],
+      "license_files": [
+        "LICENSE-MIT",
+        "LICENSE-APACHE",
+        "LICENSE-OFL",
+        "THIRD_PARTY_NOTICES.md",
+        "fonts/LICENSE",
+        "docs/functional-postscript/assets/wasm-dependency-licenses.html",
+        "fonts/base35/TeXGyre-adventor/GUST-FONT-LICENSE.txt",
+        "fonts/base35/TeXGyre-bonum/GUST-FONT-LICENSE.txt",
+        "fonts/base35/TeXGyre-chorus/GUST-FONT-LICENSE.txt",
+        "fonts/base35/TeXGyre-heroscn/GUST-FONT-LICENSE.txt",
+        "fonts/base35/TeXGyre-pagella/GUST-FONT-LICENSE.txt",
+        "fonts/base35/TeXGyre-schola/GUST-FONT-LICENSE.txt",
+        "fonts/base35/URW-symbols/LICENSE.OFL"
+      ],
+      "notes": "Generated from this checkout by scripts/build_functional_studio.py: gzip/base64 PSCat WASM, unchanged web/pscat.js, and project-owned PS examples. Existing bundled font and Rust dependency terms remain in force; no new dependency."
+    },
+    {
       "id": "embedded-liberation",
       "paths": [
         "fonts/Liberation*.ttf"
