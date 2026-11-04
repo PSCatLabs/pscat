@@ -507,6 +507,8 @@ After publishing:
       it.
 - [ ] The `post-publish-check` job (below) is green.
 - [ ] **Outsider install smoke test** (below) passes.
+- [ ] Stable releases only: the announcement is sent to the mailing list
+      (`/announce-release`, [`ANNOUNCING.md`](ANNOUNCING.md)).
 - [ ] The release issue is closed with a link to the run's release report.
 
 ### Post-publish install check

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{SUBJECT}}</title>
+</head>
+<!--
+  pscat release announcement, e-mail HTML. Copy this file next to the draft,
+  replace every {{...}} and the bracketed sample text, and keep the rest.
+  E-mail rules: tables for layout, inline styles only, no <style>/<script>,
+  no web fonts, images by absolute https URL (Gmail blocks data: URIs), alt
+  text on every image, width at most 600px. Colours are the site's light
+  palette (site/style.css).
+-->
+<body style="margin:0;padding:0;background:#f1eee7;">
+<div style="display:none;max-height:0;overflow:hidden;">{{PREHEADER: one sentence shown in the inbox list}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1eee7;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#fbfaf7;border:1px solid #d9d4c7;border-radius:10px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#21242c;">
+
+<!-- Header: logo, name, tagline -->
+<tr><td style="padding:28px 32px 8px 32px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td style="vertical-align:middle;padding-right:14px;">
+      <img src="https://pscatlabs.github.io/pscat/assets/brand/pscat-logo-d-512.png" width="56" height="56" alt="pscat logo: a %! page with cat ears" style="display:block;border:0;">
+    </td>
+    <td style="vertical-align:middle;">
+      <div style="font-size:24px;font-weight:700;letter-spacing:-0.3px;">pscat <span style="color:#0b6b5b;">{{VERSION}}</span></div>
+      <div style="font-size:14px;color:#5d6372;">PostScript for precision and imagination &middot; PSCatLabs</div>
+    </td>
+  </tr></table>
+</td></tr>
+
+<!-- Intro -->
+<tr><td style="padding:12px 32px 4px 32px;font-size:16px;line-height:1.55;">
+  <p style="margin:0 0 12px 0;">{{INTRO: what pscat is, in one or two sentences, then what this release is about}}</p>
+</td></tr>
+
+<!-- Picture strip: three renders, all made with pscat -->
+<tr><td style="padding:4px 26px 8px 26px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td width="33%" style="padding:6px;vertical-align:top;"><img src="{{IMG1_URL}}" width="170" alt="{{IMG1_ALT}}" style="display:block;width:100%;height:auto;border:1px solid #d9d4c7;border-radius:6px;"><div style="font-size:12px;color:#5d6372;padding-top:4px;">{{IMG1_CAPTION}}</div></td>
+    <td width="33%" style="padding:6px;vertical-align:top;"><img src="{{IMG2_URL}}" width="170" alt="{{IMG2_ALT}}" style="display:block;width:100%;height:auto;border:1px solid #d9d4c7;border-radius:6px;"><div style="font-size:12px;color:#5d6372;padding-top:4px;">{{IMG2_CAPTION}}</div></td>
+    <td width="33%" style="padding:6px;vertical-align:top;"><img src="{{IMG3_URL}}" width="170" alt="{{IMG3_ALT}}" style="display:block;width:100%;height:auto;border:1px solid #d9d4c7;border-radius:6px;"><div style="font-size:12px;color:#5d6372;padding-top:4px;">{{IMG3_CAPTION}}</div></td>
+  </tr></table>
+</td></tr>
+
+<!-- Highlights -->
+<tr><td style="padding:12px 32px 0 32px;">
+  <h2 style="margin:0 0 8px 0;font-size:18px;color:#0b6b5b;">What's new</h2>
+  <ul style="margin:0 0 8px 0;padding-left:20px;font-size:15px;line-height:1.55;">
+    <li style="margin-bottom:6px;"><b>{{FEATURE}}</b> &mdash; {{what someone can now do}}</li>
+  </ul>
+</td></tr>
+
+<!-- Install -->
+<tr><td style="padding:16px 32px 0 32px;">
+  <h2 style="margin:0 0 8px 0;font-size:18px;color:#0b6b5b;">Install</h2>
+  <p style="margin:0 0 6px 0;font-size:15px;line-height:1.5;"><b>Claude desktop app (Cowork)</b><br>
+  Customize &rarr; Plugins &rarr; Add &rarr; Add marketplace, enter <code style="font-family:ui-monospace,Menlo,Consolas,monospace;background:#f1eee7;padding:1px 4px;border-radius:3px;">PSCatLabs/pscat</code>, then install <b>pscat</b> and start a new Cowork task. The plugin downloads pscat itself on first use; no Rust or Node needed.</p>
+  <p style="margin:10px 0 6px 0;font-size:15px;line-height:1.5;"><b>ChatGPT desktop app</b><br>
+  Plugins &rarr; Add &rarr; Add marketplace, enter <code style="font-family:ui-monospace,Menlo,Consolas,monospace;background:#f1eee7;padding:1px 4px;border-radius:3px;">PSCatLabs/pscat</code>, then install <b>pscat</b>.</p>
+  <p style="margin:10px 0 6px 0;font-size:15px;line-height:1.5;"><b>Claude Code</b></p>
+  <pre style="margin:0 0 6px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#21242c;color:#e1e4ea;padding:10px 12px;border-radius:6px;white-space:pre-wrap;">/plugin marketplace add PSCatLabs/pscat
+/plugin install pscat@pscat</pre>
+  <p style="margin:10px 0 6px 0;font-size:15px;line-height:1.5;"><b>Codex</b></p>
+  <pre style="margin:0 0 6px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#21242c;color:#e1e4ea;padding:10px 12px;border-radius:6px;white-space:pre-wrap;">codex plugin marketplace add PSCatLabs/pscat
+codex plugin add pscat@pscat</pre>
+  <p style="margin:10px 0 0 0;font-size:15px;line-height:1.5;">{{INSTALL_EXTRA: the command line (cargo install pscat / npm) for a stable release, or the pre-release downloads link for an rc}}</p>
+</td></tr>
+
+<!-- Prompts to try -->
+<tr><td style="padding:16px 32px 0 32px;">
+  <h2 style="margin:0 0 4px 0;font-size:18px;color:#0b6b5b;">Things to ask for</h2>
+  <p style="margin:0 0 8px 0;font-size:14px;color:#5d6372;">Paste one into Claude, ChatGPT or Codex with the plugin installed.</p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:1.45;">
+    <tr><td style="padding:8px 12px;background:#f1eee7;border-left:3px solid #0b6b5b;border-radius:4px;">&ldquo;{{PROMPT}}&rdquo;<br><span style="color:#5d6372;font-size:12px;">{{what it shows}}</span></td></tr>
+    <tr><td style="height:6px;line-height:6px;font-size:0;">&nbsp;</td></tr>
+  </table>
+</td></tr>
+
+<!-- Links and sign-off -->
+<tr><td style="padding:18px 32px 28px 32px;font-size:15px;line-height:1.55;">
+  <p style="margin:0 0 12px 0;">
+    <a href="{{RELEASE_URL}}" style="color:#0b6b5b;font-weight:600;">Release notes</a> &middot;
+    <a href="https://pscatlabs.github.io/pscat/" style="color:#0b6b5b;font-weight:600;">Website and gallery</a> &middot;
+    <a href="https://github.com/PSCatLabs/pscat/issues" style="color:#0b6b5b;font-weight:600;">Report a problem</a>
+  </p>
+  <p style="margin:0;">{{SIGN_OFF}}</p>
+</td></tr>
+
+</table>
+<p style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:12px;color:#5d6372;margin:12px 0 0 0;">You're getting this because you joined the PSCat announcements group.</p>
+</td></tr>
+</table>
+</body>
+</html>
