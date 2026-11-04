@@ -88,6 +88,21 @@
   interactive, animated or reflowing web content, accessibility and editing in
   the DOM, and they need nothing installed.</p>
 
+  <h2>Refining by feedback loops</h2>
+  <p>Render, let a critic (you or an art-critic agent) judge the PNG, edit the
+  source, render again, until it looks right: the psart skill is built around
+  this render-look-refine loop, and over MCP the PNG comes straight back to the
+  agent. Each round is a targeted change (a coordinate, a palette entry, a
+  stroke count, an opacity, the seed) with everything else held fixed, so the
+  loop converges; every step is a revertible diff; the final result is
+  reproducible; and <code>--sweep-seed</code>, <code>--sweep</code> and
+  <code>pscat sheet</code> (the <code>review_sheet</code> tool) put candidates
+  side by side. Image models refine too, with conversational edits,
+  inpainting and image-to-image, but as of November 2026 an edit generally
+  re-samples the image: parts you liked can drift, there is no direct numeric
+  control, and the same edit does not repeat. In a hybrid, freeze the
+  image-model layer and iterate on the pscat layer.</p>
+
   <h2>A deterministic workflow</h2>
   <p>With the same pscat version and font packs, the same program and seed give
   the same pixels on every run, and pscat does its own math, so a seeded render matches on macOS,
@@ -115,6 +130,7 @@
     <tr><td>You're in Claude or another text-only agent and need an actual image</td><td>pscat (plugin or MCP server)</td><td>The model writes the program, sees the render and refines it; no image-model account or per-image cost</td></tr>
     <tr><td>Quick diagram or icon for a web page</td><td>LLM-written SVG or HTML</td><td>Nothing to install; the browser renders it</td></tr>
     <tr><td>Many variations of one design</td><td>pscat</td><td><code>--sweep-seed</code> and <code>pscat sheet</code></td></tr>
+    <tr><td>You will iterate on looks with an agent critic until it is right</td><td>pscat</td><td>Each round is a small, revertible source edit with everything else fixed; candidates compare on one sheet</td></tr>
     <tr><td>Thousands of rule-generated marks (patterns, L-systems, tilings)</td><td>pscat</td><td>Loops, recursion and seeded random numbers are in the language; SVG lists every element</td></tr>
     <tr><td>Interactive, animated or reflowing web content</td><td>SVG, HTML and CSS</td><td>The DOM, CSS layout, scripting and accessibility</td></tr>
     <tr><td>An image that must be regenerated identically, in CI or later</td><td>pscat (pin the version and font packs)</td><td>Same program, seed, version and fonts, same pixels; no model call</td></tr>

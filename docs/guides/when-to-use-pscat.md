@@ -242,6 +242,41 @@ Where SVG and HTML are the better choice:
 - editing in the browser's DOM or in a vector editor;
 - nothing to install: every browser renders them.
 
+## Refining by feedback loops
+
+pscat suits a goal-driven loop on looks: render, have a critic (you, or an
+art-critic agent) judge the PNG, turn that into specific feedback, edit the
+source, render again, and repeat until it looks right. The psart skill is
+built around exactly this render-look-refine loop, and over MCP
+`render_postscript` hands the PNG straight back to the agent
+([pscat for AI agents](agents.md)). This repository uses the same loop on
+itself: a render change is judged by an independent reviewer agent against
+written criteria before it merges.
+
+Why it converges:
+
+- **Each round is a targeted change.** Move a coordinate, change one palette
+  entry, the stroke count, an opacity or the seed, and everything else stays
+  exactly as it was. "Move the moon 5% left" is an edit to one number.
+- **Every step is a diff.** You can review a round, keep it or revert it.
+- **The end result is reproducible.** The final program and seed render the
+  same picture again.
+- **Candidates side by side.** `--sweep-seed 1:12` or `--sweep NAME=10,20,40`
+  renders one program across seeds or values in one run, and `pscat sheet`
+  (the `review_sheet` MCP tool) lays several programs out on one labelled PNG
+  ([Getting started](getting-started.md)).
+
+Image models refine too: conversational edits, inpainting and image-to-image
+are standard, and they work well. The general difference, as of November
+2026, is that an edit re-samples the image. It can disturb parts you were
+happy with (text, a face, the composition can drift), there is no direct
+numeric control ("warm this wash slightly"), and the same edit does not
+give the same result twice.
+
+The two combine: in a hybrid piece (see [Combining them](#combining-them)),
+generate the image-model layer once and freeze it, and do the iterating on
+the pscat layer above it.
+
 ## A deterministic workflow
 
 A pscat render is a function of the program and its seed: with the same pscat
@@ -286,6 +321,7 @@ or API call; the site's
 | You're in Claude or another text-only agent and need an actual image | pscat (plugin or MCP server) | The model writes the program, sees the render and refines it; no image-model account or per-image cost |
 | Quick diagram or icon for a web page | LLM-written SVG or HTML | Nothing to install; the browser renders it |
 | Many variations of one design | pscat | `--sweep-seed` and `pscat sheet` |
+| You will iterate on looks with an agent critic until it is right | pscat | Each round is a small, revertible source edit with everything else fixed; candidates compare on one sheet |
 | Thousands of rule-generated marks (patterns, L-systems, tilings) | pscat | Loops, recursion and seeded random numbers are in the language; SVG lists every element |
 | Interactive, animated or reflowing web content | SVG, HTML and CSS | The DOM, CSS layout, scripting and accessibility |
 | An image that must be regenerated identically, in CI or later | pscat (pin the version and font packs) | Same program, seed, version and fonts, same pixels; no model call |

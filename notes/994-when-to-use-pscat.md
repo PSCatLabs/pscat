@@ -19,7 +19,10 @@ written) draw and look at real pictures through the plugin or MCP server; the
 owner asked for that point mid-run, and then for two more sections: PostScript as a
 program versus SVG/HTML as markup (with what SVG/HTML do better), and the
 deterministic workflow (render = function of source + seed, the WebAssembly
-build). The hosted MCP server (#689) is not shipped and is not claimed. LLM-written SVG and matplotlib are treated
+build). The hosted MCP server (#689) is not shipped and is not claimed. A fourth
+addition, "Refining by feedback loops", concedes that image models refine
+(edits, inpainting, image-to-image) and contrasts only re-sampling, numeric
+control and repeatability. LLM-written SVG and matplotlib are treated
 fairly: SVG is also diffable vector source, and matplotlib is the better
 choice when the data is already in Python.
 
@@ -56,6 +59,9 @@ QR only, with "no 1D barcodes" listed as a weak spot.
 | Seeded renders match on macOS, Linux and the browser build, rare thin-curve exception | `notes/738-fmath-one-libm.md` (0 differing results/pixels after #738); `docs/guides/artkit.md` lines 7-11 |
 | Test suite pins rendered output | `tests/golden.rs` (vs Ghostscript), `tests/render.rs`, per-library pixel tests |
 | WebAssembly build renders client-side; npm `pscat`; playground | `src/wasm.rs`, `web/pscat.js`, `scripts/build_wasm.sh`, `site/playground.html`; README install block |
+| Render-look-refine loop; MCP returns the PNG | `plugin/skills/psart/SKILL.md` "The loop"; `site/agents.html` (`render_postscript`) |
+| `--sweep NAME=...`, `pscat sheet` = `review_sheet` MCP tool | `docs/guides/getting-started.md` "Seed sweeps", "Review sheets"; `site/agents.html` tool table |
+| The repo judges render changes with an independent reviewer agent against written criteria | `SDLC.md` "Who merges" tier (b); `docs/dev/TASTE.md` |
 | Evening Stream, Alpine Lake are painted with paintkit | `gallery/manifest.json` libraries |
 
 Deferred: the hybrid showcase is #995. The guide links the issue and names its
