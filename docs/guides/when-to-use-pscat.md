@@ -376,7 +376,7 @@ Safari. Its print-production notes list these.
 print-shop currently pins a pre-release pscat: a 0.6.3 feature branch plus
 a small patch that adds vector output to the WebAssembly build. That patch
 was the starting point for the SVG and PDF output now on `main`, and
-print-shop's issue #16 moves it onto that.
+[print-shop#16](https://github.com/PSCatLabs/print-shop/issues/16) moves it onto that.
 
 ## Many documents: write the template once, render each one
 
@@ -408,8 +408,8 @@ one process at a time:
 |---|---|---|---|
 | Business card, 2 sides | about 9 ms | about 10 ms | about 9 ms |
 | 40-item menu, 3 pages | about 0.15 s | about 0.2 s | about 0.27 s |
-| 500-item menu, 30 pages | about 1.9 s | about 2.4 s | about 3.6 s |
-| 1000 personalized cards, one after another | about 10 s | about 11 s | about 9 s |
+| 500-item menu, 32 pages | about 1.9 s | about 2.4 s | about 3.4 s |
+| 1000 personalized cards, one after another | about 9 s | about 11 s | about 9 s |
 
 Each figure is a median of 20 runs (the batch row is one run of 1000). The
 native times include starting the process; the WebAssembly times are runs in
@@ -439,8 +439,8 @@ figures for them.
 | Interactive, animated or reflowing web content | SVG, HTML and CSS | The DOM, CSS layout, scripting and accessibility |
 | An image that must be regenerated identically, in CI or later | pscat (pin the version and font packs) | Same program, seed, version and fonts, same pixels; no model call |
 | Rendering inside a web page, no server or GPU | pscat's WebAssembly build, or SVG | Both render client-side |
-| A web app that must produce identical print-ready documents for every user | pscat's WebAssembly build (SVG and PDF on `main`, not yet released) | Preview, download and print come from one run; same template and data, same bytes; no server ([print-shop](https://github.com/PSCatLabs/print-shop) is an example) |
-| High-volume batch generation of documents (menus, cards, labels, certificates) | pscat, with an LLM to help write the template once | Each document is a deterministic CPU render from data: no per-call cost, rate limit, GPU or re-check |
+| A web app that must produce identical print-ready documents for every user | pscat's WebAssembly build (SVG and PDF on `main` since #1003, not in 0.7.0-rc.3 or earlier) | Preview, download and print come from one run; same template and data, same bytes; no server ([print-shop](https://github.com/PSCatLabs/print-shop) is an example) |
+| High-volume batch generation of documents (menus, cards, labels, certificates) | pscat, with an LLM to help write the template once | Each document is a deterministic CPU render from data: no per-call cost, rate limit or GPU, and nothing sampled, so nothing to re-roll or spot-check per document |
 | Offline, no GPU, no per-image cost | pscat | One CPU binary, MIT or Apache-2.0 |
 
 ## pscat's weak spots

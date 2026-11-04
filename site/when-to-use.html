@@ -143,7 +143,7 @@
   byte-identical to the Node-rendered one. Its PDFs are RGB, with no PDF/X,
   TrimBox, BleedBox or crop marks. It pins a pre-release pscat (a 0.6.3 branch
   plus the patch that became the SVG and PDF output on <code>main</code>) until
-  its issue #16 repins it.</p>
+  <a href="https://github.com/PSCatLabs/print-shop/issues/16">print-shop#16</a> repins it.</p>
 
   <h2>Many documents: write the template once, render each one</h2>
   <p>For thousands of menus, cards, labels, certificates or personalized
@@ -155,9 +155,9 @@
   in and pages out, on a laptop, a server or the user's browser.</p>
   <p>Measured on print-shop's own jobs (Apple M4 Mac mini, 16 GB, macOS 15.7,
   2026-11-04, one process at a time, medians of 20): a two-sided business card
-  in about 9 ms, a 30-page, 500-item menu to PDF in about 1.9 s with native
+  in about 9 ms, a 32-page, 500-item menu to PDF in about 1.9 s with native
   <code>pscat</code>, and 1000 personalized cards one after another in about
-  10 s. The full table, including the WebAssembly build, is in the
+  9 s. The full table, including the WebAssembly build, is in the
   <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md#many-documents-write-the-template-once-render-each-one">guide</a>.
   These measure pscat only; we quote no figures for image models or LLMs.</p>
 
@@ -182,8 +182,8 @@
     <tr><td>Interactive, animated or reflowing web content</td><td>SVG, HTML and CSS</td><td>The DOM, CSS layout, scripting and accessibility</td></tr>
     <tr><td>An image that must be regenerated identically, in CI or later</td><td>pscat (pin the version and font packs)</td><td>Same program, seed, version and fonts, same pixels; no model call</td></tr>
     <tr><td>Rendering inside a web page, no server or GPU</td><td>pscat's WebAssembly build, or SVG</td><td>Both render client-side</td></tr>
-    <tr><td>A web app that must produce identical print-ready documents for every user</td><td>pscat's WebAssembly build (SVG and PDF on <code>main</code>, not yet released)</td><td>Preview, download and print come from one run; same template and data, same bytes; no server (<a href="https://github.com/PSCatLabs/print-shop">print-shop</a> is an example)</td></tr>
-    <tr><td>High-volume batch generation of documents (menus, cards, labels, certificates)</td><td>pscat, with an LLM to help write the template once</td><td>Each document is a deterministic CPU render from data: no per-call cost, rate limit, GPU or re-check</td></tr>
+    <tr><td>A web app that must produce identical print-ready documents for every user</td><td>pscat's WebAssembly build (SVG and PDF on <code>main</code> since #1003, not in 0.7.0-rc.3 or earlier)</td><td>Preview, download and print come from one run; same template and data, same bytes; no server (<a href="https://github.com/PSCatLabs/print-shop">print-shop</a> is an example)</td></tr>
+    <tr><td>High-volume batch generation of documents (menus, cards, labels, certificates)</td><td>pscat, with an LLM to help write the template once</td><td>Each document is a deterministic CPU render from data: no per-call cost, rate limit or GPU, and nothing sampled, so nothing to re-roll or spot-check per document</td></tr>
     <tr><td>Offline, no GPU, no per-image cost</td><td>pscat</td><td>One CPU binary, MIT or Apache-2.0</td></tr>
   </table>
 
