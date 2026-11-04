@@ -287,7 +287,7 @@ pub fn run(options: &mut Options, threads: u32) -> ExitCode {
         .as_deref()
         .expect("check_options requires --png");
     let refs: Vec<&Pixmap> = pages.iter().collect();
-    if !crate::write_pngs(&refs, png, options.halftone) || failed {
+    if !crate::write_pngs(&refs, png, options.halftone, options.scale()) || failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS

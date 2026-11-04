@@ -34,6 +34,7 @@ cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)
 cargo run -- --dpi 300 --png out.png file.ps   # print-resolution rendering
+                                          # (the PNG records 300 dpi, so it prints at true size)
 cargo run -- --bands 4 --png out.png file.ps   # render on 4 threads, 4 bands
 cargo run -- --spool jobs/                # act like a lab printer: render
                                           # each .ps/.eps dropped into jobs/

@@ -216,13 +216,19 @@ impl Options {
         }
     }
 
+    /// Device pixels per point at `--dpi`: the scale every canvas of this
+    /// run is made at, and what the PNG's `pHYs` chunk records (#982).
+    fn scale(&self) -> f32 {
+        self.dpi / 72.0
+    }
+
     /// A fresh interpreter on this run's page: its size at `--dpi`, the
     /// bounding box's origin, where the size came from, and the
     /// `--max-pixels` cap for any page `setpagedevice` makes (#909). An
     /// error when the page is too large at this dpi or over the cap.
     fn new_interp(&self) -> Result<Interp, String> {
         let (w, h) = self.page;
-        let scale = self.dpi / 72.0;
+        let scale = self.scale();
         self.check_pixel_cap()?;
         let mut interp = Interp::with_page_scaled(w, h, scale)
             .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
@@ -1004,7 +1010,7 @@ fn finish_headless(
         if pages.is_empty() || gfx.has_trailing_art() {
             pages.push(&gfx.pixmap);
         }
-        if !write_pngs(&pages, path, options.halftone) {
+        if !write_pngs(&pages, path, options.halftone, options.scale()) {
             return ExitCode::FAILURE;
         }
     }
@@ -1049,8 +1055,9 @@ fn finish_headless(
 }
 
 /// Write `pages` as `--png PATH` does: one page to PATH itself, several to
-/// PATH-001.png, PATH-002.png, ... False once a write fails.
-fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool {
+/// PATH-001.png, PATH-002.png, ... False once a write fails. Each file
+/// records `scale` (dpi / 72) in its `pHYs` chunk.
+fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool, scale: f32) -> bool {
     // --halftone screens the raster on the way out, like a mono
     // printer's RIP; the vector targets stay contone.
     let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
@@ -1061,7 +1068,7 @@ fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool 
         } else {
             page
         };
-        if let Err(e) = page.save_png(path) {
+        if let Err(e) = pscat::png::save(page, scale, path) {
             eprintln!("pscat: cannot write {path}: {e}");
             false
         } else {
@@ -1447,7 +1454,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         match &options.png {
             Some(path) => {
                 let out = numbered_path(path, i + 1);
-                if let Err(e) = page.save_png(&out) {
+                if let Err(e) = pscat::png::save(&page, options.scale(), &out) {
                     eprintln!("pscat: cannot write {out}: {e}");
                     return ExitCode::FAILURE;
                 }
@@ -1493,7 +1500,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
     }
 
     if let (Some((sheet, _)), Some(path)) = (&sheet, &options.contact_sheet) {
-        if let Err(e) = sheet.save_png(path) {
+        if let Err(e) = pscat::png::save(sheet, options.scale(), path) {
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }

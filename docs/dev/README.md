@@ -44,6 +44,11 @@ usage guide; for how to use a library, see the [guides](../guides/README.md).
 | [`design/CANVAS_SURFACE.md`](design/CANVAS_SURFACE.md) | The shared canvas surface under the paint and dry-media libraries. |
 | [`design/WATERCOLOR.md`](design/WATERCOLOR.md) | The watercolor rendering spike (prototypes in [`design/watercolor_prototypes/`](design/watercolor_prototypes/)). |
 | [`design/TYPEWRITER.md`](design/TYPEWRITER.md) | `lib/typewriter.ps` (references and tools in [`design/typewriter/`](design/typewriter/)). |
+| [`design/QR_CODE.md`](design/QR_CODE.md) | Native QR library feature plan, current scope, independent verification and business-card integration. |
+
+For the QR checkpoint's independent review, use the
+[review handoff](design/QR_CODE_REVIEW.md), [API contracts](design/QR_CODE_API.md)
+and [verification guide](design/QR_CODE_TESTING.md).
 
 ## Where new docs go
 

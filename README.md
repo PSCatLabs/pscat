@@ -119,6 +119,7 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 - [Printmaking and etching](docs/guides/printmaking.md) and [dry media](docs/guides/dry-media.md)
 - [Lettering, headlines and apparel](docs/guides/lettering.md)
 - [Charts and plots](docs/guides/charts.md)
+- [QR codes](docs/guides/qr-codes.md): encode a URL or other text as a QR symbol, drawn as vector geometry
 
 ## For AI agents
 

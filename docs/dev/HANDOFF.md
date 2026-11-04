@@ -5,6 +5,19 @@
 > [`README.md`](README.md)) in `docs/dev/`, and history, including the frozen
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
+>
+> In progress: `lib/qr.ps` is a native QR Model 2 encoder (byte mode,
+> versions 1–40, levels L/M/Q/H, automatic or forced masks) with a public
+> `qrencode`/`qrdraw` vector API ([guide](../guides/qr-codes.md)). Every
+> version and level is checked against an independent encoder, and its
+> PNG, SVG and PDF exports, drawn on the pixel grid, decode with two
+> independent decoders
+> ([testing](design/QR_CODE_TESTING.md)). The gallery's two-sided printable
+> business card, `gallery/pscat_card.ps` (#974), carries the repository URL.
+> Its exported sides decode and are size-checked in `tests/qr_card.rs`.
+> Gotcha: its still is rendered at 300 dpi, not 2x, so the QR stays on whole
+> pixels (command in its header). Continue from
+> [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II
@@ -1289,6 +1302,18 @@ renders eight examples in both and compares block-downsampled output).
   `--allow-read` or `--out-root` (same rule as #740); a hosted server (#689)
   must not read these. Tests build a `Config` with an injected lookup, never
   `std::env::set_var`. See `notes/756-mcp-env-limits.md`.
+- **PNGs record their resolution (#982).** Every PNG pscat writes goes through
+  `src/png.rs`, which splices one `pHYs` chunk (unit 1, round(dpi / 0.0254)
+  pixels per metre, both axes) in before the first `IDAT` of tiny-skia's output.
+  `IDAT` is untouched, so decoded pixels never change. Never call
+  `Pixmap::save_png` / `encode_png` for a file pscat writes: `clippy.toml` bans
+  them, and an SVG-embedded image is the one allowed exception. A `Page` carries
+  its scale (dpi / 72), the CLI passes `Options::scale()`, and composite sheets
+  (`pscat sheet`, `review_sheet`) mix dpis so they record a nominal 72. A PNG
+  made before #982 has no chunk: `scripts/identity_check.sh` ignores `pHYs` when it
+  compares the committed gallery still, and a base-versus-head byte comparison
+  across that change needs the chunk stripped from the head files. See
+  `notes/982-png-phys.md`.
 - **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
   (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
   `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte

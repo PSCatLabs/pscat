@@ -484,8 +484,14 @@ fn pages_of_different_sizes_in_png_svg_and_pdf() {
     assert!(run.status.success());
     let first = std::fs::read_to_string(dir.join("doc-001.svg")).expect("page 1");
     let second = std::fs::read_to_string(dir.join("doc-002.svg")).expect("page 2");
-    assert!(first.contains("width=\"200\" height=\"100\""), "{first}");
-    assert!(second.contains("width=\"100\" height=\"300\""), "{second}");
+    assert!(
+        first.contains("width=\"200pt\" height=\"100pt\""),
+        "{first}"
+    );
+    assert!(
+        second.contains("width=\"100pt\" height=\"300pt\""),
+        "{second}"
+    );
 }
 
 /// `--bands` follows the page the program sets: the same PNG bytes as a
