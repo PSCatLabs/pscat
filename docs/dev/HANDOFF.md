@@ -2185,6 +2185,12 @@ renders eight examples in both and compares block-downsampled output).
   `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
   `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750);
   `PostScriptError.warnings` and `web/index.html` show them too (#804).
+  Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
+  `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
+  DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:
+  `wasm_vector_output_matches_the_cli` in `tests/wasm.rs` holds that, and
+  a change to what the CLI does around the recorders (src/main.rs) must be
+  mirrored in `ps_begin_vector`. PSCatLabs/print-shop builds on this ABI.
   `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed

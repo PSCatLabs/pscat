@@ -31,6 +31,32 @@ filesystem, and no clock (`usertime`/`realtime` read 0 — the one
 documented deviation). Works under node too — `tests/wasm.rs` drives
 the real module through the same JS library.
 
+### SVG and PDF
+
+The wasm build writes the same vector output as `pscat --svg` and
+`pscat --pdf` (#1003, on `main`; not yet in a release). Ask for it when
+the program begins: recording is off by default, so a pixels-only page
+pays nothing.
+
+```js
+ps.run(source, 612, 792, 1, { svg: true, pdf: true });
+const pages = ps.svgCount();        // one SVG document per page
+const first = ps.svg(0);            // a string; null if not recorded
+const doc = ps.pdf();               // Uint8Array, every page in one PDF
+```
+
+For the same program, page size and dpi, the bytes are the ones the
+command-line tool writes: `tests/wasm.rs` compares them at 72 and 144 dpi
+and checks that a second run, in the same instance or a fresh one, gives
+the same bytes. A `%%Title:` or `%%For:` comment becomes the PDF's title
+or author, as for a file on the command line. As there, SVG and PDF are
+sized in device pixels, so keep the default 72 dpi (scale 1) for a
+print-size vector page. The C ABI is `ps_begin_vector(src, len, w, h,
+scale, flags)` (flag 1 SVG, 2 PDF), `ps_svg_count()`, `ps_svg(page)`,
+`ps_pdf()` and `ps_vector_ptr()`/`ps_vector_len()`; `src/wasm.rs` has the
+contract. It began as the vector adapter that
+[print-shop](https://github.com/PSCatLabs/print-shop) carried as a patch.
+
 ## The npm package
 
 From 0.6.2 the same module is published to npm as **`pscat`**
@@ -64,6 +90,11 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   the page; `begin` + `step(budget)` or the `frames()` generator drive it
   step by step. Page sizes are in points (default US Letter, 612x792) at
   `dpi` (default 72, one pixel per point). `source` is a string or bytes.
+- **SVG and PDF** (on `main`, not yet released): add `svg: true` and/or
+  `pdf: true` to the page options, then `r.svg(page)` (from 0) or
+  `r.svgPages()` give the SVG pages as strings and `r.pdf()` the whole
+  document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see
+  [SVG and PDF](#svg-and-pdf) above).
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
   offending `command`, the `line`, the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
