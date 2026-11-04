@@ -52,7 +52,7 @@ digest see). Both say the same thing.
 
 **HTML** (`announce.html`): copy [template.html](template.html) and fill
 every `{{...}}`. It carries the branding (logo, "PostScript for precision
-and imagination", the site's light palette), install steps for each host
+and imagination", the site's light palette), install steps for each host (Cowork, ChatGPT desktop, Claude Code, Codex)
 and a block of example prompts. Keep its e-mail rules (in the file's top
 comment): tables, inline styles, absolute `https` image URLs only — the
 site (`https://pscatlabs.github.io/pscat/assets/...`) or
