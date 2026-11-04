@@ -52,9 +52,10 @@ image at full size against the brief, string by string.
 
 All four JPEGs were made on 2026-11-04 by **OpenAI's image model, through the
 Codex CLI 0.166 `image_generation` tool**, signed in with the project
-owner's ChatGPT account. OpenAI's terms assign the output to the user, and the
-owner dedicates them, like the rest of `examples/`, to the public domain under
-CC0 1.0 ([`LICENSE-CC0`](../../LICENSE-CC0)).
+owner's ChatGPT account. OpenAI's terms assign the output to the user; the
+owner approved committing them. As files under `examples/`, they fall under
+that directory's existing CC0 1.0 mapping in `licenses/assets.json`
+([`LICENSE-CC0`](../../LICENSE-CC0)).
 
 Each was made by one command, run in an empty scratch directory:
 

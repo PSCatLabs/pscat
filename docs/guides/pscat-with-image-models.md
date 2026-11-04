@@ -86,11 +86,10 @@ says how they were made.
 
 ### What this shows
 
-Read honestly, the image model did far better on text than its reputation:
-every word and number in both images is right. Its QR codes are where it
-fails, and they fail completely: a symbol a phone recognizes and cannot read.
-A model can draw something that looks like a QR code. It cannot compute the
-Reed-Solomon error correction a real one needs.
+Every word and number in both of the image model's posters is right. Its QR
+codes are where it failed, in both attempts: both decoders locate a symbol
+and neither can read it. The pattern looks like a QR code, but its error
+correction does not check out.
 
 So the hybrid is worth it here for what the image model cannot do, and for
 what happens after the first draft:
@@ -134,9 +133,20 @@ The two background prompts used here:
 > A loose watercolour painting on cream cold-pressed paper for the background of a café menu card, portrait orientation (US Letter proportions, about 8.5 by 11). Two ripe pears and a few pear leaves on a sprig sit in the bottom right corner, painted with soft wet-in-wet washes of green, gold and a little rose; a pale sage wash bleeds in from the top left corner. The whole middle and left of the sheet stays almost bare cream paper with only the faintest wash, so menu text can be printed over it. Visible paper grain and soft blooms. No text, no letters, no numbers, no logos, no frame or border.
 
 They were run on 2026-11-04 with OpenAI's image model through the Codex CLI
-0.166 `image_generation` tool; each took about a minute. The whole-poster
-prompts for the comparison are in the
-[examples README](../../examples/hybrid/README.md).
+0.166 `image_generation` tool; each took about a minute. Codex reported
+passing both to its image tool unchanged.
+
+The two whole-poster prompts for the comparison's panel (a), also run on
+2026-11-04 the same way:
+
+> Design a complete A4 portrait event poster as one image. Background: a painterly oil painting of an evening sky over a calm sea, deep blue above fading to peach and gold at the horizon. The poster must contain exactly this text, spelled exactly as given: the title "Why Is the Sky Blue?"; the subtitle "A free public talk on light, air and colour"; "Dr. Imogen Hartley, atmospheric physicist"; "Thursday 3 December 2026 · 7:30 pm"; "Harbourside Library, Lecture Room 2". Include the Rayleigh scattering formula "I ∝ 1/λ⁴". Include a small bar chart titled "Scattering relative to red light (700 nm)" with six bars labelled 400 nm 9.4×, 450 nm 5.9×, 500 nm 3.8×, 550 nm 2.6×, 600 nm 1.9× and 700 nm 1.0×, each bar's height in proportion to its value. Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this poster was made" beside it.
+
+> Design a complete café menu card as one image, US Letter portrait. Background: a loose watercolour of two pears and pear leaves on cream paper. The menu must contain exactly this text, spelled exactly as given, with the prices exactly as given: the name "The Lantern Pear" and the line "Café · 14 Mill Lane". A section "Breakfast, 8–11" with "Buttermilk pancakes, maple butter 9.50", "Shakshuka with sourdough 11.25" and "Bircher muesli, poached pear 7.75". A section "Lunch, 12–3" with "Roast squash and farro salad 12.50", "Leek and Gruyère tart 13.00" and "Soup of the day with bread 8.25". A section "Drinks" with "Flat white 3.80", "Pot of tea 3.20" and "Pear and ginger soda 4.10". Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this menu was made" beside it.
+
+For these two, Codex's image skill turns the instruction into its own prompt
+before calling the tool, and the exact prompt it passed was not recorded. The
+[examples README](../../examples/hybrid/README.md) has every instruction
+verbatim, as sent to Codex.
 
 ### 2. Freeze it
 

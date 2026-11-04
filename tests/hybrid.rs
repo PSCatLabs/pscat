@@ -190,9 +190,9 @@ fn every_pscat_qr_code_decodes_in_png_and_pdf() {
 
 /// The text a program paints: `show` is wrapped to print each string first
 /// (the posters' right-aligned and centred helpers call `show` too).
-fn shown_strings(ex: &Example) -> Vec<String> {
-    let prelude = "/show { dup print (\\n) print //show } bind def";
-    let (_, out) = pscat(ex, "copy", prelude, &["--png", "{dir}/copy.png"]);
+fn shown_strings(ex: &Example, variant: &str) -> Vec<String> {
+    let prelude = format!("{variant}\n/show {{ dup print (\\n) print //show }} bind def");
+    let (_, out) = pscat(ex, "copy", &prelude, &["--png", "{dir}/copy.png"]);
     out.split(|&b| b == b'\n').map(latin1).collect()
 }
 
@@ -210,13 +210,15 @@ fn latin1(bytes: &[u8]) -> String {
 #[test]
 fn the_posters_paint_the_brief_exactly() {
     for ex in &EXAMPLES {
-        let shown = shown_strings(ex);
-        for want in ex.copy {
-            assert!(
-                shown.iter().any(|s| s == want),
-                "{}: the brief's {want:?} is not painted; painted: {shown:?}",
-                ex.name
-            );
+        for variant in ["", "/PscatOnly true def"] {
+            let shown = shown_strings(ex, variant);
+            for want in ex.copy {
+                assert!(
+                    shown.iter().any(|s| s == want),
+                    "{} {variant:?}: the brief's {want:?} is not painted; painted: {shown:?}",
+                    ex.name
+                );
+            }
         }
     }
 }
