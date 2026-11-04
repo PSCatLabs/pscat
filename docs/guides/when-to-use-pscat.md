@@ -135,7 +135,9 @@ the guide for it.
 
 pscat paints too: watercolor washes on paper, oil and palette knife,
 dry brush, chalk, crayon and charcoal ([Painting](painting.md),
-[Dry media](dry-media.md)). It will not out-paint an image model on mood.
+[Dry media](dry-media.md)). The gallery's
+[Evening Stream](../../gallery/evening_stream.ps) and
+[Alpine Lake](../../gallery/alpine_lake.ps) are painted with these libraries. It will not out-paint an image model on mood.
 What it gives you is different:
 
 - **Deterministic and seedable.** The watercolor wash and the paper under it
@@ -147,9 +149,8 @@ What it gives you is different:
   and PDF like everything else.
 - **Composable with exact parts in one document.** A watercolor background,
   type set in a real font, a QR code that scans and a chart from real data
-  can be one program and one PDF. The gallery's
-  [Evening Stream](../../gallery/evening_stream.ps) and
-  [Alpine Lake](../../gallery/alpine_lake.ps) are painted this way.
+  can be one program and one PDF: the libraries load side by side in the
+  same program.
 
 ## Pictures from a model that can't draw
 
@@ -249,8 +250,8 @@ art-critic agent) judge the PNG, turn that into specific feedback, edit the
 source, render again, and repeat until it looks right. The psart skill is
 built around exactly this render-look-refine loop, and over MCP
 `render_postscript` hands the PNG straight back to the agent
-([pscat for AI agents](agents.md)). This repository uses the same loop on
-itself: a render change is judged by an independent reviewer agent against
+([pscat for AI agents](agents.md)). This repository uses an agent critic the
+same way: a render change is judged by an independent reviewer agent against
 written criteria before it merges.
 
 Why it converges:

@@ -63,6 +63,26 @@ QR only, with "no 1D barcodes" listed as a weak spot.
 | `--sweep NAME=...`, `pscat sheet` = `review_sheet` MCP tool | `docs/guides/getting-started.md` "Seed sweeps", "Review sheets"; `site/agents.html` tool table |
 | The repo judges render changes with an independent reviewer agent against written criteria | `SDLC.md` "Who merges" tier (b); `docs/dev/TASTE.md` |
 | Evening Stream, Alpine Lake are painted with paintkit | `gallery/manifest.json` libraries |
+| A watercolor, set type, a QR code and a chart compose in one program and one PDF | ran the program below with `pscat --lint-strict --pdf` and `--png`: lint clean, exit 0 |
+
+The composability check (no gallery piece combines paintkit with QR or
+dataviz yet, so the guide cites this run, not a piece):
+
+```text
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/qr.ps) run (lib/dataviz.ps) run
+7 srand
+0 0 612 792 << /Grain 0.6 /Seed 3 >> pkpaper
+0.2 0.35 0.7 setrgbcolor
+newpath 306 560 180 0 360 arc closepath
+<< /Alpha 0.3 /Layers 3 /Wet 8 /Bloom 0.6 /Seed 5 >> pkwash
+0 setgray /Helvetica-Bold findfont 28 scalefont setfont
+72 700 moveto (Spring Concert, 12 May) show
+72 72 moveto (https://github.com/PSCatLabs/pscat) << >> qrencode << /ModuleSize 3 >> qrdraw
+0 10 260 72 280 160 setdvframe
+newpath [3 7 2 9 5] 0.25 { pop dvcolor } barchart
+newpath 5 4 6 dvaxes stroke
+showpage
+```
 
 Deferred: the hybrid showcase is #995. The guide links the issue and names its
 planned path `docs/guides/pscat-with-image-models.md` in code, not as a link,
