@@ -211,7 +211,15 @@ skeletons with TeX's box model. The subset covers:
   `\overset`, `\underset`, `\stackrel` and `\substack` limits;
 - `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
 - `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
-  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`.
+  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`;
+- logic and sets: `\wedge` `\vee` (and `\land` `\lor`), `\vdash` `\nvdash`
+  `\models`, `\top` `\bot`, `\leftrightarrow`, `\nexists`, `\oplus`
+  `\otimes`, `\emptyset`, and `\dagger` `\ddagger`, `\angle` `\triangle`
+  `\cong`, `\Re` `\Im`;
+- three alphabets: `\mathbf{v}` re-traces each letter and digit so it reads
+  heavier, `\mathbb{R}` doubles a capital's stem (or stands a short upright
+  in a round letter's bowl), and `\mathcal{L}` writes a script capital.
+  The last two draw capitals only, as in TeX.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -278,15 +286,20 @@ the whole (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`, or an `align`, `align*`,
 one formula with the delimiters removed. Words outside the pairs, or a
 delimiter that is never closed or closes nothing, fail with a one-line error
 naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
-`cases` or `\substack{}` stay where they are), and the rows are set with
+`cases` or `\substack{}` stay where they are). A bracket right after a
+row break, in a `pmatrix` or `cases` too, is TeX's row spacing (`\\[2pt]`,
+`\\[0.5\baselineskip]`, dropped) only when it holds a length; anything else
+(`\\ [\hat{x},\hat{p}] = i\hbar`, a commutator) starts the next row, where
+LaTeX would stop with an error. Write
+`\left[ ... \right]` to be sure of a bracket. The rows are set with
 `mkalign`: on their relations (or `&`), as `align` sets them, except inside a
 `gather`, `gather*` or `gathered` wrapper, where each row is centred on its
-own width, as LaTeX does. The supported subset is mathkit's, listed above and in full at
-the top of `lib/mathkit.ps`. Anything else fails with one line naming it,
+own width, as LaTeX does. The supported subset is mathkit's, listed above and in full by
+`pscat chalk --help`. Anything else fails with one line naming it,
 exits non-zero and writes no file:
 
 ```text
-pscat chalk: unsupported LaTeX command \oplus (the supported subset is listed at the top of lib/mathkit.ps)
+pscat chalk: unsupported LaTeX command \aleph (`pscat chalk --help` lists the supported subset)
 pscat chalk: unsupported character: @
 ```
 

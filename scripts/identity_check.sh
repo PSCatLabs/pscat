@@ -648,6 +648,25 @@ compare_one() {
     return $st
 }
 
+# Byte equality of two PNGs once any pHYs chunk is dropped from each. pscat
+# records the resolution in a pHYs chunk (#982) and the stills committed before
+# that do not have one; the pixels and every other byte are still compared.
+same_png_ignoring_phys() {
+    python3 -I - "$1" "$2" <<'PY'
+import struct, sys
+def strip(path):
+    data = open(path, "rb").read()
+    out, at = [data[:8]], 8
+    while at < len(data):
+        (n,) = struct.unpack(">I", data[at:at + 4])
+        if data[at + 4:at + 8] != b"pHYs":
+            out.append(data[at:at + 12 + n])
+        at += 12 + n
+    return b"".join(out)
+sys.exit(0 if strip(sys.argv[1]) == strip(sys.argv[2]) else 1)
+PY
+}
+
 while read -r f key; do
     if ! compare_one "$f" "$key"; then
         FAILED=1
@@ -670,7 +689,7 @@ if [ "$GALLERY_STILL" -eq 1 ]; then
         if [ ! -f "$committed" ] || [ ! -f "$got" ]; then
             echo "ERROR      alpine_lake at 2x vs committed still ($t): missing file"
             FAILED=1
-        elif cmp -s "$committed" "$got"; then
+        elif same_png_ignoring_phys "$committed" "$got"; then
             echo "identical  alpine_lake at 2x vs the committed still ($t tree)"
         else
             echo "DIFFERS    alpine_lake at 2x vs the committed still ($t tree)"

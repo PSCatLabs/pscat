@@ -30,6 +30,8 @@ def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
     site.mkdir()
     for f in extra_files:
         (site / f).write_text("")
+    (site / "assets/brand").mkdir(parents=True)  # the favicon every page links (#927)
+    (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
     for name, (key, body) in pages.items():
         (site / name).write_text(PAGE % (key, body))
     partials = site_pages.load_partials(PARTIALS)
@@ -38,8 +40,8 @@ def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
     return site
 
 
-# every nav destination must exist, so a fixture has all nine slots' pages
-NAV = {"index.html": "home", "learn.html": "learn", "gallery.html": "gallery",
+# every nav destination must exist, so a fixture has every slot's page
+NAV = {"index.html": "home", "when-to-use.html": "when-to-use", "learn.html": "learn", "gallery.html": "gallery",
        "fonts.html": "fonts", "playground.html": "playground", "guides.html": "guides",
        "agents.html": "agents", "contribute.html": "contribute"}
 

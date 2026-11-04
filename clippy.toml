@@ -4,6 +4,9 @@
 # and friends. sqrt, powi, to_radians, floor and the other exact or purely
 # arithmetic methods are fine and not listed. Test code that only needs a
 # reference value may `#![allow(clippy::disallowed_methods)]`.
+#
+# PNG files go through crate::png (issue #982): it adds the pHYs chunk that
+# records the resolution. tiny-skia's own encoder is banned everywhere else.
 disallowed-methods = [
     { path = "f64::sin", reason = "use crate::fmath: one libm on every platform (issue #738)" },
     { path = "f64::cos", reason = "use crate::fmath: one libm on every platform (issue #738)" },
@@ -61,4 +64,6 @@ disallowed-methods = [
     { path = "tiny_skia::Transform::pre_rotate_at", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
     { path = "tiny_skia::Transform::post_rotate", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
     { path = "tiny_skia::Transform::post_rotate_at", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
+    { path = "tiny_skia::Pixmap::save_png", reason = "use crate::png::save: it records the resolution in a pHYs chunk (issue #982)" },
+    { path = "tiny_skia::Pixmap::encode_png", reason = "use crate::png::encode: it records the resolution in a pHYs chunk (issue #982)" },
 ]

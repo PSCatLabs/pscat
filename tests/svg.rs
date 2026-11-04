@@ -16,6 +16,24 @@ fn svg_pages(src: &str) -> Vec<String> {
 }
 
 #[test]
+fn root_size_is_in_points_and_the_viewbox_stays_in_user_space() {
+    // Unitless root lengths are CSS px (96 per inch), so a 72 pt-per-inch
+    // page printed at 75% size (#981). The root says `pt`; the viewBox and
+    // everything drawn inside it stay in plain page units.
+    let pages = svg_pages("0 0 50 50 rectfill showpage");
+    let svg = &pages[0];
+    assert!(
+        svg.contains(" width=\"100pt\" height=\"100pt\" viewBox=\"0 0 100 100\">"),
+        "{svg}"
+    );
+    // The white backdrop is drawn in user space: no unit.
+    assert!(
+        svg.contains("<rect width=\"100\" height=\"100\" fill=\"#ffffff\"/>"),
+        "{svg}"
+    );
+}
+
+#[test]
 fn fill_becomes_a_path_element() {
     let pages = svg_pages("newpath 10 10 moveto 90 10 lineto 50 90 lineto closepath fill");
     assert_eq!(pages.len(), 1);

@@ -74,6 +74,44 @@ pub fn feed_stdin(child: &mut std::process::Child, bytes: &[u8]) {
     }
 }
 
+/// The chunk types of a PNG file, in order, after checking its signature
+/// and every chunk's length (issue #982).
+pub fn png_chunk_types(png: &[u8]) -> Vec<String> {
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
+    let mut types = Vec::new();
+    let mut at = 8;
+    while at < png.len() {
+        let len = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+        types.push(String::from_utf8(png[at + 4..at + 8].to_vec()).expect("ascii chunk type"));
+        at += 12 + len;
+    }
+    assert_eq!(at, png.len(), "chunks fill the file");
+    types
+}
+
+/// The `pHYs` chunk of a PNG as `(x pixels per unit, y pixels per unit,
+/// unit)`, after checking there is exactly one, that it comes straight after
+/// `IHDR` (so before `IDAT`) and that the file decodes (the decoder checks
+/// every CRC). Panics when it is missing.
+pub fn png_phys(png: &[u8]) -> (u32, u32, u8) {
+    let types = png_chunk_types(png);
+    assert_eq!(
+        types.iter().filter(|t| *t == "pHYs").count(),
+        1,
+        "exactly one pHYs: {types:?}"
+    );
+    assert_eq!(&types[..2], ["IHDR", "pHYs"], "pHYs right after IHDR");
+    tiny_skia::Pixmap::decode_png(png).expect("the PNG decodes, CRCs included");
+    // IHDR is 13 data bytes: 8 + 12 + 13 = 33 is the start of pHYs.
+    let data = &png[41..50];
+    assert_eq!(&png[33..37], &9u32.to_be_bytes(), "pHYs length");
+    (
+        u32::from_be_bytes(data[..4].try_into().unwrap()),
+        u32::from_be_bytes(data[4..8].try_into().unwrap()),
+        data[8],
+    )
+}
+
 /// A path as it can sit inside a PostScript string literal: `/` separators.
 /// Windows temp paths contain `\`, which a PostScript string reads as an
 /// escape (`\U`, `\t`, ...), and Windows accepts `/` everywhere (issue #601).

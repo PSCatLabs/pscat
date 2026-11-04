@@ -432,6 +432,13 @@ impl SvgRecorder {
         );
     }
 
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     /// The lazy showpage erase (or an explicit erasepage): the new
     /// page starts blank.
     pub(crate) fn erase(&mut self) {
@@ -444,7 +451,7 @@ impl SvgRecorder {
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
              xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
-             width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">\
+             width=\"{w}pt\" height=\"{h}pt\" viewBox=\"0 0 {w} {h}\">\
              {backdrop}{defs}{body}</svg>\n",
             backdrop = if self.transparent {
                 String::new()

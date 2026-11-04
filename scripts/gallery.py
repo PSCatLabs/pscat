@@ -35,8 +35,10 @@ scripts/site_pages.py (the last step of build_site.sh) gives them the shared she
 """
 import html
 import json
+import posixpath
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -91,6 +93,36 @@ def blob(path):
 def size(page):
     w, h = page.split("x")
     return int(w), int(h)
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+STILL_SCALE = 2            # stills are 2x supersampled, so one CSS pixel is two render pixels
+
+
+def png_size(path):
+    """(width, height) in pixels from a PNG's IHDR chunk, standard library only."""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if len(head) < 24 or head[:8] != PNG_SIGNATURE or head[12:16] != b"IHDR":
+        raise ValueError("%s is not a PNG file (no IHDR chunk)" % path)
+    return struct.unpack(">II", head[16:24])
+
+
+def thumb_size(p):
+    """The width and height attributes for a piece's image (#984). They come from the still's own
+    pixel size, because the browser reserves that box before the lazy-loaded image arrives.
+
+    A still that has its page's shape (any resolution: most are 2x, a few 1x) keeps the page size,
+    exactly as before. A still of another shape (a two-sided card drawn as a proof sheet) is its pixel
+    size at the gallery's 2x scale. `page` stays the physical page in captions and links."""
+    try:
+        w, h = png_size(ROOT / p["render"])
+    except (OSError, ValueError) as e:
+        raise SystemExit("gallery: piece %s: cannot read its render: %s" % (p["id"], e))
+    pw, ph = size(p["page"])
+    if abs(w * ph - h * pw) * 200 <= h * pw:  # same aspect ratio to within half a percent
+        return pw, ph
+    return (w + STILL_SCALE // 2) // STILL_SCALE, (h + STILL_SCALE // 2) // STILL_SCALE
 
 
 def categories(m):
@@ -285,8 +317,10 @@ def table_md(m):
         out.append("| Piece | File | How it is made |\n|---|---|---|")
         for p in ps:
             f = Path(p["source"]).name
+            # the table lives in gallery/, so a source elsewhere (examples/) links up and over
+            link = posixpath.relpath(p["source"], "gallery")  # posix: the same table on Windows
             out.append("| [%s](%s/%s) | [`%s`](%s) | %s |" % (
-                p["title"], SITE_URL, piece_page(p["id"]), f, f, p["technique"].replace("|", "\\|")))
+                p["title"], SITE_URL, piece_page(p["id"]), f, link, p["technique"].replace("|", "\\|")))
         out.append("")
     return "\n".join(out).rstrip("\n")
 
@@ -365,7 +399,7 @@ SOURCE_DIALOG = """<dialog id="source-dialog" class="source-dialog" aria-labelle
 
 def art_card(p):
     href = piece_page(p["id"])
-    w, h = size(p["page"])
+    w, h = thumb_size(p)
     libs = " ".join(p["libraries"]) or "plain"
     return ('    <div class="card" data-libs="%s"><a href="%s"><img src="assets/renders/%s.png" '
             'width="%d" height="%d" alt="%s" loading="lazy"></a>\n'
@@ -469,7 +503,8 @@ def source_head(p):
 
 def piece_html(m, p, prev, nxt):
     cat = next(c for c in m["categories"] if c["id"] == p["category"])
-    w, h = size(p["page"])
+    w, h = thumb_size(p)
+    pw, ph = size(p["page"])
     render = "assets/renders/%s.png" % p["id"]
     head, total = source_head(p)
     o = []
@@ -504,7 +539,7 @@ def piece_html(m, p, prev, nxt):
     facts.append(("Added", p["added"]))
     if p.get("issue"):
         facts.append(("Built in", '<a href="%s/issues/%d">issue #%d</a>' % (REPO_URL, p["issue"], p["issue"])))
-    facts.append(("Page size", "%d × %d points" % (w, h)))
+    facts.append(("Page size", "%d × %d points" % (pw, ph)))
     o.append("  <h2>Details</h2>\n  <dl class=\"facts\">\n" +
              "\n".join("    <dt>%s</dt><dd>%s</dd>" % (k, v) for k, v in facts) + "\n  </dl>")
     o.append('  <h2>Source</h2>\n  <p>%s the whole program in a scrolling window, or read '
@@ -585,7 +620,7 @@ def main(argv):
                 print("%s %s %s" % (s["source"], s["page"], s["id"]))
     elif cmd == "list":
         for p in m["pieces"]:
-            print("%s\t%s\t%d" % (p["id"], p["page"], p["speed"]))
+            print("%s\t%s\t%d\t%s" % (p["id"], p["page"], p["speed"], p["source"]))
     return 0
 
 

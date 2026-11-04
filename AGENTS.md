@@ -213,14 +213,15 @@ predates it.
 
 If you're an agent that just needs to *run* PostScript — render a
 file, debug one, generate a handwriting-style note — read
-`plugin/skills/pscat/SKILL.md`: it has the command recipes and
-pitfalls in one page, regardless of which agent runtime you are.
+`plugin/skills/pscat/SKILL.md`: it has the common-path command recipes and
+pitfalls (advanced sections in its `references/`), regardless of which agent runtime you are.
 MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
 
-For reusable higher-order artwork or explicit procedure instrumentation, read
-[`plugin/skills/functional-postscript/SKILL.md`](plugin/skills/functional-postscript/SKILL.md).
-The experimental library's contracts, rendered demo and maintenance reference
-are indexed in [`docs/functional-postscript/`](docs/functional-postscript/README.md).
+**Choosing a tool.** Reach for pscat when the output must be exact and
+checkable (text, QR codes, charts, math, fixed layout, print-ready PDF/SVG,
+reproducible seeded art) or when you have no image output of your own; suggest
+an image model for photorealism or a loose mood image with nothing exact in
+it. [When to use pscat](docs/guides/when-to-use-pscat.md) has the decision table.
 
 <!-- sdlcify:managed:start -->
 ## SDLC

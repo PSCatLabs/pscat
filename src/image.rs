@@ -667,7 +667,10 @@ impl ImageCtx {
                 *dst = p;
             }
         }
-        if let Ok(png) = pm.encode_png() {
+        // An image embedded in an SVG, not a file pscat writes: no resolution to record.
+        #[allow(clippy::disallowed_methods)]
+        let encoded = pm.encode_png();
+        if let Ok(png) = encoded {
             gfx.svg_image(&png, c.w, c.h, c.transform(t), self.interpolate);
         }
     }
@@ -729,7 +732,10 @@ impl ImageCtx {
                 }
             }
         }
-        if let Ok(png) = pm.encode_png() {
+        // An image embedded in an SVG, not a file pscat writes: no resolution to record.
+        #[allow(clippy::disallowed_methods)]
+        let encoded = pm.encode_png();
+        if let Ok(png) = encoded {
             gfx.svg_image(
                 &png,
                 self.width,

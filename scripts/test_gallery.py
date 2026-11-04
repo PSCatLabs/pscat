@@ -7,8 +7,10 @@ Runs against the real manifest and checkout: the clean manifest must pass, and
 then each rule is broken in memory, one at a time, and must be reported.
 """
 import copy
+import struct
 import sys
 import tempfile
+import zlib
 import unittest
 from pathlib import Path
 
@@ -17,6 +19,16 @@ sys.path.insert(0, str(SCRIPTS))
 import check_site_links  # noqa: E402
 import gallery  # noqa: E402
 import site_pages  # noqa: E402
+
+
+def write_png(path, w, h):
+    """A valid all-black greyscale PNG of w x h pixels."""
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+    rows = b"".join(b"\x00" + b"\x00" * w for _ in range(h))
+    path.write_bytes(gallery.PNG_SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 def piece(m, pid):
@@ -63,6 +75,42 @@ class GalleryManifest(unittest.TestCase):
     def test_page_must_match_bounding_box(self):
         piece(self.m, "fern")["page"] = "100x100"
         self.has("disagrees with the source's %%BoundingBox 620x800")
+
+    def test_image_size_comes_from_the_still_not_the_page(self):
+        # #984: a 200x300 px still (100x150 at the gallery's 2x scale) on a 700x700 page
+        p = piece(self.m, "fern")
+        with tempfile.TemporaryDirectory() as tmp:
+            still = Path(tmp) / "odd.png"
+            write_png(still, 200, 300)
+            p["render"] = str(still)  # ROOT / absolute path is the absolute path
+            p["page"] = "700x700"
+            self.assertEqual(gallery.png_size(still), (200, 300))
+            self.assertEqual(gallery.thumb_size(p), (100, 150))
+            self.assertIn('width="100" height="150"', gallery.art_card(p))
+            prev = next(q for q in self.m["pieces"] if q["id"] != "fern")
+            page = gallery.piece_html(self.m, p, prev, prev)
+            self.assertIn('width="100" height="150"', page)
+            self.assertNotIn('width="700"', page)
+            self.assertIn("700x700", page)  # the physical page stays in the facts
+
+    def test_a_still_with_its_pages_shape_keeps_the_page_size(self):
+        p = piece(self.m, "fern")
+        with tempfile.TemporaryDirectory() as tmp:
+            for w, h in ((1240, 1600), (620, 800)):  # a 2x and a 1x still
+                still = Path(tmp) / ("fern%d.png" % w)
+                write_png(still, w, h)
+                p["render"] = str(still)
+                self.assertEqual(gallery.thumb_size(p), (620, 800))
+        # the real manifest: the 2x fern and the 1x hortus both keep their pages
+        self.assertEqual(gallery.thumb_size(piece(gallery.load(), "fern")), (620, 800))
+        self.assertEqual(gallery.thumb_size(piece(gallery.load(), "hortus")), (620, 800))
+
+    def test_png_size_rejects_a_file_that_is_not_a_png(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.png"
+            bad.write_bytes(b"not a png at all, just text")
+            with self.assertRaises(ValueError):
+                gallery.png_size(bad)
 
     def test_playground_needs_a_self_contained_source(self):
         piece(self.m, "alpine_lake")["playground"] = True
@@ -149,7 +197,7 @@ class GalleryManifest(unittest.TestCase):
                 self.assertIn('aria-current="page"', out)
                 f.write_text(out, encoding="utf-8")
             # the rest of the site, minimal: enough for the gallery's own links to resolve
-            for name, key in (("index.html", "home"), ("learn.html", "learn"), ("fonts.html", "fonts"),
+            for name, key in (("index.html", "home"), ("when-to-use.html", "when-to-use"), ("learn.html", "learn"), ("fonts.html", "fonts"),
                               ("playground.html", "playground"), ("guides.html", "guides"),
                               ("agents.html", "agents"), ("contribute.html", "contribute")):
                 body = '<!DOCTYPE html><html><head><!--@head--></head><body><!--@header %s--><main>' % key
@@ -162,6 +210,8 @@ class GalleryManifest(unittest.TestCase):
                 (site / name).write_text(site_pages.apply_shell(body, partials, name), encoding="utf-8")
             for f in ("style.css", "pscat.js", "pscat.wasm", "source-viewer.js"):
                 (site / f).write_text("")
+            (site / "assets/brand").mkdir(parents=True, exist_ok=True)  # the favicon (#927)
+            (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
             problems, _ = check_site_links.check(site, SCRIPTS.parent)
             self.assertEqual(problems, [])
 

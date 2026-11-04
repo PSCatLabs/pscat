@@ -273,6 +273,43 @@ pub(crate) fn output_format(out: &str) -> Result<Format, String> {
     }
 }
 
+/// Other image and document types a user may mistake an output name for.
+/// `check_output_name` refuses them; any other extension is left alone.
+const OTHER_KNOWN_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "jpe", "jfif", "gif", "webp", "bmp", "tif", "tiff", "ico", "avif", "heic",
+    "heif", "ps", "eps",
+];
+
+/// For an output that is always one `want` format whatever its name (`--png`,
+/// `--svg`, `--pdf`, `handwrite -o`): refuse a name whose extension is a
+/// different known image or document type, since a viewer or upload tool
+/// trusts the extension (issue #938). A name with no extension, or one nobody
+/// knows (`out.dat`), is accepted, so existing scripts keep working. The
+/// numbered names of a multi-page run (`out-001.png`) keep the extension, so
+/// checking the name the user typed covers them.
+pub(crate) fn check_output_name(flag: &str, out: &str, want: Format) -> Result<(), String> {
+    let known = match output_format(out) {
+        Ok(f) if f == want => return Ok(()),
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let ext = std::path::Path::new(out)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !known && !OTHER_KNOWN_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()) {
+        return Ok(());
+    }
+    let (wants, suffix) = match want {
+        Format::Png => ("a PNG", ".png"),
+        Format::Svg => ("an SVG", ".svg"),
+        Format::Pdf => ("a PDF", ".pdf"),
+    };
+    Err(format!(
+        "{flag} writes {wants}, but {out} ends in .{ext}; name it {suffix} (or give it no extension)"
+    ))
+}
+
 /// Render `source` on a `page`-point canvas at `dpi` and write it to
 /// `out`, as `pscat --page WxH --dpi D [--halftone] --png|--svg|--pdf OUT
 /// file.ps` does. The file is written even after a PostScript error (a
@@ -344,6 +381,38 @@ mod tests {
             assert!(e.contains(".png, .svg, or .pdf"), "{bad:?}: {e}");
             assert!(e.ends_with(&format!("got: {bad}")), "{bad:?}: {e}");
         }
+    }
+
+    #[test]
+    fn a_fixed_format_output_refuses_only_another_known_type() {
+        // The right extension, no extension and an unknown one all pass.
+        for ok in [
+            "a.png",
+            "A.PNG",
+            "out",
+            "out.dat",
+            "dir.jpg/out",
+            "a.png.bak",
+            "",
+        ] {
+            assert_eq!(
+                check_output_name("--png", ok, Format::Png),
+                Ok(()),
+                "{ok:?}"
+            );
+        }
+        // Another image or document type is refused, in any case, naming it.
+        for bad in [
+            "a.jpg", "a.JPG", "a.jpeg", "a.gif", "a.webp", "a.pdf", "a.svg", "a.ps",
+        ] {
+            let e = check_output_name("--png", bad, Format::Png).unwrap_err();
+            let ext = bad.rsplit('.').next().unwrap();
+            assert!(e.contains(&format!("ends in .{ext}")), "{bad}: {e}");
+            assert!(e.contains("--png writes a PNG"), "{bad}: {e}");
+        }
+        assert!(check_output_name("--svg", "a.png", Format::Svg).is_err());
+        assert!(check_output_name("--pdf", "a.svg", Format::Pdf).is_err());
+        assert_eq!(check_output_name("--pdf", "a.pdf", Format::Pdf), Ok(()));
     }
 
     #[test]

@@ -540,6 +540,87 @@ fn render_of_an_errored_program_reports_the_error_once_not_a_lint_verdict() {
     );
 }
 
+/// #942: an errored run's end-of-run findings (a page with no ink, an open
+/// `gsave` or `begin`) are consequences of the error, so a render of one gets
+/// the `PostScript error:` block and the partly drawn page but no `Lint:`
+/// block, plain or banded, from either render tool.
+#[test]
+fn an_errored_render_has_no_lint_block_but_keeps_the_error_and_the_page() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let cases = [
+        ("1 0 div", "undefinedresult"),
+        ("0 0 40 40 rectfill 1 0 div showpage", "undefinedresult"),
+        ("(unterminated", "syntaxerror"),
+        (
+            "0 0 40 40 rectfill gsave 5 dict begin 1 0 div",
+            "undefinedresult",
+        ),
+        ("1 2 3 add add add", "stackunderflow"),
+    ];
+    for tool in ["render_postscript", "start_render"] {
+        for bands in [1, 2] {
+            for (source, expect) in cases {
+                let args = json!({ "source": source, "width": 40, "height": 40, "bands": bands });
+                let result = if tool == "render_postscript" {
+                    s.tool(tool, args)
+                } else {
+                    job_result_of(&mut s, args)
+                };
+                let what = format!("{tool} bands {bands} {source:?}: {result}");
+                let texts = texts(&result);
+                let err = texts
+                    .iter()
+                    .find(|t| t.starts_with("PostScript error:"))
+                    .unwrap_or_else(|| panic!("an error block, {what}"));
+                assert!(err.contains(expect), "{err} ({what})");
+                assert!(
+                    texts
+                        .iter()
+                        .all(|t| !t.starts_with("Lint:") && !t.contains("blank-page")),
+                    "no Lint block for an errored run, {what}"
+                );
+                assert!(
+                    result["content"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|c| c["type"] == "image"),
+                    "the partial page is still returned, {what}"
+                );
+            }
+        }
+    }
+}
+
+/// #942: the other tools do not lint, so an error there has no `Lint:` text
+/// to mislead either.
+#[test]
+fn eval_and_handwrite_errors_carry_no_lint_text() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for source in ["1 0 div", "(unterminated"] {
+        let result = s.tool("eval_postscript", json!({ "source": source }));
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(
+            texts(&result)
+                .iter()
+                .all(|t| !t.contains("lint") && !t.contains("blank-page")),
+            "{source:?}: {result}"
+        );
+    }
+    // `handwrite` takes plain text, not PostScript, and does not lint: even
+    // text that would be a syntax error as a program comes back as a note.
+    let result = s.tool("handwrite", json!({ "text": "(unbalanced", "seed": 1 }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result)
+            .iter()
+            .all(|t| !t.contains("lint") && !t.contains("blank-page")),
+        "{result}"
+    );
+}
+
 #[test]
 fn render_surfaces_lint_findings_for_a_blank_page() {
     let mut s = Server::start();
@@ -724,6 +805,15 @@ fn out_path_needs_the_extension_of_the_output_format() {
         ".png",
         "x.",
         "x.pdf",
+        // The CLI refuses these by name (`check_output_name`, #938); the
+        // server refuses every name without its own extension, so it agrees
+        // with that rule and is stricter on top (#947).
+        "x.jpg",
+        "x.JPEG",
+        "x.gif",
+        "x.webp",
+        "x.ps",
+        "x.eps",
     ] {
         let result = render_to(&mut s, bad);
         assert_refused_with_extension(&result, ".png");
@@ -938,6 +1028,13 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     let instructions = init["result"]["instructions"].as_str().unwrap();
     assert!(instructions.contains("read roots"), "{instructions}");
     assert!(instructions.contains("extra"), "{instructions}");
+    // The output root, and what to do when the workspace is elsewhere (#910).
+    let root = std::fs::canonicalize(&cwd).unwrap();
+    assert!(
+        instructions.contains(&format!("out_path writes only inside {}", root.display())),
+        "{instructions}"
+    );
+    assert!(instructions.contains("copy it there"), "{instructions}");
     s.send_raw(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
 
     let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
@@ -1855,14 +1952,14 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
     let mut s = Server::start();
     initialized(&mut s);
     // TeX outside mathkit's subset: the command, named, in one line.
-    let result = s.tool("chalkboard_math", small_board(r"a \oplus b"));
+    let result = s.tool("chalkboard_math", small_board(r"a \aleph b"));
     assert_eq!(error_kind(&result), "latex_error", "{result}");
     let err = &result["structuredContent"]["error"];
     assert_eq!(err["code"], "unsupported_command");
-    assert_eq!(err["token"], r"\oplus");
+    assert_eq!(err["token"], r"\aleph");
     let text = &texts(&result)[0];
     assert!(
-        text.starts_with(r"unsupported LaTeX command \oplus"),
+        text.starts_with(r"unsupported LaTeX command \aleph"),
         "{text}"
     );
     assert!(!text.contains('\n') && !text.contains("%%["), "{text}");
@@ -2807,7 +2904,9 @@ fn jobs_past_the_running_cap_queue_and_can_be_cancelled_there() {
 fn job_tools_refuse_bad_arguments_and_unknown_jobs_at_once() {
     let mut s = Server::start_in(
         &common::scratch_dir("mcp-job-args"),
-        &["--max-image-bytes", "100"],
+        // A blank 20 x 20 page is 116 bytes with its pHYs chunk (#982); the
+        // noisy 100 x 100 page below is far over any cap this small.
+        &["--max-image-bytes", "150"],
     );
     initialized(&mut s);
     // `render_postscript`'s checks run before a job exists.
@@ -3184,4 +3283,249 @@ fn a_banded_render_keeps_the_limits_and_read_confinement() {
             assert_eq!(images(&result).len(), 1, "the partial page: {result}");
         }
     }
+}
+
+/// #921: with no width/height, render_postscript and start_render take an
+/// EPSF file's %%BoundingBox as the page (any file's with `bbox`), and the
+/// pixel cap checks that page, not the letter default.
+#[test]
+fn render_tools_take_the_page_from_the_bounding_box() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-bbox"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    let plain = "%!PS-Adobe-3.0\n%%BoundingBox: 0 0 400 300\n0 0 1 setrgbcolor 0 0 400 300 rectfill showpage\n";
+    let eps = plain.replace("%!PS-Adobe-3.0\n", "%!PS-Adobe-3.0 EPSF-3.0\n");
+    let dims = |result: &Value| {
+        let png = sheet_png(result);
+        let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+        (pm.width(), pm.height())
+    };
+    // 400 x 300 is under the 300,000-pixel cap; letter (484,704) is not.
+    let direct = s.tool("render_postscript", json!({ "source": eps }));
+    assert_eq!(dims(&direct), (400, 300));
+    let with_bbox = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true }),
+    );
+    assert_eq!(dims(&with_bbox), (400, 300));
+    let result = s.tool("render_postscript", json!({ "source": plain }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    // And a box larger than letter is refused as itself, before any child.
+    let big = eps.replace("0 0 400 300\n0", "0 0 2000 2000\n0");
+    let result = s.tool("render_postscript", json!({ "source": big }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["width_px"], 2000,
+        "{result}"
+    );
+    // An explicit size wins, and asking for both is refused.
+    let sized = s.tool(
+        "render_postscript",
+        json!({ "source": eps, "width": 50, "height": 40 }),
+    );
+    assert_eq!(dims(&sized), (50, 40));
+    let both = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true, "width": 50 }),
+    );
+    assert_eq!(error_kind(&both), "invalid_argument", "{both}");
+    // A box that cannot be used is a warning beside the render.
+    let bad = eps.replace("0 0 400 300\n0", "0 0 abc 300\n0");
+    // (Letter at 36 dpi, 306 x 396, fits the cap.)
+    let result = s.tool("render_postscript", json!({ "source": bad, "dpi": 36 }));
+    assert_eq!(dims(&result), (306, 396));
+    assert!(
+        texts(&result)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("ignoring the bounding box")),
+        "{result}"
+    );
+
+    let job = start_job(&mut s, json!({ "source": eps }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "done"),
+        "{}",
+        status(&mut s, &job)
+    );
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(
+        images(&result),
+        images(&direct),
+        "the same page as render_postscript"
+    );
+}
+
+/// #921: eval_postscript has no page arguments, so it keeps the letter page
+/// even for an EPSF source, whose box would size a canvas the pixel cap
+/// never checked.
+#[test]
+fn eval_keeps_the_letter_page_for_an_epsf_source() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-eval-bbox"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    let source = "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 8000 8000\n\
+                  clippath pathbbox 4 array astore ==\n";
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result)[0].contains("[0.0 0.0 612.0 792.0]"),
+        "{result}"
+    );
+}
+
+/// #909: the issue's repro, a `setpagedevice /PageSize` preamble, renders
+/// with and without width/height, through render_postscript, start_render
+/// and bands; a page the program asks for over `--max-pixels` is
+/// `output_too_large`, checked in the child.
+#[test]
+fn render_tools_honour_a_page_size_preamble() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-pagedevice"),
+        &["--max-pixels", "600000"],
+    );
+    initialized(&mut s);
+    let source = "%!PS\n<< /PageSize [640 400] >> setpagedevice\n1 0 0 setrgbcolor\n\
+                  20 20 100 100 rectfill\nshowpage";
+    let page = |result: &Value| {
+        let png = sheet_png(result);
+        tiny_skia::Pixmap::decode_png(&png).expect("decode")
+    };
+    let red_square = |pm: &tiny_skia::Pixmap| {
+        let p = pm.pixel(70, 330).expect("in bounds");
+        let w = pm.pixel(300, 200).expect("in bounds");
+        (p.red(), p.green(), p.blue()) == (255, 0, 0)
+            && (w.red(), w.green(), w.blue()) == (255, 255, 255)
+    };
+    // The issue's call: width/height agree with the preamble.
+    let sized = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 640, "height": 400, "dpi": 72 }),
+    );
+    assert_eq!(sized["isError"], false, "{sized}");
+    let pm = page(&sized);
+    assert_eq!((pm.width(), pm.height()), (640, 400));
+    assert!(red_square(&pm), "{sized}");
+    assert!(
+        !texts(&sized)
+            .iter()
+            .any(|t| t.contains("Error") || t.starts_with("Lint")),
+        "{sized}"
+    );
+    // No width/height: the preamble sizes the page.
+    let direct = s.tool("render_postscript", json!({ "source": source }));
+    let pm = page(&direct);
+    assert_eq!((pm.width(), pm.height()), (640, 400));
+    assert!(red_square(&pm));
+    // Width/height win, with a warning that the preamble was overruled.
+    let fixed = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 300, "height": 200 }),
+    );
+    let pm = page(&fixed);
+    assert_eq!((pm.width(), pm.height()), (300, 200));
+    assert!(
+        texts(&fixed)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("/PageSize [640 400] ignored")),
+        "{fixed}"
+    );
+    // Bands follow the page the program sets.
+    let banded = s.tool("render_postscript", json!({ "source": source, "bands": 2 }));
+    assert_eq!(images(&banded), images(&direct), "{banded}");
+    // A job renders the same page.
+    let job = start_job(&mut s, json!({ "source": source }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "done"),
+        "{}",
+        status(&mut s, &job)
+    );
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(images(&result), images(&direct));
+    // Letter (484,704 pixels) fits the 600,000-pixel cap, so the server
+    // starts the child; the 1000x1000 page the program then asks for does
+    // not, and the child refuses it.
+    let big = "<< /PageSize [1000 1000] >> setpagedevice 0 0 10 10 rectfill showpage";
+    let result = s.tool("render_postscript", json!({ "source": big }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["width_px"], 1000,
+        "{result}"
+    );
+    assert_eq!(result["structuredContent"]["error"]["limit_pixels"], 600000);
+    let job = start_job(&mut s, json!({ "source": big }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "failed"),
+        "{}",
+        status(&mut s, &job)
+    );
+}
+
+/// #982: every PNG the server hands back records its resolution in a `pHYs`
+/// chunk: render_postscript and start_render at the default and at
+/// `dpi: 300`, handwrite, review_sheet and chalkboard_math (its own 144 dpi
+/// default) alike, whether the PNG comes back inline or goes to `out_path`.
+#[test]
+fn every_png_the_server_returns_records_its_resolution() {
+    let root = common::scratch_dir("mcp-phys");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let inline = |result: &Value| -> Vec<u8> {
+        assert_eq!(result["isError"], false, "{result}");
+        unbase64(&images(result)[0])
+    };
+    let phys = |png: &[u8]| common::png_phys(png);
+
+    let mut args = json!({ "source": "0 0 40 40 rectfill showpage", "width": 40, "height": 40 });
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (2835, 2835, 1)
+    );
+    assert_eq!(
+        phys(&inline(&job_result_of(&mut s, args.clone()))),
+        (2835, 2835, 1)
+    );
+    args["dpi"] = json!(300);
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (11811, 11811, 1)
+    );
+    assert_eq!(
+        phys(&inline(&job_result_of(&mut s, args.clone()))),
+        (11811, 11811, 1)
+    );
+    args["bands"] = json!(2);
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (11811, 11811, 1)
+    );
+    args["out_path"] = json!("rendered.png");
+    assert_eq!(s.tool("render_postscript", args)["isError"], false);
+    assert_eq!(
+        phys(&std::fs::read(root.join("rendered.png")).unwrap()),
+        (11811, 11811, 1)
+    );
+
+    let note = s.tool(
+        "handwrite",
+        json!({ "text": "hi", "size": 24, "seed": 3, "dpi": 300 }),
+    );
+    assert_eq!(phys(&inline(&note)), (11811, 11811, 1));
+
+    // A chalkboard defaults to 144 dpi.
+    let board = s.tool(
+        "chalkboard_math",
+        json!({ "latex": "x^2", "width": 200, "height": 100 }),
+    );
+    assert_eq!(phys(&inline(&board)), (5669, 5669, 1));
+
+    // A sheet mixes cells of any dpi: nominal 72.
+    let sheet = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "0 0 20 20 rectfill showpage", "width": 40, "height": 40 }], "dpi": [72, 144] }),
+    );
+    assert_eq!(phys(&sheet_png(&sheet)), (2835, 2835, 1));
 }

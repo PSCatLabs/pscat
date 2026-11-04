@@ -48,6 +48,7 @@ body:
         - label: crates.io shows the version and docs.rs built it
         - label: The outsider install smoke test passes (RELEASING.md)
         - label: The release report (run artifact) is linked below
+        - label: Stable releases only, the announcement is sent to the mailing list (/announce-release, docs/dev/ANNOUNCING.md)
   - type: textarea
     id: notes
     attributes:

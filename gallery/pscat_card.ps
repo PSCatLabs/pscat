@@ -1,0 +1,176 @@
+%!PS-Adobe-3.0
+%%Title: The Program Card
+%%BoundingBox: 0 0 252 144
+%%Pages: 2
+%%EndComments
+
+% The Program Card: a two-sided business card for pscat, 3.5 x 2 in
+% (252 x 144 pt). Page 1 is the front, page 2 the back. Everything on it
+% is drawn here: the cat-eared %! logo (after art/logo/pscat-logo-d.ps),
+% the type (Courier, Palatino and Helvetica, all in the LaserWriter 35
+% pscat compiles in) and the QR code, which lib/qr.ps encodes and draws
+% as vector geometry. No raster images and no font packs.
+%
+% Print it from the PDF, which carries both sides at their true size:
+%   pscat --page 252x144 --pdf card.pdf gallery/pscat_card.ps
+% or as two 300 dpi PNGs, card-001.png (front) and card-002.png (back),
+% 1050 x 600 pixels each (tell the print dialog 300 dpi):
+%   pscat --page 252x144 --dpi 300 --png card.png gallery/pscat_card.ps
+%
+% The gallery still is a proof of both sides on one sheet. Defining
+% /CardProof before the program draws that sheet instead of two pages:
+%   { printf '/CardProof true def\n'; cat gallery/pscat_card.ps; } | \
+%     pscat --page 300x360 --dpi 300 --png gallery/renders/pscat_card.png -
+% It is rendered at 300 dpi, not with the 2x prelude the other stills
+% use: the QR's modules are 1.68 pt, exactly 7 pixels at 300 dpi, and
+% the proof only translates the cards by multiples of 0.24 pt (one
+% 300 dpi pixel), so every module edge lands on a pixel edge in the
+% print PNG and in the gallery still alike. At 2x (144 dpi) a module
+% would be 3.36 pixels.
+%
+% Nothing is printed within 9 pt (1/8 in) of the trim, and the paper is
+% left white, so the card needs no bleed. Every letter is 9 pt or larger.
+% For a warm white, print it on a warm-white (natural or cream) stock
+% rather than inking a tint: a flat tint needs a bleed, or leaves a white
+% frame that a trim off by 1/32 in makes visibly uneven, and a tint under
+% the QR code would cut its contrast.
+%
+% Ghostscript runs it too (it reads lib/qr.ps):
+%   gs -dNOSAFER -dDEVICEWIDTHPOINTS=252 -dDEVICEHEIGHTPOINTS=144 \
+%     -sDEVICE=pdfwrite -o card.pdf gallery/pscat_card.ps
+%
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain. CC0 grants
+% no trademark rights in the pscat name or logo.
+
+(lib/qr.ps) run
+
+/url (https://github.com/PSCatLabs/pscat) def
+
+% The logo's colours, and a navy for the small print.
+/mustard { 0.910 0.718 0.188 setrgbcolor } def
+/cream   { 0.984 0.965 0.918 setrgbcolor } def
+/ink     { 0.110 0.106 0.118 setrgbcolor } def
+/foldtone { 0.851 0.812 0.722 setrgbcolor } def
+/navy    { 0.106 0.165 0.322 setrgbcolor } def
+
+% x y w h r roundbox: a rounded-rectangle path.
+/roundbox {
+  /rb-r exch def /rb-h exch def /rb-w exch def /rb-y exch def /rb-x exch def
+  newpath
+  rb-x rb-w add rb-r sub rb-y rb-r add rb-r -90 0 arc
+  rb-x rb-w add rb-r sub rb-y rb-h add rb-r sub rb-r 0 90 arc
+  rb-x rb-r add rb-y rb-h add rb-r sub rb-r 90 180 arc
+  rb-x rb-r add rb-y rb-r add rb-r 180 270 arc
+  closepath
+} def
+
+% x y size logo: the cat-eared %! sheet on its mustard tile, in the
+% logo's own 384-unit design space scaled to size points.
+/logo {
+  gsave
+  /lg-size exch def translate lg-size 384 div dup scale
+  mustard 0 0 384 384 36 roundbox fill
+  /sheetpath {
+    newpath
+    84 52 moveto 84 300 lineto
+    100 352 lineto 152 300 lineto
+    232 300 lineto
+    284 352 lineto 300 300 lineto
+    300 104 lineto 248 52 lineto closepath
+  } def
+  ink 14 setlinewidth 1 setlinejoin sheetpath stroke
+  cream sheetpath fill
+  newpath 300 104 moveto 248 104 lineto 248 52 lineto closepath
+  gsave foldtone fill grestore ink 8 setlinewidth stroke
+  ink
+  newpath 104 300 moveto 108 326 lineto 130 300 lineto closepath fill
+  newpath 280 300 moveto 276 326 lineto 254 300 lineto closepath fill
+  /Courier-Bold findfont 132 scalefont setfont
+  /gap -12 def
+  (%) stringwidth pop 2 mul gap add 2 div 186 exch sub 140 moveto
+  (%) show gap 0 rmoveto (!) show
+  grestore
+} def
+
+% font size (text) x y setline: show text at x y.
+/setline { moveto 3 1 roll exch findfont exch scalefont setfont show } def
+
+% ---------------------------------------------------------------- front
+
+% The front is one lockup: the 70 pt tile, the wordmark and the tagline
+% share its top and bottom edges, and the wordmark runs out to the rule's
+% right end. The numbers are the faces' ink, measured from a 1000 pt
+% raster (per 1000 units of the em; the advance widths would overshoot):
+% Courier-Bold "pscat" inks x 68 to 2906 and y -208 to 666 (the t's top),
+% and Palatino-Italic "P" starts its ink at x 9. So at 46.5 pt, drawn from
+% x 98.9, the wordmark's ink runs from 102.1 (over the tagline's first
+% stroke) to 234 (the rule's end), and from baseline 91 its t tops out at
+% 122, level with the tile; the tagline's last baseline sits on the tile's
+% bottom, 52.
+/front {
+  gsave
+  18 52 70 logo
+  ink /Courier-Bold 46.5 (pscat) 98.9 91 setline
+  /Palatino-Italic 13 (PostScript for precision) 102 67 setline
+  /Palatino-Italic 13 (and imagination.) 102 52 setline
+  mustard 18 31.5 216 1.2 rectfill
+  navy /Helvetica-Bold findfont 9 scalefont setfont
+  18 16 moveto 1.2 0 (PSCatLabs) ashow
+  /Helvetica findfont 9 scalefont setfont
+  (PostScript interpreter) dup stringwidth pop 234 exch sub 16 moveto show
+  grestore
+} def
+
+% ----------------------------------------------------------------- back
+
+% The symbol: level H fits the 34-byte URL in version 4 (33 modules), the
+% same version Q would need. 1.68 pt modules: 41 x 1.68 = 68.88 pt square,
+% about 0.96 in with the quiet zone.
+/qrmodule 1.68 def
+/qrx 171.12 def      % 713 pixels at 300 dpi
+/qry 37.44 def       % 156 pixels
+
+/back {
+  gsave
+  ink /Palatino-Bold 14 (This card is a program.) 18 108 setline
+  /Helvetica findfont 9 scalefont setfont
+  18 89 moveto (Every letter, rule and square here,) show
+  18 78 moveto (the QR code too, is drawn by a) show
+  18 67 moveto (PostScript program run by pscat.) show
+  mustard 18 54.5 24 1.2 rectfill
+  ink /Helvetica-Bold findfont 9 scalefont setfont
+  18 40 moveto (Scan to draw your own:) show
+  navy /Courier-Bold findfont 9 scalefont setfont
+  18 28 moveto (github.com/PSCatLabs/pscat) show
+  qrx qry moveto
+  url << /Level /H >> qrencode
+  << /ModuleSize qrmodule /Dark [0.106 0.165 0.322] /Light 1 >> qrdraw
+  grestore
+} def
+
+% ---------------------------------------------------------------- proof
+
+% proc x y card-at: run proc as a card at x y, white, over a soft shadow
+% that falls down and to the right (rings of grey, darkest nearest).
+/card-at {
+  gsave translate
+  5 -1 1 {
+    /k exch def
+    0.906 k 6 sub 0.012 mul add setgray
+    k neg 0.5 mul 0.8 add  k neg 0.5 mul 1.6 sub  252 k add  144 k add  k 1.5 add roundbox fill
+  } for
+  1 setgray 0 0 252 144 rectfill
+  exec
+  grestore
+} def
+
+/CardProof where {
+  pop
+  0.906 0.894 0.863 setrgbcolor clippath fill
+  { front } 24 192 card-at
+  { back } 24 24 card-at
+  showpage
+} {
+  front showpage
+  back showpage
+} ifelse

@@ -19,6 +19,7 @@ on it with them. For conventions start with [`AGENTS.md`](../../AGENTS.md) and
 | [`VM.md`](VM.md) | How `save` and `restore` work, and the rules for mutating arrays and dictionaries. |
 | [`FONTS.md`](FONTS.md) | The font machinery: Type 3 programs, Type 1 parsing and the runtime catalog. |
 | [`RELEASING.md`](RELEASING.md) | Interpreter releases: `scripts/release.sh`, the tag-driven pipeline, safe resume, the owner's one-time setup, the release checklist, hotfixes and yanking. |
+| [`ANNOUNCING.md`](ANNOUNCING.md) | E-mailing a release announcement to the PSCat-announcements Google Group: `/announce-release`, SMTP setup, the sent log. |
 | [`RELEASING-FONTS.md`](RELEASING-FONTS.md) | The font-pack release train: pack formats, cutting a `fonts-*` release, pinning a pscat release to it. |
 | [`CAPABILITIES.md`](CAPABILITIES.md) | The machine-readable art catalog that `pscat --capabilities` prints. |
 | [`PS_LIBRARY_COUPLING.md`](PS_LIBRARY_COUPLING.md) | What a PostScript-only change must touch, and how that list was shortened. |
@@ -44,11 +45,18 @@ usage guide; for how to use a library, see the [guides](../guides/README.md).
 | [`design/CANVAS_SURFACE.md`](design/CANVAS_SURFACE.md) | The shared canvas surface under the paint and dry-media libraries. |
 | [`design/WATERCOLOR.md`](design/WATERCOLOR.md) | The watercolor rendering spike (prototypes in [`design/watercolor_prototypes/`](design/watercolor_prototypes/)). |
 | [`design/TYPEWRITER.md`](design/TYPEWRITER.md) | `lib/typewriter.ps` (references and tools in [`design/typewriter/`](design/typewriter/)). |
+| [`design/QR_CODE.md`](design/QR_CODE.md) | Native QR library feature plan, current scope, independent verification and business-card integration. |
+
+For the QR checkpoint's independent review, use the
+[review handoff](design/QR_CODE_REVIEW.md), [API contracts](design/QR_CODE_API.md)
+and [verification guide](design/QR_CODE_TESTING.md).
 
 ## Where new docs go
 
 - A library **design doc**: `docs/dev/design/`, with its images beside it.
-- A **user guide**: [`docs/guides/`](../guides/README.md).
+- A **user guide**: [`docs/guides/`](../guides/README.md). When a doc or skill
+  helps someone choose pscat over another tool, link
+  [When to use pscat](../guides/when-to-use-pscat.md) rather than restating it.
 - A one-off writeup, such as the record of a decision: [`docs/archive/`](../archive/README.md).
 - **Per-issue notes**: [`notes/`](../../notes/README.md), one file per issue.
 

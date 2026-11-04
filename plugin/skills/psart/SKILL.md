@@ -13,18 +13,31 @@ catalog. Art here is *written*, rendered, looked at, and refined. The
 `pscat` skill has the command-line reference; this one is the workflow
 and the toolkit.
 
+pscat art is seeded, editable source: the same program and seed paint the
+same picture, it prints as vector PDF, and type, QR codes and charts sit
+exactly on the same page. It is not photorealistic, and its painterly look is
+procedural: for a photo or a loose mood image with nothing exact in it,
+suggest an image model (or use one for the background and pscat for the
+exact layer). [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md) has the decision table.
+
 ## The loop
 
 1. Write the piece as a `.ps` file (start from the sketch at the end).
 2. `pscat --page WxH --png out.png piece.ps` — then **look at the
    PNG**. Really look: composition, color, balance, whether the idea
    reads. (Over MCP: `render_postscript` returns the PNG inline.)
+   Looking is not showing: a picture inside a tool call usually does not reach
+   the user. When they asked to see the piece, save the PNG and the `.ps`, and put
+   the PNG in your final message by absolute path, as `![title](ABSOLUTE_PNG_PATH)`
+   plus a plain `[title.png](ABSOLUTE_PNG_PATH)` link and a link to the source (never base64). The `pscat` skill's "Show the result
+   to the user" has the per-host details.
 3. Refine and re-render. Small seeds, big differences: `N srand` at
    the top makes every run reproducible (same seed, same picture).
    `pscat piece.ps --sweep-seed 1:12 --contact-sheet grid.png` compares
    twelve seeds in one run. To compare different programs, or one at
    several sizes (a 48 px icon beside its 512 px original), with labels:
-   `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill). A seed
+   `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill's
+   `references/sheets.md`). A seed
    sweep with `seed=7` under each cell, wrapped at a width you choose:
    `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`.
 4. Optional, if Ghostscript is installed: `gs` is the behavioural
@@ -122,7 +135,8 @@ showpage
 Render it with `pscat --page 400x400 --png cloud.png cloud.ps`, and add
 `--bands 4` to split the rows (about twice as fast here, same bytes). `--bands`
 works over MCP too: `render_postscript` and `start_render` take `bands`, and a
-long render goes through `start_render` (see the `pscat` skill). An older pscat has
+long render goes through `start_render` (see the `pscat` skill's
+`references/mcp.md`). An older pscat has
 no noise operators: probe `systemdict /fbm2 known`, and fall back to artkit's
 `noise2` (or update pscat). For Ghostscript, `lib/noiseref.ps` has the same
 noise as `nrfbm2` and friends. Worked example: `gallery/basin_and_range.ps`;
@@ -186,6 +200,33 @@ Also in the library, documented in each file's header and in
 72 480 moveto (06:12  0.4 m  |  12:48  2.1 m) show
 showpage
 ```
+
+## With an image model: paint once, compose in pscat
+
+If you (or the user) also have an image tool, split the work: the image model
+paints the atmosphere, pscat sets everything exact on top. A prompt that works:
+
+> Generate a background with <image tool>: a painterly evening sky, portrait
+> 2:3, open sky in the top third, no text, letters or logos. Save it as a JPEG
+> and keep it; do not regenerate it. Then compose the poster in pscat: draw the
+> JPEG to cover the page, and set the title, the details and a QR code on top.
+
+Then iterate on the pscat layer only. pscat reads JPEG, not PNG, through
+`/DCTDecode`; give the image its pixel size:
+
+```postscript partial
+gsave 0 0 595 842 rectclip  595 595 1024 div 1536 mul scale
+/DeviceRGB setcolorspace
+<< /ImageType 1 /Width 1024 /Height 1536 /BitsPerComponent 8 /Decode [0 1 0 1 0 1]
+   /ImageMatrix [1024 0 0 -1536 0 1536]
+   /DataSource (background.jpg) (r) file /DCTDecode filter >> image
+grestore
+% now the exact layer: type, a chart, (lib/qr.ps) run ... qrencode ... qrdraw
+```
+
+Paint the QR code's quiet zone (`/Light` a light colour) so it scans over the
+painting. [pscat with an image model](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/pscat-with-image-models.md)
+has two worked examples and a comparison with the image model alone.
 
 ## Composition habits that keep pieces good
 

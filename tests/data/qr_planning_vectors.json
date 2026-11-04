@@ -1,0 +1,5118 @@
+{
+  "oracle": "https://github.com/nayuki/QR-Code-generator",
+  "revision": "3c6d0b3cefb4e049dc337e82237c9644399716a8",
+  "source_sha256": "9f4ed1dd201dcb92b1bc0d6e14f46c754bcff0ce48580c5d7e8ace8f6926c8ef",
+  "description": "All 160 block specifications; automatic byte-mode plans at maximum-1/maximum/maximum+1 for every version/level. Payload byte i is i mod 256; ECC boost disabled.",
+  "specifications": [
+    {
+      "Version": 1,
+      "Level": "L",
+      "Size": 21,
+      "RawCodewords": 26,
+      "RemainderBits": 0,
+      "DataCodewords": 19,
+      "ECCodewordsPerBlock": 7,
+      "Blocks": 1
+    },
+    {
+      "Version": 2,
+      "Level": "L",
+      "Size": 25,
+      "RawCodewords": 44,
+      "RemainderBits": 7,
+      "DataCodewords": 34,
+      "ECCodewordsPerBlock": 10,
+      "Blocks": 1
+    },
+    {
+      "Version": 3,
+      "Level": "L",
+      "Size": 29,
+      "RawCodewords": 70,
+      "RemainderBits": 7,
+      "DataCodewords": 55,
+      "ECCodewordsPerBlock": 15,
+      "Blocks": 1
+    },
+    {
+      "Version": 4,
+      "Level": "L",
+      "Size": 33,
+      "RawCodewords": 100,
+      "RemainderBits": 7,
+      "DataCodewords": 80,
+      "ECCodewordsPerBlock": 20,
+      "Blocks": 1
+    },
+    {
+      "Version": 5,
+      "Level": "L",
+      "Size": 37,
+      "RawCodewords": 134,
+      "RemainderBits": 7,
+      "DataCodewords": 108,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 1
+    },
+    {
+      "Version": 6,
+      "Level": "L",
+      "Size": 41,
+      "RawCodewords": 172,
+      "RemainderBits": 7,
+      "DataCodewords": 136,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 2
+    },
+    {
+      "Version": 7,
+      "Level": "L",
+      "Size": 45,
+      "RawCodewords": 196,
+      "RemainderBits": 0,
+      "DataCodewords": 156,
+      "ECCodewordsPerBlock": 20,
+      "Blocks": 2
+    },
+    {
+      "Version": 8,
+      "Level": "L",
+      "Size": 49,
+      "RawCodewords": 242,
+      "RemainderBits": 0,
+      "DataCodewords": 194,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 2
+    },
+    {
+      "Version": 9,
+      "Level": "L",
+      "Size": 53,
+      "RawCodewords": 292,
+      "RemainderBits": 0,
+      "DataCodewords": 232,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 2
+    },
+    {
+      "Version": 10,
+      "Level": "L",
+      "Size": 57,
+      "RawCodewords": 346,
+      "RemainderBits": 0,
+      "DataCodewords": 274,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 4
+    },
+    {
+      "Version": 11,
+      "Level": "L",
+      "Size": 61,
+      "RawCodewords": 404,
+      "RemainderBits": 0,
+      "DataCodewords": 324,
+      "ECCodewordsPerBlock": 20,
+      "Blocks": 4
+    },
+    {
+      "Version": 12,
+      "Level": "L",
+      "Size": 65,
+      "RawCodewords": 466,
+      "RemainderBits": 0,
+      "DataCodewords": 370,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 4
+    },
+    {
+      "Version": 13,
+      "Level": "L",
+      "Size": 69,
+      "RawCodewords": 532,
+      "RemainderBits": 0,
+      "DataCodewords": 428,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 4
+    },
+    {
+      "Version": 14,
+      "Level": "L",
+      "Size": 73,
+      "RawCodewords": 581,
+      "RemainderBits": 3,
+      "DataCodewords": 461,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 4
+    },
+    {
+      "Version": 15,
+      "Level": "L",
+      "Size": 77,
+      "RawCodewords": 655,
+      "RemainderBits": 3,
+      "DataCodewords": 523,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 6
+    },
+    {
+      "Version": 16,
+      "Level": "L",
+      "Size": 81,
+      "RawCodewords": 733,
+      "RemainderBits": 3,
+      "DataCodewords": 589,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 6
+    },
+    {
+      "Version": 17,
+      "Level": "L",
+      "Size": 85,
+      "RawCodewords": 815,
+      "RemainderBits": 3,
+      "DataCodewords": 647,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 6
+    },
+    {
+      "Version": 18,
+      "Level": "L",
+      "Size": 89,
+      "RawCodewords": 901,
+      "RemainderBits": 3,
+      "DataCodewords": 721,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 6
+    },
+    {
+      "Version": 19,
+      "Level": "L",
+      "Size": 93,
+      "RawCodewords": 991,
+      "RemainderBits": 3,
+      "DataCodewords": 795,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 7
+    },
+    {
+      "Version": 20,
+      "Level": "L",
+      "Size": 97,
+      "RawCodewords": 1085,
+      "RemainderBits": 3,
+      "DataCodewords": 861,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 8
+    },
+    {
+      "Version": 21,
+      "Level": "L",
+      "Size": 101,
+      "RawCodewords": 1156,
+      "RemainderBits": 4,
+      "DataCodewords": 932,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 8
+    },
+    {
+      "Version": 22,
+      "Level": "L",
+      "Size": 105,
+      "RawCodewords": 1258,
+      "RemainderBits": 4,
+      "DataCodewords": 1006,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 9
+    },
+    {
+      "Version": 23,
+      "Level": "L",
+      "Size": 109,
+      "RawCodewords": 1364,
+      "RemainderBits": 4,
+      "DataCodewords": 1094,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 9
+    },
+    {
+      "Version": 24,
+      "Level": "L",
+      "Size": 113,
+      "RawCodewords": 1474,
+      "RemainderBits": 4,
+      "DataCodewords": 1174,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 10
+    },
+    {
+      "Version": 25,
+      "Level": "L",
+      "Size": 117,
+      "RawCodewords": 1588,
+      "RemainderBits": 4,
+      "DataCodewords": 1276,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 12
+    },
+    {
+      "Version": 26,
+      "Level": "L",
+      "Size": 121,
+      "RawCodewords": 1706,
+      "RemainderBits": 4,
+      "DataCodewords": 1370,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 12
+    },
+    {
+      "Version": 27,
+      "Level": "L",
+      "Size": 125,
+      "RawCodewords": 1828,
+      "RemainderBits": 4,
+      "DataCodewords": 1468,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 12
+    },
+    {
+      "Version": 28,
+      "Level": "L",
+      "Size": 129,
+      "RawCodewords": 1921,
+      "RemainderBits": 3,
+      "DataCodewords": 1531,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 13
+    },
+    {
+      "Version": 29,
+      "Level": "L",
+      "Size": 133,
+      "RawCodewords": 2051,
+      "RemainderBits": 3,
+      "DataCodewords": 1631,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 14
+    },
+    {
+      "Version": 30,
+      "Level": "L",
+      "Size": 137,
+      "RawCodewords": 2185,
+      "RemainderBits": 3,
+      "DataCodewords": 1735,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 15
+    },
+    {
+      "Version": 31,
+      "Level": "L",
+      "Size": 141,
+      "RawCodewords": 2323,
+      "RemainderBits": 3,
+      "DataCodewords": 1843,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 16
+    },
+    {
+      "Version": 32,
+      "Level": "L",
+      "Size": 145,
+      "RawCodewords": 2465,
+      "RemainderBits": 3,
+      "DataCodewords": 1955,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 17
+    },
+    {
+      "Version": 33,
+      "Level": "L",
+      "Size": 149,
+      "RawCodewords": 2611,
+      "RemainderBits": 3,
+      "DataCodewords": 2071,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 18
+    },
+    {
+      "Version": 34,
+      "Level": "L",
+      "Size": 153,
+      "RawCodewords": 2761,
+      "RemainderBits": 3,
+      "DataCodewords": 2191,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 19
+    },
+    {
+      "Version": 35,
+      "Level": "L",
+      "Size": 157,
+      "RawCodewords": 2876,
+      "RemainderBits": 0,
+      "DataCodewords": 2306,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 19
+    },
+    {
+      "Version": 36,
+      "Level": "L",
+      "Size": 161,
+      "RawCodewords": 3034,
+      "RemainderBits": 0,
+      "DataCodewords": 2434,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 20
+    },
+    {
+      "Version": 37,
+      "Level": "L",
+      "Size": 165,
+      "RawCodewords": 3196,
+      "RemainderBits": 0,
+      "DataCodewords": 2566,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 21
+    },
+    {
+      "Version": 38,
+      "Level": "L",
+      "Size": 169,
+      "RawCodewords": 3362,
+      "RemainderBits": 0,
+      "DataCodewords": 2702,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 22
+    },
+    {
+      "Version": 39,
+      "Level": "L",
+      "Size": 173,
+      "RawCodewords": 3532,
+      "RemainderBits": 0,
+      "DataCodewords": 2812,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 24
+    },
+    {
+      "Version": 40,
+      "Level": "L",
+      "Size": 177,
+      "RawCodewords": 3706,
+      "RemainderBits": 0,
+      "DataCodewords": 2956,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 25
+    },
+    {
+      "Version": 1,
+      "Level": "M",
+      "Size": 21,
+      "RawCodewords": 26,
+      "RemainderBits": 0,
+      "DataCodewords": 16,
+      "ECCodewordsPerBlock": 10,
+      "Blocks": 1
+    },
+    {
+      "Version": 2,
+      "Level": "M",
+      "Size": 25,
+      "RawCodewords": 44,
+      "RemainderBits": 7,
+      "DataCodewords": 28,
+      "ECCodewordsPerBlock": 16,
+      "Blocks": 1
+    },
+    {
+      "Version": 3,
+      "Level": "M",
+      "Size": 29,
+      "RawCodewords": 70,
+      "RemainderBits": 7,
+      "DataCodewords": 44,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 1
+    },
+    {
+      "Version": 4,
+      "Level": "M",
+      "Size": 33,
+      "RawCodewords": 100,
+      "RemainderBits": 7,
+      "DataCodewords": 64,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 2
+    },
+    {
+      "Version": 5,
+      "Level": "M",
+      "Size": 37,
+      "RawCodewords": 134,
+      "RemainderBits": 7,
+      "DataCodewords": 86,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 2
+    },
+    {
+      "Version": 6,
+      "Level": "M",
+      "Size": 41,
+      "RawCodewords": 172,
+      "RemainderBits": 7,
+      "DataCodewords": 108,
+      "ECCodewordsPerBlock": 16,
+      "Blocks": 4
+    },
+    {
+      "Version": 7,
+      "Level": "M",
+      "Size": 45,
+      "RawCodewords": 196,
+      "RemainderBits": 0,
+      "DataCodewords": 124,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 4
+    },
+    {
+      "Version": 8,
+      "Level": "M",
+      "Size": 49,
+      "RawCodewords": 242,
+      "RemainderBits": 0,
+      "DataCodewords": 154,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 4
+    },
+    {
+      "Version": 9,
+      "Level": "M",
+      "Size": 53,
+      "RawCodewords": 292,
+      "RemainderBits": 0,
+      "DataCodewords": 182,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 5
+    },
+    {
+      "Version": 10,
+      "Level": "M",
+      "Size": 57,
+      "RawCodewords": 346,
+      "RemainderBits": 0,
+      "DataCodewords": 216,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 5
+    },
+    {
+      "Version": 11,
+      "Level": "M",
+      "Size": 61,
+      "RawCodewords": 404,
+      "RemainderBits": 0,
+      "DataCodewords": 254,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 5
+    },
+    {
+      "Version": 12,
+      "Level": "M",
+      "Size": 65,
+      "RawCodewords": 466,
+      "RemainderBits": 0,
+      "DataCodewords": 290,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 8
+    },
+    {
+      "Version": 13,
+      "Level": "M",
+      "Size": 69,
+      "RawCodewords": 532,
+      "RemainderBits": 0,
+      "DataCodewords": 334,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 9
+    },
+    {
+      "Version": 14,
+      "Level": "M",
+      "Size": 73,
+      "RawCodewords": 581,
+      "RemainderBits": 3,
+      "DataCodewords": 365,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 9
+    },
+    {
+      "Version": 15,
+      "Level": "M",
+      "Size": 77,
+      "RawCodewords": 655,
+      "RemainderBits": 3,
+      "DataCodewords": 415,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 10
+    },
+    {
+      "Version": 16,
+      "Level": "M",
+      "Size": 81,
+      "RawCodewords": 733,
+      "RemainderBits": 3,
+      "DataCodewords": 453,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 10
+    },
+    {
+      "Version": 17,
+      "Level": "M",
+      "Size": 85,
+      "RawCodewords": 815,
+      "RemainderBits": 3,
+      "DataCodewords": 507,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 11
+    },
+    {
+      "Version": 18,
+      "Level": "M",
+      "Size": 89,
+      "RawCodewords": 901,
+      "RemainderBits": 3,
+      "DataCodewords": 563,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 13
+    },
+    {
+      "Version": 19,
+      "Level": "M",
+      "Size": 93,
+      "RawCodewords": 991,
+      "RemainderBits": 3,
+      "DataCodewords": 627,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 14
+    },
+    {
+      "Version": 20,
+      "Level": "M",
+      "Size": 97,
+      "RawCodewords": 1085,
+      "RemainderBits": 3,
+      "DataCodewords": 669,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 16
+    },
+    {
+      "Version": 21,
+      "Level": "M",
+      "Size": 101,
+      "RawCodewords": 1156,
+      "RemainderBits": 4,
+      "DataCodewords": 714,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 17
+    },
+    {
+      "Version": 22,
+      "Level": "M",
+      "Size": 105,
+      "RawCodewords": 1258,
+      "RemainderBits": 4,
+      "DataCodewords": 782,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 17
+    },
+    {
+      "Version": 23,
+      "Level": "M",
+      "Size": 109,
+      "RawCodewords": 1364,
+      "RemainderBits": 4,
+      "DataCodewords": 860,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 18
+    },
+    {
+      "Version": 24,
+      "Level": "M",
+      "Size": 113,
+      "RawCodewords": 1474,
+      "RemainderBits": 4,
+      "DataCodewords": 914,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 20
+    },
+    {
+      "Version": 25,
+      "Level": "M",
+      "Size": 117,
+      "RawCodewords": 1588,
+      "RemainderBits": 4,
+      "DataCodewords": 1000,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 21
+    },
+    {
+      "Version": 26,
+      "Level": "M",
+      "Size": 121,
+      "RawCodewords": 1706,
+      "RemainderBits": 4,
+      "DataCodewords": 1062,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 23
+    },
+    {
+      "Version": 27,
+      "Level": "M",
+      "Size": 125,
+      "RawCodewords": 1828,
+      "RemainderBits": 4,
+      "DataCodewords": 1128,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 25
+    },
+    {
+      "Version": 28,
+      "Level": "M",
+      "Size": 129,
+      "RawCodewords": 1921,
+      "RemainderBits": 3,
+      "DataCodewords": 1193,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 26
+    },
+    {
+      "Version": 29,
+      "Level": "M",
+      "Size": 133,
+      "RawCodewords": 2051,
+      "RemainderBits": 3,
+      "DataCodewords": 1267,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 28
+    },
+    {
+      "Version": 30,
+      "Level": "M",
+      "Size": 137,
+      "RawCodewords": 2185,
+      "RemainderBits": 3,
+      "DataCodewords": 1373,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 29
+    },
+    {
+      "Version": 31,
+      "Level": "M",
+      "Size": 141,
+      "RawCodewords": 2323,
+      "RemainderBits": 3,
+      "DataCodewords": 1455,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 31
+    },
+    {
+      "Version": 32,
+      "Level": "M",
+      "Size": 145,
+      "RawCodewords": 2465,
+      "RemainderBits": 3,
+      "DataCodewords": 1541,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 33
+    },
+    {
+      "Version": 33,
+      "Level": "M",
+      "Size": 149,
+      "RawCodewords": 2611,
+      "RemainderBits": 3,
+      "DataCodewords": 1631,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 35
+    },
+    {
+      "Version": 34,
+      "Level": "M",
+      "Size": 153,
+      "RawCodewords": 2761,
+      "RemainderBits": 3,
+      "DataCodewords": 1725,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 37
+    },
+    {
+      "Version": 35,
+      "Level": "M",
+      "Size": 157,
+      "RawCodewords": 2876,
+      "RemainderBits": 0,
+      "DataCodewords": 1812,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 38
+    },
+    {
+      "Version": 36,
+      "Level": "M",
+      "Size": 161,
+      "RawCodewords": 3034,
+      "RemainderBits": 0,
+      "DataCodewords": 1914,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 40
+    },
+    {
+      "Version": 37,
+      "Level": "M",
+      "Size": 165,
+      "RawCodewords": 3196,
+      "RemainderBits": 0,
+      "DataCodewords": 1992,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 43
+    },
+    {
+      "Version": 38,
+      "Level": "M",
+      "Size": 169,
+      "RawCodewords": 3362,
+      "RemainderBits": 0,
+      "DataCodewords": 2102,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 45
+    },
+    {
+      "Version": 39,
+      "Level": "M",
+      "Size": 173,
+      "RawCodewords": 3532,
+      "RemainderBits": 0,
+      "DataCodewords": 2216,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 47
+    },
+    {
+      "Version": 40,
+      "Level": "M",
+      "Size": 177,
+      "RawCodewords": 3706,
+      "RemainderBits": 0,
+      "DataCodewords": 2334,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 49
+    },
+    {
+      "Version": 1,
+      "Level": "Q",
+      "Size": 21,
+      "RawCodewords": 26,
+      "RemainderBits": 0,
+      "DataCodewords": 13,
+      "ECCodewordsPerBlock": 13,
+      "Blocks": 1
+    },
+    {
+      "Version": 2,
+      "Level": "Q",
+      "Size": 25,
+      "RawCodewords": 44,
+      "RemainderBits": 7,
+      "DataCodewords": 22,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 1
+    },
+    {
+      "Version": 3,
+      "Level": "Q",
+      "Size": 29,
+      "RawCodewords": 70,
+      "RemainderBits": 7,
+      "DataCodewords": 34,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 2
+    },
+    {
+      "Version": 4,
+      "Level": "Q",
+      "Size": 33,
+      "RawCodewords": 100,
+      "RemainderBits": 7,
+      "DataCodewords": 48,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 2
+    },
+    {
+      "Version": 5,
+      "Level": "Q",
+      "Size": 37,
+      "RawCodewords": 134,
+      "RemainderBits": 7,
+      "DataCodewords": 62,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 4
+    },
+    {
+      "Version": 6,
+      "Level": "Q",
+      "Size": 41,
+      "RawCodewords": 172,
+      "RemainderBits": 7,
+      "DataCodewords": 76,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 4
+    },
+    {
+      "Version": 7,
+      "Level": "Q",
+      "Size": 45,
+      "RawCodewords": 196,
+      "RemainderBits": 0,
+      "DataCodewords": 88,
+      "ECCodewordsPerBlock": 18,
+      "Blocks": 6
+    },
+    {
+      "Version": 8,
+      "Level": "Q",
+      "Size": 49,
+      "RawCodewords": 242,
+      "RemainderBits": 0,
+      "DataCodewords": 110,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 6
+    },
+    {
+      "Version": 9,
+      "Level": "Q",
+      "Size": 53,
+      "RawCodewords": 292,
+      "RemainderBits": 0,
+      "DataCodewords": 132,
+      "ECCodewordsPerBlock": 20,
+      "Blocks": 8
+    },
+    {
+      "Version": 10,
+      "Level": "Q",
+      "Size": 57,
+      "RawCodewords": 346,
+      "RemainderBits": 0,
+      "DataCodewords": 154,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 8
+    },
+    {
+      "Version": 11,
+      "Level": "Q",
+      "Size": 61,
+      "RawCodewords": 404,
+      "RemainderBits": 0,
+      "DataCodewords": 180,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 8
+    },
+    {
+      "Version": 12,
+      "Level": "Q",
+      "Size": 65,
+      "RawCodewords": 466,
+      "RemainderBits": 0,
+      "DataCodewords": 206,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 10
+    },
+    {
+      "Version": 13,
+      "Level": "Q",
+      "Size": 69,
+      "RawCodewords": 532,
+      "RemainderBits": 0,
+      "DataCodewords": 244,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 12
+    },
+    {
+      "Version": 14,
+      "Level": "Q",
+      "Size": 73,
+      "RawCodewords": 581,
+      "RemainderBits": 3,
+      "DataCodewords": 261,
+      "ECCodewordsPerBlock": 20,
+      "Blocks": 16
+    },
+    {
+      "Version": 15,
+      "Level": "Q",
+      "Size": 77,
+      "RawCodewords": 655,
+      "RemainderBits": 3,
+      "DataCodewords": 295,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 12
+    },
+    {
+      "Version": 16,
+      "Level": "Q",
+      "Size": 81,
+      "RawCodewords": 733,
+      "RemainderBits": 3,
+      "DataCodewords": 325,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 17
+    },
+    {
+      "Version": 17,
+      "Level": "Q",
+      "Size": 85,
+      "RawCodewords": 815,
+      "RemainderBits": 3,
+      "DataCodewords": 367,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 16
+    },
+    {
+      "Version": 18,
+      "Level": "Q",
+      "Size": 89,
+      "RawCodewords": 901,
+      "RemainderBits": 3,
+      "DataCodewords": 397,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 18
+    },
+    {
+      "Version": 19,
+      "Level": "Q",
+      "Size": 93,
+      "RawCodewords": 991,
+      "RemainderBits": 3,
+      "DataCodewords": 445,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 21
+    },
+    {
+      "Version": 20,
+      "Level": "Q",
+      "Size": 97,
+      "RawCodewords": 1085,
+      "RemainderBits": 3,
+      "DataCodewords": 485,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 20
+    },
+    {
+      "Version": 21,
+      "Level": "Q",
+      "Size": 101,
+      "RawCodewords": 1156,
+      "RemainderBits": 4,
+      "DataCodewords": 512,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 23
+    },
+    {
+      "Version": 22,
+      "Level": "Q",
+      "Size": 105,
+      "RawCodewords": 1258,
+      "RemainderBits": 4,
+      "DataCodewords": 568,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 23
+    },
+    {
+      "Version": 23,
+      "Level": "Q",
+      "Size": 109,
+      "RawCodewords": 1364,
+      "RemainderBits": 4,
+      "DataCodewords": 614,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 25
+    },
+    {
+      "Version": 24,
+      "Level": "Q",
+      "Size": 113,
+      "RawCodewords": 1474,
+      "RemainderBits": 4,
+      "DataCodewords": 664,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 27
+    },
+    {
+      "Version": 25,
+      "Level": "Q",
+      "Size": 117,
+      "RawCodewords": 1588,
+      "RemainderBits": 4,
+      "DataCodewords": 718,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 29
+    },
+    {
+      "Version": 26,
+      "Level": "Q",
+      "Size": 121,
+      "RawCodewords": 1706,
+      "RemainderBits": 4,
+      "DataCodewords": 754,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 34
+    },
+    {
+      "Version": 27,
+      "Level": "Q",
+      "Size": 125,
+      "RawCodewords": 1828,
+      "RemainderBits": 4,
+      "DataCodewords": 808,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 34
+    },
+    {
+      "Version": 28,
+      "Level": "Q",
+      "Size": 129,
+      "RawCodewords": 1921,
+      "RemainderBits": 3,
+      "DataCodewords": 871,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 35
+    },
+    {
+      "Version": 29,
+      "Level": "Q",
+      "Size": 133,
+      "RawCodewords": 2051,
+      "RemainderBits": 3,
+      "DataCodewords": 911,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 38
+    },
+    {
+      "Version": 30,
+      "Level": "Q",
+      "Size": 137,
+      "RawCodewords": 2185,
+      "RemainderBits": 3,
+      "DataCodewords": 985,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 40
+    },
+    {
+      "Version": 31,
+      "Level": "Q",
+      "Size": 141,
+      "RawCodewords": 2323,
+      "RemainderBits": 3,
+      "DataCodewords": 1033,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 43
+    },
+    {
+      "Version": 32,
+      "Level": "Q",
+      "Size": 145,
+      "RawCodewords": 2465,
+      "RemainderBits": 3,
+      "DataCodewords": 1115,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 45
+    },
+    {
+      "Version": 33,
+      "Level": "Q",
+      "Size": 149,
+      "RawCodewords": 2611,
+      "RemainderBits": 3,
+      "DataCodewords": 1171,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 48
+    },
+    {
+      "Version": 34,
+      "Level": "Q",
+      "Size": 153,
+      "RawCodewords": 2761,
+      "RemainderBits": 3,
+      "DataCodewords": 1231,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 51
+    },
+    {
+      "Version": 35,
+      "Level": "Q",
+      "Size": 157,
+      "RawCodewords": 2876,
+      "RemainderBits": 0,
+      "DataCodewords": 1286,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 53
+    },
+    {
+      "Version": 36,
+      "Level": "Q",
+      "Size": 161,
+      "RawCodewords": 3034,
+      "RemainderBits": 0,
+      "DataCodewords": 1354,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 56
+    },
+    {
+      "Version": 37,
+      "Level": "Q",
+      "Size": 165,
+      "RawCodewords": 3196,
+      "RemainderBits": 0,
+      "DataCodewords": 1426,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 59
+    },
+    {
+      "Version": 38,
+      "Level": "Q",
+      "Size": 169,
+      "RawCodewords": 3362,
+      "RemainderBits": 0,
+      "DataCodewords": 1502,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 62
+    },
+    {
+      "Version": 39,
+      "Level": "Q",
+      "Size": 173,
+      "RawCodewords": 3532,
+      "RemainderBits": 0,
+      "DataCodewords": 1582,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 65
+    },
+    {
+      "Version": 40,
+      "Level": "Q",
+      "Size": 177,
+      "RawCodewords": 3706,
+      "RemainderBits": 0,
+      "DataCodewords": 1666,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 68
+    },
+    {
+      "Version": 1,
+      "Level": "H",
+      "Size": 21,
+      "RawCodewords": 26,
+      "RemainderBits": 0,
+      "DataCodewords": 9,
+      "ECCodewordsPerBlock": 17,
+      "Blocks": 1
+    },
+    {
+      "Version": 2,
+      "Level": "H",
+      "Size": 25,
+      "RawCodewords": 44,
+      "RemainderBits": 7,
+      "DataCodewords": 16,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 1
+    },
+    {
+      "Version": 3,
+      "Level": "H",
+      "Size": 29,
+      "RawCodewords": 70,
+      "RemainderBits": 7,
+      "DataCodewords": 26,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 2
+    },
+    {
+      "Version": 4,
+      "Level": "H",
+      "Size": 33,
+      "RawCodewords": 100,
+      "RemainderBits": 7,
+      "DataCodewords": 36,
+      "ECCodewordsPerBlock": 16,
+      "Blocks": 4
+    },
+    {
+      "Version": 5,
+      "Level": "H",
+      "Size": 37,
+      "RawCodewords": 134,
+      "RemainderBits": 7,
+      "DataCodewords": 46,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 4
+    },
+    {
+      "Version": 6,
+      "Level": "H",
+      "Size": 41,
+      "RawCodewords": 172,
+      "RemainderBits": 7,
+      "DataCodewords": 60,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 4
+    },
+    {
+      "Version": 7,
+      "Level": "H",
+      "Size": 45,
+      "RawCodewords": 196,
+      "RemainderBits": 0,
+      "DataCodewords": 66,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 5
+    },
+    {
+      "Version": 8,
+      "Level": "H",
+      "Size": 49,
+      "RawCodewords": 242,
+      "RemainderBits": 0,
+      "DataCodewords": 86,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 6
+    },
+    {
+      "Version": 9,
+      "Level": "H",
+      "Size": 53,
+      "RawCodewords": 292,
+      "RemainderBits": 0,
+      "DataCodewords": 100,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 8
+    },
+    {
+      "Version": 10,
+      "Level": "H",
+      "Size": 57,
+      "RawCodewords": 346,
+      "RemainderBits": 0,
+      "DataCodewords": 122,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 8
+    },
+    {
+      "Version": 11,
+      "Level": "H",
+      "Size": 61,
+      "RawCodewords": 404,
+      "RemainderBits": 0,
+      "DataCodewords": 140,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 11
+    },
+    {
+      "Version": 12,
+      "Level": "H",
+      "Size": 65,
+      "RawCodewords": 466,
+      "RemainderBits": 0,
+      "DataCodewords": 158,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 11
+    },
+    {
+      "Version": 13,
+      "Level": "H",
+      "Size": 69,
+      "RawCodewords": 532,
+      "RemainderBits": 0,
+      "DataCodewords": 180,
+      "ECCodewordsPerBlock": 22,
+      "Blocks": 16
+    },
+    {
+      "Version": 14,
+      "Level": "H",
+      "Size": 73,
+      "RawCodewords": 581,
+      "RemainderBits": 3,
+      "DataCodewords": 197,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 16
+    },
+    {
+      "Version": 15,
+      "Level": "H",
+      "Size": 77,
+      "RawCodewords": 655,
+      "RemainderBits": 3,
+      "DataCodewords": 223,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 18
+    },
+    {
+      "Version": 16,
+      "Level": "H",
+      "Size": 81,
+      "RawCodewords": 733,
+      "RemainderBits": 3,
+      "DataCodewords": 253,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 16
+    },
+    {
+      "Version": 17,
+      "Level": "H",
+      "Size": 85,
+      "RawCodewords": 815,
+      "RemainderBits": 3,
+      "DataCodewords": 283,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 19
+    },
+    {
+      "Version": 18,
+      "Level": "H",
+      "Size": 89,
+      "RawCodewords": 901,
+      "RemainderBits": 3,
+      "DataCodewords": 313,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 21
+    },
+    {
+      "Version": 19,
+      "Level": "H",
+      "Size": 93,
+      "RawCodewords": 991,
+      "RemainderBits": 3,
+      "DataCodewords": 341,
+      "ECCodewordsPerBlock": 26,
+      "Blocks": 25
+    },
+    {
+      "Version": 20,
+      "Level": "H",
+      "Size": 97,
+      "RawCodewords": 1085,
+      "RemainderBits": 3,
+      "DataCodewords": 385,
+      "ECCodewordsPerBlock": 28,
+      "Blocks": 25
+    },
+    {
+      "Version": 21,
+      "Level": "H",
+      "Size": 101,
+      "RawCodewords": 1156,
+      "RemainderBits": 4,
+      "DataCodewords": 406,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 25
+    },
+    {
+      "Version": 22,
+      "Level": "H",
+      "Size": 105,
+      "RawCodewords": 1258,
+      "RemainderBits": 4,
+      "DataCodewords": 442,
+      "ECCodewordsPerBlock": 24,
+      "Blocks": 34
+    },
+    {
+      "Version": 23,
+      "Level": "H",
+      "Size": 109,
+      "RawCodewords": 1364,
+      "RemainderBits": 4,
+      "DataCodewords": 464,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 30
+    },
+    {
+      "Version": 24,
+      "Level": "H",
+      "Size": 113,
+      "RawCodewords": 1474,
+      "RemainderBits": 4,
+      "DataCodewords": 514,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 32
+    },
+    {
+      "Version": 25,
+      "Level": "H",
+      "Size": 117,
+      "RawCodewords": 1588,
+      "RemainderBits": 4,
+      "DataCodewords": 538,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 35
+    },
+    {
+      "Version": 26,
+      "Level": "H",
+      "Size": 121,
+      "RawCodewords": 1706,
+      "RemainderBits": 4,
+      "DataCodewords": 596,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 37
+    },
+    {
+      "Version": 27,
+      "Level": "H",
+      "Size": 125,
+      "RawCodewords": 1828,
+      "RemainderBits": 4,
+      "DataCodewords": 628,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 40
+    },
+    {
+      "Version": 28,
+      "Level": "H",
+      "Size": 129,
+      "RawCodewords": 1921,
+      "RemainderBits": 3,
+      "DataCodewords": 661,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 42
+    },
+    {
+      "Version": 29,
+      "Level": "H",
+      "Size": 133,
+      "RawCodewords": 2051,
+      "RemainderBits": 3,
+      "DataCodewords": 701,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 45
+    },
+    {
+      "Version": 30,
+      "Level": "H",
+      "Size": 137,
+      "RawCodewords": 2185,
+      "RemainderBits": 3,
+      "DataCodewords": 745,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 48
+    },
+    {
+      "Version": 31,
+      "Level": "H",
+      "Size": 141,
+      "RawCodewords": 2323,
+      "RemainderBits": 3,
+      "DataCodewords": 793,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 51
+    },
+    {
+      "Version": 32,
+      "Level": "H",
+      "Size": 145,
+      "RawCodewords": 2465,
+      "RemainderBits": 3,
+      "DataCodewords": 845,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 54
+    },
+    {
+      "Version": 33,
+      "Level": "H",
+      "Size": 149,
+      "RawCodewords": 2611,
+      "RemainderBits": 3,
+      "DataCodewords": 901,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 57
+    },
+    {
+      "Version": 34,
+      "Level": "H",
+      "Size": 153,
+      "RawCodewords": 2761,
+      "RemainderBits": 3,
+      "DataCodewords": 961,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 60
+    },
+    {
+      "Version": 35,
+      "Level": "H",
+      "Size": 157,
+      "RawCodewords": 2876,
+      "RemainderBits": 0,
+      "DataCodewords": 986,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 63
+    },
+    {
+      "Version": 36,
+      "Level": "H",
+      "Size": 161,
+      "RawCodewords": 3034,
+      "RemainderBits": 0,
+      "DataCodewords": 1054,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 66
+    },
+    {
+      "Version": 37,
+      "Level": "H",
+      "Size": 165,
+      "RawCodewords": 3196,
+      "RemainderBits": 0,
+      "DataCodewords": 1096,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 70
+    },
+    {
+      "Version": 38,
+      "Level": "H",
+      "Size": 169,
+      "RawCodewords": 3362,
+      "RemainderBits": 0,
+      "DataCodewords": 1142,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 74
+    },
+    {
+      "Version": 39,
+      "Level": "H",
+      "Size": 173,
+      "RawCodewords": 3532,
+      "RemainderBits": 0,
+      "DataCodewords": 1222,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 77
+    },
+    {
+      "Version": 40,
+      "Level": "H",
+      "Size": 177,
+      "RawCodewords": 3706,
+      "RemainderBits": 0,
+      "DataCodewords": 1276,
+      "ECCodewordsPerBlock": 30,
+      "Blocks": 81
+    }
+  ],
+  "plans": [
+    {
+      "length": 0,
+      "level": "L",
+      "version": 1,
+      "capacity": 19,
+      "data_sha256": "dc881c067166c1cd6e228dc07cac10f2770138a83b526f3065f484d3a93b2c75"
+    },
+    {
+      "length": 1,
+      "level": "L",
+      "version": 1,
+      "capacity": 19,
+      "data_sha256": "578e4fd569d0948035b03eef932f06c564359c47d5d69487c70edfdb4cb7fb2f"
+    },
+    {
+      "length": 16,
+      "level": "L",
+      "version": 1,
+      "capacity": 19,
+      "data_sha256": "a35d3edc416d3dc6b2d6c84b228b541e81f1fc60ce3ce5ad7103dcaf8f87b3d0"
+    },
+    {
+      "length": 17,
+      "level": "L",
+      "version": 1,
+      "capacity": 19,
+      "data_sha256": "5ee0ad31154743664ca2e1b49072a69251a0db209a2258a192624a3968197802"
+    },
+    {
+      "length": 18,
+      "level": "L",
+      "version": 2,
+      "capacity": 34,
+      "data_sha256": "3234ac4bf86b3ff1784392f4f19cb8cc88542f5f463e248d34a89d358afa2720"
+    },
+    {
+      "length": 31,
+      "level": "L",
+      "version": 2,
+      "capacity": 34,
+      "data_sha256": "17d0bb01afc6833c2ec69e83a49f344d45080692e959d13639e9e84f7bee7ec3"
+    },
+    {
+      "length": 32,
+      "level": "L",
+      "version": 2,
+      "capacity": 34,
+      "data_sha256": "8019ee3d5816fedad0a65a4cfbd194a95f99c872b99afbd149954fa58e6952f3"
+    },
+    {
+      "length": 33,
+      "level": "L",
+      "version": 3,
+      "capacity": 55,
+      "data_sha256": "66defbf341db69b646900a330afd90e2b28424dd767e637f7827e580835b2849"
+    },
+    {
+      "length": 52,
+      "level": "L",
+      "version": 3,
+      "capacity": 55,
+      "data_sha256": "029415a097f1746ced29bad8bf0c58f5391c45f2235218d740d856687a41efed"
+    },
+    {
+      "length": 53,
+      "level": "L",
+      "version": 3,
+      "capacity": 55,
+      "data_sha256": "c9b0a517ada3cd764fe2ef2ccff1fb57a17bf1cf61ad7d921415ba0d1b7109c7"
+    },
+    {
+      "length": 54,
+      "level": "L",
+      "version": 4,
+      "capacity": 80,
+      "data_sha256": "e5e16d64d60f1ab2d7974ca3eac9531b653c1fd046a83f91f76cdcaaf5419111"
+    },
+    {
+      "length": 77,
+      "level": "L",
+      "version": 4,
+      "capacity": 80,
+      "data_sha256": "320b4e83eff8714f3a7c6eceb65d6ee4755565f12226200d0f53c646d6bbbd7a"
+    },
+    {
+      "length": 78,
+      "level": "L",
+      "version": 4,
+      "capacity": 80,
+      "data_sha256": "c583bac5a5285d7784c50e66a44145c9c24241907020b25be859952959653e3b"
+    },
+    {
+      "length": 79,
+      "level": "L",
+      "version": 5,
+      "capacity": 108,
+      "data_sha256": "4bb78775924635dccb2496556ef869606aaa9c1b64886d9ffc1ea2fb53a240fe"
+    },
+    {
+      "length": 105,
+      "level": "L",
+      "version": 5,
+      "capacity": 108,
+      "data_sha256": "f6b1e985295aaf659509332f5eb7ad2511cee004ed767744684c7442192bdced"
+    },
+    {
+      "length": 106,
+      "level": "L",
+      "version": 5,
+      "capacity": 108,
+      "data_sha256": "72f71841e606cd563e19d2d9c2b1214e3cd202582b9f1b28d882e64879197615"
+    },
+    {
+      "length": 107,
+      "level": "L",
+      "version": 6,
+      "capacity": 136,
+      "data_sha256": "db30971e264da494ba84e95995668000e571db3c1292064c7e46bf59a5bddd6d"
+    },
+    {
+      "length": 133,
+      "level": "L",
+      "version": 6,
+      "capacity": 136,
+      "data_sha256": "930f2572d4c6898964b647b9f359357cfe2e4cfc154170568ef39e5c1fe31034"
+    },
+    {
+      "length": 134,
+      "level": "L",
+      "version": 6,
+      "capacity": 136,
+      "data_sha256": "e6331b8062dd98e29afe8c06805405b52eb4b7d5b526a65779c2154c74aaf7b9"
+    },
+    {
+      "length": 135,
+      "level": "L",
+      "version": 7,
+      "capacity": 156,
+      "data_sha256": "07cca8cf05f03b451b7273a170c1d19b1f58e4b3702b99f04a3378ee31ab2a8d"
+    },
+    {
+      "length": 153,
+      "level": "L",
+      "version": 7,
+      "capacity": 156,
+      "data_sha256": "b8a15189b64692aeb87a51483a7bd2860b1eaad87724769597eb466e132bd4bb"
+    },
+    {
+      "length": 154,
+      "level": "L",
+      "version": 7,
+      "capacity": 156,
+      "data_sha256": "f4552c2373b853b2af2cbd13a84add5ad876e9bb20827e56cff87960c575b3b2"
+    },
+    {
+      "length": 155,
+      "level": "L",
+      "version": 8,
+      "capacity": 194,
+      "data_sha256": "3c3655ad4edcc780aebf8e2efbca49117d0eb2f9da19d5a17e71a4b9175f3f83"
+    },
+    {
+      "length": 191,
+      "level": "L",
+      "version": 8,
+      "capacity": 194,
+      "data_sha256": "2b5f1b549175ca34a65cb0f94e8399954df53b8bb5c2fc883b8dfe27e7fc487d"
+    },
+    {
+      "length": 192,
+      "level": "L",
+      "version": 8,
+      "capacity": 194,
+      "data_sha256": "869f1db4c5339db5691333b7a6f6cf76e0958d8fa66faf8b45c744b987350a05"
+    },
+    {
+      "length": 193,
+      "level": "L",
+      "version": 9,
+      "capacity": 232,
+      "data_sha256": "1c55cc83a57de61336d1d81213c649d256f03ffa8a43b35c6608a29b7f79ecae"
+    },
+    {
+      "length": 229,
+      "level": "L",
+      "version": 9,
+      "capacity": 232,
+      "data_sha256": "02740c0ee0f47280b611f0fbc5214e903500fef044f81ae04a5642cf7345cb48"
+    },
+    {
+      "length": 230,
+      "level": "L",
+      "version": 9,
+      "capacity": 232,
+      "data_sha256": "c8426cf334677bd6b779a605cec330f7b9916f496c56e7cd39b4af06f1d61659"
+    },
+    {
+      "length": 231,
+      "level": "L",
+      "version": 10,
+      "capacity": 274,
+      "data_sha256": "20f17ca304b79a094e4ce42bd20f54085016a9d1ec10cacc260a86aa0ecdaafc"
+    },
+    {
+      "length": 255,
+      "level": "L",
+      "version": 10,
+      "capacity": 274,
+      "data_sha256": "8c3bb97ad7e0c22bb6dda41b71999023a0241f68325d58cfc2abc612a4ca3655"
+    },
+    {
+      "length": 256,
+      "level": "L",
+      "version": 10,
+      "capacity": 274,
+      "data_sha256": "1473e236826ed36067b91472add43c10c71ca39d132c0a94a1de606176ac90ef"
+    },
+    {
+      "length": 270,
+      "level": "L",
+      "version": 10,
+      "capacity": 274,
+      "data_sha256": "991b0412a23e59d735f2d828e3a61c0c439df168884920d5b4aa82de9e00e868"
+    },
+    {
+      "length": 271,
+      "level": "L",
+      "version": 10,
+      "capacity": 274,
+      "data_sha256": "efcda60f7571d85fc3a0402aab5db4b736e9e0bbcff9f4b6c53f8d52197aca99"
+    },
+    {
+      "length": 272,
+      "level": "L",
+      "version": 11,
+      "capacity": 324,
+      "data_sha256": "cbd385997665881ee9d3a29d78571778a06c7bd2ea64c5ce92ca37302a30282d"
+    },
+    {
+      "length": 320,
+      "level": "L",
+      "version": 11,
+      "capacity": 324,
+      "data_sha256": "65fce800ff2c2625c4bd9b55c7bed1fcf6390f3a99cf1d6a99c56c6481b989c6"
+    },
+    {
+      "length": 321,
+      "level": "L",
+      "version": 11,
+      "capacity": 324,
+      "data_sha256": "b13fa643fe1a770e8980b2e1c5040a19052846a843dd1ccaf46c79a651fb9b47"
+    },
+    {
+      "length": 322,
+      "level": "L",
+      "version": 12,
+      "capacity": 370,
+      "data_sha256": "9184351c7d633033e30c2dc5e0597e5eb0f92930656b4a2a42b2c1907268834e"
+    },
+    {
+      "length": 366,
+      "level": "L",
+      "version": 12,
+      "capacity": 370,
+      "data_sha256": "763f0a4db9e780a51115bbb6f7b41d3fccae6a7119b5b14e310760c38d9a2a81"
+    },
+    {
+      "length": 367,
+      "level": "L",
+      "version": 12,
+      "capacity": 370,
+      "data_sha256": "ec3ff9902387acf212c81a139a6de8bb3a7183b2bd430191b63d4311f53249dd"
+    },
+    {
+      "length": 368,
+      "level": "L",
+      "version": 13,
+      "capacity": 428,
+      "data_sha256": "307b03fc02e76691c548cd7fbc78c2211d7584de71e48532e60f1cad62ee88a9"
+    },
+    {
+      "length": 424,
+      "level": "L",
+      "version": 13,
+      "capacity": 428,
+      "data_sha256": "dc19a05a450909429e9bccf501f8691b395ea5d5124027b783bd69fe1f488a26"
+    },
+    {
+      "length": 425,
+      "level": "L",
+      "version": 13,
+      "capacity": 428,
+      "data_sha256": "27f87f789c0e168ddadb26d647aef2abf254e2ee00bdaf0c6167b7d3567986c9"
+    },
+    {
+      "length": 426,
+      "level": "L",
+      "version": 14,
+      "capacity": 461,
+      "data_sha256": "ddbb6532e5dc40810c7c6641e96562c25397c4603c9c03d1219893baba9a2690"
+    },
+    {
+      "length": 457,
+      "level": "L",
+      "version": 14,
+      "capacity": 461,
+      "data_sha256": "b40bbcef7e9607b36f81916e14a31ca236d540a09008be9b02ae50f0b1396dde"
+    },
+    {
+      "length": 458,
+      "level": "L",
+      "version": 14,
+      "capacity": 461,
+      "data_sha256": "9400a0be7e40e978224f48e572f24c62b972dfb573263f3112b424d736fc135a"
+    },
+    {
+      "length": 459,
+      "level": "L",
+      "version": 15,
+      "capacity": 523,
+      "data_sha256": "ba0d85eaf00142aa2e9d1236aeb0f257e16153624b25bc7c60c657d6d8967d27"
+    },
+    {
+      "length": 519,
+      "level": "L",
+      "version": 15,
+      "capacity": 523,
+      "data_sha256": "fae60def372e26271bb7658990b8c747c09aa6c0593cdaa432d0f28d838b2f91"
+    },
+    {
+      "length": 520,
+      "level": "L",
+      "version": 15,
+      "capacity": 523,
+      "data_sha256": "4a6218776b0d4f8d577b658e8ef9b2bb9191a22d7258ce48d02974c5435bc8b2"
+    },
+    {
+      "length": 521,
+      "level": "L",
+      "version": 16,
+      "capacity": 589,
+      "data_sha256": "7346dd63bbb15e2e54847dcddfd1acb55e6e3d71d0ae65927e27724944e104ad"
+    },
+    {
+      "length": 585,
+      "level": "L",
+      "version": 16,
+      "capacity": 589,
+      "data_sha256": "61094080eeb1daa1feebeb424eea664233fa6b8b77e4d5c5f2e91f6ba9b83dfb"
+    },
+    {
+      "length": 586,
+      "level": "L",
+      "version": 16,
+      "capacity": 589,
+      "data_sha256": "ea3a7bdf9ea2ba110884dce0af2632652218add9f7b5b26901b6aa05c6708085"
+    },
+    {
+      "length": 587,
+      "level": "L",
+      "version": 17,
+      "capacity": 647,
+      "data_sha256": "69350dba667fa2c36fd798454c9944b6339884cef319ebe8f028722c555849bd"
+    },
+    {
+      "length": 643,
+      "level": "L",
+      "version": 17,
+      "capacity": 647,
+      "data_sha256": "70637a16c9e16ed2c61ddb5ebc067f3ce0f58ff242b2523e3b67c98ce94e76c6"
+    },
+    {
+      "length": 644,
+      "level": "L",
+      "version": 17,
+      "capacity": 647,
+      "data_sha256": "658ac5d763a13e70d7e6d42cc00ff6e26fa1fa840d394b47d771c8a68ba18ee9"
+    },
+    {
+      "length": 645,
+      "level": "L",
+      "version": 18,
+      "capacity": 721,
+      "data_sha256": "9a8f5d27fe9510cbd43ce01ad364c457eddd07996c7a6244a0848396a105ee61"
+    },
+    {
+      "length": 717,
+      "level": "L",
+      "version": 18,
+      "capacity": 721,
+      "data_sha256": "910fc64ad52f239a61423dd7d7c44a9b8e79bd2b96016a78eb94575c93982a35"
+    },
+    {
+      "length": 718,
+      "level": "L",
+      "version": 18,
+      "capacity": 721,
+      "data_sha256": "df452eeda963e943eb58de9bfb1c0022552b362e242816423f0248c46811290a"
+    },
+    {
+      "length": 719,
+      "level": "L",
+      "version": 19,
+      "capacity": 795,
+      "data_sha256": "1c57d6763ca729680a39f75c71482dde6d2c054eb30e6da1eeb7646c5e95e22a"
+    },
+    {
+      "length": 791,
+      "level": "L",
+      "version": 19,
+      "capacity": 795,
+      "data_sha256": "b19e31e690847faaa68ac3ea0482283416f49fb366582ecdcb872ad1634c0e4e"
+    },
+    {
+      "length": 792,
+      "level": "L",
+      "version": 19,
+      "capacity": 795,
+      "data_sha256": "aab3c8bd0c9a855af2e17ec2de5ccdf472b1198c6930bc8e83e5197aeb081f71"
+    },
+    {
+      "length": 793,
+      "level": "L",
+      "version": 20,
+      "capacity": 861,
+      "data_sha256": "7b99ccce7c884b27b766041b7e43dc25782b7e949e0131677f5be0ff269baf57"
+    },
+    {
+      "length": 857,
+      "level": "L",
+      "version": 20,
+      "capacity": 861,
+      "data_sha256": "96d74fc949d02d5d47c824834d1314dfd1288c78347e4b7a9247e7e62173d896"
+    },
+    {
+      "length": 858,
+      "level": "L",
+      "version": 20,
+      "capacity": 861,
+      "data_sha256": "29832caa93f86573af5a850ff548ffff7b2f25dd58acb4c1c06537ff505628b4"
+    },
+    {
+      "length": 859,
+      "level": "L",
+      "version": 21,
+      "capacity": 932,
+      "data_sha256": "9980a53f83752912bf8acdc74c858af829fce705ad1ef3b079f895b83354068a"
+    },
+    {
+      "length": 928,
+      "level": "L",
+      "version": 21,
+      "capacity": 932,
+      "data_sha256": "5553dd3d776b6ba56a808b733ed488ff86e344e9ba75bcf9ef0f6cf934387442"
+    },
+    {
+      "length": 929,
+      "level": "L",
+      "version": 21,
+      "capacity": 932,
+      "data_sha256": "11da71e1db33cdeda7100a8566a6418f9a6d53e58f772ce1474f0859f4d41287"
+    },
+    {
+      "length": 930,
+      "level": "L",
+      "version": 22,
+      "capacity": 1006,
+      "data_sha256": "7a7f8ab1642511c3718fc86f4b6d5e73110ee5970b1c6fd7410600d1627b4905"
+    },
+    {
+      "length": 1002,
+      "level": "L",
+      "version": 22,
+      "capacity": 1006,
+      "data_sha256": "0989636772c108a7e7852d56d717681012e19ba00a05e497a2843bf0e8010309"
+    },
+    {
+      "length": 1003,
+      "level": "L",
+      "version": 22,
+      "capacity": 1006,
+      "data_sha256": "a8c5afc5b298eb18d985dd5ca02fa887781b7b87501767ab7d476277185a24c7"
+    },
+    {
+      "length": 1004,
+      "level": "L",
+      "version": 23,
+      "capacity": 1094,
+      "data_sha256": "a44a5ffc963ad0f688da746a733b376c50a7dcfcc6b1cc2f435e5896a80aa4a5"
+    },
+    {
+      "length": 1090,
+      "level": "L",
+      "version": 23,
+      "capacity": 1094,
+      "data_sha256": "ee49d17c71ac6f7ea913338015340f11b0f33baf1c3079509dd62dab50fad643"
+    },
+    {
+      "length": 1091,
+      "level": "L",
+      "version": 23,
+      "capacity": 1094,
+      "data_sha256": "e537a4b7c0d685aea929985979f315d2e297365cd87a8342ca1e8b517acfd236"
+    },
+    {
+      "length": 1092,
+      "level": "L",
+      "version": 24,
+      "capacity": 1174,
+      "data_sha256": "18f187bd5525a2bb14fc11edce429d0f09e64e016827b93351edce07d9a4adb3"
+    },
+    {
+      "length": 1170,
+      "level": "L",
+      "version": 24,
+      "capacity": 1174,
+      "data_sha256": "bc1323f13f297b2de20f6215d557573c52484651ec24ee33f70761cbbdedac2a"
+    },
+    {
+      "length": 1171,
+      "level": "L",
+      "version": 24,
+      "capacity": 1174,
+      "data_sha256": "1e849d9e5f9e41f9768fd9a7f1361d3796271d89044a683f47de925653a8ef12"
+    },
+    {
+      "length": 1172,
+      "level": "L",
+      "version": 25,
+      "capacity": 1276,
+      "data_sha256": "c9533d562de0f7b2a363d5dee0b17d628348880a471ed2957ce3146069cc275e"
+    },
+    {
+      "length": 1272,
+      "level": "L",
+      "version": 25,
+      "capacity": 1276,
+      "data_sha256": "7906ef75d9ed756cc333cde5b155869f9f3f1e2c100491b6b5ad78b13e6580d7"
+    },
+    {
+      "length": 1273,
+      "level": "L",
+      "version": 25,
+      "capacity": 1276,
+      "data_sha256": "cf2d974dd7b8853a5f30fceef2053bc1f75e4da39dfd807a381c9af36308f170"
+    },
+    {
+      "length": 1274,
+      "level": "L",
+      "version": 26,
+      "capacity": 1370,
+      "data_sha256": "d80dcbe028fda308c44b33639b86f0c722a4a050447004dc4d98580717742c1c"
+    },
+    {
+      "length": 1366,
+      "level": "L",
+      "version": 26,
+      "capacity": 1370,
+      "data_sha256": "8047d910a830fcd5b92f657ea588715304bb27c630dde095f76626773a76bff7"
+    },
+    {
+      "length": 1367,
+      "level": "L",
+      "version": 26,
+      "capacity": 1370,
+      "data_sha256": "01ba83fcaf19c6e3b2b0672bc7cdbb9d3486c8841e633491908c745c0ffed438"
+    },
+    {
+      "length": 1368,
+      "level": "L",
+      "version": 27,
+      "capacity": 1468,
+      "data_sha256": "33ed9891af64ff6a2a21b492693fdcaf19b2fce75a0e2f18c172569b09f9168b"
+    },
+    {
+      "length": 1464,
+      "level": "L",
+      "version": 27,
+      "capacity": 1468,
+      "data_sha256": "4d063456042c71f1d0d8ba31aec024b9d6f87d3efb2948765eca71f84f48fc1a"
+    },
+    {
+      "length": 1465,
+      "level": "L",
+      "version": 27,
+      "capacity": 1468,
+      "data_sha256": "03ec43c61fcb5973e904373d2720b841daa911eb127cb27dd9c028b7c1f8ee05"
+    },
+    {
+      "length": 1466,
+      "level": "L",
+      "version": 28,
+      "capacity": 1531,
+      "data_sha256": "d58f0b134d28899d0c6f07c4ed760a3f8fb9bc30795c5c0ce36293b4d6937223"
+    },
+    {
+      "length": 1527,
+      "level": "L",
+      "version": 28,
+      "capacity": 1531,
+      "data_sha256": "cf8ea735207cb13e9b8dcdf048a2264fbb9403046fa1b0f9fd7a2401dc0f0490"
+    },
+    {
+      "length": 1528,
+      "level": "L",
+      "version": 28,
+      "capacity": 1531,
+      "data_sha256": "24cfba5f09e5c198aa1025cf55ef889618c455826d31f21b122e15f44a6eafd8"
+    },
+    {
+      "length": 1529,
+      "level": "L",
+      "version": 29,
+      "capacity": 1631,
+      "data_sha256": "6876e69362c947f0219947569979ee2aa1c12adc9d8726ec4bce0db6f3fd94e5"
+    },
+    {
+      "length": 1627,
+      "level": "L",
+      "version": 29,
+      "capacity": 1631,
+      "data_sha256": "2bc6ff2ad0fbc049e444ab9ba0177922f1c2e444ac65af6c1fcd9e165ad6f31f"
+    },
+    {
+      "length": 1628,
+      "level": "L",
+      "version": 29,
+      "capacity": 1631,
+      "data_sha256": "e3b5df444fa5fed8267dde41259e283abde79a92e4b01db5bbb86b330d1e2fcc"
+    },
+    {
+      "length": 1629,
+      "level": "L",
+      "version": 30,
+      "capacity": 1735,
+      "data_sha256": "7e246282a49bdd24bf3cb1e253e333eebfb58585e2dcc180aedd3d17e8c7792e"
+    },
+    {
+      "length": 1731,
+      "level": "L",
+      "version": 30,
+      "capacity": 1735,
+      "data_sha256": "ac9e71e379ffbdc5bfe61c19dc706b15ca322e19913b6d262f193ee0d9bf9f7a"
+    },
+    {
+      "length": 1732,
+      "level": "L",
+      "version": 30,
+      "capacity": 1735,
+      "data_sha256": "7b3dbf80a22c03fe5c5930fadd2e84bed4ac0b2dd268dbe03c4e74f40b859ecf"
+    },
+    {
+      "length": 1733,
+      "level": "L",
+      "version": 31,
+      "capacity": 1843,
+      "data_sha256": "a21e91fa4ac0b5005bab69a94fc1554ed861d56a116dd89fc6bf61f932198525"
+    },
+    {
+      "length": 1839,
+      "level": "L",
+      "version": 31,
+      "capacity": 1843,
+      "data_sha256": "fa3fd69a7d9fbdb454dd9eb240a875bec60a69ed5713e4fa71b51b6b8e15571f"
+    },
+    {
+      "length": 1840,
+      "level": "L",
+      "version": 31,
+      "capacity": 1843,
+      "data_sha256": "e621755dee37c95cca165d587b44a79f1a35b8ea6b7624b7a7e844a447bfd5ae"
+    },
+    {
+      "length": 1841,
+      "level": "L",
+      "version": 32,
+      "capacity": 1955,
+      "data_sha256": "255875b6efeb51c67fce7b6e4e052fc34b2d9ba293be7d672da1c8dd2a049f37"
+    },
+    {
+      "length": 1951,
+      "level": "L",
+      "version": 32,
+      "capacity": 1955,
+      "data_sha256": "e7849c202cbcd21964aa720ee873e9c4dcccee99c275a1eada4b75049e9834ee"
+    },
+    {
+      "length": 1952,
+      "level": "L",
+      "version": 32,
+      "capacity": 1955,
+      "data_sha256": "9d2463a5a2baccbf6bea6804dd35776fa02a778a4a85f05e660282710ed9a528"
+    },
+    {
+      "length": 1953,
+      "level": "L",
+      "version": 33,
+      "capacity": 2071,
+      "data_sha256": "8979d5a09bd285272362a0536891febba34a10599426346c6c3487124755bf9c"
+    },
+    {
+      "length": 2067,
+      "level": "L",
+      "version": 33,
+      "capacity": 2071,
+      "data_sha256": "cbdce8a55c3e240c894873135dfa2e8e53bf315ff1b34de0396c45827b8cab65"
+    },
+    {
+      "length": 2068,
+      "level": "L",
+      "version": 33,
+      "capacity": 2071,
+      "data_sha256": "c4696b368b2a8008b761127f3adc8fdfe7e244a0a944048f60a4873ad0ce44ec"
+    },
+    {
+      "length": 2069,
+      "level": "L",
+      "version": 34,
+      "capacity": 2191,
+      "data_sha256": "be78aa0291b951179ada3336a639241bb73a70c80a3aef4a73de4cea12863cd9"
+    },
+    {
+      "length": 2187,
+      "level": "L",
+      "version": 34,
+      "capacity": 2191,
+      "data_sha256": "63d6727916aa8b843749f19c512f08b135b6f0f29577e2f4e9ddf002e3497da8"
+    },
+    {
+      "length": 2188,
+      "level": "L",
+      "version": 34,
+      "capacity": 2191,
+      "data_sha256": "f73ecd25fc416137626d30a41787898fba1242c4e1b476de95ad3e271e733bd7"
+    },
+    {
+      "length": 2189,
+      "level": "L",
+      "version": 35,
+      "capacity": 2306,
+      "data_sha256": "d8f0527d715cda89aa7cea2a432204c778156e4919ece2d1135ebc5e17eeb27d"
+    },
+    {
+      "length": 2302,
+      "level": "L",
+      "version": 35,
+      "capacity": 2306,
+      "data_sha256": "66a3572e5619281ec75e776030fe61d29f15f8482d6de87948daf82657dd0722"
+    },
+    {
+      "length": 2303,
+      "level": "L",
+      "version": 35,
+      "capacity": 2306,
+      "data_sha256": "e69ebac1dd2fb3e0e5cf1029023d087c53b2e296e408d95d38499467fbf5ef6a"
+    },
+    {
+      "length": 2304,
+      "level": "L",
+      "version": 36,
+      "capacity": 2434,
+      "data_sha256": "c8647f4fec6dbc302040fa7bcb3ce2c3985de5544b2d34d9db2b14666e9f3bd0"
+    },
+    {
+      "length": 2430,
+      "level": "L",
+      "version": 36,
+      "capacity": 2434,
+      "data_sha256": "6e301cd70c1342545e29e20dfd003b7b8ef8572a861566e2b43675225cf4a526"
+    },
+    {
+      "length": 2431,
+      "level": "L",
+      "version": 36,
+      "capacity": 2434,
+      "data_sha256": "062b6fc20fef35de2c9652f63db978b8b22ba3d453f0cb6d6443bfc84c589966"
+    },
+    {
+      "length": 2432,
+      "level": "L",
+      "version": 37,
+      "capacity": 2566,
+      "data_sha256": "e6650fa293c4a0d22f91543b5787649a12ce68fa2d37a3b687b1c3725b0747db"
+    },
+    {
+      "length": 2562,
+      "level": "L",
+      "version": 37,
+      "capacity": 2566,
+      "data_sha256": "2156d1c8be2d633aa421db3830faf82dc89cf9ebd5cd5d28f2e6b6ebbe0fda87"
+    },
+    {
+      "length": 2563,
+      "level": "L",
+      "version": 37,
+      "capacity": 2566,
+      "data_sha256": "b6345d24d3bd9ba4023424ce2a9f982a2b588f4515a4cfc69a4cbd7ddee1e97f"
+    },
+    {
+      "length": 2564,
+      "level": "L",
+      "version": 38,
+      "capacity": 2702,
+      "data_sha256": "22b7fdf42d0009e7d4548a5549ff7a1b9900902e8b7a7037d298d3f22908001d"
+    },
+    {
+      "length": 2698,
+      "level": "L",
+      "version": 38,
+      "capacity": 2702,
+      "data_sha256": "cb88374ad3595e94ebc126293f0f65930d5299a3f87a181433e0f2f2de6d02b0"
+    },
+    {
+      "length": 2699,
+      "level": "L",
+      "version": 38,
+      "capacity": 2702,
+      "data_sha256": "914ed46710cb7b7a68ba627fcb452d91eb056c4667f5431032627ca55d1ec5a7"
+    },
+    {
+      "length": 2700,
+      "level": "L",
+      "version": 39,
+      "capacity": 2812,
+      "data_sha256": "b085a87e66623b66fe11696390acebeff863177f4150c20b76a36733f7aafa8f"
+    },
+    {
+      "length": 2808,
+      "level": "L",
+      "version": 39,
+      "capacity": 2812,
+      "data_sha256": "42d73a8df583667c35e841463f25c4163bedff87f001074a16194e8d64992c8c"
+    },
+    {
+      "length": 2809,
+      "level": "L",
+      "version": 39,
+      "capacity": 2812,
+      "data_sha256": "01a885cc08f4b7ea8235fbda7de2bac4daf0defc1fd18f998058b654c05e685c"
+    },
+    {
+      "length": 2810,
+      "level": "L",
+      "version": 40,
+      "capacity": 2956,
+      "data_sha256": "d59eb9115fd231ee2e5c0ffc35802e56d72b75a39c9c62fa47515c44dc4ae4f1"
+    },
+    {
+      "length": 2952,
+      "level": "L",
+      "version": 40,
+      "capacity": 2956,
+      "data_sha256": "e53cc21af6a35616a22f7ffe3306b9e008a0e67743bd1950f25d0b098400be35"
+    },
+    {
+      "length": 2953,
+      "level": "L",
+      "version": 40,
+      "capacity": 2956,
+      "data_sha256": "057ca71283fdd82f80122ecfaa3cc27bb42a4fd6b9f68969d3cff200238b5bfc"
+    },
+    {
+      "length": 2954,
+      "level": "L",
+      "version": null
+    },
+    {
+      "length": 0,
+      "level": "M",
+      "version": 1,
+      "capacity": 16,
+      "data_sha256": "fe35d8eec8d408332dfcf7d1079cfc3d6975bbff868b779dfe9f6000e0782e4b"
+    },
+    {
+      "length": 1,
+      "level": "M",
+      "version": 1,
+      "capacity": 16,
+      "data_sha256": "493630a77fb8b90f844372fa9b614b0cb98d6ec815933110cb165625410c1214"
+    },
+    {
+      "length": 13,
+      "level": "M",
+      "version": 1,
+      "capacity": 16,
+      "data_sha256": "b80d5c2f5df8ecdccf3c0e5eea1e68d0d07d3f638eaec8524a55c9add9f266a3"
+    },
+    {
+      "length": 14,
+      "level": "M",
+      "version": 1,
+      "capacity": 16,
+      "data_sha256": "bb3d04fd455d941055e3db9fa6c08650cf4135d871f63c6cf9d5da52c454ee8c"
+    },
+    {
+      "length": 15,
+      "level": "M",
+      "version": 2,
+      "capacity": 28,
+      "data_sha256": "13f9a385da149ec2ea692571b4a0dac525a9dcf190fdc64119678afbacabcc44"
+    },
+    {
+      "length": 25,
+      "level": "M",
+      "version": 2,
+      "capacity": 28,
+      "data_sha256": "c63ced815193e91e9b034d2399054c7aebed6389a491bf72fec91c1f7642e905"
+    },
+    {
+      "length": 26,
+      "level": "M",
+      "version": 2,
+      "capacity": 28,
+      "data_sha256": "3dbb897655cd9f51882e8bedb06d85f9ac74195423620428a140b5a34789808e"
+    },
+    {
+      "length": 27,
+      "level": "M",
+      "version": 3,
+      "capacity": 44,
+      "data_sha256": "7b8ab993a9d98045478f0d9002fef834ae0ba45572621514ffbe65720328cf7c"
+    },
+    {
+      "length": 31,
+      "level": "M",
+      "version": 3,
+      "capacity": 44,
+      "data_sha256": "9230e55e8a57b0fdab6c08d3c3eec6e0e166766f85ce38778f584fd05c8649ba"
+    },
+    {
+      "length": 41,
+      "level": "M",
+      "version": 3,
+      "capacity": 44,
+      "data_sha256": "abc187c56d59d113e63f6da5bdea5d215a9a3a5c94c26f08e61d931106dd92f0"
+    },
+    {
+      "length": 42,
+      "level": "M",
+      "version": 3,
+      "capacity": 44,
+      "data_sha256": "824c2a2e44aea30091fe189ff6427971945fe289a86035602c9a7a9331c43d40"
+    },
+    {
+      "length": 43,
+      "level": "M",
+      "version": 4,
+      "capacity": 64,
+      "data_sha256": "728a36c773a3ba7b26544bcd57fc9544374942aebf3d5b3364d6e714daa4c2d7"
+    },
+    {
+      "length": 61,
+      "level": "M",
+      "version": 4,
+      "capacity": 64,
+      "data_sha256": "ca81da0337a5c06789efa0c921116b6ca7e18f78b9234402e7449626d0928db8"
+    },
+    {
+      "length": 62,
+      "level": "M",
+      "version": 4,
+      "capacity": 64,
+      "data_sha256": "af2e8840c23f7ae3d7e4679b5bbdfc7b16aeaaf1a904babc0d617494210241d0"
+    },
+    {
+      "length": 63,
+      "level": "M",
+      "version": 5,
+      "capacity": 86,
+      "data_sha256": "fab596e05f8e8c024f858efaab6a9c1afbd27472f4dea3a8203b0c4b5f4cb465"
+    },
+    {
+      "length": 83,
+      "level": "M",
+      "version": 5,
+      "capacity": 86,
+      "data_sha256": "e68376ef48847adc280a430cdfb44f2d13a7ca16acaaa5f11a02390505ec60ce"
+    },
+    {
+      "length": 84,
+      "level": "M",
+      "version": 5,
+      "capacity": 86,
+      "data_sha256": "18664bac68a1607dceb1891f56659f26cd1c1885716c49e390de82b4604668fe"
+    },
+    {
+      "length": 85,
+      "level": "M",
+      "version": 6,
+      "capacity": 108,
+      "data_sha256": "35c668c1bdcac04ae88f816fa0efa603c2d00a350428210e36abb05430e12b3a"
+    },
+    {
+      "length": 105,
+      "level": "M",
+      "version": 6,
+      "capacity": 108,
+      "data_sha256": "f6b1e985295aaf659509332f5eb7ad2511cee004ed767744684c7442192bdced"
+    },
+    {
+      "length": 106,
+      "level": "M",
+      "version": 6,
+      "capacity": 108,
+      "data_sha256": "72f71841e606cd563e19d2d9c2b1214e3cd202582b9f1b28d882e64879197615"
+    },
+    {
+      "length": 107,
+      "level": "M",
+      "version": 7,
+      "capacity": 124,
+      "data_sha256": "3fe832acc74a59652085d3efbbb98cf6af18bea435d3f19cc6dd2111bd101863"
+    },
+    {
+      "length": 121,
+      "level": "M",
+      "version": 7,
+      "capacity": 124,
+      "data_sha256": "c9122199e6e573228c5a36274330502efa403960a52990eb89d0cb49dcc96fa6"
+    },
+    {
+      "length": 122,
+      "level": "M",
+      "version": 7,
+      "capacity": 124,
+      "data_sha256": "35cbb4abc4f3a0297fb9851caca40bfb293895ad3a8e433f1db5de3a2f5d8667"
+    },
+    {
+      "length": 123,
+      "level": "M",
+      "version": 8,
+      "capacity": 154,
+      "data_sha256": "db1eb403159e1461b92474783e8b528f6030dc37d265be15d6e3edf120c4027b"
+    },
+    {
+      "length": 151,
+      "level": "M",
+      "version": 8,
+      "capacity": 154,
+      "data_sha256": "90ae315d3ccd0bfe4d55bccf4df22a03dd7335099c734155b000f36c48cb305c"
+    },
+    {
+      "length": 152,
+      "level": "M",
+      "version": 8,
+      "capacity": 154,
+      "data_sha256": "936159ecc46be78da2d140e83caf56129240615e644ebb0b5d0518f9bc75b21c"
+    },
+    {
+      "length": 153,
+      "level": "M",
+      "version": 9,
+      "capacity": 182,
+      "data_sha256": "d21b32828f23a754001ac6c0f715bf29252c5a5e1a232d37a9475f2211a53f98"
+    },
+    {
+      "length": 179,
+      "level": "M",
+      "version": 9,
+      "capacity": 182,
+      "data_sha256": "3cc8944169539cf5010b8994f3694f898f5258ff2d7cb50683aa540019860483"
+    },
+    {
+      "length": 180,
+      "level": "M",
+      "version": 9,
+      "capacity": 182,
+      "data_sha256": "fd92b258b67336afb69d4aa2e5e1317200c0f341494600aefe8f7f78a1d9af97"
+    },
+    {
+      "length": 181,
+      "level": "M",
+      "version": 10,
+      "capacity": 216,
+      "data_sha256": "e52e59066e857814123be3a4830062b4463e3b169547fa180987a926bc048278"
+    },
+    {
+      "length": 212,
+      "level": "M",
+      "version": 10,
+      "capacity": 216,
+      "data_sha256": "9993a572bc7a2b146dd423f66e608133c7121311e772318ebf05e9927b4814f8"
+    },
+    {
+      "length": 213,
+      "level": "M",
+      "version": 10,
+      "capacity": 216,
+      "data_sha256": "6fcc1d1af3f3491d7e9947d713af18c73ba576e99434507833c90a9f64c02004"
+    },
+    {
+      "length": 214,
+      "level": "M",
+      "version": 11,
+      "capacity": 254,
+      "data_sha256": "81a80f3c5f40088c4f248509f0d518720fab916f7ec29108041dd5b4ff8c169c"
+    },
+    {
+      "length": 250,
+      "level": "M",
+      "version": 11,
+      "capacity": 254,
+      "data_sha256": "26bd14b2cd0d869536cf8c6cba914ebecd409ec5f6a823639451ef4f70546735"
+    },
+    {
+      "length": 251,
+      "level": "M",
+      "version": 11,
+      "capacity": 254,
+      "data_sha256": "02bc2103983c3e0f75421c2cb35c00b4b9cbd462c143778d9b37ad11d80aeec9"
+    },
+    {
+      "length": 252,
+      "level": "M",
+      "version": 12,
+      "capacity": 290,
+      "data_sha256": "38d2b35ccfad01099761ecbf0b3a4e6f8c0c6bd20c4a2a21a1ca0f8769bf34c3"
+    },
+    {
+      "length": 255,
+      "level": "M",
+      "version": 12,
+      "capacity": 290,
+      "data_sha256": "c91193ae448a9ecd41a72f40aa50da6ec90d71845f31b4735e95150d0d4d925e"
+    },
+    {
+      "length": 256,
+      "level": "M",
+      "version": 12,
+      "capacity": 290,
+      "data_sha256": "bae4421ed934145e50fdbe795ffb3be2d03e8ec635e4c7f9e2f7f472b879db5d"
+    },
+    {
+      "length": 286,
+      "level": "M",
+      "version": 12,
+      "capacity": 290,
+      "data_sha256": "e988deccb191c9f55ea8ff0d0cdf6bce4de8f1ef235a598033e22e008d438fa5"
+    },
+    {
+      "length": 287,
+      "level": "M",
+      "version": 12,
+      "capacity": 290,
+      "data_sha256": "b647ee4f67770056ca58a995d2ca914000a813bd807847a9a6314bfa2d76fff6"
+    },
+    {
+      "length": 288,
+      "level": "M",
+      "version": 13,
+      "capacity": 334,
+      "data_sha256": "0b33ff6fac0d85af84d3637d1695983683a3d46383ecc028cf90832e2492840f"
+    },
+    {
+      "length": 330,
+      "level": "M",
+      "version": 13,
+      "capacity": 334,
+      "data_sha256": "95fdff04050eb58195078e6d4b1753a254694d240c3afe1500546e6523c45cc1"
+    },
+    {
+      "length": 331,
+      "level": "M",
+      "version": 13,
+      "capacity": 334,
+      "data_sha256": "c298389567c6de22266436fb45c984abf85e6d75ad7fefcfc621412acef7067f"
+    },
+    {
+      "length": 332,
+      "level": "M",
+      "version": 14,
+      "capacity": 365,
+      "data_sha256": "39a1975b98be60598f87c7df50fd50900a18e2e64da25e99c507b58f30629d7d"
+    },
+    {
+      "length": 361,
+      "level": "M",
+      "version": 14,
+      "capacity": 365,
+      "data_sha256": "93b1959093d0d562eee7f3f974de1fbf1b6202c76a27c1a23b56dc31c4ebc084"
+    },
+    {
+      "length": 362,
+      "level": "M",
+      "version": 14,
+      "capacity": 365,
+      "data_sha256": "3176403dd299469a9bc8e73f2d9dc2a18adbb90b194e116f40aea39f236888a9"
+    },
+    {
+      "length": 363,
+      "level": "M",
+      "version": 15,
+      "capacity": 415,
+      "data_sha256": "24be44a87f652affdbd2c52eab222d23c8a9f57fc60597a9947f66fbc439ea43"
+    },
+    {
+      "length": 411,
+      "level": "M",
+      "version": 15,
+      "capacity": 415,
+      "data_sha256": "e1be2f2a059a5f0c29f6699b1052e4b1f51dd9357e673e95a298e62ec4d88e74"
+    },
+    {
+      "length": 412,
+      "level": "M",
+      "version": 15,
+      "capacity": 415,
+      "data_sha256": "81257585d29112a37d7ffd260bb7bcf62985deb7170cabb024cd0746ccc8f936"
+    },
+    {
+      "length": 413,
+      "level": "M",
+      "version": 16,
+      "capacity": 453,
+      "data_sha256": "19de872b3a6a7cdaa1747e706bab9246979fe7856f78a43ad65d4a93d15a80d6"
+    },
+    {
+      "length": 449,
+      "level": "M",
+      "version": 16,
+      "capacity": 453,
+      "data_sha256": "ceea069692887b4e4eff3737b07790e1e098a11d9e32fd9f2687cc437580ba4f"
+    },
+    {
+      "length": 450,
+      "level": "M",
+      "version": 16,
+      "capacity": 453,
+      "data_sha256": "5e70b124bec611616426a288d607faf649c0dd0b2a02cdba995b35aa01ac4b11"
+    },
+    {
+      "length": 451,
+      "level": "M",
+      "version": 17,
+      "capacity": 507,
+      "data_sha256": "7e458f93219ebfdfb08075c84e80628ea58884761eaaa8a0873ec818aef4215d"
+    },
+    {
+      "length": 503,
+      "level": "M",
+      "version": 17,
+      "capacity": 507,
+      "data_sha256": "e37507350c2b520cb0d49411c7d243f9c70c11725be71e1a6e0e5f0fc18de37d"
+    },
+    {
+      "length": 504,
+      "level": "M",
+      "version": 17,
+      "capacity": 507,
+      "data_sha256": "6a517a2e3ecb4c94289060ecc9f1ce51c94c7ace7b4c6159187e5cf3d312590a"
+    },
+    {
+      "length": 505,
+      "level": "M",
+      "version": 18,
+      "capacity": 563,
+      "data_sha256": "3eb6bc15fef06bbde4535954857f0a0d4abf839ed2c895fd05756b6f1477169b"
+    },
+    {
+      "length": 559,
+      "level": "M",
+      "version": 18,
+      "capacity": 563,
+      "data_sha256": "1ef4f7ff0e1640f47b5f4db59a66fb30e80016c9ce432d40a6f23be7d39c2390"
+    },
+    {
+      "length": 560,
+      "level": "M",
+      "version": 18,
+      "capacity": 563,
+      "data_sha256": "292c80f2ce0b95e85fe634c937d17a6c3c8f51de93991f30b6cf19cdb06b61b8"
+    },
+    {
+      "length": 561,
+      "level": "M",
+      "version": 19,
+      "capacity": 627,
+      "data_sha256": "ab27430168ce23bc7d070fcff8f86d5ee0481f7dc61a6781e09abaa88caf288c"
+    },
+    {
+      "length": 623,
+      "level": "M",
+      "version": 19,
+      "capacity": 627,
+      "data_sha256": "ab2648bbf3dd3d31726c9ce69dbe75aa0ae63449bab51a173197a94f7c3df037"
+    },
+    {
+      "length": 624,
+      "level": "M",
+      "version": 19,
+      "capacity": 627,
+      "data_sha256": "d109d0ed4e621de7c0e2b96effde073bbdb8bbec77198dfc4788c5887c9ac414"
+    },
+    {
+      "length": 625,
+      "level": "M",
+      "version": 20,
+      "capacity": 669,
+      "data_sha256": "d86f27f4be2b0bf4a65770436a17e235b4fab25c5d1a271756f0942ca7186f04"
+    },
+    {
+      "length": 665,
+      "level": "M",
+      "version": 20,
+      "capacity": 669,
+      "data_sha256": "82a96da69413e8da7f44c30507ff640f7118e1a0803c1167f8d7f5353e2c080f"
+    },
+    {
+      "length": 666,
+      "level": "M",
+      "version": 20,
+      "capacity": 669,
+      "data_sha256": "1245623d8dbbe8ebb14f7370eb2c2b67fad57069479ffe42ad22410efdad8d62"
+    },
+    {
+      "length": 667,
+      "level": "M",
+      "version": 21,
+      "capacity": 714,
+      "data_sha256": "57eec31c75abea14cb0c06fb4345851ec20c89e4aa2ca4396d5274dc0cbfc7e1"
+    },
+    {
+      "length": 710,
+      "level": "M",
+      "version": 21,
+      "capacity": 714,
+      "data_sha256": "b8e9ed0e024efd92fb693ff51c4d682fffb65bacb9d79592877750bb047cf1d6"
+    },
+    {
+      "length": 711,
+      "level": "M",
+      "version": 21,
+      "capacity": 714,
+      "data_sha256": "240e66603f1e83f3ada0c5143f3c5fa7a8ea2ea3ea589c260ee0da53242e138e"
+    },
+    {
+      "length": 712,
+      "level": "M",
+      "version": 22,
+      "capacity": 782,
+      "data_sha256": "db8b52bd92b209900f760afb8f0c85f5cb42df9917cf0f50fa85ad7df72a35e0"
+    },
+    {
+      "length": 778,
+      "level": "M",
+      "version": 22,
+      "capacity": 782,
+      "data_sha256": "098e7ca031c2aa91030d8fb7e595c44b422ec42cbc79d0fa7e132855d7817d71"
+    },
+    {
+      "length": 779,
+      "level": "M",
+      "version": 22,
+      "capacity": 782,
+      "data_sha256": "8c670cf146d5598f8d0777053b510d77fad1fd52ce015e46b3b85498f4e3f266"
+    },
+    {
+      "length": 780,
+      "level": "M",
+      "version": 23,
+      "capacity": 860,
+      "data_sha256": "951cd7b8158ae21d50b4b7fef967d78cd304bbeeed8f0562a9efd67241eab41b"
+    },
+    {
+      "length": 856,
+      "level": "M",
+      "version": 23,
+      "capacity": 860,
+      "data_sha256": "b5905a8cc3925813c5c6676318a280c8beb416aa3676c0bf733962752d562f15"
+    },
+    {
+      "length": 857,
+      "level": "M",
+      "version": 23,
+      "capacity": 860,
+      "data_sha256": "eed83fad0aa2c389299d569929884831af235a95c59b3f10896666be4c8dc80b"
+    },
+    {
+      "length": 858,
+      "level": "M",
+      "version": 24,
+      "capacity": 914,
+      "data_sha256": "68c1b236da95903d15e38cc91782fe45508118bd5da35ea6e500daa1d56e255e"
+    },
+    {
+      "length": 910,
+      "level": "M",
+      "version": 24,
+      "capacity": 914,
+      "data_sha256": "bedf2b1ed11c9b34887011a8d43dfe8aabbddbfb54611d803340f0010cd1ded3"
+    },
+    {
+      "length": 911,
+      "level": "M",
+      "version": 24,
+      "capacity": 914,
+      "data_sha256": "99613bbea335caa6d8c5644ed943017c87be8e4e915ab083f9a3e20d8a4345a4"
+    },
+    {
+      "length": 912,
+      "level": "M",
+      "version": 25,
+      "capacity": 1000,
+      "data_sha256": "dfb825fa27f3823d773b4512e014fc9f12f50ca9a88c4411c417dfa6c0153022"
+    },
+    {
+      "length": 996,
+      "level": "M",
+      "version": 25,
+      "capacity": 1000,
+      "data_sha256": "482dfdbaa253b00ddb963dc6772792927b7ab81d2c5d252c6289f821c757380c"
+    },
+    {
+      "length": 997,
+      "level": "M",
+      "version": 25,
+      "capacity": 1000,
+      "data_sha256": "341a98bd9dfe17fff77f0d9fe373876a3ee755799d6ab46e808a73df030636c9"
+    },
+    {
+      "length": 998,
+      "level": "M",
+      "version": 26,
+      "capacity": 1062,
+      "data_sha256": "9f7de3c7c8e8e9398ef7ec218075d89a975a99f12cc66e62e75dc4957a99d3be"
+    },
+    {
+      "length": 1058,
+      "level": "M",
+      "version": 26,
+      "capacity": 1062,
+      "data_sha256": "407d2205e3b22c19d77b4394109d03ec497b7b32a373ee4c743ff8f344ce807b"
+    },
+    {
+      "length": 1059,
+      "level": "M",
+      "version": 26,
+      "capacity": 1062,
+      "data_sha256": "a097137d7e32f83db1b8f7571a0b86ded619f7d03e687e6a6faf32df277b599f"
+    },
+    {
+      "length": 1060,
+      "level": "M",
+      "version": 27,
+      "capacity": 1128,
+      "data_sha256": "a490dceaa94c85b2136521719cb64254dc23df8e8703bfea79fab24598db5637"
+    },
+    {
+      "length": 1124,
+      "level": "M",
+      "version": 27,
+      "capacity": 1128,
+      "data_sha256": "013baaf6c379e7caf771ba06f0fd48a2af9e6c1d7894ea4a7f26fa7063600ac1"
+    },
+    {
+      "length": 1125,
+      "level": "M",
+      "version": 27,
+      "capacity": 1128,
+      "data_sha256": "7a9b5b8250c84731347e270d84c67b1db1eb9fd25fb81b8da8b11011755c158c"
+    },
+    {
+      "length": 1126,
+      "level": "M",
+      "version": 28,
+      "capacity": 1193,
+      "data_sha256": "50ab3db18203af489f9c9177a7fa0a504c3014d44460ddd039e191f5a7e896a6"
+    },
+    {
+      "length": 1189,
+      "level": "M",
+      "version": 28,
+      "capacity": 1193,
+      "data_sha256": "342b1a9a2b05b2e7c2d3e831b3ff381d85909eb27b59d44ab8879c9e9614557f"
+    },
+    {
+      "length": 1190,
+      "level": "M",
+      "version": 28,
+      "capacity": 1193,
+      "data_sha256": "b9209b5b70ff0162d07dc13f2f5c178ef635e47c2c8622cd6ca19c2b9cdeaca9"
+    },
+    {
+      "length": 1191,
+      "level": "M",
+      "version": 29,
+      "capacity": 1267,
+      "data_sha256": "fe78698889454e4d41c06c2437907cd6ed1f567f8f0b67122f4436d110bdd916"
+    },
+    {
+      "length": 1263,
+      "level": "M",
+      "version": 29,
+      "capacity": 1267,
+      "data_sha256": "760f45b07c48b8569f61c226c725968f5722a9a7964459b78fcca35818de13a0"
+    },
+    {
+      "length": 1264,
+      "level": "M",
+      "version": 29,
+      "capacity": 1267,
+      "data_sha256": "1eb60490a37e21e2be859961bc678974c1b8a01b69e7f9b59116386f12e1c40e"
+    },
+    {
+      "length": 1265,
+      "level": "M",
+      "version": 30,
+      "capacity": 1373,
+      "data_sha256": "837a69b465e3cf70a890f871943b6f80a32382dc76b732332ef8b5b220bebda8"
+    },
+    {
+      "length": 1369,
+      "level": "M",
+      "version": 30,
+      "capacity": 1373,
+      "data_sha256": "ceee1f023213acd89c27a94dcd5177fdf2d54ebbfeb685f1b2dff08600183c1f"
+    },
+    {
+      "length": 1370,
+      "level": "M",
+      "version": 30,
+      "capacity": 1373,
+      "data_sha256": "ddd278d3bb05f4dd1e988e310af64663be74e0dd25a18469ff20edaf24433737"
+    },
+    {
+      "length": 1371,
+      "level": "M",
+      "version": 31,
+      "capacity": 1455,
+      "data_sha256": "4b84b6de12a932afcd88a49adef99abe97c5fc73f8e1e89fb943cf1f641d75e7"
+    },
+    {
+      "length": 1451,
+      "level": "M",
+      "version": 31,
+      "capacity": 1455,
+      "data_sha256": "d9e76dedf9dffeac163a6b7001d72969a042fc95b7bc1bbdb50fdd604e34ac50"
+    },
+    {
+      "length": 1452,
+      "level": "M",
+      "version": 31,
+      "capacity": 1455,
+      "data_sha256": "f949862f00eb8205dea85b85ee7090bbb6074883f7fadc4903aa260fa5fad133"
+    },
+    {
+      "length": 1453,
+      "level": "M",
+      "version": 32,
+      "capacity": 1541,
+      "data_sha256": "4f15e3f15620c47089ba810df67dc8cb088ab29f9731ee82eef8bab86f4c05ed"
+    },
+    {
+      "length": 1537,
+      "level": "M",
+      "version": 32,
+      "capacity": 1541,
+      "data_sha256": "4f9407c09239be9fc383d9453e31a793b6dcb6d7ab145e707a8503c8ed9c4f1d"
+    },
+    {
+      "length": 1538,
+      "level": "M",
+      "version": 32,
+      "capacity": 1541,
+      "data_sha256": "a12d342c32a1afdd46bac7f2fee7802d8b3e00b1750082bc5b6afe01b11fa11c"
+    },
+    {
+      "length": 1539,
+      "level": "M",
+      "version": 33,
+      "capacity": 1631,
+      "data_sha256": "2971da5e4530596c43813083898d46ea9484cd403309ef0d37797b7fd1ca1602"
+    },
+    {
+      "length": 1627,
+      "level": "M",
+      "version": 33,
+      "capacity": 1631,
+      "data_sha256": "2bc6ff2ad0fbc049e444ab9ba0177922f1c2e444ac65af6c1fcd9e165ad6f31f"
+    },
+    {
+      "length": 1628,
+      "level": "M",
+      "version": 33,
+      "capacity": 1631,
+      "data_sha256": "e3b5df444fa5fed8267dde41259e283abde79a92e4b01db5bbb86b330d1e2fcc"
+    },
+    {
+      "length": 1629,
+      "level": "M",
+      "version": 34,
+      "capacity": 1725,
+      "data_sha256": "ffd7e2d719053443e72b9105088414b0aa6174aa45cfd29268d23bca6b5eb087"
+    },
+    {
+      "length": 1721,
+      "level": "M",
+      "version": 34,
+      "capacity": 1725,
+      "data_sha256": "342baa62e9a1bc919c3b758e9aef318f75f9d480e2f237161ea9a49e228747d3"
+    },
+    {
+      "length": 1722,
+      "level": "M",
+      "version": 34,
+      "capacity": 1725,
+      "data_sha256": "aeb569684dbf41594294bb8108ef97a5f8bb061e7a0a139febd15516d35b2373"
+    },
+    {
+      "length": 1723,
+      "level": "M",
+      "version": 35,
+      "capacity": 1812,
+      "data_sha256": "d06f8992a99bad8c6ccb4ff2c9cfa341a7f03fc05d2bd1db125a658be2e7f435"
+    },
+    {
+      "length": 1808,
+      "level": "M",
+      "version": 35,
+      "capacity": 1812,
+      "data_sha256": "33a2e2d031ad84331ffffea0c282c2c0b176f2e7a1433353b0ba4b41c3235414"
+    },
+    {
+      "length": 1809,
+      "level": "M",
+      "version": 35,
+      "capacity": 1812,
+      "data_sha256": "2cdcc654f14e67c7640c019bfef96fb5a7ffb8416295d5b950eef93cb118068b"
+    },
+    {
+      "length": 1810,
+      "level": "M",
+      "version": 36,
+      "capacity": 1914,
+      "data_sha256": "4d1b5a22fcb3bf049fcfecd2fa7a83d255b917a2544d0d55083e2da74a70943a"
+    },
+    {
+      "length": 1910,
+      "level": "M",
+      "version": 36,
+      "capacity": 1914,
+      "data_sha256": "8aeda353e1b68d38cac75009fa7751790957ec044e81f7e9d92b8d8bd95e7dfd"
+    },
+    {
+      "length": 1911,
+      "level": "M",
+      "version": 36,
+      "capacity": 1914,
+      "data_sha256": "5ca5e6d94cf69d170b60282438f0e88418aa9cf7718eb26f6b85efa672fd2e7a"
+    },
+    {
+      "length": 1912,
+      "level": "M",
+      "version": 37,
+      "capacity": 1992,
+      "data_sha256": "67f5bec9d25dab2eb9f900a1655b9ed8b28389576494256dd08065368b95d7ae"
+    },
+    {
+      "length": 1988,
+      "level": "M",
+      "version": 37,
+      "capacity": 1992,
+      "data_sha256": "683d0c328909dfbe79948db8b8a37c2d53238b566a827ead2411f035698bffa2"
+    },
+    {
+      "length": 1989,
+      "level": "M",
+      "version": 37,
+      "capacity": 1992,
+      "data_sha256": "3c2c42cd25dc99e0ceb42348d7cb113f7440ea7248c84090cce57cc13a0d2444"
+    },
+    {
+      "length": 1990,
+      "level": "M",
+      "version": 38,
+      "capacity": 2102,
+      "data_sha256": "dcdfdbf9e2641d999c8d36e489cd43e44dbce210bfac5c9c816b32929a4c3b88"
+    },
+    {
+      "length": 2098,
+      "level": "M",
+      "version": 38,
+      "capacity": 2102,
+      "data_sha256": "6d85a70ca7945ce4b02c2678f881d46f744bfe3e83ee7495610aa5ec9d8aa65d"
+    },
+    {
+      "length": 2099,
+      "level": "M",
+      "version": 38,
+      "capacity": 2102,
+      "data_sha256": "0f05d914a7a1dcf98d6ae30db2aaf16ddfa3cd6408c6dca398e3d627d161ddfa"
+    },
+    {
+      "length": 2100,
+      "level": "M",
+      "version": 39,
+      "capacity": 2216,
+      "data_sha256": "22d0135a5f1b21db2b2697538e17c98b98fb8b441c788b01d297563db178aab8"
+    },
+    {
+      "length": 2212,
+      "level": "M",
+      "version": 39,
+      "capacity": 2216,
+      "data_sha256": "2cfbb0628c1bce80265ed3ff452830815984ff1cddb641cd7601a93e786e5ed6"
+    },
+    {
+      "length": 2213,
+      "level": "M",
+      "version": 39,
+      "capacity": 2216,
+      "data_sha256": "e3a5ee919bc67dd8556001a60a719eae5af57284106bbb219e2fce79889eae59"
+    },
+    {
+      "length": 2214,
+      "level": "M",
+      "version": 40,
+      "capacity": 2334,
+      "data_sha256": "cc5030fef77a6ccce62280407638d4a62906aa3f456ff84f8f0e5fd2973971f6"
+    },
+    {
+      "length": 2330,
+      "level": "M",
+      "version": 40,
+      "capacity": 2334,
+      "data_sha256": "8c30dd32cb3074f830f752e2c03c7ffb2fb0dbe841328c4540358d440e0a106f"
+    },
+    {
+      "length": 2331,
+      "level": "M",
+      "version": 40,
+      "capacity": 2334,
+      "data_sha256": "7595d96d360ba5b9f8cfd68dfebc525a6985a14ea07c0c21a10dc641728cf3e0"
+    },
+    {
+      "length": 2332,
+      "level": "M",
+      "version": null
+    },
+    {
+      "length": 2953,
+      "level": "M",
+      "version": null
+    },
+    {
+      "length": 2954,
+      "level": "M",
+      "version": null
+    },
+    {
+      "length": 0,
+      "level": "Q",
+      "version": 1,
+      "capacity": 13,
+      "data_sha256": "18f8bebd0566164a131702caf88c1b1bee0c34952ea2e300b7994b1e23fd3bb3"
+    },
+    {
+      "length": 1,
+      "level": "Q",
+      "version": 1,
+      "capacity": 13,
+      "data_sha256": "f8a1cd8759e3fbf3ab8c69a8614a3ca3371ab3e74a8dc8fcd022fe2c1118286a"
+    },
+    {
+      "length": 10,
+      "level": "Q",
+      "version": 1,
+      "capacity": 13,
+      "data_sha256": "4dbf3e1a920e43217acda94b452eb6231fb706410e78b979ab98a1eb59a51b04"
+    },
+    {
+      "length": 11,
+      "level": "Q",
+      "version": 1,
+      "capacity": 13,
+      "data_sha256": "612fd8111d146c2be262fde27b2a1d8f70bede336ae8f4af63c2888bf68d2d72"
+    },
+    {
+      "length": 12,
+      "level": "Q",
+      "version": 2,
+      "capacity": 22,
+      "data_sha256": "59c894ed6f697e0ad59fe0a26272950a503e92c4e3d2af6f221a63a32aa16d6f"
+    },
+    {
+      "length": 19,
+      "level": "Q",
+      "version": 2,
+      "capacity": 22,
+      "data_sha256": "e09f4aec9fbbfb4febfacc861f1a2d9979e2d5166dd4c6870372aff12ad30ec9"
+    },
+    {
+      "length": 20,
+      "level": "Q",
+      "version": 2,
+      "capacity": 22,
+      "data_sha256": "146087ab38797991d757a3a54759241d6207d6c52d82bcf5a33326871421f810"
+    },
+    {
+      "length": 21,
+      "level": "Q",
+      "version": 3,
+      "capacity": 34,
+      "data_sha256": "cf4f68d7e553f0c4e192ae58412323e65897b381f9aca1767fcc7949d02bc60b"
+    },
+    {
+      "length": 31,
+      "level": "Q",
+      "version": 3,
+      "capacity": 34,
+      "data_sha256": "17d0bb01afc6833c2ec69e83a49f344d45080692e959d13639e9e84f7bee7ec3"
+    },
+    {
+      "length": 32,
+      "level": "Q",
+      "version": 3,
+      "capacity": 34,
+      "data_sha256": "8019ee3d5816fedad0a65a4cfbd194a95f99c872b99afbd149954fa58e6952f3"
+    },
+    {
+      "length": 33,
+      "level": "Q",
+      "version": 4,
+      "capacity": 48,
+      "data_sha256": "4ee7c36aee1a4eefb1440c3c298395f4b86c76ef6822fcdb814c7309909bc8a9"
+    },
+    {
+      "length": 45,
+      "level": "Q",
+      "version": 4,
+      "capacity": 48,
+      "data_sha256": "ae00600317a822813a8933a3f072dc165d24893362ad7df87eafe1f2363130d2"
+    },
+    {
+      "length": 46,
+      "level": "Q",
+      "version": 4,
+      "capacity": 48,
+      "data_sha256": "548a5f062c5408e4c4eaa96ffb27c5664a228aeaf40d6856d420f5599f6deca2"
+    },
+    {
+      "length": 47,
+      "level": "Q",
+      "version": 5,
+      "capacity": 62,
+      "data_sha256": "3588d2edc5d0720e6177c16fbfe3f9167872b4bf12259b559cc6f2e5f47dbefb"
+    },
+    {
+      "length": 59,
+      "level": "Q",
+      "version": 5,
+      "capacity": 62,
+      "data_sha256": "b9abca47d67435b0a72f65fe30031d21ea70b60e5235d156fb5ed580900ab79f"
+    },
+    {
+      "length": 60,
+      "level": "Q",
+      "version": 5,
+      "capacity": 62,
+      "data_sha256": "79015d11db3e04ffefb6c4d50ecf0e179dc49bf32d5ae11758afcc6ade102680"
+    },
+    {
+      "length": 61,
+      "level": "Q",
+      "version": 6,
+      "capacity": 76,
+      "data_sha256": "c335fa2d8692e40f3053e982df19d71b2ae88b43a201a44858b3e628f9be8775"
+    },
+    {
+      "length": 73,
+      "level": "Q",
+      "version": 6,
+      "capacity": 76,
+      "data_sha256": "5cbe7e09ae8d39a185eb49f931aa81ddf76bf04e9cfaf64ba56084fe03becc2d"
+    },
+    {
+      "length": 74,
+      "level": "Q",
+      "version": 6,
+      "capacity": 76,
+      "data_sha256": "03306669959744eba617de3eec3d4948457451ca374f1ea1fad54b109070ca1f"
+    },
+    {
+      "length": 75,
+      "level": "Q",
+      "version": 7,
+      "capacity": 88,
+      "data_sha256": "168e75ad36ffb1d34f83f20fa5770ac7bdb381cd8007761355ede233eb5884d0"
+    },
+    {
+      "length": 85,
+      "level": "Q",
+      "version": 7,
+      "capacity": 88,
+      "data_sha256": "3c63e86945e91ea5e591a80a8ba8cd6b89bcec5ea33a81b81b8739933d4c40c5"
+    },
+    {
+      "length": 86,
+      "level": "Q",
+      "version": 7,
+      "capacity": 88,
+      "data_sha256": "00e3c52feafd5fce84b3653afbb1e0eacc5cebd880bb3c49f1b15964791bf826"
+    },
+    {
+      "length": 87,
+      "level": "Q",
+      "version": 8,
+      "capacity": 110,
+      "data_sha256": "93af96f308d3ff7a8a91b1e3de6ccd494ff01f19cde23ce8f946dc1e19ca1577"
+    },
+    {
+      "length": 107,
+      "level": "Q",
+      "version": 8,
+      "capacity": 110,
+      "data_sha256": "3cf2872d3c57b9575188f59e87fcb2c674f5e31d7a6f9a8de04dcbda4c3ba27c"
+    },
+    {
+      "length": 108,
+      "level": "Q",
+      "version": 8,
+      "capacity": 110,
+      "data_sha256": "cc4c6684766be719fb7d7511b0cda115f3d4ff59384a3bf49e6a6ae26d568ecc"
+    },
+    {
+      "length": 109,
+      "level": "Q",
+      "version": 9,
+      "capacity": 132,
+      "data_sha256": "7d869e8c5b0c424295f13625b785368d55901feb5c7504bb9771a283bd6f2c4e"
+    },
+    {
+      "length": 129,
+      "level": "Q",
+      "version": 9,
+      "capacity": 132,
+      "data_sha256": "129007847f0db796d009d5f65ca5ba071cdbbbd7db649843294f9a2310e926ef"
+    },
+    {
+      "length": 130,
+      "level": "Q",
+      "version": 9,
+      "capacity": 132,
+      "data_sha256": "d1cab32a93313dab2b45ad5055aa7114d0aca2afde9ae6339e20678f4aad818b"
+    },
+    {
+      "length": 131,
+      "level": "Q",
+      "version": 10,
+      "capacity": 154,
+      "data_sha256": "e101f8591cca6fafc7bf8b4ebf83c6e5df0503e0f97958c23f6d1760a0bb1f03"
+    },
+    {
+      "length": 150,
+      "level": "Q",
+      "version": 10,
+      "capacity": 154,
+      "data_sha256": "f5f179bad0e6940ea032d6fb394f8fed34b08f559035bf44f98229a064c83858"
+    },
+    {
+      "length": 151,
+      "level": "Q",
+      "version": 10,
+      "capacity": 154,
+      "data_sha256": "60ef80bb6aa383e0037db409cf881e80d3ab709d7e785b11b5a3664dab13fbeb"
+    },
+    {
+      "length": 152,
+      "level": "Q",
+      "version": 11,
+      "capacity": 180,
+      "data_sha256": "21c74683ba7db2ca042af06bd008ce421991afd9f1391aad2fe945631d1be54a"
+    },
+    {
+      "length": 176,
+      "level": "Q",
+      "version": 11,
+      "capacity": 180,
+      "data_sha256": "9c33d7bfda0e953473bdffacf687e96ef8ef9f44ee52e32061d7f02bcf0d2c17"
+    },
+    {
+      "length": 177,
+      "level": "Q",
+      "version": 11,
+      "capacity": 180,
+      "data_sha256": "02c04ab196b825e0815fea018b0dac2af52ff12ebb8debe0098d4e9a04333c09"
+    },
+    {
+      "length": 178,
+      "level": "Q",
+      "version": 12,
+      "capacity": 206,
+      "data_sha256": "77547288337a146c54ba289ede71fda76d57a26e0aad23f447934a17f2c3e01d"
+    },
+    {
+      "length": 202,
+      "level": "Q",
+      "version": 12,
+      "capacity": 206,
+      "data_sha256": "01a06fd36f8e05b73150e0b61b75b580bf95badadd9fbb0397536fde6540b626"
+    },
+    {
+      "length": 203,
+      "level": "Q",
+      "version": 12,
+      "capacity": 206,
+      "data_sha256": "9d0317879087dbb0fcc42bf3267e252087adbd569930129a8f32066917e267d9"
+    },
+    {
+      "length": 204,
+      "level": "Q",
+      "version": 13,
+      "capacity": 244,
+      "data_sha256": "593d211fbae72b4c3cbcc01fd3143bbcc30de66fbc2fb1ae5879e00401ec0073"
+    },
+    {
+      "length": 240,
+      "level": "Q",
+      "version": 13,
+      "capacity": 244,
+      "data_sha256": "231678b4ddaee2f77f7a7b95c4595f5434a128db57fe9b3287801010c19b09ff"
+    },
+    {
+      "length": 241,
+      "level": "Q",
+      "version": 13,
+      "capacity": 244,
+      "data_sha256": "9e37aad19b743e5c9c54ebc4cd3f2979eba1491853b828898be8bcc44fb3115e"
+    },
+    {
+      "length": 242,
+      "level": "Q",
+      "version": 14,
+      "capacity": 261,
+      "data_sha256": "1f39612d0cd344c8578673660389cf0a99bf014829fd23e6c748275377899e7b"
+    },
+    {
+      "length": 255,
+      "level": "Q",
+      "version": 14,
+      "capacity": 261,
+      "data_sha256": "200f4dd8145447265c7253c3c3d473e793b311d50dc130a3b707b42ec6fc59ab"
+    },
+    {
+      "length": 256,
+      "level": "Q",
+      "version": 14,
+      "capacity": 261,
+      "data_sha256": "2d223e26e7e70994cd6a0f4995a3764582e19dc4360214892351130632b4468d"
+    },
+    {
+      "length": 257,
+      "level": "Q",
+      "version": 14,
+      "capacity": 261,
+      "data_sha256": "8d1063d7b3431f841066e0b02f2b5c7d65601954eb19e20663cd87375d9891d3"
+    },
+    {
+      "length": 258,
+      "level": "Q",
+      "version": 14,
+      "capacity": 261,
+      "data_sha256": "49f4471c4f3c5b2f58ef1e3e6f18192a8cfdddbb6e0ea596b6b473d3caaa018d"
+    },
+    {
+      "length": 259,
+      "level": "Q",
+      "version": 15,
+      "capacity": 295,
+      "data_sha256": "b836dabd987ad9f025d426e9828f08152906a5e5c90496b3b171282d745e92c2"
+    },
+    {
+      "length": 291,
+      "level": "Q",
+      "version": 15,
+      "capacity": 295,
+      "data_sha256": "735f107eac4551973dd0cdac485d4dadb7ef6be8f2d1c48a17954ba119c5ef3a"
+    },
+    {
+      "length": 292,
+      "level": "Q",
+      "version": 15,
+      "capacity": 295,
+      "data_sha256": "441771728fdfda87a01af9789fe01c036288fb7fe2e7ce52e3cdf3733bc63d96"
+    },
+    {
+      "length": 293,
+      "level": "Q",
+      "version": 16,
+      "capacity": 325,
+      "data_sha256": "c716a8e889cb50926645528ee3999386bd8f7e6ce5943e084ef11f8c655ab0d8"
+    },
+    {
+      "length": 321,
+      "level": "Q",
+      "version": 16,
+      "capacity": 325,
+      "data_sha256": "0f182aa50e88bf1fb24525cad8b6923d8a2ae0b2e51c5c0e875d2423821e8d85"
+    },
+    {
+      "length": 322,
+      "level": "Q",
+      "version": 16,
+      "capacity": 325,
+      "data_sha256": "b8cb1affb3beab691e6112e07c65e464ae3bb8998d2721e3c3e3d8fa9ca557b3"
+    },
+    {
+      "length": 323,
+      "level": "Q",
+      "version": 17,
+      "capacity": 367,
+      "data_sha256": "94c7794cac04608e66001bf8b92106daa16f9353ef60c7ad067c6211cbabab6e"
+    },
+    {
+      "length": 363,
+      "level": "Q",
+      "version": 17,
+      "capacity": 367,
+      "data_sha256": "933f5e8544acf6c9ff9a4793308ca5e9c82ea303c182f432de77a409333a77cd"
+    },
+    {
+      "length": 364,
+      "level": "Q",
+      "version": 17,
+      "capacity": 367,
+      "data_sha256": "7402c2c58fc509c33d498c3e43913238526222a23294a59a79fa6470a7e74221"
+    },
+    {
+      "length": 365,
+      "level": "Q",
+      "version": 18,
+      "capacity": 397,
+      "data_sha256": "6e7fa39a2817111db97f52e58571977c6dd94ba53b028c0c6b70c79b2522e044"
+    },
+    {
+      "length": 393,
+      "level": "Q",
+      "version": 18,
+      "capacity": 397,
+      "data_sha256": "a3158540a7d5612328eebd8e539e182c6ab57affdc086a968e949106357f7aae"
+    },
+    {
+      "length": 394,
+      "level": "Q",
+      "version": 18,
+      "capacity": 397,
+      "data_sha256": "12bf7920cbaaf56e1cf4bc47d49aa7354d7cd264b06a72ec56de3b391a4f31fd"
+    },
+    {
+      "length": 395,
+      "level": "Q",
+      "version": 19,
+      "capacity": 445,
+      "data_sha256": "92e055ee081aa6ad9c20600e83c8c4d38875ad7e48a30da6cad9de7bcfe6d909"
+    },
+    {
+      "length": 441,
+      "level": "Q",
+      "version": 19,
+      "capacity": 445,
+      "data_sha256": "7c5873a8f2092497bf9a25d3529dfa048f184ba18578153054632af19c969418"
+    },
+    {
+      "length": 442,
+      "level": "Q",
+      "version": 19,
+      "capacity": 445,
+      "data_sha256": "8c671c1115b2ec63f1a52d4bb8306707e6305cec6981f0db1466e7bc5e1cd411"
+    },
+    {
+      "length": 443,
+      "level": "Q",
+      "version": 20,
+      "capacity": 485,
+      "data_sha256": "ca7d21ae58f17eecbb4c290e4db45ce311931246709f3fe29baa4797493374a8"
+    },
+    {
+      "length": 481,
+      "level": "Q",
+      "version": 20,
+      "capacity": 485,
+      "data_sha256": "9dcb815a20989efdfb53a1d62e774b9620ab8e9c55262462ac724055bec6b517"
+    },
+    {
+      "length": 482,
+      "level": "Q",
+      "version": 20,
+      "capacity": 485,
+      "data_sha256": "21a012732943f78718637a2448d67f5938150c14af7fd948f21cf6a4ef92952d"
+    },
+    {
+      "length": 483,
+      "level": "Q",
+      "version": 21,
+      "capacity": 512,
+      "data_sha256": "b1d922ac705046af9ae87b5fe7cda5531a1ee9688fc7b375191608f02d8e507e"
+    },
+    {
+      "length": 508,
+      "level": "Q",
+      "version": 21,
+      "capacity": 512,
+      "data_sha256": "2ec6baec4f7436393a292949bcb85a16d21ae0f07fdeb95f014168ea94e8223f"
+    },
+    {
+      "length": 509,
+      "level": "Q",
+      "version": 21,
+      "capacity": 512,
+      "data_sha256": "dc390c23a668bb8b1fbc844aaf6c2c33080693dfe7afea2aa7befc5fd5e0c383"
+    },
+    {
+      "length": 510,
+      "level": "Q",
+      "version": 22,
+      "capacity": 568,
+      "data_sha256": "d405bee1d053d53281fbc4d194ded5871589d1e2ed8cc37f42eab252d1a3bb0f"
+    },
+    {
+      "length": 564,
+      "level": "Q",
+      "version": 22,
+      "capacity": 568,
+      "data_sha256": "34075520a4ec6959591a0ca4f3c14feb747afa3e6311637db74e4f53861d7373"
+    },
+    {
+      "length": 565,
+      "level": "Q",
+      "version": 22,
+      "capacity": 568,
+      "data_sha256": "2d985356911220deee158c598054eee262d728a7a9b71f6e167ab3040023a104"
+    },
+    {
+      "length": 566,
+      "level": "Q",
+      "version": 23,
+      "capacity": 614,
+      "data_sha256": "af184a3c5b0a530ddf75174cb56230c866e845e2208d49658504c543083b1e99"
+    },
+    {
+      "length": 610,
+      "level": "Q",
+      "version": 23,
+      "capacity": 614,
+      "data_sha256": "23926ca42ddaf4128bbf31ccbcb543e8794fe82c1392c77e4ecb08709ea43cf6"
+    },
+    {
+      "length": 611,
+      "level": "Q",
+      "version": 23,
+      "capacity": 614,
+      "data_sha256": "395458d84622bee95504a3d6cd070552508f347faddbdb6a825b6a387757513a"
+    },
+    {
+      "length": 612,
+      "level": "Q",
+      "version": 24,
+      "capacity": 664,
+      "data_sha256": "fb85f3d8a7a931bc405700affb7a9cf8c73e5b62e0dbd1aac769fe8ff04209dd"
+    },
+    {
+      "length": 660,
+      "level": "Q",
+      "version": 24,
+      "capacity": 664,
+      "data_sha256": "c6dce4122058d186e594cd622f5d95f5caca7b3bd39fe04c6c60df530c5271e2"
+    },
+    {
+      "length": 661,
+      "level": "Q",
+      "version": 24,
+      "capacity": 664,
+      "data_sha256": "c7e584d6de50f5d76b20580958e1a447b58e2b359fa4e72182b99290776700d4"
+    },
+    {
+      "length": 662,
+      "level": "Q",
+      "version": 25,
+      "capacity": 718,
+      "data_sha256": "7cbf718c13b9c641076fab1694763a0124f5b3063175a077a24691a7da7ed0ee"
+    },
+    {
+      "length": 714,
+      "level": "Q",
+      "version": 25,
+      "capacity": 718,
+      "data_sha256": "81e2563193893048d75f6885a6df23eee11f7e850baf3735f6c9a2e54b51743a"
+    },
+    {
+      "length": 715,
+      "level": "Q",
+      "version": 25,
+      "capacity": 718,
+      "data_sha256": "6ae2803de8234e065583588bbea765308aba4554828f81f4b74dfd9e10ff151c"
+    },
+    {
+      "length": 716,
+      "level": "Q",
+      "version": 26,
+      "capacity": 754,
+      "data_sha256": "289db93958f7692c52a6bae47f0b4c90cbc24a6c0bcc8706588dc4cbcb0e6606"
+    },
+    {
+      "length": 750,
+      "level": "Q",
+      "version": 26,
+      "capacity": 754,
+      "data_sha256": "4523136f748b87ed7af4bffe0523a44ae475e16f24aeb95f5896ae4c816f571a"
+    },
+    {
+      "length": 751,
+      "level": "Q",
+      "version": 26,
+      "capacity": 754,
+      "data_sha256": "8f506e7218313763f27a5aed79865e441a673752778cd26b7e7ac64eb5ea314e"
+    },
+    {
+      "length": 752,
+      "level": "Q",
+      "version": 27,
+      "capacity": 808,
+      "data_sha256": "d559be056fd606decd14f213adfd9ec8ced7af45ea2a2450f785e7b100902a3e"
+    },
+    {
+      "length": 804,
+      "level": "Q",
+      "version": 27,
+      "capacity": 808,
+      "data_sha256": "12b1adafe8e4ae4a607ac3990e4bdde5e4e735f4f80596383a96034b5cbe0aaa"
+    },
+    {
+      "length": 805,
+      "level": "Q",
+      "version": 27,
+      "capacity": 808,
+      "data_sha256": "38fd19bcfc4605ae60963d8366a7a3facceec74f56367f15a5f0df3aac60d7c7"
+    },
+    {
+      "length": 806,
+      "level": "Q",
+      "version": 28,
+      "capacity": 871,
+      "data_sha256": "5da5cd3cc3b6ce4d7705552d878539a7de80393bb1769e2bf2bdd29d674f94d2"
+    },
+    {
+      "length": 867,
+      "level": "Q",
+      "version": 28,
+      "capacity": 871,
+      "data_sha256": "61e09a7218473d67595c40dc75fd4d19c168a5dcb15639f23176d997f5f29b5d"
+    },
+    {
+      "length": 868,
+      "level": "Q",
+      "version": 28,
+      "capacity": 871,
+      "data_sha256": "0f255a4f011f0bddbf37b3f301e9d1637622ac7d0ae90a09f4dc8edb9da51caa"
+    },
+    {
+      "length": 869,
+      "level": "Q",
+      "version": 29,
+      "capacity": 911,
+      "data_sha256": "919b3053434c09a36aa35000f8e69cf604b51474d671ce9b6c1be44498833671"
+    },
+    {
+      "length": 907,
+      "level": "Q",
+      "version": 29,
+      "capacity": 911,
+      "data_sha256": "7a928ded4e52e4a58b96b24f850bcd0492c90ed449650d35bbd2c2f64c281954"
+    },
+    {
+      "length": 908,
+      "level": "Q",
+      "version": 29,
+      "capacity": 911,
+      "data_sha256": "59507d6509183a0ee461d2bf4c550d045813d6a04e6ef9f01b26a0fbeeb18c7d"
+    },
+    {
+      "length": 909,
+      "level": "Q",
+      "version": 30,
+      "capacity": 985,
+      "data_sha256": "6a9aecbffce4c63869cad22ad5fb9a82b9b84c00c5df255813428052ed351061"
+    },
+    {
+      "length": 981,
+      "level": "Q",
+      "version": 30,
+      "capacity": 985,
+      "data_sha256": "b15290be063a107fdce399b7640dd2af1ef160108b8807a405d42fe8d47ed9de"
+    },
+    {
+      "length": 982,
+      "level": "Q",
+      "version": 30,
+      "capacity": 985,
+      "data_sha256": "01c08476909da2e8be7079919083bde5d91e7c3b72ebf31dba5b1b9e5ca76aa2"
+    },
+    {
+      "length": 983,
+      "level": "Q",
+      "version": 31,
+      "capacity": 1033,
+      "data_sha256": "f72e64eb8c3867ea61477b9c6c4e9ea4bb9880549d82094a86c2d236bc564710"
+    },
+    {
+      "length": 1029,
+      "level": "Q",
+      "version": 31,
+      "capacity": 1033,
+      "data_sha256": "4e3deb59eca16a3391fbdf79e402fbacbb8b90b24f7319bddd5bfee9fbeb42de"
+    },
+    {
+      "length": 1030,
+      "level": "Q",
+      "version": 31,
+      "capacity": 1033,
+      "data_sha256": "cd343750b3e3f750db867c095b17083b9cd39a73186adcdde4a41f624ca0c685"
+    },
+    {
+      "length": 1031,
+      "level": "Q",
+      "version": 32,
+      "capacity": 1115,
+      "data_sha256": "f9c555d648d721c1b465deba0682d13dc8277a2e873401570319c8688b0632ed"
+    },
+    {
+      "length": 1111,
+      "level": "Q",
+      "version": 32,
+      "capacity": 1115,
+      "data_sha256": "a6bcbb7c555b95b1282648c10968bda91107e3694d597a9340efc4186d4304a0"
+    },
+    {
+      "length": 1112,
+      "level": "Q",
+      "version": 32,
+      "capacity": 1115,
+      "data_sha256": "9b02bb015e0300ed483c8eec1a08763fbd60977e877556a379c9782300b828cc"
+    },
+    {
+      "length": 1113,
+      "level": "Q",
+      "version": 33,
+      "capacity": 1171,
+      "data_sha256": "43dcc377e6fa0698f12705b9f2e4dcdc710ec902fe40c6ee4962b270b1dfc33c"
+    },
+    {
+      "length": 1167,
+      "level": "Q",
+      "version": 33,
+      "capacity": 1171,
+      "data_sha256": "17126e3b510f79a987a4c6b50cdfcd1078f02c244700bdf7cf763dad580cb364"
+    },
+    {
+      "length": 1168,
+      "level": "Q",
+      "version": 33,
+      "capacity": 1171,
+      "data_sha256": "c01cebd1de3c9781988ac5ed8360bb15303fea8763e492c77988ed59fbc3e8f9"
+    },
+    {
+      "length": 1169,
+      "level": "Q",
+      "version": 34,
+      "capacity": 1231,
+      "data_sha256": "6238748d0f555834e222d9122e590f4fd33181738f6e6fe490b5967e258a677f"
+    },
+    {
+      "length": 1227,
+      "level": "Q",
+      "version": 34,
+      "capacity": 1231,
+      "data_sha256": "9d8a0de4bfbedfb7bbbcb0178a66b469f486ebc34d61378e246ee13ec7d1c811"
+    },
+    {
+      "length": 1228,
+      "level": "Q",
+      "version": 34,
+      "capacity": 1231,
+      "data_sha256": "763c57d8ae9fb6aea00bbe90182fd63cc2f2dca98906146e46791734c325302c"
+    },
+    {
+      "length": 1229,
+      "level": "Q",
+      "version": 35,
+      "capacity": 1286,
+      "data_sha256": "a0216d448868c7fafcd83c257d801ab323d20d6cc4b9efcf8377049dd022a19f"
+    },
+    {
+      "length": 1282,
+      "level": "Q",
+      "version": 35,
+      "capacity": 1286,
+      "data_sha256": "9519b0b86c5470d5085d7babd6b5cb3accc7f7b2a612343d9f85c2990d9dfd12"
+    },
+    {
+      "length": 1283,
+      "level": "Q",
+      "version": 35,
+      "capacity": 1286,
+      "data_sha256": "0a1a2761a35e50f130c8ea606d19631c3e8cb074da0b2edf890c10268ba2ba57"
+    },
+    {
+      "length": 1284,
+      "level": "Q",
+      "version": 36,
+      "capacity": 1354,
+      "data_sha256": "71f9717999c608c19df982cd41ca7de9d27921fa6cc2fbb6bbbf9165ed34d999"
+    },
+    {
+      "length": 1350,
+      "level": "Q",
+      "version": 36,
+      "capacity": 1354,
+      "data_sha256": "f18152b05cf5b36e0d972d083d0f2d32533c8a92f5fe98f0d6ac922830ad6194"
+    },
+    {
+      "length": 1351,
+      "level": "Q",
+      "version": 36,
+      "capacity": 1354,
+      "data_sha256": "5c81f8971749d29f75b4e54f5b4ab508db596517b36637d5a0ccf85a8a254b89"
+    },
+    {
+      "length": 1352,
+      "level": "Q",
+      "version": 37,
+      "capacity": 1426,
+      "data_sha256": "d8b3df1a0e2db8ff91a51962a916aa84a74f2ad183234097e3363ed40aa219e8"
+    },
+    {
+      "length": 1422,
+      "level": "Q",
+      "version": 37,
+      "capacity": 1426,
+      "data_sha256": "3a5b6c0041f3c867c6a29564f357c51d13c341fb328dbdc96bc800ebbb3ecf1f"
+    },
+    {
+      "length": 1423,
+      "level": "Q",
+      "version": 37,
+      "capacity": 1426,
+      "data_sha256": "64b76085bdaecd502bc18130600593b8c64af510b668fe97366793f27389dd57"
+    },
+    {
+      "length": 1424,
+      "level": "Q",
+      "version": 38,
+      "capacity": 1502,
+      "data_sha256": "8dfa0cc906ec67db5628486d3ca76a6787fc460b56479ab5b7bbf11ac621e4cb"
+    },
+    {
+      "length": 1498,
+      "level": "Q",
+      "version": 38,
+      "capacity": 1502,
+      "data_sha256": "e34b13387ab874439d28201b1d5006a34517b3b1508c6fb3b16282216f373230"
+    },
+    {
+      "length": 1499,
+      "level": "Q",
+      "version": 38,
+      "capacity": 1502,
+      "data_sha256": "ba3b7a20bfe53f97b21f6853b519215b92e83fb8d0aa48474de3d64b5839bc65"
+    },
+    {
+      "length": 1500,
+      "level": "Q",
+      "version": 39,
+      "capacity": 1582,
+      "data_sha256": "b8dabfa88e52a9bb7dc8151d5a417703806f19e2c826e3bc562d5dbcda2d56c1"
+    },
+    {
+      "length": 1578,
+      "level": "Q",
+      "version": 39,
+      "capacity": 1582,
+      "data_sha256": "0125ac80aaf19c9876f3d957bfe980450f83553d8094587ac86c996d4a4b593c"
+    },
+    {
+      "length": 1579,
+      "level": "Q",
+      "version": 39,
+      "capacity": 1582,
+      "data_sha256": "f79c88fe033235f128c962afa009a43a0ce79dfbee4dc01c1fd18a769c06e2ab"
+    },
+    {
+      "length": 1580,
+      "level": "Q",
+      "version": 40,
+      "capacity": 1666,
+      "data_sha256": "71d1a32e36d85fc842185504fb0807cfed91542386fbee964b3daba743432ba8"
+    },
+    {
+      "length": 1662,
+      "level": "Q",
+      "version": 40,
+      "capacity": 1666,
+      "data_sha256": "57a4d4b69f4e658c08960c91180f3fc67897d498bcae9747fea3cb91868d9291"
+    },
+    {
+      "length": 1663,
+      "level": "Q",
+      "version": 40,
+      "capacity": 1666,
+      "data_sha256": "6cf8ba7528302b32caafcf2185d10b87eb878cc167dca965aa1a20867c1de2f0"
+    },
+    {
+      "length": 1664,
+      "level": "Q",
+      "version": null
+    },
+    {
+      "length": 2953,
+      "level": "Q",
+      "version": null
+    },
+    {
+      "length": 2954,
+      "level": "Q",
+      "version": null
+    },
+    {
+      "length": 0,
+      "level": "H",
+      "version": 1,
+      "capacity": 9,
+      "data_sha256": "d6ff1096ca2620ca8042247683caf58bb572894858aa2dec16c4748a0fe5f2d4"
+    },
+    {
+      "length": 1,
+      "level": "H",
+      "version": 1,
+      "capacity": 9,
+      "data_sha256": "dc0e3987441cb173b5ad115fbf941b13df3199fb4587c8f882aadfc7b6264b7a"
+    },
+    {
+      "length": 6,
+      "level": "H",
+      "version": 1,
+      "capacity": 9,
+      "data_sha256": "6c2431e1fdcf74190131d2792c6d0ef9425921725da9ba652c4176685129daf6"
+    },
+    {
+      "length": 7,
+      "level": "H",
+      "version": 1,
+      "capacity": 9,
+      "data_sha256": "b5010f1b2927ffd31609296271a741d199149e79beb505739923d4ec73be582c"
+    },
+    {
+      "length": 8,
+      "level": "H",
+      "version": 2,
+      "capacity": 16,
+      "data_sha256": "fc8415e9c1f503b9b26c887d4646b62d191ed60d33f15aab354caa65e553b65f"
+    },
+    {
+      "length": 13,
+      "level": "H",
+      "version": 2,
+      "capacity": 16,
+      "data_sha256": "b80d5c2f5df8ecdccf3c0e5eea1e68d0d07d3f638eaec8524a55c9add9f266a3"
+    },
+    {
+      "length": 14,
+      "level": "H",
+      "version": 2,
+      "capacity": 16,
+      "data_sha256": "bb3d04fd455d941055e3db9fa6c08650cf4135d871f63c6cf9d5da52c454ee8c"
+    },
+    {
+      "length": 15,
+      "level": "H",
+      "version": 3,
+      "capacity": 26,
+      "data_sha256": "33b8326ad0d94911f3a1f080176588d5763f4d23a9407d893cda3e08f24aba4f"
+    },
+    {
+      "length": 23,
+      "level": "H",
+      "version": 3,
+      "capacity": 26,
+      "data_sha256": "43e33cdfca7ca6b1e004b8baf051125349dd54232cecaabf068d0d092e8e2c69"
+    },
+    {
+      "length": 24,
+      "level": "H",
+      "version": 3,
+      "capacity": 26,
+      "data_sha256": "a8e1efb3465c18b9705a085c0443420490cff9891f1b84f0e30ad97b94293a13"
+    },
+    {
+      "length": 25,
+      "level": "H",
+      "version": 4,
+      "capacity": 36,
+      "data_sha256": "465a490fb5a812478b15e61b4ec3b560aeea9e640ca0b5ca01abb925aae770ba"
+    },
+    {
+      "length": 31,
+      "level": "H",
+      "version": 4,
+      "capacity": 36,
+      "data_sha256": "06207742b15c2fadad4f3391dc237060c4a960f4c28789a99cc50977ac90e088"
+    },
+    {
+      "length": 33,
+      "level": "H",
+      "version": 4,
+      "capacity": 36,
+      "data_sha256": "d2c2abbf2ddffe48eb01e7d99775b8dbee142c5c20ff0b6289513359b3b9749a"
+    },
+    {
+      "length": 34,
+      "level": "H",
+      "version": 4,
+      "capacity": 36,
+      "data_sha256": "5af66eaf9a8592afd2b198129f4d668e83fcd629e771cbc1d43eb102bad73db7"
+    },
+    {
+      "length": 35,
+      "level": "H",
+      "version": 5,
+      "capacity": 46,
+      "data_sha256": "23f38da9b67784836c70eb44bc80c8854381af193e47f4622ae4e9abc9fbe2cb"
+    },
+    {
+      "length": 43,
+      "level": "H",
+      "version": 5,
+      "capacity": 46,
+      "data_sha256": "9e02842b3dbe1e4d1f7b7fb70b5bf2d469f49a92f21b60497dab9b2778771d5c"
+    },
+    {
+      "length": 44,
+      "level": "H",
+      "version": 5,
+      "capacity": 46,
+      "data_sha256": "f56231cd8cbb518a7a61d97de4a9ba08fd935386ecd2eeccb3dd27a435fb434b"
+    },
+    {
+      "length": 45,
+      "level": "H",
+      "version": 6,
+      "capacity": 60,
+      "data_sha256": "29174f6f8569e2cb461e09737f21f21f73e89d7ee196b2e609b900b28379c91e"
+    },
+    {
+      "length": 57,
+      "level": "H",
+      "version": 6,
+      "capacity": 60,
+      "data_sha256": "9d2f08a35da552c4fdc703c34b47215eccabec42a4416f257aff4c4f357c8aee"
+    },
+    {
+      "length": 58,
+      "level": "H",
+      "version": 6,
+      "capacity": 60,
+      "data_sha256": "1ab98c63d73c83061bdbcb45c3be4b0dd6f2dfc1dff305d1f55c78a9781bfa22"
+    },
+    {
+      "length": 59,
+      "level": "H",
+      "version": 7,
+      "capacity": 66,
+      "data_sha256": "8439c7430e4ac27a3c37df2dc11ccf98a26c5e4f718400e289c88fb901662d1b"
+    },
+    {
+      "length": 63,
+      "level": "H",
+      "version": 7,
+      "capacity": 66,
+      "data_sha256": "41f1952d5e122e50940600ea1aba81a09fa60dd1c5aa7b6d2856fb9a1858b024"
+    },
+    {
+      "length": 64,
+      "level": "H",
+      "version": 7,
+      "capacity": 66,
+      "data_sha256": "2841a95268874bc802d30170e458766803af9e4af1131b0027ea697942313840"
+    },
+    {
+      "length": 65,
+      "level": "H",
+      "version": 8,
+      "capacity": 86,
+      "data_sha256": "2b29e395c266c7625028b17a5788ac23a1e5255fabea64b6744d79af512cbdb7"
+    },
+    {
+      "length": 83,
+      "level": "H",
+      "version": 8,
+      "capacity": 86,
+      "data_sha256": "e68376ef48847adc280a430cdfb44f2d13a7ca16acaaa5f11a02390505ec60ce"
+    },
+    {
+      "length": 84,
+      "level": "H",
+      "version": 8,
+      "capacity": 86,
+      "data_sha256": "18664bac68a1607dceb1891f56659f26cd1c1885716c49e390de82b4604668fe"
+    },
+    {
+      "length": 85,
+      "level": "H",
+      "version": 9,
+      "capacity": 100,
+      "data_sha256": "68daf1c763ac8a764e455af7e4407f17a210b4dd92a00a8925de7165c91f7669"
+    },
+    {
+      "length": 97,
+      "level": "H",
+      "version": 9,
+      "capacity": 100,
+      "data_sha256": "39c9b80426b995e9ded2fa2817f31872e346cae873cd79eeeb61cf0a7fe1362a"
+    },
+    {
+      "length": 98,
+      "level": "H",
+      "version": 9,
+      "capacity": 100,
+      "data_sha256": "782385e36d0080fccb92d995579c00dd001caf92022c0291550a087c0a2cba94"
+    },
+    {
+      "length": 99,
+      "level": "H",
+      "version": 10,
+      "capacity": 122,
+      "data_sha256": "85543c250e31b5643f92d3f2349e6ce9880d99f9caf4e6547a053c828f16615e"
+    },
+    {
+      "length": 118,
+      "level": "H",
+      "version": 10,
+      "capacity": 122,
+      "data_sha256": "0835ef45d1a509a0f3065d73f728918eea3103c4cd193acfb940271052f4b5d5"
+    },
+    {
+      "length": 119,
+      "level": "H",
+      "version": 10,
+      "capacity": 122,
+      "data_sha256": "93d39275a1cd58b68188548b33901774f63cba8984a510b26988b87025908e9d"
+    },
+    {
+      "length": 120,
+      "level": "H",
+      "version": 11,
+      "capacity": 140,
+      "data_sha256": "f8024e349491b38c6f4a5642559b1d33f9903a3def78965cecb5847382c7a9e1"
+    },
+    {
+      "length": 136,
+      "level": "H",
+      "version": 11,
+      "capacity": 140,
+      "data_sha256": "5c0cca7f8091da38e689f40137423a99a3bf56fe5852cbe2086862bfd6c1a701"
+    },
+    {
+      "length": 137,
+      "level": "H",
+      "version": 11,
+      "capacity": 140,
+      "data_sha256": "2d9d3f19122eadab4109032f699ca82adc541f53dcde1d112b610d16e165851d"
+    },
+    {
+      "length": 138,
+      "level": "H",
+      "version": 12,
+      "capacity": 158,
+      "data_sha256": "9c6d6f3067d212ca8d2d5b80af562f8e33275009ed48d7e721814f400d032a7c"
+    },
+    {
+      "length": 154,
+      "level": "H",
+      "version": 12,
+      "capacity": 158,
+      "data_sha256": "1acf36dd0d00a1691391eeaf43a770a03b5cb3dc4a7bcf8593769ab0e1c76dad"
+    },
+    {
+      "length": 155,
+      "level": "H",
+      "version": 12,
+      "capacity": 158,
+      "data_sha256": "e6f394b29bb13ed7b145d1889051d548359257dad5b098c851af2ddc3782b704"
+    },
+    {
+      "length": 156,
+      "level": "H",
+      "version": 13,
+      "capacity": 180,
+      "data_sha256": "465fb77e907d9bf1c71efa1d09861c38db0d949639bac7e1d3accc80d01a25e7"
+    },
+    {
+      "length": 176,
+      "level": "H",
+      "version": 13,
+      "capacity": 180,
+      "data_sha256": "9c33d7bfda0e953473bdffacf687e96ef8ef9f44ee52e32061d7f02bcf0d2c17"
+    },
+    {
+      "length": 177,
+      "level": "H",
+      "version": 13,
+      "capacity": 180,
+      "data_sha256": "02c04ab196b825e0815fea018b0dac2af52ff12ebb8debe0098d4e9a04333c09"
+    },
+    {
+      "length": 178,
+      "level": "H",
+      "version": 14,
+      "capacity": 197,
+      "data_sha256": "1aff1c47b5f9758a1454e9d9b12cf2c17d000d3cc7665ff62ed57cd43b0c4438"
+    },
+    {
+      "length": 193,
+      "level": "H",
+      "version": 14,
+      "capacity": 197,
+      "data_sha256": "9296cdff517c78407664f0ac9b1d7e9f12cb45922d428d19e0ce0dd05119ff62"
+    },
+    {
+      "length": 194,
+      "level": "H",
+      "version": 14,
+      "capacity": 197,
+      "data_sha256": "9b48941431672457f608423acdaabf30ac57afd4dc6fe7e870d722f5c3de5bf6"
+    },
+    {
+      "length": 195,
+      "level": "H",
+      "version": 15,
+      "capacity": 223,
+      "data_sha256": "ac679ac3793b949c1caedb330b15c47ddb4b36ebad5f237bc493965f0588af1d"
+    },
+    {
+      "length": 219,
+      "level": "H",
+      "version": 15,
+      "capacity": 223,
+      "data_sha256": "06a36e18d3e841d63926bbd1a5947f863bf83effe873863e94b454398e2f1aaf"
+    },
+    {
+      "length": 220,
+      "level": "H",
+      "version": 15,
+      "capacity": 223,
+      "data_sha256": "424baa2844e564d9611665fa2ba6afc00d3133349340f1839ce4240a2be2b1f5"
+    },
+    {
+      "length": 221,
+      "level": "H",
+      "version": 16,
+      "capacity": 253,
+      "data_sha256": "35355ddbd591bcd1e4e50fafc20bca3d543289b2d090f61d53d1de3bce347e10"
+    },
+    {
+      "length": 249,
+      "level": "H",
+      "version": 16,
+      "capacity": 253,
+      "data_sha256": "6420e9cdf73521c9ed6b78abcda1700f3083e00349334b56b1f1182cbefb2ab6"
+    },
+    {
+      "length": 250,
+      "level": "H",
+      "version": 16,
+      "capacity": 253,
+      "data_sha256": "a5691a5e38e27387ccfbaceb500d1c2e235bea49400aa969d9ac0d20b23c95ee"
+    },
+    {
+      "length": 251,
+      "level": "H",
+      "version": 17,
+      "capacity": 283,
+      "data_sha256": "9719e0b7f24eeee9f7cad3e95b96aca184274d7bfab661ec19b820ab143904bd"
+    },
+    {
+      "length": 255,
+      "level": "H",
+      "version": 17,
+      "capacity": 283,
+      "data_sha256": "5aacbdbfde29bb03eb1f95929822b0a0208493c55d5795b68d47ad07bad3a22d"
+    },
+    {
+      "length": 256,
+      "level": "H",
+      "version": 17,
+      "capacity": 283,
+      "data_sha256": "e820e39531677be388a74c1ea28fdadc93b4d18fde83b67b7499aeac8b83e881"
+    },
+    {
+      "length": 279,
+      "level": "H",
+      "version": 17,
+      "capacity": 283,
+      "data_sha256": "4c1936921494a0678f3b14b51e46e286ed0c8723549d6d5e2de487e02c78b9e8"
+    },
+    {
+      "length": 280,
+      "level": "H",
+      "version": 17,
+      "capacity": 283,
+      "data_sha256": "02ee01df31cd8a10e23574755a3b7c4f5326850912ca7f9397df4569c6906287"
+    },
+    {
+      "length": 281,
+      "level": "H",
+      "version": 18,
+      "capacity": 313,
+      "data_sha256": "79f68ba596d97bca5a269926d4b31be392d3cbe798e6df85bee803b8825a40c7"
+    },
+    {
+      "length": 309,
+      "level": "H",
+      "version": 18,
+      "capacity": 313,
+      "data_sha256": "8fb071dfbde123cd578fb28b10af72d6f816ecbb6918b3467594ac0e1fca462e"
+    },
+    {
+      "length": 310,
+      "level": "H",
+      "version": 18,
+      "capacity": 313,
+      "data_sha256": "57c74e3f1a528794dd97c61dcb940839a224cab96a57001df9ae4ccec803bb42"
+    },
+    {
+      "length": 311,
+      "level": "H",
+      "version": 19,
+      "capacity": 341,
+      "data_sha256": "de300fbc8766f9d127cc558ae5911319bd1229ac447d42461812b26aa8b35135"
+    },
+    {
+      "length": 337,
+      "level": "H",
+      "version": 19,
+      "capacity": 341,
+      "data_sha256": "d92e9879ba48a7baae38b7158bf5237d862c354d7805c3d121078f661d20be01"
+    },
+    {
+      "length": 338,
+      "level": "H",
+      "version": 19,
+      "capacity": 341,
+      "data_sha256": "b66d65a352c8f4e37a1e6bb8dee44c7374f7263e950b5d7491921c68b9deef40"
+    },
+    {
+      "length": 339,
+      "level": "H",
+      "version": 20,
+      "capacity": 385,
+      "data_sha256": "9f4cc76bc4f832999b6449231b054ec4b5736446b9b50fe791e96ac00a23bdbc"
+    },
+    {
+      "length": 381,
+      "level": "H",
+      "version": 20,
+      "capacity": 385,
+      "data_sha256": "98cd65d4f379eb13a0be2d5ad5cfd0588debb41674fd39873a7c32703ad7ae1e"
+    },
+    {
+      "length": 382,
+      "level": "H",
+      "version": 20,
+      "capacity": 385,
+      "data_sha256": "70d31d1a3744a91a116bb97616d69c847be7488dd4dbd191820c75f7da5cd24f"
+    },
+    {
+      "length": 383,
+      "level": "H",
+      "version": 21,
+      "capacity": 406,
+      "data_sha256": "a8e6665e1876dee4b12f661bad8d01a1f40c02054e0aa0d078af16f4d4450226"
+    },
+    {
+      "length": 402,
+      "level": "H",
+      "version": 21,
+      "capacity": 406,
+      "data_sha256": "599c67339a2cd9b1504538d042fb3ebfeff724e8f7f8809d918c8b1bb83ace58"
+    },
+    {
+      "length": 403,
+      "level": "H",
+      "version": 21,
+      "capacity": 406,
+      "data_sha256": "0f82e597e33ee429b43eae3027ae4bd5d7003c6e3e24337a2f888f478fc4a27b"
+    },
+    {
+      "length": 404,
+      "level": "H",
+      "version": 22,
+      "capacity": 442,
+      "data_sha256": "b70b0d83a89c77fcf35253abcc3eb8abd4e774602b6c14a5e5a89e25f4707b24"
+    },
+    {
+      "length": 438,
+      "level": "H",
+      "version": 22,
+      "capacity": 442,
+      "data_sha256": "bb5a00fc6958da2befbffe5ea35c6b78d5516d99065a3461f8bdc9eddc9b7f49"
+    },
+    {
+      "length": 439,
+      "level": "H",
+      "version": 22,
+      "capacity": 442,
+      "data_sha256": "d822f711aabb87fd439dd03cece64b35c9ae1ee2cf6745c4780c8845e16cb7a7"
+    },
+    {
+      "length": 440,
+      "level": "H",
+      "version": 23,
+      "capacity": 464,
+      "data_sha256": "c8ee153cab090de267fef497679971a87d8050fe52fadadd4ad75d60869ff44b"
+    },
+    {
+      "length": 460,
+      "level": "H",
+      "version": 23,
+      "capacity": 464,
+      "data_sha256": "0d5245bdf1e5ac2412f83d55ff7e62c7a0cd72ec68932463ff08fcc2e1e5b3dc"
+    },
+    {
+      "length": 461,
+      "level": "H",
+      "version": 23,
+      "capacity": 464,
+      "data_sha256": "f08c4cdca7482a9ace933c650832c057bc5d375acba5d1f5b622f9a06d286b4d"
+    },
+    {
+      "length": 462,
+      "level": "H",
+      "version": 24,
+      "capacity": 514,
+      "data_sha256": "652b2262e2b8fb19557800c71c0aed0936ef58c0c7dba3e857aca3144dedca32"
+    },
+    {
+      "length": 510,
+      "level": "H",
+      "version": 24,
+      "capacity": 514,
+      "data_sha256": "7bd49e1454154a792c971e2cc4dab8bf727449e126391e3348763ee10fe348a7"
+    },
+    {
+      "length": 511,
+      "level": "H",
+      "version": 24,
+      "capacity": 514,
+      "data_sha256": "085f71273d7a95c435c2ac32ffdf2d8705d40e8adc2f9e8b49f9b6edeae9874d"
+    },
+    {
+      "length": 512,
+      "level": "H",
+      "version": 25,
+      "capacity": 538,
+      "data_sha256": "9a76665a367e2381d6743d67c5854e4494445c12d9aa31f1cc8be43c44268e4f"
+    },
+    {
+      "length": 534,
+      "level": "H",
+      "version": 25,
+      "capacity": 538,
+      "data_sha256": "f9ee7da6aabb35a7369095402f8f0584adbb2945a3b55800c3fdf34840f05c16"
+    },
+    {
+      "length": 535,
+      "level": "H",
+      "version": 25,
+      "capacity": 538,
+      "data_sha256": "f28142e7e50fe21059443b4259dcc5973c8140297ca90d343a67c2452ffb31de"
+    },
+    {
+      "length": 536,
+      "level": "H",
+      "version": 26,
+      "capacity": 596,
+      "data_sha256": "942567a716d54c184e61633704c5daf7b6f099e6d60b3833a272823812495f60"
+    },
+    {
+      "length": 592,
+      "level": "H",
+      "version": 26,
+      "capacity": 596,
+      "data_sha256": "7d8a44929f38146da2e36fcb2596e873142dabcaa8e7fde132a1f63ca3b43ce9"
+    },
+    {
+      "length": 593,
+      "level": "H",
+      "version": 26,
+      "capacity": 596,
+      "data_sha256": "a841493cb7e76c213409c29c44be37599c6fcaa2c9c55de6f4a4fe9d9e2c11b5"
+    },
+    {
+      "length": 594,
+      "level": "H",
+      "version": 27,
+      "capacity": 628,
+      "data_sha256": "8c8ba50b2960a112a04d010fc6167ceb39f3f46ebf065c684897b53f8777b3d6"
+    },
+    {
+      "length": 624,
+      "level": "H",
+      "version": 27,
+      "capacity": 628,
+      "data_sha256": "1ca72193ea37df5de7ea263ab4e857a6522833f876c2cf6d07c9afa841162e95"
+    },
+    {
+      "length": 625,
+      "level": "H",
+      "version": 27,
+      "capacity": 628,
+      "data_sha256": "b887a7aa43b596b4f1d43144cc3d08cc8e89e7a840220560fec9460f05d1705f"
+    },
+    {
+      "length": 626,
+      "level": "H",
+      "version": 28,
+      "capacity": 661,
+      "data_sha256": "5dd883f60b1f8f61519792cc7989480f291d8d1142fffb277cb4babcef00a0d2"
+    },
+    {
+      "length": 657,
+      "level": "H",
+      "version": 28,
+      "capacity": 661,
+      "data_sha256": "8f75e61bb3c8e4ab2bb33cd8d9817f16e224a5ad2c07ae6f4d06c6f7a87194fb"
+    },
+    {
+      "length": 658,
+      "level": "H",
+      "version": 28,
+      "capacity": 661,
+      "data_sha256": "84b0b7fd9e896fd19610ed9c57d80313a5e271f1cebfe6e21ee00f9f8f45e5fd"
+    },
+    {
+      "length": 659,
+      "level": "H",
+      "version": 29,
+      "capacity": 701,
+      "data_sha256": "f89520a895d448ffa9ac7b19455ae611c6325904d75e5634c9c11890054ceba8"
+    },
+    {
+      "length": 697,
+      "level": "H",
+      "version": 29,
+      "capacity": 701,
+      "data_sha256": "281ee0ad60f7bf73262e94be660aa9d36392039628c6e7b360571029af4339f9"
+    },
+    {
+      "length": 698,
+      "level": "H",
+      "version": 29,
+      "capacity": 701,
+      "data_sha256": "814a2678302b4ba6ec25594daab5ad84200775f1de574f554d67eb228966b4b3"
+    },
+    {
+      "length": 699,
+      "level": "H",
+      "version": 30,
+      "capacity": 745,
+      "data_sha256": "df0d4b0de5997b2cb9dc41442b638ae4084d9e5e2811a2869468db27124c0c5e"
+    },
+    {
+      "length": 741,
+      "level": "H",
+      "version": 30,
+      "capacity": 745,
+      "data_sha256": "d25fd40a4946abcea9d21660b645335b52071b30c4c256627a819525007e2b22"
+    },
+    {
+      "length": 742,
+      "level": "H",
+      "version": 30,
+      "capacity": 745,
+      "data_sha256": "8021c8d7e85ebcc59a74ad49665d4377e06946e758a94bc82f5ee19c5ff492f0"
+    },
+    {
+      "length": 743,
+      "level": "H",
+      "version": 31,
+      "capacity": 793,
+      "data_sha256": "547b42217f57e5b6876f5c2bda5ccd190f80e1a687a97ecaf5cbe6808067ff52"
+    },
+    {
+      "length": 789,
+      "level": "H",
+      "version": 31,
+      "capacity": 793,
+      "data_sha256": "e80919d5f2cab2f5d104ee7920bb31fddc19197e85a2245790816cb8126e2d3a"
+    },
+    {
+      "length": 790,
+      "level": "H",
+      "version": 31,
+      "capacity": 793,
+      "data_sha256": "d46a565f14c4c5186cedc5dad970bf3186a25dbcb9cd26364df0f7e95e66541c"
+    },
+    {
+      "length": 791,
+      "level": "H",
+      "version": 32,
+      "capacity": 845,
+      "data_sha256": "7c77fbd16ccd123aea4f929277024d711dc59f10dfe26d38177fc944b707124a"
+    },
+    {
+      "length": 841,
+      "level": "H",
+      "version": 32,
+      "capacity": 845,
+      "data_sha256": "2c02ac985857e0ca7e6dc71b8723cc3935b0e76c7bf0c37404154b99c263f677"
+    },
+    {
+      "length": 842,
+      "level": "H",
+      "version": 32,
+      "capacity": 845,
+      "data_sha256": "717f04f0d06110abf8a9f12d26f8cfffd5f3abbcce0448b8422da1a41a0e5ddb"
+    },
+    {
+      "length": 843,
+      "level": "H",
+      "version": 33,
+      "capacity": 901,
+      "data_sha256": "0723180393f76a1f88edcb2bbe4de84464e073a33db1265184c4f2b25bea5fce"
+    },
+    {
+      "length": 897,
+      "level": "H",
+      "version": 33,
+      "capacity": 901,
+      "data_sha256": "6443929ffe57e114afa1f1137d18d40a976f3f6fa9214d10bb29f898650a65d3"
+    },
+    {
+      "length": 898,
+      "level": "H",
+      "version": 33,
+      "capacity": 901,
+      "data_sha256": "455fc2296c684ec1d9ef92de991903710049d63c9e8c21ae4eac6e777c0a4a7a"
+    },
+    {
+      "length": 899,
+      "level": "H",
+      "version": 34,
+      "capacity": 961,
+      "data_sha256": "ac7c8f3baa33fcf413d886715957e0ddd24206af6928cc9261ddff5b7ebecf22"
+    },
+    {
+      "length": 957,
+      "level": "H",
+      "version": 34,
+      "capacity": 961,
+      "data_sha256": "8c82cf65caeb26371771b8a3e12427864503760cded931e4107237f524d73fe5"
+    },
+    {
+      "length": 958,
+      "level": "H",
+      "version": 34,
+      "capacity": 961,
+      "data_sha256": "65f143e1f847aa15f177c09e6d9a23c53e54d295c91e7be53950356d252d239d"
+    },
+    {
+      "length": 959,
+      "level": "H",
+      "version": 35,
+      "capacity": 986,
+      "data_sha256": "c44851c4482df99ba3fafc08a4411ff401cacc9e9e55a6ab0c5915e3bc5558d6"
+    },
+    {
+      "length": 982,
+      "level": "H",
+      "version": 35,
+      "capacity": 986,
+      "data_sha256": "aa7b317efb34904921f67dab134b6374f0efdb05e2718b0ac4ee91e679367930"
+    },
+    {
+      "length": 983,
+      "level": "H",
+      "version": 35,
+      "capacity": 986,
+      "data_sha256": "1665e0040b7c14a35464a3d2174bdd161265ee267bee6126121011be124229c6"
+    },
+    {
+      "length": 984,
+      "level": "H",
+      "version": 36,
+      "capacity": 1054,
+      "data_sha256": "c8f11ae44c0d447bac85d42e2b4612d6731b0621682381beafbcac579b4223a3"
+    },
+    {
+      "length": 1050,
+      "level": "H",
+      "version": 36,
+      "capacity": 1054,
+      "data_sha256": "bf9c77e80b61d8c5d07fc3fd60a3ea5e198abee9f29b685d300ea87482d8a7b4"
+    },
+    {
+      "length": 1051,
+      "level": "H",
+      "version": 36,
+      "capacity": 1054,
+      "data_sha256": "ed9330a7f5f16fb9077aaef79429224daa8cf67ea5849f4a93f61d2a80d34555"
+    },
+    {
+      "length": 1052,
+      "level": "H",
+      "version": 37,
+      "capacity": 1096,
+      "data_sha256": "c919c8f5a881989aafc157a0435a2b7fc4bae04a30ce99b5d6f0b709a6709526"
+    },
+    {
+      "length": 1092,
+      "level": "H",
+      "version": 37,
+      "capacity": 1096,
+      "data_sha256": "b94b2c7daeb33de97c8eb1b740351631251e1526bc69883c846793bb10063f20"
+    },
+    {
+      "length": 1093,
+      "level": "H",
+      "version": 37,
+      "capacity": 1096,
+      "data_sha256": "e3b92f131da1b0c2153c9335c2ed7aa86a3687ab37c3bc8dec61550daa7efb36"
+    },
+    {
+      "length": 1094,
+      "level": "H",
+      "version": 38,
+      "capacity": 1142,
+      "data_sha256": "602f7f24dce60fa51a3b47eccd7a2ede96725490ba8c5baccbae0924213661a3"
+    },
+    {
+      "length": 1138,
+      "level": "H",
+      "version": 38,
+      "capacity": 1142,
+      "data_sha256": "76a6face95808e04f371a8a793b3a116b59a68dbf25c65f4666b5b43a594f4ab"
+    },
+    {
+      "length": 1139,
+      "level": "H",
+      "version": 38,
+      "capacity": 1142,
+      "data_sha256": "26f448a24eeef28f92059d438fe8df86b9672822f840168c06d302665db19e43"
+    },
+    {
+      "length": 1140,
+      "level": "H",
+      "version": 39,
+      "capacity": 1222,
+      "data_sha256": "d46b0edda532698bcfd77c65b022c1efd56494ab55652bdc048a8a8764975737"
+    },
+    {
+      "length": 1218,
+      "level": "H",
+      "version": 39,
+      "capacity": 1222,
+      "data_sha256": "a2aad9e2e9211625d8f0e69f0b163764c19956d534e84d7527861096896cedc8"
+    },
+    {
+      "length": 1219,
+      "level": "H",
+      "version": 39,
+      "capacity": 1222,
+      "data_sha256": "6f590a0a59c6b175750d3d4a25e702efe6b858009618b331effccf29e4ad0b83"
+    },
+    {
+      "length": 1220,
+      "level": "H",
+      "version": 40,
+      "capacity": 1276,
+      "data_sha256": "5295e457ebbd26c47d2e64ccf99d296d2511cb990fffa410bbec2c32e093f6cf"
+    },
+    {
+      "length": 1272,
+      "level": "H",
+      "version": 40,
+      "capacity": 1276,
+      "data_sha256": "7906ef75d9ed756cc333cde5b155869f9f3f1e2c100491b6b5ad78b13e6580d7"
+    },
+    {
+      "length": 1273,
+      "level": "H",
+      "version": 40,
+      "capacity": 1276,
+      "data_sha256": "cf2d974dd7b8853a5f30fceef2053bc1f75e4da39dfd807a381c9af36308f170"
+    },
+    {
+      "length": 1274,
+      "level": "H",
+      "version": null
+    },
+    {
+      "length": 2953,
+      "level": "H",
+      "version": null
+    },
+    {
+      "length": 2954,
+      "level": "H",
+      "version": null
+    }
+  ]
+}

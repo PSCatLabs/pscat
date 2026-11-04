@@ -39,6 +39,10 @@ returns whatever body text didn't fit, the same leftover contract
 `/marigold`, join artkit's eight, registered the same way a style
 pack registers its own.
 `examples/template_*.ps` is one specimen per template.
+`pgcertificate` anchors its title and signature block to the inner rule
+and shares the space between them equally among the gaps around the
+awardee and the citation, so a short citation does not leave an empty
+band; a long title or awardee shrinks to fit and its slot shrinks with it.
 
 ```postscript
 (lib/artkit.ps) run

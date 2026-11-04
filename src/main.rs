@@ -2,10 +2,11 @@ use std::env;
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
+use pscat::gfx::{self, PageSizeSource};
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
-use pscat::{Interp, Limits, gfx};
+use pscat::{Interp, Limits};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). A
 // thread-local add per allocation or free, folded into one shared count
@@ -32,6 +33,17 @@ struct Options {
     png: Option<String>,
     steps_per_frame: usize,
     page: (u32, u32),
+    /// `--bbox` (#921): take the page from the `%%BoundingBox` of any file,
+    /// not only an EPSF one.
+    bbox: bool,
+    /// The default user-space point at the page's lower-left corner: a
+    /// bounding box's lower-left, else `(0, 0)`.
+    page_origin: (f32, f32),
+    /// Where `page` came from: `--page`, a bounding box, or the default.
+    page_source: PageSizeSource,
+    /// `--max-pixels N` (#909): the most device pixels the page may have,
+    /// the first one and any the program's `setpagedevice` asks for.
+    max_pixels: Option<u64>,
     /// Device resolution; 72 means one pixel per point.
     dpi: f32,
     /// Write the page(s) as SVG (implies headless).
@@ -145,6 +157,10 @@ impl Options {
             png: None,
             steps_per_frame: DEFAULT_STEPS_PER_FRAME,
             page: gfx::DEFAULT_PAGE,
+            bbox: false,
+            page_origin: (0.0, 0.0),
+            page_source: PageSizeSource::Default,
+            max_pixels: None,
             dpi: 72.0,
             svg: None,
             pdf: None,
@@ -177,6 +193,66 @@ impl Options {
             profile_graph: false,
             profile_ops: false,
         }
+    }
+
+    /// Take the page from `source`'s bounding box unless `--page` set it
+    /// (#921): an EPSF file's box always, any file's with `--bbox`. A box
+    /// that cannot be used is a warning, and the page stays as it was.
+    fn resolve_page(&mut self, source: &[u8]) {
+        if self.page_source == PageSizeSource::Explicit {
+            return;
+        }
+        match pscat::bbox::page_box(source, self.bbox) {
+            Ok(Some(found)) => {
+                self.page = (found.width, found.height);
+                self.page_origin = (found.llx, found.lly);
+                self.page_source = PageSizeSource::BoundingBox;
+            }
+            Ok(None) => {}
+            Err(why) => eprintln!(
+                "pscat: warning: ignoring the bounding box ({why}); using a {}x{} page",
+                self.page.0, self.page.1
+            ),
+        }
+    }
+
+    /// Device pixels per point at `--dpi`: the scale every canvas of this
+    /// run is made at, and what the PNG's `pHYs` chunk records (#982).
+    fn scale(&self) -> f32 {
+        self.dpi / 72.0
+    }
+
+    /// A fresh interpreter on this run's page: its size at `--dpi`, the
+    /// bounding box's origin, where the size came from, and the
+    /// `--max-pixels` cap for any page `setpagedevice` makes (#909). An
+    /// error when the page is too large at this dpi or over the cap.
+    fn new_interp(&self) -> Result<Interp, String> {
+        let (w, h) = self.page;
+        let scale = self.scale();
+        self.check_pixel_cap()?;
+        let mut interp = Interp::with_page_scaled(w, h, scale)
+            .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
+        let gfx = interp.gfx_mut();
+        gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
+        gfx.set_page_size_source(self.page_source);
+        interp.set_max_page_pixels(self.max_pixels);
+        Ok(interp)
+    }
+
+    /// `--max-pixels` against the first page, before any canvas (an
+    /// interpreter or a sizing probe) is made: `with_page_scaled`'s
+    /// rounding, as the MCP server repeats it.
+    fn check_pixel_cap(&self) -> Result<(), String> {
+        let Some(max) = self.max_pixels else {
+            return Ok(());
+        };
+        let scale = self.dpi / 72.0;
+        let px = |pt: u32| ((pt as f32 * scale).round() as u64).max(1);
+        let (pw, ph) = (px(self.page.0), px(self.page.1));
+        if pw.saturating_mul(ph) > max {
+            return Err(pscat::limits::pixel_cap_message(pw, ph, max));
+        }
+        Ok(())
     }
 
     /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
@@ -271,7 +347,7 @@ fn main() -> ExitCode {
     if let Some(code) = subcmd::dispatch(env::args().skip(1)) {
         return code;
     }
-    let options = match parse_args() {
+    let mut options = match parse_args() {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -336,9 +412,28 @@ fn main() -> ExitCode {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
+    // `--bbox` only chooses a page, and `--page` always wins (#921); a
+    // window or spool run has no single file to take a box from.
+    if options.bbox
+        && (options.page_source == PageSizeSource::Explicit
+            || options.spool.is_some()
+            || options.interactive)
+    {
+        eprintln!("pscat: --bbox doesn't combine with --page/--spool/--interactive");
+        return ExitCode::FAILURE;
+    }
+    // A spool job's canvas is made per job by the window; it takes no cap.
+    if options.max_pixels.is_some() && options.spool.is_some() {
+        eprintln!("pscat: --max-pixels doesn't combine with --spool");
+        return ExitCode::FAILURE;
+    }
+    if options.bbox && options.file.is_none() && options.eval.is_none() {
+        eprintln!("pscat: --bbox needs a file, - or -e");
+        return ExitCode::FAILURE;
+    }
 
     if let Some(threads) = options.bands {
-        return bands::run(&options, threads);
+        return bands::run(&mut options, threads);
     }
     if options.band_rows.is_some() {
         eprintln!("pscat: --band-rows needs --bands");
@@ -386,7 +481,10 @@ fn main() -> ExitCode {
         // Interp below -- see read_source's doc comment for why.
         let path = options.file.as_deref().expect("checked above");
         return match read_source(path) {
-            Ok(source) => run_sweep(&options, &source),
+            Ok(source) => {
+                options.resolve_page(&source);
+                run_sweep(&options, &source)
+            }
             Err(e) => {
                 eprintln!("pscat: {e}");
                 ExitCode::FAILURE
@@ -450,14 +548,29 @@ fn main() -> ExitCode {
         };
     }
 
-    let Some(mut interp) =
-        Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-    else {
-        eprintln!(
-            "pscat: unusable page size {}x{}",
-            options.page.0, options.page.1
-        );
-        return ExitCode::FAILURE;
+    // The program is read before the interpreter is made, because its
+    // bounding box can choose the page (#921). An `--interactive` prelude is
+    // read below: the window keeps the page it was given.
+    let source = match (&options.eval, &options.file) {
+        (Some(expr), _) => Some(expr.as_bytes().to_vec()),
+        (None, Some(path)) if !options.interactive => match read_source(path) {
+            Ok(source) => Some(source),
+            Err(e) => {
+                eprintln!("pscat: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        _ => None,
+    };
+    if let Some(source) = &source {
+        options.resolve_page(source);
+    }
+    let mut interp = match options.new_interp() {
+        Ok(interp) => interp,
+        Err(msg) => {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
     };
     if let Err(msg) = options.apply_limits(&mut interp) {
         eprintln!("pscat: {msg}");
@@ -547,12 +660,8 @@ fn main() -> ExitCode {
     let Some(path) = &options.file else {
         return repl(&mut interp, &options);
     };
-    let source = match read_source(path) {
-        Ok(source) => source,
-        Err(e) => {
-            eprintln!("pscat: {e}");
-            return ExitCode::FAILURE;
-        }
+    let Some(source) = source else {
+        unreachable!("a file run's source was read above");
     };
 
     if options.pdf.is_some() {
@@ -901,7 +1010,7 @@ fn finish_headless(
         if pages.is_empty() || gfx.has_trailing_art() {
             pages.push(&gfx.pixmap);
         }
-        if !write_pngs(&pages, path, options.halftone) {
+        if !write_pngs(&pages, path, options.halftone, options.scale()) {
             return ExitCode::FAILURE;
         }
     }
@@ -946,8 +1055,9 @@ fn finish_headless(
 }
 
 /// Write `pages` as `--png PATH` does: one page to PATH itself, several to
-/// PATH-001.png, PATH-002.png, ... False once a write fails.
-fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool {
+/// PATH-001.png, PATH-002.png, ... False once a write fails. Each file
+/// records `scale` (dpi / 72) in its `pHYs` chunk.
+fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool, scale: f32) -> bool {
     // --halftone screens the raster on the way out, like a mono
     // printer's RIP; the vector targets stay contone.
     let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
@@ -958,7 +1068,7 @@ fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool 
         } else {
             page
         };
-        if let Err(e) = page.save_png(path) {
+        if let Err(e) = pscat::png::save(page, scale, path) {
             eprintln!("pscat: cannot write {path}: {e}");
             false
         } else {
@@ -983,11 +1093,11 @@ const RUN_ERROR_CHECK: &str = "run-error";
 
 /// `--lint`: print findings to stderr, one per line, prefixed
 /// `pscat: lint:` so a caller can grep for them (or, for `pscat-mcp`,
-/// parse them back out of the child's stderr). Runs regardless of `ok`
-/// — a blank page after a crash is exactly the kind of thing lint
-/// should still surface. Returns whether anything was found, which is
-/// what `--lint-strict` turns into a non-zero exit; plain `--lint`
-/// stays advisory, as it has been since issue #17.
+/// parse them back out of the child's stderr). Returns whether anything
+/// was found, which is what `--lint-strict` turns into a non-zero exit;
+/// plain `--lint` stays advisory, as it has been since issue #17. After
+/// an error (`ok` false) it prints the `run-error` line and no findings:
+/// they would be consequences of the abort, not of the program (#947).
 ///
 /// `ok` is whether the program ran to the end. An errored run is never
 /// "clean" (issue #369): the verdict line used to say so right under the
@@ -1031,26 +1141,28 @@ pub(crate) fn print_lint(
     strict: bool,
     note: Option<&str>,
 ) -> bool {
-    if let Some(note) = note {
-        eprintln!("pscat: lint: {LINT_NOTE}{note}");
-    }
     if !ok {
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
         );
+        // Every other check reads end-of-run state, so after an abort it
+        // reports the abort (a blank page, an unbalanced gsave, a leaked
+        // dict), not the program (#947, as `pscat-mcp` since #942). The
+        // note explains findings and there are none, so it is left out
+        // too. The errored run fails on its own, whatever `--lint-strict`
+        // says.
+        return true;
+    }
+    if let Some(note) = note {
+        eprintln!("pscat: lint: {LINT_NOTE}{note}");
     }
     if findings.is_empty() {
-        if ok {
-            eprintln!("pscat: lint: clean");
-        }
-        return !ok;
+        eprintln!("pscat: lint: clean");
+        return false;
     }
     for f in findings {
         eprintln!("pscat: lint: [{}] {}", f.check, f.message);
     }
-    // The footer counts real findings only: an errored run already
-    // fails on its own, so "because --lint-strict was given" would be
-    // misleading for it.
     if strict {
         eprintln!(
             "pscat: lint: {} finding(s) — failing because --lint-strict was given",
@@ -1184,62 +1296,67 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         SweepAxis::Param(_, v) => v.len(),
     };
 
-    // Every frame renders at this same pixel size (a probe Interp,
-    // not a duplicated copy of with_page_scaled's point->pixel
-    // formula) -- needed up front to size the contact sheet before
-    // any frame actually runs.
-    let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-    else {
-        eprintln!(
-            "pscat: unusable page size {}x{}",
-            options.page.0, options.page.1
-        );
-        return ExitCode::FAILURE;
-    };
-    let (cell_w, cell_h) = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
-    drop(probe);
-
-    let mut sheet = match &options.contact_sheet {
+    let grid = match &options.contact_sheet {
         None => None,
-        Some(_) => {
-            let (cols, rows) = match options.grid {
-                Some((c, r)) => {
-                    if (c as usize) * (r as usize) < n {
-                        eprintln!(
-                            "pscat: --grid {c}x{r} has only {} cells for {n} frames",
-                            c as usize * r as usize
-                        );
-                        return ExitCode::FAILURE;
-                    }
-                    (c, r)
-                }
-                None => {
-                    let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
-                    (cols, (n as u32).div_ceil(cols))
-                }
-            };
-            match pscat::contact_sheet::new_sheet(
-                cols,
-                rows,
-                cell_w,
-                cell_h,
-                pscat::contact_sheet::GAP,
-            ) {
-                Ok(mut s) => {
-                    // Gaps and unused cells stay transparent too, matching
-                    // the transparent frames blitted into them.
-                    if options.transparent {
-                        s.fill(tiny_skia::Color::TRANSPARENT);
-                    }
-                    Some((s, cols))
-                }
-                Err(msg) => {
-                    eprintln!("pscat: {msg}");
+        Some(_) => match options.grid {
+            Some((c, r)) => {
+                if (c as usize) * (r as usize) < n {
+                    eprintln!(
+                        "pscat: --grid {c}x{r} has only {} cells for {n} frames",
+                        c as usize * r as usize
+                    );
                     return ExitCode::FAILURE;
                 }
+                Some((c, r))
+            }
+            None => {
+                let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
+                Some((cols, (n as u32).div_ceil(cols)))
+            }
+        },
+    };
+    // The contact sheet's cells are the page's size, made (and so checked)
+    // before any frame renders. The program's `setpagedevice` can size the
+    // page (#909): then the sheet is made again for the first frame's size.
+    let new_sheet = |(cols, rows): (u32, u32), (w, h): (u32, u32)| {
+        pscat::contact_sheet::new_sheet(cols, rows, w, h, pscat::contact_sheet::GAP).map(|mut s| {
+            // Gaps and unused cells stay transparent too, matching the
+            // transparent frames blitted into them.
+            if options.transparent {
+                s.fill(tiny_skia::Color::TRANSPARENT);
+            }
+            (s, (w, h))
+        })
+    };
+    let mut sheet: Option<(tiny_skia::Pixmap, (u32, u32))> = None;
+    // Only an explicit page is known before the frames run; any other page
+    // the program may resize, so its sheet waits for the first frame.
+    if let Some(grid) = grid
+        && options.page_source == PageSizeSource::Explicit
+    {
+        if let Err(msg) = options.check_pixel_cap() {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
+        let Some(probe) =
+            Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
+        else {
+            eprintln!(
+                "pscat: unusable page size {}x{}",
+                options.page.0, options.page.1
+            );
+            return ExitCode::FAILURE;
+        };
+        let cell = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
+        drop(probe);
+        match new_sheet(grid, cell) {
+            Ok(s) => sheet = Some(s),
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                return ExitCode::FAILURE;
             }
         }
-    };
+    }
 
     let mut any_failed = false;
     let mut seed_ever_fired = false;
@@ -1250,11 +1367,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             SweepAxis::Param(name, values) => format!("{name}={}", format_sweep_value(values[i])),
         };
         let frame = run_on_fresh_thread(|| -> Result<SweepFrame, String> {
-            let mut interp =
-                Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-                    .ok_or_else(|| {
-                        format!("unusable page size {}x{}", options.page.0, options.page.1)
-                    })?;
+            let mut interp = options.new_interp()?;
             options.apply_limits(&mut interp)?;
             if options.transparent {
                 interp.gfx_mut().set_transparent_background();
@@ -1341,7 +1454,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         match &options.png {
             Some(path) => {
                 let out = numbered_path(path, i + 1);
-                if let Err(e) = page.save_png(&out) {
+                if let Err(e) = pscat::png::save(&page, options.scale(), &out) {
                     eprintln!("pscat: cannot write {out}: {e}");
                     return ExitCode::FAILURE;
                 }
@@ -1349,8 +1462,33 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             }
             None => println!("pscat: sweep: {}/{n} {label}{status}", i + 1),
         }
-        if let Some((sheet, cols)) = sheet.as_mut() {
-            pscat::contact_sheet::blit_cell(sheet, *cols, pscat::contact_sheet::GAP, i, &page);
+        if let Some((cols, rows)) = grid {
+            let frame = (page.width(), page.height());
+            if sheet.is_none() || (i == 0 && sheet.as_ref().is_some_and(|(_, c)| *c != frame)) {
+                drop(sheet.take());
+                match new_sheet((cols, rows), frame) {
+                    Ok(s) => sheet = Some(s),
+                    Err(msg) => {
+                        eprintln!("pscat: {msg}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if let Some((sheet, cell)) = sheet.as_mut() {
+                if (page.width(), page.height()) != *cell {
+                    eprintln!(
+                        "pscat: sweep: frame {}/{n} is {}x{} pixels but the contact sheet's \
+                         cells are {}x{}; every frame must draw the same page size",
+                        i + 1,
+                        page.width(),
+                        page.height(),
+                        cell.0,
+                        cell.1
+                    );
+                    return ExitCode::FAILURE;
+                }
+                pscat::contact_sheet::blit_cell(sheet, cols, pscat::contact_sheet::GAP, i, &page);
+            }
         }
     }
 
@@ -1362,7 +1500,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
     }
 
     if let (Some((sheet, _)), Some(path)) = (&sheet, &options.contact_sheet) {
-        if let Err(e) = sheet.save_png(path) {
+        if let Err(e) = pscat::png::save(sheet, options.scale(), path) {
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }
@@ -1806,6 +1944,15 @@ fn parse_args() -> Result<Options, String> {
                     .ok_or_else(|| format!("missing value after {flag}"))?;
                 limit_flag(&mut options.limits, flag, &n)?;
             }
+            "--max-pixels" => {
+                let n = args.next().ok_or("missing value after --max-pixels")?;
+                let max: u64 = n.parse().map_err(|_| {
+                    format!(
+                        "invalid --max-pixels value: {n} (expected a whole number; 0 = no limit)"
+                    )
+                })?;
+                options.max_pixels = (max > 0).then_some(max);
+            }
             "--max-write-bytes" => {
                 let n = args.next().ok_or("missing value after --max-write-bytes")?;
                 let bytes = parse_byte_count(&n).ok_or_else(|| {
@@ -1891,7 +2038,9 @@ fn parse_args() -> Result<Options, String> {
                     return Err(format!("--page dimensions must be 1..8000, got {spec}"));
                 }
                 options.page = (w, h);
+                options.page_source = PageSizeSource::Explicit;
             }
+            "--bbox" => options.bbox = true,
             "--sweep-seed" => {
                 let spec = args.next().ok_or("missing SPEC after --sweep-seed")?;
                 options.sweep_seed = Some(parse_seed_spec(&spec)?);
@@ -1945,6 +2094,23 @@ fn parse_args() -> Result<Options, String> {
             }
         }
     }
+    // Before any mode runs or writes: a name for another known image or
+    // document type is refused, not written with the wrong bytes (#938).
+    for (flag, path, format) in [
+        ("--png", &options.png, subcmd::Format::Png),
+        ("--svg", &options.svg, subcmd::Format::Svg),
+        ("--pdf", &options.pdf, subcmd::Format::Pdf),
+        // Always a PNG, whatever the name (#947).
+        (
+            "--contact-sheet",
+            &options.contact_sheet,
+            subcmd::Format::Png,
+        ),
+    ] {
+        if let Some(path) = path {
+            subcmd::check_output_name(flag, path, format)?;
+        }
+    }
     Ok(options)
 }
 
@@ -1963,7 +2129,10 @@ fn print_usage() {
     println!("      --headless      run the file without a window");
     println!("      --png PATH      write the final canvas as a PNG (implies --headless)");
     println!("      --speed N       interpreter steps per frame (default 100)");
-    println!("      --page WxH      canvas size in points (default 612x792, US Letter)");
+    println!("      --page WxH      canvas size in points (default: an EPSF file's %%BoundingBox,");
+    println!("                      else 612x792, US Letter); always wins");
+    println!("      --bbox          take the page from any file's %%BoundingBox, not only an EPSF");
+    println!("                      file's (%!PS-Adobe-3.0 EPSF-3.0)");
     println!("      --svg PATH      write the page(s) as SVG (implies --headless)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
@@ -1996,6 +2165,8 @@ fn print_usage() {
     println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit).");
     println!("                      Reading a whole file (`file`, `run`) charges one step per KiB");
     println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
+    println!("      --max-pixels N  refuse a page of more than N device pixels, the first one");
+    println!("                      or one the program's setpagedevice asks for (0 = no limit)");
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
     println!(
