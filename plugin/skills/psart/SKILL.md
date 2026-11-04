@@ -13,6 +13,13 @@ catalog. Art here is *written*, rendered, looked at, and refined. The
 `pscat` skill has the command-line reference; this one is the workflow
 and the toolkit.
 
+pscat art is seeded, editable source: the same program and seed paint the
+same picture, it prints as vector PDF, and type, QR codes and charts sit
+exactly on the same page. It is not photorealistic, and its painterly look is
+procedural: for a photo or a loose mood image with nothing exact in it,
+suggest an image model (or use one for the background and pscat for the
+exact layer). [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md) has the decision table.
+
 ## The loop
 
 1. Write the piece as a `.ps` file (start from the sketch at the end).

@@ -715,6 +715,14 @@ renders eight examples in both and compares block-downsampled output).
   (`SDLC.md`, "Who merges"). Agents propose follow-ups instead of filing
   them; running many issues at once is `docs/dev/DISPATCH.md`.
 
+- **Tool-choice claims live in one guide** (#994).
+  `docs/guides/when-to-use-pscat.md` says when to use pscat, an image model or
+  an LLM's own SVG/matplotlib; `site/when-to-use.html` repeats its decision
+  table (keep the rows identical), and README, AGENTS.md, CLAUDE.md and the
+  plugin skills only point to it. Every pscat claim in it traces to a shipped
+  feature (`notes/994-when-to-use-pscat.md`); update it when a capability it
+  names changes, and link the hybrid guide from it when #995 lands.
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice

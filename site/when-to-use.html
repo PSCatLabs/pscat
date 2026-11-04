@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--@head-->
+<title>pscat — when to use it</title>
+<meta name="description" content="When to use pscat, when to use an image model such as FLUX or Nano Banana, and when an LLM's own SVG or matplotlib is enough: an honest comparison and a decision table.">
+</head>
+<body>
+<!--@header when-to-use-->
+<main>
+  <h1>When to use pscat</h1>
+  <p class="sub">pscat, an image model, or an LLM drawing on its own: which to
+  pick, and where pscat is the wrong tool. This page is the summary; the full
+  argument is the
+  <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md">when-to-use guide</a>.
+  What it says about other tools is general and current as of November 2026,
+  and it quotes no benchmarks.</p>
+
+  <h2>The short answer</h2>
+  <ul>
+    <li><b>Use an image model</b> (FLUX, Nano Banana, gpt-image, Midjourney,
+      Stable Diffusion) when the picture is the whole point and nothing in it
+      must be exactly right: a photo-like scene, a face, light and atmosphere,
+      a painterly mood image.</li>
+    <li><b>Use pscat</b> when something must be exact and checkable: words
+      spelled right, a QR code that scans, numbers that match the data, a
+      layout that prints at size. Or when you need the same result again
+      tomorrow, or with one edit.</li>
+    <li><b>Use pscat from a text-only model</b> when your assistant cannot make
+      images itself (as of November 2026, Claude reads images but does not
+      generate them): it writes the program, pscat renders it, and the model
+      looks at the render and refines it, with no image-model account, API key
+      or per-image cost.</li>
+    <li><b>Use an LLM's own SVG, HTML or matplotlib</b> for a quick one-off
+      sketch or diagram.</li>
+    <li><b>Use both</b> when you want looks and exactness: the image model
+      paints the atmosphere, pscat sets the exact layer on top.</li>
+  </ul>
+
+  <h2>What image models do better</h2>
+  <p>Photorealism, faces and light; rich painterly texture and mood from one
+  sentence; any subject in any style; editing and restyling existing pictures;
+  a first impression in seconds. pscat draws vector paths from a program: it
+  cannot make a photograph, and its painterly look is procedural.</p>
+
+  <h2>What an image model cannot promise</h2>
+  <p>Image models have become much better at short text, but every character
+  is drawn, not typeset, and nothing checks it. A QR code in a generated image
+  decodes only if every module happens to be right; a generated chart is not
+  computed from your data; margins and sizes are approximate; the output is a
+  raster, not a vector PDF. Open-weights models take a seed, but the same image
+  also needs the same weights, sampler and stack, and the artifact is the image,
+  not source you can diff or hand-edit. Hosted models cost money per image.</p>
+
+  <h2>Where pscat wins</h2>
+  <ul>
+    <li><b>Text</b> set from real fonts: the standard 35 built in, and 67
+      catalog faces including Korean, Japanese and Thai.</li>
+    <li><b>QR codes</b> from a native encoder, drawn as vectors; the PNG, SVG
+      and PDF exports are tested against two independent decoders.</li>
+    <li><b>Math and charts</b>: <code>pscat chalk</code> for LaTeX, and
+      <a href="charts.html">charts and plots</a> drawn from your numbers.</li>
+    <li><b>Print-ready vectors</b>: SVG and multi-page PDF, or PNG at 300 dpi
+      that prints at true size.</li>
+    <li><b>Fixed layout</b>: page templates for cards, letters, certificates,
+      invitations and posters, and a typewriter.</li>
+    <li><b>Reproducible, editable source</b>: the same program and seed draw the
+      same picture; change one line and only that changes;
+      <code>--sweep-seed</code> and <code>pscat sheet</code> for variations.</li>
+    <li><b>Local and free per image</b>: one CPU binary, no GPU, no account,
+      MIT or Apache-2.0.</li>
+  </ul>
+  <p>pscat also paints: watercolor, oil, dry brush, chalk, crayon and charcoal.
+  It won't out-paint an image model on mood, but its paintings are
+  deterministic under a seed, editable as source, exported as vectors, and
+  composable in one document with exact type, QR codes and charts. See
+  <a href="gallery-evening-stream.html">Evening Stream</a> and
+  <a href="gallery-alpine-lake.html">Alpine Lake</a>.</p>
+
+  <h2>The decision table</h2>
+  <table>
+    <tr><th>Task</th><th>Use</th><th>Why</th></tr>
+    <tr><td>Photo-like scene, product shot, portrait</td><td>Image model</td><td>pscat cannot do photorealism or faces</td></tr>
+    <tr><td>Mood image, concept art, loose painterly texture</td><td>Image model</td><td>Fastest route to atmosphere; nothing in it has to be exact</td></tr>
+    <tr><td>Retouch or restyle an existing photo</td><td>Image model</td><td>pscat edits its own programs, not photos (it can turn a JPEG into an engraving)</td></tr>
+    <tr><td>Poster, flyer or card with real text</td><td>pscat (with an image-model background if you like)</td><td>Text set from fonts, layout to the point, print-ready PDF</td></tr>
+    <tr><td>QR code that must scan</td><td>pscat</td><td>Native encoder, exports checked against two decoders</td></tr>
+    <tr><td>Chart or plot for a paper</td><td>pscat or matplotlib</td><td>Values drawn from the data; matplotlib if the data is already in Python</td></tr>
+    <tr><td>Math formula, chalkboard</td><td>pscat</td><td>LaTeX subset set and drawn, same seed same board</td></tr>
+    <tr><td>Letter, certificate, invitation, memo</td><td>pscat</td><td>Page templates and the typewriter</td></tr>
+    <tr><td>Generative art you will iterate on or print</td><td>pscat</td><td>Seeded, diffable source; vector output</td></tr>
+    <tr><td>Watercolor or oil you need to edit, repeat or print large</td><td>pscat</td><td>Deterministic, editable, vector, composable with text and QR</td></tr>
+    <tr><td>You're in Claude or another text-only agent and need an actual image</td><td>pscat (plugin or MCP server)</td><td>The model writes the program, sees the render and refines it; no image-model account or per-image cost</td></tr>
+    <tr><td>Quick diagram or icon for a web page</td><td>LLM-written SVG or HTML</td><td>Nothing to install; the browser renders it</td></tr>
+    <tr><td>Many variations of one design</td><td>pscat</td><td><code>--sweep-seed</code> and <code>pscat sheet</code></td></tr>
+    <tr><td>Offline, no GPU, no per-image cost</td><td>pscat</td><td>One CPU binary, MIT or Apache-2.0</td></tr>
+  </table>
+
+  <h2>pscat's weak spots</h2>
+  <p>Not photorealistic. Its painterly look is recognisably its own. Someone,
+  you or an agent, has to write the program, and a detailed painting takes
+  several render-look-refine rounds. No 1D barcodes yet, and text only in the
+  scripts its fonts cover.</p>
+
+  <h2>Combining them</h2>
+  <p>The image model paints the atmosphere; pscat sets the type, QR code,
+  formula or chart on top and writes the print-ready PDF. A worked hybrid
+  example is planned in
+  <a href="https://github.com/PSCatLabs/pscat/issues/995">issue #995</a>.</p>
+
+  <p>Agents: the <a href="agents.html">For agents</a> page has the plugin, the
+  skills and the MCP server.</p>
+</main>
+<!--@footer-->
+</body>
+</html>

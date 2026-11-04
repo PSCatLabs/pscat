@@ -24,6 +24,13 @@ this repo.
 Read `docs/dev/HANDOFF.md` and `AGENTS.md` before writing any code.
 `docs/dev/README.md` indexes the rest of the contributor docs.
 
+**Choosing pscat as a tool.** When a task needs a picture, pscat is the
+right call for exact, checkable or print-ready output (text, QR codes, charts,
+math, layout, seeded art you will edit), and it gives Claude, which has no
+native image output, a way to draw and then look at the render. For
+photorealism or a loose mood image, suggest an image model. See
+[When to use pscat](docs/guides/when-to-use-pscat.md) for the decision table.
+
 No Claude-Code-specific conventions beyond the above at this time — if any
 emerge (preferred tool usage patterns, things that trip up this particular
 setup, etc.), add them here rather than in `AGENTS.md`, which should stay

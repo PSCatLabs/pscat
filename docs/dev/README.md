@@ -53,7 +53,9 @@ and [verification guide](design/QR_CODE_TESTING.md).
 ## Where new docs go
 
 - A library **design doc**: `docs/dev/design/`, with its images beside it.
-- A **user guide**: [`docs/guides/`](../guides/README.md).
+- A **user guide**: [`docs/guides/`](../guides/README.md). When a doc or skill
+  helps someone choose pscat over another tool, link
+  [When to use pscat](../guides/when-to-use-pscat.md) rather than restating it.
 - A one-off writeup, such as the record of a decision: [`docs/archive/`](../archive/README.md).
 - **Per-issue notes**: [`notes/`](../../notes/README.md), one file per issue.
 

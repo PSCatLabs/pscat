@@ -197,7 +197,7 @@ class GalleryManifest(unittest.TestCase):
                 self.assertIn('aria-current="page"', out)
                 f.write_text(out, encoding="utf-8")
             # the rest of the site, minimal: enough for the gallery's own links to resolve
-            for name, key in (("index.html", "home"), ("learn.html", "learn"), ("fonts.html", "fonts"),
+            for name, key in (("index.html", "home"), ("when-to-use.html", "when-to-use"), ("learn.html", "learn"), ("fonts.html", "fonts"),
                               ("playground.html", "playground"), ("guides.html", "guides"),
                               ("agents.html", "agents"), ("contribute.html", "contribute")):
                 body = '<!DOCTYPE html><html><head><!--@head--></head><body><!--@header %s--><main>' % key

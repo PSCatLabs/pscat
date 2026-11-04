@@ -7,7 +7,7 @@ A page carries three markers instead of a copy of the shared markup:
 
     <!--@head-->            charset, viewport, icon and stylesheet (inside <head>)
     <!--@header KEY-->      the top navigation; KEY is the nav slot this page
-                            belongs to (home, learn, gallery, fonts, playground,
+                            belongs to (home, when-to-use, learn, gallery, fonts, playground,
                             guides, agents, contribute), highlighted as "here"
     <!--@footer-->          the site footer (optional: the full-height
                             playground has none)

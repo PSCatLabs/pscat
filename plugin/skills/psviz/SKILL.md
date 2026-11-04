@@ -15,6 +15,11 @@ Use `lib/graph.ps` (function/surface plotting) and `lib/dataviz.ps` (categorical
 
 If the user says "chart", "bar", "line", "pie", "scatter" -> `dataviz.ps`. If they say "plot", "function", "surface", "polar" -> `graph.ps`.
 
+Prefer these over an image model for any chart: the bars and points are
+computed from the data, so the numbers are right. If the data already lives in
+a Python pipeline, matplotlib is a fine alternative. [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md)
+compares the options.
+
 ## Calling conventions
 
 ### graph.ps

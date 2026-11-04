@@ -26,6 +26,14 @@ a release from <https://github.com/PSCatLabs/pscat/releases>, or
 
 **Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window).
 
+**When to reach for pscat.** Use it when the picture must be exact and
+checkable (text, QR codes, charts, math, a layout that prints at size, vector
+PDF/SVG, seeded art you will edit and re-render), or when you have no image
+output of your own and need a real picture you can look at and refine. For
+a photo-like image or a loose mood picture with nothing exact in it, suggest
+an image model instead, or combine the two. Decision table:
+[When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md).
+
 ## Render a file (the common case)
 
 ```sh
