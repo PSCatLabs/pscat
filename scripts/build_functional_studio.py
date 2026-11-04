@@ -26,8 +26,8 @@ def build(skip_wasm):
     if not skip_wasm:
         subprocess.run([str(ROOT / "scripts/build_wasm.sh")], cwd=ROOT, check=True, timeout=240)
     wasm = (ROOT / "web/pscat.wasm").read_bytes()
-    api = (ROOT / "web/pscat.js").read_text()
-    sources = {name: (ROOT / "examples/functional" / name).read_text() for name in SOURCES}
+    api = (ROOT / "web/pscat.js").read_text(encoding="utf-8")
+    sources = {name: (ROOT / "examples/functional" / name).read_text(encoding="utf-8") for name in SOURCES}
     include = "(examples/functional/type-common.ps) run"
     programs = {}
     for key, name in (("terrain", "type-terrain.ps"), ("press", "observable-press.ps")):
@@ -66,8 +66,8 @@ def build(skip_wasm):
     return await Pscat.instantiate(bytes);
   } finally { URL.revokeObjectURL(url); }
 };
-''')
-    (ASSETS / "studio-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+''', encoding="utf-8")
+    (ASSETS / "studio-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Offline studio: {len(wasm):,} WASM bytes -> {out.stat().st_size:,} JS bytes; two actual PS programs")
 
 
