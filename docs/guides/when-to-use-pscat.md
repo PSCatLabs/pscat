@@ -306,6 +306,116 @@ It also runs in the browser. The WebAssembly build (`npm install pscat`, or
 [pscat in the browser](browser.md)) renders client-side, with no server, GPU
 or API call; the site's
 [playground](https://pscatlabs.github.io/pscat/playground.html) is that build.
+On `main` it also writes SVG and PDF; see the next section.
+
+## Documents from a web page, the same for every user
+
+A web app can use pscat's WebAssembly build as its document engine: the
+page holds a PostScript template, fills it with the user's data, and runs it
+in the user's browser. What that gives you:
+
+- **One run makes every output.** The on-screen preview, the downloaded SVG
+  or PDF and the printed page all come from the same PostScript run, so
+  nothing is laid out a second time by a different engine.
+- **The same pages for every user.** The same template and data give the
+  same bytes, because the pages come from one deterministic module rather
+  than from each browser's layout and print path. Printing HTML and CSS
+  differs from one browser and device to the next: page breaks, fonts,
+  margins and the print dialog's settings. pscat's own test suite checks
+  that the WebAssembly build's SVG and PDF are byte-identical to the
+  command-line tool's, at two resolutions, and that a repeat run gives the
+  same bytes (macOS on Apple silicon, and Linux in CI). Text is drawn as
+  outlines, so the output does not depend on the fonts the viewer has
+  installed.
+- **No server, account, GPU or AI model.** All of it runs client-side; an
+  app can even ship as one HTML file that works offline.
+- **Not sampled.** Unlike an image model, nothing is drawn at random: the
+  program decides every mark, and the same input never gives a different
+  page.
+
+**What is released.** SVG and PDF from the WebAssembly build are on `main`
+since #1003 (2026-11-04), and not in 0.7.0-rc.3 or any earlier release.
+Released builds give a web page RGBA pixels only (for a `<canvas>`); the
+command-line tool has written SVG and PDF all along. See
+[pscat in the browser](browser.md#svg-and-pdf) for the API.
+
+### A worked example: print-shop
+
+[PSCatLabs/print-shop](https://github.com/PSCatLabs/print-shop) is an
+example of what can be built on pscat: a small-business publishing app that
+runs entirely in the browser. You import a menu as CSV, pick one of three
+PostScript templates (Classic Bistro, Modernist, Retro Diner), adjust the
+name, palette, type, page size and columns, preview the real vector pages,
+and download SVG or PDF. It also makes a two-sided business card on a 3.5 x 2
+inch trim with an eighth-inch bleed. The PostScript does the layout:
+it measures text with the real fonts, wraps it, aligns prices, flows columns
+and pages, and repeats a category heading after a break.
+
+What its tests and its
+[verification record](https://github.com/PSCatLabs/print-shop/blob/main/docs/VERIFICATION.md)
+show:
+
+- the same content and settings give byte-identical SVG, PDF and layout logs
+  on repeated runs;
+- 1-, 40- and 500-item menus place every item exactly once, inside the
+  measured column bounds, and the three templates render distinctly;
+- the SVG pages are outlined paths, with no embedded image or `<text>`, and
+  the PDF's structure (page count, media size, cross-reference table) is
+  checked;
+- in headless Chrome 156 the app passes its in-page checks both as a served
+  site and as one offline HTML file, at a desktop size and in mobile
+  emulation;
+- a menu PDF downloaded from the app in Chrome was byte-identical to the one
+  its Node tests render.
+
+And what it does not claim: its PDFs are RGB with outlined type, with no ICC
+output intent, PDF/X conformance, TrimBox, BleedBox or crop marks, and menus
+have no bleed; the mobile runs are Chrome's device emulation, not a phone or
+Safari. Its print-production notes list these.
+
+print-shop currently pins a pre-release pscat: a 0.6.3 feature branch plus
+a small patch that adds vector output to the WebAssembly build. That patch
+was the starting point for the SVG and PDF output now on `main`, and
+print-shop's issue #16 moves it onto that.
+
+## Many documents: write the template once, render each one
+
+Some jobs are high volume: thousands of menus, place cards, labels,
+certificates, name badges or personalized letters, each the same design with
+different data. Generating each one with an image model or an LLM call means
+paying for every one, as of November 2026:
+
+- a per-image or per-token price, and the latency of each call;
+- rate limits on a hosted API, or a GPU to run a local model;
+- a network or API dependency in the pipeline;
+- output that differs every time, so each document needs a person to check
+  it;
+- the failure modes this guide describes above: a misspelled word, a wrong
+  number, a layout that drifts.
+
+With pscat the model's part, if any, happens once. An LLM can help write and
+refine the template; after that every document is a deterministic CPU render,
+data in and pages out, on a laptop, a server or the user's own browser. A
+browser app such as print-shop costs nothing to serve beyond static files.
+
+To put a number on it, we timed pscat on print-shop's own jobs (its Classic
+Bistro menu template and its business card, compiled from print-shop's
+code, with the one helper library its templates load from its pinned
+branch), on an Apple M4 Mac mini with 16 GB under macOS 15.7, on 2026-11-04,
+one process at a time:
+
+| Job | Native `pscat --pdf` | Native, PDF and SVG | WebAssembly in Node 24, PDF and SVG |
+|---|---|---|---|
+| Business card, 2 sides | about 9 ms | about 10 ms | about 9 ms |
+| 40-item menu, 3 pages | about 0.15 s | about 0.2 s | about 0.27 s |
+| 500-item menu, 30 pages | about 1.9 s | about 2.4 s | about 3.6 s |
+| 1000 personalized cards, one after another | about 10 s | about 11 s | about 9 s |
+
+Each figure is a median of 20 runs (the batch row is one run of 1000). The
+native times include starting the process; the WebAssembly times are runs in
+one already-loaded instance. These are measurements of pscat on one machine
+and one core, not a comparison: we ran no image model or LLM, and quote no
+figures for them.
 
 ## The decision table
 
@@ -329,6 +439,8 @@ or API call; the site's
 | Interactive, animated or reflowing web content | SVG, HTML and CSS | The DOM, CSS layout, scripting and accessibility |
 | An image that must be regenerated identically, in CI or later | pscat (pin the version and font packs) | Same program, seed, version and fonts, same pixels; no model call |
 | Rendering inside a web page, no server or GPU | pscat's WebAssembly build, or SVG | Both render client-side |
+| A web app that must produce identical print-ready documents for every user | pscat's WebAssembly build (SVG and PDF on `main`, not yet released) | Preview, download and print come from one run; same template and data, same bytes; no server ([print-shop](https://github.com/PSCatLabs/print-shop) is an example) |
+| High-volume batch generation of documents (menus, cards, labels, certificates) | pscat, with an LLM to help write the template once | Each document is a deterministic CPU render from data: no per-call cost, rate limit, GPU or re-check |
 | Offline, no GPU, no per-image cost | pscat | One CPU binary, MIT or Apache-2.0 |
 
 ## pscat's weak spots
