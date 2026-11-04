@@ -138,20 +138,20 @@ PscatOnly {
 % stays clear of the pears and leaves on the right of the painting.
 /L 64 def
 ink
-/Name-M 52 font
-L 690 moveto (The Lantern Pear) show
-/Ital-M 18 font
-L 2 add 660 moveto (Caf\351 \267 14 Mill Lane) show
+/Name-M 56 font
+L 694 moveto (The Lantern Pear) show
+/Ital-M 20 font
+L 2 add 662 moveto (Caf\351 \267 14 Mill Lane) show
 
-/y 598 def
+/y 604 def
 /section { % (title) -
-  ink /Ital-M 23 font L y moveto show
-  0.6 setlinewidth newpath L y 10 sub moveto L 210 add y 10 sub lineto stroke
-  /y y 34 sub def } def
+  ink /Ital-M 26 font L y moveto show
+  0.6 setlinewidth newpath L y 10 sub moveto L 236 add y 10 sub lineto stroke
+  /y y 36 sub def } def
 /item { % (dish) (price) -
-  ink /Body-M 14 font L y moveto exch show
-  (  ) show /Ital-M 14 font show
-  /y y 24 sub def } def
+  ink /Body-M 16 font L y moveto exch show
+  (  ) show /Ital-M 16 font show
+  /y y 25 sub def } def
 
 (Breakfast, 8\20011) section
 (Buttermilk pancakes, maple butter) (9.50) item
@@ -174,6 +174,6 @@ L 2 add 660 moveto (Caf\351 \267 14 Mill Lane) show
 /QX 62 def /QY 48 def
 QX QY moveto URL << /Level /H >> qrencode
 << /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light [0.99 0.97 0.91] >> qrdraw
-ink /Ital-M 12 font
-QX 98 add QY 41 add moveto (Scan: how this menu was made) show
+ink /Ital-M 15 font
+QX 2 add QY 100 add moveto (Scan: how this menu was made) show
 showpage

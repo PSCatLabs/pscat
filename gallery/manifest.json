@@ -904,6 +904,72 @@
    "alt": "The Man from 2026, a typed 1962 TOP SECRET memorandum for the record on aged legal paper: red typed classification lines at the head and foot, a control number and copy line, a registry stamp, a paper clip and punch holes, numbered paragraphs with x-outs and a strikeover, a signature block and distribution list, a regrading box and handwritten initials and a margin note",
    "blurb": "A TOP SECRET memorandum of 1962 that was never released: an interviewing officer's flat account of a man who says he came from 2026 and built his time machine by talking to another machine.",
    "technique": "Typed with `tw-type` on the `/Typewriter` font, an elite manual struck at an even hand (`/StrikeWear 0.5`, so the darkness varies without whole letters fading out; every strike is still its own: the weave in the ink, feathered edges, a few light or high letters, the `e` clogged on this machine). The memo-for-the-record header, tab stops, two x-outs, a strikeover (`<o>offcie|office</o>`) and an underscore are markup in one text string. The same machine then types the control lines in black and, with its ribbon lifted to the red half (`tw-set` with a red `/Ink`, and a `/Bleed` from above that puts the black half into the tops of a few letters), the classification at the head and foot of the sheet. `rel-page` with `/Generation 0` makes it the ribbon original, never copied: aged legal paper, two punch holes, a gem clip, the scanner's tilt and lamp. The registry stamp, a regrading box, the routing initials and the margin note (`lib/handscript.ps`) are marks over the page. The office, people and places are invented; the only real names are in the man's own testimony."
+  },
+  {
+   "id": "hybrid_sky_talk",
+   "title": "Why Is the Sky Blue?",
+   "category": "lettering",
+   "tags": [
+    "poster",
+    "hybrid",
+    "qr"
+   ],
+   "libraries": [
+    "artkit",
+    "paintkit",
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 995,
+   "added": "2026-11-04",
+   "source": "examples/hybrid/sky_talk.ps",
+   "render": "gallery/renders/hybrid_sky_talk.png",
+   "page": "595x842",
+   "speed": 400,
+   "alt": "Why Is the Sky Blue?, an A4 talk poster: white serif title over an oil-painted evening sky, the Rayleigh formula, a six-bar chart of scattering by wavelength in the colours of each light, the date and venue over a dark sea, and a navy QR code on a cream tile",
+   "blurb": "A talk poster made in two layers: an image model painted the sky once, and pscat sets every exact thing on top.",
+   "technique": "The evening sky is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter and scales it to cover the page. Everything exact is drawn by pscat over it: the type in Palatino, the Rayleigh formula in Times and Symbol, a bar chart whose bar heights and labels the program computes from the formula, and a QR code that `lib/qr.ps` encodes and draws as vector squares, which two independent decoders read from the PNG and the PDF. Changing the copy or the chart re-renders the same sky. Defining `/PscatOnly true` first swaps the painting for a sky painted with paintkit.",
+   "reference": {
+    "file": "examples/hybrid/sky_talk_bg.jpg",
+    "alt": "The image model's oil-painted evening sky over a calm sea and a headland, with no text",
+    "caption": "The atmosphere layer: made once by an image model from a prompt that asked for open sky at the top and a quiet sea at the bottom, then frozen.",
+    "render_caption": "The exact layer added by pscat: type, formula, a computed chart and a QR code that scans.",
+    "text": "The image model is good at light, texture and mood, so it paints the background. pscat draws everything that must be exactly right on top of it, as vector type and shapes, so the poster prints sharp at A4 and its QR code scans. To change the date or the chart, edit the program and render again: the painting is never regenerated."
+   }
+  },
+  {
+   "id": "hybrid_menu_card",
+   "title": "The Lantern Pear",
+   "category": "lettering",
+   "tags": [
+    "menu",
+    "hybrid",
+    "qr"
+   ],
+   "libraries": [
+    "artkit",
+    "paintkit",
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 995,
+   "added": "2026-11-04",
+   "source": "examples/hybrid/menu_card.ps",
+   "render": "gallery/renders/hybrid_menu_card.png",
+   "page": "612x792",
+   "speed": 400,
+   "alt": "The Lantern Pear, a US Letter café menu: a dark olive serif name and three sections of dishes with prices on cream watercolour paper, two painted pears and leaves in the lower right, and a QR code in the lower left",
+   "blurb": "A café menu over a watercolour of pears: the painting from an image model, every dish, price and the QR code from pscat.",
+   "technique": "The watercolour is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter. pscat sets the name, the sections and every dish and price in Palatino, re-encoded for the accents and the en dash, keeping each line clear of the painted pears, and draws a QR code with `lib/qr.ps` on the paper's own cream. A price change is one edit and a re-render. Defining `/PscatOnly true` first swaps the painting for paintkit's own paper and washes.",
+   "reference": {
+    "file": "examples/hybrid/menu_card_bg.jpg",
+    "alt": "The image model's watercolour of two pears and leaves on cream paper, with no text",
+    "caption": "The atmosphere layer: a watercolour made once by an image model, with the middle and left left bare for the menu.",
+    "render_caption": "The exact layer added by pscat: the name, every dish and price, and a QR code that scans.",
+    "text": "The prompt asked for bare paper where the menu goes, so the painting needs no editing. Every word and number on the card comes from the program, so the menu can change without asking the image model for anything again."
+   }
   }
  ],
  "groups": [
@@ -954,6 +1020,12 @@
    "title": "Type 3 fonts",
    "guide": "docs/guides/fonts.md",
    "blurb": "Fonts where every glyph is a PostScript program."
+  },
+  {
+   "id": "hybrid",
+   "title": "pscat with an image model",
+   "guide": "docs/guides/pscat-with-image-models.md",
+   "blurb": "An image model paints the background once; pscat sets the exact layer on top. Each sheet compares the image model alone, pscat alone and the two together, with the facts checked under each panel: whether the QR code decodes, whether the text is spelled right, whether the numbers are right."
   }
  ],
  "specimens": [
@@ -1295,6 +1367,24 @@
    "blurb": "Type 3 fonts where every glyph is invented fresh at show time.",
    "source": "examples/type3_ransom.ps",
    "page": "612x792"
+  },
+  {
+   "id": "compare_sky_talk",
+   "group": "hybrid",
+   "title": "Why Is the Sky Blue?, three ways",
+   "alt": "Three versions of the same talk poster side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "The image model alone got every word and number right, but its QR code does not decode. pscat alone and the hybrid scan; the hybrid keeps the painted sky.",
+   "source": "examples/hybrid/compare_sky_talk.ps",
+   "render": "docs/guides/hybrid/sky_talk_compare.png"
+  },
+  {
+   "id": "compare_menu_card",
+   "group": "hybrid",
+   "title": "The Lantern Pear, three ways",
+   "alt": "Three versions of the same café menu side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "The image model alone set the whole menu correctly, but its QR code does not decode. pscat alone and the hybrid scan; the hybrid keeps the watercolour.",
+   "source": "examples/hybrid/compare_menu_card.ps",
+   "render": "docs/guides/hybrid/menu_card_compare.png"
   }
  ]
 }

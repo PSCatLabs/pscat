@@ -75,7 +75,7 @@ PscatOnly {
   /skyat { WL sub PH WL sub div 0 max 1 min /skt exch def
     skt 0.4 lt { HORIZON MID skt 0.4 div 0.8 exp mix3 }
                { MID ZENITH skt 0.4 sub 0.6 div 0.7 exp mix3 } ifelse } def
-  WL 2 PH { /sky_y exch def sky_y skyat setrgbcolor 0 sky_y PW 2.5 rectfill } for
+  WL 2 PH { /sky_y exch def sky_y skyat setrgbcolor 0 sky_y PW 4 rectfill } for
   WL 30 PH { /sky_y exch def [ sky_y 15 add skyat ] /sky_c exch def
     0 sky_y PW 30 screct
     << /Count 7 /Length 70 /Angle 30 /Lean 6 /LengthJitter 0.2 >> pkcrisscross
@@ -117,7 +117,7 @@ PscatOnly {
   /SEA [ 0.22 0.27 0.42 ] def
   /seaat { WL exch sub WL div 0 max 1 min /st exch def
     [ WL st 1.5 mul 0.3 add PH WL sub mul add skyat ] SEA st 0.5 mul 0.45 add mix3 } def
-  WL 2 sub -2 0 { /wt_y exch def [ wt_y seaat ] 0.8 shade setrgbcolor 0 wt_y PW 2.5 rectfill } for
+  WL 2 sub -2 0 { /wt_y exch def [ wt_y seaat ] 0.8 shade setrgbcolor 0 wt_y PW 4 rectfill } for
   WL 4 sub -9 0 { /wt_y exch def
     [ wt_y seaat ] 0.72 shade setrgbcolor
     /wt_x PW chance 80 sub def
@@ -219,6 +219,6 @@ white
 /QX 461 def /QY 36 def
 QX QY moveto URL << /Level /H >> qrencode
 << /ModuleSize 2 /Dark [0.08 0.12 0.30] /Light [1 0.96 0.88] >> qrdraw
-cream /Ital-L1 11 font
-QX 90 add QY 98 add moveto (Scan: how this poster was made) rshow
+cream /Ital-L1 12 font
+QX 90 add QY 100 add moveto (Scan: how this poster was made) rshow
 showpage

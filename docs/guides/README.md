@@ -8,6 +8,9 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 - [When to use pscat](when-to-use-pscat.md): pscat, an image model, or an LLM
   drawing on its own; what each does best, with a decision table.
+- [pscat with an image model](pscat-with-image-models.md): the image model
+  paints the background once, pscat sets the exact layer on top; two worked
+  examples and a three-way comparison.
 - [Getting started](getting-started.md): build or install pscat, the
   command-line flags, the live window, and PNG, SVG and PDF output.
 - [pscat in the browser](browser.md): the WebAssembly build and a JavaScript

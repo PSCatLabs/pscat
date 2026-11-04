@@ -35,6 +35,7 @@ scripts/site_pages.py (the last step of build_site.sh) gives them the shared she
 """
 import html
 import json
+import os
 import re
 import shutil
 import struct
@@ -316,8 +317,10 @@ def table_md(m):
         out.append("| Piece | File | How it is made |\n|---|---|---|")
         for p in ps:
             f = Path(p["source"]).name
+            # the table lives in gallery/, so a source elsewhere (examples/) links up and over
+            link = os.path.relpath(p["source"], "gallery")
             out.append("| [%s](%s/%s) | [`%s`](%s) | %s |" % (
-                p["title"], SITE_URL, piece_page(p["id"]), f, f, p["technique"].replace("|", "\\|")))
+                p["title"], SITE_URL, piece_page(p["id"]), f, link, p["technique"].replace("|", "\\|")))
         out.append("")
     return "\n".join(out).rstrip("\n")
 

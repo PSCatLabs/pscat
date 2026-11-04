@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--@head-->
+<title>pscat — with an image model</title>
+<meta name="description" content="pscat and an image model together: the image model paints the background once, pscat sets the exact layer on top. Two worked examples and a three-way comparison with checked facts.">
+<style>
+.cmp { max-width:100%; height:auto; border:1px solid var(--edge); border-radius:6px; background:#fff; }
+.pair { display:flex; flex-wrap:wrap; gap:18px; }
+.pair figure { flex:1 1 260px; margin:0; }
+.pair img { width:100%; height:auto; border:1px solid var(--edge); border-radius:6px; }
+.pair figcaption { color:var(--dim); font-size:13px; margin-top:6px; }
+</style>
+</head>
+<body>
+<!--@header guides-->
+<main>
+  <h1>pscat with an image model</h1>
+  <p class="sub">An image model paints the atmosphere; pscat sets everything
+  exact on top: type, numbers, a chart, a QR code that scans, a print-ready
+  PDF. The image is generated once and frozen, and all the iterating happens
+  in the pscat layer. This page is the summary; the full workflow, the prompts
+  and the checks are in the
+  <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/pscat-with-image-models.md">guide</a>.
+  It complements <a href="when-to-use.html">When to use pscat</a>.</p>
+
+  <h2>Two worked examples</h2>
+  <div class="pair">
+    <figure>
+      <a href="gallery-hybrid-sky-talk.html"><img src="assets/renders/hybrid_sky_talk.png" width="1190" height="1684" loading="lazy"
+        alt="Why Is the Sky Blue?, an A4 talk poster: white serif title over an oil-painted evening sky, the Rayleigh formula, a bar chart, the date and venue, and a QR code"></a>
+      <figcaption>Why Is the Sky Blue? An oil-painted sky from the image model;
+      the type, the formula, a chart computed from it and the QR code from
+      pscat.</figcaption>
+    </figure>
+    <figure>
+      <a href="gallery-hybrid-menu-card.html"><img src="assets/renders/hybrid_menu_card.png" width="1224" height="1584" loading="lazy"
+        alt="The Lantern Pear, a café menu: a serif name and three sections of dishes and prices over a watercolour of pears, with a QR code"></a>
+      <figcaption>The Lantern Pear. A watercolour from the image model; every
+      dish, price and the QR code from pscat.</figcaption>
+    </figure>
+  </div>
+
+  <h2>The comparison</h2>
+  <p>The image model was also asked for each whole poster, with the same text,
+  numbers and "a scannable QR code" for the same URL: one attempt each, no
+  picking. Each sheet shows (a) that image, (b) pscat alone and (c) the
+  hybrid, with checked facts under each panel.</p>
+  <p><img class="cmp" src="assets/renders/compare_sky_talk.png" width="1249" height="761" loading="lazy"
+    alt="The talk poster three ways, side by side, with the checked facts under each panel"></p>
+  <p><img class="cmp" src="assets/renders/compare_menu_card.png" width="1282" height="728" loading="lazy"
+    alt="The café menu three ways, side by side, with the checked facts under each panel"></p>
+  <ul>
+    <li><b>Text and numbers:</b> the image model got every word and number
+      right in both images (read at full size against the brief), and its
+      chart bars were within 2% of the data. pscat's text is checked string by
+      string in its tests, and its chart is computed.</li>
+    <li><b>QR codes:</b> the image model's do not decode. Two independent
+      decoders find each symbol and fail its error correction. pscat's decode to
+      the URL in both decoders, from the PNG and from the PDF.</li>
+    <li><b>Output:</b> the image model gives one raster, about 127 pixels per
+      inch at A4. The hybrid's type, chart and QR code are vectors in the PDF.</li>
+    <li><b>Looks:</b> the hybrid keeps the image model's painting, which
+      paintkit alone does not match.</li>
+  </ul>
+
+  <h2>When it is worth it</h2>
+  <p>When a page needs both a painted look and something exact: a QR code,
+  numbers from data, a page that will be edited or made in versions, or print
+  at size. A price change is one edit and a re-render; asking the image model
+  again repaints the whole page, which then needs proofreading again. For a
+  mood image with nothing exact in it, use the image model alone; for a page
+  with nothing painted, pscat alone.</p>
+
+  <h2>Try it with an agent</h2>
+  <p>An agent with both an image tool and pscat: "Generate a background with
+  your image tool, with no text and room for the type. Save it as a JPEG and
+  do not regenerate it. Then write a pscat program that draws it to cover the
+  page and sets the title, details and a QR code on top; render, look, and
+  refine the pscat layer only." The <a href="agents.html">For agents</a> page
+  has the plugin, the skills and the MCP server.</p>
+</main>
+<!--@footer-->
+</body>
+</html>

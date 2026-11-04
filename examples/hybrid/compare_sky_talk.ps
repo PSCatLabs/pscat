@@ -1,0 +1,33 @@
+%!PS
+% The comparison sheet for the sky talk poster (595 x 842 pt plus a
+% 190 pt facts strip). From the repository root:
+%   pscat sheet -o docs/guides/hybrid/sky_talk_compare.png --page 595x1032 \
+%     --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+%     --label "Why Is the Sky Blue?: (a) image model alone, (b) pscat alone, (c) hybrid" \
+%     examples/hybrid/compare_sky_talk.ps
+% Every fact below is checked: the QR results by tests/hybrid.rs (two
+% decoders, rqrr and rxing, on the PNG and PDF exports and on the image
+% model's JPEG), the copy of (b) and (c) string by string by the same
+% test, and the copy of (a) by reading the image at full size.
+/PageW 595 def /PageH 842 def
+/Example (examples/hybrid/sky_talk.ps) def
+/ModelJPEG (examples/hybrid/sky_talk_model.jpg) def /ModelW 1055 def /ModelH 1491 def
+/FactsA [
+  [/ok (Text: all 20 strings of the brief spelled right)]
+  [/ok (Chart: labels right, bars within 2% of the data)]
+  [/no (QR code: found, but does not decode)]
+  [/note (Raster only: 1055 x 1491 px, 127 px/in at A4)]
+] def
+/FactsB [
+  [/ok (Text: all 20 strings painted exactly as written)]
+  [/ok (Chart: bars computed from the formula)]
+  [/ok (QR code: decodes to the URL, PNG and PDF)]
+  [/note (Look: paintkit's procedural sky)]
+] def
+/FactsC [
+  [/ok (Text: all 20 strings painted exactly as written)]
+  [/ok (Chart: bars computed from the formula)]
+  [/ok (QR code: decodes to the URL, PNG and PDF)]
+  [/note (Look: the image model's painting, frozen)]
+] def
+(examples/hybrid/compare_panel.ps) run
