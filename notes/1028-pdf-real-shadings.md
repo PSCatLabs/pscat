@@ -39,6 +39,22 @@ ramp's position-weighted average colour (a red-to-blue axial came out
 - `/Background` is ignored by `shfill` (PLRM) and not parsed.
 - Alpha and blend go through the ExtGState like any paint (`ca` applies to
   `sh`).
+- **tiny-skia's degenerate cases are recorded as the raster paints them**,
+  decided with its own tolerance (`DEGENERATE_THRESHOLD`, 2^-15) on the same
+  rescaled f32 numbers (Codex rounds 2–5). An axis that collapses (Coords
+  distinct in f64 but one point in f32) is a solid fill in the last colour,
+  not a zero-length shading that readers skip. Two (nearly) coincident circles
+  of (nearly) one radius paint the first colour inside and the last outside,
+  with a hard edge. PDF readers draw those circles as nothing (CoreGraphics)
+  or as just the disk (gs), so the recorder writes a radial from the centre
+  to twice the radius, at half scale with the `cm` doubling it back so it
+  stays finite near f32::MAX, with a stitching function that steps at
+  `/Bounds [0.5]`. A hard edge at either end of the axis gets a 1e-6 sliver
+  leg, so the function starts and ends on the outermost stops' colours,
+  which the raster pads with. A non-finite number is never written.
+  Pre-existing and left alone: gs's own rendering of the equal-circle
+  PostScript is a thin ring, so the raster's fallback already differs from
+  gs there.
 
 **Not mapped, because the interpreter has none of them in any output:**
 ShadingType 1 and 4–7 rangecheck in `parse_shading_dict`, and there is no
