@@ -102,6 +102,8 @@ PREFIX=feature   # or "fix" if the issue carries the `bug` label — AGENTS.md's
 BRANCH="${PREFIX}/<N>-${SLUG}"
 WORKTREE_DIR="../${REPO_DIR}-issue-<N>"
 git worktree add --no-track -b "$BRANCH" "$WORKTREE_DIR" origin/main
+# Optional (#1033): build on another disk. A no-op unless PSCAT_TARGET_ROOT names an existing folder.
+[ -n "${PSCAT_TARGET_ROOT:-}" ] && [ -d "$PSCAT_TARGET_ROOT" ] && mkdir -p "$PSCAT_TARGET_ROOT/issue-<N>" && ln -s "$PSCAT_TARGET_ROOT/issue-<N>" "$WORKTREE_DIR/target"
 (cd "$WORKTREE_DIR" && pwd)   # note this absolute path: it is WORKTREE_DIR from now on
 bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 ```
