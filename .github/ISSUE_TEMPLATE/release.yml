@@ -37,7 +37,7 @@ body:
       label: Publishing
       options:
         - label: "Tag pushed: `git tag -a vX.Y.Z -m \"pscat X.Y.Z\" && git push origin vX.Y.Z`"
-        - label: The draft GitHub Release looks right (five archives, SHA256SUMS, release-manifest.json, notes)
+        - label: The draft GitHub Release looks right (five archives, the npm tarball, SHA256SUMS, release-manifest.json, notes)
         - label: "First release only: crates.io bootstrap publish from the tag, trusted publisher configured (RELEASING.md, step 6)"
         - label: The release environment approved; the publish job's report says every stage published or skipped
   - type: checkboxes

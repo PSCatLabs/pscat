@@ -46,9 +46,9 @@ run first:
 |---|---|---|
 | `verify` | Checks that the tag matches `Cargo.toml` and is on `main`. Checks that `PINNED_INDEX` is set and that its `font-index.json` hashes to the pinned SHA-256. Runs the quality gate, the MCP Inspector check, the licence checks, `scripts/check_package.sh` (crate acceptance), the release-script tests, and `cargo semver-checks` against crates.io once pscat is published. Generates the `cargo-about` notices and packages the `.crate` from the clean commit, then builds and packs the npm package (`scripts/build_npm.sh --pack release-inputs`). | read |
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
-| `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
-| `draft` | Creates a **draft** GitHub Release with the archives, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
-| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. For a release candidate it runs only the GitHub pre-release and the plugin check ([Release candidates](#release-candidates)). It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
+| `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest), over the archives and the npm tarball `verify` packed, which it copies in beside them (#1006; an error if `npm/package.json` exists and the tarball does not). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
+| `draft` | Creates a **draft** GitHub Release with the archives, the npm tarball `pscat-X.Y.Z.tgz`, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
+| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. For a release candidate it runs only the GitHub pre-release and the plugin check ([Release candidates](#release-candidates)). It signs build-provenance attestations for every archive, the npm tarball and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
 | `post-publish-check` | Calls `.github/workflows/release-check.yml`: installs the release from the public channels on Linux, macOS and Windows and fails if it does not install or run (below). | `contents: read`, `attestations: read` |
 
 The draft exists before the approval prompt, so you can review it (assets,
@@ -94,7 +94,9 @@ It first asks the registry what is already there:
 - **npm.** The registry's `dist.integrity` equals the SHA-512 of the
   tarball `verify` packed (`release-inputs/pscat-X.Y.Z.tgz`, beside the
   `.crate`). The stage publishes that file, never a fresh `npm pack`, and
-  halts if it is missing or holds another name or version.
+  halts if it is missing, holds another name or version, or is not the
+  tarball `release-manifest.json` lists (the one on the GitHub Release,
+  #1006), so npm and the release always carry the same bytes.
 - **MCP Registry.** The registry's entry for the name and version
   (`GET /v0.1/servers/{name}/versions/{version}`) lists the same packages
   as `server.json`: registry type, identifier, version, transport and
@@ -189,8 +191,8 @@ dependency under any other licence fails the build.
   them. To update a pin by hand, resolve the new tag with
   `gh api repos/OWNER/REPO/commits/TAG --jq .sha`. Never type a SHA from
   memory.
-- **Signed provenance.** The `publish` job attests every archive and the
-  `.crate` with `actions/attest-build-provenance` before anything goes
+- **Signed provenance.** The `publish` job attests every archive, the npm
+  tarball and the `.crate` with `actions/attest-build-provenance` before anything goes
   public. The attestation is signed with the job's OIDC token, which is why
   it lives in the `release` environment job and nowhere else. See
   [Verifying a release](#verifying-a-release).
@@ -380,7 +382,7 @@ GitHub **pre-release**:
 | `Cargo.toml` and manifests | `X.Y.Z` | `X.Y.Z-rc.N` |
 | `CHANGELOG.md` | new section | unchanged |
 | Gates in `verify` (pin, quality gate, MCP Inspector, licences, crate acceptance, semver) | run | run, the same |
-| Five archives, `SHA256SUMS`, `release-manifest.json` | GitHub Release | GitHub **pre-release** |
+| Five archives, the npm tarball, `SHA256SUMS`, `release-manifest.json` | GitHub Release | GitHub **pre-release** |
 | Provenance attestations | yes | yes |
 | `release` environment approval | yes | yes |
 | crates.io, npm, MCP Registry | published | **never** |
@@ -447,8 +449,8 @@ pre-releases are refused.
    release candidate, GitHub pre-release only". The `assemble` job's plan
    lists `draft`, `publish` and `plugin` only.
 5. When `draft` is done, the Releases page shows a draft marked
-   **Pre-release** with five archives, `SHA256SUMS` and
-   `release-manifest.json`. Approve the `release` environment.
+   **Pre-release** with five archives, the npm tarball
+   `pscat-0.7.0-rc.1.tgz`, `SHA256SUMS` and `release-manifest.json`. Approve the `release` environment.
 6. A good result:
    - <https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.1> is public,
      with the **Pre-release** badge. The notes start "Release candidate for
@@ -466,7 +468,37 @@ pre-releases are refused.
    ```
    https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/pscat-0.7.0-rc.1-<target>.tar.gz   (.zip on Windows)
    https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/SHA256SUMS
+   https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/pscat-0.7.0-rc.1.tgz      (the npm package)
    ```
+
+#### Testing a candidate's npm package
+
+A release candidate never goes to npm, but its pre-release carries the
+npm tarball `pscat-X.Y.Z-rc.N.tgz` as an asset (#1006): the exact file
+`verify` packed, listed in `SHA256SUMS` and attested like the archives. A
+browser or Node project tests the candidate by installing it from its URL:
+
+```sh
+npm install https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/pscat-0.7.0-rc.1.tgz
+```
+
+npm records that URL (and the tarball's integrity) in `package.json` and
+the lockfile, so the pin holds until it is changed to the next candidate
+or to the released `pscat@X.Y.Z` from npm. To check the bytes first,
+download it and check it against the release:
+
+```sh
+B=https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1
+curl -fLO "$B/pscat-0.7.0-rc.1.tgz" && curl -fLO "$B/SHA256SUMS"
+shasum -a 256 -c SHA256SUMS --ignore-missing     # sha256sum on Linux
+gh attestation verify pscat-0.7.0-rc.1.tgz --repo PSCatLabs/pscat
+npm install ./pscat-0.7.0-rc.1.tgz
+```
+
+From a checkout, `scripts/test_npm_tarball.sh pscat-0.7.0-rc.1.tgz`
+installs it into a fresh project and renders a page, SVG and PDF with it.
+Final releases carry the tarball too, the same file the `npm` stage
+publishes.
 
 A fix found in testing merges to `main` as usual, then
 `scripts/release.sh 0.7.0-rc.2` and the same steps. To release, run
@@ -502,8 +534,8 @@ Before tagging:
 
 After publishing:
 
-- [ ] The GitHub Release is public with five archives, `SHA256SUMS` and
-      `release-manifest.json`. crates.io shows the version, and docs.rs built
+- [ ] The GitHub Release is public with five archives, the npm tarball
+      `pscat-X.Y.Z.tgz`, `SHA256SUMS` and `release-manifest.json`. crates.io shows the version, and docs.rs built
       it.
 - [ ] The `post-publish-check` job (below) is green.
 - [ ] **Outsider install smoke test** (below) passes.
@@ -607,12 +639,15 @@ the final chat surface; a returned-image byte count is not evidence.
 
 ### Verifying a release
 
-Every archive and `.crate` released after #635 carries a signed SLSA build
+Every archive and `.crate` released after #635, and every npm tarball
+attached to a release after #1006, carries a signed SLSA build
 provenance attestation (0.6.0 and earlier have none). With the GitHub CLI:
 
 ```sh
 gh attestation verify pscat-X.Y.Z-<target>.tar.gz --repo PSCatLabs/pscat \
   --signer-workflow PSCatLabs/pscat/.github/workflows/release.yml
+gh attestation verify pscat-X.Y.Z.tgz --repo PSCatLabs/pscat \
+  --signer-workflow PSCatLabs/pscat/.github/workflows/release.yml   # the npm tarball
 ```
 
 It checks that the file's digest was attested by this repository's
@@ -624,7 +659,7 @@ and `release-manifest.json` record the same digests unsigned.
 - **A pull request** that touches the pipeline (`release.yml`,
   `scripts/release*.{sh,py}`, `package_release.sh`, `cliff.toml`,
   `about.*`, `Cargo.toml`, `Cargo.lock`) runs `verify`, `binaries` and
-  `assemble`. That is all five archives, the manifest, the rehearsal and the
+  `assemble`. That is all five archives, the npm tarball, the manifest, the rehearsal and the
   read-only plan. Nothing is published.
 - **A manual dry run:** Actions → release → Run workflow, with an optional
   branch, tag or commit as `ref`. It is always a dry run. A real release

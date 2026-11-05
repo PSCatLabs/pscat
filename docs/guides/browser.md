@@ -68,6 +68,19 @@ and ships TypeScript types.
 npm install pscat                  # from 0.6.2
 ```
 
+From 0.7.0-rc.4 on, every GitHub release also carries the same package as a file,
+`pscat-X.Y.Z.tgz`, listed in its `SHA256SUMS`. Release candidates are
+never published to npm, so this is how to try one: install it from its
+URL, for example
+
+```sh
+npm install https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z-rc.N/pscat-X.Y.Z-rc.N.tgz
+```
+
+and change the dependency to `pscat@X.Y.Z` once that is released
+([RELEASING.md](../dev/RELEASING.md#testing-a-candidates-npm-package)
+has the checksum and attestation checks).
+
 ```js
 import { createRenderer, PostScriptError } from 'pscat';
 

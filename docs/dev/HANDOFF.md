@@ -49,7 +49,9 @@ different one, so a failed release resumes by re-running; since #635 the
 `publish` job signs build-provenance attestations, and since #638
 `release-check.yml` installs every published release from the public
 channels; since #854 a `vX.Y.Z-rc.N` tag publishes a GitHub pre-release
-only, never crates.io/npm/MCP Registry or "latest"; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
+only, never crates.io/npm/MCP Registry or "latest"; since #1006 every
+release, candidates included, carries the npm tarball `pscat-X.Y.Z.tgz` as
+an asset in `SHA256SUMS`, the way to test a candidate from npm/the browser; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
 the font catalog reaches installs as downloadable font packs on their
 own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
 install`, `.github/workflows/release-fonts.yml`,
