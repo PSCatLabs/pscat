@@ -111,7 +111,8 @@ what happens after the first draft:
 And the layout is pscat's in (b) and (c): a stated grid, a display face for
 the title, the formula set as a real fraction, a chart as large as the
 type around it, and the menu's prices right-aligned on one column with dot
-leaders. The image model's own layouts set everything in one stock serif.
+leaders. The image model's two whole-poster images set every line in one
+serif family.
 
 Where the hybrid beats pscat alone is the painting. pscat's own art (a
 screen-printed sky, a botanical print) is deliberate and clean, but an image
