@@ -415,7 +415,12 @@ SX 20 moveto (15:05   16:35   18:05) show
 % the QR code: version 5 at level H, 2-point modules on whole points,
 % its light quiet zone painted
 /QX 466 def /QY 34 def
-QX QY moveto URL << /Level /H >> qrencode
+% a dark mat around the light quiet zone, so the symbol's edge stays
+% clear of a bright ground (the autumn photograph's frost)
+URL << /Level /H >> qrencode /qr exch def
+/QS qr /Size get 8 add 2 mul def                 % the symbol and its quiet zone
+0.10 0.11 0.14 setrgbcolor QX 4 sub QY 4 sub QS 8 add QS 8 add rectfill
+QX QY moveto qr
 << /ModuleSize 2 /Dark [0.10 0.11 0.14] /Light [1 1 1] >> qrdraw
 wht /Sans-P 8 font
 QX 49 add QY 13 sub moveto (Scan: how this poster was made) cshow

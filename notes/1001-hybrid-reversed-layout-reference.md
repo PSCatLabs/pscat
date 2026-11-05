@@ -25,8 +25,11 @@ Shade edge: median 4 and 5 px. Hut roof: 3.8 px and 14.1 px left (the autumn
 hut grew). Big outlines hold to about a pixel; small objects drift more, so
 the exact layer anchors to big edges and points at small ones with leaders.
 
-**Reference format.** Flat colour with the light in it (1.2 px) beat the same
-shapes as black outlines (4 px, systematically high). The model keeps crude
+**Reference format.** One run each. Flat colour with the light in it: 1.2
+px. The same shapes as edge-detected black outlines (about 3 px lines): the
+photograph followed the lines to 0.8 px, but the lines sat 3.5 px above the
+true edge, so it ended 4 px from the layout. Flat colour was kept because a
+block's edge is the layout's edge. The model keeps crude
 shapes too: a first, rougher block-in came back as geometric pyramids with a
 hard shadow band, so the block-in has to be drawn as the picture should be.
 Depth maps and paintkit renders as references were not tried.
@@ -42,5 +45,10 @@ second photograph, and edits without regeneration; not spelling.
 **Gotchas.** `codex exec -i FILE "prompt"` takes the prompt as a second image
 (`-i` is multi-valued); write `--image=FILE`. Codex's image skill rewrites the
 instruction into a "sketch-to-render" prompt with its own position estimates;
-all prompts are in `examples/hybrid/README.md`. Names `meadow`, `m`, `white`,
+all prompts are in `examples/hybrid/README.md`. On the whole autumn page
+rasterized by hayro, rxing's finder search finds no symbol (the frosted
+grass leads it off); framed to the page's bottom-right quarter, as a scanner
+frames it, both decoders read every variant, and the test checks it that
+way (the image model's code fails framed too). A dark mat now surrounds the
+quiet zone. Names `meadow`, `m`, `white`,
 `last`, `i`, `k` collide with artkit/paintkit globals: the program avoids them.

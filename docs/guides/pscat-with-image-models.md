@@ -428,16 +428,22 @@ shadow rather than a line. So anchor the exact layer to big edges (the ridge
 and its summits), and keep small anchors loose: the hut's label points at
 the hut with a leader, so a few pixels do not show.
 
-**What format works best for the reference.** Two were tried, with the
-same instruction:
+**What format works best for the reference.** Two were tried, one run
+each, with the same instruction:
 
 - a **flat colour block-in**, with the light already in it (lit west faces,
-  shaded east faces, a shaded foreground): ridge drift 1.2 px;
-- the **same shapes as black outlines** on white: 4 px, systematically high.
+  shaded east faces, a shaded foreground);
+- the **same shapes as black outlines** on white, made by edge-detecting the
+  block-in, with lines about 3 px wide.
 
-The flat colour reference was kept on that measurement; both photographs
-looked equally good. Greyscale depth maps and rough paintkit renders were
-not tried here.
+Each photograph followed its own reference to within a pixel: the
+line-drawing photograph's ridge sat a mean of 0.8 px from the drawn line.
+But the drawn line itself sat 3.5 px above the true edge, and the
+photograph inherited that, ending 4 px from the layout. The flat colour
+reference has no such ambiguity, because the edge of a colour block is the
+layout's edge. It was kept on that measurement; both photographs looked
+equally good. Greyscale depth maps and rough paintkit renders were not tried
+here.
 
 The first, rougher reference had straight-sided peaks and a flat foreground
 band, and it taught one more thing: **the model keeps your shapes, crude ones
@@ -493,3 +499,16 @@ What worked here, in the instruction to the image model:
 
 The full instructions, and the prompts Codex passed to its tool, are in the
 [examples README](../../examples/hybrid/README.md).
+
+### Other tools
+
+The Codex CLI is the one measured here. More generally:
+
+- many hosted image models have an edit or image-to-image mode that takes an
+  input image with the prompt;
+- open-weights diffusion pipelines can condition generation on an edge,
+  depth or segmentation map of a layout (ControlNet-style guides), which
+  pscat can draw as easily as the flat block-in.
+
+None of these was measured for this guide. The same reference and the same
+detector in `tests/hybrid_reverse.rs` would measure any of them.

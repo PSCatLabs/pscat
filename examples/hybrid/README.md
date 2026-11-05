@@ -858,7 +858,7 @@ pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
   examples/hybrid/compare_alpine_trail.ps
 ```
 
-`tests/hybrid_reverse.rs` checks the facts: the program still draws the reference that was sent; the layout drift of both photographs (ridge, shade edge, hut) and how quiet the type zones stayed, measured on the committed files; the QR code in both decoders from the PNG and the PDF, for the hybrid and for pscat alone; the brief, string by string; and the decoders' verdict on the image model's own QR code.
+`tests/hybrid_reverse.rs` checks the facts: the program still draws the reference that was sent; the layout drift of both photographs (ridge, shade edge, hut) and how quiet the type zones stayed, measured on the committed files; the QR code in both decoders from the PNG and the PDF, framed as a scanner frames it (the page's bottom-right quarter), for the summer and autumn hybrids and for pscat alone; the brief, string by string; and the decoders' verdict on the image model's own QR code.
 
 ### Where these images came from
 
@@ -917,7 +917,7 @@ Same framing and same 2:3 portrait aspect ratio as the input. Do not crop, zoom,
 
 </details>
 
-**3. Line-drawing reference, 09:48 (not used).** The same reference reduced to black outlines on white (its colour edges, drawn with Pillow in a scratch script), sent with the same instruction but for the first sentence. Its ridge sat a mean of 4 px from the layout's, systematically high, against 1.2 px for the flat colour reference, so run 2 was kept. The choice was made on that measurement, not on looks; the two photographs looked equally good.
+**3. Line-drawing reference, 09:48 (not used).** The same reference reduced to black outlines on white: its colour edges, found and thickened to about 3 px lines with Pillow in a scratch script. It was sent with the same instruction except for the first sentence. The photograph followed the drawn lines closely (ridge 0.8 px from them, mean), but the lines sat 3.5 px above the true edge, so it ended 4 px from the layout, against 1.2 px for run 2. Run 2 was kept on that measurement, not on looks; the two photographs looked equally good.
 
 <details><summary>The instruction sent to Codex</summary>
 
