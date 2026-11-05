@@ -253,6 +253,12 @@ showpage
 0.1 0.5 0.3 setrgbcolor 100 100 moveto 400 300 lineto 200 50 lineto closepath fill
 gsave 37 rotate 200 200 translate 0 0 50 30 rectstroke grestore
 100 500 moveto 150 600 250 450 300 550 curveto stroke
+gsave newpath 400 500 80 0 360 arc clip
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [380 520 5 400 500 80]
+   /Function << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1]
+     /Functions [ << /FunctionType 2 /Domain [0 1] /C0 [1 1 0.8] /C1 [0.9 0.4 0.1] /N 1 >>
+                  << /FunctionType 2 /Domain [0 1] /C0 [0.9 0.4 0.1] /C1 [0.2 0 0.3] /N 1 >> ] >> >> shfill
+grestore
 showpage
 ";
 

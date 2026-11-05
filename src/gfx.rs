@@ -1722,31 +1722,7 @@ impl Gfx {
                 mask.as_deref(),
             );
             if self.svg.is_some() {
-                let svg_kind = match shading.kind {
-                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                        crate::svg::ShKind::Axial {
-                            x0: x0 as f32,
-                            y0: y0 as f32,
-                            x1: x1 as f32,
-                            y1: y1 as f32,
-                        }
-                    }
-                    crate::shading::ShadingKind::Radial {
-                        x0,
-                        y0,
-                        r0,
-                        x1,
-                        y1,
-                        r1,
-                    } => crate::svg::ShKind::Radial {
-                        x0: x0 as f32,
-                        y0: y0 as f32,
-                        r0: r0 as f32,
-                        x1: x1 as f32,
-                        y1: y1 as f32,
-                        r1: r1 as f32,
-                    },
-                };
+                let svg_kind = sh_kind(shading.kind, 1.0);
                 let svg_ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 // The same device-space path the raster painted with
@@ -1760,37 +1736,38 @@ impl Gfx {
                 }
             }
             if self.pdf.is_some() {
-                // PDF export approximates a shading as a flat fill in
-                // the ramp's *position-weighted* average color — real
-                // PDF shading dictionaries need pattern-colorspace
-                // machinery this exporter doesn't have; documented gap
-                // (docs/dev/HANDOFF.md). Weighted by the position gap between
-                // consecutive stops (trapezoidal integration), not a
-                // flat mean over the stop list: stops aren't evenly
-                // spaced (build_stops packs extra ones at stitching
-                // bounds and domain-clamp corners), so an unweighted
-                // mean lets a tiny sliver of stops dominate the
-                // average — e.g. a ramp that's red through position
-                // 0.99 then blue only has ~4 stops near that boundary,
-                // and an unweighted mean renders 50/50 purple instead
-                // of ~99% red (caught by a Codex review). Stops always
-                // span the full [0,1] position range (`sample_positions`
-                // starts at 0.0 and ends at 1.0), so the weights here
-                // already sum to 1.0 with no separate normalization.
-                let (mut sr, mut sg, mut sb) = (0.0f32, 0.0f32, 0.0f32);
-                for w in shading.stops.windows(2) {
-                    let (p0, r0, g0, b0) = w[0];
-                    let (p1, r1, g1, b1) = w[1];
-                    let width = p1 - p0;
-                    sr += (r0 + r1) * 0.5 * width;
-                    sg += (g0 + g1) * 0.5 * width;
-                    sb += (b0 + b1) * 0.5 * width;
-                }
-                let avg = (sr, sg, sb);
+                // A real PDF shading (#1028): the same stops under the
+                // same CTM. Geometry whose characteristic length is under
+                // SAFE_LEN is rescaled, with the inverse folded into the
+                // `cm`, exactly as for the raster above: the composed map
+                // is unchanged, and the numbers the PDF carries stay in a
+                // range every reader holds precisely.
+                let char_len = match shading.kind {
+                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
+                        fmath::hypotf((x1 - x0) as f32, (y1 - y0) as f32)
+                    }
+                    crate::shading::ShadingKind::Radial {
+                        x0,
+                        y0,
+                        r0,
+                        x1,
+                        y1,
+                        r1,
+                    } => (r0.max(r1) as f32).max(fmath::hypotf((x1 - x0) as f32, (y1 - y0) as f32)),
+                };
+                let k = if char_len > 0.0 && char_len < SAFE_LEN {
+                    SAFE_LEN / char_len
+                } else {
+                    1.0
+                };
+                let kind = sh_kind(shading.kind, k);
+                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+                let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+                let region = shading.bbox.map(|_| &path);
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.fill(&path, FillRule::Winding, avg, comp, &chain);
+                    pdf.shfill(&kind, pdf_ctm, &shading.stops, region, comp, &chain);
                 }
             }
             self.dirty = true;
@@ -3018,6 +2995,35 @@ fn clamp01(v: f64) -> f32 {
 
 fn to_u8(v: f32) -> u8 {
     (v * 255.0).round() as u8
+}
+
+/// `shfill` geometry for the vector recorders, its lengths multiplied by
+/// `k` (1 for SVG; the SAFE_LEN rescale for PDF, `Gfx::shfill`).
+fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
+    use crate::shading::ShadingKind as K;
+    match kind {
+        K::Axial { x0, y0, x1, y1 } => crate::svg::ShKind::Axial {
+            x0: x0 as f32 * k,
+            y0: y0 as f32 * k,
+            x1: x1 as f32 * k,
+            y1: y1 as f32 * k,
+        },
+        K::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => crate::svg::ShKind::Radial {
+            x0: x0 as f32 * k,
+            y0: y0 as f32 * k,
+            r0: r0 as f32 * k,
+            x1: x1 as f32 * k,
+            y1: y1 as f32 * k,
+            r1: r1 as f32 * k,
+        },
+    }
 }
 
 #[cfg(test)]
