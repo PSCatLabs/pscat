@@ -1782,6 +1782,8 @@ impl Gfx {
                 const DEGENERATE: f32 = 1.0 / (1 << 15) as f32;
                 let fallback;
                 let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
+                // The scale the recorded geometry carries; the `cm` undoes it.
+                let mut k_pdf = k;
                 if let crate::svg::ShKind::Radial {
                     x0,
                     y0,
@@ -1795,14 +1797,18 @@ impl Gfx {
                     && r1 > DEGENERATE
                     && let (Some(first), Some(last)) = (stops.first(), stops.last())
                 {
+                    // Twice the radius, written at half scale (the `cm`
+                    // doubles it back), so a radius near f32::MAX stays
+                    // finite.
                     kind = crate::svg::ShKind::Radial {
-                        x0,
-                        y0,
+                        x0: x0 * 0.5,
+                        y0: y0 * 0.5,
                         r0: 0.0,
-                        x1: x0,
-                        y1: y0,
-                        r1: 2.0 * r1,
+                        x1: x0 * 0.5,
+                        y1: y0 * 0.5,
+                        r1,
                     };
+                    k_pdf = k * 0.5;
                     let (f, l) = ((first.1, first.2, first.3), (last.1, last.2, last.3));
                     fallback = [
                         (0.0, f.0, f.1, f.2),
@@ -1812,7 +1818,7 @@ impl Gfx {
                     ];
                     stops = &fallback;
                 }
-                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+                let m = ctm.pre_scale(1.0 / k_pdf, 1.0 / k_pdf);
                 let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let region = shading.bbox.map(|_| &path);

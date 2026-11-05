@@ -466,7 +466,7 @@ fn equal_coincident_circles_export_the_rasters_disk_and_surround() {
     assert_eq!(px(250, 250), (255, 0, 0), "raster: first colour inside");
     assert_eq!(px(20, 20), (0, 0, 255), "raster: last colour outside");
     let text = pdf_text(&pdf);
-    assert!(text.contains("/Coords [250 250 0 250 250 300]"), "{text}");
+    assert!(text.contains("/Coords [125 125 0 125 125 150]"), "{text}");
     assert!(
         text.contains("/Bounds [0.5]"),
         "a hard edge, not a ramp: {text}"
@@ -485,6 +485,11 @@ fn nearly_equal_and_huge_equal_circles_keep_a_hard_edge() {
                /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
         ),
         (
+            "sh_max_equal",
+            &b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 0 2e38 0 0 2e38]
+               /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+        ),
+        (
             "sh_huge_equal",
             &b"-999800 0 translate
                << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 250 1000000 0 250 1000000]
@@ -492,7 +497,9 @@ fn nearly_equal_and_huge_equal_circles_keep_a_hard_edge() {
         ),
     ] {
         let (pdf, canvas) = pdf_and_canvas(src);
-        assert!(pdf_text(&pdf).contains("/Bounds [0.5]"), "{name}");
+        let text = pdf_text(&pdf);
+        assert!(text.contains("/Bounds [0.5]"), "{name}");
+        assert!(!text.contains("inf") && !text.contains("NaN"), "{name}: {text}");
         assert_gs_matches(&pdf, &canvas, name);
     }
 }

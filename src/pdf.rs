@@ -330,6 +330,23 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
+        // A non-finite number has no PDF spelling; writing `inf` would make
+        // the whole file invalid. Every caller keeps these finite, so this
+        // is a last guard, not a path content takes.
+        let geometry = match *kind {
+            crate::svg::ShKind::Axial { x0, y0, x1, y1 } => vec![x0, y0, x1, y1],
+            crate::svg::ShKind::Radial {
+                x0,
+                y0,
+                r0,
+                x1,
+                y1,
+                r1,
+            } => vec![x0, y0, r0, x1, y1, r1],
+        };
+        if !geometry.iter().chain(ctm.iter()).all(|v| v.is_finite()) {
+            return;
+        }
         let stops_key: Vec<[u32; 4]> = stops
             .iter()
             .map(|s| [s.0.to_bits(), s.1.to_bits(), s.2.to_bits(), s.3.to_bits()])
