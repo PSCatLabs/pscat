@@ -118,7 +118,7 @@ formatOptions 80` for the two backgrounds, `90` for the two whole-poster
 attempts). Both decoders gave the same verdict on the original PNGs as on the
 JPEGs: a symbol found, its error correction failed.
 
-## The repeat runs (2026-11-05)
+### The repeat runs (2026-11-05)
 
 For [issue #999](https://github.com/PSCatLabs/pscat/issues/999) the
 whole-poster and whole-menu instructions above were run again, six times
