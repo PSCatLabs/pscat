@@ -1,0 +1,403 @@
+%!PS-Adobe-3.0
+%%Title: Piz Calderan (a reversed hybrid poster: pscat layout, image-model photograph, pscat exact layer)
+%%BoundingBox: 0 0 576 864
+%%EndComments
+
+% A 2:3 travel poster (8 x 12 in) for a summit trail, made the other way
+% round from sky_talk.ps: pscat sets the composition first.
+%
+%   1. /Stage /Reference: pscat draws a flat block-in of the scene (the
+%      ridge, its two summits and the col, the slopes, the lake, the hut,
+%      the trail, the shaded foreground), every shape at the coordinates
+%      defined below. Rendered at 128 dpi it is 1024 x 1536 px, the size
+%      the image model works at; examples/hybrid/alpine_trail_ref.png.
+%   2. The image model takes that reference as its input image and makes
+%      it a photograph, keeping the composition: alpine_trail_photo.jpg,
+%      made once and frozen (the prompt is in examples/hybrid/README.md).
+%   3. /Stage /Hybrid (the default): the photograph covers the page at
+%      exactly 1024 x 1536 px to 576 x 864 pt, no crop, and pscat lays the
+%      exact layer back on at the same coordinates as step 1: the summit
+%      and col labels on leader lines that end at the summits it drew, the
+%      route along the ridge it drew, the hut it placed, and in the shaded
+%      foreground it left empty, an elevation profile, the stats computed
+%      from that profile, the bus times and a QR code.
+%
+% /Stage /PscatOnly paints the scene with paintkit instead (the "pscat
+% alone" panel of the comparison); the exact layer is the same. So does
+% /PscatOnly true, as for the other hybrid examples.
+%
+% Render from the repository root (the program reads the JPEG by a
+% relative path):
+%   pscat --page 576x864 --pdf alpine_trail.pdf examples/hybrid/alpine_trail.ps
+%   { echo '/Stage /Reference def'; cat examples/hybrid/alpine_trail.ps; } | \
+%     pscat --page 576x864 --dpi 128 --png alpine_trail_ref.png -
+%
+% The mountain, the valley, the hut and the bus are invented.
+% CC0 1.0 (see LICENSE-CC0). The photograph was made by OpenAI's image
+% model; examples/hybrid/README.md says where it came from and how it is
+% licensed.
+
+/PscatOnly where { pop PscatOnly { /Stage /PscatOnly def } if } if
+/Stage where { pop } { /Stage /Hybrid def } ifelse
+
+/PW 576 def /PH 864 def
+/URL (https://pscatlabs.github.io/pscat/hybrid.html) def
+
+% =============================================================== layout
+% Every coordinate the picture and the exact layer share is here.
+
+% The ridge against the sky, west to east. Piz Mora at 132 530, the col
+% (the Bocchetta) at 196 478, Piz Calderan at 360 604.
+/Ridge [
+  -6 452 1 454 8 454 14 456 21 461 28 464 34 468 41 469 48 474 58 479
+  69 484 80 491 90 502 100 507 111 512 122 523 132 530 140 522 148 513
+  156 508 164 499 172 494 180 489 188 485 196 478 203 479 210 482 217 480
+  224 481 231 482 238 485 245 491 252 494 257 497 262 500 267 502 272 505
+  277 509 282 514 287 517 292 522 300 532 309 542 318 550 326 559 334 570
+  343 582 352 592 360 604 367 599 374 596 382 591 389 585 396 580 404 573
+  411 567 418 560 424 556 430 555 437 549 443 544 449 541 456 539 462 536
+  468 532 475 528 482 523 488 517 495 511 502 509 508 508 515 505 522 500
+  530 497 537 494 544 492 552 487 560 485 567 483 574 478 582 472
+] def
+/MoraX 132 def /MoraY 530 def
+/ColX 196 def /ColY 478 def
+/CalderanX 360 def /CalderanY 604 def
+
+/HutX 92 def /HutY 340 def /HutW 30 def /HutH 16 def   % the hut's walls
+/HutDoorX 107 def
+
+% The trail, as the picture shows it: from the bottom edge up the meadow
+% to the hut, then zigzags up the slope to the col.
+/TrailLow [ 300 -4  284 90  246 170  196 238  150 290  118 322  HutDoorX HutY ] def
+/TrailHigh [ HutDoorX 4 add HutY HutH add 2 add  150 372  124 398  168 420
+             142 444  182 462  ColX ColY ] def
+
+% Zones the picture leaves empty for the type: the open sky above the
+% ridge, and the foreground in shade below ShadeTop.
+/ShadeTop 186 def
+
+% ============================================================ helpers
+/pts { % [x y x y ...] -> path through them (moveto first)
+  dup 0 get 1 index 1 get moveto
+  2 2 2 index length 1 sub { /pi exch def dup pi get 1 index pi 1 add get lineto } for pop
+} def
+/smooth { % [x y ...] -> a Catmull-Rom curve through the points
+  /sm_p exch def /sm_n sm_p length 2 idiv def
+  /sm_x { 0 max sm_n 1 sub min 2 mul sm_p exch get } def
+  /sm_y { 0 max sm_n 1 sub min 2 mul 1 add sm_p exch get } def
+  0 sm_x 0 sm_y moveto
+  0 1 sm_n 2 sub { /sm_i exch def
+    sm_i sm_x sm_i 1 add sm_x sm_i 1 sub sm_x sub 6 div add
+    sm_i sm_y sm_i 1 add sm_y sm_i 1 sub sm_y sub 6 div add
+    sm_i 1 add sm_x sm_i 2 add sm_x sm_i sm_x sub 6 div sub
+    sm_i 1 add sm_y sm_i 2 add sm_y sm_i sm_y sub 6 div sub
+    sm_i 1 add sm_x sm_i 1 add sm_y curveto } for
+} def
+/rgb { aload pop setrgbcolor } def
+
+% ========================================================= the picture
+/ridgepath { % the rock: the ridge down to below the slopes
+  newpath 582 380 moveto Ridge aload pop Ridge length 2 idiv { lineto } repeat
+  -6 380 lineto closepath } def
+/slopes { % grass below the rock, down to the lake and the meadow
+  newpath -6 300 moveto -6 446 lineto
+  40 430 70 440 110 424 curveto 150 410 190 432 240 418 curveto
+  290 404 330 422 380 410 curveto 440 396 500 414 582 402 curveto
+  582 300 lineto closepath } def
+/lake {
+  newpath 196 318 moveto 230 352 300 348 360 354 curveto
+  430 360 500 350 582 356 curveto 582 300 lineto
+  520 294 440 302 380 298 curveto 300 292 230 296 196 318 curveto closepath } def
+/meadowfill { 0 0 PW 304 rectfill } def  % under the lake's near shore
+/shadezone { % the foreground in shade, below an undulating edge
+  newpath -6 -6 moveto -6 ShadeTop 6 add lineto
+  80 ShadeTop 14 add 160 ShadeTop 2 sub 240 ShadeTop 4 add curveto
+  320 ShadeTop 10 add 420 ShadeTop 4 sub 582 ShadeTop 6 add curveto
+  582 -6 lineto closepath } def
+/hut { % fill colours: walls, roof
+  /hut_roof exch def /hut_wall exch def
+  hut_wall rgb HutX HutY HutW HutH rectfill
+  hut_roof rgb newpath HutX 4 sub HutY HutH add moveto
+  HutX HutW 2 div add HutY HutH add 14 add lineto
+  HutX HutW add 4 add HutY HutH add lineto closepath fill } def
+
+/skyat { % y -> r g b: deep blue at the top, warm and pale at the ridge
+  380 sub PH 380 sub div 1 exch sub 0 max 1 min /t exch def
+  0.93 t mul 0.16 1 t sub mul add  0.84 t mul 0.36 1 t sub mul add
+  0.72 t mul 0.68 1 t sub mul add } def
+/litmora { % the lit west face of Piz Mora
+  newpath MoraX MoraY moveto 0 470 lineto 0 400 lineto 104 400 lineto 112 432 lineto
+    124 446 lineto 118 468 lineto 136 488 lineto 128 506 lineto closepath } def
+/litcalderan { % and of Piz Calderan
+  newpath CalderanX CalderanY moveto 230 470 lineto 214 400 lineto 330 400 lineto
+    318 430 lineto 336 452 lineto 326 484 lineto 348 512 lineto 340 548 lineto
+    356 574 lineto closepath } def
+/shoulder { % the meadow west of the lake, where the hut stands
+  -6 300 moveto -6 346 lineto 80 350 160 336 200 312 curveto
+    200 300 lineto closepath } def
+/blockin {
+  % A flat block-in: one colour per thing, with the light already in it
+  % (sun low from the west: the west faces lit, the east faces in shadow),
+  % so the image model has the values as well as the shapes.
+  0 1 63 { /si exch def                                % the sky, in 64 bands
+    si 63 div /t exch def
+    [ 0.93 t mul 0.16 1 t sub mul add  0.84 t mul 0.36 1 t sub mul add
+      0.72 t mul 0.68 1 t sub mul add ] rgb
+    0 PH si 1 add PH 380 sub 64 div mul sub PW PH 380 sub 64 div 1 add rectfill
+  } for
+  [ 0.31 0.31 0.36 ] rgb ridgepath fill                % rock in shadow
+  gsave ridgepath clip
+    [ 0.72 0.55 0.42 ] rgb litmora fill litcalderan fill
+    [ 0.31 0.31 0.36 ] rgb                             % gullies in the lit faces
+    newpath 290 520 moveto 300 480 lineto 296 440 lineto 304 470 lineto closepath fill
+    newpath 70 470 moveto 84 440 lineto 80 410 lineto 90 446 lineto closepath fill
+  grestore
+  [ 0.36 0.47 0.25 ] rgb slopes fill
+  [ 0.47 0.60 0.30 ] rgb meadowfill newpath shoulder fill
+  [ 0.27 0.44 0.58 ] rgb lake fill
+  trail
+  [ 0.45 0.30 0.20 ] [ 0.62 0.16 0.12 ] hut
+  [ 0.15 0.20 0.14 ] rgb shadezone fill
+  [ 0.35 0.30 0.22 ] rgb 7 setlinewidth gsave shadezone clip newpath TrailLow smooth stroke grestore
+} def
+/trail { % pale earth
+  [ 0.80 0.70 0.52 ] rgb 1 setlinecap 1 setlinejoin
+  7 setlinewidth newpath TrailLow smooth stroke
+  3 setlinewidth newpath TrailHigh pts stroke } def
+
+Stage /Reference eq { blockin } if
+
+Stage /PscatOnly eq {
+  % pscat alone: the same block-in, then painted over with paintkit's
+  % broken strokes, each area in its own colours, the light kept.
+  (lib/artkit.ps) run
+  (lib/paintkit.ps) run
+  11 srand
+  blockin
+  /tx_k 0.06 def
+  /tex { % {path} [rgb] count length angle width -> broken strokes over the area
+    /tx_w exch def /tx_a exch def /tx_l exch def /tx_n exch def /tx_c exch def /tx_p exch def
+    gsave tx_p clip
+      tx_p scpath << /Count tx_n /Length tx_l /Angle tx_a /LengthJitter 0.4 >> pkcrisscross
+      << /Width tx_w /Charge 0.7 /Depletion 0.8 /Edge 0.3 /ColorMix 1
+         /Colors [ [ tx_c tx_k 1 add shade ] [ tx_c 1 tx_k sub shade ] ] >> pkbroad
+    grestore } def
+  % the sky: long, nearly level pulls in the colour of their height,
+  % kept off the rock
+  gsave
+  newpath Ridge pts 582 PH lineto -6 PH lineto closepath clip
+  380 24 PH { /sy exch def
+    0 sy PW 24 screct << /Count 8 /Length 80 /Angle 4 /Lean 3 >> pkcrisscross
+    << /Width 30 /Charge 0.7 /Depletion 0.8 /Edge 0.3 /ColorMix 1
+       /Colors [ [ sy 12 add skyat ] 1.03 shade 3 array astore
+                 [ sy 12 add skyat ] 0.98 shade 3 array astore ] >> pkbroad } for
+  grestore
+  % the rock along its fall lines, the grass and water across
+  { ridgepath } [ 0.31 0.31 0.36 ] 700 16 62 10 tex
+  { ridgepath clip litmora } [ 0.72 0.55 0.42 ] 120 16 62 9 tex
+  { ridgepath clip litcalderan } [ 0.72 0.55 0.42 ] 260 16 62 9 tex
+  { slopes } [ 0.36 0.47 0.25 ] 220 22 12 7 tex
+  /meadowpath { newpath -6 150 moveto 582 150 lineto 582 304 lineto -6 304 lineto
+    closepath shoulder } def
+  { meadowpath } [ 0.47 0.60 0.30 ] 260 18 20 6 tex
+  [ 0.27 0.44 0.58 ] rgb lake fill
+  { lake } [ 0.27 0.44 0.58 ] 90 46 3 5 tex
+  trail
+  [ 0.45 0.30 0.20 ] [ 0.62 0.16 0.12 ] hut
+  [ 0.15 0.20 0.14 ] rgb shadezone fill
+  { shadezone } [ 0.15 0.20 0.14 ] 220 30 15 8 tex
+  [ 0.35 0.30 0.22 ] rgb 1 setlinecap 7 setlinewidth
+  gsave shadezone clip newpath TrailLow smooth stroke grestore
+} if
+
+Stage /Hybrid eq {
+  % The photograph, 1024 x 1536 px, to the page exactly: 128 dpi, no crop.
+  gsave
+    /BgW 1024 def /BgH 1536 def
+    PW PH scale
+    /DeviceRGB setcolorspace
+    << /ImageType 1 /Width BgW /Height BgH /BitsPerComponent 8
+       /Decode [0 1 0 1 0 1] /ImageMatrix [BgW 0 0 BgH neg 0 BgH]
+       /DataSource (examples/hybrid/alpine_trail_photo.jpg) (r) file /DCTDecode filter
+    >> image
+  grestore
+} if
+
+Stage /Reference ne {
+% ===================================================== the exact layer
+(lib/qr.ps) run
+% Latin-1 for the middle dot and the en dash slot; the arrow and the
+% dash come from a spare slot each.
+/PosterEncoding ISOLatin1Encoding dup length array copy
+  dup 8#200 /endash put dup 8#201 /arrowright put def
+/pfont { % /New /Base -
+  findfont dup length dict copy dup /Encoding PosterEncoding put definefont pop } def
+/Head-P /AvantGarde-Demi pfont
+/Book-P /AvantGarde-Book pfont
+/Sans-P /Helvetica pfont
+/SansB-P /Helvetica-Bold pfont
+/Narrow-P /Helvetica-Narrow pfont
+/NarrowB-P /Helvetica-Narrow-Bold pfont
+/font { exch findfont exch scalefont setfont } def
+/wht { 1 1 1 setrgbcolor } def
+/ink { 0.10 0.11 0.14 setrgbcolor } def
+/cshow { dup stringwidth pop 2 div neg 0 rmoveto show } def
+/rshow { dup stringwidth pop neg 0 rmoveto show } def
+/tshow { % (string) tracking -> show with extra space between letters
+  0 exch 0 4 -1 roll ashow } def
+/tcshow { % (string) tracking -> centred tracked show
+  2 copy exch length 1 sub mul 2 index stringwidth pop add 2 div neg 0 rmoveto tshow } def
+
+% --------------------------------------------------------- the data
+% The route, (km, m), measured along the trail; the named points are
+% the places the picture shows.
+/Profile [
+  [ 0.0 1412 (Pont da Brenna) ]
+  [ 1.2 1490 () ] [ 2.4 1610 () ] [ 3.6 1745 () ]
+  [ 4.6 1862 (Rifugio Lago Scuro) ]
+  [ 5.3 1950 () ] [ 6.1 2105 () ] [ 7.0 2290 () ]
+  [ 7.9 2436 (Bocchetta di Brenna) ]
+  [ 8.5 2590 () ] [ 8.9 2702 () ]
+  [ 9.4 2874 (Piz Calderan) ]
+] def
+/elev { Profile exch get 1 get } def
+/LastPt Profile length 1 sub def
+/Distance Profile LastPt get 0 get def
+/Ascent 0 1 1 LastPt { dup elev exch 1 sub elev sub 0 max add } for def
+% walking time by DIN 33466: 4 km/h on the flat, 300 m/h up; the longer
+% of the two plus half the shorter, rounded to 5 minutes
+/Hours Distance 4 div Ascent 300 div 2 copy max 3 1 roll min 2 div add def
+/Minutes Hours 60 mul 5 div round 5 mul cvi def
+
+/str { 12 string cvs } def
+/cat { % (a) (b) -> (ab)
+  1 index length 1 index length add string
+  dup 0 4 index putinterval dup 3 index length 3 index putinterval 3 1 roll pop pop } def
+/thou { % int -> (2,874)
+  dup 1000 ge { dup 1000 idiv str (,) cat exch 1000 mod 1000 add str 1 3 getinterval cat }
+              { str } ifelse } def
+/fmt1 { % x -> (x.x)
+  10 mul round cvi dup 10 idiv str (.) cat exch 10 mod str cat } def
+/meters { thou ( m) cat } def
+
+% ------------------------------------------------------------ title
+wht
+/Head-P 58 font
+PW 2 div 776 moveto (PIZ CALDERAN) 2 tcshow
+/Book-P 15 font
+PW 2 div 748 moveto (VAL BRENNA \267 THE SUMMIT TRAIL \267 SUMMER 2027) 2.2 tcshow
+
+% ------------------------------------- labels on the picture's points
+% Type on a photograph: white, over a soft dark shadow of itself.
+/shadowed { % x y {proc} -> run proc at x y in white, over its shadow
+  /sh_p exch def /sh_y exch def /sh_x exch def
+  gsave 0 setgray 0.5 setalpha sh_x 0.7 add sh_y 0.7 sub moveto sh_p grestore
+  wht sh_x sh_y moveto sh_p } def
+/leader { % label-x label-y point-x point-y -> a white leader line
+  newpath moveto lineto
+  gsave 0 setgray 0.4 setalpha 2.4 setlinewidth stroke grestore
+  wht 0.9 setlinewidth stroke } def
+/dot { % x y r -> a white dot with a dark ring
+  /dr exch def 2 copy newpath dr 0 360 arc 0.1 setgray fill
+  newpath dr 0.62 mul 0 360 arc wht fill } def
+/label { % x y (name) (height) {align} -> two lines, name above height
+  /la exch def /lh exch def /ln exch def /ly exch def /lx exch def
+  /SansB-P 10.5 font lx ly 11 add { ln la } shadowed
+  /Sans-P 9.5 font lx ly { lh la } shadowed } def
+
+% The route: up the trail to the hut, the zigzags to the col, then the
+% ridge itself to the summit, all on the coordinates the picture was
+% made from. It stops where the foreground's shade begins.
+/ridgeroute { % the ridge points from the col to the summit
+  ColX ColY moveto
+  0 2 Ridge length 2 sub { /ri exch def
+    Ridge ri get dup ColX gt exch CalderanX le and {
+      Ridge ri get Ridge ri 1 add get lineto } if } for } def
+/routepath { newpath TrailLow smooth TrailHigh pts ridgeroute } def
+gsave
+  0 ShadeTop 8 add PW PH rectclip
+  0 setlinecap 1 setlinejoin
+  routepath 0 setgray 0.4 setalpha 3 setlinewidth stroke
+  1 setalpha [ 4 3 ] 0 setdash 1 0.84 0.28 setrgbcolor 1.5 setlinewidth
+  routepath stroke
+grestore
+
+CalderanX CalderanY 30 add CalderanX CalderanY 5 add leader
+CalderanX CalderanY 3.4 dot
+CalderanX CalderanY 34 add (Piz Calderan) 11 elev meters { cshow } label
+MoraX MoraY 30 add MoraX MoraY 5 add leader
+MoraX MoraY 2.8 dot
+MoraX MoraY 34 add (Piz Mora) (2,512 m) { cshow } label
+ColX 22 add ColY 96 add ColX ColY 4 add leader
+ColX ColY 2.8 dot
+ColX 22 add ColY 100 add (Bocchetta di Brenna) 8 elev meters { cshow } label
+HutX 6 add HutY 2 add 40 HutY 24 sub leader
+HutX 6 add HutY 2 add 2.4 dot
+14 HutY 38 sub (Rifugio Lago Scuro) 4 elev meters { show } label
+
+% ---------------------------------------- the foreground: the facts
+% the elevation profile, computed from the data
+/GX 42 def /GY 50 def /GW 218 def /GH 76 def
+/E0 1400 def /E1 2900 def
+/gx { Distance div GW mul GX add } def
+/gy { E0 sub E1 E0 sub div GH mul GY add } def
+/profilepath {
+  newpath Profile 0 get aload pop pop gy exch gx exch moveto
+  Profile { aload pop pop gy exch gx exch lineto } forall } def
+gsave
+  % the faint area under the profile
+  profilepath GX GW add GY lineto GX GY lineto closepath
+  1 0.84 0.28 setrgbcolor 0.18 setalpha fill 1 setalpha
+  % the grid, the axis and its ticks
+  /Narrow-P 7.5 font
+  1500 500 2500 { /e exch def
+    wht 0.3 setalpha 0.4 setlinewidth newpath GX e gy moveto GX GW add e gy lineto stroke
+    1 setalpha GX 5 sub e gy 2.5 sub moveto e meters rshow } for
+  wht 0.6 setlinewidth newpath GX GY moveto GX GW add GY lineto stroke
+  0 2 10 { /tk exch def tk Distance le {
+      newpath tk gx GY moveto 0 -3 rlineto stroke
+      tk gx GY 12 sub moveto tk str ( km) cat cshow } if } for
+  profilepath 1 0.84 0.28 setrgbcolor 1.8 setlinewidth 1 setlinejoin stroke
+  % the named points, as labelled on the picture
+  Profile { aload pop /pn exch def /pe exch def /pk exch def
+    pn length 0 gt {
+      pk gx pe gy 2.4 dot
+      wht /NarrowB-P 7.5 font
+      pk 0 eq { GX 3 add GY 9 add moveto pn show }
+              { pk gx 4 sub pe gy 4 add moveto pn rshow } ifelse
+    } if } forall
+grestore
+
+% the stats, from the same data
+/SX 288 def /SV SX 168 add def
+wht /Head-P 9 font
+SX 156 moveto (THE TRAIL) 1.2 tshow
+/stat { % y (label) (value)
+  /sv exch def /sl exch def /sy exch def
+  wht /Sans-P 9 font SX sy moveto sl show
+  /SansB-P 9 font SV sy moveto sv rshow } def
+140 (Distance, one way) Distance fmt1 ( km) cat stat
+127 (Ascent) Ascent cvi meters stat
+114 (Walking time up) Minutes 60 idiv str ( h ) cat Minutes 60 mod 100 add str 1 2 getinterval cat ( min) cat stat
+101 (Hut open) (20 June \200 20 September) stat
+
+wht /Head-P 9 font
+SX 80 moveto (BUS 412) 1.2 tshow
+/Sans-P 9 font
+SX 66 moveto (Valbrenna station \201 Pont da Brenna) show
+/SansB-P 9 font
+SX 54 moveto (07:10   08:25   09:40) show
+/Sans-P 9 font
+SX 40 moveto (Pont da Brenna \201 Valbrenna station) show
+/SansB-P 9 font
+SX 28 moveto (15:05   16:35   18:05) show
+
+% the QR code: version 5 at level H, 2-point modules on whole points,
+% its light quiet zone painted
+/QX 466 def /QY 30 def
+QX QY moveto URL << /Level /H >> qrencode
+<< /ModuleSize 2 /Dark [0.10 0.11 0.14] /Light [1 1 1] >> qrdraw
+wht /Sans-P 7.5 font
+QX 49 add QY 12 sub moveto (Scan: how this poster was made) cshow
+} if
+showpage
