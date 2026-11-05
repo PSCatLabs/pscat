@@ -915,8 +915,6 @@
     "qr"
    ],
    "libraries": [
-    "artkit",
-    "paintkit",
     "qr"
    ],
    "featured": false,
@@ -929,7 +927,7 @@
    "speed": 400,
    "alt": "Why Is the Sky Blue?, an A4 talk poster: white serif title over an oil-painted evening sky, the Rayleigh formula, a six-bar chart of scattering by wavelength in the colours of each light, the date and venue over a dark sea, and a navy QR code on a cream tile",
    "blurb": "A talk poster made in two layers: an image model painted the sky once, and pscat sets every exact thing on top.",
-   "technique": "The evening sky is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter and scales it to cover the page. Everything exact is drawn by pscat over it: the type in Palatino, the Rayleigh formula in Times and Symbol, a bar chart whose bar heights and labels the program computes from the formula, and a QR code that `lib/qr.ps` encodes and draws as vector squares, which two independent decoders read from the PNG and the PDF. Changing the copy or the chart re-renders the same sky. Defining `/PscatOnly true` first swaps the painting for a sky painted with paintkit.",
+   "technique": "The evening sky is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter and scales it to cover the page. Everything exact is drawn by pscat over it on a six-column grid: the title in Abril Fatface, the reading lines in Palatino and every label in tracked Jost (`ashow`), the Rayleigh formula set as a real fraction, a bar chart whose bar heights and labels the program computes from the formula, and a QR code that `lib/qr.ps` encodes and draws as vector squares, which two independent decoders read from the PNG and the PDF. A soft shade built from strips of rising `setalpha` sits under the date and venue on the sea. Changing the copy or the chart re-renders the same sky. Defining `/PscatOnly true` first swaps the painting for a screen-printed vector sky that pscat draws itself: `shfill` gradients, three-ink clouds and a low sun.",
    "reference": {
     "file": "examples/hybrid/sky_talk_bg.jpg",
     "alt": "The image model's oil-painted evening sky over a calm sea and a headland, with no text",
@@ -962,7 +960,7 @@
    "speed": 400,
    "alt": "The Lantern Pear, a US Letter café menu: a dark olive serif name and three sections of dishes with prices on cream watercolour paper, two painted pears and leaves in the lower right, and a QR code in the lower left",
    "blurb": "A café menu over a watercolour of pears: the painting from an image model, every dish, price and the QR code from pscat.",
-   "technique": "The watercolour is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter. pscat sets the name, the sections and every dish and price in Palatino, re-encoded for the accents and the en dash, keeping each line clear of the painted pears, and draws a QR code with `lib/qr.ps` on the paper's own cream. A price change is one edit and a re-render. Defining `/PscatOnly true` first swaps the painting for paintkit's own paper and washes.",
+   "technique": "The watercolour is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter. pscat sets the name in Playfair Display, the section heads in tracked Cinzel with hairline rules, and every dish in Palatino with dot leaders to a right-aligned price column that stops where the painted leaves begin, all re-encoded for the accents and the en dash, and draws a QR code with `lib/qr.ps` on the paper's own cream. A price change is one edit and a re-render. Defining `/PscatOnly true` first swaps the painting for a botanical print in flat inks on paintkit's paper.",
    "reference": {
     "file": "examples/hybrid/menu_card_bg.jpg",
     "alt": "The image model's watercolour of two pears and leaves on cream paper, with no text",

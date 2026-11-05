@@ -10,14 +10,20 @@ Two worked examples for [pscat with image models](../../docs/guides/pscat-with-i
 Render from the repository root (the programs read their JPEGs by a relative
 path):
 
+The title and label faces (Abril Fatface and Jost on the poster, Playfair
+Display and Cinzel on the menu) are catalog faces. A checkout has them; an
+installed pscat needs `pscat fonts install --pack extras` first, or they
+stand in as Helvetica.
+
 ```sh
 pscat --page 595x842 --pdf sky_talk.pdf examples/hybrid/sky_talk.ps
 pscat --page 612x792 --pdf menu_card.pdf examples/hybrid/menu_card.ps
 pscat --page 595x842 --dpi 144 --png sky_talk.png examples/hybrid/sky_talk.ps
 ```
 
-`/PscatOnly true def` before a program swaps the painting for one that
-paintkit paints, keeping the exact layer:
+`/PscatOnly true def` before a program swaps the painting for art that
+pscat draws itself (a screen-printed vector sky; a flat-ink botanical print
+of the pears), keeping the exact layer:
 
 ```sh
 { echo '/PscatOnly true def'; cat examples/hybrid/sky_talk.ps; } | \

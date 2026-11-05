@@ -26,8 +26,9 @@
 % 125 pixels per inch across the page, plenty for a soft painted sky).
 %
 % Defining /PscatOnly true before the program swaps the painting for a
-% sky that paintkit paints (the "pscat alone" panel of the comparison in
-% docs/guides/pscat-with-image-models.md); the exact layer is unchanged:
+% sky that pscat draws itself, a screen-printed vector sky (the "pscat
+% alone" panel of the comparison in docs/guides/pscat-with-image-models.md);
+% the exact layer is unchanged:
 %   { echo '/PscatOnly true def'; cat examples/hybrid/sky_talk.ps; } | \
 %     pscat --page 595x842 --dpi 144 --png sky_pscat.png -
 %
