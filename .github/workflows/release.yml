@@ -9,10 +9,12 @@
 #              acceptance, semver against crates.io once there is a baseline);
 #              cargo-about notices; the .crate
 #   binaries   macOS arm64/x86_64, Linux musl x86_64/aarch64, Windows x86_64
-#   assemble   SHA256SUMS and release-manifest.json (commit + digests); the
-#              resume/mismatch rehearsal against fake registries; a read-only
-#              plan against the real registries
-#   draft      a draft GitHub Release with the archives          (real only)
+#   assemble   SHA256SUMS and release-manifest.json (commit + digests) over
+#              the archives and the npm tarball (#1006); the resume/mismatch
+#              rehearsal against fake registries; a read-only plan against
+#              the real registries
+#   draft      a draft GitHub Release with the archives and the npm
+#              tarball                                            (real only)
 #   publish    environment `release` (owner approval): provenance
 #              attestations, crates.io, npm when npm/package.json exists
 #              (the tarball `verify` packed), publish the GitHub Release,
@@ -27,7 +29,9 @@
 # `publish` runs only the draft, publish and plugin stages: no crates.io
 # token is minted, nothing goes to crates.io, npm or the MCP Registry, and
 # the release never becomes "latest". release_stages.py refuses those
-# channels for an rc version whatever stages it is given. The
+# channels for an rc version whatever stages it is given. The pre-release
+# still carries the npm tarball as an asset (#1006), so a browser or npm
+# consumer can install the candidate from its GitHub URL. The
 # post-publish check installs the archives and skips the crate.
 #
 # Every stage checks its registry first: skip on an identical artifact,
@@ -340,8 +344,11 @@ jobs:
           COMMIT: ${{ needs.verify.outputs.commit }}
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
+          # --npm-from: the tarball verify packed becomes a release asset,
+          # listed in SHA256SUMS (#1006); missing while npm/package.json
+          # exists is an error.
           python3 scripts/release_stages.py manifest --tag "$TAG" --commit "$COMMIT" \
-            --dist dist --crate "release-inputs/pscat-$VERSION.crate"
+            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs
           N=$(ls dist/*.tar.gz dist/*.zip | wc -l)
           [ "$N" -eq 5 ] || { echo "::error::expected 5 archives, found $N"; exit 1; }
           { echo '### SHA256SUMS'; echo '```'; cat dist/SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -443,7 +450,8 @@ jobs:
           name: release-inputs
           path: release-inputs
       # Signed SLSA build provenance for every archive and the .crate (#635),
-      # before anything goes public, so a published artifact always has one.
+      # and the npm tarball (#1006), before anything goes public, so a
+      # published artifact always has one.
       # `gh attestation verify FILE --repo PSCatLabs/pscat` checks it
       # (RELEASING.md). A re-run attests the same digests again: harmless.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -451,6 +459,7 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.tgz
             release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on
