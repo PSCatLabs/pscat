@@ -5,7 +5,7 @@
     python3 scripts/release_stages.py bump-manifests 0.6.0
     python3 scripts/release_stages.py version-info 0.7.0-rc.1
     python3 scripts/release_stages.py manifest --tag v0.6.0 --commit SHA \\
-        --dist dist --crate target/package/pscat-0.6.0.crate
+        --dist dist --crate target/package/pscat-0.6.0.crate [--npm-from release-inputs]
     python3 scripts/release_stages.py run --dist dist --crate FILE \\
         --stage draft --stage crates --stage npm --stage publish --stage plugin \\
         --stage registry [--plan] [--fake DIR] [--report-dir DIR]
@@ -28,13 +28,14 @@ that already finished skip, and the rest run.
 
 Stages, in release order:
 
-- `draft`: a draft GitHub Release for the tag holding the archives,
+- `draft`: a draft GitHub Release for the tag holding the archives, the
+  npm tarball when the npm channel is on (#1006; release candidates too),
   SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
   without one is known to be incomplete).
 - `crates`: `cargo publish` to crates.io.
 - `npm`: `npm publish` of the tarball scripts/build_npm.sh packed beside the
-  .crate (release-inputs/<name>-<version>.tgz); enabled only when
-  npm/package.json exists.
+  .crate (release-inputs/<name>-<version>.tgz), after checking it is the
+  file the manifest lists; enabled only when npm/package.json exists.
 - `publish`: makes the draft GitHub Release public, after re-checking it.
 - `plugin`: checks every plugin manifest (Claude Code and Codex) carries
   the release version; enabled only when a plugin manifest exists.
@@ -448,7 +449,39 @@ def registry_identity(server):
     return server.get("name"), server.get("version"), pkgs
 
 
-def build_manifest(tag, commit, dist, crate_path):
+def find_npm_tarball(root, src_dir, version):
+    """The npm tarball verify packed into `src_dir` for this release, or None
+    when the npm channel is off (no npm/package.json). Its name is npm pack's
+    for package.json's name, as the npm stage looks it up; a missing tarball,
+    or one holding another package or version, is an error, so a release
+    cannot quietly ship without it (#1006)."""
+    pkg = npm_manifest(root)
+    if not pkg:
+        return None
+    with open(pkg, encoding="utf-8") as f:
+        name = json.load(f).get("name")
+    path = os.path.join(src_dir, npm_tarball_name(name, version))
+    if not os.path.isfile(path):
+        raise SystemExit(f"npm/package.json exists but there is no npm tarball {path}; "
+                         "the verify job packs it (scripts/build_npm.sh --pack release-inputs)")
+    inner = npm_tarball_manifest(path) or {}
+    if inner.get("name") != name:
+        raise SystemExit(f"{os.path.basename(path)} holds package {inner.get('name')!r}, not {name!r}")
+    return path
+
+
+def npm_asset(manifest):
+    """The name of the npm tarball a release carries as an asset, or None
+    (releases before #1006, or with the npm channel off)."""
+    names = [a["name"] for a in manifest["assets"] if a["name"].endswith(".tgz")]
+    return names[0] if names else None
+
+
+def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
+    """The manifest of the archives in `dist` and the .crate. With
+    `npm_tarball`, that file is copied into `dist` and listed after the
+    archives, so it is uploaded to the GitHub Release (release candidates
+    included) and recorded in SHA256SUMS (#1006)."""
     version = tag[1:] if tag.startswith("v") else tag
     if not VERSION_RE.match(version) or tag != f"v{version}":
         raise SystemExit(f"{tag} is not vX.Y.Z or vX.Y.Z-rc.N")
@@ -457,6 +490,16 @@ def build_manifest(tag, commit, dist, crate_path):
     assets = []
     for name in archives_in(dist):
         p = os.path.join(dist, name)
+        assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
+    if npm_tarball:
+        name = os.path.basename(npm_tarball)
+        inner = npm_tarball_manifest(npm_tarball)
+        if not name.endswith(".tgz") or not inner or inner.get("version") != version:
+            got = inner.get("version") if inner else "no readable package/package.json"
+            raise SystemExit(f"{name} is not the npm tarball of {version} ({got})")
+        p = os.path.join(dist, name)
+        if os.path.abspath(npm_tarball) != os.path.abspath(p):
+            shutil.copyfile(npm_tarball, p)
         assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
     content, sha1 = crate_identity(crate_path)
     if sha1 != commit:
@@ -502,7 +545,7 @@ def release_files(manifest):
     return [a["name"] for a in manifest["assets"]] + [SUMS_NAME, MANIFEST_NAME]
 
 
-def changelog_notes(version, root=ROOT):
+def changelog_notes(version, root=ROOT, npm_tarball=None):
     path = os.path.join(root, "CHANGELOG.md")
     body = ""
     if is_prerelease(version):
@@ -517,11 +560,18 @@ def changelog_notes(version, root=ROOT):
         m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
         if m:
             body = m.group(1).strip() + "\n\n"
+    npm = ""
+    if npm_tarball:
+        where = ("it is not on npm" if is_prerelease(version)
+                 else "the same file that is published to npm")
+        npm = (f"{npm_tarball} is the npm package (WebAssembly, for the browser and Node); {where}. "
+               f"Install it from this release with `npm install https://github.com/PSCatLabs/pscat/releases/"
+               f"download/v{version}/{npm_tarball}`. ")
     return (
         f"{body}Each archive carries the licences (LICENSE-MIT, LICENSE-APACHE, LICENSE-OFL), "
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
-        f"{SUMS_NAME} has the SHA-256 of every archive; {MANIFEST_NAME} records the commit "
-        "they were built from. Install guide: "
+        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}; "
+        f"{MANIFEST_NAME} records the commit they were built from. Install guide: "
         "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )
 
@@ -1106,7 +1156,8 @@ def stage_draft(ctx):
         if ctx.plan:
             return "would create", f"a draft release {ctx.m['tag']} with {len(release_files(ctx.m))} assets"
         rid = ctx.github.create_draft(ctx.m["tag"], f"pscat {ctx.m['version']}",
-                                      changelog_notes(ctx.m["version"], ctx.root), prerelease=ctx.prerelease)
+                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m)),
+                                      prerelease=ctx.prerelease)
         for name in release_files(ctx.m):
             ctx.github.upload(rid, os.path.join(ctx.dist, name), name)
         return "published", f"draft release {ctx.m['tag']} (id {rid})"
@@ -1189,6 +1240,21 @@ def stage_npm(ctx):
     if not inner or (inner.get("name"), inner.get("version")) != (meta["name"], ctx.m["version"]):
         got = f"{inner.get('name')}@{inner.get('version')}" if inner else "no readable package.json"
         raise Halt(f"{os.path.basename(tarball)} holds {got}, not {meta['name']}@{ctx.m['version']}")
+    # The GitHub Release carries the same file (#1006): what npm gets must
+    # be the bytes SHA256SUMS lists. A draft that already exists is judged
+    # by its own manifest, as the draft stage adopts it on a rerun whose
+    # rebuilt artifacts differ, so compare against that, not this run's.
+    if npm_asset(ctx.m):
+        name = os.path.basename(tarball)
+        listed, where = ctx.local.get(name), MANIFEST_NAME
+        rel = the_release(ctx)
+        if rel is not None:
+            ref, adopted = reference_digests(ctx, rel)
+            if adopted:
+                listed, where = ref.get(name), f"release {ctx.m['tag']}'s {MANIFEST_NAME}"
+        if listed != sha256_file(tarball):
+            raise Halt(f"{name} beside the .crate is not the npm tarball {where} lists "
+                       f"(sha256 {listed}); npm and the GitHub Release must carry the same bytes")
     local = npm_integrity(tarball)
     remote = ctx.npm.view(meta["name"], ctx.m["version"])
     if remote is not None:
@@ -1599,6 +1665,10 @@ def main(argv=None):
     mf.add_argument("--commit", required=True)
     mf.add_argument("--dist", required=True)
     mf.add_argument("--crate", required=True)
+    mf.add_argument("--npm-from", metavar="DIR",
+                    help="also attach the npm tarball verify packed into DIR (required there when "
+                         "npm/package.json exists; ignored when it does not)")
+    mf.add_argument("--repo-root", default=ROOT)
 
     for name in ("run", "rehearse"):
         p = sub.add_parser(name)
@@ -1635,7 +1705,10 @@ def main(argv=None):
         return EXIT_OK
 
     if args.cmd == "manifest":
-        m = build_manifest(args.tag, args.commit, args.dist, args.crate)
+        tarball = None
+        if args.npm_from:
+            tarball = find_npm_tarball(args.repo_root, args.npm_from, args.tag.removeprefix("v"))
+        m = build_manifest(args.tag, args.commit, args.dist, args.crate, tarball)
         write_manifest(m, args.dist)
         print(json.dumps(m, indent=2))
         return EXIT_OK
