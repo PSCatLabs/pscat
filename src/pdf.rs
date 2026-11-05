@@ -50,6 +50,7 @@
 //! Verified end-to-end by rasterizing the output with gs and
 //! block-comparing against our own canvas (tests/pdf.rs).
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::rc::Rc;
 
@@ -95,14 +96,23 @@ pub struct PdfRecorder {
     /// Function dict bodies for shadings (#1028), deduped by content so a
     /// ramp reused by many `shfill`s is written once.
     functions: Vec<String>,
+    /// `functions` by body, so interning is one hash lookup: a generative
+    /// piece may `shfill` thousands of times.
+    function_ids: HashMap<String, usize>,
+    /// The function index each stop list (as bits) already produced, so a
+    /// repeated ramp skips building and merging its function text.
+    stops_ids: HashMap<Vec<[u32; 4]>, usize>,
     /// Shading dicts: the body (minus `/Function`) and the index of its
     /// function in `functions`, deduped; pages reference them by index,
     /// like `images`. Empty for a program that never calls `shfill`, so
     /// such documents are byte-identical to what came before.
     shadings: Vec<(String, usize)>,
+    shading_ids: HashMap<(String, usize), usize>,
     /// Which shadings each finished page references.
     page_shadings: Vec<Vec<usize>>,
     current_shadings: Vec<usize>,
+    /// `current_shadings` as a set, for the per-`shfill` membership test.
+    current_shading_set: HashSet<usize>,
 }
 
 impl PdfRecorder {
@@ -123,9 +133,13 @@ impl PdfRecorder {
             author: None,
             open_clip: None,
             functions: Vec::new(),
+            function_ids: HashMap::new(),
+            stops_ids: HashMap::new(),
             shadings: Vec::new(),
+            shading_ids: HashMap::new(),
             page_shadings: Vec::new(),
             current_shadings: Vec::new(),
+            current_shading_set: HashSet::new(),
         }
     }
 
@@ -316,8 +330,19 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
-        let func = stops_function(stops);
-        let fidx = intern(&mut self.functions, func);
+        let stops_key: Vec<[u32; 4]> = stops
+            .iter()
+            .map(|s| [s.0.to_bits(), s.1.to_bits(), s.2.to_bits(), s.3.to_bits()])
+            .collect();
+        let fidx = match self.stops_ids.get(&stops_key) {
+            Some(&i) => i,
+            None => {
+                let func = stops_function(stops);
+                let i = intern(&mut self.functions, &mut self.function_ids, func);
+                self.stops_ids.insert(stops_key, i);
+                i
+            }
+        };
         let body = match *kind {
             crate::svg::ShKind::Axial { x0, y0, x1, y1 } => format!(
                 "/ShadingType 2 /ColorSpace /DeviceRGB /Coords [{} {} {} {}] /Extend [true true]",
@@ -343,18 +368,17 @@ Q",
                 p(r1)
             ),
         };
-        let sidx = match self
-            .shadings
-            .iter()
-            .position(|s| s.0 == body && s.1 == fidx)
-        {
-            Some(i) => i,
+        let key = (body, fidx);
+        let sidx = match self.shading_ids.get(&key) {
+            Some(&i) => i,
             None => {
-                self.shadings.push((body, fidx));
-                self.shadings.len() - 1
+                let i = self.shadings.len();
+                self.shadings.push(key.clone());
+                self.shading_ids.insert(key, i);
+                i
             }
         };
-        if !self.current_shadings.contains(&sidx) {
+        if self.current_shading_set.insert(sidx) {
             self.current_shadings.push(sidx);
         }
         self.enter_clip(chain);
@@ -498,6 +522,7 @@ Q",
         self.current_images.clear();
         self.current_gstates.clear();
         self.current_shadings.clear();
+        self.current_shading_set.clear();
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -712,15 +737,15 @@ fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     enc.finish().ok()
 }
 
-/// Index of `body` in `list`, appending it if new.
-fn intern(list: &mut Vec<String>, body: String) -> usize {
-    match list.iter().position(|b| *b == body) {
-        Some(i) => i,
-        None => {
-            list.push(body);
-            list.len() - 1
-        }
+/// Index of `body` in `list` (looked up through `ids`), appending it if new.
+fn intern(list: &mut Vec<String>, ids: &mut HashMap<String, usize>, body: String) -> usize {
+    if let Some(&i) = ids.get(&body) {
+        return i;
     }
+    let i = list.len();
+    list.push(body.clone());
+    ids.insert(body, i);
+    i
 }
 
 /// The PDF function for a shading's RGB stop list (#1028): linear
