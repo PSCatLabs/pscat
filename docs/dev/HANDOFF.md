@@ -2193,12 +2193,13 @@ renders eight examples in both and compares block-downsampled output).
   `wasm_vector_output_matches_the_cli` in `tests/wasm.rs` holds that, and
   a change to what the CLI does around the recorders (src/main.rs) must be
   mirrored in `ps_begin_vector`. It started as PSCatLabs/print-shop's
-  adapter patch; print-shop's #16 moves that app onto this ABI. Two
-  sentences go stale on dates: `docs/guides/when-to-use-pscat.md` and
-  `site/when-to-use.html` say SVG/PDF from wasm is "on `main`, not in
-  0.7.0-rc.3 or earlier", and that print-shop pins a pre-release engine
-  (#1002). Update both when a release includes #1003 and when print-shop#16
-  lands.
+  adapter patch; print-shop has run on this ABI since its #16, and on the released rc.4
+  package since its #28. Release-status
+  sentences go stale: `docs/guides/when-to-use-pscat.md`,
+  `site/when-to-use.html` and `docs/guides/browser.md` say SVG/PDF from wasm
+  first ships in 0.7.0-rc.4 (npm at 0.7.0), and that print-shop runs on the
+  rc.4 package (#1007). At 0.7.0 final, say it is on npm, and update the
+  print-shop line once print-shop#29 moves it to `pscat@0.7.0`.
   `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed
