@@ -34,7 +34,7 @@ the real module through the same JS library.
 ### SVG and PDF
 
 The wasm build writes the same vector output as `pscat --svg` and
-`pscat --pdf` (#1003, on `main`; not yet in a release). Ask for it when
+`pscat --pdf` (#1003, since 0.7.0-rc.4). Ask for it when
 the program begins: recording is off by default, so a pixels-only page
 pays nothing.
 
@@ -103,7 +103,7 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   the page; `begin` + `step(budget)` or the `frames()` generator drive it
   step by step. Page sizes are in points (default US Letter, 612x792) at
   `dpi` (default 72, one pixel per point). `source` is a string or bytes.
-- **SVG and PDF** (on `main`, not yet released): add `svg: true` and/or
+- **SVG and PDF** (since 0.7.0-rc.4): add `svg: true` and/or
   `pdf: true` to the page options, then `r.svg(page)` (from 0) or
   `r.svgPages()` give the SVG pages as strings and `r.pdf()` the whole
   document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see
