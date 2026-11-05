@@ -1,0 +1,272 @@
+%!PS-Adobe-3.0
+%%Title: Harbour Ferry (a hybrid timetable: image model + pscat)
+%%BoundingBox: 0 0 595 842
+%%EndComments
+
+% An A4 ferry timetable, the "harder example" of the guide
+% docs/guides/pscat-with-image-models.md: 40 departure times, 8 fares,
+% two lines of small print and a QR code, where one wrong digit sends a
+% passenger to the pier at the wrong time. Made in two layers:
+%
+%   1. The atmosphere: examples/hybrid/ferry_bg.jpg, a watercolour of a
+%      ferry and a lighthouse made once by an image model (the prompt is
+%      in examples/hybrid/README.md) and then frozen.
+%   2. The exact layer, everything below. The times are not typed in: the
+%      program computes them from the eight departures at Harbourside Pier
+%      and each stop's minutes out, so a change to one sailing moves its
+%      whole column and nothing else.
+%
+% Render from the repository root (the program reads the JPEG by a
+% relative path):
+%   pscat --page 595x842 --pdf ferry.pdf examples/hybrid/ferry_timetable.ps
+%   pscat --page 595x842 --dpi 144 --png ferry.png examples/hybrid/ferry_timetable.ps
+% The title and table faces (Abril Fatface, Jost) are catalog faces: a
+% checkout has them, an installed pscat needs `pscat fonts install --pack
+% extras` (without it they stand in as Helvetica).
+%
+% Defining /PscatOnly true before the program swaps the painting for a
+% harbour that pscat draws itself in flat inks; the exact layer is
+% unchanged:
+%   { echo '/PscatOnly true def'; cat examples/hybrid/ferry_timetable.ps; } | \
+%     pscat --page 595x842 --dpi 144 --png ferry_pscat.png -
+%
+% The ferry, its stops and its fares are invented.
+% CC0 1.0 (see LICENSE-CC0). The background image was made by OpenAI's
+% image model; examples/hybrid/README.md says where it came from and how
+% it is licensed.
+
+(lib/qr.ps) run
+
+/PscatOnly where { pop } { /PscatOnly false def } ifelse
+% The soft marks use pscat's setalpha. Where it is missing (Ghostscript)
+% it becomes a no-op so the program still runs, but those marks then
+% print solid: render it with pscat.
+/setalpha where { pop } { /setalpha { pop } bind def } ifelse
+
+/PW 595 def /PH 842 def
+/URL (https://pscatlabs.github.io/pscat/hybrid.html) def
+
+% ------------------------------------------------------------------ data
+% The departures from the first stop, in minutes after midnight (07:15,
+% then every 90 minutes), and each stop's minutes out from it.
+/DEPARTS [ 0 1 7 { 90 mul 435 add } for ] def
+/STOPS [
+  [ (Harbourside Pier)  0 ]
+  [ (Mill Lane Steps)   7 ]
+  [ (Lighthouse Point) 16 ]
+  [ (Gull Island)      29 ]
+  [ (Westbay)          41 ]
+] def
+/FARES [ % label single return
+  [ (Adult)              (3.40) (6.20) ]
+  [ (Child \(5\20015\)) (1.70) (3.10) ]
+  [ (Concession)         (2.30) (4.20) ]
+  [ (Bicycle)            (1.00) (1.80) ]
+] def
+/hhmm { % minutes -> (hh:mm), a new string each time
+  dup 60 idiv exch 60 mod                        % h m
+  (00:00) 5 string copy                          % h m s
+  dup 0 4 index 10 idiv 48 add put  dup 1 4 index 10 mod 48 add put
+  dup 3 3 index 10 idiv 48 add put  dup 4 3 index 10 mod 48 add put
+  3 1 roll pop pop } def
+
+% ---------------------------------------------------------------- fonts
+% Abril Fatface for the name only, Palatino for the reading lines, Jost
+% for the table, the fares and every label. Latin-1 plus an en dash in
+% the unused slot 8#200, for "Child (5-15)" with its proper dash.
+/TTEncoding ISOLatin1Encoding dup length array copy dup 8#200 /endash put def
+/ttfont { % /New /Base -
+  findfont dup length dict copy dup /Encoding TTEncoding put definefont pop
+} def
+/Display-T /AbrilFatface-Regular ttfont
+/Ital-T /Palatino-Italic ttfont
+/Label-T /Jost-Regular ttfont
+/font { exch findfont exch scalefont setfont } def
+/twidth { % (s) track -> w
+  1 index stringwidth pop exch 2 index length 1 sub mul add exch pop } def
+/tshow { 0 3 -1 roll ashow } def                % (s) track -
+/rshow { dup stringwidth pop neg 0 rmoveto show } def
+/cshow { dup stringwidth pop 2 div neg 0 rmoveto show } def
+
+/navy { 0.07 0.15 0.31 setrgbcolor } def
+/signal { 0.74 0.20 0.18 setrgbcolor } def      % the lighthouse red
+/rule { 0.07 0.15 0.31 setrgbcolor } def
+
+% ----------------------------------------------------------------- grid
+% A4, 44 pt margins (a 507 pt measure). The table: a 132 pt column of
+% stop names, then eight 46.875 pt columns of times, each time centred on
+% its column; rows 28 pt apart. Below it, the fares on the left half and
+% the QR code on the right, then the small print across the foot.
+/M 44 def /RIGHT PW M sub def
+/NAMEW 132 def
+/TCOL RIGHT M NAMEW add sub DEPARTS length div def
+/tx { TCOL mul M add NAMEW add TCOL 2 div add } def   % column -> centre x
+
+% ------------------------------------------------------------- the layer
+PscatOnly {
+  % pscat alone: a harbour in flat inks, as a screen print would make it,
+  % across the top of the sheet, on paintkit's paper.
+  (lib/artkit.ps) run
+  (lib/paintkit.ps) run
+  0 0 PW PH << /Tone [0.985 0.965 0.915] /Grain 0.45 /Seed 5 >> pkpaper
+  /HZ 640 def                                   % the horizon
+  /vband { % y0 y1 [r g b] [r g b] -   a vertical ramp in 1 pt strips
+    /vb_c1 exch def /vb_c0 exch def /vb_y1 exch def /vb_y0 exch def
+    vb_y0 1 vb_y1 { /vb_y exch def
+      /vb_f vb_y vb_y0 sub vb_y1 vb_y0 sub div def
+      0 1 2 { /k exch def vb_c0 k get vb_c1 k get vb_c0 k get sub vb_f mul add } for
+      setrgbcolor 0 vb_y PW 2 rectfill } for } def
+  gsave
+    % the picture's edge: a slow wave above the paper
+    newpath 0 PH moveto PW PH lineto PW 560 lineto
+    480 548 400 574 300 560 curveto 200 546 120 572 0 556 curveto closepath clip
+    HZ PH [0.80 0.89 0.95] [0.42 0.64 0.86] vband
+    540 HZ [0.23 0.47 0.68] [0.50 0.70 0.84] vband
+    % distant hills, two inks
+    0.62 0.72 0.80 setrgbcolor
+    newpath 0 HZ moveto 60 HZ 18 add 140 HZ 22 add 220 HZ 8 add curveto
+    260 HZ lineto closepath fill
+    0.55 0.66 0.76 setrgbcolor
+    newpath 300 HZ moveto 360 HZ 10 add 420 HZ 12 add 470 HZ 4 add curveto 480 HZ lineto closepath fill
+    % the headland and the lighthouse on the right
+    0.47 0.44 0.36 setrgbcolor
+    newpath 420 HZ moveto 450 HZ 20 add 520 HZ 34 add PW 10 add HZ 36 add curveto
+    PW 10 add HZ 8 sub lineto 470 HZ 8 sub lineto closepath fill
+    0.66 0.60 0.44 setrgbcolor
+    newpath 452 HZ 14 add moveto 500 HZ 30 add 560 HZ 32 add PW 10 add HZ 34 add curveto
+    PW 10 add HZ 26 add lineto 540 HZ 24 add 490 HZ 20 add 452 HZ 14 add curveto fill
+    /LX 530 def /LY HZ 32 add def
+    1 1 1 setrgbcolor newpath LX 11 sub LY moveto LX 7 sub LY 92 add lineto
+    LX 7 add LY 92 add lineto LX 11 add LY lineto closepath fill
+    gsave newpath LX 11 sub LY moveto LX 7 sub LY 92 add lineto
+      LX 7 add LY 92 add lineto LX 11 add LY lineto closepath clip
+      signal LX 15 sub LY 30 add 30 16 rectfill LX 15 sub LY 64 add 30 14 rectfill grestore
+    0.20 0.22 0.26 setrgbcolor LX 9 sub LY 92 add 18 3 rectfill
+    1 0.92 0.62 setrgbcolor LX 6 sub LY 95 add 12 11 rectfill
+    signal newpath LX 9 sub LY 106 add moveto LX LY 116 add lineto LX 9 add LY 106 add lineto closepath fill
+    % the lighthouse's reflection, broken by the swell
+    0.86 0.40 0.36 setrgbcolor 0.5 setalpha
+    0 1 9 { /k exch def LX 9 sub k 2 mod 3 mul add HZ 6 sub k 5 mul sub 16 k 3 mod sub 2 rectfill } for
+    1 setalpha
+    % the ferry: hull, deckhouse, windows, wheelhouse and mast
+    /FX 150 def /FY 600 def
+    0.92 0.95 0.98 setrgbcolor 0.6 setalpha
+    newpath FX 20 sub FY 2 sub moveto FX 210 add FY 2 sub lineto FX 200 add FY 6 sub lineto FX 10 sub FY 6 sub lineto closepath fill
+    1 setalpha
+    0.10 0.22 0.48 setrgbcolor
+    newpath FX FY moveto FX 190 add FY lineto FX 214 add FY 28 add lineto FX 6 sub FY 24 add lineto closepath fill
+    0.74 0.20 0.18 setrgbcolor FX 2 add FY 1 add 188 3 rectfill
+    0.97 0.97 0.95 setrgbcolor FX 20 add FY 24 add 150 26 rectfill FX 110 add FY 50 add 54 18 rectfill
+    0.16 0.24 0.34 setrgbcolor
+    0 1 7 { 16 mul FX 28 add add FY 32 add 11 10 rectfill } for
+    FX 116 add FY 55 add 42 8 rectfill
+    0.30 0.30 0.30 setrgbcolor 1.4 setlinewidth
+    newpath FX 140 add FY 68 add moveto FX 140 add FY 96 add lineto stroke
+    signal newpath FX 140 add FY 96 add moveto FX 152 add FY 92 add lineto FX 140 add FY 88 add lineto closepath fill
+    % the wake and the swell: short pale strokes
+    1 1 1 setrgbcolor 0.75 setalpha
+    3 srand
+    0 1 40 { pop
+      /wx rand 1000 mod 1000 div PW mul def /wy rand 1000 mod 1000 div 90 mul 545 add def
+      wx wy rand 30 mod 10 add 1.2 rectfill } for
+    0 1 10 { /k exch def FX 30 sub k 9 mul sub FY 2 add k 1.5 mul sub 26 k 2 mul sub 1.6 rectfill } for
+    1 setalpha
+    % three gulls
+    0.25 0.28 0.32 setrgbcolor 1.3 setlinewidth 1 setlinecap
+    [ [330 760 9] [360 745 7] [300 735 6] ] { aload pop /gs exch def /gy exch def /gx exch def
+      newpath gx gs sub gy moveto
+      gx gs 0.6 mul sub gy gs 0.5 mul add  gx gs 0.2 mul sub gy gs 0.4 mul add  gx gy curveto
+      gx gs 0.2 mul add gy gs 0.4 mul add  gx gs 0.6 mul add gy gs 0.5 mul add  gx gs add gy curveto
+      stroke } forall
+  grestore
+} {
+  % the hybrid: the frozen painting, scaled to cover the page.
+  gsave
+    0 0 PW PH rectclip
+    /BgW 1055 def /BgH 1491 def
+    PW PW BgW div BgH mul scale
+    /DeviceRGB setcolorspace
+    << /ImageType 1 /Width BgW /Height BgH /BitsPerComponent 8
+       /Decode [0 1 0 1 0 1] /ImageMatrix [BgW 0 0 BgH neg 0 BgH]
+       /DataSource (examples/hybrid/ferry_bg.jpg) (r) file /DCTDecode filter
+    >> image
+  grestore
+} ifelse
+
+% ------------------------------------------------------------ the title
+navy
+/Display-T 68 font
+M 3 sub 470 moveto (Harbour Ferry) show
+/Ital-T 18 font
+M 441 moveto (Winter timetable from Tuesday 1 December 2026) show
+
+% ------------------------------------------------------------ the table
+% A navy head band, then one 28 pt row per stop: the stop in the name
+% column, its eight times centred on the time columns.
+/band { % y h (left) (right) x1 -   a navy band, M to x1, with white tracked labels
+  /bd_x exch def /bd_r exch def /bd_l exch def /bd_h exch def /bd_y exch def
+  navy M bd_y bd_x M sub bd_h rectfill
+  1 1 1 setrgbcolor /Label-T 11 font
+  M 8 add bd_y bd_h 2 div add 4 sub moveto bd_l 1.8 tshow
+  bd_x 8 sub bd_y bd_h 2 div add 4 sub moveto bd_r 1.2 2 copy twidth neg 0 rmoveto tshow } def
+/TOP 404 def                                     % the head band's top
+TOP 24 sub 24 (MONDAY TO SATURDAY) (DEPARTURES) RIGHT band
+/ROW 28 def
+/row0 TOP 24 sub ROW sub 9 add def               % the first row's baseline
+% a pale band behind every other row, to carry the eye along it
+0 1 STOPS length 1 sub { /r exch def
+  r 2 mod 1 eq { 0.07 0.15 0.31 setrgbcolor 0.11 setalpha
+    M row0 r ROW mul sub 9 sub RIGHT M sub ROW rectfill 1 setalpha } if } for
+0 1 STOPS length 1 sub { /r exch def
+  STOPS r get aload pop /out exch def /name exch def
+  /y row0 r ROW mul sub def
+  navy /Label-T 13 font
+  M 8 add y moveto name show
+  /Label-T 14 font
+  0 1 DEPARTS length 1 sub { /c exch def
+    c tx y moveto DEPARTS c get out add hhmm cshow } for
+} for
+1.2 setlinewidth rule
+/tbot row0 STOPS length 1 sub ROW mul sub 9 sub def
+newpath M tbot moveto RIGHT tbot lineto stroke
+
+% ------------------------------------------------------------ the fares
+% The fares on the left half, the same head band cut to its width.
+/FTOP tbot 30 sub def
+/SX M 200 add def /RX M 290 add def              % the price columns' right edges
+FTOP 24 sub 24 (FARES) () RX 8 add band
+1 1 1 setrgbcolor /Label-T 12 font
+SX FTOP 12 sub 4 sub moveto (Single) rshow
+RX FTOP 12 sub 4 sub moveto (Return) rshow
+0 1 FARES length 1 sub { /r exch def
+  FARES r get aload pop /ret exch def /sgl exch def /lab exch def
+  /y FTOP 24 sub 18 sub r 24 mul sub def
+  r 2 mod 1 eq { 0.07 0.15 0.31 setrgbcolor 0.11 setalpha
+    M y 8 sub RX 8 add M sub 24 rectfill 1 setalpha } if
+  navy /Label-T 13 font
+  M 8 add y moveto lab show
+  /Label-T 14 font
+  SX y moveto sgl rshow
+  RX y moveto ret rshow
+} for
+1.2 setlinewidth rule
+/fbot FTOP 24 sub 18 sub 3 24 mul sub 8 sub def
+newpath M fbot moveto RX 8 add fbot lineto stroke
+
+% ---------------------------------------------------------- the QR code
+% The URL is 44 bytes: version 5 at level H, 2-point modules on whole
+% points, the quiet zone painted in the paper's tone. It sits on the
+% right, its top on the fares' head band, the caption under it.
+/QX 461 def /QY FTOP 90 sub def
+QX QY moveto URL << /Level /H >> qrencode
+/QLight PscatOnly { [0.985 0.965 0.915] } { [0.98 0.95 0.89] } ifelse def
+<< /ModuleSize 2 /Dark [0.07 0.15 0.31] /Light QLight >> qrdraw
+navy /Ital-T 12 font
+RIGHT QY 8 sub moveto (Scan: how this timetable was made) rshow
+
+% ------------------------------------------------------ the small print
+0.6 setlinewidth rule newpath M 66 moveto RIGHT 66 lineto stroke
+navy /Ital-T 11.5 font
+M 48 moveto (Children under 5 travel free. Tickets on board, card or cash.) show
+M 32 moveto (Sailings may be cancelled in high winds; check the board at each pier.) show
+showpage

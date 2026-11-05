@@ -75,10 +75,11 @@ How each fact was checked:
   read at full size against the brief. Every string in both images is right:
   the title, the date with its middle dot, "Gruyère" with its accent, the en
   dashes in "8–11" and "12–3".
-- **Numbers.** (a)'s chart labels are right and its bars, measured in pixels,
-  are within 2% of the values (9.39, 5.93, 3.82, 2.58 and 1.88 times the
-  700 nm bar, against 9.38, 5.86, 3.84, 2.62 and 1.85). Its nine prices are
-  right.
+- **Numbers.** (a)'s chart labels are right. Its bars, measured in pixels
+  from the axis and scaled so the 400 nm bar reads 9.4, read 5.91, 3.80,
+  2.61, 1.87 and 1.02 against 5.9, 3.8, 2.6, 1.9 and 1.0: within 2%. One
+  pixel is about 3% of the shortest bar, so that is as close as a picture
+  of a chart can be measured. Its nine prices are right.
 
 Each whole-poster image is the image model's first and only attempt, with no
 retries and no picking; the [examples README](../../examples/hybrid/README.md)
@@ -86,8 +87,10 @@ says how they were made.
 
 ### What this shows
 
-Every word and number in both of the image model's posters is right. Its QR
-codes are where it failed, in both attempts: both decoders locate a symbol
+Every word and number in both of the image model's posters is right. The
+[repeat test](#is-it-right-every-time-a-repeat-test) below ran both briefs
+six more times each, and every word and number was right in all 12 runs. Its QR codes are
+where it failed, in both attempts here and in every repeat: both decoders locate a symbol
 and neither can read it. The pattern looks like a QR code, but its error
 correction does not check out.
 
@@ -117,6 +120,107 @@ serif family.
 Where the hybrid beats pscat alone is the painting. pscat's own art (a
 screen-printed sky, a botanical print) is deliberate and clean, but an image
 model's painted light is richer, and costs one prompt.
+
+## Is it right every time? A repeat test
+
+One correct image is one sample. An image model is sampled, so we ran the
+same whole-poster and whole-menu instructions again, six times each, and
+checked every result the same way. The model was OpenAI's image model through
+the Codex CLI 0.166 `image_generation` tool, on 2026-11-05. The instructions
+were the ones above, with one sentence added at the end: "Do not check, edit
+or post-process the image after generating it." That stopped Codex from
+patching its own QR code, as it began to in #995. Codex rewrites
+each instruction into its own prompt for the image tool, so the prompt that
+reached the tool differed from run to run. Every one is recorded verbatim in
+the [examples README](../../examples/hybrid/README.md#the-repeat-runs-2026-11-05).
+Each saved image is byte-identical to the tool's original output.
+
+| Run | Text errors | Number errors | QR: rqrr | QR: rxing | Largest bar-height error |
+|---|---|---|---|---|---|
+| Poster 1 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 15% (bars 450–700 nm too tall) |
+| Poster 2 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | nothing found | 5% |
+| Poster 3 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 8% (the 700 nm bar, about 2.5 px) |
+| Poster 4 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 1% |
+| Poster 5 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 2% |
+| Poster 6 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 3% |
+| Menu 1 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 2 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 3 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 4 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 5 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 6 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+
+In sum: 0 text and 0 number errors in all 12 runs, and 0 of 12 QR codes decode.
+
+How it was checked:
+
+- **Text and numbers.** Every string and number of the brief was read on a
+  2x crop of the original image. That included every small glyph: the middle
+  dots, the × signs, the en dashes in "8–11" and "12–3", which were measured
+  against the digits, the accents in "Café" and "Gruyère", and the formula's
+  ∝, λ and superscript 4. Nothing was wrong, missing or misplaced. Some runs
+  set the formula as a stacked fraction or added y-axis tick numbers; neither
+  is counted as an error.
+- **Bar heights.** Each poster's bars were measured in pixels from the axis
+  and scaled so that the 400 nm bar reads 9.4; the table gives each run's
+  largest error. Four runs came within 5% of every value, one within 4% except
+  its shortest bar, and run 1's 450 to 700 nm bars were 6 to 15% too tall (5.9
+  read as 6.27, 1.0 as 1.15). One pixel is 3 to 4% of the shortest bar. The
+  labels were right in every run; the bars are a picture of the numbers.
+- **QR codes.** rqrr found a symbol in all 12 images and failed its error
+  correction every time. rxing failed its checksum on 11 and found no code at
+  all in poster run 2. Neither decoded any of them.
+
+**Then one small edit.** We gave the image model the first poster run and
+asked it to "change only the date line" to "Friday 4 December 2026 · 7:30 pm",
+and gave it the first menu run with the instruction to change only the Flat
+white price to 3.95. Both edits came back right, and every other string still
+read correctly at full size (the edits were not proofread on 2x crops). But
+the model redrew the whole image, not just the line we asked about. Outside
+the edited line, 42% of the poster's pixels and 20% of the menu's changed by
+more than 8 levels out of 255, and about 1% and 0.3% by more than 64: every
+glyph edge and brush mark moved slightly, and the QR code's region was
+redrawn with the rest. Neither code decodes. So each edit is a new image, and it needs proofreading again
+from top to bottom. In the hybrid, the same edit changes one string.
+
+So, on the date we ran it: this model set every word and number right in 12
+of 12 attempts, and drew a scannable QR code in 0 of 12. That is a measured
+rate for these two briefs, not a guarantee for the next run or the next
+model.
+
+## A harder example: a ferry timetable
+
+To push on exactness, the third example is denser: an A4 ferry timetable
+([`ferry_timetable.ps`](../../examples/hybrid/ferry_timetable.ps)) with five
+stops, 40 departure times, 8 fares, two lines of small print and a QR code.
+In pscat the times are not typed in: the program computes them from the
+eight departures and each stop's minutes out, and `tests/hybrid.rs` checks
+the painted times against the brief, which is typed out separately. The image
+model painted the watercolour header once and it was frozen, as before.
+
+![Three versions of the Harbour Ferry timetable side by side, with the checked facts under each panel](hybrid/ferry_compare.png)
+
+The image model was asked for the whole timetable five times, with every
+time and fare quoted in the instruction. The scoring list was written down
+before any image was opened: the title, the subtitle, the five stop names,
+40 times, the two column heads, four fare labels, eight fares, the small
+print and the caption, 64 strings in all, 48 of them numbers. "Monday to
+Saturday", which the instruction mentions but does not quote as copy, was
+not scored.
+
+| Run (2026-11-05) | Text errors (of 64 strings) | Time and fare errors (of 48) | QR: rqrr | QR: rxing |
+|---|---|---|---|---|
+| Timetable 1 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 2 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 3 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 4 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 5 | 0 | 0 | found, error correction fails | checksum fails |
+
+All 200 times and all 40 fares across the five runs are right and in the
+right cells, with the en dash in "Child (5–15)" and the semicolon in the
+small print. The model's text did not break down on the denser page in these
+runs. Its QR codes failed every time. Panel (a) is the first run, with no
+picking.
 
 ## The workflow
 
@@ -244,8 +348,10 @@ For an agent that has both an image tool and pscat (the
   image model's job alone;
 - **nothing needs to look painted**: a chart for a paper, a QR card, a form.
   pscat alone is simpler, and its own paint and dry media may be enough;
-- the page is a one-off with a few words and no code to scan, and you are
-  willing to proofread the model's output: in this test, its text was right.
+- the page is a one-off with no code to scan, and you are willing to
+  proofread the model's output: in our runs its text and numbers were right
+  every time (19 whole-page images and 2 edits, three briefs), but each new
+  image or edit needs reading again.
 
 ## Limits
 

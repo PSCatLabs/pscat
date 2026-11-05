@@ -66,6 +66,27 @@
       vector art does not match for painted light.</li>
   </ul>
 
+  <h2>Is it right every time?</h2>
+  <p>An image model is sampled, so one good image is one sample. On
+  2026-11-05 we ran the whole-poster and whole-menu briefs six more times
+  each, and a denser brief, a ferry timetable with 40 times and 8 fares, five
+  times. Every string and number was read on 2x crops, and every QR code was
+  run through two decoders.</p>
+  <ul>
+    <li><b>Text and numbers:</b> right in all 17 images: every word, every price
+      and all 200 of the timetable runs' times. The bar charts' heights were
+      within 5% in four poster runs out of six; one run was off by up to 15%.</li>
+    <li><b>QR codes:</b> 0 of 17 decoded.</li>
+    <li><b>A one-line edit</b> ("change only the date") came back right, but
+      the model redrew the whole image: 42% of the poster's other pixels
+      changed by more than 8 levels out of 255, so it needs proofreading
+      again.</li>
+  </ul>
+  <p>That is what we measured for this model on that date, not a guarantee.
+  The timetable three ways, with pscat computing the times:</p>
+  <p><img class="cmp" src="assets/renders/compare_ferry.png" width="1249" height="761" loading="lazy"
+    alt="The ferry timetable three ways, side by side, with the checked facts under each panel"></p>
+
   <h2>When it is worth it</h2>
   <p>When a page needs both a painted look and something exact: a QR code,
   numbers from data, a page that will be edited or made in versions, or print

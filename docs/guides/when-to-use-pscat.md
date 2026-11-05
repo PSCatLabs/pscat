@@ -466,4 +466,7 @@ turn it into an engraving ([Printmaking](printmaking.md)).
 examples, an A4 talk poster and a café menu, each with a side-by-side
 comparison of the image model alone, pscat alone and the two together, and
 the facts checked under each: whether the QR code decodes, whether the text is
-spelled right, whether the numbers are right.
+spelled right, whether the numbers are right. It also has a repeat test, the same
+briefs run again and checked each time, and a denser ferry timetable. In
+those runs, on 2026-11-05, the image model set every word and number right
+and never drew a QR code that scans.
