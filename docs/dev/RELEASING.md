@@ -667,6 +667,9 @@ and `release-manifest.json` record the same digests unsigned.
   `ref` at a scratch commit made with
   `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (push that
   as a branch, never a tag). Its rehearsal runs the rc scenarios below.
+  The workflow file comes from the default branch but the scripts from
+  `ref`, so a `ref` older than the workflow's script options (`version-info`,
+  #854; `manifest --npm-from`, #1006) fails in `verify` or `assemble`.
 - **The rehearsal** (`python3 scripts/release_stages.py rehearse --dist DIR
   --crate FILE`) runs these scenarios against fresh fake registries with the
   real artifacts:
