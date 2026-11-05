@@ -766,15 +766,52 @@ fn stops_function(stops: &[(f32, f32, f32, f32)]) -> String {
         )
     };
     let stops = merge_collinear_stops(stops);
-    // (end position as written, leg) for every leg of positive width.
+    type Stop = (f32, f32, f32, f32);
+    // (end position, from, to) for every leg of positive width; each
+    // starts where the previous one ended (the first at 0).
+    let mut spans: Vec<(f32, Stop, Stop)> = Vec::new();
+    for w in stops.windows(2) {
+        if w[1].0 > w[0].0 {
+            spans.push((w[1].0.clamp(0.0, 1.0), w[0], w[1]));
+        }
+    }
+    // A hard edge at either end of the axis (two stops at 0, or at 1, in
+    // different colours) has no leg of its own, but the raster pads with
+    // the outermost stop's colour, so the PDF must end on it too: give it
+    // a sliver leg, `EDGE` wide, or recolour a leg already that narrow.
+    const EDGE: f32 = 1e-6;
+    let same = |a: &Stop, b: &Stop| a.1 == b.1 && a.2 == b.2 && a.3 == b.3;
+    if let (Some(&last), Some(&(_, _, to))) = (stops.last(), spans.last())
+        && !same(&last, &to)
+    {
+        let n = spans.len();
+        let start = if n >= 2 { spans[n - 2].0 } else { 0.0 };
+        if start < 1.0 - EDGE {
+            spans[n - 1].0 = 1.0 - EDGE;
+            spans.push((1.0, to, last));
+        } else {
+            spans[n - 1].2 = last;
+        }
+    }
+    if let (Some(&first), Some(&(end, from, _))) = (stops.first(), spans.first())
+        && !same(&first, &from)
+    {
+        if end > EDGE {
+            spans.insert(0, (EDGE, first, from));
+        } else {
+            spans[0].1 = first;
+        }
+    }
+    // (end position as written, leg); a leg whose end prints the same as
+    // its start is dropped, so `/Bounds` stays strictly increasing.
     let mut legs: Vec<(String, String)> = Vec::new();
     let mut start = "0".to_string();
-    for w in stops.windows(2) {
-        let end = p(w[1].0.clamp(0.0, 1.0));
-        if end == start || w[1].0 <= w[0].0 {
+    for (end, from, to) in &spans {
+        let end = p(*end);
+        if end == start {
             continue;
         }
-        legs.push((end.clone(), leg(&w[0], &w[1])));
+        legs.push((end.clone(), leg(from, to)));
         start = end;
     }
     match legs.len() {

@@ -414,6 +414,41 @@ fn stitched_shfill_keeps_its_legs_and_hard_edge() {
     assert_gs_matches(&pdf, &canvas, "sh_stitched");
 }
 
+/// A hard edge at each end of the axis (a zero-width first and last leg,
+/// in other colours than their neighbours): the raster pads with the
+/// outermost stops' colours, so the PDF function must start red and end
+/// blue, not green (a Codex review of #1028 found the end dropped).
+#[test]
+fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
+    let src = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [100 0 400 0]
+       /Function << /FunctionType 3 /Domain [0 1] /Bounds [0 0.99999988 1] /Encode [0 1 0 1 0 1 0 1]
+         /Functions [
+           << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [0 1 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [0 1 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> ] >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 2);
+    let px = |x: u32| {
+        let c = canvas.pixel(x, 250).expect("pixel");
+        (c.red(), c.green(), c.blue())
+    };
+    let text = pdf_text(&pdf);
+    let func = text
+        .split("/FunctionType 3")
+        .nth(1)
+        .expect("a stitching function");
+    let first_c0 = func.split("/C0 [").nth(1).and_then(|r| r.split(']').next());
+    let last_c1 = func
+        .rsplit("/C1 [")
+        .next()
+        .and_then(|r| r.split(']').next());
+    let as_rgb = |(r, g, b): (u8, u8, u8)| format!("{} {} {}", r / 255, g / 255, b / 255);
+    assert_eq!(first_c0, Some(as_rgb(px(20)).as_str()), "left pad: {func}");
+    assert_eq!(last_c1, Some(as_rgb(px(480)).as_str()), "right pad: {func}");
+    assert_gs_matches(&pdf, &canvas, "sh_end_edges");
+}
+
 #[test]
 fn clipped_shfill_paints_inside_the_clip_group() {
     let src = [
