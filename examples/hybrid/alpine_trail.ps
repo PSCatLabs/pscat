@@ -250,7 +250,7 @@ Stage /Reference ne {
 /cshow { dup stringwidth pop 2 div neg 0 rmoveto show } def
 /rshow { dup stringwidth pop neg 0 rmoveto show } def
 /tshow { % (string) tracking -> show with extra space between letters
-  0 exch 0 4 -1 roll ashow } def
+  0 3 -1 roll ashow } def
 /tcshow { % (string) tracking -> centred tracked show
   2 copy exch length 1 sub mul 2 index stringwidth pop add 2 div neg 0 rmoveto tshow } def
 
@@ -309,8 +309,8 @@ PW 2 div 748 moveto Season /Autumn eq { (VAL BRENNA \267 THE SUMMIT TRAIL \267 A
   newpath dr 0.62 mul 0 360 arc wht fill } def
 /label { % x y (name) (height) {align} -> two lines, name above height
   /la exch def /lh exch def /ln exch def /ly exch def /lx exch def
-  /SansB-P 12 font lx ly 12.5 add { ln la } shadowed
-  /Sans-P 10.5 font lx ly { lh la } shadowed } def
+  /SansB-P 13 font lx ly 13.5 add { ln la } shadowed
+  /Sans-P 11 font lx ly { lh la } shadowed } def
 
 % The route: up the trail to the hut, the zigzags to the col, then the
 % ridge itself to the summit, all on the coordinates the picture was
@@ -324,8 +324,8 @@ PW 2 div 748 moveto Season /Autumn eq { (VAL BRENNA \267 THE SUMMIT TRAIL \267 A
 gsave
   0 ShadeTop 8 add PW PH rectclip
   0 setlinecap 1 setlinejoin
-  routepath 0 setgray 0.4 setalpha 3 setlinewidth stroke
-  1 setalpha [ 4 3 ] 0 setdash 1 0.84 0.28 setrgbcolor 1.5 setlinewidth
+  routepath 0 setgray 0.45 setalpha 4 setlinewidth stroke
+  1 setalpha [ 5 3 ] 0 setdash 1 0.86 0.30 setrgbcolor 2.2 setlinewidth
   routepath stroke
 grestore
 
@@ -335,9 +335,9 @@ CalderanX CalderanY 34 add (Piz Calderan) 11 elev meters { cshow } label
 MoraX MoraY 30 add MoraX MoraY 5 add leader
 MoraX MoraY 2.8 dot
 MoraX MoraY 34 add (Piz Mora) (2,512 m) { cshow } label
-ColX 22 add ColY 96 add ColX ColY 4 add leader
+ColX 36 add ColY 96 add ColX ColY 4 add leader
 ColX ColY 2.8 dot
-ColX 22 add ColY 100 add (Bocchetta di Brenna) 8 elev meters { cshow } label
+ColX 36 add ColY 100 add (Bocchetta di Brenna) 8 elev meters { cshow } label
 HutX 6 add HutY 2 add 40 HutY 34 sub leader
 HutX 6 add HutY 2 add 2.4 dot
 12 HutY 60 sub (Rifugio Lago Scuro) 4 elev meters { show } label

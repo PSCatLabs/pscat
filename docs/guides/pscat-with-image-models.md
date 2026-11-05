@@ -363,3 +363,133 @@ For an agent that has both an image tool and pscat (the
 - A frozen image is fixed. If the layout changes so much that the painting
   no longer fits it, you generate a new background, and that is a new image
   with all the variation that brings.
+
+## pscat sets the layout, the image model renders it
+
+The workflow above lets the image model compose the picture and fits the
+type around it. It can be turned round: **pscat draws the composition
+first**, the image model makes that drawing a photograph, and pscat lays the
+exact layer back on **at the coordinates it drew**. Neither can make this
+poster alone. The image model cannot promise a QR code or a number. pscat
+cannot make a photograph. And the forward hybrid never knows where the
+picture's summits are.
+
+[`examples/hybrid/alpine_trail.ps`](../../examples/hybrid/alpine_trail.ps) is
+a 2:3 travel poster (8 x 12 in) for an invented summit trail, made this way:
+
+![Four panels: pscat's flat layout reference, the photograph the image model made from it, the poster with pscat's exact layer, and the same layer on a second, autumn photograph made from the same reference](hybrid/alpine_trail_process.png)
+
+1. **pscat draws the layout reference** (`/Stage /Reference`): a flat colour
+   block-in of the scene. It shows the ridge with two summits and a col, the
+   lit and shaded faces, the slopes, the lake, the hut, the trail, and a
+   foreground in shade where the facts will go. Every shape sits at
+   coordinates in the program. Rendered at 128 dpi it is 1024 x 1536 px, the
+   size the image model works at.
+2. **The image model makes it a photograph.** The reference goes in as the
+   input image (`codex exec --image=ref.png "<instruction>"`). The instruction
+   asks for a photograph of the scene that keeps every shape where the
+   reference has it, with the same framing and aspect, and no text. The
+   result is frozen as a JPEG.
+3. **pscat lays the exact layer on.** The photograph covers the page at
+   exactly 128 dpi, with no crop. Then the program uses the same coordinates
+   as step 1:
+   - leader lines that end on the summits and the col it drew;
+   - a dashed route along its own trail and ridge line;
+   - the hut's label;
+   - in the shade it left empty: an elevation profile, the stats computed
+     from that profile (distance, ascent, the DIN 33466 walking time), the
+     bus times and a QR code.
+
+Because the composition belongs to the program, the **same layer goes on a
+second photograph** made from the same reference. In the fourth panel only
+the season and light changed in the instruction (`/Season /Autumn`); the
+labels, route, chart and QR code did not move.
+
+### How closely the photograph follows the reference
+
+Measured on the committed images by `tests/hybrid_reverse.rs`, with one
+detector run on the reference and on the photograph. At 1024 x 1536 px, 1 px
+is 0.56 pt on the poster.
+
+| | Summer photograph | Autumn photograph |
+|---|---|---|
+| **Ridge against the sky**, 1024 columns | mean 1.2 px, 95% within 4 px, max 7 px | mean 1.1 px, 95% within 4 px, max 7 px |
+| **Edge of the foreground shade** (the facts' zone) | median 4 px | median 5 px |
+| **The hut's red roof**, centre | 3.8 px left, 4.3 px down | 14.1 px left, 1.3 px down (a larger hut) |
+| **Title zone** (open sky), detail as luma deviation about each row's mean | 6.6 of 255 | 5.3 of 255 |
+| **Facts zone** (the shade), same measure | 9.1 of 255 | 16.3 of 255 (frost catches the light) |
+
+These numbers are for **OpenAI's image model through the Codex CLI 0.166
+`image_generation` tool, on 2026-11-05**. Another model, or this one on
+another day, will differ; measure your own the same way. In practice, the
+outline of the big shapes held to about a pixel. Small objects moved more:
+the autumn hut drifted 14 px and grew. And the shade edge became a soft
+shadow rather than a line. So anchor the exact layer to big edges (the ridge
+and its summits), and keep small anchors loose: the hut's label points at
+the hut with a leader, so a few pixels do not show.
+
+**What format works best for the reference.** Two were tried, with the
+same instruction:
+
+- a **flat colour block-in**, with the light already in it (lit west faces,
+  shaded east faces, a shaded foreground): ridge drift 1.2 px;
+- the **same shapes as black outlines** on white: 4 px, systematically high.
+
+The flat colour reference was kept on that measurement; both photographs
+looked equally good. Greyscale depth maps and rough paintkit renders were
+not tried here.
+
+The first, rougher reference had straight-sided peaks and a flat foreground
+band, and it taught one more thing: **the model keeps your shapes, crude ones
+included**. That photograph had geometric pyramids and a hard horizontal
+shadow. Draw the block-in as you want the picture to be, with a jagged ridge
+and soft edges, and leave the detail to the model.
+
+### The comparison
+
+The image model was also asked for the **whole poster** in one image, with
+the same brief: every label, the chart's data points, the stats, the bus
+times and "a scannable QR code that encodes exactly" the URL. It got one
+attempt, with no picking. (b) is pscat alone, painting paintkit over the same
+block-in. (c) is the reversed hybrid.
+
+![Three versions of the Piz Calderan poster side by side, with the checked facts under each panel](hybrid/alpine_trail_compare.png)
+
+| | (a) Image model alone | (b) pscat alone | (c) Reversed hybrid |
+|---|---|---|---|
+| **Text** (26 strings) | All spelled right, arrows and en dash included | All exact | All exact |
+| **Chart** | Labels right; points up to 0.1 km and 30 m off the data; its "9.4 km" tick sits at 9.5 km | Computed from the route data | Same as (b) |
+| **Labels on the picture** | Placed by the model | At the coordinates it drew | At the coordinates it drew, on a photograph that kept them (table above) |
+| **QR code** | rqrr finds it, error correction fails; rxing does not read it | Decodes to the URL in both decoders, PNG and PDF | Same as (b) |
+| **The look** | Photograph | Flat, painted | Photograph |
+| **Change a bus time** | A new poster, all of it re-proofread | One edit | One edit; the photograph does not change |
+
+As in the two examples above, **the image model set every word right**,
+including the arrows and the en dash. Text alone is not where it failed.
+What separates the three:
+
+- the QR code scans only where it was encoded;
+- the chart and the stats are exact by construction, not close by luck;
+- (c) has (a)'s photograph and (b)'s exactness, and its composition is the
+  program's: measured, repeatable for a second photograph, and known before
+  the picture exists.
+
+### Prompting for the reference stage
+
+What worked here, in the instruction to the image model:
+
+- say what the attachment is ("a flat colour block-in of the scene") and ask
+  for it to be **edited, not described**: "Pass the attached image to the
+  image generation tool as the input image to edit, not only as a
+  description";
+- name every shape that carries a coordinate, and ask for it to stay at
+  **the same position and size**;
+- ask for the **same framing and aspect, no crop, zoom, pan or extension**,
+  and check the pixel size of what comes back;
+- keep the empty areas empty in words too: a **clear, cloudless sky with a
+  smooth gradient**, and a foreground **in deep shadow, quiet and low in
+  contrast**;
+- **no text, letters, numbers, logos, signs or people**.
+
+The full instructions, and the prompts Codex passed to its tool, are in the
+[examples README](../../examples/hybrid/README.md).

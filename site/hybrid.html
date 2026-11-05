@@ -87,6 +87,32 @@
   <p><img class="cmp" src="assets/renders/compare_ferry.png" width="1249" height="761" loading="lazy"
     alt="The ferry timetable three ways, side by side, with the checked facts under each panel"></p>
 
+  <h2>Turned round: pscat sets the layout</h2>
+  <p>pscat can also go first. It draws a flat block-in of the scene, with every
+  summit, edge and empty area at known coordinates. The image model gets that
+  as its input image and makes it a photograph that keeps the layout: here
+  the ridge sat a mean of 1.2 px from pscat's (measured on 2026-11-05 with
+  OpenAI's image model through the Codex CLI). pscat then lays the exact layer
+  back on at the same coordinates: labels that end on the summits, the route
+  along the ridge, and in the shade it left empty, an elevation profile,
+  stats computed from it, bus times and a QR code. The same layer fits a
+  second photograph made from the same reference.</p>
+  <div class="pair">
+    <figure>
+      <a href="gallery-hybrid-alpine-trail.html"><img src="assets/renders/hybrid_alpine_trail.png" width="1152" height="1728" loading="lazy"
+        alt="Piz Calderan, a travel poster: a photograph of two granite peaks over a lake and a hut, with summit labels on leader lines, a dashed route up the trail and ridge, and an elevation profile, stats, bus times and a QR code in the shaded foreground"></a>
+      <figcaption>Piz Calderan. pscat's layout, the image model's photograph,
+      pscat's labels, route, chart and QR code.</figcaption>
+    </figure>
+  </div>
+  <p><img class="cmp" src="assets/renders/process_alpine_trail.png" width="1226" height="600" loading="lazy"
+    alt="Four panels: pscat's flat layout reference, the photograph made from it, the poster with pscat's exact layer, and the same layer on an autumn photograph made from the same reference"></p>
+  <p><img class="cmp" src="assets/renders/compare_alpine_trail.png" width="1210" height="776" loading="lazy"
+    alt="The travel poster three ways, side by side, with the checked facts under each panel: the image model alone, pscat alone, and the reversed hybrid"></p>
+  <p>The image model alone again spelled every word right. Its chart points
+  were up to 0.1 km and 30 m off and its QR code did not decode. The reversed
+  hybrid has its photograph and pscat's exactness.</p>
+
   <h2>When it is worth it</h2>
   <p>When a page needs both a painted look and something exact: a QR code,
   numbers from data, a page that will be edited or made in versions, or print
