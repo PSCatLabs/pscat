@@ -4,12 +4,14 @@
 //! facts `docs/guides/pscat-with-image-models.md` states about it are
 //! checked here:
 //!
-//! - the program still draws, pixel for pixel, the reference the image
-//!   model was given (so the coordinates the exact layer uses are the ones
-//!   the picture was made from);
-//! - how far the photograph moved the layout: the ridge line against the
-//!   sky, column by column, and the hut's red roof, measured with one
-//!   detector on the reference and on the committed JPEG, and pinned;
+//! - the program still draws the reference the image model was given
+//!   (`alpine_trail_ref.png`, committed as sent), so the coordinates the
+//!   exact layer uses are the ones the photographs were made from;
+//! - how far each photograph moved the layout, measured with one detector
+//!   on the committed reference and on the committed JPEG: the ridge line
+//!   against the sky, column by column, the edge of the foreground shade
+//!   that holds the facts, and the hut's red roof; and how quiet the two
+//!   zones left for type stayed. The numbers are pinned;
 //! - the QR code of the hybrid and of the pscat-alone variant decodes in
 //!   two independent decoders (rqrr, rxing) from the PNG and from the PDF
 //!   rasterized by hayro;
@@ -27,7 +29,10 @@ use std::process::Command;
 const URL: &str = "https://pscatlabs.github.io/pscat/hybrid.html";
 const SOURCE: &str = "examples/hybrid/alpine_trail.ps";
 const PAGE: &str = "576x864";
-const PHOTO: &str = "examples/hybrid/alpine_trail_photo.jpg";
+/// The layout reference exactly as the image model got it.
+const REFERENCE: &str = "examples/hybrid/alpine_trail_ref.png";
+const SUMMER: &str = "examples/hybrid/alpine_trail_photo.jpg";
+const AUTUMN: &str = "examples/hybrid/alpine_trail_autumn.jpg";
 const MODEL_ALONE: &str = "examples/hybrid/alpine_trail_model.jpg";
 
 /// Every line of copy the poster must carry, exactly.
@@ -103,10 +108,15 @@ impl Rgb {
     fn at(&self, x: usize, y: usize) -> [u8; 3] {
         self.px[y * self.width + x]
     }
+    /// Rec. 601 luma.
+    fn luma(&self, x: usize, y: usize) -> f64 {
+        let [r, g, b] = self.at(x, y).map(f64::from);
+        0.299 * r + 0.587 * g + 0.114 * b
+    }
 }
 
 fn rgb_png(bytes: &[u8]) -> Rgb {
-    let p = tiny_skia::Pixmap::decode_png(bytes).expect("pscat PNG");
+    let p = tiny_skia::Pixmap::decode_png(bytes).expect("decode PNG");
     let px = p
         .pixels()
         .iter()
@@ -136,11 +146,12 @@ fn grey_rgb(img: &Rgb) -> Grey {
 }
 
 /// The image model's own QR code, from its whole-poster attempt (the
-/// committed JPEG; the PNG original gave the same result): neither
-/// decoder reads it. If a regenerated image ever scans, this fails and the
-/// guide's comparison must be rewritten to match.
+/// committed JPEG; the PNG original gave the same result): rqrr finds the
+/// symbol and its error correction fails; rxing does not read it. If a
+/// regenerated image ever scans, this fails and the guide's comparison
+/// must be rewritten to match.
 #[test]
-fn the_image_models_qr_code_does_not_decode() {
+fn the_image_models_qr_code_is_found_but_does_not_decode() {
     let g = grey_rgb(&rgb_jpeg(MODEL_ALONE));
     let mut image =
         rqrr::PreparedImage::prepare_from_greyscale(g.width, g.height, |x, y| g.at(x, y));
@@ -149,7 +160,7 @@ fn the_image_models_qr_code_does_not_decode() {
         .iter()
         .map(|grid| grid.decode().map(|(_, s)| s))
         .collect();
-    eprintln!("rqrr on the image model's poster: {found:?}");
+    assert!(!found.is_empty(), "rqrr finds no symbol at all");
     assert!(
         found.iter().all(Result::is_err),
         "rqrr decoded the image model's QR: {found:?}"
@@ -157,39 +168,86 @@ fn the_image_models_qr_code_does_not_decode() {
     assert!(read_rxing(&g).is_err(), "rxing decoded the image model's QR");
 }
 
-/// The reference as the image model got it: `/Stage /Reference` at 128 dpi.
-fn reference() -> Rgb {
+/// The program still draws the reference the image model was given: the
+/// committed PNG is what was sent, and `/Stage /Reference` at 128 dpi
+/// renders it again (allowing a little anti-aliasing drift between
+/// platforms on the shapes' edges).
+#[test]
+fn the_program_draws_the_reference_the_model_was_given() {
     let (dir, _) = pscat(
         "reference",
         "/Stage /Reference def",
         &["--dpi", "128", "--png", "{dir}/ref.png"],
     );
-    rgb_png(&read(&dir.join("ref.png")))
+    let now = rgb_png(&read(&dir.join("ref.png")));
+    let sent = rgb_png(&read(&root().join(REFERENCE)));
+    assert_eq!((now.width, now.height), (1024, 1536));
+    assert_eq!((sent.width, sent.height), (1024, 1536));
+    let differ = now
+        .px
+        .iter()
+        .zip(&sent.px)
+        .filter(|(a, b)| (0..3).any(|i| a[i].abs_diff(b[i]) > 24))
+        .count();
+    assert!(
+        differ < now.px.len() / 1000,
+        "{differ} px differ from the reference the image model was given"
+    );
+    for photo in [SUMMER, AUTUMN] {
+        let p = rgb_jpeg(photo);
+        assert_eq!(
+            (p.width, p.height),
+            (1024, 1536),
+            "{photo}: placed at exactly 128 dpi, no crop"
+        );
+    }
 }
 
 /// The ridge line, per column: scanning down from the top of the sky, the
 /// first row whose colour differs from the row 4 px above by more than 60
 /// (summed over R, G and B). The sky is a smooth gradient with no
 /// clouds, so the first such edge is the rock against it.
-fn ridge(img: &Rgb) -> Vec<Option<usize>> {
+fn ridge(img: &Rgb) -> Vec<usize> {
     (0..img.width)
         .map(|x| {
-            (300..1100).find(|&y| {
-                let (a, b) = (img.at(x, y - 4), img.at(x, y));
-                (0..3).map(|i| a[i].abs_diff(b[i]) as u32).sum::<u32>() > 60
-            })
+            (300..1100)
+                .find(|&y| {
+                    let (a, b) = (img.at(x, y - 4), img.at(x, y));
+                    (0..3).map(|i| u32::from(a[i].abs_diff(b[i]))).sum::<u32>() > 60
+                })
+                .unwrap_or_else(|| panic!("no ridge in column {x}"))
         })
         .collect()
 }
 
-/// The centre of the hut's red roof: the strongly red pixels in the
-/// region around the hut, as (x, y, count).
-fn roof(img: &Rgb) -> (f64, f64, usize) {
+/// The edge of the foreground shade, per column: the row between 1050
+/// and 1450 px where the 16 px above are brightest against the 16 px
+/// below (luma summed).
+fn shade_edge(img: &Rgb) -> Vec<usize> {
+    (0..img.width)
+        .map(|x| {
+            let col: Vec<f64> = (1050..1450).map(|y| img.luma(x, y)).collect();
+            (16..col.len() - 16)
+                .max_by(|&i, &j| {
+                    let step = |k: usize| {
+                        col[k - 16..k].iter().sum::<f64>() - col[k..k + 16].iter().sum::<f64>()
+                    };
+                    step(i).total_cmp(&step(j))
+                })
+                .expect("a step")
+                + 1050
+        })
+        .collect()
+}
+
+/// The centre of the hut's red roof: the saturated red pixels around the
+/// hut, as (x, y).
+fn roof(img: &Rgb) -> (f64, f64) {
     let (mut sx, mut sy, mut n) = (0usize, 0usize, 0usize);
-    for y in 820..1000 {
-        for x in 100..450 {
+    for y in 840..960 {
+        for x in 100..300 {
             let [r, g, b] = img.at(x, y).map(u32::from);
-            if r > 110 && r * 10 > g * 18 && r * 10 > b * 18 {
+            if r > 120 && r * 10 > g * 22 && r * 10 > b * 22 {
                 sx += x;
                 sy += y;
                 n += 1;
@@ -197,59 +255,97 @@ fn roof(img: &Rgb) -> (f64, f64, usize) {
         }
     }
     assert!(n > 100, "no red roof found ({n} px)");
-    (sx as f64 / n as f64, sy as f64 / n as f64, n)
+    (sx as f64 / n as f64, sy as f64 / n as f64)
 }
 
-/// The program still draws the reference the photograph was made from:
-/// the size the model was given, and the same block-in.
-#[test]
-fn the_reference_is_the_image_models_input_size() {
-    let r = reference();
-    assert_eq!((r.width, r.height), (1024, 1536));
-    let photo = rgb_jpeg(PHOTO);
-    assert_eq!(
-        (photo.width, photo.height),
-        (1024, 1536),
-        "the photograph is placed at exactly 128 dpi, no crop"
-    );
+/// How busy a zone is: the standard deviation of luma about each row's
+/// own mean, so a smooth gradient counts as quiet.
+fn busyness(img: &Rgb, rows: std::ops::Range<usize>) -> f64 {
+    let mut dev = Vec::new();
+    for y in rows.step_by(2) {
+        let row: Vec<f64> = (0..img.width).step_by(2).map(|x| img.luma(x, y)).collect();
+        let m = row.iter().sum::<f64>() / row.len() as f64;
+        dev.extend(row.iter().map(|v| v - m));
+    }
+    (dev.iter().map(|d| d * d).sum::<f64>() / dev.len() as f64).sqrt()
 }
 
-/// The layout fidelity the guide states: along the 1024 columns of the
-/// ridge, the photograph's edge is a mean of 1.2 px from the reference's
-/// (1 px is 0.56 pt on the poster), 95% of columns within 4 px, none
-/// more than 7 px; the hut's red roof moved 6.1 px left and 3.5 px down.
-#[test]
-fn the_photograph_keeps_the_layout() {
-    let r = reference();
-    let p = rgb_jpeg(PHOTO);
-    let (a, b) = (ridge(&r), ridge(&p));
-    let mut d: Vec<usize> = a
-        .iter()
-        .zip(&b)
-        .map(|(a, b)| {
-            let (a, b) = (a.expect("reference ridge"), b.expect("photo ridge"));
-            a.abs_diff(b)
-        })
-        .collect();
+/// Sorted absolute differences, column by column.
+fn drift(a: &[usize], b: &[usize]) -> Vec<usize> {
+    let mut d: Vec<usize> = a.iter().zip(b).map(|(a, b)| a.abs_diff(*b)).collect();
     d.sort_unstable();
-    let mean = d.iter().sum::<usize>() as f64 / d.len() as f64;
-    let p95 = d[d.len() * 95 / 100];
-    let max = d[d.len() - 1];
-    eprintln!("ridge drift: mean {mean:.2} px, p95 {p95} px, max {max} px");
-    assert!(
-        (1.15..1.25).contains(&mean),
-        "mean ridge drift {mean:.2} px, the guide says 1.2"
-    );
-    assert_eq!((p95, max), (4, 7), "p95 and max ridge drift");
+    d
+}
 
-    let (rx, ry, _) = roof(&r);
-    let (px, py, _) = roof(&p);
-    let (dx, dy) = (px - rx, py - ry);
-    eprintln!("roof moved {dx:.1} px across, {dy:.1} px down");
-    assert!(
-        (-6.6..-5.6).contains(&dx) && (3.0..4.0).contains(&dy),
-        "the hut's roof moved ({dx:.1}, {dy:.1}) px, the guide says (-6.1, 3.5)"
+struct Fidelity {
+    ridge_mean: f64,
+    ridge_p95: usize,
+    ridge_max: usize,
+    shade_median: usize,
+    roof: (f64, f64),
+    title_busy: f64,
+    info_busy: f64,
+}
+
+fn fidelity(photo: &str) -> Fidelity {
+    let r = rgb_png(&read(&root().join(REFERENCE)));
+    let p = rgb_jpeg(photo);
+    let d = drift(&ridge(&r), &ridge(&p));
+    let s = drift(&shade_edge(&r), &shade_edge(&p));
+    let (rx, ry) = roof(&r);
+    let (px, py) = roof(&p);
+    let f = Fidelity {
+        ridge_mean: d.iter().sum::<usize>() as f64 / d.len() as f64,
+        ridge_p95: d[d.len() * 95 / 100],
+        ridge_max: d[d.len() - 1],
+        shade_median: s[s.len() / 2],
+        roof: (px - rx, py - ry),
+        // the title's rows, and the facts' rows, in the 1536 px frame
+        title_busy: busyness(&p, 60..460),
+        info_busy: busyness(&p, 1250..1520),
+    };
+    eprintln!(
+        "{photo}: ridge mean {:.2} p95 {} max {}; shade median {}; roof ({:.1}, {:.1}); \
+         busyness title {:.1} info {:.1}",
+        f.ridge_mean,
+        f.ridge_p95,
+        f.ridge_max,
+        f.shade_median,
+        f.roof.0,
+        f.roof.1,
+        f.title_busy,
+        f.info_busy
     );
+    f
+}
+
+fn near(v: f64, want: f64, tol: f64) -> bool {
+    (v - want).abs() <= tol
+}
+
+/// The layout fidelity the guide states, for each photograph made from
+/// the one reference (1 px is 0.56 pt on the poster).
+#[test]
+fn the_photographs_keep_the_layout() {
+    // (photo, ridge mean, p95, max, shade median, roof dx, dy, title, info)
+    let pinned = [
+        (SUMMER, 1.21, 4, 7, 4, -3.8, 4.3, 6.6, 9.1),
+        (AUTUMN, 1.12, 4, 7, 5, -14.1, 1.3, 5.3, 16.3),
+    ];
+    for (photo, mean, p95, max, shade, dx, dy, title, info) in pinned {
+        let f = fidelity(photo);
+        assert!(near(f.ridge_mean, mean, 0.06), "{photo}: ridge mean {:.2}", f.ridge_mean);
+        assert_eq!((f.ridge_p95, f.ridge_max), (p95, max), "{photo}: ridge p95, max");
+        assert_eq!(f.shade_median, shade, "{photo}: shade edge median");
+        assert!(
+            near(f.roof.0, dx, 0.6) && near(f.roof.1, dy, 0.6),
+            "{photo}: roof moved ({:.1}, {:.1})",
+            f.roof.0,
+            f.roof.1
+        );
+        assert!(near(f.title_busy, title, 0.3), "{photo}: title zone {:.1}", f.title_busy);
+        assert!(near(f.info_busy, info, 0.3), "{photo}: info zone {:.1}", f.info_busy);
+    }
 }
 
 /// Both decoders must read exactly the URL.
