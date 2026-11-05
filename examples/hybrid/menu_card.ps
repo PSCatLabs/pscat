@@ -194,9 +194,9 @@ L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 /item { % (dish) (price) -
   /pr exch def /di exch def
   ink /Body-M 14 font L y moveto di show
-  currentpoint pop 6 add /lx exch def
+  currentpoint pop 4 add /lx exch def
   R y moveto pr rshow
-  pr stringwidth pop R exch sub 6 sub /rx exch def
+  pr stringwidth pop R exch sub 4 sub /rx exch def
   % dot leaders on a 4.5 pt pitch, aligned to R so they line up row to row
   leader
   R 4.5 sub { dup lx lt { pop exit } if dup rx le { dup y 2.6 add 0.55 0 360 arc fill } if
@@ -228,6 +228,6 @@ QX QY moveto URL << /Level /H >> qrencode
 % no box: the painting's warm cream, or paintkit's paper
 /QLight PscatOnly { [0.98 0.955 0.89] } { [0.975 0.915 0.79] } ifelse def
 << /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light QLight >> qrdraw
-ink /Ital-M 13 font
+ink /Ital-M 12 font
 QX 102 add QY 41 add moveto (Scan: how this menu was made) show
 showpage

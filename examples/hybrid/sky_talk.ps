@@ -95,30 +95,31 @@
 PscatOnly {
   % pscat alone: not an imitation of the oil painting, which procedural
   % paint does not win, but what vector art does well: a screen-printed
-  % travel-poster sky. Smooth shaded gradients, flat cloud shapes in three
+  % travel-poster sky. Smooth gradients, flat cloud shapes in three
   % inks, a low sun and its streaked reflection, and a fine print grain
   % over everything. The same horizon line as the painting.
   /WL 152 def
   /SUNX 118 def
-  /ramp { % [ [t r g b] ... ] -> a stitched type 3 function over 0..1
-    /rp exch def
-    << /FunctionType 3 /Domain [0 1]
-       /Functions [ 0 1 rp length 2 sub { /k exch def
-         << /FunctionType 2 /Domain [0 1] /N 1
-            /C0 [ rp k get aload pop ] 1 3 getinterval
-            /C1 [ rp k 1 add get aload pop ] 1 3 getinterval >> } for ]
-       /Bounds [ 1 1 rp length 2 sub { rp exch get 0 get } for ]
-       /Encode [ 1 1 rp length 1 sub { pop 0 1 } for ] >> } def
-  /axial { % x0 y0 x1 y1 ramp -
-    /ax_f exch def /ax_c exch def
-    << /ShadingType 2 /ColorSpace /DeviceRGB /Coords ax_c
-       /Function ax_f /Extend [true true] >> shfill } def
+  % a vertical colour ramp, painted as 1 pt strips (not shfill: pscat's
+  % PDF export flattens a shading to one colour, and strips survive every
+  % output). y0 y1 [ [t r g b] ... ] -
+  /vramp {
+    /vr_k exch def /vr_y1 exch def /vr_y0 exch def
+    vr_y0 1 vr_y1 { /vr_y exch def
+      /vr_t vr_y vr_y0 sub vr_y1 vr_y0 sub div def
+      0 1 vr_k length 2 sub { /vr_i exch def
+        vr_k vr_i get aload pop /vr_b0 exch def /vr_g0 exch def /vr_r0 exch def /vr_t0 exch def
+        vr_k vr_i 1 add get aload pop /vr_b1 exch def /vr_g1 exch def /vr_r1 exch def /vr_t1 exch def
+        vr_t vr_t0 ge vr_t vr_t1 le and {
+          /vr_f vr_t vr_t0 sub vr_t1 vr_t0 sub div def
+          vr_r0 vr_r1 vr_r0 sub vr_f mul add
+          vr_g0 vr_g1 vr_g0 sub vr_f mul add
+          vr_b0 vr_b1 vr_b0 sub vr_f mul add setrgbcolor } if } for
+      0 vr_y PW 3 rectfill } for } def
   % the sky, horizon gold up to a deep evening blue
-  gsave 0 WL PW PH WL sub rectclip
-    [ 0 WL 0 PH ]
+  WL PH
     [ [0 1.00 0.80 0.46] [0.10 0.99 0.62 0.42] [0.26 0.88 0.50 0.56]
-      [0.46 0.58 0.48 0.76] [0.70 0.28 0.36 0.70] [1 0.11 0.18 0.48] ] ramp axial
-  grestore
+      [0.46 0.58 0.48 0.76] [0.70 0.28 0.36 0.70] [1 0.11 0.18 0.48] ] vramp
   % the glow round the low sun: soft discs, each a little more opaque
   gsave 0 WL PW PH WL sub rectclip
     1 0.86 0.55 setrgbcolor
@@ -168,10 +169,8 @@ PscatOnly {
   250 238 230 8 band  10 216 170 6 band  330 204 220 7 band  110 194 110 4 band
   420 184 130 4 band  0 252 90 5 band
   % the sea: a dark gradient, and the sun's reflection in broken streaks
-  gsave 0 0 PW WL rectclip
-    [ 0 0 0 WL ]
-    [ [0 0.07 0.09 0.22] [0.75 0.17 0.19 0.38] [1 0.36 0.32 0.50] ] ramp axial
-  grestore
+  0 WL 1 sub
+    [ [0 0.07 0.09 0.22] [0.75 0.17 0.19 0.38] [1 0.36 0.32 0.50] ] vramp
   7 srand
   /rnd { rand 2147483647 div } def
   1 0.80 0.50 setrgbcolor
@@ -222,7 +221,7 @@ gsave
   0.03 0.05 0.14 setrgbcolor
   0 2 196 { /sh_y exch def
     1 sh_y 196 div sub dup mul 0.62 mul setalpha
-    0 sh_y PW 2.2 rectfill } for
+    0 sh_y PW 2 rectfill } for
 grestore
 
 % ------------------------------------------------------------ the title
@@ -233,9 +232,9 @@ white
 M 3 sub 724 moveto (Why Is the) show
 M 3 sub 634 moveto (Sky Blue?) show
 /Ital-L1 22 font
-M 596 moveto (A free public talk on light, air and colour) show
-/Label-L1 14 font
-M 572 moveto (Dr. Imogen Hartley, atmospheric physicist) 0.6 tshow
+M 581 moveto (A free public talk on light, air and colour) show
+/Label-L1 15 font
+M 558 moveto (Dr. Imogen Hartley, atmospheric physicist) 0.6 tshow
 
 % ------------------------------------------- the formula and the chart
 % Rayleigh: scattered intensity goes as one over the fourth power of the
@@ -287,9 +286,9 @@ newpath M BANDTOP 12 add moveto RIGHT BANDTOP 12 add lineto stroke
 % under the whole band, first, a faint shade, strongest at the chart's foot
 % where the brightest cloud is, fading out above and below
 gsave 0.06 0.06 0.20 setrgbcolor
-  CY 40 sub 2 BANDTOP 10 add { /sh_y exch def
+  CY 70 sub 2 CY 70 add { /sh_y exch def
     sh_y CY sub abs 70 div 1 exch sub 0 max 0.2 mul setalpha
-    0 sh_y PW 2.2 rectfill } for
+    0 sh_y PW 2 rectfill } for
 grestore
 0 1 bars length 1 sub { /i exch def
   bars i get aload pop setrgbcolor /nm exch def

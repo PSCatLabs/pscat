@@ -21,7 +21,7 @@ have not worked on it enough. This was a design pass, not an engine change.
   begin. The QR's light modules take the paper's tone under it, so there is
   no white box, and the caption sits level with the code's middle.
 - **pscat alone (b).** Not paintkit imitating the painting: the poster's sky
-  is a screen-printed vector sky (`shfill` ramps, three-ink clouds scaled
+  is a screen-printed vector sky (1 pt gradient strips, three-ink clouds scaled
   towards their crowns, tapered stratus, a low sun with streaked reflection
   kept above the date, fine grain); the menu is a flat-ink botanical print on
   paintkit's paper (shadow side, graded blush, speckle, highlight, a key line
