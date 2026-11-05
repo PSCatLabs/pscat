@@ -1816,9 +1816,25 @@ impl Gfx {
                 let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let region = shading.bbox.map(|_| &path);
+                // An axis that tiny-skia finds degenerate (its tolerance, on
+                // the same f32 numbers: distinct f64 Coords can collapse)
+                // paints the last stop's colour, solid, over the region; a
+                // PDF reader paints such a shading as nothing. Record that
+                // solid fill instead (a Codex review of #1028).
+                let solid = match kind {
+                    crate::svg::ShKind::Axial { x0, y0, x1, y1 }
+                        if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
+                    {
+                        stops.last().map(|l| (l.1, l.2, l.3))
+                    }
+                    _ => None,
+                };
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.shfill(&kind, pdf_ctm, stops, region, comp, &chain);
+                    match solid {
+                        Some(rgb) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
+                        None => pdf.shfill(&kind, pdf_ctm, stops, region, comp, &chain),
+                    }
                 }
             }
             self.dirty = true;

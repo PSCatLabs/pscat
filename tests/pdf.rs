@@ -497,6 +497,29 @@ fn nearly_equal_and_huge_equal_circles_keep_a_hard_edge() {
     }
 }
 
+/// Coords distinct in f64 but one point in f32: the raster paints the last
+/// colour solid (tiny-skia's degenerate axis), so the PDF must too, not a
+/// zero-length shading readers skip (a Codex review of #1028).
+#[test]
+fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
+    let (pdf, canvas) = pdf_and_canvas(
+        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
+             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    );
+    let c = canvas.pixel(100, 100).expect("pixel");
+    assert_eq!(
+        (c.red(), c.green(), c.blue()),
+        (0, 0, 255),
+        "raster: solid C1"
+    );
+    let content = page_content(&pdf);
+    assert!(
+        content.contains("0 0 1 rg") && !content.contains(" sh"),
+        "{content}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_collapsed_axis");
+}
+
 #[test]
 fn clipped_shfill_paints_inside_the_clip_group() {
     let src = [
