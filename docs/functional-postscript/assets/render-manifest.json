@@ -3,21 +3,21 @@
     "file": "ultraviolet.png",
     "style": 0,
     "page": "720x960",
-    "sha256": "f32227096a8335f00957b3c0ea9421e66c1221acff7c252b19f47c93414b233d",
+    "sha256": "43f2a9a4b69f1a23495c919fe4682698e9f35e808322aea59465e9082bd99c2e",
     "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/ultraviolet.png\n"
   },
   {
     "file": "sunprint.png",
     "style": 1,
     "page": "720x960",
-    "sha256": "21c35e4df1946263d4744973250734c1ab9b554c6a5519c0182c1484914a08b9",
+    "sha256": "5beb5ef502587685dcc344f78cd78c44d21285a1141a7ae0b0224957239e919d",
     "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/sunprint.png\n"
   },
   {
     "file": "blue-hour.png",
     "style": 2,
     "page": "720x960",
-    "sha256": "6a79ef170ab55781a4d68d3b82b11cea102b715ef218063343ad2b2896111106",
+    "sha256": "68b02a024b729ca3ce8c8e71bcf1b8ef0f882877749ad6f578d014705634f058",
     "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/blue-hour.png\n"
   },
   {
@@ -38,46 +38,46 @@
   {
     "file": "imperative.png",
     "page": "720x960",
-    "sha256": "f32227096a8335f00957b3c0ea9421e66c1221acff7c252b19f47c93414b233d"
+    "sha256": "43f2a9a4b69f1a23495c919fe4682698e9f35e808322aea59465e9082bd99c2e"
   },
   {
     "file": "type-nocturne.png",
     "page": "960x1200",
-    "sha256": "5c84ba1236e32718d6182f13a5006806748802d94ed2f23710b817d5694b7227"
+    "sha256": "61ca3ffae34e0b6a43270ca2d3a3123d059b11e56deb1566b49bb3966e2b9478"
   },
   {
     "file": "type-sunprint.png",
     "page": "960x1200",
-    "sha256": "1876cac65ac9b667eb8c9402c8721bd2d1ba7c7a5500140a06ff30bf73674893"
+    "sha256": "4763e69a2eae192db0252d8821233e2b35c75c2b1bb7e52d374d8644e90edc6a"
   },
   {
     "file": "type-blueprint.png",
     "page": "960x1200",
-    "sha256": "13eb1358ee95c82034c29d130d556b92f04fd7186c5c25fa1164a924291ee831"
+    "sha256": "46861e165a223b9bbb5a2dff3efe1b0a0c2d89763ea7b5f79699dcdbda69beb1"
   },
   {
     "file": "type-risograph.png",
     "page": "960x1200",
-    "sha256": "259e177479a0ad2cc6a6f625282a6314733f36d5c72c9049f09d9fc40a9d9f49"
+    "sha256": "04af2d32653c35cb503d5543d747fedb5dae345f025c6cbe367f726eb3d56225"
   },
   {
     "file": "type-neon.png",
     "page": "960x1200",
-    "sha256": "cc7c4e33e2ec00eb19d7b629384b6f5456f67d6e2c2c476d76fe339131b23711"
+    "sha256": "58e324c926d148e54e369b953ded72cffa4f58142fe8371d2d33b3309c2f5940"
   },
   {
     "file": "type-opart.png",
     "page": "960x1200",
-    "sha256": "f2c589088ed6ec5cbb968b7eb43ed4d60d93ea3b23ff5a5b3c6281c94d2d0558"
+    "sha256": "b3b7fb55929e937def1fd3be824da93614c12b991ef8430e431d436f07b31804"
   },
   {
     "file": "press-inspected.png",
     "page": "1280x960",
-    "sha256": "9abfae623f196e10726c0274c6de8da654c90b19594b441e6c098502210ca0e3"
+    "sha256": "fec0ba0ee2b5851f79d0e2cb8bcecdd444726fafead89b480211812220adb5f3"
   },
   {
     "file": "press-clean.png",
     "page": "1280x960",
-    "sha256": "c08674fa7a4e5825224b54340f700d2682d99cd9993433607a4dc899ba7b3d16"
+    "sha256": "adc53f6f650238cc377ba721f74a52197db6a3780d561d67360ebbb90c5f1305"
   }
 ]

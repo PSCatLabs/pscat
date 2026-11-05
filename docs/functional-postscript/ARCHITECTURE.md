@@ -9,7 +9,7 @@ semantic, release, or MCP changes are required.
 ## Integration boundary
 
 ```text
-Artist / ArtColony agent
+Artist / agent
         | ordinary PostScript, (lib/...) run
         v
 functional.ps <------- aspect.ps (explicit constructors)
