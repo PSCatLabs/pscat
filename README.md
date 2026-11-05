@@ -139,7 +139,7 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 ## For AI agents
 
 pscat works well from a coding agent. The skills in `plugin/skills/` (`pscat`,
-`psart`, `psviz`) are plain Markdown any agent can read, and `pscat-mcp` is an
+`psart`, `psviz`, `functional-postscript`) are plain Markdown any agent can read, and `pscat-mcp` is an
 MCP server with ten tools. In Claude Code, both come as one plugin:
 `/plugin install pscat --marketplace PSCatLabs/pscat`
 (after installing pscat; see [plugin/README.md](plugin/README.md)). In Codex:

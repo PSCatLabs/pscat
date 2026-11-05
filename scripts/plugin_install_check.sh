@@ -8,7 +8,7 @@
 #
 # 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
-# 3. The installed copy holds the three skills as real files, the shared
+# 3. The installed copy holds every skill in plugin/skills/ as real files, the shared
 #    hooks/hooks.json, the launcher scripts/pscat-mcp.sh and its release pin
 #    pscat-release, and nothing else of the repo (plugin/ also carries the
 #    Codex manifest and mcp.json; scripts/codex_plugin_install_check.sh). The
@@ -51,7 +51,7 @@ bad() { echo "FAIL $*" >&2; fail=1; }
 version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
     "$repo/plugin/.claude-plugin/plugin.json")
 copy="$CLAUDE_CONFIG_DIR/plugins/cache/pscat/pscat/$version"
-for s in pscat psart psviz; do
+for s in $(ls "$repo/plugin/skills"); do
     if [ -f "$copy/skills/$s/SKILL.md" ] && [ ! -L "$copy/skills" ]; then
         ok "installed copy has skills/$s/SKILL.md"
     else
