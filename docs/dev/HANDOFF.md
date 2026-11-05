@@ -742,6 +742,9 @@ renders eight examples in both and compares block-downsampled output).
   The layouts were redesigned in #998 (`notes/998-hybrid-showcase-layouts.md`)
   and use catalog faces (`extras` pack); their tracked labels are `ashow`,
   which the copy test captures alongside `show`.
+  #999 added a repeat-run test (results stated by date in the guide; the
+  repeat images are not committed, their prompts are in the examples README)
+  and a third example, `ferry_timetable.ps`, whose times are computed.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in

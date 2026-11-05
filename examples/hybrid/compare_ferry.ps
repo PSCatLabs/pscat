@@ -1,0 +1,33 @@
+%!PS
+% The comparison sheet for the ferry timetable (595 x 842 pt plus a
+% 190 pt facts strip). From the repository root:
+%   pscat sheet -o docs/guides/hybrid/ferry_compare.png --page 595x1032 \
+%     --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+%     --label "Harbour Ferry: (a) image model alone, (b) pscat alone, (c) hybrid" \
+%     examples/hybrid/compare_ferry.ps
+% Every fact below is checked: the QR results by tests/hybrid.rs (two
+% decoders, rqrr and rxing, on the PNG and PDF exports and on the image
+% model's JPEG), the copy of (b) and (c) string by string by the same
+% test, and the copy of (a) by reading 2x crops of the original image.
+/PageW 595 def /PageH 842 def
+/Example (examples/hybrid/ferry_timetable.ps) def
+/ModelJPEG (examples/hybrid/ferry_model.jpg) def /ModelW 1055 def /ModelH 1491 def
+/FactsA [
+  [/ok (Text: all 64 strings of the brief right)]
+  [/ok (Times and fares: all 48 right)]
+  [/no (QR code: found, but does not decode)]
+  [/note (Raster only: 1055 x 1491 px, 127 px/in at A4)]
+] def
+/FactsB [
+  [/ok (Text: all 64 strings painted exactly as written)]
+  [/ok (Times: computed from the departures)]
+  [/ok (QR code: decodes to the URL, PNG and PDF)]
+  [/note (Look: pscat's own harbour, flat inks)]
+] def
+/FactsC [
+  [/ok (Text: all 64 strings painted exactly as written)]
+  [/ok (Times: computed from the departures)]
+  [/ok (QR code: decodes to the URL, PNG and PDF)]
+  [/note (Look: the image model's painting, frozen)]
+] def
+(examples/hybrid/compare_panel.ps) run

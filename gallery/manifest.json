@@ -1383,6 +1383,15 @@
    "blurb": "The image model alone set the whole menu correctly, but its QR code does not decode. pscat alone and the hybrid scan; the hybrid keeps the watercolour.",
    "source": "examples/hybrid/compare_menu_card.ps",
    "render": "docs/guides/hybrid/menu_card_compare.png"
+  },
+  {
+   "id": "compare_ferry",
+   "group": "hybrid",
+   "title": "Harbour Ferry, three ways",
+   "alt": "Three versions of the same A4 ferry timetable side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "A denser test: 40 times and 8 fares. The image model alone set every one right in five runs, and its QR code never decoded. pscat computes the times; its QR code scans.",
+   "source": "examples/hybrid/compare_ferry.ps",
+   "render": "docs/guides/hybrid/ferry_compare.png"
   }
  ]
 }
