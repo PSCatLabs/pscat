@@ -40,6 +40,10 @@
 (lib/qr.ps) run
 
 /PscatOnly where { pop } { /PscatOnly false def } ifelse
+% The soft shades, shadows and grain use pscat's setalpha. Where it is
+% missing (Ghostscript), it becomes a no-op so the program still runs, but
+% those marks then print solid: render it with pscat.
+/setalpha where { pop } { /setalpha { pop } bind def } ifelse
 
 /PW 595 def /PH 842 def
 /URL (https://pscatlabs.github.io/pscat/hybrid.html) def
