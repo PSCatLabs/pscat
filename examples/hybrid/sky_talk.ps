@@ -44,93 +44,156 @@
 /URL (https://pscatlabs.github.io/pscat/hybrid.html) def
 
 % ---------------------------------------------------------------- fonts
-% Latin-1 for the multiplication sign and the middle dot.
+% Three faces with one job each: Abril Fatface, a fat Didone, for the
+% title only; Palatino for the reading lines; Jost, a geometric sans, for
+% every label and number. Abril Fatface and Jost are catalog faces: in a
+% checkout they are in fonts/catalog/, and an installed pscat gets them
+% with `pscat fonts install --pack extras` (without the pack they stand
+% in as Helvetica and pscat says so). Latin-1 for the multiplication sign
+% and the middle dot.
 /latin1 { % /New /Base -
   findfont dup length dict copy dup /Encoding ISOLatin1Encoding put definefont pop
 } def
-/Title-L1 /Palatino-Bold latin1
+/Display-L1 /AbrilFatface-Regular latin1
 /Body-L1 /Palatino-Roman latin1
 /Ital-L1 /Palatino-Italic latin1
-/Sans-L1 /Helvetica latin1
-/SansB-L1 /Helvetica-Bold latin1
+/Label-L1 /Jost-Regular latin1
 /font { exch findfont exch scalefont setfont } def
 
 /white { 1 1 1 setrgbcolor } def
 /cream { 1 0.96 0.88 setrgbcolor } def
-/rshow { dup stringwidth pop neg 0 rmoveto show } def
 /cat { % (a) (b) -> (ab)
   1 index length 1 index length add string
   dup 0 4 index putinterval dup 3 index length 3 index putinterval 3 1 roll pop pop } def
-/cshow { dup stringwidth pop 2 div neg 0 rmoveto show } def
+% Tracked type: the string is drawn whole by ashow, `track` points of
+% extra space after each character (none after the last, so it measures
+% and aligns true).
+/twidth { % (s) track -> w
+  1 index stringwidth pop exch 2 index length 1 sub mul add exch pop } def
+/tshow { % (s) track -
+  0 3 -1 roll ashow } def
+/rtshow { % (s) track -   right-aligned at the current point
+  2 copy twidth neg 0 rmoveto tshow } def
+/ctshow { % (s) track -   centred on the current point
+  2 copy twidth 2 div neg 0 rmoveto tshow } def
+
+% ----------------------------------------------------------------- grid
+% A4, a 44 pt margin each side and a six-column grid on the 507 pt
+% measure (columns of 74.5 pt, 12 pt gutters). Everything sits on a
+% column edge: the type on column 1, the formula on columns 1-2, the
+% chart on columns 3-6, the date and venue on 1-4, the QR code on 6.
+/M 44 def
+/RIGHT PW M sub def
+/COL { 86.5 mul M add } def          % n -> x of column n+1's left edge
 
 % ------------------------------------------------------------- the layer
 PscatOnly {
-  % pscat alone: a sky painted with paintkit (the landscape cookbook's sky,
-  % water and cloud recipes), the same horizon line as the painting.
-  (lib/artkit.ps) run
-  (lib/paintkit.ps) run
-  5 srand
+  % pscat alone: not an imitation of the oil painting, which procedural
+  % paint does not win, but what vector art does well: a screen-printed
+  % travel-poster sky. Smooth shaded gradients, flat cloud shapes in three
+  % inks, a low sun and its streaked reflection, and a fine print grain
+  % over everything. The same horizon line as the painting.
   /WL 152 def
-  /HORIZON [ /cadmiumyellow 1 /titaniumwhite 3 /alizarin 0.45 ] pigcolor def
-  /MID [ /alizarin 0.35 /phthaloblue 0.55 /titaniumwhite 3.5 ] pigcolor def
-  /ZENITH [ /phthaloblue 1 /titaniumwhite 0.6 ] pigcolor def
-  /skyat { WL sub PH WL sub div 0 max 1 min /skt exch def
-    skt 0.4 lt { HORIZON MID skt 0.4 div 0.8 exp mix3 }
-               { MID ZENITH skt 0.4 sub 0.6 div 0.7 exp mix3 } ifelse } def
-  WL 2 PH { /sky_y exch def sky_y skyat setrgbcolor 0 sky_y PW 4 rectfill } for
-  WL 30 PH { /sky_y exch def [ sky_y 15 add skyat ] /sky_c exch def
-    0 sky_y PW 30 screct
-    << /Count 7 /Length 70 /Angle 30 /Lean 6 /LengthJitter 0.2 >> pkcrisscross
-    << /Width 34 /Charge 0.7 /Depletion 0.8 /Edge 0.3 /ColorMix 1
-       /Colors [ [ sky_c 1.03 shade ] [ sky_c 0.97 shade ] ] >> pkbroad } for
-  % two clouds with form, lit from the glow below
-  /lump { /cb_h exch def /cb_w exch def /cb_y exch def /cb_x exch def
-    newpath cb_x cb_y moveto
-    cb_x cb_w 0.1 mul add cb_y cb_h 0.9 mul add  cb_x cb_w 0.3 mul add cb_y cb_h 1.1 mul add
-    cb_x cb_w 0.42 mul add cb_y cb_h 0.8 mul add curveto
-    cb_x cb_w 0.55 mul add cb_y cb_h 1.35 mul add  cb_x cb_w 0.8 mul add cb_y cb_h 1.05 mul add
-    cb_x cb_w 0.84 mul add cb_y cb_h 0.5 mul add curveto
-    cb_x cb_w 0.95 mul add cb_y cb_h 0.5 mul add  cb_x cb_w 1.02 mul add cb_y cb_h 0.2 mul add
-    cb_x cb_w add cb_y curveto
-    cb_x cb_w 0.6 mul add cb_y cb_h 0.1 mul sub  cb_x cb_w 0.3 mul add cb_y cb_h 0.3 mul sub
-    cb_x cb_y curveto closepath } def
-  /form { srand /fm_w exch def /fm_y exch def /fm_x exch def
-    /fm_h fm_w 0.28 mul def  /fm_r fm_w 0.04 mul def
-    /fm_under [ fm_y fm_h 2 div add skyat ] def
-    /fm_body [ 0.64 0.53 0.68 ] def  /fm_lit [ 0.93 0.72 0.62 ] def
-    /fm_n fm_w fm_h mul 1.4 mul fm_r dup mul 3.14 mul div cvi def
-    { fm_x fm_y fm_w fm_h lump scpath
-      << /Count fm_n /Radius fm_r /Squash 0.7 >> pkscumblein
-      << /Width fm_r 2.4 mul /Charge 0.75 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
-         /Colors [ [ fm_body 1.1 shade ] [ fm_body 0.9 shade ] ] >> pkbroad }
-    << /Soft 0.8 /Under fm_under >> pkwet
-    { fm_x fm_y fm_w fm_h lump scpath
-      << /Count fm_n 2 mul /Radius fm_r /Squash 0.7 /Light 250 /Reach 0.4 /Feather 0.9 >> pkscumblein
-      << /Width fm_r 2.4 mul /Charge 0.75 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
-         /Colors [ [ fm_body fm_lit 0.35 mix3 ] [ fm_body fm_lit 0.5 mix3 ] ] >> pkbroad
-      fm_x fm_y fm_w fm_h lump scpath
-      << /Count fm_n 4 mul /Radius fm_r 0.6 mul /Squash 0.7 /Light 250 /Reach 0.22 /Feather 1 >> pkscumblein
-      << /Width fm_r 1.5 mul /Charge 0.8 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
-         /Colors [ [ fm_lit fm_under 0.2 mix3 ] [ fm_lit fm_body 0.2 mix3 ] ] >> pkbroad }
-    << /Soft 0.6 /Under fm_body >> pkwet } def
-  80 300 260 2 form
-  380 270 150 4 form
-  % the sea: the sky mirrored and darkened, with broken horizontal pulls
-  /SEA [ 0.22 0.27 0.42 ] def
-  /seaat { WL exch sub WL div 0 max 1 min /st exch def
-    [ WL st 1.5 mul 0.3 add PH WL sub mul add skyat ] SEA st 0.5 mul 0.45 add mix3 } def
-  WL 2 sub -2 0 { /wt_y exch def [ wt_y seaat ] 0.8 shade setrgbcolor 0 wt_y PW 4 rectfill } for
-  WL 4 sub -9 0 { /wt_y exch def
-    [ wt_y seaat ] 0.72 shade setrgbcolor
-    /wt_x PW chance 80 sub def
-    newpath wt_x wt_y moveto wt_x 120 add 80 chance add wt_y 1.5 frnd mul add lineto
-    << /Width 8 /Charge 0.3 /Depletion 0.9 /Edge 0.3 >> pkbroad } for
-  % the headland on the right, as in the painting
-  [ 0.24 0.20 0.30 ] aload pop setrgbcolor
+  /SUNX 118 def
+  /ramp { % [ [t r g b] ... ] -> a stitched type 3 function over 0..1
+    /rp exch def
+    << /FunctionType 3 /Domain [0 1]
+       /Functions [ 0 1 rp length 2 sub { /k exch def
+         << /FunctionType 2 /Domain [0 1] /N 1
+            /C0 [ rp k get aload pop ] 1 3 getinterval
+            /C1 [ rp k 1 add get aload pop ] 1 3 getinterval >> } for ]
+       /Bounds [ 1 1 rp length 2 sub { rp exch get 0 get } for ]
+       /Encode [ 1 1 rp length 1 sub { pop 0 1 } for ] >> } def
+  /axial { % x0 y0 x1 y1 ramp -
+    /ax_f exch def /ax_c exch def
+    << /ShadingType 2 /ColorSpace /DeviceRGB /Coords ax_c
+       /Function ax_f /Extend [true true] >> shfill } def
+  % the sky, horizon gold up to a deep evening blue
+  gsave 0 WL PW PH WL sub rectclip
+    [ 0 WL 0 PH ]
+    [ [0 1.00 0.80 0.46] [0.10 0.99 0.62 0.42] [0.26 0.88 0.50 0.56]
+      [0.46 0.58 0.48 0.76] [0.70 0.28 0.36 0.70] [1 0.11 0.18 0.48] ] ramp axial
+  grestore
+  % the glow round the low sun: soft discs, each a little more opaque
+  gsave 0 WL PW PH WL sub rectclip
+    1 0.86 0.55 setrgbcolor
+    260 -3 20 { /gr exch def 0.013 setalpha
+      newpath SUNX WL gr 0 360 arc fill } for
+    1 0.97 0.82 setrgbcolor 1 setalpha
+    newpath SUNX WL 4 add 15 0 360 arc fill
+  grestore
+  % a cloud: a row of puffs [dx dy r] with a flat base at y, printed in
+  % three inks like a screen print. The warm lit underside is the whole
+  % shape; the pink body and the cool crown are the same shape scaled
+  % towards its top, so the lit rim is widest underneath, where the low
+  % sun catches it, and every edge follows the puffs.
+  /puffs { % x y [ [dx dy r] ... ] -   path of the puffs
+    /pf_l exch def /pf_y exch def /pf_x exch def
+    newpath pf_l { aload pop /pr exch def /pdy exch def /pdx exch def
+      pf_x pdx add pr add pf_y pdy add moveto
+      pf_x pdx add pf_y pdy add pr 0 360 arc closepath } forall } def
+  /cloud { % x y [puffs] -
+    /cl_p exch def /cl_y exch def /cl_x exch def
+    % the anchor: the middle of the puffs, at the top of the highest
+    /cl_l 1e9 def /cl_r -1e9 def /cl_t -1e9 def
+    cl_p { aload pop /pr exch def /pdy exch def /pdx exch def
+      /cl_l cl_l pdx pr sub min def /cl_r cl_r pdx pr add max def
+      /cl_t cl_t pdy pr add max def } forall
+    /cl_ax cl_x cl_l cl_r add 2 div add def /cl_ay cl_y cl_t add 2 sub def
+    [ [1 [1.00 0.75 0.50]] [0.86 [0.85 0.54 0.62]] [0.62 [0.58 0.45 0.68]] ] {
+      aload pop /cl_c exch def /cl_s exch def
+      gsave
+        cl_ax cl_ay translate cl_s dup scale cl_ax neg cl_ay neg translate
+        0 cl_y PW PH rectclip
+        cl_c aload pop setrgbcolor cl_x cl_y cl_p puffs fill
+      grestore } forall } def
+  60 300 [ [0 0 22] [26 10 30] [62 22 40] [104 30 46] [150 18 36]
+           [186 8 26] [214 0 18] [120 52 30] [80 46 24] ] cloud
+  380 300 [ [0 0 16] [22 8 22] [52 16 28] [86 10 24] [116 2 16] [60 34 18] ] cloud
+  % long thin bands of stratus low over the sea glow, lit from below
+  /band { % x y w h -
+    /bd_h exch def /bd_w exch def /bd_y exch def /bd_x exch def
+    % a tapered streak, fullest a third of the way along
+    newpath bd_x bd_y moveto
+    bd_x bd_w 0.2 mul add bd_y bd_h add  bd_x bd_w 0.5 mul add bd_y bd_h add
+    bd_x bd_w add bd_y bd_h 0.2 mul add curveto
+    bd_x bd_w 0.6 mul add bd_y bd_h 0.3 mul sub  bd_x bd_w 0.25 mul add bd_y bd_h 0.4 mul sub
+    bd_x bd_y curveto closepath fill } def
+  0.84 0.50 0.58 setrgbcolor
+  250 238 230 8 band  10 216 170 6 band  330 204 220 7 band  110 194 110 4 band
+  420 184 130 4 band  0 252 90 5 band
+  % the sea: a dark gradient, and the sun's reflection in broken streaks
+  gsave 0 0 PW WL rectclip
+    [ 0 0 0 WL ]
+    [ [0 0.07 0.09 0.22] [0.75 0.17 0.19 0.38] [1 0.36 0.32 0.50] ] ramp axial
+  grestore
+  7 srand
+  /rnd { rand 2147483647 div } def
+  1 0.80 0.50 setrgbcolor
+  WL 3 sub -4 124 { /sy exch def
+    sy 120 sub WL 120 sub div dup 0.9 mul 0.1 add setalpha
+    /sw exch 0.6 mul 0.3 add 40 mul def
+    0 1 2 { pop
+      /sx SUNX rnd 0.5 sub sw 2 mul mul add def
+      sx sy sw rnd 0.6 mul 0.2 add mul 1.3 band } for } for
+  0.55 0.50 0.72 setrgbcolor
+  WL 8 sub -11 20 { /sy exch def sy WL div 0.5 mul setalpha
+    0 1 1 { pop rnd PW mul sy rnd 40 mul 10 add 0.8 band } for } for
+  1 setalpha
+  % the headland on the right, a far ridge and a near one
+  0.36 0.28 0.42 setrgbcolor
+  newpath 160 WL moveto 230 WL 10 add 300 WL 16 add 360 WL 24 add curveto
+  420 WL 32 add 480 WL 36 add PW 10 add WL 46 add curveto PW 10 add WL lineto closepath fill
+  0.18 0.14 0.25 setrgbcolor
   newpath 200 WL moveto 230 WL 6 add 260 WL 9 add 300 WL 12 add curveto
   340 WL 22 add 380 WL 24 add 430 WL 30 add curveto
   480 WL 36 add 520 WL 33 add 560 WL 38 add curveto
   580 WL 40 add 600 WL 41 add PW 10 add WL 42 add curveto PW 10 add WL lineto closepath fill
+  % print grain: fine specks, light and dark, at a low alpha
+  0 1 9000 { pop
+    rnd 0.5 lt { 1 setgray } { 0 setgray } ifelse 0.07 setalpha
+    rnd PW mul rnd PH mul 0.7 0.7 rectfill } for
+  1 setalpha
 } {
   % the hybrid: the frozen painting, scaled to cover the page width and
   % aligned to the bottom edge (its open sky runs off the top).
@@ -146,32 +209,50 @@ PscatOnly {
   grestore
 } ifelse
 
+% A soft shade under the bottom band: the sea is dark already, and this
+% deepens it evenly behind the date, the venue and the QR caption so the
+% type never sits on a bright wave. Thin horizontal strips of rising
+% opacity, so it fades in with no visible edge.
+gsave
+  0.03 0.05 0.14 setrgbcolor
+  0 2 196 { /sh_y exch def
+    1 sh_y 196 div sub dup mul 0.62 mul setalpha
+    0 sh_y PW 2.2 rectfill } for
+grestore
+
 % ------------------------------------------------------------ the title
+% The title is the poster: two lines of Abril Fatface set solid (leading
+% about the cap height plus a little), filling the measure.
 white
-/Title-L1 66 font
-44 744 moveto (Why Is the) show
-44 676 moveto (Sky Blue?) show
-/Ital-L1 21 font
-46 636 moveto (A free public talk on light, air and colour) show
-/Body-L1 15 font
-46 610 moveto (Dr. Imogen Hartley, atmospheric physicist) show
+/Display-L1 98 font
+M 3 sub 724 moveto (Why Is the) show
+M 3 sub 634 moveto (Sky Blue?) show
+/Ital-L1 22 font
+M 596 moveto (A free public talk on light, air and colour) show
+/Label-L1 14 font
+M 572 moveto (Dr. Imogen Hartley, atmospheric physicist) 0.6 tshow
 
 % ------------------------------------------- the formula and the chart
 % Rayleigh: scattered intensity goes as one over the fourth power of the
 % wavelength. The bars are (700 / lambda)^4, computed here, so the chart
 % and its labels cannot disagree with the formula.
-/formula { % x y -
-  moveto
-  /Times-Italic 38 font (I) show
-  /Symbol 38 font ( \265 ) show
-  /Times-Roman 38 font (1/) show
-  /Symbol 38 font (l) show
-  /Times-Roman 22 font 0 16 rmoveto (4) show
+/BANDTOP 530 def                       % the top line of the science band
+0.5 setlinewidth white
+newpath M BANDTOP 12 add moveto RIGHT BANDTOP 12 add lineto stroke
+
+% the formula, as a typeset fraction: I proportional to 1 over lambda^4
+/formula { % x y -   (y is the fraction bar)
+  /fy exch def /fx exch def
+  /Ital-L1 46 font fx fy 15 sub moveto (I) show
+  /Symbol 40 font ( \265 ) show
+  currentpoint pop /fbx exch def
+  /Symbol 40 font (l) stringwidth pop /lw exch def
+  /Palatino-Roman 22 font (4) stringwidth pop lw add /fw exch def
+  /Palatino-Roman 40 font fbx fw (1) stringwidth pop sub 2 div add fy 7 add moveto (1) show
+  /Symbol 40 font fbx fy 34 sub moveto (l) show
+  /Palatino-Roman 22 font 1 17 rmoveto (4) show
+  1.6 setlinewidth newpath fbx 1 sub fy moveto fbx fw add 2 add fy lineto stroke
 } def
-white
-/Sans-L1 10 font
-46 552 moveto (Rayleigh scattering) show
-46 508 formula
 
 /bars [ % nm  r g b  (each bar in the colour of its light)
   [ 400 0.62 0.45 1.00 ]
@@ -189,31 +270,41 @@ white
   dup 0 in putinterval dup in length (.) putinterval
   dup in length 1 add fr putinterval } def
 
-/CX 300 def /CY 470 def /CW 250 def /CH 66 def     % the chart's box
-/bw 26 def
+/CX 2 COL def /CW RIGHT CX sub def          % columns 3-6
+/CY BANDTOP 128 sub def /CH 92 def         % baseline and tallest bar
 /pitch CW bars length div def
-white /Sans-L1 10 font
-CX 552 moveto (Scattering relative to red light \(700 nm\)) show
-0 1 bars length 1 sub {
-  /i exch def
-  bars i get aload pop /cb exch def /cg exch def /cr exch def /nm exch def
-  /x CX i pitch mul add pitch bw sub 2 div add def
-  /h nm ratio 9.4 div CH mul def
-  cr cg cb setrgbcolor x CY bw h rectfill
-  white /SansB-L1 9.5 font
-  x bw 2 div add CY h add 4 add moveto nm ratio fmt1 (\327) cat cshow
-  /Sans-L1 8.5 font
-  x bw 2 div add CY 12 sub moveto nm 3 string cvs ( nm) cat cshow
-} for
-0.8 setlinewidth white
-newpath CX CY moveto CX CW add CY lineto stroke
+/bw pitch 0.62 mul def
+% the bars first, then every white mark over them twice: once as a soft
+% dark shadow a point down and right, once in white, so the labels stay
+% crisp where the painting behind them turns to bright cloud
+/barx { pitch mul CX add pitch bw sub 2 div add } def   % i -> x
+/barh { ratio 9.4 div CH mul } def                      % nm -> height
+0 1 bars length 1 sub { /i exch def
+  bars i get aload pop setrgbcolor /nm exch def
+  i barx CY bw nm barh rectfill } for
+/marks { % -   everything white in the science band, in the current colour
+  M 1 add BANDTOP 62 sub formula
+  /Label-L1 11 font
+  M BANDTOP 6 sub moveto (Rayleigh scattering) 1.2 tshow
+  CX BANDTOP 6 sub moveto (Scattering relative to red light \(700 nm\)) 1.2 tshow
+  0 1 bars length 1 sub { /i exch def
+    bars i get 0 get /nm exch def
+    /Label-L1 13 font
+    i barx bw 2 div add CY nm barh add 5 add moveto nm ratio fmt1 (\327) cat 0 ctshow
+    /Label-L1 10.5 font
+    i barx bw 2 div add CY 15 sub moveto nm 3 string cvs ( nm) cat 0.3 ctshow
+  } for
+  0.8 setlinewidth newpath CX CY moveto RIGHT CY lineto stroke
+} def
+gsave 0.04 0.05 0.16 setrgbcolor 0.4 setalpha 0.9 -0.9 translate marks grestore
+white marks
 
 % ------------------------------------------------- when, where, the QR
 white
-/Title-L1 22 font
-46 104 moveto (Thursday 3 December 2026 \267 7:30 pm) show
-/Body-L1 16 font
-46 80 moveto (Harbourside Library, Lecture Room 2) show
+/Display-L1 22 font
+M 106 moveto (Thursday 3 December 2026 \267 7:30 pm) show
+/Body-L1 17 font
+M 81 moveto (Harbourside Library, Lecture Room 2) show
 
 % The URL is 44 bytes: version 5 at level H. 2-point modules put every
 % module edge on a pixel edge at 72 and 144 dpi (the origin is on whole
@@ -221,6 +312,6 @@ white
 /QX 461 def /QY 36 def
 QX QY moveto URL << /Level /H >> qrencode
 << /ModuleSize 2 /Dark [0.08 0.12 0.30] /Light [1 0.96 0.88] >> qrdraw
-cream /Ital-L1 12 font
-QX 90 add QY 100 add moveto (Scan: how this poster was made) rshow
+cream /Label-L1 11 font
+RIGHT QY 100 add moveto (Scan: how this poster was made) 0.6 rtshow
 showpage

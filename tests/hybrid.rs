@@ -188,10 +188,14 @@ fn every_pscat_qr_code_decodes_in_png_and_pdf() {
     }
 }
 
-/// The text a program paints: `show` is wrapped to print each string first
-/// (the posters' right-aligned and centred helpers call `show` too).
+/// The text a program paints: `show` and `ashow` (the tracked type) are
+/// wrapped to print each string first (the posters' right-aligned and
+/// centred helpers call them too).
 fn shown_strings(ex: &Example, variant: &str) -> Vec<String> {
-    let prelude = format!("{variant}\n/show {{ dup print (\\n) print //show }} bind def");
+    let prelude = format!(
+        "{variant}\n/show {{ dup print (\\n) print //show }} bind def\n\
+         /ashow {{ dup print (\\n) print //ashow }} bind def"
+    );
     let (_, out) = pscat(ex, "copy", &prelude, &["--png", "{dir}/copy.png"]);
     out.split(|&b| b == b'\n').map(latin1).collect()
 }
