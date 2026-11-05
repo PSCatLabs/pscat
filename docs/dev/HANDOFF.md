@@ -76,7 +76,7 @@ has the full story). Also done: issue #20, axial/radial gradient
 (shading) fill support — the `shfill` operator (`src/shading.rs`,
 `src/ops/shading.rs`, `Gfx::shfill`), `ShadingType` 2/3 with
 `FunctionType` 2/3, native SVG `<linearGradient>`/`<radialGradient>`
-export, a PDF average-color-fill approximation, and `lib/artkit.ps`'s
+export, a PDF average-color-fill approximation (real PDF shadings since #1028), and `lib/artkit.ps`'s
 "gradients" section (`gradfn`/`axialsh`/`radialsh`/`gradfill`) on top of it
 (docs/archive/NOTES.md's entry has the full story). Also done: issue #9, a tiling/tessellation
 library for artkit — `lattice`/`hex`/`tri`/`hexgrid`/`trigrid`/
@@ -621,9 +621,14 @@ renders eight examples in both and compares block-downsampled output).
   `[true true]` — the `gsave <path> clip shfill grestore` idiom
   already bounds the painted region, so `false`'s "transparent beyond
   the axis" is an edge case that idiom never hits. SVG export gets
-  real `<linearGradient>`/`<radialGradient>`; PDF export approximates
-  a shading as a flat fill in the ramp's *position-weighted* average
-  color (no pattern-colorspace machinery). SVG's two-circle radial
+  real `<linearGradient>`/`<radialGradient>`; PDF export writes a real
+  `sh` on a `/Shading` resource (#1028: before, a flat fill in the
+  ramp's average colour), its Function built from the same RGB stops the
+  raster and SVG paint, with `/Extend [true true]` to match the raster
+  and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`).
+  ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
+  `/Pattern` colour spaces) are not implemented at all, in any output.
+  SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
   off-center `ShadingType` 3 that fails that (valid PostScript; no
