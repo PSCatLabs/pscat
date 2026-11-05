@@ -280,6 +280,13 @@ newpath M BANDTOP 12 add moveto RIGHT BANDTOP 12 add lineto stroke
 % crisp where the painting behind them turns to bright cloud
 /barx { pitch mul CX add pitch bw sub 2 div add } def   % i -> x
 /barh { ratio 9.4 div CH mul } def                      % nm -> height
+% under the whole band, first, a faint shade, strongest at the chart's foot
+% where the brightest cloud is, fading out above and below
+gsave 0.06 0.06 0.20 setrgbcolor
+  CY 40 sub 2 BANDTOP 10 add { /sh_y exch def
+    sh_y CY sub abs 70 div 1 exch sub 0 max 0.2 mul setalpha
+    0 sh_y PW 2.2 rectfill } for
+grestore
 0 1 bars length 1 sub { /i exch def
   bars i get aload pop setrgbcolor /nm exch def
   i barx CY bw nm barh rectfill } for

@@ -734,6 +734,9 @@ renders eight examples in both and compares block-downsampled output).
   assets with their prompts in `examples/hybrid/README.md`: do not regenerate
   them to change a poster; edit the pscat layer. If one is ever replaced,
   re-check the facts on the comparison sheets (`compare_*.ps`) and the guide.
+  The layouts were redesigned in #998 (`notes/998-hybrid-showcase-layouts.md`)
+  and use catalog faces (`extras` pack); their tracked labels are `ashow`,
+  which the copy test captures alongside `show`.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in

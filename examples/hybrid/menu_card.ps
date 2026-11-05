@@ -220,7 +220,10 @@ L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 % caption sits beside it, level with its middle.
 /QX 56 def /QY 56 def
 QX QY moveto URL << /Level /H >> qrencode
-<< /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light [0.98 0.955 0.88] >> qrdraw
+% the light modules in the paper's own tone under the code, so it shows
+% no box: the painting's warm cream, or paintkit's paper
+/QLight PscatOnly { [0.98 0.955 0.89] } { [0.975 0.915 0.79] } ifelse def
+<< /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light QLight >> qrdraw
 ink /Ital-M 13 font
 QX 102 add QY 41 add moveto (Scan: how this menu was made) show
 showpage
