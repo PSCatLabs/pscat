@@ -306,7 +306,7 @@ It also runs in the browser. The WebAssembly build (`npm install pscat`, or
 [pscat in the browser](browser.md)) renders client-side, with no server, GPU
 or API call; the site's
 [playground](https://pscatlabs.github.io/pscat/playground.html) is that build.
-On `main` it also writes SVG and PDF; see the next section.
+From 0.7.0-rc.4 it also writes SVG and PDF; see the next section.
 
 ## Documents from a web page, the same for every user
 

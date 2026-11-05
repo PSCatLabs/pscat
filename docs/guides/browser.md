@@ -59,8 +59,12 @@ contract. It began as the vector adapter that
 
 ## The npm package
 
-From 0.6.2 the same module is published to npm as **`pscat`**
-(not on npm yet; until then, build it from a checkout as below). It
+From 0.6.2 the same module is published to npm as **`pscat`**. SVG and
+PDF output arrive on npm with 0.7.0; until then, install the 0.7.0-rc.4
+package from its
+[GitHub pre-release](https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.4)
+(`npm install https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.4/pscat-0.7.0-rc.4.tgz`)
+or build it from a checkout as below. It
 works in browsers (with or without a bundler) and in Node 22 or later,
 and ships TypeScript types.
 

@@ -2193,7 +2193,8 @@ renders eight examples in both and compares block-downsampled output).
   `wasm_vector_output_matches_the_cli` in `tests/wasm.rs` holds that, and
   a change to what the CLI does around the recorders (src/main.rs) must be
   mirrored in `ps_begin_vector`. It started as PSCatLabs/print-shop's
-  adapter patch; print-shop's #16 moves that app onto this ABI. Release-status
+  adapter patch; print-shop has run on this ABI since its #16, and on the released rc.4
+  package since its #28. Release-status
   sentences go stale: `docs/guides/when-to-use-pscat.md`,
   `site/when-to-use.html` and `docs/guides/browser.md` say SVG/PDF from wasm
   first ships in 0.7.0-rc.4 (npm at 0.7.0), and that print-shop runs on the
