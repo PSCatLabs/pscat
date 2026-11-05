@@ -819,3 +819,192 @@ Change only the price of "Flat white" in the Drinks section from "3.80" to "3.95
 ```
 
 </details>
+
+## The reversed hybrid: pscat sets the layout (#1001)
+
+[`alpine_trail.ps`](alpine_trail.ps), a 2:3 travel poster (576 x 864 pt, 8 x 12 in), turns the hybrid round. pscat draws the composition first, the image model makes that drawing a photograph, and pscat lays the exact layer back on at the coordinates it drew:
+
+| Stage | File |
+|---|---|
+| 1. The layout reference pscat draws (`/Stage /Reference`, 128 dpi) | [`alpine_trail_ref.png`](alpine_trail_ref.png), 1024 x 1536 px, as sent |
+| 2. The photograph the image model made from it (frozen) | [`alpine_trail_photo.jpg`](alpine_trail_photo.jpg) |
+| 3. The poster: the photograph and pscat's exact layer | `alpine_trail.ps` (the default stage) |
+| A second photograph from the same reference | [`alpine_trail_autumn.jpg`](alpine_trail_autumn.jpg) (`/Season /Autumn`) |
+| The image model alone, for comparison | [`alpine_trail_model.jpg`](alpine_trail_model.jpg) |
+
+Render from the repository root:
+
+```sh
+pscat --page 576x864 --pdf alpine_trail.pdf examples/hybrid/alpine_trail.ps
+pscat --page 576x864 --dpi 144 --png alpine_trail.png examples/hybrid/alpine_trail.ps
+{ echo '/Stage /Reference def'; cat examples/hybrid/alpine_trail.ps; } | \
+  pscat --page 576x864 --dpi 128 --png alpine_trail_ref.png -
+{ echo '/Season /Autumn def'; cat examples/hybrid/alpine_trail.ps; } | \
+  pscat --page 576x864 --dpi 144 --png alpine_trail_autumn.png -
+{ echo '/PscatOnly true def'; cat examples/hybrid/alpine_trail.ps; } | \
+  pscat --page 576x864 --dpi 144 --png alpine_trail_pscat.png -
+```
+
+The comparison and the process sheet ([`compare_alpine_trail.ps`](compare_alpine_trail.ps), which draws its own panels):
+
+```sh
+pscat sheet -o docs/guides/hybrid/alpine_trail_compare.png --page 576x1054 \
+  --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+  --label "Piz Calderan: (a) image model alone, (b) pscat alone, (c) reversed hybrid" \
+  examples/hybrid/compare_alpine_trail.ps
+pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
+  --dpi 36 --no-sizes --sweep Panel=4,5,6,7 \
+  --label "Piz Calderan: one layout, two photographs, one exact layer" \
+  examples/hybrid/compare_alpine_trail.ps
+```
+
+`tests/hybrid_reverse.rs` checks the facts: the program still draws the reference that was sent; the layout drift of both photographs (ridge, shade edge, hut) and how quiet the type zones stayed, measured on the committed files; the QR code in both decoders from the PNG and the PDF, framed as a scanner frames it (the page's bottom-right quarter), for the summer and autumn hybrids and for pscat alone; the brief, string by string; and the decoders' verdict on the image model's own QR code.
+
+### Where these images came from
+
+All were made on 2026-11-05 by **OpenAI's image model, through the Codex CLI 0.166 `image_generation` tool**, signed in with the project owner's ChatGPT account, under the same terms as the images above (the output is assigned to the user; CC0 1.0 under this directory's mapping in `licenses/assets.json`). Each was one command in an empty scratch directory holding the reference as `ref.png`:
+
+```sh
+codex exec --skip-git-repo-check -s workspace-write --image=ref.png "<instruction>" < /dev/null
+```
+
+Write `--image=ref.png`, with the `=`: `-i` takes several files, so `-i ref.png "<instruction>"` reads the instruction as a second image path and Codex then waits for a prompt on standard input. The image-model-alone run had no `--image`.
+
+Codex's image skill rewrites each instruction into its own prompt before calling the tool, and for the reference runs it labels the job "sketch-to-render" and adds its own estimates of where things are. In every reference run Codex reported that the tool received the attached reference as its input image to edit, not only as a description. These are all five runs, in order, each with the instruction as sent and the prompt Codex printed as the one it passed to the tool:
+
+
+**1. Probe, 09:40 (not committed).** A first, rougher block-in (straight-sided peaks, a flat foreground band; drawn in a scratch file, not kept). The photograph kept the composition closely, but it also kept the crude shapes: geometric pyramids and a hard horizontal shadow. So the block-in was redrawn with a jagged ridge, lit faces and an undulating shadow edge: that is `/Stage /Reference` now.
+
+<details><summary>The instruction sent to Codex</summary>
+
+```text
+Use your image generation tool to turn the attached layout reference into a photorealistic photograph of an alpine valley in late summer, keeping its composition exactly: the ridge line of dark granite peaks against the sky, the green slopes, the lake shoreline, the small wooden hut with a red roof, the path and the dark foreground must stay in the same positions and the same sizes as the flat shapes in the reference. Same framing and aspect (portrait 2:3): do not crop, zoom, pan or add anything outside the frame. The sky stays clear and open. No snow, no text, no letters, no logos, no people. Pass the attached image to the image generation tool as the reference or input image to edit, not just as a description. Save it as photo.png in the current directory at full resolution; do not resize it. Then print the path and pixel dimensions, say whether the image tool received the attached image as an input, and print verbatim the exact prompt you passed to the image generation tool.
+```
+
+</details>
+
+<details><summary>The prompt Codex passed to the image tool</summary>
+
+```text
+Use case: sketch-to-render.
+Edit the attached input image into a photorealistic photograph of an alpine valley in late summer. The input image is the exact layout reference and edit target, not merely inspiration. Replace the flat colors with realistic photographic materials, texture, natural light and depth while preserving the composition exactly.
+Keep every region, silhouette, position, size and boundary aligned with the reference: the ridge line of dark granite peaks against the sky, green slopes, lake shoreline, small wooden hut with a red roof, curved tan path and dark foreground. The tallest granite summit stays at approximately 66% across and 26% down; the smaller left summit stays at 26% across and 37% down. Preserve the complete mountain silhouette. Preserve the open blue sky regions. The green far slopes stay around 54–61% down, the narrow blue lake around 59–65% down, and the near green meadow around 65–80% down. The small hut stays near 75% across, with its red roof around 60–62% down and its wooden body ending at 65% down. Keep the hut as small as in the input. The path curves from approximately 48% across at 80% down to the hut at 74% across at 65% down, with the same width and route. The dark green foreground occupies the bottom 20% with the same upper boundary; render it as deeply shaded natural ground vegetation. Keep all these shapes in their exact reference positions and sizes.
+Photographic detail: rugged dark granite rock faces without snow, late-summer green alpine grass, naturally blue lake water, weathered wood on the hut, a red roof and a pale earthen path. Clear open blue sky with no clouds. Natural realistic late-summer daylight. The result must look like a real photograph, with realistic fine surface detail rather than flat vector art.
+Same framing and portrait 2:3 aspect ratio as the input. Do not crop, zoom, pan, reframe, extend the canvas or add anything outside the frame. No snow, text, letters, logos, watermarks or people. Do not introduce extra buildings or other objects. Generate the full-resolution image.
+```
+
+</details>
+
+**2. Flat colour reference, 09:48: `alpine_trail_photo.jpg`.** The reference sent was `alpine_trail_ref.png`, which the program still draws (`tests/hybrid_reverse.rs` checks it).
+
+<details><summary>The instruction sent to Codex</summary>
+
+```text
+Use your image generation tool to turn the attached layout reference, a flat colour block-in of the scene, into a photograph. Make it a photorealistic landscape photograph of a high alpine valley in late summer, in warm late-afternoon light with the sun low on the left: two rugged peaks of dark granite with no snow, their west faces lit warm and their east faces in cool shadow; grassy slopes with scattered boulders and a few larches; a calm dark-blue mountain lake; a small old stone-and-timber mountain hut with a red roof where the reference puts it; a narrow earth footpath that climbs from the bottom of the frame to the hut and then zigzags up the slope to the col; and in the bottom part of the frame, the near ground in deep shadow: dark grass and low rocks, quiet and low in contrast. Keep the composition of the reference exactly: the ridge's silhouette against the sky with every summit and the col at the same point, the slopes, the lake shoreline, the hut, the path and the edge of the shadow must stay in the same positions and the same sizes. Same framing and the same 2:3 portrait aspect: do not crop, zoom, pan or extend the frame. A clear, cloudless sky with a smooth gradient, deep blue at the top to warm pale near the ridge. No text, letters, numbers, logos, signs or people. Pass the attached image to the image generation tool as the input image to edit, not only as a description. Save it as photo.png in the current directory at full resolution; do not resize it. Then print the path and pixel dimensions, say whether the image tool received the attached image as an input, and print verbatim the exact prompt you passed to the image generation tool.
+```
+
+</details>
+
+<details><summary>The prompt Codex passed to the image tool</summary>
+
+```text
+Use case: sketch-to-render.
+Input image: the attached flat-colour landscape block-in is the edit target and exact composition guide.
+Turn this image into a photorealistic landscape photograph of a high alpine valley in late summer, in warm late-afternoon light with the sun low on the left. Two rugged peaks of dark granite with no snow, their west faces lit warm and their east faces in cool shadow. Grassy slopes with scattered boulders and a few larches. A calm dark-blue mountain lake. A small old stone-and-timber mountain hut with a red roof exactly where the reference puts it. A narrow earth footpath climbs from the bottom of the frame to the hut and then zigzags up the slope to the col. In the bottom part of the frame, the near ground is in deep shadow: dark grass and low rocks, quiet and low in contrast.
+Preserve the reference composition exactly. The ridge silhouette against the sky, every summit and the col, the slopes, the lake shoreline, the hut, the entire path and its switchbacks, and the edge of the foreground shadow must remain at precisely the same positions and sizes as in the input. Keep the large area of open sky. Add photographic material texture and natural detail within the existing shapes without changing their outlines or geometry. Keep the small hut small. Keep the foreground shadow boundary at its existing height and contour.
+Same framing and same 2:3 portrait aspect ratio as the input. Do not crop, zoom, pan, or extend the frame. Clear cloudless sky with a smooth gradient, deep blue at the top to warm pale near the ridge. Realistic natural photographic detail and exposure, no painterly or illustrated appearance. No snow, text, letters, numbers, logos, signs, or people.
+```
+
+</details>
+
+**3. Line-drawing reference, 09:48 (not used).** The same reference reduced to black outlines on white: its colour edges, found and thickened to about 3 px lines with Pillow in a scratch script. It was sent with the same instruction except for the first sentence. The photograph followed the drawn lines closely (ridge 0.8 px from them, mean), but the lines sat 3.5 px above the true edge, so it ended 4 px from the layout, against 1.2 px for run 2. Run 2 was kept on that measurement, not on looks; the two photographs looked equally good.
+
+<details><summary>The instruction sent to Codex</summary>
+
+```text
+Use your image generation tool to turn the attached layout reference, a black-on-white line drawing of the scene's outlines, into a photograph. Make it a photorealistic landscape photograph of a high alpine valley in late summer, in warm late-afternoon light with the sun low on the left: two rugged peaks of dark granite with no snow, their west faces lit warm and their east faces in cool shadow; grassy slopes with scattered boulders and a few larches; a calm dark-blue mountain lake; a small old stone-and-timber mountain hut with a red roof where the reference puts it; a narrow earth footpath that climbs from the bottom of the frame to the hut and then zigzags up the slope to the col; and in the bottom part of the frame, the near ground in deep shadow: dark grass and low rocks, quiet and low in contrast. Keep the composition of the reference exactly: the ridge's silhouette against the sky with every summit and the col at the same point, the slopes, the lake shoreline, the hut, the path and the edge of the shadow must stay in the same positions and the same sizes. Same framing and the same 2:3 portrait aspect: do not crop, zoom, pan or extend the frame. A clear, cloudless sky with a smooth gradient, deep blue at the top to warm pale near the ridge. No text, letters, numbers, logos, signs or people. Pass the attached image to the image generation tool as the input image to edit, not only as a description. Save it as photo.png in the current directory at full resolution; do not resize it. Then print the path and pixel dimensions, say whether the image tool received the attached image as an input, and print verbatim the exact prompt you passed to the image generation tool.
+```
+
+</details>
+
+<details><summary>The prompt Codex passed to the image tool</summary>
+
+```text
+Use case: sketch-to-render.
+Edit target: the attached black-on-white line drawing. Transform this input image into a photorealistic landscape photograph, using its lines as exact spatial constraints, not as a loose inspiration.
+
+A high alpine valley in late summer, warm late-afternoon light with the sun low on the left. Two rugged peaks of dark granite with no snow, their west faces lit warm and their east faces in cool shadow. Grassy slopes with scattered boulders and a few larches. A calm dark-blue mountain lake. A small old stone-and-timber mountain hut with a red roof exactly where the drawing places it. A narrow earth footpath climbs from the bottom of the frame to the hut and then zigzags up the slope to the col. In the bottom part of the frame, the near ground is in deep shadow: dark grass and low rocks, quiet and low in contrast. Clear, cloudless sky with a smooth gradient from deep blue at the top to warm pale near the ridge.
+
+Preserve the composition of the input exactly. The ridge silhouette against the sky, every summit and the col, the slopes, lake shoreline, hut, footpath, and edge of the foreground shadow must remain at the same positions and sizes. In the 1024 by 1536 reference coordinates: the left summit is at about (234,594), the col at (350,685), and the right summit at (639,462). The hut occupies approximately x157–223 and y879–933. The lake occupies the right middle ground between the drawn shorelines at approximately y904–1010, with its leftmost point at about (349,971). The footpath enters the bottom around x530, curves up-left to the hut around (190,933), then follows the drawn zigzags through (267,875), (220,828), (298,789), (252,747), (324,716), to the col. The foreground shadow boundary follows the gently undulating line around y1195 across the full frame. Match the actual input lines precisely; these coordinates only help identify the features. Retain the large expanse of sky and the exact 2:3 portrait framing. Do not crop, zoom, pan, extend the frame, relocate objects, enlarge the hut, or change the shape of the mountains. Replace all sketch lines with natural photographic boundaries and realistic terrain and materials; leave no drawn outlines. Natural photographic detail and color, with the foreground shadow subdued.
+
+No text, letters, numbers, logos, signs, people, snow, or clouds. Output a full-resolution 2:3 portrait image.
+```
+
+</details>
+
+**4. Same reference, autumn, 10:00: `alpine_trail_autumn.jpg`.** Only the season and light changed in the instruction; the reference was the same file as run 2's.
+
+<details><summary>The instruction sent to Codex</summary>
+
+```text
+Use your image generation tool to turn the attached layout reference, a flat colour block-in of the scene, into a photograph. Make it a photorealistic landscape photograph of a high alpine valley in mid-October, early on a clear frosty morning with the sun low on the left: two rugged peaks of dark granite with a light dusting of fresh snow high up, their west faces lit and their east faces in cool shadow; slopes of golden autumn larches and russet grass with scattered boulders; a calm, still mountain lake; a small old stone-and-timber mountain hut with a red roof where the reference puts it; a narrow earth footpath that climbs from the bottom of the frame to the hut and then zigzags up the slope to the col; and in the bottom part of the frame, the near ground in deep shadow: dark frosted grass and low rocks, quiet and low in contrast. Keep the composition of the reference exactly: the ridge's silhouette against the sky with every summit and the col at the same point, the slopes, the lake shoreline, the hut, the path and the edge of the shadow must stay in the same positions and the same sizes. Same framing and the same 2:3 portrait aspect: do not crop, zoom, pan or extend the frame. A clear, cloudless sky with a smooth gradient, deep blue at the top to pale near the ridge. No text, letters, numbers, logos, signs or people. Pass the attached image to the image generation tool as the input image to edit, not only as a description. Save it as photo.png in the current directory at full resolution; do not resize it. Then print the path and pixel dimensions, say whether the image tool received the attached image as an input, and print verbatim the exact prompt you passed to the image generation tool.
+```
+
+</details>
+
+<details><summary>The prompt Codex passed to the image tool</summary>
+
+```text
+Use case: sketch-to-render.
+Edit the attached image, ref.png, into a photorealistic landscape photograph. The attached image is the edit target and the exact composition map, not merely an inspiration image. Replace its flat color blocks with convincing photographic materials, natural detail, and light while preserving its geometry.
+
+Scene: a high alpine valley in mid-October, early on a clear frosty morning with the sun low on the left. Two rugged peaks of dark granite with a light dusting of fresh snow high up; their west faces lit and their east faces in cool shadow. Slopes of golden autumn larches and russet grass with scattered boulders. A calm, still mountain lake. A small old stone-and-timber mountain hut with a red roof exactly where the reference puts it. A narrow earth footpath climbs from the bottom of the frame to the hut and then zigzags up the slope to the col. In the bottom part of the frame, the near ground is in deep shadow: dark frosted grass and low rocks, quiet and low in contrast. Clear, cloudless sky with a smooth gradient from deep blue at the top to pale near the ridge. Natural photographic texture and realistic optical detail throughout, not painting or illustration.
+
+Composition is locked to the input image. Keep the ridge silhouette against the sky with every summit, minor ridge break, and the col at exactly the same point. Keep the slopes, lake shoreline, hut, path including each bend, and the edge of the foreground shadow in the same positions and at the same sizes. At the input's 1024 x 1536 coordinate scale, the left summit is at approximately (234,594), the col/path arrival at (350,685), and the main summit at (640,463); the hut roof spans approximately x156–224 at y879–903 with the hut base at y931; the lake occupies the right side around y904–1010, its leftmost shoreline near (350,971); the foreground shadow edge runs near y1195; the path enters the bottom near x532. These coordinates describe the input's existing shapes, which must remain fixed. Preserve the generous area of sky, all original framing, and the exact 2:3 portrait aspect ratio. Do not crop, zoom, pan, extend the frame, move objects, enlarge the hut, alter the mountain outline, or change the shoreline. Preserve the composition exactly while rendering it as a photograph. No text, letters, numbers, logos, signs, watermarks, or people. Return the image at full native resolution.
+```
+
+</details>
+
+**5. The image model alone, 09:54: `alpine_trail_model.jpg`.** No reference: the whole poster, from the same brief. One attempt, no retries, no picking. Codex checked its QR code afterwards, found it did not decode, and (as instructed) left the image alone: the committed JPEG is converted from a PNG byte-identical to the tool's original in `~/.codex/generated_images/`.
+
+<details><summary>The instruction sent to Codex</summary>
+
+```text
+Use your image generation tool to create the following image. Design a complete travel poster as one image, portrait 2:3. A photorealistic photograph of a high alpine valley in late summer, in warm late-afternoon light: two rugged granite peaks with no snow, grassy slopes with a few larches, a calm mountain lake, a small stone-and-timber hut with a red roof, and a footpath that climbs from the bottom of the frame to the hut and zigzags up to the col between the peaks. The poster must contain exactly this text, spelled exactly as given: the title "PIZ CALDERAN" and the line "VAL BRENNA · THE SUMMIT TRAIL · SUMMER 2027". Label the higher peak "Piz Calderan 2,874 m", the lower peak "Piz Mora 2,512 m", the col between them "Bocchetta di Brenna 2,436 m" and the hut "Rifugio Lago Scuro 1,862 m", each with a leader line to the exact point. Draw the route as a dashed line up the path to the hut, up the zigzags to the col and along the ridge to the summit. At the bottom, over the dark shaded foreground: an elevation profile chart of the route, distance 0 to 9.4 km on the x axis and 1,500 m to 2,500 m gridlines, rising from Pont da Brenna (0 km, 1,412 m) through Rifugio Lago Scuro (4.6 km, 1,862 m) and Bocchetta di Brenna (7.9 km, 2,436 m) to Piz Calderan (9.4 km, 2,874 m), with those four points marked and labelled; a block headed "THE TRAIL" with "Distance, one way 9.4 km", "Ascent 1,462 m", "Walking time up 6 h 05 min" and "Hut open 20 June – 20 September"; a block headed "BUS 412" with "Valbrenna station → Pont da Brenna 07:10 08:25 09:40" and "Pont da Brenna → Valbrenna station 15:05 16:35 18:05". Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this poster was made" under it. Save it as model.png in the current directory at full resolution; do not resize or recompress it. Do not edit, patch or composite the image after generating it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool.
+```
+
+</details>
+
+<details><summary>The prompt Codex passed to the image tool</summary>
+
+```text
+Design a complete travel poster as one image, portrait 2:3, at the highest available native resolution. Generate the entire finished poster in one pass, including all photography, typography, leader lines, route, chart, information blocks, and QR code.
+
+A photorealistic photograph of a high alpine valley in late summer, in warm late-afternoon light: two rugged granite peaks with no snow, grassy slopes with a few larches, a calm mountain lake, a small stone-and-timber hut with a red roof, and a footpath that climbs from the bottom of the frame to the hut and zigzags up to the col between the peaks. The higher peak is Piz Calderan and the lower peak is Piz Mora. Compose the landscape so the peaks, col, hut, lake, and continuous climbing path are clearly visible. Reserve the dark shaded foreground at the bottom for the chart and information, with crisp, legible, well-spaced typography.
+
+The poster must contain exactly the following specified text, spelled exactly as given, with no extra slogans or invented text:
+Title: "PIZ CALDERAN"
+Subtitle: "VAL BRENNA · THE SUMMIT TRAIL · SUMMER 2027"
+
+Label the higher peak "Piz Calderan 2,874 m", the lower peak "Piz Mora 2,512 m", the col between them "Bocchetta di Brenna 2,436 m" and the hut "Rifugio Lago Scuro 1,862 m", each with a precise leader line ending at the exact corresponding summit, col, or hut. Draw the route as a dashed line following the actual visible footpath from the bottom up to the hut, up the zigzags to the col, and along the ridge to the higher summit.
+
+At the bottom, over the dark shaded foreground, include an elevation profile chart of the route. Use a linear distance x axis from 0 to 9.4 km. The elevation scale must extend above 2,874 m so the summit is accurately plotted, with labelled horizontal gridlines at 1,500 m, 2,000 m, and 2,500 m. Plot the route rising from Pont da Brenna (0 km, 1,412 m) through Rifugio Lago Scuro (4.6 km, 1,862 m) and Bocchetta di Brenna (7.9 km, 2,436 m) to Piz Calderan (9.4 km, 2,874 m). Mark and label all four points with these exact names, distances, and elevations. Position the four points at their correct proportional distances and heights; the final point is higher than the 2,500 m gridline.
+
+Include a block headed "THE TRAIL" with these exact four lines:
+"Distance, one way 9.4 km"
+"Ascent 1,462 m"
+"Walking time up 6 h 05 min"
+"Hut open 20 June – 20 September"
+
+Include a block headed "BUS 412" with these exact two lines:
+"Valbrenna station → Pont da Brenna 07:10 08:25 09:40"
+"Pont da Brenna → Valbrenna station 15:05 16:35 18:05"
+
+Include a real, scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html . Render it with sharp square black modules on a clean white square, a proper white quiet zone, and sufficient size for scanning. Under it, put the exact caption "Scan: how this poster was made".
+
+Use an elegant, polished travel-poster hierarchy with a prominent title, fine leader lines, a clear dashed route, and highly readable chart and information typography. Keep every required element inside the image with comfortable margins. No snow, no watermark, no additional text.
+```
+
+</details>
+
+The originals are 1024 x 1536 px PNGs, committed as JPEGs with `sips -s format jpeg -s formatOptions 85` (the two photographs) and `90` (the whole poster). The decoders gave the same verdict on the image model's QR code in the PNG original as in the JPEG.

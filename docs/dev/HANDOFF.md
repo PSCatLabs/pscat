@@ -746,6 +746,15 @@ renders eight examples in both and compares block-downsampled output).
   repeat images are not committed, their prompts are in the examples README)
   and a third example, `ferry_timetable.ps`, whose times are computed.
 
+- **The reversed hybrid pins its layout fidelity** (#1001).
+  `examples/hybrid/alpine_trail.ps` draws a layout reference
+  (`/Stage /Reference`), an image model made it a photograph, and the program
+  lays its exact layer on at the reference's coordinates. `alpine_trail_ref.png`
+  is the reference exactly as sent; `tests/hybrid_reverse.rs` checks the
+  program still draws it and pins the measured drift of both photographs.
+  Moving a shape in the block-in means a new photograph: the exact layer's
+  coordinates and the photograph must come from the same reference.
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice

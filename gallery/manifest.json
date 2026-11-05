@@ -968,6 +968,40 @@
     "render_caption": "The exact layer added by pscat: the name, every dish and price, and a QR code that scans.",
     "text": "The prompt asked for bare paper where the menu goes, so the painting needs no editing. Every word and number on the card comes from the program, so the menu can change without asking the image model for anything again."
    }
+  },
+  {
+   "id": "hybrid_alpine_trail",
+   "title": "Piz Calderan",
+   "category": "lettering",
+   "tags": [
+    "poster",
+    "hybrid",
+    "qr",
+    "chart"
+   ],
+   "libraries": [
+    "artkit",
+    "paintkit",
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 1001,
+   "added": "2026-11-05",
+   "source": "examples/hybrid/alpine_trail.ps",
+   "render": "gallery/renders/hybrid_alpine_trail.png",
+   "page": "576x864",
+   "speed": 400,
+   "alt": "Piz Calderan, a 2:3 travel poster: a photograph of two granite peaks in late-afternoon light over a lake and a red-roofed hut, white tracked title in the clear sky, summit, col and hut labels on leader lines ending at the points, a dashed yellow route up the path and along the ridge, and in the shaded foreground an elevation profile, trail stats, bus times and a QR code",
+   "blurb": "The hybrid turned round: pscat drew the layout, an image model made it a photograph, and pscat laid the exact layer back on at the same coordinates.",
+   "technique": "pscat first draws a flat block-in of the scene (`/Stage /Reference`): the ridge, two summits and a col, the slopes, the lake, the hut, the trail and a shaded foreground, every shape at coordinates in the program. That 1024 x 1536 px reference went to an image model as its input image, with a prompt to make it a photograph and keep the composition; the result is frozen as a JPEG and placed at exactly 128 dpi, no crop. The photograph's ridge sits a mean of 1.2 px from the reference's (measured and pinned by `tests/hybrid_reverse.rs`), so the exact layer can use the same coordinates: the labels end on the summits, the route runs along the trail and the ridge, and the elevation profile, the stats computed from it (DIN 33466 walking time), the bus times and a QR code that `lib/qr.ps` encodes sit in the shade the layout left empty. `/Season /Autumn` puts the same layer on a second photograph made from the same reference.",
+   "reference": {
+    "file": "examples/hybrid/alpine_trail_ref.png",
+    "alt": "pscat's flat colour block-in of the scene: a sky gradient, two dark peaks with lit west faces, green slopes, a blue lake, a small red-roofed hut, a pale trail and a dark foreground band",
+    "caption": "The layout reference pscat drew and the image model received as its input image.",
+    "render_caption": "The photograph made from it, with pscat's exact layer laid back on at the same coordinates.",
+    "text": "The image model is good at light and surfaces; pscat is exact. Here pscat decides the composition first, so it knows where every summit, the hut and the empty areas are before the photograph exists, and its labels, route, chart and QR code land where the layout says."
+   }
   }
  ],
  "groups": [
@@ -1392,6 +1426,24 @@
    "blurb": "A denser test: 40 times and 8 fares. The image model alone set every one right in five runs, and its QR code never decoded. pscat computes the times; its QR code scans.",
    "source": "examples/hybrid/compare_ferry.ps",
    "render": "docs/guides/hybrid/ferry_compare.png"
+  },
+  {
+   "id": "compare_alpine_trail",
+   "group": "hybrid",
+   "title": "Piz Calderan, three ways",
+   "alt": "Three versions of the same travel poster side by side, with checked facts under each: the image model alone, pscat alone, and the reversed hybrid",
+   "blurb": "The image model alone spelled all 26 strings right, but its chart is off by up to 0.1 km and 30 m and its QR code does not decode. pscat alone is exact but flat; the reversed hybrid is exact and photographic.",
+   "source": "examples/hybrid/compare_alpine_trail.ps",
+   "render": "docs/guides/hybrid/alpine_trail_compare.png"
+  },
+  {
+   "id": "process_alpine_trail",
+   "group": "hybrid",
+   "title": "Piz Calderan: one layout, two photographs",
+   "alt": "Four panels: pscat's flat layout reference, the photograph an image model made from it, the poster with pscat's exact layer, and the same layer on a second, autumn photograph made from the same reference",
+   "blurb": "pscat's layout, the image model's photograph, pscat's exact layer; and the same layer on a second photograph from the same reference.",
+   "source": "examples/hybrid/compare_alpine_trail.ps",
+   "render": "docs/guides/hybrid/alpine_trail_process.png"
   }
  ]
 }

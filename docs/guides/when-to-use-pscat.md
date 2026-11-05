@@ -423,6 +423,7 @@ figures for them.
 | Task | Use | Why |
 |---|---|---|
 | Photo-like scene, product shot, portrait | Image model | pscat cannot do photorealism or faces |
+| Photo-like scene with exact labels, data or a QR code placed on it | pscat, then the image model, then pscat ([reversed hybrid](pscat-with-image-models.md#pscat-sets-the-layout-the-image-model-renders-it)) | pscat draws the layout, the model photographs it in place, pscat sets the exact layer at the same coordinates |
 | Mood image, concept art, loose painterly texture | Image model | Fastest route to atmosphere; nothing in it has to be exact |
 | Retouch or restyle an existing photo | Image model | pscat edits its own programs, not photos (it can turn a JPEG into an engraving) |
 | Poster, flyer or card with real text | pscat (with an image-model background if you like) | Text set from fonts, layout to the point, print-ready PDF |
