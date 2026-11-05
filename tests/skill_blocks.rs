@@ -325,3 +325,78 @@ untagged
     assert_eq!((got[0].line, got[0].code.as_str()), (3, "1 2 add pop\n"));
     assert_eq!(got[1].code, "indented 1\n  deeper\n");
 }
+
+/// The skill counts a text states: every "<number> skill(s)" phrase, where
+/// the number is a digit string or a word from one to twelve. Markdown
+/// emphasis and punctuation around the words are ignored, so `**Three
+/// skills**` counts. A text that gives no count yields nothing.
+fn stated_skill_counts(text: &str) -> Vec<usize> {
+    const WORDS: [&str; 12] = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+        "twelve",
+    ];
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_ascii_lowercase()
+        })
+        .collect();
+    tokens
+        .windows(2)
+        .filter(|w| w[1] == "skill" || w[1] == "skills")
+        .filter_map(|w| {
+            w[0].parse::<usize>()
+                .ok()
+                .or_else(|| WORDS.iter().position(|x| *x == w[0]).map(|i| i + 1))
+        })
+        .collect()
+}
+
+/// Issue #1012: the plugin manifests said "Three skills" for a plugin that
+/// ships four. No manifest or listing text may state a skill count other
+/// than the number of skills in `plugin/skills/` (a directory holding a
+/// `SKILL.md`). Wording without a count is fine; a count must be true.
+#[test]
+fn manifests_and_listings_state_the_real_skill_count() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let actual = std::fs::read_dir(skills_dir())
+        .expect("plugin/skills")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("SKILL.md").is_file())
+        .count();
+    assert!(actual >= 4, "plugin/skills/ lost skills: {actual}");
+    // Each file must exist, so a renamed manifest fails here instead of
+    // quietly leaving the scan empty.
+    for rel in [
+        "plugin/plugin.json",
+        "plugin/.claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json",
+        "server.json",
+        "plugin/README.md",
+        "README.md",
+    ] {
+        let text = std::fs::read_to_string(root.join(rel))
+            .unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
+        for n in stated_skill_counts(&text) {
+            assert_eq!(
+                n, actual,
+                "{rel} says {n} skills but plugin/skills/ has {actual}; fix the text or drop the count"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_skill_count_scanner_reads_words_digits_and_emphasis() {
+    assert_eq!(stated_skill_counts("- **Three skills**: `pscat`"), [3]);
+    assert_eq!(
+        stated_skill_counts("ships 4 skills, and one Skill."),
+        [4, 1]
+    );
+    assert_eq!(
+        stated_skill_counts("Agent skills plus the pscat-mcp server. The skills in plugin/"),
+        Vec::<usize>::new()
+    );
+}

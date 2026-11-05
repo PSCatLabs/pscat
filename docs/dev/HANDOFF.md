@@ -1530,9 +1530,9 @@ renders eight examples in both and compares block-downsampled output).
   fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
   composer in the library (see `notes/708-mcp-review-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
-  psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
+  psviz, functional-postscript; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
-  holds the repo-development skills plus symlinks to those three, so a
+  holds the repo-development skills plus symlinks to the first three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
   `SKILL.md` and puts each medium in `references/`; add new media there.
   pscat does the same since #922: `SKILL.md` is the common path (install,

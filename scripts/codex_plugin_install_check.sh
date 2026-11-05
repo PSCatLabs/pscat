@@ -9,7 +9,7 @@
 # 1. `codex plugin marketplace add <this checkout>` reads
 #    .agents/plugins/marketplace.json; `codex plugin add pscat@pscat`.
 # 2. The installed copy sits under plugins/cache/pscat/pscat/<version> with
-#    the version from plugin/plugin.json, holds the three skills as real
+#    the version from plugin/plugin.json, holds every skill in plugin/skills/ as real
 #    files (Codex skips symlinks when it copies a plugin), mcp.json,
 #    hooks/hooks.json, the launcher scripts/pscat-mcp.sh and its pin
 #    pscat-release, and nothing else of the repo. The hook command is run
@@ -55,7 +55,7 @@ version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["versi
 copy="$CODEX_HOME/plugins/cache/pscat/pscat/$version"
 [ -d "$copy" ] && ok "installed under version $version" \
     || bad "no $copy ($(ls "$CODEX_HOME/plugins/cache/pscat/pscat" 2>&1))"
-for s in pscat psart psviz; do
+for s in $(ls "$repo/plugin/skills"); do
     [ -f "$copy/skills/$s/SKILL.md" ] && ok "installed copy has skills/$s/SKILL.md" \
         || bad "installed copy lacks skills/$s/SKILL.md"
 done

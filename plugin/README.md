@@ -5,11 +5,13 @@ paper-ready charts from Claude Code or Codex, with the
 [pscat](https://github.com/PSCatLabs/pscat) PostScript
 interpreter. The plugin bundles:
 
-- **Three skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
+- **Four skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
   debug, lint, seed sweeps, handwriting-style notes, typed letters and memos,
   photo-to-engraving), `psart` (the render-look-refine loop for generative
-  art, painting, dry media, chalkboard maths and style packs) and `psviz`
-  (function plots and bar/line/area/scatter/pie charts for papers).
+  art, painting, dry media, chalkboard maths and style packs), `psviz`
+  (function plots and bar/line/area/scatter/pie charts for papers) and
+  `functional-postscript` (map, filter and fold over lists of records, and
+  wrapping procedures to count or trace calls).
 - **The `pscat-mcp` server**, which gives the agent ten tools:
   `render_postscript` (pages come back as images the agent can look at),
   `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
