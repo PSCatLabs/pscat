@@ -1241,11 +1241,20 @@ def stage_npm(ctx):
         got = f"{inner.get('name')}@{inner.get('version')}" if inner else "no readable package.json"
         raise Halt(f"{os.path.basename(tarball)} holds {got}, not {meta['name']}@{ctx.m['version']}")
     # The GitHub Release carries the same file (#1006): what npm gets must
-    # be the bytes SHA256SUMS lists.
-    listed = ctx.local.get(os.path.basename(tarball))
-    if npm_asset(ctx.m) and listed != sha256_file(tarball):
-        raise Halt(f"{os.path.basename(tarball)} beside the .crate is not the npm tarball "
-                   f"{MANIFEST_NAME} lists ({npm_asset(ctx.m)}, sha256 {listed})")
+    # be the bytes SHA256SUMS lists. A draft that already exists is judged
+    # by its own manifest, as the draft stage adopts it on a rerun whose
+    # rebuilt artifacts differ, so compare against that, not this run's.
+    if npm_asset(ctx.m):
+        name = os.path.basename(tarball)
+        listed, where = ctx.local.get(name), MANIFEST_NAME
+        rel = the_release(ctx)
+        if rel is not None:
+            ref, adopted = reference_digests(ctx, rel)
+            if adopted:
+                listed, where = ref.get(name), f"release {ctx.m['tag']}'s {MANIFEST_NAME}"
+        if listed != sha256_file(tarball):
+            raise Halt(f"{name} beside the .crate is not the npm tarball {where} lists "
+                       f"(sha256 {listed}); npm and the GitHub Release must carry the same bytes")
     local = npm_integrity(tarball)
     remote = ctx.npm.view(meta["name"], ctx.m["version"])
     if remote is not None:

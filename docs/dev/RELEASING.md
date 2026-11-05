@@ -96,7 +96,8 @@ It first asks the registry what is already there:
   `.crate`). The stage publishes that file, never a fresh `npm pack`, and
   halts if it is missing, holds another name or version, or is not the
   tarball `release-manifest.json` lists (the one on the GitHub Release,
-  #1006), so npm and the release always carry the same bytes.
+  #1006; on a rerun that adopted an existing draft, the draft's manifest),
+  so npm and the release always carry the same bytes.
 - **MCP Registry.** The registry's entry for the name and version
   (`GET /v0.1/servers/{name}/versions/{version}`) lists the same packages
   as `server.json`: registry type, identifier, version, transport and

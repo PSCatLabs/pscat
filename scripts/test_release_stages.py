@@ -417,6 +417,21 @@ class Channels(Base):
         self.assertIn("is not the npm tarball", {x["stage"]: x["detail"] for x in res}["npm"])
         self.assertIsNone(self.fake.npm_view("pscat-wasm", VERSION))
 
+    def test_npm_compares_against_an_adopted_draft(self):
+        # A draft from a first run, then a rerun whose rebuilt tarball (and
+        # so its manifest) differs: the draft is adopted, and npm must not
+        # publish bytes the release does not carry (Codex, PR #1008).
+        tarball = self._attach()
+        st, _ = rs.run_stages(self.ctx(), ["draft"])
+        self.assertEqual(st, rs.EXIT_OK)
+        make_npm_tarball(tarball, extra=b"// rebuilt\n")
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, tarball), self.dist)
+        self.m = rs.load_manifest(self.dist)
+        st, r, res = self.run_all()
+        self.assertEqual((st, r["draft"], r["npm"], r["publish"]), (rs.EXIT_HALT, "skipped", "halted", "not run"))
+        self.assertIn("release v9.8.7's release-manifest.json", {x["stage"]: x["detail"] for x in res}["npm"])
+        self.assertIsNone(self.fake.npm_view("pscat-wasm", VERSION))
+
     def test_find_npm_tarball(self):
         src = os.path.dirname(self.crate)
         self.assertIsNone(rs.find_npm_tarball(self.repo, src, VERSION), "npm channel off: nothing to attach")
