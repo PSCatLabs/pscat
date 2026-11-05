@@ -129,16 +129,28 @@ checked every result the same way. The model was OpenAI's image model through
 the Codex CLI 0.166 `image_generation` tool, on 2026-11-05. The instructions
 were the ones above, with one sentence added at the end: "Do not check, edit
 or post-process the image after generating it." That stopped Codex from
-patching its own QR code, as it began to in the first run. Codex rewrites
+patching its own QR code, as it began to in #995. Codex rewrites
 each instruction into its own prompt for the image tool, so the prompt that
 reached the tool differed from run to run. Every one is recorded verbatim in
 the [examples README](../../examples/hybrid/README.md#the-repeat-runs-2026-11-05).
 Each saved image is byte-identical to the tool's original output.
 
-| Runs | Text errors | Number errors | QR code decodes |
-|---|---|---|---|
-| Poster, 6 runs (20 strings and 6 values each) | 0 in all 6 | 0 in all 6 | 0 of 6 |
-| Menu, 6 runs (24 strings and 9 prices each) | 0 in all 6 | 0 in all 6 | 0 of 6 |
+| Run | Text errors | Number errors | QR: rqrr | QR: rxing | Largest bar-height error |
+|---|---|---|---|---|---|
+| Poster 1 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 15% (bars 450–700 nm too tall) |
+| Poster 2 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | nothing found | 5% |
+| Poster 3 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 8% (the 700 nm bar, about 2.5 px) |
+| Poster 4 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 1% |
+| Poster 5 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 2% |
+| Poster 6 (of 20 strings, 6 values) | 0 | 0 | found, error correction fails | checksum fails | 3% |
+| Menu 1 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 2 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 3 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 4 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 5 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+| Menu 6 (of 24 strings, 9 prices) | 0 | 0 | found, error correction fails | checksum fails | |
+
+In sum: 0 text and 0 number errors in all 12 runs, and 0 of 12 QR codes decode.
 
 How it was checked:
 
@@ -150,23 +162,25 @@ How it was checked:
   set the formula as a stacked fraction or added y-axis tick numbers; neither
   is counted as an error.
 - **Bar heights.** Each poster's bars were measured in pixels from the axis
-  and scaled so that the 400 nm bar reads 9.4. Five of the six runs came within
-  5% of every value. In the sixth, the 450 to 700 nm bars were 6 to 15% too
-  tall (5.9 read as 6.27, 1.0 as 1.15). One pixel is 3 to 4% of the shortest
-  bar.
-- **QR codes.** Both decoders, rqrr and rxing, found a symbol in all 12
-  images and decoded none of them. rqrr failed error correction every time.
-  rxing failed its checksum 11 times, and once found no code at all.
+  and scaled so that the 400 nm bar reads 9.4; the table gives each run's
+  largest error. Four runs came within 5% of every value, one within 4% except
+  its shortest bar, and run 1's 450 to 700 nm bars were 6 to 15% too tall (5.9
+  read as 6.27, 1.0 as 1.15). One pixel is 3 to 4% of the shortest bar. The
+  labels were right in every run; the bars are a picture of the numbers.
+- **QR codes.** rqrr found a symbol in all 12 images and failed its error
+  correction every time. rxing failed its checksum on 11 and found no code at
+  all in poster run 2. Neither decoded any of them.
 
 **Then one small edit.** We gave the image model the first poster run and
 asked it to "change only the date line" to "Friday 4 December 2026 · 7:30 pm",
 and gave it the first menu run with the instruction to change only the Flat
 white price to 3.95. Both edits came back right, and every other string still
-read correctly. But the model redrew the whole image, not just the line we
-asked about. Outside the edited line, 42% of the poster's pixels and 20% of
-the menu's changed by more than 8 levels out of 255. Every glyph edge and
-brush mark moved slightly, and the QR codes' modules changed too; neither
-code decodes. So each edit is a new image, and it needs proofreading again
+read correctly at full size (the edits were not proofread on 2x crops). But
+the model redrew the whole image, not just the line we asked about. Outside
+the edited line, 42% of the poster's pixels and 20% of the menu's changed by
+more than 8 levels out of 255, and about 1% and 0.3% by more than 64: every
+glyph edge and brush mark moved slightly, and the QR code's region was
+redrawn with the rest. Neither code decodes. So each edit is a new image, and it needs proofreading again
 from top to bottom. In the hybrid, the same edit changes one string.
 
 So, on the date we ran it: this model set every word and number right in 12
@@ -194,9 +208,13 @@ print and the caption, 64 strings in all, 48 of them numbers. "Monday to
 Saturday", which the instruction mentions but does not quote as copy, was
 not scored.
 
-| Runs (2026-11-05) | Text errors | Time and fare errors | QR code decodes |
-|---|---|---|---|
-| Timetable, 5 runs (64 strings, 48 numbers each) | 0 in all 5 | 0 in all 5 | 0 of 5 |
+| Run (2026-11-05) | Text errors (of 64 strings) | Time and fare errors (of 48) | QR: rqrr | QR: rxing |
+|---|---|---|---|---|
+| Timetable 1 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 2 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 3 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 4 | 0 | 0 | found, error correction fails | checksum fails |
+| Timetable 5 | 0 | 0 | found, error correction fails | checksum fails |
 
 All 200 times and all 40 fares across the five runs are right and in the
 right cells, with the en dash in "Child (5–15)" and the semicolon in the

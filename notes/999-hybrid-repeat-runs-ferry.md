@@ -21,11 +21,13 @@ measures how often it is right, with checked facts.
   number was read on 2x crops; en dashes were measured against digits.
 - QR codes: 0 of 17 decode (rqrr fails error correction every time; rxing
   fails its checksum 16 times and finds nothing once).
-- Bar heights: within 5% in five of six poster runs. Run 1 was 6–15% too tall
-  on the 450–700 nm bars. One pixel is 3–4% of the 700 nm bar.
+- Bar heights (largest error per run): 15, 5, 8, 1, 2, 3%. Run 1 was 6–15% too
+  tall on the 450–700 nm bars; run 3's 8% is its 700 nm bar, about 2.5 px.
+  One pixel is 3–4% of the 700 nm bar.
 - Edits: both came back right, but the image was redrawn: 42% (poster) and
   20% (menu) of the pixels outside the edited line changed by more than 8
-  levels, the QR modules included.
+  levels (about 1% and 0.3% by more than 64), the QR region included. The
+  edits were read at full size, not on 2x crops.
 - The committed #995 poster's bars were re-measured against the 400 nm bar
   (5.91, 3.80, 2.61, 1.87, 1.02); the guide now states that reading.
 
