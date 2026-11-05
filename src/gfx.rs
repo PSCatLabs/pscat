@@ -1742,9 +1742,12 @@ impl Gfx {
                 // `cm`, exactly as for the raster above: the composed map
                 // is unchanged, and the numbers the PDF carries stay in a
                 // range every reader holds precisely.
+                // The same k as the raster's (same f32 arithmetic), so the
+                // degenerate test below sees the numbers tiny-skia saw.
                 let char_len = match shading.kind {
                     crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                        fmath::hypotf((x1 - x0) as f32, (y1 - y0) as f32)
+                        let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+                        fmath::hypotf(x1 - x0, y1 - y0)
                     }
                     crate::shading::ShadingKind::Radial {
                         x0,
@@ -1753,7 +1756,12 @@ impl Gfx {
                         x1,
                         y1,
                         r1,
-                    } => (r0.max(r1) as f32).max(fmath::hypotf((x1 - x0) as f32, (y1 - y0) as f32)),
+                    } => {
+                        let (x0, y0, r0, x1, y1, r1) = (
+                            x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
+                        );
+                        r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
+                    }
                 };
                 let k = if char_len > 0.0 && char_len < SAFE_LEN {
                     SAFE_LEN / char_len
@@ -1761,14 +1769,18 @@ impl Gfx {
                     1.0
                 };
                 let mut kind = sh_kind(shading.kind, k);
-                // Two coincident circles of one positive radius: tiny-skia's
-                // degenerate fallback paints the first stop's colour inside
-                // the circle and the last one outside it, while a PDF reader
-                // paints such a shading as nothing at all (CoreGraphics) or
-                // just the disk (gs). Record the raster's picture instead: a
-                // ring 1e-4 of the radius wide from the first colour to the
-                // last, padded both ways (a Codex review of #1028).
-                let ring;
+                // Two (nearly) coincident circles of (nearly) one radius:
+                // tiny-skia's degenerate case, decided with its own
+                // tolerance (`DEGENERATE_THRESHOLD`, 2^-15, on the rescaled
+                // numbers). It paints the first stop's colour inside the end
+                // circle and the last one outside, with a hard edge; a PDF
+                // reader paints those circles as nothing (CoreGraphics) or
+                // just a disk (gs). Record the raster's picture exactly: a
+                // radial from the centre out to twice the radius, constant
+                // first colour to the halfway bound, then constant last
+                // colour, padded (Codex reviews of #1028).
+                const DEGENERATE: f32 = 1.0 / (1 << 15) as f32;
+                let fallback;
                 let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
                 if let crate::svg::ShKind::Radial {
                     x0,
@@ -1776,20 +1788,29 @@ impl Gfx {
                     r0,
                     x1,
                     y1,
-                    ref mut r1,
+                    r1,
                 } = kind
-                    && x0 == x1
-                    && y0 == y1
-                    && r0 == *r1
-                    && r0 > 0.0
+                    && fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE
+                    && (r0 - r1).abs() <= DEGENERATE
+                    && r1 > DEGENERATE
                     && let (Some(first), Some(last)) = (stops.first(), stops.last())
                 {
-                    *r1 = r0 * (1.0 + 1e-4);
-                    ring = [
-                        (0.0, first.1, first.2, first.3),
-                        (1.0, last.1, last.2, last.3),
+                    kind = crate::svg::ShKind::Radial {
+                        x0,
+                        y0,
+                        r0: 0.0,
+                        x1: x0,
+                        y1: y0,
+                        r1: 2.0 * r1,
+                    };
+                    let (f, l) = ((first.1, first.2, first.3), (last.1, last.2, last.3));
+                    fallback = [
+                        (0.0, f.0, f.1, f.2),
+                        (0.5, f.0, f.1, f.2),
+                        (0.5, l.0, l.1, l.2),
+                        (1.0, l.0, l.1, l.2),
                     ];
-                    stops = &ring;
+                    stops = &fallback;
                 }
                 let m = ctm.pre_scale(1.0 / k, 1.0 / k);
                 let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
