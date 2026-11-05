@@ -1760,14 +1760,44 @@ impl Gfx {
                 } else {
                     1.0
                 };
-                let kind = sh_kind(shading.kind, k);
+                let mut kind = sh_kind(shading.kind, k);
+                // Two coincident circles of one positive radius: tiny-skia's
+                // degenerate fallback paints the first stop's colour inside
+                // the circle and the last one outside it, while a PDF reader
+                // paints such a shading as nothing at all (CoreGraphics) or
+                // just the disk (gs). Record the raster's picture instead: a
+                // ring 1e-4 of the radius wide from the first colour to the
+                // last, padded both ways (a Codex review of #1028).
+                let ring;
+                let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
+                if let crate::svg::ShKind::Radial {
+                    x0,
+                    y0,
+                    r0,
+                    x1,
+                    y1,
+                    ref mut r1,
+                } = kind
+                    && x0 == x1
+                    && y0 == y1
+                    && r0 == *r1
+                    && r0 > 0.0
+                    && let (Some(first), Some(last)) = (stops.first(), stops.last())
+                {
+                    *r1 = r0 * (1.0 + 1e-4);
+                    ring = [
+                        (0.0, first.1, first.2, first.3),
+                        (1.0, last.1, last.2, last.3),
+                    ];
+                    stops = &ring;
+                }
                 let m = ctm.pre_scale(1.0 / k, 1.0 / k);
                 let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let region = shading.bbox.map(|_| &path);
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.shfill(&kind, pdf_ctm, &shading.stops, region, comp, &chain);
+                    pdf.shfill(&kind, pdf_ctm, stops, region, comp, &chain);
                 }
             }
             self.dirty = true;

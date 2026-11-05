@@ -449,6 +449,30 @@ fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
     assert_gs_matches(&pdf, &canvas, "sh_end_edges");
 }
 
+/// Two coincident circles of one radius: the raster paints the first
+/// colour inside and the last outside; written as is, a PDF reader paints
+/// nothing (CoreGraphics) or only the disk (gs). The PDF records the
+/// raster's picture as a hairline ring (a Codex review of #1028).
+#[test]
+fn equal_coincident_circles_export_the_rasters_disk_and_surround() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill
+      << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150 250 250 150]
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let px = |x: u32, y: u32| {
+        let c = canvas.pixel(x, y).expect("pixel");
+        (c.red(), c.green(), c.blue())
+    };
+    assert_eq!(px(250, 250), (255, 0, 0), "raster: first colour inside");
+    assert_eq!(px(20, 20), (0, 0, 255), "raster: last colour outside");
+    let text = pdf_text(&pdf);
+    assert!(
+        text.contains("/Coords [250 250 150 250 250 150.015]"),
+        "{text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_equal_circles");
+}
+
 #[test]
 fn clipped_shfill_paints_inside_the_clip_group() {
     let src = [
