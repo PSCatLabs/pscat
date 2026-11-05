@@ -24,9 +24,9 @@
 % (about 130 pixels per inch across the page).
 %
 % Defining /PscatOnly true before the program swaps the painting for a
-% watercolour that paintkit paints (the "pscat alone" panel of the
-% comparison in docs/guides/pscat-with-image-models.md); the exact layer
-% is unchanged:
+% botanical print that pscat draws itself, flat inks on paintkit's paper
+% (the "pscat alone" panel of the comparison in
+% docs/guides/pscat-with-image-models.md); the exact layer is unchanged:
 %   { echo '/PscatOnly true def'; cat examples/hybrid/menu_card.ps; } | \
 %     pscat --page 612x792 --dpi 144 --png menu_pscat.png -
 %
@@ -38,89 +38,131 @@
 (lib/qr.ps) run
 
 /PscatOnly where { pop } { /PscatOnly false def } ifelse
+% The soft shades, shadows and grain use pscat's setalpha. Where it is
+% missing (Ghostscript), it becomes a no-op so the program still runs, but
+% those marks then print solid: render it with pscat.
+/setalpha where { pop } { /setalpha { pop } bind def } ifelse
 
 /PW 612 def /PH 792 def
 /URL (https://pscatlabs.github.io/pscat/hybrid.html) def
 
 % ---------------------------------------------------------------- fonts
+% Three faces, one job each: Playfair Display for the name, Cinzel (an
+% inscriptional face with no lower case, so every heading sets in capitals
+% as typed) for the line under it and the section heads, Palatino for the
+% dishes and prices (its figures are lining and tabular, so the prices
+% line up on the decimal point). Playfair Display and Cinzel are catalog
+% faces: in a checkout they are in fonts/catalog/, and an installed pscat
+% gets them with `pscat fonts install --pack extras` (without the pack
+% they stand in as Helvetica and pscat says so).
 % Latin-1 for the accents and the middle dot, plus an en dash (Latin-1
 % has none) in an unused slot, 8#200.
 /MenuEncoding ISOLatin1Encoding dup length array copy dup 8#200 /endash put def
 /menufont { % /New /Base -
   findfont dup length dict copy dup /Encoding MenuEncoding put definefont pop
 } def
-/Name-M /Palatino-Roman menufont
+/Name-M /PlayfairDisplay-Regular menufont
+/Caps-M /Cinzel-Regular menufont
 /Ital-M /Palatino-Italic menufont
 /Body-M /Palatino-Roman menufont
 /font { exch findfont exch scalefont setfont } def
+% Tracked type: drawn whole by ashow, `track` points after each character
+% but the last, so it measures and aligns true.
+/twidth { % (s) track -> w
+  1 index stringwidth pop exch 2 index length 1 sub mul add exch pop } def
+/tshow { 0 3 -1 roll ashow } def          % (s) track -
 /rshow { dup stringwidth pop neg 0 rmoveto show } def
 
 /ink { 0.17 0.19 0.08 setrgbcolor } def          % a dark olive, from the leaves
+/rust { 0.50 0.24 0.13 setrgbcolor } def         % the pears' blush, for the heads
+/leader { 0.55 0.55 0.42 setrgbcolor } def       % the dot leaders
+
+% ----------------------------------------------------------------- grid
+% US Letter. One text column on the left, from L to R: a 64 pt margin and
+% a 252 pt measure, the prices right-aligned on R. R stops short of the
+% painted leaves (their nearest edge is about x 350 at the height of the
+% Drinks section) and the menu ends above them. A 23 pt line for the
+% dishes; an 18 pt gap between sections.
+/L 64 def /R 316 def
 
 % ------------------------------------------------------------- the layer
 PscatOnly {
-  % pscat alone: paper and translucent washes from paintkit.
+  % pscat alone: not an imitation of the watercolour, but a botanical
+  % print in flat inks, which vector art does well. paintkit lays the
+  % paper; the pears and leaves are each a few flat
+  % shapes, overprinted: a body, a shadow side, a blush, a highlight, and
+  % a fine key line printed a point off register.
   (lib/artkit.ps) run
   (lib/paintkit.ps) run
   11 srand
-  0 0 PW PH << /Tone [0.98 0.95 0.88] /Grain 0.5 /Seed 3 >> pkpaper
-  % a sage wash bleeding in from the top left, in several soft passes
-  0.60 0.68 0.46 setrgbcolor
-  [ [0 0.07] [40 0.05] [90 0.04] ] {
-    aload pop /wa exch def /wo exch def
-    newpath -30 PH 30 add moveto 300 wo sub PH 30 add lineto
-    200 wo sub PH 80 sub 120 wo sub PH 150 sub 60 wo sub PH 260 sub curveto
-    -30 PH 420 wo sub sub lineto closepath
-    << /Alpha wa /Layers 4 /Wet 30 /Bloom 0.25 >> pkwash
-  } forall
-  % a pear: x y (base centre) s (size) -
-  /pear { /ps exch def /py exch def /px exch def
-    newpath px py moveto
-    px ps 0.62 mul add py  px ps 0.60 mul add py ps 0.62 mul add  px ps 0.30 mul add py ps 0.82 mul add curveto
-    px ps 0.12 mul add py ps 0.95 mul add  px ps 0.14 mul add py ps 1.25 mul add  px py ps 1.27 mul add curveto
-    px ps 0.14 mul sub py ps 1.25 mul add  px ps 0.12 mul sub py ps 0.95 mul add  px ps 0.30 mul sub py ps 0.82 mul add curveto
-    px ps 0.60 mul sub py ps 0.62 mul add  px ps 0.62 mul sub py  px py curveto closepath } def
-  % paint one pear: a gold-green body, a cooler shadow side, a rose blush,
-  % each a translucent wash kept inside the pear's outline
-  /pearpaint { /ps exch def /py exch def /px exch def
-    0.86 0.80 0.38 setrgbcolor px py ps pear
-    << /Alpha 0.32 /Layers 5 /Wet 4 /Bloom 0.8 >> pkwash
-    % soft glazes, graded by stacking shrinking discs at a low alpha
+  0 0 PW PH << /Tone [0.98 0.955 0.89] /Grain 0.5 /Seed 3 >> pkpaper
+  % a pear: x y (base centre) s (size) -   the path
+  /pear { /qs exch def /qy exch def /qx exch def
+    newpath qx qy moveto
+    qx qs 0.62 mul add qy  qx qs 0.60 mul add qy qs 0.62 mul add  qx qs 0.30 mul add qy qs 0.82 mul add curveto
+    qx qs 0.12 mul add qy qs 0.95 mul add  qx qs 0.14 mul add qy qs 1.25 mul add  qx qy qs 1.27 mul add curveto
+    qx qs 0.14 mul sub qy qs 1.25 mul add  qx qs 0.12 mul sub qy qs 0.95 mul add  qx qs 0.30 mul sub qy qs 0.82 mul add curveto
+    qx qs 0.60 mul sub qy qs 0.62 mul add  qx qs 0.62 mul sub qy  qx qy curveto closepath } def
+  /keyline { 0.30 0.30 0.14 setrgbcolor } def
+  /pearpaint { % x y s -
+    /ps exch def /py exch def /px exch def
     gsave px py ps pear clip
-      0.50 0.60 0.26 setrgbcolor
-      1 -0.12 0.4 { /k exch def
-        newpath px ps 0.42 mul add py ps 0.42 mul add ps 0.55 mul k mul 0 360 arc closepath
-        << /Alpha 0.05 /Layers 2 /Wet 6 /Bloom 0 >> pkwash } for
-      0.88 0.50 0.40 setrgbcolor
-      1 -0.15 0.3 { /k exch def
-        newpath px ps 0.30 mul sub py ps 0.36 mul add ps 0.34 mul k mul 0 360 arc closepath
-        << /Alpha 0.035 /Layers 2 /Wet 6 /Bloom 0 >> pkwash } for
-      1 1 0.92 setrgbcolor
-      newpath px ps 0.22 mul sub py ps 0.62 mul add ps 0.07 mul 0 360 arc closepath
-      << /Alpha 0.35 /Layers 2 /Wet 2 /Bloom 0 >> pkwash
+      % the shadow side, then the lit body over all but its right edge
+      0.55 0.62 0.24 setrgbcolor px py ps pear fill
+      0.86 0.82 0.36 setrgbcolor
+      px ps 0.07 mul sub py ps 0.03 mul add ps 0.94 mul pear fill
+      % the blush, low on the sunny side: soft discs, each a little more
+      % opaque towards the middle, so it grades into the body
+      0.88 0.46 0.36 setrgbcolor
+      gsave px ps 0.24 mul sub py ps 0.36 mul add translate 1 0.85 scale
+        ps 0.40 mul ps -0.02 mul ps 0.04 mul { 0.07 setalpha
+          newpath 0 0 3 -1 roll 0 360 arc fill } for grestore
+      % the speckle of a ripe pear's skin
+      0.42 0.40 0.16 setrgbcolor 0.35 setalpha
+      0 1 70 { pop
+        px rand 1000 mod 500 sub 1000 div ps 1.3 mul mul add
+        py rand 1000 mod 1000 div ps 1.2 mul mul add
+        rand 3 mod 0.3 mul 0.5 add 0 360 arc fill } for
+      % the highlight
+      1 0.98 0.86 setrgbcolor 0.8 setalpha
+      gsave px ps 0.26 mul sub py ps 0.66 mul add translate -25 rotate 0.45 1 scale
+        newpath 0 0 ps 0.09 mul 0 360 arc fill grestore
+      1 setalpha
     grestore
-    0.42 0.30 0.18 setrgbcolor 2.2 setlinewidth 1 setlinecap
+    % the key line, a point off register
+    gsave 1.2 -0.8 translate keyline 0.9 setlinewidth px py ps pear stroke grestore
+    % the stem
+    0.40 0.28 0.16 setrgbcolor 2.4 setlinewidth 1 setlinecap
     newpath px py ps 1.25 mul add moveto px 1 add py ps 1.33 mul add px 3 add py ps 1.40 mul add px 8 add py ps 1.46 mul add curveto stroke } def
-  % a leaf along an angle: x y len angle -
-  /leaf { gsave 4 2 roll translate rotate /ll exch def
-    0.48 0.60 0.32 setrgbcolor
-    newpath 0 0 moveto ll 0.25 mul ll 0.26 mul ll 0.72 mul ll 0.22 mul ll 0 curveto
-    ll 0.72 mul ll -0.22 mul ll 0.25 mul ll -0.26 mul 0 0 curveto closepath
-    << /Alpha 0.26 /Layers 4 /Wet 3 /Bloom 0.7 >> pkwash
-    0.38 0.48 0.26 setrgbcolor 0.7 setlinewidth
-    newpath 0 0 moveto ll 0.4 mul ll 0.03 mul ll 0.7 mul ll 0.02 mul ll 0.92 mul 0 curveto stroke grestore } def
+  % a leaf along an angle, in two greens split at the midrib: x y len angle -
+  /leafpath { % len -
+    /ll exch def newpath 0 0 moveto ll 0.25 mul ll 0.27 mul ll 0.72 mul ll 0.22 mul ll 0 curveto
+    ll 0.72 mul ll -0.22 mul ll 0.25 mul ll -0.27 mul 0 0 curveto closepath } def
+  /leaf { gsave 4 2 roll translate rotate /lf exch def
+    0.50 0.62 0.32 setrgbcolor lf leafpath fill
+    gsave lf leafpath clip 0.38 0.50 0.24 setrgbcolor 0 -100 lf 100 rectfill grestore
+    0.86 0.88 0.66 setrgbcolor 0.8 setlinewidth
+    newpath 0 0 moveto lf 0.4 mul lf 0.03 mul lf 0.7 mul lf 0.02 mul lf 0.92 mul 0 curveto stroke
+    gsave 1.2 -0.8 translate keyline 0.7 setlinewidth lf leafpath stroke grestore
+    grestore } def
+  % a soft shadow on the table under the pears
+  0.62 0.52 0.40 setrgbcolor 0.10 setalpha
+  gsave 462 52 translate 1 0.12 scale newpath 0 0 130 0 360 arc fill grestore
+  1 setalpha
   % the branch, the leaves behind, the pears, a leaf in front
-  0.50 0.38 0.25 setrgbcolor 2.6 setlinewidth 1 setlinecap
-  newpath 615 420 moveto 560 395 500 360 455 320 curveto stroke
-  1.8 setlinewidth
-  newpath 470 333 moveto 440 310 420 290 403 274 curveto stroke
-  newpath 538 380 moveto 528 340 522 300 518 275 curveto stroke
-  455 322 120 160 leaf
-  540 384 105 70 leaf
-  585 404 90 -15 leaf
-  395 70 140 pearpaint
-  510 100 120 pearpaint
-  470 30 105 -18 leaf
+  0.42 0.30 0.18 setrgbcolor 3 setlinewidth 1 setlinecap
+  newpath 586 424 moveto 556 400 516 368 470 330 curveto stroke
+  2 setlinewidth
+  newpath 484 342 moveto 452 316 430 296 413 278 curveto stroke
+  newpath 548 397 moveto 540 356 534 316 533 279 curveto stroke
+  % the cut end of the sprig
+  0.62 0.50 0.32 setrgbcolor newpath 586 424 2 0 360 arc fill
+  466 334 112 160 leaf
+  552 402 92 96 leaf
+  512 372 74 118 leaf
+  405 60 150 pearpaint
+  525 92 128 pearpaint
+  470 40 96 6 leaf
 } {
   % the hybrid: the frozen painting, scaled to cover the page.
   gsave
@@ -136,35 +178,41 @@ PscatOnly {
 } ifelse
 
 % ------------------------------------------------------------- the menu
-% Each price follows its dish (no right-hand price column), so every line
-% stays clear of the pears and leaves on the right of the painting.
-/L 64 def
 ink
-/Name-M 56 font
-L 694 moveto (The Lantern Pear) show
-/Ital-M 20 font
-L 2 add 662 moveto (Caf\351 \267 14 Mill Lane) show
+/Name-M 60 font
+L 3 sub 712 moveto (The Lantern Pear) show
+rust /Caps-M 13 font
+L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 
-/y 604 def
+/y 632 def
 /section { % (title) -
-  ink /Ital-M 26 font L y moveto show
-  0.6 setlinewidth newpath L y 10 sub moveto L 236 add y 10 sub lineto stroke
-  /y y 36 sub def } def
+  rust /Caps-M 16 font L y moveto dup 2.4 tshow
+  % a hairline from the end of the head to the price column
+  2.4 twidth L add 10 add /hx exch def
+  0.5 setlinewidth leader newpath hx y 4 add moveto R y 4 add lineto stroke
+  /y y 32 sub def } def
 /item { % (dish) (price) -
-  ink /Body-M 16 font L y moveto exch show
-  (  ) show /Ital-M 16 font show
-  /y y 25 sub def } def
+  /pr exch def /di exch def
+  ink /Body-M 14 font L y moveto di show
+  currentpoint pop 4 add /lx exch def
+  R y moveto pr rshow
+  pr stringwidth pop R exch sub 4 sub /rx exch def
+  % dot leaders on a 4.5 pt pitch, aligned to R so they line up row to row
+  leader
+  R 4.5 sub { dup lx lt { pop exit } if dup rx le { dup y 2.6 add 0.55 0 360 arc fill } if
+    4.5 sub } loop
+  /y y 23 sub def } def
 
 (Breakfast, 8\20011) section
 (Buttermilk pancakes, maple butter) (9.50) item
 (Shakshuka with sourdough) (11.25) item
 (Bircher muesli, poached pear) (7.75) item
-/y y 26 sub def
+/y y 18 sub def
 (Lunch, 12\2003) section
 (Roast squash and farro salad) (12.50) item
 (Leek and Gruy\350re tart) (13.00) item
 (Soup of the day with bread) (8.25) item
-/y y 26 sub def
+/y y 18 sub def
 (Drinks) section
 (Flat white) (3.80) item
 (Pot of tea) (3.20) item
@@ -172,10 +220,14 @@ L 2 add 662 moveto (Caf\351 \267 14 Mill Lane) show
 
 % The URL is 44 bytes: version 5 at level H, 2-point modules on whole
 % points, so every module edge is a pixel edge at 72 and 144 dpi. Dark
-% olive on the paper's own cream, with the quiet zone painted.
-/QX 62 def /QY 48 def
+% olive on the paper's own cream, with the quiet zone painted. The
+% caption sits beside it, level with its middle.
+/QX 56 def /QY 56 def
 QX QY moveto URL << /Level /H >> qrencode
-<< /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light [0.99 0.97 0.91] >> qrdraw
-ink /Ital-M 15 font
-QX 2 add QY 100 add moveto (Scan: how this menu was made) show
+% the light modules in the paper's own tone under the code, so it shows
+% no box: the painting's warm cream, or paintkit's paper
+/QLight PscatOnly { [0.98 0.955 0.89] } { [0.975 0.915 0.79] } ifelse def
+<< /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light QLight >> qrdraw
+ink /Ital-M 12 font
+QX 102 add QY 41 add moveto (Scan: how this menu was made) show
 showpage

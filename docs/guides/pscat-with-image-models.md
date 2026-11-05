@@ -46,8 +46,8 @@ guide's page on the site.
 For each example the image model was also asked for the **whole poster**: the
 same brief, every line of text, the chart or the prices, and "a scannable QR
 code that encodes exactly" the same URL. Each sheet shows (a) that image, (b)
-the poster pscat makes alone, with a sky or watercolour painted by paintkit,
-and (c) the hybrid. Under each panel are only facts that were checked.
+the poster pscat makes alone, with art it draws itself (a screen-printed
+vector sky; a flat-ink botanical print), and (c) the hybrid. Under each panel are only facts that were checked.
 
 ![Three versions of the Why Is the Sky Blue? poster side by side, with the checked facts under each panel](hybrid/sky_talk_compare.png)
 
@@ -59,7 +59,7 @@ and (c) the hybrid. Under each panel are only facts that were checked.
 | **Numbers** | Chart labels right, bar heights within 2% of the data; all 9 prices right | Computed by the program, or typed in it | Same as (b) |
 | **QR code** | Found by both decoders, **decodes in neither**, on both | Decodes to the URL in both decoders, PNG and PDF | Same as (b) |
 | **Output** | One raster: 1055 x 1491 px (poster), 1103 x 1426 px (menu), about 127-130 px per inch at print size | Vector type, chart and QR code at any size | Vector exact layer over the painting, which is embedded at its own resolution |
-| **The look** | The image model's | paintkit's procedural paint | The image model's |
+| **The look** | The image model's, layout included | pscat's own vector art, with pscat's layout | The image model's painting, with pscat's layout |
 
 How each fact was checked:
 
@@ -108,9 +108,15 @@ what happens after the first draft:
 - **The same render again.** The program and the frozen background give the
   same pixels on every run.
 
-And where the hybrid beats pscat alone: the look. paintkit paints a fine
-sky and a fair watercolour, but an image model's painted light is better, and
-costs one prompt.
+And the layout is pscat's in (b) and (c): a stated grid, a display face for
+the title, the formula set as a real fraction, a chart as large as the
+type around it, and the menu's prices right-aligned on one column with dot
+leaders. The image model's two whole-poster images set every line in one
+serif family.
+
+Where the hybrid beats pscat alone is the painting. pscat's own art (a
+screen-printed sky, a botanical print) is deliberate and clean, but an image
+model's painted light is richer, and costs one prompt.
 
 ## The workflow
 
@@ -189,9 +195,10 @@ Habits that keep the exact layer exact:
   144 dpi); see [QR codes](qr-codes.md).
 - **Compute what you can.** The sky poster's bar heights and labels come from
   `(700 / λ)^4` in the program, so the chart cannot disagree with its formula.
-- **Fit the type to the painting, not the painting to the type.** The menu
-  puts each price after its dish, not in a right-hand column, so no line runs
-  into the painted pears.
+- **Fit the type to the painting, not the painting to the type.** The menu's
+  price column stops at x = 316 pt, where the painted leaves begin, and the
+  sections end above them; the poster's date and venue sit on the dark sea,
+  with a soft shade under them.
 - **Fonts with the characters you need.** The base fonts' standard encoding
   has no "é", "·" or "×"; re-encode with `ISOLatin1Encoding` (the examples
   show how, with an en dash added in a spare slot).
