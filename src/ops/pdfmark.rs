@@ -47,9 +47,21 @@ struct Budget {
     nodes: usize,
     bytes: usize,
     used: usize,
+    /// Bytes this call may copy only for a while (a `{name}` reference
+    /// becomes an object number, an ignored key is dropped): checked, but
+    /// not charged to the document.
+    scratch: usize,
 }
 
 impl Budget {
+    fn scratch(&mut self, n: usize) -> Result<(), Skip> {
+        if n > self.scratch {
+            return Err(PsError::Limitcheck.into());
+        }
+        self.scratch -= n;
+        Ok(())
+    }
+
     fn bytes(&mut self, n: usize) -> Result<(), Skip> {
         if n > self.bytes {
             return Err(PsError::Limitcheck.into());
@@ -130,6 +142,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
         nodes: MAX_NODES,
         bytes: pdf.mark_room(),
         used: 0,
+        scratch: crate::pdf::MAX_MARK_BYTES,
     };
     apply_kind(pdf, kind, args, &mut budget)?;
     pdf.charge(budget.used);
@@ -145,18 +158,19 @@ fn apply_kind(
     match kind {
         "DOCINFO" => {
             let mut entries = Vec::new();
-            for (key, value) in pairs(args)? {
+            for (key, value) in pairs(args, budget)? {
                 let value = match &value.value {
                     Value::String(s) => PdfValue::Text(budget.string(s)?),
                     _ => convert(value, 0, budget)?,
                 };
+                budget.bytes(key.len())?;
                 entries.push((key, value));
             }
             pdf.docinfo(entries);
         }
         "OBJ" => {
             let (mut name, mut kind) = (None, None);
-            for (key, value) in pairs(args)? {
+            for (key, value) in pairs(args, budget)? {
                 match key.as_str() {
                     "_objdef" => name = Some(reference(value)?),
                     "type" => {
@@ -263,7 +277,7 @@ fn apply_kind(
         }
         "EMBED" => {
             let (mut name, mut fs) = (None, None);
-            for (key, value) in pairs(args)? {
+            for (key, value) in pairs(args, budget)? {
                 match key.as_str() {
                     "Name" => match &value.value {
                         Value::String(s) => name = Some(budget.string(s)?),
@@ -289,14 +303,17 @@ fn apply_kind(
 
 /// `key value …` with name keys: the key text and the value. An odd
 /// count is a `rangecheck`, a key that is not a name a `typecheck`.
-fn pairs(args: &[Object]) -> Result<Vec<(String, &Object)>, Skip> {
+fn pairs<'a>(args: &'a [Object], budget: &mut Budget) -> Result<Vec<(String, &'a Object)>, Skip> {
     if !args.len().is_multiple_of(2) {
         return Err(PsError::Rangecheck.into());
     }
     (0..args.len())
         .step_by(2)
         .map(|i| match &args[i].value {
-            Value::Name(n) if !n.contains('\0') => Ok((n.to_string(), &args[i + 1])),
+            Value::Name(n) if !n.contains('\0') => {
+                budget.scratch(n.len())?;
+                Ok((n.to_string(), &args[i + 1]))
+            }
             Value::Name(_) => Err(PsError::Rangecheck.into()),
             _ => Err(PsError::Typecheck.into()),
         })
@@ -344,7 +361,11 @@ fn convert(obj: &Object, depth: usize, budget: &mut Budget) -> Result<PdfValue, 
         Value::Real(_) => return Err(PsError::Rangecheck.into()),
         Value::Name(n) => PdfValue::Name(budget.name(n)?),
         Value::String(s) => PdfValue::Str(budget.string(s)?),
-        Value::Array(_) if obj.executable => PdfValue::Named(reference(obj)?),
+        Value::Array(_) if obj.executable => {
+            let name = reference(obj)?;
+            budget.scratch(name.len())?;
+            PdfValue::Named(name)
+        }
         Value::Array(a) => {
             let mut items = Vec::with_capacity(a.len());
             for i in 0..a.len() {

@@ -255,6 +255,19 @@ fn string_bytes_are_counted_per_copy() {
 }
 
 #[test]
+fn reference_names_and_keys_are_counted_per_copy() {
+    // A 1 MiB name used 128 times as a `{name}` reference, and 100 times as
+    // a key: each copy is counted, though neither is stored.
+    let src = "/n 1048576 string dup 0 1 1048575 { 97 put dup } for pop cvn def \
+               /r [ n ] cvx def /a [ /r load /r load ] def 6 { /a [ a a ] def } repeat \
+               [ /_objdef {x} /type /array /OBJ pdfmark \
+               { [ {x} a /APPEND pdfmark } stopped { $error /errorname get = } if \
+               { mark 1 1 100 { pop n 0 } for /OBJ pdfmark } stopped \
+               { $error /errorname get = } if";
+    assert_eq!(eval(src, true), "limitcheck\nlimitcheck\n");
+}
+
+#[test]
 fn decodeparms_without_filter_is_not_given_pscats_flate() {
     let src = "[ /_objdef {s} /type /stream /OBJ pdfmark \
                [ {s} << /DecodeParms << /Columns 4 >> >> /PUT pdfmark [ {s} (abcd) /PUT pdfmark \

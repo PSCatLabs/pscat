@@ -1312,7 +1312,10 @@ fn pdf_real(v: f64) -> String {
 
 fn write_entries(out: &mut String, entries: &[(String, PdfValue)], refs: &dyn Fn(usize) -> usize) {
     for (key, value) in entries {
-        let _ = write!(out, " {} {}", pdf_name(key), value.to_pdf(refs));
+        out.push(' ');
+        out.push_str(&pdf_name(key));
+        out.push(' ');
+        value.write_pdf(out, refs);
     }
 }
 
@@ -1320,29 +1323,48 @@ impl PdfValue {
     /// This value in PDF syntax; `refs` maps a named object to its
     /// object number.
     fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> String {
+        let mut out = String::new();
+        self.write_pdf(&mut out, refs);
+        out
+    }
+
+    /// Append this value's PDF syntax to `out`: one buffer for the whole
+    /// object, so a big array is not built again at every level.
+    fn write_pdf(&self, out: &mut String, refs: &dyn Fn(usize) -> usize) {
         match self {
-            PdfValue::Null => "null".to_string(),
-            PdfValue::Bool(b) => b.to_string(),
-            PdfValue::Int(i) => i.to_string(),
-            PdfValue::Real(r) => pdf_real(*r),
-            PdfValue::Name(n) => pdf_name(n),
-            PdfValue::Str(s) => literal_string(s),
-            PdfValue::Text(s) => pdf_text_bytes(s),
+            PdfValue::Null => out.push_str("null"),
+            PdfValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            PdfValue::Int(i) => {
+                let _ = write!(out, "{i}");
+            }
+            PdfValue::Real(r) => out.push_str(&pdf_real(*r)),
+            PdfValue::Name(n) => out.push_str(&pdf_name(n)),
+            PdfValue::Str(s) => out.push_str(&literal_string(s)),
+            PdfValue::Text(s) => out.push_str(&pdf_text_bytes(s)),
             PdfValue::Array(items) => {
-                let parts: Vec<String> = items.iter().map(|v| v.to_pdf(refs)).collect();
-                format!("[{}]", parts.join(" "))
+                out.push('[');
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    v.write_pdf(out, refs);
+                }
+                out.push(']');
             }
-            PdfValue::Dict(entries) => {
-                let mut out = String::from("<<");
-                write_entries(&mut out, entries, refs);
-                out.push_str(" >>");
-                out
+            PdfValue::Dict(entries) => write_dict(out, entries, refs),
+            PdfValue::Ref(i) => {
+                let _ = write!(out, "{} 0 R", refs(*i));
             }
-            PdfValue::Ref(i) => format!("{} 0 R", refs(*i)),
             // Every stored value was resolved; never reached.
-            PdfValue::Named(_) => "null".to_string(),
+            PdfValue::Named(_) => out.push_str("null"),
         }
     }
+}
+
+fn write_dict(out: &mut String, entries: &[(String, PdfValue)], refs: &dyn Fn(usize) -> usize) {
+    out.push_str("<<");
+    write_entries(out, entries, refs);
+    out.push_str(" >>");
 }
 
 impl NamedObj {
@@ -1351,10 +1373,22 @@ impl NamedObj {
     /// encoded), and `/Length` is always the real one.
     fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> Vec<u8> {
         match self.kind {
-            ObjKind::Dict => PdfValue::Dict(self.dict.clone()).to_pdf(refs).into_bytes(),
-            ObjKind::Array => PdfValue::Array(self.items.clone())
-                .to_pdf(refs)
-                .into_bytes(),
+            ObjKind::Dict => {
+                let mut out = String::new();
+                write_dict(&mut out, &self.dict, refs);
+                out.into_bytes()
+            }
+            ObjKind::Array => {
+                let mut out = String::from("[");
+                for (i, v) in self.items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    v.write_pdf(&mut out, refs);
+                }
+                out.push(']');
+                out.into_bytes()
+            }
             ObjKind::Stream => {
                 let mut head = String::from("<<");
                 write_entries(&mut head, &self.dict, refs);

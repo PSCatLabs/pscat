@@ -72,7 +72,13 @@ MIME subtype as `(text/plain) cvn`.
   (`limitcheck`). A decoding filter read to its end can grow without bound.
   And one string that appears in many places (an array holding it twice,
   doubled) is copied once per place, inside a single operator, where
-  `--max-memory` is not checked.
+  `--max-memory` is not checked. Copies a mark makes only for a while
+  (`{name}` references, which become object numbers, and the keys of
+  `/OBJ` and `/EMBED`) are checked against a second 64 MiB per call but not
+  charged to the document. The writer appends each object to one buffer.
+  Its peak is still about 3x the written text (the object list, then the
+  file), so 64 MiB of NUL strings (each written `\000`, 4x) peaks near
+  0.7 GB. That is a known limit of `finish`, not of pdfmark.
   Operands nested more than 32 deep (or a value that contains itself) are a
   `limitcheck`, and so is a mark whose operands hold more than 2^20
   objects in all, counting a shared array once per place it appears. The
