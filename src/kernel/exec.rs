@@ -29,7 +29,14 @@ const FULL: u64 = if LANES == 64 {
     (1u64 << LANES) - 1
 };
 /// Integers are held exactly in an f64 up to here.
+///
+/// The bound is strict: every integer of magnitude *below* 2^53 is exact in
+/// an f64, but 2^53 itself is also what 2^53 + 1 rounds to, so a value
+/// that reaches it may already have lost its last bit.
 pub(crate) const INT_LIMIT: f64 = 9_007_199_254_740_992.0; // 2^53
+/// The bound for an i64, checked *before* conversion: every integer of
+/// magnitude up to and including 2^53 converts exactly.
+pub(crate) const INT_LIMIT_I: u64 = 1 << 53;
 /// Element tag of a local array slot that holds PostScript's null.
 const NULL_TAG: f64 = 2.0;
 
@@ -294,7 +301,9 @@ impl<'k> Machine<'k> {
                     for (l, v) in t.iter_mut().enumerate() {
                         let x = self.geti(*a, l);
                         *v = x as f64;
-                        if !within_int(*v) {
+                        // Checked as an integer: converting first would
+                        // round 2^53 + 1 to 2^53 and pass.
+                        if x.unsigned_abs() > INT_LIMIT_I {
                             bad |= 1 << l;
                         }
                     }
@@ -759,10 +768,11 @@ pub(crate) fn real_to_int(r: f64) -> Option<i64> {
     Some(t as i64)
 }
 
-/// An integer this exact in an f64 (false for NaN).
+/// An integer-valued f64 that is certainly exact (false for NaN): the
+/// result of exact integer inputs that stays below 2^53 did not round.
 #[inline]
 fn within_int(x: f64) -> bool {
-    x.abs() <= INT_LIMIT
+    x.abs() < INT_LIMIT
 }
 
 /// One lane of a binary op, `None` where PostScript would raise an error.

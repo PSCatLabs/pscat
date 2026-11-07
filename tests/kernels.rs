@@ -574,7 +574,8 @@ fn run_mode(mode: &str, src: &str, limits: Option<Limits>) -> Result<Vec<u8>, St
     if let Some(l) = limits {
         it.set_limits(l).expect("limits");
     }
-    match it.run_str(&format!("/{mode} .kernelmode\n{src}\nshowpage")) {
+    // The image's unit square fills the 4x4 page, so every sample shows.
+    match it.run_str(&format!("/{mode} .kernelmode 4 4 scale\n{src}\nshowpage")) {
         Ok(()) => Ok(it.pages()[0].rgba8()),
         Err(e) => Err(e.name().to_string()),
     }
@@ -665,11 +666,25 @@ fn side_effects_in_uncompiled_branches_keep_the_interpreters_result() {
 
 #[test]
 fn integers_beside_mixed_values_stay_exact() {
-    auto_matches_interpreter(
-        "4 4 [4 0 0 -4 0 4] { pop /i exch def \
-           i 1 add 53 bitshift 1 add i 0 eq { 9007199254740992 } { 0.0 } ifelse eq { 1 } { 0 } ifelse \
-           i 1 add 53 bitshift 1 add i 0 eq { 9007199254740992 } { 0.0 } ifelse sub 0.25 mul 0.5 add } \
-         2 kernelimage",
+    // At i = 0, 2^53 + 1 (an exact integer) against a value that is the
+    // integer 2^53 on this lane and a real elsewhere: eq is false and the
+    // difference is 1 in the interpreter. Rounding 2^53 + 1 to an f64 would
+    // make them equal.
+    let src = "4 4 [4 0 0 -4 0 4] { pop /i exch def \
+           /a i 1 add 53 bitshift 1 add def \
+           /b i 0 eq { 9007199254740992 } { 0.0 } ifelse def \
+           a b eq { 0.9 } { 0.1 } ifelse a b sub 0 gt { 0.5 } { 0.0 } ifelse add 0.5 mul } \
+         1 kernelimage";
+    let interp = run_mode("interpret", src, None);
+    assert!(interp.is_ok(), "{interp:?}");
+    assert_eq!(run_mode("auto", src, None), interp);
+    // And the compiled path really ran (retiring the inexact lane).
+    let mut it = Interp::with_page(4, 4).expect("page");
+    it.run_str(&format!("{src} .kernelstats")).expect("run");
+    let st = it.operand_stack();
+    assert!(
+        st[st.len() - 3].repr() == "1" || st[st.len() - 2].repr() == "1",
+        "not compiled"
     );
 }
 

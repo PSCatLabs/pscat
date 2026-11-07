@@ -28,7 +28,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::exec::{INT_LIMIT, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
+use super::exec::{INT_LIMIT_I, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
 use super::ir::{
     BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableData, TableKind, UnOp,
 };
@@ -587,7 +587,7 @@ impl<'a> Compiler<'a> {
 
     /// Push an integer constant: an immediate when exact in an f64.
     fn push_int(&mut self, v: i64) -> CResult<()> {
-        if (v as f64).abs() <= INT_LIMIT {
+        if v.unsigned_abs() <= INT_LIMIT_I {
             self.push_num(Op::Imm(v as f64), NT::Int);
         } else {
             let d = self.ireg();
@@ -774,7 +774,7 @@ impl<'a> Compiler<'a> {
     fn cap_to_sval(&self, obj: &Object) -> CResult<SVal> {
         Ok(match &obj.value {
             Value::Integer(i) => {
-                if (*i as f64).abs() > INT_LIMIT {
+                if i.unsigned_abs() > INT_LIMIT_I {
                     return nc("an integer past 2^53");
                 }
                 SVal::Num(Op::Imm(*i as f64), NT::Int)
@@ -2750,7 +2750,7 @@ fn const_eq(a: &SVal, b: &SVal) -> Option<bool> {
 
 fn num_of(o: &Object) -> Option<(f64, bool)> {
     match o.value {
-        Value::Integer(i) if (i as f64).abs() <= INT_LIMIT => Some((i as f64, true)),
+        Value::Integer(i) if i.unsigned_abs() <= INT_LIMIT_I => Some((i as f64, true)),
         Value::Real(r) => Some((r, false)),
         _ => None,
     }
