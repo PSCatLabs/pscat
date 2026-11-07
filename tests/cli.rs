@@ -1273,3 +1273,48 @@ fn a_closed_stdout_ends_quietly() {
         assert_eq!(std::fs::read(&kept).unwrap(), b"kept", "{bands:?}: flushed");
     }
 }
+
+/// #1059: a REPL whose stdout reader has gone stops at once, flushing as it
+/// leaves, instead of waiting on a stdin that stays open.
+#[cfg(unix)]
+#[test]
+fn a_repl_stops_when_its_stdout_reader_goes() {
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    drop(child.stdout.take());
+    // Held open until the child has exited: it must not need the EOF.
+    let stdin = child.stdin.take();
+    let out = common::wait_output(child);
+    drop(stdin);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+}
+
+/// An `ioerror` the program raises later is still reported after it caught
+/// the one from a closed stdout: only the error that came from the failed
+/// write is silenced.
+#[cfg(unix)]
+#[test]
+fn only_the_error_from_the_closed_stdout_is_silenced() {
+    let mut child = Command::new(BIN)
+        .args([
+            "--headless",
+            "-e",
+            "{ 1 1 200000 { = } for } stopped pop (%stdout) (w) file read",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    drop(child.stdout.take());
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("ioerror"), "the read's own error: {stderr}");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+}

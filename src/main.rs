@@ -50,6 +50,20 @@ fn note_stdout_closed() {
     STDOUT_CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether a write of this binary has found the reader of stdout gone.
+fn stdout_is_closed() -> bool {
+    STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Flush stdout, noting a reader that has gone like [`stdout_text`].
+fn flush_stdout() {
+    if let Err(e) = io::stdout().flush()
+        && e.kind() == io::ErrorKind::BrokenPipe
+    {
+        note_stdout_closed();
+    }
+}
+
 /// End the process after `--help`, `--version`, `--fonts` or `--capabilities`
 /// printed: success, or [`EXIT_STDOUT_CLOSED`] if the reader went away.
 fn exit_after_printing() -> ! {
@@ -1028,7 +1042,7 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
         // A reader that went away (`| head`) is not the program's fault: its
         // `ioerror` would be noise in the terminal the user is looking at
         // (#1059). The output files below are still written.
-        Err(PsError::Io) if interp.stdout_closed() => {
+        Err(PsError::Io) if interp.stdout_epipe_error() => {
             note_stdout_closed();
             false
         }
@@ -2397,7 +2411,12 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                 print!("PS<{depth}> ");
             }
         }
-        let _ = io::stdout().flush();
+        flush_stdout();
+        // Nobody is reading the prompts or results any more: stop, rather
+        // than wait on a stdin that may never end (#1059).
+        if stdout_is_closed() {
+            return repl_exit(interp);
+        }
 
         let mut line = String::new();
         match stdin.lock().read_line(&mut line) {
@@ -2410,6 +2429,10 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                     continue;
                 };
                 if let Err(e) = interp.run_str(&source) {
+                    if matches!(e, PsError::Io) && interp.stdout_epipe_error() {
+                        note_stdout_closed();
+                        return repl_exit(interp);
+                    }
                     eprintln!("{}", interp.error_report(&e));
                     if options.pstack_on_error {
                         print_pstack(interp);

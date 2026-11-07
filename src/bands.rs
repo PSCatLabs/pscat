@@ -549,7 +549,7 @@ fn run_band(
         Ok(()) => None,
         // The reader of stdout went away (`| head`): not a failure to report
         // (#1059); `main` ends with the status for it.
-        Err(PsError::Io) if interp.stdout_closed() => {
+        Err(PsError::Io) if interp.stdout_epipe_error() => {
             crate::note_stdout_closed();
             None
         }

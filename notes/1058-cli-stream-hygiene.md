@@ -19,8 +19,11 @@ Five reports from the ArtColony batch, one CLI PR (#1060 is only investigated, s
   page, the flush of `--allow-write` files, which `SECURITY.md` promises on
   every exit) still have to run. For a PostScript program's own `print`/`=`,
   `Interp::write_stdout` records the `EPIPE` (`Interp::stdout_closed`); a
-  headless run, and a `--bands` band, then skip the `ioerror` report (only
-  that one error, and only after a real `EPIPE`) and set the same flag.
+  headless run, a `--bands` band and the REPL then skip the `ioerror` report
+  and set the same flag. The report is skipped only for the error that came
+  from the failed write: `Interp::recover` clears the mark when a `stopped`
+  catches an error, so a later, unrelated `ioerror` is still reported. The
+  REPL also leaves at once, as nobody reads its prompts (Codex review, round 1).
   `SIGPIPE` is deliberately not reset to its default action: that would kill
   the process before the files are flushed. Not covered: `pscat fonts list |
   head` (`src/fontpacks/cli.rs` is in the library crate) and sweep frames,

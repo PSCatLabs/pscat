@@ -448,8 +448,10 @@ pub struct Interp {
     bytes_written: Arc<AtomicU64>,
     /// Set when a write to the process's stdout failed because the reader
     /// had gone (a closed pipe, `| head`), so the CLI can end quietly
-    /// instead of reporting the `ioerror` that follows (#1059).
-    stdout_closed: bool,
+    /// instead of reporting the `ioerror` that follows (#1059). Cleared when
+    /// a `stopped` catches an error, so a later, unrelated `ioerror` is not
+    /// taken for it.
+    stdout_epipe_error: bool,
     /// The most bytes it may hand to disk files; `None` for no cap.
     max_write_bytes: Option<u64>,
     /// `--profile` (issue #737): `Some` while profiling. A program that
@@ -604,7 +606,7 @@ impl Interp {
             open_outputs: Vec::new(),
             lost_write: Rc::new(Cell::new(false)),
             bytes_written: Arc::new(AtomicU64::new(0)),
-            stdout_closed: false,
+            stdout_epipe_error: false,
             max_write_bytes: None,
             profile: None,
             op_name: "",
@@ -740,11 +742,11 @@ impl Interp {
         self.bytes_written = count;
     }
 
-    /// Whether a write to stdout failed because its reader had gone
-    /// (`EPIPE`): the `ioerror` that followed is that, not a fault in the
-    /// program.
-    pub fn stdout_closed(&self) -> bool {
-        self.stdout_closed
+    /// Whether the last error raised failed a write to stdout because its
+    /// reader had gone (`EPIPE`), and nothing has caught it: an `ioerror`
+    /// that is that, not a fault in the program.
+    pub fn stdout_epipe_error(&self) -> bool {
+        self.stdout_epipe_error
     }
 
     /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
@@ -1460,6 +1462,7 @@ impl Interp {
             return Err(e);
         }
         self.record_error(&e, command);
+        self.stdout_epipe_error = false;
         self.caught_error = Some(e);
         self.do_stop();
         self.push(Object::bool(true));
@@ -2796,7 +2799,7 @@ impl Interp {
             if let Err(e) = &written
                 && e.kind() == std::io::ErrorKind::BrokenPipe
             {
-                self.stdout_closed = true;
+                self.stdout_epipe_error = true;
             }
             return written;
         };
