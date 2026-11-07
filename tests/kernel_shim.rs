@@ -63,14 +63,25 @@ fn same(body: &str, ncomp: u32) {
     let native = render(&prog, w, h, false);
     let shim = render(&prog, w, h, true);
     assert!(native.is_ok(), "native failed: {native:?}\n{prog}");
-    assert!(native == shim, "native and shim renders differ: {shim:?}\n{prog}");
+    assert!(
+        native == shim,
+        "native and shim renders differ: {shim:?}\n{prog}"
+    );
 }
 
 #[track_caller]
 fn same_error(body: &str, ncomp: u32, err: &str) {
     let prog = program(body, 70, 9, ncomp);
-    assert_eq!(render(&prog, 70, 9, false), Err(err.to_string()), "native\n{prog}");
-    assert_eq!(render(&prog, 70, 9, true), Err(err.to_string()), "shim\n{prog}");
+    assert_eq!(
+        render(&prog, 70, 9, false),
+        Err(err.to_string()),
+        "native\n{prog}"
+    );
+    assert_eq!(
+        render(&prog, 70, 9, true),
+        Err(err.to_string()),
+        "shim\n{prog}"
+    );
 }
 
 #[test]
@@ -84,13 +95,17 @@ fn under_pscat_the_native_operators_win() {
     )
     .expect("probe");
     let got: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(got, ["true"; 4], "operator, operator, not in userdict twice");
+    assert_eq!(
+        got, ["true"; 4],
+        "operator, operator, not in userdict twice"
+    );
 }
 
 #[test]
 fn the_masked_load_defines_both_and_kernelcompile_says_no() {
     let mut it = interp(4, 4, true);
-    it.run_str("{ pop pop 0 } 1 kernelcompile").expect("kernelcompile");
+    it.run_str("{ pop pop 0 } 1 kernelcompile")
+        .expect("kernelcompile");
     let st = it.operand_stack();
     assert_eq!(st.len(), 2);
     assert_eq!(st[0].repr(), "false");
@@ -153,7 +168,10 @@ fn names_resolve_through_the_callers_dicts_not_the_shims() {
     );
     let native = render(&prog, w, h, false);
     assert!(native.is_ok(), "{native:?}");
-    assert!(native == render(&prog, w, h, true), "native and shim differ");
+    assert!(
+        native == render(&prog, w, h, true),
+        "native and shim differ"
+    );
 }
 
 #[test]
@@ -171,7 +189,11 @@ fn per_pixel_defs_do_not_persist() {
 #[test]
 fn wrong_component_counts_and_types_are_errors() {
     same_error("/pixel { pop pop 0.5 0.5 } bind def", 3, "rangecheck");
-    same_error("/pixel { pop pop 0.1 0.2 0.3 0.4 } bind def", 3, "rangecheck");
+    same_error(
+        "/pixel { pop pop 0.1 0.2 0.3 0.4 } bind def",
+        3,
+        "rangecheck",
+    );
     same_error("/pixel { pop pop (x) } bind def", 1, "typecheck");
     same_error("/pixel { pop pop 0.5 0.5 } bind def", 2, "rangecheck");
 }
