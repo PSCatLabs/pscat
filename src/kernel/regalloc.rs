@@ -87,9 +87,15 @@ pub(crate) fn allocate(k: &mut Kernel) {
         }
     }
     // Pack each body on its own.
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); groups];
+    let mut gidx = vec![0u32; n];
+    for (r, &g) in owner.iter().enumerate() {
+        gidx[r] = members[g].len() as u32;
+        members[g].push(r);
+    }
     let mut local = vec![0u32; n];
     let mut count = Vec::with_capacity(groups);
-    for g in 0..groups {
+    for (g, members) in members.iter().enumerate() {
         let (body, entry, exit): (&Vec<Ins>, Vec<Reg>, Vec<Reg>) = if g == 0 {
             let outs = k
                 .outputs
@@ -105,7 +111,13 @@ pub(crate) fn allocate(k: &mut Kernel) {
             let s = &k.subs[g - 1];
             (&s.body, s.params.clone(), s.results.clone())
         };
-        count.push(pack(body, &entry, &exit, &owner, g, &mut local));
+        let body_of = Body {
+            owner: &owner,
+            g,
+            members,
+            gidx: &gidx,
+        };
+        count.push(pack(body, &entry, &exit, &body_of, &mut local));
     }
     // Lay the regions out: each past every caller's (callers come first:
     // the kernel's body, then subroutines from the last made).
@@ -146,15 +158,25 @@ pub(crate) fn allocate(k: &mut Kernel) {
 
 /// Linear scan over the registers of body `g` (those `owner` gives it):
 /// sets their `local` numbers, returns how many it used.
-fn pack(
-    body: &[Ins],
-    entry: &[Reg],
-    exit: &[Reg],
-    owner: &[usize],
+/// Which registers are body `g`'s: `owner[r] == g`, listed in `members`,
+/// with `gidx[r]` the index of `r` in that list.
+struct Body<'a> {
+    owner: &'a [usize],
     g: usize,
-    local: &mut [u32],
-) -> u32 {
-    let n = owner.len();
+    members: &'a [usize],
+    gidx: &'a [u32],
+}
+
+fn pack(body: &[Ins], entry: &[Reg], exit: &[Reg], b: &Body, local: &mut [u32]) -> u32 {
+    let Body {
+        owner,
+        g,
+        members,
+        gidx,
+    } = *b;
+    // Arrays over this body's registers only (`gidx` numbers a register
+    // within its body), so packing every body is linear in all of them.
+    let n = members.len();
     // First and last position of each register.
     let mut first = vec![usize::MAX; n];
     let mut last = vec![0usize; n];
@@ -166,8 +188,9 @@ fn pack(
         &mut |r, p| {
             let r = r as usize;
             if owner[r] == g {
-                first[r] = first[r].min(p);
-                last[r] = last[r].max(p);
+                let i = gidx[r] as usize;
+                first[i] = first[i].min(p);
+                last[i] = last[i].max(p);
             }
         },
         &mut loops,
@@ -175,15 +198,14 @@ fn pack(
     let end = pos + 1;
     // The inputs are written before the body; the outputs read after it.
     for &r in entry {
-        first[r as usize] = 0;
+        first[gidx[r as usize] as usize] = 0;
     }
     for &r in exit {
-        last[r as usize] = end;
-        first[r as usize] = first[r as usize].min(end);
+        let i = gidx[r as usize] as usize;
+        last[i] = end;
+        first[i] = first[i].min(end);
     }
-    let regs: Vec<usize> = (0..n)
-        .filter(|&r| owner[r] == g && first[r] != usize::MAX)
-        .collect();
+    let regs: Vec<usize> = (0..n).filter(|&i| first[i] != usize::MAX).collect();
     // Widen across loops until nothing changes (an outer loop may widen an
     // interval into an inner one's range and back).
     loop {
@@ -226,7 +248,7 @@ fn pack(
             count += 1;
             count - 1
         });
-        local[r] = reg;
+        local[members[r]] = reg;
         active.push(std::cmp::Reverse((last[r], reg)));
     }
     count

@@ -1592,3 +1592,26 @@ fn reused_subroutines_nest_no_deeper_than_inlining() {
         assert_eq!(shared.0, inlined.0, "/{mode}: {}", shared.1);
     }
 }
+
+#[test]
+fn an_exit_compiled_outside_a_loop_is_not_reused_inside_one() {
+    // Found by Codex: `p` first compiles where its `exit` has no loop (that
+    // branch becomes an abort); reused inside a loop, the abort would send
+    // every pixel to the interpreter instead of leaving the loop.
+    // (Not `/strict`: the branch with no loop does not compile.)
+    let pad = "i 1.5 mul sin pop ".repeat(30);
+    for body in ["", pad.as_str()] {
+        for mode in ["all", "large", "never"] {
+            let prog = format!(
+                "/{mode} .kernelshare {SHOW} /p {{ {body} i 5 gt {{ exit }} if }} def
+                 /pixel {{ /j exch def /i exch def
+                   i 5 le {{ p p }} if
+                   0 {{ 1 add p dup 9 gt {{ exit }} if }} loop
+                   0.05 mul show3 }} def"
+            );
+            let (k, ran) = render_counted("auto", &prog, W, H);
+            assert!(ran, "/{mode}: the compiled path did not finish the image");
+            assert!(k == render("interpret", &prog), "/{mode}: renders differ");
+        }
+    }
+}

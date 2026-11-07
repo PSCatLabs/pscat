@@ -2547,19 +2547,21 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_exit(&mut self) -> CResult<()> {
-        let Some(ctx) = self.loops.last() else {
-            return nc("exit outside a loop in the kernel");
-        };
-        if ctx.unrolled {
-            return nc(EXIT_UNROLLED);
-        }
-        // An exit from a loop around a shared body: that body cannot be a
+        // An exit from a loop around a shared body (or with no loop at all,
+        // which a branch may turn into an abort): what it compiles to
+        // depends on the caller's loops, so that body cannot be a
         // subroutine (a `Break` in one would leave the caller's loop).
         let nloops = self.loops.len();
         for f in &mut self.frames {
             if f.loops >= nloops {
                 f.unshareable = true;
             }
+        }
+        let Some(ctx) = self.loops.last() else {
+            return nc("exit outside a loop in the kernel");
+        };
+        if ctx.unrolled {
+            return nc(EXIT_UNROLLED);
         }
         if self.st.stack.len() != ctx.depth {
             return nc("exit leaves a different stack depth than the loop started with");
