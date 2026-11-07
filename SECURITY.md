@@ -221,7 +221,10 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   cannot catch, this one is an ordinary, catchable `limitcheck`: a program that
   catches it can only fail to write more, so the disk is still safe, and the
   step and time limits still bound the loop. The count is for the interpreter's
-  whole life (the CLI runs one program), is of bytes handed over and not of
+  whole life (the CLI runs one program; the bands of a `--bands` render
+  share one count, #1045, and each band runs the whole program, so a program
+  that writes in every band spends the budget that many times over), is of
+  bytes handed over and not of
   disk used (overwriting a file after `setfileposition` counts again, and an
   `(a)` or `(w)` of an existing file does not count what was already in it), and
   does not count `%stdout` or `%stderr`.
@@ -478,7 +481,8 @@ without the limits above:
   `web/pscat.js`) so a runaway does not freeze the tab.
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
-  `--bands` band (steps and time; the bands share `--max-memory`) is its own
+  `--bands` band (steps and time; the bands share `--max-memory` and
+  `--max-write-bytes`) is its own
   run with the whole of `--max-steps` and `--max-time`; a page is not a run, so a multi-page program is one. `pscat
   handwrite`, `typewrite` and `photo-etch` run two programs (a measuring pass,
   then the render) and give each the full limits, so their worst case is about

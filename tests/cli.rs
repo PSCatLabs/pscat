@@ -1,6 +1,7 @@
 //! CLI contract tests (Stage 14): the behaviors scripts and agents
 //! rely on — `-` reads stdin, exit codes are honest, artifacts are
-//! announced on stdout and errors go to stderr.
+//! announced on stderr (stdout is the program's alone) and errors go to
+//! stderr.
 
 use std::process::{Command, Stdio};
 
@@ -40,7 +41,11 @@ fn dash_reads_the_program_from_stdin() {
         "0 0 50 50 rectfill",
     );
     assert!(ok, "stderr: {stderr}");
-    assert!(stdout.contains("wrote"), "artifact announced: {stdout}");
+    assert!(
+        stderr.contains("pscat: wrote"),
+        "artifact announced: {stderr}"
+    );
+    assert!(stdout.is_empty(), "stdout is the program's alone: {stdout}");
     let bytes = std::fs::read(&png).expect("png written");
     assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
 }
@@ -1184,4 +1189,62 @@ fn the_largest_step_limit_does_not_overflow() {
     );
     assert!(ok, "{stderr}");
     assert_eq!(out.trim(), "7");
+}
+
+/// #1058: the "wrote FILE" report is on stderr, so a program's own output
+/// can be piped on unchanged, whichever file it writes.
+#[test]
+fn the_wrote_report_is_not_on_stdout() {
+    let dir = common::scratch_dir("pscat-cli-wrote");
+    for flag in ["--png", "--svg", "--pdf"] {
+        let out = dir.join(format!("w{flag}.out"));
+        let (ok, stdout, stderr) = run(
+            &[flag, out.to_str().unwrap(), "-"],
+            "(x) print 0 0 1 1 rectfill showpage",
+        );
+        assert!(ok, "{flag}: {stderr}");
+        assert_eq!(stdout, "x", "{flag}: program output only");
+        assert!(stderr.contains("pscat: wrote"), "{flag}: {stderr}");
+    }
+}
+
+/// #1059: a reader that goes away (`| head`) is not a crash. The CLI's own
+/// stdout writes end quietly, and so does a program's `print`: no Rust panic,
+/// no `ioerror` report, a non-zero status, and the page still written.
+#[cfg(unix)]
+#[test]
+fn a_closed_stdout_ends_quietly() {
+    // Far more than a pipe holds, so the write cannot all land before the
+    // test closes its end.
+    let spawn = |args: &[&str]| {
+        let mut child = Command::new(BIN)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn pscat");
+        drop(child.stdout.take());
+        common::wait_output(child)
+    };
+    let out = spawn(&["--capabilities"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "the SIGPIPE status");
+
+    let png = common::scratch_dir("pscat-cli-epipe").join("p.png");
+    let out = spawn(&[
+        "--page",
+        "20x20",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "0 0 10 10 rectfill 1 1 200000 { = } for",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("ioerror"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141));
+    assert!(png.exists(), "the page is still written");
 }

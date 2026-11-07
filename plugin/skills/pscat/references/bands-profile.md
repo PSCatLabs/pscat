@@ -12,8 +12,10 @@ faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`
 0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
 procedure that computes only those rows plus a margin: the `psart` skill has a
 runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
-sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
-apply to each band. An unaware program pays for the whole run once per band,
+sweeps and `--profile`. `--max-steps` and `--max-time`
+apply to each band. `--allow-write DIR` works, with one shared
+`--max-write-bytes` budget; every band runs the whole program, so its file
+writes happen once per band, unordered: guard them with `BandIndex 0 eq`. An unaware program pays for the whole run once per band,
 but only band 0 writes stdout and stderr; an uncaught error is reported once.
 
 `--lint` works with it: one report after the run and a `pscat: lint: note:` line

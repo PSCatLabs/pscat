@@ -18,6 +18,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::PsError;
 use crate::font::{ShowCtx, ShowStep};
@@ -440,8 +442,14 @@ pub struct Interp {
     /// Set by a disk file dropped with bytes it could not write; shared
     /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
     lost_write: Rc<Cell<bool>>,
-    /// Bytes the program has handed to disk files so far (issue #762).
-    bytes_written: u64,
+    /// Bytes the program has handed to disk files so far (issue #762). An
+    /// `Arc` so the bands of a `--bands` render can count against one
+    /// budget ([`Interp::share_write_count`], #1045).
+    bytes_written: Arc<AtomicU64>,
+    /// Set when a write to the process's stdout failed because the reader
+    /// had gone (a closed pipe, `| head`), so the CLI can end quietly
+    /// instead of reporting the `ioerror` that follows (#1059).
+    stdout_closed: bool,
     /// The most bytes it may hand to disk files; `None` for no cap.
     max_write_bytes: Option<u64>,
     /// `--profile` (issue #737): `Some` while profiling. A program that
@@ -595,7 +603,8 @@ impl Interp {
             read_roots: None,
             open_outputs: Vec::new(),
             lost_write: Rc::new(Cell::new(false)),
-            bytes_written: 0,
+            bytes_written: Arc::new(AtomicU64::new(0)),
+            stdout_closed: false,
             max_write_bytes: None,
             profile: None,
             op_name: "",
@@ -716,10 +725,26 @@ impl Interp {
     /// `writehexstring` and `writereals`, so overwriting a file after
     /// `setfileposition` counts again. A write that would pass the cap
     /// writes nothing and raises `limitcheck`. Calling this again also
-    /// starts the count again.
+    /// starts the count again (on a fresh count of its own, so it leaves
+    /// alone one shared with other interpreters).
     pub fn set_max_write_bytes(&mut self, max: Option<u64>) {
         self.max_write_bytes = max;
-        self.bytes_written = 0;
+        self.bytes_written = Arc::new(AtomicU64::new(0));
+    }
+
+    /// Count this interpreter's writes in `count`, which other
+    /// interpreters may hold too, so they all spend one
+    /// [`Interp::set_max_write_bytes`] budget (`--bands`, #1045). Call it
+    /// after `set_max_write_bytes`, which starts a count of its own.
+    pub fn share_write_count(&mut self, count: Arc<AtomicU64>) {
+        self.bytes_written = count;
+    }
+
+    /// Whether a write to stdout failed because its reader had gone
+    /// (`EPIPE`): the `ioerror` that followed is that, not a fault in the
+    /// program.
+    pub fn stdout_closed(&self) -> bool {
+        self.stdout_closed
     }
 
     /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
@@ -730,16 +755,28 @@ impl Interp {
     /// Whether `n` more bytes fit under the write cap.
     pub(crate) fn check_write_bytes(&self, n: u64) -> Result<(), PsError> {
         match self.max_write_bytes {
-            Some(max) if self.bytes_written.saturating_add(n) > max => Err(PsError::Limitcheck),
+            Some(max) if self.bytes_written.load(Ordering::Relaxed).saturating_add(n) > max => {
+                Err(PsError::Limitcheck)
+            }
             _ => Ok(()),
         }
     }
 
     /// Count `n` bytes against the write cap, or `limitcheck`.
     pub(crate) fn charge_write_bytes(&mut self, n: u64) -> Result<(), PsError> {
-        self.check_write_bytes(n)?;
-        self.bytes_written = self.bytes_written.saturating_add(n);
-        Ok(())
+        let Some(max) = self.max_write_bytes else {
+            self.bytes_written.fetch_add(n, Ordering::Relaxed);
+            return Ok(());
+        };
+        // One atomic check-and-add: bands sharing the count must not both
+        // pass a check that only one of them fits under.
+        self.bytes_written
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                let total = used.saturating_add(n);
+                (total <= max).then_some(total)
+            })
+            .map(|_| ())
+            .map_err(|_| PsError::Limitcheck)
     }
 
     /// Forget output files that are closed or gone, and refuse (with
@@ -2753,8 +2790,15 @@ impl Interp {
         use std::io::Write;
         let Some(buf) = self.stdout_capture.as_mut() else {
             let mut out = std::io::stdout();
-            out.write_all(bytes)?;
-            return if flush { out.flush() } else { Ok(()) };
+            let written = out
+                .write_all(bytes)
+                .and_then(|()| if flush { out.flush() } else { Ok(()) });
+            if let Err(e) = &written
+                && e.kind() == std::io::ErrorKind::BrokenPipe
+            {
+                self.stdout_closed = true;
+            }
+            return written;
         };
         if self.stdout_truncated || bytes.is_empty() {
             return Ok(());

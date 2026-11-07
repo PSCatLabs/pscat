@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
 use pscat::gfx::{self, PageSizeSource};
@@ -14,12 +14,47 @@ use pscat::{Interp, Limits};
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
+// `println!` and `print!` for this binary and the modules below it (macros
+// are in scope for every `mod` declared after them): the std ones panic when
+// stdout's reader has gone, so `pscat --capabilities | head -c 5` died with
+// a panic message (#1059). These end the process quietly instead, as the
+// Unix tools do (`stdout_text`).
+macro_rules! println {
+    () => { $crate::stdout_text(format_args!("\n")) };
+    ($($arg:tt)*) => {
+        $crate::stdout_text(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+macro_rules! print {
+    ($($arg:tt)*) => { $crate::stdout_text(format_args!($($arg)*)) };
+}
+
 // The MCP server, shared with the pscat-mcp binary (#569).
 #[path = "mcp_server.rs"]
 mod mcp_server;
 mod subcmd;
 // `--bands N` (#736).
 mod bands;
+
+/// The exit status of a process whose stdout reader went away: 128 + SIGPIPE,
+/// what a shell reports for a tool that `SIGPIPE` killed, so `set -o pipefail`
+/// sees the same as with any other Unix tool.
+const EXIT_STDOUT_CLOSED: u8 = 141;
+
+/// What `println!`/`print!` write (see the macros above). A closed reader
+/// ends the process quietly with [`EXIT_STDOUT_CLOSED`]: Rust ignores
+/// `SIGPIPE`, so the write fails with `EPIPE` instead of killing us, and the
+/// std macros turn that into a panic. Any other write error is a real
+/// failure and panics as the std macros do.
+fn stdout_text(args: std::fmt::Arguments<'_>) {
+    let mut out = io::stdout().lock();
+    if let Err(e) = out.write_fmt(args) {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            std::process::exit(i32::from(EXIT_STDOUT_CLOSED));
+        }
+        panic!("failed printing to stdout: {e}");
+    }
+}
 
 /// Interpreter steps per rendered frame in the windowed modes. Named
 /// so `--selftest`'s runs-alone check can tell "the user asked for a
@@ -268,6 +303,12 @@ impl Options {
                 .set_read_roots(dirs)
                 .map_err(|e| format!("--read-root: {e}"))?;
         }
+        self.apply_write_policy(interp)
+    }
+
+    /// `--allow-write` and `--max-write-bytes` on a fresh interpreter. Each
+    /// `--bands` band calls it too, then hands every band one shared count.
+    fn apply_write_policy(&self, interp: &mut Interp) -> Result<(), String> {
         interp
             .set_write_roots(&self.allow_write)
             .map_err(|e| format!("--allow-write: {e}"))?;
@@ -687,6 +728,16 @@ fn main() -> ExitCode {
         );
     }
 
+    // The one path that opens a window for a plain run. An agent or a script
+    // with no terminal on either end has not asked for one, and would wait on
+    // a window nobody sees, with no output to say why (#1035). A notice, not
+    // a headless fallback: a desktop launcher has no terminal either and does
+    // want the window.
+    if window_without_terminal(io::stdin().is_terminal(), io::stdout().is_terminal()) {
+        eprintln!(
+            "pscat: opening a window; pass --headless, --png/--svg/--pdf or -e for batch use"
+        );
+    }
     interp.begin_source(&source);
     let window_options = WindowOptions {
         title: format!("pscat — {path}"),
@@ -700,6 +751,14 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Whether a run that is about to open its window has no terminal at either
+/// end (#1035): the case where a caller is probably waiting for output rather
+/// than looking at a window. `-` has stdin as its program, so only stdout
+/// tells a person at a shell (`cat f.ps | pscat -`) from a script.
+fn window_without_terminal(stdin_is_terminal: bool, stdout_is_terminal: bool) -> bool {
+    !stdin_is_terminal && !stdout_is_terminal
 }
 
 /// `path`'s program bytes: stdin for `-`, the file otherwise —
@@ -932,6 +991,10 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     };
     let ok = match run {
         Ok(()) => true,
+        // A reader that went away (`| head`) is not the program's fault: its
+        // `ioerror` would be noise in the terminal the user is looking at
+        // (#1059). The output files below are still written.
+        Err(_) if interp.stdout_closed() => false,
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
             if options.pstack_on_error {
@@ -1022,7 +1085,7 @@ fn finish_headless(
                 eprintln!("pscat: cannot write {p}: {e}");
                 false
             } else {
-                println!("pscat: wrote {p}");
+                eprintln!("pscat: wrote {p}");
                 true
             }
         };
@@ -1045,10 +1108,12 @@ fn finish_headless(
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }
-        println!("pscat: wrote {path}");
+        eprintln!("pscat: wrote {path}");
     }
     if ok && !lint_failed {
         ExitCode::SUCCESS
+    } else if interp.stdout_closed() {
+        ExitCode::from(EXIT_STDOUT_CLOSED)
     } else {
         ExitCode::FAILURE
     }
@@ -1072,7 +1137,7 @@ fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool, scale: f
             eprintln!("pscat: cannot write {path}: {e}");
             false
         } else {
-            println!("pscat: wrote {path}");
+            eprintln!("pscat: wrote {path}");
             true
         }
     };
@@ -1504,7 +1569,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }
-        println!("pscat: wrote {path}");
+        eprintln!("pscat: wrote {path}");
     }
 
     if any_failed {
@@ -2120,6 +2185,8 @@ fn print_usage() {
     println!();
     println!("Runs file.ps in a live window (watch it draw), or a REPL if no file.");
     println!("'-' reads the program from stdin (use with --png/--svg/--pdf/--headless).");
+    println!("With none of those or -e, a file opens a live window. A written file is");
+    println!("reported on stderr (`pscat: wrote FILE`); stdout is the program's own output.");
     println!();
     println!("  -h, --help          show this text and exit");
     println!("  -V, --version       print \"pscat X.Y.Z\" and exit");
@@ -2186,7 +2253,8 @@ fn print_usage() {
     println!("      --max-write-bytes N  with --allow-write, stop a program that writes more");
     println!("                      than N bytes to files: N is bytes or takes a k, m or g");
     println!("                      suffix (1g = 1 GiB, the default); 0 = no limit. The");
-    println!("                      write raises `limitcheck`, which `stopped` can catch");
+    println!("                      write raises `limitcheck`, which `stopped` can catch.");
+    println!("                      With --bands, all the bands spend one budget");
     println!("      --bands N       render the PNG on N threads (1..64; PNG only). The page");
     println!("                      is cut into horizontal bands, by default 2 per thread and");
     println!("                      none under 8 rows, that the threads take from a queue,");
@@ -2196,8 +2264,11 @@ fn print_usage() {
     println!("                      one that doesn't pays for the whole program per band. The");
     println!("                      result is identical to a plain --png render unless the");
     println!("                      program reads the clock. Steps and time limits apply per");
-    println!("                      band, --max-memory to all bands together; the first band");
-    println!("                      to hit a limit stops the queue. The band names are in");
+    println!("                      band, --max-memory and --max-write-bytes to all bands");
+    println!("                      together; --allow-write works with --bands, but every band");
+    println!("                      runs the whole program, so its file writes happen once per");
+    println!("                      band, unordered (guard them with BandIndex 0 eq). The first");
+    println!("                      band to hit a limit stops the queue. The band names are in");
     println!("                      userdict and differ per band: leave them out of anything");
     println!("                      that hashes or serialises userdict (a cache key) or");
     println!("                      walks it with forall. --lint works with --bands: it checks");
@@ -2319,6 +2390,21 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod window_notice_tests {
+    use super::window_without_terminal;
+
+    #[test]
+    fn only_a_run_with_no_terminal_at_either_end_gets_the_notice() {
+        // An agent's shell: stdin /dev/null or a pipe, stdout captured.
+        assert!(window_without_terminal(false, false));
+        // A person at a shell: any terminal means someone may be looking.
+        assert!(!window_without_terminal(true, true));
+        assert!(!window_without_terminal(true, false), "pscat f.ps | cat");
+        assert!(!window_without_terminal(false, true), "cat f.ps | pscat -");
     }
 }
 

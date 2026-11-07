@@ -215,9 +215,13 @@ More on the less obvious ones:
   `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
-  refuses `--svg`, `--pdf`, sweeps, `--progress`, `--profile` and
-  `--allow-write`, since every band would write the same file (or, for
-  `--profile`, report N copies of the same calls: profile a plain run).
+  refuses `--svg`, `--pdf`, sweeps, `--progress` and `--profile` (which would
+  report N copies of the same calls: profile a plain run). `--allow-write`
+  works, with the same roots in every band and one `--max-write-bytes` budget
+  that all the bands spend together. But every band runs the whole program, so
+  an unaware one writes its file once per band, at the same time as the others
+  and in no fixed order: write from band 0 only (`BandIndex 0 eq`), or write a
+  temporary name and `renamefile` it, which is atomic.
   `--lint` and `--lint-strict` do work, and lint once, after the run, with a
   `pscat: lint: note:` line saying so: band 0 (the top band) is checked for
   the declared page count, unbalanced `gsave` and leftover operands, which are

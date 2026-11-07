@@ -65,8 +65,8 @@
 
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
 
 use pscat::Interp;
 use tiny_skia::Pixmap;
@@ -111,10 +111,6 @@ fn check_options(options: &Options) -> Result<(), String> {
         return Err(format!(
             "--bands writes a PNG only; it doesn't combine with {flag}"
         ));
-    }
-    if !options.allow_write.is_empty() {
-        // Every band runs the whole program, so each would write the file.
-        return Err("--bands doesn't combine with --allow-write".to_string());
     }
     if options.png.is_none() {
         return Err("--bands needs --png".to_string());
@@ -350,6 +346,9 @@ struct Queue {
     next: AtomicU32,
     stop: AtomicBool,
     count: u32,
+    /// Bytes every band has written to disk files, against the one
+    /// `--max-write-bytes` budget (#1045).
+    written: Arc<AtomicU64>,
 }
 
 impl Queue {
@@ -389,6 +388,7 @@ fn render(
         next: AtomicU32::new(0),
         stop: AtomicBool::new(false),
         count: plan.count,
+        written: Arc::new(AtomicU64::new(0)),
     };
     let base = MemoryBase(
         pscat::memtrack::live_bytes()
@@ -538,8 +538,13 @@ fn run_band(
             .set_read_roots(dirs)
             .map_err(|e| format!("--read-root: {e}"))?;
     }
+    // `--allow-write` and `--max-write-bytes` (#1045): the same roots in
+    // every band, and one byte budget for all of them, so a banded run
+    // cannot write `bands` times what the flag allows.
+    options.apply_write_policy(&mut interp)?;
+    interp.share_write_count(Arc::clone(&queue.written));
     let mut hit_limit = false;
-    let error = match interp.run_source(source) {
+    let mut error = match interp.run_source(source) {
         Ok(()) => None,
         Err(e) => {
             hit_limit = e.limit().is_some();
@@ -552,6 +557,13 @@ fn run_band(
         }
     };
     let _ = std::io::stdout().flush();
+    // Files the program left open go out now, and a write that was lost
+    // fails the band, as it fails a plain render (#762).
+    if let Err(e) = interp.flush_outputs() {
+        error.get_or_insert_with(|| {
+            format!("pscat: could not write a file the program left open: {e}")
+        });
+    }
     // The pages `--png` writes, chosen as `finish_headless` chooses them;
     // only this band's rows of each are kept, the rows of that page's own
     // height (a `setpagedevice` can change it, #909).
