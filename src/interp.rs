@@ -420,6 +420,9 @@ pub struct Interp {
     pub(crate) kernel_mode: crate::kernel::KernelMode,
     /// Reasons a `kernelimage` procedure did not compile, each noted once.
     pub(crate) kernel_notes: std::collections::HashSet<String>,
+    /// `kernelimage` calls finished by the compiled path, and calls run by
+    /// the interpreter (`.kernelstats`).
+    pub(crate) kernel_stats: (i64, i64),
     /// Steps run by the current program (`begin_source` zeroes it).
     steps_used: u64,
     /// Starts when the current program does; read only when `limits` has a
@@ -593,6 +596,7 @@ impl Interp {
             page_device_notes: std::collections::HashSet::new(),
             kernel_mode: crate::kernel::KernelMode::Auto,
             kernel_notes: std::collections::HashSet::new(),
+            kernel_stats: (0, 0),
             steps_used: 0,
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,

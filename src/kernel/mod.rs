@@ -52,6 +52,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, ".kernelmode", kernelmode);
     op(dict, ".kfstore", kfstore);
     op(dict, ".kfrow", kfrow);
+    op(dict, ".kernelstats", kernelstats);
 }
 
 /// A component (nominally 0..1) as an 8-bit sample: clamped to [0, 1],
@@ -110,7 +111,10 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 }
                 let rows = rows_needed(it, a.w, a.h, a.matrix);
                 match run(it, &k, a.w, a.h, a.ncomp, rows) {
-                    Ok(bytes) => return paint(it, &a, bytes),
+                    Ok(bytes) => {
+                        it.kernel_stats.0 += 1;
+                        return paint(it, &a, bytes);
+                    }
                     Err(Stop::Limit(e)) => return Err(e),
                     // Some pixel would raise an error: the interpreter
                     // raises it, with the real stack (design: "Error rule").
@@ -130,7 +134,18 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
             }
         }
     }
+    it.kernel_stats.1 += 1;
     fallback(it, a)
+}
+
+/// `.kernelstats compiled interpreted`: how many `kernelimage` calls each
+/// path finished (a test hook: a differential test must know the
+/// compiled path really ran).
+fn kernelstats(it: &mut Interp) -> Result<(), PsError> {
+    let (c, f) = it.kernel_stats;
+    it.push(Object::int(c));
+    it.push(Object::int(f));
+    Ok(())
 }
 
 /// Paint `bytes` (8-bit, `ncomp` per sample) as `colorimage` would.
