@@ -1414,7 +1414,8 @@ fn gpu_preview_description() -> String {
          it off for a final render. {build} The call's limits still apply: the time and \
          step limits are checked before each GPU dispatch of at most {} pixels and stop \
          the render with limit_exceeded. GPU loop trips are not counted as steps but \
-         capped at {} per pixel. One dispatch cannot be interrupted, so a dispatch still \
+         capped at {} per pixel, so a runaway loop returns a capped (often blank) image, \
+         not an error, unless the capped work runs past the limits. One dispatch cannot be interrupted, so a dispatch still \
          running at the call's (or job's) wall-clock limit is killed (timeout). A kernel \
          that does not compile, or a GPU failure, runs on the CPU; Warnings name the GPU \
          that ran. Other drawing is unaffected.",

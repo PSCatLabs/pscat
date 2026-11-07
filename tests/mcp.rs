@@ -3661,4 +3661,21 @@ fn gpu_preview_renders_under_the_call_limits() {
         "{text}"
     );
     assert_eq!(images(&result).len(), 1, "the partial page: {result}");
+
+    // As documented: a loop with no exit is no error on the GPU. Each
+    // pixel stops at the loop cap and an image comes back (the CPU, where
+    // the machine has no GPU, stops it with the step limit instead).
+    let no_exit = "/pixel { pop pop 0 { 1 add } loop } bind def \
+        8 8 [8 0 0 -8 0 8] /pixel load 1 kernelimage showpage";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": no_exit, "width": 8, "height": 8, "gpu_preview": true }),
+    );
+    let text = texts(&result).join("\n");
+    if text.contains("f32 on") {
+        assert!(!text.contains("PostScript error:"), "{text}");
+    } else {
+        assert!(text.contains("limitexceeded (steps)"), "{text}");
+    }
+    assert_eq!(images(&result).len(), 1, "{result}");
 }

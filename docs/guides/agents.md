@@ -504,13 +504,20 @@ kernel draws as before.
   descriptions say which build this is. `false` is a plain render in every
   build; anything but a boolean is `invalid_argument`.
 - **Limits.** The server's limits still hold. The interpreter checks the
-  time and step limits before each GPU dispatch of 65536 pixels, so a
-  runaway kernel stops with `limit_exceeded` and the partial page, as on
-  the CPU. A dispatch is charged the kernel's straight-line size per pixel
-  in steps; loop trips on the GPU are not counted but capped at 2^20 per
-  pixel, so every dispatch finishes. One dispatch cannot be interrupted:
-  one still running at the call's (or job's) wall-clock limit is killed
-  with the child, and the result is `timeout`.
+  time and step limits before each GPU dispatch of 65536 pixels; a limit
+  that has fired stops the render with `limit_exceeded` and the partial
+  page, as on the CPU. A dispatch is charged the kernel's straight-line
+  size per pixel in steps; loop trips on the GPU are not counted but capped
+  at 2^20 per pixel, so every dispatch finishes. One dispatch cannot be
+  interrupted: one still running at the call's (or job's) wall-clock limit
+  is killed with the child, and the result is `timeout`.
+- **A runaway loop is not an error on the GPU.** On the CPU, a kernel loop
+  that never exits always ends in `limit_exceeded`. On the GPU each pixel
+  stops at the loop cap and an image comes back, often blank (a loop with
+  no `exit` at all compiles to a constant colour). You get `limit_exceeded`
+  only when the capped work runs past the time or step limit. A preview
+  that comes back blank or flat may be a runaway loop: render it once
+  without `gpu_preview` to see the error.
 - **What you see.** A `Warnings:` line names the GPU that ran
   (`pscat: --gpu-preview: f32 on Apple M4`). A kernel that does not compile,
   or a GPU failure (no adapter, say), runs on the CPU, with a line saying

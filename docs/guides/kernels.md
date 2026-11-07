@@ -161,7 +161,9 @@ A pscat built with the `gpu` cargo feature (`cargo build --release
   than on its ten CPU cores.
 - Final renders stay on the exact CPU path.
 - On the GPU, one budget caps every loop trip of a pixel at 2^20, nested
-  loops included, so a runaway kernel still finishes.
+  loops included, so a runaway kernel still finishes. It finishes with an
+  image, not an error: a loop the CPU would stop with a time error gives a
+  capped, often blank picture.
 - It runs under `--max-time` and `--max-steps` too (#1065). A GPU dispatch
   cannot be interrupted, so the limits are checked before each dispatch of
   65536 pixels, and a limit stops the image with the same error as on the

@@ -84,6 +84,15 @@ its mutex.
   with the CPU's count for kernels with loops.
 - A GPU failure after some dispatches has already charged their steps, and
   the CPU run then charges its own.
-- A kernel whose loop never exits compiles to a constant colour. The shader
-  compiler drops the loop, so the GPU shows black where the CPU path would
-  hit the time limit. This predates this issue.
+- **A runaway loop is an image on the GPU, not an error.** The GPU stops
+  each pixel at the loop cap, and the image comes back. The CPU path stops
+  the same program with `limit_exceeded`. The GPU gives that error only when
+  the capped work runs past a limit. A loop with no `exit` at all compiles
+  to a constant colour; the shader compiler then drops the loop, and the
+  picture is black. The lowering is from #742, but this branch is the first
+  to let MCP users, and runs under limits, meet it. The docs and the
+  argument's description say so. A fix for the owner to weigh: under a
+  limit, have `lower` refuse (`Failed`, so the CPU runs it) any loop with
+  no reachable `Break`. That covers only the no-exit case. A shader-side
+  "ran out of fuel" flag, painted magenta like `Abort`, would cover the
+  rest.
