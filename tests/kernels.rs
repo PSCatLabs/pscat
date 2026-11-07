@@ -206,6 +206,130 @@ fn nested_loops_with_names_and_exits() {
     ));
 }
 
+/// Issue #1062: a name first defined inside a loop and read after it.
+/// Lanes that reach the read with it undefined must give the interpreter's
+/// `undefined`, so each case has a variant where some lanes do.
+#[test]
+fn names_first_defined_in_a_loop_are_read_after_it() {
+    // The issue's example (more than 16 trips, so not unrolled), with the
+    // exit depending on the pixel.
+    let issue = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               /hit false def
+               0 1 99 {{ /k exch def /hx k 0.1 mul def
+                 hx i 0.1 mul j add gt {{ /hit true def exit }} if }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    let prog = issue("hit { hx } { 0 } ifelse");
+    let (ok, why) = compiles(&prog);
+    assert!(ok && !why.contains("branches"), "{why}");
+    same(&prog);
+    // As written, but with a run-time trip count that is zero for some
+    // pixels: they never define hx.
+    let some_never = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 30 sub {{ /k exch def /hx k j add 0.25 mul def }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&some_never("i 30 ge { hx } { -1 } ifelse"));
+    same_error(&some_never("hx"), "undefined");
+    // An exit before the body's def, on the lanes where j is 0.
+    let exit_first = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 40 add {{ /k exch def k j 2 mul eq {{ exit }} if /hx k i add def }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&exit_first("j 0 gt { hx } { 7 } ifelse"));
+    same_error(&exit_first("hx"), "undefined");
+    // An integer on the back edge and a real at an exit: the flagged slot
+    // widens to a value with a per-lane integer bit.
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           0 1 i 20 add {{ /k exch def /hx k def
+             k j 3 mul 2 add gt {{ /hx k 0.5 add def exit }} if }} for
+           hx floor cvi 3 mod 0 eq {{ 0.25 }} {{ 0.75 }} ifelse hx add show3 }} bind def"
+    ));
+    // A boolean, read after the loop.
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           0 1 i 20 add {{ /k exch def /big k j 5 mul gt def }} for
+           big {{ 0.9 }} {{ 0.1 }} ifelse show3 }} bind def"
+    ));
+}
+
+/// The flag across nested loops, from a branch before the loop, and a
+/// read in the body before the body's own def.
+#[test]
+fn loop_defined_names_nest_and_join_branch_defined_ones() {
+    // Defined in the inner loop, read after the outer one: the outer loop
+    // carries the inner one's flag. The inner loop runs no trips when a is
+    // 0, and the outer one none for i < 20.
+    let nested = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 20 sub {{ /a exch def 1 1 a {{ /b exch def /hx a b mul j add def }} for }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&nested("i 21 ge { hx } { 0.5 } ifelse"));
+    same_error(&nested("hx"), "undefined");
+    // Defined on even pixels before the loop (a branch-defined name), and
+    // by the loop on trips past `cond`: with `i 2 mul`, on pixels i < 20
+    // only, so odd pixels from 21 on never define it.
+    let before = |cond: &str, hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               i 2 mod 0 eq {{ /hx 0.5 def }} if
+               0 1 i 20 add {{ /k exch def k {cond} gt {{ /hx k def }} if }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&before("10", "hx"));
+    same(&before(
+        "i 2 mul",
+        "i 2 mod 0 eq i 20 lt or { hx } { 3 } ifelse",
+    ));
+    same_error(&before("i 2 mul", "hx"), "undefined");
+    // Read in the body before the body's own def: the previous trip's
+    // value, undefined on the first trip unless guarded. The first pass
+    // over the body does not know the name yet, so this compiles in /auto
+    // (the branch is given up on, then compiled on the next pass), not
+    // under /strict.
+    let read_first = |guard: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 20 add {{ /k exch def {guard} /hx k j add def }} for
+               hx show3 }} bind def"
+        )
+    };
+    for (guard, want) in [
+        ("k 0 gt { hx 0.5 add /s exch def } if", Ok(())),
+        ("i 5 gt k 0 eq and { hx pop } if", Err("undefined")),
+    ] {
+        let prog = read_first(guard);
+        let (ok, why) = compiles(&prog);
+        assert!(ok && !why.contains("branches"), "{why}\n{prog}");
+        let (k, ran) = render_counted("auto", &prog, W, H);
+        let r = render("interpret", &prog);
+        assert_eq!(
+            r.as_ref().map(|_| ()).map_err(String::as_str),
+            want,
+            "{prog}"
+        );
+        assert!(k == r, "compiled and interpreted renders differ\n{prog}");
+        assert!(
+            ran || want.is_err(),
+            "the compiled path did not finish\n{prog}"
+        );
+    }
+}
+
 #[test]
 fn stack_carried_loop_state() {
     // The fractal_clouds style: the running state lives on the stack.

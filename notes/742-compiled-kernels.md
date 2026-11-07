@@ -272,9 +272,12 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 
 ### Deferred, and follow-ups to file
 
-- **Names defined only inside a loop and read after it** do not compile
-  (Mandelbulb works around it with an initial `def`). Loop-defined names
-  could carry a defined-flag the way branch-defined names do.
+- **A read in a loop body before the body's own def, under `/strict`.**
+  Names first defined inside a loop now carry a defined-flag (#1062), so a
+  read after the loop compiles. But the fixpoint's first pass does not know
+  the name yet, so a read before the def compiles only in `/auto`: there a
+  guarded read's branch is compiled on the next pass. An unguarded one, or
+  any such read under `/strict`, is refused.
 - **`rand` and `srand` in a kernel** (done in #1063, see `KERNELS.md`).
   fractal_clouds' `PixSeed` reseeds per
   pixel, so a per-lane random state seeded inside the kernel would be pure.

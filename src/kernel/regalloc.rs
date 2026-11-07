@@ -113,6 +113,74 @@ pub(crate) fn allocate(k: &mut Kernel) {
     k.nregs = count.max(1) as usize;
 }
 
+/// Remove moves into registers nothing reads. A name a loop defines is
+/// carried round it in a register (with a defined-flag where it may be
+/// undefined) in case the next trip or the code after the loop reads it;
+/// for a loop's scratch names (`/k exch def`) nothing does, and their
+/// back-edge moves would otherwise run on every trip.
+///
+/// A register is live if any instruction other than a move mentions it,
+/// it is an input or output, or it is the source of a move into a live
+/// register. Moves have no side effects (no lane is ever retired by one),
+/// so dropping the rest changes nothing a kernel computes.
+pub(crate) fn drop_dead_moves(k: &mut Kernel) {
+    fn scan(b: &[Ins], live: &mut [bool], movs: &mut Vec<(Reg, Reg)>) {
+        for ins in b {
+            match ins {
+                Ins::Mov(d, Op::R(s)) => movs.push((*d, *s)),
+                Ins::Mov(_, Op::Imm(_)) | Ins::MovI(..) => {}
+                Ins::If(c, t, e) => {
+                    live[*c as usize] = true;
+                    scan(t, live, movs);
+                    scan(e, live, movs);
+                }
+                Ins::Loop(body) => scan(body, live, movs),
+                other => each_reg(other, |r| live[r as usize] = true),
+            }
+        }
+    }
+    fn prune(b: &mut Vec<Ins>, live: &[bool]) {
+        b.retain(|ins| match ins {
+            Ins::Mov(d, _) | Ins::MovI(d, _) => live[*d as usize],
+            _ => true,
+        });
+        for ins in b {
+            match ins {
+                Ins::If(_, t, e) => {
+                    prune(t, live);
+                    prune(e, live);
+                }
+                Ins::Loop(body) => prune(body, live),
+                _ => {}
+            }
+        }
+    }
+    let mut live = vec![false; k.nregs];
+    let mut movs = Vec::new();
+    scan(&k.body, &mut live, &mut movs);
+    for r in [k.in_i, k.in_j] {
+        live[r as usize] = true;
+    }
+    for o in &k.outputs {
+        if let Op::R(r) = o {
+            live[*r as usize] = true;
+        }
+    }
+    loop {
+        let mut changed = false;
+        for &(d, s) in &movs {
+            if live[d as usize] && !live[s as usize] {
+                live[s as usize] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    prune(&mut k.body, &live);
+}
+
 /// Visit every register occurrence with its position; record loop ranges.
 fn walk(
     b: &[Ins],
