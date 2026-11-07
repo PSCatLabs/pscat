@@ -387,6 +387,53 @@ fn unread_loop_names_cost_nothing() {
     );
 }
 
+/// An integer defined on some pixels only, then widened by a loop that
+/// makes it real: the conversion on loop entry must not run where it is
+/// undefined (stale register bits past 2^53 would retire the pixel).
+#[test]
+fn an_undefined_value_is_not_converted_on_loop_entry() {
+    // The second layout is one where, before the fix, the register x's
+    // value takes on odd pixels still held a large real from the
+    // previous batch (i and j live to the end keep the allocator from
+    // reusing a register written earlier in this batch).
+    for (pre, post) in [("", ""), ("/a i 1e300 mul def", "i j add 0 mul add")] {
+        let src = format!(
+            "4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def
+               /odd i 2 mod 0 eq def {pre}
+               odd {{ /x i j add def }} if
+               0 1 20 {{ /k exch def /x k 0.5 add def }} for
+               x 0.04 mul {post} }} 1 kernelimage"
+        );
+        auto_matches_interpreter(&src);
+        assert_eq!(
+            kernel_stats_after(&src),
+            ("1".into(), "0".into(), "0".into()),
+            "pixels left the compiled path\n{src}"
+        );
+    }
+}
+
+/// The dead-move pass is linear: a long chain of branch merges, each
+/// moving the last one's defined-flag on, compiles well inside a budget
+/// (propagating liveness by repeated scans was quadratic here: seconds).
+#[test]
+fn a_long_chain_of_merges_compiles_in_linear_time() {
+    let mut prog = String::from("/pixel { /j exch def /i exch def /c i 1 gt def ");
+    for _ in 0..35_000 {
+        prog.push_str("c { /x 1 def } if ");
+    }
+    prog.push_str("x dup dup } def");
+    common::within_cpu_budget(
+        "kernelcompile of 35,000 merges",
+        Duration::from_millis(300),
+        3,
+        || {
+            let (ok, why) = compiles(&prog);
+            assert!(ok, "{why}");
+        },
+    );
+}
+
 #[test]
 fn stack_carried_loop_state() {
     // The fractal_clouds style: the running state lives on the stack.

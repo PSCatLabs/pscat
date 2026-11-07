@@ -1132,7 +1132,7 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             (Lk::Partial(v, g), Some(f)) => {
-                self.moves_into(c.reg, c.tag, c.ty, v, out)?;
+                self.moves_into_where(c.reg, c.tag, c.ty, v, Op::R(*g), out)?;
                 out.pairs.push((f, Op::R(*g), false));
                 Ok(())
             }
@@ -1144,6 +1144,31 @@ impl<'a> Compiler<'a> {
             }
             _ => nc(lost),
         }
+    }
+
+    /// `moves_into` for a value defined only on the lanes where `flag` is
+    /// set. Its conversion runs on those lanes only: elsewhere the register
+    /// holds whatever it last held, and an `I2FExact` of stale bits would
+    /// retire a pixel that never reads the value. The flag stays 0 there,
+    /// so the unconverted result is never read.
+    fn moves_into_where(
+        &mut self,
+        reg: Reg,
+        tag: Option<Reg>,
+        ty: CT,
+        v: &SVal,
+        flag: Op,
+        out: &mut Moves,
+    ) -> CResult<()> {
+        let n = out.pre.len();
+        self.moves_into(reg, tag, ty, v, out)?;
+        if let Op::R(f) = flag
+            && out.pre.len() > n
+        {
+            let conv = out.pre.split_off(n);
+            out.pre.push(Ins::If(f, conv, Vec::new()));
+        }
+        Ok(())
     }
 
     /// Emit `moves` as a parallel assignment (after its conversions).
@@ -1334,10 +1359,10 @@ impl<'a> Compiler<'a> {
         let tag = (t == CT::Dyn).then(|| self.reg());
         let flag = self.reg();
         if let Some(x) = &xa {
-            self.moves_into(reg, tag, t, x, ma)?;
+            self.moves_into_where(reg, tag, t, x, fa, ma)?;
         }
         if let Some(x) = &xb {
-            self.moves_into(reg, tag, t, x, mb)?;
+            self.moves_into_where(reg, tag, t, x, fb, mb)?;
         }
         ma.pairs.push((flag, fa, false));
         mb.pairs.push((flag, fb, false));

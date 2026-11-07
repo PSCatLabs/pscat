@@ -411,19 +411,16 @@ mod tests {
     }
 
     /// A chain of moves, each feeding the next in program order, live from
-    /// the output back to the input. Liveness then flows against program
-    /// order: the worst case for a scan repeated to a fixpoint (one link
-    /// per pass, so quadratic). The worklist visits each register once.
+    /// the output back to the input: liveness flows against program order,
+    /// and every link must be found. (Its cost is checked through
+    /// `kernelcompile` in `tests/kernels.rs`.)
     #[test]
-    fn a_long_live_move_chain_is_kept_in_linear_time() {
-        let n = 200_000u32;
+    fn a_live_move_chain_against_program_order_is_kept() {
+        let n = 1000u32;
         let body: Vec<Ins> = (1..n).map(|r| Ins::Mov(r + 1, Op::R(r))).collect();
         let mut k = kernel(n as usize + 1, body, n);
-        let t = std::time::Instant::now();
         drop_dead_moves(&mut k);
         assert_eq!(k.body.len(), n as usize - 1, "a live move was dropped");
-        // Linear is milliseconds; the repeated scan took minutes here.
-        assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
     }
 
     /// Moves and int-to-real conversions into registers nothing reads go;
