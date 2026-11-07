@@ -775,3 +775,28 @@ fn compiling_charges_steps_every_time() {
         .expect("limits");
     assert_eq!(it.run_str(&src).unwrap_err(), PsError::StepsExceeded);
 }
+
+#[test]
+fn the_interpreter_fallback_checks_its_row_buffer_against_the_memory_limit() {
+    // A 100-megasample row: the interpreter driver's row string must be
+    // refused by --max-memory, not allocated.
+    let dir = common::scratch_dir("kfallmem");
+    let ps = dir.join("f.ps");
+    std::fs::write(
+        &ps,
+        "/interpret .kernelmode 100000000 1 [100000000 0 0 -1 0 1] { pop pop 0 } 1 kernelimage showpage",
+    )
+    .expect("write");
+    let out = common::wait_output(
+        std::process::Command::new(BIN)
+            .args(["--page", "4x4", "--max-memory", "50", "--png"])
+            .arg(dir.join("f.png"))
+            .arg(&ps)
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("limitexceeded (memory)"), "{err}");
+}

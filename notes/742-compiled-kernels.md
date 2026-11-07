@@ -151,8 +151,8 @@ None of the fixes changed the gallery renders' bytes or speed.
 
 **Second Codex round.** The adversarial mode broke off twice on its own
 output format; the plain review mode completed. Six more findings, all valid
-and all fixed, each with a regression test and a mutation check that the test
-catches:
+and all fixed, each with a regression test. Mutation checks (the fix removed,
+the test must fail) were run for items 1, 4 and 6.
 
 1. **Exactness at 2^53.** An integer converted to an f64 was checked *after*
    conversion, so 2^53 + 1 (which rounds to 2^53) passed. Integers are now
@@ -164,7 +164,10 @@ catches:
    charge. Each copy is now work, and the stack is capped at 4096 entries,
    past which the interpreter runs the procedure.
 3. **Fallback allocations.** The interpreter fallback's row buffer and its
-   pixel list now go through `check_alloc`.
+   pixel list now go through `check_alloc`. Its test shows the right error and
+   no crash, but it cannot show the allocation was avoided: without the fix,
+   the zeroed row is allocated lazily and the interpreter's own memory check
+   still fires afterwards.
 4. **Merged arrays.** Merging arrays at a join lost aliasing. Merged arrays,
    and the arrays merged, are now frozen: a later `put` refuses compilation.
 5. **Row identity.** `eq` on two run-time table rows compared index
@@ -251,8 +254,10 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 ### Go/no-go
 
 - **CPU kernels: go.**
-  - The gain is 15–165× over the interpreter on real per-pixel programs, and
-    16–22× over the best band-parallel interpreted render.
+  - The gain is 15–165× over the interpreter on real per-pixel programs.
+  - Against the best band-parallel interpreted render (`--bands 8`) it is
+    4.4–22×. The low end is the relief bench, whose time is mostly in native
+    noise operators that were already fast.
   - There is no change to output (byte-identical).
   - There is no new dependency.
   - The program that asked for it compiles unmodified apart from the call
