@@ -251,6 +251,46 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 - **Packaging.** The cost is an optional dependency tree (wgpu 30, MSRV 1.87,
   MIT/Apache), off by default and never on wasm.
 
+### Large kernels (#1064)
+
+**Setup.** fractal_clouds, 160×100 frames through `kernelimage`, release build,
+10 threads, machine load about 4.5, three interleaved rounds. "Before" is
+`feature/compute-kernels` at 978983f. Every render is byte-identical to
+`/interpret`.
+
+**`mountains`.**
+
+| | instructions | registers | compile | `kernelimage` run |
+|---|---:|---:|---:|---:|
+| before | 48,462 (44,326 in some runs) | 515 | 81–86 ms | 195–220 ms |
+| after, default (`/auto`: DCE, no sharing) | 34,801 | 56 | 87–90 ms | 200–210 ms |
+| after, `/large .kernelshare` | 13,791 (61 subroutines) | 285 | 40–41 ms | 210–213 ms |
+
+**`alpine_forest`.** The procedure, by `kernelcompile`:
+
+| | instructions | soft branches | compile |
+|---|---:|---|---:|
+| before | 130,724 | 2 "too large", 6 "defined on some paths only", sometimes 1 "put into an array that a branch chose" | 1.06 s |
+| after, default | 103,173 | the 6 "defined on some paths only" | 1.2 s |
+| after, `/large` | 24,176 (98 subroutines) | the same 6 | 0.19 s |
+
+**The whole image goes to the interpreter.** In every case above, the frame
+still runs in the interpreter (about 32 s). 11,196 of the 16,000 pixels take
+one of the remaining soft branches.
+
+**Checking the compiled pixels.** A debug build that keeps the kernel's own
+pixels instead of falling back checked the other 4,804. All of them are equal
+to `/interpret`:
+
+- under `/auto`;
+- under `/large`;
+- under `/all`, which made 195 subroutines.
+
+**Varying sizes.** The frozen-array set of the merged `[ ]` arrays held bare
+addresses. A new array allocated where a freed frozen one had been was refused
+a `put`, by chance. That is why the "before" sizes vary from run to run. It is
+fixed on this branch, and the sizes are now the same on every run.
+
 ### Go/no-go
 
 - **CPU kernels: go.**
