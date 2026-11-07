@@ -332,7 +332,9 @@ fn a_touch_budget_error_leaves_the_state_alone() {
         &format!(
             "<< /Weave 0.01 >> pkcanvas {TRI_PAGE} \
              {{ << /Width 12 /Direction 30 /Touch 0.5 >> pktrowelplane }} stopped \
-             {{ $error /command get /pktrowel-touch-area-exceeds-safety-limit eq }} {{ false }} ifelse \
+             {{ $error /errorname get /limitcheck eq \
+                $error /command get (pktrowel: /Touch is limited to 60000) anchorsearch \
+                {{ pop pop true }} {{ false }} ifelse and }} {{ false }} ifelse \
              /tplseen exch def \
              newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill"
         ),
