@@ -371,8 +371,9 @@ pub struct Interp {
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `recover`, before a caller can unwind the
-    /// execution stack, and shown by `error_report` only while its
-    /// innermost entry still matches `last_line`/`last_file`.
+    /// execution stack; its innermost entry is the location
+    /// `error_report` gives. Cleared by `begin_source` and by a top-level
+    /// `stop`, so it never outlives the error it describes.
     error_chain: Vec<(Option<Rc<str>>, usize)>,
     /// The font names `findfont` has already printed a stand-in note for
     /// (issue #728), so a `save`/`restore` loop warns once per name per
@@ -1602,6 +1603,22 @@ impl Interp {
         }
     }
 
+    /// Point `last_line`/`last_file` back at the innermost source still
+    /// on the execution stack (#1043). Without this, an error right after
+    /// `run` returns inside a procedure (`/f { (lib.ps) run 1 0 div } def`)
+    /// would name the finished file, since no token is scanned between.
+    fn restore_scan_location(&mut self) {
+        for frame in self.estack.iter().rev() {
+            if let Frame::Scanner(lexer) = frame
+                && let Some(line) = lexer.line()
+            {
+                self.last_line = Some(line);
+                self.last_file = lexer.run_name().cloned();
+                return;
+            }
+        }
+    }
+
     /// Record the open `run` frames for `error_report` (issue #1043).
     /// Only reached for an error nothing catches, so a `stopped` loop
     /// used as control flow pays nothing.
@@ -1620,15 +1637,15 @@ impl Interp {
     /// (issue #1043). A main-program line stays a bare number, so the
     /// report for a single-file program reads exactly as before.
     fn error_location(&self, line: usize) -> String {
-        let Some(file) = &self.last_file else {
+        let file = match self.error_chain.first() {
+            Some((f, _)) => f,
+            None => &self.last_file,
+        };
+        let Some(file) = file else {
             return line.to_string();
         };
         let mut out = format!("{line} ({})", report_name(file));
-        let chain_matches = self
-            .error_chain
-            .first()
-            .is_some_and(|(f, l)| *l == line && f.as_ref().is_some_and(|f| Rc::ptr_eq(f, file)));
-        if chain_matches && self.error_chain.len() > 1 {
+        if self.error_chain.len() > 1 {
             let link = |(f, l): &(Option<Rc<str>>, usize)| match f {
                 Some(f) => format!("{}:{l}", report_name(f)),
                 None => format!("line {l}"),
@@ -1673,7 +1690,13 @@ impl Interp {
                 |n| cap_text(&n, ERROR_NAME_LIMIT),
             ),
         };
-        match self.last_line {
+        // The chain's innermost entry is the source still open when the
+        // error left the machine, which beats the sticky location: a
+        // `stop` that unwound a `run` file mid-procedure scans no token
+        // to correct it. The sticky one serves a top-level `stop`, whose
+        // stack is already drained (no chain).
+        let line = self.error_chain.first().map(|(_, l)| *l).or(self.last_line);
+        match line {
             Some(line) => {
                 let at = self.error_location(line);
                 format!("%%[ Error: {kind}; OffendingCommand: {command}; Line: {at} ]%%")
@@ -1704,6 +1727,9 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
+            /// A `run` file's scanner is exhausted (#1043): pop it and give
+            /// the error location back to the source that ran it.
+            PopRunScanner,
             /// A profiled call returned (`--profile`).
             ProfExit,
         }
@@ -1736,6 +1762,8 @@ impl Interp {
                         None => {
                             if lexer.pop_systemdict {
                                 Action::PopScannerAndDict
+                            } else if lexer.run_name().is_some() {
+                                Action::PopRunScanner
                             } else {
                                 Action::Pop
                             }
@@ -1944,6 +1972,10 @@ impl Interp {
                     if let Some(frame) = self.estack.pop() {
                         self.cleanup_unwound_frame(frame);
                     }
+                }
+                Action::PopRunScanner => {
+                    self.estack.pop();
+                    self.restore_scan_location();
                 }
                 Action::ProfExit => {
                     self.estack.pop();

@@ -172,3 +172,41 @@ fn a_file_name_cannot_forge_the_report_fields() {
     assert!(got.contains("Line: 1 (a%0Ab.ps); "), "{got}");
     assert!(got.ends_with(" ]%%"), "{got}");
 }
+
+#[test]
+fn an_error_after_run_returns_inside_a_procedure_is_the_callers() {
+    // Codex review of PR #1070: `run` returning into a procedure scans no
+    // token, so the location must be handed back to the caller's source.
+    let got = report(
+        "run-return",
+        &[
+            ("lib.ps", "%!PS\n\n/x 1 def\n"),
+            ("main.ps", "/f { (lib.ps) run 1 0 div } def\n\nf\n"),
+        ],
+        "main.ps",
+    );
+    assert_eq!(
+        got,
+        "%%[ Error: undefinedresult; OffendingCommand: div; Line: 3 ]%%"
+    );
+}
+
+#[test]
+fn an_error_after_a_stop_unwinds_a_run_file_is_the_callers() {
+    // The run file is abandoned by `stop`, not exhausted.
+    let got = report(
+        "run-unwound",
+        &[
+            ("lib.ps", "%!PS\n\nstop\n/never 1 def\n"),
+            (
+                "main.ps",
+                "/f { { (lib.ps) run } stopped pop 1 0 div } def\n\nf\n",
+            ),
+        ],
+        "main.ps",
+    );
+    assert_eq!(
+        got,
+        "%%[ Error: undefinedresult; OffendingCommand: div; Line: 3 ]%%"
+    );
+}

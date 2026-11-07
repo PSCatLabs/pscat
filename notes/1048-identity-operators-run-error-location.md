@@ -29,12 +29,18 @@ compare per token, no refcount traffic in the common case). The report:
 - **The chain** is the estack's line-bearing scanners, innermost first,
   snapshotted in `recover` on the uncaught path only (a `stopped` used as
   control flow pays nothing), before any caller could unwind the stack. It
-  is shown only while its innermost entry still matches the reported
-  location, and cleared by `begin_source` and by a top-level `stop` (which
+  is cleared by `begin_source` and by a top-level `stop` (which
   has already drained the stack). Capped at 8 named frames, then `...` and
   the outermost. The main program shows as `line N`: the interpreter is
   given bytes, not a file name, and teaching every CLI entry point to pass
   one was out of this lane.
+- **Location source (Codex review, round 1).** The sticky `last_line`/
+  `last_file` alone named a finished file when `run` returned inside a
+  procedure (`/f { (lib.ps) run 1 0 div } def f`), since no token is scanned
+  in between. The report now takes its location from the chain's innermost
+  entry (the source still open at the error), and an exhausted `run` scanner
+  hands the sticky location back to the source under it (`PopRunScanner`).
+  The sticky value is left only for a top-level `stop`, whose stack is gone.
 - **Escaping.** `;` and `]` in a file name are `%3B`/`%5D`, so a name cannot
   forge the `; ` field separator or the ` ]%%` end that `pscat-mcp` splits on.
 - **Not done: procedure bodies.** An error inside a procedure reports the
