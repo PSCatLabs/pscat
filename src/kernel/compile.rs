@@ -2486,6 +2486,40 @@ impl<'a> Compiler<'a> {
                     return nc("a table is too large");
                 }
                 let nums: Option<Vec<(f64, bool)>> = items.iter().map(num_of).collect();
+                // An array of equal-length strings: an image read row by
+                // row (`readstring`), as one byte table.
+                let strs: Option<Vec<crate::object::PsString>> = items
+                    .iter()
+                    .map(|o| match &o.value {
+                        Value::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(rows) = strs.filter(|r| !r.is_empty()) {
+                    let cols = rows[0].len();
+                    if rows.iter().any(|r| r.len() != cols) {
+                        return nc("run-time index into an array of strings of different lengths");
+                    }
+                    let total = rows.len().saturating_mul(cols);
+                    if total > MAX_TABLE_BYTES || self.it.check_alloc(total).is_err() {
+                        return nc("a string table is too large");
+                    }
+                    let mut data = Vec::with_capacity(total);
+                    for r in &rows {
+                        data.extend_from_slice(&r.borrow_bytes());
+                    }
+                    let t = Table {
+                        rows: rows.len(),
+                        cols,
+                        data: TableData::U8(data),
+                        kind: TableKind::Int,
+                        null_rows: Vec::new(),
+                    };
+                    let id = self.tables.len() as u32;
+                    self.tables.push(t);
+                    self.table_ids.insert(key, (id, true));
+                    return Ok((id, true));
+                }
                 if let Some(nums) = nums {
                     (table_of(1, nums.len(), nums), false)
                 } else {
