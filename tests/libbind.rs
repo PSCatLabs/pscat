@@ -31,12 +31,15 @@
 //! outline table (lib/typewriter_outlines.ps) binds each glyph procedure as
 //! it is read and holds them in a dict the walk does not enter, so it loads
 //! as a prerequisite.
+//! kernel (#1066, the kernelimage shim) was written bound too. Under pscat it
+//! adds only its kernel--* helpers (the native kernelimage wins); under
+//! Ghostscript it adds kernelimage and kernelcompile as well.
 
 use pscat::Interp;
 
 mod common;
 
-const LIBS: [&str; 8] = [
+const LIBS: [&str; 9] = [
     "lib/artkit.ps",
     "lib/paintkit.ps",
     "lib/drykit.ps",
@@ -45,6 +48,7 @@ const LIBS: [&str; 8] = [
     "lib/mathkit.ps",
     "lib/typewriter.ps",
     "lib/released.ps",
+    "lib/kernel.ps",
 ];
 
 /// Libraries a checked one needs but that are not themselves checked:

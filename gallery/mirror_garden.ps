@@ -19,8 +19,8 @@
 %
 % pscat compiles /pixel into native code and runs it on every core
 % (`kernelimage`, docs/guides/kernels.md). Any other PostScript
-% interpreter runs the same procedure through `colorimage`, by the
-% fallback just below: the same picture, very much slower.
+% interpreter loads lib/kernel.ps, the shim just below, which runs the
+% same procedure through `colorimage`: the same picture, very much slower.
 %
 % Run from the repo root:
 %
@@ -31,21 +31,7 @@
 % kernelimage; the same procedure in the interpreter (`/interpret
 % .kernelmode` first) takes 149 s and gives the same bytes.
 
-/kernelimage where { pop } {
-  % w h matrix proc ncomp -: the procedure per pixel, in a fresh dict,
-  % painted with colorimage (pscat's kernelimage, the slow way)
-  /kernelimage { 16 dict begin
-    /KNc exch def /KPr exch def /KMx exch def /KH exch def /KW exch def
-    /KRow KW KNc mul string def /KJ 0 def
-    KW KH 8 KMx
-    { 0 1 KW 1 sub { /KI exch def
-        KI KJ 8 dict begin KPr end
-        KNc 1 sub -1 0 { KI KNc mul add KRow exch 3 -1 roll
-          dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul 0.5 add floor cvi put } for
-      } for
-      /KJ KJ 1 add def KRow }
-    false KNc colorimage end } bind def
-} ifelse
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
 
 /W 1440 def /H 960 def
 3 noiseseed
