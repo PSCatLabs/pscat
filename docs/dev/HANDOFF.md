@@ -879,7 +879,8 @@ renders eight examples in both and compares block-downsampled output).
    each composed at load from the base glyph plus accent strokes
    (`sgaccents`, `sgcomposed` generated from Unicode decompositions), and
    reads a string that is not valid UTF-8 as Latin-1, so `(caf\351)` is
-   `café`: `notes/1051-strokeglyphs-accented-latin.md`.
+   `café`. `sgmetrics` (and so mathkit) stays UTF-8 only, since mathkit
+   slices bytes by lead byte: `notes/1051-strokeglyphs-accented-latin.md`.
    #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
    TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
    and the annotations `mkframe`, `mkunderline`, `mkarrow`), with

@@ -1556,6 +1556,9 @@
 %   (caf\351) sgnames 3 get /eacute eq (byte E9 is é) mustbe
 %   (ℏħ) sgnames aload pop /hstroke eq exch /hbar eq and
 %   (ħ does not take over the name of the board-math ℏ) mustbe
+%   (é) << >> sgmetrics /Name get /eacute eq (sgmetrics names a UTF-8 é) mustbe
+%   (\351ab) << >> sgmetrics /Name get /.notdef eq
+%   (sgmetrics stays UTF-8 only, so mathkit's slices never swallow bytes) mustbe
 %   (\303) sgnames 0 get /Atilde eq
 %   (a truncated UTF-8 sequence is read as Latin-1) mustbe
 %   { (a\277) 0 0 << >> sgpath } /sg-missing-glyph:¿
@@ -1881,7 +1884,7 @@
 
 % glyph opts sgmetrics -> dict
 % @kind: Procedure
-% @summary: Layout metrics for one glyph (a name, or the first glyph of a string) at the given size and slant: /Advance and /Italic correction in points, /BBox [llx lly urx ury] of the unjittered centerline in points relative to the origin, and /Class, TeX's math class (/ord /op /bin /rel /open /close /punct).
+% @summary: Layout metrics for one glyph (a name, or the first glyph of a UTF-8 string; a string that is not valid UTF-8 gives .notdef) at the given size and slant: /Advance and /Italic correction in points, /BBox [llx lly urx ury] of the unjittered centerline in points relative to the origin, and /Class, TeX's math class (/ord /op /bin /rel /open /close /punct).
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run /f << /Size 40 /Slant 12 >> sgmetrics /Italic get
 % @param: /Size [points] The em size (default 36)
 % @param: /Slant [degrees] The slant sgpath will draw with; it widens the box and sets the italic correction (default 0)
@@ -1889,6 +1892,10 @@
   sgcheckopts
   exch
   dup type /nametype eq { } {
+    % UTF-8 only, as before #1051: mathkit hands this one character's
+    % bytes, sliced by their lead byte, and a Latin-1 reading of a broken
+    % slice would name its first byte and lose the bytes after it
+    dup type /stringtype eq { dup sgutf8ok not { pop () } if } if
     sgnames dup length 0 eq { pop /.notdef } { 0 get } ifelse
   } ifelse
   /sgmn exch def

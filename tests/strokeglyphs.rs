@@ -421,3 +421,26 @@ fn ghostscript_builds_the_same_accented_path() {
         );
     }
 }
+
+/// #1051 left mathkit's input UTF-8 only. mathkit slices a character's
+/// bytes by its lead byte and asks `sgmetrics` for the name, so a Latin-1
+/// byte must still be refused there, not read as é while the two bytes
+/// after it vanish. A UTF-8 accented letter now lays out in `\text{}`.
+#[test]
+fn mathkit_refuses_latin1_bytes_and_draws_utf8_accents() {
+    let mut it = Interp::new();
+    load(
+        &mut it,
+        &["lib/handscript.ps", "lib/strokeglyphs.ps", "lib/mathkit.ps"],
+    );
+    run(
+        &mut it,
+        "newpath { (\\351ab) 0 0 << >> mkpath } stopped \
+         { $error /command get 40 string cvs (mk-unsupported-character:) anchorsearch \
+           { pop pop true } { pop false } ifelse } { false } ifelse \
+         newpath (\\\\text{caf\u{e9}}) 0 0 << /Seed 1 >> mkpath currentpoint pop pop",
+    );
+    let stack = it.operand_stack();
+    assert_eq!(stack.len(), 1, "the probe left one result");
+    assert_eq!(stack[0].repr(), "true", "mathkit accepted a Latin-1 byte");
+}

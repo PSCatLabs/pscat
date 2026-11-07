@@ -90,9 +90,17 @@ advance or committed render changed (see Evidence).
 
 ## Not done
 
-- **mathkit** still refuses accented letters in math
-  (`mk-unsupported-character`). TeX's `\acute` and friends are a separate
-  feature.
+- **mathkit takes UTF-8 only.** mathkit names its characters through
+  `sgmetrics`, so a UTF-8 accented letter now lays out (`\text{café}`, and
+  `pscat chalk` with it) where it used to raise `mk-unsupported-character`.
+  A Latin-1 byte is still refused. mathkit slices a character's bytes by
+  the lead byte (E9 claims three), and a Latin-1 reading of that slice
+  would draw é and silently drop the two characters after it. So
+  `sgmetrics` stays UTF-8 only, as it was before; a string that is not
+  valid UTF-8 names `.notdef`. A review probe caught this
+  (`(\351ab)` drew a lone é), and
+  `mathkit_refuses_latin1_bytes_and_draws_utf8_accents` pins it. TeX's
+  `\acute{}` and friends are a separate feature.
 - **Latin-1 punctuation and symbols** are still missing: ¡ ¿ « » € £ ° and
   the rest.
 - **Latin Extended-B** beyond ș ț, and Vietnamese, are still missing.
