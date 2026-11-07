@@ -428,7 +428,8 @@ name as the program gave it, and the chain of open `run` frames, innermost first
 A procedure keeps no record of where it was written, so an error inside one
 reports the line of the token being read when it ran: a procedure from a
 library, called from your program, reports your program's line that called it.
-`;` and `]` in a file name are shown as `%3B` and `%5D`. `--pstack-on-error`
+`;`, `]` and line breaks in a file name are shown percent-escaped (`%3B`,
+`%5D`, `%0A`, `%0D`). `--pstack-on-error`
 adds the operand stack to the report.
 
 ## Which pscat is running
@@ -444,7 +445,12 @@ both 700), so a program can test for a release that has a feature it needs:
 
 `serialnumber` returns 0. Other interpreters answer these too (Ghostscript's
 `product` is `(GPL Ghostscript)`), so check `product` before reading `revision`
-as a pscat release.
+as a pscat release. pscat's `version` is not a number (`(0.7.0-rc.4)`), unlike
+Ghostscript's `(3010)`: compare `revision`, never `version cvr`.
+
+A procedure that keeps one of these four names as a local variable (`dict
+begin /version exch def ... end`) and is `bind`-ed gets the operator instead,
+as in Ghostscript: rename the local.
 
 ## Where next
 

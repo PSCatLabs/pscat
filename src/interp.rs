@@ -45,11 +45,14 @@ const NO_NAME: u32 = u32::MAX;
 /// A `run` file's name as an error report shows it (issue #1043): capped
 /// like an offending command, with `;` and `]` percent-escaped so a name
 /// cannot forge the report's `; ` field separator or its ` ]%%` end
-/// (`pscat-mcp` splits on both, #745).
+/// (`pscat-mcp` splits on both, #745), and CR/LF escaped so the report
+/// stays one line (consumers read the first stderr line).
 fn report_name(name: &str) -> String {
     cap_text(name, ERROR_NAME_LIMIT)
         .replace(';', "%3B")
         .replace(']', "%5D")
+        .replace('\n', "%0A")
+        .replace('\r', "%0D")
 }
 
 /// How many innermost `run` frames an error report's `Run chain` names

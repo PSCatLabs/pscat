@@ -136,8 +136,23 @@ fn the_run_chain_is_capped_for_deep_recursion() {
 }
 
 #[test]
-fn a_file_name_cannot_forge_the_report_fields() {
+fn separators_in_a_file_name_are_escaped() {
     // `;` and `]` are escaped, so `pscat-mcp`'s `; ` / ` ]%%` split holds.
+    let got = report(
+        "run-escape",
+        &[
+            ("a; b ]c.ps", "1 0 div\n"),
+            ("main.ps", "(a; b ]c.ps) run\n"),
+        ],
+        "main.ps",
+    );
+    assert!(got.contains("Line: 1 (a%3B b %5Dc.ps); "), "{got}");
+}
+
+/// `:` and a newline cannot be in a Windows file name.
+#[cfg(unix)]
+#[test]
+fn a_file_name_cannot_forge_the_report_fields() {
     let got = report(
         "run-forge",
         &[
@@ -148,4 +163,12 @@ fn a_file_name_cannot_forge_the_report_fields() {
     );
     assert!(got.contains("Line: 1 (a%3B Line: 9 %5Dx.ps); "), "{got}");
     assert_eq!(got.matches("; Line: ").count(), 1, "{got}");
+    // A newline in the name would split the report across stderr lines.
+    let got = report(
+        "run-newline",
+        &[("a\nb.ps", "1 0 div\n"), ("main.ps", "(a\\nb.ps) run\n")],
+        "main.ps",
+    );
+    assert!(got.contains("Line: 1 (a%0Ab.ps); "), "{got}");
+    assert!(got.ends_with(" ]%%"), "{got}");
 }
