@@ -9,9 +9,10 @@
 #
 # The wasm comes from scripts/build_wasm.sh, the same build as the site's
 # playground, and the low-level wrapper is web/pscat.js (copied in as
-# core.js). Licence files are copied from the repository root, and the
-# dependency notices are cargo-about's (the same command as the release
-# workflow's), so the package carries the same terms as the crate and the
+# core.js; scripts/build_npm_global.mjs turns both into pscat.global.js, the
+# classic-script build for a plain <script> tag, #1025). Licence files are
+# copied from the repository root, and the dependency notices are
+# cargo-about's (the same command as the release workflow's), so the package carries the same terms as the crate and the
 # binaries. The release workflow's `verify` job runs this with --pack into
 # release-inputs/, and the npm stage of scripts/release_stages.py publishes
 # that exact tarball.
@@ -65,6 +66,8 @@ chmod a+r "$NPM_WASM_TMP"
 mv -f "$NPM_WASM_TMP" "$NPM/pscat.wasm"
 NPM_WASM_TMP=""
 cp "$ROOT/web/pscat.js" "$NPM/core.js"
+# The classic-script build (#1025): the same sources as one script, no modules.
+node "$ROOT/scripts/build_npm_global.mjs" "$NPM/pscat.global.js"
 mkdir -p "$NPM/fonts" "$NPM/licenses"
 cp "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/LICENSE-OFL" "$ROOT/THIRD_PARTY_NOTICES.md" "$NPM/"
 cp "$ROOT/fonts/LICENSE" "$NPM/fonts/LICENSE"
@@ -104,7 +107,7 @@ base35 = {
 } | {f"fonts/base35/URW-symbols/{n}" for n in ("LICENSE.md", "LICENSE.OFL", "PROVENANCE.md")}
 expected = {
     "package.json", "README.md", "index.js", "node.js", "renderer.js", "core.js", "index.d.ts",
-    "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",
+    "pscat.global.js", "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",
     "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_LICENSES.html", "licenses/assets.json",
 } | base35
 got = {f["path"] for f in info["files"]}
