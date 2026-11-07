@@ -771,14 +771,24 @@ impl Interp {
             return Ok(());
         };
         // One atomic check-and-add: bands sharing the count must not both
-        // pass a check that only one of them fits under.
-        self.bytes_written
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
-                let total = used.saturating_add(n);
-                (total <= max).then_some(total)
-            })
-            .map(|_| ())
-            .map_err(|_| PsError::Limitcheck)
+        // pass a check that only one of them fits under. A compare-exchange
+        // loop, not `fetch_update`, which newer toolchains rename.
+        let mut used = self.bytes_written.load(Ordering::Relaxed);
+        loop {
+            let total = used.saturating_add(n);
+            if total > max {
+                return Err(PsError::Limitcheck);
+            }
+            match self.bytes_written.compare_exchange_weak(
+                used,
+                total,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(now) => used = now,
+            }
+        }
     }
 
     /// Forget output files that are closed or gone, and refuse (with

@@ -862,7 +862,7 @@ fn allow_write_works_with_bands() {
             "%%BoundingBox: 0 0 20 20\n\
              /BandIndex where {{ pop BandIndex 0 eq {{ ({}/hello.txt) (w) file dup (hi) writestring closefile }} if }} if\n\
              0 0 20 20 rectfill showpage\n",
-            out.display()
+            common::ps_path(&out)
         ),
     );
     let png = dir.join("w.png");
@@ -881,6 +881,7 @@ fn allow_write_works_with_bands() {
 }
 
 /// The write roots bind every band, not just the first.
+#[cfg(unix)]
 #[test]
 fn bands_cannot_write_outside_the_roots() {
     let dir = common::scratch_dir("bands-write-outside");
@@ -926,7 +927,7 @@ fn bands_share_one_write_budget() {
         "w.ps",
         &format!(
             "({}/f.bin) (w) file dup 100 string writestring closefile 0 0 1 1 rectfill showpage\n",
-            out.display()
+            common::ps_path(&out)
         ),
     );
     let run = |cap: &str| {
@@ -972,7 +973,7 @@ fn bands_resolve_their_roots_once() {
         "w.ps",
         &format!(
             "/BandIndex where {{ pop BandIndex 0 eq {{ ({}/hello.txt) (w) file dup (hi) writestring closefile }} if }} if showpage\n",
-            link.display()
+            common::ps_path(&link)
         ),
     );
     let png = dir.join("w.png");
