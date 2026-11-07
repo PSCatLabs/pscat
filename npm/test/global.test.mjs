@@ -36,6 +36,7 @@ function load(src) {
 test('it is a classic script: it parses with no module syntax and defines one global', () => {
   assert.doesNotThrow(() => new vm.Script(source), 'a module-syntax leftover is a SyntaxError here');
   assert.equal(source.includes('import.meta'), false);
+  assert.equal(/<\/script|<!--/i.test(source), false, 'it must be safe to paste inside an HTML script element');
   assert.equal(/^\s*(import|export)\s/m.test(source), false);
   const before = new Set(Object.getOwnPropertyNames(globalThis));
   const p = load('https://example.com/lib/pscat.global.js');
@@ -89,5 +90,18 @@ test('with no script URL (inline, blob:, a worker) the default asks for options.
     await assert.rejects(p.createRenderer(), /pass createRenderer\(\{ wasm \}\)/, `src ${JSON.stringify(src)}`);
     // ...and naming the module still works.
     assert.equal((await p.createRenderer({ wasm })).render('', { width: 4, height: 4 }).width, 4);
+  }
+});
+
+test('a page opened from file:// says why the default fetch failed and what to pass instead', async () => {
+  const p = load('file:///home/me/page/pscat.global.js');
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  try {
+    await assert.rejects(p.createRenderer(), (e) => /file: page.*Failed to fetch.*pass createRenderer\(\{ wasm \}\)/s.test(e.message) && e.cause instanceof TypeError);
+    // The failure is not cached, and naming the module works.
+    assert.equal((await p.createRenderer({ wasm })).render('', { width: 3, height: 3 }).width, 3);
+  } finally {
+    globalThis.fetch = saved;
   }
 });

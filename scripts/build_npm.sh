@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     --notices) NOTICES="$2"; shift 2 ;;
     --no-notices) NO_NOTICES=1; shift ;;
     --pack) PACK_DIR="$2"; shift 2 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "build_npm.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done

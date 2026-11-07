@@ -22,6 +22,13 @@ imports to Blob URLs.
   (inline script, `blob:`/`data:`, a worker, where `self.location` is the
   worker's own file), `createRenderer()` rejects with a message naming
   `createRenderer({ wasm })` rather than fetching a guess.
+- From `file://` Chrome loads the script but refuses `fetch('file:///.../pscat.wasm')`
+  with a bare "Failed to fetch", so the default load rethrows that with the
+  `createRenderer({ wasm })` hint (the cause kept). A single HTML file with the
+  script and the wasm as base64 inlined renders from `file://` (checked in
+  headless Chrome). The first inline attempt failed on a literal end-script tag in
+  the banner comment, so the generator now refuses `</script` and `<!--` anywhere
+  in the output.
 - Tests: `npm/test/global.test.mjs` (classic parse, one global and nothing
   leaked, pages/SVG/PDF byte-equal to the ES module's, the default URL
   resolved against the script URL, the no-URL error) and a check in
