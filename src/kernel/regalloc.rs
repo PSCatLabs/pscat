@@ -94,6 +94,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
             let outs = k
                 .outputs
                 .iter()
+                .chain(&k.rand)
                 .filter_map(|o| match o {
                     Op::R(r) => Some(*r),
                     Op::Imm(_) => None,
@@ -127,7 +128,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
     }
     k.in_i = map[k.in_i as usize];
     k.in_j = map[k.in_j as usize];
-    for o in &mut k.outputs {
+    for o in k.outputs.iter_mut().chain(&mut k.rand) {
         if let Op::R(r) = o {
             *r = map[*r as usize];
         }

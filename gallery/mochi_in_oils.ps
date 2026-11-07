@@ -24,7 +24,7 @@
 % reads for the picture. pscat compiles /pixel and runs it on every core
 % (`kernelimage`, docs/guides/kernels.md); the photo's rows are read
 % straight from the strings the program decoded. Any other interpreter
-% runs the same procedure through `colorimage`, by the fallback below.
+% runs the same procedure through `colorimage`, by lib/kernel.ps.
 %
 %   pscat --page 600x800 --dpi 144 --png mochi_in_oils.png gallery/mochi_in_oils.ps
 %
@@ -33,19 +33,7 @@
 % kernelimage, decoding included; the same procedure in the interpreter
 % (`/interpret .kernelmode` first) takes 273 s and gives the same bytes.
 
-/kernelimage where { pop } {
-  /kernelimage { 16 dict begin
-    /KNc exch def /KPr exch def /KMx exch def /KH exch def /KW exch def
-    /KRow KW KNc mul string def /KJ 0 def
-    KW KH 8 KMx
-    { 0 1 KW 1 sub { /KI exch def
-        KI KJ 8 dict begin KPr end
-        KNc 1 sub -1 0 { KI KNc mul add KRow exch 3 -1 roll
-          dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul 0.5 add floor cvi put } for
-      } for
-      /KJ KJ 1 add def KRow }
-    false KNc colorimage end } bind def
-} ifelse
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
 
 /W 1200 def /H 1600 def                       % the painting
 /SW 3000 def /SH 4000 def                     % the photograph

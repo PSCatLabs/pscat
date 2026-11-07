@@ -200,8 +200,13 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 let rows = rows_needed(it, a.w, a.h, a.matrix);
                 // The GPU cannot be interrupted, so a render under a time or
                 // step limit (pscat-mcp, `--max-time`) stays on the CPU.
+                // Nor does a kernel with `srand`: its state must be exact, and
+                // the LCG's products do not fit the shader's i32.
                 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
-                if GPU_PREVIEW.load(Ordering::Relaxed) && it.remaining_budget() == (None, None) {
+                if GPU_PREVIEW.load(Ordering::Relaxed)
+                    && it.remaining_budget() == (None, None)
+                    && k.rand.is_none()
+                {
                     let r = gpu::run(&k, a.w, a.h, a.ncomp, rows);
                     lap("gpu run (with any device setup)", t1);
                     match r {
@@ -227,8 +232,31 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 lap("cpu run", t1);
                 match r {
                     Ok(ran) if ran.pixels.is_empty() => {
-                        it.kernel_stats.0 += 1;
-                        return paint(it, &a, ran.bytes);
+                        // The random state after the call: what the last
+                        // pixel in raster order leaves (#1063).
+                        match final_rand_state(it, &k, &a, &ran.seeds, rows) {
+                            Ok(Some(found)) => {
+                                if let Some(s) = found {
+                                    it.rand_state = s;
+                                    // Every compiled `srand` under an
+                                    // override is a forced one (a restore
+                                    // retires its lane): some pixel seeded,
+                                    // so the override fired.
+                                    if it.seed_override.is_some() {
+                                        it.seed_override_fired = true;
+                                    }
+                                }
+                                it.kernel_stats.0 += 1;
+                                return paint(it, &a, ran.bytes);
+                            }
+                            // A pixel outside this band's rows retires
+                            // before any seeds: the interpreter decides.
+                            Ok(None) | Err(Stop::Cancelled) => {
+                                it.kernel_stats.2 += 1;
+                                return fallback(it, a);
+                            }
+                            Err(Stop::Limit(e)) => return Err(e),
+                        }
                     }
                     Ok(ran) => {
                         // Some pixels would raise an error or took a branch
@@ -242,11 +270,15 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                             );
                             let _ = it.write_stderr(line.as_bytes(), true);
                         }
-                        if !soft.is_empty() {
+                        if !soft.is_empty() || k.rand.is_some() {
                             // An uncompiled branch may have side effects
                             // (`store`, `put`, `srand`) that pixels compiled
                             // from the snapshot did not see: only the whole
                             // image in the interpreter is exact then.
+                            // So with `srand` (#1063): a retired pixel's
+                            // interpreted `rand` may read the state its
+                            // compiled predecessor left, which the
+                            // interpreter never saw.
                             it.kernel_stats.2 += 1;
                             return fallback(it, a);
                         }
@@ -404,9 +436,11 @@ fn run(
     let queue = Mutex::new(rows.into_iter());
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
     let retired: Mutex<Retired> = Mutex::new((Vec::new(), None));
+    let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, ctl);
         let mut mine: Vec<(usize, usize)> = Vec::new();
+        let mut my_seeds: Vec<(usize, i64)> = Vec::new();
         loop {
             let next = match queue.lock() {
                 Ok(mut q) => q.next(),
@@ -415,6 +449,8 @@ fn run(
             let Some((j, row)) = next else { break };
             let mut i0 = 0;
             let mut r = Ok(());
+            // The state the row's last seeding pixel left (`Kernel::rand`).
+            let mut row_seed = None;
             while i0 < w {
                 let n = (w - i0).min(LANES);
                 match m.run_batch(
@@ -427,6 +463,14 @@ fn run(
                         for l in (0..n).filter(|l| killed >> l & 1 != 0) {
                             mine.push((j, i0 + l));
                         }
+                        if k.rand.is_some()
+                            && let Some(s) = (0..n)
+                                .rev()
+                                .filter(|l| killed >> l & 1 == 0)
+                                .find_map(|l| m.rand_state(l))
+                        {
+                            row_seed = Some(s);
+                        }
                     }
                     Err(e) => {
                         r = Err(e);
@@ -434,6 +478,9 @@ fn run(
                     }
                 }
                 i0 += n;
+            }
+            if let Some(s) = row_seed {
+                my_seeds.push((j, s));
             }
             if let Err(e) = r {
                 ctl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -444,6 +491,9 @@ fn run(
                 }
                 break;
             }
+        }
+        if let Ok(mut sd) = seeds.lock() {
+            sd.extend(my_seeds);
         }
         if let Ok(mut rt) = retired.lock() {
             rt.0.extend(mine);
@@ -475,11 +525,70 @@ fn run(
     // Raster order, so the interpreter meets an error at the pixel it
     // would have met it at.
     pixels.sort_unstable();
+    let mut seeds = seeds.into_inner().unwrap_or_default();
+    seeds.sort_unstable();
     Ok(Ran {
         bytes: out,
         pixels,
         why,
+        seeds,
     })
+}
+
+/// The random state an interpreted render leaves after the call: the one
+/// the last pixel in raster order to call `srand` left (a pixel that never
+/// seeds leaves the state as it found it). `Some(None)` when no pixel
+/// seeds; `None` when a pixel after the last seeding one would retire (only
+/// in rows the run did not compute: outside this `--bands` band).
+///
+/// `seeds` has the computed rows' answers (`rows`); any other row is run
+/// again here, from the last row back, until a pixel that seeded is found.
+fn final_rand_state(
+    it: &mut Interp,
+    k: &Kernel,
+    a: &Args,
+    seeds: &[(usize, i64)],
+    (j0, j1): (usize, usize),
+) -> Result<Option<Option<i64>>, Stop> {
+    match k.rand {
+        None => return Ok(Some(None)),
+        Some(ir::Op::Imm(v)) if v < 0.0 => return Ok(Some(None)),
+        _ => {}
+    }
+    let (steps_left, deadline) = it.remaining_budget();
+    let ctl = RunCtl::new(deadline, steps_left);
+    let mut m = Machine::new(k, &ctl);
+    let mut buf = vec![0u8; LANES * a.ncomp];
+    let mut scan = || -> Result<Option<Option<i64>>, Stop> {
+        for j in (0..a.h).rev() {
+            if (j0..j1).contains(&j) {
+                // Computed, with no pixel retired.
+                match seeds.binary_search_by_key(&j, |&(r, _)| r) {
+                    Ok(x) => return Ok(Some(Some(seeds[x].1))),
+                    Err(_) => continue,
+                }
+            }
+            let mut hi = a.w;
+            while hi > 0 {
+                let i0 = hi.saturating_sub(LANES);
+                let n = hi - i0;
+                let killed = m.run_batch(j as i64, i0 as i64, n, &mut buf[..n * a.ncomp])?;
+                for l in (0..n).rev() {
+                    if killed >> l & 1 != 0 {
+                        return Ok(None);
+                    }
+                    if let Some(s) = m.rand_state(l) {
+                        return Ok(Some(Some(s)));
+                    }
+                }
+                hi = i0;
+            }
+        }
+        Ok(Some(None))
+    };
+    let r = scan();
+    it.charge_steps(ctl.steps.load(std::sync::atomic::Ordering::Relaxed));
+    r
 }
 
 /// Pixels (row, column) retired to the interpreter, and why the first was.
@@ -491,6 +600,9 @@ struct Ran {
     bytes: Vec<u8>,
     pixels: Vec<(usize, usize)>,
     why: Option<&'static str>,
+    /// Per computed row that has a pixel that seeded (`srand`), the random
+    /// state the last such pixel left, by row.
+    seeds: Vec<(usize, i64)>,
 }
 
 /// `proc ncomp kernelcompile bool string`: would `kernelimage` compile

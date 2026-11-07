@@ -134,7 +134,7 @@ pub(crate) fn dce(k: &mut Kernel) {
         for s in &k.subs {
             count(&s.body);
         }
-        for o in &k.outputs {
+        for o in k.outputs.iter().chain(&k.rand) {
             if let Op::R(r) = o {
                 uses[*r as usize] += 1;
             }

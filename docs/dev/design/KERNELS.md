@@ -123,11 +123,40 @@ registers.
 | `get` on a captured array or string of numbers with a run-time index | a gather from a snapshot table |
 | `get` on a captured array of equal-length numeric arrays | a row reference; then `aload` or a constant `get` gathers |
 | `gnoise2 gnoise3 vnoise2 vnoise3 fbm2 fbm3 vfbm2 vfbm3 ridged2 ridged3 gnoise2d` | calls to the same Rust functions, with the table snapshotted at compile time |
+| `srand`, then `rand rrand` | the LCG on a per-lane random state (#1063, below) |
 
 Anything else is not compilable: `put` into a captured composite, `store`,
-`rand`/`srand`, strings, dicts as values, graphics, I/O, `stopped`, and so on.
+`rand` before the pixel's `srand`, strings, dicts as values, graphics, I/O,
+`stopped`, and so on.
 The proc then runs through the fallback (one stderr note per call site), or
 raises an error under `/strict`.
+
+### Random numbers (#1063)
+
+A pixel that calls `srand` before any `rand` draws only from its own seed,
+so it is still a pure function of `i` and `j`.
+
+- **State.** The random state is a binding in the pixel's own scope, under
+  an id no name can have. So it merges at joins and is carried round loops
+  like any name. It is an integer: -1 before the pixel's first `srand`
+  (no real state is negative), then the LCG state.
+- **`srand`** masks its integer operand to 31 bits. Under `--sweep-seed`
+  it sets the forced seed instead. An `rrand` value coming back is a
+  restore: its lanes retire, so the interpreter does it.
+- **`rand`** is the interpreter's step, `(s * 1103515245 + 12345) &
+  0x7fffffff`, as I64 ops. When no path has seeded, the procedure is
+  refused. When only some have, the lanes still at -1 retire.
+- **Afterwards.** The state an interpreted render leaves is the one the last
+  seeding pixel in raster order left. The run records it per computed row.
+  Rows it did not compute (other `--bands` bands) are run again, from the
+  last row back, until a pixel that seeded is found. Under an override, a
+  pixel that seeded is one whose `srand` fired.
+- **Retired pixels.** A retired pixel's `rand` may read the state its
+  compiled predecessor left, which the interpreter never saw. So a seeding
+  kernel with any retired pixel runs the whole image in the interpreter,
+  from the untouched starting state.
+- **GPU.** A kernel with `srand` stays on the CPU: the LCG's products do
+  not fit an i32.
 
 ### Numbers and errors
 

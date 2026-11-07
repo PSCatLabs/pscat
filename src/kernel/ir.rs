@@ -536,6 +536,11 @@ pub(crate) struct Kernel {
     pub in_j: Reg,
     /// The output components, in order.
     pub outputs: Vec<Op>,
+    /// The kernel calls `srand` (issue #1063): the random state a pixel
+    /// leaves (an integer, I64), or -1 where it never seeded. A pixel that
+    /// seeds draws only from its own seed, so pixels stay independent; the
+    /// state the last pixel leaves is the interpreter's state afterwards.
+    pub rand: Option<Op>,
     pub tables: Vec<Table>,
     /// Sizes of the per-lane local arrays.
     pub larrays: Vec<usize>,

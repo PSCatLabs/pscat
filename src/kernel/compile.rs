@@ -35,6 +35,7 @@ use super::ir::{
 use crate::interp::Interp;
 use crate::name::PsName;
 use crate::object::{Dict, Object, Operator, PsArray, Value};
+use crate::ops::arith::{RAND_INC, RAND_MASK, RAND_MUL, RRAND_TAG};
 
 /// A compiled kernel and what compiling it found.
 pub(crate) struct Compiled {
@@ -358,8 +359,10 @@ type ProcId = (usize, usize, usize);
 /// with registers numbered in order of first appearance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Atom {
-    /// The `n`th distinct register, and whether it is I64.
-    Reg(u32, bool),
+    /// The `n`th distinct register, and its kind: bit 0 for I64, bit 1
+    /// for a register known to hold a seeded random state (#1063), which
+    /// changes what `rand` compiles to.
+    Reg(u32, u8),
     Imm(u64),
     T(u8),
     N(u64),
@@ -374,19 +377,16 @@ struct KeyB {
 }
 
 impl KeyB {
-    fn reg(&mut self, r: Reg, kinds: &[bool]) {
+    fn reg(&mut self, r: Reg, kinds: &dyn Fn(Reg) -> u8) {
         let n = self.regs.len() as u32;
         let k = *self.idx.entry(r).or_insert(n);
         if k == n {
             self.regs.push(r);
         }
-        self.atoms.push(Atom::Reg(
-            k,
-            kinds.get(r as usize).copied().unwrap_or(false),
-        ));
+        self.atoms.push(Atom::Reg(k, kinds(r)));
     }
 
-    fn op(&mut self, o: Op, kinds: &[bool]) {
+    fn op(&mut self, o: Op, kinds: &dyn Fn(Reg) -> u8) {
         match o {
             Op::R(r) => self.reg(r, kinds),
             Op::Imm(v) => self.atoms.push(Atom::Imm(v.to_bits())),
@@ -399,7 +399,7 @@ impl KeyB {
 
     /// `None` for a value a shared body may not take (an array built in
     /// the kernel, which a body could change in place; a dict not begun).
-    fn sval(&mut self, v: &SVal, kinds: &[bool]) -> Option<()> {
+    fn sval(&mut self, v: &SVal, kinds: &dyn Fn(Reg) -> u8) -> Option<()> {
         match v {
             SVal::Num(o, t) => {
                 self.atoms.push(Atom::T(0));
@@ -468,7 +468,7 @@ impl KeyB {
         Some(())
     }
 
-    fn binding(&mut self, b: Option<&Binding>, kinds: &[bool]) -> Option<()> {
+    fn binding(&mut self, b: Option<&Binding>, kinds: &dyn Fn(Reg) -> u8) -> Option<()> {
         match b {
             None => self.atoms.push(Atom::T(20)),
             Some(Binding::Val(v)) => {
@@ -638,6 +638,15 @@ const MAX_TABLE: usize = 16 << 20;
 /// Largest string a kernel may snapshot (bytes, kept at one byte each).
 const MAX_TABLE_BYTES: usize = 256 << 20;
 
+/// The random state's slot (issue #1063): a binding in the pixel's own
+/// scope under an id no name can have, so it merges at joins and is carried
+/// round loops like any name. It holds an integer: the LCG state, or
+/// [`UNSEEDED`] on the paths that have not called `srand` yet.
+const RAND_ID: u32 = u32::MAX;
+/// The random state before the pixel's first `srand`. `srand` and `rand`
+/// always mask to [0, 2^31), so no seeded state is ever -1.
+const UNSEEDED: i64 = -1;
+
 pub(crate) struct Compiler<'a> {
     it: &'a Interp,
     nregs: u32,
@@ -656,6 +665,11 @@ pub(crate) struct Compiler<'a> {
     larrays: Vec<usize>,
     begun_dicts: Vec<u32>,
     pub(crate) uses_noise: bool,
+    /// It calls `srand`: the state each pixel leaves is an output.
+    uses_rand: bool,
+    /// Registers that hold a seeded random state on every lane that writes
+    /// them (`srand` and `rand` results): a `rand` of one needs no check.
+    seeded: std::collections::HashSet<Reg>,
     /// The procedures being inlined, by name, for error messages.
     trail: Vec<String>,
     /// `[ ]` arrays merged at a join: no longer to be changed.
@@ -743,7 +757,10 @@ fn compile_with(
             scopes: vec![Scope {
                 uid: 0,
                 kind: ScopeKind::Local,
-                names: Vec::new(),
+                names: vec![(
+                    RAND_ID,
+                    Binding::Val(SVal::Num(Op::Imm(UNSEEDED as f64), NT::Int)),
+                )],
             }],
             dead: false,
         },
@@ -759,6 +776,8 @@ fn compile_with(
         larrays: Vec::new(),
         begun_dicts: Vec::new(),
         uses_noise: false,
+        uses_rand: false,
+        seeded: std::collections::HashSet::new(),
         trail: Vec::new(),
         frozen: std::collections::HashSet::new(),
         soft: Vec::new(),
@@ -791,6 +810,13 @@ fn compile_with(
             }));
         }
         let mut outputs = Vec::new();
+        let rand = if !c.uses_rand {
+            None
+        } else if c.st.dead {
+            Some(Op::Imm(UNSEEDED as f64))
+        } else {
+            Some(c.rand_state()?)
+        };
         if !c.st.dead {
             if c.st.scopes.len() != 1 {
                 return nc("the procedure leaves a dictionary begun (begin without end)");
@@ -825,6 +851,7 @@ fn compile_with(
             in_i: ri,
             in_j: rj,
             outputs,
+            rand,
             tables: std::mem::take(&mut c.tables),
             larrays: std::mem::take(&mut c.larrays),
             perm: it.noise_perm,
@@ -1327,7 +1354,10 @@ impl<'a> Compiler<'a> {
     /// entries and the names `ids` (sorted); `None` if it holds a value no
     /// subroutine may take.
     fn key_of(&self, st: &State, nstack: usize, ids: &[u32]) -> Option<KeyB> {
-        let kinds = &self.kinds;
+        let kinds = &|r: Reg| {
+            u8::from(self.kinds.get(r as usize).copied().unwrap_or(false))
+                | u8::from(self.seeded.contains(&r)) << 1
+        };
         let mut kb = KeyB::default();
         for s in &st.scopes {
             match &s.kind {
@@ -1576,6 +1606,9 @@ impl<'a> Compiler<'a> {
                 self.reg()
             };
             self.emit(Ins::Mov(t, Op::R(r)))?;
+            if self.seeded.contains(&r) {
+                self.seeded.insert(t);
+            }
             outs.push(t);
         }
         if d.dead {
@@ -3134,6 +3167,36 @@ impl<'a> Compiler<'a> {
                 }
                 self.push(c);
             }
+            // random numbers (issue #1063), with the pixel's own seed
+            "srand" => {
+                self.touch_name(RAND_ID);
+                self.srand()?
+            }
+            "rand" => {
+                self.touch_name(RAND_ID);
+                if let Some(s) = self.seeded_state("rand")? {
+                    let a = self.ibin_int(IBinOp::Mul, s, Op::Imm(RAND_MUL as f64))?;
+                    let b = self.ibin_int(IBinOp::Add, a, Op::Imm(RAND_INC as f64))?;
+                    let n = self.ibin_int(IBinOp::And, b, Op::Imm(RAND_MASK as f64))?;
+                    if let Op::R(r) = n {
+                        self.seeded.insert(r);
+                    }
+                    self.set_rand_state(n);
+                    self.push_num(n, NT::Int);
+                }
+            }
+            "rrand" => {
+                self.touch_name(RAND_ID);
+                if let Some(s) = self.seeded_state("rrand")? {
+                    // Tagged under a seed override, as `ops/arith.rs` does.
+                    if self.it.seed_override.is_some() {
+                        let t = self.ibin_int(IBinOp::Or, s, Op::Imm(RRAND_TAG as f64))?;
+                        self.push_num(t, NT::Int);
+                    } else {
+                        self.push_num(s, NT::Int);
+                    }
+                }
+            }
             other => {
                 if let Some(kind) = NoiseKind::from_name(other) {
                     return self.noise(kind);
@@ -3141,6 +3204,84 @@ impl<'a> Compiler<'a> {
                 return nc(format!("the operator {other} is not in the kernel subset"));
             }
         }
+        Ok(())
+    }
+
+    // --- random numbers (issue #1063) ----------------------------------------
+
+    /// The random state on this path: the slot's integer (see [`RAND_ID`]).
+    fn rand_state(&self) -> CResult<Op> {
+        match self.st.scopes.first().and_then(|s| s.get(RAND_ID)) {
+            Some(Binding::Val(SVal::Num(o, NT::Int))) => Ok(*o),
+            _ => nc("internal: the random state is lost"),
+        }
+    }
+
+    fn set_rand_state(&mut self, o: Op) {
+        if let Some(s) = self.st.scopes.first_mut() {
+            s.set(RAND_ID, Binding::Val(SVal::Num(o, NT::Int)));
+        }
+    }
+
+    /// An integer op whose result is an integer (no constant overflow).
+    fn ibin_int(&mut self, op: IBinOp, a: Op, b: Op) -> CResult<Op> {
+        self.ibin(op, a, b)?;
+        match self.pop()? {
+            SVal::Num(o, NT::Int) => Ok(o),
+            _ => nc("internal: an integer op on the random state overflowed"),
+        }
+    }
+
+    /// The state `rand` or `rrand` reads. Before any `srand` in the pixel it
+    /// is what the previous pixel left, which is not compiled: refused when
+    /// no path has seeded, and the lanes that have not retire otherwise (and
+    /// then the whole image runs in the interpreter). `None` when the path
+    /// certainly errors.
+    fn seeded_state(&mut self, what: &str) -> CResult<Option<Op>> {
+        match self.rand_state()? {
+            Op::Imm(v) if v as i64 == UNSEEDED => nc(format!(
+                "{what} before srand in the pixel (it reads the state the previous pixel left)"
+            )),
+            Op::R(r) if !self.seeded.contains(&r) => {
+                self.ibin(IBinOp::Ne, Op::R(r), Op::Imm(UNSEEDED as f64))?;
+                match self.pop_bool()? {
+                    Op::R(c) => self.emit(Ins::Assert(Op::R(c)))?,
+                    Op::Imm(_) => return nc("internal: the random state folded"),
+                }
+                Ok(Some(Op::R(r)))
+            }
+            s => Ok(Some(s)),
+        }
+    }
+
+    /// `srand`, as `ops/arith.rs` does it: an integer operand (a real is a
+    /// `typecheck`), masked to 31 bits; under a seed override (`--sweep-seed`)
+    /// the forced seed instead. An `rrand` value coming back under an
+    /// override is a restore, not a seeding: its lanes retire, so the
+    /// interpreter does it (and decides whether the override fired).
+    fn srand(&mut self) -> CResult<()> {
+        let (o, t) = self.pop_num()?;
+        let Some(x) = self.as_i(o, t)? else {
+            return Ok(());
+        };
+        self.uses_rand = true;
+        let s = match self.it.seed_override {
+            None => self.ibin_int(IBinOp::And, x, Op::Imm(RAND_MASK as f64))?,
+            Some(forced) => {
+                let hi = self.ibin_int(IBinOp::And, x, Op::Imm(!RAND_MASK as f64))?;
+                self.ibin(IBinOp::Ne, hi, Op::Imm(RRAND_TAG as f64))?;
+                match self.pop_bool()? {
+                    Op::Imm(0.0) => return self.abort_path(),
+                    Op::Imm(_) => {}
+                    c => self.emit(Ins::Assert(c))?,
+                }
+                Op::Imm((forced & RAND_MASK) as f64)
+            }
+        };
+        if let Op::R(r) = s {
+            self.seeded.insert(r);
+        }
+        self.set_rand_state(s);
         Ok(())
     }
 

@@ -55,9 +55,29 @@ grestore showpage
 ```
 
 `kernelimage` is a pscat extension. A program meant for other interpreters
-too can define a fallback when `/kernelimage where` fails. Each gallery piece
-in [Computed pixels](../../gallery/README.md) carries a ten-line fallback that
-runs the same procedure through `colorimage`.
+too, Ghostscript for instance, can load the shim
+[`lib/kernel.ps`](../../lib/kernel.ps) when the operator is missing:
+
+```postscript
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
+```
+
+The shim defines `kernelimage` and `kernelcompile` only when they are not
+defined already, so under pscat the native operators win. Its `kernelimage`
+runs the same procedure through `colorimage`, one fresh dict per pixel and
+quantized as above, so the picture matches pscat's up to the other
+interpreter's arithmetic (Ghostscript's reals are 32-bit). Its
+`kernelcompile` always answers `false`. A program that loads it reads a
+file, so it cannot run in the browser playground.
+
+Ghostscript's default `-dSAFER` mode refuses that `run`
+(`invalidfileaccess`). From the repo root, either allow the read or load the
+shim first on the command line:
+
+```sh
+gs --permit-file-read=lib/ -sDEVICE=png16m -o out.png gallery/dreaming_network.ps
+gs -sDEVICE=png16m -o out.png lib/kernel.ps gallery/dreaming_network.ps
+```
 
 ### Every pixel gets a fresh dictionary
 
@@ -94,6 +114,7 @@ made of:
 | `[ … ]`, `aload astore length get put`, `N array` | arrays made in the kernel |
 | `get` on an array or string defined outside | a table read: colour ramps, weights, an image's rows |
 | `gnoise2 gnoise3 vnoise2 vnoise3 fbm2 fbm3 vfbm2 vfbm3 ridged2 ridged3 gnoise2d` | the native noise operators |
+| `srand rand rrand` | when the pixel seeds its own stream first (`i j hash srand`): see below |
 
 Data from outside the kernel (arrays, strings, an image decoded into an
 array of row strings) is **read-only** inside it.
@@ -101,10 +122,32 @@ array of row strings) is **read-only** inside it.
 What does not compile:
 
 - painting, text and I/O;
-- `rand`, `srand` and `store`;
+- `rand` before the pixel's own `srand` (it would read the state the
+  previous pixel left), and `store`;
 - `put` into an array from outside;
 - strings and dictionaries as values;
 - recursion.
+
+### Random numbers
+
+A pixel that seeds its stream from its position, then draws, is a pure
+function of `i` and `j`, so it compiles:
+
+```postscript
+/pixel { /j exch def /i exch def
+  i 16#45D9F3B mul j 16#2545F491 mul xor 16#7fffffff and srand
+  rand 255 and 255 div  rand 255 and 255 div  rand 255 and 255 div } bind def
+```
+
+- `--sweep-seed` forces every pixel's `srand` as it does in the
+  interpreter, and an `rrand` value given back to `srand` is still a
+  restore.
+- After the call, the random state is the one the last pixel (in raster
+  order) that called `srand` left, as in the interpreter, `--bands` included.
+- A `rand` that some pixel reaches before its `srand` is not compiled. When
+  no pixel can seed first, the whole procedure runs in the interpreter.
+  When only some pixels skip the `srand`, and whenever a seeding kernel has
+  a pixel to leave to the interpreter, the whole image runs there.
 
 How it degrades:
 
@@ -146,6 +189,14 @@ Tips:
 clock between batches and every 256 loop trips, so a runaway `{ } loop`
 stops with a time error. The image buffer and the table snapshots count
 against `--max-memory`.
+
+**Known limitation under `--bands`.** Each band computes only the image rows
+that reach it, so an error that only a row outside the band would raise is
+not raised in that band. A plain render, and a render with `/interpret
+.kernelmode`, raise it in every band. The stitched picture differs only for
+a program whose per-pixel procedure errors *and* that catches the error
+(`stopped`) and draws differently afterwards. Without `stopped`, the render
+fails either way.
 
 ## GPU preview
 
