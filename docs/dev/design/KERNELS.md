@@ -184,6 +184,63 @@ operand stack and error command. That covers:
 Errors are rare in finished art, so this keeps the semantics exact without
 modelling error states.
 
+### Large kernels: shared subroutines and dead code (#1064)
+
+Every call is inlined, so a big program can pass the 200,000-instruction
+cap. fractal_clouds' `alpine_forest` reaches about 166k instructions
+inlined (it hit the cap at 130k while a counting bug counted branch and
+loop bodies twice). Two passes shrink large kernels.
+
+**Dead-code elimination** (`opt.rs`) runs on every kernel. It removes pure
+instructions whose results nothing needs, marked back from the roots in
+one pass. A merge of a name that nothing reads after the join is a
+typical case. An instruction that can retire a lane (a division, an
+ordered compare, a checked integer op, a gather, a check) is a root, even
+when its value is unused, because it stands for the interpreter's error.
+The mountains kernel goes from 48k instructions to 35k.
+
+**Shared subroutines.** A named procedure body can be compiled once, as a
+subroutine (`Ins::Call`, `Kernel::subs`), and called from every place it
+is used with the same symbolic context.
+
+- **Recording.** While the body compiles, the compiler records what it
+  reads of the state it entered with:
+  - the stack entries it reaches;
+  - the names it looks up or merges at a join;
+  - the dictionary stack's shape.
+
+  Names it only defines are outputs, not inputs.
+- **The key.** That record, with constants by value, captured objects by
+  identity, and registers numbered in order of first appearance with
+  their kinds, is the subroutine's key.
+- **Reuse.** The compiler is deterministic, and the body's compilation
+  depends on the state only through the key. So a later call whose state
+  has the same key would compile to the same code with its own registers.
+  It calls the subroutine instead.
+- **Making the subroutine.** The code is moved out of the body, and the
+  outer registers it reads are renamed to parameters. At each call:
+  1. the parameters are written;
+  2. `Call` runs the body;
+  3. each register the body leaves in the state is copied out at once into
+     a fresh register, so the state after a call stays SSA.
+- **What stays inlined.** A body stays inline when it:
+  - writes a register from outside;
+  - `exit`s a loop around it;
+  - takes a `[ ]` array or a dict not begun, which it could change in place;
+  - leaves an array or local array it built where the caller can see it.
+- **Executor and allocation.**
+  - The executor runs a call like an `If` that every active lane takes.
+  - The register allocator packs each body on its own, into a region past
+    all its callers' regions, so a call clobbers nothing its caller keeps.
+  - The GPU lowering inlines each call.
+
+When it applies: `.kernelshare` (`/auto` by default) shares only when the
+inlined kernel is too large. The compiler then compiles again, sharing every
+body of 48 instructions or more from its second call on. A kernel under
+the cap gets exactly the inlined IR, so the mountains frame is unchanged.
+`/large` forces sharing, `/all` shares every named procedure from its
+first call (a test mode), and `/never` turns it off.
+
 ## Executor
 
 ```

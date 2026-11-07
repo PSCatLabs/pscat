@@ -585,6 +585,9 @@ struct Frame {
     /// Deepest stack the body made (checked against the symbolic cap).
     high: usize,
     ids: HashSet<u32>,
+    /// Names it defined without reading them first: not part of the
+    /// key (a `def` does not look at what it replaces), but outputs.
+    wids: HashSet<u32>,
     /// Registers made before the body.
     reg_base: u32,
     loops: usize,
@@ -609,6 +612,7 @@ struct SubDef {
     id: u32,
     nstack: usize,
     ids: Vec<u32>,
+    wids: Vec<u32>,
     key: Vec<Atom>,
     /// Parameter registers, by the input they take.
     params: Vec<(u32, Reg)>,
@@ -1086,11 +1090,58 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// A shared body looked up, defined or merged name `id`.
+    /// A shared body looked up or merged name `id`.
     #[inline]
     fn touch_name(&mut self, id: u32) {
         if let Some(f) = self.frames.last_mut() {
             f.ids.insert(id);
+        }
+    }
+
+    /// A shared body looks name `id` up. What it finds depends on the
+    /// state it entered with unless it finds a binding the body itself
+    /// made on this path (one that differs from what that scope held on
+    /// entry: bindings are never removed, so no scope above it held the
+    /// name either).
+    fn touch_read(&mut self, id: u32) {
+        let Some(f) = self.frames.last() else {
+            return;
+        };
+        for s in self.st.scopes.iter().rev() {
+            match &s.kind {
+                ScopeKind::Local => {
+                    if let Some(b) = s.get(id) {
+                        // (A kernel dict compares unequal even to itself.)
+                        if let Binding::Val(SVal::LocalDict) = b {
+                            break;
+                        }
+                        let at_entry = f.entry.scopes.iter().find(|e| e.uid == s.uid);
+                        let made = match at_entry {
+                            Some(e) => !binding_eq(e.get(id), Some(b)),
+                            // A scope begun in the body.
+                            None => true,
+                        };
+                        if made {
+                            return;
+                        }
+                        break;
+                    }
+                }
+                ScopeKind::Captured(d) => {
+                    if d.borrow().get_id(id).is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+        self.touch_name(id);
+    }
+
+    /// A shared body defined name `id`.
+    #[inline]
+    fn touch_def(&mut self, id: u32) {
+        if let Some(f) = self.frames.last_mut() {
+            f.wids.insert(id);
         }
     }
 
@@ -1223,7 +1274,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn exec_name(&mut self, n: &PsName) -> CResult<()> {
-        self.touch_name(n.id());
+        self.touch_read(n.id());
         match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
             Found::Partial(v, f, uid) => {
                 let v = self.read_partial(n, v, f, uid)?;
@@ -1343,6 +1394,9 @@ impl<'a> Compiler<'a> {
         for &id in &d.ids {
             self.touch_name(id);
         }
+        for &id in &d.wids {
+            self.touch_def(id);
+        }
         if let Some(f) = self.frames.last_mut() {
             f.high = f.high.max(len + d.growth);
         }
@@ -1392,6 +1446,7 @@ impl<'a> Compiler<'a> {
             low: len,
             high: len,
             ids: HashSet::new(),
+            wids: HashSet::new(),
             reg_base: self.nregs,
             loops: self.loops.len(),
             larrays: self.larrays.len(),
@@ -1406,6 +1461,7 @@ impl<'a> Compiler<'a> {
             parent.low = parent.low.min(f.low);
             parent.high = parent.high.max(f.high);
             parent.ids.extend(f.ids.iter().copied());
+            parent.wids.extend(f.wids.iter().copied());
         }
         r?;
         if !self.extract(p, pid, f)? {
@@ -1474,7 +1530,7 @@ impl<'a> Compiler<'a> {
                     if binding_eq(es.get(*nid), Some(b)) {
                         continue;
                     }
-                    if ids.binary_search(nid).is_err() {
+                    if ids.binary_search(nid).is_err() && !f.wids.contains(nid) {
                         return Ok(false);
                     }
                     binds.push((si, *nid, b.clone()));
@@ -1575,6 +1631,7 @@ impl<'a> Compiler<'a> {
             id: sid,
             nstack,
             ids,
+            wids: f.wids.iter().copied().collect(),
             key: kb.atoms,
             params,
             results,
@@ -2972,7 +3029,7 @@ impl<'a> Compiler<'a> {
                 let SVal::Name(n) = k else {
                     return nc(format!("def with a key that is {}", describe(&k)));
                 };
-                self.touch_name(n.id());
+                self.touch_def(n.id());
                 let Some(top) = self.st.scopes.last_mut() else {
                     return nc("internal: no scope");
                 };
@@ -2988,7 +3045,7 @@ impl<'a> Compiler<'a> {
                 let SVal::Name(n) = k else {
                     return nc("load of a non-name");
                 };
-                self.touch_name(n.id());
+                self.touch_read(n.id());
                 match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
                     Found::Val(v) => self.push(v),
                     Found::Partial(v, f, uid) => {

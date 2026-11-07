@@ -1408,3 +1408,32 @@ fn a_shared_procedure_drawing_random_numbers() {
         );
     }
 }
+
+#[test]
+fn a_procedure_that_defines_its_scratch_names_is_shared_once() {
+    // `/t exch def` does not read what it replaces: the first call (t not
+    // yet defined) and the later ones (t from the call before) are the
+    // same context, so one subroutine serves all four.
+    let prog = "/sq { /t exch def t t mul t add sqrt } def
+                /pixel { /j exch def /i exch def i sq j sq add i j add sq j 2 mul sq add add
+                         t add 0.01 mul dup dup } def";
+    let (ok, why) = compiles(&format!("/all .kernelshare {prog}"));
+    assert!(ok, "{why}");
+    assert!(why.contains(", 1 shared subroutines"), "{why}");
+    same_shared(prog);
+}
+
+#[test]
+fn a_name_defined_on_one_path_and_read_on_another_is_part_of_the_context() {
+    // `pick` defines t in one branch and reads the caller's t in the
+    // other: the caller's t (a constant at the first call, a register at
+    // the second) is an input, so the first call's code cannot serve the
+    // second.
+    same_shared(&format!(
+        "{SHOW} /pick {{ /c exch def c 0 gt {{ /t 2 def t }} {{ t 1 add }} ifelse }} def
+         /pixel {{ /j exch def /i exch def
+           /t 5 def i 3 sub pick
+           /t i 0.5 mul def j 3 sub pick add
+           /t 7 def i j sub pick add show3 }} def"
+    ));
+}

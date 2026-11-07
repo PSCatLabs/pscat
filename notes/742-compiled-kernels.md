@@ -278,9 +278,12 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 - **`rand` and `srand` in a kernel** (done in #1063, see `KERNELS.md`).
   fractal_clouds' `PixSeed` reseeds per
   pixel, so a per-lane random state seeded inside the kernel would be pure.
-- **Kernels past the 200k-instruction cap.** `alpine_forest`'s trees exceed it,
-  and their branches fall back. Not inlining big procedures called from
-  several places, or caching their compiled body, would shrink kernels.
+- **Kernels past the 200k-instruction cap** (#1064, done): a counting bug,
+  dead-code elimination, and shared subroutines. See the design note.
+  `alpine_forest`'s `fc-pixel` now compiles with no size-cap branch. It still
+  has six "defined on some paths only" branches: names defined inside a loop
+  (at its `exit`) and read after it, the next item. While one of those is
+  taken, the whole image runs in the interpreter.
 - **fractal_clouds' depth-edge antialiasing** reads neighbouring pixels'
   depth keys (carried state). It needs a two-pass form: one kernel for keys,
   a second for colour.
