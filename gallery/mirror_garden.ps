@@ -1,0 +1,241 @@
+%!PS-Adobe-3.0
+%%Title: Mirror Garden
+%%BoundingBox: 0 0 720 480
+%%Creator: Claude
+%%EndComments
+
+% A ray tracer in PostScript: chrome and glazed spheres on a marble floor
+% in late sun. Every pixel is one call of /pixel, a plain PostScript
+% procedure `i j -> r g b`, handed to `kernelimage`:
+%
+%   - four rays per pixel on a rotated grid (antialiasing);
+%   - each ray bounces up to four times off the spheres and the polished
+%     floor, weighted by Schlick's Fresnel term, so the floor mirrors
+%     weakly face-on and strongly at grazing angles;
+%   - soft shadows: four shadow rays per hit, spread over the sun's disc,
+%     jittered per pixel by an integer hash;
+%   - the floor is a marble checker, veined with `fbm2` noise;
+%   - a sky with a sun glow, haze with distance, and a filmic tone curve.
+%
+% pscat compiles /pixel into native code and runs it on every core
+% (`kernelimage`, docs/guides/kernels.md). Any other PostScript
+% interpreter runs the same procedure through `colorimage`, by the
+% fallback just below: the same picture, very much slower.
+%
+% Run from the repo root:
+%
+%   pscat --page 720x480 --dpi 144 --png mirror_garden.png gallery/mirror_garden.ps
+%
+% Render time (release build, 10-core M4 laptop, 1440x960 grid, four
+% camera rays and up to sixteen shadow rays a pixel): 0.9 s with
+% kernelimage; the same procedure in the interpreter (`/interpret
+% .kernelmode` first) takes 149 s and gives the same bytes.
+
+/kernelimage where { pop } {
+  % w h matrix proc ncomp -: the procedure per pixel, in a fresh dict,
+  % painted with colorimage (pscat's kernelimage, the slow way)
+  /kernelimage { 16 dict begin
+    /KNc exch def /KPr exch def /KMx exch def /KH exch def /KW exch def
+    /KRow KW KNc mul string def /KJ 0 def
+    KW KH 8 KMx
+    { 0 1 KW 1 sub { /KI exch def
+        KI KJ 8 dict begin KPr end
+        KNc 1 sub -1 0 { KI KNc mul add KRow exch 3 -1 roll
+          dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul 0.5 add floor cvi put } for
+      } for
+      /KJ KJ 1 add def KRow }
+    false KNc colorimage end } bind def
+} ifelse
+
+/W 1440 def /H 960 def
+3 noiseseed
+
+% --- the scene -------------------------------------------------------------
+% spheres: [cx cy cz radius  red green blue  F0] (F0: reflectance face-on)
+/Sph [
+  [  0.00 1.10  0.30 1.10   0.92 0.93 0.95  0.90 ]   % chrome
+  [ -2.35 0.70 -0.40 0.70   0.78 0.10 0.07  0.05 ]   % red glaze
+  [  2.25 0.80 -0.10 0.80   0.06 0.22 0.55  0.06 ]   % cobalt glaze
+  [  1.05 0.42 -1.75 0.42   0.95 0.66 0.18  0.80 ]   % brass
+  [ -0.95 0.30 -2.05 0.30   0.10 0.42 0.20  0.05 ]   % jade
+  [ -3.80 1.30  2.80 1.30   0.72 0.36 0.20  0.04 ]   % terracotta, far left
+] def
+/NS Sph length def
+% the sun: a direction (normalised below) and the half-angle of its disc
+/Sx -0.62 def /Sy 0.46 def /Sz 0.64 def
+Sx Sx mul Sy Sy mul add Sz Sz mul add sqrt
+dup Sx exch div /Sx exch def dup Sy exch div /Sy exch def Sz exch div /Sz exch def
+/SunR 0.045 def
+% the camera
+/Ex 0.35 def /Ey 1.25 def /Ez -7.4 def
+/Pitch -4 def                                  % degrees, looking down a little
+/Zoom 1.45 def
+
+% --- small helpers ------------------------------------------------------------
+% i j k -> h in 0..1: an integer hash (exact 64-bit arithmetic)
+/hash01 {
+  1000003 mul exch 2654435761 mul xor exch 40503 mul xor 16#7fffffff and
+  dup -15 bitshift xor 16#45D9F3B mul 16#7fffffff and
+  dup -13 bitshift xor 16#45D9F3B mul 16#7fffffff and
+  dup -16 bitshift xor 16#7fffffff and 2147483647 div
+} bind def
+
+% ox oy oz dx dy dz -> t k   (nearest hit; k = -1 floor, -2 nothing)
+/trace {
+  /dz exch def /dy exch def /dx exch def /oz exch def /oy exch def /ox exch def
+  /bt 1e30 def /bk -2 def
+  dy -1e-9 lt { oy neg dy div dup 1e-4 gt { /bt exch def /bk -1 def } { pop } ifelse } if
+  0 1 NS 1 sub { /k exch def
+    Sph k get aload pop pop pop pop pop /sr exch def /sz exch def /sy exch def /sx exch def
+    ox sx sub /px exch def oy sy sub /py exch def oz sz sub /pz exch def
+    px dx mul py dy mul add pz dz mul add /b exch def
+    b b mul px px mul py py mul add pz pz mul add sr sr mul sub sub /disc exch def
+    disc 0 gt {
+      b neg disc sqrt sub /t exch def
+      t 1e-4 gt t bt lt and { /bt t def /bk k def } if
+    } if
+  } for
+  bt bk
+} bind def
+
+% ox oy oz dx dy dz -> blocked?  (any sphere in the way)
+/blocked {
+  /dz exch def /dy exch def /dx exch def /oz exch def /oy exch def /ox exch def
+  false
+  0 1 NS 1 sub { /k exch def
+    Sph k get aload pop pop pop pop pop /sr exch def /sz exch def /sy exch def /sx exch def
+    ox sx sub /px exch def oy sy sub /py exch def oz sz sub /pz exch def
+    px dx mul py dy mul add pz dz mul add /b exch def
+    b b mul px px mul py py mul add pz pz mul add sr sr mul sub sub /disc exch def
+    disc 0 gt { b neg disc sqrt sub 1e-4 gt { pop true } if } if
+  } for
+} bind def
+
+% dx dy dz -> r g b: the sky, with the sun's glow
+/sky {
+  /qz exch def /qy exch def /qx exch def
+  qy 0 lt { /qy 0 def } if
+  /hz 1 qy sub dup mul dup mul def                % near 1 at the horizon
+  /sd qx Sx mul qy Sy mul add qz Sz mul add def   % cosine to the sun
+  sd 0 lt { /sd 0 def } if
+  /glow sd 6 exp 0.45 mul sd 900 exp 8 mul add def
+  0.06 0.80 hz mul add glow 1.00 mul add
+  0.13 0.40 hz mul add glow 0.72 mul add
+  0.42 0.10 hz mul sub glow 0.42 mul add
+} bind def
+
+% x z -> r g b: polished marble checker, veined
+/marble {
+  /mz exch def /mx exch def
+  mx 0.9 mul floor mz 0.9 mul floor add cvi 2 mod 0 eq
+  { 0.80 0.76 0.70 } { 0.07 0.07 0.08 } ifelse
+  /mb exch def /mg exch def /mr exch def
+  mx 1.7 mul mz 0.6 mul add mx 0.8 mul mz 0.8 mul 5 0.5 2.0 fbm2 5 mul add
+  57.3 mul sin abs 0.18 exp                       % veins: dark where the sine is near 0
+  0.35 mul 0.65 add /vein exch def
+  mr vein mul mg vein mul mb vein mul
+} bind def
+
+% fraction of the sun visible from hx hy hz (normal nx ny nz): 4 shadow
+% rays spread over the sun's disc
+/sunlight {
+  /lit 0 def
+  0 1 3 { /s exch def
+    PI PJ PS s add hash01 0.5 sub SunR mul 2 mul /ja exch def
+    PI PJ PS s add 7 add hash01 0.5 sub SunR mul 2 mul /jb exch def
+    hx nx 1e-3 mul add hy ny 1e-3 mul add hz nz 1e-3 mul add
+    Sx ja add Sy jb add Sz ja jb add 0.5 mul sub
+    blocked not { /lit lit 0.25 add def } if
+  } for
+  lit
+} bind def
+
+% ox oy oz dx dy dz -> r g b: one camera ray, up to four bounces
+/radiance {
+  /rz exch def /ry exch def /rx exch def /oz exch def /oy exch def /ox exch def
+  /cr 0 def /cg 0 def /cb 0 def /wr 1 def /wg 1 def /wb 1 def
+  /first 1 def
+  0 1 3 { /bounce exch def
+    ox oy oz rx ry rz trace /k exch def /t exch def
+    k -2 eq {
+      rx ry rz sky
+      /cb exch wb mul cb add def /cg exch wg mul cg add def /cr exch wr mul cr add def
+      exit
+    } if
+    ox rx t mul add /hx exch def oy ry t mul add /hy exch def oz rz t mul add /hz exch def
+    k -1 eq {
+      /nx 0 def /ny 1 def /nz 0 def
+      hx hz marble /ab exch def /ag exch def /ar exch def
+      /f0 0.025 def
+    } {
+      Sph k get aload pop /f0 exch def /ab exch def /ag exch def /ar exch def
+      /sr exch def /sz exch def /sy exch def /sx exch def
+      /nx hx sx sub sr div def /ny hy sy sub sr div def /nz hz sz sub sr div def
+    } ifelse
+    % Schlick's Fresnel: more mirror at grazing angles
+    rx nx mul ry ny mul add rz nz mul add neg /cosi exch def
+    cosi 0 lt { /cosi 0 def } if
+    1 cosi sub dup dup mul dup mul mul /f5 exch def
+    f0 1 f0 sub f5 mul add /fr exch def
+    % direct light: Lambert with soft shadows, plus a little sky fill
+    nx Sx mul ny Sy mul add nz Sz mul add /ndl exch def
+    ndl 0 gt { sunlight ndl mul } { 0 } ifelse /sun exch def
+    % warm sun, cool sky fill from above
+    ny 0.5 mul 0.5 add 0.16 mul /skyf exch def
+    sun 3.4 mul skyf 0.70 mul add 0.02 add /shr exch def
+    sun 2.9 mul skyf 0.85 mul add 0.02 add /shg exch def
+    sun 2.1 mul skyf 1.15 mul add 0.03 add /shb exch def
+    % the specular highlight of the sun
+    /dn rx nx mul ry ny mul add rz nz mul add 2 mul def
+    rx nx dn mul sub /qx exch def ry ny dn mul sub /qy exch def rz nz dn mul sub /qz exch def
+    qx Sx mul qy Sy mul add qz Sz mul add dup 0 lt { pop 0 } if 220 exp sun mul fr mul 6 mul /spec exch def
+    % haze: the first hit fades to the horizon colour with distance
+    % (squared, so the near scene stays clear and the far floor dissolves)
+    first 1 eq { t 28 div dup mul neg 2.71828 exch exp } { 1 } ifelse /keep exch def
+    1 fr sub keep mul /kd exch def
+    /cr cr wr ar shr mul kd mul spec add 1 keep sub 0.86 mul add mul add def
+    /cg cg wg ag shg mul kd mul spec 0.9 mul add 1 keep sub 0.55 mul add mul add def
+    /cb cb wb ab shb mul kd mul spec 0.75 mul add 1 keep sub 0.36 mul add mul add def
+    % carry on along the mirror direction, weighted by the Fresnel term
+    % (metals tint their reflection)
+    f0 0.5 gt { /wr wr fr ar mul mul keep mul def /wg wg fr ag mul mul keep mul def /wb wb fr ab mul mul keep mul def }
+              { /wr wr fr mul keep mul def /wg wg fr mul keep mul def /wb wb fr mul keep mul def } ifelse
+    wr wg add wb add 0.01 lt { exit } if
+    /ox hx nx 1e-3 mul add def /oy hy ny 1e-3 mul add def /oz hz nz 1e-3 mul add def
+    /rx qx def /ry qy def /rz qz def
+    /first 0 def
+  } for
+  cr cg cb
+} bind def
+
+% --- the pixel ------------------------------------------------------------------
+/CP Pitch cos def /SP Pitch sin def
+/pixel {
+  /PJ exch def /PI exch def
+  /ar 0 def /ag 0 def /ab 0 def
+  % four rays on a rotated grid
+  [ 0.125 0.375  0.375 -0.125  -0.125 -0.375  -0.375 0.125 ] /Off exch def
+  0 1 3 { /PK exch def
+    /PS PK 16 mul def                          % this ray's own hash stream
+    PI 0.5 add Off PK 2 mul get add W 2 div sub W div 2 mul Zoom div /u exch def
+    H 2 div PJ 0.5 sub Off PK 2 mul 1 add get sub sub W div 2 mul Zoom div /v exch def
+    % pitch the camera: rotate (v, 1) about x
+    u  v CP mul SP add  CP v SP mul sub
+    3 copy dup mul exch dup mul add exch dup mul add sqrt /l exch def
+    l div 3 1 roll l div 3 1 roll l div 3 1 roll
+    /dzz exch def /dyy exch def /dxx exch def
+    Ex Ey Ez dxx dyy dzz radiance
+    /ab exch ab add def /ag exch ag add def /ar exch ar add def
+  } for
+  % filmic: x / (x + 0.55), then a gentle gamma
+  ar 0.25 mul dup 0.55 add div 1.4 mul 0.62 exp
+  ag 0.25 mul dup 0.55 add div 1.4 mul 0.62 exp
+  ab 0.25 mul dup 0.55 add div 1.4 mul 0.62 exp
+} bind def
+
+/PI 0 def /PJ 0 def /PS 0 def                  % for the hash outside a pixel
+gsave
+720 480 scale
+W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage
+grestore
+showpage

@@ -1,0 +1,197 @@
+%!PS-Adobe-3.0
+%%Title: Mandelbulb
+%%BoundingBox: 0 0 600 600
+%%Creator: Claude
+%%EndComments
+
+% The Mandelbulb, ray-marched in PostScript. The power-8 bulb is the
+% three-dimensional cousin of the Mandelbrot set (White and Nylander,
+% 2009): a point is squared-and-added in spherical coordinates, its
+% angles multiplied by 8 and its radius raised to the 8th power, and the
+% points that never escape make the solid.
+%
+% Each pixel's ray steps toward the surface by the bulb's distance
+% estimate, 0.5 ln(r) r / dr, which is never more than the true distance,
+% so the ray cannot step through it. At the hit:
+%   - the normal comes from four more estimates around the point;
+%   - ambient occlusion from five estimates stepping out along the normal
+%     (crevices are close to other surface, so they darken);
+%   - colour from an orbit trap: how close the point's orbit came to the
+%     origin picks a tone between bronze and verdigris;
+%   - a key light, a cool rim light and a little sky.
+% Rays that miss pick up a faint glow from how near they passed.
+%
+% That is about a hundred distance estimates per pixel, each an 8-step
+% loop of `atan`, `sin`, `cos`, `ln` and `exp`. pscat compiles /pixel and
+% runs it on every core (`kernelimage`, docs/guides/kernels.md); any other
+% interpreter runs the same procedure through `colorimage` by the fallback
+% below, which is the same picture, only far slower.
+%
+%   pscat --page 600x600 --dpi 144 --png mandelbulb.png gallery/mandelbulb.ps
+%
+% Render time (release build, 10-core M4 laptop, 1200x1200 grid, four
+% rays a pixel): about 5 s with kernelimage. The interpreter takes 2.3 s
+% for a 100x100 grid of the same procedure (the same bytes), so about
+% five and a half minutes for this one.
+
+/kernelimage where { pop } {
+  /kernelimage { 16 dict begin
+    /KNc exch def /KPr exch def /KMx exch def /KH exch def /KW exch def
+    /KRow KW KNc mul string def /KJ 0 def
+    KW KH 8 KMx
+    { 0 1 KW 1 sub { /KI exch def
+        KI KJ 8 dict begin KPr end
+        KNc 1 sub -1 0 { KI KNc mul add KRow exch 3 -1 roll
+          dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul 0.5 add floor cvi put } for
+      } for
+      /KJ KJ 1 add def KRow }
+    false KNc colorimage end } bind def
+} ifelse
+
+/W 1200 def /H 1200 def
+/Power 8 def /Iter 9 def /MaxSteps 140 def
+
+% --- the camera: on a sphere round the bulb, looking at the centre --------
+/Yaw 28 def /Tilt 22 def /Dist 2.35 def /Fov 0.78 def
+/Cx Dist Tilt cos mul Yaw sin mul def
+/Cy Dist Tilt sin mul def
+/Cz Dist Tilt cos mul Yaw cos mul neg def
+% forward = -C/|C|, right = up x forward, up' = forward x right
+/Fx Cx neg Dist div def /Fy Cy neg Dist div def /Fz Cz neg Dist div def
+/Rx Fz def /Ry 0 def /Rz Fx neg def
+Rx Rx mul Rz Rz mul add sqrt dup Rx exch div /Rx exch def Rz exch div /Rz exch def
+/Ux Fy Rz mul Fz Ry mul sub def
+/Uy Fz Rx mul Fx Rz mul sub def
+/Uz Fx Ry mul Fy Rx mul sub def
+% the key light (towards it) and the rim light
+/Lx 0.58 def /Ly 0.66 def /Lz -0.47 def
+/Mx -0.70 def /My 0.15 def /Mz 0.70 def
+
+% --- the distance estimate ------------------------------------------------
+% x y z -> d, and leaves /trap (the orbit's closest approach to the origin)
+/de {
+  /pz exch def /py exch def /px exch def
+  /zx px def /zy py def /zz pz def /dr 1.0 def /rr 0.0 def /trap 10.0 def
+  0 1 Iter 1 sub { pop
+    zx zx mul zy zy mul add zz zz mul add sqrt /rr exch def
+    rr 2 gt { exit } if
+    rr trap lt { /trap rr def } if
+    % spherical angles about the vertical (y) axis, in degrees as
+    % PostScript has them
+    zx zx mul zz zz mul add sqrt zy atan /th exch def
+    zx abs zz abs add 1e-12 lt { 0 } { zz zx atan } ifelse /ph exch def
+    rr 1e-12 max /rr exch def
+    rr rr mul dup mul dup mul /r8 exch def            % r^8
+    r8 rr div Power mul dr mul 1 add /dr exch def     % 8 r^7 dr + 1
+    th Power mul /th exch def ph Power mul /ph exch def
+    th sin r8 mul /st exch def
+    st ph cos mul px add /zx exch def
+    st ph sin mul pz add /zz exch def
+    th cos r8 mul py add /zy exch def
+  } for
+  zx zx mul zy zy mul add zz zz mul add sqrt 1e-12 max /rr exch def
+  0.5 rr ln mul rr mul dr div
+} bind def
+
+% --- shading ----------------------------------------------------------------
+/sky {                                      % dy -> r g b (the background)
+  0.5 mul 0.5 add /g exch def
+  0.015 0.035 g mul add 0.020 0.050 g mul add 0.040 0.090 g mul add
+} bind def
+
+/shade {                                    % -> r g b, at hx hy hz
+  hx hy hz de pop /tr trap def
+  % the normal, from a tetrahedron of estimates
+  /e t 0.0009 mul 0.0003 max def           % about a pixel's footprint
+  hx e add hy e sub hz e sub de /d1 exch def
+  hx e sub hy e sub hz e add de /d2 exch def
+  hx e sub hy e add hz e sub de /d3 exch def
+  hx e add hy e add hz e add de /d4 exch def
+  d1 d2 sub d3 sub d4 add /nx exch def
+  d1 neg d2 sub d3 add d4 add /ny exch def
+  d1 neg d2 add d3 sub d4 add /nz exch def
+  nx nx mul ny ny mul add nz nz mul add sqrt 1e-12 max /nl exch def
+  /nx nx nl div def /ny ny nl div def /nz nz nl div def
+  % ambient occlusion: five steps out along the normal
+  /ao 0 def /wt 1 def
+  1 1 5 { /k exch def
+    k 0.012 mul /hd exch def
+    hd hx nx hd mul add hy ny hd mul add hz nz hd mul add de sub wt mul ao add /ao exch def
+    /wt wt 0.5 mul def
+  } for
+  1 ao 14 mul sub dup 0 lt { pop 0 } if /occ exch def
+  % orbit-trap colour: bronze in the hollows, verdigris on the crests
+  tr 0.55 sub 1.6 mul dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if /m exch def
+  0.86 0.55 m mul sub /ar exch def
+  0.50 0.12 m mul add /ag exch def
+  0.24 0.30 m mul add /ab exch def
+  % lights
+  nx Lx mul ny Ly mul add nz Lz mul add 0 max /dif exch def
+  nx Mx mul ny My mul add nz Mz mul add 0 max /rim exch def
+  % a Blinn highlight of the key light
+  Lx dx sub Ly dy sub Lz dz sub
+  3 copy dup mul exch dup mul add exch dup mul add sqrt /hl exch def
+  hl div nz mul exch hl div ny mul add exch hl div nx mul add 0 max 48 exp /sp exch def
+  ny 0.5 mul 0.5 add 0.10 mul /amb exch def
+  ar dif 1.25 mul amb add occ mul mul rim 0.22 mul occ mul add sp 0.7 mul dif mul add
+  ag dif 1.10 mul amb add occ mul mul rim 0.42 mul occ mul add sp 0.65 mul dif mul add
+  ab dif 0.90 mul amb add occ mul mul rim 0.60 mul occ mul add sp 0.55 mul dif mul add
+} bind def
+
+% --- the pixel ----------------------------------------------------------------
+/sample {                                   % su sv -> r g b (one ray)
+  /v exch def /u exch def
+  Fx Rx u mul add Ux v mul add /dx exch def
+  Fy Ry u mul add Uy v mul add /dy exch def
+  Fz Rz u mul add Uz v mul add /dz exch def
+  dx dx mul dy dy mul add dz dz mul add sqrt /l exch def
+  /dx dx l div def /dy dy l div def /dz dz l div def
+  % start where the ray enters a sphere round the bulb (radius 1.5)
+  Cx dx mul Cy dy mul add Cz dz mul add /b exch def
+  b b mul Cx Cx mul Cy Cy mul add Cz Cz mul add 2.25 sub sub /disc exch def
+  /hit false def /glow 1e9 def
+  /hx 0 def /hy 0 def /hz 0 def            % (set by the march; read after it)
+  disc 0 gt {
+    b neg disc sqrt sub 0 max /t exch def
+    b neg disc sqrt add /tfar exch def
+    0 1 MaxSteps 1 sub { /steps exch def
+      Cx dx t mul add /hx exch def Cy dy t mul add /hy exch def Cz dz t mul add /hz exch def
+      hx hy hz de /d exch def
+      d glow lt { /glow d def } if
+      d t 0.0009 mul 0.00015 max lt { /hit true def exit } if
+      t tfar gt { exit } if
+      /t t d 0.92 mul add def
+    } for
+  } if
+  hit {
+    shade
+    % tone: x / (x + 0.5), then gamma
+    3 { 3 1 roll dup 0.45 add div 1.45 mul 0.8 exp } repeat
+  } {
+    dy sky
+    % the halo of near misses
+    glow 1e8 gt { 0 } { 1 glow 45 mul 1 add dup mul div } ifelse 0.30 mul /gl exch def
+    3 -1 roll gl 0.85 mul add 3 -1 roll gl 0.70 mul add 3 -1 roll gl 0.55 mul add
+    3 { 3 1 roll 0.55 exp } repeat
+  } ifelse
+} bind def
+
+% four rays per pixel on a rotated grid, averaged
+/pixel {
+  /pj exch def /pi exch def
+  /sr 0 def /sg 0 def /sb 0 def
+  [ 0.125 0.375  0.375 -0.125  -0.125 -0.375  -0.375 0.125 ] /Off exch def
+  0 1 3 { /q exch def
+    pi 0.5 add Off q 2 mul get add W 2 div sub W div 2 mul Fov mul
+    H 2 div pj 0.5 add Off q 2 mul 1 add get add sub W div 2 mul Fov mul
+    sample
+    /sb exch sb add def /sg exch sg add def /sr exch sr add def
+  } for
+  sr 0.25 mul sg 0.25 mul sb 0.25 mul
+} bind def
+
+gsave
+600 600 scale
+W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage
+grestore
+showpage
