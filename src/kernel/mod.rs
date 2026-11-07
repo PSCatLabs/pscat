@@ -24,6 +24,7 @@ pub(crate) mod exec;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 pub(crate) mod gpu;
 pub(crate) mod ir;
+pub(crate) mod regalloc;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -72,6 +73,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, ".kfstore", kfstore);
     op(dict, ".kfrow", kfrow);
     op(dict, ".kernelstats", kernelstats);
+    op(dict, ".kfnext", kfnext);
+    op(dict, ".kfput", kfput);
+    op(dict, ".kfpaint", kfpaint);
 }
 
 /// A component (nominally 0..1) as an 8-bit sample: clamped to [0, 1],
@@ -133,9 +137,20 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
         }
     };
     if it.kernel_mode != KernelMode::Interpret {
-        let compiled = compile::compile(it, &a.proc, a.ncomp);
+        let strict = it.kernel_mode == KernelMode::Strict;
+        let compiled = compile::compile(it, &a.proc, a.ncomp, strict);
         lap("compile", t0);
-        if let Ok((k, _)) = &compiled
+        if let Ok((_, _, soft)) = &compiled {
+            for why in soft {
+                if it.kernel_notes.insert(why.clone()) {
+                    let note = format!(
+                        "pscat: kernelimage: a branch runs in the interpreter when taken ({why})\n"
+                    );
+                    let _ = it.write_stderr(note.as_bytes(), true);
+                }
+            }
+        }
+        if let Ok((k, _, _)) = &compiled
             && timing
         {
             eprintln!(
@@ -146,7 +161,7 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
         }
         let t1 = crate::clock::Clock::mono_ns();
         match compiled {
-            Ok((k, noise)) => {
+            Ok((k, noise, _)) => {
                 if noise {
                     crate::ops::noise::note_sampled(it);
                 }
@@ -177,14 +192,27 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 let r = run(it, &k, a.w, a.h, a.ncomp, rows);
                 lap("cpu run", t1);
                 match r {
-                    Ok(bytes) => {
+                    Ok(ran) if ran.pixels.is_empty() => {
                         it.kernel_stats.0 += 1;
-                        return paint(it, &a, bytes);
+                        return paint(it, &a, ran.bytes);
+                    }
+                    Ok(ran) => {
+                        // Some pixels would raise an error or took a branch
+                        // that did not compile: the interpreter does those
+                        // (and raises the error for real, at the same pixel).
+                        let why = ran.why.unwrap_or("an error");
+                        let note = format!("{} pixels: {why}", ran.pixels.len());
+                        if it.kernel_notes.insert(why.to_string()) {
+                            let line = format!(
+                                "pscat: kernelimage: {note}; those run in the interpreter\n"
+                            );
+                            let _ = it.write_stderr(line.as_bytes(), true);
+                        }
+                        it.kernel_stats.1 += 1;
+                        return fallback_pixels(it, a, ran.bytes, ran.pixels);
                     }
                     Err(Stop::Limit(e)) => return Err(e),
-                    // Some pixel would raise an error: the interpreter
-                    // raises it, with the real stack (design: "Error rule").
-                    Err(Stop::Fallback | Stop::Cancelled) => {}
+                    Err(Stop::Cancelled) => {}
                 }
             }
             Err(compile::NotCompilable(why)) => {
@@ -292,7 +320,7 @@ fn run(
     h: usize,
     ncomp: usize,
     (j0, j1): (usize, usize),
-) -> Result<Vec<u8>, Stop> {
+) -> Result<Ran, Stop> {
     let row_bytes = w * ncomp;
     let total = row_bytes
         .checked_mul(h)
@@ -310,8 +338,11 @@ fn run(
         .collect();
     let queue = Mutex::new(rows.into_iter());
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
+    let retired: Mutex<(Vec<(usize, usize)>, Option<&'static str>)> =
+        Mutex::new((Vec::new(), None));
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, ctl);
+        let mut mine: Vec<(usize, usize)> = Vec::new();
         loop {
             let next = match queue.lock() {
                 Ok(mut q) => q.next(),
@@ -322,14 +353,21 @@ fn run(
             let mut r = Ok(());
             while i0 < w {
                 let n = (w - i0).min(LANES);
-                r = m.run_batch(
+                match m.run_batch(
                     j as i64,
                     i0 as i64,
                     n,
                     &mut row[i0 * ncomp..(i0 + n) * ncomp],
-                );
-                if r.is_err() {
-                    break;
+                ) {
+                    Ok(killed) => {
+                        for l in (0..n).filter(|l| killed >> l & 1 != 0) {
+                            mine.push((j, i0 + l));
+                        }
+                    }
+                    Err(e) => {
+                        r = Err(e);
+                        break;
+                    }
                 }
                 i0 += n;
             }
@@ -341,6 +379,12 @@ fn run(
                     *fe = Some(e);
                 }
                 break;
+            }
+        }
+        if let Ok(mut rt) = retired.lock() {
+            rt.0.extend(mine);
+            if rt.1.is_none() {
+                rt.1 = m.why;
             }
         }
     };
@@ -359,7 +403,23 @@ fn run(
     {
         return Err(e);
     }
-    Ok(out)
+    let (mut pixels, why) = retired.into_inner().unwrap_or_default();
+    // Raster order, so the interpreter meets an error at the pixel it
+    // would have met it at.
+    pixels.sort_unstable();
+    Ok(Ran {
+        bytes: out,
+        pixels,
+        why,
+    })
+}
+
+/// A compiled run's result: the image, and the pixels (row, column) that
+/// left the compiled path, for the interpreter to finish.
+struct Ran {
+    bytes: Vec<u8>,
+    pixels: Vec<(usize, usize)>,
+    why: Option<&'static str>,
 }
 
 /// `proc ncomp kernelcompile bool string`: would `kernelimage` compile
@@ -376,8 +436,16 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
     if !p.executable {
         return Err(PsError::Typecheck);
     }
-    let (ok, why) = match compile::compile(it, proc, ncomp as usize) {
-        Ok((k, _)) => (true, format!("{} instructions", k.size())),
+    let (ok, why) = match compile::compile(it, proc, ncomp as usize, false) {
+        Ok((k, _, soft)) if soft.is_empty() => (true, format!("{} instructions", k.size())),
+        Ok((k, _, soft)) => (
+            true,
+            format!(
+                "{} instructions; branches that run in the interpreter when taken: {}",
+                k.size(),
+                soft.join("; ")
+            ),
+        ),
         Err(compile::NotCompilable(why)) => (false, why),
     };
     it.push(Object::bool(ok));
@@ -426,6 +494,50 @@ fn fallback(it: &mut Interp, a: Args) -> Result<(), PsError> {
     );
     let ks = Object::lit(Value::Dict(Rc::new(RefCell::new(ks))));
     let Some((driver, _)) = it.scan_token_from(DRIVER.as_bytes().to_vec())? else {
+        return Err(PsError::Undefined("kernelimage driver".into()));
+    };
+    let sys = it.systemdict();
+    let driver = substitute(&driver, &ks, &sys.borrow());
+    let Value::Array(body) = &driver.value else {
+        return Err(PsError::Undefined("kernelimage driver".into()));
+    };
+    it.exec_object(Object::exec(Value::Array(body.clone())))
+}
+
+/// The interpreter for some pixels only: per pixel, as in [`DRIVER`], in a
+/// fresh dict, in raster order; then the whole buffer is painted.
+const PIXEL_DRIVER: &str = "{ { KS .kfnext not { exit } if \
+    mark 3 1 roll KS /P get 8 dict begin exec end KS .kfput } loop \
+  KS .kfpaint }";
+
+fn fallback_pixels(
+    it: &mut Interp,
+    a: Args,
+    bytes: Vec<u8>,
+    pixels: Vec<(usize, usize)>,
+) -> Result<(), PsError> {
+    let mut ks = Dict::new();
+    let m: Vec<Object> = a.matrix.iter().map(|v| Object::real(*v)).collect();
+    ks.put("M".into(), Object::lit(Value::Array(PsArray::from_vec(m))));
+    ks.put("P".into(), Object::exec(Value::Array(a.proc.clone())));
+    ks.put("N".into(), Object::int(a.ncomp as i64));
+    ks.put("W".into(), Object::int(a.w as i64));
+    ks.put("H".into(), Object::int(a.h as i64));
+    ks.put("K".into(), Object::int(0));
+    let flat: Vec<Object> = pixels
+        .iter()
+        .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)])
+        .collect();
+    ks.put(
+        "Pix".into(),
+        Object::lit(Value::Array(PsArray::from_vec(flat))),
+    );
+    ks.put(
+        "Buf".into(),
+        Object::lit(Value::String(PsString::from_bytes(bytes))),
+    );
+    let ks = Object::lit(Value::Dict(Rc::new(RefCell::new(ks))));
+    let Some((driver, _)) = it.scan_token_from(PIXEL_DRIVER.as_bytes().to_vec())? else {
         return Err(PsError::Undefined("kernelimage driver".into()));
     };
     let sys = it.systemdict();
@@ -511,6 +623,106 @@ fn kfstore(it: &mut Interp) -> Result<(), PsError> {
         }
     }
     Ok(())
+}
+
+/// `KS .kfnext i j true` for the next pixel to interpret, or `false`.
+fn kfnext(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let mut ks = ks.borrow_mut();
+    let k = int_of(&ks, "K")? as usize;
+    let Some(Value::Array(pix)) = ks.get("Pix").map(|o| o.value) else {
+        return Err(PsError::Typecheck);
+    };
+    if 2 * k + 1 >= pix.len() {
+        it.push(Object::bool(false));
+        return Ok(());
+    }
+    let (Some(i), Some(j)) = (pix.get(2 * k), pix.get(2 * k + 1)) else {
+        return Err(PsError::Rangecheck);
+    };
+    ks.put("K".into(), Object::int(k as i64 + 1));
+    it.push(i);
+    it.push(j);
+    it.push(Object::bool(true));
+    Ok(())
+}
+
+/// `mark c1 .. cn KS .kfput -`: the current pixel's components.
+fn kfput(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let ks = ks.borrow();
+    let n = int_of(&ks, "N")? as usize;
+    let comps = pop_components(it, n)?;
+    let k = int_of(&ks, "K")? as usize - 1;
+    let w = int_of(&ks, "W")? as usize;
+    let Some(Value::Array(pix)) = ks.get("Pix").map(|o| o.value) else {
+        return Err(PsError::Typecheck);
+    };
+    let at = |x: usize| match pix.get(x).map(|o| o.value) {
+        Some(Value::Integer(v)) => Ok(v as usize),
+        _ => Err(PsError::Typecheck),
+    };
+    let (i, j) = (at(2 * k)?, at(2 * k + 1)?);
+    let Some(Value::String(buf)) = ks.get("Buf").map(|o| o.value) else {
+        return Err(PsError::Typecheck);
+    };
+    let mut buf = buf.borrow_bytes_mut();
+    for (c, v) in comps.iter().enumerate() {
+        if let Some(b) = buf.get_mut((j * w + i) * n + c) {
+            *b = quantize(*v);
+        }
+    }
+    Ok(())
+}
+
+/// `KS .kfpaint -`: paint the finished buffer.
+fn kfpaint(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let (a, bytes) = {
+        let ks = ks.borrow();
+        let Some(Value::String(buf)) = ks.get("Buf").map(|o| o.value) else {
+            return Err(PsError::Typecheck);
+        };
+        let Some(m) = ks.get("M") else {
+            return Err(PsError::Typecheck);
+        };
+        let Some(Value::Array(p)) = ks.get("P").map(|o| o.value) else {
+            return Err(PsError::Typecheck);
+        };
+        (
+            Args {
+                w: int_of(&ks, "W")? as usize,
+                h: int_of(&ks, "H")? as usize,
+                matrix: crate::ops::image::read_matrix6(&m)?,
+                proc: p,
+                ncomp: int_of(&ks, "N")? as usize,
+            },
+            buf.to_vec(),
+        )
+    };
+    paint(it, &a, bytes)
+}
+
+/// The `n` components above the mark (popping them and the mark).
+fn pop_components(it: &mut Interp, n: usize) -> Result<Vec<f64>, PsError> {
+    let mut comps = Vec::with_capacity(n);
+    loop {
+        let o = it.pop()?;
+        match o.value {
+            Value::Mark => break,
+            Value::Integer(i) => comps.push(i as f64),
+            Value::Real(r) => comps.push(r),
+            _ => return Err(PsError::Typecheck),
+        }
+        if comps.len() > n {
+            return Err(PsError::Rangecheck);
+        }
+    }
+    if comps.len() != n {
+        return Err(PsError::Rangecheck);
+    }
+    comps.reverse();
+    Ok(comps)
 }
 
 /// `KS .kfrow row`: the finished row; moves to the next.

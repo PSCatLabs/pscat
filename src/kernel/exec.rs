@@ -12,9 +12,9 @@
 //! interpreter's order (see `lane_bin`/`lane_un`), with the same `fmath`
 //! transcendentals and the same noise functions. There is no fused
 //! multiply-add and no cross-lane arithmetic. A lane that would raise a
-//! PostScript error aborts the whole kernel ([`Stop::Fallback`]); the
-//! caller then runs the image through the interpreter, which raises it for
-//! real.
+//! PostScript error (or takes a branch that did not compile) is retired
+//! (`Machine::kill`); the caller then runs those pixels through the
+//! interpreter, which raises the error for real.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -34,8 +34,6 @@ type Lane = [f64; LANES];
 /// Why a kernel run stopped early.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Stop {
-    /// Some lane would raise a PostScript error: rerun in the interpreter.
-    Fallback,
     /// A limit (`--max-time`, `--max-steps`) fired.
     Limit(PsError),
     /// Another worker stopped the run.
@@ -94,6 +92,12 @@ pub(crate) struct Machine<'k> {
     ctl: &'k RunCtl,
     /// Steps since the last poll.
     pending: u64,
+    /// Lanes of this batch retired because they would raise a PostScript
+    /// error (or took a branch that did not compile): their pixels are
+    /// run by the interpreter afterwards.
+    killed: u64,
+    /// Why the first lane was retired.
+    pub(crate) why: Option<&'static str>,
 }
 
 impl<'k> Machine<'k> {
@@ -109,18 +113,21 @@ impl<'k> Machine<'k> {
             alive: Vec::new(),
             ctl,
             pending: 0,
+            killed: 0,
+            why: None,
         }
     }
 
     /// Run the kernel for pixels `i0..i0+n` of row `j`, writing `ncomp`
-    /// bytes per pixel into `out`.
+    /// bytes per pixel into `out`. Returns the lanes retired to the
+    /// interpreter (bit `l` is pixel `i0 + l`); their bytes are left 0.
     pub(crate) fn run_batch(
         &mut self,
         j: i64,
         i0: i64,
         n: usize,
         out: &mut [u8],
-    ) -> Result<(), Stop> {
+    ) -> Result<u64, Stop> {
         debug_assert!(n <= LANES);
         let mask = if n == LANES { FULL } else { (1u64 << n) - 1 };
         let (ri, rj) = (self.k.in_i as usize, self.k.in_j as usize);
@@ -129,11 +136,13 @@ impl<'k> Machine<'k> {
             self.regs[rj][l] = j as f64;
         }
         self.alive.clear();
+        self.killed = 0;
         let k = self.k;
         self.block(&k.body, mask)?;
+        let killed = self.killed;
         let nc = k.outputs.len();
         for (c, o) in k.outputs.iter().enumerate() {
-            for l in 0..n {
+            for l in (0..n).filter(|l| killed >> l & 1 == 0) {
                 let v = match *o {
                     Op::R(r) => self.regs[r as usize][l],
                     Op::Imm(x) => x,
@@ -142,7 +151,20 @@ impl<'k> Machine<'k> {
             }
         }
         let charged = std::mem::take(&mut self.pending);
-        self.ctl.poll(charged)
+        self.ctl.poll(charged)?;
+        Ok(killed)
+    }
+
+    /// Retire `lanes` (see `killed`).
+    fn kill(&mut self, lanes: u64, why: &'static str) {
+        if lanes == 0 {
+            return;
+        }
+        self.killed |= lanes;
+        self.why.get_or_insert(why);
+        for a in &mut self.alive {
+            *a &= !lanes;
+        }
     }
 
     #[inline(always)]
@@ -179,6 +201,7 @@ impl<'k> Machine<'k> {
     /// at its end (a `Break` inside takes lanes out).
     fn block(&mut self, b: &[Ins], mut mask: u64) -> Result<u64, Stop> {
         for ins in b {
+            mask &= !self.killed;
             if mask == 0 {
                 break;
             }
@@ -192,12 +215,17 @@ impl<'k> Machine<'k> {
                     self.store(*d, &t, mask);
                 }
                 Ins::Bin(op, d, a, b) => {
-                    let t = self.bin(*op, *a, *b, mask)?;
-                    self.store(*d, &t, mask);
+                    let (t, bad) = self.bin(*op, *a, *b, mask);
+                    self.kill(bad, "an arithmetic error (division by zero, NaN in a compare, an integer past 2^53)");
+                    self.store(*d, &t, mask & !bad);
                 }
                 Ins::Un(op, d, a) => {
-                    let t = self.un(*op, *a, mask)?;
-                    self.store(*d, &t, mask);
+                    let (t, bad) = self.un(*op, *a, mask);
+                    self.kill(
+                        bad,
+                        "a math error (sqrt of a negative, ln of zero or less, cvi out of range)",
+                    );
+                    self.store(*d, &t, mask & !bad);
                 }
                 Ins::ForFin(d, c, inc, lim) => {
                     let mut t = [0.0; LANES];
@@ -209,28 +237,37 @@ impl<'k> Machine<'k> {
                     self.store(*d, &t, mask);
                 }
                 Ins::CheckInt(v, tag) => {
+                    let mut bad = 0;
                     for l in 0..LANES {
                         if mask >> l & 1 != 0
                             && self.get(*tag, l) != 0.0
                             && !within_int(self.get(*v, l))
                         {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
                         }
                     }
+                    self.kill(bad, "an integer past 2^53");
                 }
                 Ins::NeedInt(tag) => {
+                    let mut bad = 0;
                     for l in 0..LANES {
                         if mask >> l & 1 != 0 && self.get(*tag, l) == 0.0 {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
                         }
                     }
+                    self.kill(bad, "a real where an integer is needed");
                 }
                 Ins::Assert(c) => {
+                    let mut bad = 0;
                     for l in 0..LANES {
                         if mask >> l & 1 != 0 && self.get(*c, l) == 0.0 {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
                         }
                     }
+                    self.kill(
+                        bad,
+                        "a name read where this pixel did not define it, or a bad repeat count",
+                    );
                 }
                 Ins::Gather {
                     d,
@@ -244,6 +281,7 @@ impl<'k> Machine<'k> {
                     let tb = &self.k.tables[*table as usize];
                     let mut t = [0.0; LANES];
                     let mut tt = [0.0; LANES];
+                    let mut bad = 0u64;
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
@@ -254,7 +292,12 @@ impl<'k> Machine<'k> {
                             || !(r >= 0.0 && (r as usize) < tb.rows)
                             || !(c >= 0.0 && (c as usize) < tb.cols)
                         {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
+                            continue;
+                        }
+                        if tb.null_rows.get(r as usize).copied().unwrap_or(false) {
+                            bad |= 1 << l;
+                            continue;
                         }
                         let ix = r as usize * tb.cols + c as usize;
                         t[l] = tb.data[ix];
@@ -262,9 +305,13 @@ impl<'k> Machine<'k> {
                             tt[l] = tags[ix];
                         }
                     }
-                    self.store(*d, &t, mask);
+                    self.kill(
+                        bad,
+                        "a table index out of range, not an integer, or a null row",
+                    );
+                    self.store(*d, &t, mask & !bad);
                     if let Some(dt) = dtag {
-                        self.store(*dt, &tt, mask);
+                        self.store(*dt, &tt, mask & !bad);
                     }
                 }
                 Ins::LNew(a) => {
@@ -287,6 +334,7 @@ impl<'k> Machine<'k> {
                 } => {
                     let mut t = [0.0; LANES];
                     let mut tt = [0.0; LANES];
+                    let mut bad = 0u64;
                     {
                         let (vals, tags) = &self.larr[*arr as usize];
                         for l in 0..LANES {
@@ -296,18 +344,21 @@ impl<'k> Machine<'k> {
                             let i = self.get(*idx, l);
                             if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < vals.len())
                             {
-                                return Err(Stop::Fallback);
+                                bad |= 1 << l;
+                                continue;
                             }
                             let i = i as usize;
                             if tags[i][l] == NULL_TAG {
-                                return Err(Stop::Fallback);
+                                bad |= 1 << l;
+                                continue;
                             }
                             t[l] = vals[i][l];
                             tt[l] = tags[i][l];
                         }
                     }
-                    self.store(*d, &t, mask);
-                    self.store(*dtag, &tt, mask);
+                    self.kill(bad, "a local array index out of range, or a null element");
+                    self.store(*d, &t, mask & !bad);
+                    self.store(*dtag, &tt, mask & !bad);
                 }
                 Ins::LPut {
                     arr,
@@ -317,42 +368,51 @@ impl<'k> Machine<'k> {
                     vtag,
                 } => {
                     let n = self.larr[*arr as usize].0.len();
+                    let mut bad = 0u64;
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
                         }
                         let i = self.get(*idx, l);
                         if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < n) {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
+                            continue;
                         }
                         let (val, tag) = (self.get(*v, l), self.get(*vtag, l));
                         let (vals, tags) = &mut self.larr[*arr as usize];
                         vals[i as usize][l] = val;
                         tags[i as usize][l] = tag;
                     }
+                    self.kill(bad, "a local array index out of range");
                 }
                 Ins::Noise { kind, d, a, octtag } => {
                     let mut outs = [[0.0; LANES]; 3];
+                    let mut bad = 0u64;
                     #[allow(clippy::needless_range_loop)] // lanes index three outputs
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
                         }
                         if kind.octaves() && self.get(*octtag, l) == 0.0 {
-                            return Err(Stop::Fallback);
+                            bad |= 1 << l;
+                            continue;
                         }
                         let mut args = [0.0; 6];
                         for (x, o) in args.iter_mut().zip(a.iter()) {
                             *x = self.get(*o, l);
                         }
-                        let r = crate::ops::noise::kernel_noise(&self.k.perm, *kind, &args)
-                            .map_err(|_| Stop::Fallback)?;
-                        for c in 0..3 {
-                            outs[c][l] = r[c];
+                        match crate::ops::noise::kernel_noise(&self.k.perm, *kind, &args) {
+                            Ok(r) => {
+                                for c in 0..3 {
+                                    outs[c][l] = r[c];
+                                }
+                            }
+                            Err(_) => bad |= 1 << l,
                         }
                     }
+                    self.kill(bad, "a noise operand out of range");
                     for (c, reg) in d.iter().enumerate().take(kind.outputs()) {
-                        self.store(*reg, &outs[c], mask);
+                        self.store(*reg, &outs[c], mask & !bad);
                     }
                 }
                 Ins::If(c, t, e) => {
@@ -376,7 +436,7 @@ impl<'k> Machine<'k> {
                     self.alive.push(mask);
                     let mut iters = 0u32;
                     loop {
-                        let m = *self.alive.last().unwrap_or(&0);
+                        let m = *self.alive.last().unwrap_or(&0) & !self.killed;
                         if m == 0 {
                             break;
                         }
@@ -399,7 +459,10 @@ impl<'k> Machine<'k> {
                     }
                     return Ok(0);
                 }
-                Ins::Abort => return Err(Stop::Fallback),
+                Ins::Abort => {
+                    self.kill(mask, "a branch that did not compile, or a certain error");
+                    return Ok(0);
+                }
             }
         }
         Ok(mask)
@@ -414,7 +477,8 @@ impl<'k> Machine<'k> {
         }
     }
 
-    fn bin(&self, op: BinOp, a: Op, b: Op, mask: u64) -> Result<Lane, Stop> {
+    /// The op over the batch, and the active lanes it fails on.
+    fn bin(&self, op: BinOp, a: Op, b: Op, mask: u64) -> (Lane, u64) {
         let (x, y) = (self.opnd(a), self.opnd(b));
         macro_rules! lanes {
             ($f:expr) => {{
@@ -441,7 +505,8 @@ impl<'k> Machine<'k> {
                 t
             }};
         }
-        Ok(match op {
+        let mut bad = 0u64;
+        let t = match op {
             BinOp::Add => lanes!(|a: f64, b: f64| a + b),
             BinOp::Sub => lanes!(|a: f64, b: f64| a - b),
             BinOp::Mul => lanes!(|a: f64, b: f64| a * b),
@@ -460,18 +525,19 @@ impl<'k> Machine<'k> {
                     let (p, q) = (x.at(l), y.at(l));
                     match lane_bin(op, p, q) {
                         Some(r) => *v = r,
-                        None if mask >> l & 1 != 0 => return Err(Stop::Fallback),
-                        None => {}
+                        None => bad |= 1 << l,
                     }
                 }
                 t
             }
-        })
+        };
+        (t, bad & mask)
     }
 
-    fn un(&self, op: UnOp, a: Op, mask: u64) -> Result<Lane, Stop> {
+    fn un(&self, op: UnOp, a: Op, mask: u64) -> (Lane, u64) {
         let x = self.opnd(a);
         let mut t = [0.0; LANES];
+        let mut bad = 0u64;
         match op {
             UnOp::Neg => {
                 for (l, v) in t.iter_mut().enumerate() {
@@ -492,13 +558,12 @@ impl<'k> Machine<'k> {
                 for (l, v) in t.iter_mut().enumerate() {
                     match lane_un(op, x.at(l)) {
                         Some(r) => *v = r,
-                        None if mask >> l & 1 != 0 => return Err(Stop::Fallback),
-                        None => {}
+                        None => bad |= 1 << l,
                     }
                 }
             }
         }
-        Ok(t)
+        (t, bad & mask)
     }
 }
 

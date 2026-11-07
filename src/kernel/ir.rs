@@ -207,6 +207,9 @@ pub(crate) struct Table {
     pub cols: usize,
     pub data: Vec<f64>,
     pub kind: TableKind,
+    /// Rows that are `null` in the program's array (reading one is the
+    /// interpreter's `typecheck`, so the kernel aborts). Empty when none.
+    pub null_rows: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]

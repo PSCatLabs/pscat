@@ -69,6 +69,9 @@ enum SVal {
     Num(Op, NT),
     Bool(Op),
     Mark,
+    Null,
+    /// A kernel scope's dictionary, as `where` finds it: only to drop.
+    LocalDict,
     Name(PsName),
     Proc(PsArray),
     /// A literal array or string from outside the kernel: read only.
@@ -97,6 +100,7 @@ impl PartialEq for SVal {
             (Num(a, at), Num(b, bt)) => a == b && at == bt,
             (Bool(a), Bool(b)) => a == b,
             (Mark, Mark) => true,
+            (Null, Null) => true,
             (Name(a), Name(b)) => a == b,
             (Proc(a), Proc(b)) => a.same_object(b),
             (Cap(a), Cap(b)) => match (&a.value, &b.value) {
@@ -138,6 +142,11 @@ enum Binding {
     Val(SVal),
     /// Defined on some paths only, with nothing to merge with.
     Maybe,
+    /// A number or boolean defined on some paths only: its value where it
+    /// is, and a per-lane flag register (1 where defined). A read asserts
+    /// the flag, so a lane that would read it undefined aborts to the
+    /// interpreter, which then does whatever the program really does.
+    Partial(SVal, Reg),
 }
 
 #[derive(Clone)]
@@ -189,6 +198,7 @@ enum Slot {
 enum Lk {
     Val(SVal),
     Maybe,
+    Partial(SVal, Reg),
     Undef,
 }
 
@@ -243,6 +253,46 @@ struct LoopCtx {
     carried: Vec<Carried>,
     exits: Vec<State>,
     depth: usize,
+    /// An unrolled loop: `exit` cannot be compiled inside it.
+    unrolled: bool,
+}
+
+/// The `exit`-inside-an-unrolled-loop refusal, retried as a real loop.
+const EXIT_UNROLLED: &str = "exit inside an unrolled loop";
+/// Constant loops with at most this many trips are unrolled.
+const UNROLL_SMALL: usize = 16;
+/// A loop whose body changes the stack depth can only be unrolled; up to
+/// this many trips.
+const UNROLL_MAX: usize = 256;
+
+/// The counter values of a `for` with constant operands, as
+/// `ForControl` steps them, or `None` past `cap` trips.
+fn for_trips(init: f64, inc: f64, lim: f64, cap: usize) -> Option<Vec<f64>> {
+    let mut v = Vec::new();
+    let mut c = init;
+    loop {
+        let fin = if inc >= 0.0 { c > lim } else { c < lim };
+        if fin {
+            return Some(v);
+        }
+        if v.len() >= cap {
+            return None;
+        }
+        v.push(c);
+        c += inc;
+    }
+}
+
+/// A point to roll the compiler back to after a failed attempt.
+struct Checkpoint {
+    st: State,
+    block: u32,
+    code: usize,
+    emitted: usize,
+    trail: usize,
+    loops: usize,
+    /// Exits the innermost loop had recorded.
+    exits: usize,
 }
 
 /// Procedure nesting allowed at compile time (inlining depth).
@@ -271,10 +321,23 @@ pub(crate) struct Compiler<'a> {
     larrays: Vec<usize>,
     begun_dicts: Vec<u32>,
     pub(crate) uses_noise: bool,
+    /// The procedures being inlined, by name, for error messages.
+    trail: Vec<String>,
+    /// Branches that did not compile and abort to the interpreter when a
+    /// lane takes them (why, for `kernelcompile`); with `strict`, refused.
+    pub(crate) soft: Vec<String>,
+    strict: bool,
 }
 
 /// Compile `proc` as a kernel taking `i j` and leaving `ncomp` numbers.
-pub(crate) fn compile(it: &Interp, proc: &PsArray, ncomp: usize) -> CResult<(Kernel, bool)> {
+/// With `strict`, a branch that does not compile fails the whole kernel
+/// instead of aborting to the interpreter when taken.
+pub(crate) fn compile(
+    it: &Interp,
+    proc: &PsArray,
+    ncomp: usize,
+    strict: bool,
+) -> CResult<(Kernel, bool, Vec<String>)> {
     let mut c = Compiler {
         it,
         nregs: 0,
@@ -299,11 +362,23 @@ pub(crate) fn compile(it: &Interp, proc: &PsArray, ncomp: usize) -> CResult<(Ker
         larrays: Vec::new(),
         begun_dicts: Vec::new(),
         uses_noise: false,
+        trail: Vec::new(),
+        soft: Vec::new(),
+        strict,
     };
     let (ri, rj) = (c.reg(), c.reg());
     c.st.stack.push(SVal::Num(Op::R(ri), NT::Int));
     c.st.stack.push(SVal::Num(Op::R(rj), NT::Int));
-    c.exec_proc(proc)?;
+    if let Err(NotCompilable(why)) = c.exec_proc(proc) {
+        // Say where: the innermost named procedures being inlined.
+        let t = &c.trail;
+        let path = t[t.len().saturating_sub(4)..].join(" > ");
+        return Err(NotCompilable(if path.is_empty() {
+            why
+        } else {
+            format!("{why}, in {path}")
+        }));
+    }
     let mut outputs = Vec::new();
     if !c.st.dead {
         if c.st.scopes.len() != 1 {
@@ -325,19 +400,19 @@ pub(crate) fn compile(it: &Interp, proc: &PsArray, ncomp: usize) -> CResult<(Ker
         outputs = vec![Op::Imm(0.0); ncomp];
     }
     let noise = c.uses_noise;
-    Ok((
-        Kernel {
-            nregs: c.nregs as usize,
-            body: c.code,
-            in_i: ri,
-            in_j: rj,
-            outputs,
-            tables: c.tables,
-            larrays: c.larrays,
-            perm: it.noise_perm,
-        },
-        noise,
-    ))
+    let soft = std::mem::take(&mut c.soft);
+    let mut kernel = Kernel {
+        nregs: c.nregs as usize,
+        body: c.code,
+        in_i: ri,
+        in_j: rj,
+        outputs,
+        tables: c.tables,
+        larrays: c.larrays,
+        perm: it.noise_perm,
+    };
+    super::regalloc::allocate(&mut kernel);
+    Ok((kernel, noise, soft))
 }
 
 impl<'a> Compiler<'a> {
@@ -441,7 +516,7 @@ impl<'a> Compiler<'a> {
     }
 
     /// A value from outside the kernel (or a literal in its body).
-    fn cap_to_sval(&mut self, obj: &Object) -> CResult<SVal> {
+    fn cap_to_sval(&self, obj: &Object) -> CResult<SVal> {
         Ok(match &obj.value {
             Value::Integer(i) => {
                 if (*i as f64).abs() > INT_LIMIT {
@@ -452,6 +527,7 @@ impl<'a> Compiler<'a> {
             Value::Real(r) => SVal::Num(Op::Imm(*r), NT::Real),
             Value::Boolean(b) => SVal::Bool(Op::Imm(f64::from(u8::from(*b)))),
             Value::Mark => SVal::Mark,
+            Value::Null => SVal::Null,
             Value::Name(n) if !obj.executable => SVal::Name(n.clone()),
             Value::Array(a) if obj.executable => SVal::Proc(a.clone()),
             Value::Array(_) | Value::String(_) => SVal::Cap(obj.clone()),
@@ -462,14 +538,19 @@ impl<'a> Compiler<'a> {
 
     fn exec_name(&mut self, n: &PsName) -> CResult<()> {
         match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
-            Found::Val(SVal::Proc(p)) => self.exec_proc(&p),
+            Found::Partial(v, f, uid) => {
+                let v = self.read_partial(n, v, f, uid)?;
+                self.push(v);
+                Ok(())
+            }
+            Found::Val(SVal::Proc(p)) => self.exec_named(n, &p),
             Found::Val(v) => {
                 self.push(v);
                 Ok(())
             }
             Found::Obj(obj) => match &obj.value {
                 Value::Operator(op) => self.apply(op),
-                Value::Array(a) if obj.executable => self.exec_proc(a),
+                Value::Array(a) if obj.executable => self.exec_named(n, a),
                 Value::Name(n2) if obj.executable => {
                     let n2 = n2.clone();
                     self.exec_name(&n2)
@@ -484,6 +565,53 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Read a partly defined name: abort the lanes where it is undefined;
+    /// past here it is defined on this path.
+    fn read_partial(&mut self, n: &PsName, v: SVal, flag: Reg, uid: u32) -> CResult<SVal> {
+        self.emit(Ins::Assert(Op::R(flag)))?;
+        if let Some(s) = self.st.scopes.iter_mut().find(|s| s.uid == uid) {
+            s.set(n.id(), Binding::Val(v.clone()));
+        }
+        Ok(v)
+    }
+
+    /// Inline a procedure reached by name, keeping the name for messages.
+    fn exec_named(&mut self, n: &PsName, p: &PsArray) -> CResult<()> {
+        self.trail.push(n.to_string());
+        let r = self.exec_proc(p);
+        if r.is_ok() {
+            self.trail.pop();
+        }
+        r
+    }
+
+    /// `where`, decided at compile time: the dictionary defining `n` (a
+    /// kernel scope is a `LocalDict`, usable only to `pop`).
+    fn where_(&self, n: &PsName) -> CResult<Option<SVal>> {
+        for s in self.st.scopes.iter().rev() {
+            match &s.kind {
+                ScopeKind::Local => match s.get(n.id()) {
+                    Some(Binding::Val(_)) => return Ok(Some(SVal::LocalDict)),
+                    Some(Binding::Maybe | Binding::Partial(..)) => {
+                        return nc(format!("where on /{n}, defined on some paths only"));
+                    }
+                    None => {}
+                },
+                ScopeKind::Captured(d) => {
+                    if d.borrow().get_id(n.id()).is_some() {
+                        return Ok(Some(SVal::CapDict(d.clone())));
+                    }
+                }
+            }
+        }
+        let key = Object::lit(Value::Name(n.clone()));
+        Ok(self
+            .it
+            .find_defining_dict(&key)
+            .map_err(|_| NotCompilable("where".into()))?
+            .map(SVal::CapDict))
+    }
+
     /// Look name `id` up from scope `top` down, then in the program's
     /// dictionary stack.
     fn lookup(&self, st: &State, id: u32, top: usize) -> CResult<Found> {
@@ -491,6 +619,9 @@ impl<'a> Compiler<'a> {
             match &s.kind {
                 ScopeKind::Local => match s.get(id) {
                     Some(Binding::Val(v)) => return Ok(Found::Val(v.clone())),
+                    Some(Binding::Partial(v, f)) => {
+                        return Ok(Found::Partial(v.clone(), *f, s.uid));
+                    }
                     Some(Binding::Maybe) => {
                         return nc(format!(
                             "/{} is defined on some paths only",
@@ -512,6 +643,23 @@ impl<'a> Compiler<'a> {
         })
     }
 
+    /// The elements of a short array of numbers or booleans, if `v` is one.
+    fn elems(&self, v: &SVal) -> Option<Vec<SVal>> {
+        let items = match v {
+            SVal::Tuple(t, _) => t.borrow().clone(),
+            SVal::Cap(o) => match &o.value {
+                Value::Array(a) if a.len() <= UNROLL_MAX => a
+                    .snapshot()
+                    .iter()
+                    .map(|e| self.cap_to_sval(e).ok())
+                    .collect::<Option<Vec<_>>>()?,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        items.iter().all(SVal::is_scalar).then_some(items)
+    }
+
     /// What a slot holds in `st`.
     fn slot_val(&mut self, st: &State, slot: Slot) -> CResult<Lk> {
         match slot {
@@ -528,6 +676,7 @@ impl<'a> Compiler<'a> {
                         ScopeKind::Local => match s.get(id) {
                             Some(Binding::Val(v)) => return Ok(Lk::Val(v.clone())),
                             Some(Binding::Maybe) => return Ok(Lk::Maybe),
+                            Some(Binding::Partial(v, f)) => return Ok(Lk::Partial(v.clone(), *f)),
                             None => {}
                         },
                         ScopeKind::Captured(d) => {
@@ -692,6 +841,50 @@ impl<'a> Compiler<'a> {
                         None => Binding::Maybe,
                     }
                 }
+                (Lk::Val(x), Lk::Val(y)) => match (self.elems(x), self.elems(y)) {
+                    // Two arrays of numbers of one length (a colour
+                    // chosen by a branch): merged element by element.
+                    (Some(ex), Some(ey)) if ex.len() == ey.len() => {
+                        let mut out = Vec::with_capacity(ex.len());
+                        let mut ok = true;
+                        for (a, b) in ex.iter().zip(&ey) {
+                            if a == b {
+                                out.push(a.clone());
+                                continue;
+                            }
+                            let t = match (ct_of(a), ct_of(b)) {
+                                (Some(ta), Some(tb)) => ct_join(ta, tb),
+                                _ => None,
+                            };
+                            let Some(t) = t else {
+                                ok = false;
+                                break;
+                            };
+                            let reg = self.reg();
+                            let tag = (t == CT::Dyn).then(|| self.reg());
+                            Self::moves_into(reg, tag, t, a, &mut ma)?;
+                            Self::moves_into(reg, tag, t, b, &mut mb)?;
+                            out.push(
+                                Carried {
+                                    slot: sl,
+                                    reg,
+                                    tag,
+                                    ty: t,
+                                }
+                                .sval(),
+                            );
+                        }
+                        if ok {
+                            Binding::Val(SVal::Tuple(Rc::new(RefCell::new(out)), self.block))
+                        } else {
+                            Binding::Maybe
+                        }
+                    }
+                    _ => Binding::Maybe,
+                },
+                _ if matches!(sl, Slot::Bind(..)) => {
+                    self.merge_partial(&va, &vb, &mut ma, &mut mb)?
+                }
                 _ => Binding::Maybe,
             };
             if let (Slot::Stack(_), Binding::Maybe) = (sl, &merged) {
@@ -702,6 +895,52 @@ impl<'a> Compiler<'a> {
         self.par_moves(ma, &mut ca)?;
         self.par_moves(mb, &mut cb)?;
         Ok((out, ca, cb))
+    }
+
+    /// Merge a name defined (as a number or boolean) on one path or both
+    /// into a partly defined binding with a flag register.
+    fn merge_partial(
+        &mut self,
+        a: &Lk,
+        b: &Lk,
+        ma: &mut Vec<(Reg, Op)>,
+        mb: &mut Vec<(Reg, Op)>,
+    ) -> CResult<Binding> {
+        let side = |lk: &Lk| -> (Option<SVal>, Op) {
+            match lk {
+                Lk::Val(x) if x.is_scalar() => (Some(x.clone()), Op::Imm(1.0)),
+                Lk::Partial(v, f) => (Some(v.clone()), Op::R(*f)),
+                _ => (None, Op::Imm(0.0)),
+            }
+        };
+        let ((xa, fa), (xb, fb)) = (side(a), side(b));
+        let ty = match (xa.as_ref().and_then(ct_of), xb.as_ref().and_then(ct_of)) {
+            (Some(x), Some(y)) => ct_join(x, y),
+            (Some(x), None) | (None, Some(x)) => Some(x),
+            (None, None) => None,
+        };
+        let Some(t) = ty else {
+            return Ok(Binding::Maybe);
+        };
+        let reg = self.reg();
+        let tag = (t == CT::Dyn).then(|| self.reg());
+        let flag = self.reg();
+        if let Some(x) = &xa {
+            Self::moves_into(reg, tag, t, x, ma)?;
+        }
+        if let Some(x) = &xb {
+            Self::moves_into(reg, tag, t, x, mb)?;
+        }
+        ma.push((flag, fa));
+        mb.push((flag, fb));
+        let v = Carried {
+            slot: Slot::Stack(0),
+            reg,
+            tag,
+            ty: t,
+        }
+        .sval();
+        Ok(Binding::Partial(v, flag))
     }
 
     // --- control flow -----------------------------------------------------
@@ -727,31 +966,59 @@ impl<'a> Compiler<'a> {
         let entry = self.st.clone();
         let saved = std::mem::take(&mut self.code);
         let bid = self.block;
-        self.block = self.fresh_block();
-        self.exec_proc(&t)?;
-        let tcode = std::mem::take(&mut self.code);
-        let tstate = std::mem::replace(&mut self.st, entry);
-        self.block = self.fresh_block();
-        if let Some(e) = e {
-            self.exec_proc(&e)?;
-        }
-        let ecode = std::mem::take(&mut self.code);
-        let estate = std::mem::replace(
-            &mut self.st,
-            State {
-                stack: Vec::new(),
-                scopes: Vec::new(),
-                dead: true,
-            },
-        );
+        // Compile both branches; whatever happens, put the enclosing
+        // block's code and id back (a failed attempt may be rolled back
+        // and retried, see `loop_or_unroll`).
+        let branches = (|| {
+            self.block = self.fresh_block();
+            self.branch(&t)?;
+            let tcode = std::mem::take(&mut self.code);
+            let tstate = std::mem::replace(&mut self.st, entry);
+            self.block = self.fresh_block();
+            if let Some(e) = e {
+                self.branch(&e)?;
+            }
+            let ecode = std::mem::take(&mut self.code);
+            let estate = std::mem::replace(
+                &mut self.st,
+                State {
+                    stack: Vec::new(),
+                    scopes: Vec::new(),
+                    dead: true,
+                },
+            );
+            Ok((tcode, tstate, ecode, estate))
+        })();
         self.block = bid;
         self.code = saved;
+        let (tcode, tstate, ecode, estate) = branches?;
         let both_dead = tstate.dead && estate.dead;
         let (mut st, tcode, ecode) = self.join2(tstate, tcode, estate, ecode)?;
         st.dead = both_dead;
         self.emit(Ins::If(c, tcode, ecode))?;
         self.st = st;
         Ok(())
+    }
+
+    /// One branch of a run-time `if`. A branch that does not compile
+    /// becomes an abort: lanes that take it run in the interpreter.
+    fn branch(&mut self, p: &PsArray) -> CResult<()> {
+        let cp = self.checkpoint();
+        match self.exec_proc(p) {
+            Ok(()) => Ok(()),
+            Err(NotCompilable(why)) if !self.strict && why != EXIT_UNROLLED => {
+                let t = &self.trail;
+                let at = t[t.len().saturating_sub(3)..].join(" > ");
+                self.rollback(cp);
+                self.soft.push(if at.is_empty() {
+                    why
+                } else {
+                    format!("{why}, in {at}")
+                });
+                self.abort_path()
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// The state with each carried slot reading its register.
@@ -781,6 +1048,7 @@ impl<'a> Compiler<'a> {
                 carried: carried.clone(),
                 exits: Vec::new(),
                 depth: hstate.stack.len(),
+                unrolled: false,
             });
             let saved = std::mem::take(&mut self.code);
             let saved_emitted = self.emitted;
@@ -906,6 +1174,91 @@ impl<'a> Compiler<'a> {
         nc("a loop's types did not settle")
     }
 
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            st: self.st.clone(),
+            block: self.block,
+            code: self.code.len(),
+            emitted: self.emitted,
+            trail: self.trail.len(),
+            loops: self.loops.len(),
+            exits: self.loops.last().map_or(0, |l| l.exits.len()),
+        }
+    }
+
+    fn rollback(&mut self, cp: Checkpoint) {
+        self.st = cp.st;
+        self.block = cp.block;
+        self.code.truncate(cp.code);
+        self.emitted = cp.emitted;
+        self.trail.truncate(cp.trail);
+        self.loops.truncate(cp.loops);
+        if let Some(l) = self.loops.last_mut() {
+            l.exits.truncate(cp.exits);
+        }
+    }
+
+    /// A counted loop: unrolled when its trips are known and few (the
+    /// counter is then a constant, so table reads with it fold away), or
+    /// when only unrolling can compile it (a body that changes the stack
+    /// depth, like `0 1 2 { ... } for` making three values); otherwise a
+    /// real loop (`real`). `trips` holds what each trip pushes first.
+    fn loop_or_unroll(
+        &mut self,
+        trips: Option<Vec<Option<SVal>>>,
+        body: PsArray,
+        real: impl FnOnce(&mut Self, PsArray) -> CResult<()>,
+    ) -> CResult<()> {
+        if let Some(t) = &trips
+            && t.len() <= UNROLL_SMALL
+        {
+            let cp = self.checkpoint();
+            match self.unrolled(t, &body) {
+                Ok(()) => return Ok(()),
+                Err(NotCompilable(why)) if why == EXIT_UNROLLED => self.rollback(cp),
+                Err(e) => return Err(e),
+            }
+            return real(self, body);
+        }
+        let cp = self.checkpoint();
+        match real(self, body.clone()) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let Some(t) = trips else { return Err(e) };
+                self.rollback(cp);
+                match self.unrolled(&t, &body) {
+                    Ok(()) => Ok(()),
+                    // Report the loop's own reason, not the unroller's.
+                    Err(_) => Err(e),
+                }
+            }
+        }
+    }
+
+    fn unrolled(&mut self, trips: &[Option<SVal>], body: &PsArray) -> CResult<()> {
+        self.loops.push(LoopCtx {
+            carried: Vec::new(),
+            exits: Vec::new(),
+            depth: 0,
+            unrolled: true,
+        });
+        let mut r = Ok(());
+        for v in trips {
+            if self.st.dead {
+                break;
+            }
+            if let Some(v) = v {
+                self.push(v.clone());
+            }
+            r = self.exec_proc(body);
+            if r.is_err() {
+                break;
+            }
+        }
+        self.loops.pop();
+        r
+    }
+
     fn loop_prefix(&mut self, head: &LoopHead) -> CResult<()> {
         match head {
             LoopHead::For { c, ct, inc, lim } => {
@@ -931,6 +1284,9 @@ impl<'a> Compiler<'a> {
         let Some(ctx) = self.loops.last() else {
             return nc("exit outside a loop in the kernel");
         };
+        if ctx.unrolled {
+            return nc(EXIT_UNROLLED);
+        }
         if self.st.stack.len() != ctx.depth {
             return nc("exit leaves a different stack depth than the loop started with");
         }
@@ -1000,6 +1356,19 @@ impl<'a> Compiler<'a> {
 
     /// A binary op with a fixed result type and no integer overflow.
     fn bin_to(&mut self, op: BinOp, a: Op, b: Op, out: fn(Op) -> SVal) -> CResult<()> {
+        // `false x and` is false, `true x or` is true, and the other
+        // constant leaves `x`: a constant guard prunes the branch it gates.
+        if matches!(op, BinOp::BAnd | BinOp::BOr) {
+            let short = if op == BinOp::BAnd { 0.0 } else { 1.0 };
+            match (a, b) {
+                (Op::Imm(k), x) | (x, Op::Imm(k)) if !matches!(x, Op::Imm(_)) => {
+                    let kb = if k != 0.0 { 1.0 } else { 0.0 };
+                    self.push(out(if kb == short { Op::Imm(short) } else { x }));
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         if let (Op::Imm(x), Op::Imm(y)) = (a, b) {
             return match lane_bin(op, x, y) {
                 Some(r) => {
@@ -1222,15 +1591,14 @@ impl<'a> Compiler<'a> {
                     (SVal::Num(x, _), SVal::Num(y, _)) | (SVal::Bool(x), SVal::Bool(y)) => {
                         self.bin_to(op, *x, *y, boolean)?;
                     }
-                    (SVal::Num(..), SVal::Bool(_)) | (SVal::Bool(_), SVal::Num(..)) => {
-                        let v = f64::from(u8::from(name == "ne"));
+                    _ => {
+                        // Not two run-time numbers or booleans: decided now.
+                        let Some(e) = const_eq(&a, &b) else {
+                            return nc(format!("{name} on {} and {}", describe(&a), describe(&b)));
+                        };
+                        let v = f64::from(u8::from(e == (name == "eq")));
                         self.push(SVal::Bool(Op::Imm(v)));
                     }
-                    (SVal::Name(x), SVal::Name(y)) => {
-                        let v = f64::from(u8::from((x == y) == (name == "eq")));
-                        self.push(SVal::Bool(Op::Imm(v)));
-                    }
-                    _ => return nc(format!("{name} on {} and {}", describe(&a), describe(&b))),
                 }
             }
             "and" | "or" | "xor" => {
@@ -1296,19 +1664,36 @@ impl<'a> Compiler<'a> {
                 let (lim, lt) = self.pop_num()?;
                 let (inc, it_) = self.pop_num()?;
                 let (init, nt) = self.pop_num()?;
-                let ct = match (nt, it_, lt) {
-                    (NT::Int, NT::Int, NT::Int) => NT::Int,
-                    (NT::Real, _, _) | (_, NT::Real, _) | (_, _, NT::Real) => NT::Real,
-                    _ => {
-                        let t = self.reg();
-                        self.emit(Ins::Bin(BinOp::TagAnd, t, nt.tag(), it_.tag()))?;
-                        self.emit(Ins::Bin(BinOp::TagAnd, t, Op::R(t), lt.tag()))?;
-                        NT::Dyn(t)
+                let trips = match (init, inc, lim) {
+                    (Op::Imm(a), Op::Imm(b), Op::Imm(c)) if !matches!(nt, NT::Dyn(_)) => {
+                        let ct = if (nt, it_, lt) == (NT::Int, NT::Int, NT::Int) {
+                            NT::Int
+                        } else {
+                            NT::Real
+                        };
+                        for_trips(a, b, c, UNROLL_MAX).map(|v| {
+                            v.into_iter()
+                                .map(|x| Some(SVal::Num(Op::Imm(x), ct)))
+                                .collect::<Vec<_>>()
+                        })
                     }
+                    _ => None,
                 };
-                let c = self.reg();
-                self.emit(Ins::Mov(c, init))?;
-                self.compile_loop(LoopHead::For { c, ct, inc, lim }, body)?;
+                self.loop_or_unroll(trips, body, |c: &mut Compiler<'a>, body| {
+                    let ct = match (nt, it_, lt) {
+                        (NT::Int, NT::Int, NT::Int) => NT::Int,
+                        (NT::Real, _, _) | (_, NT::Real, _) | (_, _, NT::Real) => NT::Real,
+                        _ => {
+                            let t = c.reg();
+                            c.emit(Ins::Bin(BinOp::TagAnd, t, nt.tag(), it_.tag()))?;
+                            c.emit(Ins::Bin(BinOp::TagAnd, t, Op::R(t), lt.tag()))?;
+                            NT::Dyn(t)
+                        }
+                    };
+                    let r = c.reg();
+                    c.emit(Ins::Mov(r, init))?;
+                    c.compile_loop(LoopHead::For { c: r, ct, inc, lim }, body)
+                })?;
             }
             "repeat" => {
                 let body = self.pop_proc()?;
@@ -1321,12 +1706,59 @@ impl<'a> Compiler<'a> {
                 {
                     return self.abort_path();
                 }
-                let ok = self.reg();
-                self.emit(Ins::Bin(BinOp::Ge, ok, n, Op::Imm(0.0)))?;
-                self.emit(Ins::Assert(Op::R(ok)))?;
-                let k = self.reg();
-                self.emit(Ins::Mov(k, n))?;
-                self.compile_loop(LoopHead::Repeat { k }, body)?;
+                let trips = match n {
+                    Op::Imm(v) if v as usize <= UNROLL_MAX => Some(vec![None; v as usize]),
+                    _ => None,
+                };
+                self.loop_or_unroll(trips, body, |c: &mut Compiler<'a>, body| {
+                    let ok = c.reg();
+                    c.emit(Ins::Bin(BinOp::Ge, ok, n, Op::Imm(0.0)))?;
+                    c.emit(Ins::Assert(Op::R(ok)))?;
+                    let k = c.reg();
+                    c.emit(Ins::Mov(k, n))?;
+                    c.compile_loop(LoopHead::Repeat { k }, body)
+                })?;
+            }
+            "forall" => {
+                let body = self.pop_proc()?;
+                let c = self.pop()?;
+                let n = match &c {
+                    SVal::Cap(o) => cap_len(o),
+                    SVal::Tuple(t, _) => t.borrow().len(),
+                    SVal::Row { cols, .. } => *cols,
+                    SVal::LArr(_, n) => *n,
+                    other => return nc(format!("forall over {}", describe(other))),
+                };
+                if n > UNROLL_MAX {
+                    return nc("forall over a long array (it is unrolled)");
+                }
+                // Unrolled: each trip reads its element, then runs the body.
+                self.loops.push(LoopCtx {
+                    carried: Vec::new(),
+                    exits: Vec::new(),
+                    depth: 0,
+                    unrolled: true,
+                });
+                let mut r = Ok(());
+                for k in 0..n {
+                    if self.st.dead {
+                        break;
+                    }
+                    r = self
+                        .get(c.clone(), Op::Imm(k as f64), NT::Int)
+                        .and_then(|_| self.exec_proc(&body));
+                    if r.is_err() {
+                        break;
+                    }
+                }
+                self.loops.pop();
+                if let Err(NotCompilable(why)) = r {
+                    return nc(if why == EXIT_UNROLLED {
+                        "exit inside forall".to_string()
+                    } else {
+                        why
+                    });
+                }
             }
             "loop" => {
                 let body = self.pop_proc()?;
@@ -1357,6 +1789,10 @@ impl<'a> Compiler<'a> {
                 };
                 match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
                     Found::Val(v) => self.push(v),
+                    Found::Partial(v, f, uid) => {
+                        let v = self.read_partial(&n, v, f, uid)?;
+                        self.push(v);
+                    }
                     Found::Obj(o) => {
                         if let Value::Operator(_) = o.value {
                             return nc("load of an operator");
@@ -1366,6 +1802,32 @@ impl<'a> Compiler<'a> {
                     }
                     Found::None => return nc(format!("/{n} is not defined")),
                 }
+            }
+            "where" => {
+                let k = self.pop()?;
+                let SVal::Name(n) = k else {
+                    return nc("where with a key that is not a name");
+                };
+                let found = self.where_(&n)?;
+                match found {
+                    Some(d) => {
+                        self.push(d);
+                        self.push(SVal::Bool(Op::Imm(1.0)));
+                    }
+                    None => self.push(SVal::Bool(Op::Imm(0.0))),
+                }
+            }
+            "known" => {
+                let k = self.pop()?;
+                let d = self.pop()?;
+                let SVal::Name(n) = k else {
+                    return nc("known with a key that is not a name");
+                };
+                let SVal::CapDict(d) = d else {
+                    return nc(format!("known on {}", describe(&d)));
+                };
+                let v = d.borrow().get_id(n.id()).is_some();
+                self.push(SVal::Bool(Op::Imm(f64::from(u8::from(v)))));
             }
             "bind" => {
                 let p = self.pop_proc()?;
@@ -1721,6 +2183,7 @@ impl<'a> Compiler<'a> {
                         cols: data.len(),
                         data,
                         kind: TableKind::Int,
+                        null_rows: Vec::new(),
                     },
                     false,
                 )
@@ -1734,32 +2197,59 @@ impl<'a> Compiler<'a> {
                 if let Some(nums) = nums {
                     (table_of(1, nums.len(), nums), false)
                 } else {
-                    // An array of equal-length numeric arrays.
+                    // An array of equal-length numeric arrays (rows that
+                    // are null are allowed, and abort if read).
                     let mut cols = None;
-                    let mut all = Vec::new();
+                    let mut rows = Vec::new();
+                    let mut nulls = Vec::new();
                     for it in &items {
-                        let Value::Array(row) = &it.value else {
-                            return nc(
-                                "run-time index into an array that mixes numbers and other values",
-                            );
-                        };
-                        let r = row.snapshot();
-                        if *cols.get_or_insert(r.len()) != r.len() {
-                            return nc(
-                                "run-time index into an array of arrays of different lengths",
-                            );
-                        }
-                        for e in &r {
-                            let Some(n) = num_of(e) else {
-                                return nc("run-time index into an array of arrays of non-numbers");
-                            };
-                            all.push(n);
-                        }
-                        if all.len() > MAX_TABLE {
-                            return nc("a table is too large");
+                        match &it.value {
+                            Value::Array(row) => {
+                                let r = row.snapshot();
+                                if *cols.get_or_insert(r.len()) != r.len() {
+                                    return nc(
+                                        "run-time index into an array of arrays of different lengths",
+                                    );
+                                }
+                                rows.push(Some(r));
+                                nulls.push(false);
+                            }
+                            Value::Null => {
+                                rows.push(None);
+                                nulls.push(true);
+                            }
+                            _ => {
+                                return nc(
+                                    "run-time index into an array that mixes numbers and other values",
+                                );
+                            }
                         }
                     }
-                    (table_of(items.len(), cols.unwrap_or(0), all), true)
+                    let cols = cols.unwrap_or(0);
+                    if items.len().saturating_mul(cols) > MAX_TABLE {
+                        return nc("a table is too large");
+                    }
+                    let mut all = Vec::new();
+                    for r in &rows {
+                        match r {
+                            Some(r) => {
+                                for e in r {
+                                    let Some(n) = num_of(e) else {
+                                        return nc(
+                                            "run-time index into an array of arrays of non-numbers",
+                                        );
+                                    };
+                                    all.push(n);
+                                }
+                            }
+                            None => all.extend(std::iter::repeat_n((0.0, false), cols)),
+                        }
+                    }
+                    let mut t = table_of(items.len(), cols, all);
+                    if nulls.iter().any(|n| *n) {
+                        t.null_rows = nulls;
+                    }
+                    (t, true)
                 }
             }
             _ => return nc("a table must be an array or string"),
@@ -1773,6 +2263,8 @@ impl<'a> Compiler<'a> {
 
 enum Found {
     Val(SVal),
+    /// A partly defined binding: value, flag, and the scope it lives in.
+    Partial(SVal, Reg, u32),
     Obj(Object),
     None,
 }
@@ -1790,6 +2282,32 @@ enum LoopHead {
         k: Reg,
     },
     Loop,
+}
+
+/// PostScript `eq` decided at compile time, where it can be: values of
+/// different kinds are unequal; names, null and marks by value; strings
+/// by content; other composites by identity. `None` when it depends on a
+/// run-time value of the same kind (two numbers, two booleans).
+fn const_eq(a: &SVal, b: &SVal) -> Option<bool> {
+    use SVal::*;
+    let text = |v: &SVal| -> Option<Vec<u8>> {
+        match v {
+            Name(n) => Some(n.as_bytes().to_vec()),
+            Cap(o) => match &o.value {
+                Value::String(s) => Some(s.to_vec()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    if let (Some(x), Some(y)) = (text(a), text(b)) {
+        return Some(x == y);
+    }
+    Some(match (a, b) {
+        (Num(..), Num(..)) | (Bool(_), Bool(_)) => return None,
+        (Null, Null) | (Mark, Mark) => true,
+        _ => a == b,
+    })
 }
 
 fn num_of(o: &Object) -> Option<(f64, bool)> {
@@ -1815,6 +2333,7 @@ fn table_of(rows: usize, cols: usize, nums: Vec<(f64, bool)>) -> Table {
         cols,
         data: nums.into_iter().map(|n| n.0).collect(),
         kind,
+        null_rows: Vec::new(),
     }
 }
 
@@ -1849,6 +2368,8 @@ fn describe(v: &SVal) -> &'static str {
         SVal::Num(..) => "a number",
         SVal::Bool(_) => "a boolean",
         SVal::Mark => "a mark",
+        SVal::Null => "null",
+        SVal::LocalDict => "a kernel dictionary",
         SVal::Name(_) => "a name",
         SVal::Proc(_) => "a procedure",
         SVal::Cap(_) => "an outside array or string",
