@@ -19,7 +19,8 @@
 % per-pixel array: model inference, the dense, regular arithmetic the
 % compiled kernels are for. pscat compiles /pixel and runs it on every
 % core (`kernelimage`, docs/guides/kernels.md). Any other interpreter runs
-% the same procedure through `colorimage`, by lib/kernel.ps.
+% the same procedure through `colorimage`, by lib/kernel.ps. Ghostscript
+% needs `--permit-file-read=lib/` to read it (docs/guides/kernels.md).
 %
 % Change /Seed for a different network, /Z for a different "dream" of
 % the same one.

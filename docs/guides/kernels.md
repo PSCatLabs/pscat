@@ -70,6 +70,15 @@ interpreter's arithmetic (Ghostscript's reals are 32-bit). Its
 `kernelcompile` always answers `false`. A program that loads it reads a
 file, so it cannot run in the browser playground.
 
+Ghostscript's default `-dSAFER` mode refuses that `run`
+(`invalidfileaccess`). From the repo root, either allow the read or load the
+shim first on the command line:
+
+```sh
+gs --permit-file-read=lib/ -sDEVICE=png16m -o out.png gallery/dreaming_network.ps
+gs -sDEVICE=png16m -o out.png lib/kernel.ps gallery/dreaming_network.ps
+```
+
 ### Every pixel gets a fresh dictionary
 
 Each pixel runs as if by `8 dict begin i j proc end`:

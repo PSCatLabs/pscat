@@ -25,7 +25,8 @@
 % loop of `atan`, `sin`, `cos`, `ln` and `exp`. pscat compiles /pixel and
 % runs it on every core (`kernelimage`, docs/guides/kernels.md); any other
 % interpreter loads lib/kernel.ps, which runs the same procedure through
-% `colorimage`: the same picture, only far slower.
+% `colorimage`: the same picture, only far slower. Ghostscript needs
+% `--permit-file-read=lib/` to read it (docs/guides/kernels.md).
 %
 %   pscat --page 600x600 --dpi 144 --png mandelbulb.png gallery/mandelbulb.ps
 %

@@ -71,7 +71,8 @@ accident.
   It also checks that a plain load under pscat leaves both operators in
   place.
 - **Ghostscript** (gs 10.07, `-sDEVICE=png16m -r72 -g64x64`, run by
-  `tests/kernel_shim.rs` when `gs` is installed) against pscat native:
+  `tests/kernel_shim.rs` when `gs` is installed, loading the shim with
+  `/kernelimage where ... run`) against pscat native:
   - a smooth gradient-and-sine kernel: max per-channel difference 1, with
     55 of 4096 pixels differing, mean 0.0134. These are 32-bit rounding at
     the `floor` boundary;
@@ -80,12 +81,25 @@ accident.
     pixels, and one count is 2.55 levels.
 - **`tests/libbind.rs`** now walks `lib/kernel.ps` too, in pscat and in gs.
 
+### Ghostscript's file permissions
+
+Under Ghostscript's default `-dSAFER`, `(lib/kernel.ps) run` is an
+`invalidfileaccess`. The inline fallback the pieces used to carry did not
+need it. The guide gives the two ways round, both from the repo root:
+`gs --permit-file-read=lib/ piece.ps`, or `gs lib/kernel.ps piece.ps`, which
+loads the shim before the piece asks for it. The gs test loads the shim the
+way a program does, with `--permit-file-read=lib/` (found by Codex review).
+
 ### Gallery
 
 The four kernel pieces now load the shim instead of carrying the inline
 fallback. Under pscat the `run` never happens, so their renders are
-unchanged. Each piece now lists the `kernel` library in the manifest, and
-`playground` stays false.
+unchanged: byte-identical PNGs before and after, checked at 72 dpi. Each
+piece now lists the `kernel` library in the manifest, and `playground` stays
+false. Mandelbulb and Dreaming Network run in Ghostscript with the shim; a
+60x60 Dreaming Network rendered there. Mirror Garden and Mochi in Oils also
+use pscat's noise operators (`noiseseed`, `fbm2`), so they did not run in gs
+before this change either.
 
 ### Deferred
 

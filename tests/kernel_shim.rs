@@ -9,15 +9,19 @@
 //! byte for byte: pscat's reals are 64-bit in both paths, and the shim
 //! quantizes as `src/kernel/mod.rs::quantize` does.
 //!
-//! The Ghostscript check renders the same programs with the shim under `gs`
-//! (32-bit reals) and compares them with pscat's native render. It runs
-//! only where `gs` is installed (CI has none).
+//! The Ghostscript check renders the same programs under `gs` (32-bit
+//! reals), loading the shim the way a program does, and compares them with
+//! pscat's native render. It runs only where `gs` is installed (CI has
+//! none).
 
 use pscat::Interp;
 
 mod common;
 
 const SHIM: &str = include_str!("../lib/kernel.ps");
+
+/// How a program loads the shim (docs/guides/kernels.md).
+const LOAD: &str = "/kernelimage where { pop } { (lib/kernel.ps) run } ifelse";
 
 /// `where` answering false for the two kernel names, for the shim's load.
 const MASK: &str = "/where { dup /kernelimage eq 1 index /kernelcompile eq or \
@@ -203,9 +207,13 @@ fn gs_against_native(body: &str) -> (u8, usize, f64) {
     let dir = common::scratch_dir("pscat-kernel-shim");
     let src = dir.join("shim.ps");
     let png = dir.join("shim.png");
-    std::fs::write(&src, format!("{SHIM}\n{prog}\n")).expect("write");
+    // The load a program does, from the repo root, with the read
+    // permission Ghostscript's default SAFER mode needs for it.
+    std::fs::write(&src, format!("{LOAD}\n{prog}\n")).expect("write");
     let out = std::process::Command::new("gs")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args(["-q", "-dNOPAUSE", "-dBATCH", "-sDEVICE=png16m", "-r72"])
+        .arg("--permit-file-read=lib/")
         .arg(format!("-g{w}x{h}"))
         .arg(format!("-sOutputFile={}", png.display()))
         .arg(&src)
