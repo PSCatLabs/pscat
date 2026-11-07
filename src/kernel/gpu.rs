@@ -13,12 +13,31 @@
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
 
+use super::exec::{RunCtl, Stop};
 use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, TableKind, UnOp};
+use crate::error::PsError;
+
+/// Why [`run`] gave no image.
+pub(crate) enum GpuStop {
+    /// A time or step limit fired between dispatches: the same error the
+    /// CPU path raises.
+    Limit(PsError),
+    /// No device, a rejected shader, a failed readback: the CPU paths run
+    /// the image instead.
+    Failed(String),
+}
+
+impl From<String> for GpuStop {
+    fn from(why: String) -> Self {
+        GpuStop::Failed(why)
+    }
+}
 
 /// Loop trips (all loops together) a pixel may run on the GPU.
-const LOOP_CAP: u32 = 1 << 20;
-/// Pixels per dispatch: keeps each submission short of a GPU watchdog.
-const CHUNK_PIXELS: usize = 1 << 16;
+const LOOP_CAP: u32 = super::GPU_LOOP_CAP;
+/// Pixels per dispatch: keeps each submission short of a GPU watchdog,
+/// and is the unit at which the limits are looked at.
+const CHUNK_PIXELS: usize = super::GPU_CHUNK_PIXELS;
 const WG: u32 = 64;
 
 struct Ctx {
@@ -69,7 +88,8 @@ pub(crate) fn run(
     h: usize,
     ncomp: usize,
     (j0, j1): (usize, usize),
-) -> Result<Vec<u8>, String> {
+    ctl: &RunCtl,
+) -> Result<Vec<u8>, GpuStop> {
     let timing = std::env::var_os("PSCAT_KERNEL_TIMING").is_some();
     let t = std::time::Instant::now();
     let (src, data) = lower(k, ncomp)?;
@@ -141,7 +161,7 @@ pub(crate) fn run(
         ],
     });
     if let Some(e) = pollster::block_on(scope.pop()) {
-        return Err(format!("shader rejected: {e}"));
+        return Err(GpuStop::Failed(format!("shader rejected: {e}")));
     }
     if timing {
         eprintln!(
@@ -155,6 +175,16 @@ pub(crate) fn run(
     while j < j1 {
         let n = rows_per.min(j1 - j);
         let px = (n * w) as u32;
+        // A dispatch cannot be interrupted, so the limits are looked at
+        // before each one (#1065): a dispatch is at most CHUNK_PIXELS
+        // pixels of at most LOOP_CAP loop trips each. Its steps are the
+        // kernel's straight-line size per pixel; loop trips are capped,
+        // not counted.
+        match ctl.poll(u64::from(px).saturating_mul(k.size() as u64)) {
+            Ok(()) => {}
+            Err(Stop::Limit(e)) => return Err(GpuStop::Limit(e)),
+            Err(Stop::Cancelled) => return Err(GpuStop::Failed("stopped".into())),
+        }
         let p: [u32; 4] = [w as u32, j as u32, px, 0];
         g.queue.write_buffer(&params, 0, bytemuck_u32(&p));
         let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
