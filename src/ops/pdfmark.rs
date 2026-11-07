@@ -39,6 +39,43 @@ const MAX_DEPTH: usize = 32;
 /// doubled 25 times, is 2^26 objects to copy within depth 32.
 const MAX_NODES: usize = 1 << 20;
 
+/// What one mark may still copy: objects ([`MAX_NODES`]) and string and
+/// name bytes (the document's room under [`crate::pdf::MAX_MARK_BYTES`],
+/// shared with `/PUT` stream data). A shared string is charged every
+/// place it appears, as it is copied every time.
+struct Budget {
+    nodes: usize,
+    bytes: usize,
+    used: usize,
+}
+
+impl Budget {
+    fn bytes(&mut self, n: usize) -> Result<(), Skip> {
+        if n > self.bytes {
+            return Err(PsError::Limitcheck.into());
+        }
+        self.bytes -= n;
+        self.used += n;
+        Ok(())
+    }
+
+    /// A copy of string `s`, charged.
+    fn string(&mut self, s: &crate::object::PsString) -> Result<Vec<u8>, Skip> {
+        self.bytes(s.len())?;
+        Ok(s.borrow_bytes().to_vec())
+    }
+
+    /// Name text, charged; a NUL byte has no PDF spelling, even as `#00`
+    /// (PDF 32000-1 7.3.5), so it is a `rangecheck`.
+    fn name(&mut self, n: &str) -> Result<String, Skip> {
+        if n.contains('\0') {
+            return Err(PsError::Rangecheck.into());
+        }
+        self.bytes(n.len())?;
+        Ok(n.to_string())
+    }
+}
+
 /// Why a mark was not applied.
 enum Skip {
     /// A PostScript error: the operands stay on the stack.
@@ -89,15 +126,29 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
     let Value::Name(kind) = &kind.value else {
         return Err(PsError::Typecheck.into());
     };
-    let mut budget = MAX_NODES;
-    let mut conv = |obj: &Object| convert(obj, 0, &mut budget);
-    match &**kind {
+    let mut budget = Budget {
+        nodes: MAX_NODES,
+        bytes: pdf.mark_room(),
+        used: 0,
+    };
+    apply_kind(pdf, kind, args, &mut budget)?;
+    pdf.charge(budget.used);
+    Ok(())
+}
+
+fn apply_kind(
+    pdf: &mut PdfRecorder,
+    kind: &str,
+    args: &[Object],
+    budget: &mut Budget,
+) -> Result<(), Skip> {
+    match kind {
         "DOCINFO" => {
             let mut entries = Vec::new();
             for (key, value) in pairs(args)? {
                 let value = match &value.value {
-                    Value::String(s) => PdfValue::Text(s.borrow_bytes().to_vec()),
-                    _ => conv(value)?,
+                    Value::String(s) => PdfValue::Text(budget.string(s)?),
+                    _ => convert(value, 0, budget)?,
                 };
                 entries.push((key, value));
             }
@@ -138,7 +189,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                         if kind == ObjKind::Array {
                             return Err(PsError::Typecheck.into());
                         }
-                        let PdfValue::Dict(entries) = conv(value)? else {
+                        let PdfValue::Dict(entries) = convert(value, 0, budget)? else {
                             unreachable!("a dict converts to a dict");
                         };
                         let obj = pdf.named_ref(&target);
@@ -158,7 +209,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                         let obj = pdf.named_ref(&target);
                         // Read at most one byte past the room left, so an
                         // endless or expanding source stops at the cap.
-                        let room = pdf.stream_room();
+                        let room = pdf.mark_room();
                         let mut data = Vec::new();
                         let mut file = f.borrow_mut();
                         while data.len() <= room {
@@ -186,7 +237,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                 if pdf.kind_of(&target) != ObjKind::Array {
                     return Err(PsError::Typecheck.into());
                 }
-                let value = conv(value)?;
+                let value = convert(value, 0, budget)?;
                 let obj = pdf.named_ref(&target);
                 pdf.put_index(obj, i, value)?;
             }
@@ -200,7 +251,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
             if pdf.kind_of(&target) != ObjKind::Array {
                 return Err(PsError::Typecheck.into());
             }
-            let value = conv(value)?;
+            let value = convert(value, 0, budget)?;
             let obj = pdf.named_ref(&target);
             pdf.append(obj, value)?;
         }
@@ -215,11 +266,11 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
             for (key, value) in pairs(args)? {
                 match key.as_str() {
                     "Name" => match &value.value {
-                        Value::String(s) => name = Some(s.borrow_bytes().to_vec()),
+                        Value::String(s) => name = Some(budget.string(s)?),
                         _ => return Err(PsError::Typecheck.into()),
                     },
                     "FS" => match &value.value {
-                        Value::Dict(_) => fs = Some(conv(value)?),
+                        Value::Dict(_) => fs = Some(convert(value, 0, budget)?),
                         _ => return Err(PsError::Typecheck.into()),
                     },
                     _ => {}
@@ -245,7 +296,8 @@ fn pairs(args: &[Object]) -> Result<Vec<(String, &Object)>, Skip> {
     (0..args.len())
         .step_by(2)
         .map(|i| match &args[i].value {
-            Value::Name(n) => Ok((n.to_string(), &args[i + 1])),
+            Value::Name(n) if !n.contains('\0') => Ok((n.to_string(), &args[i + 1])),
+            Value::Name(_) => Err(PsError::Rangecheck.into()),
             _ => Err(PsError::Typecheck.into()),
         })
         .collect()
@@ -277,21 +329,21 @@ fn reference(obj: &Object) -> Result<String, Skip> {
 
 /// A PostScript operand as a PDF value. Dict keys are written in sorted
 /// order: a dict's own order follows interned name ids, which a different
-/// host (the CLI, the wasm build) may number differently. `budget` is
-/// the objects the mark may still copy ([`MAX_NODES`]).
-fn convert(obj: &Object, depth: usize, budget: &mut usize) -> Result<PdfValue, Skip> {
-    if depth > MAX_DEPTH || *budget == 0 {
+/// host (the CLI, the wasm build) may number differently. Every object,
+/// string and name is charged to `budget`.
+fn convert(obj: &Object, depth: usize, budget: &mut Budget) -> Result<PdfValue, Skip> {
+    if depth > MAX_DEPTH || budget.nodes == 0 {
         return Err(PsError::Limitcheck.into());
     }
-    *budget -= 1;
+    budget.nodes -= 1;
     Ok(match &obj.value {
         Value::Null => PdfValue::Null,
         Value::Boolean(b) => PdfValue::Bool(*b),
         Value::Integer(i) => PdfValue::Int(*i),
         Value::Real(r) if r.is_finite() => PdfValue::Real(*r),
         Value::Real(_) => return Err(PsError::Rangecheck.into()),
-        Value::Name(n) => PdfValue::Name(n.to_string()),
-        Value::String(s) => PdfValue::Str(s.borrow_bytes().to_vec()),
+        Value::Name(n) => PdfValue::Name(budget.name(n)?),
+        Value::String(s) => PdfValue::Str(budget.string(s)?),
         Value::Array(_) if obj.executable => PdfValue::Named(reference(obj)?),
         Value::Array(a) => {
             let mut items = Vec::with_capacity(a.len());
@@ -306,8 +358,11 @@ fn convert(obj: &Object, depth: usize, budget: &mut usize) -> Result<PdfValue, S
             let mut entries = Vec::with_capacity(pairs.len());
             for (k, v) in &pairs {
                 let key = match &k.value {
-                    Value::Name(n) => n.to_string(),
-                    Value::String(s) => String::from_utf8_lossy(&s.borrow_bytes()).into_owned(),
+                    Value::Name(n) => budget.name(n)?,
+                    Value::String(s) => {
+                        let bytes = budget.string(s)?;
+                        budget.name(&String::from_utf8_lossy(&bytes))?
+                    }
                     _ => return Err(PsError::Typecheck.into()),
                 };
                 entries.push((key, convert(v, depth + 1, budget)?));

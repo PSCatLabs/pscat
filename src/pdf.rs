@@ -124,8 +124,9 @@ pub struct PdfRecorder {
     /// `/EMBED` attachments: name-tree key (raw bytes) and the file
     /// specification, written into the Catalog's `/EmbeddedFiles`.
     embeds: Vec<(Vec<u8>, PdfValue)>,
-    /// Stream bytes added by `/PUT` so far, against [`MAX_STREAM_BYTES`].
-    stream_bytes: usize,
+    /// Bytes pdfmark has stored so far (stream data, strings, names),
+    /// against [`MAX_MARK_BYTES`].
+    mark_bytes: usize,
 }
 
 /// A PDF object built by `pdfmark` (#1032): the interpreter converts the
@@ -171,7 +172,7 @@ struct NamedObj {
 
 /// The most stream data `/PUT` may add to one document (64 MiB): a
 /// decoding filter read to its end can expand without bound.
-pub(crate) const MAX_STREAM_BYTES: usize = 64 << 20;
+pub(crate) const MAX_MARK_BYTES: usize = 64 << 20;
 
 /// Why a pdfmark edit of the recorder was refused; the operator maps it
 /// to a PostScript error.
@@ -181,7 +182,7 @@ pub(crate) enum MarkError {
     Range,
     /// The object is not of the kind this mark needs (`typecheck`).
     Type,
-    /// Past [`MAX_STREAM_BYTES`] (`limitcheck`).
+    /// Past [`MAX_MARK_BYTES`] (`limitcheck`).
     Limit,
 }
 
@@ -222,7 +223,7 @@ impl PdfRecorder {
             named: Vec::new(),
             named_ids: HashMap::new(),
             embeds: Vec::new(),
-            stream_bytes: 0,
+            mark_bytes: 0,
         }
     }
 
@@ -313,18 +314,24 @@ impl PdfRecorder {
         if self.named[obj].kind != ObjKind::Stream {
             return Err(MarkError::Type);
         }
-        let total = self.stream_bytes.saturating_add(data.len());
-        if total > MAX_STREAM_BYTES {
+        let total = self.mark_bytes.saturating_add(data.len());
+        if total > MAX_MARK_BYTES {
             return Err(MarkError::Limit);
         }
-        self.stream_bytes = total;
+        self.mark_bytes = total;
         self.named[obj].data.extend_from_slice(data);
         Ok(())
     }
 
-    /// Stream bytes `/PUT` may still add before [`MAX_STREAM_BYTES`].
-    pub(crate) fn stream_room(&self) -> usize {
-        MAX_STREAM_BYTES - self.stream_bytes
+    /// Bytes pdfmark may still store before [`MAX_MARK_BYTES`].
+    pub(crate) fn mark_room(&self) -> usize {
+        MAX_MARK_BYTES - self.mark_bytes
+    }
+
+    /// Count `n` bytes a mark stored as values (strings, names) against
+    /// [`MAX_MARK_BYTES`]; the operator checked they fit.
+    pub(crate) fn charge(&mut self, n: usize) {
+        self.mark_bytes = self.mark_bytes.saturating_add(n).min(MAX_MARK_BYTES);
     }
 
     /// The kind of named object `name`; a dict if it does not exist yet,
@@ -1351,7 +1358,12 @@ impl NamedObj {
             ObjKind::Stream => {
                 let mut head = String::from("<<");
                 write_entries(&mut head, &self.dict, refs);
-                let has_filter = self.dict.iter().any(|(k, _)| k == "Filter");
+                // `/DecodeParms` without `/Filter` means nothing to a
+                // reader, but pscat's own Flate filter must not pick it up.
+                let has_filter = self
+                    .dict
+                    .iter()
+                    .any(|(k, _)| k == "Filter" || k == "DecodeParms");
                 let packed = if has_filter {
                     None
                 } else {

@@ -89,7 +89,8 @@ More on the less obvious ones:
   no files to open. `/EMBED` needs `/Name` and `/FS`. Write a MIME subtype as
   `(text/plain) cvn`: a `#` in a PostScript name is a literal `#`. Other marks
   (`/ANN`, `/OUT`, `/DEST`, and the `{Catalog}`/`{ThisPage}` objects) are
-  ignored for now. On PNG, SVG and the window, `pdfmark` just clears the stack
+  ignored for now. The data all marks of one document hold is capped at
+  64 MiB. On PNG, SVG and the window, `pdfmark` just clears the stack
   to the mark, so the same program renders everywhere. Inline `currentfile`
   data is then read as program text, so keep a portable program's
   attachments in strings.

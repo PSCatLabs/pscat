@@ -65,16 +65,22 @@ MIME subtype as `(text/plain) cvn`.
   data and needs no file system. pscat has no `SubFileDecode`.
 - On a non-PDF device that inline data is not consumed, so it runs as
   program text. gs behaves the same way. Strings are the portable spelling.
-- Stream data is Flate-compressed unless the program gave a `/Filter`; with
-  a `/Filter` the data is taken as already encoded.
-- The total stream data per document is capped at 64 MiB (`limitcheck`),
-  because a decoding filter read to its end can grow without bound.
+- Stream data is Flate-compressed unless the program gave a `/Filter` (or
+  `/DecodeParms`); with one of them the data is taken as already encoded.
+- Everything the marks of one document store (stream data, and every
+  string and name copied into a value) is capped at 64 MiB in all
+  (`limitcheck`). A decoding filter read to its end can grow without bound.
+  And one string that appears in many places (an array holding it twice,
+  doubled) is copied once per place, inside a single operator, where
+  `--max-memory` is not checked.
   Operands nested more than 32 deep (or a value that contains itself) are a
   `limitcheck`, and so is a mark whose operands hold more than 2^20
   objects in all, counting a shared array once per place it appears. The
   execution limits are only looked at between operators, and an array
   that holds one array twice, doubled 25 times, would otherwise be 2^26
   copies inside one `pdfmark`.
+- A NUL byte in a name (a key, or a value from `cvn`) is a `rangecheck`:
+  PDF names cannot hold one, even as `#00` (PDF 32000-1 7.3.5).
 - A mark that fails leaves the document as it was: a missing `/PUT` target
   is only created once the mark is known to succeed.
 - WASM parity: strings and `currentfile` data give byte-identical PDFs from

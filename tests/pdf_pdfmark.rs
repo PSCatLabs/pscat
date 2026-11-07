@@ -243,6 +243,37 @@ fn shared_structure_is_counted_per_object() {
 }
 
 #[test]
+fn string_bytes_are_counted_per_copy() {
+    // A 1 MiB string in 256 places is 256 MiB of copies, over the 64 MiB
+    // a document's marks may hold; and many keys naming one string too.
+    let src = "/s 1048576 string def /a [ s s ] def 7 { /a [ a a ] def } repeat \
+               [ /_objdef {x} /type /array /OBJ pdfmark \
+               { [ {x} a /APPEND pdfmark } stopped { $error /errorname get = } if \
+               { mark 0 1 99 { 3 string cvs cvn s } for /DOCINFO pdfmark } stopped \
+               { $error /errorname get = } if";
+    assert_eq!(eval(src, true), "limitcheck\nlimitcheck\n");
+}
+
+#[test]
+fn decodeparms_without_filter_is_not_given_pscats_flate() {
+    let src = "[ /_objdef {s} /type /stream /OBJ pdfmark \
+               [ {s} << /DecodeParms << /Columns 4 >> >> /PUT pdfmark [ {s} (abcd) /PUT pdfmark \
+               [ /Name (s) /FS << /F (s) /EF << /F {s} >> >> /EMBED pdfmark showpage";
+    let text = pdf_text(&pdf_of(src));
+    assert!(
+        text.contains("<< /DecodeParms << /Columns 4 >> /Length 4 >>\nstream\nabcd\nendstream"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_nul_in_a_name_is_a_rangecheck() {
+    let src = "{ [ /Foo << (a\\000b) 1 >> /DOCINFO pdfmark } stopped { $error /errorname get = } if \
+               { [ (a\\000b) cvn 1 /DOCINFO pdfmark } stopped { $error /errorname get = } if";
+    assert_eq!(eval(src, true), "rangecheck\nrangecheck\n");
+}
+
+#[test]
 fn a_self_containing_value_is_a_limitcheck() {
     let src = "{ [ /Title [ 1 ] dup dup 0 exch put /DOCINFO pdfmark } stopped \
                { $error /errorname get = } if";
