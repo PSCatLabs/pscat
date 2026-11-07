@@ -1547,6 +1547,39 @@ impl<'a> Compiler<'a> {
         }
         let mut ids: Vec<u32> = f.ids.iter().copied().collect();
         ids.sort_unstable();
+        let mut extra: Vec<u32> = Vec::new();
+        // What it leaves: the stack from `low` up, and the bindings it
+        // changed (only names it touched).
+        let mut out_stack = Vec::new();
+        let mut binds = Vec::new();
+        if !x.dead {
+            out_stack = x.stack[f.low..].to_vec();
+            for (si, (xs, es)) in x.scopes.iter().zip(&e.scopes).enumerate() {
+                if xs.names.len() < es.names.len() {
+                    return Ok(false);
+                }
+                for (nid, b) in &xs.names {
+                    let defined = f.wids.contains(&(xs.uid, *nid));
+                    if !defined && binding_eq(es.get(*nid), Some(b)) {
+                        continue;
+                    }
+                    if !defined && ids.binary_search(nid).is_err() {
+                        return Ok(false);
+                    }
+                    // A defined name left as the entry had it may hold that
+                    // value only because the paths that defined it died (a
+                    // join keeps the live side as it is): the value is then
+                    // the caller's, so it goes in the key.
+                    if defined && binding_eq(es.get(*nid), Some(b)) {
+                        extra.push(*nid);
+                    }
+                    binds.push((si, *nid, b.clone()));
+                }
+            }
+        }
+        ids.extend(extra);
+        ids.sort_unstable();
+        ids.dedup();
         let nstack = e.stack.len() - f.low;
         let Some(kb) = self.key_of(e, nstack, &ids) else {
             return Ok(false);
@@ -1568,28 +1601,6 @@ impl<'a> Compiler<'a> {
         });
         if !ok {
             return Ok(false);
-        }
-        // What it leaves: the stack from `low` up, and the bindings it
-        // changed (only names it touched).
-        let mut out_stack = Vec::new();
-        let mut binds = Vec::new();
-        if !x.dead {
-            out_stack = x.stack[f.low..].to_vec();
-            for (si, (xs, es)) in x.scopes.iter().zip(&e.scopes).enumerate() {
-                if xs.names.len() < es.names.len() {
-                    return Ok(false);
-                }
-                for (nid, b) in &xs.names {
-                    let defined = f.wids.contains(&(xs.uid, *nid));
-                    if !defined && binding_eq(es.get(*nid), Some(b)) {
-                        continue;
-                    }
-                    if !defined && ids.binary_search(nid).is_err() {
-                        return Ok(false);
-                    }
-                    binds.push((si, *nid, b.clone()));
-                }
-            }
         }
         // Each register it leaves is an input or a result.
         let mut src: HashMap<Reg, Src> = HashMap::new();

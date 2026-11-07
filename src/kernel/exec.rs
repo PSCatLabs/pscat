@@ -92,6 +92,8 @@ impl RunCtl {
 
 /// Loop iterations between looks at the limits.
 const POLL_ITERS: u32 = 256;
+/// Lane-instructions run between polls at subroutine calls.
+const POLL_STEPS: u64 = 1 << 16;
 
 /// One worker's machine: a register file and local-array storage.
 pub(crate) struct Machine<'k> {
@@ -599,6 +601,13 @@ impl<'k> Machine<'k> {
                     // A subroutine has no `Break` of its own loops' caller:
                     // the lanes it leaves running are the active ones less
                     // any it retired, as after an `If`.
+                    // Calls nest, so a compact call graph can run far more
+                    // instructions than it holds with no loop in it: look
+                    // at the limits here too.
+                    if self.pending >= POLL_STEPS {
+                        let charged = std::mem::take(&mut self.pending);
+                        self.ctl.poll(charged)?;
+                    }
                     let k = self.k;
                     self.block(&k.subs[*id as usize].body, mask)?;
                     mask = self.live(mask);

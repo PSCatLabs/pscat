@@ -1529,3 +1529,40 @@ fn a_definition_made_through_a_reused_subroutine_is_still_seen_by_joins() {
         ));
     }
 }
+
+#[test]
+fn nested_shared_calls_stop_at_the_limits() {
+    // Found by Codex: subroutines calling each other ten times a level run
+    // 10^8 leaf bodies a pixel with no loop to poll at; the limits are
+    // looked at in calls too.
+    let mut src = String::from("/all .kernelshare /p0 { ");
+    src += &"dup sin add ".repeat(50);
+    src += "} def\n";
+    for n in 1..=8 {
+        src += &format!("/p{n} {{ {} }} def\n", format!("p{} ", n - 1).repeat(10));
+    }
+    src += "/pixel { pop 0.001 mul p8 0 mul } def 8 8 [8 0 0 -8 0 8] /pixel load 1 kernelimage";
+    let mut it = Interp::with_page(8, 8).expect("page");
+    it.set_limits(Limits::none().with_max_time(Duration::from_millis(300)))
+        .expect("limits");
+    assert_eq!(it.run_str(&src).unwrap_err(), PsError::TimeExceeded);
+    let mut it = Interp::with_page(8, 8).expect("page");
+    it.set_limits(Limits::none().with_max_steps(5_000_000))
+        .expect("limits");
+    assert_eq!(it.run_str(&src).unwrap_err(), PsError::StepsExceeded);
+}
+
+#[test]
+fn a_shared_body_whose_defining_path_dies_keeps_the_callers_value() {
+    // Found by Codex: x is defined only on a path that certainly errors,
+    // so the live path leaves the caller's x, which must be in the key.
+    for f in [
+        "i 0 lt { /x 1 def 1 0 div } if",
+        "0 1 i 100 sub { pop /x 1 def 1 0 div } for",
+    ] {
+        same_shared(&format!(
+            "{SHOW} /f {{ {f} }} def
+             /pixel {{ /j exch def /i exch def /x 1 def f /x 2 def f x 0.25 mul i 0.01 mul add show3 }} def"
+        ));
+    }
+}
