@@ -120,7 +120,8 @@ pub(crate) fn allocate(k: &mut Kernel) {
 /// back-edge moves would otherwise run on every trip.
 ///
 /// A register is live if any instruction other than a move mentions it,
-/// it is an input or output, or it is the source of a move into a live
+/// it is an input, an output or the random state a pixel leaves (both
+/// read after the body), or it is the source of a move into a live
 /// register. Int-to-real conversions count as moves: `I2FExact` retires a
 /// lane only to keep the converted value exact, so with the value unread it
 /// guards nothing (and an unused carried name would otherwise send pixels
@@ -171,7 +172,7 @@ pub(crate) fn drop_dead_moves(k: &mut Kernel) {
     for r in [k.in_i, k.in_j] {
         live[r as usize] = true;
     }
-    for o in &k.outputs {
+    for o in k.outputs.iter().chain(&k.rand) {
         if let Op::R(r) = o {
             live[*r as usize] = true;
         }
@@ -404,6 +405,7 @@ mod tests {
             in_i: 0,
             in_j: 1,
             outputs: vec![Op::R(out)],
+            rand: None,
             tables: Vec::new(),
             larrays: Vec::new(),
             perm: [0; 256],
@@ -421,6 +423,21 @@ mod tests {
         let mut k = kernel(n as usize + 1, body, n);
         drop_dead_moves(&mut k);
         assert_eq!(k.body.len(), n as usize - 1, "a live move was dropped");
+    }
+
+    /// The random state a pixel leaves is read after the body, like an
+    /// output: a move into it stays.
+    #[test]
+    fn a_move_into_the_random_state_is_kept() {
+        let body = vec![
+            Ins::MovI(2, 7),
+            Ins::Mov(3, Op::R(2)),
+            Ins::I2F(4, Op::R(0)),
+        ];
+        let mut k = kernel(5, body, 4);
+        k.rand = Some(Op::R(3));
+        drop_dead_moves(&mut k);
+        assert_eq!(k.body.len(), 3, "{:?}", k.body);
     }
 
     /// Moves and int-to-real conversions into registers nothing reads go;
