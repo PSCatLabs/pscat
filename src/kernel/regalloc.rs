@@ -176,16 +176,21 @@ pub(crate) fn drop_dead_moves(k: &mut Kernel) {
             live[*r as usize] = true;
         }
     }
-    loop {
-        let mut changed = false;
-        for &(d, s) in &movs {
-            if live[d as usize] && !live[s as usize] {
+    // Liveness flows from a move's destination to its source. A worklist
+    // over those edges visits each register once, so a long chain of merge
+    // moves (60,000 `c { /x 1 def } if`) costs linear time, not a scan of
+    // every move per link.
+    let mut srcs: Vec<Vec<Reg>> = vec![Vec::new(); k.nregs];
+    for &(d, s) in &movs {
+        srcs[d as usize].push(s);
+    }
+    let mut work: Vec<Reg> = (0..k.nregs as Reg).filter(|&r| live[r as usize]).collect();
+    while let Some(d) = work.pop() {
+        for &s in &srcs[d as usize] {
+            if !live[s as usize] {
                 live[s as usize] = true;
-                changed = true;
+                work.push(s);
             }
-        }
-        if !changed {
-            break;
         }
     }
     prune(&mut k.body, &live);
@@ -384,5 +389,61 @@ fn rename(b: &mut [Ins], map: &[u32]) {
             Ins::Loop(body) => rename(body, map),
             Ins::LNew(_) | Ins::Break | Ins::Abort => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A kernel of `body`, reading inputs 0 and 1 and writing `out`.
+    fn kernel(nregs: usize, body: Vec<Ins>, out: Reg) -> Kernel {
+        Kernel {
+            nregs,
+            body,
+            in_i: 0,
+            in_j: 1,
+            outputs: vec![Op::R(out)],
+            tables: Vec::new(),
+            larrays: Vec::new(),
+            perm: [0; 256],
+        }
+    }
+
+    /// A chain of moves, each feeding the next in program order, live from
+    /// the output back to the input. Liveness then flows against program
+    /// order: the worst case for a scan repeated to a fixpoint (one link
+    /// per pass, so quadratic). The worklist visits each register once.
+    #[test]
+    fn a_long_live_move_chain_is_kept_in_linear_time() {
+        let n = 200_000u32;
+        let body: Vec<Ins> = (1..n).map(|r| Ins::Mov(r + 1, Op::R(r))).collect();
+        let mut k = kernel(n as usize + 1, body, n);
+        let t = std::time::Instant::now();
+        drop_dead_moves(&mut k);
+        assert_eq!(k.body.len(), n as usize - 1, "a live move was dropped");
+        // Linear is milliseconds; the repeated scan took minutes here.
+        assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
+    }
+
+    /// Moves and int-to-real conversions into registers nothing reads go;
+    /// whatever feeds the output or a check stays.
+    #[test]
+    fn only_unread_moves_and_conversions_are_dropped() {
+        let body = vec![
+            Ins::Mov(2, Op::R(0)), // read by the Assert: kept
+            Ins::Assert(Op::R(2)),
+            Ins::I2FExact(3, Op::R(1)), // feeds only 4, which nothing reads
+            Ins::Mov(4, Op::R(3)),
+            Ins::Loop(vec![Ins::MovI(5, 1), Ins::Break]), // 5 is unread
+            Ins::I2F(6, Op::R(1)),                        // the output
+        ];
+        let mut k = kernel(7, body, 6);
+        drop_dead_moves(&mut k);
+        assert_eq!(k.body.len(), 4, "{:?}", k.body);
+        assert!(matches!(k.body[0], Ins::Mov(2, _)));
+        assert!(matches!(k.body[1], Ins::Assert(_)));
+        assert!(matches!(&k.body[2], Ins::Loop(b) if matches!(b[..], [Ins::Break])));
+        assert!(matches!(k.body[3], Ins::I2F(6, _)));
     }
 }
