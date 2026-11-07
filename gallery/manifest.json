@@ -139,6 +139,10 @@
   "qr": {
    "title": "qr",
    "guide": "docs/guides/qr-codes.md"
+  },
+  "kernel": {
+   "title": "kernel",
+   "guide": "docs/guides/kernels.md"
   }
  },
  "pieces": [
@@ -1015,7 +1019,9 @@
    "tags": [
     "ray tracing"
    ],
-   "libraries": [],
+   "libraries": [
+    "kernel"
+   ],
    "featured": false,
    "playground": false,
    "issue": 742,
@@ -1036,7 +1042,9 @@
     "fractal",
     "ray marching"
    ],
-   "libraries": [],
+   "libraries": [
+    "kernel"
+   ],
    "featured": false,
    "playground": false,
    "issue": 742,
@@ -1056,7 +1064,9 @@
    "tags": [
     "neural network"
    ],
-   "libraries": [],
+   "libraries": [
+    "kernel"
+   ],
    "featured": false,
    "playground": false,
    "issue": 742,
@@ -1077,7 +1087,9 @@
     "photo",
     "image filter"
    ],
-   "libraries": [],
+   "libraries": [
+    "kernel"
+   ],
    "featured": false,
    "playground": false,
    "issue": 742,

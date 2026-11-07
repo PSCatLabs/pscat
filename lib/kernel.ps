@@ -1,0 +1,154 @@
+%!PS-Adobe-3.0
+%%Title: kernel.ps -- a kernelimage shim for other PostScript interpreters
+%%EndComments
+% Issue #1066. `kernelimage` and `kernelcompile` are pscat extensions
+% (docs/guides/kernels.md). This file defines them for an interpreter that
+% lacks them, Ghostscript for instance, and leaves pscat's native operators
+% alone:
+%
+%   /kernelimage where { pop } { (lib/kernel.ps) run } ifelse
+%
+%   width height matrix proc ncomp kernelimage -
+%   proc ncomp kernelcompile false string
+%
+% The shim runs `proc` (i j -> c1 .. cn) once per sample through
+% `colorimage`, the way pscat's interpreter path does:
+%
+% - each pixel runs as if by `8 dict begin i j proc end`, so a `def` lands
+%   in a dictionary of its own that the next pixel never sees;
+% - a name the pixel has not defined resolves through the dictionary stack
+%   as it was when kernelimage was called. The shim's own state (sizes,
+%   row buffer, row counter) is a dictionary written into the data
+%   procedure as an object, never put on the dictionary stack;
+% - each component becomes a byte as in pscat: NaN is 0, then clamp to
+%   [0, 1], then floor(c * 255 + 0.5);
+% - a procedure that leaves the wrong number of components is a
+%   rangecheck, and a component that is not a number a typecheck.
+%
+% The kernel--* helpers below are defined in every interpreter (they are
+% what the %%SelfTest blocks exercise under pscat). Only kernelimage and
+% kernelcompile depend on what the interpreter already has.
+
+%%SelfTest: kernel-quantizes-like-pscat
+% 0 kernel--q 0 eq (0 is 0) mustbe
+% 1 kernel--q 255 eq (1 is 255) mustbe
+% 1.0 kernel--q 255 eq (1.0 is 255) mustbe
+% -0.2 kernel--q 0 eq (below 0 clamps to 0) mustbe
+% 1.7 kernel--q 255 eq (above 1 clamps to 255) mustbe
+% 7 kernel--q 255 eq (an integer above 1 clamps) mustbe
+% 0.5 kernel--q 128 eq (0.5 rounds half up) mustbe
+% 0.001 kernel--q 0 eq (0.255 + 0.5 floors to 0) mustbe
+% 0.002 kernel--q 1 eq (0.51 + 0.5 floors to 1) mustbe
+% 0.25 kernel--q 64 eq (63.75 + 0.5 floors to 64) mustbe
+% 1e308 10 mul kernel--q 255 eq (infinity clamps to 255) mustbe
+% 1e308 10 mul dup sub kernel--q 0 eq (NaN is 0) mustbe
+% { (x) kernel--q } /typecheck (a string is not a component) mustfail
+%%EndSelfTest
+% c kernel--q byte: a component as an 8-bit sample, as pscat's quantize.
+% @internal
+/kernel--q {
+  dup dup ne { pop 0 } if                    % NaN (only it differs from itself)
+  dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+  255 mul 0.5 add floor cvi
+} bind def
+
+% i mark c1 .. cn D kernel--store -: one pixel's components into D's row.
+% @internal
+/kernel--store {
+  counttomark 1 sub 1 index /N get ne { /kernelimage errordict /rangecheck get exec } if
+  dup /Row get exch /N get                   % i mark c1 .. cn Row n
+  dup 3 add index 1 index mul add 1 sub      % i mark c1 .. cn Row last
+  { counttomark 2 eq { exit } if
+    3 -1 roll //kernel--q exec               % ... Row last byte
+    2 index 2 index 3 -1 roll put
+    1 sub } loop
+  pop pop pop pop
+} bind def
+
+% proc dict kernel--subst proc': a copy of proc with each executable name
+% that is a key of dict replaced by its value (top level only).
+% @internal
+/kernel--subst {
+  exch [ exch {
+    dup type /nametype eq 1 index xcheck and {
+      counttomark 1 add index 1 index known { counttomark 1 add index exch get } if
+    } if
+  } forall ] cvx exch pop
+} bind def
+
+%%SelfTest: kernel-shim-checks-its-operands
+% { 2 2 [2 0 0 2 0 0] { pop pop 0.5 } 2 kernel--image } /rangecheck (ncomp 2) mustfail
+% { 2 2 [2 0 0 2 0 0] { pop pop 0.5 } 3.0 kernel--image } /typecheck (a real ncomp) mustfail
+% { 2 2 [2 0 0 2 0 0] [ /pop /pop 0.5 ] 1 kernel--image } /typecheck (a literal array) mustfail
+% { 2 2 [2 0 0 2 0 0] (pop) 1 kernel--image } /typecheck (a string) mustfail
+% { 2 2 1 { pop pop 0.5 } 1 kernel--image } /typecheck (a matrix that is not an array) mustfail
+% { -1 2 [2 0 0 2 0 0] { pop pop 0.5 } 1 kernel--image } /rangecheck (a negative width) mustfail
+% { 2 2.5 [2 0 0 2 0 0] { pop pop 0.5 } 1 kernel--image } /typecheck (a real height) mustfail
+% { 0 5 [1 0 0 1 0 0] { pop pop 0.5 } 3 kernel--image } (a zero width paints nothing) mustpass
+% { 5 0 [1 0 0 1 0 0] { pop pop 0.5 } 3 kernel--image } (a zero height paints nothing) mustpass
+%%EndSelfTest
+%%SelfTest: kernel-shim-wants-exactly-ncomp-components
+% { 2 2 [2 0 0 2 0 0] { pop pop 0.5 0.5 } 3 kernel--image } /rangecheck (too few) mustfail
+% { 2 2 [2 0 0 2 0 0] { pop pop 0.1 0.2 0.3 0.4 } 3 kernel--image } /rangecheck (too many) mustfail
+% { 2 2 [2 0 0 2 0 0] { pop pop } 1 kernel--image } /rangecheck (none) mustfail
+% { 2 2 [2 0 0 2 0 0] { pop pop (x) } 1 kernel--image } /typecheck (a string) mustfail
+% { 2 2 [2 0 0 2 0 0] { pop pop 0.5 0.5 0.5 } 3 kernel--image } (three for RGB) mustpass
+% { 2 2 [2 0 0 2 0 0] { pop pop 0 0.5 1 0.25 } 4 kernel--image } (four for CMYK) mustpass
+% { 2 2 [2 0 0 2 0 0] { pop pop 2 } 1 kernel--image } (an integer component) mustpass
+%%EndSelfTest
+%%SelfTest: kernel-shim-pixels-get-fresh-dicts
+% /kt-seen 6 array def /kt-outer 0.5 def
+% { 3 2 [3 0 0 2 0 0]
+%   { /j exch def /i exch def
+%     kt-seen j 3 mul i add
+%       currentdict length 2 eq            % only i and j so far
+%       currentdict /t known not and       % no earlier pixel's /t
+%       /KS where { pop false } { true } ifelse and
+%       /Row where { pop false } { true } ifelse and
+%       /kt-outer where { /kt-outer get 0.5 eq } { false } ifelse and
+%     put
+%     /t i def kt-outer }
+%   1 kernel--image } (a pixel that defines names) mustpass
+% true kt-seen { and } forall (each pixel saw a fresh dict and only the outside names) mustbe
+% /t where { pop false } { true } ifelse (no pixel def survives the call) mustbe
+% /kt-ij 6 array def
+% { 3 2 [3 0 0 2 0 0] { /j exch def /i exch def kt-ij j 3 mul i add j 10 mul i add put 0 } 1 kernel--image } (i and j) mustpass
+% true 0 1 5 { dup kt-ij exch get exch dup 3 idiv 10 mul exch 3 mod add eq and } for (i is the column and j the row) mustbe
+%%EndSelfTest
+% w h matrix proc ncomp kernel--image -: kernelimage, the interpreted way.
+% @internal
+/kernel--image {
+  dup type /integertype ne { /kernelimage errordict /typecheck get exec } if
+  dup 1 ne 1 index 3 ne and 1 index 4 ne and { /kernelimage errordict /rangecheck get exec } if
+  1 index dup type dup /arraytype ne exch /packedarraytype ne and exch xcheck not or
+    { /kernelimage errordict /typecheck get exec } if
+  2 index type dup /arraytype ne exch /packedarraytype ne and
+    { /kernelimage errordict /typecheck get exec } if
+  3 index type /integertype ne 5 index type /integertype ne or
+    { /kernelimage errordict /typecheck get exec } if
+  3 index 0 lt 5 index 0 lt or { /kernelimage errordict /rangecheck get exec } if
+  4 index 0 eq 4 index 0 eq or { pop pop pop pop pop } {
+    8 dict                                   % w h matrix proc ncomp D
+    dup /N 4 -1 roll put dup /P 4 -1 roll put dup /M 4 -1 roll put
+    dup /H 4 -1 roll put dup /W 4 -1 roll put
+    dup /J 0 put
+    dup /Row 1 index /W get 2 index /N get mul string put
+    % The per-pixel body and the data procedure, with D in place of KS.
+    { dup mark exch KS /J get KS /P get 8 dict begin exec end KS //kernel--store exec }
+    2 dict dup /KS 4 index put //kernel--subst exec
+    { 0 1 KS /W get 1 sub KB for KS /J 2 copy get 1 add put KS /Row get }
+    2 dict dup /KS 5 index put dup /KB 5 -1 roll put //kernel--subst exec
+    exch                                     % data D
+    dup /W get 1 index /H get 8 3 index /M get 6 -1 roll false 7 -1 roll /N get
+    colorimage
+  } ifelse
+} bind def
+
+% proc ncomp kernel--compile false string: nothing compiles here.
+% @internal
+/kernel--compile {
+  pop pop false (not compiled: this interpreter has no native kernelimage; lib/kernel.ps runs the procedure in the interpreter)
+} bind def
+
+/kernelimage where { pop } { /kernelimage //kernel--image def } ifelse
+/kernelcompile where { pop } { /kernelcompile //kernel--compile def } ifelse
