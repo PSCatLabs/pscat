@@ -10,8 +10,9 @@ the same interpreter as the [`pscat` crate and command-line tool](https://github
 npm install pscat
 ```
 
-Node 22 or later, or any current browser. It is ESM only, ships
-TypeScript types, and has no dependencies and no install scripts.
+Node 22 or later, or any current browser. It is ESM (plus a classic-script
+build for `<script>` tags, below), ships TypeScript types, and has no
+dependencies and no install scripts.
 
 ## Render a page
 
@@ -32,6 +33,31 @@ page.output;  // what the program printed with = == print stack pstack
 
 In a browser, `r.paintTo(canvas)` draws the page into a `<canvas>`
 (resizing it), and `r.imageData()` returns an `ImageData`.
+
+## Without modules: a plain `<script>` tag
+
+`pscat.global.js` is the same API as one classic script, for a page with no
+bundler, an inline script in a single HTML file, or a classic worker. It
+defines one global, `pscat`, holding `createRenderer`, `PostScriptError` and
+`Renderer`:
+
+```html
+<script src="node_modules/pscat/pscat.global.js"></script>
+<script>
+  pscat.createRenderer().then((r) => {
+    r.render('0 0 1 setrgbcolor 20 20 100 60 rectfill', { width: 160, height: 100 });
+    r.paintTo(document.querySelector('canvas'));
+  });
+</script>
+```
+
+`pscat.wasm` is fetched from next to the script. Where the script cannot
+tell where it came from (inline, `blob:`, a worker, a `file://` page that
+cannot fetch), `createRenderer()` says so, and you pass the module:
+`createRenderer({ wasm: url })` or `{ wasm: bytes }`. From a CDN once the
+release is on npm, load the file by name
+(`https://unpkg.com/pscat@X.Y.Z/pscat.global.js`): a bare package URL has no
+`pscat.wasm` beside it.
 
 ## Watch it draw
 
