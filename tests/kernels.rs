@@ -330,6 +330,63 @@ fn loop_defined_names_nest_and_join_branch_defined_ones() {
     }
 }
 
+/// `.kernelstats` after `src`: (finished compiled, partly, wholly
+/// interpreted).
+fn kernel_stats_after(src: &str) -> (String, String, String) {
+    let mut it = Interp::with_page(4, 4).expect("page");
+    it.run_str(&format!("4 4 scale {src} .kernelstats"))
+        .expect("run");
+    let st = it.operand_stack();
+    let n = st.len();
+    (st[n - 3].repr(), st[n - 2].repr(), st[n - 1].repr())
+}
+
+/// A name a flag says is undefined must be undefined: a lane that fails
+/// the flag runs alone in the interpreter, so a procedure behind it (one
+/// pixel's own `/p { ... store ... }`) would make side effects the
+/// compiled pixels never see.
+#[test]
+fn a_procedure_is_never_hidden_behind_a_defined_flag() {
+    let src = |between: &str| {
+        format!(
+            "/X 0 def 4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def
+               i 0 eq j 0 eq and {{ /p {{ /X X 1 add store 0 }} def }} if
+               {between}
+               p pop X 0.25 mul }} 1 kernelimage"
+        )
+    };
+    // Through a loop that defines p as a number on the other pixels.
+    auto_matches_interpreter(&src(
+        "0 1 i 20 add { /k exch def i 0 gt j 0 gt or { /p k def } if } for",
+    ));
+    // Through a branch that does.
+    auto_matches_interpreter(&src("i 0 gt j 0 gt or { /p 2 def } if"));
+}
+
+/// Loop-defined names nothing reads after the loop compile, and cost no
+/// fallback, whatever types they take on the way.
+#[test]
+fn unread_loop_names_cost_nothing() {
+    // A number on the back edge and a boolean at an exit.
+    same(
+        "/pixel { /j exch def /i exch def
+           0 1 99 { /k exch def /x k def k i eq { /x true def exit } if } for
+           i 0.01 mul dup dup } bind def",
+    );
+    // An integer past 2^53 and a real at an exit: an exactness check on
+    // the unused carried value would retire every pixel but one.
+    let src = "4 4 [4 0 0 -4 0 4] { /j exch def /i exch def
+                 0 1 99 { /k exch def /x 1 54 bitshift k add def
+                   k i 3 add eq { /x 0.5 def exit } if } for
+                 i 0.25 mul } 1 kernelimage";
+    auto_matches_interpreter(src);
+    assert_eq!(
+        kernel_stats_after(src),
+        ("1".into(), "0".into(), "0".into()),
+        "pixels left the compiled path"
+    );
+}
+
 #[test]
 fn stack_carried_loop_state() {
     // The fractal_clouds style: the running state lives on the stack.

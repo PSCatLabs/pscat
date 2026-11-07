@@ -246,13 +246,16 @@ fn ct_of(v: &SVal) -> Option<CT> {
 
 /// For a name that may be undefined on a path into or round a loop: its
 /// type where defined (`Some(None)` where undefined), or `None` if it holds
-/// something a flagged register cannot. An entry value that is `Maybe` is
-/// treated as undefined (a read of it aborts the lane); a `Maybe` coming
-/// round the loop is not, as its lanes may hold a value the loop needs.
-fn partial_ty(lk: &Lk, entry: bool) -> Option<Option<CT>> {
+/// something a flagged register cannot.
+///
+/// Only a truly undefined name may sit behind a flag of 0. A lane whose
+/// read fails the flag runs alone in the interpreter (`fallback_pixels`),
+/// which is exact only if all it can do is raise `undefined`; a `Maybe`
+/// may be a procedure there, whose side effects (`store`) the compiled
+/// pixels would not see.
+fn partial_ty(lk: &Lk) -> Option<Option<CT>> {
     match lk {
         Lk::Undef => Some(None),
-        Lk::Maybe if entry => Some(None),
         Lk::Val(x) | Lk::Partial(x, _) if x.is_scalar() => Some(ct_of(x)),
         _ => None,
     }
@@ -1133,10 +1136,9 @@ impl<'a> Compiler<'a> {
                 out.pairs.push((f, Op::R(*g), false));
                 Ok(())
             }
-            // Not defined, or defined as something a register cannot hold
-            // (a procedure from outside, say): a read aborts the lane to the
-            // interpreter, which then does whatever the program does.
-            (Lk::Undef | Lk::Maybe, Some(f)) => {
+            // Not defined: a read retires the lane to the interpreter, which
+            // raises `undefined` (see `partial_ty`).
+            (Lk::Undef, Some(f)) => {
                 out.pairs.push((f, Op::Imm(0.0), false));
                 Ok(())
             }
@@ -1306,14 +1308,20 @@ impl<'a> Compiler<'a> {
         ma: &mut Moves,
         mb: &mut Moves,
     ) -> CResult<Binding> {
-        let side = |lk: &Lk| -> (Option<SVal>, Op) {
+        // Undefined only where truly undefined: a lane failing the flag
+        // runs alone in the interpreter, so what it finds there must not be
+        // a procedure with side effects (see `partial_ty`).
+        let side = |lk: &Lk| -> Option<(Option<SVal>, Op)> {
             match lk {
-                Lk::Val(x) if x.is_scalar() => (Some(x.clone()), Op::Imm(1.0)),
-                Lk::Partial(v, f) => (Some(v.clone()), Op::R(*f)),
-                _ => (None, Op::Imm(0.0)),
+                Lk::Val(x) if x.is_scalar() => Some((Some(x.clone()), Op::Imm(1.0))),
+                Lk::Partial(v, f) => Some((Some(v.clone()), Op::R(*f))),
+                Lk::Undef => Some((None, Op::Imm(0.0))),
+                _ => None,
             }
         };
-        let ((xa, fa), (xb, fb)) = (side(a), side(b));
+        let (Some((xa, fa)), Some((xb, fb))) = (side(a), side(b)) else {
+            return Ok(Binding::Maybe);
+        };
         let ty = match (xa.as_ref().and_then(ct_of), xb.as_ref().and_then(ct_of)) {
             (Some(x), Some(y)) => ct_join(x, y),
             (Some(x), None) | (None, Some(x)) => Some(x),
@@ -1511,7 +1519,7 @@ impl<'a> Compiler<'a> {
                             _ => None,
                         },
                         _ if matches!(sl, Slot::Bind(..)) => {
-                            match (partial_ty(&ev, true), partial_ty(&sv, false)) {
+                            match (partial_ty(&ev), partial_ty(&sv)) {
                                 (Some(Some(x)), Some(Some(y))) => ct_join(x, y),
                                 (Some(Some(x)), Some(None)) | (Some(None), Some(Some(x))) => {
                                     Some(x)
@@ -1544,6 +1552,15 @@ impl<'a> Compiler<'a> {
                                 }
                                 grew = true;
                             } else if ct_join(c.ty, t).is_none() {
+                                // A name that is a number on one path and a
+                                // boolean on another: compilable as long as
+                                // nothing reads it, like any other `maybe`.
+                                if let Slot::Bind(..) = sl {
+                                    maybe.push(sl);
+                                    carried.retain(|c| c.slot != sl);
+                                    grew = true;
+                                    break;
+                                }
                                 return nc("a loop changes a value's type");
                             }
                             if flagged && c.flag.is_none() {

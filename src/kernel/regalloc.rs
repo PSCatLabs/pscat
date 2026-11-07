@@ -121,14 +121,22 @@ pub(crate) fn allocate(k: &mut Kernel) {
 ///
 /// A register is live if any instruction other than a move mentions it,
 /// it is an input or output, or it is the source of a move into a live
-/// register. Moves have no side effects (no lane is ever retired by one),
-/// so dropping the rest changes nothing a kernel computes.
+/// register. Int-to-real conversions count as moves: `I2FExact` retires a
+/// lane only to keep the converted value exact, so with the value unread it
+/// guards nothing (and an unused carried name would otherwise send pixels
+/// to the interpreter). Plain moves have no side effects at all, so
+/// dropping the rest changes nothing a kernel computes.
 pub(crate) fn drop_dead_moves(k: &mut Kernel) {
     fn scan(b: &[Ins], live: &mut [bool], movs: &mut Vec<(Reg, Reg)>) {
         for ins in b {
             match ins {
-                Ins::Mov(d, Op::R(s)) => movs.push((*d, *s)),
-                Ins::Mov(_, Op::Imm(_)) | Ins::MovI(..) => {}
+                Ins::Mov(d, Op::R(s)) | Ins::I2F(d, Op::R(s)) | Ins::I2FExact(d, Op::R(s)) => {
+                    movs.push((*d, *s))
+                }
+                Ins::Mov(_, Op::Imm(_))
+                | Ins::I2F(_, Op::Imm(_))
+                | Ins::I2FExact(_, Op::Imm(_))
+                | Ins::MovI(..) => {}
                 Ins::If(c, t, e) => {
                     live[*c as usize] = true;
                     scan(t, live, movs);
@@ -141,7 +149,9 @@ pub(crate) fn drop_dead_moves(k: &mut Kernel) {
     }
     fn prune(b: &mut Vec<Ins>, live: &[bool]) {
         b.retain(|ins| match ins {
-            Ins::Mov(d, _) | Ins::MovI(d, _) => live[*d as usize],
+            Ins::Mov(d, _) | Ins::MovI(d, _) | Ins::I2F(d, _) | Ins::I2FExact(d, _) => {
+                live[*d as usize]
+            }
             _ => true,
         });
         for ins in b {
