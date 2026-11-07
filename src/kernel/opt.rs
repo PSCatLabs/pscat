@@ -116,55 +116,88 @@ fn pure(i: &Ins) -> bool {
     }
 }
 
-/// Remove pure instructions whose results are never read, and `If`s left
-/// with nothing in either branch, until none is left.
+/// Remove pure instructions whose results nothing needs, and `If`s left
+/// with nothing in either branch.
+///
+/// A register is needed when an instruction that is not pure reads it (or
+/// an `If` tests it, or it is an output), or a pure instruction writing a
+/// needed register reads it: marked from those roots in one pass, so a
+/// long chain of dead moves (merges of a name nothing reads, through many
+/// joins) goes at once.
 pub(crate) fn dce(k: &mut Kernel) {
-    for _ in 0..64 {
-        let mut uses = vec![0u32; k.nregs];
-        let mut count = |b: &[Ins]| {
+    for _ in 0..8 {
+        let n = k.nregs;
+        // For each register, what its pure definitions read.
+        let mut deps: Vec<Vec<u32>> = vec![Vec::new(); n];
+        let mut need = vec![false; n];
+        let mut work: Vec<u32> = Vec::new();
+        let root = |r: u32, need: &mut Vec<bool>, work: &mut Vec<u32>| {
+            if !need[r as usize] {
+                need[r as usize] = true;
+                work.push(r);
+            }
+        };
+        let mut scan = |b: &[Ins], need: &mut Vec<bool>, work: &mut Vec<u32>| {
             super::ir::walk(b, &mut |i| {
-                i.regs(&mut |r, w| {
-                    if !w {
-                        uses[r as usize] += 1;
+                if pure(i) {
+                    let (mut d, mut rs) = (Vec::new(), Vec::new());
+                    i.regs(&mut |r, w| if w { d.push(r) } else { rs.push(r) });
+                    for x in d {
+                        deps[x as usize].extend_from_slice(&rs);
                     }
-                })
+                } else {
+                    i.regs(&mut |r, w| {
+                        if !w {
+                            root(r, need, work);
+                        }
+                    });
+                }
             })
         };
-        count(&k.body);
+        scan(&k.body, &mut need, &mut work);
         for s in &k.subs {
-            count(&s.body);
+            scan(&s.body, &mut need, &mut work);
         }
         for o in k.outputs.iter().chain(&k.rand) {
             if let Op::R(r) = o {
-                uses[*r as usize] += 1;
+                root(*r, &mut need, &mut work);
             }
         }
-        let mut changed = sweep(&mut k.body, &uses);
-        for s in &mut k.subs {
-            changed |= sweep(&mut s.body, &uses);
+        while let Some(r) = work.pop() {
+            for &x in &std::mem::take(&mut deps[r as usize]) {
+                root(x, &mut need, &mut work);
+            }
         }
+        let mut changed = sweep(&mut k.body, &need);
+        for s in &mut k.subs {
+            changed |= sweep(&mut s.body, &need);
+        }
+        // Another round only if an emptied `If` freed its condition.
         if !changed {
             break;
         }
     }
 }
 
-fn sweep(b: &mut Vec<Ins>, uses: &[u32]) -> bool {
-    let mut changed = false;
+/// Remove what [`dce`] found unneeded; true if an `If` went.
+fn sweep(b: &mut Vec<Ins>, need: &[bool]) -> bool {
+    let mut ifs = false;
     for i in b.iter_mut() {
         for nb in i.blocks_mut() {
-            changed |= sweep(nb, uses);
+            ifs |= sweep(nb, need);
         }
     }
-    let before = b.len();
     b.retain(|i| match i {
-        Ins::If(_, t, e) => !(t.is_empty() && e.is_empty()),
+        Ins::If(_, t, e) if t.is_empty() && e.is_empty() => {
+            ifs = true;
+            false
+        }
         _ if pure(i) => {
             let mut live = false;
-            i.regs(&mut |r, w| live |= w && uses[r as usize] != 0);
+            i.regs(&mut |r, w| live |= w && need[r as usize]);
             live
         }
         _ => true,
     });
-    changed || b.len() != before
+    ifs
 }
