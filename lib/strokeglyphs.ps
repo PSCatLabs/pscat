@@ -79,9 +79,23 @@
 % /phi.loopy, reached by name (`[/phi.loopy]`) and by mathkit's \varphi.
 % U+03C6 keeps drawing /phi, as it always has.
 %
+% --- Accented Latin letters (issue #1051) ---------------------------------
+% Latin-1 (U+00C0-00FF) and Latin Extended-A (U+0100-017F), with ș ț
+% (U+0219, U+021B): café, jalapeño, crème brûlée, naïve, Łódź. Each is its
+% base letter's skeleton plus accent strokes (`sgaccents`), composed at
+% load by `sgaccented` from tables generated from Unicode's decompositions,
+% so the accented forms carry the base's hand and its jitter. Accents over
+% a capital or an ascender sit higher and flatter. A few letters are drawn
+% whole (ß Æ Þ þ ð ĸ Ŋ ŋ ſ) or run together from two (Œ œ æ Ĳ ĳ ŉ).
+%
 % --- Text ---------------------------------------------------------------
-% Text is a string or an array of glyph names. A string is decoded as
-% UTF-8: ASCII maps to handscript's lowercase, digits and punctuation
+% Text is a string or an array of glyph names. A string that is valid
+% UTF-8 is decoded as UTF-8; any other string (a byte from 80 up that is
+% not part of a well-formed sequence) is read as Latin-1, one byte one
+% code point, so (caf\351) and (café) draw the same word. The one
+% ambiguity: a Latin-1 string whose bytes happen to form valid UTF-8 (an
+% accented capital followed by a rare byte from 80 to BF, such as Ã©) is
+% read as UTF-8. ASCII maps to handscript's lowercase, digits and punctuation
 % and to the new capitals and operators; Greek and math symbols map by
 % code point (`sgcmap`). Math-hand variants have names only (`/x.curly`
 % `/z.crossed` `/y.math` `/t.math` `/n.math`) and are also reached by
@@ -1532,6 +1546,23 @@
 %   newpath
 %%EndSelfTest
 %
+%%SelfTest: sgpath-reads-utf8-and-latin1-accented-letters
+%   % issue #1051: a valid UTF-8 string is UTF-8, any other is Latin-1
+%   (café) << >> sgwidth (caf\351) << >> sgwidth eq
+%   (a Latin-1 byte string measures as its UTF-8 twin) mustbe
+%   (café) << >> sgwidth (cafe) << >> sgwidth eq
+%   (é keeps the e's advance) mustbe
+%   (Łódź) sgnames length 4 eq (Łódź is four glyphs) mustbe
+%   (caf\351) sgnames 3 get /eacute eq (byte E9 is é) mustbe
+%   (\303) sgnames 0 get /Atilde eq
+%   (a truncated UTF-8 sequence is read as Latin-1) mustbe
+%   { (a\277) 0 0 << >> sgpath } /sg-missing-glyph:¿
+%   (a missing Latin-1 letter is labelled as the character) mustguard
+%   { (\351\342\206) 0 0 << >> sgpath } /sg-missing-glyph:U+0086
+%   (a C1 control byte is labelled by number) mustguard
+%   newpath
+%%EndSelfTest
+%
 %%SelfTest: sggrow-rejects-malformed-operands
 %   { newpath 0 0 moveto 10 5 << /Symbol /blob >> sggrow pop }
 %   /sggrow-unknown-symbol (an unknown symbol) mustguard
@@ -1770,7 +1801,7 @@
 %
 % (text) x y opts sgpath -
 % @kind: Procedure
-% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, superscript and subscript digits, Greek with its variant forms, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
+% @summary: Appends the jittered centerline skeleton of a string (UTF-8, or Latin-1 when the string is not valid UTF-8: Latin with the Latin-1 and Latin Extended-A accented letters, digits, superscript and subscript digits, Greek with its variant forms, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (∀ε>0 ∃δ>0) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
 % @param: /Size [points] The em size: cap height is 0.7 of it (default 36)
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
