@@ -76,6 +76,7 @@ pscat extensions, probed with `where` (#646 discussion):
 | `kernelimage` | `w h matrix proc ncomp -` | the above |
 | `kernelcompile` | `proc ninputs noutputs - bool string` | compile only: does the proc compile, and if not, why |
 | `.kernelmode` | `name -` | `/auto` (default), `/interpret` (always the fallback), `/strict` (an uncompilable proc is an error, not a fallback) |
+| `.kernelshare` | `name -` | `/auto` (default: share procedure bodies as subroutines only when inlining makes the kernel too large), `/never`, `/large`, `/all` (see "Large kernels") |
 
 The fallback a portable program writes for other interpreters is a
 `colorimage` loop that calls the same proc in a fresh dict (the

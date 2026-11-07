@@ -281,9 +281,12 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 - **Kernels past the 200k-instruction cap** (#1064, done): a counting bug,
   dead-code elimination, and shared subroutines. See the design note.
   `alpine_forest`'s `fc-pixel` now compiles with no size-cap branch. It still
-  has six "defined on some paths only" branches: names defined inside a loop
-  (at its `exit`) and read after it, the next item. While one of those is
-  taken, the whole image runs in the interpreter.
+  has six "defined on some paths only" branches. These are names that a loop
+  defines on some of its paths only (at its `exit`, or in a branch of its
+  body, as `fc-tree-cell` does with `FcIH`) and that are read after the loop
+  behind a guard. That is the next item. While a lane takes one of those
+  branches, the whole image runs in the interpreter, so forest frames are
+  not yet faster.
 - **fractal_clouds' depth-edge antialiasing** reads neighbouring pixels'
   depth keys (carried state). It needs a two-pass form: one kernel for keys,
   a second for colour.

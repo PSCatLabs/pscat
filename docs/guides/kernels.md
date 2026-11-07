@@ -170,6 +170,11 @@ So the picture is always exactly the interpreter's. Only the speed changes.
   that names the reason. `/interpret .kernelmode` always uses the
   interpreter, the reference to compare a render against. `/auto
   .kernelmode` is the default.
+- A very large procedure (past 200,000 compiled instructions, all calls
+  inlined) is compiled again with the bodies it calls often shared as
+  subroutines. `/large .kernelshare` asks for that sharing always, and
+  `/never .kernelshare` turns it off. `kernelcompile` reports the
+  subroutine count.
 - `PSCAT_KERNEL_TIMING=1` prints the compile and run times and the kernel's
   size. `PSCAT_KERNEL_THREADS=N` sets the number of worker threads (the
   default is every core; one under `--bands`).
