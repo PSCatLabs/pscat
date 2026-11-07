@@ -25,12 +25,12 @@
 //! caller then runs the procedure through the interpreter instead.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::exec::{INT_LIMIT_I, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
 use super::ir::{
-    BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableData, TableKind, UnOp,
+    BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Sub, Table, TableData, TableKind, UnOp,
 };
 use crate::interp::Interp;
 use crate::name::PsName;
@@ -326,6 +326,299 @@ struct Checkpoint {
     loops: usize,
     /// Exits the innermost loop had recorded.
     exits: usize,
+    frames: usize,
+}
+
+/// How the compiler shares procedure bodies (#1064): see [`Compiler::call_named`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShareMode {
+    /// Inline everything; share only if that makes the kernel too large.
+    Auto,
+    Never,
+    /// Share a procedure of [`SHARE_MIN`] instructions or more from its
+    /// second call on.
+    Large,
+    /// Share every named procedure from its first call (a test mode).
+    All,
+}
+
+/// A procedure body is worth sharing from this many instructions.
+const SHARE_MIN: usize = 48;
+/// Subroutines one procedure may have (one per distinct context).
+const MAX_DEFS: usize = 16;
+/// Failed attempts to share one procedure before it is always inlined.
+const MAX_SHARE_FAILS: u32 = 3;
+/// The size cap's refusal, which `ShareMode::Auto` retries with sharing.
+const TOO_LARGE: &str = "the kernel is too large";
+
+/// A procedure, by identity.
+type ProcId = (usize, usize, usize);
+
+/// One element of a sharing key: the shape of the values a body reads,
+/// with registers numbered in order of first appearance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Atom {
+    /// The `n`th distinct register, and whether it is I64.
+    Reg(u32, bool),
+    Imm(u64),
+    T(u8),
+    N(u64),
+}
+
+/// A key under construction: its atoms and the registers it numbered.
+#[derive(Default)]
+struct KeyB {
+    atoms: Vec<Atom>,
+    regs: Vec<Reg>,
+    idx: HashMap<Reg, u32>,
+}
+
+impl KeyB {
+    fn reg(&mut self, r: Reg, kinds: &[bool]) {
+        let n = self.regs.len() as u32;
+        let k = *self.idx.entry(r).or_insert(n);
+        if k == n {
+            self.regs.push(r);
+        }
+        self.atoms.push(Atom::Reg(
+            k,
+            kinds.get(r as usize).copied().unwrap_or(false),
+        ));
+    }
+
+    fn op(&mut self, o: Op, kinds: &[bool]) {
+        match o {
+            Op::R(r) => self.reg(r, kinds),
+            Op::Imm(v) => self.atoms.push(Atom::Imm(v.to_bits())),
+        }
+    }
+
+    fn n(&mut self, v: usize) {
+        self.atoms.push(Atom::N(v as u64));
+    }
+
+    /// `None` for a value a shared body may not take (an array built in
+    /// the kernel, which a body could change in place; a dict not begun).
+    fn sval(&mut self, v: &SVal, kinds: &[bool]) -> Option<()> {
+        match v {
+            SVal::Num(o, t) => {
+                self.atoms.push(Atom::T(0));
+                self.op(*o, kinds);
+                match t {
+                    NT::Int => self.atoms.push(Atom::T(10)),
+                    NT::Real => self.atoms.push(Atom::T(11)),
+                    NT::Dyn(r) => {
+                        self.atoms.push(Atom::T(12));
+                        self.reg(*r, kinds);
+                    }
+                }
+            }
+            SVal::Bool(o) => {
+                self.atoms.push(Atom::T(1));
+                self.op(*o, kinds);
+            }
+            SVal::Mark => self.atoms.push(Atom::T(2)),
+            SVal::Null => self.atoms.push(Atom::T(3)),
+            SVal::LocalDict => self.atoms.push(Atom::T(4)),
+            SVal::Name(n) => {
+                self.atoms.push(Atom::T(5));
+                self.n(n.id() as usize);
+            }
+            SVal::Proc(p) => {
+                self.atoms.push(Atom::T(6));
+                let (a, b, c) = p.identity();
+                self.n(a);
+                self.n(b);
+                self.n(c);
+            }
+            SVal::Cap(o) => {
+                let (t, (a, b, c)) = match &o.value {
+                    Value::Array(x) => (7, x.identity()),
+                    Value::String(x) => (8, x.identity()),
+                    _ => return None,
+                };
+                self.atoms.push(Atom::T(t));
+                self.n(a);
+                self.n(b);
+                self.n(c);
+            }
+            SVal::Row {
+                table,
+                row,
+                rtag,
+                cols,
+            } => {
+                self.atoms.push(Atom::T(9));
+                self.n(*table as usize);
+                self.op(*row, kinds);
+                self.op(*rtag, kinds);
+                self.n(*cols);
+            }
+            SVal::LArr(id, n) => {
+                self.atoms.push(Atom::T(13));
+                self.n(*id as usize);
+                self.n(*n);
+            }
+            SVal::CapDict(d) => {
+                self.atoms.push(Atom::T(14));
+                self.n(Rc::as_ptr(d) as *const () as usize);
+            }
+            SVal::Tuple(..) | SVal::NewDict(_) => return None,
+        }
+        Some(())
+    }
+
+    fn binding(&mut self, b: Option<&Binding>, kinds: &[bool]) -> Option<()> {
+        match b {
+            None => self.atoms.push(Atom::T(20)),
+            Some(Binding::Val(v)) => {
+                self.atoms.push(Atom::T(21));
+                self.sval(v, kinds)?;
+            }
+            Some(Binding::Maybe) => self.atoms.push(Atom::T(22)),
+            Some(Binding::Partial(v, f)) => {
+                self.atoms.push(Atom::T(23));
+                self.sval(v, kinds)?;
+                self.reg(*f, kinds);
+            }
+        }
+        Some(())
+    }
+}
+
+/// Every register in a value.
+fn sval_regs(v: &SVal, f: &mut impl FnMut(Reg)) {
+    let o = |o: &Op, f: &mut dyn FnMut(Reg)| {
+        if let Op::R(r) = o {
+            f(*r);
+        }
+    };
+    match v {
+        SVal::Num(x, t) => {
+            o(x, f);
+            if let NT::Dyn(r) = t {
+                f(*r);
+            }
+        }
+        SVal::Bool(x) => o(x, f),
+        SVal::Row { row, rtag, .. } => {
+            o(row, f);
+            o(rtag, f);
+        }
+        _ => {}
+    }
+}
+
+fn binding_regs(b: &Binding, f: &mut impl FnMut(Reg)) {
+    match b {
+        Binding::Val(v) => sval_regs(v, f),
+        Binding::Maybe => {}
+        Binding::Partial(v, flag) => {
+            sval_regs(v, f);
+            f(*flag);
+        }
+    }
+}
+
+/// `v` with each register renamed by `m`.
+fn map_sval(v: &SVal, m: &impl Fn(Reg) -> Reg) -> SVal {
+    let o = |o: Op| match o {
+        Op::R(r) => Op::R(m(r)),
+        x => x,
+    };
+    match v {
+        SVal::Num(x, t) => SVal::Num(
+            o(*x),
+            match t {
+                NT::Dyn(r) => NT::Dyn(m(*r)),
+                t => *t,
+            },
+        ),
+        SVal::Bool(x) => SVal::Bool(o(*x)),
+        SVal::Row {
+            table,
+            row,
+            rtag,
+            cols,
+        } => SVal::Row {
+            table: *table,
+            row: o(*row),
+            rtag: o(*rtag),
+            cols: *cols,
+        },
+        other => other.clone(),
+    }
+}
+
+fn map_binding(b: &Binding, m: &impl Fn(Reg) -> Reg) -> Binding {
+    match b {
+        Binding::Val(v) => Binding::Val(map_sval(v, m)),
+        Binding::Maybe => Binding::Maybe,
+        Binding::Partial(v, f) => Binding::Partial(map_sval(v, m), m(*f)),
+    }
+}
+
+fn binding_eq(a: Option<&Binding>, b: Option<&Binding>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(Binding::Val(x)), Some(Binding::Val(y))) => x == y,
+        (Some(Binding::Maybe), Some(Binding::Maybe)) => true,
+        (Some(Binding::Partial(v, f)), Some(Binding::Partial(w, g))) => v == w && f == g,
+        _ => false,
+    }
+}
+
+/// A procedure body being compiled so that it may be shared: what of the
+/// state it entered with it has looked at (#1064).
+///
+/// The compiler is deterministic, and a body's compilation depends on the
+/// state only through what this records: the stack entries it reached
+/// (`low` up), the names it looked up, defined or merged, and the
+/// structure of the dictionary stack. Another call whose state agrees on
+/// all of that (constants equal, registers in the same pattern and of the
+/// same kinds) would compile to the same code with its registers in place
+/// of these, so it may call the code compiled here instead.
+struct Frame {
+    entry: State,
+    /// Lowest stack index the body read or changed.
+    low: usize,
+    /// Deepest stack the body made (checked against the symbolic cap).
+    high: usize,
+    ids: HashSet<u32>,
+    /// Registers made before the body.
+    reg_base: u32,
+    loops: usize,
+    larrays: usize,
+    code_start: usize,
+    /// Why the body cannot be shared, whatever its context.
+    unshareable: bool,
+}
+
+/// Where a register in a subroutine's outputs comes from at a call.
+#[derive(Clone, Copy, Debug)]
+enum Src {
+    /// The caller's `n`th input register.
+    In(u32),
+    /// The subroutine's `n`th result, copied out.
+    Res(u32),
+}
+
+/// A shared subroutine of one procedure, and the context it serves.
+struct SubDef {
+    proc: PsArray,
+    id: u32,
+    nstack: usize,
+    ids: Vec<u32>,
+    key: Vec<Atom>,
+    /// Parameter registers, by the input they take.
+    params: Vec<(u32, Reg)>,
+    results: Vec<Reg>,
+    growth: usize,
+    dead: bool,
+    stack: Vec<SVal>,
+    /// Bindings it changes: scope index, name, binding.
+    binds: Vec<(usize, u32, Binding)>,
+    src: HashMap<Reg, Src>,
 }
 
 /// Procedure nesting allowed at compile time (inlining depth).
@@ -379,6 +672,19 @@ pub(crate) struct Compiler<'a> {
     /// lane takes them (why, for `kernelcompile`); with `strict`, refused.
     pub(crate) soft: Vec<String>,
     strict: bool,
+    share: ShareMode,
+    /// Shared subroutines made so far (some may end up unused).
+    subs: Vec<Sub>,
+    /// Owner of each register, as `Kernel::owner` (missing: 0).
+    owner: Vec<u32>,
+    /// Instructions moved into subroutines, counted against the cap.
+    sub_insns: usize,
+    /// Bodies being compiled for sharing, innermost last.
+    frames: Vec<Frame>,
+    defs: HashMap<ProcId, Vec<Rc<SubDef>>>,
+    /// Size of a procedure's inlined body, the most seen.
+    seen: HashMap<ProcId, usize>,
+    share_fails: HashMap<ProcId, u32>,
 }
 
 /// Compile `proc` as a kernel taking `i j` and leaving `ncomp` numbers.
@@ -389,6 +695,44 @@ pub(crate) fn compile(
     proc: &PsArray,
     ncomp: usize,
     strict: bool,
+    share: ShareMode,
+) -> Result<Compiled, Refusal> {
+    let first = if share == ShareMode::Auto {
+        ShareMode::Never
+    } else {
+        share
+    };
+    let r = compile_with(it, proc, ncomp, strict, first, 0);
+    if share != ShareMode::Auto {
+        return r;
+    }
+    let (big, spent) = match &r {
+        Ok(c) => (c.soft.iter().any(|w| w.starts_with(TOO_LARGE)), c.work),
+        Err(Refusal::Not(w, n)) => (w.starts_with(TOO_LARGE), *n),
+        Err(Refusal::Limit(_)) => (false, 0),
+    };
+    if !big {
+        return r;
+    }
+    // Too large inlined: compile again sharing the bodies called often,
+    // the first attempt's work charged too.
+    match compile_with(it, proc, ncomp, strict, ShareMode::Large, spent) {
+        Ok(mut c) => {
+            c.work += spent;
+            Ok(c)
+        }
+        Err(Refusal::Not(w, n)) => Err(Refusal::Not(w, n + spent)),
+        Err(e) => Err(e),
+    }
+}
+
+fn compile_with(
+    it: &Interp,
+    proc: &PsArray,
+    ncomp: usize,
+    strict: bool,
+    share: ShareMode,
+    spent: u64,
 ) -> Result<Compiled, Refusal> {
     let mut c = Compiler {
         it,
@@ -421,8 +765,16 @@ pub(crate) fn compile(
         strict,
         work: 0,
         deadline: it.remaining_budget().1,
-        steps_left: it.remaining_budget().0,
+        steps_left: it.remaining_budget().0.map(|s| s.saturating_sub(spent)),
         limit: None,
+        share,
+        subs: Vec::new(),
+        owner: Vec::new(),
+        sub_insns: 0,
+        frames: Vec::new(),
+        defs: HashMap::new(),
+        seen: HashMap::new(),
+        share_fails: HashMap::new(),
     };
     let r = (|c: &mut Compiler| -> CResult<(Kernel, bool, Vec<String>)> {
         let (ri, rj) = (c.ireg(), c.ireg());
@@ -463,9 +815,13 @@ pub(crate) fn compile(
         }
         let noise = c.uses_noise;
         let soft = std::mem::take(&mut c.soft);
+        let mut owner = std::mem::take(&mut c.owner);
+        owner.resize(c.nregs as usize, 0);
         let mut kernel = Kernel {
             nregs: c.nregs as usize,
             body: std::mem::take(&mut c.code),
+            subs: std::mem::take(&mut c.subs),
+            owner,
             in_i: ri,
             in_j: rj,
             outputs,
@@ -473,6 +829,8 @@ pub(crate) fn compile(
             larrays: std::mem::take(&mut c.larrays),
             perm: it.noise_perm,
         };
+        super::opt::prune_subs(&mut kernel);
+        super::opt::dce(&mut kernel);
         if cfg!(debug_assertions) {
             super::check::kinds(&kernel, &c.kinds)
                 .map_err(|e| NotCompilable(format!("internal: {e}")))?;
@@ -659,8 +1017,8 @@ impl<'a> Compiler<'a> {
 
     fn emit(&mut self, i: Ins) -> CResult<()> {
         self.emitted += 1;
-        if self.emitted > MAX_INSNS {
-            return nc("the kernel is too large");
+        if self.emitted + self.sub_insns > MAX_INSNS {
+            return nc(TOO_LARGE);
         }
         self.code.push(i);
         Ok(())
@@ -673,7 +1031,10 @@ impl<'a> Compiler<'a> {
     /// The symbolic stack may not outgrow what a kernel plausibly needs
     /// (`n copy` doubles it); past that the interpreter runs the procedure
     /// and meets the program's real limits.
-    fn check_depth(&self) -> CResult<()> {
+    fn check_depth(&mut self) -> CResult<()> {
+        if let Some(f) = self.frames.last_mut() {
+            f.high = f.high.max(self.st.stack.len());
+        }
         if self.st.stack.len() > MAX_SYMBOLIC_STACK {
             return nc("the stack grows too deep");
         }
@@ -682,8 +1043,34 @@ impl<'a> Compiler<'a> {
 
     fn pop(&mut self) -> CResult<SVal> {
         match self.st.stack.pop() {
-            Some(v) => Ok(v),
+            Some(v) => {
+                self.touch(self.st.stack.len());
+                Ok(v)
+            }
             None => nc("stack underflow at compile time"),
+        }
+    }
+
+    /// A shared body read or changed stack entry `i` (see [`Frame`]).
+    #[inline]
+    fn touch(&mut self, i: usize) {
+        if let Some(f) = self.frames.last_mut() {
+            f.low = f.low.min(i);
+        }
+    }
+
+    /// A shared body looked up, defined or merged name `id`.
+    #[inline]
+    fn touch_name(&mut self, id: u32) {
+        if let Some(f) = self.frames.last_mut() {
+            f.ids.insert(id);
+        }
+    }
+
+    fn touch_slot(&mut self, sl: Slot) {
+        match sl {
+            Slot::Stack(i) => self.touch(i),
+            Slot::Bind(_, id) => self.touch_name(id),
         }
     }
 
@@ -809,6 +1196,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn exec_name(&mut self, n: &PsName) -> CResult<()> {
+        self.touch_name(n.id());
         match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
             Found::Partial(v, f, uid) => {
                 let v = self.read_partial(n, v, f, uid)?;
@@ -858,11 +1246,357 @@ impl<'a> Compiler<'a> {
     /// Inline a procedure reached by name, keeping the name for messages.
     fn exec_named(&mut self, n: &PsName, p: &PsArray) -> CResult<()> {
         self.trail.push(n.to_string());
-        let r = self.exec_proc(p);
+        let r = self.call_named(p);
         if r.is_ok() {
             self.trail.pop();
         }
         r
+    }
+
+    // --- shared subroutines (#1064) ---------------------------------------
+    //
+    // A named procedure is inlined, or (by `share`) compiled once as a
+    // subroutine and called from each place it is used with the same
+    // context: see [`Frame`] for what "the same" is. The first call that
+    // makes a subroutine compiles the body inline as usual, recording what
+    // it reads; the code is then moved out, the registers it read from
+    // outside renamed to parameters, and a call put in its place. A body
+    // that writes a register from outside, exits a loop around it, or
+    // leaves an array it built (or anything not a plain value) where the
+    // caller can see it, stays inline.
+
+    fn call_named(&mut self, p: &PsArray) -> CResult<()> {
+        if self.share == ShareMode::Never || self.st.dead {
+            return self.exec_proc(p);
+        }
+        let pid = p.identity();
+        if self.reuse(pid, p)? {
+            return Ok(());
+        }
+        let candidate = (match self.share {
+            ShareMode::All => true,
+            _ => self.seen.get(&pid).is_some_and(|&n| n >= SHARE_MIN),
+        }) && self.defs.get(&pid).map_or(0, Vec::len) < MAX_DEFS
+            && self.share_fails.get(&pid).copied().unwrap_or(0) < MAX_SHARE_FAILS;
+        if candidate {
+            return self.compile_shared(pid, p);
+        }
+        let e0 = self.emitted + self.sub_insns;
+        let r = self.exec_proc(p);
+        let size = (self.emitted + self.sub_insns).saturating_sub(e0);
+        let e = self.seen.entry(pid).or_insert(0);
+        *e = (*e).max(size);
+        r
+    }
+
+    /// Call a subroutine already made for `p`, if one serves this context.
+    fn reuse(&mut self, pid: ProcId, p: &PsArray) -> CResult<bool> {
+        let Some(defs) = self.defs.get(&pid) else {
+            return Ok(false);
+        };
+        let len = self.st.stack.len();
+        let mut hit = None;
+        for d in defs {
+            if !d.proc.same_object(p) || d.nstack > len || len + d.growth > MAX_SYMBOLIC_STACK {
+                continue;
+            }
+            let Some(kb) = self.key_of(&self.st, d.nstack, &d.ids) else {
+                continue;
+            };
+            if kb.atoms == d.key {
+                hit = Some((d.clone(), kb.regs));
+                break;
+            }
+        }
+        let Some((d, regs)) = hit else {
+            return Ok(false);
+        };
+        // What the body reads, an enclosing shared body reads too.
+        self.touch(len - d.nstack);
+        for &id in &d.ids {
+            self.touch_name(id);
+        }
+        if let Some(f) = self.frames.last_mut() {
+            f.high = f.high.max(len + d.growth);
+        }
+        self.call_sub(&d, &regs)?;
+        Ok(true)
+    }
+
+    /// The sharing key of `st` for a body that reads the top `nstack`
+    /// entries and the names `ids` (sorted); `None` if it holds a value no
+    /// subroutine may take.
+    fn key_of(&self, st: &State, nstack: usize, ids: &[u32]) -> Option<KeyB> {
+        let kinds = &self.kinds;
+        let mut kb = KeyB::default();
+        for s in &st.scopes {
+            match &s.kind {
+                ScopeKind::Local => kb.atoms.push(Atom::T(30)),
+                ScopeKind::Captured(d) => {
+                    kb.atoms.push(Atom::T(31));
+                    kb.n(Rc::as_ptr(d) as *const () as usize);
+                }
+            }
+        }
+        kb.n(nstack);
+        for v in &st.stack[st.stack.len() - nstack..] {
+            kb.sval(v, kinds)?;
+        }
+        for &id in ids {
+            kb.n(id as usize);
+            for s in &st.scopes {
+                if let ScopeKind::Local = s.kind {
+                    kb.binding(s.get(id), kinds)?;
+                }
+            }
+        }
+        Some(kb)
+    }
+
+    /// Compile `p` inline, recording what it reads; then make it a
+    /// subroutine if it can be one.
+    fn compile_shared(&mut self, pid: ProcId, p: &PsArray) -> CResult<()> {
+        let len = self.st.stack.len();
+        self.frames.push(Frame {
+            entry: self.st.clone(),
+            low: len,
+            high: len,
+            ids: HashSet::new(),
+            reg_base: self.nregs,
+            loops: self.loops.len(),
+            larrays: self.larrays.len(),
+            code_start: self.code.len(),
+            unshareable: false,
+        });
+        let r = self.exec_proc(p);
+        let Some(f) = self.frames.pop() else {
+            return nc("internal: sharing frame lost");
+        };
+        if let Some(parent) = self.frames.last_mut() {
+            parent.low = parent.low.min(f.low);
+            parent.high = parent.high.max(f.high);
+            parent.ids.extend(f.ids.iter().copied());
+        }
+        r?;
+        if !self.extract(p, pid, f)? {
+            *self.share_fails.entry(pid).or_insert(0) += 1;
+        }
+        Ok(())
+    }
+
+    /// Is `r` a register from before the body of `f` (and not a
+    /// subroutine's)?
+    fn outer(&self, r: Reg, base: u32) -> bool {
+        r < base && self.owner.get(r as usize).is_none_or(|&o| o == 0)
+    }
+
+    /// Move the code compiled for frame `f` into a subroutine and call it;
+    /// false (the code left inline) if it cannot be shared.
+    fn extract(&mut self, p: &PsArray, pid: ProcId, f: Frame) -> CResult<bool> {
+        if f.unshareable {
+            return Ok(false);
+        }
+        let x = &self.st;
+        let e = &f.entry;
+        let dead = x.dead;
+        if !x.dead
+            && (x.scopes.len() != e.scopes.len()
+                || x.scopes.iter().zip(&e.scopes).any(|(a, b)| a.uid != b.uid)
+                || x.stack.len() < f.low)
+        {
+            return Ok(false);
+        }
+        let mut ids: Vec<u32> = f.ids.iter().copied().collect();
+        ids.sort_unstable();
+        let nstack = e.stack.len() - f.low;
+        let Some(kb) = self.key_of(e, nstack, &ids) else {
+            return Ok(false);
+        };
+        let base = f.reg_base;
+        // The body may read registers from outside only through its key,
+        // and write none.
+        let mut used = vec![false; kb.regs.len()];
+        let mut ok = true;
+        super::ir::walk(&self.code[f.code_start..], &mut |ins| {
+            ins.regs(&mut |r, w| {
+                if self.outer(r, base) {
+                    match kb.idx.get(&r) {
+                        Some(&k) if !w => used[k as usize] = true,
+                        _ => ok = false,
+                    }
+                }
+            });
+        });
+        if !ok {
+            return Ok(false);
+        }
+        // What it leaves: the stack from `low` up, and the bindings it
+        // changed (only names it touched).
+        let mut out_stack = Vec::new();
+        let mut binds = Vec::new();
+        if !x.dead {
+            out_stack = x.stack[f.low..].to_vec();
+            for (si, (xs, es)) in x.scopes.iter().zip(&e.scopes).enumerate() {
+                if xs.names.len() < es.names.len() {
+                    return Ok(false);
+                }
+                for (nid, b) in &xs.names {
+                    if binding_eq(es.get(*nid), Some(b)) {
+                        continue;
+                    }
+                    if ids.binary_search(nid).is_err() {
+                        return Ok(false);
+                    }
+                    binds.push((si, *nid, b.clone()));
+                }
+            }
+        }
+        // Each register it leaves is an input or a result.
+        let mut src: HashMap<Reg, Src> = HashMap::new();
+        let mut results: Vec<Reg> = Vec::new();
+        let mut ok = true;
+        let mut plain_ok = true;
+        {
+            let mut see = |r: Reg| {
+                if src.contains_key(&r) {
+                    return;
+                }
+                if self.outer(r, base) {
+                    match kb.idx.get(&r) {
+                        Some(&k) => {
+                            src.insert(r, Src::In(k));
+                        }
+                        None => ok = false,
+                    }
+                } else if self.owner.get(r as usize).is_some_and(|&o| o != 0) || r < base {
+                    ok = false;
+                } else {
+                    src.insert(r, Src::Res(results.len() as u32));
+                    results.push(r);
+                }
+            };
+            let plain = |v: &SVal| match v {
+                SVal::Tuple(..) | SVal::NewDict(_) => false,
+                SVal::LArr(id, _) => (*id as usize) < f.larrays,
+                _ => true,
+            };
+            for v in &out_stack {
+                plain_ok &= plain(v);
+                sval_regs(v, &mut see);
+            }
+            for (_, _, b) in &binds {
+                if let Binding::Val(v) | Binding::Partial(v, _) = b {
+                    plain_ok &= plain(v);
+                }
+                binding_regs(b, &mut see);
+            }
+        }
+        if !ok || !plain_ok {
+            return Ok(false);
+        }
+        // Move the code out, the inputs it reads renamed to parameters.
+        let mut body = self.code.split_off(f.code_start);
+        let mut pmap: HashMap<Reg, Reg> = HashMap::new();
+        let mut params = Vec::new();
+        for (k, &r) in kb.regs.iter().enumerate() {
+            if used[k] {
+                let pr = if self.kinds[r as usize] {
+                    self.ireg()
+                } else {
+                    self.reg()
+                };
+                pmap.insert(r, pr);
+                params.push((k as u32, pr));
+            }
+        }
+        super::ir::walk_regs_mut(&mut body, &mut |r, _| {
+            if let Some(p) = pmap.get(r) {
+                *r = *p;
+            }
+        });
+        let sid = self.subs.len() as u32;
+        self.owner.resize(self.nregs as usize, 0);
+        {
+            let owner = &mut self.owner;
+            super::ir::walk(&body, &mut |ins| {
+                ins.regs(&mut |r, _| {
+                    if owner[r as usize] == 0 {
+                        owner[r as usize] = sid + 1;
+                    }
+                });
+            });
+            for &(_, r) in &params {
+                owner[r as usize] = sid + 1;
+            }
+            for &r in &results {
+                owner[r as usize] = sid + 1;
+            }
+        }
+        let size = super::ir::count(&body);
+        self.emitted = self.emitted.saturating_sub(size);
+        self.sub_insns += size;
+        self.subs.push(Sub {
+            body,
+            params: params.iter().map(|p| p.1).collect(),
+            results: results.clone(),
+        });
+        let def = Rc::new(SubDef {
+            proc: p.clone(),
+            id: sid,
+            nstack,
+            ids,
+            key: kb.atoms,
+            params,
+            results,
+            growth: f.high - e.stack.len(),
+            dead,
+            stack: out_stack,
+            binds,
+            src,
+        });
+        // Back to the state the body entered with, then the call.
+        self.st = f.entry;
+        self.call_sub(&def, &kb.regs)?;
+        self.defs.entry(pid).or_default().push(def);
+        Ok(true)
+    }
+
+    /// Call subroutine `d` with `site` as its inputs, and leave the state
+    /// its body would have.
+    fn call_sub(&mut self, d: &SubDef, site: &[Reg]) -> CResult<()> {
+        for &(k, p) in &d.params {
+            self.emit(Ins::Mov(p, Op::R(site[k as usize])))?;
+        }
+        self.emit(Ins::Call(d.id))?;
+        let mut outs = Vec::with_capacity(d.results.len());
+        for &r in &d.results {
+            let t = if self.kinds[r as usize] {
+                self.ireg()
+            } else {
+                self.reg()
+            };
+            self.emit(Ins::Mov(t, Op::R(r)))?;
+            outs.push(t);
+        }
+        if d.dead {
+            self.st.dead = true;
+            return Ok(());
+        }
+        let m = |r: Reg| match d.src.get(&r) {
+            Some(Src::In(k)) => site[*k as usize],
+            Some(Src::Res(j)) => outs[*j as usize],
+            None => r,
+        };
+        let len = self.st.stack.len();
+        self.st.stack.truncate(len - d.nstack);
+        for v in &d.stack {
+            self.st.stack.push(map_sval(v, &m));
+        }
+        for (si, id, b) in &d.binds {
+            let b = map_binding(b, &m);
+            self.st.scopes[*si].set(*id, b);
+        }
+        Ok(())
     }
 
     /// `where`, decided at compile time: the dictionary defining `n` (a
@@ -1100,8 +1834,8 @@ impl<'a> Compiler<'a> {
             }
         }
         self.emitted += code.len() - before;
-        if self.emitted > MAX_INSNS {
-            return nc("the kernel is too large");
+        if self.emitted + self.sub_insns > MAX_INSNS {
+            return nc(TOO_LARGE);
         }
         Ok(())
     }
@@ -1128,6 +1862,7 @@ impl<'a> Compiler<'a> {
             if va == vb {
                 continue;
             }
+            self.touch_slot(sl);
             let merged = match (&va, &vb) {
                 (Lk::Val(x), Lk::Val(y)) if x.is_scalar() && y.is_scalar() => {
                     let (Some(tx), Some(ty)) = (ct_of(x), ct_of(y)) else {
@@ -1413,6 +2148,7 @@ impl<'a> Compiler<'a> {
                     if sv == hv {
                         continue;
                     }
+                    self.touch_slot(sl);
                     let joined = match (&ev, &sv) {
                         (Lk::Val(x), Lk::Val(y)) => match (ct_of(x), ct_of(y)) {
                             (Some(tx), Some(ty)) => ct_join(tx, ty),
@@ -1510,6 +2246,7 @@ impl<'a> Compiler<'a> {
             trail: self.trail.len(),
             loops: self.loops.len(),
             exits: self.loops.last().map_or(0, |l| l.exits.len()),
+            frames: self.frames.len(),
         }
     }
 
@@ -1523,6 +2260,10 @@ impl<'a> Compiler<'a> {
         if let Some(l) = self.loops.last_mut() {
             l.exits.truncate(cp.exits);
         }
+        // A sharing frame is popped by the call that pushed it, error or
+        // not, so none is open past a checkpoint taken outside it.
+        debug_assert_eq!(self.frames.len(), cp.frames);
+        self.frames.truncate(cp.frames);
     }
 
     /// A counted loop: unrolled when its trips are known and few (the
@@ -1627,6 +2368,14 @@ impl<'a> Compiler<'a> {
         };
         if ctx.unrolled {
             return nc(EXIT_UNROLLED);
+        }
+        // An exit from a loop around a shared body: that body cannot be a
+        // subroutine (a `Break` in one would leave the caller's loop).
+        let nloops = self.loops.len();
+        for f in &mut self.frames {
+            if f.loops >= nloops {
+                f.unshareable = true;
+            }
         }
         if self.st.stack.len() != ctx.depth {
             return nc("exit leaves a different stack depth than the loop started with");
@@ -1804,6 +2553,7 @@ impl<'a> Compiler<'a> {
                     return nc("copy past the kernel's stack");
                 }
                 let from = len - n as usize;
+                self.touch(from);
                 for i in from..len {
                     self.charge()?;
                     let v = self.st.stack[i].clone();
@@ -1816,6 +2566,7 @@ impl<'a> Compiler<'a> {
                 if n < 0 || n as usize >= len {
                     return nc("index past the kernel's stack");
                 }
+                self.touch(len - 1 - n as usize);
                 let v = self.st.stack[len - 1 - n as usize].clone();
                 self.push(v);
             }
@@ -1826,6 +2577,7 @@ impl<'a> Compiler<'a> {
                 if n < 0 || n as usize > len {
                     return nc("roll past the kernel's stack");
                 }
+                self.touch(len - n as usize);
                 if n > 0 {
                     let s = &mut self.st.stack[len - n as usize..];
                     let k = j.rem_euclid(n) as usize;
@@ -1837,20 +2589,26 @@ impl<'a> Compiler<'a> {
             "count" => return nc("count (it sees the whole operand stack)"),
             "mark" => self.push(SVal::Mark),
             "counttomark" => {
-                let Some(p) = self.st.stack.iter().rposition(|v| *v == SVal::Mark) else {
+                let found = self.st.stack.iter().rposition(|v| *v == SVal::Mark);
+                self.touch(found.unwrap_or(0));
+                let Some(p) = found else {
                     return nc("counttomark with no mark");
                 };
                 let n = (self.st.stack.len() - p - 1) as f64;
                 self.push_num(Op::Imm(n), NT::Int);
             }
             "cleartomark" => {
-                let Some(p) = self.st.stack.iter().rposition(|v| *v == SVal::Mark) else {
+                let found = self.st.stack.iter().rposition(|v| *v == SVal::Mark);
+                self.touch(found.unwrap_or(0));
+                let Some(p) = found else {
                     return nc("cleartomark with no mark");
                 };
                 self.st.stack.truncate(p);
             }
             "]" => {
-                let Some(p) = self.st.stack.iter().rposition(|v| *v == SVal::Mark) else {
+                let found = self.st.stack.iter().rposition(|v| *v == SVal::Mark);
+                self.touch(found.unwrap_or(0));
+                let Some(p) = found else {
                     return nc("] with no mark");
                 };
                 let items = self.st.stack.split_off(p + 1);
@@ -2181,6 +2939,7 @@ impl<'a> Compiler<'a> {
                 let SVal::Name(n) = k else {
                     return nc(format!("def with a key that is {}", describe(&k)));
                 };
+                self.touch_name(n.id());
                 let Some(top) = self.st.scopes.last_mut() else {
                     return nc("internal: no scope");
                 };
@@ -2196,6 +2955,7 @@ impl<'a> Compiler<'a> {
                 let SVal::Name(n) = k else {
                     return nc("load of a non-name");
                 };
+                self.touch_name(n.id());
                 match self.lookup(&self.st, n.id(), self.st.scopes.len() - 1)? {
                     Found::Val(v) => self.push(v),
                     Found::Partial(v, f, uid) => {
@@ -2217,6 +2977,7 @@ impl<'a> Compiler<'a> {
                 let SVal::Name(n) = k else {
                     return nc("where with a key that is not a name");
                 };
+                self.touch_name(n.id());
                 let found = self.where_(&n)?;
                 match found {
                     Some(d) => {
@@ -2366,6 +3127,7 @@ impl<'a> Compiler<'a> {
                 if self.st.stack.len() < n {
                     return nc("astore past the kernel's stack");
                 }
+                self.touch(self.st.stack.len() - n);
                 let vals = self.st.stack.split_off(self.st.stack.len() - n);
                 for (k, v) in vals.into_iter().enumerate() {
                     self.put(c.clone(), Op::Imm(k as f64), NT::Int, v)?;

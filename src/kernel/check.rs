@@ -46,7 +46,7 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
         }
         Ok(())
     }
-    walk(&k.body, &mut |ins| match ins {
+    let mut g = |ins: &Ins| match ins {
         Ins::Mov(d, a) => {
             // A copy keeps the kind; an immediate is an f64 value.
             match a {
@@ -142,8 +142,12 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
             }
             Ok(())
         }
-        Ins::Loop(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => Ok(()),
-    })?;
+        Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => Ok(()),
+    };
+    walk(&k.body, &mut g)?;
+    for s in &k.subs {
+        walk(&s.body, &mut g)?;
+    }
     for o in &k.outputs {
         f(o, "an output")?;
     }

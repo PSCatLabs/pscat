@@ -839,3 +839,247 @@ fn the_size_cap_counts_each_instruction_once() {
     assert!((110_000..200_000).contains(&n), "{why}");
     same_small(prog);
 }
+
+/// `prog` matches the interpreter with procedure bodies shared as
+/// subroutines (`/all`: every named procedure; `/large`: the default rule
+/// once a kernel is too large), and inlined.
+#[track_caller]
+fn same_shared(prog: &str) {
+    for mode in ["all", "large", "never"] {
+        same(&format!("/{mode} .kernelshare {prog}"));
+    }
+}
+
+/// `kernelcompile`'s instruction count for `prog` under share `mode`.
+fn size_with(mode: &str, prog: &str) -> usize {
+    let (ok, why) = compiles(&format!("/{mode} .kernelshare {prog}"));
+    assert!(ok, "{why}");
+    why.trim_matches('(')
+        .split(' ')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("a size")
+}
+
+// A procedure that reads its argument, globals of the pixel and the stack
+// below it, and leaves a result and some definitions.
+const SHADE: &str = "/shade { /sx exch def
+      sx 1.3 mul sin sx 0.7 mul cos add k mul
+      sx 3 gt { /hi sx def } { /lo sx def } ifelse   % defined on some paths only
+      0 1 9 { 0.5 mul sx abs add sqrt add } for
+      dup 0 lt { neg } if 0.1 add } def";
+
+#[test]
+fn a_procedure_shared_across_many_contexts() {
+    same_shared(&format!(
+        "{SHOW} {SHADE}
+         /pixel {{ /j exch def /i exch def /k 0.25 def
+           i shade j shade add                         % two register contexts
+           3 shade add 3 shade add                     % a constant context, twice
+           /k i 0.01 mul def i j add shade add          % k now a register
+           j 4 gt {{ i shade }} {{ j 2 mul shade }} ifelse add    % in branches
+           0 1 3 {{ shade add }} for                    % in a loop, the counter
+           i 10 mod {{ dup 2.5 gt {{ exit }} if 0.3 add dup shade pop }} loop add
+           i 5 add shade pop hi add                     % hi is defined here on every lane
+           show3 }} def"
+    ));
+}
+
+#[test]
+fn sharing_makes_a_kernel_with_repeated_calls_smaller() {
+    let prog = format!(
+        "{SHADE} /pixel {{ /j exch def /i exch def /k 0.5 def
+           i shade j shade i j add shade i j sub shade i j mul shade
+           i 2 mul shade j 3 mul shade i j 2 mul add shade
+           add add add add add add add 0.01 mul dup dup }} def"
+    );
+    let (inl, shared) = (size_with("never", &prog), size_with("large", &prog));
+    assert!(shared * 2 < inl, "inlined {inl}, shared {shared}");
+    same_shared(&format!("{SHOW} {}", prog.replace("dup dup }", "show3 }")));
+}
+
+#[test]
+fn a_shared_procedure_with_its_own_exit_and_one_that_exits_the_callers_loop() {
+    // `seek` exits its own loop: shared. `stop5` exits the loop it is
+    // called from: it must stay inline.
+    same_shared(&format!(
+        "{SHOW} /seek {{ /sv exch def 0 {{ 1 add dup sv gt {{ exit }} if }} loop }} def
+         /stop5 {{ dup 5 gt {{ exit }} if }} def
+         /pixel {{ /j exch def /i exch def
+           i seek j seek add i j add seek add
+           0 {{ 1 add stop5 }} loop add
+           0 {{ 2 add j 1 add {{ 0.5 add }} repeat stop5 }} loop add
+           show3 }} def"
+    ));
+}
+
+#[test]
+fn shared_procedures_on_the_stack_and_in_nested_calls() {
+    // `rot3` works on the caller's stack below its own; `outer` calls
+    // `inner` several times; `pair` leaves two values; `nothing` leaves
+    // only definitions.
+    same_shared(&format!(
+        "{SHOW} /rot3 {{ 3 1 roll 2 index add }} def
+         /inner {{ dup mul 0.5 add }} def
+         /outer {{ inner exch inner add 1 index inner mul }} def
+         /pair {{ dup 2 mul exch 3 add }} def
+         /nothing {{ /n1 i 2 mul def /n2 j def }} def
+         /pixel {{ /j exch def /i exch def
+           i j 7 rot3 add add
+           i j outer j i outer add 0.001 mul add
+           i pair mul j pair mul add 0.01 mul add
+           nothing nothing n1 n2 add 0.01 mul add
+           j 3 gt {{ i 0.5 j outer }} {{ j 0.25 i outer }} ifelse pop add
+           show3 }} def"
+    ));
+}
+
+#[test]
+fn shared_procedures_raise_the_interpreters_errors() {
+    let p = "/half { dup 0 eq { pop 1 } if 10 exch div } def
+             /root { 7 exch sub sqrt } def
+             /pixel { /j exch def /i exch def i 3 sub half j half add i root add
+                      j root add 0.01 mul dup dup } def";
+    for mode in ["all", "large"] {
+        same_error(&format!("/{mode} .kernelshare {p}"), "rangecheck");
+    }
+}
+
+/// A program whose procedures are called from many contexts: with
+/// constants and registers, inside branches and loops, nested in each
+/// other, reading the caller's names and stack and defining names of
+/// their own, some with loops and `exit`s of their own and some exiting
+/// the caller's loop.
+fn shared_program(r: &mut Rng) -> String {
+    let mut defs = String::new();
+    let mut procs: Vec<String> = Vec::new();
+    for k in 0..3 {
+        let name = format!("p{k}");
+        // Each takes one number and leaves one; `g` is the caller's.
+        let mut vars = vec!["a".to_string(), "g".to_string()];
+        let mut body = String::from("/a exch def ");
+        if let Some(prev) = procs.last()
+            && r.below(2) == 0
+        {
+            body += &format!("/a a {prev} def ");
+        }
+        match r.below(5) {
+            0 => {
+                body += &format!(
+                    "a 0 gt {{ /q{k} {} def }} {{ /q{k} {} def }} ifelse ",
+                    expr(r, 2, &vars),
+                    expr(r, 2, &vars)
+                );
+                vars.push(format!("q{k}"));
+            }
+            1 => {
+                // Defined on some paths only.
+                body += &format!("a 1 gt {{ /h{k} {} def }} if ", expr(r, 2, &vars));
+            }
+            2 => {
+                body += &format!(
+                    "/a a abs 1 add {{ dup 20 gt {{ exit }} if {} abs 1 add add }} loop def ",
+                    expr(r, 1, &vars)
+                );
+            }
+            3 => body += "/g g 0.5 mul a add def ",
+            _ => {}
+        }
+        body += &expr(r, 3, &vars);
+        defs += &format!("/{name} {{ {body} }} def\n");
+        procs.push(name);
+    }
+    defs += "/ex2 { dup 2 gt { exit } if } def\n";
+    let mut main = String::from("/j exch def /i exch def /g i j add 0.1 mul def 0\n");
+    let vars = vec!["i".to_string(), "j".to_string(), "g".to_string()];
+    for _ in 0..6 {
+        let p = &procs[r.below(procs.len() as u64) as usize];
+        let call = match r.below(7) {
+            0 => format!("{} {p}", expr(r, 2, &vars)),
+            1 => format!("{} {p}", r.below(9) as i64 - 4),
+            2 => format!(
+                "{} 0 gt {{ {} {p} }} {{ {} {p} }} ifelse",
+                expr(r, 1, &vars),
+                expr(r, 1, &vars),
+                expr(r, 1, &vars)
+            ),
+            3 => format!("0 0 1 {} {{ {p} add }} for", r.below(20)),
+            4 => format!("0 {{ 1 add dup {p} pop ex2 }} loop"),
+            5 => format!("/g {} def g {p} g add", expr(r, 1, &vars)),
+            _ => format!("i {p} j {p} 2 index pop add"),
+        };
+        main += &format!("{call} add\n");
+    }
+    format!(
+        "{SHOW} 5 noiseseed /Tbl [ 3 1.5 -2 7 0.25 9 4 4.5 ] def\n{defs}/pixel {{ {main} show3 }} bind def"
+    )
+}
+
+#[test]
+fn differential_fuzz_shared() {
+    let cases = 150;
+    let mut r = Rng(0x5eed_1064);
+    let (mut ran, mut errors, mut shared) = (0, 0, 0);
+    for n in 0..cases {
+        let prog = shared_program(&mut r);
+        // The sharing must really happen: count the kernels with any.
+        let (_, why) = compiles(&format!("/all .kernelshare {prog}"));
+        shared += usize::from(why.contains("shared subroutines"));
+        let reference = render_sized("interpret", &prog, 33, 5);
+        errors += usize::from(reference.is_err());
+        for mode in ["all", "large"] {
+            let p = format!("/{mode} .kernelshare {prog}");
+            let (k, ran_compiled) = render_counted("strict", &p, 33, 5);
+            ran += usize::from(ran_compiled);
+            if let Err(s) = &k
+                && s.starts_with("kernelimage: not compiled")
+            {
+                // Outside the subset either way (a type change across a
+                // loop, say): inlined, it must not compile either.
+                let (inl, _) =
+                    render_counted("strict", &format!("/never .kernelshare {prog}"), 33, 5);
+                assert!(
+                    matches!(&inl, Err(t) if t.starts_with("kernelimage: not compiled")),
+                    "case {n} /{mode}: compiles only inlined: {s}\n{prog}"
+                );
+                continue;
+            }
+            assert!(
+                k == reference,
+                "case {n} /{mode}: compiled {:?} vs interpreted {:?}\n{prog}",
+                k.as_ref().err(),
+                reference.as_ref().err()
+            );
+        }
+    }
+    assert!(errors < cases / 2, "{errors} of {cases} cases errored");
+    assert!(
+        ran >= cases,
+        "only {ran} of {} images came from the compiled path",
+        2 * cases
+    );
+    assert!(
+        shared >= cases / 2,
+        "only {shared} of {cases} kernels shared code"
+    );
+}
+
+#[test]
+fn unused_results_of_operations_that_can_fail_still_fail() {
+    // Dead-code elimination drops unused pure results only: a division by
+    // zero or a negative sqrt whose value is popped is still the error.
+    same_error(
+        "/pixel { /j exch def /i exch def 1 i 3 sub div pop i j add 0.01 mul dup dup } def",
+        "undefinedresult",
+    );
+    same_error(
+        "/pixel { /j exch def /i exch def i 50 sub sqrt pop i 0.01 mul dup dup } def",
+        "rangecheck",
+    );
+    // And unused pure results go without changing the picture.
+    same(
+        "/pixel { /j exch def /i exch def i j mul pop i 3 add /u exch def
+           j 2 gt { /w i def } { /w j def } ifelse
+           i 0.013 mul dup j 0.1 mul } def",
+    );
+}

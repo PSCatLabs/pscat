@@ -418,6 +418,8 @@ pub struct Interp {
     pub(crate) page_device_notes: std::collections::HashSet<String>,
     /// How `kernelimage` runs its procedure (`.kernelmode`, #742).
     pub(crate) kernel_mode: crate::kernel::KernelMode,
+    /// `.kernelshare`: when the kernel compiler shares procedure bodies.
+    pub(crate) kernel_share: crate::kernel::compile::ShareMode,
     /// Reasons a `kernelimage` procedure did not compile, each noted once.
     pub(crate) kernel_notes: std::collections::HashSet<String>,
     /// `kernelimage` calls finished by the compiled path, by it with some
@@ -596,6 +598,7 @@ impl Interp {
             max_page_pixels: None,
             page_device_notes: std::collections::HashSet::new(),
             kernel_mode: crate::kernel::KernelMode::Auto,
+            kernel_share: crate::kernel::compile::ShareMode::Auto,
             kernel_notes: std::collections::HashSet::new(),
             kernel_stats: (0, 0, 0),
             steps_used: 0,

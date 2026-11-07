@@ -19,49 +19,176 @@
 //! every incoming path; a partly defined name is read only behind an
 //! `Assert` of its flag.
 
+//!
+//! **Subroutines** (`Ins::Call`, #1064). Each body (the kernel's own, and
+//! each subroutine's) is packed on its own, into a region of registers
+//! disjoint from every body that may be running when it is: a
+//! subroutine's region lies past the regions of all its callers. So a
+//! call clobbers nothing its caller keeps, whatever is live across it. A
+//! subroutine's parameters are live from its start and its results to its
+//! end, as the kernel's inputs and outputs are for the kernel's body.
+
+use std::collections::HashSet;
+
 use super::ir::{Ins, Kernel, Op, Reg};
 
-/// Pack `k`'s registers; returns the new register count.
+/// Pack `k`'s registers. Leaves `k` as it is if its subroutine structure
+/// is not what the compiler makes (a register shared between bodies other
+/// than as a parameter or a result).
 pub(crate) fn allocate(k: &mut Kernel) {
     let n = k.nregs;
     if n == 0 {
         return;
     }
+    let groups = k.subs.len() + 1;
+    let owner: Vec<usize> = (0..n)
+        .map(|r| k.owner.get(r).copied().unwrap_or(0) as usize)
+        .collect();
+    if owner.iter().any(|&g| g >= groups) {
+        debug_assert!(false, "a register owned by no body");
+        return;
+    }
+    let params: Vec<HashSet<Reg>> = std::iter::once(HashSet::new())
+        .chain(k.subs.iter().map(|s| s.params.iter().copied().collect()))
+        .collect();
+    let results: Vec<HashSet<Reg>> = std::iter::once(HashSet::new())
+        .chain(k.subs.iter().map(|s| s.results.iter().copied().collect()))
+        .collect();
+    // Check the structure, and find each body's callers.
+    let mut callers: Vec<Vec<usize>> = vec![Vec::new(); groups];
+    for g in 0..groups {
+        let body = if g == 0 { &k.body } else { &k.subs[g - 1].body };
+        let mut ok = true;
+        super::ir::walk(body, &mut |ins| {
+            if let Ins::Call(id) = ins {
+                let c = *id as usize + 1;
+                // A subroutine calls only subroutines made before it.
+                if c >= groups || (g != 0 && c >= g) {
+                    ok = false;
+                } else if !callers[c].contains(&g) {
+                    callers[c].push(g);
+                }
+            }
+            ins.regs(&mut |r, w| {
+                let o = owner[r as usize];
+                let shared = if w {
+                    params[o].contains(&r)
+                } else {
+                    results[o].contains(&r)
+                };
+                if o != g && (o == 0 || !shared) {
+                    ok = false;
+                }
+            });
+        });
+        if !ok {
+            debug_assert!(false, "registers shared between bodies");
+            return;
+        }
+    }
+    // Pack each body on its own.
+    let mut local = vec![0u32; n];
+    let mut count = Vec::with_capacity(groups);
+    for g in 0..groups {
+        let (body, entry, exit): (&Vec<Ins>, Vec<Reg>, Vec<Reg>) = if g == 0 {
+            let outs = k
+                .outputs
+                .iter()
+                .filter_map(|o| match o {
+                    Op::R(r) => Some(*r),
+                    Op::Imm(_) => None,
+                })
+                .collect();
+            (&k.body, vec![k.in_i, k.in_j], outs)
+        } else {
+            let s = &k.subs[g - 1];
+            (&s.body, s.params.clone(), s.results.clone())
+        };
+        count.push(pack(body, &entry, &exit, &owner, g, &mut local));
+    }
+    // Lay the regions out: each past every caller's (callers come first:
+    // the kernel's body, then subroutines from the last made).
+    let mut off = vec![0u32; groups];
+    for g in (1..groups).rev() {
+        off[g] = callers[g]
+            .iter()
+            .map(|&c| off[c] + count[c])
+            .max()
+            .unwrap_or(count[0]);
+    }
+    let map: Vec<u32> = (0..n).map(|r| off[owner[r]] + local[r]).collect();
+    let total = (0..groups).map(|g| off[g] + count[g]).max().unwrap_or(0);
+    rename(&mut k.body, &map);
+    for s in &mut k.subs {
+        rename(&mut s.body, &map);
+        for r in s.params.iter_mut().chain(s.results.iter_mut()) {
+            *r = map[*r as usize];
+        }
+    }
+    k.in_i = map[k.in_i as usize];
+    k.in_j = map[k.in_j as usize];
+    for o in &mut k.outputs {
+        if let Op::R(r) = o {
+            *r = map[*r as usize];
+        }
+    }
+    let nregs = total.max(1) as usize;
+    if !k.subs.is_empty() {
+        let mut own = vec![0u32; nregs];
+        for r in 0..n {
+            own[map[r] as usize] = owner[r] as u32;
+        }
+        k.owner = own;
+    }
+    k.nregs = nregs;
+}
+
+/// Linear scan over the registers of body `g` (those `owner` gives it):
+/// sets their `local` numbers, returns how many it used.
+fn pack(
+    body: &[Ins],
+    entry: &[Reg],
+    exit: &[Reg],
+    owner: &[usize],
+    g: usize,
+    local: &mut [u32],
+) -> u32 {
+    let n = owner.len();
     // First and last position of each register.
     let mut first = vec![usize::MAX; n];
     let mut last = vec![0usize; n];
     let mut loops: Vec<(usize, usize)> = Vec::new();
     let mut pos = 1usize;
     walk(
-        &k.body,
+        body,
         &mut pos,
         &mut |r, p| {
             let r = r as usize;
-            first[r] = first[r].min(p);
-            last[r] = last[r].max(p);
+            if owner[r] == g {
+                first[r] = first[r].min(p);
+                last[r] = last[r].max(p);
+            }
         },
         &mut loops,
     );
     let end = pos + 1;
     // The inputs are written before the body; the outputs read after it.
-    for r in [k.in_i, k.in_j] {
+    for &r in entry {
         first[r as usize] = 0;
     }
-    for o in &k.outputs {
-        if let Op::R(r) = o {
-            last[*r as usize] = end;
-            first[*r as usize] = first[*r as usize].min(end);
-        }
+    for &r in exit {
+        last[r as usize] = end;
+        first[r as usize] = first[r as usize].min(end);
     }
+    let regs: Vec<usize> = (0..n)
+        .filter(|&r| owner[r] == g && first[r] != usize::MAX)
+        .collect();
     // Widen across loops until nothing changes (an outer loop may widen an
     // interval into an inner one's range and back).
     loop {
         let mut changed = false;
         for &(ls, le) in &loops {
-            for r in 0..n {
-                if first[r] == usize::MAX {
-                    continue;
-                }
+            for &r in &regs {
                 let inside = first[r] <= le && last[r] >= ls;
                 let outside = first[r] < ls || last[r] > le;
                 if inside && outside {
@@ -79,9 +206,8 @@ pub(crate) fn allocate(k: &mut Kernel) {
         }
     }
     // Linear scan.
-    let mut order: Vec<usize> = (0..n).filter(|&r| first[r] != usize::MAX).collect();
+    let mut order = regs;
     order.sort_by_key(|&r| (first[r], last[r]));
-    let mut map = vec![0u32; n];
     let mut active: std::collections::BinaryHeap<std::cmp::Reverse<(usize, u32)>> =
         std::collections::BinaryHeap::new();
     let mut free: Vec<u32> = Vec::new();
@@ -99,18 +225,10 @@ pub(crate) fn allocate(k: &mut Kernel) {
             count += 1;
             count - 1
         });
-        map[r] = reg;
+        local[r] = reg;
         active.push(std::cmp::Reverse((last[r], reg)));
     }
-    rename(&mut k.body, &map);
-    k.in_i = map[k.in_i as usize];
-    k.in_j = map[k.in_j as usize];
-    for o in &mut k.outputs {
-        if let Op::R(r) = o {
-            *r = map[*r as usize];
-        }
-    }
-    k.nregs = count.max(1) as usize;
+    count
 }
 
 /// Visit every register occurrence with its position; record loop ranges.
@@ -216,7 +334,7 @@ fn each_reg(ins: &Ins, mut f: impl FnMut(Reg)) {
             }
             each_op(octtag, &mut f);
         }
-        Ins::LNew(_) | Ins::Break | Ins::Abort | Ins::If(..) | Ins::Loop(_) => {}
+        Ins::LNew(_) | Ins::Break | Ins::Abort | Ins::If(..) | Ins::Loop(_) | Ins::Call(_) => {}
     }
 }
 
@@ -304,7 +422,7 @@ fn rename(b: &mut [Ins], map: &[u32]) {
                 rename(e, map);
             }
             Ins::Loop(body) => rename(body, map),
-            Ins::LNew(_) | Ins::Break | Ins::Abort => {}
+            Ins::LNew(_) | Ins::Break | Ins::Abort | Ins::Call(_) => {}
         }
     }
 }

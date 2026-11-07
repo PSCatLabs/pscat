@@ -25,6 +25,7 @@ pub(crate) mod exec;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 pub(crate) mod gpu;
 pub(crate) mod ir;
+pub(crate) mod opt;
 pub(crate) mod regalloc;
 
 use std::cell::RefCell;
@@ -73,6 +74,7 @@ pub fn install(dict: &mut Dict) {
     use crate::ops::op;
     op(dict, "kernelimage", kernelimage);
     op(dict, "kernelcompile", kernelcompile);
+    op(dict, ".kernelshare", kernelshare);
     op(dict, ".kernelmode", kernelmode);
     op(dict, ".kernelstats", kernelstats);
     // The drivers' own helpers (`.kfstore` and the rest) are not installed:
@@ -162,7 +164,7 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
     };
     if it.kernel_mode != KernelMode::Interpret {
         let strict = it.kernel_mode == KernelMode::Strict;
-        let compiled = compile::compile(it, &a.proc, a.ncomp, strict);
+        let compiled = compile::compile(it, &a.proc, a.ncomp, strict, it.kernel_share);
         lap("compile", t0);
         if let Ok(c) = &compiled {
             it.charge_steps(c.work);
@@ -179,8 +181,8 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
             && timing
         {
             eprintln!(
-                "pscat: kernel size: {} instructions, {} registers",
-                c.kernel.size(),
+                "pscat: kernel size: {}, {} registers",
+                size_note(&c.kernel),
                 c.kernel.nregs
             );
         }
@@ -459,7 +461,11 @@ fn run(
             }
         });
     }
-    it.charge_steps(ctl.steps.load(std::sync::atomic::Ordering::Relaxed));
+    let steps = ctl.steps.load(std::sync::atomic::Ordering::Relaxed);
+    if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+        eprintln!("pscat: kernel steps: {steps} lane-instructions");
+    }
+    it.charge_steps(steps);
     if let Ok(mut fe) = first_err.lock()
         && let Some(e) = fe.take()
     {
@@ -501,21 +507,28 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
     if !p.executable {
         return Err(PsError::Typecheck);
     }
-    let compiled = compile::compile(it, proc, ncomp as usize, false);
+    let t0 = crate::clock::Clock::mono_ns();
+    let compiled = compile::compile(it, proc, ncomp as usize, false, it.kernel_share);
+    if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+        eprintln!(
+            "pscat: kernelcompile: {:.2} ms",
+            (crate::clock::Clock::mono_ns() - t0) as f64 / 1e6
+        );
+    }
     match &compiled {
         Ok(c) => it.charge_steps(c.work),
         Err(compile::Refusal::Not(_, work)) => it.charge_steps(*work),
         Err(compile::Refusal::Limit(_)) => {}
     }
     let (ok, why) = match compiled {
-        Ok(c) if c.soft.is_empty() => (true, format!("{} instructions", c.kernel.size())),
+        Ok(c) if c.soft.is_empty() => (true, size_note(&c.kernel)),
         Ok(compile::Compiled {
             kernel: k, soft, ..
         }) => (
             true,
             format!(
-                "{} instructions; branches that run in the interpreter when taken: {}",
-                k.size(),
+                "{}; branches that run in the interpreter when taken: {}",
+                size_note(&k),
                 soft.join("; ")
             ),
         ),
@@ -529,6 +542,14 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// "N instructions", and how many of them form shared subroutines.
+fn size_note(k: &ir::Kernel) -> String {
+    match k.subs.len() {
+        0 => format!("{} instructions", k.size()),
+        n => format!("{} instructions, {n} shared subroutines", k.size()),
+    }
+}
+
 fn kernelmode(it: &mut Interp) -> Result<(), PsError> {
     let v = it.pop()?;
     let Value::Name(n) = &v.value else {
@@ -538,6 +559,25 @@ fn kernelmode(it: &mut Interp) -> Result<(), PsError> {
         "auto" => KernelMode::Auto,
         "interpret" => KernelMode::Interpret,
         "strict" => KernelMode::Strict,
+        _ => return Err(PsError::Rangecheck),
+    };
+    Ok(())
+}
+
+/// `name .kernelshare -`: whether the compiler shares procedure bodies
+/// as subroutines (#1064): `/auto` (only when inlining makes the kernel
+/// too large), `/never`, `/large` (bodies of some size called again) or
+/// `/all` (every named procedure: a test hook).
+fn kernelshare(it: &mut Interp) -> Result<(), PsError> {
+    let v = it.pop()?;
+    let Value::Name(n) = &v.value else {
+        return Err(PsError::Typecheck);
+    };
+    it.kernel_share = match &**n {
+        "auto" => compile::ShareMode::Auto,
+        "never" => compile::ShareMode::Never,
+        "large" => compile::ShareMode::Large,
+        "all" => compile::ShareMode::All,
         _ => return Err(PsError::Rangecheck),
     };
     Ok(())

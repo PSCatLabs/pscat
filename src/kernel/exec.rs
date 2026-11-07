@@ -588,6 +588,14 @@ impl<'k> Machine<'k> {
                     // that left an *outer* loop meanwhile are still out.
                     mask = self.live(mask);
                 }
+                Ins::Call(id) => {
+                    // A subroutine has no `Break` of its own loops' caller:
+                    // the lanes it leaves running are the active ones less
+                    // any it retired, as after an `If`.
+                    let k = self.k;
+                    self.block(&k.subs[*id as usize].body, mask)?;
+                    mask = self.live(mask);
+                }
                 Ins::Break => {
                     if let Some(a) = self.alive.last_mut() {
                         *a &= !mask;

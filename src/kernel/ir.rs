@@ -247,10 +247,225 @@ pub(crate) enum Ins {
     },
     If(Reg, Vec<Ins>, Vec<Ins>),
     Loop(Vec<Ins>),
+    /// Run shared subroutine `id` ([`Kernel::subs`]) for the active lanes,
+    /// as if its body stood here. Its parameters are written just before
+    /// and its results copied out just after; no `Break` in it leaves it.
+    Call(u32),
     /// Leave the innermost loop (the active lanes stop iterating).
     Break,
     /// Every active lane would raise a PostScript error here.
     Abort,
+}
+
+impl Ins {
+    /// Visit the registers this instruction itself (not a nested block)
+    /// reads (`false`) or writes (`true`).
+    pub(crate) fn regs_mut(&mut self, f: &mut dyn FnMut(&mut Reg, bool)) {
+        let rd = |o: &mut Op, f: &mut dyn FnMut(&mut Reg, bool)| {
+            if let Op::R(r) = o {
+                f(r, false);
+            }
+        };
+        match self {
+            Ins::Mov(d, a)
+            | Ins::Un(_, d, a)
+            | Ins::IUn(_, d, a)
+            | Ins::I2F(d, a)
+            | Ins::I2FExact(d, a)
+            | Ins::F2I(d, a) => {
+                rd(a, f);
+                f(d, true);
+            }
+            Ins::MovI(d, _) => f(d, true),
+            Ins::Bin(_, d, a, b) | Ins::IBin(_, d, a, b) => {
+                rd(a, f);
+                rd(b, f);
+                f(d, true);
+            }
+            Ins::ForFin(d, a, b, c) => {
+                rd(a, f);
+                rd(b, f);
+                rd(c, f);
+                f(d, true);
+            }
+            Ins::CheckInt(a, b) => {
+                rd(a, f);
+                rd(b, f);
+            }
+            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => rd(a, f),
+            Ins::Gather {
+                d,
+                dtag,
+                row,
+                rtag,
+                col,
+                ctag,
+                ..
+            } => {
+                for x in [row, rtag, col, ctag] {
+                    rd(x, f);
+                }
+                f(d, true);
+                if let Some(t) = dtag {
+                    f(t, true);
+                }
+            }
+            Ins::LGet {
+                d, dtag, idx, itag, ..
+            } => {
+                rd(idx, f);
+                rd(itag, f);
+                f(d, true);
+                f(dtag, true);
+            }
+            Ins::LPut {
+                idx, itag, v, vtag, ..
+            } => {
+                for x in [idx, itag, v, vtag] {
+                    rd(x, f);
+                }
+            }
+            Ins::Noise { kind, d, a, octtag } => {
+                for x in a.iter_mut() {
+                    rd(x, f);
+                }
+                rd(octtag, f);
+                for r in d.iter_mut().take(kind.outputs()) {
+                    f(r, true);
+                }
+            }
+            Ins::If(c, ..) => f(c, false),
+            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => {}
+        }
+    }
+
+    /// As [`Ins::regs_mut`], reading only.
+    pub(crate) fn regs(&self, f: &mut dyn FnMut(Reg, bool)) {
+        let rd = |o: &Op, f: &mut dyn FnMut(Reg, bool)| {
+            if let Op::R(r) = o {
+                f(*r, false);
+            }
+        };
+        match self {
+            Ins::Mov(d, a)
+            | Ins::Un(_, d, a)
+            | Ins::IUn(_, d, a)
+            | Ins::I2F(d, a)
+            | Ins::I2FExact(d, a)
+            | Ins::F2I(d, a) => {
+                rd(a, f);
+                f(*d, true);
+            }
+            Ins::MovI(d, _) => f(*d, true),
+            Ins::Bin(_, d, a, b) | Ins::IBin(_, d, a, b) => {
+                rd(a, f);
+                rd(b, f);
+                f(*d, true);
+            }
+            Ins::ForFin(d, a, b, c) => {
+                rd(a, f);
+                rd(b, f);
+                rd(c, f);
+                f(*d, true);
+            }
+            Ins::CheckInt(a, b) => {
+                rd(a, f);
+                rd(b, f);
+            }
+            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => rd(a, f),
+            Ins::Gather {
+                d,
+                dtag,
+                row,
+                rtag,
+                col,
+                ctag,
+                ..
+            } => {
+                for x in [row, rtag, col, ctag] {
+                    rd(x, f);
+                }
+                f(*d, true);
+                if let Some(t) = dtag {
+                    f(*t, true);
+                }
+            }
+            Ins::LGet {
+                d, dtag, idx, itag, ..
+            } => {
+                rd(idx, f);
+                rd(itag, f);
+                f(*d, true);
+                f(*dtag, true);
+            }
+            Ins::LPut {
+                idx, itag, v, vtag, ..
+            } => {
+                for x in [idx, itag, v, vtag] {
+                    rd(x, f);
+                }
+            }
+            Ins::Noise { kind, d, a, octtag } => {
+                for x in a {
+                    rd(x, f);
+                }
+                rd(octtag, f);
+                for r in d.iter().take(kind.outputs()) {
+                    f(*r, true);
+                }
+            }
+            Ins::If(c, ..) => f(*c, false),
+            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => {}
+        }
+    }
+
+    /// The nested blocks of an `If` or `Loop`.
+    pub(crate) fn blocks(&self) -> Vec<&Vec<Ins>> {
+        match self {
+            Ins::If(_, t, e) => vec![t, e],
+            Ins::Loop(b) => vec![b],
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn blocks_mut(&mut self) -> Vec<&mut Vec<Ins>> {
+        match self {
+            Ins::If(_, t, e) => vec![t, e],
+            Ins::Loop(b) => vec![b],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Visit every instruction of `b`, nested blocks included (outer first).
+pub(crate) fn walk(b: &[Ins], f: &mut dyn FnMut(&Ins)) {
+    for i in b {
+        f(i);
+        for nb in i.blocks() {
+            walk(nb, f);
+        }
+    }
+}
+
+/// Visit every register occurrence in `b`, nested blocks included.
+pub(crate) fn walk_regs_mut(b: &mut [Ins], f: &mut dyn FnMut(&mut Reg, bool)) {
+    for i in b {
+        i.regs_mut(f);
+        for nb in i.blocks_mut() {
+            walk_regs_mut(nb, f);
+        }
+    }
+}
+
+/// A shared subroutine: a procedure body compiled once and run by `Call`
+/// from each place it is used with the same symbolic context (#1064).
+#[derive(Clone, Debug)]
+pub(crate) struct Sub {
+    pub body: Vec<Ins>,
+    /// Written by the caller just before each `Call`.
+    pub params: Vec<Reg>,
+    /// Read by the caller just after each `Call`.
+    pub results: Vec<Reg>,
 }
 
 /// A table captured from the program's data at compile time: an array or
@@ -308,6 +523,14 @@ pub(crate) enum TableKind {
 pub(crate) struct Kernel {
     pub nregs: usize,
     pub body: Vec<Ins>,
+    /// Shared subroutines, run by `Ins::Call`. A subroutine calls only
+    /// subroutines of lower index.
+    pub subs: Vec<Sub>,
+    /// Which body owns each register: 0 for `body`, `s + 1` for `subs[s]`
+    /// (empty when there are no subroutines). A subroutine's registers
+    /// occur only in its own body, except that its callers write its
+    /// parameters and read its results.
+    pub owner: Vec<u32>,
     /// Register holding `i` (column) and `j` (row).
     pub in_i: Reg,
     pub in_j: Reg,
@@ -320,17 +543,19 @@ pub(crate) struct Kernel {
 }
 
 impl Kernel {
-    /// Instruction count, counting nested blocks.
+    /// Instruction count, counting nested blocks and each subroutine once.
     pub(crate) fn size(&self) -> usize {
-        fn count(b: &[Ins]) -> usize {
-            b.iter()
-                .map(|i| match i {
-                    Ins::If(_, t, e) => 1 + count(t) + count(e),
-                    Ins::Loop(body) => 1 + count(body),
-                    _ => 1,
-                })
-                .sum()
-        }
-        count(&self.body)
+        count(&self.body) + self.subs.iter().map(|s| count(&s.body)).sum::<usize>()
     }
+}
+
+/// Instruction count of a block, nested blocks included.
+pub(crate) fn count(b: &[Ins]) -> usize {
+    b.iter()
+        .map(|i| match i {
+            Ins::If(_, t, e) => 1 + count(t) + count(e),
+            Ins::Loop(body) => 1 + count(body),
+            _ => 1,
+        })
+        .sum()
 }

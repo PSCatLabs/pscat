@@ -512,6 +512,11 @@ fn block(
                 block(b, k, toff, s, ind + 1, lp)?;
                 let _ = writeln!(s, "{pad}}}");
             }
+            Ins::Call(id) => {
+                // Inlined: a subroutine's `Break`s are its own loops', and an
+                // `Abort` returns from the shader as anywhere else.
+                block(&k.subs[*id as usize].body, k, toff, s, ind, lp)?;
+            }
             Ins::Break => {
                 let _ = writeln!(s, "{pad}break;");
             }
