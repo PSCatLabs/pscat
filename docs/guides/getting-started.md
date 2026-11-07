@@ -61,6 +61,14 @@ cargo test                                # language + pixel-level render tests
 
 More on the less obvious ones:
 
+- **Streams.** stdout is the program's own output (`print`, `=`, `==`) and
+  nothing else: `pscat: wrote FILE` and every other note go to stderr, so
+  `pscat --pdf out.pdf prog.ps | jq .` pipes cleanly. If the reader of stdout
+  goes away (`| head`) pscat ends quietly with status 141, after writing the
+  page and flushing any files the program left open. A file (or `-`) run with
+  no output flag opens a window; when neither stdin nor stdout is a terminal
+  (a script, an agent's shell) pscat says so on stderr first, as a hint to pass
+  `--headless`, `--png`/`--svg`/`--pdf` or `-e` for batch use.
 - **Multi-page output.** `showpage` ends a page. The window keeps showing the
   finished page, and `--png` numbers the pages (`out-001.png`, ...).
   `--svg` and `--pdf` export the same paint pipeline. A PDF is a real

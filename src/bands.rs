@@ -69,6 +69,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
 use pscat::Interp;
+use pscat::PsError;
 use tiny_skia::Pixmap;
 
 use crate::Options;
@@ -546,6 +547,12 @@ fn run_band(
     let mut hit_limit = false;
     let mut error = match interp.run_source(source) {
         Ok(()) => None,
+        // The reader of stdout went away (`| head`): not a failure to report
+        // (#1059); `main` ends with the status for it.
+        Err(PsError::Io) if interp.stdout_closed() => {
+            crate::note_stdout_closed();
+            None
+        }
         Err(e) => {
             hit_limit = e.limit().is_some();
             let mut report = interp.error_report(&e);

@@ -216,7 +216,9 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   **1 GiB when `--allow-write` is given** unless the flag says otherwise; the
   library applies none until the embedder sets one. A write that would pass the
   cap writes nothing and raises `limitcheck`; `writereals` checks its whole
-  size before it opens (and so truncates) the file. Unlike `--max-steps`,
+  size before it opens (and so truncates) the file (under `--bands` another band
+  can spend the budget between that check and the write, so the file may be
+  truncated and partly written before the `limitcheck`). Unlike `--max-steps`,
   `--max-time` and `--max-memory`, which end the run with an error `stopped`
   cannot catch, this one is an ordinary, catchable `limitcheck`: a program that
   catches it can only fail to write more, so the disk is still safe, and the

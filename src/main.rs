@@ -6,7 +6,7 @@ use pscat::gfx::{self, PageSizeSource};
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
-use pscat::{Interp, Limits};
+use pscat::{Interp, Limits, PsError};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). A
 // thread-local add per allocation or free, folded into one shared count
@@ -41,18 +41,44 @@ mod bands;
 /// sees the same as with any other Unix tool.
 const EXIT_STDOUT_CLOSED: u8 = 141;
 
-/// What `println!`/`print!` write (see the macros above). A closed reader
-/// ends the process quietly with [`EXIT_STDOUT_CLOSED`]: Rust ignores
-/// `SIGPIPE`, so the write fails with `EPIPE` instead of killing us, and the
-/// std macros turn that into a panic. Any other write error is a real
-/// failure and panics as the std macros do.
+/// Set once a `println!`/`print!` of this binary found its reader gone.
+static STDOUT_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A run found the reader of stdout gone: `main` will exit with
+/// [`EXIT_STDOUT_CLOSED`].
+fn note_stdout_closed() {
+    STDOUT_CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// End the process after `--help`, `--version`, `--fonts` or `--capabilities`
+/// printed: success, or [`EXIT_STDOUT_CLOSED`] if the reader went away.
+fn exit_after_printing() -> ! {
+    let closed = STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed);
+    std::process::exit(if closed {
+        i32::from(EXIT_STDOUT_CLOSED)
+    } else {
+        0
+    });
+}
+
+/// What `println!`/`print!` write (see the macros above). Rust ignores
+/// `SIGPIPE`, so a write to a closed pipe fails with `EPIPE` instead of
+/// killing us, and the std macros turn that into a panic. Here it is
+/// remembered and the text dropped, and `main` ends with
+/// [`EXIT_STDOUT_CLOSED`] once the run is over: not at the first failed
+/// write, because the paths that follow (flushing the files a program left
+/// open, writing the page) still have to happen. Any other write error is a
+/// real failure and panics as the std macros do.
 fn stdout_text(args: std::fmt::Arguments<'_>) {
-    let mut out = io::stdout().lock();
-    if let Err(e) = out.write_fmt(args) {
-        if e.kind() == io::ErrorKind::BrokenPipe {
-            std::process::exit(i32::from(EXIT_STDOUT_CLOSED));
+    use std::sync::atomic::Ordering::Relaxed;
+    if STDOUT_CLOSED.load(Relaxed) {
+        return;
+    }
+    if let Err(e) = io::stdout().lock().write_fmt(args) {
+        if e.kind() != io::ErrorKind::BrokenPipe {
+            panic!("failed printing to stdout: {e}");
         }
-        panic!("failed printing to stdout: {e}");
+        note_stdout_closed();
     }
 }
 
@@ -373,6 +399,14 @@ fn parse_byte_count(s: &str) -> Option<u64> {
 }
 
 fn main() -> ExitCode {
+    let code = run_cli();
+    if STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
+        return ExitCode::from(EXIT_STDOUT_CLOSED);
+    }
+    code
+}
+
+fn run_cli() -> ExitCode {
     // `pscat fonts ...` is its own small CLI (src/fontpacks/cli.rs).
     let argv: Vec<String> = env::args().skip(1).collect();
     if argv.first().is_some_and(|a| a == "fonts") {
@@ -994,7 +1028,10 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
         // A reader that went away (`| head`) is not the program's fault: its
         // `ioerror` would be noise in the terminal the user is looking at
         // (#1059). The output files below are still written.
-        Err(_) if interp.stdout_closed() => false,
+        Err(PsError::Io) if interp.stdout_closed() => {
+            note_stdout_closed();
+            false
+        }
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
             if options.pstack_on_error {
@@ -1112,8 +1149,6 @@ fn finish_headless(
     }
     if ok && !lint_failed {
         ExitCode::SUCCESS
-    } else if interp.stdout_closed() {
-        ExitCode::from(EXIT_STDOUT_CLOSED)
     } else {
         ExitCode::FAILURE
     }
@@ -1941,11 +1976,11 @@ fn parse_args() -> Result<Options, String> {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_usage();
-                std::process::exit(0);
+                exit_after_printing();
             }
             "-V" | "--version" => {
                 println!("pscat {}", env!("PSCAT_VERSION"));
-                std::process::exit(0);
+                exit_after_printing();
             }
             "--fonts" => {
                 for name in pscat::font::available_fonts() {
@@ -1955,11 +1990,11 @@ fn parse_args() -> Result<Options, String> {
                 for line in pscat::fontpacks::status_lines() {
                     println!("{line}");
                 }
-                std::process::exit(0);
+                exit_after_printing();
             }
             "--capabilities" => {
                 println!("{}", pscat::capabilities::payload_json());
-                std::process::exit(0);
+                exit_after_printing();
             }
             "-e" | "--eval" => {
                 options.eval = Some(args.next().ok_or("missing expression after -e")?);

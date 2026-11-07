@@ -1247,4 +1247,29 @@ fn a_closed_stdout_ends_quietly() {
     assert!(!stderr.contains("ioerror"), "{stderr}");
     assert_eq!(out.status.code(), Some(141));
     assert!(png.exists(), "the page is still written");
+
+    // The exit still flushes a file the program left open, on a plain run and
+    // on a banded one (which must not report band 1 as failed).
+    let dir = common::scratch_dir("pscat-cli-epipe-flush");
+    let program = format!(
+        "({}/kept.txt) (w) file dup (kept) writestring pop 1 1 200000 {{ = }} for",
+        dir.display()
+    );
+    for bands in [None, Some("2")] {
+        let kept = dir.join("kept.txt");
+        let _ = std::fs::remove_file(&kept);
+        let mut args = vec!["--page", "20x20", "--allow-write", dir.to_str().unwrap()];
+        args.extend(["--png", png.to_str().unwrap()]);
+        if let Some(n) = bands {
+            args.extend(["--bands", n]);
+        }
+        args.extend(["-e", &program]);
+        let out = spawn(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("panicked"), "{bands:?}: {stderr}");
+        assert!(!stderr.contains("ioerror"), "{bands:?}: {stderr}");
+        assert!(!stderr.contains("failed"), "{bands:?}: {stderr}");
+        assert_eq!(out.status.code(), Some(141), "{bands:?}");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"kept", "{bands:?}: flushed");
+    }
 }
