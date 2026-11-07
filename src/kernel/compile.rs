@@ -29,7 +29,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::exec::{INT_LIMIT, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
-use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableKind, UnOp};
+use super::ir::{
+    BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableData, TableKind, UnOp,
+};
 use crate::interp::Interp;
 use crate::name::PsName;
 use crate::object::{Dict, Object, Operator, PsArray, Value};
@@ -315,6 +317,8 @@ const MAX_INSNS: usize = 200_000;
 const MAX_LOCAL_ARRAY: usize = 4096;
 /// Largest table a kernel may snapshot (elements).
 const MAX_TABLE: usize = 16 << 20;
+/// Largest string a kernel may snapshot (bytes, kept at one byte each).
+const MAX_TABLE_BYTES: usize = 256 << 20;
 
 pub(crate) struct Compiler<'a> {
     it: &'a Interp,
@@ -2461,12 +2465,15 @@ impl<'a> Compiler<'a> {
         }
         let (table, two) = match &o.value {
             Value::String(s) => {
-                let data: Vec<f64> = s.to_vec().into_iter().map(f64::from).collect();
+                if s.len() > MAX_TABLE_BYTES || self.it.check_alloc(s.len()).is_err() {
+                    return nc("a string table is too large");
+                }
+                let data = s.to_vec();
                 (
                     Table {
                         rows: 1,
                         cols: data.len(),
-                        data,
+                        data: TableData::U8(data),
                         kind: TableKind::Int,
                         null_rows: Vec::new(),
                     },
@@ -2475,7 +2482,7 @@ impl<'a> Compiler<'a> {
             }
             Value::Array(a) => {
                 let items = a.snapshot();
-                if items.len() > MAX_TABLE {
+                if items.len() > MAX_TABLE || self.it.check_alloc(items.len() * 8).is_err() {
                     return nc("a table is too large");
                 }
                 let nums: Option<Vec<(f64, bool)>> = items.iter().map(num_of).collect();
@@ -2616,7 +2623,7 @@ fn table_of(rows: usize, cols: usize, nums: Vec<(f64, bool)>) -> Table {
     Table {
         rows,
         cols,
-        data: nums.into_iter().map(|n| n.0).collect(),
+        data: TableData::F64(nums.into_iter().map(|n| n.0).collect()),
         kind,
         null_rows: Vec::new(),
     }

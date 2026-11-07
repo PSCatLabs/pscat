@@ -256,11 +256,37 @@ pub(crate) enum Ins {
 pub(crate) struct Table {
     pub rows: usize,
     pub cols: usize,
-    pub data: Vec<f64>,
+    pub data: TableData,
     pub kind: TableKind,
     /// Rows that are `null` in the program's array (reading one is the
     /// interpreter's `typecheck`, so the kernel aborts). Empty when none.
     pub null_rows: Vec<bool>,
+}
+
+/// A table's elements: f64s, or bytes (a string: an image read with
+/// `readstring` is a table of bytes, kept at a byte each).
+#[derive(Clone, Debug)]
+pub(crate) enum TableData {
+    F64(Vec<f64>),
+    U8(Vec<u8>),
+}
+
+impl TableData {
+    #[inline(always)]
+    pub(crate) fn at(&self, i: usize) -> f64 {
+        match self {
+            TableData::F64(v) => v[i],
+            TableData::U8(v) => f64::from(v[i]),
+        }
+    }
+
+    #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            TableData::F64(v) => v.len(),
+            TableData::U8(v) => v.len(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

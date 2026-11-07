@@ -218,7 +218,7 @@ fn lower(k: &Kernel, ncomp: usize) -> Result<(String, Vec<f32>), String> {
     let mut toff = Vec::new();
     for t in &k.tables {
         let off = data.len();
-        data.extend(t.data.iter().map(|&v| v as f32));
+        data.extend((0..t.data.len()).map(|i| t.data.at(i) as f32));
         let tag = match &t.kind {
             TableKind::Mixed(tags) => {
                 let o = data.len();

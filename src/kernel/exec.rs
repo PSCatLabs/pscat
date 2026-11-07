@@ -22,8 +22,12 @@ use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
 
-pub(crate) const LANES: usize = 64;
-const FULL: u64 = u64::MAX;
+pub(crate) const LANES: usize = 16;
+const FULL: u64 = if LANES == 64 {
+    u64::MAX
+} else {
+    (1u64 << LANES) - 1
+};
 /// Integers are held exactly in an f64 up to here.
 pub(crate) const INT_LIMIT: f64 = 9_007_199_254_740_992.0; // 2^53
 /// Element tag of a local array slot that holds PostScript's null.
@@ -402,7 +406,7 @@ impl<'k> Machine<'k> {
                             continue;
                         }
                         let ix = r as usize * tb.cols + c as usize;
-                        t[l] = tb.data[ix];
+                        t[l] = tb.data.at(ix);
                         if let TableKind::Mixed(tags) = &tb.kind {
                             tt[l] = tags[ix];
                         }
