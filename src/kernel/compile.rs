@@ -28,8 +28,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::exec::{INT_LIMIT, lane_bin, lane_un};
-use super::ir::{BinOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableKind, UnOp};
+use super::exec::{INT_LIMIT, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
+use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Table, TableKind, UnOp};
 use crate::interp::Interp;
 use crate::name::PsName;
 use crate::object::{Dict, Object, Operator, PsArray, Value};
@@ -249,12 +249,23 @@ impl Carried {
     }
 }
 
+/// Moves into merge or loop-carried registers: conversions first, then
+/// the moves (`(dst, src, dst is I64)`), done as a parallel assignment.
+#[derive(Default)]
+struct Moves {
+    pre: Vec<Ins>,
+    pairs: Vec<(Reg, Op, bool)>,
+}
+
 struct LoopCtx {
     carried: Vec<Carried>,
     exits: Vec<State>,
     depth: usize,
     /// An unrolled loop: `exit` cannot be compiled inside it.
     unrolled: bool,
+    /// An `exit` found a value that does not fit its carried slot's type
+    /// yet: the fixpoint widens the slot and compiles the body again.
+    mismatch: bool,
 }
 
 /// The `exit`-inside-an-unrolled-loop refusal, retried as a real loop.
@@ -308,6 +319,8 @@ const MAX_TABLE: usize = 16 << 20;
 pub(crate) struct Compiler<'a> {
     it: &'a Interp,
     nregs: u32,
+    /// Storage kind of each register (see `ir.rs`): true for I64.
+    kinds: Vec<bool>,
     st: State,
     code: Vec<Ins>,
     emitted: usize,
@@ -341,6 +354,7 @@ pub(crate) fn compile(
     let mut c = Compiler {
         it,
         nregs: 0,
+        kinds: Vec::new(),
         st: State {
             stack: Vec::new(),
             scopes: vec![Scope {
@@ -366,7 +380,7 @@ pub(crate) fn compile(
         soft: Vec::new(),
         strict,
     };
-    let (ri, rj) = (c.reg(), c.reg());
+    let (ri, rj) = (c.ireg(), c.ireg());
     c.st.stack.push(SVal::Num(Op::R(ri), NT::Int));
     c.st.stack.push(SVal::Num(Op::R(rj), NT::Int));
     if let Err(NotCompilable(why)) = c.exec_proc(proc) {
@@ -390,9 +404,12 @@ pub(crate) fn compile(
                 c.st.stack.len()
             ));
         }
-        for v in &c.st.stack {
+        for v in c.st.stack.clone() {
             match v {
-                SVal::Num(o, _) => outputs.push(*o),
+                SVal::Num(o, t) => {
+                    let o = c.to_f(o, t)?;
+                    outputs.push(o);
+                }
                 _ => return nc("an output component is not a number"),
             }
         }
@@ -411,14 +428,163 @@ pub(crate) fn compile(
         larrays: c.larrays,
         perm: it.noise_perm,
     };
-    super::regalloc::allocate(&mut kernel);
+    if cfg!(debug_assertions) {
+        super::check::kinds(&kernel, &c.kinds)
+            .map_err(|e| NotCompilable(format!("internal: {e}")))?;
+    }
+    let dump = std::env::var_os("PSCAT_KERNEL_DUMP").is_some();
+    if dump {
+        eprintln!("--- kernel before allocation ---\n{:#?}", kernel.body);
+    }
+    if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
+        super::regalloc::allocate(&mut kernel);
+    }
+    if dump {
+        eprintln!(
+            "--- after ---\n{:#?}\noutputs {:?}",
+            kernel.body, kernel.outputs
+        );
+    }
     Ok((kernel, noise, soft))
 }
 
 impl<'a> Compiler<'a> {
+    /// A new F64 register.
     fn reg(&mut self) -> Reg {
+        self.kinds.push(false);
         self.nregs += 1;
         self.nregs - 1
+    }
+
+    /// A new I64 register.
+    fn ireg(&mut self) -> Reg {
+        self.kinds.push(true);
+        self.nregs += 1;
+        self.nregs - 1
+    }
+
+    /// A register for a merged or carried value of type `t`.
+    fn reg_for(&mut self, t: CT) -> Reg {
+        if t == CT::Int {
+            self.ireg()
+        } else {
+            self.reg()
+        }
+    }
+
+    /// `o` (of type `t`) as an f64 operand, as the interpreter's
+    /// `to_f64` makes it: an I64 register is converted.
+    fn to_f(&mut self, o: Op, t: NT) -> CResult<Op> {
+        match (o, t) {
+            (Op::R(_), NT::Int) => {
+                let d = self.reg();
+                self.emit(Ins::I2F(d, o))?;
+                Ok(Op::R(d))
+            }
+            _ => Ok(o),
+        }
+    }
+
+    /// `o` as an exact f64 (into storage that holds integers as f64s, a
+    /// local array): an I64 register past 2^53 retires its lane.
+    fn to_exact_f(&mut self, o: Op, t: NT) -> CResult<Op> {
+        match (o, t) {
+            (Op::R(_), NT::Int) => {
+                let d = self.reg();
+                self.emit(Ins::I2FExact(d, o))?;
+                Ok(Op::R(d))
+            }
+            _ => Ok(o),
+        }
+    }
+
+    /// `o` as an integer operand for an integer-only operator (I64 or an
+    /// integer immediate); `None` when the path certainly errors.
+    fn to_i(&mut self, o: Op, t: NT) -> CResult<Option<Op>> {
+        match t {
+            NT::Int => Ok(Some(o)),
+            NT::Real => {
+                self.abort_path()?;
+                Ok(None)
+            }
+            NT::Dyn(tag) => {
+                self.emit(Ins::NeedInt(Op::R(tag)))?;
+                match o {
+                    Op::Imm(_) => Ok(Some(o)),
+                    Op::R(_) => {
+                        let d = self.ireg();
+                        self.emit(Ins::F2I(d, o))?;
+                        Ok(Some(Op::R(d)))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Push an integer constant: an immediate when exact in an f64.
+    fn push_int(&mut self, v: i64) -> CResult<()> {
+        if (v as f64).abs() <= INT_LIMIT {
+            self.push_num(Op::Imm(v as f64), NT::Int);
+        } else {
+            let d = self.ireg();
+            self.emit(Ins::MovI(d, v))?;
+            self.push_num(Op::R(d), NT::Int);
+        }
+        Ok(())
+    }
+
+    /// An integer op on two integer operands, folded when both are
+    /// constants (an overflow folds to the interpreter's real result).
+    fn ibin(&mut self, op: IBinOp, a: Op, b: Op) -> CResult<()> {
+        if let (Op::Imm(x), Op::Imm(y)) = (a, b) {
+            let (x, y) = (x as i64, y as i64);
+            return match lane_ibin(op, x, y) {
+                Some(IOut::I(v)) => self.push_int(v),
+                Some(IOut::B(v)) => {
+                    self.push(SVal::Bool(Op::Imm(f64::from(u8::from(v)))));
+                    Ok(())
+                }
+                None => {
+                    let (fx, fy) = (x as f64, y as f64);
+                    let r = match op {
+                        IBinOp::Add => fx + fy,
+                        IBinOp::Sub => fx - fy,
+                        IBinOp::Mul => fx * fy,
+                        _ => return self.abort_path(),
+                    };
+                    self.push_num(Op::Imm(r), NT::Real);
+                    Ok(())
+                }
+            };
+        }
+        if op.is_compare() {
+            let d = self.reg();
+            self.emit(Ins::IBin(op, d, a, b))?;
+            self.push(SVal::Bool(Op::R(d)));
+        } else {
+            let d = self.ireg();
+            self.emit(Ins::IBin(op, d, a, b))?;
+            self.push_num(Op::R(d), NT::Int);
+        }
+        Ok(())
+    }
+
+    fn iun(&mut self, op: IUnOp, a: Op) -> CResult<()> {
+        if let Op::Imm(x) = a {
+            let x = x as i64;
+            return match lane_iun(op, x) {
+                Some(v) => self.push_int(v),
+                None => {
+                    // neg/abs of i64::MIN: the interpreter's real.
+                    self.push_num(Op::Imm(-(x as f64)), NT::Real);
+                    Ok(())
+                }
+            };
+        }
+        let d = self.ireg();
+        self.emit(Ins::IUn(op, d, a))?;
+        self.push_num(Op::R(d), NT::Int);
+        Ok(())
     }
 
     fn emit(&mut self, i: Ins) -> CResult<()> {
@@ -748,46 +914,78 @@ impl<'a> Compiler<'a> {
 
     /// Moves putting `v` into a merge/carried slot of type `ty`.
     fn moves_into(
+        &mut self,
         reg: Reg,
         tag: Option<Reg>,
         ty: CT,
         v: &SVal,
-        out: &mut Vec<(Reg, Op)>,
+        out: &mut Moves,
     ) -> CResult<()> {
         match (v, ty) {
-            (SVal::Num(o, nt), CT::Int | CT::Real | CT::Dyn) => {
-                out.push((reg, *o));
+            (SVal::Num(o, nt), CT::Int) if *nt == NT::Int => out.pairs.push((reg, *o, true)),
+            (SVal::Num(o, NT::Int), CT::Dyn) => {
+                // An integer joining values that are real on other paths:
+                // held exactly as an f64, so it must be within 2^53.
+                let o = match o {
+                    Op::R(_) => {
+                        let t = self.reg();
+                        out.pre.push(Ins::I2FExact(t, *o));
+                        Op::R(t)
+                    }
+                    Op::Imm(_) => *o,
+                };
+                out.pairs.push((reg, o, false));
+                out.pairs.push((tag.unwrap_or(reg), Op::Imm(1.0), false));
+            }
+            (SVal::Num(o, nt), CT::Real | CT::Dyn) if *nt != NT::Int => {
+                out.pairs.push((reg, *o, false));
                 if ty == CT::Dyn {
-                    out.push((tag.unwrap_or(reg), nt.tag()));
+                    out.pairs.push((tag.unwrap_or(reg), nt.tag(), false));
                 }
             }
-            (SVal::Bool(o), CT::Bool) => out.push((reg, *o)),
-            _ => return nc("a value changes type between paths"),
+            (SVal::Bool(o), CT::Bool) => out.pairs.push((reg, *o, false)),
+            (v, ty) => {
+                return nc(format!(
+                    "a value changes type between paths ({} into {ty:?})",
+                    describe(v)
+                ));
+            }
         }
         Ok(())
     }
 
-    /// Emit `moves` as a parallel assignment.
-    fn par_moves(&mut self, moves: Vec<(Reg, Op)>, code: &mut Vec<Ins>) -> CResult<()> {
-        let moves: Vec<_> = moves.into_iter().filter(|(d, s)| *s != Op::R(*d)).collect();
-        let hazard = moves
+    /// Emit `moves` as a parallel assignment (after its conversions).
+    fn par_moves(&mut self, moves: Moves, code: &mut Vec<Ins>) -> CResult<()> {
+        let before = code.len();
+        code.extend(moves.pre);
+        let mv = |d: Reg, s: Op, int: bool| match (s, int) {
+            (Op::Imm(v), true) => Ins::MovI(d, v as i64),
+            _ => Ins::Mov(d, s),
+        };
+        let pairs: Vec<_> = moves
+            .pairs
+            .into_iter()
+            .filter(|(d, s, _)| *s != Op::R(*d))
+            .collect();
+        let hazard = pairs
             .iter()
-            .any(|(_, s)| moves.iter().any(|(d, _)| s.uses(*d)));
+            .any(|(_, s, _)| pairs.iter().any(|(d, _, _)| s.uses(*d)));
         if hazard {
             let mut tmps = Vec::new();
-            for (_, s) in &moves {
-                let t = self.reg();
-                code.push(Ins::Mov(t, *s));
+            for (_, s, int) in &pairs {
+                let t = if *int { self.ireg() } else { self.reg() };
+                code.push(mv(t, *s, *int));
                 tmps.push(t);
             }
-            for ((d, _), t) in moves.iter().zip(tmps) {
+            for ((d, _, _), t) in pairs.iter().zip(tmps) {
                 code.push(Ins::Mov(*d, Op::R(t)));
             }
         } else {
-            for (d, s) in moves {
-                code.push(Ins::Mov(d, s));
+            for (d, s, int) in pairs {
+                code.push(mv(d, s, int));
             }
         }
+        let _ = before;
         self.emitted += code.len();
         if self.emitted > MAX_INSNS {
             return nc("the kernel is too large");
@@ -811,7 +1009,7 @@ impl<'a> Compiler<'a> {
         }
         let slots = Self::slots_of(&[&a, &b])?;
         let mut out = a.clone();
-        let (mut ma, mut mb) = (Vec::new(), Vec::new());
+        let (mut ma, mut mb) = (Moves::default(), Moves::default());
         for sl in slots {
             let (va, vb) = (self.slot_val(&a, sl)?, self.slot_val(&b, sl)?);
             if va == vb {
@@ -824,10 +1022,10 @@ impl<'a> Compiler<'a> {
                     };
                     match ct_join(tx, ty) {
                         Some(t) => {
-                            let reg = self.reg();
+                            let reg = self.reg_for(t);
                             let tag = (t == CT::Dyn).then(|| self.reg());
-                            Self::moves_into(reg, tag, t, x, &mut ma)?;
-                            Self::moves_into(reg, tag, t, y, &mut mb)?;
+                            self.moves_into(reg, tag, t, x, &mut ma)?;
+                            self.moves_into(reg, tag, t, y, &mut mb)?;
                             Binding::Val(
                                 Carried {
                                     slot: sl,
@@ -860,10 +1058,10 @@ impl<'a> Compiler<'a> {
                                 ok = false;
                                 break;
                             };
-                            let reg = self.reg();
+                            let reg = self.reg_for(t);
                             let tag = (t == CT::Dyn).then(|| self.reg());
-                            Self::moves_into(reg, tag, t, a, &mut ma)?;
-                            Self::moves_into(reg, tag, t, b, &mut mb)?;
+                            self.moves_into(reg, tag, t, a, &mut ma)?;
+                            self.moves_into(reg, tag, t, b, &mut mb)?;
                             out.push(
                                 Carried {
                                     slot: sl,
@@ -903,8 +1101,8 @@ impl<'a> Compiler<'a> {
         &mut self,
         a: &Lk,
         b: &Lk,
-        ma: &mut Vec<(Reg, Op)>,
-        mb: &mut Vec<(Reg, Op)>,
+        ma: &mut Moves,
+        mb: &mut Moves,
     ) -> CResult<Binding> {
         let side = |lk: &Lk| -> (Option<SVal>, Op) {
             match lk {
@@ -922,17 +1120,17 @@ impl<'a> Compiler<'a> {
         let Some(t) = ty else {
             return Ok(Binding::Maybe);
         };
-        let reg = self.reg();
+        let reg = self.reg_for(t);
         let tag = (t == CT::Dyn).then(|| self.reg());
         let flag = self.reg();
         if let Some(x) = &xa {
-            Self::moves_into(reg, tag, t, x, ma)?;
+            self.moves_into(reg, tag, t, x, ma)?;
         }
         if let Some(x) = &xb {
-            Self::moves_into(reg, tag, t, x, mb)?;
+            self.moves_into(reg, tag, t, x, mb)?;
         }
-        ma.push((flag, fa));
-        mb.push((flag, fb));
+        ma.pairs.push((flag, fa, false));
+        mb.pairs.push((flag, fb, false));
         let v = Carried {
             slot: Slot::Stack(0),
             reg,
@@ -1049,6 +1247,7 @@ impl<'a> Compiler<'a> {
                 exits: Vec::new(),
                 depth: hstate.stack.len(),
                 unrolled: false,
+                mismatch: false,
             });
             let saved = std::mem::take(&mut self.code);
             let saved_emitted = self.emitted;
@@ -1111,9 +1310,10 @@ impl<'a> Compiler<'a> {
                                 && w != c.ty
                             {
                                 c.ty = w;
+                                // Widened (Int to Dyn): an F64 register now.
+                                c.reg = self.reg_for(w);
                                 if w == CT::Dyn && c.tag.is_none() {
-                                    c.tag = Some(self.nregs);
-                                    self.nregs += 1;
+                                    c.tag = Some(self.reg());
                                 }
                                 grew = true;
                             } else if ct_join(c.ty, t).is_none() {
@@ -1121,7 +1321,7 @@ impl<'a> Compiler<'a> {
                             }
                         }
                         None => {
-                            let reg = self.reg();
+                            let reg = self.reg_for(t);
                             let tag = (t == CT::Dyn).then(|| self.reg());
                             carried.push(Carried {
                                 slot: sl,
@@ -1138,13 +1338,16 @@ impl<'a> Compiler<'a> {
                 self.emitted = saved_emitted;
                 continue;
             }
+            if ctx.mismatch {
+                return nc("a value at a loop's exit does not fit the loop's type for it");
+            }
             // Final pass: entry moves, the loop, and the state after it.
-            let mut pre = Vec::new();
+            let mut pre = Moves::default();
             for c in &carried {
                 let Lk::Val(v) = self.slot_val(&entry, c.slot)? else {
                     return nc("a loop-carried value has no starting value");
                 };
-                Self::moves_into(c.reg, c.tag, c.ty, &v, &mut pre)?;
+                self.moves_into(c.reg, c.tag, c.ty, &v, &mut pre)?;
             }
             let mut pcode = Vec::new();
             self.par_moves(pre, &mut pcode)?;
@@ -1152,12 +1355,12 @@ impl<'a> Compiler<'a> {
                 self.emit(i)?;
             }
             if !end.dead {
-                let mut back = Vec::new();
+                let mut back = Moves::default();
                 for c in &carried {
                     let Lk::Val(v) = self.slot_val(&end, c.slot)? else {
                         return nc("a loop-carried value is lost");
                     };
-                    Self::moves_into(c.reg, c.tag, c.ty, &v, &mut back)?;
+                    self.moves_into(c.reg, c.tag, c.ty, &v, &mut back)?;
                 }
                 self.par_moves(back, &mut bcode)?;
                 if let LoopHead::For { c, inc, .. } = &head {
@@ -1241,6 +1444,7 @@ impl<'a> Compiler<'a> {
             exits: Vec::new(),
             depth: 0,
             unrolled: true,
+            mismatch: false,
         });
         let mut r = Ok(());
         for v in trips {
@@ -1265,9 +1469,17 @@ impl<'a> Compiler<'a> {
                 let fin = self.reg();
                 self.emit(Ins::ForFin(fin, Op::R(*c), *inc, *lim))?;
                 self.emit(Ins::If(fin, vec![Ins::Break], Vec::new()))?;
-                let v = self.reg();
-                self.emit(Ins::Mov(v, Op::R(*c)))?;
-                self.push(SVal::Num(Op::R(v), *ct));
+                // The counter steps as an f64, as `ForControl` does; an
+                // integer loop pushes it as an integer.
+                if *ct == NT::Int {
+                    let v = self.ireg();
+                    self.emit(Ins::F2I(v, Op::R(*c)))?;
+                    self.push(SVal::Num(Op::R(v), *ct));
+                } else {
+                    let v = self.reg();
+                    self.emit(Ins::Mov(v, Op::R(*c)))?;
+                    self.push(SVal::Num(Op::R(v), *ct));
+                }
             }
             LoopHead::Repeat { k } => {
                 let fin = self.reg();
@@ -1292,17 +1504,25 @@ impl<'a> Compiler<'a> {
         }
         let carried = ctx.carried.clone();
         let snapshot = self.st.clone();
-        let mut mv = Vec::new();
+        let mut mv = Moves::default();
+        let mut fits = true;
         for c in &carried {
             let Lk::Val(v) = self.slot_val(&snapshot, c.slot)? else {
                 return nc("a loop-carried value is undefined at exit");
             };
-            Self::moves_into(c.reg, c.tag, c.ty, &v, &mut mv)?;
+            if self.moves_into(c.reg, c.tag, c.ty, &v, &mut mv).is_err() {
+                fits = false;
+                break;
+            }
         }
-        let mut code = Vec::new();
-        self.par_moves(mv, &mut code)?;
-        for i in code {
-            self.emit(i)?;
+        if fits {
+            let mut code = Vec::new();
+            self.par_moves(mv, &mut code)?;
+            for i in code {
+                self.emit(i)?;
+            }
+        } else if let Some(ctx) = self.loops.last_mut() {
+            ctx.mismatch = true;
         }
         self.emit(Ins::Break)?;
         if let Some(ctx) = self.loops.last_mut() {
@@ -1322,18 +1542,25 @@ impl<'a> Compiler<'a> {
     fn arith(&mut self, op: BinOp) -> CResult<()> {
         let (b, bt) = self.pop_num()?;
         let (a, at) = self.pop_num()?;
+        if (at, bt) == (NT::Int, NT::Int) {
+            let iop = match op {
+                BinOp::Add => IBinOp::Add,
+                BinOp::Sub => IBinOp::Sub,
+                BinOp::Mul => IBinOp::Mul,
+                BinOp::Min => IBinOp::Min,
+                _ => IBinOp::Max,
+            };
+            return self.ibin(iop, a, b);
+        }
         let rt = match (at, bt) {
-            (NT::Int, NT::Int) => NT::Int,
             (NT::Real, _) | (_, NT::Real) => NT::Real,
             _ => NT::Dyn(0),
         };
-        if let (Op::Imm(x), Op::Imm(y), false) = (a, b, matches!(rt, NT::Dyn(_))) {
+        let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+        if let (Op::Imm(x), Op::Imm(y), NT::Real) = (a, b, rt) {
             let Some(r) = lane_bin(op, x, y) else {
                 return self.abort_path();
             };
-            if rt == NT::Int && r.abs() > INT_LIMIT {
-                return nc("an integer past 2^53");
-            }
             self.push_num(Op::Imm(r), rt);
             return Ok(());
         }
@@ -1343,13 +1570,14 @@ impl<'a> Compiler<'a> {
             NT::Dyn(_) => {
                 let t = self.reg();
                 self.emit(Ins::Bin(BinOp::TagAnd, t, at.tag(), bt.tag()))?;
+                // Integer lanes of a Dyn value are exact f64s.
+                if !matches!(op, BinOp::Min | BinOp::Max) {
+                    self.emit(Ins::CheckInt(Op::R(d), Op::R(t)))?;
+                }
                 NT::Dyn(t)
             }
             x => x,
         };
-        if rt != NT::Real && !matches!(op, BinOp::Min | BinOp::Max) {
-            self.emit(Ins::CheckInt(Op::R(d), rt.tag()))?;
-        }
         self.push_num(Op::R(d), rt);
         Ok(())
     }
@@ -1420,7 +1648,6 @@ impl<'a> Compiler<'a> {
     fn apply(&mut self, op: &Operator) -> CResult<()> {
         let name = op.name;
         let real = |o: Op| SVal::Num(o, NT::Real);
-        let int = |o: Op| SVal::Num(o, NT::Int);
         let boolean = SVal::Bool;
         match name {
             // stack
@@ -1506,20 +1733,23 @@ impl<'a> Compiler<'a> {
             "min" | ".min" => self.arith(BinOp::Min)?,
             "max" | ".max" => self.arith(BinOp::Max)?,
             "div" => {
-                let (b, _) = self.pop_num()?;
-                let (a, _) = self.pop_num()?;
+                let (b, bt) = self.pop_num()?;
+                let (a, at) = self.pop_num()?;
+                let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
                 self.bin_to(BinOp::Div, a, b, real)?;
             }
             "idiv" | "mod" => {
                 let (b, bt) = self.pop_num()?;
                 let (a, at) = self.pop_num()?;
-                if self.need_int(at)? && self.need_int(bt)? {
+                if let Some(a) = self.to_i(a, at)?
+                    && let Some(b) = self.to_i(b, bt)?
+                {
                     let op = if name == "idiv" {
-                        BinOp::Idiv
+                        IBinOp::Idiv
                     } else {
-                        BinOp::Mod
+                        IBinOp::Mod
                     };
-                    self.bin_to(op, a, b, int)?;
+                    self.ibin(op, a, b)?;
                 }
             }
             "neg" | "abs" | "ceiling" | "floor" | "round" | "truncate" => {
@@ -1532,14 +1762,20 @@ impl<'a> Compiler<'a> {
                     "round" => UnOp::Round,
                     _ => UnOp::Trunc,
                 };
-                if t == NT::Int && op != UnOp::Neg && op != UnOp::Abs {
-                    self.push_num(a, t);
+                if t == NT::Int {
+                    // An integer is its own rounding; neg and abs are exact.
+                    match op {
+                        UnOp::Neg => self.iun(IUnOp::Neg, a)?,
+                        UnOp::Abs => self.iun(IUnOp::Abs, a)?,
+                        _ => self.push_num(a, t),
+                    }
                 } else {
                     self.un_to(op, a, move |o| SVal::Num(o, t))?;
                 }
             }
             "sqrt" | "sin" | "cos" | "ln" | "log" => {
-                let (a, _) = self.pop_num()?;
+                let (a, at) = self.pop_num()?;
+                let a = self.to_f(a, at)?;
                 let op = match name {
                     "sqrt" => UnOp::Sqrt,
                     "sin" => UnOp::Sin,
@@ -1550,8 +1786,9 @@ impl<'a> Compiler<'a> {
                 self.un_to(op, a, real)?;
             }
             "atan" | "exp" => {
-                let (b, _) = self.pop_num()?;
-                let (a, _) = self.pop_num()?;
+                let (b, bt) = self.pop_num()?;
+                let (a, at) = self.pop_num()?;
+                let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
                 let op = if name == "atan" {
                     BinOp::Atan
                 } else {
@@ -1561,34 +1798,61 @@ impl<'a> Compiler<'a> {
             }
             "cvi" => {
                 let (a, t) = self.pop_num()?;
-                if t == NT::Int {
-                    self.push_num(a, t);
-                } else {
-                    self.un_to(UnOp::Cvi, a, int)?;
+                match (t, a) {
+                    (NT::Int, _) => self.push_num(a, t),
+                    (_, Op::Imm(x)) => match real_to_int(x) {
+                        Some(v) => self.push_int(v)?,
+                        None => self.abort_path()?,
+                    },
+                    _ => {
+                        let d = self.ireg();
+                        self.emit(Ins::F2I(d, a))?;
+                        self.push_num(Op::R(d), NT::Int);
+                    }
                 }
             }
             "cvr" => {
-                let (a, _) = self.pop_num()?;
+                let (a, t) = self.pop_num()?;
+                let a = self.to_f(a, t)?;
                 self.push_num(a, NT::Real);
             }
             // relational and logic
             "lt" | "le" | "gt" | "ge" => {
-                let (b, _) = self.pop_num()?;
-                let (a, _) = self.pop_num()?;
-                let op = match name {
-                    "lt" => BinOp::Lt,
-                    "le" => BinOp::Le,
-                    "gt" => BinOp::Gt,
-                    _ => BinOp::Ge,
-                };
-                self.bin_to(op, a, b, boolean)?;
+                let (b, bt) = self.pop_num()?;
+                let (a, at) = self.pop_num()?;
+                if (at, bt) == (NT::Int, NT::Int) {
+                    let op = match name {
+                        "lt" => IBinOp::Lt,
+                        "le" => IBinOp::Le,
+                        "gt" => IBinOp::Gt,
+                        _ => IBinOp::Ge,
+                    };
+                    self.ibin(op, a, b)?;
+                } else {
+                    let op = match name {
+                        "lt" => BinOp::Lt,
+                        "le" => BinOp::Le,
+                        "gt" => BinOp::Gt,
+                        _ => BinOp::Ge,
+                    };
+                    let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+                    self.bin_to(op, a, b, boolean)?;
+                }
             }
             "eq" | "ne" => {
                 let b = self.pop()?;
                 let a = self.pop()?;
                 let op = if name == "eq" { BinOp::Eq } else { BinOp::Ne };
                 match (&a, &b) {
-                    (SVal::Num(x, _), SVal::Num(y, _)) | (SVal::Bool(x), SVal::Bool(y)) => {
+                    (SVal::Num(x, NT::Int), SVal::Num(y, NT::Int)) => {
+                        let iop = if name == "eq" { IBinOp::Eq } else { IBinOp::Ne };
+                        self.ibin(iop, *x, *y)?;
+                    }
+                    (SVal::Num(x, xt), SVal::Num(y, yt)) => {
+                        let (x, y) = (self.to_f(*x, *xt)?, self.to_f(*y, *yt)?);
+                        self.bin_to(op, x, y, boolean)?;
+                    }
+                    (SVal::Bool(x), SVal::Bool(y)) => {
                         self.bin_to(op, *x, *y, boolean)?;
                     }
                     _ => {
@@ -1615,13 +1879,15 @@ impl<'a> Compiler<'a> {
                     }
                     (SVal::Num(x, xt), SVal::Num(y, yt)) => {
                         let (x, y, xt, yt) = (*x, *y, *xt, *yt);
-                        if self.need_int(xt)? && self.need_int(yt)? {
+                        if let Some(x) = self.to_i(x, xt)?
+                            && let Some(y) = self.to_i(y, yt)?
+                        {
                             let op = match name {
-                                "and" => BinOp::IAnd,
-                                "or" => BinOp::IOr,
-                                _ => BinOp::IXor,
+                                "and" => IBinOp::And,
+                                "or" => IBinOp::Or,
+                                _ => IBinOp::Xor,
                             };
-                            self.bin_to(op, x, y, int)?;
+                            self.ibin(op, x, y)?;
                         }
                     }
                     _ => return nc(format!("{name} on {} and {}", describe(&a), describe(&b))),
@@ -1630,8 +1896,8 @@ impl<'a> Compiler<'a> {
             "not" => match self.pop()? {
                 SVal::Bool(x) => self.un_to(UnOp::BNot, x, boolean)?,
                 SVal::Num(x, t) => {
-                    if self.need_int(t)? {
-                        self.un_to(UnOp::INot, x, int)?;
+                    if let Some(x) = self.to_i(x, t)? {
+                        self.iun(IUnOp::Not, x)?;
                     }
                 }
                 other => return nc(format!("not on {}", describe(&other))),
@@ -1639,8 +1905,10 @@ impl<'a> Compiler<'a> {
             "bitshift" => {
                 let (s, st) = self.pop_num()?;
                 let (x, xt) = self.pop_num()?;
-                if self.need_int(xt)? && self.need_int(st)? {
-                    self.bin_to(BinOp::Shift, x, s, int)?;
+                if let Some(x) = self.to_i(x, xt)?
+                    && let Some(s) = self.to_i(s, st)?
+                {
+                    self.ibin(IBinOp::Shift, x, s)?;
                 }
             }
             // control
@@ -1690,6 +1958,8 @@ impl<'a> Compiler<'a> {
                             NT::Dyn(t)
                         }
                     };
+                    // The counter is an f64, as `ForControl` keeps it.
+                    let (init, inc, lim) = (c.to_f(init, nt)?, c.to_f(inc, it_)?, c.to_f(lim, lt)?);
                     let r = c.reg();
                     c.emit(Ins::Mov(r, init))?;
                     c.compile_loop(LoopHead::For { c: r, ct, inc, lim }, body)
@@ -1711,6 +1981,7 @@ impl<'a> Compiler<'a> {
                     _ => None,
                 };
                 self.loop_or_unroll(trips, body, |c: &mut Compiler<'a>, body| {
+                    let n = c.to_f(n, t)?;
                     let ok = c.reg();
                     c.emit(Ins::Bin(BinOp::Ge, ok, n, Op::Imm(0.0)))?;
                     c.emit(Ins::Assert(Op::R(ok)))?;
@@ -1738,6 +2009,7 @@ impl<'a> Compiler<'a> {
                     exits: Vec::new(),
                     depth: 0,
                     unrolled: true,
+                    mismatch: false,
                 });
                 let mut r = Ok(());
                 for k in 0..n {
@@ -1965,19 +2237,20 @@ impl<'a> Compiler<'a> {
         let mut octtag = Op::Imm(1.0);
         let dims = kind.dims();
         if kind.octaves() {
-            let (lac, _) = self.pop_num()?;
-            let (gain, _) = self.pop_num()?;
+            let (lac, lt) = self.pop_num()?;
+            let (gain, gt) = self.pop_num()?;
             let (oct, ot) = self.pop_num()?;
             if ot == NT::Real {
                 return self.abort_path();
             }
             octtag = ot.tag();
-            a[dims] = oct;
-            a[dims + 1] = gain;
-            a[dims + 2] = lac;
+            a[dims] = self.to_f(oct, ot)?;
+            a[dims + 1] = self.to_f(gain, gt)?;
+            a[dims + 2] = self.to_f(lac, lt)?;
         }
         for k in (0..dims).rev() {
-            a[k] = self.pop_num()?.0;
+            let (v, t) = self.pop_num()?;
+            a[k] = self.to_f(v, t)?;
         }
         let d = [self.reg(), self.reg(), self.reg()];
         self.emit(Ins::Noise { kind, d, a, octtag })?;
@@ -1992,6 +2265,8 @@ impl<'a> Compiler<'a> {
         if it_ == NT::Real {
             return self.abort_path();
         }
+        // Indices are read as f64 (with their integer tag).
+        let i = self.to_f(i, it_)?;
         match c {
             SVal::Cap(o) => {
                 if let Op::Imm(k) = i {
@@ -2053,11 +2328,12 @@ impl<'a> Compiler<'a> {
                             let SVal::Num(o, t) = v else {
                                 return nc("run-time index into an array of non-numbers");
                             };
+                            let o = self.to_exact_f(*o, *t)?;
                             self.emit(Ins::LPut {
                                 arr: id,
                                 idx: Op::Imm(k as f64),
                                 itag: Op::Imm(1.0),
-                                v: *o,
+                                v: o,
                                 vtag: t.tag(),
                             })?;
                         }
@@ -2114,6 +2390,13 @@ impl<'a> Compiler<'a> {
             col,
             ctag,
         })?;
+        if nt == NT::Int {
+            // Tables hold f64s; an integer table's elements are exact.
+            let di = self.ireg();
+            self.emit(Ins::F2I(di, Op::R(d)))?;
+            self.push_num(Op::R(di), nt);
+            return Ok(());
+        }
         self.push_num(Op::R(d), nt);
         Ok(())
     }
@@ -2140,6 +2423,8 @@ impl<'a> Compiler<'a> {
                 let SVal::Num(o, vt) = v else {
                     return nc("put of a non-number into a local array");
                 };
+                let i = self.to_f(i, it_)?;
+                let o = self.to_exact_f(o, vt)?;
                 self.emit(Ins::LPut {
                     arr: id,
                     idx: i,
@@ -2365,6 +2650,8 @@ fn type_name(o: &Object) -> &'static str {
 
 fn describe(v: &SVal) -> &'static str {
     match v {
+        SVal::Num(_, NT::Int) => "an integer",
+        SVal::Num(_, NT::Real) => "a real",
         SVal::Num(..) => "a number",
         SVal::Bool(_) => "a boolean",
         SVal::Mark => "a mark",

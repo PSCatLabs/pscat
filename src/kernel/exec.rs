@@ -18,7 +18,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use super::ir::{BinOp, Ins, Kernel, Op, Reg, TableKind, UnOp};
+use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
 
@@ -132,8 +132,9 @@ impl<'k> Machine<'k> {
         let mask = if n == LANES { FULL } else { (1u64 << n) - 1 };
         let (ri, rj) = (self.k.in_i as usize, self.k.in_j as usize);
         for l in 0..LANES {
-            self.regs[ri][l] = (i0 + l as i64) as f64;
-            self.regs[rj][l] = j as f64;
+            // The inputs are integers: I64 registers hold their bits.
+            self.regs[ri][l] = f64::from_bits((i0 + l as i64) as u64);
+            self.regs[rj][l] = f64::from_bits(j as u64);
         }
         self.alive.clear();
         self.killed = 0;
@@ -183,6 +184,15 @@ impl<'k> Machine<'k> {
         }
     }
 
+    /// An integer operand: an I64 register's bits, or an immediate's value.
+    #[inline(always)]
+    fn geti(&self, o: Op, l: usize) -> i64 {
+        match o {
+            Op::R(r) => self.regs[r as usize][l].to_bits() as i64,
+            Op::Imm(x) => x as i64,
+        }
+    }
+
     #[inline(always)]
     fn store(&mut self, d: Reg, t: &Lane, mask: u64) {
         let dst = &mut self.regs[d as usize];
@@ -214,9 +224,101 @@ impl<'k> Machine<'k> {
                     };
                     self.store(*d, &t, mask);
                 }
+                Ins::MovI(d, v) => {
+                    let t = [f64::from_bits(*v as u64); LANES];
+                    self.store(*d, &t, mask);
+                }
+                Ins::IBin(op, d, a, b) => {
+                    let mut t = [0.0; LANES];
+                    let mut bad = 0u64;
+                    match op {
+                        IBinOp::Add | IBinOp::Sub | IBinOp::Mul => {
+                            // The common hash/arith case: tight loop.
+                            for (l, v) in t.iter_mut().enumerate() {
+                                let (x, y) = (self.geti(*a, l), self.geti(*b, l));
+                                let r = match op {
+                                    IBinOp::Add => x.checked_add(y),
+                                    IBinOp::Sub => x.checked_sub(y),
+                                    _ => x.checked_mul(y),
+                                };
+                                match r {
+                                    Some(r) => *v = f64::from_bits(r as u64),
+                                    None => bad |= 1 << l,
+                                }
+                            }
+                        }
+                        _ => {
+                            for (l, v) in t.iter_mut().enumerate() {
+                                match lane_ibin(*op, self.geti(*a, l), self.geti(*b, l)) {
+                                    Some(r) => *v = r.bits(),
+                                    None => bad |= 1 << l,
+                                }
+                            }
+                        }
+                    }
+                    let bad = bad & mask;
+                    self.kill(
+                        bad,
+                        "an integer overflow (the interpreter makes it a real) or a zero divisor",
+                    );
+                    self.store(*d, &t, mask & !bad);
+                }
+                Ins::IUn(op, d, a) => {
+                    let mut t = [0.0; LANES];
+                    let mut bad = 0u64;
+                    for (l, v) in t.iter_mut().enumerate() {
+                        match lane_iun(*op, self.geti(*a, l)) {
+                            Some(r) => *v = f64::from_bits(r as u64),
+                            None => bad |= 1 << l,
+                        }
+                    }
+                    let bad = bad & mask;
+                    self.kill(bad, "an integer overflow (the interpreter makes it a real)");
+                    self.store(*d, &t, mask & !bad);
+                }
+                Ins::I2F(d, a) => {
+                    let mut t = [0.0; LANES];
+                    for (l, v) in t.iter_mut().enumerate() {
+                        *v = self.geti(*a, l) as f64;
+                    }
+                    self.store(*d, &t, mask);
+                }
+                Ins::I2FExact(d, a) => {
+                    let mut t = [0.0; LANES];
+                    let mut bad = 0u64;
+                    for (l, v) in t.iter_mut().enumerate() {
+                        let x = self.geti(*a, l);
+                        *v = x as f64;
+                        if !within_int(*v) {
+                            bad |= 1 << l;
+                        }
+                    }
+                    let bad = bad & mask;
+                    self.kill(
+                        bad,
+                        "an integer past 2^53 where a value is integer on some lanes only",
+                    );
+                    self.store(*d, &t, mask & !bad);
+                }
+                Ins::F2I(d, a) => {
+                    let mut t = [0.0; LANES];
+                    let mut bad = 0u64;
+                    for (l, v) in t.iter_mut().enumerate() {
+                        match real_to_int(self.get(*a, l)) {
+                            Some(r) => *v = f64::from_bits(r as u64),
+                            None => bad |= 1 << l,
+                        }
+                    }
+                    let bad = bad & mask;
+                    self.kill(bad, "cvi of a value out of integer range");
+                    self.store(*d, &t, mask & !bad);
+                }
                 Ins::Bin(op, d, a, b) => {
                     let (t, bad) = self.bin(*op, *a, *b, mask);
-                    self.kill(bad, "an arithmetic error (division by zero, NaN in a compare, an integer past 2^53)");
+                    self.kill(
+                        bad,
+                        "an arithmetic error (division by zero, NaN in a compare)",
+                    );
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::Un(op, d, a) => {
@@ -583,6 +685,75 @@ impl OpRef<'_> {
     }
 }
 
+/// One lane of an integer op, `None` where PostScript would raise an
+/// error or promote to a real. Compares give 0.0/1.0 *as bits of an f64*
+/// (`ibin_out` turns the result into register bits). Also the compiler's
+/// constant folder.
+pub(crate) fn lane_ibin(op: IBinOp, x: i64, y: i64) -> Option<IOut> {
+    use IBinOp::*;
+    Some(match op {
+        Add => IOut::I(x.checked_add(y)?),
+        Sub => IOut::I(x.checked_sub(y)?),
+        Mul => IOut::I(x.checked_mul(y)?),
+        Min => IOut::I(x.min(y)),
+        Max => IOut::I(x.max(y)),
+        Idiv => IOut::I(x.checked_div(y)?),
+        Mod => IOut::I(x.checked_rem(y)?),
+        And => IOut::I(x & y),
+        Or => IOut::I(x | y),
+        Xor => IOut::I(x ^ y),
+        Shift => IOut::I(if y >= 64 {
+            0
+        } else if y <= -64 {
+            x >> 63
+        } else if y >= 0 {
+            x.wrapping_shl(y as u32)
+        } else {
+            x >> (-y) as u32
+        }),
+        Lt => IOut::B(x < y),
+        Le => IOut::B(x <= y),
+        Gt => IOut::B(x > y),
+        Ge => IOut::B(x >= y),
+        Eq => IOut::B(x == y),
+        Ne => IOut::B(x != y),
+    })
+}
+
+/// An integer op's result: an integer, or a boolean.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum IOut {
+    I(i64),
+    B(bool),
+}
+
+impl IOut {
+    /// As register bits.
+    fn bits(self) -> f64 {
+        match self {
+            IOut::I(v) => f64::from_bits(v as u64),
+            IOut::B(b) => f64::from(u8::from(b)),
+        }
+    }
+}
+
+pub(crate) fn lane_iun(op: IUnOp, x: i64) -> Option<i64> {
+    match op {
+        IUnOp::Neg => x.checked_neg(),
+        IUnOp::Abs => x.checked_abs(),
+        IUnOp::Not => Some(!x),
+    }
+}
+
+/// `cvi` of a real, as `ops/convert.rs` does it.
+pub(crate) fn real_to_int(r: f64) -> Option<i64> {
+    let t = r.trunc();
+    if !t.is_finite() || t < i64::MIN as f64 || t > i64::MAX as f64 {
+        return None;
+    }
+    Some(t as i64)
+}
+
 /// An integer this exact in an f64 (false for NaN).
 #[inline]
 fn within_int(x: f64) -> bool {
@@ -593,7 +764,6 @@ fn within_int(x: f64) -> bool {
 /// Also the compiler's constant folder, so folding and running agree.
 pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
     let bool_f = |c: bool| f64::from(u8::from(c));
-    let int = |x: f64| x as i64;
     Some(match op {
         BinOp::Add => a + b,
         BinOp::Sub => a - b,
@@ -607,10 +777,6 @@ pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
             }
             a / b
         }
-        // Inactive lanes may hold anything, so never panic: a zero or
-        // overflowing divisor is an error, as in `ops/arith.rs`.
-        BinOp::Idiv => int(a).checked_div(int(b))? as f64,
-        BinOp::Mod => int(a).checked_rem(int(b))? as f64,
         BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
             let ord = a.partial_cmp(&b)?;
             use std::cmp::Ordering::*;
@@ -626,25 +792,6 @@ pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
         BinOp::BAnd => bool_f(a != 0.0 && b != 0.0),
         BinOp::BOr => bool_f(a != 0.0 || b != 0.0),
         BinOp::BXor => bool_f((a != 0.0) ^ (b != 0.0)),
-        BinOp::IAnd => (int(a) & int(b)) as f64,
-        BinOp::IOr => (int(a) | int(b)) as f64,
-        BinOp::IXor => (int(a) ^ int(b)) as f64,
-        BinOp::Shift => {
-            let (x, s) = (int(a), int(b));
-            let r = if s >= 64 {
-                0
-            } else if s <= -64 {
-                x >> 63
-            } else if s >= 0 {
-                x.wrapping_shl(s as u32)
-            } else {
-                x >> (-s) as u32
-            };
-            if (r as f64).abs() > INT_LIMIT {
-                return None;
-            }
-            r as f64
-        }
         BinOp::Atan => {
             if a == 0.0 && b == 0.0 {
                 return None;
@@ -698,13 +845,5 @@ pub(crate) fn lane_un(op: UnOp, x: f64) -> Option<f64> {
             fmath::log10(x)
         }
         UnOp::BNot => f64::from(u8::from(x == 0.0)),
-        UnOp::INot => !(x as i64) as f64,
-        UnOp::Cvi => {
-            let t = x.trunc();
-            if !within_int(t) {
-                return None;
-            }
-            t
-        }
     })
 }

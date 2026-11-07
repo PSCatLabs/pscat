@@ -150,11 +150,17 @@ fn each_op(o: &Op, f: &mut impl FnMut(Reg)) {
 /// Every register a straight-line instruction reads or writes.
 fn each_reg(ins: &Ins, mut f: impl FnMut(Reg)) {
     match ins {
-        Ins::Mov(d, a) | Ins::Un(_, d, a) => {
+        Ins::Mov(d, a)
+        | Ins::Un(_, d, a)
+        | Ins::IUn(_, d, a)
+        | Ins::I2F(d, a)
+        | Ins::I2FExact(d, a)
+        | Ins::F2I(d, a) => {
             f(*d);
             each_op(a, &mut f);
         }
-        Ins::Bin(_, d, a, b) => {
+        Ins::MovI(d, _) => f(*d),
+        Ins::Bin(_, d, a, b) | Ins::IBin(_, d, a, b) => {
             f(*d);
             each_op(a, &mut f);
             each_op(b, &mut f);
@@ -224,11 +230,17 @@ fn rename(b: &mut [Ins], map: &[u32]) {
     };
     for ins in b {
         match ins {
-            Ins::Mov(d, a) | Ins::Un(_, d, a) => {
+            Ins::Mov(d, a)
+            | Ins::Un(_, d, a)
+            | Ins::IUn(_, d, a)
+            | Ins::I2F(d, a)
+            | Ins::I2FExact(d, a)
+            | Ins::F2I(d, a) => {
                 m(d);
                 mo(a);
             }
-            Ins::Bin(_, d, a, b) => {
+            Ins::MovI(d, _) => m(d),
+            Ins::Bin(_, d, a, b) | Ins::IBin(_, d, a, b) => {
                 m(d);
                 mo(a);
                 mo(b);

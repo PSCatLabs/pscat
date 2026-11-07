@@ -13,7 +13,7 @@
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
 
-use super::ir::{BinOp, Ins, Kernel, NoiseKind, Op, TableKind, UnOp};
+use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, TableKind, UnOp};
 
 /// Iterations any one loop may run per pixel on the GPU.
 const LOOP_CAP: u32 = 1 << 20;
@@ -317,8 +317,6 @@ fn block(
                     BinOp::Div => format!("{a} / {b}"),
                     BinOp::Min => format!("min({a}, {b})"),
                     BinOp::Max => format!("max({a}, {b})"),
-                    BinOp::Idiv => format!("f32(i32({a}) / nz(i32({b})))"),
-                    BinOp::Mod => format!("f32(i32({a}) % nz(i32({b})))"),
                     BinOp::Lt => format!("b2f(({a}) < ({b}))"),
                     BinOp::Le => format!("b2f(({a}) <= ({b}))"),
                     BinOp::Gt => format!("b2f(({a}) > ({b}))"),
@@ -328,10 +326,6 @@ fn block(
                     BinOp::BAnd => format!("b2f({a} != 0.0 && {b} != 0.0)"),
                     BinOp::BOr => format!("b2f({a} != 0.0 || {b} != 0.0)"),
                     BinOp::BXor => format!("b2f(({a} != 0.0) != ({b} != 0.0))"),
-                    BinOp::IAnd => format!("f32(i32({a}) & i32({b}))"),
-                    BinOp::IOr => format!("f32(i32({a}) | i32({b}))"),
-                    BinOp::IXor => format!("f32(i32({a}) ^ i32({b}))"),
-                    BinOp::Shift => format!("shift({a}, {b})"),
                     BinOp::Atan => format!("ps_atan({a}, {b})"),
                     BinOp::Pow => format!("ps_pow({a}, {b})"),
                 };
@@ -345,14 +339,56 @@ fn block(
                     UnOp::Floor => format!("floor({a})"),
                     UnOp::Ceil => format!("ceil({a})"),
                     UnOp::Round => format!("floor({a} + 0.5)"),
-                    UnOp::Trunc | UnOp::Cvi => format!("trunc({a})"),
+                    UnOp::Trunc => format!("trunc({a})"),
                     UnOp::Sqrt => format!("sqrt(max({a}, 0.0))"),
                     UnOp::Sin => format!("sin(radians({a}))"),
                     UnOp::Cos => format!("cos(radians({a}))"),
                     UnOp::Ln => format!("log({a})"),
                     UnOp::Log => format!("(log({a}) * 0.4342944819)"),
                     UnOp::BNot => format!("b2f(({a}) == 0.0)"),
-                    UnOp::INot => format!("f32(~i32({a}))"),
+                };
+                let _ = writeln!(s, "{pad}r{d} = {e};");
+            }
+            // Integers are f32 values on the GPU (a preview: big hashes lose
+            // their low bits).
+            Ins::MovI(d, v) => {
+                let _ = writeln!(s, "{pad}r{d} = {};", lit(*v as f64));
+            }
+            Ins::I2F(d, a) | Ins::I2FExact(d, a) => {
+                let _ = writeln!(s, "{pad}r{d} = {};", op(*a));
+            }
+            Ins::F2I(d, a) => {
+                let _ = writeln!(s, "{pad}r{d} = trunc({});", op(*a));
+            }
+            Ins::IBin(o, d, a, b) => {
+                let (a, b) = (op(*a), op(*b));
+                let e = match o {
+                    IBinOp::Add => format!("{a} + {b}"),
+                    IBinOp::Sub => format!("{a} - {b}"),
+                    IBinOp::Mul => format!("{a} * {b}"),
+                    IBinOp::Min => format!("min({a}, {b})"),
+                    IBinOp::Max => format!("max({a}, {b})"),
+                    IBinOp::Idiv => format!("f32(i32({a}) / nz(i32({b})))"),
+                    IBinOp::Mod => format!("f32(i32({a}) % nz(i32({b})))"),
+                    IBinOp::And => format!("f32(i32({a}) & i32({b}))"),
+                    IBinOp::Or => format!("f32(i32({a}) | i32({b}))"),
+                    IBinOp::Xor => format!("f32(i32({a}) ^ i32({b}))"),
+                    IBinOp::Shift => format!("shift({a}, {b})"),
+                    IBinOp::Lt => format!("b2f(({a}) < ({b}))"),
+                    IBinOp::Le => format!("b2f(({a}) <= ({b}))"),
+                    IBinOp::Gt => format!("b2f(({a}) > ({b}))"),
+                    IBinOp::Ge => format!("b2f(({a}) >= ({b}))"),
+                    IBinOp::Eq => format!("b2f(({a}) == ({b}))"),
+                    IBinOp::Ne => format!("b2f(({a}) != ({b}))"),
+                };
+                let _ = writeln!(s, "{pad}r{d} = {e};");
+            }
+            Ins::IUn(o, d, a) => {
+                let a = op(*a);
+                let e = match o {
+                    IUnOp::Neg => format!("-{a}"),
+                    IUnOp::Abs => format!("abs({a})"),
+                    IUnOp::Not => format!("f32(~i32({a}))"),
                 };
                 let _ = writeln!(s, "{pad}r{d} = {e};");
             }

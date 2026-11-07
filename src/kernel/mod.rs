@@ -19,6 +19,7 @@
 //! ([`fallback`]): the reference the compiled path is tested against.
 //! The design and its measurements: `docs/dev/design/KERNELS.md`.
 
+pub(crate) mod check;
 pub(crate) mod compile;
 pub(crate) mod exec;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
@@ -70,12 +71,24 @@ pub fn install(dict: &mut Dict) {
     op(dict, "kernelimage", kernelimage);
     op(dict, "kernelcompile", kernelcompile);
     op(dict, ".kernelmode", kernelmode);
-    op(dict, ".kfstore", kfstore);
-    op(dict, ".kfrow", kfrow);
     op(dict, ".kernelstats", kernelstats);
-    op(dict, ".kfnext", kfnext);
-    op(dict, ".kfput", kfput);
-    op(dict, ".kfpaint", kfpaint);
+    // The drivers' own helpers (`.kfstore` and the rest) are not installed:
+    // `substitute` puts them into the driver procedures as operator
+    // objects, so no program can call them with a state dict of its own.
+}
+
+/// The drivers' private helpers, by the name the driver source uses.
+fn helper(name: &str) -> Option<Object> {
+    use crate::object::{OpFn, Operator};
+    let (name, func): (&'static str, OpFn) = match name {
+        ".kfstore" => (".kfstore", kfstore),
+        ".kfrow" => (".kfrow", kfrow),
+        ".kfnext" => (".kfnext", kfnext),
+        ".kfput" => (".kfput", kfput),
+        ".kfpaint" => (".kfpaint", kfpaint),
+        _ => return None,
+    };
+    Some(Object::exec(Value::Operator(Operator { name, func })))
 }
 
 /// A component (nominally 0..1) as an 8-bit sample: clamped to [0, 1],
@@ -228,16 +241,18 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
             }
         }
     }
-    it.kernel_stats.1 += 1;
+    it.kernel_stats.2 += 1;
     fallback(it, a)
 }
 
-/// `.kernelstats compiled interpreted`: how many `kernelimage` calls each
-/// path finished (a test hook: a differential test must know the
-/// compiled path really ran).
+/// `.kernelstats compiled partly interpreted`: how many `kernelimage`
+/// calls the compiled path finished, finished with some pixels left to the
+/// interpreter, and left wholly to the interpreter (a test hook: a
+/// differential test must know the compiled path really ran).
 fn kernelstats(it: &mut Interp) -> Result<(), PsError> {
-    let (c, f) = it.kernel_stats;
+    let (c, p, f) = it.kernel_stats;
     it.push(Object::int(c));
+    it.push(Object::int(p));
     it.push(Object::int(f));
     Ok(())
 }
@@ -556,6 +571,9 @@ fn substitute(obj: &Object, ks: &Object, sys: &Dict) -> Object {
             if &**n == "KS" {
                 return ks.clone();
             }
+            if let Some(h) = helper(n) {
+                return h;
+            }
             match sys.get_name(n) {
                 Some(o) => o,
                 None => obj.clone(),
@@ -590,35 +608,30 @@ fn int_of(d: &Dict, k: &str) -> Result<i64, PsError> {
     }
 }
 
+/// A non-negative integer entry. The state dicts are built here, but a
+/// program can reach the drivers' operators (`execstack`), so every entry
+/// is checked as untrusted input.
+fn uint_of(d: &Dict, k: &str) -> Result<usize, PsError> {
+    usize::try_from(int_of(d, k)?).map_err(|_| PsError::Rangecheck)
+}
+
 /// `i mark c1 .. cn KS .kfstore -`: one pixel's components into the row.
 fn kfstore(it: &mut Interp) -> Result<(), PsError> {
     let ks = state(it)?;
     let ks = ks.borrow();
-    let n = int_of(&ks, "N")? as usize;
-    let mut comps = Vec::with_capacity(n);
-    loop {
-        let o = it.pop()?;
-        match o.value {
-            Value::Mark => break,
-            Value::Integer(i) => comps.push(i as f64),
-            Value::Real(r) => comps.push(r),
-            _ => return Err(PsError::Typecheck),
-        }
-        if comps.len() > n {
-            return Err(PsError::Rangecheck);
-        }
-    }
-    if comps.len() != n {
-        return Err(PsError::Rangecheck);
-    }
-    comps.reverse();
-    let i = it.pop_int()? as usize;
+    let n = uint_of(&ks, "N")?;
+    let comps = pop_components(it, n)?;
+    let i = usize::try_from(it.pop_int()?).map_err(|_| PsError::Rangecheck)?;
     let Some(Value::String(row)) = ks.get("Row").map(|o| o.value) else {
         return Err(PsError::Typecheck);
     };
     let mut row = row.borrow_bytes_mut();
     for (c, v) in comps.iter().enumerate() {
-        if let Some(b) = row.get_mut(i * n + c) {
+        if let Some(b) = i
+            .checked_mul(n)
+            .and_then(|x| x.checked_add(c))
+            .and_then(|x| row.get_mut(x))
+        {
             *b = quantize(*v);
         }
     }
@@ -629,11 +642,11 @@ fn kfstore(it: &mut Interp) -> Result<(), PsError> {
 fn kfnext(it: &mut Interp) -> Result<(), PsError> {
     let ks = state(it)?;
     let mut ks = ks.borrow_mut();
-    let k = int_of(&ks, "K")? as usize;
+    let k = uint_of(&ks, "K")?;
     let Some(Value::Array(pix)) = ks.get("Pix").map(|o| o.value) else {
         return Err(PsError::Typecheck);
     };
-    if 2 * k + 1 >= pix.len() {
+    if k.saturating_mul(2).saturating_add(1) >= pix.len() {
         it.push(Object::bool(false));
         return Ok(());
     }
@@ -651,24 +664,31 @@ fn kfnext(it: &mut Interp) -> Result<(), PsError> {
 fn kfput(it: &mut Interp) -> Result<(), PsError> {
     let ks = state(it)?;
     let ks = ks.borrow();
-    let n = int_of(&ks, "N")? as usize;
+    let n = uint_of(&ks, "N")?;
     let comps = pop_components(it, n)?;
-    let k = int_of(&ks, "K")? as usize - 1;
-    let w = int_of(&ks, "W")? as usize;
+    let k = uint_of(&ks, "K")?
+        .checked_sub(1)
+        .ok_or(PsError::Rangecheck)?;
+    let w = uint_of(&ks, "W")?;
     let Some(Value::Array(pix)) = ks.get("Pix").map(|o| o.value) else {
         return Err(PsError::Typecheck);
     };
     let at = |x: usize| match pix.get(x).map(|o| o.value) {
-        Some(Value::Integer(v)) => Ok(v as usize),
+        Some(Value::Integer(v)) => usize::try_from(v).map_err(|_| PsError::Rangecheck),
         _ => Err(PsError::Typecheck),
     };
     let (i, j) = (at(2 * k)?, at(2 * k + 1)?);
+    let base = j
+        .checked_mul(w)
+        .and_then(|x| x.checked_add(i))
+        .and_then(|x| x.checked_mul(n))
+        .ok_or(PsError::Rangecheck)?;
     let Some(Value::String(buf)) = ks.get("Buf").map(|o| o.value) else {
         return Err(PsError::Typecheck);
     };
     let mut buf = buf.borrow_bytes_mut();
     for (c, v) in comps.iter().enumerate() {
-        if let Some(b) = buf.get_mut((j * w + i) * n + c) {
+        if let Some(b) = base.checked_add(c).and_then(|x| buf.get_mut(x)) {
             *b = quantize(*v);
         }
     }
@@ -691,15 +711,19 @@ fn kfpaint(it: &mut Interp) -> Result<(), PsError> {
         };
         (
             Args {
-                w: int_of(&ks, "W")? as usize,
-                h: int_of(&ks, "H")? as usize,
+                w: uint_of(&ks, "W")?,
+                h: uint_of(&ks, "H")?,
                 matrix: crate::ops::image::read_matrix6(&m)?,
                 proc: p,
-                ncomp: int_of(&ks, "N")? as usize,
+                ncomp: uint_of(&ks, "N")?,
             },
             buf.to_vec(),
         )
     };
+    let need = a.w.checked_mul(a.h).and_then(|x| x.checked_mul(a.ncomp));
+    if !matches!(a.ncomp, 1 | 3 | 4) || need != Some(bytes.len()) {
+        return Err(PsError::Rangecheck);
+    }
     paint(it, &a, bytes)
 }
 
@@ -731,7 +755,7 @@ fn kfrow(it: &mut Interp) -> Result<(), PsError> {
     let row = {
         let mut ks = ks.borrow_mut();
         let j = int_of(&ks, "J")?;
-        ks.put("J".into(), Object::int(j + 1));
+        ks.put("J".into(), Object::int(j.saturating_add(1)));
         ks.get("Row").ok_or(PsError::Typecheck)?
     };
     it.push(row);

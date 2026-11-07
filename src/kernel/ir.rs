@@ -1,12 +1,21 @@
 //! The kernel IR: structured, register-based, one f64 per lane per
 //! register. See `docs/dev/design/KERNELS.md`.
 //!
-//! Every value is an f64. Booleans are 0.0 or 1.0. An integer is held
-//! exactly as an f64 while it stays within ±2^53. Past that the kernel
-//! aborts to the interpreter, which keeps i64 semantics. Whether a value
-//! is an integer is known statically in most places; where branches merge
-//! an integer and a real, the compiler carries a *tag* register (1.0 =
-//! integer, 0.0 = real) next to it.
+//! A register is 64 bits per lane, in one of two *storage kinds* (fixed
+//! per register by the compiler, checked by `check.rs` in debug builds):
+//!
+//! - **I64**: a value statically known to be a PostScript integer, as i64
+//!   bits, with the interpreter's exact i64 arithmetic (`IBin`, `IUn`);
+//!   an overflow, which the interpreter would promote to a real, retires
+//!   the lane.
+//! - **F64**: a real, a boolean (0.0 or 1.0), a tag or flag, or a value
+//!   whose integer-ness differs per lane (*Dyn*): an f64, with a *tag*
+//!   register (1.0 = integer) beside it. A Dyn integer is held exactly,
+//!   so it must stay within ±2^53 (`CheckInt`, `I2FExact`).
+//!
+//! `Op::Imm` is always a *value* (an integer immediate is read as `v as
+//! i64` by integer ops), never bits; an integer constant past 2^53 is
+//! put in a register with `MovI`.
 
 pub(crate) type Reg = u32;
 
@@ -32,9 +41,6 @@ pub(crate) enum BinOp {
     Div,
     Min,
     Max,
-    /// `idiv`, `mod` on integers (operands already checked to be integers).
-    Idiv,
-    Mod,
     /// Relational: abort on a NaN operand (PostScript's `undefinedresult`).
     Lt,
     Le,
@@ -46,12 +52,6 @@ pub(crate) enum BinOp {
     BAnd,
     BOr,
     BXor,
-    /// Bitwise and/or/xor on integers.
-    IAnd,
-    IOr,
-    IXor,
-    /// `bitshift` on integers.
-    Shift,
     /// `num den atan`, degrees in [0, 360); aborts when both are 0.
     Atan,
     /// `base exp exp`; aborts on NaN.
@@ -77,10 +77,50 @@ pub(crate) enum UnOp {
     Log,
     /// Boolean not on 0/1.
     BNot,
-    /// Bitwise not on an integer.
-    INot,
-    /// `cvi` on a real: truncate; aborts when not finite or past ±2^53.
-    Cvi,
+}
+
+/// Integer ops on i64 bits (results i64 bits, compares 0.0/1.0 f64).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IBinOp {
+    /// Checked: an overflow retires the lane.
+    Add,
+    Sub,
+    Mul,
+    Min,
+    Max,
+    /// Checked: a zero divisor retires the lane.
+    Idiv,
+    Mod,
+    And,
+    Or,
+    Xor,
+    /// `bitshift`.
+    Shift,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl IBinOp {
+    /// Writes a boolean (F64) rather than an integer.
+    pub(crate) fn is_compare(self) -> bool {
+        matches!(
+            self,
+            IBinOp::Lt | IBinOp::Le | IBinOp::Gt | IBinOp::Ge | IBinOp::Eq | IBinOp::Ne
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IUnOp {
+    /// Checked.
+    Neg,
+    Abs,
+    /// Bitwise not.
+    Not,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,9 +180,20 @@ impl NoiseKind {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Ins {
+    /// Copy 64 bits (either kind), or write an immediate's f64 value.
     Mov(Reg, Op),
+    /// Write an integer constant's i64 bits.
+    MovI(Reg, i64),
     Bin(BinOp, Reg, Op, Op),
     Un(UnOp, Reg, Op),
+    IBin(IBinOp, Reg, Op, Op),
+    IUn(IUnOp, Reg, Op),
+    /// Integer to real, as the interpreter's `as f64` (may round).
+    I2F(Reg, Op),
+    /// Integer to an exact f64 (into a Dyn slot): retires the lane past 2^53.
+    I2FExact(Reg, Op),
+    /// `cvi` of a real: truncate; retires the lane when not finite or past i64.
+    F2I(Reg, Op),
     /// `d = if inc >= 0 { c > limit } else { c < limit }`: `for`'s
     /// termination test, exactly `ForControl::finished`.
     ForFin(Reg, Op, Op, Op),

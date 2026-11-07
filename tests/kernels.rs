@@ -33,7 +33,11 @@ fn render_counted(mode: &str, prog: &str, w: u32, h: u32) -> (Result<Vec<u8>, St
     );
     let r = it.run_str(&src);
     it.run_str("clear .kernelstats").expect("stats");
-    let ran_compiled = it.operand_stack()[0].repr() == "1";
+    // Finished by the compiled path, possibly with some pixels (an integer
+    // overflow the interpreter turns into a real, say) left to the
+    // interpreter: either way the kernel produced the image's pixels.
+    let st = it.operand_stack();
+    let ran_compiled = st[0].repr() == "1" || st[1].repr() == "1";
     let out = match r {
         Ok(()) => Ok(it.pages()[0].rgba8()),
         Err(e) => Err(match &e {
@@ -55,6 +59,16 @@ fn same(prog: &str) {
         "did not compile: {k:?}\n{prog}"
     );
     assert!(r.is_ok(), "the reference failed: {r:?}\n{prog}");
+    assert!(k == r, "compiled and interpreted renders differ\n{prog}");
+}
+
+/// Assert `prog` compiles and matches the interpreter, some pixels of it
+/// possibly finished by the interpreter.
+#[track_caller]
+fn same_or_partial(prog: &str) {
+    let k = render("strict", prog);
+    let r = render("interpret", prog);
+    assert!(r.is_ok(), "the reference failed: {r:?}");
     assert!(k == r, "compiled and interpreted renders differ\n{prog}");
 }
 
@@ -107,6 +121,35 @@ fn integer_promotion_matches() {
            i 31 sub 0.37 mul dup 0 lt {{ pop 0 }} if dup 5 gt {{ pop 5 }} if
            dup 2 mul exch pop
            i j mul 2 mod 0 eq {{ 1 }} {{ 1.0 }} ifelse add
+           show3 }} bind def"
+    ));
+}
+
+#[test]
+fn integer_hashes_are_exact_past_2_pow_53() {
+    // fractal_clouds' per-pixel hash: 31-bit products reach ~2^58, exact
+    // in the interpreter's i64 (an f64 would lose the low bits).
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           i j 16 bitshift add 16#2545F491 xor
+           dup 13 bitshift xor 16#7fffffff and
+           dup -17 bitshift xor
+           dup 5 bitshift xor 16#7fffffff and
+           16#45D9F3B mul 16#7fffffff and dup -15 bitshift xor
+           16#45D9F3B mul 16#7fffffff and dup -16 bitshift xor
+           dup 255 and 255 div exch -8 bitshift 255 and 0.5 mul add
+           i 16#7fffff mul 16#7fffffff mul j add 1000 mod add     % ~2^60
+           show3 }} bind def"
+    ));
+}
+
+#[test]
+fn integer_overflow_promotes_like_the_interpreter() {
+    // Past i64 the interpreter's product is a real: the lanes that overflow
+    // run in the interpreter, the rest stay compiled.
+    same_or_partial(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           i 1 add 16#7fffffffffff mul 16#7fffff mul 1e-30 mul
            show3 }} bind def"
     ));
 }
@@ -347,7 +390,7 @@ fn expr(r: &mut Rng, depth: u32, vars: &[String]) -> String {
             expr(r, d, vars)
         };
     }
-    match r.below(17) {
+    match r.below(21) {
         0 => format!("{} {} add", e!(), e!()),
         1 => format!("{} {} sub", e!(), e!()),
         2 => format!("{} {} mul", e!(), e!()),
@@ -384,6 +427,19 @@ fn expr(r: &mut Rng, depth: u32, vars: &[String]) -> String {
         ),
         14 => format!("Tbl {} cvi 8 mod abs get", e!()),
         15 => format!("{} 0.1 mul {} 0.1 mul gnoise2", e!(), e!()),
+        // Integer hashing, the procedural-art staple: products past 2^53
+        // (exact in the interpreter's i64), masks, shifts and xors.
+        17 => format!("{} cvi 16#45D9F3B mul 16#7fffffff and", e!()),
+        18 => format!(
+            "{} cvi dup 13 bitshift xor dup -17 bitshift xor 1000003 mul 255 and 255 div",
+            e!()
+        ),
+        19 => format!(
+            "{} cvi 16#2545F491 mul {} cvi 1 or {}",
+            e!(),
+            e!(),
+            ["idiv", "mod"][r.below(2) as usize]
+        ),
         _ => format!("{} {} {}", e!(), e!(), ["min", "max"][r.below(2) as usize]),
     }
 }
@@ -421,6 +477,9 @@ fn differential_fuzz() {
         let reference = render_sized("interpret", &prog, 33, 5);
         let (k, ran_compiled) = render_counted("strict", &prog, 33, 5);
         ran += usize::from(ran_compiled);
+        if !ran_compiled && reference.is_ok() && std::env::var_os("KFUZZ_DEBUG").is_some() {
+            eprintln!("FELLBACK case {n}:\n{prog}");
+        }
         if let Err(s) = &k
             && s.starts_with("kernelimage: not compiled")
         {
