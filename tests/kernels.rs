@@ -705,3 +705,73 @@ fn bind_and_count_inside_a_kernel_are_left_to_the_interpreter() {
         "1 1 [1 0 0 -1 0 1] { pop pop count 0 eq { 0 } { 1 0 div } ifelse } 1 kernelimage",
     );
 }
+
+// --- regressions from the second Codex review ----------------------------------
+
+#[test]
+fn copy_cannot_grow_the_compile_time_stack_without_bound() {
+    // Doubling with `n copy` sixteen times: the compiler refuses it (the
+    // interpreter then runs it and meets the real limits) instead of
+    // building a huge symbolic stack.
+    let mut body = String::from("[ 0 ");
+    let mut n = 1;
+    for _ in 0..16 {
+        body += &format!("{n} copy ");
+        n *= 2;
+    }
+    body += "] pop 0";
+    let mut it = Interp::new();
+    it.run_str(&format!("{{ pop pop {body} }} 1 kernelcompile"))
+        .expect("kernelcompile");
+    let st = it.operand_stack();
+    assert_eq!(st[0].repr(), "false", "{}", st[1].repr());
+}
+
+#[test]
+fn a_merged_array_keeps_its_aliases_or_is_not_compiled() {
+    auto_matches_interpreter(
+        "2 1 [2 0 0 -1 0 1] { pop /i exch def /A [0] def /B A def \
+           i 1 eq { /A [1] def } if A 0 1 put B 0 get } 1 kernelimage",
+    );
+}
+
+#[test]
+fn table_rows_compare_by_identity_at_run_time() {
+    auto_matches_interpreter(
+        "/T [[1]] def 1 1 [1 0 0 -1 0 1] { pop /i exch def \
+           T i get T i 0 add get eq { 1 } { 0 } ifelse } 1 kernelimage",
+    );
+}
+
+#[test]
+fn operations_on_null_or_string_rows_error_like_the_interpreter() {
+    let null_len =
+        "/T [null [1]] def 2 1 [2 0 0 -1 0 1] { pop T exch get length 10 div } 1 kernelimage";
+    assert_eq!(
+        run_mode("auto", null_len, None),
+        run_mode("interpret", null_len, None)
+    );
+    assert!(run_mode("interpret", null_len, None).is_err());
+    let str_aload =
+        "/T [(a) (b)] def 2 1 [2 0 0 -1 0 1] { pop T exch get aload pop 255 div } 1 kernelimage";
+    assert_eq!(
+        run_mode("auto", str_aload, None),
+        run_mode("interpret", str_aload, None)
+    );
+    assert!(run_mode("interpret", str_aload, None).is_err());
+}
+
+#[test]
+fn compiling_charges_steps_every_time() {
+    // Twenty probes of a procedure that inlines 2^7 copies of a leaf: each
+    // compile is charged, so a small step budget runs out.
+    let mut src = String::from("/p0 { 1 pop } def\n");
+    for n in 1..=7 {
+        src += &format!("/p{n} {{ p{} p{} }} def\n", n - 1, n - 1);
+    }
+    src += "20 { { pop pop p7 0 } 1 kernelcompile pop pop } repeat";
+    let mut it = Interp::new();
+    it.set_limits(Limits::none().with_max_steps(1000))
+        .expect("limits");
+    assert_eq!(it.run_str(&src).unwrap_err(), PsError::StepsExceeded);
+}

@@ -49,8 +49,9 @@ pub(crate) struct Compiled {
 
 /// Why `compile` gave no kernel.
 pub(crate) enum Refusal {
-    /// Not in the compiled subset: run the interpreter instead.
-    Not(String),
+    /// Not in the compiled subset: run the interpreter instead. With the
+    /// compile-time work spent finding that out (charged as steps).
+    Not(String, u64),
     /// A limit (`--max-time`, `--max-steps`) fired while compiling.
     Limit(crate::error::PsError),
 }
@@ -335,6 +336,8 @@ const MAX_INSNS: usize = 200_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
+/// Deepest symbolic operand stack a compile may build.
+const MAX_SYMBOLIC_STACK: usize = 4096;
 /// Largest `N array` a kernel may make.
 const MAX_LOCAL_ARRAY: usize = 4096;
 /// Largest table a kernel may snapshot (elements).
@@ -362,6 +365,8 @@ pub(crate) struct Compiler<'a> {
     pub(crate) uses_noise: bool,
     /// The procedures being inlined, by name, for error messages.
     trail: Vec<String>,
+    /// `[ ]` arrays merged at a join: no longer to be changed.
+    frozen: std::collections::HashSet<usize>,
     /// Procedure elements executed at compile time: bounded, and charged
     /// as steps, so compiling cannot escape the program's limits.
     pub(crate) work: u64,
@@ -411,6 +416,7 @@ pub(crate) fn compile(
         begun_dicts: Vec::new(),
         uses_noise: false,
         trail: Vec::new(),
+        frozen: std::collections::HashSet::new(),
         soft: Vec::new(),
         strict,
         work: 0,
@@ -497,7 +503,7 @@ pub(crate) fn compile(
             soft,
             work,
         }),
-        Err(NotCompilable(why)) => Err(Refusal::Not(why)),
+        Err(NotCompilable(why)) => Err(Refusal::Not(why, work)),
     }
 }
 
@@ -664,6 +670,16 @@ impl<'a> Compiler<'a> {
         self.st.stack.push(v);
     }
 
+    /// The symbolic stack may not outgrow what a kernel plausibly needs
+    /// (`n copy` doubles it); past that the interpreter runs the procedure
+    /// and meets the program's real limits.
+    fn check_depth(&self) -> CResult<()> {
+        if self.st.stack.len() > MAX_SYMBOLIC_STACK {
+            return nc("the stack grows too deep");
+        }
+        Ok(())
+    }
+
     fn pop(&mut self) -> CResult<SVal> {
         match self.st.stack.pop() {
             Some(v) => Ok(v),
@@ -755,6 +771,7 @@ impl<'a> Compiler<'a> {
     /// One element of a procedure body.
     fn exec_item(&mut self, obj: &Object) -> CResult<()> {
         self.charge()?;
+        self.check_depth()?;
         match &obj.value {
             Value::Name(n) if obj.executable => self.exec_name(n),
             Value::Operator(op) => self.apply(op),
@@ -1170,7 +1187,17 @@ impl<'a> Compiler<'a> {
                             );
                         }
                         if ok {
-                            Binding::Val(SVal::Tuple(Rc::new(RefCell::new(out)), self.block))
+                            // The merge is a new array: neither it nor the
+                            // arrays merged may be changed later, as an
+                            // alias of either would not see the change.
+                            for v in [x, y] {
+                                if let SVal::Tuple(t, _) = v {
+                                    self.frozen.insert(Rc::as_ptr(t) as usize);
+                                }
+                            }
+                            let merged = Rc::new(RefCell::new(out));
+                            self.frozen.insert(Rc::as_ptr(&merged) as usize);
+                            Binding::Val(SVal::Tuple(merged, self.block))
                         } else {
                             Binding::Maybe
                         }
@@ -1782,6 +1809,7 @@ impl<'a> Compiler<'a> {
                 }
                 let from = len - n as usize;
                 for i in from..len {
+                    self.charge()?;
                     let v = self.st.stack[i].clone();
                     self.push(v);
                 }
@@ -2104,7 +2132,12 @@ impl<'a> Compiler<'a> {
                 let n = match &c {
                     SVal::Cap(o) => cap_len(o),
                     SVal::Tuple(t, _) => t.borrow().len(),
-                    SVal::Row { cols, .. } => *cols,
+                    SVal::Row {
+                        table, row, cols, ..
+                    } => {
+                        self.emit(Ins::RowCheck(*table, *row))?;
+                        *cols
+                    }
                     SVal::LArr(_, n) => *n,
                     other => return nc(format!("forall over {}", describe(other))),
                 };
@@ -2270,7 +2303,12 @@ impl<'a> Compiler<'a> {
                     },
                     SVal::Proc(p) => p.len(),
                     SVal::Tuple(t, _) => t.borrow().len(),
-                    SVal::Row { cols, .. } => cols,
+                    SVal::Row {
+                        table, row, cols, ..
+                    } => {
+                        self.emit(Ins::RowCheck(table, row))?;
+                        cols
+                    }
                     SVal::LArr(_, n) => n,
                     other => return nc(format!("length of {}", describe(&other))),
                 };
@@ -2299,7 +2337,17 @@ impl<'a> Compiler<'a> {
                         _ => return nc("aload of a string"),
                     },
                     SVal::Tuple(t, _) => t.borrow().len(),
-                    SVal::Row { cols, .. } => *cols,
+                    SVal::Row {
+                        table, row, cols, ..
+                    } => {
+                        if self.tables[*table as usize].strings {
+                            // `aload` takes arrays only: a string row is
+                            // the interpreter's typecheck.
+                            return self.abort_path();
+                        }
+                        self.emit(Ins::RowCheck(*table, *row))?;
+                        *cols
+                    }
                     SVal::LArr(_, n) => *n,
                     SVal::Proc(p) => p.len(),
                     other => return nc(format!("aload of {}", describe(other))),
@@ -2526,6 +2574,9 @@ impl<'a> Compiler<'a> {
                 let Op::Imm(k) = i else {
                     return nc("put at a run-time index into a [ ] array");
                 };
+                if self.frozen.contains(&(Rc::as_ptr(&t) as usize)) {
+                    return nc("put into an array that a branch chose");
+                }
                 if b != self.block {
                     return nc("put into a [ ] array from inside an if or loop");
                 }
@@ -2588,6 +2639,7 @@ impl<'a> Compiler<'a> {
                         data: TableData::U8(data),
                         kind: TableKind::Int,
                         null_rows: Vec::new(),
+                        strings: false,
                     },
                     false,
                 )
@@ -2626,6 +2678,7 @@ impl<'a> Compiler<'a> {
                         data: TableData::U8(data),
                         kind: TableKind::Int,
                         null_rows: Vec::new(),
+                        strings: true,
                     };
                     let id = self.tables.len() as u32;
                     self.tables.push(t);
@@ -2743,6 +2796,9 @@ fn const_eq(a: &SVal, b: &SVal) -> Option<bool> {
     }
     Some(match (a, b) {
         (Num(..), Num(..)) | (Bool(_), Bool(_)) => return None,
+        // A row chosen at run time is some array of the table: whether two
+        // are the same object is a run-time question.
+        (Row { .. }, _) | (_, Row { .. }) => return None,
         (Null, Null) | (Mark, Mark) => true,
         _ => a == b,
     })
@@ -2772,6 +2828,7 @@ fn table_of(rows: usize, cols: usize, nums: Vec<(f64, bool)>) -> Table {
         data: TableData::F64(nums.into_iter().map(|n| n.0).collect()),
         kind,
         null_rows: Vec::new(),
+        strings: false,
     }
 }
 

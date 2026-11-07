@@ -174,7 +174,7 @@ fn each_reg(ins: &Ins, mut f: impl FnMut(Reg)) {
             each_op(a, &mut f);
             each_op(b, &mut f);
         }
-        Ins::NeedInt(a) | Ins::Assert(a) => each_op(a, &mut f),
+        Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => each_op(a, &mut f),
         Ins::Gather {
             d,
             dtag,
@@ -254,7 +254,7 @@ fn rename(b: &mut [Ins], map: &[u32]) {
                 mo(a);
                 mo(b);
             }
-            Ins::NeedInt(a) | Ins::Assert(a) => mo(a),
+            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => mo(a),
             Ins::Gather {
                 d,
                 dtag,

@@ -256,7 +256,8 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 }
             }
             Err(compile::Refusal::Limit(e)) => return Err(e),
-            Err(compile::Refusal::Not(why)) => {
+            Err(compile::Refusal::Not(why, work)) => {
+                it.charge_steps(work);
                 if it.kernel_mode == KernelMode::Strict {
                     return Err(PsError::Undefined(format!(
                         "kernelimage: not compiled: {why}"
@@ -500,7 +501,13 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
     if !p.executable {
         return Err(PsError::Typecheck);
     }
-    let (ok, why) = match compile::compile(it, proc, ncomp as usize, false) {
+    let compiled = compile::compile(it, proc, ncomp as usize, false);
+    match &compiled {
+        Ok(c) => it.charge_steps(c.work),
+        Err(compile::Refusal::Not(_, work)) => it.charge_steps(*work),
+        Err(compile::Refusal::Limit(_)) => {}
+    }
+    let (ok, why) = match compiled {
         Ok(c) if c.soft.is_empty() => (true, format!("{} instructions", c.kernel.size())),
         Ok(compile::Compiled {
             kernel: k, soft, ..
@@ -512,7 +519,7 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
                 soft.join("; ")
             ),
         ),
-        Err(compile::Refusal::Not(why)) => (false, why),
+        Err(compile::Refusal::Not(why, _)) => (false, why),
         Err(compile::Refusal::Limit(e)) => return Err(e),
     };
     it.push(Object::bool(ok));
@@ -555,6 +562,7 @@ fn fallback(it: &mut Interp, a: Args) -> Result<(), PsError> {
     ks.put("P".into(), Object::exec(Value::Array(a.proc.clone())));
     ks.put("N".into(), Object::int(a.ncomp as i64));
     ks.put("J".into(), Object::int(0));
+    it.check_alloc(a.w * a.ncomp)?;
     ks.put(
         "Row".into(),
         Object::lit(Value::String(PsString::from_bytes(vec![0; a.w * a.ncomp]))),
@@ -591,6 +599,11 @@ fn fallback_pixels(
     ks.put("W".into(), Object::int(a.w as i64));
     ks.put("H".into(), Object::int(a.h as i64));
     ks.put("K".into(), Object::int(0));
+    it.check_alloc(
+        pixels
+            .len()
+            .saturating_mul(2 * std::mem::size_of::<Object>()),
+    )?;
     let flat: Vec<Object> = pixels
         .iter()
         .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)])

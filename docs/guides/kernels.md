@@ -18,7 +18,7 @@ On a 10-core Apple M4 laptop, release build:
 |---|---:|---:|---:|
 | [Mirror Garden](../../gallery/mirror_garden.ps): ray tracer, 1440×960, 4 rays a pixel | 149 s | 0.9 s | 165× |
 | a Mandelbrot zoom, 480×320 | 4.8 s | 0.06 s | 75× |
-| the fractal_clouds landscape renderer, one 160×100 frame | 18 s | 0.6 s | 30× |
+| the fractal_clouds landscape renderer, one 160×100 frame | 18 s | 0.29 s | 61× |
 
 More measurements are in [`notes/742-compiled-kernels.md`](../../notes/742-compiled-kernels.md).
 

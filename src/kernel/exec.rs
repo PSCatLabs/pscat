@@ -430,6 +430,25 @@ impl<'k> Machine<'k> {
                         self.store(*dt, &tt, mask & !bad);
                     }
                 }
+                Ins::RowCheck(table, row) => {
+                    let tb = &self.k.tables[*table as usize];
+                    let mut bad = 0u64;
+                    for l in 0..LANES {
+                        if mask >> l & 1 == 0 {
+                            continue;
+                        }
+                        let r = self.get(*row, l);
+                        if !(r >= 0.0 && (r as usize) < tb.rows)
+                            || tb.null_rows.get(r as usize).copied().unwrap_or(false)
+                        {
+                            bad |= 1 << l;
+                        }
+                    }
+                    self.kill(
+                        bad,
+                        "an operation on a table row that is null or out of range",
+                    );
+                }
                 Ins::LNew(a) => {
                     let (vals, tags) = &mut self.larr[*a as usize];
                     for (v, t) in vals.iter_mut().zip(tags.iter_mut()) {

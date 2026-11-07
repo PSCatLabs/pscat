@@ -398,7 +398,7 @@ fn block(
                     "{pad}r{d} = b2f(select(({c}) < ({lim}), ({c}) > ({lim}), ({inc}) >= 0.0));"
                 );
             }
-            Ins::CheckInt(..) | Ins::NeedInt(_) | Ins::Assert(_) => {}
+            Ins::CheckInt(..) | Ins::NeedInt(_) | Ins::Assert(_) | Ins::RowCheck(..) => {}
             Ins::Gather {
                 d,
                 dtag,

@@ -91,7 +91,7 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
             f(a, "CheckInt")?;
             f(b, "CheckInt")
         }
-        Ins::NeedInt(a) | Ins::Assert(a) => f(a, "a check"),
+        Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => f(a, "a check"),
         Ins::Gather {
             d,
             dtag,

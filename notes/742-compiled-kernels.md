@@ -149,6 +149,31 @@ except item 7, which is GPU-only and was checked by hand.
 
 None of the fixes changed the gallery renders' bytes or speed.
 
+**Second Codex round.** The adversarial mode broke off twice on its own
+output format; the plain review mode completed. Six more findings, all valid
+and all fixed, each with a regression test and a mutation check that the test
+catches:
+
+1. **Exactness at 2^53.** An integer converted to an f64 was checked *after*
+   conversion, so 2^53 + 1 (which rounds to 2^53) passed. Integers are now
+   checked as integers, 2^53 inclusive. f64 results are checked strictly below
+   2^53, since 2^53 may itself be a rounded 2^53 + 1. My regression test for
+   the first round had hidden this: it used 2 components (a `rangecheck` in
+   both modes) and painted into one device pixel.
+2. **Symbolic stack.** `n copy` could double the compile-time stack without
+   charge. Each copy is now work, and the stack is capped at 4096 entries,
+   past which the interpreter runs the procedure.
+3. **Fallback allocations.** The interpreter fallback's row buffer and its
+   pixel list now go through `check_alloc`.
+4. **Merged arrays.** Merging arrays at a join lost aliasing. Merged arrays,
+   and the arrays merged, are now frozen: a later `put` refuses compilation.
+5. **Row identity.** `eq` on two run-time table rows compared index
+   expressions. It is now undecidable at compile time, so refused.
+6. **Row types.** `length`, `aload` and `forall` on a null row, and `aload`
+   on a string row, now raise the interpreter's error: a row check retires the
+   lane. Every `kernelcompile` and refused compile also charges its work as
+   steps.
+
 ### Measurements
 
 Release build, Apple M4 (4 performance + 6 efficiency cores). Wall time
@@ -173,7 +198,7 @@ mapping, 48k IR instructions. The test was a 160×100 frame, AA off, via a
 |---|---:|
 | interpreter | 17.95 s |
 | compiled, 1 thread | 1.24 s (14.5×) |
-| compiled, all cores | 0.61 s (29×) |
+| compiled, all cores | 0.29 s (61×) |
 
 The scene's own bakes (erosion and forest maps, about 12 s) are not
 per-pixel and stay interpreted. They now dominate a frame at this size.

@@ -215,6 +215,9 @@ pub(crate) enum Ins {
         col: Op,
         ctag: Op,
     },
+    /// Retire the lanes whose `row` of `table` is out of range or null (an
+    /// operation on the row itself, such as `length`, reads no element).
+    RowCheck(u32, Op),
     /// Per-lane local array (`N array`): fill every element with null.
     LNew(u32),
     /// `d = arr[idx]`, with its tag; aborts on a null element, a non-integer
@@ -261,6 +264,9 @@ pub(crate) struct Table {
     /// Rows that are `null` in the program's array (reading one is the
     /// interpreter's `typecheck`, so the kernel aborts). Empty when none.
     pub null_rows: Vec<bool>,
+    /// Built from strings (each row a string): `aload` of a row is a
+    /// `typecheck`, as for any string.
+    pub strings: bool,
 }
 
 /// A table's elements: f64s, or bytes (a string: an image read with
