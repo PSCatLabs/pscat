@@ -683,9 +683,10 @@ pub(crate) struct Compiler<'a> {
     trail: Vec<String>,
     /// `[ ]` arrays merged at a join: no longer to be changed.
     frozen: std::collections::HashSet<usize>,
-    /// The frozen arrays themselves, kept alive so that no array made
-    /// later can have a frozen one's address.
-    frozen_keep: Vec<Rc<RefCell<Vec<SVal>>>>,
+    /// Weak references to the frozen arrays: a weak reference keeps the
+    /// allocation (not its elements), so no array made later can take a
+    /// frozen one's address.
+    frozen_keep: Vec<std::rc::Weak<RefCell<Vec<SVal>>>>,
     /// Procedure elements executed at compile time: bounded, and charged
     /// as steps, so compiling cannot escape the program's limits.
     pub(crate) work: u64,
@@ -2108,11 +2109,11 @@ impl<'a> Compiler<'a> {
                                 if let SVal::Tuple(t, _) = v
                                     && self.frozen.insert(Rc::as_ptr(t) as usize)
                                 {
-                                    self.frozen_keep.push(t.clone());
+                                    self.frozen_keep.push(Rc::downgrade(t));
                                 }
                             }
                             self.frozen.insert(Rc::as_ptr(&merged) as usize);
-                            self.frozen_keep.push(merged.clone());
+                            self.frozen_keep.push(Rc::downgrade(&merged));
                             Binding::Val(SVal::Tuple(merged, self.block))
                         } else {
                             Binding::Maybe
