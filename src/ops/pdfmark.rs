@@ -34,6 +34,11 @@ pub fn install(dict: &mut Dict) {
 /// one, or one that contains itself, is a `limitcheck`.
 const MAX_DEPTH: usize = 32;
 
+/// How many objects one mark's operands may hold in all. Limits are only
+/// looked at between operators, and an array that holds one array twice,
+/// doubled 25 times, is 2^26 objects to copy within depth 32.
+const MAX_NODES: usize = 1 << 20;
+
 /// Why a mark was not applied.
 enum Skip {
     /// A PostScript error: the operands stay on the stack.
@@ -84,13 +89,15 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
     let Value::Name(kind) = &kind.value else {
         return Err(PsError::Typecheck.into());
     };
+    let mut budget = MAX_NODES;
+    let mut conv = |obj: &Object| convert(obj, 0, &mut budget);
     match &**kind {
         "DOCINFO" => {
             let mut entries = Vec::new();
             for (key, value) in pairs(args)? {
                 let value = match &value.value {
                     Value::String(s) => PdfValue::Text(s.borrow_bytes().to_vec()),
-                    _ => convert(value, 0)?,
+                    _ => conv(value)?,
                 };
                 entries.push((key, value));
             }
@@ -123,23 +130,32 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
         "PUT" => match args {
             [target, value] => {
                 let target = reference(target)?;
+                // A mark that fails must leave no trace, so the kind is
+                // checked before `named_ref` makes a missing target.
+                let kind = pdf.kind_of(&target);
                 match &value.value {
                     Value::Dict(_) => {
-                        let PdfValue::Dict(entries) = convert(value, 0)? else {
+                        if kind == ObjKind::Array {
+                            return Err(PsError::Typecheck.into());
+                        }
+                        let PdfValue::Dict(entries) = conv(value)? else {
                             unreachable!("a dict converts to a dict");
                         };
                         let obj = pdf.named_ref(&target);
                         pdf.put_dict(obj, entries)?;
                     }
                     Value::String(s) => {
+                        if kind != ObjKind::Stream {
+                            return Err(PsError::Typecheck.into());
+                        }
                         let obj = pdf.named_ref(&target);
                         pdf.put_data(obj, &s.borrow_bytes())?;
                     }
                     Value::File(f) => {
-                        let obj = pdf.named_ref(&target);
-                        if pdf.kind(obj) != ObjKind::Stream {
+                        if kind != ObjKind::Stream {
                             return Err(PsError::Typecheck.into());
                         }
+                        let obj = pdf.named_ref(&target);
                         // Read at most one byte past the room left, so an
                         // endless or expanding source stops at the cap.
                         let room = pdf.stream_room();
@@ -167,7 +183,10 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                     .ok()
                     .filter(|&i| i < 1 << 16)
                     .ok_or(PsError::Rangecheck)?;
-                let value = convert(value, 0)?;
+                if pdf.kind_of(&target) != ObjKind::Array {
+                    return Err(PsError::Typecheck.into());
+                }
+                let value = conv(value)?;
                 let obj = pdf.named_ref(&target);
                 pdf.put_index(obj, i, value)?;
             }
@@ -178,7 +197,10 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                 return Err(PsError::Rangecheck.into());
             };
             let target = reference(target)?;
-            let value = convert(value, 0)?;
+            if pdf.kind_of(&target) != ObjKind::Array {
+                return Err(PsError::Typecheck.into());
+            }
+            let value = conv(value)?;
             let obj = pdf.named_ref(&target);
             pdf.append(obj, value)?;
         }
@@ -197,7 +219,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
                         _ => return Err(PsError::Typecheck.into()),
                     },
                     "FS" => match &value.value {
-                        Value::Dict(_) => fs = Some(convert(value, 0)?),
+                        Value::Dict(_) => fs = Some(conv(value)?),
                         _ => return Err(PsError::Typecheck.into()),
                     },
                     _ => {}
@@ -254,11 +276,13 @@ fn reference(obj: &Object) -> Result<String, Skip> {
 
 /// A PostScript operand as a PDF value. Dict keys are written in sorted
 /// order: a dict's own order follows interned name ids, which a different
-/// host (the CLI, the wasm build) may number differently.
-fn convert(obj: &Object, depth: usize) -> Result<PdfValue, Skip> {
-    if depth > MAX_DEPTH {
+/// host (the CLI, the wasm build) may number differently. `budget` is
+/// the objects the mark may still copy ([`MAX_NODES`]).
+fn convert(obj: &Object, depth: usize, budget: &mut usize) -> Result<PdfValue, Skip> {
+    if depth > MAX_DEPTH || *budget == 0 {
         return Err(PsError::Limitcheck.into());
     }
+    *budget -= 1;
     Ok(match &obj.value {
         Value::Null => PdfValue::Null,
         Value::Boolean(b) => PdfValue::Bool(*b),
@@ -272,7 +296,7 @@ fn convert(obj: &Object, depth: usize) -> Result<PdfValue, Skip> {
             let mut items = Vec::with_capacity(a.len());
             for i in 0..a.len() {
                 let Some(item) = a.get(i) else { break };
-                items.push(convert(&item, depth + 1)?);
+                items.push(convert(&item, depth + 1, budget)?);
             }
             PdfValue::Array(items)
         }
@@ -285,7 +309,7 @@ fn convert(obj: &Object, depth: usize) -> Result<PdfValue, Skip> {
                     Value::String(s) => String::from_utf8_lossy(&s.borrow_bytes()).into_owned(),
                     _ => return Err(PsError::Typecheck.into()),
                 };
-                entries.push((key, convert(v, depth + 1)?));
+                entries.push((key, convert(v, depth + 1, budget)?));
             }
             entries.sort_by(|a, b| a.0.cmp(&b.0));
             PdfValue::Dict(entries)

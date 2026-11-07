@@ -219,6 +219,30 @@ fn errors_leave_the_operands_on_the_stack() {
 }
 
 #[test]
+fn a_failed_mark_leaves_no_trace_in_the_document() {
+    let clean = pdf_of("showpage");
+    for body in [
+        "[ {nope} (x) /PUT pdfmark",
+        "[ {nope} 0 1 /PUT pdfmark",
+        "[ {nope} 1 /APPEND pdfmark",
+        "[ /FS << /EF << /F {nope} >> >> /EMBED pdfmark",
+        "[ /Title {nope} /Subject /add load /DOCINFO pdfmark",
+    ] {
+        let pdf = pdf_of(&format!("{{ {body} }} stopped pop clear showpage"));
+        assert!(pdf == clean, "{body} left something in the PDF");
+    }
+}
+
+#[test]
+fn shared_structure_is_counted_per_object() {
+    // 2^26 objects at depth 26: under the depth cap, so the node count is
+    // what stops it, at once.
+    let src = "/a [ 1 ] def 25 { /a [ a a ] def } repeat \
+               { [ /Title a /DOCINFO pdfmark } stopped { $error /errorname get = } if";
+    assert_eq!(eval(src, true), "limitcheck\n");
+}
+
+#[test]
 fn a_self_containing_value_is_a_limitcheck() {
     let src = "{ [ /Title [ 1 ] dup dup 0 exch put /DOCINFO pdfmark } stopped \
                { $error /errorname get = } if";

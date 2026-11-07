@@ -327,9 +327,12 @@ impl PdfRecorder {
         MAX_STREAM_BYTES - self.stream_bytes
     }
 
-    /// The kind of named object `obj`.
-    pub(crate) fn kind(&self, obj: usize) -> ObjKind {
-        self.named[obj].kind
+    /// The kind of named object `name`; a dict if it does not exist yet,
+    /// as a reference would make it.
+    pub(crate) fn kind_of(&self, name: &str) -> ObjKind {
+        self.named_ids
+            .get(name)
+            .map_or(ObjKind::Dict, |&i| self.named[i].kind)
     }
 
     /// `/PUT` into an array: element `index`, padding with nulls.

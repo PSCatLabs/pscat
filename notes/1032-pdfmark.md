@@ -70,7 +70,13 @@ MIME subtype as `(text/plain) cvn`.
 - The total stream data per document is capped at 64 MiB (`limitcheck`),
   because a decoding filter read to its end can grow without bound.
   Operands nested more than 32 deep (or a value that contains itself) are a
-  `limitcheck`.
+  `limitcheck`, and so is a mark whose operands hold more than 2^20
+  objects in all, counting a shared array once per place it appears. The
+  execution limits are only looked at between operators, and an array
+  that holds one array twice, doubled 25 times, would otherwise be 2^26
+  copies inside one `pdfmark`.
+- A mark that fails leaves the document as it was: a missing `/PUT` target
+  is only created once the mark is known to succeed.
 - WASM parity: strings and `currentfile` data give byte-identical PDFs from
   the CLI and the wasm build (`wasm_pdfmark_document_matches_the_cli`). A
   named file cannot be opened in the browser build (it has no file system),
