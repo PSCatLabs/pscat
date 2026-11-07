@@ -47,3 +47,16 @@ compare per token, no refcount traffic in the common case). The report:
 - **Still unnamed:** `(f.ps) (r) file cvx exec` (a file object `exec`ed
   directly has no name to report), eexec streams and executable strings
   keep the sticky outer location, as before.
+
+**`bind` hazard, found by the selftest.** `lib/qr.ps` used `version` as a
+local (`12 dict begin ... /version exch def ... version 10 lt`) inside
+`bind def` procedures. With `version` now an operator in systemdict, `bind`
+replaced the local's lookups with the operator, and 16 qr selftest blocks
+failed with `typecheck`. The local is now `qrver` (code lines only; the
+dicts' `/Version` keys are unchanged, so QR output is identical). This is
+also how gs behaves, since it has the same four operators, so the old qr.ps
+was already wrong under gs. A user program that does the same thing (one of
+these four names as a `dict begin` local inside a bound procedure) changes
+behaviour the same way. A name defined in userdict before the `bind` is
+safe: `bind` finds the user's value first. No other tracked `.ps` file uses
+the four names executably (`git ls-files '*.ps'` grep).

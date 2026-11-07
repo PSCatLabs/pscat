@@ -50,9 +50,9 @@
   1 index gt { qr-data-does-not-fit-capacity } if
 
   12 dict begin
-    /capacity exch def /version exch def /data exch cvlit def
+    /capacity exch def /qrver exch def /data exch cvlit def
     /out capacity string def /n data length def
-    /header version 10 lt { 2 } { 3 } ifelse def
+    /header qrver 10 lt { 2 } { 3 } ifelse def
     % Mode 0100 plus an 8/16-bit count leaves the stream nibble-aligned.
     header 2 eq {
       out 0 64 n -4 bitshift or put
@@ -231,12 +231,12 @@ qr--block-count readonly pop
   1 index type /integertype ne { qr-version-must-be-integer } if
   1 index dup 1 lt exch 40 gt or { qr-version-must-be-in-1-40 } if
   10 dict begin
-    /level exch def /version exch def
-    /size version 4 mul 17 add def
-    /raw version qr--raw-modules def
-    /ec qr--ecc-per-block level get version 1 sub get def
-    /blocks qr--block-count level get version 1 sub get def
-    << /Version version /Level level /Size size
+    /level exch def /qrver exch def
+    /size qrver 4 mul 17 add def
+    /raw qrver qr--raw-modules def
+    /ec qr--ecc-per-block level get qrver 1 sub get def
+    /blocks qr--block-count level get qrver 1 sub get def
+    << /Version qrver /Level level /Size size
        /RawCodewords raw 8 idiv /RemainderBits raw 8 mod
        /DataCodewords raw 8 idiv ec blocks mul sub
        /ECCodewordsPerBlock ec /Blocks blocks >>
@@ -267,16 +267,16 @@ qr--block-count readonly pop
     qr-data-too-long-for-level
   } if
   8 dict begin
-    /level exch def /data exch cvlit def /n data length def /version 1 def
+    /level exch def /data exch cvlit def /n data length def /qrver 1 def
     {
-      /spec version level qr--block-spec def
-      /header version 10 lt { 2 } { 3 } ifelse def
+      /spec qrver level qr--block-spec def
+      /header qrver 10 lt { 2 } { 3 } ifelse def
       n header add spec /DataCodewords get le
-      n version 10 lt { 255 } { 65535 } ifelse le and {
-        spec /Data data version spec /DataCodewords get qr--byte-data put
+      n qrver 10 lt { 255 } { 65535 } ifelse le and {
+        spec /Data data qrver spec /DataCodewords get qr--byte-data put
         spec exit
       } if
-      /version version 1 add def
+      /qrver qrver 1 add def
     } loop
   end
 } bind def
@@ -366,9 +366,9 @@ qr--block-count readonly pop
   qr--check-version
   dup 1 eq { pop [] } {
     6 dict begin
-      /version exch def /n version 7 idiv 2 add def
-      /size version 4 mul 17 add def
-      /step version 8 mul n 3 mul add 5 add n 4 mul 4 sub idiv 2 mul def
+      /qrver exch def /n qrver 7 idiv 2 add def
+      /size qrver 4 mul 17 add def
+      /step qrver 8 mul n 3 mul add 5 add n 4 mul 4 sub idiv 2 mul def
       /out n array def out 0 6 put
       1 1 n 1 sub { /i exch def out n i sub size 7 sub i 1 sub step mul sub put } for
       out
@@ -390,7 +390,7 @@ qr--block-count readonly pop
 /qr--function-matrix {
   qr--check-version
   12 dict begin
-    /version exch def /size version 4 mul 17 add def
+    /qrver exch def /size qrver 4 mul 17 add def
     /cells size dup mul string def
     % x y value -> -, writing one cell flag byte.
     /cell { 3 1 roll size mul add exch cells 3 1 roll put } def
@@ -412,7 +412,7 @@ qr--block-count readonly pop
         } for
       } for
     } forall
-    /centers version qr--alignment-centers def /last centers length 1 sub def
+    /centers qrver qr--alignment-centers def /last centers length 1 sub def
     0 1 last { /i exch def
       0 1 last { /j exch def
         % Skip the three corners occupied by finder patterns.
@@ -435,12 +435,12 @@ qr--block-count readonly pop
     size 7 sub 1 size 1 sub { 8 exch 6 cell } for
     8 size 8 sub 3 cell
     % Version information (v>=7): two 6x3 blocks beside the far finders.
-    version 7 ge {
+    qrver 7 ge {
       0 1 5 { /b exch def
         size 11 sub 1 size 9 sub { /a exch def a b 6 cell b a 6 cell } for
       } for
     } if
-    << /Version version /Size size /Cells cells /Mask null >>
+    << /Version qrver /Size size /Cells cells /Mask null >>
   end
 } bind def
 
