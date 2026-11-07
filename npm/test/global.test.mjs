@@ -85,7 +85,7 @@ test('by default pscat.wasm is fetched from next to the script', async () => {
 });
 
 test('with no script URL (inline, blob:, a worker) the default asks for options.wasm instead of guessing', async () => {
-  for (const src of [undefined, '', 'blob:https://example.com/1-2-3', 'data:text/javascript,0']) {
+  for (const src of [undefined, '', 'blob:https://example.com/1-2-3', 'data:text/javascript,0', 'https://unpkg.com/pscat@0.7.0']) {
     const p = load(src);
     await assert.rejects(p.createRenderer(), /pass createRenderer\(\{ wasm \}\)/, `src ${JSON.stringify(src)}`);
     // ...and naming the module still works.

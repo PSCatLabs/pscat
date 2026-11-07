@@ -26,8 +26,6 @@
   "sideEffects": [
     "./pscat.global.js"
   ],
-  "unpkg": "./pscat.global.js",
-  "jsdelivr": "./pscat.global.js",
   "engines": {
     "node": ">=22"
   },

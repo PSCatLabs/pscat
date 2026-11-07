@@ -638,11 +638,21 @@ fn ellipsearc_is_parametric_and_directed() {
         (x - 80.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6,
         "got ({x}, {y})"
     );
-    // 0..270 counterclockwise and clockwise end at the same point, by
-    // different ways round (the paths differ, the end does not).
-    let long = eval("newpath 100 100 60 20 0 270 ellipsearc currentpoint");
-    let short = eval("newpath 100 100 60 20 0 270 ellipsearcn currentpoint");
-    assert_eq!(long, short, "same end point, opposite way round");
+    // 0..270 counterclockwise (three quarters, through the top and left) and
+    // clockwise (one quarter, down to the bottom) end at the same point by
+    // different ways round: the bounding boxes tell the directions apart.
+    let ccw = eval("newpath 100 100 60 20 0 270 ellipsearc pathbbox");
+    let cw = eval("newpath 100 100 60 20 0 270 ellipsearcn pathbbox");
+    let f = |v: &[String]| -> Vec<f64> { v.iter().map(|x| x.parse().unwrap()).collect() };
+    let (ccw, cw) = (f(&ccw), f(&cw));
+    assert!(
+        ccw[0] < 45.0 && ccw[3] > 119.0,
+        "ccw reaches the left and the top: {ccw:?}"
+    );
+    assert!(
+        cw[0] > 95.0 && cw[3] < 101.0,
+        "cw is the quarter below the right end: {cw:?}"
+    );
 }
 
 /// A second ellipse in one path starts its own subpath: no connecting

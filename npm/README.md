@@ -54,8 +54,10 @@ defines one global, `pscat`, holding `createRenderer`, `PostScriptError` and
 `pscat.wasm` is fetched from next to the script. Where the script cannot
 tell where it came from (inline, `blob:`, a worker, a `file://` page that
 cannot fetch), `createRenderer()` says so, and you pass the module:
-`createRenderer({ wasm: url })` or `{ wasm: bytes }`. unpkg and jsDelivr
-serve the script by default once the release is on npm.
+`createRenderer({ wasm: url })` or `{ wasm: bytes }`. From a CDN once the
+release is on npm, load the file by name
+(`https://unpkg.com/pscat@X.Y.Z/pscat.global.js`): a bare package URL has no
+`pscat.wasm` beside it.
 
 ## Watch it draw
 

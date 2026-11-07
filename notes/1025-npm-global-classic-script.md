@@ -14,8 +14,7 @@ imports to Blob URLs.
   a missing anchor), and the output is parsed with `vm.Script`, which is a
   classic-script parse, so module syntax anywhere is a SyntaxError.
   `build_npm.sh` runs it; the file is gitignored like `core.js`, listed in
-  the package `files`, in the exports map (`pscat/pscat.global.js`), as
-  `unpkg` / `jsdelivr`, and in the tarball's expected file set.
+  the package `files`, in the exports map (`pscat/pscat.global.js`), and in the tarball's expected file set.
 - Default wasm location: `pscat.wasm` next to the script, from
   `document.currentScript.src` read at the script's top level (it is null by
   the time an async function runs). When there is no usable script URL

@@ -78,11 +78,13 @@ const entry = `
 // null by the time an async function runs. It is empty for an inline
 // <script> (nothing to be relative to), for a blob: or data: URL, and in a
 // worker (self.location is the worker's own script, not necessarily this
-// one), and then pscat.wasm has to be named with createRenderer({ wasm }).
+// one), or a URL that does not end in .js (a bare CDN package URL), and then pscat.wasm has to be named with createRenderer({ wasm }).
 const wasmBase = (() => {
   try {
     const src = typeof document !== 'undefined' && document.currentScript && document.currentScript.src;
-    return src && /^(https?|file):/i.test(src) ? src : null;
+    // Only a URL that names a script file: a bare CDN package URL (".../pscat") has no
+    // sibling pscat.wasm to resolve against, so it must not guess either.
+    return src && /^(https?|file):/i.test(src) && /\\.m?js(\\?.*)?$/i.test(src) ? src : null;
   } catch (e) {
     return null;
   }

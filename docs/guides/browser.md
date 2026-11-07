@@ -162,9 +162,9 @@ HTML file or used from a classic worker.
 ```
 
 By default `pscat.wasm` is fetched from next to the script, so serve the two
-files together (`node_modules/pscat/pscat.global.js` and `pscat.wasm`; the
-package's `unpkg` and `jsdelivr` fields name the script, so
-`https://unpkg.com/pscat` serves it once a release is on npm). Where the
+files together (`node_modules/pscat/pscat.global.js` and `pscat.wasm`; from a CDN once a
+release is on npm, name the file: `https://unpkg.com/pscat@X.Y.Z/pscat.global.js`,
+not the bare package URL). Where the
 script cannot tell where it was loaded from (an inline `<script>`, a
 `blob:` URL, a worker), `createRenderer()` rejects and says so; pass the
 module yourself: `createRenderer({ wasm: url })`, or `{ wasm: bytes }`
