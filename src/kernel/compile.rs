@@ -1445,6 +1445,7 @@ impl<'a> Compiler<'a> {
             let uid = self.st.scopes[si].uid;
             if let Some(f) = self.frames.last_mut() {
                 f.wids.insert((uid, id));
+                f.wnames.insert(id);
             }
         }
         if let Some(f) = self.frames.last_mut() {

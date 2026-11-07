@@ -1512,3 +1512,20 @@ fn an_array_built_after_a_merged_one_is_gone_can_still_be_changed() {
         "{SHOW} /pixel {{ /j exch def /i exch def 0 {body} 0.001 mul show3 }} def"
     ));
 }
+
+#[test]
+fn a_definition_made_through_a_reused_subroutine_is_still_seen_by_joins() {
+    // Found by review: `Q` is already a subroutine when `P` is compiled,
+    // so `P` reaches Q's def of x through a reused call. The join after
+    // `c { Q } if` sees x = 1 on both paths at the first P call (the entry
+    // value is 1 too); the second call, with x = 2, must still merge.
+    for p in ["c { Q } if", "k { c { Q } if } repeat"] {
+        same_shared(&format!(
+            "{SHOW} /Q {{ /x 1 def }} def /P {{ {p} }} def
+             /pixel {{ /j exch def /i exch def /k j 1 add def Q
+               /c i 10 lt def /x 1 def P
+               /c i 20 lt def /x 2 def P
+               x 0.25 mul i 0.01 mul add show3 }} def"
+        ));
+    }
+}
