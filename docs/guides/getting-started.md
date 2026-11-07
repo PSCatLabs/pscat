@@ -67,6 +67,33 @@ More on the less obvious ones:
   document: `%%Title:` and `%%For:` header comments become its title and
   author metadata, so a multi-page piece opens in any reader or e-reader with
   a proper title.
+- **`pdfmark`** (#1032). With `--pdf`, the Distiller/Ghostscript `pdfmark`
+  operator sets document info and attaches files:
+
+  ```postscript
+  [ /Title (Tune) /Subject (X:1 abc) /Keywords (folk) /DOCINFO pdfmark
+  [ /_objdef {f1} /type /stream /OBJ pdfmark
+  [ {f1} (X:1\nK:C\nCDE|) /PUT pdfmark
+  [ {f1} << /Subtype (text/vnd.abc) cvn >> /PUT pdfmark
+  [ /Name (tune.abc) /FS << /Type /Filespec /F (tune.abc) /EF << /F {f1} >> >> /EMBED pdfmark
+  ```
+
+  `/DOCINFO` takes any keys. A key it sets wins over `%%Title:`/`%%For:`,
+  as in Ghostscript, and `/Producer` stays `pscat`. Non-ASCII UTF-8 text is
+  written as UTF-16, so a reader shows it as typed. `/OBJ` makes a named
+  `/stream`, `/dict` or `/array`; `/PUT` adds a string, a file or dict entries
+  to it (an array takes `index value`), and `/APPEND` adds to an array. A
+  file is one the program opened with `file`, so `--read-root` applies, or
+  inline data from `currentfile /ASCIIHexDecode filter`. The browser build
+  writes the same bytes as the CLI for strings and `currentfile` data; it has
+  no files to open. `/EMBED` needs `/Name` and `/FS`. Write a MIME subtype as
+  `(text/plain) cvn`: a `#` in a PostScript name is a literal `#`. Other marks
+  (`/ANN`, `/OUT`, `/DEST`, and the `{Catalog}`/`{ThisPage}` objects) are
+  ignored for now. The data all marks of one document hold is capped at
+  64 MiB. On PNG, SVG and the window, `pdfmark` just clears the stack
+  to the mark, so the same program renders everywhere. Inline `currentfile`
+  data is then read as program text, so keep a portable program's
+  attachments in strings.
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded

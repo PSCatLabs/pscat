@@ -2135,6 +2135,11 @@ impl Gfx {
         }
     }
 
+    /// The PDF recorder, when `--pdf` is on (`pdfmark`, #1032).
+    pub(crate) fn pdf_mut(&mut self) -> Option<&mut crate::pdf::PdfRecorder> {
+        self.pdf.as_deref_mut()
+    }
+
     pub(crate) fn pdf_wanted(&self) -> bool {
         self.pdf.is_some() && !self.painting_off()
     }
