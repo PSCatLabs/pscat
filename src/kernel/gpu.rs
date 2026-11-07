@@ -213,7 +213,40 @@ fn bytemuck_u32(v: &[u32]) -> &[u8] {
 
 /// WGSL for `k`, and the one f32 buffer holding the noise permutation
 /// (first 256 entries) and every table (values, then tags when mixed).
+/// Most instructions a kernel may have with its calls inlined (the lowering
+/// inlines each `Call`, and shared subroutines calling each other can
+/// multiply: past this the CPU does the render).
+const MAX_INLINED: usize = 1 << 20;
+
+/// `k`'s instruction count with every call inlined, or `None` past
+/// [`MAX_INLINED`].
+fn inlined_size(k: &Kernel) -> Option<usize> {
+    fn count(b: &[Ins], subs: &[usize]) -> usize {
+        b.iter()
+            .map(|i| match i {
+                Ins::If(_, t, e) => 1usize
+                    .saturating_add(count(t, subs))
+                    .saturating_add(count(e, subs)),
+                Ins::Loop(body) => 1usize.saturating_add(count(body, subs)),
+                Ins::Call(id) => subs[*id as usize],
+                _ => 1,
+            })
+            .fold(0usize, usize::saturating_add)
+    }
+    // A subroutine calls only lower-numbered ones.
+    let mut subs = Vec::with_capacity(k.subs.len());
+    for s in &k.subs {
+        let n = count(&s.body, &subs);
+        subs.push(n);
+    }
+    let n = count(&k.body, &subs);
+    (n <= MAX_INLINED).then_some(n)
+}
+
 fn lower(k: &Kernel, ncomp: usize) -> Result<(String, Vec<f32>), String> {
+    if inlined_size(k).is_none() {
+        return Err("the kernel is too large for the GPU with its subroutines inlined".into());
+    }
     let mut data: Vec<f32> = k.perm.iter().map(|&p| f32::from(p)).collect();
     let mut toff = Vec::new();
     for t in &k.tables {

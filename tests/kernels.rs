@@ -1454,3 +1454,43 @@ fn a_shared_definition_of_the_value_already_there_still_takes_effect() {
          /pixel {{ /j exch def /i exch def /t 0 def f /t 1 def f /t 2 def f f t u add 0.01 mul show3 }} def"
     ));
 }
+
+#[test]
+fn a_shared_conditional_definition_of_the_value_already_there() {
+    // As above, with the def under a run-time condition.
+    let pad = "i 1.5 mul sin pop ".repeat(30);
+    for body in ["", pad.as_str()] {
+        same_shared(&format!(
+            "{SHOW} /f {{ {body} i 3 gt {{ /t 0 def }} if }} def
+             /pixel {{ /j exch def /i exch def /t 0 def f /t 1 def f /t j def f
+                       t i 0.01 mul add show3 }} def"
+        ));
+    }
+}
+
+#[test]
+fn a_shared_definition_that_a_join_cannot_tell_from_none() {
+    // Each `f` leaves t, on the paths that define it, as the first call
+    // found it: the join after cannot tell def from no def there, so at
+    // the later calls (t different) the code made at the first is wrong.
+    let pad = "i 1.5 mul sin pop ".repeat(30);
+    for (f, setup) in [
+        // Defined twice on one path, back to the value it had.
+        ("i 3 gt { /t 5 def /t 0 def } if", "/t 0 def"),
+        // In a scope begun around the call, over the pixel's own t.
+        ("i 3 gt { /t 0 def } if t pop", "/t 0 def 4 dict begin"),
+        // In a loop.
+        ("0 1 i { pop /t 0 def } for", "/t 0 def"),
+        // A global's value, at the first call.
+        ("i 3 gt { /G 0 def } if", ""),
+    ] {
+        let ends = if setup.contains("begin") { "end" } else { "" };
+        for body in ["", pad.as_str()] {
+            same_shared(&format!(
+                "{SHOW} /G 0 def /f {{ {body} {f} }} def
+                 /pixel {{ /j exch def /i exch def {setup} f /t 1 def /G 1 def f
+                           /t j def /G j def f t G add i 0.01 mul add {ends} show3 }} def"
+            ));
+        }
+    }
+}

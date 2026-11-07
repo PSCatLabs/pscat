@@ -590,6 +590,8 @@ struct Frame {
     /// (by scope uid and name: a def lands in the scope then on top, and
     /// is an output even when it writes the value already there).
     wids: HashSet<(u32, u32)>,
+    /// The names in `wids`.
+    wnames: HashSet<u32>,
     /// Registers made before the body.
     reg_base: u32,
     loops: usize,
@@ -1146,7 +1148,44 @@ impl<'a> Compiler<'a> {
         let uid = self.st.scopes.last().map_or(0, |s| s.uid);
         if let Some(f) = self.frames.last_mut() {
             f.wids.insert((uid, id));
+            f.wnames.insert(id);
         }
+    }
+
+    /// A join found name slot `sl` holding `v` on every path. If a shared
+    /// body defined that name somewhere and `v` is what the body's entry
+    /// state shows there, a path may hold it only because it skipped the
+    /// def, and another context (where the def changes the value) would
+    /// need a merge: the entry value is then part of the key.
+    fn touch_equal_join(&mut self, sl: Slot, v: &Lk) -> CResult<()> {
+        let Slot::Bind(uid, id) = sl else {
+            return Ok(());
+        };
+        if !self.frames.iter().any(|f| f.wnames.contains(&id)) {
+            return Ok(());
+        }
+        let mut frames = std::mem::take(&mut self.frames);
+        for f in &mut frames {
+            if !f.wnames.contains(&id) {
+                continue;
+            }
+            // From that scope down, as at entry (a scope the body began
+            // sits above all of the entry's).
+            let euid = if f.entry.scopes.iter().any(|s| s.uid == uid) {
+                uid
+            } else {
+                f.entry.scopes.last().map_or(0, |s| s.uid)
+            };
+            let same = self
+                .slot_val(&f.entry, Slot::Bind(euid, id))
+                .is_ok_and(|ev| ev == *v);
+            let unknown = self.slot_val(&f.entry, Slot::Bind(euid, id)).is_err();
+            if same || unknown {
+                f.ids.insert(id);
+            }
+        }
+        self.frames = frames;
+        Ok(())
     }
 
     fn touch_slot(&mut self, sl: Slot) {
@@ -1454,6 +1493,7 @@ impl<'a> Compiler<'a> {
             high: len,
             ids: HashSet::new(),
             wids: HashSet::new(),
+            wnames: HashSet::new(),
             reg_base: self.nregs,
             loops: self.loops.len(),
             larrays: self.larrays.len(),
@@ -1469,6 +1509,7 @@ impl<'a> Compiler<'a> {
             parent.high = parent.high.max(f.high);
             parent.ids.extend(f.ids.iter().copied());
             parent.wids.extend(f.wids.iter().copied());
+            parent.wnames.extend(f.wnames.iter().copied());
         }
         r?;
         if !self.extract(p, pid, f)? {
@@ -1965,6 +2006,7 @@ impl<'a> Compiler<'a> {
         for sl in slots {
             let (va, vb) = (self.slot_val(&a, sl)?, self.slot_val(&b, sl)?);
             if va == vb {
+                self.touch_equal_join(sl, &va)?;
                 continue;
             }
             self.touch_slot(sl);
@@ -2251,6 +2293,7 @@ impl<'a> Compiler<'a> {
                 for s in &states[1..] {
                     let sv = self.slot_val(s, sl)?;
                     if sv == hv {
+                        self.touch_equal_join(sl, &hv)?;
                         continue;
                     }
                     self.touch_slot(sl);
