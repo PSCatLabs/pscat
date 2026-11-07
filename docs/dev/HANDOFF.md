@@ -522,6 +522,11 @@ renders eight examples in both and compares block-downsampled output).
   hides the checkout's `lib/` and `fonts/catalog/`) and fails on a
   font-pack note, so a skill example cannot need a pack; a fragment is
   fenced `postscript partial`.
+- Built-in font dicts carry a pscat-only `/PSCatFace` entry (the registry
+  index) so the PLRM re-encoding idiom, which copies every entry but `FID`,
+  keeps the face: `definefont` takes a missing `FID` from it (#1022,
+  `notes/1022-definefont-copy-keeps-face.md`). Before, such a copy drew as
+  Helvetica. `glyphshow` (name only) is implemented for every font kind (#1023).
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
