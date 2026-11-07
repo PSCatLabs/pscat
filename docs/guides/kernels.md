@@ -160,3 +160,7 @@ A pscat built with the `gpu` cargo feature (`cargo build --release
 - It is meant for previews: on an M4 the gallery kernels run 23–68× faster
   than on its ten CPU cores.
 - Final renders stay on the exact CPU path.
+- A GPU dispatch cannot be interrupted, so under `--max-time` or
+  `--max-steps` (as in pscat-mcp) kernels run on the CPU even with
+  `--gpu-preview`. On the GPU itself, one budget caps every loop trip of a
+  pixel, nested loops included, so a runaway kernel still finishes.
