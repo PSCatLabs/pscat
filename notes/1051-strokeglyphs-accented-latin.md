@@ -43,6 +43,11 @@ advance or committed render changed (see Evidence).
   Þ þ, ð (a round d whose stem curls back, crossed), ĸ (a small K), Ŋ ŋ (n
   with the right leg hooked down), ſ (f without its bar).
 
+- **Names.** The new glyphs use Adobe names, except ħ Ħ: `/hbar` was
+  already the board-math ℏ, so they are `/hstroke` `/Hstroke`. The first
+  identity run caught the clash (ℏ had turned into ħ); a SelfTest line now
+  pins it.
+
 ## UTF-8 or Latin-1
 
 - **The rule is per string.** A string that is well-formed UTF-8 (`sgutf8ok`:

@@ -654,8 +654,8 @@
   [272 /Dcroat /D 0 [10 360 200 360]]
   [208 /Eth /D 0 [10 360 200 360]]
   [273 /dcroat /d 0 [320 640 470 640]]
-  [294 /Hbar /H 0 [20 540 560 545]]
-  [295 /hbar /h 0 [0 640 160 640]]
+  [294 /Hstroke /H 0 [20 540 560 545]]
+  [295 /hstroke /h 0 [0 640 160 640]]
   [358 /Tbar /T 0 [140 360 360 360]]
   [359 /tbar /t 0 [100 300 270 300]]
   [216 /Oslash /O 0 [570 760 50 -60]]
@@ -1554,6 +1554,8 @@
 %   (é keeps the e's advance) mustbe
 %   (Łódź) sgnames length 4 eq (Łódź is four glyphs) mustbe
 %   (caf\351) sgnames 3 get /eacute eq (byte E9 is é) mustbe
+%   (ℏħ) sgnames aload pop /hstroke eq exch /hbar eq and
+%   (ħ does not take over the name of the board-math ℏ) mustbe
 %   (\303) sgnames 0 get /Atilde eq
 %   (a truncated UTF-8 sequence is read as Latin-1) mustbe
 %   { (a\277) 0 0 << >> sgpath } /sg-missing-glyph:¿
