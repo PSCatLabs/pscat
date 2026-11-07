@@ -242,9 +242,10 @@ fn pairs(args: &[Object]) -> Result<Vec<(String, &Object)>, Skip> {
     if !args.len().is_multiple_of(2) {
         return Err(PsError::Rangecheck.into());
     }
-    args.chunks_exact(2)
-        .map(|kv| match &kv[0].value {
-            Value::Name(n) => Ok((n.to_string(), &kv[1])),
+    (0..args.len())
+        .step_by(2)
+        .map(|i| match &args[i].value {
+            Value::Name(n) => Ok((n.to_string(), &args[i + 1])),
             _ => Err(PsError::Typecheck.into()),
         })
         .collect()
