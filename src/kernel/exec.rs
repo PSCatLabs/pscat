@@ -40,7 +40,8 @@ type Lane = [f64; LANES];
 pub(crate) enum Stop {
     /// A limit (`--max-time`, `--max-steps`) fired.
     Limit(PsError),
-    /// Another worker stopped the run.
+    /// Another worker stopped the run, or the compiled run would not fit
+    /// the memory limit: the interpreter does the image instead.
     Cancelled,
 }
 

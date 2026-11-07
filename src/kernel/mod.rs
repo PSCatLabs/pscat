@@ -52,6 +52,9 @@ pub(crate) enum KernelMode {
 
 static GPU_PREVIEW: AtomicBool = AtomicBool::new(false);
 
+/// Largest sample buffer a `kernelimage` may make (4 GiB).
+const MAX_IMAGE_BYTES: u64 = 1 << 32;
+
 /// Run compiled kernels on the GPU, in f32, as a preview (`--gpu-preview`;
 /// cargo feature `gpu`). Process-wide. Fails in a build without the
 /// feature. Procedures that do not compile, and any GPU failure, still use
@@ -125,6 +128,14 @@ fn pop_args(it: &mut Interp) -> Result<Args, PsError> {
     if w > 0 && h > 0 && crate::image::invert6(matrix).is_none() {
         return Err(PsError::UndefinedResult);
     }
+    // Every size the paths compute from these must fit (untrusted input).
+    let bytes = (w as usize)
+        .checked_mul(h as usize)
+        .and_then(|x| x.checked_mul(ncomp as usize))
+        .filter(|&x| x as u64 <= MAX_IMAGE_BYTES);
+    if bytes.is_none() {
+        return Err(PsError::Limitcheck);
+    }
     Ok(Args {
         w: w as usize,
         h: h as usize,
@@ -153,8 +164,9 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
         let strict = it.kernel_mode == KernelMode::Strict;
         let compiled = compile::compile(it, &a.proc, a.ncomp, strict);
         lap("compile", t0);
-        if let Ok((_, _, soft)) = &compiled {
-            for why in soft {
+        if let Ok(c) = &compiled {
+            it.charge_steps(c.work);
+            for why in &c.soft {
                 if it.kernel_notes.insert(why.clone()) {
                     let note = format!(
                         "pscat: kernelimage: a branch runs in the interpreter when taken ({why})\n"
@@ -163,24 +175,31 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 }
             }
         }
-        if let Ok((k, _, _)) = &compiled
+        if let Ok(c) = &compiled
             && timing
         {
             eprintln!(
                 "pscat: kernel size: {} instructions, {} registers",
-                k.size(),
-                k.nregs
+                c.kernel.size(),
+                c.kernel.nregs
             );
         }
         let t1 = crate::clock::Clock::mono_ns();
         match compiled {
-            Ok((k, noise, _)) => {
+            Ok(compile::Compiled {
+                kernel: k,
+                noise,
+                soft,
+                ..
+            }) => {
                 if noise {
                     crate::ops::noise::note_sampled(it);
                 }
                 let rows = rows_needed(it, a.w, a.h, a.matrix);
+                // The GPU cannot be interrupted, so a render under a time or
+                // step limit (pscat-mcp, `--max-time`) stays on the CPU.
                 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
-                if GPU_PREVIEW.load(Ordering::Relaxed) {
+                if GPU_PREVIEW.load(Ordering::Relaxed) && it.remaining_budget() == (None, None) {
                     let r = gpu::run(&k, a.w, a.h, a.ncomp, rows);
                     lap("gpu run (with any device setup)", t1);
                     match r {
@@ -221,6 +240,14 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                             );
                             let _ = it.write_stderr(line.as_bytes(), true);
                         }
+                        if !soft.is_empty() {
+                            // An uncompiled branch may have side effects
+                            // (`store`, `put`, `srand`) that pixels compiled
+                            // from the snapshot did not see: only the whole
+                            // image in the interpreter is exact then.
+                            it.kernel_stats.2 += 1;
+                            return fallback(it, a);
+                        }
                         it.kernel_stats.1 += 1;
                         return fallback_pixels(it, a, ran.bytes, ran.pixels);
                     }
@@ -228,7 +255,8 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                     Err(Stop::Cancelled) => {}
                 }
             }
-            Err(compile::NotCompilable(why)) => {
+            Err(compile::Refusal::Limit(e)) => return Err(e),
+            Err(compile::Refusal::Not(why)) => {
                 if it.kernel_mode == KernelMode::Strict {
                     return Err(PsError::Undefined(format!(
                         "kernelimage: not compiled: {why}"
@@ -340,11 +368,30 @@ fn run(
     let total = row_bytes
         .checked_mul(h)
         .ok_or(Stop::Limit(PsError::Limitcheck))?;
-    it.check_alloc(total).map_err(Stop::Limit)?;
+    if it.check_alloc(total).is_err() {
+        return Err(Stop::Cancelled);
+    }
     let mut out = vec![0u8; total];
     let (steps_left, deadline) = it.remaining_budget();
     let ctl = RunCtl::new(deadline, steps_left);
     let threads = thread_count(it).min(j1.saturating_sub(j0)).max(1);
+    // Each worker's register file and local arrays, reserved against the
+    // memory limit before any is made.
+    let lane_bytes = (LANES * 8) as u64;
+    let per = (k.nregs as u64).saturating_mul(lane_bytes).saturating_add(
+        k.larrays.iter().fold(0u64, |acc, &n| {
+            acc.saturating_add((n as u64).saturating_mul(2 * lane_bytes))
+        }),
+    );
+    let all = per.saturating_mul(threads as u64);
+    // Too much for the memory limit: not an error the program would get
+    // from the interpreter, so the interpreter does the image instead.
+    if it
+        .check_alloc(usize::try_from(all).unwrap_or(usize::MAX))
+        .is_err()
+    {
+        return Err(Stop::Cancelled);
+    }
     let rows: Vec<(usize, &mut [u8])> = out
         .chunks_mut(row_bytes)
         .enumerate()
@@ -454,8 +501,10 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     }
     let (ok, why) = match compile::compile(it, proc, ncomp as usize, false) {
-        Ok((k, _, soft)) if soft.is_empty() => (true, format!("{} instructions", k.size())),
-        Ok((k, _, soft)) => (
+        Ok(c) if c.soft.is_empty() => (true, format!("{} instructions", c.kernel.size())),
+        Ok(compile::Compiled {
+            kernel: k, soft, ..
+        }) => (
             true,
             format!(
                 "{} instructions; branches that run in the interpreter when taken: {}",
@@ -463,7 +512,8 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
                 soft.join("; ")
             ),
         ),
-        Err(compile::NotCompilable(why)) => (false, why),
+        Err(compile::Refusal::Not(why)) => (false, why),
+        Err(compile::Refusal::Limit(e)) => return Err(e),
     };
     it.push(Object::bool(ok));
     it.push(Object::lit(Value::String(PsString::from_bytes(

@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, TableKind, UnOp};
 
-/// Iterations any one loop may run per pixel on the GPU.
+/// Loop trips (all loops together) a pixel may run on the GPU.
 const LOOP_CAP: u32 = 1 << 20;
 /// Pixels per dispatch: keeps each submission short of a GPU watchdog.
 const CHUNK_PIXELS: usize = 1 << 16;
@@ -253,9 +253,8 @@ fn lower(k: &Kernel, ncomp: usize) -> Result<(String, Vec<f32>), String> {
     let mut lp = 0usize;
     let mut body = String::new();
     block(&k.body, k, &toff, &mut body, 1, &mut lp)?;
-    for l in 0..lp {
-        let _ = writeln!(s, "  var it{l}: u32 = 0u;");
-    }
+    let _ = lp;
+    s.push_str("  var fuel: u32 = 0u;\n");
     s.push_str(&body);
     let comp = |c: usize| match k.outputs.get(c) {
         Some(o) => format!("q({})", op(*o)),
@@ -503,11 +502,12 @@ fn block(
                 }
             }
             Ins::Loop(b) => {
-                let l = *lp;
+                // One budget for every loop trip of the pixel, nested loops
+                // included, so a runaway kernel cannot hang the GPU.
                 *lp += 1;
                 let _ = writeln!(
                     s,
-                    "{pad}it{l} = 0u;\n{pad}loop {{\n{pad}  it{l} += 1u;\n{pad}  if (it{l} > {LOOP_CAP}u) {{ break; }}"
+                    "{pad}loop {{\n{pad}  fuel += 1u;\n{pad}  if (fuel > {LOOP_CAP}u) {{ break; }}"
                 );
                 block(b, k, toff, s, ind + 1, lp)?;
                 let _ = writeln!(s, "{pad}}}");

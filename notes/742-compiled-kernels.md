@@ -109,6 +109,46 @@ Every test renders twice, under `/strict` and under `/interpret`.
 - The drivers' helper operators are not in systemdict, and they validate
   their state dict as untrusted input.
 
+**Codex adversarial review** (2026-11-06, verdict "needs attention").
+
+Ten findings, all valid. Each has a regression test in `tests/kernels.rs`
+except item 7, which is GPU-only and was checked by hand.
+
+1. **Alias cycles.** A name-alias cycle (`/a /a cvx def`) overflowed the Rust
+   stack. Alias hops now count against the inline-depth guard.
+2. **Dimensions.** `w × ncomp` could overflow before validation. Every size
+   product is now checked up front, capped at 4 GiB, as a `limitcheck`.
+3. **Compile work.** Exponential inlining with no emitted IR escaped the
+   limits. There is now a compile work budget, charged as steps, with time
+   and step polling during compilation. A limit hit there is that limit's
+   error, never swallowed by a branch fallback or an unroll retry.
+4. **Worker memory.** Worker register files and local arrays bypassed
+   `--max-memory`. They are now reserved through `check_alloc` for all workers
+   before any is spawned. When they do not fit, the interpreter does the image
+   instead, so the program never sees an error the interpreter would not
+   raise.
+5. **Side effects in fallback.** A retired pixel's interpreted run could have
+   side effects (`store` in an uncompiled branch) that compiled pixels did not
+   see. Per-pixel fallback is now used only when the kernel has no uncompiled
+   branch (compiled code has no side effects). Otherwise the whole image is
+   interpreted.
+6. **Exact integers in mixed values.** An integer meeting a mixed value (an
+   integer on some lanes, a real on others) was rounded past 2^53. It now
+   converts exactly, retiring the lane if it cannot, in arithmetic and in
+   comparisons.
+7. **GPU deadline.** The GPU had none. A render under any time or step limit
+   now stays on the CPU, and in the shader one loop budget covers all of a
+   pixel's loops, nested ones included. A runaway kernel stops in 1 s on the
+   GPU, and with `--max-time 1` on the CPU.
+8. **Row checks.** `T i get pop` on a two-level table skipped the range check.
+   The row index is now checked when the row is fetched.
+9. **`bind`** was treated as a no-op. Inside a kernel it is now refused, and
+   the procedure runs in the interpreter.
+10. **`count`** saw only the kernel's own stack. It is now refused the same
+   way.
+
+None of the fixes changed the gallery renders' bytes or speed.
+
 ### Measurements
 
 Release build, Apple M4 (4 performance + 6 efficiency cores). Wall time

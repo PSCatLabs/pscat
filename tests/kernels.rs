@@ -565,3 +565,128 @@ fn bytes_do_not_depend_on_threads_or_bands() {
     let interp = format!("/interpret .kernelmode\n{SCENE}");
     assert_eq!(cli_png(&interp, &[], None), one, "interpreted");
 }
+
+// --- regressions from the Codex adversarial review ---------------------------
+
+/// Run `src` on a fresh 4x4 page in `mode`: Ok(page bytes) or the error.
+fn run_mode(mode: &str, src: &str, limits: Option<Limits>) -> Result<Vec<u8>, String> {
+    let mut it = Interp::with_page(4, 4).expect("page");
+    if let Some(l) = limits {
+        it.set_limits(l).expect("limits");
+    }
+    match it.run_str(&format!("/{mode} .kernelmode\n{src}\nshowpage")) {
+        Ok(()) => Ok(it.pages()[0].rgba8()),
+        Err(e) => Err(e.name().to_string()),
+    }
+}
+
+#[track_caller]
+fn auto_matches_interpreter(src: &str) {
+    assert_eq!(
+        run_mode("auto", src, None),
+        run_mode("interpret", src, None),
+        "{src}"
+    );
+}
+
+#[test]
+fn a_name_alias_cycle_is_refused_not_a_crash() {
+    let mut it = Interp::new();
+    it.run_str("/a /a cvx def { pop pop a 0 } 1 kernelcompile")
+        .expect("kernelcompile");
+    let st = it.operand_stack();
+    assert_eq!(st[0].repr(), "false");
+    assert!(st[1].repr().contains("cycle"), "{}", st[1].repr());
+}
+
+#[test]
+fn huge_dimensions_are_a_limitcheck_not_a_panic() {
+    let err = run_mode(
+        "auto",
+        "4611686018427387904 1 [1 0 0 1 0 0] {pop pop 0 0 0 0} 4 kernelimage",
+        None,
+    );
+    assert_eq!(err, Err("limitcheck".into()));
+}
+
+#[test]
+fn exponential_inlining_stops_at_the_time_limit() {
+    let mut src = String::from("/p0 {} def\n");
+    for n in 1..=30 {
+        src += &format!("/p{n} {{ p{} p{} }} def\n", n - 1, n - 1);
+    }
+    src += "1 1 [1 0 0 1 0 0] { pop pop p30 0 } 1 kernelimage";
+    let limits = Limits::none().with_max_time(Duration::from_millis(200));
+    let (r, cpu) = common::cpu_time_of(|| run_mode("auto", &src, Some(limits)));
+    assert!(r.is_err(), "{r:?}");
+    assert!(
+        cpu < common::scale_budget(Duration::from_secs(5)),
+        "took {cpu:?}"
+    );
+}
+
+#[test]
+fn worker_storage_respects_the_memory_limit() {
+    // Sixteen local arrays a pixel: the compiled run's storage (on every
+    // worker) would pass a small memory cap, so the interpreter does the
+    // image instead, and the result is the interpreter's.
+    let body =
+        "4 4 [4 0 0 -4 0 4] { pop pop 16 { 4096 array pop } repeat 0.5 } 1 kernelimage showpage";
+    let run = |mode: &str| {
+        let dir = common::scratch_dir("kmem");
+        let ps = dir.join("m.ps");
+        let png = dir.join("m.png");
+        std::fs::write(&ps, format!("/{mode} .kernelmode {body}")).expect("write");
+        let out = common::wait_output(
+            std::process::Command::new(BIN)
+                .args(["--page", "4x4", "--max-memory", "6", "--png"])
+                .arg(&png)
+                .arg(&ps)
+                .env("PSCAT_KERNEL_THREADS", "4")
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn"),
+        );
+        (out.status.success(), std::fs::read(&png).ok())
+    };
+    let (ok, png) = run("auto");
+    assert!(ok, "the compiled path must fall back, not fail");
+    assert_eq!((ok, png), run("interpret"));
+}
+
+#[test]
+fn side_effects_in_uncompiled_branches_keep_the_interpreters_result() {
+    auto_matches_interpreter(
+        "/X 0 def 2 1 [2 0 0 -1 0 1] \
+         { pop /i exch def i 0 eq { /X 1 store } if i 1 eq X 1 eq and { 1 0 div } { 0 } ifelse } \
+         1 kernelimage",
+    );
+}
+
+#[test]
+fn integers_beside_mixed_values_stay_exact() {
+    auto_matches_interpreter(
+        "4 4 [4 0 0 -4 0 4] { pop /i exch def \
+           i 1 add 53 bitshift 1 add i 0 eq { 9007199254740992 } { 0.0 } ifelse eq { 1 } { 0 } ifelse \
+           i 1 add 53 bitshift 1 add i 0 eq { 9007199254740992 } { 0.0 } ifelse sub 0.25 mul 0.5 add } \
+         2 kernelimage",
+    );
+}
+
+#[test]
+fn a_discarded_table_row_is_still_range_checked() {
+    let src = "/T [[1 2]] def 1 1 [1 0 0 -1 0 1] { /j exch def /i exch def T i 1 add get pop 0 } 1 kernelimage";
+    assert_eq!(run_mode("strict", src, None), Err("rangecheck".into()));
+    auto_matches_interpreter(src);
+}
+
+#[test]
+fn bind_and_count_inside_a_kernel_are_left_to_the_interpreter() {
+    auto_matches_interpreter(
+        "1 1 [1 0 0 -1 0 1] { pop pop /p { 0 0 add } bind def /add { pop pop 1 } def \
+           p 1 eq { 0 } { 1 0 div } ifelse } 1 kernelimage",
+    );
+    auto_matches_interpreter(
+        "1 1 [1 0 0 -1 0 1] { pop pop count 0 eq { 0 } { 1 0 div } ifelse } 1 kernelimage",
+    );
+}

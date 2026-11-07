@@ -36,6 +36,25 @@ use crate::interp::Interp;
 use crate::name::PsName;
 use crate::object::{Dict, Object, Operator, PsArray, Value};
 
+/// A compiled kernel and what compiling it found.
+pub(crate) struct Compiled {
+    pub kernel: Kernel,
+    /// It samples the noise table.
+    pub noise: bool,
+    /// Branches that run in the interpreter when taken (why, each).
+    pub soft: Vec<String>,
+    /// Compile-time work, charged as interpreter steps.
+    pub work: u64,
+}
+
+/// Why `compile` gave no kernel.
+pub(crate) enum Refusal {
+    /// Not in the compiled subset: run the interpreter instead.
+    Not(String),
+    /// A limit (`--max-time`, `--max-steps`) fired while compiling.
+    Limit(crate::error::PsError),
+}
+
 /// Why a procedure is not in the compiled subset.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NotCompilable(pub String);
@@ -313,6 +332,9 @@ const MAX_INLINE: usize = 48;
 /// Upper bound on emitted instructions, so a pathological program cannot
 /// make the compiler itself expensive.
 const MAX_INSNS: usize = 200_000;
+/// Procedure elements a compile may execute (inlining can multiply a
+/// short program's work: `{p p}` nested 30 deep).
+const MAX_WORK: u64 = 20_000_000;
 /// Largest `N array` a kernel may make.
 const MAX_LOCAL_ARRAY: usize = 4096;
 /// Largest table a kernel may snapshot (elements).
@@ -340,6 +362,14 @@ pub(crate) struct Compiler<'a> {
     pub(crate) uses_noise: bool,
     /// The procedures being inlined, by name, for error messages.
     trail: Vec<String>,
+    /// Procedure elements executed at compile time: bounded, and charged
+    /// as steps, so compiling cannot escape the program's limits.
+    pub(crate) work: u64,
+    /// The time limit as a `Clock::mono_ns` instant, and the steps left.
+    deadline: Option<u64>,
+    steps_left: Option<u64>,
+    /// A limit fired while compiling: reported as that limit's error.
+    pub(crate) limit: Option<crate::error::PsError>,
     /// Branches that did not compile and abort to the interpreter when a
     /// lane takes them (why, for `kernelcompile`); with `strict`, refused.
     pub(crate) soft: Vec<String>,
@@ -354,7 +384,7 @@ pub(crate) fn compile(
     proc: &PsArray,
     ncomp: usize,
     strict: bool,
-) -> CResult<(Kernel, bool, Vec<String>)> {
+) -> Result<Compiled, Refusal> {
     let mut c = Compiler {
         it,
         nregs: 0,
@@ -383,73 +413,92 @@ pub(crate) fn compile(
         trail: Vec::new(),
         soft: Vec::new(),
         strict,
+        work: 0,
+        deadline: it.remaining_budget().1,
+        steps_left: it.remaining_budget().0,
+        limit: None,
     };
-    let (ri, rj) = (c.ireg(), c.ireg());
-    c.st.stack.push(SVal::Num(Op::R(ri), NT::Int));
-    c.st.stack.push(SVal::Num(Op::R(rj), NT::Int));
-    if let Err(NotCompilable(why)) = c.exec_proc(proc) {
-        // Say where: the innermost named procedures being inlined.
-        let t = &c.trail;
-        let path = t[t.len().saturating_sub(4)..].join(" > ");
-        return Err(NotCompilable(if path.is_empty() {
-            why
-        } else {
-            format!("{why}, in {path}")
-        }));
-    }
-    let mut outputs = Vec::new();
-    if !c.st.dead {
-        if c.st.scopes.len() != 1 {
-            return nc("the procedure leaves a dictionary begun (begin without end)");
+    let r = (|c: &mut Compiler| -> CResult<(Kernel, bool, Vec<String>)> {
+        let (ri, rj) = (c.ireg(), c.ireg());
+        c.st.stack.push(SVal::Num(Op::R(ri), NT::Int));
+        c.st.stack.push(SVal::Num(Op::R(rj), NT::Int));
+        if let Err(NotCompilable(why)) = c.exec_proc(proc) {
+            // Say where: the innermost named procedures being inlined.
+            let t = &c.trail;
+            let path = t[t.len().saturating_sub(4)..].join(" > ");
+            return Err(NotCompilable(if path.is_empty() {
+                why
+            } else {
+                format!("{why}, in {path}")
+            }));
         }
-        if c.st.stack.len() != ncomp {
-            return nc(format!(
-                "the procedure must consume i and j and leave {ncomp} numbers; it leaves {} values",
-                c.st.stack.len()
-            ));
-        }
-        for v in c.st.stack.clone() {
-            match v {
-                SVal::Num(o, t) => {
-                    let o = c.as_f(o, t)?;
-                    outputs.push(o);
-                }
-                _ => return nc("an output component is not a number"),
+        let mut outputs = Vec::new();
+        if !c.st.dead {
+            if c.st.scopes.len() != 1 {
+                return nc("the procedure leaves a dictionary begun (begin without end)");
             }
+            if c.st.stack.len() != ncomp {
+                return nc(format!(
+                    "the procedure must consume i and j and leave {ncomp} numbers; it leaves {} values",
+                    c.st.stack.len()
+                ));
+            }
+            for v in c.st.stack.clone() {
+                match v {
+                    SVal::Num(o, t) => {
+                        let o = c.as_f(o, t)?;
+                        outputs.push(o);
+                    }
+                    _ => return nc("an output component is not a number"),
+                }
+            }
+        } else {
+            outputs = vec![Op::Imm(0.0); ncomp];
         }
-    } else {
-        outputs = vec![Op::Imm(0.0); ncomp];
+        let noise = c.uses_noise;
+        let soft = std::mem::take(&mut c.soft);
+        let mut kernel = Kernel {
+            nregs: c.nregs as usize,
+            body: std::mem::take(&mut c.code),
+            in_i: ri,
+            in_j: rj,
+            outputs,
+            tables: std::mem::take(&mut c.tables),
+            larrays: std::mem::take(&mut c.larrays),
+            perm: it.noise_perm,
+        };
+        if cfg!(debug_assertions) {
+            super::check::kinds(&kernel, &c.kinds)
+                .map_err(|e| NotCompilable(format!("internal: {e}")))?;
+        }
+        let dump = std::env::var_os("PSCAT_KERNEL_DUMP").is_some();
+        if dump {
+            eprintln!("--- kernel before allocation ---\n{:#?}", kernel.body);
+        }
+        if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
+            super::regalloc::allocate(&mut kernel);
+        }
+        if dump {
+            eprintln!(
+                "--- after ---\n{:#?}\noutputs {:?}",
+                kernel.body, kernel.outputs
+            );
+        }
+        Ok((kernel, noise, soft))
+    })(&mut c);
+    if let Some(e) = c.limit.take() {
+        return Err(Refusal::Limit(e));
     }
-    let noise = c.uses_noise;
-    let soft = std::mem::take(&mut c.soft);
-    let mut kernel = Kernel {
-        nregs: c.nregs as usize,
-        body: c.code,
-        in_i: ri,
-        in_j: rj,
-        outputs,
-        tables: c.tables,
-        larrays: c.larrays,
-        perm: it.noise_perm,
-    };
-    if cfg!(debug_assertions) {
-        super::check::kinds(&kernel, &c.kinds)
-            .map_err(|e| NotCompilable(format!("internal: {e}")))?;
+    let work = c.work;
+    match r {
+        Ok((kernel, noise, soft)) => Ok(Compiled {
+            kernel,
+            noise,
+            soft,
+            work,
+        }),
+        Err(NotCompilable(why)) => Err(Refusal::Not(why)),
     }
-    let dump = std::env::var_os("PSCAT_KERNEL_DUMP").is_some();
-    if dump {
-        eprintln!("--- kernel before allocation ---\n{:#?}", kernel.body);
-    }
-    if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
-        super::regalloc::allocate(&mut kernel);
-    }
-    if dump {
-        eprintln!(
-            "--- after ---\n{:#?}\noutputs {:?}",
-            kernel.body, kernel.outputs
-        );
-    }
-    Ok((kernel, noise, soft))
 }
 
 impl<'a> Compiler<'a> {
@@ -486,6 +535,17 @@ impl<'a> Compiler<'a> {
                 Ok(Op::R(d))
             }
             _ => Ok(o),
+        }
+    }
+
+    /// Two numbers to compare as f64s. Beside a Dyn value (an integer on
+    /// some lanes) an integer must convert exactly, as the interpreter
+    /// compares two integers exactly.
+    fn cmp_operands(&mut self, a: Op, at: NT, b: Op, bt: NT) -> CResult<(Op, Op)> {
+        if matches!(at, NT::Dyn(_)) || matches!(bt, NT::Dyn(_)) {
+            Ok((self.as_exact_f(a, at)?, self.as_exact_f(b, bt)?))
+        } else {
+            Ok((self.as_f(a, at)?, self.as_f(b, bt)?))
         }
     }
 
@@ -668,8 +728,33 @@ impl<'a> Compiler<'a> {
         r
     }
 
+    /// Count one element of compile-time work; look at the limits now and
+    /// then.
+    fn charge(&mut self) -> CResult<()> {
+        self.work += 1;
+        if self.work > MAX_WORK {
+            return nc("the kernel takes too long to compile");
+        }
+        if self.work.is_multiple_of(4096) {
+            if let Some(s) = self.steps_left
+                && self.work > s
+            {
+                self.limit = Some(crate::error::PsError::StepsExceeded);
+                return nc("limit");
+            }
+            if let Some(d) = self.deadline
+                && crate::clock::Clock::mono_ns() >= d
+            {
+                self.limit = Some(crate::error::PsError::TimeExceeded);
+                return nc("limit");
+            }
+        }
+        Ok(())
+    }
+
     /// One element of a procedure body.
     fn exec_item(&mut self, obj: &Object) -> CResult<()> {
+        self.charge()?;
         match &obj.value {
             Value::Name(n) if obj.executable => self.exec_name(n),
             Value::Operator(op) => self.apply(op),
@@ -722,8 +807,16 @@ impl<'a> Compiler<'a> {
                 Value::Operator(op) => self.apply(op),
                 Value::Array(a) if obj.executable => self.exec_named(n, a),
                 Value::Name(n2) if obj.executable => {
+                    // An alias (`/a /b cvx def`): counts as a level of
+                    // nesting, so a cycle (`/a /a cvx def`) is refused.
+                    if self.depth >= MAX_INLINE {
+                        return nc("names refer to each other in a cycle");
+                    }
                     let n2 = n2.clone();
-                    self.exec_name(&n2)
+                    self.depth += 1;
+                    let r = self.exec_name(&n2);
+                    self.depth -= 1;
+                    r
                 }
                 _ => {
                     let v = self.cap_to_sval(&obj)?;
@@ -1208,7 +1301,9 @@ impl<'a> Compiler<'a> {
         let cp = self.checkpoint();
         match self.exec_proc(p) {
             Ok(()) => Ok(()),
-            Err(NotCompilable(why)) if !self.strict && why != EXIT_UNROLLED => {
+            Err(NotCompilable(why))
+                if !self.strict && why != EXIT_UNROLLED && self.limit.is_none() =>
+            {
                 let t = &self.trail;
                 let at = t[t.len().saturating_sub(3)..].join(" > ");
                 self.rollback(cp);
@@ -1422,7 +1517,9 @@ impl<'a> Compiler<'a> {
             let cp = self.checkpoint();
             match self.unrolled(t, &body) {
                 Ok(()) => return Ok(()),
-                Err(NotCompilable(why)) if why == EXIT_UNROLLED => self.rollback(cp),
+                Err(NotCompilable(why)) if why == EXIT_UNROLLED && self.limit.is_none() => {
+                    self.rollback(cp)
+                }
                 Err(e) => return Err(e),
             }
             return real(self, body);
@@ -1432,6 +1529,9 @@ impl<'a> Compiler<'a> {
             Ok(()) => Ok(()),
             Err(e) => {
                 let Some(t) = trips else { return Err(e) };
+                if self.limit.is_some() {
+                    return Err(e);
+                }
                 self.rollback(cp);
                 match self.unrolled(&t, &body) {
                     Ok(()) => Ok(()),
@@ -1560,7 +1660,12 @@ impl<'a> Compiler<'a> {
             (NT::Real, _) | (_, NT::Real) => NT::Real,
             _ => NT::Dyn(0),
         };
-        let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
+        // Into a Dyn result an integer must stay exact (2^53).
+        let (a, b) = if matches!(rt, NT::Dyn(_)) {
+            (self.as_exact_f(a, at)?, self.as_exact_f(b, bt)?)
+        } else {
+            (self.as_f(a, at)?, self.as_f(b, bt)?)
+        };
         if let (Op::Imm(x), Op::Imm(y), NT::Real) = (a, b, rt) {
             let Some(r) = lane_bin(op, x, y) else {
                 return self.abort_path();
@@ -1703,10 +1808,9 @@ impl<'a> Compiler<'a> {
                     s.rotate_right(k);
                 }
             }
-            "count" => {
-                let n = self.st.stack.len() as f64;
-                self.push_num(Op::Imm(n), NT::Int);
-            }
+            // `count` would see the operands below the procedure's own (the
+            // caller's, and the driver's), which the kernel does not have.
+            "count" => return nc("count (it sees the whole operand stack)"),
             "mark" => self.push(SVal::Mark),
             "counttomark" => {
                 let Some(p) = self.st.stack.iter().rposition(|v| *v == SVal::Mark) else {
@@ -1839,7 +1943,7 @@ impl<'a> Compiler<'a> {
                         "gt" => BinOp::Gt,
                         _ => BinOp::Ge,
                     };
-                    let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
+                    let (a, b) = self.cmp_operands(a, at, b, bt)?;
                     self.bin_to(op, a, b, boolean)?;
                 }
             }
@@ -1853,7 +1957,7 @@ impl<'a> Compiler<'a> {
                         self.ibin(iop, *x, *y)?;
                     }
                     (SVal::Num(x, xt), SVal::Num(y, yt)) => {
-                        let (x, y) = (self.as_f(*x, *xt)?, self.as_f(*y, *yt)?);
+                        let (x, y) = self.cmp_operands(*x, *xt, *y, *yt)?;
                         self.bin_to(op, x, y, boolean)?;
                     }
                     (SVal::Bool(x), SVal::Bool(y)) => {
@@ -2105,10 +2209,9 @@ impl<'a> Compiler<'a> {
                 let v = d.borrow().get_id(n.id()).is_some();
                 self.push(SVal::Bool(Op::Imm(f64::from(u8::from(v)))));
             }
-            "bind" => {
-                let p = self.pop_proc()?;
-                self.push(SVal::Proc(p));
-            }
+            // `bind` inside the kernel would replace names with whatever
+            // they mean at that moment, in place; not modelled.
+            "bind" => return nc("bind inside the procedure"),
             "dict" => {
                 let n = self.pop_const_int("dict's size")?;
                 if n < 0 {
@@ -2296,8 +2399,17 @@ impl<'a> Compiler<'a> {
                 }
                 let (t, two_level) = self.table_for(&o)?;
                 if two_level {
-                    let cols = self.tables[t as usize].cols;
-                    // Range of the row is checked when the row is read.
+                    let (rows, cols) = (self.tables[t as usize].rows, self.tables[t as usize].cols);
+                    // `get` checks the row index now, as the interpreter
+                    // does, even if the row is never read.
+                    if let NT::Dyn(tag) = it_ {
+                        self.emit(Ins::NeedInt(Op::R(tag)))?;
+                    }
+                    let (lo, hi, ok) = (self.reg(), self.reg(), self.reg());
+                    self.emit(Ins::Bin(BinOp::Ge, lo, i, Op::Imm(0.0)))?;
+                    self.emit(Ins::Bin(BinOp::Lt, hi, i, Op::Imm(rows as f64)))?;
+                    self.emit(Ins::Bin(BinOp::BAnd, ok, Op::R(lo), Op::R(hi)))?;
+                    self.emit(Ins::Assert(Op::R(ok)))?;
                     self.push(SVal::Row {
                         table: t,
                         row: i,
