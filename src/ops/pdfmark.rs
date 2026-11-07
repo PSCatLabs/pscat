@@ -217,7 +217,7 @@ fn apply(pdf: &mut PdfRecorder, operands: &[Object]) -> Result<(), Skip> {
 /// `key value …` with name keys: the key text and the value. An odd
 /// count is a `rangecheck`, a key that is not a name a `typecheck`.
 fn pairs(args: &[Object]) -> Result<Vec<(String, &Object)>, Skip> {
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(PsError::Rangecheck.into());
     }
     args.chunks_exact(2)
