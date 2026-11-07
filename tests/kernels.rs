@@ -1566,3 +1566,29 @@ fn a_shared_body_whose_defining_path_dies_keeps_the_callers_value() {
         ));
     }
 }
+
+#[test]
+fn reused_subroutines_nest_no_deeper_than_inlining() {
+    // Found by Codex: calling p0, p1, ... in turn, each p(k) calling
+    // p(k-1), reused each body at the top level, building a call chain far
+    // deeper than inlining allows (and overflowing the native stack when
+    // run). Reuse now keeps to the inlining depth.
+    let mut defs = String::from("/p0 { 0.00001 add } def\n");
+    let mut calls = String::new();
+    for k in 1..=200 {
+        defs += &format!("/p{k} {{ p{} }} def\n", k - 1);
+        calls += &format!("p{k} ");
+    }
+    for mode in ["all", "large"] {
+        let prog = format!(
+            "/{mode} .kernelshare {defs} /pixel {{ /j exch def /i exch def i 0.001 mul {calls} dup dup }} def"
+        );
+        assert_eq!(render("auto", &prog), render("interpret", &prog), "/{mode}");
+        // Inlined, the chain nests too deeply to compile; shared, it must not
+        // compile either.
+        let shared = compiles(&prog);
+        let inlined = compiles(&prog.replacen(&format!("/{mode} "), "/never ", 1));
+        assert!(!inlined.0, "{}", inlined.1);
+        assert_eq!(shared.0, inlined.0, "/{mode}: {}", shared.1);
+    }
+}

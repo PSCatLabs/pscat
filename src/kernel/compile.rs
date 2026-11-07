@@ -701,6 +701,8 @@ pub(crate) struct Compiler<'a> {
     share: ShareMode,
     /// Shared subroutines made so far (some may end up unused).
     subs: Vec<Sub>,
+    /// How deep calls nest from each subroutine, itself included.
+    sub_depth: Vec<usize>,
     /// Owner of each register, as `Kernel::owner` (missing: 0).
     owner: Vec<u32>,
     /// Instructions moved into subroutines, counted against the cap.
@@ -801,6 +803,7 @@ fn compile_with(
         limit: None,
         share,
         subs: Vec::new(),
+        sub_depth: Vec::new(),
         owner: Vec::new(),
         sub_insns: 0,
         frames: Vec::new(),
@@ -1422,7 +1425,13 @@ impl<'a> Compiler<'a> {
         let len = self.st.stack.len();
         let mut hit = None;
         for d in defs {
-            if !d.proc.same_object(p) || d.nstack > len || len + d.growth > MAX_SYMBOLIC_STACK {
+            // A call nests as deep as inlining would: within MAX_INLINE
+            // (the executor and the GPU lowering recurse per call).
+            if !d.proc.same_object(p)
+                || d.nstack > len
+                || len + d.growth > MAX_SYMBOLIC_STACK
+                || self.depth + self.sub_depth[d.id as usize] >= MAX_INLINE
+            {
                 continue;
             }
             let Some(kb) = self.key_of(&self.st, d.nstack, &d.ids) else {
@@ -1686,6 +1695,13 @@ impl<'a> Compiler<'a> {
         let size = super::ir::count(&body);
         self.emitted = self.emitted.saturating_sub(size);
         self.sub_insns += size;
+        let mut depth = 0;
+        super::ir::walk(&body, &mut |i| {
+            if let Ins::Call(c) = i {
+                depth = depth.max(self.sub_depth[*c as usize]);
+            }
+        });
+        self.sub_depth.push(depth + 1);
         self.subs.push(Sub {
             body,
             params: params.iter().map(|p| p.1).collect(),
