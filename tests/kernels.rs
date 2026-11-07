@@ -413,6 +413,39 @@ fn an_undefined_value_is_not_converted_on_loop_entry() {
     }
 }
 
+/// A name first defined inside a loop and read on the next trip, before
+/// the body's def: its value register lives round the back edge, so a
+/// temporary made earlier in the body must not take it. (Nothing outside
+/// the loop wrote it, and register allocation keeps a register live across
+/// a loop only if it occurs outside the loop too.) Read before the def, so
+/// /auto only: see `loop_defined_names_nest_and_join_branch_defined_ones`.
+#[test]
+fn a_value_carried_round_a_loop_keeps_its_register() {
+    let body = |use_hx: &str| {
+        format!(
+            "4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def /acc 0 def
+               0 1 99 {{ /k exch def i k mul j k mul add /scratch exch def
+                 k 0 gt {{ {use_hx} }} if
+                 /hx k i add def }} for
+               acc 6000 div }} 1 kernelimage"
+        )
+    };
+    // Into the colour: a clobbered value is a wrong pixel.
+    let sum = body("/acc acc hx add def");
+    auto_matches_interpreter(&sum);
+    // Into a check that errors if hx is not the previous trip's: a
+    // clobbered value retires every pixel.
+    let check = body("hx k 1 sub i add ne { 1 0 div pop } if");
+    auto_matches_interpreter(&check);
+    for src in [&sum, &check] {
+        assert_eq!(
+            kernel_stats_after(src),
+            ("1".into(), "0".into(), "0".into()),
+            "pixels left the compiled path\n{src}"
+        );
+    }
+}
+
 /// The dead-move pass is linear: a long chain of branch merges, each
 /// moving the last one's defined-flag on, compiles well inside a budget
 /// (propagating liveness by repeated scans was quadratic here: seconds).

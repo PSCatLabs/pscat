@@ -1137,9 +1137,17 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             // Not defined: a read retires the lane to the interpreter, which
-            // raises `undefined` (see `partial_ty`).
+            // raises `undefined` (see `partial_ty`). The value and its tag
+            // are written too, though never read here: a register the loop
+            // carries must occur outside the loop, or register allocation
+            // treats it as the loop's own and lets a temporary made before
+            // the next trip's read take it (see `regalloc`).
             (Lk::Undef, Some(f)) => {
                 out.pairs.push((f, Op::Imm(0.0), false));
+                out.pairs.push((c.reg, Op::Imm(0.0), c.ty == CT::Int));
+                if let Some(t) = c.tag {
+                    out.pairs.push((t, Op::Imm(0.0), false));
+                }
                 Ok(())
             }
             _ => nc(lost),
