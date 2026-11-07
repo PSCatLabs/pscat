@@ -1,0 +1,221 @@
+## Compiled per-pixel kernels: `kernelimage`, CPU and GPU (issue #742, 2026-11-06)
+
+Issue #742 asked for a compiled kernel subset for per-pixel procedures: a
+compiled CPU path first, then a GPU backend as a preview. This branch builds
+both, with four gallery pieces, and gives a go/no-go. The design record is
+[`docs/dev/design/KERNELS.md`](../docs/dev/design/KERNELS.md); the user guide
+is [`docs/guides/kernels.md`](../docs/guides/kernels.md).
+
+**Compared with #1044** (array-at-a-time operators, filed the same day by
+fractal_clouds as the lighter alternative):
+
+- The executor here *is* array-at-a-time: each instruction runs over a batch
+  of 16 lanes.
+- What #742 adds is the compiler that writes the array program from ordinary
+  scalar PostScript. fractal_clouds' renderer compiled with no wavefront
+  rewrite (below).
+- #1044 stays useful as a user-facing buffer API for multi-pass work
+  (erosion, reaction-diffusion), and could reuse the executor. It is not
+  needed for per-pixel work.
+
+### What was built
+
+- **`kernelimage`** (`w h matrix proc ncomp`). `proc` is `i j -> c1..cn`, in
+  a fresh dict per pixel, and the result is painted like an 8-bit
+  `colorimage`.
+- **`kernelcompile`**: `proc ncomp -> bool reason`.
+- **`.kernelmode`**: `/auto`, `/interpret` or `/strict`.
+- **`.kernelstats`**: a test hook.
+- **`--gpu-preview`**, with the `gpu` cargo feature.
+
+The code is in `src/kernel/`:
+
+- **`compile.rs`, an abstract interpreter over a symbolic stack.**
+  - Stack ops, names and calls are resolved at compile time.
+  - Names and stack slots are SSA values, merged at joins with merge
+    registers.
+  - Loops reach a fixpoint over the slots they carry.
+  - Short constant loops are unrolled, and so are loops that change the stack
+    depth.
+  - Names defined on some paths only carry a per-lane flag that a read
+    asserts.
+  - A branch that does not compile becomes an abort for its lanes.
+- **`ir.rs`**: a structured register IR. Registers are I64 (exact integers)
+  or F64; mixed values are F64 with an integer tag.
+- **`exec.rs`, the lane-batched executor.**
+  - It works on 16-lane batches with masks, on all cores.
+  - A lane that would error is *retired*.
+  - It uses the interpreter's own expressions (`fmath`, the noise
+    functions), so the bytes are the same.
+- **`regalloc.rs`**: linear-scan allocation over structured live intervals.
+  fractal_clouds' `fc-pixel` went from 70,097 to 515 registers.
+- **`check.rs`**: a debug-build validator of register storage kinds.
+- **`gpu.rs`**: WGSL lowering, run through wgpu, in f32.
+- **`mod.rs`**: the operators, the threaded runner, the `--bands` row range,
+  and two interpreter drivers: one for the whole image, one for the retired
+  pixels only.
+
+### Correctness
+
+The compiled path is byte-identical to the interpreter, errors included.
+Every test renders twice, under `/strict` and under `/interpret`.
+
+**`tests/kernels.rs` (21 tests):**
+
+- arithmetic and integer promotion;
+- loops and exits;
+- stack-carried loop state;
+- dict scopes;
+- tables, tuples and local arrays;
+- the noise operators;
+- 64-bit hashes past 2^53;
+- error parity;
+- limits;
+- thread-count and `--bands` byte identity;
+- a seeded differential fuzz over random programs, hash-shaped expressions
+  included.
+
+**Mutation checks** (each deliberately broken executor caught by the suite):
+
+- the PostScript `round` rule;
+- an off-by-one in `for`;
+- a store that ignores the mask;
+- a 1e-12 error in `sub`;
+- a dropped int-to-real conversion, which the kind validator rejects
+  outright.
+
+**Whole renders, compared with `/interpret`:**
+
+- the three benches;
+- the fractal_clouds `mountains` frame;
+- Mirror Garden at full size.
+
+**Bugs the testing caught on the way:**
+
+- A rollback after a failed unroll attempt dropped instructions, because
+  `compile_if` did not restore the enclosing block on an error path. The
+  differential test hung, which is how it was found.
+- Integers held as exact f64s cannot hold fractal_clouds' 31-bit hash
+  products, which reach about 2^58. That forced the I64 register kind.
+- My own art had two bugs of its own (an overflowing hash, and `fill`/`ln`
+  used as variable names). Both paths agreed on the real error each time.
+
+**Robustness for untrusted programs (pscat-mcp):**
+
+- `--max-time` and `--max-steps` are checked between batches and every 256
+  loop trips. A runaway kernel `{ } loop` ends with `TimeExceeded`, and that
+  is tested.
+- Buffers and table snapshots go through `check_alloc`.
+- The drivers' helper operators are not in systemdict, and they validate
+  their state dict as untrusted input.
+
+### Measurements
+
+Release build, Apple M4 (4 performance + 6 efficiency cores). Wall time
+includes process start.
+
+**Benches** (`scripts/bench_kernels.sh`, 480×320, median of 5):
+
+| bench | plain, 1 core | `--bands 8` | kernel, 1 thread | kernel, all cores | vs plain | vs bands 8 |
+|---|---:|---:|---:|---:|---:|---:|
+| mandel (escape time, 200 iterations) | 4.77 s | 1.39 s | 0.216 s | 0.064 s | 75× | 22× |
+| relief (noise heights, three samples a pixel) | 0.82 s | 0.24 s | 0.167 s | 0.055 s | 15× | 4.4× |
+| spheres (ray tracer, 3 bounces) | 1.67 s | 0.50 s | 0.056 s | 0.030 s | 55× | 16× |
+
+Relief gains least: most of its time is already in native `fbm2`/`ridged2`.
+
+**fractal_clouds, the program that filed #742.** The `mountains` scene's
+whole `fc-pixel` compiles: terrain, erosion lookups, sky, clouds and tone
+mapping, 48k IR instructions. The test was a 160×100 frame, AA off, via a
+`kernelimage` driver; the result is byte-identical to `/interpret`.
+
+| | `kernelimage` call |
+|---|---:|
+| interpreter | 17.95 s |
+| compiled, 1 thread | 1.24 s (14.5×) |
+| compiled, all cores | 0.61 s (29×) |
+
+The scene's own bakes (erosion and forest maps, about 12 s) are not
+per-pixel and stay interpreted. They now dominate a frame at this size.
+
+**Batch width.** The fractal_clouds frame and the benches, 1 thread,
+compiled run only:
+
+| lanes | fractal_clouds | mandel | relief | spheres |
+|---|---:|---:|---:|---:|
+| 64 | 3219 ms | 385 | 141 | 62 |
+| 32 | 1495 | 207 | 132 | 35 |
+| **16** | **1237** | **183** | **130** | **31** |
+| 8 | 1238 | 206 | 134 | 35 |
+
+16 lanes wins on all four. Narrower batches waste fewer lanes where rays
+diverge, and keep the register file (registers × lanes × 8 bytes) in cache.
+
+**Gallery pieces** (full size, `--dpi 144`; the interpreter column is the same
+file under `/interpret .kernelmode`):
+
+| piece | grid | interpreter | kernelimage (10 cores) | GPU dispatch |
+|---|---|---:|---:|---:|
+| Mirror Garden (ray tracer) | 1440×960, 4 rays/pixel | 149 s | 0.9 s | 17–23 ms |
+| Mandelbulb (ray-marched fractal) | 1200×1200, 4 rays/pixel | INTERP_MB | 4.9 s | 66 ms |
+| Dreaming Network (CPPN inference) | 1200×1200 | INTERP_DN | 3.9 s | 86 ms |
+| Mochi in Oils (Kuwahara filter, 36 MB photo) | 1200×1600 | INTERP_MO | 2.7 s | 99 ms |
+
+The interpreted renders match the compiled ones byte for byte.
+
+**GPU preview** (`--gpu-preview`, f32, Metal on the M4's 10-core GPU):
+
+- **Speed.** Dispatch plus readback is **23–68× faster than the CPU path on
+  all ten cores**: Mandelbulb 66 ms against 4.6 s, Dreaming Network 86 ms
+  against 4.0 s.
+- **Fixed costs.**
+  - Device setup is 8–250 ms.
+  - Shader compile is 75–660 ms cold, and 17–25 ms once Metal has cached it.
+  - The small benches are no faster end to end: those fixed costs dominate.
+- **Fidelity.** f32 against the exact f64 bytes:
+  - Dreaming Network differs by at most 1 level in 255.
+  - Mandelbulb and Mochi in Oils differ by a mean of 0.00 levels.
+  - Mirror Garden differs by more than 16 levels on 2.7% of pixels. Its
+    integer hash for shadow jitter is not exact in f32, though the picture
+    looks the same.
+  - The Mandelbrot bench differs on 2.5% of pixels: chaotic iteration near the
+    set's boundary.
+- **Packaging.** The cost is an optional dependency tree (wgpu 30, MSRV 1.87,
+  MIT/Apache), off by default and never on wasm.
+
+### Go/no-go
+
+- **CPU kernels: go.**
+  - The gain is 15–165× over the interpreter on real per-pixel programs, and
+    16–22× over the best band-parallel interpreted render.
+  - There is no change to output (byte-identical).
+  - There is no new dependency.
+  - The program that asked for it compiles unmodified apart from the call
+    site.
+- **GPU: worth keeping as an opt-in preview, not more.**
+  - It is another 23–68× on heavy kernels, which is what an interactive
+    preview of a 30-core-minute fractal_clouds frame needs.
+  - But it is f32, not bit-exact.
+  - It pays a fixed 25–700 ms per call, so it loses on small images.
+  - It adds a large optional dependency.
+  - Final renders should stay on the CPU path.
+
+### Deferred, and follow-ups to file
+
+- **Names defined only inside a loop and read after it** do not compile
+  (Mandelbulb works around it with an initial `def`). Loop-defined names
+  could carry a defined-flag the way branch-defined names do.
+- **`rand` and `srand` in a kernel.** fractal_clouds' `PixSeed` reseeds per
+  pixel, so a per-lane random state seeded inside the kernel would be pure.
+- **Kernels past the 200k-instruction cap.** `alpine_forest`'s trees exceed it,
+  and their branches fall back. Not inlining big procedures called from
+  several places, or caching their compiled body, would shrink kernels.
+- **fractal_clouds' depth-edge antialiasing** reads neighbouring pixels'
+  depth keys (carried state). It needs a two-pass form: one kernel for keys,
+  a second for colour.
+- **`--gpu-preview` and pscat-mcp.** It is CLI only, and the MCP server could
+  pass it through. On the GPU, f64 could be emulated (double-float) for
+  integer hashes.
+- **#1044's buffer API** for multi-pass simulations, on top of this executor.
+- **A `kernelimage` shim in `lib/`** for Ghostscript. The gallery pieces carry
+  their own ten-line fallback.

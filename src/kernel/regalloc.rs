@@ -46,7 +46,6 @@ pub(crate) fn allocate(k: &mut Kernel) {
     // The inputs are written before the body; the outputs read after it.
     for r in [k.in_i, k.in_j] {
         first[r as usize] = 0;
-        last[r as usize] = last[r as usize].max(0);
     }
     for o in &k.outputs {
         if let Op::R(r) = o {

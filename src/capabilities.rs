@@ -409,6 +409,24 @@ static ENTRIES: &[Entry] = &[
     // internal artkit hook .permnoise2. tests/capabilities.rs checks
     // every row here is a real operator in systemdict.
     entry!(
+        "kernelimage",
+        CapabilityKind::Operator,
+        "pscat extension (#742). Like colorimage, but the data is a per-pixel procedure i j -> c1..cn (components 0..1) that pscat compiles and runs on every core, byte for byte as the interpreter would: ray tracers, fractals, image filters, neural networks. Each pixel gets a fresh dict; uncompilable procedures or pixels fall back to the interpreter. docs/guides/kernels.md.",
+        &[],
+        SYSTEMDICT,
+        "width height matrix proc ncomp kernelimage -",
+        BUILTIN
+    ),
+    entry!(
+        "kernelcompile",
+        CapabilityKind::Operator,
+        "pscat extension (#742). Would kernelimage compile proc? Returns true and the kernel's size, or false and the reason (naming the procedures involved).",
+        &[],
+        SYSTEMDICT,
+        "proc ncomp kernelcompile bool string",
+        BUILTIN
+    ),
+    entry!(
         "noiseseed",
         CapabilityKind::Operator,
         "pscat extension. Seeds the native noise table from an integer; never touches rand. A fresh interpreter behaves as if 0 noiseseed had run. nrseed is the PostScript twin.",

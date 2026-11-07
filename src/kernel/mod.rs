@@ -353,8 +353,7 @@ fn run(
         .collect();
     let queue = Mutex::new(rows.into_iter());
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
-    let retired: Mutex<(Vec<(usize, usize)>, Option<&'static str>)> =
-        Mutex::new((Vec::new(), None));
+    let retired: Mutex<Retired> = Mutex::new((Vec::new(), None));
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, ctl);
         let mut mine: Vec<(usize, usize)> = Vec::new();
@@ -428,6 +427,9 @@ fn run(
         why,
     })
 }
+
+/// Pixels (row, column) retired to the interpreter, and why the first was.
+type Retired = (Vec<(usize, usize)>, Option<&'static str>);
 
 /// A compiled run's result: the image, and the pixels (row, column) that
 /// left the compiled path, for the interpreter to finish.

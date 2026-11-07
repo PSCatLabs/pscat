@@ -411,7 +411,7 @@ pub(crate) fn compile(
         for v in c.st.stack.clone() {
             match v {
                 SVal::Num(o, t) => {
-                    let o = c.to_f(o, t)?;
+                    let o = c.as_f(o, t)?;
                     outputs.push(o);
                 }
                 _ => return nc("an output component is not a number"),
@@ -478,7 +478,7 @@ impl<'a> Compiler<'a> {
 
     /// `o` (of type `t`) as an f64 operand, as the interpreter's
     /// `to_f64` makes it: an I64 register is converted.
-    fn to_f(&mut self, o: Op, t: NT) -> CResult<Op> {
+    fn as_f(&mut self, o: Op, t: NT) -> CResult<Op> {
         match (o, t) {
             (Op::R(_), NT::Int) => {
                 let d = self.reg();
@@ -491,7 +491,7 @@ impl<'a> Compiler<'a> {
 
     /// `o` as an exact f64 (into storage that holds integers as f64s, a
     /// local array): an I64 register past 2^53 retires its lane.
-    fn to_exact_f(&mut self, o: Op, t: NT) -> CResult<Op> {
+    fn as_exact_f(&mut self, o: Op, t: NT) -> CResult<Op> {
         match (o, t) {
             (Op::R(_), NT::Int) => {
                 let d = self.reg();
@@ -504,7 +504,7 @@ impl<'a> Compiler<'a> {
 
     /// `o` as an integer operand for an integer-only operator (I64 or an
     /// integer immediate); `None` when the path certainly errors.
-    fn to_i(&mut self, o: Op, t: NT) -> CResult<Option<Op>> {
+    fn as_i(&mut self, o: Op, t: NT) -> CResult<Option<Op>> {
         match t {
             NT::Int => Ok(Some(o)),
             NT::Real => {
@@ -1560,7 +1560,7 @@ impl<'a> Compiler<'a> {
             (NT::Real, _) | (_, NT::Real) => NT::Real,
             _ => NT::Dyn(0),
         };
-        let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+        let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
         if let (Op::Imm(x), Op::Imm(y), NT::Real) = (a, b, rt) {
             let Some(r) = lane_bin(op, x, y) else {
                 return self.abort_path();
@@ -1739,14 +1739,14 @@ impl<'a> Compiler<'a> {
             "div" => {
                 let (b, bt) = self.pop_num()?;
                 let (a, at) = self.pop_num()?;
-                let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+                let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
                 self.bin_to(BinOp::Div, a, b, real)?;
             }
             "idiv" | "mod" => {
                 let (b, bt) = self.pop_num()?;
                 let (a, at) = self.pop_num()?;
-                if let Some(a) = self.to_i(a, at)?
-                    && let Some(b) = self.to_i(b, bt)?
+                if let Some(a) = self.as_i(a, at)?
+                    && let Some(b) = self.as_i(b, bt)?
                 {
                     let op = if name == "idiv" {
                         IBinOp::Idiv
@@ -1779,7 +1779,7 @@ impl<'a> Compiler<'a> {
             }
             "sqrt" | "sin" | "cos" | "ln" | "log" => {
                 let (a, at) = self.pop_num()?;
-                let a = self.to_f(a, at)?;
+                let a = self.as_f(a, at)?;
                 let op = match name {
                     "sqrt" => UnOp::Sqrt,
                     "sin" => UnOp::Sin,
@@ -1792,7 +1792,7 @@ impl<'a> Compiler<'a> {
             "atan" | "exp" => {
                 let (b, bt) = self.pop_num()?;
                 let (a, at) = self.pop_num()?;
-                let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+                let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
                 let op = if name == "atan" {
                     BinOp::Atan
                 } else {
@@ -1817,7 +1817,7 @@ impl<'a> Compiler<'a> {
             }
             "cvr" => {
                 let (a, t) = self.pop_num()?;
-                let a = self.to_f(a, t)?;
+                let a = self.as_f(a, t)?;
                 self.push_num(a, NT::Real);
             }
             // relational and logic
@@ -1839,7 +1839,7 @@ impl<'a> Compiler<'a> {
                         "gt" => BinOp::Gt,
                         _ => BinOp::Ge,
                     };
-                    let (a, b) = (self.to_f(a, at)?, self.to_f(b, bt)?);
+                    let (a, b) = (self.as_f(a, at)?, self.as_f(b, bt)?);
                     self.bin_to(op, a, b, boolean)?;
                 }
             }
@@ -1853,7 +1853,7 @@ impl<'a> Compiler<'a> {
                         self.ibin(iop, *x, *y)?;
                     }
                     (SVal::Num(x, xt), SVal::Num(y, yt)) => {
-                        let (x, y) = (self.to_f(*x, *xt)?, self.to_f(*y, *yt)?);
+                        let (x, y) = (self.as_f(*x, *xt)?, self.as_f(*y, *yt)?);
                         self.bin_to(op, x, y, boolean)?;
                     }
                     (SVal::Bool(x), SVal::Bool(y)) => {
@@ -1883,8 +1883,8 @@ impl<'a> Compiler<'a> {
                     }
                     (SVal::Num(x, xt), SVal::Num(y, yt)) => {
                         let (x, y, xt, yt) = (*x, *y, *xt, *yt);
-                        if let Some(x) = self.to_i(x, xt)?
-                            && let Some(y) = self.to_i(y, yt)?
+                        if let Some(x) = self.as_i(x, xt)?
+                            && let Some(y) = self.as_i(y, yt)?
                         {
                             let op = match name {
                                 "and" => IBinOp::And,
@@ -1900,7 +1900,7 @@ impl<'a> Compiler<'a> {
             "not" => match self.pop()? {
                 SVal::Bool(x) => self.un_to(UnOp::BNot, x, boolean)?,
                 SVal::Num(x, t) => {
-                    if let Some(x) = self.to_i(x, t)? {
+                    if let Some(x) = self.as_i(x, t)? {
                         self.iun(IUnOp::Not, x)?;
                     }
                 }
@@ -1909,8 +1909,8 @@ impl<'a> Compiler<'a> {
             "bitshift" => {
                 let (s, st) = self.pop_num()?;
                 let (x, xt) = self.pop_num()?;
-                if let Some(x) = self.to_i(x, xt)?
-                    && let Some(s) = self.to_i(s, st)?
+                if let Some(x) = self.as_i(x, xt)?
+                    && let Some(s) = self.as_i(s, st)?
                 {
                     self.ibin(IBinOp::Shift, x, s)?;
                 }
@@ -1963,7 +1963,7 @@ impl<'a> Compiler<'a> {
                         }
                     };
                     // The counter is an f64, as `ForControl` keeps it.
-                    let (init, inc, lim) = (c.to_f(init, nt)?, c.to_f(inc, it_)?, c.to_f(lim, lt)?);
+                    let (init, inc, lim) = (c.as_f(init, nt)?, c.as_f(inc, it_)?, c.as_f(lim, lt)?);
                     let r = c.reg();
                     c.emit(Ins::Mov(r, init))?;
                     c.compile_loop(LoopHead::For { c: r, ct, inc, lim }, body)
@@ -1985,7 +1985,7 @@ impl<'a> Compiler<'a> {
                     _ => None,
                 };
                 self.loop_or_unroll(trips, body, |c: &mut Compiler<'a>, body| {
-                    let n = c.to_f(n, t)?;
+                    let n = c.as_f(n, t)?;
                     let ok = c.reg();
                     c.emit(Ins::Bin(BinOp::Ge, ok, n, Op::Imm(0.0)))?;
                     c.emit(Ins::Assert(Op::R(ok)))?;
@@ -2248,13 +2248,13 @@ impl<'a> Compiler<'a> {
                 return self.abort_path();
             }
             octtag = ot.tag();
-            a[dims] = self.to_f(oct, ot)?;
-            a[dims + 1] = self.to_f(gain, gt)?;
-            a[dims + 2] = self.to_f(lac, lt)?;
+            a[dims] = self.as_f(oct, ot)?;
+            a[dims + 1] = self.as_f(gain, gt)?;
+            a[dims + 2] = self.as_f(lac, lt)?;
         }
         for k in (0..dims).rev() {
             let (v, t) = self.pop_num()?;
-            a[k] = self.to_f(v, t)?;
+            a[k] = self.as_f(v, t)?;
         }
         let d = [self.reg(), self.reg(), self.reg()];
         self.emit(Ins::Noise { kind, d, a, octtag })?;
@@ -2270,7 +2270,7 @@ impl<'a> Compiler<'a> {
             return self.abort_path();
         }
         // Indices are read as f64 (with their integer tag).
-        let i = self.to_f(i, it_)?;
+        let i = self.as_f(i, it_)?;
         match c {
             SVal::Cap(o) => {
                 if let Op::Imm(k) = i {
@@ -2332,7 +2332,7 @@ impl<'a> Compiler<'a> {
                             let SVal::Num(o, t) = v else {
                                 return nc("run-time index into an array of non-numbers");
                             };
-                            let o = self.to_exact_f(*o, *t)?;
+                            let o = self.as_exact_f(*o, *t)?;
                             self.emit(Ins::LPut {
                                 arr: id,
                                 idx: Op::Imm(k as f64),
@@ -2427,8 +2427,8 @@ impl<'a> Compiler<'a> {
                 let SVal::Num(o, vt) = v else {
                     return nc("put of a non-number into a local array");
                 };
-                let i = self.to_f(i, it_)?;
-                let o = self.to_exact_f(o, vt)?;
+                let i = self.as_f(i, it_)?;
+                let o = self.as_exact_f(o, vt)?;
                 self.emit(Ins::LPut {
                     arr: id,
                     idx: i,
