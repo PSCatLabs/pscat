@@ -26,8 +26,10 @@
     circle). With it, the end crosses the start at a shallow angle.
 - **Short strokes are left alone.** Everything is scaled by
   `clamp((L - 4w) / 40w)`. A dot or a stroke under four widths comes back
-  as the identical array, and most glyph strokes get a fraction of a point.
-  That is why text needs no "is this sgpath?" detection.
+  as the identical array. A glyph stroke, at 10 to 50 widths long, gets a
+  fraction of the full drift. That is why text needs no "is this sgpath?"
+  detection. It does still move a little (fallback review): pass `/Hand 0`
+  to `dctext` for lettering that keeps sgpath's own jitter only.
 - **Sampling.** The vertices are kept, and only segments longer than two
   widths are subdivided. Resampling at a fixed pitch would chop flattened
   curves (advisor review), and it would change the polyline, and therefore

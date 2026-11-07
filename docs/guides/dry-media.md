@@ -113,8 +113,9 @@ newpath 40 60 moveto 300 80 lineto
     stroke drifts slowly to either side, more on a longer stroke, and runs
     straight on a little past its end. A closed outline ends a little past
     or short of where it began. Strokes shorter than about four widths
-    (dots, most lettering from `sgpath`) are left as they are, and the
-    wobble comes from the stroke's own seed, never your `rand`. The
+    (dots, ticks) are left as they are, and the drift fades in up to about
+    44 widths, so lettering from `sgpath` moves far less than a long line.
+    The wobble comes from the stroke's own seed, never your `rand`. The
     default is 0, so existing boards render as before; 0.5 to 0.8 reads
     as a steady hand.
   - `/Corners /separate` cuts a path at its sharp corners, so a box is

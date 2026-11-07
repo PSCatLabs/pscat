@@ -638,10 +638,12 @@ fn ink_columns(it: &Interp, y0: u32, y1: u32, above: f64) -> (u32, u32) {
     (*lit.first().expect("no ink"), *lit.last().expect("no ink"))
 }
 
-/// Issue #1049: /Hand 0 (and /Corners /joined) is exactly the ruled
-/// stroke every caller had before, so no existing board changes.
+/// Issue #1049: an explicit /Hand 0 and /Corners /joined are the defaults
+/// byte for byte. (That the defaults match the renders from before #1049 is
+/// `scripts/identity_check.sh --loader lib/drychalk.ps`'s job, recorded in
+/// the PR: a test in one tree cannot see the old library.)
 #[test]
-fn hand_zero_is_the_ruled_stroke() {
+fn explicit_hand_zero_is_the_default() {
     let path = "newpath 10 30 moveto 190 34 lineto 190 80 lineto 20 12 moveto 120 14 lineto";
     let ruled = data(&on_board(
         200,

@@ -618,6 +618,7 @@
         /dcHwn dcHwP length 2 idiv def
         /dcHwQ dcHwn 2 mul array def
         /dcHwsx 0 def
+        dcHwP 0 1 dcHwdir neg exch neg exch /dcHwty exch def /dcHwtx exch def
         0 1 dcHwn 1 sub {
             /dcHwi exch def
             /dcHwx dcHwP dcHwi 2 mul get def /dcHwy dcHwP dcHwi 2 mul 1 add get def
@@ -627,14 +628,16 @@
                     dcHwy dcHwP dcHwi 2 mul 1 sub get sub dup mul add sqrt
                 add def
             } if
-            % the tangent from the neighbours (one-sided at the ends)
+            % the tangent from the neighbours (one-sided at the ends); where
+            % both neighbours sit on this point (repeated points), the last
+            % tangent holds
             /dcHwa dcHwi 1 sub 0 dcmax def /dcHwb dcHwi 1 add dcHwn 1 sub dcmin def
-            /dcHwtx dcHwP dcHwb 2 mul get dcHwP dcHwa 2 mul get sub def
-            /dcHwty dcHwP dcHwb 2 mul 1 add get dcHwP dcHwa 2 mul 1 add get sub def
-            /dcHwtl dcHwtx dup mul dcHwty dup mul add sqrt def
+            /dcHwgx dcHwP dcHwb 2 mul get dcHwP dcHwa 2 mul get sub def
+            /dcHwgy dcHwP dcHwb 2 mul 1 add get dcHwP dcHwa 2 mul 1 add get sub def
+            /dcHwtl dcHwgx dup mul dcHwgy dup mul add sqrt def
             dcHwtl 1e-9 gt {
-                /dcHwtx dcHwtx dcHwtl div def /dcHwty dcHwty dcHwtl div def
-            } { /dcHwtx 1 def /dcHwty 0 def } ifelse
+                /dcHwtx dcHwgx dcHwtl div def /dcHwty dcHwgy dcHwtl div def
+            } if
             /dcHwo dcHwsx dcHwwave dcrand 2 mul 1 sub dcHwtr mul add def
             % a closed outline eases its drift over the last ten widths to
             % the start's, give or take dcHwd, so the end crosses the start
@@ -866,7 +869,7 @@
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, 1..4: skipped valleys streak with the travel (default 1.6)
 % @param: /Under [rgb array] What lies beneath (default the board tone dcboard set, else the dksurface ground)
 % @param: /Seed [integer] Seed for every stroke's variation and texture; subpath i uses Seed + 7919 i. Leaves the caller's rand stream untouched (default from each stroke's position on the board)
-% @param: /Hand [0..1] Draws the path freehand rather than ruled: a slow drift to either side that grows with the stroke's length, a straight run past each end, and a closed outline that ends a little past or short of its start. 0 follows the path exactly; strokes shorter than about four widths (dots, most lettering) are left as they are (default 0)
+% @param: /Hand [0..1] Draws the path freehand rather than ruled: a slow drift to either side that grows with the stroke's length, a straight run past each end, and a closed outline that ends a little past or short of its start. 0 follows the path exactly; strokes shorter than about four widths (dots, ticks) are left as they are, and the drift fades in up to about 44 widths, so lettering moves far less than a long line (default 0)
 % @param: /Corners [name] /joined draws each subpath as one stroke; /separate cuts it at every sharp corner between long legs, so a box is four strokes that land, lift and (with /Hand) overshoot on their own (default /joined)
 /dcchalk {
     dcscratch begin
@@ -1031,6 +1034,9 @@
         not { dcleader-positions-must-be-numbers } if
     /dcRy exch def /dcRx2 exch def /dcRx1 exch def
     /dcRr exch def /dcRl exch def
+    [ /dcRl load /dcRr load ] {
+        type dup /stringtype ne exch /arraytype ne and { dcleader-text-must-be-a-string } if
+    } forall
     /sgpath where { pop } { dcleader-needs-strokeglyphs } ifelse
     /dcRsz dcRO /Size 36 1e-6 1e6 /dcleader-size-must-be-positive dcoptnum def
     /dcRpitch dcRO /Pitch dcRsz 0.4 mul 1e-6 1e6 /dcleader-pitch-must-be-positive dcoptnum def
@@ -1073,6 +1079,7 @@
 %   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
 %   { (a) (b) 0 100 0 5 dcleader } /dcleader-options-must-be-a-dict (a number for the options) mustguard
 %   { (a) (b) 0 (x) 0 << >> dcleader } /dcleader-positions-must-be-numbers (a string x2) mustguard
+%   { 5 (b) 0 100 0 << >> dcleader } /dcleader-text-must-be-a-string (a number for the left text) mustguard
 %   { (a) (b) 0 100 0 << /Size -1 >> dcleader } /dcleader-size-must-be-positive (/Size -1) mustguard
 %   { (a) (b) 0 100 0 << /Pitch 0 >> dcleader } /dcleader-pitch-must-be-positive (/Pitch 0) mustguard
 %   { (a) (b) 0 100 0 << /Gap -1 >> dcleader } /dcleader-gap-must-not-be-negative (/Gap -1) mustguard
