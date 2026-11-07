@@ -55,9 +55,20 @@ grestore showpage
 ```
 
 `kernelimage` is a pscat extension. A program meant for other interpreters
-too can define a fallback when `/kernelimage where` fails. Each gallery piece
-in [Computed pixels](../../gallery/README.md) carries a ten-line fallback that
-runs the same procedure through `colorimage`.
+too, Ghostscript for instance, can load the shim
+[`lib/kernel.ps`](../../lib/kernel.ps) when the operator is missing:
+
+```postscript
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
+```
+
+The shim defines `kernelimage` and `kernelcompile` only when they are not
+defined already, so under pscat the native operators win. Its `kernelimage`
+runs the same procedure through `colorimage`, one fresh dict per pixel and
+quantized as above, so the picture matches pscat's up to the other
+interpreter's arithmetic (Ghostscript's reals are 32-bit). Its
+`kernelcompile` always answers `false`. A program that loads it reads a
+file, so it cannot run in the browser playground.
 
 ### Every pixel gets a fresh dictionary
 

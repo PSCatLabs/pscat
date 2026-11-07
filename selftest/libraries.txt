@@ -27,3 +27,4 @@ lib/etching.ps
 lib/qr.ps
 lib/functional.ps
 lib/aspect.ps
+lib/kernel.ps
