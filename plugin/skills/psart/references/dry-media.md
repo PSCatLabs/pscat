@@ -118,6 +118,9 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   fills the tooth, leaving `/Value` between paper and the current colour.
   drykit cannot read the page, so give `/Under` (the tone beneath) when it
   is not paper. Over hatching, a moderate `/Touch` lets the hatch show.
+  (paintkit's `pkcanvas` `/Touch`, in paint.md, is a different thing and has a
+  limit: one touched stroke may reach at most 60000 weave cells, about a 612 pt
+  square at the default `/Weave 2.5`.)
 - `opts dhlift` — an eraser's track: `/Eraser /kneaded` (grey, soft, never
   back to paper) or `/hard` (a narrow, crisp line). `/Under` defaults to the
   current colour.

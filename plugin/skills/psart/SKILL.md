@@ -238,6 +238,7 @@ has two worked examples and a comparison with the image model alone.
 - Big shapes read; a thousand tiny marks are texture, not subject.
 - Deterministic art is debuggable art: seed everything, and when a
   region misbehaves, render just that region at `--page` scale.
+- Don't name a variable after an operator (`sub`, `div`, `exp`, `ln`, `dict`, `string`, `rand`, `count`, `copy`, `index`, ...): `/sub (subtitle) def` replaces the operator, and a later `5 3 sub` fails far away, often with an error that doesn't name it. `pscat --lint` reports it as `[shadowed-operator]`. Use a longer name (`/subtitle`), keep a short local in a `begin ... end` dict, or, for a deliberate redefinition, add a `%lint: allow shadowed-operator` comment line.
 - grestore discards the current path (it restores the path with the graphics state). To build a path under a temporary transform (an ellipse, a rotated shape), save and restore only the matrix (`matrix currentmatrix ... setmatrix`), not gsave/grestore. The ellipse builders do this for you.
 
 ## A sketch to start from

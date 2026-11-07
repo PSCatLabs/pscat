@@ -110,7 +110,7 @@ stderr as `%%[ Error: undefined; OffendingCommand: bogus; Line: 3 ]%%`
 error: useful to see how far a program got.
 
 **`--lint`** catches mistakes that don't *error*: a blank page, an
-unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack.
+unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack, a built-in operator name such as `/sub` redefined as a plain value (`[shadowed-operator]`; silence a deliberate one with a `%lint: allow shadowed-operator` comment line).
 Findings print to stderr as `pscat: lint: [check] message` (or
 `pscat: lint: clean`); the exit code is unchanged (`--lint-strict` makes
 findings fail). A run that errored prints `pscat: lint: [run-error]`.
