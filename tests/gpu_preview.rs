@@ -65,3 +65,23 @@ fn a_gpu_kernel_runs_under_limits() {
     let st = it.operand_stack();
     assert_eq!(st[st.len() - 3].repr(), "1", "not compiled");
 }
+
+/// A grid row wider than one GPU dispatch would make a dispatch past the
+/// bound the limits rely on (and past the device's workgroup count): the
+/// CPU does that image instead, under the same limits (Codex review).
+#[test]
+fn a_row_wider_than_a_dispatch_runs_on_the_cpu() {
+    pscat::set_gpu_preview(true).expect("gpu build");
+    let mut it = Interp::with_page(64, 4).expect("page");
+    it.set_limits(Limits::none().with_max_time(Duration::from_secs(30)))
+        .expect("limits");
+    // Past 65535 workgroups of 64 lanes, where one dispatch would panic.
+    let w = 4_200_000;
+    it.run_str(&format!(
+        "/pixel {{ pop {w} div }} bind def \
+         64 4 scale {w} 1 [{w} 0 0 -1 0 1] /pixel load 1 kernelimage .kernelstats"
+    ))
+    .expect("render");
+    let st = it.operand_stack();
+    assert_eq!(st[st.len() - 3].repr(), "1", "the compiled CPU path ran");
+}

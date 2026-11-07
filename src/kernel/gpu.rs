@@ -90,6 +90,14 @@ pub(crate) fn run(
     (j0, j1): (usize, usize),
     ctl: &RunCtl,
 ) -> Result<Vec<u8>, GpuStop> {
+    // A dispatch holds whole rows, so a row wider than a chunk would make
+    // one dispatch larger than the bound the limits rely on (and past the
+    // device's workgroup count): the CPU does such an image.
+    if w > CHUNK_PIXELS {
+        return Err(GpuStop::Failed(format!(
+            "a row of {w} samples is wider than a GPU dispatch ({CHUNK_PIXELS})"
+        )));
+    }
     let timing = std::env::var_os("PSCAT_KERNEL_TIMING").is_some();
     let t = std::time::Instant::now();
     let (src, data) = lower(k, ncomp)?;
