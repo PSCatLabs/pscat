@@ -70,7 +70,9 @@ kernels.
 
 **Bands.** `gpu_preview` works with `bands`. Each band's `kernelimage`
 computes only its own rows, and the bands share the one GPU context through
-its mutex.
+its mutex. In a manual check through the gpu build, `bands: 2` and
+`bands: 1` gave the same PNG bytes for a gradient kernel, each with the
+GPU warning.
 
 **Tests.**
 - `tests/mcp.rs`: the schema and the descriptions, refusals of non-booleans,
