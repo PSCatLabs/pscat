@@ -43,13 +43,13 @@ pub fn install(dict: &mut Dict) {
     op(dict, "bitshift", bitshift);
 }
 
+/// The LCG's multiplier and increment (compiled kernels emit the same step).
+pub(crate) const RAND_MUL: i64 = 1_103_515_245;
+pub(crate) const RAND_INC: i64 = 12_345;
+
 /// The classic LCG; range [0, 2^31), per the PLRM's `rand`.
 fn rand(it: &mut Interp) -> Result<(), PsError> {
-    it.rand_state = (it
-        .rand_state
-        .wrapping_mul(1_103_515_245)
-        .wrapping_add(12_345))
-        & 0x7fff_ffff;
+    it.rand_state = (it.rand_state.wrapping_mul(RAND_MUL).wrapping_add(RAND_INC)) & RAND_MASK;
     it.push(Object::int(it.rand_state));
     Ok(())
 }
@@ -62,8 +62,8 @@ fn rand(it: &mut Interp) -> Result<(), PsError> {
 /// outside `[RRAND_TAG, RRAND_TAG + 2^31)` -- every ordinary seed, and
 /// any seed a library derives by arithmetic from `rrand` -- is still
 /// forced.
-const RRAND_TAG: i64 = 1 << 40;
-const RAND_MASK: i64 = 0x7fff_ffff;
+pub(crate) const RRAND_TAG: i64 = 1 << 40;
+pub(crate) const RAND_MASK: i64 = 0x7fff_ffff;
 
 fn srand(it: &mut Interp) -> Result<(), PsError> {
     let requested = it.pop_int()?;

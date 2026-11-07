@@ -275,7 +275,8 @@ The interpreted renders match the compiled ones byte for byte: 70–165× faster
 - **Names defined only inside a loop and read after it** do not compile
   (Mandelbulb works around it with an initial `def`). Loop-defined names
   could carry a defined-flag the way branch-defined names do.
-- **`rand` and `srand` in a kernel.** fractal_clouds' `PixSeed` reseeds per
+- **`rand` and `srand` in a kernel** (done in #1063, see `KERNELS.md`).
+  fractal_clouds' `PixSeed` reseeds per
   pixel, so a per-lane random state seeded inside the kernel would be pure.
 - **Kernels past the 200k-instruction cap.** `alpine_forest`'s trees exceed it,
   and their branches fall back. Not inlining big procedures called from
