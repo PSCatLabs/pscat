@@ -178,9 +178,11 @@ path list), `$PSCAT_HOME/lib`, `lib/` in the current directory, `lib/` in the
 per-user data directory (`~/Library/Application Support/pscat` on macOS,
 `~/.local/share/pscat` on Linux, `%APPDATA%\pscat` on Windows), `lib/` beside
 the binary, then the copy compiled into pscat. The first that exists wins, so a
-file in the per-user `lib/` is a place for your own library, and one that
-shadows a built-in name replaces it. `PSCAT_TRACE_RESOURCES=1` prints one line
-on stderr naming the copy that served each file. Reads honour `--read-root`: a
+file in the per-user `lib/` is a place for your own library. A file there
+named like a built-in one (`artkit.ps`) overrides the built-in everywhere, the
+command line and MCP, so a stale copy is a trap. `PSCAT_TRACE_RESOURCES=1`
+prints one line on stderr naming the copy that served each file `run` loaded
+(it does not cover fonts). Reads honour `--read-root`: a
 `$PSCAT_LIB` outside the read roots is not found. The `pscat-mcp` tools can read
 the per-user data directory, so a library installed there works over MCP too;
 another directory needs the server's `--allow-read` (see

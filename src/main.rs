@@ -2265,7 +2265,7 @@ fn print_usage() {
         "                         serves (lib/artkit.ps) run; a single directory, not a path list"
     );
     println!(
-        "  PSCAT_TRACE_RESOURCES  1: print on stderr which copy served each lib/ or font file"
+        "  PSCAT_TRACE_RESOURCES  1: print on stderr which copy served each file a program loads"
     );
     println!("  The lib/ search order is $PSCAT_LIB, $PSCAT_HOME, the current directory, the");
     println!("  per-user data directory, the binary's directory, then the copy built into pscat.");

@@ -138,10 +138,18 @@ PSCAT_MCP_MAX_PIXELS, ...); a flag overrides it, and a bad value stops the
 server. --allow-read and --out-root have no variable.";
 
 /// Said in the instructions and in every image tool's description (#1055):
-/// the image block reaches the model, not necessarily the user, and
-/// `out_path` is how a file comes back (its `wrote <path>` line).
-const PREVIEW_NOTE: &str = "The image preview is usually seen by you, not the user: to show \
-    them, pass out_path and send the file named in the `wrote <path>` line.";
+/// the image block reaches the model, not necessarily the user. `out_path`
+/// is how a file comes back (its `wrote <path>` line); when it is off, the
+/// command line is.
+fn preview_note(cfg: &Config) -> &'static str {
+    if cfg.out_root.is_ok() {
+        "The image preview is usually seen by you, not the user: to show them, \
+         pass out_path and send the file named in the `wrote <path>` line."
+    } else {
+        "The image preview is usually seen by you, not the user: to show them a \
+         file, render it with the pscat command line."
+    }
+}
 
 /// The limits and the output root, fixed for the server's lifetime by
 /// whoever registered it. No tool argument can change them. Each call and
@@ -913,6 +921,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
             ));
         }
     };
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "out_path writes only inside {} (relative paths start there), only to a name \
@@ -941,7 +950,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
              {bands}A page, board or sheet is limited to {} pixels. \
-             {PREVIEW_NOTE} {out_path} {reads}",
+             {preview} {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
             cfg.max_pixels,
@@ -1103,6 +1112,7 @@ fn annotations_with(title: &str, read_only: bool, idempotent: bool) -> Value {
 }
 
 fn tool_list(cfg: &Config) -> Value {
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "Also write the file here: a path inside {} (relative paths start there; \
@@ -1152,7 +1162,7 @@ fn tool_list(cfg: &Config) -> Value {
                 a Lint: block when the page looks wrong (blank page, unbalanced gsave, \
                 leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
-                {PREVIEW_NOTE} \
+                {preview} \
                 Writes a file only when out_path is given (then it replaces an existing render \
                 file of that extension), which is why this tool is not marked read-only. \
                 {READS_BRIEF}",
@@ -1169,7 +1179,7 @@ fn tool_list(cfg: &Config) -> Value {
                 specific person's handwriting or presenting writing as someone else's. \
                 Lowercase letters, digits and .,-'!? only; anything else is invisible. \
                 Writes a file only when out_path is given (then it replaces an existing .png), \
-                which is why this tool is not marked read-only. {PREVIEW_NOTE} {limits} {canvas}"),
+                which is why this tool is not marked read-only. {preview} {limits} {canvas}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1201,7 +1211,7 @@ fn tool_list(cfg: &Config) -> Value {
                 The input is LaTeX only, never PostScript. svg and pdf (megabytes: tens of \
                 thousands of grain marks) are written to out_path only. Writes a file only \
                 when out_path is given (then it replaces an existing file of that \
-                extension), which is why this tool is not marked read-only. {PREVIEW_NOTE} Limits: \
+                extension), which is why this tool is not marked read-only. {preview} Limits: \
                 latex at most {max_latex} bytes; the board at most {max_pixels} \
                 pixels (width and height in points times dpi/72) and 8000 a side; \
                 {}s per call (the server's --timeout; its default is 60); the interpreter's step, time and memory limits \
@@ -1262,7 +1272,7 @@ fn tool_list(cfg: &Config) -> Value {
                 error text alongside. Labels in Latin (accents included), Korean, Japanese, \
                 Chinese and Thai are drawn in a face for the script (the last three need the \
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
-                an existing .png), which is why this tool is not marked read-only. {PREVIEW_NOTE} Limits: \
+                an existing .png), which is why this tool is not marked read-only. {preview} Limits: \
                 {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
                 side, and the cells rendered at most {max_pixels} pixels in all; labels at \
                 most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
