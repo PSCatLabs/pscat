@@ -206,6 +206,267 @@ fn nested_loops_with_names_and_exits() {
     ));
 }
 
+/// Issue #1062: a name first defined inside a loop and read after it.
+/// Lanes that reach the read with it undefined must give the interpreter's
+/// `undefined`, so each case has a variant where some lanes do.
+#[test]
+fn names_first_defined_in_a_loop_are_read_after_it() {
+    // The issue's example (more than 16 trips, so not unrolled), with the
+    // exit depending on the pixel.
+    let issue = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               /hit false def
+               0 1 99 {{ /k exch def /hx k 0.1 mul def
+                 hx i 0.1 mul j add gt {{ /hit true def exit }} if }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    let prog = issue("hit { hx } { 0 } ifelse");
+    let (ok, why) = compiles(&prog);
+    assert!(ok && !why.contains("branches"), "{why}");
+    same(&prog);
+    // As written, but with a run-time trip count that is zero for some
+    // pixels: they never define hx.
+    let some_never = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 30 sub {{ /k exch def /hx k j add 0.25 mul def }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&some_never("i 30 ge { hx } { -1 } ifelse"));
+    same_error(&some_never("hx"), "undefined");
+    // An exit before the body's def, on the lanes where j is 0.
+    let exit_first = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 40 add {{ /k exch def k j 2 mul eq {{ exit }} if /hx k i add def }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&exit_first("j 0 gt { hx } { 7 } ifelse"));
+    same_error(&exit_first("hx"), "undefined");
+    // An integer on the back edge and a real at an exit: the flagged slot
+    // widens to a value with a per-lane integer bit.
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           0 1 i 20 add {{ /k exch def /hx k def
+             k j 3 mul 2 add gt {{ /hx k 0.5 add def exit }} if }} for
+           hx floor cvi 3 mod 0 eq {{ 0.25 }} {{ 0.75 }} ifelse hx add show3 }} bind def"
+    ));
+    // A boolean, read after the loop.
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           0 1 i 20 add {{ /k exch def /big k j 5 mul gt def }} for
+           big {{ 0.9 }} {{ 0.1 }} ifelse show3 }} bind def"
+    ));
+}
+
+/// The flag across nested loops, from a branch before the loop, and a
+/// read in the body before the body's own def.
+#[test]
+fn loop_defined_names_nest_and_join_branch_defined_ones() {
+    // Defined in the inner loop, read after the outer one: the outer loop
+    // carries the inner one's flag. The inner loop runs no trips when a is
+    // 0, and the outer one none for i < 20.
+    let nested = |hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 20 sub {{ /a exch def 1 1 a {{ /b exch def /hx a b mul j add def }} for }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&nested("i 21 ge { hx } { 0.5 } ifelse"));
+    same_error(&nested("hx"), "undefined");
+    // Defined on even pixels before the loop (a branch-defined name), and
+    // by the loop on trips past `cond`: with `i 2 mul`, on pixels i < 20
+    // only, so odd pixels from 21 on never define it.
+    let before = |cond: &str, hx_read: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               i 2 mod 0 eq {{ /hx 0.5 def }} if
+               0 1 i 20 add {{ /k exch def k {cond} gt {{ /hx k def }} if }} for
+               {hx_read} show3 }} bind def"
+        )
+    };
+    same(&before("10", "hx"));
+    same(&before(
+        "i 2 mul",
+        "i 2 mod 0 eq i 20 lt or { hx } { 3 } ifelse",
+    ));
+    same_error(&before("i 2 mul", "hx"), "undefined");
+    // Read in the body before the body's own def: the previous trip's
+    // value, undefined on the first trip unless guarded. The first pass
+    // over the body does not know the name yet, so this compiles in /auto
+    // (the branch is given up on, then compiled on the next pass), not
+    // under /strict.
+    let read_first = |guard: &str| {
+        format!(
+            "{SHOW} /pixel {{ /j exch def /i exch def
+               0 1 i 20 add {{ /k exch def {guard} /hx k j add def }} for
+               hx show3 }} bind def"
+        )
+    };
+    for (guard, want) in [
+        ("k 0 gt { hx 0.5 add /s exch def } if", Ok(())),
+        ("i 5 gt k 0 eq and { hx pop } if", Err("undefined")),
+    ] {
+        let prog = read_first(guard);
+        let (ok, why) = compiles(&prog);
+        assert!(ok && !why.contains("branches"), "{why}\n{prog}");
+        let (k, ran) = render_counted("auto", &prog, W, H);
+        let r = render("interpret", &prog);
+        assert_eq!(
+            r.as_ref().map(|_| ()).map_err(String::as_str),
+            want,
+            "{prog}"
+        );
+        assert!(k == r, "compiled and interpreted renders differ\n{prog}");
+        assert!(
+            ran || want.is_err(),
+            "the compiled path did not finish\n{prog}"
+        );
+    }
+}
+
+/// `.kernelstats` after `src`: (finished compiled, partly, wholly
+/// interpreted).
+fn kernel_stats_after(src: &str) -> (String, String, String) {
+    let mut it = Interp::with_page(4, 4).expect("page");
+    it.run_str(&format!("4 4 scale {src} .kernelstats"))
+        .expect("run");
+    let st = it.operand_stack();
+    let n = st.len();
+    (st[n - 3].repr(), st[n - 2].repr(), st[n - 1].repr())
+}
+
+/// A name a flag says is undefined must be undefined: a lane that fails
+/// the flag runs alone in the interpreter, so a procedure behind it (one
+/// pixel's own `/p { ... store ... }`) would make side effects the
+/// compiled pixels never see.
+#[test]
+fn a_procedure_is_never_hidden_behind_a_defined_flag() {
+    let src = |between: &str| {
+        format!(
+            "/X 0 def 4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def
+               i 0 eq j 0 eq and {{ /p {{ /X X 1 add store 0 }} def }} if
+               {between}
+               p pop X 0.25 mul }} 1 kernelimage"
+        )
+    };
+    // Through a loop that defines p as a number on the other pixels.
+    auto_matches_interpreter(&src(
+        "0 1 i 20 add { /k exch def i 0 gt j 0 gt or { /p k def } if } for",
+    ));
+    // Through a branch that does.
+    auto_matches_interpreter(&src("i 0 gt j 0 gt or { /p 2 def } if"));
+}
+
+/// Loop-defined names nothing reads after the loop compile, and cost no
+/// fallback, whatever types they take on the way.
+#[test]
+fn unread_loop_names_cost_nothing() {
+    // A number on the back edge and a boolean at an exit.
+    same(
+        "/pixel { /j exch def /i exch def
+           0 1 99 { /k exch def /x k def k i eq { /x true def exit } if } for
+           i 0.01 mul dup dup } bind def",
+    );
+    // An integer past 2^53 and a real at an exit: an exactness check on
+    // the unused carried value would retire every pixel but one.
+    let src = "4 4 [4 0 0 -4 0 4] { /j exch def /i exch def
+                 0 1 99 { /k exch def /x 1 54 bitshift k add def
+                   k i 3 add eq { /x 0.5 def exit } if } for
+                 i 0.25 mul } 1 kernelimage";
+    auto_matches_interpreter(src);
+    assert_eq!(
+        kernel_stats_after(src),
+        ("1".into(), "0".into(), "0".into()),
+        "pixels left the compiled path"
+    );
+}
+
+/// An integer defined on some pixels only, then widened by a loop that
+/// makes it real: the conversion on loop entry must not run where it is
+/// undefined (stale register bits past 2^53 would retire the pixel).
+#[test]
+fn an_undefined_value_is_not_converted_on_loop_entry() {
+    // The second layout is one where, before the fix, the register x's
+    // value takes on odd pixels still held a large real from the
+    // previous batch (i and j live to the end keep the allocator from
+    // reusing a register written earlier in this batch).
+    for (pre, post) in [("", ""), ("/a i 1e300 mul def", "i j add 0 mul add")] {
+        let src = format!(
+            "4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def
+               /odd i 2 mod 0 eq def {pre}
+               odd {{ /x i j add def }} if
+               0 1 20 {{ /k exch def /x k 0.5 add def }} for
+               x 0.04 mul {post} }} 1 kernelimage"
+        );
+        auto_matches_interpreter(&src);
+        assert_eq!(
+            kernel_stats_after(&src),
+            ("1".into(), "0".into(), "0".into()),
+            "pixels left the compiled path\n{src}"
+        );
+    }
+}
+
+/// A name first defined inside a loop and read on the next trip, before
+/// the body's def: its value register lives round the back edge, so a
+/// temporary made earlier in the body must not take it. (Nothing outside
+/// the loop wrote it, and register allocation keeps a register live across
+/// a loop only if it occurs outside the loop too.) Read before the def, so
+/// /auto only: see `loop_defined_names_nest_and_join_branch_defined_ones`.
+#[test]
+fn a_value_carried_round_a_loop_keeps_its_register() {
+    let body = |use_hx: &str| {
+        format!(
+            "4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def /acc 0 def
+               0 1 99 {{ /k exch def i k mul j k mul add /scratch exch def
+                 k 0 gt {{ {use_hx} }} if
+                 /hx k i add def }} for
+               acc 6000 div }} 1 kernelimage"
+        )
+    };
+    // Into the colour: a clobbered value is a wrong pixel.
+    let sum = body("/acc acc hx add def");
+    auto_matches_interpreter(&sum);
+    // Into a check that errors if hx is not the previous trip's: a
+    // clobbered value retires every pixel.
+    let check = body("hx k 1 sub i add ne { 1 0 div pop } if");
+    auto_matches_interpreter(&check);
+    for src in [&sum, &check] {
+        assert_eq!(
+            kernel_stats_after(src),
+            ("1".into(), "0".into(), "0".into()),
+            "pixels left the compiled path\n{src}"
+        );
+    }
+}
+
+/// The dead-move pass is linear: a long chain of branch merges, each
+/// moving the last one's defined-flag on, compiles well inside a budget
+/// (propagating liveness by repeated scans was quadratic here: seconds).
+#[test]
+fn a_long_chain_of_merges_compiles_in_linear_time() {
+    let mut prog = String::from("/pixel { /j exch def /i exch def /c i 1 gt def ");
+    for _ in 0..35_000 {
+        prog.push_str("c { /x 1 def } if ");
+    }
+    prog.push_str("x dup dup } def");
+    common::within_cpu_budget(
+        "kernelcompile of 35,000 merges",
+        Duration::from_millis(300),
+        3,
+        || {
+            let (ok, why) = compiles(&prog);
+            assert!(ok, "{why}");
+        },
+    );
+}
+
 #[test]
 fn stack_carried_loop_state() {
     // The fractal_clouds style: the running state lives on the stack.

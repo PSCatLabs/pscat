@@ -95,6 +95,10 @@ So carried state between pixels, like basin_and_range's `/left` and `prev`
 row, is impossible by construction. Both paths give the same answer for a
 read before a write. A `def` under one branch of an `if` starts its register
 from the snapshot value.
+A name defined on some paths only, under one branch of an `if` or inside a
+loop that may run no trips or exit before its `def`, carries a per-lane
+"defined" flag. A read of it asserts the flag: a pixel that would read it
+undefined sends the image to the interpreter, which raises the real error.
 
 The fallback path is literally that: per pixel, `dict begin i j proc end`, run
 by the interpreter. It is also the reference the compiled path is tested
@@ -295,6 +299,11 @@ at run time by `--gpu-preview`:
   elsewhere.
 - It is approximate (f32), so it is never the default, and output is never
   claimed bit-exact. Final renders stay on the CPU path.
+- Under `--max-time`/`--max-steps` (pscat-mcp's `gpu_preview`, #1065) the
+  limits are checked before each dispatch of 65536 pixels, and a dispatch is
+  charged the kernel's straight-line size per pixel in steps. Loop trips are
+  capped at 2^20 per pixel, not counted, so a runaway loop gives a capped
+  image rather than an error unless the capped work runs past a limit.
 
 Its value is to be measured, not assumed. "The GPU isn't worth it" is a valid
 outcome of this work.

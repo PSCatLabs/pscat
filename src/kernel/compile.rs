@@ -244,6 +244,23 @@ fn ct_of(v: &SVal) -> Option<CT> {
     }
 }
 
+/// For a name that may be undefined on a path into or round a loop: its
+/// type where defined (`Some(None)` where undefined), or `None` if it holds
+/// something a flagged register cannot.
+///
+/// Only a truly undefined name may sit behind a flag of 0. A lane whose
+/// read fails the flag runs alone in the interpreter (`fallback_pixels`),
+/// which is exact only if all it can do is raise `undefined`; a `Maybe`
+/// may be a procedure there, whose side effects (`store`) the compiled
+/// pixels would not see.
+fn partial_ty(lk: &Lk) -> Option<Option<CT>> {
+    match lk {
+        Lk::Undef => Some(None),
+        Lk::Val(x) | Lk::Partial(x, _) if x.is_scalar() => Some(ct_of(x)),
+        _ => None,
+    }
+}
+
 fn ct_join(a: CT, b: CT) -> Option<CT> {
     match (a, b) {
         (CT::Bool, CT::Bool) => Some(CT::Bool),
@@ -259,6 +276,11 @@ struct Carried {
     reg: Reg,
     tag: Option<Reg>,
     ty: CT,
+    /// A name the loop defines that is undefined on some path into or
+    /// round it (nothing usable before the loop, or an exit before the
+    /// body's def): a per-lane flag register, 1 where defined, as for
+    /// [`Binding::Partial`].
+    flag: Option<Reg>,
 }
 
 impl Carried {
@@ -883,6 +905,7 @@ fn compile_with(
         if dump {
             eprintln!("--- kernel before allocation ---\n{:#?}", kernel.body);
         }
+        super::regalloc::drop_dead_moves(&mut kernel);
         if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
             super::regalloc::allocate(&mut kernel);
         }
@@ -1981,6 +2004,66 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// Moves putting what a path holds in `c`'s slot into its registers.
+    /// A flagged slot also takes whether the name is defined on the path:
+    /// where it is not, only the flag is written, and a later read asserts
+    /// it before the value register is used.
+    fn carry_into(&mut self, c: &Carried, lk: &Lk, out: &mut Moves, lost: &str) -> CResult<()> {
+        match (lk, c.flag) {
+            (Lk::Val(v), None) => self.moves_into(c.reg, c.tag, c.ty, v, out),
+            (Lk::Val(v), Some(f)) => {
+                self.moves_into(c.reg, c.tag, c.ty, v, out)?;
+                out.pairs.push((f, Op::Imm(1.0), false));
+                Ok(())
+            }
+            (Lk::Partial(v, g), Some(f)) => {
+                self.moves_into_where(c.reg, c.tag, c.ty, v, Op::R(*g), out)?;
+                out.pairs.push((f, Op::R(*g), false));
+                Ok(())
+            }
+            // Not defined: a read retires the lane to the interpreter, which
+            // raises `undefined` (see `partial_ty`). The value and its tag
+            // are written too, though never read here: a register the loop
+            // carries must occur outside the loop, or register allocation
+            // treats it as the loop's own and lets a temporary made before
+            // the next trip's read take it (see `regalloc`).
+            (Lk::Undef, Some(f)) => {
+                out.pairs.push((f, Op::Imm(0.0), false));
+                out.pairs.push((c.reg, Op::Imm(0.0), c.ty == CT::Int));
+                if let Some(t) = c.tag {
+                    out.pairs.push((t, Op::Imm(0.0), false));
+                }
+                Ok(())
+            }
+            _ => nc(lost),
+        }
+    }
+
+    /// `moves_into` for a value defined only on the lanes where `flag` is
+    /// set. Its conversion runs on those lanes only: elsewhere the register
+    /// holds whatever it last held, and an `I2FExact` of stale bits would
+    /// retire a pixel that never reads the value. The flag stays 0 there,
+    /// so the unconverted result is never read.
+    fn moves_into_where(
+        &mut self,
+        reg: Reg,
+        tag: Option<Reg>,
+        ty: CT,
+        v: &SVal,
+        flag: Op,
+        out: &mut Moves,
+    ) -> CResult<()> {
+        let n = out.pre.len();
+        self.moves_into(reg, tag, ty, v, out)?;
+        if let Op::R(f) = flag
+            && out.pre.len() > n
+        {
+            let conv = out.pre.split_off(n);
+            out.pre.push(Ins::If(f, conv, Vec::new()));
+        }
+        Ok(())
+    }
+
     /// Emit `moves` as a parallel assignment (after its conversions).
     fn par_moves(&mut self, moves: Moves, code: &mut Vec<Ins>) -> CResult<()> {
         let before = code.len();
@@ -2060,6 +2143,7 @@ impl<'a> Compiler<'a> {
                                     reg,
                                     tag,
                                     ty: t,
+                                    flag: None,
                                 }
                                 .sval(),
                             )
@@ -2096,6 +2180,7 @@ impl<'a> Compiler<'a> {
                                     reg,
                                     tag,
                                     ty: t,
+                                    flag: None,
                                 }
                                 .sval(),
                             );
@@ -2145,14 +2230,20 @@ impl<'a> Compiler<'a> {
         ma: &mut Moves,
         mb: &mut Moves,
     ) -> CResult<Binding> {
-        let side = |lk: &Lk| -> (Option<SVal>, Op) {
+        // Undefined only where truly undefined: a lane failing the flag
+        // runs alone in the interpreter, so what it finds there must not be
+        // a procedure with side effects (see `partial_ty`).
+        let side = |lk: &Lk| -> Option<(Option<SVal>, Op)> {
             match lk {
-                Lk::Val(x) if x.is_scalar() => (Some(x.clone()), Op::Imm(1.0)),
-                Lk::Partial(v, f) => (Some(v.clone()), Op::R(*f)),
-                _ => (None, Op::Imm(0.0)),
+                Lk::Val(x) if x.is_scalar() => Some((Some(x.clone()), Op::Imm(1.0))),
+                Lk::Partial(v, f) => Some((Some(v.clone()), Op::R(*f))),
+                Lk::Undef => Some((None, Op::Imm(0.0))),
+                _ => None,
             }
         };
-        let ((xa, fa), (xb, fb)) = (side(a), side(b));
+        let (Some((xa, fa)), Some((xb, fb))) = (side(a), side(b)) else {
+            return Ok(Binding::Maybe);
+        };
         let ty = match (xa.as_ref().and_then(ct_of), xb.as_ref().and_then(ct_of)) {
             (Some(x), Some(y)) => ct_join(x, y),
             (Some(x), None) | (None, Some(x)) => Some(x),
@@ -2165,10 +2256,10 @@ impl<'a> Compiler<'a> {
         let tag = (t == CT::Dyn).then(|| self.reg());
         let flag = self.reg();
         if let Some(x) = &xa {
-            self.moves_into(reg, tag, t, x, ma)?;
+            self.moves_into_where(reg, tag, t, x, fa, ma)?;
         }
         if let Some(x) = &xb {
-            self.moves_into(reg, tag, t, x, mb)?;
+            self.moves_into_where(reg, tag, t, x, fb, mb)?;
         }
         ma.pairs.push((flag, fa, false));
         mb.pairs.push((flag, fb, false));
@@ -2177,6 +2268,7 @@ impl<'a> Compiler<'a> {
             reg,
             tag,
             ty: t,
+            flag: None,
         }
         .sval();
         Ok(Binding::Partial(v, flag))
@@ -2266,11 +2358,16 @@ impl<'a> Compiler<'a> {
     fn with_carried(entry: &State, carried: &[Carried], maybe: &[Slot]) -> State {
         let mut st = entry.clone();
         for c in carried {
-            Self::set_slot(&mut st, c.slot, Binding::Val(c.sval()));
+            let b = match c.flag {
+                Some(f) => Binding::Partial(c.sval(), f),
+                None => Binding::Val(c.sval()),
+            };
+            Self::set_slot(&mut st, c.slot, b);
         }
-        // Names a loop defines with nothing usable before it: undefined on
-        // the first pass round, so a read before the body's own def does not
-        // compile (and neither does a read after the loop).
+        // Names a loop defines that cannot be carried in a register (an
+        // array, or a number on one path and a procedure on another): a
+        // read of one in the body before its def, or after the loop, does
+        // not compile.
         for sl in maybe {
             Self::set_slot(&mut st, *sl, Binding::Maybe);
         }
@@ -2283,6 +2380,11 @@ impl<'a> Compiler<'a> {
         let mut carried: Vec<Carried> = Vec::new();
         let mut maybe: Vec<Slot> = Vec::new();
         for _pass in 0..12 {
+            // Branches a pass gave up on: forgotten if the pass is redone.
+            // On the first pass a name the body defines is not bound yet, so
+            // a read of it before the def (`k 0 gt { hx } if`) gives up
+            // where the next pass, with the name carried, compiles it.
+            let soft = self.soft.len();
             let hstate = Self::with_carried(&entry, &carried, &maybe);
             self.st = hstate.clone();
             self.loops.push(LoopCtx {
@@ -2333,14 +2435,26 @@ impl<'a> Compiler<'a> {
                         continue;
                     }
                     self.touch_slot(sl);
+                    // The type the slot holds, and whether some path round
+                    // the loop leaves it undefined (it then gets a flag).
                     let joined = match (&ev, &sv) {
                         (Lk::Val(x), Lk::Val(y)) => match (ct_of(x), ct_of(y)) {
-                            (Some(tx), Some(ty)) => ct_join(tx, ty),
+                            (Some(tx), Some(ty)) => ct_join(tx, ty).map(|t| (t, false)),
                             _ => None,
                         },
+                        _ if matches!(sl, Slot::Bind(..)) => {
+                            match (partial_ty(&ev), partial_ty(&sv)) {
+                                (Some(Some(x)), Some(Some(y))) => ct_join(x, y),
+                                (Some(Some(x)), Some(None)) | (Some(None), Some(Some(x))) => {
+                                    Some(x)
+                                }
+                                _ => None,
+                            }
+                            .map(|t| (t, true))
+                        }
                         _ => None,
                     };
-                    let Some(t) = joined else {
+                    let Some((t, flagged)) = joined else {
                         if let Slot::Bind(..) = sl {
                             maybe.push(sl);
                             carried.retain(|c| c.slot != sl);
@@ -2362,17 +2476,32 @@ impl<'a> Compiler<'a> {
                                 }
                                 grew = true;
                             } else if ct_join(c.ty, t).is_none() {
+                                // A name that is a number on one path and a
+                                // boolean on another: compilable as long as
+                                // nothing reads it, like any other `maybe`.
+                                if let Slot::Bind(..) = sl {
+                                    maybe.push(sl);
+                                    carried.retain(|c| c.slot != sl);
+                                    grew = true;
+                                    break;
+                                }
                                 return nc("a loop changes a value's type");
+                            }
+                            if flagged && c.flag.is_none() {
+                                c.flag = Some(self.reg());
+                                grew = true;
                             }
                         }
                         None => {
                             let reg = self.reg_for(t);
                             let tag = (t == CT::Dyn).then(|| self.reg());
+                            let flag = flagged.then(|| self.reg());
                             carried.push(Carried {
                                 slot: sl,
                                 reg,
                                 tag,
                                 ty: t,
+                                flag,
                             });
                             grew = true;
                         }
@@ -2381,6 +2510,7 @@ impl<'a> Compiler<'a> {
             }
             if grew {
                 self.emitted = saved_emitted;
+                self.soft.truncate(soft);
                 continue;
             }
             if ctx.mismatch {
@@ -2389,10 +2519,13 @@ impl<'a> Compiler<'a> {
             // Final pass: entry moves, the loop, and the state after it.
             let mut pre = Moves::default();
             for c in &carried {
-                let Lk::Val(v) = self.slot_val(&entry, c.slot)? else {
-                    return nc("a loop-carried value has no starting value");
-                };
-                self.moves_into(c.reg, c.tag, c.ty, &v, &mut pre)?;
+                let v = self.slot_val(&entry, c.slot)?;
+                self.carry_into(
+                    c,
+                    &v,
+                    &mut pre,
+                    "a loop-carried value has no starting value",
+                )?;
             }
             // (`par_moves` counts what it adds: append, not `emit`.)
             let mut pcode = Vec::new();
@@ -2401,10 +2534,8 @@ impl<'a> Compiler<'a> {
             if !end.dead {
                 let mut back = Moves::default();
                 for c in &carried {
-                    let Lk::Val(v) = self.slot_val(&end, c.slot)? else {
-                        return nc("a loop-carried value is lost");
-                    };
-                    self.moves_into(c.reg, c.tag, c.ty, &v, &mut back)?;
+                    let v = self.slot_val(&end, c.slot)?;
+                    self.carry_into(c, &v, &mut back, "a loop-carried value is lost")?;
                 }
                 self.par_moves(back, &mut bcode)?;
                 if let LoopHead::For { c, inc, .. } = &head {
@@ -2571,10 +2702,11 @@ impl<'a> Compiler<'a> {
         let mut mv = Moves::default();
         let mut fits = true;
         for c in &carried {
-            let Lk::Val(v) = self.slot_val(&snapshot, c.slot)? else {
+            let v = self.slot_val(&snapshot, c.slot)?;
+            if c.flag.is_none() && !matches!(v, Lk::Val(_)) {
                 return nc("a loop-carried value is undefined at exit");
-            };
-            if self.moves_into(c.reg, c.tag, c.ty, &v, &mut mv).is_err() {
+            }
+            if self.carry_into(c, &v, &mut mv, "").is_err() {
                 fits = false;
                 break;
             }

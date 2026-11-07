@@ -139,7 +139,6 @@ Rx Rx mul Rz Rz mul add sqrt dup Rx exch div /Rx exch def Rz exch div /Rz exch d
   Cx dx mul Cy dy mul add Cz dz mul add /b exch def
   b b mul Cx Cx mul Cy Cy mul add Cz Cz mul add 2.25 sub sub /disc exch def
   /hit false def /glow 1e9 def
-  /hx 0 def /hy 0 def /hz 0 def            % (set by the march; read after it)
   disc 0 gt {
     b neg disc sqrt sub 0 max /t exch def
     b neg disc sqrt add /tfar exch def
