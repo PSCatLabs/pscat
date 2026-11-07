@@ -414,6 +414,9 @@ fn parse_byte_count(s: &str) -> Option<u64> {
 
 fn main() -> ExitCode {
     let code = run_cli();
+    // Short text without a newline is still buffered here, and Rust's own
+    // flush at exit would lose the failure; find it now.
+    flush_stdout();
     if STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
         return ExitCode::from(EXIT_STDOUT_CLOSED);
     }

@@ -1248,6 +1248,16 @@ fn a_closed_stdout_ends_quietly() {
     assert_eq!(out.status.code(), Some(141));
     assert!(png.exists(), "the page is still written");
 
+    // Short text with no newline is buffered; the failure shows only when
+    // it is flushed, and still decides the status.
+    let out = spawn(&[
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "(%stdout) (w) file (hello) writestring",
+    ]);
+    assert_eq!(out.status.code(), Some(141), "buffered output");
+
     // The exit still flushes a file the program left open, on a plain run and
     // on a banded one (which must not report band 1 as failed).
     let dir = common::scratch_dir("pscat-cli-epipe-flush");

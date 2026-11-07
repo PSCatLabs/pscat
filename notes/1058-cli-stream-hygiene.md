@@ -66,3 +66,12 @@ Five reports from the ArtColony batch, one CLI PR (#1060 is only investigated, s
   start, not pscat's read path, which is a plain `read_to_end` to EOF. No
   change made; the reporter's workaround (write the program to a file) is the
   right one.
+
+Codex round 2: `WriteRoots::open`, `rename` and `delete` now hold one
+process-wide lock across their check and use (`src/write_roots.rs`). With
+`--bands` the program runs on several threads of one process, so a band's
+`renamefile` of an in-root symlink could otherwise race another band's open of
+the name it replaced and truncate a file outside the roots; before bands only a
+different process could do that. `main` also flushes stdout before choosing the
+exit status, since newline-free text is buffered and its `EPIPE` showed only in
+Rust's exit cleanup.

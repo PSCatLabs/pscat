@@ -37,8 +37,24 @@
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use crate::error::PsError;
+
+/// Held across a check-then-act on a directory entry (`open`, `rename`,
+/// `delete`), so no other interpreter in this process can swap the entry
+/// between the check and the use. Needed since `--bands` (#1045): the bands
+/// are threads of one process running the same untrusted program, so one
+/// band's `renamefile` of a symlink could otherwise race another band's
+/// `open` of the name it replaced. A different *process* is still the
+/// module doc's accepted window.
+static ENTRY_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_entries() -> MutexGuard<'static, ()> {
+    ENTRY_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// The directories a program may write in, canonicalised. Empty (the
 /// default) means no disk writes at all.
@@ -185,6 +201,7 @@ impl WriteRoots {
     /// a symlink swapped in by another process is the module doc's only
     /// remaining window.
     pub fn open(&self, name: &str, mode: WriteMode) -> Result<std::fs::File, PsError> {
+        let _entries = lock_entries();
         let (path, existed) = self.resolve(name)?;
         let mut opts = std::fs::OpenOptions::new();
         match mode {
@@ -235,6 +252,7 @@ impl WriteRoots {
 
     /// `deletefile`: remove the file entry `name`.
     pub fn delete(&self, name: &str) -> Result<(), PsError> {
+        let _entries = lock_entries();
         let entry = self.resolve_entry(name, true)?;
         let meta = std::fs::symlink_metadata(&entry).map_err(io_error)?;
         if meta.is_dir() {
@@ -245,6 +263,7 @@ impl WriteRoots {
 
     /// `renamefile`: move the entry `old` to `new`, both inside the roots.
     pub fn rename(&self, old: &str, new: &str) -> Result<(), PsError> {
+        let _entries = lock_entries();
         let from = self.resolve_entry(old, true)?;
         let to = self.resolve_entry(new, false)?;
         // Files, as the PLRM says, and as `deletefile` treats them.
