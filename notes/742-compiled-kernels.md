@@ -157,11 +157,11 @@ file under `/interpret .kernelmode`):
 | piece | grid | interpreter | kernelimage (10 cores) | GPU dispatch |
 |---|---|---:|---:|---:|
 | Mirror Garden (ray tracer) | 1440×960, 4 rays/pixel | 149 s | 0.9 s | 17–23 ms |
-| Mandelbulb (ray-marched fractal) | 1200×1200, 4 rays/pixel | INTERP_MB | 4.9 s | 66 ms |
-| Dreaming Network (CPPN inference) | 1200×1200 | INTERP_DN | 3.9 s | 86 ms |
-| Mochi in Oils (Kuwahara filter, 36 MB photo) | 1200×1600 | INTERP_MO | 2.7 s | 99 ms |
+| Mandelbulb (ray-marched fractal) | 1200×1200, 4 rays/pixel | 345 s | 4.9 s | 66 ms |
+| Dreaming Network (CPPN inference) | 1200×1200 | 349 s | 3.9 s | 86 ms |
+| Mochi in Oils (Kuwahara filter, 36 MB photo) | 1200×1600 | 273 s | 2.7 s | 99 ms |
 
-The interpreted renders match the compiled ones byte for byte.
+The interpreted renders match the compiled ones byte for byte: 70–165× faster on all cores, as the same pictures.
 
 **GPU preview** (`--gpu-preview`, f32, Metal on the M4's 10-core GPU):
 

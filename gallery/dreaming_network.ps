@@ -26,8 +26,9 @@
 %
 %   pscat --page 600x600 --dpi 144 --png dreaming_network.png gallery/dreaming_network.ps
 %
-% Render time (release build, 10-core M4 laptop, 1200x1200 grid): see the
-% numbers at the end of this header.
+% Render time (release build, 10-core M4 laptop, 1200x1200 grid): about
+% 4 s with kernelimage; the same procedure in the interpreter (`/interpret
+% .kernelmode` first) takes 349 s and gives the same bytes.
 
 /kernelimage where { pop } {
   /kernelimage { 16 dict begin

@@ -29,6 +29,9 @@
 %   pscat --page 600x800 --dpi 144 --png mochi_in_oils.png gallery/mochi_in_oils.ps
 %
 % (Run from the repo root: the photo is read from gallery/references/.)
+% Render time (release build, 10-core M4 laptop): about 2.7 s with
+% kernelimage, decoding included; the same procedure in the interpreter
+% (`/interpret .kernelmode` first) takes 273 s and gives the same bytes.
 
 /kernelimage where { pop } {
   /kernelimage { 16 dict begin

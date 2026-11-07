@@ -30,9 +30,9 @@
 %   pscat --page 600x600 --dpi 144 --png mandelbulb.png gallery/mandelbulb.ps
 %
 % Render time (release build, 10-core M4 laptop, 1200x1200 grid, four
-% rays a pixel): about 5 s with kernelimage. The interpreter takes 2.3 s
-% for a 100x100 grid of the same procedure (the same bytes), so about
-% five and a half minutes for this one.
+% rays a pixel): about 5 s with kernelimage; the same procedure in the
+% interpreter (`/interpret .kernelmode` first) takes 345 s and gives the
+% same bytes.
 
 /kernelimage where { pop } {
   /kernelimage { 16 dict begin
