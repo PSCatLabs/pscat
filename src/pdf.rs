@@ -113,6 +113,84 @@ pub struct PdfRecorder {
     current_shadings: Vec<usize>,
     /// `current_shadings` as a set, for the per-`shfill` membership test.
     current_shading_set: HashSet<usize>,
+    /// `/DOCINFO` pdfmark entries (#1032), in first-set order, a later
+    /// mark replacing a key in place. `Title`/`Author` here win over the
+    /// DSC ones above; `Producer` never gets here (gs keeps its own too).
+    docinfo: Vec<(String, PdfValue)>,
+    /// Named objects from `/OBJ` (and forward `{name}` references, which
+    /// make an empty dict as gs does), numbered after the shadings.
+    named: Vec<NamedObj>,
+    named_ids: HashMap<String, usize>,
+    /// `/EMBED` attachments: name-tree key (raw bytes) and the file
+    /// specification, written into the Catalog's `/EmbeddedFiles`.
+    embeds: Vec<(Vec<u8>, PdfValue)>,
+    /// Stream bytes added by `/PUT` so far, against [`MAX_STREAM_BYTES`].
+    stream_bytes: usize,
+}
+
+/// A PDF object built by `pdfmark` (#1032): the interpreter converts the
+/// PostScript operands into this tree, and `finish` writes it once the
+/// object numbers are known. `Ref` is an index into the named objects.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PdfValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Real(f64),
+    Name(String),
+    /// A byte string, written as an escaped literal.
+    Str(Vec<u8>),
+    /// A text string (a `/DOCINFO` value): UTF-8 becomes UTF-16BE, see
+    /// [`pdf_text_bytes`].
+    Text(Vec<u8>),
+    Array(Vec<PdfValue>),
+    Dict(Vec<(String, PdfValue)>),
+    /// A `{name}` reference as the operator read it; the recorder turns
+    /// it into `Ref` when the value is stored.
+    Named(String),
+    Ref(usize),
+}
+
+/// What `/OBJ /type` asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObjKind {
+    Dict,
+    Array,
+    Stream,
+}
+
+struct NamedObj {
+    kind: ObjKind,
+    /// Defined by `/OBJ` (false: only referenced so far).
+    defined: bool,
+    /// Dict entries, or a stream's dict entries.
+    dict: Vec<(String, PdfValue)>,
+    items: Vec<PdfValue>,
+    data: Vec<u8>,
+}
+
+/// The most stream data `/PUT` may add to one document (64 MiB): a
+/// decoding filter read to its end can expand without bound.
+pub(crate) const MAX_STREAM_BYTES: usize = 64 << 20;
+
+/// Why a pdfmark edit of the recorder was refused; the operator maps it
+/// to a PostScript error.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MarkError {
+    /// Wrong operands for this mark (PostScript `rangecheck`).
+    Range,
+    /// The object is not of the kind this mark needs (`typecheck`).
+    Type,
+    /// Past [`MAX_STREAM_BYTES`] (`limitcheck`).
+    Limit,
+}
+
+/// Put `key` in `entries`, replacing an existing entry in place.
+fn set_entry(entries: &mut Vec<(String, PdfValue)>, key: String, value: PdfValue) {
+    match entries.iter_mut().find(|(k, _)| *k == key) {
+        Some(slot) => slot.1 = value,
+        None => entries.push((key, value)),
+    }
 }
 
 impl PdfRecorder {
@@ -140,6 +218,157 @@ impl PdfRecorder {
             page_shadings: Vec::new(),
             current_shadings: Vec::new(),
             current_shading_set: HashSet::new(),
+            docinfo: Vec::new(),
+            named: Vec::new(),
+            named_ids: HashMap::new(),
+            embeds: Vec::new(),
+            stream_bytes: 0,
+        }
+    }
+
+    /// `/DOCINFO` (#1032): set document-info entries. `Producer` is
+    /// dropped, as gs's pdfwrite does: the producer is always pscat.
+    pub(crate) fn docinfo(&mut self, mut entries: Vec<(String, PdfValue)>) {
+        self.resolve_entries(&mut entries);
+        for (key, value) in entries {
+            if key != "Producer" {
+                set_entry(&mut self.docinfo, key, value);
+            }
+        }
+    }
+
+    /// The index of named object `name`, creating an empty, undefined
+    /// dict for a forward reference (gs does the same).
+    pub(crate) fn named_ref(&mut self, name: &str) -> usize {
+        if let Some(&i) = self.named_ids.get(name) {
+            return i;
+        }
+        let i = self.named.len();
+        self.named.push(NamedObj {
+            kind: ObjKind::Dict,
+            defined: false,
+            dict: Vec::new(),
+            items: Vec::new(),
+            data: Vec::new(),
+        });
+        self.named_ids.insert(name.to_string(), i);
+        i
+    }
+
+    /// Turn every `Named` reference in `v` into a `Ref`.
+    fn resolve(&mut self, v: &mut PdfValue) {
+        match v {
+            PdfValue::Named(name) => {
+                let i = self.named_ref(&std::mem::take(name));
+                *v = PdfValue::Ref(i);
+            }
+            PdfValue::Array(items) => items.iter_mut().for_each(|x| self.resolve(x)),
+            PdfValue::Dict(entries) => self.resolve_entries(entries),
+            _ => {}
+        }
+    }
+
+    fn resolve_entries(&mut self, entries: &mut [(String, PdfValue)]) {
+        for (_, v) in entries.iter_mut() {
+            self.resolve(v);
+        }
+    }
+
+    /// `/OBJ`: define named object `name` as `kind`. Defining a name twice
+    /// is a `rangecheck`; an object only referenced so far takes the kind
+    /// unless it was already given dict entries and `kind` is not a dict.
+    pub(crate) fn define(&mut self, name: &str, kind: ObjKind) -> Result<(), MarkError> {
+        let i = self.named_ref(name);
+        let obj = &mut self.named[i];
+        if obj.defined || (kind != ObjKind::Dict && !obj.dict.is_empty()) {
+            return Err(MarkError::Range);
+        }
+        obj.defined = true;
+        obj.kind = kind;
+        Ok(())
+    }
+
+    /// `/PUT` of dict entries into a dict or a stream's dict. For a stream
+    /// `Length` is ignored: it is always computed.
+    pub(crate) fn put_dict(
+        &mut self,
+        obj: usize,
+        mut entries: Vec<(String, PdfValue)>,
+    ) -> Result<(), MarkError> {
+        if self.named[obj].kind == ObjKind::Array {
+            return Err(MarkError::Type);
+        }
+        self.resolve_entries(&mut entries);
+        let o = &mut self.named[obj];
+        for (key, value) in entries {
+            if !(o.kind == ObjKind::Stream && key == "Length") {
+                set_entry(&mut o.dict, key, value);
+            }
+        }
+        Ok(())
+    }
+
+    /// `/PUT` of data onto a stream.
+    pub(crate) fn put_data(&mut self, obj: usize, data: &[u8]) -> Result<(), MarkError> {
+        if self.named[obj].kind != ObjKind::Stream {
+            return Err(MarkError::Type);
+        }
+        let total = self.stream_bytes.saturating_add(data.len());
+        if total > MAX_STREAM_BYTES {
+            return Err(MarkError::Limit);
+        }
+        self.stream_bytes = total;
+        self.named[obj].data.extend_from_slice(data);
+        Ok(())
+    }
+
+    /// Stream bytes `/PUT` may still add before [`MAX_STREAM_BYTES`].
+    pub(crate) fn stream_room(&self) -> usize {
+        MAX_STREAM_BYTES - self.stream_bytes
+    }
+
+    /// The kind of named object `obj`.
+    pub(crate) fn kind(&self, obj: usize) -> ObjKind {
+        self.named[obj].kind
+    }
+
+    /// `/PUT` into an array: element `index`, padding with nulls.
+    pub(crate) fn put_index(
+        &mut self,
+        obj: usize,
+        index: usize,
+        mut value: PdfValue,
+    ) -> Result<(), MarkError> {
+        if self.named[obj].kind != ObjKind::Array {
+            return Err(MarkError::Type);
+        }
+        self.resolve(&mut value);
+        let o = &mut self.named[obj];
+        if index >= o.items.len() {
+            o.items.resize(index + 1, PdfValue::Null);
+        }
+        o.items[index] = value;
+        Ok(())
+    }
+
+    /// `/APPEND` onto an array.
+    pub(crate) fn append(&mut self, obj: usize, mut value: PdfValue) -> Result<(), MarkError> {
+        if self.named[obj].kind != ObjKind::Array {
+            return Err(MarkError::Type);
+        }
+        self.resolve(&mut value);
+        self.named[obj].items.push(value);
+        Ok(())
+    }
+
+    /// `/EMBED`: attach the file specification `fs` under `name` in the
+    /// document's `/EmbeddedFiles` name tree; a later one of the same name
+    /// replaces it.
+    pub(crate) fn embed(&mut self, name: Vec<u8>, mut fs: PdfValue) {
+        self.resolve(&mut fs);
+        match self.embeds.iter_mut().find(|(k, _)| *k == name) {
+            Some(slot) => slot.1 = fs,
+            None => self.embeds.push((name, fs)),
         }
     }
 
@@ -577,7 +806,33 @@ Q",
         // [page, contents], then all images, in that order.
         let mut objects: Vec<Vec<u8>> = Vec::new();
         let kids: Vec<String> = (0..npages).map(|i| format!("{} 0 R", 3 + i * 2)).collect();
-        objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+        let image_base = 3 + npages * 2;
+        // Shading functions, then shadings, follow the images (#1028), so a
+        // document without shadings keeps every object number it had.
+        let function_base = image_base + self.images.len();
+        let shading_base = function_base + self.functions.len();
+        // pdfmark's named objects (#1032) follow the shadings, for the same
+        // reason.
+        let named_base = shading_base + self.shadings.len();
+        let refs = |i: usize| named_base + i;
+        if self.embeds.is_empty() {
+            objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+        } else {
+            // One root node holding every key, sorted by bytes as a name
+            // tree must be.
+            let mut embeds: Vec<&(Vec<u8>, PdfValue)> = self.embeds.iter().collect();
+            embeds.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut names = String::new();
+            for (key, fs) in embeds {
+                let _ = write!(names, " {} {}", literal_string(key), fs.to_pdf(&refs));
+            }
+            objects.push(
+                format!(
+                    "<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [{names} ] >> >> >>"
+                )
+                .into_bytes(),
+            );
+        }
         objects.push(
             format!(
                 "<< /Type /Pages /Kids [{}] /Count {npages} >>",
@@ -585,11 +840,6 @@ Q",
             )
             .into_bytes(),
         );
-        let image_base = 3 + npages * 2;
-        // Shading functions, then shadings, follow the images (#1028), so a
-        // document without shadings keeps every object number it had.
-        let function_base = image_base + self.images.len();
-        let shading_base = function_base + self.functions.len();
         for (i, ((((content, imgs), gss), shs), &(width, height))) in pages
             .iter()
             .zip(&page_images)
@@ -682,18 +932,34 @@ Q",
             objects
                 .push(format!("<< {body} /Function {} 0 R >>", function_base + fidx).into_bytes());
         }
+        for obj in &self.named {
+            objects.push(obj.to_pdf(&refs));
+        }
 
         // /Info is appended last, after every page/image object, so it
         // never shifts the kids/image_base positional math above —
         // those were computed against the object count *before* this
         // point. Only emitted when there's something to say; every
         // pscat PDF still gets /Producer.
+        //
+        // A `/DOCINFO` pdfmark entry wins over the DSC comment for the same
+        // key, whichever comes first in the file (gs's pdfwrite: a
+        // `/Title` mark replaces `%%Title:`, and `%%For:` stays the
+        // author when no mark sets one). Title and Author keep their place
+        // after Producer; the other marked keys follow in first-set order.
         let mut info = String::from("<< /Producer (pscat)");
-        if let Some(t) = &self.title {
-            let _ = write!(info, " /Title {}", pdf_string(t));
+        let marked = |key: &str| self.docinfo.iter().find(|(k, _)| k == key).map(|e| &e.1);
+        for (key, dsc) in [("Title", &self.title), ("Author", &self.author)] {
+            if let Some(v) = marked(key) {
+                let _ = write!(info, " /{key} {}", v.to_pdf(&refs));
+            } else if let Some(s) = dsc {
+                let _ = write!(info, " /{key} {}", pdf_string(s));
+            }
         }
-        if let Some(a) = &self.author {
-            let _ = write!(info, " /Author {}", pdf_string(a));
+        for (key, value) in &self.docinfo {
+            if key != "Title" && key != "Author" {
+                let _ = write!(info, " {} {}", pdf_name(key), value.to_pdf(&refs));
+            }
         }
         info.push_str(" >>");
         let info_obj_num = objects.len() + 1;
@@ -956,6 +1222,152 @@ fn pdf_string(s: &str) -> String {
         }
         out.push('>');
         out
+    }
+}
+
+/// A byte string as a PDF literal string: `(`, `)` and `\` escaped, and
+/// every byte outside printable ASCII written as a 3-digit octal escape,
+/// so the object text stays ASCII and reads back as exactly these bytes.
+fn literal_string(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() + 2);
+    out.push('(');
+    for &b in bytes {
+        match b {
+            b'(' | b')' | b'\\' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            0x20..=0x7e => out.push(b as char),
+            _ => {
+                let _ = write!(out, "\\{b:03o}");
+            }
+        }
+    }
+    out.push(')');
+    out
+}
+
+/// A text string (a `/DOCINFO` value, #1032). Bytes that already start
+/// with the UTF-16BE byte order mark are the program's own UTF-16 and
+/// pass through as hex; printable ASCII stays a literal; other valid
+/// UTF-8 becomes UTF-16BE, so a reader shows the characters the source
+/// spelled (gs writes the UTF-8 bytes as they are, which a reader decodes
+/// as PDFDocEncoding: mojibake); anything else is written byte for byte.
+fn pdf_text_bytes(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        let mut out = String::from("<");
+        for b in bytes {
+            let _ = write!(out, "{b:02X}");
+        }
+        out.push('>');
+        return out;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => pdf_string(s),
+        Err(_) => literal_string(bytes),
+    }
+}
+
+/// A PDF name object: `/` and the name's bytes, each byte outside the
+/// regular characters (printable ASCII less the delimiters and `#`)
+/// written as `#XX` (PDF 1.2+). So a PostScript `/text#2Fplain` keeps its
+/// `#` and comes out `/text#232Fplain`, as gs writes it; spell the name
+/// `(text/plain) cvn` to get `/text#2Fplain` in the file.
+fn pdf_name(name: &str) -> String {
+    let mut out = String::from("/");
+    for &b in name.as_bytes() {
+        match b {
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%' | b'#' => {
+                let _ = write!(out, "#{b:02X}");
+            }
+            0x21..=0x7e => out.push(b as char),
+            _ => {
+                let _ = write!(out, "#{b:02X}");
+            }
+        }
+    }
+    out
+}
+
+/// A real as the shortest decimal that reads back as the same `f64`
+/// (`Display` never uses an exponent, which PDF numbers cannot have);
+/// never `-0`. The operator refuses non-finite values before they get here.
+fn pdf_real(v: f64) -> String {
+    if v == 0.0 || !v.is_finite() {
+        return "0".to_string();
+    }
+    let s = format!("{v}");
+    if s.contains('.') { s } else { format!("{s}.0") }
+}
+
+fn write_entries(out: &mut String, entries: &[(String, PdfValue)], refs: &dyn Fn(usize) -> usize) {
+    for (key, value) in entries {
+        let _ = write!(out, " {} {}", pdf_name(key), value.to_pdf(refs));
+    }
+}
+
+impl PdfValue {
+    /// This value in PDF syntax; `refs` maps a named object to its
+    /// object number.
+    fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> String {
+        match self {
+            PdfValue::Null => "null".to_string(),
+            PdfValue::Bool(b) => b.to_string(),
+            PdfValue::Int(i) => i.to_string(),
+            PdfValue::Real(r) => pdf_real(*r),
+            PdfValue::Name(n) => pdf_name(n),
+            PdfValue::Str(s) => literal_string(s),
+            PdfValue::Text(s) => pdf_text_bytes(s),
+            PdfValue::Array(items) => {
+                let parts: Vec<String> = items.iter().map(|v| v.to_pdf(refs)).collect();
+                format!("[{}]", parts.join(" "))
+            }
+            PdfValue::Dict(entries) => {
+                let mut out = String::from("<<");
+                write_entries(&mut out, entries, refs);
+                out.push_str(" >>");
+                out
+            }
+            PdfValue::Ref(i) => format!("{} 0 R", refs(*i)),
+            // Every stored value was resolved; never reached.
+            PdfValue::Named(_) => "null".to_string(),
+        }
+    }
+}
+
+impl NamedObj {
+    /// The object's body. A stream's data is Flate-compressed unless the
+    /// program gave a `/Filter` (then the data is taken as already
+    /// encoded), and `/Length` is always the real one.
+    fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> Vec<u8> {
+        match self.kind {
+            ObjKind::Dict => PdfValue::Dict(self.dict.clone()).to_pdf(refs).into_bytes(),
+            ObjKind::Array => PdfValue::Array(self.items.clone())
+                .to_pdf(refs)
+                .into_bytes(),
+            ObjKind::Stream => {
+                let mut head = String::from("<<");
+                write_entries(&mut head, &self.dict, refs);
+                let has_filter = self.dict.iter().any(|(k, _)| k == "Filter");
+                let packed = if has_filter {
+                    None
+                } else {
+                    deflate(&[&self.data])
+                };
+                let body: &[u8] = match &packed {
+                    Some(z) => {
+                        head.push_str(" /Filter /FlateDecode");
+                        z
+                    }
+                    None => &self.data,
+                };
+                let _ = write!(head, " /Length {} >>\nstream\n", body.len());
+                let mut out = head.into_bytes();
+                out.extend_from_slice(body);
+                out.extend_from_slice(b"\nendstream");
+                out
+            }
+        }
     }
 }
 
