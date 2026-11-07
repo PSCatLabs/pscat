@@ -81,6 +81,7 @@
 // The supported surface: documented, and checked by `missing_docs`.
 pub mod error;
 pub mod interp;
+pub(crate) mod kernel;
 pub mod limits;
 pub mod memtrack;
 pub mod page;

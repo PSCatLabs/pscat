@@ -416,6 +416,10 @@ pub struct Interp {
     /// `setpagedevice` keys already warned about as unsupported, and
     /// whether an explicit page's refusal was noted (#909): each once.
     pub(crate) page_device_notes: std::collections::HashSet<String>,
+    /// How `kernelimage` runs its procedure (`.kernelmode`, #742).
+    pub(crate) kernel_mode: crate::kernel::KernelMode,
+    /// Reasons a `kernelimage` procedure did not compile, each noted once.
+    pub(crate) kernel_notes: std::collections::HashSet<String>,
     /// Steps run by the current program (`begin_source` zeroes it).
     steps_used: u64,
     /// Starts when the current program does; read only when `limits` has a
@@ -587,6 +591,8 @@ impl Interp {
             limits: Limits::none(),
             max_page_pixels: None,
             page_device_notes: std::collections::HashSet::new(),
+            kernel_mode: crate::kernel::KernelMode::Auto,
+            kernel_notes: std::collections::HashSet::new(),
             steps_used: 0,
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,
@@ -841,6 +847,31 @@ impl Interp {
     /// this check, through [`crate::write_roots::WriteRoots::open`].
     pub fn writable_path(&self, name: &str) -> Result<std::path::PathBuf, PsError> {
         self.write_roots.resolve_open(name)
+    }
+
+    /// What is left of the step and time limits, for work done off the
+    /// machine (a compiled kernel, #742): steps still allowed, and the
+    /// deadline as a `Clock::mono_ns` instant.
+    pub(crate) fn remaining_budget(&self) -> (Option<u64>, Option<u64>) {
+        let steps = self
+            .limits
+            .max_steps
+            .map(|m| m.saturating_sub(self.steps_used));
+        let deadline = self.limits.max_time.map(|t| {
+            let left = (t.as_millis() as i64 - self.run_clock.elapsed_ms()).max(0) as u64;
+            crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
+        });
+        (steps, deadline)
+    }
+
+    /// Count `n` steps done off the machine.
+    pub(crate) fn charge_steps(&mut self, n: u64) {
+        self.steps_used = self.steps_used.saturating_add(n);
+    }
+
+    /// The permanent systemdict.
+    pub(crate) fn systemdict(&self) -> Rc<RefCell<Dict>> {
+        self.dstack[0].clone()
     }
 
     /// Interpreter steps the current program has run, counted only while

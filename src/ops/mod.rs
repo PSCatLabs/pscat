@@ -53,6 +53,7 @@ pub fn install_all(dict: &mut Dict) {
     level2::install(dict);
     shading::install(dict);
     noise::install(dict);
+    crate::kernel::install(dict);
     pagedevice::install(dict);
 
     // Constants: executing a name bound to a literal object pushes the

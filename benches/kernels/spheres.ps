@@ -1,0 +1,93 @@
+%!PS
+% Kernel benchmark: a small Whitted-style ray tracer (#742): four spheres
+% over a checkered plane, one light, hard shadows, up to three mirror
+% bounces. Spheres live in a table read with a run-time index.
+%   pscat --page 480x320 --png out.png benches/kernels/spheres.ps
+/W 480 def /H 320 def
+% [cx cy cz r  red green blue  reflectivity]
+/Sph [
+  [ 0.0 1.0 0.0 1.0   0.90 0.30 0.25  0.35 ]
+  [ 2.1 0.7 0.8 0.7   0.25 0.55 0.90  0.50 ]
+  [-2.0 0.8 0.9 0.8   0.95 0.85 0.40  0.20 ]
+  [ 0.9 0.35 -1.6 0.35  0.85 0.85 0.85  0.85 ]
+] def
+/NSph Sph length def
+/Lx -4 def /Ly 6 def /Lz -3 def          % light position
+/Ex 0 def /Ey 1.6 def /Ez -6.5 def       % eye
+% trace: ox oy oz dx dy dz -> t index (index -1 = plane, -2 = miss)
+/hit {
+  /dz exch def /dy exch def /dx exch def /oz exch def /oy exch def /ox exch def
+  /bt 1e30 def /bk -2 def
+  % ground plane y = 0
+  dy -1e-9 lt { oy neg dy div dup 1e-4 gt { /bt exch def /bk -1 def } { pop } ifelse } if
+  0 1 NSph 1 sub { /k exch def
+    Sph k get aload pop pop pop pop pop /sr exch def /sz exch def /sy exch def /sx exch def
+    ox sx sub /px exch def oy sy sub /py exch def oz sz sub /pz exch def
+    px dx mul py dy mul add pz dz mul add /b exch def
+    px px mul py py mul add pz pz mul add sr sr mul sub /c exch def
+    b b mul c sub /disc exch def
+    disc 0 gt {
+      b neg disc sqrt sub /t exch def
+      t 1e-4 gt t bt lt and { /bt t def /bk k def } if
+    } if
+  } for
+  bt bk
+} bind def
+/pixel {
+  /j exch def /i exch def
+  % primary ray
+  i W 2 div sub W div 1.1 mul /rx exch def
+  H 2 div j sub W div 1.1 mul /ry exch def
+  /rz 1 def
+  rx rx mul ry ry mul add rz rz mul add sqrt /l exch def
+  /rx rx l div def /ry ry l div def /rz rz l div def
+  /ox Ex def /oy Ey def /oz Ez def
+  /cr 0 def /cg 0 def /cb 0 def /wt 1 def
+  0 1 2 { pop
+    ox oy oz rx ry rz hit /k exch def /t exch def
+    k -2 eq {
+      % sky
+      0.55 ry 0.4 mul add /s exch def
+      /cr cr wt 0.45 s mul 0.25 add mul add def
+      /cg cg wt 0.65 s mul 0.30 add mul add def
+      /cb cb wt 0.95 s mul 0.35 add mul add def
+      exit
+    } if
+    ox rx t mul add /hx exch def oy ry t mul add /hy exch def oz rz t mul add /hz exch def
+    k -1 eq {
+      /nx 0 def /ny 1 def /nz 0 def
+      hx 1.5 mul floor hz 1.5 mul floor add cvi 2 mod 0 eq
+      { /ar 0.85 def /ag 0.82 def /ab 0.76 def } { /ar 0.18 def /ag 0.20 def /ab 0.26 def } ifelse
+      /rf 0.25 def
+    } {
+      Sph k get aload pop /rf exch def /ab exch def /ag exch def /ar exch def
+      /sr exch def /sz exch def /sy exch def /sx exch def
+      /nx hx sx sub sr div def /ny hy sy sub sr div def /nz hz sz sub sr div def
+    } ifelse
+    % light
+    Lx hx sub /lx exch def Ly hy sub /ly exch def Lz hz sub /lz exch def
+    lx lx mul ly ly mul add lz lz mul add sqrt /ld exch def
+    /lx lx ld div def /ly ly ld div def /lz lz ld div def
+    nx lx mul ny ly mul add nz lz mul add /dif exch def
+    dif 0 lt { /dif 0 def } if
+    dif 0 gt {
+      hx nx 1e-3 mul add hy ny 1e-3 mul add hz nz 1e-3 mul add lx ly lz hit
+      /sk exch def /st exch def
+      sk -2 ne st ld lt and { /dif dif 0.15 mul def } if
+    } if
+    % reflect
+    rx nx mul ry ny mul add rz nz mul add 2 mul /dn exch def
+    /rx rx nx dn mul sub def /ry ry ny dn mul sub def /rz rz nz dn mul sub def
+    % specular
+    rx lx mul ry ly mul add rz lz mul add dup 0 lt { pop 0 } if 40 exp
+    dif 0.15 gt { 0.6 } { 0 } ifelse mul /sp exch def
+    dif 0.85 mul 0.15 add /sh exch def
+    /cr cr wt 1 rf sub mul ar sh mul sp add mul add def
+    /cg cg wt 1 rf sub mul ag sh mul sp add mul add def
+    /cb cb wt 1 rf sub mul ab sh mul sp add mul add def
+    /wt wt rf mul def
+    /ox hx nx 1e-3 mul add def /oy hy ny 1e-3 mul add def /oz hz nz 1e-3 mul add def
+  } for
+  cr cg cb
+} bind def
+(benches/kernels/driver.ps) run
