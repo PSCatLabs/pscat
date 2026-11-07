@@ -20,6 +20,10 @@
     to a width and a half.
   - A closed outline, whose last point equals its first, ends up to two
     widths past its start or one width short.
+  - Over the last ten widths of a closed outline, the drift eases to the
+    start's drift give or take half a width. Without that, the end stepped
+    sideways beside the start in a visible jog (seen on the specimen's
+    circle). With it, the end crosses the start at a shallow angle.
 - **Short strokes are left alone.** Everything is scaled by
   `clamp((L - 4w) / 40w)`. A dot or a stroke under four widths comes back
   as the identical array, and most glyph strokes get a fraction of a point.

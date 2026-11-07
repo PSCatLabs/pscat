@@ -554,6 +554,18 @@
     ]
 } bind def
 
+% s -> offset   (the hand's drift at distance s along the stroke: two
+% waves under a third, slower one, so the wander never settles into a
+% ripple; dywobble's shape, without its hook)
+% @internal
+/dcHwwave {
+    /dcHws exch def
+    dcHwp1 dcHws dcHwlam div 360 mul add sin 0.65 mul
+    dcHwp2 dcHws dcHwlam 0.43 mul div 360 mul add sin 0.2 mul add
+    dcHwp3 dcHws dcHwlam 2.7 mul div 360 mul add sin 0.45 mul 0.75 add mul
+    dcHwamp mul
+} bind def
+
 % pts -> pts'   (one subpath as the hand draws it, from dcHand, dcw and
 % the stroke's own seed; a stroke too short to wobble comes back as it is)
 % @internal
@@ -571,10 +583,12 @@
         /dcHwfe dcrand def /dcHwfs dcrand def /dcHwfc dcrand def
         % a closed outline ends where it began
         /dcHwn dcHwP length def
-        dcHwn 6 ge {
+        /dcHwclosed dcHwn 6 ge {
             dcHwP 0 get dcHwP dcHwn 2 sub get eq
             dcHwP 1 get dcHwP dcHwn 1 sub get eq and
-        } { false } ifelse {
+        } { false } ifelse def
+        /dcHwLc dcHwL def
+        dcHwclosed {
             % the hand closes it up to two widths past its start, or up to
             % one short
             /dcHwe dcHwfc 3 mul 1 sub dcw mul dcHwk mul def
@@ -598,6 +612,9 @@
         /dcHwamp dcw 0.5 mul dcHwL 0.005 mul add dcHwk mul def
         /dcHwlam dcw 24 mul dcHwL 0.6 mul add def
         /dcHwtr dcw 0.05 mul dcHwk mul def
+        /dcHwR dcw 10 mul dcHwLc 0.5 mul dcmin def
+        /dcHwd dcrand 0.5 sub dcw mul dcHwk mul def
+        /dcHwo0 0 dcHwwave def
         /dcHwn dcHwP length 2 idiv def
         /dcHwQ dcHwn 2 mul array def
         /dcHwsx 0 def
@@ -618,15 +635,16 @@
             dcHwtl 1e-9 gt {
                 /dcHwtx dcHwtx dcHwtl div def /dcHwty dcHwty dcHwtl div def
             } { /dcHwtx 1 def /dcHwty 0 def } ifelse
-            % two waves under a third, slower one, so the wander never
-            % settles into a ripple (dywobble's shape, without its hook)
-            /dcHwo
-                dcHwp1 dcHwsx dcHwlam div 360 mul add sin 0.65 mul
-                dcHwp2 dcHwsx dcHwlam 0.43 mul div 360 mul add sin 0.2 mul add
-                dcHwp3 dcHwsx dcHwlam 2.7 mul div 360 mul add sin 0.45 mul 0.75 add mul
-                dcHwamp mul
-                dcrand 2 mul 1 sub dcHwtr mul add
-            def
+            /dcHwo dcHwsx dcHwwave dcrand 2 mul 1 sub dcHwtr mul add def
+            % a closed outline eases its drift over the last ten widths to
+            % the start's, give or take dcHwd, so the end crosses the start
+            % at a shallow angle instead of stepping beside it
+            dcHwclosed {
+                dcHwsx dcHwLc dcHwR sub sub dcHwR div 0 dcmax 1 dcmin
+                dup 3 2 2 index mul sub mul mul
+                dcHwo0 dcHwd add dcHwLc dcHwwave sub mul
+                /dcHwo exch dcHwo add def
+            } if
             dcHwQ dcHwi 2 mul dcHwx dcHwty dcHwo mul sub put
             dcHwQ dcHwi 2 mul 1 add dcHwy dcHwtx dcHwo mul add put
         } for
