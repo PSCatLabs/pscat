@@ -587,7 +587,9 @@ struct Frame {
     ids: HashSet<u32>,
     /// Names it defined without reading them first: not part of the
     /// key (a `def` does not look at what it replaces), but outputs.
-    wids: HashSet<u32>,
+    /// (by scope uid and name: a def lands in the scope then on top, and
+    /// is an output even when it writes the value already there).
+    wids: HashSet<(u32, u32)>,
     /// Registers made before the body.
     reg_base: u32,
     loops: usize,
@@ -612,7 +614,8 @@ struct SubDef {
     id: u32,
     nstack: usize,
     ids: Vec<u32>,
-    wids: Vec<u32>,
+    /// Names it defines: entry scope index, name.
+    wids: Vec<(usize, u32)>,
     key: Vec<Atom>,
     /// Parameter registers, by the input they take.
     params: Vec<(u32, Reg)>,
@@ -1140,8 +1143,9 @@ impl<'a> Compiler<'a> {
     /// A shared body defined name `id`.
     #[inline]
     fn touch_def(&mut self, id: u32) {
+        let uid = self.st.scopes.last().map_or(0, |s| s.uid);
         if let Some(f) = self.frames.last_mut() {
-            f.wids.insert(id);
+            f.wids.insert((uid, id));
         }
     }
 
@@ -1394,8 +1398,11 @@ impl<'a> Compiler<'a> {
         for &id in &d.ids {
             self.touch_name(id);
         }
-        for &id in &d.wids {
-            self.touch_def(id);
+        for &(si, id) in &d.wids {
+            let uid = self.st.scopes[si].uid;
+            if let Some(f) = self.frames.last_mut() {
+                f.wids.insert((uid, id));
+            }
         }
         if let Some(f) = self.frames.last_mut() {
             f.high = f.high.max(len + d.growth);
@@ -1527,10 +1534,11 @@ impl<'a> Compiler<'a> {
                     return Ok(false);
                 }
                 for (nid, b) in &xs.names {
-                    if binding_eq(es.get(*nid), Some(b)) {
+                    let defined = f.wids.contains(&(xs.uid, *nid));
+                    if !defined && binding_eq(es.get(*nid), Some(b)) {
                         continue;
                     }
-                    if ids.binary_search(nid).is_err() && !f.wids.contains(nid) {
+                    if !defined && ids.binary_search(nid).is_err() {
                         return Ok(false);
                     }
                     binds.push((si, *nid, b.clone()));
@@ -1631,7 +1639,14 @@ impl<'a> Compiler<'a> {
             id: sid,
             nstack,
             ids,
-            wids: f.wids.iter().copied().collect(),
+            wids: f
+                .wids
+                .iter()
+                .filter_map(|&(uid, id)| {
+                    let si = e.scopes.iter().position(|s| s.uid == uid)?;
+                    Some((si, id))
+                })
+                .collect(),
             key: kb.atoms,
             params,
             results,

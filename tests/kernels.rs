@@ -1437,3 +1437,20 @@ fn a_name_defined_on_one_path_and_read_on_another_is_part_of_the_context() {
            /t 7 def i j sub pick add show3 }} def"
     ));
 }
+
+#[test]
+fn a_shared_definition_of_the_value_already_there_still_takes_effect() {
+    // Found by Codex: `f` first runs where t is already 0, so its `def`
+    // changes nothing there; it must still set t at the second call, where
+    // t is 1.
+    same_shared(&format!(
+        "{SHOW} /f {{ /t 0 def }} def
+         /pixel {{ /j exch def /i exch def /t 0 def f /t 1 def f t i 0.01 mul add show3 }} def"
+    ));
+    // The same with a body large enough for `/large`.
+    let pad = "i 1.5 mul sin pop ".repeat(30);
+    same_shared(&format!(
+        "{SHOW} /f {{ {pad} /t 0 def /u i 0.5 mul def }} def
+         /pixel {{ /j exch def /i exch def /t 0 def f /t 1 def f /t 2 def f f t u add 0.01 mul show3 }} def"
+    ));
+}
