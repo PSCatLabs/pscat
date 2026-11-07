@@ -30,3 +30,5 @@ opposite winding.
   subpath and CTM). `src/capabilities.rs` has the eight entries and
   `elrun` in `ARTKIT_INTERNAL`: `artkit.ps` is still on the hand-written
   catalog, and `artkit_names_match_the_catalog_exactly` fails otherwise.
+
+![A cat, two rings and a rosette built from the ellipse procedures](1053-ellipse-sheet.png)
