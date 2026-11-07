@@ -1293,8 +1293,10 @@
 } def
 
 % string -> bool   true when the string is well-formed UTF-8: every byte
-% from 0x80 up is part of a sequence with a lead byte C2-F4 and the right
-% number of continuation bytes 80-BF (issue #1051)
+% from 0x80 up is part of a sequence with a lead byte C2-F4, the right
+% number of continuation bytes 80-BF, and after E0 ED F0 F4 the narrower
+% second-byte range that rules out overlong forms, surrogates and code
+% points past U+10FFFF (issue #1051)
 % @internal
 /sgutf8ok {
   /sgus exch def
@@ -1307,6 +1309,17 @@
       sgub 194 lt sgub 244 gt or { pop false exit } if
       sgub 224 lt { 1 } { sgub 240 lt { 2 } { 3 } ifelse } ifelse
       dup sguk add sgus length gt { pop pop false exit } if
+      % the second byte's narrower range after E0 ED F0 F4: no overlong
+      % form, no surrogate, nothing above U+10FFFF (Unicode table 3-7)
+      sgus sguk get
+      sgub 224 eq { dup 160 lt } {
+        sgub 237 eq { dup 159 gt } {
+          sgub 240 eq { dup 144 lt } {
+            sgub 244 eq { dup 143 gt } { false } ifelse
+          } ifelse
+        } ifelse
+      } ifelse
+      exch pop { pop pop false exit } if
       true exch {
         sgus sguk get 192 and 128 ne { pop false } if
         /sguk sguk 1 add def
@@ -1559,6 +1572,15 @@
 %   (é) << >> sgmetrics /Name get /eacute eq (sgmetrics names a UTF-8 é) mustbe
 %   (\351ab) << >> sgmetrics /Name get /.notdef eq
 %   (sgmetrics stays UTF-8 only, so mathkit's slices never swallow bytes) mustbe
+%   <E083A9> sgutf8ok not (an overlong é is not UTF-8) mustbe
+%   <EDA080> sgutf8ok not (a surrogate is not UTF-8) mustbe
+%   <F4908080> sgutf8ok not (a code point past U+10FFFF is not UTF-8) mustbe
+%   <F08F8080> sgutf8ok not (an overlong four-byte form is not UTF-8) mustbe
+%   <E0A080> sgutf8ok <ED9FBF> sgutf8ok <F0908080> sgutf8ok <F48FBFBF> sgutf8ok
+%   and and and (each boundary's first valid sequence is UTF-8) mustbe
+%   <E083A9> sgnames length 3 eq (a malformed string falls back to Latin-1) mustbe
+%   <E083A9> << >> sgmetrics /Name get /.notdef eq
+%   (sgmetrics refuses a malformed string) mustbe
 %   (\303) sgnames 0 get /Atilde eq
 %   (a truncated UTF-8 sequence is read as Latin-1) mustbe
 %   { (a\277) 0 0 << >> sgpath } /sg-missing-glyph:¿
