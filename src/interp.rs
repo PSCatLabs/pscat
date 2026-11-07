@@ -370,8 +370,8 @@ pub struct Interp {
     last_file: Option<Rc<str>>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
-    /// main program. Taken in `recover`, before a caller can unwind the
-    /// execution stack; its innermost entry is the location
+    /// main program. Taken in `step_n` before it unwinds the execution
+    /// stack (limit errors included); its innermost entry is the location
     /// `error_report` gives. Cleared by `begin_source` and by a top-level
     /// `stop`, so it never outlives the error it describes.
     error_chain: Vec<(Option<Rc<str>>, usize)>,
@@ -916,6 +916,7 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
+                    self.snapshot_error_chain();
                     self.unwind_all();
                     return Err(e);
                 }
@@ -934,6 +935,12 @@ impl Interp {
             result = self.after_slice(result, budget);
         }
         if result.is_err() || self.quit_requested {
+            // Every uncaught error, limits included, passes here with the
+            // execution stack still whole: the one place to record the
+            // open `run` frames before they are dropped (#1043).
+            if result.is_err() {
+                self.snapshot_error_chain();
+            }
             self.unwind_all();
         }
         result
@@ -1450,7 +1457,6 @@ impl Interp {
         // A limit error is never catchable: `stopped` would otherwise let a
         // runaway program swallow it and carry on (issue #604).
         if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
-            self.snapshot_error_chain();
             return Err(e);
         }
         self.record_error(&e, command);
@@ -1620,8 +1626,8 @@ impl Interp {
     }
 
     /// Record the open `run` frames for `error_report` (issue #1043).
-    /// Only reached for an error nothing catches, so a `stopped` loop
-    /// used as control flow pays nothing.
+    /// Called by `step_n` only for an error nothing caught, before it
+    /// unwinds, so a `stopped` loop used as control flow pays nothing.
     fn snapshot_error_chain(&mut self) {
         self.error_chain.clear();
         for frame in self.estack.iter().rev() {
@@ -2338,9 +2344,20 @@ impl Interp {
     /// context existed; with none, the whole program is aborted, which is
     /// what the PLRM's outermost job-server `stopped` would do.
     pub(crate) fn do_stop(&mut self) -> bool {
+        let mut left_run_file = false;
         while let Some(frame) = self.estack.pop() {
             if matches!(frame, Frame::StopMark) {
+                // A `stopped` that abandoned a `run` file resumes in the
+                // source under it, which scans no token to say so (#1043).
+                if left_run_file {
+                    self.restore_scan_location();
+                }
                 return true;
+            }
+            if let Frame::Scanner(lexer) = &frame
+                && lexer.run_name().is_some()
+            {
+                left_run_file = true;
             }
             self.cleanup_unwound_frame(frame);
         }

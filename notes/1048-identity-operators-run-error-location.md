@@ -27,8 +27,8 @@ compare per token, no refcount traffic in the common case). The report:
   `pscat-mcp`'s `ps_error_fields` splits `5 (inner3.ps)` into `line` 5 and
   `file`, and gives the chain as `run_chain`.
 - **The chain** is the estack's line-bearing scanners, innermost first,
-  snapshotted in `recover` on the uncaught path only (a `stopped` used as
-  control flow pays nothing), before any caller could unwind the stack. It
+  snapshotted by `step_n` for an uncaught error (limits included) just
+  before it unwinds the stack; a `stopped` used as control flow pays nothing. It
   is cleared by `begin_source` and by a top-level `stop` (which
   has already drained the stack). Capped at 8 named frames, then `...` and
   the outermost. The main program shows as `line N`: the interpreter is
@@ -39,7 +39,10 @@ compare per token, no refcount traffic in the common case). The report:
   procedure (`/f { (lib.ps) run 1 0 div } def f`), since no token is scanned
   in between. The report now takes its location from the chain's innermost
   entry (the source still open at the error), and an exhausted `run` scanner
-  hands the sticky location back to the source under it (`PopRunScanner`).
+  hands the sticky location back to the source under it (`PopRunScanner`),
+  as does a `stopped` that unwinds one (`do_stop`, Codex round 2). Round 2
+  also moved the snapshot from `recover` to `step_n`, so a limit error,
+  which never reaches `recover`, gets its chain too.
   The sticky value is left only for a top-level `stop`, whose stack is gone.
 - **Escaping.** `;` and `]` in a file name are `%3B`/`%5D`, so a name cannot
   forge the `; ` field separator or the ` ]%%` end that `pscat-mcp` splits on.

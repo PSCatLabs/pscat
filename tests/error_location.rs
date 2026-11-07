@@ -210,3 +210,42 @@ fn an_error_after_a_stop_unwinds_a_run_file_is_the_callers() {
         "%%[ Error: undefinedresult; OffendingCommand: div; Line: 3 ]%%"
     );
 }
+
+#[test]
+fn a_top_level_stop_after_a_caught_run_error_is_the_callers() {
+    // Codex review of PR #1070, round 2: the caught error unwinds the run
+    // file, then a top-level `stop` drains the stack (no chain), so the
+    // sticky location must already be the caller's.
+    let got = report(
+        "run-caught-stop",
+        &[
+            ("lib.ps", "%!PS\n\n1 0 div\n"),
+            (
+                "main.ps",
+                "/f { { (lib.ps) run } stopped pop stop } def\n\n\n\nf\n",
+            ),
+        ],
+        "main.ps",
+    );
+    assert!(got.ends_with("Line: 5 ]%%"), "{got}");
+}
+
+#[test]
+fn a_limit_hit_inside_a_run_file_reports_the_chain() {
+    // Limits leave `step_n` without going through `recover` (round 2).
+    let dir = common::scratch_dir("run-limit");
+    std::fs::write(dir.join("spin.ps"), "%!PS\n{ } loop\n").expect("write");
+    std::fs::write(dir.join("main.ps"), "\n(spin.ps) run\n").expect("write");
+    let out = Command::new(BIN)
+        .args(["--headless", "--max-steps", "5000", "main.ps"])
+        .current_dir(&dir)
+        .output_deadline()
+        .expect("run pscat");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let got = stderr.lines().next().unwrap_or_default();
+    assert!(got.contains("limitexceeded (steps)"), "{got}");
+    assert!(
+        got.contains("(spin.ps); Run chain: spin.ps:2 <- line 2 ]%%"),
+        "{got}"
+    );
+}

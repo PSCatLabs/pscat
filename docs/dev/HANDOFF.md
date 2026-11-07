@@ -700,7 +700,7 @@ renders eight examples in both and compares block-downsampled output).
   call site's line, not the procedure's definition site. Since #1043 a
   `run` file's line names the file, `Line: 5 (inner.ps)`, plus `; Run
   chain: inner.ps:5 <- outer.ps:2 <- line 1` (the `run` frames open when
-  the error left the machine, snapshotted in `recover`, capped at 8 named
+  the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
   and `run_chain` fields. Tagging procedure bodies with scan positions
