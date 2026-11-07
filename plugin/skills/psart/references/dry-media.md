@@ -44,7 +44,10 @@ newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
 - **`dcchalk`** treats each subpath as one stroke. It lands heavy, tires in
   the middle, lifts thin, sheds dust and differs a little from its
   neighbours. `/Tilt` 80-90 with `/Side` gives broad side-of-chalk
-  underlines and shading.
+  underlines and shading. `/Hand` 0..1 draws the path freehand: slow drift, a straight run past each end, closed outlines that end a little past or short of the start. 0 (the default) is ruled; 0.5–0.8 reads as a steady hand; strokes under ~4 widths are untouched. `/Corners /separate` draws a box as four strokes that overshoot the corners.
+- **`(text) x y opts dctext`** writes chalk lettering. `/Align /left|/center|/right` places it by its measured width, and `/Fit w` sizes it to exactly w points. Other keys go to dcchalk; `/Width` defaults to 0.048 × `/Size`. It needs handscript and strokeglyphs loaded.
+- **`(left) (right) x1 x2 y opts dcleader`** draws a menu, price-list or contents row with dotted leaders. Use `/Pitch` and `/Gap`; `/Leader << dcchalk opts >>` styles the dots. Rows with the same pitch line their dots up.
+- A sign's frame, nails and doodles belong in the piece's own `dcchalk` calls.
 - **`/name dcchalkcolor`** picks the chalk: `/white /yellow /pink /blue
   /green /orange`.
 - Real chalk is grey, not white: the defaults (`/Strength 0.55`) were
