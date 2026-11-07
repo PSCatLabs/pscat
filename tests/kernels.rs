@@ -93,6 +93,7 @@ fn arithmetic_and_types() {
            add add add
            i 7 mul 360 div sin i cos add i 1 add sqrt add 2 i 0.1 mul exp add i 1 add ln add i 1 add log add
            add i j 1 add atan add i 11 max j min add 1.5 cvi add i cvr add
+           i 2 div 17 sub round 3 mul add          % PostScript rounds -0.5 up to 0
            show3 }} bind def"
     ));
 }
@@ -445,4 +446,63 @@ fn differential_fuzz() {
     );
     // The generator must not be all errors (or all successes).
     assert!(errors < cases / 2, "{errors} of {cases} cases errored");
+}
+
+// --- threads and bands (CLI) ----------------------------------------------
+
+mod common;
+
+const BIN: &str = env!("CARGO_BIN_EXE_pscat");
+
+/// Render `src` with the CLI: the PNG bytes.
+fn cli_png(src: &str, args: &[&str], threads: Option<&str>) -> Vec<u8> {
+    let dir = common::scratch_dir("kernels");
+    let ps = dir.join("k.ps");
+    let png = dir.join("k.png");
+    std::fs::write(&ps, src).expect("write");
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["--page", "200x130", "--png"])
+        .arg(&png)
+        .args(args)
+        .arg(&ps);
+    match threads {
+        Some(t) => cmd.env("PSCAT_KERNEL_THREADS", t),
+        None => cmd.env_remove("PSCAT_KERNEL_THREADS"),
+    };
+    let out = common::wait_output(
+        cmd.stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::read(&png).expect("png")
+}
+
+const SCENE: &str = "%!PS
+/pixel { /j exch def /i exch def
+  /cr i 100 sub 60 div 0.5 sub def /ci j 65 sub 60 div def
+  /zr 0.0 def /zi 0.0 def /n 0 def
+  { zr zr mul zi zi mul add 4 gt n 60 ge or { exit } if
+    zr zr mul zi zi mul sub cr add zr zi mul 2 mul ci add /zi exch def /zr exch def
+    /n n 1 add def } loop
+  n 60 div dup dup mul i 200 div } bind def
+gsave 15 10 translate 5 rotate 180 110 scale
+200 130 [200 0 0 -130 0 130] /pixel load 3 kernelimage grestore showpage
+";
+
+#[test]
+fn bytes_do_not_depend_on_threads_or_bands() {
+    let one = cli_png(SCENE, &[], Some("1"));
+    assert_eq!(cli_png(SCENE, &[], Some("7")), one, "7 threads");
+    assert_eq!(cli_png(SCENE, &[], None), one, "all cores");
+    for n in ["2", "3", "8"] {
+        assert_eq!(cli_png(SCENE, &["--bands", n], None), one, "--bands {n}");
+    }
+    // And the interpreter's own render of the same program.
+    let interp = format!("/interpret .kernelmode\n{SCENE}");
+    assert_eq!(cli_png(&interp, &[], None), one, "interpreted");
 }
