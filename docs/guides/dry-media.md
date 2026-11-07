@@ -182,6 +182,13 @@ variant Greek letters `ϑ ϰ ϱ ϖ ς ϵ ϕ`; `examples/strokeglyphs_subscripts_
 is their specimen. In mathkit `\varphi \vartheta \varkappa \varrho \varpi
 \varsigma` draw the variants, and `\epsilon` is the lunate ϵ while
 `\varepsilon` stays the three-shaped ε, as in TeX.
+It writes accented Latin letters too, every letter of Latin-1 and Latin
+Extended-A (`café`, `jalapeño`, `crème brûlée`, `naïve`, `Ångström`,
+`Łódź`, `Straße`), each the base letter's own skeleton plus accent strokes,
+so the accents keep the hand. A string that is valid UTF-8 is read as
+UTF-8; any other string is read as Latin-1, so `(caf\351)` and `(café)`
+draw the same word. `examples/strokeglyphs_accents.ps` is their specimen,
+with a chalk cafe sign.
 
 ```postscript
 (lib/handscript.ps) run
