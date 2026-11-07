@@ -6,7 +6,7 @@
 #![cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
 
 use pscat::{Interp, Limits, PsError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A loop whose result is the pixel (so no shader compiler can drop it)
 /// and whose exit is never taken: every pixel runs the GPU's loop budget.
@@ -24,12 +24,12 @@ fn a_runaway_gpu_kernel_stops_at_the_time_limit() {
     let mut it = Interp::with_page(2000, 2000).expect("page");
     it.set_limits(Limits::none().with_max_time(Duration::from_millis(300)))
         .expect("limits");
-    let t = Instant::now();
+    // 61 dispatches of the loop budget; the limit is looked at between
+    // them. No wall-clock bound here (AGENTS.md: timing assertions measure
+    // CPU time, and the GPU's time is not this thread's); without the
+    // checks the 61 dispatches would take tens of seconds, not a fraction.
     let err = it.run_str(&runaway(2000)).unwrap_err();
     assert_eq!(err, PsError::TimeExceeded);
-    // 61 dispatches of the loop budget take tens of seconds; the limit is
-    // looked at between them.
-    assert!(t.elapsed() < Duration::from_secs(20), "{:?}", t.elapsed());
 }
 
 #[test]
