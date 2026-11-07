@@ -75,3 +75,10 @@ the name it replaced and truncate a file outside the roots; before bands only a
 different process could do that. `main` also flushes stdout before choosing the
 exit status, since newline-free text is buffered and its `EPIPE` showed only in
 Rust's exit cleanup.
+
+Codex round 3: `--bands` now resolves `--allow-write` and `--read-root` once on
+the main thread (`bands::freeze_roots`) and hands every band the resolved
+directories, so a root that is a symlink cannot be retargeted by an earlier
+band's `renamefile` before a later band starts. A confined read's
+admit-then-open (`read_roots::open_confined`) takes the same entry lock as
+`renamefile`, so a band cannot swap the entry between them either.

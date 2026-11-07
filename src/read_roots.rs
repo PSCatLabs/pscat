@@ -146,32 +146,37 @@ pub(crate) fn open_confined(
     roots.check_name(name)?;
     let absolute = Path::new(name).is_absolute();
     let refused = std::cell::Cell::new(false);
-    let gated = |p: &Path| match roots.admit(p) {
-        Admit::Open(canon) => read(&canon),
-        Admit::Refused => {
-            // A search-order place outside the roots altogether (the
-            // executable's directory, or the working directory when that
-            // isn't a root) is skipped as if empty, so a relative name
-            // can't probe what exists there; a link inside a root that
-            // leads out is a refusal.
-            let parent = match p.parent() {
-                Some(d) if d.as_os_str().is_empty() => Path::new("."),
-                Some(d) => d,
-                None => Path::new("/"),
-            };
-            if absolute || roots.contains_path(parent) {
-                refused.set(true);
+    let gated = |p: &Path| {
+        // Admission and the open under one lock, so a band's `renamefile`
+        // cannot swap the entry between them (see `write_roots::ENTRY_LOCK`).
+        let _entries = crate::write_roots::lock_entries();
+        match roots.admit(p) {
+            Admit::Open(canon) => read(&canon),
+            Admit::Refused => {
+                // A search-order place outside the roots altogether (the
+                // executable's directory, or the working directory when that
+                // isn't a root) is skipped as if empty, so a relative name
+                // can't probe what exists there; a link inside a root that
+                // leads out is a refusal.
+                let parent = match p.parent() {
+                    Some(d) if d.as_os_str().is_empty() => Path::new("."),
+                    Some(d) => d,
+                    None => Path::new("/"),
+                };
+                if absolute || roots.contains_path(parent) {
+                    refused.set(true);
+                }
+                None
             }
-            None
-        }
-        // A missing file outside is refused only when the program named
-        // it outright: a search-order place that doesn't have the file
-        // just isn't the place.
-        Admit::Missing { inside } => {
-            if absolute && !inside {
-                refused.set(true);
+            // A missing file outside is refused only when the program named
+            // it outright: a search-order place that doesn't have the file
+            // just isn't the place.
+            Admit::Missing { inside } => {
+                if absolute && !inside {
+                    refused.set(true);
+                }
+                None
             }
-            None
         }
     };
     let found = crate::paths::open_with_reader(name, &gated);

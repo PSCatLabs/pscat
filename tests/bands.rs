@@ -955,3 +955,39 @@ fn bands_share_one_write_budget() {
     assert!(ok, "exactly the budget: {e}");
     assert_eq!(std::fs::read(out.join("f.bin")).unwrap().len(), 100);
 }
+
+/// The roots are resolved once, before any band runs (Codex review, round 3):
+/// a root named through a symlink works for every band, and a missing one is
+/// refused up front with the flag's name.
+#[cfg(unix)]
+#[test]
+fn bands_resolve_their_roots_once() {
+    let dir = common::scratch_dir("bands-roots-frozen");
+    let real = dir.join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let file = write_source(
+        &dir,
+        "w.ps",
+        &format!(
+            "/BandIndex where {{ pop BandIndex 0 eq {{ ({}/hello.txt) (w) file dup (hi) writestring closefile }} if }} if showpage\n",
+            link.display()
+        ),
+    );
+    let png = dir.join("w.png");
+    let run = |roots: &[&str]| {
+        let mut args = vec!["--page", "20x20", "--bands", "2"];
+        for r in roots {
+            args.extend(["--allow-write", r]);
+        }
+        args.extend(["--png", png.to_str().unwrap(), file.to_str().unwrap()]);
+        pscat(&args)
+    };
+    let (ok, _, e) = run(&[link.to_str().unwrap()]);
+    assert!(ok, "{e}");
+    assert_eq!(std::fs::read(real.join("hello.txt")).unwrap(), b"hi");
+    let (ok, _, e) = run(&[dir.join("nope").to_str().unwrap()]);
+    assert!(!ok);
+    assert!(e.contains("--allow-write"), "{e}");
+}

@@ -42,7 +42,7 @@ use std::sync::{Mutex, MutexGuard};
 use crate::error::PsError;
 
 /// Held across a check-then-act on a directory entry (`open`, `rename`,
-/// `delete`), so no other interpreter in this process can swap the entry
+/// `delete`, and a confined read's admit-then-open in `read_roots`), so no other interpreter in this process can swap the entry
 /// between the check and the use. Needed since `--bands` (#1045): the bands
 /// are threads of one process running the same untrusted program, so one
 /// band's `renamefile` of a symlink could otherwise race another band's
@@ -50,7 +50,7 @@ use crate::error::PsError;
 /// module doc's accepted window.
 static ENTRY_LOCK: Mutex<()> = Mutex::new(());
 
-fn lock_entries() -> MutexGuard<'static, ()> {
+pub(crate) fn lock_entries() -> MutexGuard<'static, ()> {
     ENTRY_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

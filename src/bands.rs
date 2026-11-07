@@ -122,6 +122,35 @@ fn check_options(options: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve `--allow-write` and `--read-root` once, before any program runs,
+/// and give every band the resolved directories. Each band resolves the
+/// names it is given, so a root that is a symlink could otherwise be
+/// retargeted by an earlier band (`renamefile` onto it) before a later band
+/// starts, and widen what that band may reach. A resolved path has no
+/// symlink left in it, and directories cannot be renamed or removed.
+fn freeze_roots(options: &mut Options) -> Result<(), String> {
+    fn resolved(dirs: &[std::path::PathBuf]) -> Result<Vec<String>, String> {
+        dirs.iter()
+            .map(|d| {
+                d.to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("{}: not a UTF-8 path", d.display()))
+            })
+            .collect()
+    }
+    if !options.allow_write.is_empty() {
+        let roots = pscat::write_roots::WriteRoots::new(&options.allow_write)
+            .map_err(|e| format!("--allow-write: {e}"))?;
+        options.allow_write = resolved(roots.dirs())?;
+    }
+    if let Some(dirs) = &options.read_roots {
+        let roots =
+            pscat::read_roots::ReadRoots::new(dirs).map_err(|e| format!("--read-root: {e}"))?;
+        options.read_roots = Some(resolved(roots.dirs())?);
+    }
+    Ok(())
+}
+
 /// What one band hands back: its own rows of every page it produced, and
 /// its error report. Strings, not `PsError`s: those hold `Rc`s and cannot
 /// leave the band's thread.
@@ -197,6 +226,10 @@ pub fn parse_rows(n: &str) -> Result<u32, String> {
 /// `pscat --bands N`: check the options, run the bands, stitch and write.
 pub fn run(options: &mut Options, threads: u32) -> ExitCode {
     if let Err(msg) = check_options(options) {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(msg) = freeze_roots(options) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
