@@ -3529,3 +3529,153 @@ fn every_png_the_server_returns_records_its_resolution() {
     );
     assert_eq!(phys(&sheet_png(&sheet)), (2835, 2835, 1));
 }
+
+// --- gpu_preview (#1065) --------------------------------------------------
+
+/// A small compiled kernel: a gradient, three components.
+const KERNEL: &str = "/pixel { 32 div exch 32 div 0.5 } bind def \
+    32 32 [32 0 0 -32 0 32] /pixel load 3 kernelimage showpage";
+
+/// `render_postscript` and `start_render` both take `gpu_preview` as a
+/// boolean, and their descriptions say what it means here: the build has
+/// it or not, and the call's limits still apply.
+#[test]
+fn gpu_preview_is_in_the_render_schemas_and_descriptions() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let list = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let mut seen = 0;
+    for tool in list["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let arg = &tool["inputSchema"]["properties"]["gpu_preview"];
+        if !["render_postscript", "start_render"].contains(&name) {
+            assert!(arg.is_null(), "{name} takes no gpu_preview");
+            continue;
+        }
+        seen += 1;
+        assert_eq!(arg["type"], "boolean", "{name}: {arg}");
+        let about = arg["description"].as_str().unwrap();
+        for words in ["32-bit floats", "limit_exceeded", "per pixel", "timeout"] {
+            assert!(about.contains(words), "{name}: {words:?} in {about}");
+        }
+        let has = if cfg!(feature = "gpu") {
+            "This server's pscat has it"
+        } else {
+            "gpu_unavailable"
+        };
+        assert!(about.contains(has), "{name}: {about}");
+        let description = tool["description"].as_str().unwrap();
+        assert!(description.contains("gpu_preview"), "{name}: {description}");
+    }
+    assert_eq!(seen, 2);
+}
+
+/// Anything but a boolean is refused, naming the argument, before a job
+/// starts; `false` is a plain render in every build.
+#[test]
+fn gpu_preview_must_be_a_boolean_and_false_is_a_plain_render() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for tool in ["render_postscript", "start_render"] {
+        for bad in [json!("yes"), json!(1), json!([true])] {
+            let result = s.tool(tool, json!({ "source": KERNEL, "gpu_preview": bad }));
+            assert_eq!(error_kind(&result), "invalid_argument", "{tool}: {result}");
+            assert!(
+                texts(&result).join("\n").contains("gpu_preview"),
+                "{tool}: {result}"
+            );
+        }
+    }
+    let plain = s.tool(
+        "render_postscript",
+        json!({ "source": KERNEL, "width": 32, "height": 32 }),
+    );
+    let off = s.tool(
+        "render_postscript",
+        json!({ "source": KERNEL, "width": 32, "height": 32, "gpu_preview": false }),
+    );
+    assert_eq!(off["isError"], false, "{off}");
+    assert_eq!(images(&off).len(), 1);
+    assert!(images(&off) == images(&plain), "false is a plain render");
+    let job = job_result_of(
+        &mut s,
+        json!({ "source": KERNEL, "width": 32, "height": 32, "gpu_preview": false }),
+    );
+    assert!(images(&job) == images(&plain), "start_render false");
+}
+
+/// Without the `gpu` feature, `gpu_preview: true` is a structured
+/// `gpu_unavailable` error saying so, from both tools, and `start_render`
+/// refuses it at once instead of starting a job.
+#[cfg(not(feature = "gpu"))]
+#[test]
+fn gpu_preview_is_refused_by_a_build_without_the_gpu_feature() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for tool in ["render_postscript", "start_render"] {
+        let result = s.tool(tool, json!({ "source": KERNEL, "gpu_preview": true }));
+        assert_eq!(result["isError"], true, "{tool}: {result}");
+        assert_eq!(error_kind(&result), "gpu_unavailable", "{tool}: {result}");
+        let error = &result["structuredContent"]["error"];
+        assert_eq!(error["argument"], "gpu_preview", "{tool}: {result}");
+        let text = texts(&result).join("\n");
+        assert!(
+            text.contains("`gpu` cargo feature") && text.contains("--features gpu"),
+            "{tool}: {text}"
+        );
+        assert!(result["structuredContent"]["job_id"].is_null(), "{result}");
+    }
+}
+
+/// With the `gpu` feature, `gpu_preview: true` renders (on the GPU, or on
+/// the CPU with a note when the machine has none) under the call's limits:
+/// a runaway kernel still stops with the step limit's error and the
+/// partial page, as on the CPU.
+#[cfg(feature = "gpu")]
+#[test]
+fn gpu_preview_renders_under_the_call_limits() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-gpu"), &["--max-steps", "200000"]);
+    initialized(&mut s);
+    for tool in ["render_postscript", "start_render"] {
+        let args = json!({ "source": KERNEL, "width": 32, "height": 32, "gpu_preview": true });
+        let result = if tool == "render_postscript" {
+            s.tool(tool, args)
+        } else {
+            job_result_of(&mut s, args)
+        };
+        assert_eq!(result["isError"], false, "{tool}: {result}");
+        assert_eq!(images(&result).len(), 1, "{tool}: {result}");
+        let warnings = texts(&result).join("\n");
+        assert!(warnings.contains("--gpu-preview"), "{tool}: {warnings}");
+    }
+    let runaway = "/pixel { add 0.001 mul \
+        { dup dup mul 0.2 add sqrt 0.999 mul add 0.5 mul dup 10 gt { exit } if } loop \
+        0.1 mul } bind def 400 400 [400 0 0 -400 0 400] /pixel load 1 kernelimage showpage";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": runaway, "width": 400, "height": 400, "gpu_preview": true }),
+    );
+    let text = texts(&result).join("\n");
+    assert!(
+        text.contains("PostScript error:") && text.contains("limitexceeded (steps)"),
+        "{text}"
+    );
+    assert_eq!(images(&result).len(), 1, "the partial page: {result}");
+
+    // As documented: a loop with no exit is no error on the GPU. Each
+    // pixel stops at the loop cap and an image comes back (the CPU, where
+    // the machine has no GPU, stops it with the step limit instead).
+    let no_exit = "/pixel { pop pop 0 { 1 add } loop } bind def \
+        8 8 [8 0 0 -8 0 8] /pixel load 1 kernelimage showpage";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": no_exit, "width": 8, "height": 8, "gpu_preview": true }),
+    );
+    let text = texts(&result).join("\n");
+    if text.contains("f32 on") {
+        assert!(!text.contains("PostScript error:"), "{text}");
+    } else {
+        assert!(text.contains("limitexceeded (steps)"), "{text}");
+    }
+    assert_eq!(images(&result).len(), 1, "{result}");
+}

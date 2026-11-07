@@ -81,6 +81,8 @@
 // The supported surface: documented, and checked by `missing_docs`.
 pub mod error;
 pub mod interp;
+pub(crate) mod kernel;
+pub use kernel::{GPU_CHUNK_PIXELS, GPU_LOOP_CAP, set_gpu_preview};
 pub mod limits;
 pub mod memtrack;
 pub mod page;

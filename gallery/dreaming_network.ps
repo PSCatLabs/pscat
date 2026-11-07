@@ -1,0 +1,106 @@
+%!PS-Adobe-3.0
+%%Title: Dreaming Network
+%%BoundingBox: 0 0 600 600
+%%Creator: Claude
+%%EndComments
+
+% A neural network, run in PostScript once for every pixel. This is a
+% CPPN (a compositional pattern-producing network, Stanley 2007): a small
+% multilayer perceptron whose inputs are the pixel's position (x, y, its
+% distance from the centre and a few waves of x and y) plus a fixed
+% "latent" vector, and whose three outputs are the pixel's red, green and
+% blue. Nobody trained it: the weights are drawn at random from a seed,
+% and the picture is what that particular random function looks like.
+%
+%   inputs (10) -> 24 sin -> 24 tanh -> 24 gaussian -> 3 sigmoid
+%
+% That is about 1,400 multiply-adds a pixel, reading the weights from
+% arrays by computed index and keeping each layer's activations in a
+% per-pixel array: model inference, the dense, regular arithmetic the
+% compiled kernels are for. pscat compiles /pixel and runs it on every
+% core (`kernelimage`, docs/guides/kernels.md). Any other interpreter runs
+% the same procedure through `colorimage`, by lib/kernel.ps. Ghostscript
+% needs `--permit-file-read=lib/` to read it (docs/guides/kernels.md).
+%
+% Change /Seed for a different network, /Z for a different "dream" of
+% the same one.
+%
+%   pscat --page 600x600 --dpi 144 --png dreaming_network.png gallery/dreaming_network.ps
+%
+% Render time (release build, 10-core M4 laptop, 1200x1200 grid): about
+% 4 s with kernelimage; the same procedure in the interpreter (`/interpret
+% .kernelmode` first) takes 349 s and gives the same bytes.
+
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
+
+/W 1200 def /H 1200 def
+/Seed 20261106 def
+/NI 10 def /NH 24 def                       % inputs, neurons per hidden layer
+
+% --- the weights: seeded, roughly normal (a sum of four uniforms) ----------
+Seed srand
+/gauss { 0 4 { rand 2147483647 div add } repeat 2 sub 1.732 mul } bind def
+% n scale -> array of n weights
+/weights { /sc exch def [ exch { gauss sc mul } repeat ] } bind def
+/W1 NH NI mul 1.6 weights def               % input layer: broad
+/B1 NH 0.8 weights def
+/W2 NH NH mul 2.2 NH sqrt div weights def
+/B2 NH 0.4 weights def
+/W3 NH NH mul 2.6 NH sqrt div weights def
+/B3 NH 0.4 weights def
+/W4 3 NH mul 3.2 NH sqrt div weights def
+/B4 3 0.3 weights def
+/Z [ 4 { gauss } repeat ] def               % the latent vector
+% the palette, dark to light and back to rust
+/Pal [ [0.04 0.07 0.16] [0.05 0.33 0.38] [0.93 0.88 0.74] [0.86 0.62 0.20] [0.55 0.17 0.10] ] def
+/NP Pal length def
+
+% --- inference ------------------------------------------------------------------
+% n A B in out act -> -: out[o] = act(B[o] + sum_k A[o*n+k] in[k])
+/layer {
+  /act exch def /out exch def /in exch def /Bb exch def /Aa exch def /n exch def
+  0 1 out length 1 sub { /o exch def
+    Bb o get
+    0 1 n 1 sub { /k exch def Aa o n mul k add get in k get mul add } for
+    act out exch o exch put
+  } for
+} bind def
+
+/tanh { 2 mul 2.718281828 exch exp 1 add 2 exch div 1 exch sub } bind def
+/sigmoid { neg 2.718281828 exch exp 1 add 1 exch div } bind def
+
+/pixel {
+  /pj exch def /pi exch def
+  pi 0.5 add W div 2 mul 1 sub 1.6 mul /x exch def
+  1 pj 0.5 add H div 2 mul sub 1.6 mul /y exch def
+  /X NI array def /H1 NH array def /H2 NH array def /H3 NH array def /O 3 array def
+  X 0 x put  X 1 y put
+  X 2 x x mul y y mul add sqrt 1.4 mul put
+  X 3 x 3 mul 57.29578 mul sin put  X 4 y 3 mul 57.29578 mul cos put
+  0 1 3 { /k exch def X k 5 add Z k get put } for
+  X 9 1 put                                  % a constant input
+  NI W1 B1 X H1 { 57.29578 mul sin } layer
+  NH W2 B2 H1 H2 { tanh } layer
+  NH W3 B3 H2 H3 { dup mul neg 2.718281828 exch exp } layer
+  NH W4 B4 H3 O { sigmoid } layer
+  % output 0 picks a colour from the palette, output 1 draws fine
+  % isolines (like marbled endpaper), output 2 shades
+  O 0 get 1.25 mul 0.18 sub dup 0 lt { pop 0 } if dup 0.999 gt { pop 0.999 } if
+  NP 1 sub mul /t exch def
+  /seg t floor cvi def /f t seg sub def
+  /f f f mul 3 f 2 mul sub mul def           % smoothstep between stops
+  Pal seg get aload pop /b0 exch def /g0 exch def /r0 exch def
+  Pal seg 1 add get aload pop /b1 exch def /g1 exch def /r1 exch def
+  O 1 get 360 mul 4 mul sin abs /iso exch def
+  iso 0.10 lt { iso 0.10 div 0.5 mul 0.5 add } { 1 } ifelse
+  O 2 get 0.45 mul 0.62 add mul /sh exch def
+  r1 r0 sub f mul r0 add sh mul
+  g1 g0 sub f mul g0 add sh mul
+  b1 b0 sub f mul b0 add sh mul
+} bind def
+
+gsave
+600 600 scale
+W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage
+grestore
+showpage

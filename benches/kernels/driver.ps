@@ -1,0 +1,39 @@
+% Shared driver for the kernel benchmarks (issue #742).
+%
+% A bench defines W, H and /pixel { i j -> r g b } (components 0..1), then
+% runs this file. /BenchMode picks the path:
+%   /kernel      W H matrix /pixel 3 kernelimage (the default when it exists)
+%   /colorimage  a hand-written colorimage loop: the best plain-PostScript
+%                form, and the baseline every speedup is measured against
+% Both quantise with the same rule: clamp to [0, 1], floor(c * 255 + 0.5).
+/BenchMode where { pop } {
+  /BenchMode /kernelimage where { pop /kernel } { /colorimage } ifelse def
+} ifelse
+gsave
+clippath pathbbox /Ury exch def /Urx exch def /Lly exch def /Llx exch def
+Llx Lly translate Urx Llx sub Ury Lly sub scale
+BenchMode /kernel eq {
+  W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage
+} {
+  /Q { dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul 0.5 add floor cvi } bind def
+  /Row W 3 mul string def /Jj 0 def
+  % band-aware (--bands N): only rows within a row of this band are
+  % computed, so the --bands baseline is the best plain PostScript can do
+  /Jlo -1 def /Jhi H def
+  /BandBBox where { pop
+    BandBBox 1 get Lly sub Ury Lly sub div H mul /Bb exch def
+    BandBBox 3 get Lly sub Ury Lly sub div H mul /Bt exch def
+    /Jlo H Bt sub floor cvi 2 sub def /Jhi H Bb sub ceiling cvi 2 add def
+  } if
+  W H 8 [W 0 0 H neg 0 H]
+  { Jj Jlo ge Jj Jhi le and { 0 1 W 1 sub { /Ii exch def
+      Ii Jj pixel
+      Q Row Ii 3 mul 2 add 3 -1 roll put
+      Q Row Ii 3 mul 1 add 3 -1 roll put
+      Q Row Ii 3 mul 3 -1 roll put
+    } for } if
+    /Jj Jj 1 add def Row }
+  false 3 colorimage
+} ifelse
+grestore
+showpage

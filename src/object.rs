@@ -138,7 +138,9 @@ impl PsArray {
         true
     }
 
-    fn identity(&self) -> (usize, usize, usize) {
+    /// Identity of this view (storage, offset, length), for caches keyed
+    /// by object identity (also the kernel compiler's table snapshots).
+    pub(crate) fn identity(&self) -> (usize, usize, usize) {
         (Rc::as_ptr(&self.data) as usize, self.off, self.len)
     }
 
@@ -181,6 +183,15 @@ impl PsString {
         RefMut::map(self.data.borrow_mut(), |v| {
             &mut v[self.off..self.off + self.len]
         })
+    }
+
+    /// Identity of this view, as [`PsArray::identity`].
+    pub(crate) fn identity(&self) -> (usize, usize, usize) {
+        (
+            Rc::as_ptr(&self.data) as *const () as usize,
+            self.off,
+            self.len,
+        )
     }
 
     pub fn to_vec(&self) -> Vec<u8> {

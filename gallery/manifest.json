@@ -12,6 +12,11 @@
    "blurb": "Rules and random numbers that grow into plants, fabrics and fields."
   },
   {
+   "id": "compute",
+   "title": "Computed pixels",
+   "blurb": "Ray tracing, fractals, a neural network and a photo filter, every pixel computed by a PostScript procedure that pscat compiles."
+  },
+  {
    "id": "painting",
    "title": "Painting",
    "blurb": "Brush strokes with bristle, loaded paint, wet edges and paper underneath."
@@ -134,6 +139,10 @@
   "qr": {
    "title": "qr",
    "guide": "docs/guides/qr-codes.md"
+  },
+  "kernel": {
+   "title": "kernel",
+   "guide": "docs/guides/kernels.md"
   }
  },
  "pieces": [
@@ -1002,6 +1011,96 @@
     "render_caption": "The photograph made from it, with pscat's exact layer laid back on at the same coordinates.",
     "text": "The image model is good at light and surfaces; pscat is exact. Here pscat decides the composition first, so it knows where every summit, the hut and the empty areas are before the photograph exists, and its labels, route, chart and QR code land where the layout says."
    }
+  },
+  {
+   "id": "mirror_garden",
+   "title": "Mirror Garden",
+   "category": "compute",
+   "tags": [
+    "ray tracing"
+   ],
+   "libraries": [
+    "kernel"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 742,
+   "added": "2026-11-06",
+   "source": "gallery/mirror_garden.ps",
+   "render": "gallery/renders/mirror_garden.png",
+   "page": "720x480",
+   "speed": 200,
+   "alt": "Mirror Garden, six glossy spheres (chrome, red, cobalt, brass, jade and terracotta) on a black and white marble checkerboard at sunset, reflecting each other and the floor, with soft shadows and a lilac-to-peach sky",
+   "blurb": "A ray tracer in PostScript: chrome and glazed spheres on polished marble in late sun.",
+   "technique": "Every pixel is one call of a plain PostScript procedure, handed to `kernelimage`, which compiles it and runs it on every core. Four rays per pixel bounce up to four times off the spheres and the floor, weighted by Schlick's Fresnel term; four shadow rays spread over the sun's disc, jittered by an integer hash, give soft shadows; the floor is a marble checker veined with `fbm2`. 1440x960 in under a second; the same procedure in the interpreter takes about two and a half minutes and gives the same bytes."
+  },
+  {
+   "id": "mandelbulb",
+   "title": "Mandelbulb",
+   "category": "compute",
+   "tags": [
+    "fractal",
+    "ray marching"
+   ],
+   "libraries": [
+    "kernel"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 742,
+   "added": "2026-11-06",
+   "source": "gallery/mandelbulb.ps",
+   "render": "gallery/renders/mandelbulb.png",
+   "page": "600x600",
+   "speed": 200,
+   "alt": "Mandelbulb, a tiered bronze and verdigris three-dimensional fractal like a carved crown, covered in bulbous buds and fine knots, glowing faintly against a dark blue ground",
+   "blurb": "The power-8 Mandelbulb, ray-marched by its distance estimate.",
+   "technique": "Each ray steps toward the surface by the bulb's distance estimate, 0.5 ln(r) r / dr, so it can never step through it. At the hit, four more estimates give the normal and five give ambient occlusion, an orbit trap picks the colour between bronze and verdigris, and a key, a rim and a sky light shade it; rays that miss glow by how near they passed. About a hundred estimates per pixel, each an eight-step loop of `atan`, `sin`, `cos`, `ln` and `exp`: about five seconds compiled with `kernelimage`, almost six minutes in the interpreter, the same bytes either way."
+  },
+  {
+   "id": "dreaming_network",
+   "title": "Dreaming Network",
+   "category": "compute",
+   "tags": [
+    "neural network"
+   ],
+   "libraries": [
+    "kernel"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 742,
+   "added": "2026-11-06",
+   "source": "gallery/dreaming_network.ps",
+   "render": "gallery/renders/dreaming_network.png",
+   "page": "600x600",
+   "speed": 200,
+   "alt": "Dreaming Network, an organic marbled field of rust, gold and cream with deep teal and navy islands, crossed by fine dark contour lines",
+   "blurb": "A random neural network evaluated at every pixel: model inference in PostScript.",
+   "technique": "A CPPN, a small multilayer perceptron (10 inputs, three hidden layers of 24 neurons with sine, tanh and Gaussian activations, three outputs) maps each pixel's position and a fixed latent vector to three numbers: one picks a colour from a five-stop palette, one draws fine isolines like marbled endpaper, one shades. The weights are drawn from a seeded `rand`, kept in arrays and read by computed index, and each layer's activations live in a per-pixel array: about 1,400 multiply-adds a pixel, compiled by `kernelimage`. About four seconds; the interpreter takes almost six minutes for the same bytes."
+  },
+  {
+   "id": "mochi_in_oils",
+   "title": "Mochi in Oils",
+   "category": "compute",
+   "tags": [
+    "photo",
+    "image filter"
+   ],
+   "libraries": [
+    "kernel"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 742,
+   "added": "2026-11-06",
+   "source": "gallery/mochi_in_oils.ps",
+   "render": "gallery/renders/mochi_in_oils.png",
+   "page": "600x800",
+   "speed": 200,
+   "alt": "Mochi in Oils, a fluffy orange Pomeranian resting its chin on a denim sleeve, rendered as flat, knife-laid patches of paint with crisp dark eyes and a pink nose",
+   "blurb": "A photograph turned into a painting by a Kuwahara filter written in PostScript.",
+   "technique": "The 3000x4000 photo is decoded with `/DCTDecode` into an array of row strings. For every pixel of the 1200x1600 result the Kuwahara filter looks at four overlapping 7x7 windows around the point, finds the one whose brightness varies least and paints its mean colour, so edges stay sharp while fur and denim flatten into brush-like patches. A faint canvas weave and a warm grade finish it. About a billion table reads, compiled by `kernelimage` and read straight from the decoded strings. About three seconds; the interpreter takes four and a half minutes for the same bytes."
   }
  ],
  "groups": [

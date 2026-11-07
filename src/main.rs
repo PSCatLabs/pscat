@@ -1967,6 +1967,9 @@ fn parse_args() -> Result<Options, String> {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
                 options.allow_write.push(dir);
             }
+            "--gpu-preview" => {
+                pscat::set_gpu_preview(true)?;
+            }
             "--bands" => {
                 let n = args.next().ok_or("missing value after --bands")?;
                 options.bands = Some(bands::parse_count(&n)?);
@@ -2205,6 +2208,12 @@ fn print_usage() {
     println!("                      leaks, and the stitched page for a blank one, and says so");
     println!("                      (a program that branches on /BandIndex may leak in");
     println!("                      another band; lint won't see it)");
+    println!("      --gpu-preview   run compiled kernelimage procedures on the GPU, in f32: a");
+    println!("                      fast, approximate preview (not bit-identical; errors not");
+    println!("                      checked). Needs a build with the `gpu` feature. Under");
+    println!("                      --max-time/--max-steps the limits are checked before each");
+    println!("                      GPU dispatch (65536 pixels); GPU loop trips are capped at");
+    println!("                      2^20 per pixel, not counted as steps");
     println!("      --band-rows R   with --bands, cut the page into bands about R device rows");
     println!("                      tall instead (ceil(height/R) bands of equal height)");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
