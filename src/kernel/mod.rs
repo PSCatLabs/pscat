@@ -55,10 +55,19 @@ static GPU_PREVIEW: AtomicBool = AtomicBool::new(false);
 /// Largest sample buffer a `kernelimage` may make (4 GiB).
 const MAX_IMAGE_BYTES: u64 = 1 << 32;
 
+/// Loop trips (all loops together) one pixel may run on the GPU
+/// (`--gpu-preview`): the bound on a runaway loop there, which is capped
+/// rather than counted as steps.
+pub const GPU_LOOP_CAP: u32 = 1 << 20;
+/// Pixels per GPU dispatch. A dispatch cannot be interrupted, so the time
+/// and step limits are looked at between dispatches.
+pub const GPU_CHUNK_PIXELS: usize = 1 << 16;
+
 /// Run compiled kernels on the GPU, in f32, as a preview (`--gpu-preview`;
 /// cargo feature `gpu`). Process-wide. Fails in a build without the
 /// feature. Procedures that do not compile, and any GPU failure, still use
-/// the CPU paths.
+/// the CPU paths. Under a time or step limit the GPU runs too: the limits
+/// are looked at before each dispatch of [`GPU_CHUNK_PIXELS`] pixels.
 pub fn set_gpu_preview(on: bool) -> Result<(), String> {
     if on && !cfg!(all(feature = "gpu", not(target_arch = "wasm32"))) {
         return Err("--gpu-preview needs a pscat built with the `gpu` feature \
@@ -196,16 +205,24 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                     crate::ops::noise::note_sampled(it);
                 }
                 let rows = rows_needed(it, a.w, a.h, a.matrix);
-                // The GPU cannot be interrupted, so a render under a time or
-                // step limit (pscat-mcp, `--max-time`) stays on the CPU.
-                // Nor does a kernel with `srand`: its state must be exact, and
-                // the LCG's products do not fit the shader's i32.
+                // A GPU dispatch cannot be interrupted, so `gpu::run` looks
+                // at the time and step limits before each one (#1065): a
+                // limit stops the image with the error the CPU path would
+                // raise. One dispatch is bounded by its pixel count and the
+                // per-pixel loop budget; loop trips are not counted as steps.
+                // A kernel with `srand` stays on the CPU (#1063): its state
+                // must be exact, and the LCG's products do not fit the
+                // shader's i32.
                 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
                 if GPU_PREVIEW.load(Ordering::Relaxed)
-                    && it.remaining_budget() == (None, None)
+                    && let Some(n) = a.w.checked_mul(a.h).and_then(|n| n.checked_mul(a.ncomp))
+                    && it.check_alloc(n).is_ok()
                     && k.rand.is_none()
                 {
-                    let r = gpu::run(&k, a.w, a.h, a.ncomp, rows);
+                    let (steps_left, deadline) = it.remaining_budget();
+                    let ctl = RunCtl::new(deadline, steps_left);
+                    let r = gpu::run(&k, a.w, a.h, a.ncomp, rows, &ctl);
+                    it.charge_steps(ctl.steps.load(Ordering::Relaxed));
                     lap("gpu run (with any device setup)", t1);
                     match r {
                         Ok(bytes) => {
@@ -218,7 +235,8 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                             it.kernel_stats.0 += 1;
                             return paint(it, &a, bytes);
                         }
-                        Err(why) => {
+                        Err(gpu::GpuStop::Limit(e)) => return Err(e),
+                        Err(gpu::GpuStop::Failed(why)) => {
                             if it.kernel_notes.insert(why.clone()) {
                                 let note = format!("pscat: --gpu-preview: {why}; using the CPU\n");
                                 let _ = it.write_stderr(note.as_bytes(), true);

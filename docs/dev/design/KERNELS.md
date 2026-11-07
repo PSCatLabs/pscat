@@ -237,6 +237,11 @@ at run time by `--gpu-preview`:
   elsewhere.
 - It is approximate (f32), so it is never the default, and output is never
   claimed bit-exact. Final renders stay on the CPU path.
+- Under `--max-time`/`--max-steps` (pscat-mcp's `gpu_preview`, #1065) the
+  limits are checked before each dispatch of 65536 pixels, and a dispatch is
+  charged the kernel's straight-line size per pixel in steps. Loop trips are
+  capped at 2^20 per pixel, not counted, so a runaway loop gives a capped
+  image rather than an error unless the capped work runs past a limit.
 
 Its value is to be measured, not assumed. "The GPU isn't worth it" is a valid
 outcome of this work.

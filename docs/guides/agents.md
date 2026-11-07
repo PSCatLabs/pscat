@@ -99,8 +99,9 @@ PIL composite. A one-call typewriter or chart is not added yet.
 ## The MCP server
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
-  or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
-  `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
+  or a PDF written to `out_path`), with page size, `dpi`, `halftone`,
+  `bands` and `gpu_preview` options (see "Banded renders" and "GPU preview"
+  below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
@@ -483,6 +484,46 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
   measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
   CPU (18x at one row per band), and a large band count multiplies the
   per-band step and time budgets. An agent has no measurement to tune it by.
+
+### GPU preview
+
+`render_postscript` and `start_render` take `gpu_preview` (#1065), a
+boolean: `true` renders as `pscat --gpu-preview` does (see the
+[kernels guide](kernels.md#gpu-preview)). Compiled `kernelimage` procedures
+run on the GPU in 32-bit floats, a fast approximate preview of a heavy
+kernel piece: through the server on an Apple M4, `gallery/mandelbulb.ps`
+takes about 0.8 s against 8 s on the CPU. It is not the CPU's exact pixels,
+so leave it off for a final render. Everything that is not a compiled
+kernel draws as before.
+
+- **Builds.** Only a `pscat` built with the `gpu` cargo feature has it
+  (`cargo build --release --features gpu`). The server and its `pscat`
+  child come from the same build, so the server knows: without the feature,
+  `true` is a `gpu_unavailable` error (`structuredContent.error.argument`
+  is `gpu_preview`), refused before any job starts, and the tool
+  descriptions say which build this is. `false` is a plain render in every
+  build; anything but a boolean is `invalid_argument`.
+- **Limits.** The server's limits still hold. The interpreter checks the
+  time and step limits before each GPU dispatch of 65536 pixels; a limit
+  that has fired stops the render with `limit_exceeded` and the partial
+  page, as on the CPU. A dispatch is charged the kernel's straight-line
+  size per pixel in steps; loop trips on the GPU are not counted but capped
+  at 2^20 per pixel, so every dispatch finishes. One dispatch cannot be
+  interrupted: one still running at the call's (or job's) wall-clock limit
+  is killed with the child, and the result is `timeout`.
+- **A runaway loop is not an error on the GPU.** On the CPU, a kernel loop
+  that never exits always ends in `limit_exceeded`. On the GPU each pixel
+  stops at the loop cap and an image comes back, often blank (a loop with
+  no `exit` at all compiles to a constant colour). You get `limit_exceeded`
+  only when the capped work runs past the time or step limit. A preview
+  that comes back blank or flat may be a runaway loop: render it once
+  without `gpu_preview` to see the error.
+- **What you see.** A `Warnings:` line names the GPU that ran
+  (`pscat: --gpu-preview: f32 on Apple M4`). A kernel that does not compile,
+  or a GPU failure (no adapter, say), runs on the CPU, with a line saying
+  so.
+- **Not on `review_sheet`.** A sheet promises the bytes `pscat sheet`
+  writes, and the GPU's are approximate.
 
 ### Protocol
 

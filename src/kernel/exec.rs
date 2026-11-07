@@ -71,7 +71,7 @@ impl RunCtl {
     }
 
     /// Charge `n` steps and look at the limits.
-    fn poll(&self, n: u64) -> Result<(), Stop> {
+    pub(crate) fn poll(&self, n: u64) -> Result<(), Stop> {
         let used = self.steps.fetch_add(n, Ordering::Relaxed) + n;
         if self.stop.load(Ordering::Relaxed) {
             return Err(Stop::Cancelled);
