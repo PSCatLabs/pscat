@@ -1,6 +1,7 @@
 //! CLI contract tests (Stage 14): the behaviors scripts and agents
 //! rely on — `-` reads stdin, exit codes are honest, artifacts are
-//! announced on stdout and errors go to stderr.
+//! announced on stderr (stdout is the program's alone) and errors go to
+//! stderr.
 
 use std::process::{Command, Stdio};
 
@@ -40,7 +41,11 @@ fn dash_reads_the_program_from_stdin() {
         "0 0 50 50 rectfill",
     );
     assert!(ok, "stderr: {stderr}");
-    assert!(stdout.contains("wrote"), "artifact announced: {stdout}");
+    assert!(
+        stderr.contains("pscat: wrote"),
+        "artifact announced: {stderr}"
+    );
+    assert!(stdout.is_empty(), "stdout is the program's alone: {stdout}");
     let bytes = std::fs::read(&png).expect("png written");
     assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
 }
@@ -1184,4 +1189,142 @@ fn the_largest_step_limit_does_not_overflow() {
     );
     assert!(ok, "{stderr}");
     assert_eq!(out.trim(), "7");
+}
+
+/// #1058: the "wrote FILE" report is on stderr, so a program's own output
+/// can be piped on unchanged, whichever file it writes.
+#[test]
+fn the_wrote_report_is_not_on_stdout() {
+    let dir = common::scratch_dir("pscat-cli-wrote");
+    for flag in ["--png", "--svg", "--pdf"] {
+        let out = dir.join(format!("w{flag}.out"));
+        let (ok, stdout, stderr) = run(
+            &[flag, out.to_str().unwrap(), "-"],
+            "(x) print 0 0 1 1 rectfill showpage",
+        );
+        assert!(ok, "{flag}: {stderr}");
+        assert_eq!(stdout, "x", "{flag}: program output only");
+        assert!(stderr.contains("pscat: wrote"), "{flag}: {stderr}");
+    }
+}
+
+/// #1059: a reader that goes away (`| head`) is not a crash. The CLI's own
+/// stdout writes end quietly, and so does a program's `print`: no Rust panic,
+/// no `ioerror` report, a non-zero status, and the page still written.
+#[cfg(unix)]
+#[test]
+fn a_closed_stdout_ends_quietly() {
+    // Far more than a pipe holds, so the write cannot all land before the
+    // test closes its end.
+    let spawn = |args: &[&str]| {
+        let mut child = Command::new(BIN)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn pscat");
+        drop(child.stdout.take());
+        common::wait_output(child)
+    };
+    let out = spawn(&["--capabilities"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "the SIGPIPE status");
+
+    let png = common::scratch_dir("pscat-cli-epipe").join("p.png");
+    let out = spawn(&[
+        "--page",
+        "20x20",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "0 0 10 10 rectfill 1 1 200000 { = } for",
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("ioerror"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141));
+    assert!(png.exists(), "the page is still written");
+
+    // Short text with no newline is buffered; the failure shows only when
+    // it is flushed, and still decides the status.
+    let out = spawn(&[
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "(%stdout) (w) file (hello) writestring",
+    ]);
+    assert_eq!(out.status.code(), Some(141), "buffered output");
+
+    // The exit still flushes a file the program left open, on a plain run and
+    // on a banded one (which must not report band 1 as failed).
+    let dir = common::scratch_dir("pscat-cli-epipe-flush");
+    let program = format!(
+        "({}/kept.txt) (w) file dup (kept) writestring pop 1 1 200000 {{ = }} for",
+        dir.display()
+    );
+    for bands in [None, Some("2")] {
+        let kept = dir.join("kept.txt");
+        let _ = std::fs::remove_file(&kept);
+        let mut args = vec!["--page", "20x20", "--allow-write", dir.to_str().unwrap()];
+        args.extend(["--png", png.to_str().unwrap()]);
+        if let Some(n) = bands {
+            args.extend(["--bands", n]);
+        }
+        args.extend(["-e", &program]);
+        let out = spawn(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("panicked"), "{bands:?}: {stderr}");
+        assert!(!stderr.contains("ioerror"), "{bands:?}: {stderr}");
+        assert!(!stderr.contains("failed"), "{bands:?}: {stderr}");
+        assert_eq!(out.status.code(), Some(141), "{bands:?}");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"kept", "{bands:?}: flushed");
+    }
+}
+
+/// #1059: a REPL whose stdout reader has gone stops at once, flushing as it
+/// leaves, instead of waiting on a stdin that stays open.
+#[cfg(unix)]
+#[test]
+fn a_repl_stops_when_its_stdout_reader_goes() {
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    drop(child.stdout.take());
+    // Held open until the child has exited: it must not need the EOF.
+    let stdin = child.stdin.take();
+    let out = common::wait_output(child);
+    drop(stdin);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+}
+
+/// An `ioerror` the program raises later is still reported after it caught
+/// the one from a closed stdout: only the error that came from the failed
+/// write is silenced.
+#[cfg(unix)]
+#[test]
+fn only_the_error_from_the_closed_stdout_is_silenced() {
+    let mut child = Command::new(BIN)
+        .args([
+            "--headless",
+            "-e",
+            "{ 1 1 200000 { = } for } stopped pop (%stdout) (w) file read",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    drop(child.stdout.take());
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("ioerror"), "the read's own error: {stderr}");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
 }
