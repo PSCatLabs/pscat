@@ -455,6 +455,28 @@
   /Z.cal [520 [60 600 160 700 300 660 450 700 300 500 140 230 60 10 220 60
                360 0 480 40]]
 
+  % --- Latin letters that are not an accented base (issue #1051): their
+  % code points are in sgcmap. The ß is a long stem over the ascender into
+  % a 3-like double bump; the thorns are a stem with a bowl hung on it; the
+  % eth is a round d whose stem curls back over, crossed; the eng is an n
+  % whose right leg hooks down; the kra is a small K; the long s is the f
+  % without its bar.
+  /AE [720 [40 0 330 700] [330 700 330 0] [330 700 660 700]
+           [150 330 590 340] [330 0 670 0]]
+  /germandbls [500 [70 0 70 540 120 690 240 740 340 680 340 540 240 450
+                    190 430 190 430 290 400 420 300 430 140 330 20 190 10]]
+  /Thorn [500 [70 700 70 0] [70 560 300 560 430 480 430 320 300 230 70 230]]
+  /thorn [460 [60 750 60 -250] [60 400 220 510 380 400 380 150 230 20 60 90]]
+  /eth [460 [150 740 300 600 390 400 380 150 240 10 90 80 60 260 150 420
+             280 450 380 380]
+            [160 610 340 700]]
+  /kgreenlandic [400 [70 500 70 0] [330 500 70 210] [160 290 360 0]]
+  /eng [420 [60 500 60 20]
+            [60 350 190 510 330 430 340 0 330 -150 250 -240 150 -220]]
+  /Eng [580 [70 0 70 700]
+            [70 540 200 690 380 700 490 560 500 300 490 -60 410 -200 300 -190]]
+  /longs [300 [280 690 200 750 140 660 140 30]]
+
   % --- \mathbb: the Z has its diagonal doubled, so it is drawn whole; the
   % other capitals are derived in sginit (sgbbextra)
   /Z.bb [600 [60 700 560 700] [440 700 60 0] [550 700 170 0] [60 0 560 0]]
@@ -642,6 +664,7 @@
   [329 /napostrophe /quoteright /n 120]
   [230 /ae /a /e 330]
   [339 /oe /o /e 340]
+  [338 /OE /O /E 500]
 ] def
 
 % Code point -> glyph name for UTF-8 text. ASCII letters, digits and
@@ -689,6 +712,8 @@
   8476 /Rfractur  8465 /Ifractur
   8450 /C.bb  8461 /H.bb  8469 /N.bb  8473 /P.bb  8474 /Q.bb  8477 /R.bb
   8484 /Z.bb
+  198 /AE  222 /Thorn  223 /germandbls  240 /eth  254 /thorn
+  312 /kgreenlandic  330 /Eng  331 /eng  383 /longs
 >> def
 
 % Math class of each glyph, TeX's seven (`/ord` when absent): /op for
