@@ -21,11 +21,14 @@
 
 pub(crate) mod compile;
 pub(crate) mod exec;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub(crate) mod gpu;
 pub(crate) mod ir;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::PsError;
 use crate::image::{ImageColor, ImageCtx, ImageSource};
@@ -43,6 +46,22 @@ pub(crate) enum KernelMode {
     Interpret,
     /// Compile, or fail with an error naming why not.
     Strict,
+}
+
+static GPU_PREVIEW: AtomicBool = AtomicBool::new(false);
+
+/// Run compiled kernels on the GPU, in f32, as a preview (`--gpu-preview`;
+/// cargo feature `gpu`). Process-wide. Fails in a build without the
+/// feature. Procedures that do not compile, and any GPU failure, still use
+/// the CPU paths.
+pub fn set_gpu_preview(on: bool) -> Result<(), String> {
+    if on && !cfg!(all(feature = "gpu", not(target_arch = "wasm32"))) {
+        return Err("--gpu-preview needs a pscat built with the `gpu` feature \
+                    (cargo build --release --features gpu)"
+            .into());
+    }
+    GPU_PREVIEW.store(on, Ordering::Relaxed);
+    Ok(())
 }
 
 pub fn install(dict: &mut Dict) {
@@ -103,14 +122,61 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
     if a.w == 0 || a.h == 0 {
         return paint(it, &a, Vec::new());
     }
+    let timing = std::env::var_os("PSCAT_KERNEL_TIMING").is_some();
+    let t0 = crate::clock::Clock::mono_ns();
+    let lap = |what: &str, t: u64| {
+        if timing {
+            eprintln!(
+                "pscat: kernel {what}: {:.2} ms",
+                (crate::clock::Clock::mono_ns() - t) as f64 / 1e6
+            );
+        }
+    };
     if it.kernel_mode != KernelMode::Interpret {
-        match compile::compile(it, &a.proc, a.ncomp) {
+        let compiled = compile::compile(it, &a.proc, a.ncomp);
+        lap("compile", t0);
+        if let Ok((k, _)) = &compiled
+            && timing
+        {
+            eprintln!(
+                "pscat: kernel size: {} instructions, {} registers",
+                k.size(),
+                k.nregs
+            );
+        }
+        let t1 = crate::clock::Clock::mono_ns();
+        match compiled {
             Ok((k, noise)) => {
                 if noise {
                     crate::ops::noise::note_sampled(it);
                 }
                 let rows = rows_needed(it, a.w, a.h, a.matrix);
-                match run(it, &k, a.w, a.h, a.ncomp, rows) {
+                #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+                if GPU_PREVIEW.load(Ordering::Relaxed) {
+                    let r = gpu::run(&k, a.w, a.h, a.ncomp, rows);
+                    lap("gpu run (with any device setup)", t1);
+                    match r {
+                        Ok(bytes) => {
+                            if let Ok(name) = gpu::adapter_name()
+                                && it.kernel_notes.insert(format!("gpu {name}"))
+                            {
+                                let note = format!("pscat: --gpu-preview: f32 on {name}\n");
+                                let _ = it.write_stderr(note.as_bytes(), true);
+                            }
+                            it.kernel_stats.0 += 1;
+                            return paint(it, &a, bytes);
+                        }
+                        Err(why) => {
+                            if it.kernel_notes.insert(why.clone()) {
+                                let note = format!("pscat: --gpu-preview: {why}; using the CPU\n");
+                                let _ = it.write_stderr(note.as_bytes(), true);
+                            }
+                        }
+                    }
+                }
+                let r = run(it, &k, a.w, a.h, a.ncomp, rows);
+                lap("cpu run", t1);
+                match r {
                     Ok(bytes) => {
                         it.kernel_stats.0 += 1;
                         return paint(it, &a, bytes);
