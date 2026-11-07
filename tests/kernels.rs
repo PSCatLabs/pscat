@@ -800,3 +800,42 @@ fn the_interpreter_fallback_checks_its_row_buffer_against_the_memory_limit() {
     assert!(!out.status.success());
     assert!(err.contains("limitexceeded (memory)"), "{err}");
 }
+
+// --- large kernels (issue #1064) -------------------------------------------
+
+/// `prog` compiles under `/strict` and matches the interpreter, on a small
+/// image (a large kernel's interpreter reference is slow per pixel).
+#[track_caller]
+fn same_small(prog: &str) {
+    let (k, ran) = render_counted("strict", prog, 5, 3);
+    let (r, _) = render_counted("interpret", prog, 5, 3);
+    assert!(
+        !matches!(&k, Err(s) if s.starts_with("kernelimage: not compiled")),
+        "did not compile: {k:?}"
+    );
+    assert!(ran, "the compiled path did not finish the image");
+    assert!(r.is_ok(), "the reference failed: {r:?}");
+    assert!(k == r, "compiled and interpreted renders differ");
+}
+
+#[test]
+fn the_size_cap_counts_each_instruction_once() {
+    // About 120k instructions, all at the top level of one branch. The
+    // count once added a branch's whole code again at its join (and a loop
+    // body's at its back edge), so this passed the 200k cap.
+    let prog = "/a { x 1.0000001 mul 0.37 add /x exch def } def
+                /b { a a a a a a a a a a } def /c { b b b b b b b b b b } def
+                /d { c c c c c c c c c c } def /e { d d d d d d d d d d } def
+                /pixel { /j exch def /i exch def /x i 0.1 mul def
+                  j 1 ge { e e e e e e } if
+                  3 { x 1.0001 mul /x exch def } repeat
+                  x 0.001 mul dup floor sub j 0.25 mul i 0.2 mul } def";
+    let (ok, why) = compiles(prog);
+    assert!(ok, "{why}");
+    let n: usize = why
+        .trim_matches(|c: char| !c.is_ascii_digit())
+        .parse()
+        .expect("a size");
+    assert!((110_000..200_000).contains(&n), "{why}");
+    same_small(prog);
+}

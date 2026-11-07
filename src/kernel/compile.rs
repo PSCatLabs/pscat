@@ -1099,8 +1099,7 @@ impl<'a> Compiler<'a> {
                 code.push(mv(d, s, int));
             }
         }
-        let _ = before;
-        self.emitted += code.len();
+        self.emitted += code.len() - before;
         if self.emitted > MAX_INSNS {
             return nc("the kernel is too large");
         }
@@ -1475,11 +1474,10 @@ impl<'a> Compiler<'a> {
                 };
                 self.moves_into(c.reg, c.tag, c.ty, &v, &mut pre)?;
             }
+            // (`par_moves` counts what it adds: append, not `emit`.)
             let mut pcode = Vec::new();
             self.par_moves(pre, &mut pcode)?;
-            for i in pcode {
-                self.emit(i)?;
-            }
+            self.code.extend(pcode);
             if !end.dead {
                 let mut back = Moves::default();
                 for c in &carried {
@@ -1649,9 +1647,7 @@ impl<'a> Compiler<'a> {
         if fits {
             let mut code = Vec::new();
             self.par_moves(mv, &mut code)?;
-            for i in code {
-                self.emit(i)?;
-            }
+            self.code.extend(code);
         } else if let Some(ctx) = self.loops.last_mut() {
             ctx.mismatch = true;
         }
