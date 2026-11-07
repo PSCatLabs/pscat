@@ -13,7 +13,14 @@ colour (that is `gallery/hundred_lines.ps`'s flat look). Load
 gives skeleton paths, and `dcchalk` inks them. A character with no
 skeleton (a superscript two, say) raises `sg-missing-glyph:<char>` rather
 than vanishing; write it another way, or pass `/Strict false` to let it
-advance blank.
+advance blank. `sgpath` draws the Latin-1 and Latin Extended-A letters
+(`café`, `jalapeño`, `crème brûlée`, `Zoë`, `Ångström`, `Łódź`), so those
+need no workaround: each is the base letter's own skeleton plus accent
+strokes. A string that is valid UTF-8 is read as UTF-8, and any other
+string is read as Latin-1, so `(caf\351)` draws the same `café` (the one
+ambiguity: Latin-1 bytes that happen to form valid UTF-8 are read as
+UTF-8). `sgmetrics` and `lib/mathkit.ps` stay UTF-8 only; in a formula write
+`\text{café}` in UTF-8.
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run

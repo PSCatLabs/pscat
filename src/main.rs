@@ -2225,6 +2225,11 @@ fn print_usage() {
         "                      (`#` lines after: pinned pack release, installed packs, overrides)"
     );
     println!(
+        "                      your own fonts: put .ttf/.otf/.ttc files in fonts/catalog/<dir>/"
+    );
+    println!("                      (current directory, $PSCAT_HOME, the per-user data directory");
+    println!("                      or beside the binary); `/<FileStem> findfont` then finds them");
+    println!(
         "      --capabilities  print the agent-usable art catalog (fonts, palettes, templates, procedures) as JSON, then exit"
     );
     println!();
@@ -2247,6 +2252,23 @@ fn print_usage() {
         "  pscat sheet a.ps b.ps ...    labelled review sheet: files or sweeps at several sizes, one PNG"
     );
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
+    println!();
+    println!("Environment (where pscat finds lib/ and fonts; the full search order is in");
+    println!("docs/guides/getting-started.md, \"Where pscat finds its files\"):");
+    println!(
+        "  PSCAT_HOME             a pscat tree holding lib/ and fonts/catalog/ (old name PSCAT_ROOT)"
+    );
+    println!(
+        "  PSCAT_LIB              one directory that stands in for lib/, so $PSCAT_LIB/artkit.ps"
+    );
+    println!(
+        "                         serves (lib/artkit.ps) run; a single directory, not a path list"
+    );
+    println!(
+        "  PSCAT_TRACE_RESOURCES  1: print on stderr which copy served each lib/ or font file"
+    );
+    println!("  The lib/ search order is $PSCAT_LIB, $PSCAT_HOME, the current directory, the");
+    println!("  per-user data directory, the binary's directory, then the copy built into pscat.");
 }
 
 /// Write out the files the program left open (issue #762), and say so when

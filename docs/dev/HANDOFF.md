@@ -1618,6 +1618,13 @@ renders eight examples in both and compares block-downsampled output).
   `v<version>`, rc included (#867). Tests:
   `scripts/test_plugin_launcher.py` (fake file:// release); both install
   checks download from `scripts/fake_plugin_release.py`.
+  **The preview is for the model (#1055):** `PREVIEW_NOTE` in
+  `src/mcp_server.rs` is in the server instructions and every image tool's
+  description; the user gets a file only through `out_path` (its `wrote <path>`
+  line). No `path` field exists on purpose: without `out_path` the pages sit in a
+  deleted scratch directory. `pscat --help` has an Environment block
+  (`PSCAT_HOME`, `PSCAT_LIB`, `PSCAT_TRACE_RESOURCES`) and the own-font drop-in
+  (#1024, #1056 part 1; `notes/1024-docs-fonts-mcp-preview-lib.md`).
   See `notes/853-plugin-launcher.md`.
   **Output root (#910):** Codex starts a plugin server with cwd
   `${PLUGIN_ROOT}` (the installed copy), so the launcher, not the server,

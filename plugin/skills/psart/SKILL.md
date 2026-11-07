@@ -26,8 +26,8 @@ exact layer). [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/d
 2. `pscat --page WxH --png out.png piece.ps` — then **look at the
    PNG**. Really look: composition, color, balance, whether the idea
    reads. (Over MCP: `render_postscript` returns the PNG inline.)
-   Looking is not showing: a picture inside a tool call usually does not reach
-   the user. When they asked to see the piece, save the PNG and the `.ps`, and put
+   Looking is not showing: that preview is visible to you, not to the user, and
+   a picture inside a tool call usually does not reach them. When they asked to see the piece, save the PNG and the `.ps`, and put
    the PNG in your final message by absolute path, as `![title](ABSOLUTE_PNG_PATH)`
    plus a plain `[title.png](ABSOLUTE_PNG_PATH)` link and a link to the source (never base64). The `pscat` skill's "Show the result
    to the user" has the per-host details.
@@ -77,6 +77,7 @@ name from prose.
   2 = end; the literal end always gets a call): what a tapered brush wants.
 - **Shapes/text/layout**: `ngon`, `star`, `rrect`; `(s) cx y
   showctr`, `(s) w fitfont`; `x y w h cols rows {x y w h ...} grid`.
+- **Ellipses**: `cx cy rx ry ellipse` (closed, counterclockwise) and `ellipsen` (reversed winding: use it for the hole of a ring or a cutout, under nonzero fill, `eofill` or `clip`); `cx cy rx ry a1 a2 ellipsearc` / `ellipsearcn` (open arcs, angles parametric so 90 is always the top). Add `rot` degrees as the LAST operand with the `...rot` forms: `cx cy rx ry rot ellipserot`, `ellipsenrot`, `cx cy rx ry a1 a2 rot ellipsearcrot`, `ellipsearcnrot`. They only add to the path; radii must be nonzero.
 - **Scatter** (the area counterpart to `alongpath`): a region from
   `x y w h screct` or `scpath` (the current path; `clippath scpath` for
   the clip), then `region << /Mark {x y scale angle ...} ... >> scatter`.
@@ -237,6 +238,7 @@ has two worked examples and a comparison with the image model alone.
 - Big shapes read; a thousand tiny marks are texture, not subject.
 - Deterministic art is debuggable art: seed everything, and when a
   region misbehaves, render just that region at `--page` scale.
+- grestore discards the current path (it restores the path with the graphics state). To build a path under a temporary transform (an ellipse, a rotated shape), save and restore only the matrix (`matrix currentmatrix ... setmatrix`), not gsave/grestore. The ellipse builders do this for you.
 
 ## A sketch to start from
 

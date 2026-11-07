@@ -13,7 +13,8 @@ interpreter. The plugin bundles:
   `functional-postscript` (map, filter and fold over lists of records, and
   wrapping procedures to count or trace calls).
 - **The `pscat-mcp` server**, which gives the agent ten tools:
-  `render_postscript` (pages come back as images the agent can look at),
+  `render_postscript` (pages come back as images the agent can look at; the
+  user usually cannot, so the agent saves a file with `out_path` to show one),
   `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
   PNG back), `review_sheet` (several programs at several sizes, labelled, on
   one PNG), `describe_art_capabilities`, and `start_render`,

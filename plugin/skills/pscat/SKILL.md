@@ -63,16 +63,20 @@ over threads: [references/bands-profile.md](references/bands-profile.md).
 
 ## Show the result to the user
 
-A render that succeeded is not an image the user has seen. A picture returned
-inside a tool call (an MCP image block, a file you viewed yourself) usually shows
-only in the tool trace, which hosts collapse; the user reads your final message.
+A render that succeeded is not an image the user has seen. The MCP render
+preview is an image block for you, the model: the user usually cannot see it. A
+picture returned inside a tool call (that block, a file you viewed yourself)
+shows only in the tool trace, which hosts collapse; the user reads your final
+message.
 When they asked to see something, the final message must contain it. Check two
 things separately: the render worked (exit 0, clean `Lint:`), and the image is
 in the final answer.
 
 1. Save the PNG where the user can open it (the project or working folder), by
    `--png` or `out_path`, and keep the source `.ps` beside it when they may want
-   changes. `out_path`'s reply says `wrote <absolute path>`; use that path.
+   changes. Over MCP, pass `out_path` on the first render (a render without it
+   leaves no file to hand over, so you would render twice). `out_path`'s reply
+   says `wrote <absolute path>`; use that path.
 2. Put the image in the final message twice over, as an embed and as a plain
    link, so that a host that does not draw the embed still gives the user the
    file, then link the source: `![a colourful spiral](ABSOLUTE_PNG_PATH)`,
@@ -154,9 +158,36 @@ With the pack installed the real face is used and nothing changes. The Type
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
 /Circuitry, /Stitchwork, /Confetti).
 
+**Your own font files** (`.ttf`, `.otf`, `.ttc`) need no pack: put one in a
+subdirectory of `fonts/catalog/` in the current directory, `$PSCAT_HOME`, the
+per-user data directory or beside the binary
+(`mkdir -p fonts/catalog/mine && cp SomeFont.ttf fonts/catalog/mine/`), and
+`/SomeFont findfont` finds it by file name (case does not matter). It wins over
+an installed pack, and `pscat fonts list` shows the directory. This is the
+command-line counterpart of the browser build's `renderer.addFont(name, bytes)`.
+
 `pscat --capabilities` prints the machine-readable inventory of what this build
 has (fonts, palettes, templates, procedures, native operators) as JSON; prefer
 it over guessing a name from prose, this file included.
+
+## Where `(lib/...) run` finds a file
+
+A `lib/` name tries, in order: `$PSCAT_LIB` (one directory that stands in for
+`lib/`: `$PSCAT_LIB/artkit.ps` serves `lib/artkit.ps`; a single directory, not a
+path list), `$PSCAT_HOME/lib`, `lib/` in the current directory, `lib/` in the
+per-user data directory (`~/Library/Application Support/pscat` on macOS,
+`~/.local/share/pscat` on Linux, `%APPDATA%\pscat` on Windows), `lib/` beside
+the binary, then the copy compiled into pscat. The first that exists wins, so a
+file in the per-user `lib/` is a place for your own library, and one that
+shadows a built-in name replaces it. `PSCAT_TRACE_RESOURCES=1` prints one line
+on stderr naming the copy that served each file. Reads honour `--read-root`: a
+`$PSCAT_LIB` outside the read roots is not found. The `pscat-mcp` tools can read
+the per-user data directory, so a library installed there works over MCP too;
+another directory needs the server's `--allow-read` (see
+[references/mcp.md](references/mcp.md)). The full list:
+[Where pscat finds its files](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files).
+A program cannot ask for the name of the file it is running, so a library that
+loads sibling files needs its directory passed in.
 
 ## QR codes (lib/qr.ps)
 
