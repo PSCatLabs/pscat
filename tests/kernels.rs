@@ -1494,3 +1494,21 @@ fn a_shared_definition_that_a_join_cannot_tell_from_none() {
         }
     }
 }
+
+#[test]
+fn an_array_built_after_a_merged_one_is_gone_can_still_be_changed() {
+    // Merged `[ ]` arrays are frozen (a later put is refused). The frozen
+    // set once held bare addresses, so a new array allocated where a frozen
+    // one had been was refused too: by chance, so a kernel's compiled size
+    // varied from run to run.
+    let mut body = String::new();
+    for k in 0..40 {
+        body += &format!(
+            "i {k} gt {{ [1 2 3] }} {{ [4 5 6] }} ifelse /c exch def /c 0 def
+             [7 8 9] dup 0 i put 0 get add\n"
+        );
+    }
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def 0 {body} 0.001 mul show3 }} def"
+    ));
+}

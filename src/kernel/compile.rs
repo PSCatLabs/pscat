@@ -683,6 +683,9 @@ pub(crate) struct Compiler<'a> {
     trail: Vec<String>,
     /// `[ ]` arrays merged at a join: no longer to be changed.
     frozen: std::collections::HashSet<usize>,
+    /// The frozen arrays themselves, kept alive so that no array made
+    /// later can have a frozen one's address.
+    frozen_keep: Vec<Rc<RefCell<Vec<SVal>>>>,
     /// Procedure elements executed at compile time: bounded, and charged
     /// as steps, so compiling cannot escape the program's limits.
     pub(crate) work: u64,
@@ -789,6 +792,7 @@ fn compile_with(
         seeded: std::collections::HashSet::new(),
         trail: Vec::new(),
         frozen: std::collections::HashSet::new(),
+        frozen_keep: Vec::new(),
         soft: Vec::new(),
         strict,
         work: 0,
@@ -2071,13 +2075,16 @@ impl<'a> Compiler<'a> {
                             // The merge is a new array: neither it nor the
                             // arrays merged may be changed later, as an
                             // alias of either would not see the change.
+                            let merged = Rc::new(RefCell::new(out));
                             for v in [x, y] {
-                                if let SVal::Tuple(t, _) = v {
-                                    self.frozen.insert(Rc::as_ptr(t) as usize);
+                                if let SVal::Tuple(t, _) = v
+                                    && self.frozen.insert(Rc::as_ptr(t) as usize)
+                                {
+                                    self.frozen_keep.push(t.clone());
                                 }
                             }
-                            let merged = Rc::new(RefCell::new(out));
                             self.frozen.insert(Rc::as_ptr(&merged) as usize);
+                            self.frozen_keep.push(merged.clone());
                             Binding::Val(SVal::Tuple(merged, self.block))
                         } else {
                             Binding::Maybe
