@@ -51,6 +51,7 @@ pub fn check_with_pages(
     }
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, render_checks, &mut findings);
+    check_shadowed_operators(interp, &mut findings);
     findings
 }
 
@@ -67,6 +68,7 @@ pub fn check_band(interp: &Interp, declared_pages: &DeclaredPages) -> Vec<LintFi
     check_declared_pages(interp, declared_pages, &mut findings);
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, true, &mut findings);
+    check_shadowed_operators(interp, &mut findings);
     findings
 }
 
@@ -299,6 +301,101 @@ fn string_preview(s: &PsString) -> String {
         format!("({escaped}...<{len} bytes total>)")
     } else {
         format!("({escaped})")
+    }
+}
+
+/// Most `shadowed-operator` findings reported for one program; the rest are
+/// counted in a closing finding, so a prologue that redefines fifty names
+/// stays readable.
+const SHADOWED_SHOWN: usize = 10;
+
+/// A name bound in `userdict` to a plain value while a built-in operator of
+/// that name exists in `systemdict` (issue #1052): `/sub (subtitle) def`
+/// makes every later `sub` push a string, and the failure surfaces far from
+/// the cause, often as an error that never mentions the name.
+///
+/// A heuristic over the finished run's `userdict`, so it is deliberately
+/// narrow, to keep false positives low:
+/// - Only a non-procedure value counts. Wrapping an operator in a procedure
+///   (`/showpage { ... showpage } def`, a prologue override) is the normal,
+///   deliberate way to redefine one, and is left alone; so is an operator
+///   bound to its own name.
+/// - Only `userdict` is read. A name defined inside a `begin ... end` that
+///   has already closed is invisible here (its dictionary is gone), and that
+///   is also the way to opt out: keep a local like `/sub` in a local
+///   dictionary, or give it another name.
+/// - A `store` of an operator's name overwrites the operator in
+///   `systemdict` itself (that is where `store` finds the name), which this
+///   does not see; `def`, the usual way, defines in `userdict`.
+/// - There is no line number: lint runs on the finished interpreter, which
+///   keeps no record of where a `def` was.
+///
+/// Not gated by `render_checks`: shadowing an operator is a mistake whether
+/// or not a page was meant to be drawn.
+fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
+    let (Some(system), Some(user)) = (
+        dict_named(interp, "systemdict"),
+        dict_named(interp, "userdict"),
+    ) else {
+        return;
+    };
+    let mut shadowed: Vec<(String, &'static str)> = Vec::new();
+    for (key, value) in user.borrow().pairs() {
+        let Value::Name(name) = &key.value else {
+            continue;
+        };
+        let Some(builtin) = system.borrow().get(name) else {
+            continue;
+        };
+        let Value::Operator(op) = &builtin.value else {
+            continue;
+        };
+        match &value.value {
+            Value::Array(_) if value.executable => continue,
+            Value::Operator(bound) if bound.name == op.name => continue,
+            _ => {}
+        }
+        let kind = value.type_name();
+        shadowed.push((name.to_string(), kind.strip_suffix("type").unwrap_or(kind)));
+    }
+    // `pairs` order depends on the interner, so sort for stable output.
+    shadowed.sort();
+    for (name, kind) in shadowed.iter().take(SHADOWED_SHOWN) {
+        findings.push(LintFinding {
+            check: "shadowed-operator",
+            message: format!(
+                "/{name} was redefined as {} {kind}, replacing the operator {name}: every later `{name}` pushes that value instead of running the operator (rename it, or keep it in a local dictionary with begin ... end)",
+                article(kind)
+            ),
+        });
+    }
+    if shadowed.len() > SHADOWED_SHOWN {
+        findings.push(LintFinding {
+            check: "shadowed-operator",
+            message: format!(
+                "{} more operator name(s) redefined as plain values ({SHADOWED_SHOWN} shown, in name order)",
+                shadowed.len() - SHADOWED_SHOWN
+            ),
+        });
+    }
+}
+
+fn article(word: &str) -> &'static str {
+    if word.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    }
+}
+
+/// The dictionary a permanent name (`systemdict`, `userdict`) is bound to.
+fn dict_named(
+    interp: &Interp,
+    name: &str,
+) -> Option<std::rc::Rc<std::cell::RefCell<crate::object::Dict>>> {
+    match interp.load(name)?.value {
+        Value::Dict(d) => Some(d),
+        _ => None,
     }
 }
 
@@ -673,5 +770,108 @@ mod tests {
             "should note it was truncated: {}",
             leak.message
         );
+    }
+
+    fn shadow_messages(it: &Interp) -> Vec<String> {
+        check(it, true)
+            .into_iter()
+            .filter(|f| f.check == "shadowed-operator")
+            .map(|f| f.message)
+            .collect()
+    }
+
+    #[test]
+    fn a_string_defined_over_an_operator_is_flagged_by_name() {
+        // The issue's repro: `/sub` meant as "subtitle".
+        let it = run("/sub (hello) def /x 5 3 sub def showpage");
+        let found = shadow_messages(&it);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with("/sub was redefined as a string"),
+            "{}",
+            found[0]
+        );
+        assert!(
+            found[0].contains("replacing the operator sub"),
+            "{}",
+            found[0]
+        );
+    }
+
+    #[test]
+    fn numbers_and_arrays_are_flagged_and_name_the_type() {
+        let it = run("/div 2 def /dict [1] def /rand 0.5 def");
+        let found = shadow_messages(&it);
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(
+            found[0].starts_with("/dict was redefined as an array"),
+            "{found:?}"
+        );
+        assert!(
+            found[1].starts_with("/div was redefined as an integer"),
+            "{found:?}"
+        );
+        assert!(
+            found[2].starts_with("/rand was redefined as a real"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_procedure_wrapping_an_operator_is_a_deliberate_redefinition() {
+        let it = run("/showpage { showpage } bind def /sub { neg add } def");
+        assert!(shadow_messages(&it).is_empty());
+    }
+
+    #[test]
+    fn an_ordinary_name_and_an_operator_bound_to_itself_are_not_flagged() {
+        let it = run("/subtitle (hello) def /n 3 def /sub /sub load def /add2 /add load def");
+        assert!(shadow_messages(&it).is_empty());
+    }
+
+    #[test]
+    fn an_operator_bound_to_another_operators_name_is_flagged() {
+        let it = run("/sub /add load def");
+        let found = shadow_messages(&it);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with("/sub was redefined as an operator"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_local_dictionary_that_has_ended_is_the_opt_out() {
+        let it = run("4 dict begin /sub (hello) def /dict 3 def end /x 5 3 sub def showpage");
+        assert!(shadow_messages(&it).is_empty());
+    }
+
+    #[test]
+    fn shadowing_is_flagged_without_render_checks_too() {
+        let it = run("/sub 1 def");
+        let found: Vec<_> = check(&it, false).into_iter().map(|f| f.check).collect();
+        assert_eq!(found, ["shadowed-operator"]);
+    }
+
+    #[test]
+    fn a_long_list_is_capped_and_counted() {
+        let names = [
+            "add", "sub", "mul", "div", "mod", "neg", "abs", "exp", "dict", "string", "rand",
+            "count", "copy",
+        ];
+        let src: String = names.iter().map(|n| format!("/{n} 1 def ")).collect();
+        let found = shadow_messages(&run(&src));
+        assert_eq!(found.len(), SHADOWED_SHOWN + 1, "{found:?}");
+        assert!(
+            found[SHADOWED_SHOWN].starts_with("3 more operator name(s)"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_band_lint_reports_it_too() {
+        let it = run("/sub (hello) def");
+        let found = check_band(&it, &DeclaredPages::None);
+        assert!(found.iter().any(|f| f.check == "shadowed-operator"));
     }
 }
