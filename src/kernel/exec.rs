@@ -168,6 +168,13 @@ impl<'k> Machine<'k> {
         Ok(killed)
     }
 
+    /// The random state lane `l` of the last batch left, if it seeded
+    /// (`Kernel::rand`; meaningful for a lane that was not retired).
+    pub(crate) fn rand_state(&self, l: usize) -> Option<i64> {
+        let s = self.geti(self.k.rand?, l);
+        (s >= 0).then_some(s)
+    }
+
     /// Retire `lanes` (see `killed`).
     fn kill(&mut self, lanes: u64, why: &'static str) {
         if lanes == 0 {

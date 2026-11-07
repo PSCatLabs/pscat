@@ -147,5 +147,8 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
     for o in &k.outputs {
         f(o, "an output")?;
     }
+    if let Some(o) = &k.rand {
+        i(o, "the random state")?;
+    }
     Ok(())
 }

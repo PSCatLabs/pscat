@@ -114,6 +114,7 @@ made of:
 | `[ … ]`, `aload astore length get put`, `N array` | arrays made in the kernel |
 | `get` on an array or string defined outside | a table read: colour ramps, weights, an image's rows |
 | `gnoise2 gnoise3 vnoise2 vnoise3 fbm2 fbm3 vfbm2 vfbm3 ridged2 ridged3 gnoise2d` | the native noise operators |
+| `srand rand rrand` | when the pixel seeds its own stream first (`i j hash srand`): see below |
 
 Data from outside the kernel (arrays, strings, an image decoded into an
 array of row strings) is **read-only** inside it.
@@ -121,10 +122,32 @@ array of row strings) is **read-only** inside it.
 What does not compile:
 
 - painting, text and I/O;
-- `rand`, `srand` and `store`;
+- `rand` before the pixel's own `srand` (it would read the state the
+  previous pixel left), and `store`;
 - `put` into an array from outside;
 - strings and dictionaries as values;
 - recursion.
+
+### Random numbers
+
+A pixel that seeds its stream from its position, then draws, is a pure
+function of `i` and `j`, so it compiles:
+
+```postscript
+/pixel { /j exch def /i exch def
+  i 16#45D9F3B mul j 16#2545F491 mul xor 16#7fffffff and srand
+  rand 255 and 255 div  rand 255 and 255 div  rand 255 and 255 div } bind def
+```
+
+- `--sweep-seed` forces every pixel's `srand` as it does in the
+  interpreter, and an `rrand` value given back to `srand` is still a
+  restore.
+- After the call, the random state is the one the last pixel (in raster
+  order) that called `srand` left, as in the interpreter, `--bands` included.
+- A `rand` that some pixel reaches before its `srand` is not compiled. When
+  no pixel can seed first, the whole procedure runs in the interpreter.
+  When only some pixels skip the `srand`, and whenever a seeding kernel has
+  a pixel to leave to the interpreter, the whole image runs there.
 
 How it degrades:
 

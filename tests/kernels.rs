@@ -445,8 +445,26 @@ fn expr(r: &mut Rng, depth: u32, vars: &[String]) -> String {
 }
 
 fn program(r: &mut Rng) -> String {
+    program_with(r, false)
+}
+
+/// A random program; `seeded`, one that seeds its random stream from the
+/// pixel (issue #1063) and draws from it among the expressions' leaves.
+fn program_with(r: &mut Rng, seeded: bool) -> String {
     let mut body = String::from("/j exch def /i exch def\n");
     let mut vars: Vec<String> = Vec::new();
+    if seeded {
+        body += &match r.below(4) {
+            0 => format!("{} cvi srand\n", expr(r, 2, &vars)),
+            1 => format!(
+                "{} 0 gt {{ i j hash srand }} {{ j 7 mul i add srand }} ifelse\n",
+                expr(r, 2, &vars)
+            ),
+            _ => "i j hash srand\n".into(),
+        };
+        vars.push("rand 1000 mod".into());
+        vars.push("rand 16#7fffffff div".into());
+    }
     for k in 0..r.below(4) {
         let e = expr(r, 3, &vars);
         let name = format!("v{k}");
@@ -799,4 +817,285 @@ fn the_interpreter_fallback_checks_its_row_buffer_against_the_memory_limit() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(err.contains("limitexceeded (memory)"), "{err}");
+}
+
+// --- per-pixel seeded rand/srand (issue #1063) -------------------------------
+
+/// fractal_clouds' `PixSeed` shape: a seed from the pixel's position.
+const HASH: &str = "/hash { 16#45D9F3B mul exch 16#2545F491 mul xor 16#7fffffff and } bind def";
+
+/// What a render of `prog` leaves: the page (or error), the random stream
+/// after the `kernelimage` (three `rand`s and an `rrand`), and whether a
+/// seed override fired.
+#[derive(Debug, PartialEq)]
+struct RandRun {
+    page: Result<Vec<u8>, String>,
+    after: Vec<String>,
+    fired: bool,
+}
+
+/// Render `prog` in `mode` under `seed` (as `--sweep-seed`): what it
+/// leaves, and the `.kernelstats` triple.
+fn rand_run(mode: &str, prog: &str, seed: Option<i64>) -> (RandRun, [i64; 3]) {
+    rand_run_sized(mode, prog, seed, W, H)
+}
+
+fn rand_run_sized(
+    mode: &str,
+    prog: &str,
+    seed: Option<i64>,
+    w: u32,
+    h: u32,
+) -> (RandRun, [i64; 3]) {
+    let mut it = Interp::with_page(w, h).expect("page");
+    it.set_seed_override(seed);
+    let src = format!(
+        "/{mode} .kernelmode\n/W {w} def /H {h} def\n{HASH}\n{prog}\n\
+         gsave W H scale W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage grestore showpage"
+    );
+    let page = match it.run_str(&src) {
+        Ok(()) => Ok(it.pages()[0].rgba8()),
+        Err(e) => Err(match &e {
+            PsError::Undefined(s) if s.starts_with("kernelimage: not compiled") => s.clone(),
+            other => other.name().to_string(),
+        }),
+    };
+    let fired = it.seed_override_fired();
+    it.run_str("clear rand rand rand rrand")
+        .expect("rand after");
+    let after = it.operand_stack().iter().map(|o| o.repr()).collect();
+    it.run_str("clear .kernelstats").expect("stats");
+    let st = it.operand_stack();
+    let n = |k: usize| st[k].repr().parse::<i64>().expect("stat");
+    (RandRun { page, after, fired }, [n(0), n(1), n(2)])
+}
+
+/// `prog` compiles, the compiled path finishes the image, and the image,
+/// the random stream after it and the override's `fired` all match the
+/// interpreter's.
+#[track_caller]
+fn same_rand(prog: &str, seed: Option<i64>) {
+    let (k, stats) = rand_run("strict", prog, seed);
+    let (r, _) = rand_run("interpret", prog, seed);
+    assert!(r.page.is_ok(), "the reference failed: {:?}\n{prog}", r.page);
+    assert_eq!(
+        stats[0],
+        1,
+        "not finished by the compiled path ({stats:?}): {:?}\n{prog}",
+        k.page.as_ref().err()
+    );
+    assert!(
+        k == r,
+        "compiled {:?} {:?} {} vs interpreted {:?} {}\n{prog}",
+        k.page.as_ref().err(),
+        k.after,
+        k.fired,
+        r.after,
+        r.fired
+    );
+}
+
+/// As `same_rand`, but the image may go to the interpreter (`/auto`);
+/// returns the compiled run's `.kernelstats`.
+#[track_caller]
+fn same_rand_auto(prog: &str, seed: Option<i64>) -> [i64; 3] {
+    let (k, stats) = rand_run("auto", prog, seed);
+    let (r, _) = rand_run("interpret", prog, seed);
+    assert!(
+        k == r,
+        "auto {:?} {:?} {} vs interpreted {:?} {:?} {}\n{prog}",
+        k.page.as_ref().err(),
+        k.after,
+        k.fired,
+        r.page.as_ref().err(),
+        r.after,
+        r.fired
+    );
+    stats
+}
+
+const SEEDED: &str = "/pixel { /j exch def /i exch def i j hash srand
+   rand 255 and 255 div rand 16#7fffffff div rand 1000 mod 1000 div } bind def";
+
+#[test]
+fn a_pixel_seeded_stream_compiles_and_matches() {
+    for seed in [None, Some(42), Some(-7)] {
+        same_rand(SEEDED, seed);
+        // Drawn in a loop, in a dict scope, and through rrand.
+        same_rand(
+            "/pixel { 8 dict begin /j exch def /i exch def i j hash srand
+               0 1 1 4 { pop rand 7 mod add } for 30 div
+               rrand 255 and 255 div
+               0 { rand dup 16#40000000 lt { pop exit } if pop 1 add } loop 10 div end } bind def",
+            seed,
+        );
+        // Seeded inside a loop, with no srand before it.
+        same_rand(
+            "/pixel { /j exch def /i exch def 0 0 1 2 { i add j hash srand rand 3 mod add } for 6 div
+               rand 255 and 255 div 0.5 } bind def",
+            seed,
+        );
+    }
+    // Reseeded from an rrand of its own stream (the save/restore idiom; a
+    // restore under an override retires to the interpreter, below).
+    same_rand(
+        "/pixel { /j exch def /i exch def i j hash srand rrand rand pop srand
+           rand 255 and 255 div 0 0 } bind def",
+        None,
+    );
+}
+
+#[test]
+fn the_state_after_the_call_is_the_last_seeding_pixels() {
+    for seed in [None, Some(5)] {
+        // Only some pixels seed: the last one in raster order is mid-row,
+        // and the last rows do not seed at all.
+        same_rand(
+            "/pixel { /j exch def /i exch def i 40 lt j 5 lt and
+               { i j hash srand rand 255 and 255 div } { 0 } ifelse 0 0 } bind def",
+            seed,
+        );
+        // No pixel seeds (the branch is never taken): the state is
+        // untouched, and an override does not fire.
+        same_rand(
+            "/pixel { /j exch def /i exch def i 1000 gt { 9 srand } if 0 0 0 } bind def",
+            seed,
+        );
+        // The last pixel seeds, then draws: the state is its last draw.
+        same_rand(
+            "/pixel { /j exch def /i exch def i j hash srand rand rand pop 255 and 255 div 0 0 } bind def",
+            seed,
+        );
+    }
+}
+
+#[test]
+fn rand_without_a_prior_srand_matches_through_the_interpreter() {
+    for seed in [None, Some(3)] {
+        // Never seeded: refused, so the interpreter does the image.
+        let stats = same_rand_auto("/pixel { pop pop rand 255 and 255 div 0 0 } bind def", seed);
+        assert_eq!(stats, [0, 0, 1], "never seeded");
+        // Seeded on some lanes only: the others retire, and the whole image
+        // goes to the interpreter (a retired pixel's rand reads the state
+        // its compiled neighbour left).
+        let stats = same_rand_auto(
+            "/pixel { /j exch def /i exch def i 3 mod 0 eq { i j hash srand } if
+               rand 255 and 255 div 0 0 } bind def",
+            seed,
+        );
+        assert_eq!(stats, [0, 0, 1], "seeded on some paths");
+        // A branch that draws before seeding, taken by a few pixels.
+        same_rand_auto(
+            "/pixel { /j exch def /i exch def i 60 gt { rand pop } if i j hash srand
+               rand 255 and 255 div 0 0 } bind def",
+            seed,
+        );
+        // Under /strict, a never-seeded rand is not compiled.
+        let (k, _) = rand_run("strict", "/pixel { pop pop rand 0 0 } bind def", seed);
+        assert!(
+            matches!(&k.page, Err(s) if s.contains("rand before srand")),
+            "{:?}",
+            k.page
+        );
+    }
+}
+
+#[test]
+fn seed_override_and_tagged_seeds_match() {
+    // An rrand-style tagged seed (2^40 + n, past 2^31): plain, it seeds n;
+    // under an override it is a restore, which retires to the interpreter.
+    let tagged = "/pixel { /j exch def /i exch def 16#10000000000 i j hash add srand
+       rand 255 and 255 div 0 0 } bind def";
+    same_rand(tagged, None);
+    let stats = same_rand_auto(tagged, Some(11));
+    assert_eq!(stats, [0, 0, 1], "a restore under an override");
+    // Past 2^53, and negative: masked, as srand does.
+    for seed in [None, Some(11)] {
+        same_rand(
+            "/pixel { /j exch def /i exch def 16#40000000 dup mul i j hash add srand rand 255 and 255 div
+               i j hash neg srand rand 255 and 255 div 0 } bind def",
+            seed,
+        );
+    }
+    // A real seed is the interpreter's typecheck, overridden or not.
+    for seed in [None, Some(1)] {
+        let prog = "/pixel { pop pop 1.5 srand 0 0 0 } bind def";
+        let (k, _) = rand_run("strict", prog, seed);
+        let (r, _) = rand_run("interpret", prog, seed);
+        assert_eq!(r.page, Err("typecheck".into()));
+        assert_eq!(k, r);
+    }
+}
+
+const RAND_SCENE: &str = "%!PS
+/hash { 16#45D9F3B mul exch 16#2545F491 mul xor 16#7fffffff and } bind def
+/pixel { /j exch def /i exch def i j hash srand
+  rand 255 and 255 div rand 255 and 255 div j 40 lt { rand 255 and 255 div } { 0.5 } ifelse } bind def
+gsave 20 70 translate 120 50 scale
+80 50 [80 0 0 -50 0 50] /pixel load 3 kernelimage grestore
+% The random state after the call, as full-height stripes every band paints.
+0 10 190 { 0 moveto 10 0 rlineto 0 130 rlineto -10 0 rlineto closepath
+  rand 255 and 255 div rand 255 and 255 div rand 255 and 255 div setrgbcolor fill } for
+showpage
+";
+
+#[test]
+fn the_state_after_the_call_does_not_depend_on_threads_or_bands() {
+    // The image covers part of the page, so some bands have none of its
+    // rows; each band must still end with the last pixel's state.
+    let interp = format!("/interpret .kernelmode\n{RAND_SCENE}");
+    let reference = cli_png(&interp, &[], None);
+    assert_eq!(cli_png(RAND_SCENE, &[], Some("1")), reference, "1 thread");
+    assert_eq!(cli_png(RAND_SCENE, &[], None), reference, "all cores");
+    for n in ["2", "3", "8"] {
+        assert_eq!(
+            cli_png(RAND_SCENE, &["--bands", n], None),
+            reference,
+            "--bands {n}"
+        );
+        assert_eq!(
+            cli_png(&interp, &["--bands", n], None),
+            reference,
+            "interpreted, --bands {n}"
+        );
+    }
+}
+
+#[test]
+fn differential_fuzz_seeded() {
+    // Random programs that seed per pixel and draw: the image, the stream
+    // after the call and the override's `fired` match the interpreter's.
+    let cases = if cfg!(debug_assertions) { 80 } else { 300 };
+    let mut r = Rng(0x5eed_1063);
+    let (mut ran, mut errors) = (0, 0);
+    for n in 0..cases {
+        let prog = program_with(&mut r, true);
+        let seed = (n % 3 == 0).then_some(n as i64);
+        let (reference, _) = rand_run_sized("interpret", &prog, seed, 33, 5);
+        let (k, stats) = rand_run_sized("strict", &prog, seed, 33, 5);
+        if let Err(s) = &k.page
+            && s.starts_with("kernelimage: not compiled")
+        {
+            panic!("case {n} did not compile: {s}\n{prog}");
+        }
+        ran += usize::from(stats[0] == 1);
+        errors += usize::from(reference.page.is_err());
+        assert!(
+            k == reference,
+            "case {n}: compiled {:?} {:?} {} vs interpreted {:?} {:?} {}\n{prog}",
+            k.page.as_ref().err(),
+            k.after,
+            k.fired,
+            reference.page.as_ref().err(),
+            reference.after,
+            reference.fired
+        );
+    }
+    // A retired pixel sends a seeded image wholly to the interpreter, so
+    // not every case runs compiled; most must (over 90% when written).
+    assert!(
+        ran >= (cases - errors) * 3 / 4,
+        "only {ran} of {cases} images came from the compiled path ({errors} errored)"
+    );
+    assert!(errors < cases / 2, "{errors} of {cases} cases errored");
 }

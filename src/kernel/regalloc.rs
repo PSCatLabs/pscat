@@ -47,7 +47,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
     for r in [k.in_i, k.in_j] {
         first[r as usize] = 0;
     }
-    for o in &k.outputs {
+    for o in k.outputs.iter().chain(&k.rand) {
         if let Op::R(r) = o {
             last[*r as usize] = end;
             first[*r as usize] = first[*r as usize].min(end);
@@ -105,7 +105,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
     rename(&mut k.body, &map);
     k.in_i = map[k.in_i as usize];
     k.in_j = map[k.in_j as usize];
-    for o in &mut k.outputs {
+    for o in k.outputs.iter_mut().chain(&mut k.rand) {
         if let Op::R(r) = o {
             *r = map[*r as usize];
         }
