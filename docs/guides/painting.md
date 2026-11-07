@@ -566,7 +566,7 @@ the brush raises `limitcheck` with the numbers in the message:
 The fixes are in the message: drop `/Touch` on that mass (and let the
 canvas show through some other way), paint it as several strokes that each
 reach less (a big diagonal as two or three short ones), or call `pkcanvas`
-with a larger `/Weave`. Pscat does not tile a large stroke for you. The limit
+with a larger `/Weave`. There is no automatic tiling of a large stroke. The limit
 applies to `pkdry`, `pktrowel`, `pkfan`, `pkbroad` and `pkliner` alike.
 
 ## Brush motions

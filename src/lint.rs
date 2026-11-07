@@ -304,6 +304,52 @@ fn string_preview(s: &PsString) -> String {
     }
 }
 
+/// The checks a program silences for itself with a `%lint: allow NAME`
+/// comment line (issue #1052). Only `shadowed-operator` can be silenced:
+/// the other checks are what `--lint-strict` drivers depend on, and a
+/// program has no business turning them off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LintAllows {
+    shadowed_operator: bool,
+}
+
+/// Read the `%lint: allow ...` comment lines of a program's source. A line
+/// is a comment that starts (after any indentation) with `%lint: allow`,
+/// followed by check names separated by spaces or commas; it may sit next
+/// to the deliberate `def` it excuses, or in the header. Names this does
+/// not know are ignored, so a typo does not silence anything else.
+pub fn scan_lint_allows(source: &[u8]) -> LintAllows {
+    let mut allows = LintAllows::default();
+    for raw_line in source.split(|&b| b == b'\n') {
+        let line = String::from_utf8_lossy(raw_line);
+        let Some(rest) = line.trim_start().strip_prefix("%lint:") else {
+            continue;
+        };
+        let Some(names) = rest.trim_start().strip_prefix("allow") else {
+            continue;
+        };
+        if !names.starts_with(|c: char| c.is_whitespace() || c == ',') {
+            continue;
+        }
+        for name in names.split(|c: char| c.is_whitespace() || c == ',') {
+            if name == "shadowed-operator" {
+                allows.shadowed_operator = true;
+            }
+        }
+    }
+    allows
+}
+
+impl LintAllows {
+    /// `findings` without the checks the program allowed.
+    pub fn filter(&self, mut findings: Vec<LintFinding>) -> Vec<LintFinding> {
+        if self.shadowed_operator {
+            findings.retain(|f| f.check != "shadowed-operator");
+        }
+        findings
+    }
+}
+
 /// Most `shadowed-operator` findings reported for one program; the rest are
 /// counted in a closing finding, so a prologue that redefines fifty names
 /// stays readable.
@@ -321,9 +367,12 @@ const SHADOWED_SHOWN: usize = 10;
 ///   deliberate way to redefine one, and is left alone; so is an operator
 ///   bound to its own name.
 /// - Only `userdict` is read. A name defined inside a `begin ... end` that
-///   has already closed is invisible here (its dictionary is gone), and that
-///   is also the way to opt out: keep a local like `/sub` in a local
-///   dictionary, or give it another name.
+///   has already closed is invisible here (its dictionary is gone), which is
+///   one way to keep a local like `/sub` out of the report.
+/// - A deliberate redefinition is silenced by a `%lint: allow
+///   shadowed-operator` comment line anywhere in the program
+///   ([`scan_lint_allows`]); the callers apply it, since this function
+///   never sees the source.
 /// - A `store` of an operator's name overwrites the operator in
 ///   `systemdict` itself (that is where `store` finds the name), which this
 ///   does not see; `def`, the usual way, defines in `userdict`.
@@ -873,5 +922,48 @@ mod tests {
         let it = run("/sub (hello) def");
         let found = check_band(&it, &DeclaredPages::None);
         assert!(found.iter().any(|f| f.check == "shadowed-operator"));
+    }
+
+    #[test]
+    fn the_allow_comment_names_what_it_silences() {
+        let findings = || {
+            vec![
+                LintFinding {
+                    check: "shadowed-operator",
+                    message: String::new(),
+                },
+                LintFinding {
+                    check: "blank-page",
+                    message: String::new(),
+                },
+            ]
+        };
+        let names = |src: &[u8]| -> Vec<&'static str> {
+            scan_lint_allows(src)
+                .filter(findings())
+                .iter()
+                .map(|f| f.check)
+                .collect()
+        };
+        assert_eq!(names(b"showpage\n"), ["shadowed-operator", "blank-page"]);
+        // The directive silences that check only, whatever else it names.
+        for src in [
+            &b"%lint: allow shadowed-operator\n"[..],
+            b"  %lint: allow shadowed-operator\r\n",
+            b"/sub 1 def %lint: allow shadowed-operator\n%lint: allow shadowed-operator, blank-page\n",
+            b"%lint: allow blank-page shadowed-operator\n",
+        ] {
+            assert_eq!(names(src), ["blank-page"], "{src:?}");
+        }
+        // A typo, another check, or a longer word silences nothing.
+        for src in [
+            &b"%lint: allow shadowed-operators\n"[..],
+            b"%lint: allow blank-page\n",
+            b"%lint: allowshadowed-operator\n",
+            b"% lint: allow shadowed-operator\n",
+            b"%lint: deny shadowed-operator\n",
+        ] {
+            assert_eq!(names(src), ["shadowed-operator", "blank-page"], "{src:?}");
+        }
     }
 }

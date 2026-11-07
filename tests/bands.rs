@@ -751,6 +751,19 @@ fn lint_with_bands_reports_a_blank_page_once() {
     assert!(!err.contains("lint: clean"), "{err}");
 }
 
+/// A shadowed operator is reported once (band 0), and the allow comment
+/// silences it here as it does in a plain run (#1052).
+#[test]
+fn lint_with_bands_reports_a_shadowed_operator_once_and_honours_the_allow() {
+    let src = format!("/sub (hello) def {PAINTS}");
+    let (_ok, err) = bands_stderr("bands-lint-shadow", &["--lint"], &src);
+    assert_eq!(findings(&err, "shadowed-operator"), 1, "{err}");
+    let allowed = format!("%lint: allow shadowed-operator\n{src}");
+    let (_ok, err) = bands_stderr("bands-lint-shadow-allowed", &["--lint"], &allowed);
+    assert_eq!(findings(&err, "shadowed-operator"), 0, "{err}");
+    assert!(err.contains("lint: clean"), "{err}");
+}
+
 /// A band-aware program paints nothing in the top band, so band 0's own
 /// canvas is empty; the page is not blank, and lint must not say so.
 #[test]
