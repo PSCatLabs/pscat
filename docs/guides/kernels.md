@@ -190,6 +190,14 @@ clock between batches and every 256 loop trips, so a runaway `{ } loop`
 stops with a time error. The image buffer and the table snapshots count
 against `--max-memory`.
 
+**Known limitation under `--bands`.** Each band computes only the image rows
+that reach it, so an error that only a row outside the band would raise is
+not raised in that band. A plain render, and a render with `/interpret
+.kernelmode`, raise it in every band. The stitched picture differs only for
+a program whose per-pixel procedure errors *and* that catches the error
+(`stopped`) and draws differently afterwards. Without `stopped`, the render
+fails either way.
+
 ## GPU preview
 
 A pscat built with the `gpu` cargo feature (`cargo build --release
