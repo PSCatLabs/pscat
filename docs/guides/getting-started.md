@@ -408,6 +408,44 @@ directory. See [Fonts](fonts.md#font-packs-the-catalog-outside-a-checkout).
 `PSCAT_TRACE_RESOURCES=1 pscat ...` prints one line per file to stderr,
 naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).
 
+## Error reports
+
+An uncaught error prints one line on stderr and exits nonzero:
+
+```
+%%[ Error: undefined; OffendingCommand: bogus; Line: 3 ]%%
+```
+
+`Line` is a line of the program you ran. When the error happens while a file
+loaded with `run` is being read, the line is that file's, followed by the file's
+name as the program gave it, and the chain of open `run` frames, innermost first
+(`line N` is the top-level program):
+
+```
+%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); Run chain: inner3.ps:5 <- lib/util.ps:12 <- line 2 ]%%
+```
+
+A procedure keeps no record of where it was written, so an error inside one
+reports the line of the token being read when it ran: a procedure from a
+library, called from your program, reports your program's line that called it.
+`;` and `]` in a file name are shown as `%3B` and `%5D`. `--pstack-on-error`
+adds the operand stack to the report.
+
+## Which pscat is running
+
+`product` returns `(pscat)` and `version` the release, for example
+`(0.7.0)`. `revision` is the release as one integer, `major*10000 +
+minor*100 + patch` with any pre-release tag dropped (0.7.0 and 0.7.0-rc.4 are
+both 700), so a program can test for a release that has a feature it needs:
+
+```postscript
+/revision where { pop product (pscat) eq revision 700 ge and } { false } ifelse
+```
+
+`serialnumber` returns 0. Other interpreters answer these too (Ghostscript's
+`product` is `(GPL Ghostscript)`), so check `product` before reading `revision`
+as a pscat release.
+
 ## Where next
 
 - [Handwriting](handwriting.md): turn a string into a handwriting-style PNG.

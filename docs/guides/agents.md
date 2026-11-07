@@ -287,7 +287,8 @@ and `stack` truncate their own output well below that (1024 elements per array,
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
-PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
+PostScript errors `ps_error`, `offending_command`, `line`, and for an error in a
+`run` file its `file` and the `run_chain`; a program stopped by
 an interpreter limit has kind `limit_exceeded` and a `limit` field).
 
 **`out_path`** is resolved against the output root (relative paths start
