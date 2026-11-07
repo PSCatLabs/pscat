@@ -109,13 +109,44 @@ newpath 40 60 moveto 300 80 lineto
     and every other caller render as before).
   - With `/Tilt`, the stick lies on its side for broad underlines and
     shading: two bright edges over a granular face.
+  - `/Hand` (0 to 1) draws the path freehand instead of ruled. Each
+    stroke drifts slowly to either side, more on a longer stroke, and runs
+    straight on a little past its end. A closed outline ends a little past
+    or short of where it began. Strokes shorter than about four widths
+    (dots, ticks) are left as they are, and the drift fades in up to about
+    44 widths, so lettering from `sgpath` moves far less than a long line.
+    The wobble comes from the stroke's own seed, never your `rand`. The
+    default is 0, so existing boards render as before; 0.5 to 0.8 reads
+    as a steady hand.
+  - `/Corners /separate` cuts a path at its sharp corners, so a box is
+    drawn as four strokes. Each one lands and lifts, and with `/Hand` it
+    overshoots the corner a little.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
+- **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
+  (`sgpath` drawn with `dcchalk`). `/Align /left`, `/center` or `/right`
+  places the measured width on x. `/Fit w` sizes the text to fill exactly
+  w points, which suits a title. Any other key (`/Hand`, `/Touch`,
+  `/Strength`) goes to `dcchalk`. `/Width` defaults to 0.048 × `/Size`.
+- **`dcleader`** (`(left) (right) x1 x2 y opts`) is a menu, price-list or
+  contents row. The left string starts at x1 and the right one ends at
+  x2, with a dotted leader of chalk dots between them. The dots are
+  thinner and fainter than the lettering, and `/Leader << ... >>` styles
+  them. They sit on whole multiples of `/Pitch`, so stacked rows line
+  their dots up, as typeset leaders do.
+
+A sign's wood frame, nails and doodles are part of the piece itself, so
+draw them with `dcchalk` in your own PostScript. drychalk keeps to
+general tools.
 
 The defaults were tuned against the photographs in `docs/dev/design/drymedia/refs/`.
 Real chalk reads about halfway from the board to white, not white.
 `examples/drychalk_specimen.ps` shows `gallery/hundred_lines.ps`'s
 pen-stroke chalk before and after, on both boards.
+`examples/drychalk_hand.ps` shows a box, a line and a circle ruled
+and by hand, and a cafe menu set with `dctext` and `dcleader`:
+
+![The same box, diagonal and circle in chalk, ruled and by hand, over a cafe menu with a fitted title and dotted-leader price rows](../dev/design/drymedia/chalk_hand_specimen.png)
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
@@ -123,6 +154,9 @@ pen-stroke chalk before and after, on both boards.
 40 40 520 300 << /Surface /slate /Ghost { (old notes) 60 250 << /Size 30 >> sgpath } >> dcboard
 /white dcchalkcolor
 newpath (fresh notes) 60 180 << /Size 32 >> sgpath << /Width 1.8 >> dcchalk
+newpath 60 90 moveto 300 90 lineto 300 150 lineto 60 150 lineto closepath
+<< /Width 2 /Hand 0.7 /Corners /separate >> dcchalk
+(Espresso) (2.80) 360 520 120 << /Size 20 >> dcleader
 ```
 
 ## Crayon: drycrayon
