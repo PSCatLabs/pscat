@@ -26,6 +26,7 @@ pub(crate) mod exec;
 pub(crate) mod gpu;
 pub(crate) mod ir;
 pub(crate) mod opt;
+pub(crate) mod pure;
 pub(crate) mod regalloc;
 
 use std::cell::RefCell;
@@ -98,7 +99,9 @@ fn helper(name: &str) -> Option<Object> {
         ".kfstore" => (".kfstore", kfstore),
         ".kfrow" => (".kfrow", kfrow),
         ".kfnext" => (".kfnext", kfnext),
-        ".kfput" => (".kfput", kfput),
+        // Named as the whole-image driver's operator: an error it raises
+        // (a wrong component count) reads the same either way.
+        ".kfput" => (".kfstore", kfput),
         ".kfpaint" => (".kfpaint", kfpaint),
         _ => return None,
     };
@@ -280,23 +283,36 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                         // Some pixels would raise an error or took a branch
                         // that did not compile: the interpreter does those
                         // (and raises the error for real, at the same pixel).
-                        let whole = if !soft.is_empty() {
-                            Some("a branch that did not compile may have side effects")
-                        } else if k.rand.is_some() {
-                            Some("a retired pixel's rand may read state a compiled one left")
+                        // With `srand` (#1063), a retired pixel's
+                        // interpreted `rand` may read the state its compiled
+                        // predecessor left, which the interpreter never saw.
+                        // An uncompiled branch may have side effects (`store`,
+                        // `put`, `srand`) that pixels compiled from the
+                        // snapshot did not see: unless nothing the procedure
+                        // can reach has any (#1093), only the whole image in
+                        // the interpreter is exact. `soft` is read off the
+                        // finished kernel (#1092), and the scan is of the whole
+                        // procedure, so no verdict outlives a redone pass.
+                        let whole = if k.rand.is_some() {
+                            Some("a retired pixel's rand may read state a compiled one left".into())
+                        } else if !soft.is_empty() && rows != (0, a.h) {
+                            // Under `--bands` the rows outside this band are
+                            // not computed, so a soft pixel there, which can
+                            // still change the operand stack or raise an
+                            // error, would not run at all.
+                            Some("a branch that did not compile, under --bands".into())
+                        } else if !soft.is_empty() {
+                            side_effect(it, &a.proc).map(|why| {
+                                format!(
+                                    "a pixel that takes a branch that did not compile \
+                                     cannot run alone: {why}"
+                                )
+                            })
                         } else {
                             None
                         };
-                        retire_note(it, &k, &ran, whole, timing);
+                        retire_note(it, &k, &ran, whole.as_deref(), timing);
                         if whole.is_some() {
-                            // An uncompiled branch may have side effects
-                            // (`store`, `put`, `srand`) that pixels compiled
-                            // from the snapshot did not see: only the whole
-                            // image in the interpreter is exact then.
-                            // So with `srand` (#1063): a retired pixel's
-                            // interpreted `rand` may read the state its
-                            // compiled predecessor left, which the
-                            // interpreter never saw.
                             it.kernel_stats.2 += 1;
                             return fallback(it, a);
                         }
@@ -324,6 +340,20 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
     }
     it.kernel_stats.2 += 1;
     fallback(it, a)
+}
+
+/// Why the pixels a soft branch retires cannot be interpreted one by one
+/// after the compiled ones (`pure`), or `None` when they can.
+fn side_effect(it: &Interp, proc: &PsArray) -> Option<String> {
+    let t = crate::clock::Clock::mono_ns();
+    let why = pure::impurity(it, proc, it.operand_stack());
+    if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+        eprintln!(
+            "pscat: kernel side-effect scan: {:.2} ms",
+            (crate::clock::Clock::mono_ns() - t) as f64 / 1e6
+        );
+    }
+    why
 }
 
 /// `.kernelstats compiled partly interpreted`: how many `kernelimage`
@@ -712,14 +742,22 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
         Ok(c) if c.soft.is_empty() => (true, size_note(&c.kernel)),
         Ok(compile::Compiled {
             kernel: k, soft, ..
-        }) => (
-            true,
-            format!(
-                "{}; branches that run in the interpreter when taken: {}",
-                size_note(&k),
-                soft.join("; ")
-            ),
-        ),
+        }) => {
+            // The operands under this call stand in for those under the
+            // `kernelimage` call (a pixel can reach them).
+            let alone = match pure::impurity(it, proc, it.operand_stack()) {
+                None => "the pixels that take one run alone".to_string(),
+                Some(why) => format!("one taken runs the whole image there ({why})"),
+            };
+            (
+                true,
+                format!(
+                    "{}; branches that run in the interpreter when taken: {}; {alone}",
+                    size_note(&k),
+                    soft.join("; ")
+                ),
+            )
+        }
         Err(compile::Refusal::Not(why, _)) => (false, why),
         Err(compile::Refusal::Limit(e)) => return Err(e),
     };
@@ -809,8 +847,24 @@ fn fallback(it: &mut Interp, a: Args) -> Result<(), PsError> {
 
 /// The interpreter for some pixels only: per pixel, as in [`DRIVER`], in a
 /// fresh dict, in raster order; then the whole buffer is painted.
-const PIXEL_DRIVER: &str = "{ { KS .kfnext not { exit } if \
-    mark 3 1 roll KS /P get 8 dict begin exec end KS .kfput } loop \
+///
+/// A pixel sees the operand stack as [`DRIVER`] shows it (`i mark i j` on
+/// the caller's operands), and `.kfput` pops what `.kfstore` pops, so a
+/// pixel that reaches under its own operands (uncompiled code can) does the
+/// same in both. It also runs as many execution-stack frames deep as under
+/// `colorimage`'s data procedure and `for`, so the same recursion overflows
+/// in both: hence the `{ … loop KS pop } exec` (without the `KS pop` the
+/// extra procedure adds no frame, `loop` being its last element; the test
+/// `a_soft_pixel_runs_as_deep_in_the_execution_stack_as_the_interpreters`
+/// pins the depth). Two things
+/// only the whole image can say: a pixel that `exit`s out of the procedure
+/// (out of the `loop` here, which `.kfpaint` sees as a pixel `.kfput` never
+/// finished; out of the row's `for` in [`DRIVER`]), and one that changed the
+/// `i` under its mark ([`DRIVER`] stores the pixel in that column). Then the
+/// caller's operands and dictionary stack are put back and `.kfpaint` runs
+/// the whole image instead: a pure procedure (`pure`) changed nothing else.
+const PIXEL_DRIVER: &str = "{ { { KS .kfnext not { exit } if \
+    KS /P get 8 dict begin exec end KS .kfput } loop KS pop } exec \
   KS .kfpaint }";
 
 fn fallback_pixels(
@@ -827,6 +881,20 @@ fn fallback_pixels(
     ks.put("W".into(), Object::int(a.w as i64));
     ks.put("H".into(), Object::int(a.h as i64));
     ks.put("K".into(), Object::int(0));
+    ks.put("Busy".into(), Object::bool(false));
+    ks.put("Fail".into(), Object::bool(false));
+    ks.put("Depth".into(), Object::int(it.dict_stack_len() as i64));
+    // The caller's operands, to put back for the whole image.
+    it.check_alloc(
+        it.operand_stack()
+            .len()
+            .saturating_mul(std::mem::size_of::<Object>()),
+    )?;
+    let base = it.operand_stack().to_vec();
+    ks.put(
+        "Base".into(),
+        Object::lit(Value::Array(PsArray::from_vec(base))),
+    );
     it.check_alloc(
         pixels
             .len()
@@ -947,18 +1015,41 @@ fn kfnext(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Rangecheck);
     };
     ks.put("K".into(), Object::int(k as i64 + 1));
+    ks.put("Busy".into(), Object::bool(true));
+    // `i mark i j`, as `DRIVER` leaves them for the procedure.
+    it.push(i.clone());
+    it.push(Object::lit(Value::Mark));
     it.push(i);
     it.push(j);
     it.push(Object::bool(true));
     Ok(())
 }
 
-/// `mark c1 .. cn KS .kfput -`: the current pixel's components.
+/// The caller's operands and dictionary stack back as `fallback_pixels`
+/// found them, and `Fail` set, for `.kfpaint` to run the whole image.
+fn give_up(it: &mut Interp, ks: &mut Dict) -> Result<(), PsError> {
+    let Some(Value::Array(base)) = ks.get("Base").map(|o| o.value) else {
+        return Err(PsError::Typecheck);
+    };
+    let depth = uint_of(ks, "Depth")?;
+    while it.dict_stack_len() > depth {
+        it.pop_dict()?;
+    }
+    it.ostack.clear();
+    it.ostack.extend(base.snapshot());
+    ks.put("Fail".into(), Object::bool(true));
+    ks.put("Busy".into(), Object::bool(false));
+    Ok(())
+}
+
+/// `i mark c1 .. cn KS .kfput -`: the current pixel's components. It pops
+/// what `DRIVER`'s `.kfstore` pops, with the same errors. A pixel that left
+/// another column than its own where `.kfstore` reads it cannot be finished
+/// alone (see [`PIXEL_DRIVER`]): `give_up`, and no pixel after it runs.
 fn kfput(it: &mut Interp) -> Result<(), PsError> {
     let ks = state(it)?;
-    let ks = ks.borrow();
+    let mut ks = ks.borrow_mut();
     let n = uint_of(&ks, "N")?;
-    let comps = pop_components(it, n)?;
     let k = uint_of(&ks, "K")?
         .checked_sub(1)
         .ok_or(PsError::Rangecheck)?;
@@ -971,6 +1062,15 @@ fn kfput(it: &mut Interp) -> Result<(), PsError> {
         _ => Err(PsError::Typecheck),
     };
     let (i, j) = (at(2 * k)?, at(2 * k + 1)?);
+    let comps = pop_components(it, n)?;
+    let col = usize::try_from(it.pop_int()?).map_err(|_| PsError::Rangecheck)?;
+    ks.put("Busy".into(), Object::bool(false));
+    if col != i {
+        give_up(it, &mut ks)?;
+        let end = pix.len() / 2;
+        ks.put("K".into(), Object::int(end as i64));
+        return Ok(());
+    }
     let base = j
         .checked_mul(w)
         .and_then(|x| x.checked_add(i))
@@ -988,9 +1088,22 @@ fn kfput(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// `KS .kfpaint -`: paint the finished buffer.
+/// `KS .kfpaint -`: paint the finished buffer, or, when a pixel could not
+/// be finished alone (`Fail`, or `Busy`: it left the driver's loop with
+/// `exit`), run the whole image in the interpreter.
 fn kfpaint(it: &mut Interp) -> Result<(), PsError> {
     let ks = state(it)?;
+    let busy = matches!(
+        ks.borrow().get("Busy").map(|o| o.value),
+        Some(Value::Boolean(true))
+    );
+    if busy {
+        give_up(it, &mut ks.borrow_mut())?;
+    }
+    let failed = matches!(
+        ks.borrow().get("Fail").map(|o| o.value),
+        Some(Value::Boolean(true))
+    );
     let (a, bytes) = {
         let ks = ks.borrow();
         let Some(Value::String(buf)) = ks.get("Buf").map(|o| o.value) else {
@@ -1016,6 +1129,11 @@ fn kfpaint(it: &mut Interp) -> Result<(), PsError> {
     let need = a.w.checked_mul(a.h).and_then(|x| x.checked_mul(a.ncomp));
     if !matches!(a.ncomp, 1 | 3 | 4) || need != Some(bytes.len()) {
         return Err(PsError::Rangecheck);
+    }
+    if failed {
+        it.kernel_stats.1 -= 1;
+        it.kernel_stats.2 += 1;
+        return fallback(it, a);
     }
     paint(it, &a, bytes)
 }

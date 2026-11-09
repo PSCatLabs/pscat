@@ -660,12 +660,14 @@ const MAX_INLINE: usize = 48;
 /// Retire-site texts used more than once.
 const INDEX: &str = "a constant index out of range";
 const RESTORE: &str = "an rrand value given to srand under --sweep-seed (a restore)";
-/// Upper bound on the IR a kernel holds while it compiles (inline code and
-/// the subroutines it reaches), so a pathological program cannot make the
-/// compiler's memory large: an `Ins` is at most 128 bytes, so about 51 MB
-/// of instructions. The compiler's time is bounded by `MAX_WORK` and the
-/// program's time and step limits. 400k (#1091): fractal_clouds'
-/// evening_lake holds 299k before DCE, golden_coast 236k.
+/// Upper bound on the kernel being compiled: its inline code and the
+/// subroutines that code reaches, at most 128 bytes an `Ins` (about 51 MB
+/// at the cap). It does not bound everything a compile holds: subroutines
+/// made in discarded code are kept for reuse uncounted, and `/auto` keeps
+/// its first pass while it retries; that, and the compiler's time, are
+/// bounded by `MAX_WORK` and the program's time and step limits. 400k
+/// (#1091): fractal_clouds' evening_lake holds 299k before DCE,
+/// golden_coast 236k.
 const MAX_INSNS: usize = 400_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
@@ -802,7 +804,8 @@ pub(crate) fn compile(
     }
     // Too large inlined: compile again sharing the bodies called often,
     // the first attempt's work charged too. If that does no better (it is
-    // refused, or leaves more branches to the interpreter), the first
+    // refused, or still too large somewhere and leaves more branches to the
+    // interpreter), the first
     // attempt's kernel stands (#1091): sharing lets branches that were too
     // large compile, and their code can then push what follows over.
     let retry = compile_with(it, proc, ncomp, strict, ShareMode::Large, spent);
@@ -811,7 +814,13 @@ pub(crate) fn compile(
             first.work += n;
             Ok(first)
         }
-        (Ok(mut first), Ok(c)) if c.soft.len() > first.soft.len() => {
+        // (A shared kernel with no branch too large has done better even
+        // with more soft branches: those were inside a branch the first
+        // pass dropped whole.)
+        (Ok(mut first), Ok(c))
+            if c.soft.iter().any(|w| w.starts_with(TOO_LARGE))
+                && c.soft.len() > first.soft.len() =>
+        {
             first.work += c.work;
             Ok(first)
         }
@@ -1964,7 +1973,7 @@ impl<'a> Compiler<'a> {
                 roots.extend_from_slice(&self.subs[*c as usize].params);
             }
         });
-        super::opt::dce_body(self.nregs as usize, &mut body, &roots);
+        super::opt::dce_body(&mut body, &roots);
         let size = super::ir::count(&body);
         self.sub_size.push(size);
         self.charged.push(false);

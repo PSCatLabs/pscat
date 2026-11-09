@@ -143,9 +143,24 @@ pub(crate) fn dce(k: &mut Kernel) {
 /// [`dce`] on one subroutine's body, made as the compiler goes (#1091):
 /// what it leaves (`results`) is needed, as is what its instructions that
 /// are not pure read. The final [`dce`] can remove more (a result no call
-/// site reads), never less.
-pub(crate) fn dce_body(nregs: usize, body: &mut Vec<Ins>, results: &[u32]) {
-    dce_blocks(nregs, &mut [body], results);
+/// site reads), never less. Its registers are numbered densely first, so
+/// the cost is the body's size, not the kernel's register count.
+pub(crate) fn dce_body(body: &mut Vec<Ins>, results: &[u32]) {
+    let mut dense: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut orig: Vec<u32> = Vec::new();
+    super::ir::walk_regs_mut(body, &mut |r, _| {
+        *r = *dense.entry(*r).or_insert_with(|| {
+            orig.push(*r);
+            orig.len() as u32 - 1
+        });
+    });
+    // A result the body never mentions needs nothing in it.
+    let roots: Vec<u32> = results
+        .iter()
+        .filter_map(|r| dense.get(r).copied())
+        .collect();
+    dce_blocks(orig.len(), &mut [body], &roots);
+    super::ir::walk_regs_mut(body, &mut |r, _| *r = orig[*r as usize]);
 }
 
 fn dce_blocks(n: usize, blocks: &mut [&mut Vec<Ins>], roots: &[u32]) {
