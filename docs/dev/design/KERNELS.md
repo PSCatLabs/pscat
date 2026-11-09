@@ -233,6 +233,16 @@ is used with the same symbolic context.
   - `exit`s a loop around it;
   - takes a `[ ]` array or a dict not begun, which it could change in place;
   - leaves an array or local array it built where the caller can see it.
+- **Counting against the cap (#1091).** The cap counts the inline code
+  plus each subroutine that code can still call, once. A subroutine made
+  in code the compiler then discards (a branch rolled back to an abort,
+  an earlier round of a loop's type fixpoint) stops counting:
+  `rollback` and the fixpoint undo a trail of charged subroutines. It is
+  kept, so a later call can reuse it, and that call charges it, and what
+  it calls, again. The "too large" note gives the count and the cap.
+  `PSCAT_KERNEL_TIMING` prints the count next to the size the finished
+  code reaches, before DCE. A debug build checks that every subroutine
+  reached is counted.
 - **Executor and allocation.**
   - The executor runs a call like an `If` that every active lane takes.
   - The register allocator packs each body on its own, into a region past

@@ -345,6 +345,8 @@ struct Checkpoint {
     block: u32,
     code: usize,
     emitted: usize,
+    /// Length of `Compiler::charge_trail`.
+    charges: usize,
     trail: usize,
     loops: usize,
     /// Exits the innermost loop had recorded.
@@ -728,8 +730,22 @@ pub(crate) struct Compiler<'a> {
     sub_depth: Vec<usize>,
     /// Owner of each register, as `Kernel::owner` (missing: 0).
     owner: Vec<u32>,
-    /// Instructions moved into subroutines, counted against the cap.
+    /// Instructions ever moved into subroutines (it only grows): for
+    /// `seen`, a procedure's size as inlined.
+    sub_made: usize,
+    /// Instructions of the subroutines that the code compiled so far can
+    /// still reach, counted against the cap with `emitted` (#1091): a
+    /// subroutine made in code later discarded (a rolled-back branch, an
+    /// earlier round of a loop's fixpoint) is not, until a `Call` of it is
+    /// emitted again.
     sub_insns: usize,
+    /// Each subroutine's own size (`ir::count` of its body).
+    sub_size: Vec<usize>,
+    /// Which subroutines `sub_insns` counts.
+    charged: Vec<bool>,
+    /// The subroutines charged, in order: `rollback` and a loop's fixpoint
+    /// uncharge back to a mark.
+    charge_trail: Vec<u32>,
     /// Bodies being compiled for sharing, innermost last.
     frames: Vec<Frame>,
     defs: HashMap<ProcId, Vec<Rc<SubDef>>>,
@@ -828,7 +844,11 @@ fn compile_with(
         subs: Vec::new(),
         sub_depth: Vec::new(),
         owner: Vec::new(),
+        sub_made: 0,
         sub_insns: 0,
+        sub_size: Vec::new(),
+        charged: Vec::new(),
+        charge_trail: Vec::new(),
         frames: Vec::new(),
         defs: HashMap::new(),
         seen: HashMap::new(),
@@ -878,6 +898,7 @@ fn compile_with(
         } else {
             outputs = vec![Op::Imm(0.0); ncomp];
         }
+        c.size_accounting()?;
         let noise = c.uses_noise;
         let soft = std::mem::take(&mut c.soft);
         let mut owner = std::mem::take(&mut c.owner);
@@ -932,7 +953,74 @@ fn compile_with(
     }
 }
 
+/// `n` with its digits in groups of three: 200,000.
+fn grouped(n: usize) -> String {
+    let d = n.to_string();
+    let mut out = String::new();
+    for (k, ch) in d.chars().enumerate() {
+        if k > 0 && (d.len() - k).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 impl<'a> Compiler<'a> {
+    /// The finished kernel's size as counted against the cap, and as the
+    /// code really reaches it (before `prune_subs` and DCE): printed under
+    /// `PSCAT_KERNEL_TIMING`. In a debug build, every subroutine the code
+    /// reaches must be counted (#1091).
+    fn size_accounting(&self) -> CResult<()> {
+        let timing = std::env::var_os("PSCAT_KERNEL_TIMING").is_some();
+        if !timing && !cfg!(debug_assertions) {
+            return Ok(());
+        }
+        let mut reach = vec![false; self.subs.len()];
+        let mut todo = Vec::new();
+        let calls = |b: &[Ins], todo: &mut Vec<u32>| {
+            super::ir::walk(b, &mut |i| {
+                if let Ins::Call(c) = i {
+                    todo.push(*c);
+                }
+            })
+        };
+        calls(&self.code, &mut todo);
+        let mut sub_reach = 0;
+        while let Some(s) = todo.pop() {
+            let s = s as usize;
+            if reach[s] {
+                continue;
+            }
+            reach[s] = true;
+            sub_reach += self.sub_size[s];
+            calls(&self.subs[s].body, &mut todo);
+        }
+        if let Some(s) = (0..self.subs.len()).find(|&s| reach[s] && !self.charged[s]) {
+            return nc(format!(
+                "internal: subroutine {s} is called but not counted against the size cap"
+            ));
+        }
+        if timing {
+            let inline = super::ir::count(&self.code);
+            eprintln!(
+                "pscat: kernel size counted: {} ({} inline, {} in {} of {} subroutines), cap {}; \
+                 reachable: {} ({} inline, {} in {} subroutines)",
+                grouped(self.emitted + self.sub_insns),
+                grouped(self.emitted),
+                grouped(self.sub_insns),
+                self.charged.iter().filter(|&&c| c).count(),
+                self.subs.len(),
+                grouped(MAX_INSNS),
+                grouped(inline + sub_reach),
+                grouped(inline),
+                grouped(sub_reach),
+                reach.iter().filter(|&&r| r).count(),
+            );
+        }
+        Ok(())
+    }
+
     /// A new F64 register.
     fn reg(&mut self) -> Reg {
         self.kinds.push(false);
@@ -1084,11 +1172,54 @@ impl<'a> Compiler<'a> {
 
     fn emit(&mut self, i: Ins) -> CResult<()> {
         self.emitted += 1;
-        if self.emitted + self.sub_insns > MAX_INSNS {
-            return nc(TOO_LARGE);
-        }
+        self.check_size()?;
         self.code.push(i);
         Ok(())
+    }
+
+    /// The size cap: the instructions emitted (inline) and those of the
+    /// subroutines they can reach.
+    fn check_size(&self) -> CResult<()> {
+        let n = self.emitted + self.sub_insns;
+        if n > MAX_INSNS {
+            return nc(format!(
+                "{TOO_LARGE}: {} instructions counted ({} inline, {} in subroutines), cap {}",
+                grouped(n),
+                grouped(self.emitted),
+                grouped(self.sub_insns),
+                grouped(MAX_INSNS)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Count subroutine `id` against the cap, and the subroutines it calls,
+    /// each once, if they are not counted already.
+    fn charge_sub(&mut self, id: u32) -> CResult<()> {
+        let mut todo = vec![id];
+        while let Some(s) = todo.pop() {
+            let s = s as usize;
+            if self.charged[s] {
+                continue;
+            }
+            self.charged[s] = true;
+            self.charge_trail.push(s as u32);
+            self.sub_insns += self.sub_size[s];
+            super::ir::walk(&self.subs[s].body, &mut |i| {
+                if let Ins::Call(c) = i {
+                    todo.push(*c);
+                }
+            });
+        }
+        self.check_size()
+    }
+
+    /// Uncharge the subroutines charged since the trail had `mark` entries.
+    fn uncharge_to(&mut self, mark: usize) {
+        for s in self.charge_trail.drain(mark..) {
+            self.charged[s as usize] = false;
+            self.sub_insns -= self.sub_size[s as usize];
+        }
     }
 
     fn push(&mut self, v: SVal) {
@@ -1433,9 +1564,9 @@ impl<'a> Compiler<'a> {
         if candidate {
             return self.compile_shared(pid, p);
         }
-        let e0 = self.emitted + self.sub_insns;
+        let e0 = self.emitted + self.sub_made;
         let r = self.exec_proc(p);
-        let size = (self.emitted + self.sub_insns).saturating_sub(e0);
+        let size = (self.emitted + self.sub_made).saturating_sub(e0);
         let e = self.seen.entry(pid).or_insert(0);
         *e = (*e).max(size);
         r
@@ -1718,7 +1849,9 @@ impl<'a> Compiler<'a> {
         }
         let size = super::ir::count(&body);
         self.emitted = self.emitted.saturating_sub(size);
-        self.sub_insns += size;
+        self.sub_made += size;
+        self.sub_size.push(size);
+        self.charged.push(false);
         let mut depth = 0;
         super::ir::walk(&body, &mut |i| {
             if let Ins::Call(c) = i {
@@ -1731,6 +1864,9 @@ impl<'a> Compiler<'a> {
             params: params.iter().map(|p| p.1).collect(),
             results: results.clone(),
         });
+        // Its code moves from `emitted` to `sub_insns`: the call below
+        // reaches it.
+        self.charge_sub(sid)?;
         let def = Rc::new(SubDef {
             proc: p.clone(),
             id: sid,
@@ -1763,6 +1899,8 @@ impl<'a> Compiler<'a> {
     /// Call subroutine `d` with `site` as its inputs, and leave the state
     /// its body would have.
     fn call_sub(&mut self, d: &SubDef, site: &[Reg]) -> CResult<()> {
+        // A subroutine made in code since discarded counts again.
+        self.charge_sub(d.id)?;
         for &(k, p) in &d.params {
             self.emit(Ins::Mov(p, Op::R(site[k as usize])))?;
         }
@@ -2096,10 +2234,7 @@ impl<'a> Compiler<'a> {
             }
         }
         self.emitted += code.len() - before;
-        if self.emitted + self.sub_insns > MAX_INSNS {
-            return nc(TOO_LARGE);
-        }
-        Ok(())
+        self.check_size()
     }
 
     /// Join the states at the end of an `if`'s two branches.
@@ -2396,6 +2531,7 @@ impl<'a> Compiler<'a> {
             });
             let saved = std::mem::take(&mut self.code);
             let saved_emitted = self.emitted;
+            let saved_charges = self.charge_trail.len();
             let bid = self.block;
             self.block = self.fresh_block();
             let r = self.loop_prefix(&head).and_then(|_| self.exec_proc(&body));
@@ -2510,6 +2646,7 @@ impl<'a> Compiler<'a> {
             }
             if grew {
                 self.emitted = saved_emitted;
+                self.uncharge_to(saved_charges);
                 self.soft.truncate(soft);
                 continue;
             }
@@ -2540,6 +2677,7 @@ impl<'a> Compiler<'a> {
                 self.par_moves(back, &mut bcode)?;
                 if let LoopHead::For { c, inc, .. } = &head {
                     bcode.push(Ins::Bin(BinOp::Add, *c, Op::R(*c), *inc));
+                    self.emitted += 1;
                 }
             }
             self.emit(Ins::Loop(bcode))?;
@@ -2558,6 +2696,7 @@ impl<'a> Compiler<'a> {
             block: self.block,
             code: self.code.len(),
             emitted: self.emitted,
+            charges: self.charge_trail.len(),
             trail: self.trail.len(),
             loops: self.loops.len(),
             exits: self.loops.last().map_or(0, |l| l.exits.len()),
@@ -2570,6 +2709,7 @@ impl<'a> Compiler<'a> {
         self.block = cp.block;
         self.code.truncate(cp.code);
         self.emitted = cp.emitted;
+        self.uncharge_to(cp.charges);
         self.trail.truncate(cp.trail);
         self.loops.truncate(cp.loops);
         if let Some(l) = self.loops.last_mut() {

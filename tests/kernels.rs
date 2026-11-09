@@ -1119,6 +1119,30 @@ fn the_size_cap_counts_each_instruction_once() {
     same_small(prog);
 }
 
+#[test]
+fn the_too_large_note_says_the_count_and_the_cap() {
+    // About 240k instructions in one branch (#1091: the note says by how
+    // much a kernel is over).
+    let prog = "/never .kernelshare
+                /a { x 1.0000001 mul 0.37 add /x exch def } def
+                /b { a a a a a a a a a a } def /c { b b b b b b b b b b } def
+                /d { c c c c c c c c c c } def /e { d d d d d d d d d d } def
+                /pixel { /j exch def /i exch def /x i 0.1 mul def
+                  j 1 ge { e e e e e e e e e e e e } if
+                  x 0.001 mul dup floor sub j 0.25 mul i 0.2 mul } def";
+    let (ok, why) = compiles(prog);
+    assert!(ok, "{why}");
+    // (`repr` escapes the parentheses.)
+    let why = why.replace('\\', "");
+    assert!(
+        why.contains(
+            "the kernel is too large: 200,001 instructions counted \
+             (200,001 inline, 0 in subroutines), cap 200,000"
+        ),
+        "{why}"
+    );
+}
+
 /// `prog` matches the interpreter with procedure bodies shared as
 /// subroutines (`/all`: every named procedure; `/large`: the default rule
 /// once a kernel is too large), and inlined.
@@ -1875,4 +1899,73 @@ fn an_exit_compiled_outside_a_loop_is_not_reused_inside_one() {
             assert!(k == render("interpret", &prog), "/{mode}: renders differ");
         }
     }
+}
+
+/// `n` distinct procedures `{prefix}0..`, each `head` then a straight run
+/// of about `2 * k` instructions on the number on top of the stack.
+fn big_procs(prefix: &str, head: &str, n: usize, k: usize) -> String {
+    let run = "1.0000001 mul 0.37 add ".repeat(k);
+    (0..n)
+        .map(|p| format!("/{prefix}{p} {{ {head} {p} add {run} }} def\n"))
+        .collect()
+}
+
+#[test]
+fn subroutines_made_in_discarded_rounds_of_a_loop_are_not_counted() {
+    // #1091: `p0..p7` read `w` and `x`, each first an integer, then a real
+    // once its loop's type fixpoint widens it. Each round of the inner
+    // loop, in each round of the outer one, shares them anew under a new
+    // key (the first, both constant, folds away); only the last rounds'
+    // code is kept. The kept kernel is ~80k instructions, but the cap once
+    // counted every round's subroutines (~240k) and refused it.
+    let prog = format!(
+        "/all .kernelshare {}
+         /pixel {{ /j exch def /i exch def /w 0 def /acc 0.0 def
+           j 2 add {{
+             /x 0 def
+             i 3 add {{
+               p0 p1 add p2 add p3 add p4 add p5 add p6 add p7 add acc add /acc exch def
+               /x x 0.5 add def
+             }} repeat
+             /w w 0.25 add def
+           }} repeat
+           acc 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("p", "x w add", 8, 5000)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(!why.contains("interpreter"), "{why}");
+    let n: usize = why
+        .trim_matches('(')
+        .split(' ')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("a size");
+    assert!(n < 100_000, "{why}");
+}
+
+#[test]
+fn subroutines_made_in_rolled_back_branches_are_not_counted() {
+    // #1091: each branch shares a ~10k-instruction procedure, then fails
+    // (an `exit` with no loop) and is rolled back to an abort. Twenty-five
+    // of them once counted ~250k against the cap, so the later branches
+    // and the final calls (small) were refused as too large.
+    let mut tries = String::new();
+    for p in 0..25 {
+        tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
+    }
+    let prog = format!(
+        "/all .kernelshare {} {}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           {tries}
+           j 3 gt {{ x r0 /x exch def }} if
+           x r1 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("q", "", 25, 5000),
+        big_procs("r", "", 2, 50)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(!why.contains("too large"), "{why}");
+    // Only the 25 branches with an `exit` run in the interpreter.
+    assert_eq!(why.matches("exit outside a loop").count(), 25, "{why}");
 }
