@@ -6,7 +6,8 @@
 //!   instructions that cannot retire a lane go: one that can (a division,
 //!   an ordered compare, a checked integer op, a gather, a check) stands
 //!   for the error the interpreter would raise, so it stays even when its
-//!   value is unused.
+//!   value is unused. [`dce_body`] does the same for one subroutine as
+//!   it is made, so the size cap counts what it will keep.
 
 use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, UnOp};
 
@@ -125,8 +126,30 @@ fn pure(i: &Ins) -> bool {
 /// long chain of dead moves (merges of a name nothing reads, through many
 /// joins) goes at once.
 pub(crate) fn dce(k: &mut Kernel) {
+    let roots: Vec<u32> = k
+        .outputs
+        .iter()
+        .chain(&k.rand)
+        .filter_map(|o| match o {
+            Op::R(r) => Some(*r),
+            _ => None,
+        })
+        .collect();
+    let mut blocks: Vec<&mut Vec<Ins>> = vec![&mut k.body];
+    blocks.extend(k.subs.iter_mut().map(|s| &mut s.body));
+    dce_blocks(k.nregs, &mut blocks, &roots);
+}
+
+/// [`dce`] on one subroutine's body, made as the compiler goes (#1091):
+/// what it leaves (`results`) is needed, as is what its instructions that
+/// are not pure read. The final [`dce`] can remove more (a result no call
+/// site reads), never less.
+pub(crate) fn dce_body(nregs: usize, body: &mut Vec<Ins>, results: &[u32]) {
+    dce_blocks(nregs, &mut [body], results);
+}
+
+fn dce_blocks(n: usize, blocks: &mut [&mut Vec<Ins>], roots: &[u32]) {
     for _ in 0..8 {
-        let n = k.nregs;
         // For each register, what its pure definitions read.
         let mut deps: Vec<Vec<u32>> = vec![Vec::new(); n];
         let mut need = vec![false; n];
@@ -154,23 +177,20 @@ pub(crate) fn dce(k: &mut Kernel) {
                 }
             })
         };
-        scan(&k.body, &mut need, &mut work);
-        for s in &k.subs {
-            scan(&s.body, &mut need, &mut work);
+        for b in blocks.iter() {
+            scan(b, &mut need, &mut work);
         }
-        for o in k.outputs.iter().chain(&k.rand) {
-            if let Op::R(r) = o {
-                root(*r, &mut need, &mut work);
-            }
+        for &r in roots {
+            root(r, &mut need, &mut work);
         }
         while let Some(r) = work.pop() {
             for &x in &std::mem::take(&mut deps[r as usize]) {
                 root(x, &mut need, &mut work);
             }
         }
-        let mut changed = sweep(&mut k.body, &need);
-        for s in &mut k.subs {
-            changed |= sweep(&mut s.body, &need);
+        let mut changed = false;
+        for b in blocks.iter_mut() {
+            changed |= sweep(b, &need);
         }
         // Another round only if an emptied `If` freed its condition.
         if !changed {

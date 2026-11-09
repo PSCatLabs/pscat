@@ -656,9 +656,13 @@ struct SubDef {
 
 /// Procedure nesting allowed at compile time (inlining depth).
 const MAX_INLINE: usize = 48;
-/// Upper bound on emitted instructions, so a pathological program cannot
-/// make the compiler itself expensive.
-const MAX_INSNS: usize = 200_000;
+/// Upper bound on the IR a kernel holds while it compiles (inline code and
+/// the subroutines it reaches), so a pathological program cannot make the
+/// compiler's memory large: an `Ins` is at most 128 bytes, so about 51 MB
+/// of instructions. The compiler's time is bounded by `MAX_WORK` and the
+/// program's time and step limits. 400k (#1091): fractal_clouds'
+/// evening_lake holds 299k before DCE, golden_coast 236k.
+const MAX_INSNS: usize = 400_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
@@ -782,14 +786,26 @@ pub(crate) fn compile(
         return r;
     }
     // Too large inlined: compile again sharing the bodies called often,
-    // the first attempt's work charged too.
-    match compile_with(it, proc, ncomp, strict, ShareMode::Large, spent) {
-        Ok(mut c) => {
+    // the first attempt's work charged too. If that does no better (it is
+    // refused, or leaves more branches to the interpreter), the first
+    // attempt's kernel stands (#1091): sharing lets branches that were too
+    // large compile, and their code can then push what follows over.
+    let retry = compile_with(it, proc, ncomp, strict, ShareMode::Large, spent);
+    match (r, retry) {
+        (Ok(mut first), Err(Refusal::Not(_, n))) => {
+            first.work += n;
+            Ok(first)
+        }
+        (Ok(mut first), Ok(c)) if c.soft.len() > first.soft.len() => {
+            first.work += c.work;
+            Ok(first)
+        }
+        (_, Ok(mut c)) => {
             c.work += spent;
             Ok(c)
         }
-        Err(Refusal::Not(w, n)) => Err(Refusal::Not(w, n + spent)),
-        Err(e) => Err(e),
+        (_, Err(Refusal::Not(w, n))) => Err(Refusal::Not(w, n + spent)),
+        (_, Err(e)) => Err(e),
     }
 }
 
@@ -1852,9 +1868,20 @@ impl<'a> Compiler<'a> {
                 owner[r as usize] = sid + 1;
             }
         }
+        let made = super::ir::count(&body);
+        self.emitted = self.emitted.saturating_sub(made);
+        self.sub_made += made;
+        // What the cap counts is what the subroutine keeps (#1091): the
+        // code its results and its effects (a lane it can retire) need.
+        // The parameters of the subroutines it calls are read there.
+        let mut roots = results.clone();
+        super::ir::walk(&body, &mut |i| {
+            if let Ins::Call(c) = i {
+                roots.extend_from_slice(&self.subs[*c as usize].params);
+            }
+        });
+        super::opt::dce_body(self.nregs as usize, &mut body, &roots);
         let size = super::ir::count(&body);
-        self.emitted = self.emitted.saturating_sub(size);
-        self.sub_made += size;
         self.sub_size.push(size);
         self.charged.push(false);
         let mut depth = 0;

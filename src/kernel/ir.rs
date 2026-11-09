@@ -564,3 +564,13 @@ pub(crate) fn count(b: &[Ins]) -> usize {
         })
         .sum()
 }
+
+#[cfg(test)]
+mod size_tests {
+    /// The size cap's memory bound (`MAX_INSNS` in compile.rs) assumes
+    /// 128 bytes an instruction.
+    #[test]
+    fn an_instruction_is_at_most_128_bytes() {
+        assert!(std::mem::size_of::<super::Ins>() <= 128);
+    }
+}

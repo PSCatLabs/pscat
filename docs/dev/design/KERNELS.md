@@ -191,8 +191,8 @@ modelling error states.
 
 ### Large kernels: shared subroutines and dead code (#1064)
 
-Every call is inlined, so a big program can pass the 200,000-instruction
-cap. fractal_clouds' `alpine_forest` reaches about 166k instructions
+Every call is inlined, so a big program can pass the instruction cap
+(400,000 since #1091; 200,000 before). fractal_clouds' `alpine_forest` reaches about 166k instructions
 inlined (it hit the cap at 130k while a counting bug counted branch and
 loop bodies twice). Two passes shrink large kernels.
 
@@ -239,10 +239,17 @@ is used with the same symbolic context.
   an earlier round of a loop's type fixpoint) stops counting:
   `rollback` and the fixpoint undo a trail of charged subroutines. It is
   kept, so a later call can reuse it, and that call charges it, and what
-  it calls, again. The "too large" note gives the count and the cap.
-  `PSCAT_KERNEL_TIMING` prints the count next to the size the finished
-  code reaches, before DCE. A debug build checks that every subroutine
-  reached is counted.
+  it calls, again. A subroutine's body is pruned as it is made (DCE with
+  its results, and the parameters of what it calls, as roots), and the
+  cap counts what it keeps. The "too large" note gives the count and the
+  cap. `PSCAT_KERNEL_TIMING` prints the count next to the size the
+  finished code reaches, before the final DCE. A debug build checks that
+  every subroutine reached is counted.
+- **The cap** (`MAX_INSNS`, 400,000) bounds the IR a compile holds, not
+  its time: `MAX_WORK` and the program's time and step limits bound
+  that. An `Ins` is at most 128 bytes, so the cap is about 51 MB of
+  instructions. fractal_clouds' evening_lake holds 299k instructions
+  before the final DCE (82k after), golden_coast 236k (74k).
 - **Executor and allocation.**
   - The executor runs a call like an `If` that every active lane takes.
   - The register allocator packs each body on its own, into a region past
@@ -251,8 +258,12 @@ is used with the same symbolic context.
 
 When it applies: `.kernelshare` (`/auto` by default) shares only when the
 inlined kernel is too large. The compiler then compiles again, sharing every
-body of 48 instructions or more from its second call on. A kernel under
-the cap gets exactly the inlined IR, so the mountains frame is unchanged.
+body of 48 instructions or more from its second call on. If that kernel
+is refused, or leaves more branches to the interpreter than the inlined
+one, the inlined one stands (#1091): sharing lets branches that were
+too large compile, and their code can push what follows over the cap. A
+kernel under the cap gets exactly the inlined IR, so the mountains frame
+is unchanged.
 `/large` forces sharing, `/all` shares every named procedure from its
 first call (a test mode), and `/never` turns it off.
 
