@@ -2233,7 +2233,8 @@ impl<'a> Compiler<'a> {
                 code.push(mv(d, s, int));
             }
         }
-        self.emitted += code.len() - before;
+        // (Nested too: a conversion on some paths only is an `If`.)
+        self.emitted += super::ir::count(&code[before..]);
         self.check_size()
     }
 
