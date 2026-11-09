@@ -45,6 +45,9 @@ on:
       - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
+      - "plugin-chatgpt/**"
+      - "scripts/build_chatgpt_plugin.py"
+      - "scripts/test_build_chatgpt_plugin.py"
       - ".github/workflows/plugin.yml"
   pull_request:
     paths:
@@ -61,6 +64,9 @@ on:
       - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
+      - "plugin-chatgpt/**"
+      - "scripts/build_chatgpt_plugin.py"
+      - "scripts/test_build_chatgpt_plugin.py"
       - ".github/workflows/plugin.yml"
 
 permissions:
@@ -81,6 +87,8 @@ jobs:
         run: python3 scripts/plugin_check.py
       - name: Launcher tests (fake local release, no network)
         run: python3 scripts/test_plugin_launcher.py
+      - name: ChatGPT plugin ZIP tests (fake SHA256SUMS, no network)
+        run: python3 scripts/test_build_chatgpt_plugin.py
 
   install:
     runs-on: ubuntu-latest

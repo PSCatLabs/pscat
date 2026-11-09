@@ -44,6 +44,10 @@
 # release the pin names (#853).
 /plugin/scripts/            @jeromebanks
 /plugin/pscat-release       @jeromebanks
+# The ChatGPT-only skill tells an agent to download and run a binary, and
+# the build writes the hashes it checks against (#1089).
+/plugin-chatgpt/            @jeromebanks
+/scripts/build_chatgpt_plugin.py @jeromebanks
 # The MCP Registry entry (it names the command registry clients run).
 /server.json                @jeromebanks
 

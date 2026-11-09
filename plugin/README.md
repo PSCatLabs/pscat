@@ -309,3 +309,33 @@ Codex's portable `plugin.json` and `mcp.json` (the same launcher, as
 `${PLUGIN_ROOT}`). Each agent ignores the other's files. There is no
 top-level `bin/`: claude.ai and Cowork refuse to install a plugin that has
 one.
+
+## ChatGPT (trial)
+
+ChatGPT gets a ZIP built from this directory, not a marketplace. Build it
+from a checkout (no network once `SHA256SUMS` is downloaded):
+
+```sh
+gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS
+python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS                # dist/pscat-chatgpt-plugin-<version>.zip
+python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --skills-only  # the same without mcp.json
+```
+
+The ZIP holds this plugin's skills, launcher and portable manifests, without
+`hooks/`, this README or Claude Code's manifest, plus one ChatGPT-only skill
+from `plugin-chatgpt/`: `pscat-chatgpt-setup`. Claude Code, Codex and Cowork
+installs never see that skill. In a ChatGPT session in the cloud, where the
+plugin's local MCP server does not run and github.com is often unreachable,
+it installs the pinned release through the GitHub connector's
+workflow-artifact download, checks the archive against the release's SHA-256
+(the build writes the hashes into the skill), and renders with the
+`pscat` command line (#1089). It reports a missing prerequisite instead of
+falling back to another renderer.
+
+What is known so far (November 2026): OpenAI marks a plugin with a local
+(stdio) MCP server **Desktop only**, so the MCP tools need the ChatGPT desktop
+app; ChatGPT on the web and on mobile gets the skills only. The release
+workflow's artifacts expire 90 days after the release, so the setup skill
+works for a release that recent. Install steps for ChatGPT come once the
+trial has confirmed them; `notes/1089-chatgpt-github-artifact.md` has the
+details.

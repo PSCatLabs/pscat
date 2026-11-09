@@ -22,7 +22,7 @@
     "com.openai": {
       "interface": {
         "displayName": "pscat",
-        "shortDescription": "PostScript for precision and imagination: render documents and art to PNG, SVG and PDF.",
+        "shortDescription": "PostScript to PNG, SVG and PDF",
         "developerName": "Jerome Banks",
         "category": "Design",
         "websiteURL": "https://github.com/PSCatLabs/pscat",

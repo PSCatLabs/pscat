@@ -469,7 +469,83 @@ def check(root):
         else:
             check_plugin(root, plugin_dir, entry, version, errors)
     check_codex(root, version, errors)
+    check_chatgpt(root, errors)
     return errors
+
+
+# OpenAI's limits for extensions.com.openai.interface
+# (https://developers.openai.com/plugins/deploy/submission, checked 2026-11-08).
+OPENAI_TEXT_LIMITS = {"displayName": 30, "shortDescription": 30, "developerName": 80,
+                      "longDescription": 4000}
+OPENAI_PLACEHOLDERS = re.compile(r"PSCAT_RELEASE|PSCAT_VERSION|SHA256:[a-z0-9_]+-[a-z0-9_-]+")
+
+
+def _png_size(path):
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def check_chatgpt(root, errors):
+    """The ChatGPT plugin ZIP (#1089, scripts/build_chatgpt_plugin.py): OpenAI's
+    interface limits on plugin/plugin.json, and the ChatGPT-only skills in
+    plugin-chatgpt/, which get the same skill checks as plugin/ plus: only the
+    build's placeholders, no hand-written release tag or hash, and no skill name
+    that plugin/skills already uses."""
+    plugin_dir = os.path.join(root, "plugin")
+    manifest = os.path.join(plugin_dir, "plugin.json")
+    if os.path.isfile(manifest):
+        data = _load(manifest, errors) or {}
+        ui = data.get("extensions", {}).get("com.openai", {}).get("interface", {})
+        for key, limit in OPENAI_TEXT_LIMITS.items():
+            if isinstance(ui.get(key), str) and len(ui[key]) > limit:
+                errors.append(f"plugin/plugin.json: com.openai interface.{key} is "
+                              f"{len(ui[key])} characters; OpenAI allows {limit}")
+        prompts = ui.get("defaultPrompt")
+        prompts = [prompts] if isinstance(prompts, str) else prompts or []
+        if len(prompts) > 3 or any(len(p) > 128 for p in prompts):
+            errors.append("plugin/plugin.json: com.openai interface.defaultPrompt: at most 3 "
+                          "prompts of at most 128 characters each")
+        for key in ("logo", "composerIcon"):
+            rel = ui.get(key)
+            if not isinstance(rel, str):
+                continue
+            path = os.path.join(plugin_dir, rel)
+            if not rel.startswith("./") or not _inside(path, plugin_dir) or not os.path.isfile(path):
+                errors.append(f"plugin/plugin.json: com.openai interface.{key} {rel!r} must be "
+                              "a ./ path to a file in the plugin")
+                continue
+            size = _png_size(path) if rel.lower().endswith(".png") else None
+            if (size is None or size[0] != size[1] or not 48 <= size[0] <= 4096
+                    or os.path.getsize(path) > 5 * 1024 * 1024):
+                errors.append(f"plugin/plugin.json: com.openai interface.{key} {rel}: OpenAI "
+                              "wants a square PNG, 48 to 4096 pixels, at most 5 MiB")
+    extra = os.path.join(root, "plugin-chatgpt")
+    if not os.path.isdir(extra):
+        return
+    _check_no_symlinks(root, extra, errors)
+    _check_skills(extra, "plugin-chatgpt", errors)
+    _check_asset_paths(root, extra, errors)
+    extra_skills = os.path.join(extra, "skills")
+    for d in sorted(os.listdir(extra_skills)) if os.path.isdir(extra_skills) else []:
+        if os.path.isdir(os.path.join(plugin_dir, "skills", d)):
+            errors.append(f"plugin-chatgpt/skills/{d}: plugin/skills already has a skill of "
+                          "this name; the ZIP can hold only one")
+    for dirpath, _, filenames in sorted(os.walk(extra)):
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            where = os.path.relpath(path, root)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            for key in re.findall(r"\{\{([^{}]*)\}\}", text):
+                if not OPENAI_PLACEHOLDERS.fullmatch(key):
+                    errors.append(f"{where}: unknown placeholder {{{{{key}}}}}; the build "
+                                  "fills only PSCAT_RELEASE, PSCAT_VERSION and SHA256:<target>")
+            if re.search(r"\bv?\d+\.\d+\.\d+(-rc\.\d+)?\b", text) or re.search(r"\b[0-9a-f]{64}\b", text):
+                errors.append(f"{where}: names a release version or a SHA-256 by hand; use the "
+                              "build's placeholders so a version bump cannot leave it stale")
 
 
 def main(argv):
