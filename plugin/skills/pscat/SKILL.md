@@ -50,6 +50,8 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
+**PDF metadata and attachments (`pdfmark`).** With `--pdf` (or `pdf: true` in the browser build), the Distiller `pdfmark` operator works. `[ /Title (T) /Subject (S) /Keywords (k) /DOCINFO pdfmark` sets document info; a key you set wins over `%%Title:`/`%%For:`, `/Producer` stays pscat, and UTF-8 text is fine. To attach a file: `[ /_objdef {f1} /type /stream /OBJ pdfmark  [ {f1} (data) /PUT pdfmark  [ {f1} << /Subtype (text/plain) cvn >> /PUT pdfmark  [ /Name (x.txt) /FS << /Type /Filespec /F (x.txt) /EF << /F {f1} >> >> /EMBED pdfmark`. Write MIME subtypes with `(a/b) cvn` (a `#` in a PS name is literal). Data can be a string, a file opened with `file` (read roots apply; not in the browser build), or inline `currentfile /ASCIIHexDecode filter` data. On PNG/SVG/window output pdfmark only clears to the mark. `/ANN` (links), `/OUT` (bookmarks) and `{Catalog}`/`{ThisPage}` marks are ignored for now. Mark data is capped at 64 MiB per document. (Needs the pscat release that includes PR #1073.)
+
 Page size: `--page` always wins. Without it, a `<< /PageSize [w h] >>
 setpagedevice` in the program sets the page (other page-device keys are
 ignored with a warning). Without that, an EPSF file (first line
