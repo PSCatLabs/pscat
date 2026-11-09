@@ -409,7 +409,7 @@ fn each_reg(ins: &Ins, mut f: impl FnMut(Reg)) {
             each_op(a, &mut f);
             each_op(b, &mut f);
         }
-        Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => each_op(a, &mut f),
+        Ins::NeedInt(a) | Ins::Assert(a, _) | Ins::RowCheck(_, a) => each_op(a, &mut f),
         Ins::Gather {
             d,
             dtag,
@@ -451,7 +451,7 @@ fn each_reg(ins: &Ins, mut f: impl FnMut(Reg)) {
             }
             each_op(octtag, &mut f);
         }
-        Ins::LNew(_) | Ins::Break | Ins::Abort | Ins::If(..) | Ins::Loop(_) | Ins::Call(_) => {}
+        Ins::LNew(_) | Ins::Break | Ins::Abort(_) | Ins::If(..) | Ins::Loop(_) | Ins::Call(_) => {}
     }
 }
 
@@ -489,7 +489,7 @@ fn rename(b: &mut [Ins], map: &[u32]) {
                 mo(a);
                 mo(b);
             }
-            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => mo(a),
+            Ins::NeedInt(a) | Ins::Assert(a, _) | Ins::RowCheck(_, a) => mo(a),
             Ins::Gather {
                 d,
                 dtag,
@@ -539,7 +539,7 @@ fn rename(b: &mut [Ins], map: &[u32]) {
                 rename(e, map);
             }
             Ins::Loop(body) => rename(body, map),
-            Ins::LNew(_) | Ins::Break | Ins::Abort | Ins::Call(_) => {}
+            Ins::LNew(_) | Ins::Break | Ins::Abort(_) | Ins::Call(_) => {}
         }
     }
 }
@@ -562,6 +562,7 @@ mod tests {
             perm: [0; 256],
             subs: Vec::new(),
             owner: Vec::new(),
+            sites: vec![String::new()],
         }
     }
 
@@ -620,7 +621,7 @@ mod tests {
     fn only_unread_moves_and_conversions_are_dropped() {
         let body = vec![
             Ins::Mov(2, Op::R(0)), // read by the Assert: kept
-            Ins::Assert(Op::R(2)),
+            Ins::Assert(Op::R(2), 0),
             Ins::I2FExact(3, Op::R(1)), // feeds only 4, which nothing reads
             Ins::Mov(4, Op::R(3)),
             Ins::Loop(vec![Ins::MovI(5, 1), Ins::Break]), // 5 is unread
@@ -630,7 +631,7 @@ mod tests {
         drop_dead_moves(&mut k);
         assert_eq!(k.body.len(), 4, "{:?}", k.body);
         assert!(matches!(k.body[0], Ins::Mov(2, _)));
-        assert!(matches!(k.body[1], Ins::Assert(_)));
+        assert!(matches!(k.body[1], Ins::Assert(..)));
         assert!(matches!(&k.body[2], Ins::Loop(b) if matches!(b[..], [Ins::Break])));
         assert!(matches!(k.body[3], Ins::I2F(6, _)));
     }

@@ -14,11 +14,13 @@
 //! multiply-add and no cross-lane arithmetic. A lane that would raise a
 //! PostScript error (or takes a branch that did not compile) is retired
 //! (`Machine::kill`); the caller then runs those pixels through the
-//! interpreter, which raises the error for real.
+//! interpreter, which raises the error for real. Each retired lane is
+//! counted under its reason ([`Why`], or the `Abort`/`Assert` site), which
+//! costs nothing until a lane retires.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, TableKind, UnOp};
+use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
 
@@ -41,6 +43,132 @@ pub(crate) const INT_LIMIT_I: u64 = 1 << 53;
 const NULL_TAG: f64 = 2.0;
 
 type Lane = [f64; LANES];
+
+/// Why an instruction retired a lane, for the instructions whose reason
+/// is fixed by their kind and operator. `Abort` and `Assert` carry a site
+/// instead ([`Kernel::sites`]); a reason code is a `Why` below [`NWHY`],
+/// else `NWHY` plus a site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Why {
+    IntOverflow,
+    IntDivide,
+    IntNeg,
+    IntInexact,
+    CviRange,
+    DivZero,
+    CompareNan,
+    Atan00,
+    ExpUndefined,
+    SqrtNeg,
+    LnNonPos,
+    LogNonPos,
+    IntPast53,
+    NeedInt,
+    TableIndex,
+    TableNull,
+    RowBad,
+    LocalIndex,
+    LocalNull,
+    LocalPutIndex,
+    NoiseOperand,
+}
+
+/// How many [`Why`] reasons there are: site codes start here.
+pub(crate) const NWHY: u32 = Why::NoiseOperand as u32 + 1;
+
+impl Why {
+    pub(crate) fn text(self) -> &'static str {
+        match self {
+            Why::IntOverflow => {
+                "an integer add, sub or mul past 64 bits (the interpreter makes it a real)"
+            }
+            Why::IntDivide => "idiv or mod by zero (or of the most negative integer by -1)",
+            Why::IntNeg => {
+                "neg or abs of the most negative integer (the interpreter makes it a real)"
+            }
+            Why::IntInexact => {
+                "an integer past 2^53 converted where the value is integer on some lanes only"
+            }
+            Why::CviRange => "cvi of a value out of integer range",
+            Why::DivZero => "div by zero",
+            Why::CompareNan => "an ordered compare of NaN",
+            Why::Atan00 => "0 0 atan",
+            Why::ExpUndefined => "exp with an undefined result",
+            Why::SqrtNeg => "sqrt of a negative",
+            Why::LnNonPos => "ln of zero or less",
+            Why::LogNonPos => "log of zero or less",
+            Why::IntPast53 => "an integer result past 2^53",
+            Why::NeedInt => "a real where an integer is needed",
+            Why::TableIndex => "a table index out of range or not an integer",
+            Why::TableNull => "a table row that is null",
+            Why::RowBad => "an operation on a table row that is null or out of range",
+            Why::LocalIndex => "a local array index out of range or not an integer",
+            Why::LocalNull => "a null element of a local array",
+            Why::LocalPutIndex => "a put into a local array out of range or not an integer",
+            Why::NoiseOperand => "a noise operand out of range",
+        }
+    }
+
+    const ALL: [Why; NWHY as usize] = [
+        Why::IntOverflow,
+        Why::IntDivide,
+        Why::IntNeg,
+        Why::IntInexact,
+        Why::CviRange,
+        Why::DivZero,
+        Why::CompareNan,
+        Why::Atan00,
+        Why::ExpUndefined,
+        Why::SqrtNeg,
+        Why::LnNonPos,
+        Why::LogNonPos,
+        Why::IntPast53,
+        Why::NeedInt,
+        Why::TableIndex,
+        Why::TableNull,
+        Why::RowBad,
+        Why::LocalIndex,
+        Why::LocalNull,
+        Why::LocalPutIndex,
+        Why::NoiseOperand,
+    ];
+
+    /// The reason a failing `op` gives (`lane_bin`'s `None` cases).
+    pub(crate) fn bin(op: BinOp) -> Why {
+        match op {
+            BinOp::Div => Why::DivZero,
+            BinOp::Atan => Why::Atan00,
+            BinOp::Pow => Why::ExpUndefined,
+            _ => Why::CompareNan,
+        }
+    }
+
+    /// The reason a failing `op` gives (`lane_un`'s `None` cases).
+    pub(crate) fn un(op: UnOp) -> Why {
+        match op {
+            UnOp::Ln => Why::LnNonPos,
+            UnOp::Log => Why::LogNonPos,
+            _ => Why::SqrtNeg,
+        }
+    }
+}
+
+/// The text of reason code `code` in kernel `k`.
+pub(crate) fn why_text(k: &Kernel, code: usize) -> &str {
+    match Why::ALL.get(code) {
+        Some(w) => w.text(),
+        None => k
+            .sites
+            .get(code - NWHY as usize)
+            .map_or("an unknown reason", String::as_str),
+    }
+}
+
+/// The reason code of site `s`.
+#[inline]
+fn site(s: Site) -> u32 {
+    NWHY + s
+}
 
 /// Why a kernel run stopped early.
 #[derive(Debug, Clone, PartialEq)]
@@ -110,8 +238,9 @@ pub(crate) struct Machine<'k> {
     /// error (or took a branch that did not compile): their pixels are
     /// run by the interpreter afterwards.
     killed: u64,
-    /// Why the first lane was retired.
-    pub(crate) why: Option<&'static str>,
+    /// Lanes retired so far (every batch this machine ran), by reason code
+    /// (see [`Why`]).
+    pub(crate) retired: Vec<u64>,
 }
 
 impl<'k> Machine<'k> {
@@ -128,7 +257,7 @@ impl<'k> Machine<'k> {
             ctl,
             pending: 0,
             killed: 0,
-            why: None,
+            retired: vec![0; NWHY as usize + k.sites.len()],
         }
     }
 
@@ -177,13 +306,24 @@ impl<'k> Machine<'k> {
         (s >= 0).then_some(s)
     }
 
-    /// Retire `lanes` (see `killed`).
-    fn kill(&mut self, lanes: u64, why: &'static str) {
+    /// Retire `lanes` (see `killed`) for reason `code` (see [`Why`]).
+    #[inline]
+    fn kill(&mut self, lanes: u64, code: u32) {
         if lanes == 0 {
             return;
         }
+        self.kill_slow(lanes, code);
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn kill_slow(&mut self, lanes: u64, code: u32) {
+        // Every instruction runs only lanes not yet retired.
+        debug_assert_eq!(lanes & self.killed, 0);
         self.killed |= lanes;
-        self.why.get_or_insert(why);
+        if let Some(n) = self.retired.get_mut(code as usize) {
+            *n += u64::from(lanes.count_ones());
+        }
         for a in &mut self.alive {
             *a &= !lanes;
         }
@@ -278,10 +418,11 @@ impl<'k> Machine<'k> {
                         }
                     }
                     let bad = bad & mask;
-                    self.kill(
-                        bad,
-                        "an integer overflow (the interpreter makes it a real) or a zero divisor",
-                    );
+                    let why = match op {
+                        IBinOp::Add | IBinOp::Sub | IBinOp::Mul => Why::IntOverflow,
+                        _ => Why::IntDivide,
+                    };
+                    self.kill(bad, why as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::IUn(op, d, a) => {
@@ -294,7 +435,7 @@ impl<'k> Machine<'k> {
                         }
                     }
                     let bad = bad & mask;
-                    self.kill(bad, "an integer overflow (the interpreter makes it a real)");
+                    self.kill(bad, Why::IntNeg as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::I2F(d, a) => {
@@ -317,10 +458,7 @@ impl<'k> Machine<'k> {
                         }
                     }
                     let bad = bad & mask;
-                    self.kill(
-                        bad,
-                        "an integer past 2^53 where a value is integer on some lanes only",
-                    );
+                    self.kill(bad, Why::IntInexact as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::F2I(d, a) => {
@@ -333,23 +471,17 @@ impl<'k> Machine<'k> {
                         }
                     }
                     let bad = bad & mask;
-                    self.kill(bad, "cvi of a value out of integer range");
+                    self.kill(bad, Why::CviRange as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::Bin(op, d, a, b) => {
                     let (t, bad) = self.bin(*op, *a, *b, mask);
-                    self.kill(
-                        bad,
-                        "an arithmetic error (division by zero, NaN in a compare)",
-                    );
+                    self.kill(bad, Why::bin(*op) as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::Un(op, d, a) => {
                     let (t, bad) = self.un(*op, *a, mask);
-                    self.kill(
-                        bad,
-                        "a math error (sqrt of a negative, ln of zero or less, cvi out of range)",
-                    );
+                    self.kill(bad, Why::un(*op) as u32);
                     self.store(*d, &t, mask & !bad);
                 }
                 Ins::ForFin(d, c, inc, lim) => {
@@ -371,7 +503,7 @@ impl<'k> Machine<'k> {
                             bad |= 1 << l;
                         }
                     }
-                    self.kill(bad, "an integer past 2^53");
+                    self.kill(bad, Why::IntPast53 as u32);
                 }
                 Ins::NeedInt(tag) => {
                     let mut bad = 0;
@@ -380,19 +512,16 @@ impl<'k> Machine<'k> {
                             bad |= 1 << l;
                         }
                     }
-                    self.kill(bad, "a real where an integer is needed");
+                    self.kill(bad, Why::NeedInt as u32);
                 }
-                Ins::Assert(c) => {
+                Ins::Assert(c, s) => {
                     let mut bad = 0;
                     for l in 0..LANES {
                         if mask >> l & 1 != 0 && self.get(*c, l) == 0.0 {
                             bad |= 1 << l;
                         }
                     }
-                    self.kill(
-                        bad,
-                        "a name read where this pixel did not define it, or a bad repeat count",
-                    );
+                    self.kill(bad, site(*s));
                 }
                 Ins::Gather {
                     d,
@@ -407,6 +536,7 @@ impl<'k> Machine<'k> {
                     let mut t = [0.0; LANES];
                     let mut tt = [0.0; LANES];
                     let mut bad = 0u64;
+                    let mut null = 0u64;
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
@@ -421,7 +551,7 @@ impl<'k> Machine<'k> {
                             continue;
                         }
                         if tb.null_rows.get(r as usize).copied().unwrap_or(false) {
-                            bad |= 1 << l;
+                            null |= 1 << l;
                             continue;
                         }
                         let ix = r as usize * tb.cols + c as usize;
@@ -430,10 +560,9 @@ impl<'k> Machine<'k> {
                             tt[l] = tags[ix];
                         }
                     }
-                    self.kill(
-                        bad,
-                        "a table index out of range, not an integer, or a null row",
-                    );
+                    self.kill(bad, Why::TableIndex as u32);
+                    self.kill(null, Why::TableNull as u32);
+                    let bad = bad | null;
                     self.store(*d, &t, mask & !bad);
                     if let Some(dt) = dtag {
                         self.store(*dt, &tt, mask & !bad);
@@ -453,10 +582,7 @@ impl<'k> Machine<'k> {
                             bad |= 1 << l;
                         }
                     }
-                    self.kill(
-                        bad,
-                        "an operation on a table row that is null or out of range",
-                    );
+                    self.kill(bad, Why::RowBad as u32);
                 }
                 Ins::LNew(a) => {
                     let (vals, tags) = &mut self.larr[*a as usize];
@@ -479,6 +605,7 @@ impl<'k> Machine<'k> {
                     let mut t = [0.0; LANES];
                     let mut tt = [0.0; LANES];
                     let mut bad = 0u64;
+                    let mut null = 0u64;
                     {
                         let (vals, tags) = &self.larr[*arr as usize];
                         for l in 0..LANES {
@@ -493,14 +620,16 @@ impl<'k> Machine<'k> {
                             }
                             let i = i as usize;
                             if tags[i][l] == NULL_TAG {
-                                bad |= 1 << l;
+                                null |= 1 << l;
                                 continue;
                             }
                             t[l] = vals[i][l];
                             tt[l] = tags[i][l];
                         }
                     }
-                    self.kill(bad, "a local array index out of range, or a null element");
+                    self.kill(bad, Why::LocalIndex as u32);
+                    self.kill(null, Why::LocalNull as u32);
+                    let bad = bad | null;
                     self.store(*d, &t, mask & !bad);
                     self.store(*dtag, &tt, mask & !bad);
                 }
@@ -527,18 +656,19 @@ impl<'k> Machine<'k> {
                         vals[i as usize][l] = val;
                         tags[i as usize][l] = tag;
                     }
-                    self.kill(bad, "a local array index out of range");
+                    self.kill(bad, Why::LocalPutIndex as u32);
                 }
                 Ins::Noise { kind, d, a, octtag } => {
                     let mut outs = [[0.0; LANES]; 3];
                     let mut bad = 0u64;
+                    let mut real_oct = 0u64;
                     #[allow(clippy::needless_range_loop)] // lanes index three outputs
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
                         }
                         if kind.octaves() && self.get(*octtag, l) == 0.0 {
-                            bad |= 1 << l;
+                            real_oct |= 1 << l;
                             continue;
                         }
                         let mut args = [0.0; 6];
@@ -554,7 +684,9 @@ impl<'k> Machine<'k> {
                             Err(_) => bad |= 1 << l,
                         }
                     }
-                    self.kill(bad, "a noise operand out of range");
+                    self.kill(bad, Why::NoiseOperand as u32);
+                    self.kill(real_oct, Why::NeedInt as u32);
+                    let bad = bad | real_oct;
                     for (c, reg) in d.iter().enumerate().take(kind.outputs()) {
                         self.store(*reg, &outs[c], mask & !bad);
                     }
@@ -618,8 +750,8 @@ impl<'k> Machine<'k> {
                     }
                     return Ok(0);
                 }
-                Ins::Abort => {
-                    self.kill(mask, "a branch that did not compile, or a certain error");
+                Ins::Abort(s) => {
+                    self.kill(mask, site(*s));
                     return Ok(0);
                 }
             }

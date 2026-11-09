@@ -91,7 +91,7 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
             f(a, "CheckInt")?;
             f(b, "CheckInt")
         }
-        Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => f(a, "a check"),
+        Ins::NeedInt(a) | Ins::Assert(a, _) | Ins::RowCheck(_, a) => f(a, "a check"),
         Ins::Gather {
             d,
             dtag,
@@ -142,7 +142,7 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
             }
             Ok(())
         }
-        Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => Ok(()),
+        Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort(_) => Ok(()),
     };
     walk(&k.body, &mut g)?;
     for s in &k.subs {

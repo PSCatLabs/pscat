@@ -1966,8 +1966,10 @@ fn subroutines_made_in_rolled_back_branches_are_not_counted() {
     let (ok, why) = compiles(&prog);
     assert!(ok, "{why}");
     assert!(!why.contains("too large"), "{why}");
-    // Only the 25 branches with an `exit` run in the interpreter.
-    assert_eq!(why.matches("exit outside a loop").count(), 25, "{why}");
+    // Only the branches with an `exit` run in the interpreter (one note,
+    // the same reason for all 25).
+    let notes = why.split_once("when taken: ").map_or("", |n| n.1);
+    assert_eq!(notes, "exit outside a loop in the kernel)", "{why}");
 }
 
 #[test]
@@ -2017,4 +2019,162 @@ fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
     let why = why.replace('\\', "");
     assert!(!why.contains("shared subroutines"), "{why}");
     assert_eq!(why.matches("the kernel is too large").count(), 1, "{why}");
+}
+
+#[test]
+fn a_shared_body_reused_after_a_redone_loop_pass_keeps_its_uncompiled_branch() {
+    // #1092: `f`'s branch writes an outside array, so it does not compile.
+    // `f` is shared while the loop's first pass compiles; that pass is
+    // redone (`a` turns out to be carried), and the redone pass reuses the
+    // subroutine. The branch must still count as uncompiled, so the image
+    // runs wholly in the interpreter: pixels compiled from the snapshot
+    // would miss the earlier pixels' writes.
+    let prog = format!(
+        "/all .kernelshare {SHOW} /G [0] def
+         /f {{ j 3 lt {{ G 0 i put }} if }} def
+         /pixel {{ /j exch def /i exch def /a 0 def
+           0 1 j {{ pop f /a a 1 add def }} for
+           G 0 get a add 0.01 mul show3 }} def"
+    );
+    assert!(
+        render("auto", &prog) == render("interpret", &prog),
+        "renders differ"
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(why.contains("put into an outside array"), "{why}");
+}
+
+#[test]
+fn arrays_of_booleans_are_tables() {
+    // #1092: fractal_clouds' per-species flags (`FsSpPalm FcSp get { .. } if`).
+    let defs = "/A [true false false true true] def /B [false] def";
+    same(&format!(
+        "{defs} /pixel {{ /j exch def /i exch def
+           /k i j add 5 mod def
+           A k get {{ 0.2 }} {{ 0.7 }} ifelse
+           A k get not A 4 k sub get and {{ 1 }} {{ 0 }} ifelse
+           A k get B 0 get or A k get xor {{ 0.25 }} {{ 0.5 }} ifelse }} def"
+    ));
+    // Compared with a boolean and a number, as the interpreter does.
+    same(&format!(
+        "{defs} /pixel {{ /j exch def /i exch def /k i 5 mod def
+           A k get true eq {{ 1 }} {{ 0 }} ifelse
+           A k get 1 eq {{ 1 }} {{ 0 }} ifelse
+           A k get A k 1 add 5 mod get ne {{ 1 }} {{ 0 }} ifelse }} def"
+    ));
+    let (ok, why) = compiles(&format!(
+        "{defs} /pixel {{ /j exch def /i exch def A i 5 mod get {{ 1 }} {{ 0 }} ifelse dup dup }} def"
+    ));
+    assert!(ok, "{why}");
+    same_error(
+        &format!(
+            "{defs} /pixel {{ /j exch def /i exch def A i get {{ 1 }} {{ 0 }} ifelse dup dup }} def"
+        ),
+        "rangecheck",
+    );
+    same_error(
+        &format!(
+            "{defs} /pixel {{ /j exch def /i exch def A i 0.5 mul get {{ 1 }} {{ 0 }} ifelse dup dup }} def"
+        ),
+        "typecheck",
+    );
+    // Booleans mixed with numbers stay refused.
+    let (ok, _) =
+        compiles("/A [true 1] def /pixel { /j exch def /i exch def A i 2 mod get pop 0 0 0 } def");
+    assert!(!ok);
+}
+
+/// Run `src` with the CLI (`PSCAT_KERNEL_TIMING` set when `timing`): its
+/// stderr.
+fn cli_stderr(src: &str, timing: bool) -> String {
+    let dir = common::scratch_dir("kernel-retire");
+    let ps = dir.join("k.ps");
+    std::fs::write(&ps, src).expect("write");
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["--page", "20x2", "--png"])
+        .arg(dir.join("k.png"))
+        .arg(&ps);
+    if timing {
+        cmd.env("PSCAT_KERNEL_TIMING", "1");
+    } else {
+        cmd.env_remove("PSCAT_KERNEL_TIMING");
+    }
+    let out = common::wait_output(
+        cmd.stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+#[test]
+fn retired_pixels_are_counted_by_reason() {
+    // #1092: 3 pixels a row overflow an integer add (the interpreter makes
+    // it a real), 5 a row take a branch that does not compile.
+    let src = "/ov { i 3 lt { i 1 add 3037000500 mul dup mul pop } if } def
+        /sb { i 15 ge { gsave grestore } if } def
+        gsave 20 2 scale 20 2 [20 0 0 -2 0 2]
+        { /j exch def /i exch def ov sb i 20 div 0.5 0.5 } 3 kernelimage grestore showpage";
+    let ovf = "an integer add, sub or mul past 64 bits";
+    let soft =
+        "a branch that did not compile (the operator gsave is not in the kernel subset, in sb)";
+    let quiet = cli_stderr(src, false);
+    let notes: Vec<&str> = quiet
+        .lines()
+        .filter(|l| l.contains("pixels retired"))
+        .collect();
+    assert_eq!(notes.len(), 1, "{quiet}");
+    assert!(
+        notes[0].contains("16 pixels retired: 10 for ")
+            && notes[0].contains(soft)
+            && notes[0].contains("6 for 1 other reason")
+            && notes[0].contains("the whole image runs in the interpreter"),
+        "{quiet}"
+    );
+    assert!(!quiet.contains("kernel retired:"), "{quiet}");
+    let loud = cli_stderr(src, true);
+    assert!(
+        loud.contains(&format!("pscat: kernel retired: 10 pixels: {soft}")),
+        "{loud}"
+    );
+    assert!(
+        loud.contains(&format!("pscat: kernel retired: 6 pixels: {ovf}")),
+        "{loud}"
+    );
+}
+
+#[test]
+fn a_name_read_undefined_names_the_name_and_where() {
+    // #1092: pixels from i = 2 on read /x where they did not define it (the
+    // interpreter then raises `undefined`); the report says which name, in
+    // which procedure.
+    let src = "/f { i 2 lt { /x 1 def } if x } def
+        gsave 20 2 scale 20 2 [20 0 0 -2 0 2]
+        { /j exch def /i exch def f pop 0 0 0 } 3 kernelimage grestore showpage";
+    let err = cli_stderr(src, true);
+    assert!(
+        err.contains(
+            "pscat: kernel retired: 36 pixels: /x read where this pixel has not defined it, in f"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("undefined"), "{err}");
+}
+
+#[test]
+fn a_certain_error_names_its_operator() {
+    // #1092: a real given to an integer-only operator is a certain error,
+    // compiled as an abort; the report names the operator and procedure.
+    let src = "/g { i 1.5 mul 1 bitshift } def
+        gsave 20 2 scale 20 2 [20 0 0 -2 0 2]
+        { /j exch def /i exch def g pop 0 0 0 } 3 kernelimage grestore showpage";
+    let err = cli_stderr(src, true);
+    assert!(
+        err.contains(
+            "pscat: kernel retired: 40 pixels: a real where an integer is needed (bitshift), in g"
+        ),
+        "{err}"
+    );
 }

@@ -18,6 +18,8 @@
 //! put in a register with `MovI`.
 
 pub(crate) type Reg = u32;
+/// An index into [`Kernel::sites`].
+pub(crate) type Site = u32;
 
 /// An instruction operand: a register or an immediate.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -201,8 +203,9 @@ pub(crate) enum Ins {
     CheckInt(Op, Op),
     /// Abort where `tag` is 0 (a real where an integer is needed).
     NeedInt(Op),
-    /// Abort where the boolean operand is false.
-    Assert(Op),
+    /// Abort where the boolean operand is false. The site
+    /// ([`Kernel::sites`]) says what failed, for the retire report.
+    Assert(Op, Site),
     /// `d = table[row][col]` (and its integer tag into `dtag` when the
     /// table mixes integers and reals). Aborts where `row` or `col` is
     /// out of range or not an integer (per `rtag`/`ctag`).
@@ -253,8 +256,9 @@ pub(crate) enum Ins {
     Call(u32),
     /// Leave the innermost loop (the active lanes stop iterating).
     Break,
-    /// Every active lane would raise a PostScript error here.
-    Abort,
+    /// Every active lane would raise a PostScript error here, or took a
+    /// branch that did not compile: the site ([`Kernel::sites`]) says which.
+    Abort(Site),
 }
 
 impl Ins {
@@ -292,7 +296,7 @@ impl Ins {
                 rd(a, f);
                 rd(b, f);
             }
-            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => rd(a, f),
+            Ins::NeedInt(a) | Ins::Assert(a, _) | Ins::RowCheck(_, a) => rd(a, f),
             Ins::Gather {
                 d,
                 dtag,
@@ -335,7 +339,7 @@ impl Ins {
                 }
             }
             Ins::If(c, ..) => f(c, false),
-            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => {}
+            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort(_) => {}
         }
     }
 
@@ -372,7 +376,7 @@ impl Ins {
                 rd(a, f);
                 rd(b, f);
             }
-            Ins::NeedInt(a) | Ins::Assert(a) | Ins::RowCheck(_, a) => rd(a, f),
+            Ins::NeedInt(a) | Ins::Assert(a, _) | Ins::RowCheck(_, a) => rd(a, f),
             Ins::Gather {
                 d,
                 dtag,
@@ -415,7 +419,7 @@ impl Ins {
                 }
             }
             Ins::If(c, ..) => f(*c, false),
-            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort => {}
+            Ins::Loop(_) | Ins::Call(_) | Ins::LNew(_) | Ins::Break | Ins::Abort(_) => {}
         }
     }
 
@@ -482,6 +486,9 @@ pub(crate) struct Table {
     /// Built from strings (each row a string): `aload` of a row is a
     /// `typecheck`, as for any string.
     pub strings: bool,
+    /// A one-level array of booleans, held as 0 and 1 (`Real` kind): a
+    /// gather from it is a boolean, as a boolean register holds it.
+    pub bools: bool,
 }
 
 /// A table's elements: f64s, or bytes (a string: an image read with
@@ -545,6 +552,9 @@ pub(crate) struct Kernel {
     /// Sizes of the per-lane local arrays.
     pub larrays: Vec<usize>,
     pub perm: [u8; 256],
+    /// What each `Abort` or `Assert` site stands for, with the named
+    /// procedures it was compiled in: the report of why pixels retired.
+    pub sites: Vec<String>,
 }
 
 impl Kernel {
