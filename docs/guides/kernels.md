@@ -154,8 +154,15 @@ How it degrades:
 - **The whole procedure does not compile:** `kernelimage` runs it in the
   interpreter, with a one-line note on stderr saying why and in which
   procedures.
-- **One branch does not compile:** only the pixels that take it are
-  interpreted.
+- **One branch does not compile:** the pixels that take it are interpreted,
+  one by one after the compiled ones, when nothing the procedure can reach
+  changes what another pixel reads. That rules out writing into anything the
+  pixel did not make (`put`, `putinterval`, `astore`, `copy`, `store`,
+  `begin`), `srand` and `rand`, files and graphics, and turning data into
+  code (`cvx`, `load`). Any of those anywhere in reach, even in code the
+  pixels never run, and a pixel that takes such a branch sends the whole
+  image to the interpreter. The stderr note names what was found and where,
+  and `kernelcompile` says which of the two it will be.
 - **A pixel would raise an error** (a division by zero, a table index out of
   range) **or overflow a 64-bit integer:** only that pixel is interpreted. It
   then raises the real error, at the same pixel, or makes the real result.

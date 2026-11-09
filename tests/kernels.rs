@@ -1877,6 +1877,336 @@ fn an_exit_compiled_outside_a_loop_is_not_reused_inside_one() {
     }
 }
 
+// --- soft branches: per-pixel or whole-image fallback (#1093) ----------------
+
+/// One run of `src` on a 4x4 page in `mode`: the page or the error (its
+/// name and message), the operand stack left after it, and `.kernelstats`
+/// (finished compiled, partly interpreted, wholly interpreted).
+type SoftRun = (Result<Vec<u8>, String>, Vec<String>, [i64; 3]);
+
+fn soft_run(mode: &str, src: &str) -> SoftRun {
+    let mut it = Interp::with_page(4, 4).expect("page");
+    let r = it.run_str(&format!("/{mode} .kernelmode 4 4 scale\n{src}\nshowpage"));
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    it.run_str("clear .kernelstats").expect("stats");
+    let st = it.operand_stack();
+    let n = |k: usize| st[k].repr().parse::<i64>().expect("count");
+    let stats = [n(0), n(1), n(2)];
+    let out = match r {
+        Ok(()) => Ok(it.pages()[0].rgba8()),
+        Err(e) => Err(format!("{} ({e})", e.name())),
+    };
+    (out, stack, stats)
+}
+
+/// Assert `src` gives exactly what `/interpret` gives (page or error, and
+/// the operand stack after), and return how `/auto` ran it.
+#[track_caller]
+fn soft_same(src: &str) -> SoftRun {
+    let auto = soft_run("auto", src);
+    let interp = soft_run("interpret", src);
+    assert_eq!(auto.0, interp.0, "result\n{src}");
+    assert_eq!(auto.1, interp.1, "operand stack\n{src}");
+    auto
+}
+
+/// The procedure `{ /j exch def /i exch def <body> }` drawn as a 4x4 gray
+/// `kernelimage`, after `pre`.
+fn soft_prog(pre: &str, body: &str) -> String {
+    format!("{pre} 4 4 [4 0 0 -4 0 4] {{ /j exch def /i exch def {body} }} 1 kernelimage")
+}
+
+/// Pixels interpreted one by one after the compiled ones.
+const PER_PIXEL: [i64; 3] = [0, 1, 0];
+/// The whole image interpreted.
+const WHOLE: [i64; 3] = [0, 0, 1];
+
+#[test]
+fn a_pure_soft_branch_interprets_only_the_pixels_that_take_it() {
+    // `count` does not compile (it sees the whole operand stack), and
+    // neither does `5 dict length`; nothing here writes anything outside
+    // the pixel's own dictionary.
+    for body in [
+        "i 2 lt { count pop 0.5 } { i 0.25 mul } ifelse",
+        "/t T i get def i j add 3 gt { /k 5 dict length def t k mul 0.05 mul } { t 0.1 mul } ifelse",
+        "i 1 eq { /f { 0.5 mul } def count pop 0.3 } { /f { 0.9 mul } def 0.6 } ifelse f",
+        // Defines a name the compiled rest reads.
+        "/v 0.2 def j 2 ge { /v 5 dict length 0.1 mul def } if v i 0.1 mul add",
+        // Reads under its own operands (the caller's, below).
+        "j 1 eq { 3 index 0.01 mul } { 0.5 } ifelse",
+    ] {
+        let src = soft_prog("/T [3 1 4 1] def 1 2 3", body);
+        let (out, _, stats) = soft_same(&src);
+        assert!(out.is_ok(), "{out:?}\n{src}");
+        assert_eq!(stats, PER_PIXEL, "{src}");
+    }
+}
+
+#[test]
+fn a_soft_branch_with_side_effects_interprets_the_whole_image() {
+    // Each writes something a later compiled pixel reads (or would read)
+    // from the state `kernelimage` was called with.
+    for (pre, body) in [
+        // `store` into a global.
+        (
+            "/X 0 def",
+            "i 0 eq { /X X 1 add store } if X 0.1 mul i 0.1 mul add",
+        ),
+        // `put` into a global array.
+        (
+            "/G [0 0 0 0] def",
+            "i 0 eq { G j 7 put count pop } if G i get 0.1 mul",
+        ),
+        // `srand` (the global random state).
+        ("", "i 0 eq { count pop i j add srand } if 0.5"),
+        // `begin` on a global dict, a read only.
+        (
+            "/D 1 dict def D /q 0.5 put",
+            "i 0 eq { D begin q end count pop pop } if 0.25",
+        ),
+        // `def` into a global dict through `begin`.
+        (
+            "/D 1 dict def D /q 0.5 put",
+            "i 0 eq { D begin /q 0.1 def end } if D /q get",
+        ),
+        // A rebinding the compiled rest writes through: `buf` is a local
+        // array on the compiled paths, the global G after the branch.
+        (
+            "/G [0.5 0.5 0.5] def",
+            "/buf 3 array def i 0 eq { count pop /buf G def } if \
+             buf 0 0.1 put G 0 get",
+        ),
+        // A procedure reached as data, not by name.
+        (
+            "/G [0.5] def /Tab [ { G 0 0.9 put } ] def",
+            "i 0 eq { count pop Tab 0 get exec } if G 0 get",
+        ),
+        // A procedure the caller left under the call.
+        (
+            "/G [0.5] def { G 0 0.9 put }",
+            "i 0 eq j 0 eq and { count pop 2 index exec } if G 0 get",
+        ),
+    ] {
+        let src = soft_prog(pre, body);
+        let (_, _, stats) = soft_same(&src);
+        assert_eq!(stats, WHOLE, "{src}");
+    }
+}
+
+#[test]
+fn a_pixel_that_reaches_under_its_operands_does_what_the_interpreter_does() {
+    // Both drivers show the procedure `i mark i j` on the caller's
+    // operands. A change under them lasts the same way in both...
+    for body in [
+        "i 1 eq j 2 eq and { 4 -1 roll pop 9 4 1 roll } if i j add 0.1 mul",
+        "i 1 eq { 3 -1 roll 1 add 3 1 roll } if i j add 0.1 mul",
+    ] {
+        let src = soft_prog("41 42", body);
+        let (_, stack, stats) = soft_same(&src);
+        assert_eq!(stats, PER_PIXEL, "{src}");
+        assert!(
+            stack.len() == 2 && stack != ["41", "42"],
+            "{stack:?}\n{src}"
+        );
+    }
+    // ...but a pixel that changes the driver's own `i` (the column `DRIVER`
+    // stores it in) or leaves the procedure with `exit` (the row's `for` in
+    // `DRIVER`) is something only the whole image says.
+    for body in [
+        "i 1 eq j 2 eq and { exch pop 2 exch } if i j add 0.1 mul",
+        "i 1 eq j 2 eq and { exch pop 9 exch } if i j add 0.1 mul",
+        "i 1 eq j 2 eq and { count pop exit } if i j add 0.1 mul",
+    ] {
+        let src = soft_prog("41 42", body);
+        let (_, _, stats) = soft_same(&src);
+        assert_eq!(stats, WHOLE, "{src}");
+    }
+}
+
+#[test]
+fn errors_after_a_pure_soft_branch_are_the_interpreters() {
+    // The first error in raster order wins, whichever path met it: a
+    // compiled pixel's error retires it like a soft branch does.
+    for body in [
+        // The soft pixel (1, 0) errors before the compiled one (2, 1).
+        "i 1 eq j 0 eq and { count pop 1 0 div } if i 2 eq j 1 eq and { T 9 get } if 0.5",
+        // The compiled pixel (0, 0) errors before the soft one (3, 3).
+        "i 3 eq j 3 eq and { count pop 1 0 div } if i 0 eq j 0 eq and { T 9 get } if 0.5",
+        // A soft pixel with the wrong number of components.
+        "i 2 eq { count pop 0.5 } if 0.5",
+        // An error in the soft branch itself after it did some work.
+        "i 2 eq { /z 5 dict length def z -1 sqrt } if 0.5",
+        // The driver's mark gone: the components then run into the
+        // caller's operands, the same error from either driver.
+        "i 1 eq j 2 eq and { count pop cleartomark 0 } if 0.5",
+    ] {
+        let src = soft_prog("/T [1 2] def 7", body);
+        let (out, _, stats) = soft_same(&src);
+        assert!(out.is_err(), "{src}");
+        assert_eq!(stats, PER_PIXEL, "{src}");
+    }
+}
+
+#[test]
+fn a_soft_pixel_runs_as_deep_in_the_execution_stack_as_the_interpreters() {
+    // Found in review: a frame the per-pixel driver added made a pure pixel
+    // near the execution-stack limit overflow where `/interpret` did not.
+    let src = |d: u32| {
+        soft_prog(
+            "/f { dup 0 gt { 1 sub f 0 add } if } def",
+            &format!("i 0 eq {{ {d} f pop 0.5 }} {{ 0.2 }} ifelse"),
+        )
+    };
+    // The deepest recursion the reference survives, and one past it.
+    let mut d = 9000;
+    while soft_run("interpret", &src(d + 1)).0.is_ok() {
+        d += 1;
+        assert!(d < 20_000, "no execution-stack limit found");
+    }
+    for d in [d, d + 1] {
+        let (_, _, stats) = soft_same(&src(d));
+        assert_eq!(stats, PER_PIXEL, "depth {d}");
+    }
+}
+
+#[test]
+fn a_soft_branch_under_bands_runs_the_whole_image() {
+    // Found in review: under `--bands` a band computes only its own rows,
+    // so a soft pixel in another band's rows would not run at all; it can
+    // still change the operand stack (here) or raise an error.
+    for body in [
+        "i 0 eq j 0 eq and { count pop } if \
+         i 0 eq j 3 eq and { 99 3 1 roll 0.9 } { 0.4 } ifelse",
+        "i 0 eq j 0 eq and { count pop 0.9 } { j 3 eq i 3 eq and { 1 0 idiv } { 0.3 } ifelse } ifelse",
+    ] {
+        let src = |mode: &str| {
+            format!(
+                "/{mode} .kernelmode 4 4 scale {} \
+                 count 0 gt {{ 0 setgray 0 0 1 1 rectfill }} if showpage",
+                soft_prog("", body)
+            )
+        };
+        let dir = common::scratch_dir("kernels-soft-bands");
+        let run = |mode: &str| {
+            let ps = dir.join(format!("{mode}.ps"));
+            let png = dir.join(format!("{mode}.png"));
+            std::fs::write(&ps, src(mode)).expect("write");
+            let out = common::wait_output(
+                std::process::Command::new(BIN)
+                    .args(["--page", "4x4", "--bands", "4", "--png"])
+                    .arg(&png)
+                    .arg(&ps)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("spawn"),
+            );
+            let err = String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .filter(|l| l.contains("Error"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (out.status.success(), err, std::fs::read(&png).ok())
+        };
+        assert_eq!(run("auto"), run("interpret"), "{body}");
+    }
+}
+
+#[test]
+fn kernelcompile_says_whether_soft_pixels_run_alone() {
+    let (ok, why) = compiles(
+        "/pixel { /j exch def /i exch def i 2 lt { count pop } if i W div dup dup } bind def",
+    );
+    assert!(ok, "{why}");
+    assert!(why.contains("run alone"), "{why}");
+    let (ok, why) = compiles(
+        "/G [0] def /pixel { /j exch def /i exch def i 2 lt { G 0 i put } if i W div dup dup } bind def",
+    );
+    assert!(ok, "{why}");
+    assert!(why.contains("whole image") && why.contains("put"), "{why}");
+}
+
+/// A random program with a soft branch some pixels take, which writes
+/// state a later pixel reads (`Gx`, `Ga`, `Gb`, the random state) or not:
+/// and whether it is pure.
+fn soft_program(r: &mut Rng) -> (String, bool) {
+    const PURE: [&str; 4] = [
+        "count pop",
+        "/k 5 dict length def",
+        "count pop /v0 v0 1 add def",
+        "count pop Ga 1 get pop",
+    ];
+    const IMPURE: [&str; 4] = [
+        "/Gx Gx 1 add store",
+        "Ga 1 i put count pop",
+        "count pop i srand",
+        "count pop /Gb Ga def",
+    ];
+    let pure = r.below(2) == 0;
+    let snip = if pure {
+        PURE[r.below(4) as usize]
+    } else {
+        IMPURE[r.below(4) as usize]
+    };
+    let vars: Vec<String> = vec!["Gx".into(), "Ga 1 get".into(), "v0".into()];
+    let cond = format!("{} {} gt", expr(r, 2, &vars), expr(r, 1, &vars));
+    let out = expr(r, 3, &vars);
+    // Writes through the array the soft branch may have rebound.
+    let rest = if snip.contains("/Gb") {
+        "Gb 1 i put"
+    } else {
+        ""
+    };
+    let prog = format!(
+        "{SHOW} 5 noiseseed /Tbl [ 3 1.5 -2 7 0.25 9 4 4.5 ] def /Gx 0 def /Ga [1 2 3] def \
+         /Gb [0 0] def /pixel {{ /j exch def /i exch def /v0 i def \
+         {cond} {{ {snip} }} if {rest} {out} show3 }} bind def"
+    );
+    (prog, pure)
+}
+
+#[test]
+fn soft_branch_fuzz() {
+    let cases = if cfg!(debug_assertions) { 60 } else { 200 };
+    let mut r = Rng(0x5eed_1093);
+    let (mut alone, mut pure_cases, mut impure_alone) = (0, 0, 0);
+    for n in 0..cases {
+        let (prog, pure) = soft_program(&mut r);
+        let reference = render_sized("interpret", &prog, 33, 5);
+        let mut it = Interp::with_page(33, 5).expect("page");
+        let src = format!(
+            "/auto .kernelmode\n/W 33 def /H 5 def\n{prog}\n\
+             gsave W H scale W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage grestore showpage"
+        );
+        let k = match it.run_str(&src) {
+            Ok(()) => Ok(it.pages()[0].rgba8()),
+            Err(e) => Err(e.name().to_string()),
+        };
+        it.run_str("clear .kernelstats").expect("stats");
+        let partly = it.operand_stack()[1].repr() == "1";
+        assert!(
+            k == reference,
+            "case {n}: auto {:?} vs interpreted {:?}\n{prog}",
+            k.as_ref().err(),
+            reference.as_ref().err()
+        );
+        // (An impure one can still run per pixel when every pixel errors
+        // before any soft branch: then nothing compiled has one.)
+        pure_cases += usize::from(pure);
+        alone += usize::from(partly && pure);
+        impure_alone += usize::from(partly && !pure);
+    }
+    // The per-pixel path must really be exercised.
+    assert!(
+        alone * 3 >= pure_cases,
+        "only {alone} of {pure_cases} pure cases ran per pixel"
+    );
+    assert!(
+        impure_alone * 10 <= cases - pure_cases,
+        "{impure_alone} impure cases ran per pixel"
+    );
+}
+
 #[test]
 fn a_shared_body_reused_after_a_redone_loop_pass_keeps_its_uncompiled_branch() {
     // #1092: `f`'s branch writes an outside array, so it does not compile.
