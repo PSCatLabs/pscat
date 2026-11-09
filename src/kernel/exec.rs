@@ -82,7 +82,7 @@ impl Why {
             Why::IntOverflow => {
                 "an integer add, sub or mul past 64 bits (the interpreter makes it a real)"
             }
-            Why::IntDivide => "idiv or mod by zero",
+            Why::IntDivide => "idiv or mod by zero (or of the most negative integer by -1)",
             Why::IntNeg => {
                 "neg or abs of the most negative integer (the interpreter makes it a real)"
             }
@@ -661,13 +661,14 @@ impl<'k> Machine<'k> {
                 Ins::Noise { kind, d, a, octtag } => {
                     let mut outs = [[0.0; LANES]; 3];
                     let mut bad = 0u64;
+                    let mut real_oct = 0u64;
                     #[allow(clippy::needless_range_loop)] // lanes index three outputs
                     for l in 0..LANES {
                         if mask >> l & 1 == 0 {
                             continue;
                         }
                         if kind.octaves() && self.get(*octtag, l) == 0.0 {
-                            bad |= 1 << l;
+                            real_oct |= 1 << l;
                             continue;
                         }
                         let mut args = [0.0; 6];
@@ -684,6 +685,8 @@ impl<'k> Machine<'k> {
                         }
                     }
                     self.kill(bad, Why::NoiseOperand as u32);
+                    self.kill(real_oct, Why::NeedInt as u32);
+                    let bad = bad | real_oct;
                     for (c, reg) in d.iter().enumerate().take(kind.outputs()) {
                         self.store(*reg, &outs[c], mask & !bad);
                     }

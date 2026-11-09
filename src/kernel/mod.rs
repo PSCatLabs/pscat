@@ -648,7 +648,10 @@ fn retire_note(it: &mut Interp, k: &Kernel, ran: &Ran, whole: Option<&str>, timi
         return;
     };
     let top_text = exec::why_text(k, top);
-    if it.kernel_notes.insert(format!("retired {top_text}")) {
+    if it
+        .kernel_notes
+        .insert(format!("retired {top_text} {}", whole.is_some()))
+    {
         let rest = ran.why.len() - 1;
         let mut line = if rest == 0 {
             format!("pscat: kernelimage: {n} pixels retired: {top_text}")
