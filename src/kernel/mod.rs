@@ -280,15 +280,15 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                         // Some pixels would raise an error or took a branch
                         // that did not compile: the interpreter does those
                         // (and raises the error for real, at the same pixel).
-                        let why = ran.why.unwrap_or("an error");
-                        let note = format!("{} pixels: {why}", ran.pixels.len());
-                        if it.kernel_notes.insert(why.to_string()) {
-                            let line = format!(
-                                "pscat: kernelimage: {note}; those run in the interpreter\n"
-                            );
-                            let _ = it.write_stderr(line.as_bytes(), true);
-                        }
-                        if !soft.is_empty() || k.rand.is_some() {
+                        let whole = if !soft.is_empty() {
+                            Some("a branch that did not compile may have side effects")
+                        } else if k.rand.is_some() {
+                            Some("a retired pixel's rand may read state a compiled one left")
+                        } else {
+                            None
+                        };
+                        retire_note(it, &k, &ran, whole, timing);
+                        if whole.is_some() {
                             // An uncompiled branch may have side effects
                             // (`store`, `put`, `srand`) that pixels compiled
                             // from the snapshot did not see: only the whole
@@ -453,7 +453,7 @@ fn run(
         .collect();
     let queue = Mutex::new(rows.into_iter());
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
-    let retired: Mutex<Retired> = Mutex::new((Vec::new(), None));
+    let retired: Mutex<Retired> = Mutex::new((Vec::new(), Vec::new()));
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, ctl);
@@ -515,8 +515,11 @@ fn run(
         }
         if let Ok(mut rt) = retired.lock() {
             rt.0.extend(mine);
-            if rt.1.is_none() {
-                rt.1 = m.why;
+            if rt.1.len() < m.retired.len() {
+                rt.1.resize(m.retired.len(), 0);
+            }
+            for (a, b) in rt.1.iter_mut().zip(&m.retired) {
+                *a += b;
             }
         }
     };
@@ -539,7 +542,15 @@ fn run(
     {
         return Err(e);
     }
-    let (mut pixels, why) = retired.into_inner().unwrap_or_default();
+    let (mut pixels, counts) = retired.into_inner().unwrap_or_default();
+    // Most first; ties in reason order, so the report is deterministic.
+    let mut why: Vec<(u64, usize)> = counts
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, n)| n > 0)
+        .map(|(c, n)| (n, c))
+        .collect();
+    why.sort_by_key(|&(n, c)| (std::cmp::Reverse(n), c));
     // Raster order, so the interpreter meets an error at the pixel it
     // would have met it at.
     pixels.sort_unstable();
@@ -609,18 +620,62 @@ fn final_rand_state(
     r
 }
 
-/// Pixels (row, column) retired to the interpreter, and why the first was.
-type Retired = (Vec<(usize, usize)>, Option<&'static str>);
+/// Pixels (row, column) retired to the interpreter, and how many retired
+/// for each reason code (`exec::Why`).
+type Retired = (Vec<(usize, usize)>, Vec<u64>);
 
 /// A compiled run's result: the image, and the pixels (row, column) that
 /// left the compiled path, for the interpreter to finish.
 struct Ran {
     bytes: Vec<u8>,
     pixels: Vec<(usize, usize)>,
-    why: Option<&'static str>,
+    /// How many pixels retired for each reason code, most first.
+    why: Vec<(u64, usize)>,
     /// Per computed row that has a pixel that seeded (`srand`), the random
     /// state the last such pixel left, by row.
     seeds: Vec<(usize, i64)>,
+}
+
+/// Say why pixels of a compiled run retired to the interpreter: one note
+/// naming the commonest reason (once per reason), and under
+/// `PSCAT_KERNEL_TIMING` every reason with its count.
+///
+/// `whole` says why, when it is so, the whole image reruns in the
+/// interpreter rather than only the retired pixels.
+fn retire_note(it: &mut Interp, k: &Kernel, ran: &Ran, whole: Option<&str>, timing: bool) {
+    let n = ran.pixels.len();
+    let Some(&(top_n, top)) = ran.why.first() else {
+        return;
+    };
+    let top_text = exec::why_text(k, top);
+    if it.kernel_notes.insert(format!("retired {top_text}")) {
+        let rest = ran.why.len() - 1;
+        let mut line = if rest == 0 {
+            format!("pscat: kernelimage: {n} pixels retired: {top_text}")
+        } else {
+            let s = if rest == 1 { "" } else { "s" };
+            format!(
+                "pscat: kernelimage: {n} pixels retired: {top_n} for {top_text}, {} for \
+                 {rest} other reason{s} (PSCAT_KERNEL_TIMING=1 lists them)",
+                n as u64 - top_n
+            )
+        };
+        match whole {
+            Some(why) => line.push_str(&format!(
+                "; the whole image runs in the interpreter ({why})\n"
+            )),
+            None => line.push_str("; those run in the interpreter\n"),
+        }
+        let _ = it.write_stderr(line.as_bytes(), true);
+    }
+    if timing {
+        for &(c, code) in &ran.why {
+            eprintln!(
+                "pscat: kernel retired: {c} pixels: {}",
+                exec::why_text(k, code)
+            );
+        }
+    }
 }
 
 /// `proc ncomp kernelcompile bool string`: would `kernelimage` compile
