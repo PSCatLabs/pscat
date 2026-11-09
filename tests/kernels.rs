@@ -1099,14 +1099,14 @@ fn same_small(prog: &str) {
 
 #[test]
 fn the_size_cap_counts_each_instruction_once() {
-    // About 120k instructions, all at the top level of one branch. The
+    // About 240k instructions, all at the top level of one branch. The
     // count once added a branch's whole code again at its join (and a loop
-    // body's at its back edge), so this passed the 200k cap.
+    // body's at its back edge), so this passed the 400k cap.
     let prog = "/a { x 1.0000001 mul 0.37 add /x exch def } def
                 /b { a a a a a a a a a a } def /c { b b b b b b b b b b } def
                 /d { c c c c c c c c c c } def /e { d d d d d d d d d d } def
                 /pixel { /j exch def /i exch def /x i 0.1 mul def
-                  j 1 ge { e e e e e e } if
+                  j 1 ge { e e e e e e e e e e e e } if
                   3 { x 1.0001 mul /x exch def } repeat
                   x 0.001 mul dup floor sub j 0.25 mul i 0.2 mul } def";
     let (ok, why) = compiles(prog);
@@ -1115,8 +1115,32 @@ fn the_size_cap_counts_each_instruction_once() {
         .trim_matches(|c: char| !c.is_ascii_digit())
         .parse()
         .expect("a size");
-    assert!((110_000..200_000).contains(&n), "{why}");
+    assert!((220_000..400_000).contains(&n), "{why}");
     same_small(prog);
+}
+
+#[test]
+fn the_too_large_note_says_the_count_and_the_cap() {
+    // About 480k instructions in one branch (#1091: the note says by how
+    // much a kernel is over).
+    let prog = "/never .kernelshare
+                /a { x 1.0000001 mul 0.37 add /x exch def } def
+                /b { a a a a a a a a a a } def /c { b b b b b b b b b b } def
+                /d { c c c c c c c c c c } def /e { d d d d d d d d d d } def
+                /pixel { /j exch def /i exch def /x i 0.1 mul def
+                  j 1 ge { e e e e e e e e e e e e e e e e e e e e e e e e } if
+                  x 0.001 mul dup floor sub j 0.25 mul i 0.2 mul } def";
+    let (ok, why) = compiles(prog);
+    assert!(ok, "{why}");
+    // (`repr` escapes the parentheses.)
+    let why = why.replace('\\', "");
+    assert!(
+        why.contains(
+            "the kernel is too large: 400,001 instructions counted \
+             (400,001 inline, 0 in subroutines), cap 400,000"
+        ),
+        "{why}"
+    );
 }
 
 /// `prog` matches the interpreter with procedure bodies shared as
@@ -1875,6 +1899,178 @@ fn an_exit_compiled_outside_a_loop_is_not_reused_inside_one() {
             assert!(k == render("interpret", &prog), "/{mode}: renders differ");
         }
     }
+}
+
+/// `n` distinct procedures `{prefix}0..`, each `head` then a straight run
+/// of about `2 * k` instructions on the number on top of the stack.
+fn big_procs(prefix: &str, head: &str, n: usize, k: usize) -> String {
+    let run = "1.0000001 mul 0.37 add ".repeat(k);
+    (0..n)
+        .map(|p| format!("/{prefix}{p} {{ {head} {p} add {run} }} def\n"))
+        .collect()
+}
+
+#[test]
+fn subroutines_made_in_discarded_rounds_of_a_loop_are_not_counted() {
+    // #1091: `p0..p7` read `w` and `x`, each first an integer, then a real
+    // once its loop's type fixpoint widens it. Each round of the inner
+    // loop, in each round of the outer one, shares them anew under a new
+    // key (the first, both constant, folds away); only the last rounds'
+    // code is kept. The kept kernel is ~160k instructions, but the cap
+    // once counted every round's subroutines (~480k) and refused it.
+    let prog = format!(
+        "/all .kernelshare {}
+         /pixel {{ /j exch def /i exch def /w 0 def /acc 0.0 def
+           j 2 add {{
+             /x 0 def
+             i 3 add {{
+               p0 p1 add p2 add p3 add p4 add p5 add p6 add p7 add acc add /acc exch def
+               /x x 0.5 add def
+             }} repeat
+             /w w 0.25 add def
+           }} repeat
+           acc 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("p", "x w add", 8, 10_000)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(!why.contains("interpreter"), "{why}");
+    let n: usize = why
+        .trim_matches('(')
+        .split(' ')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("a size");
+    assert!(n < 200_000, "{why}");
+}
+
+#[test]
+fn subroutines_made_in_rolled_back_branches_are_not_counted() {
+    // #1091: each branch shares a ~20k-instruction procedure, then fails
+    // (an `exit` with no loop) and is rolled back to an abort. Twenty-five
+    // of them once counted ~500k against the cap, so the later branches
+    // and the final calls (small) were refused as too large.
+    let mut tries = String::new();
+    for p in 0..25 {
+        tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
+    }
+    let prog = format!(
+        "/all .kernelshare {} {}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           {tries}
+           j 3 gt {{ x r0 /x exch def }} if
+           x r1 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("q", "", 25, 10_000),
+        big_procs("r", "", 2, 50)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(!why.contains("too large"), "{why}");
+    // Only the branches with an `exit` run in the interpreter (one note,
+    // the same reason for all 25).
+    let notes = why.split_once("when taken: ").map_or("", |n| n.1);
+    let notes = notes.trim_end_matches(')');
+    let notes = notes.trim_end_matches("; the pixels that take one run alone");
+    assert_eq!(notes, "exit outside a loop in the kernel", "{why}");
+}
+
+#[test]
+fn a_subroutine_counts_what_it_keeps() {
+    // #1091: each `p` computes ~20k instructions it then drops. Shared,
+    // that dead code goes as each subroutine is made, so 25 of them (~500k
+    // as compiled) count a few instructions each, not the whole.
+    let run = "1.0000001 mul 0.37 add ".repeat(10_000);
+    let procs: String = (0..25)
+        .map(|p| format!("/p{p} {{ dup {run} pop {p} add 0.5 mul }} def\n"))
+        .collect();
+    let calls: String = (0..25).map(|p| format!("p{p} ")).collect();
+    let prog = format!(
+        "/all .kernelshare {procs}
+         /pixel {{ /j exch def /i exch def i j add 0.5 mul {calls}
+           0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def"
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(!why.contains("interpreter"), "{why}");
+    // The dead code computed by a shared body goes in a small kernel.
+    same(&format!(
+        "/all .kernelshare {SHOW} /q {{ dup 3 mul sin 2 add pop dup 1.5 mul exch 0.25 add }} def
+         /r {{ q add q mul }} def
+         /pixel {{ /j exch def /i exch def i r j r add i j add r add show3 }} def"
+    ));
+}
+
+#[test]
+fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
+    // #1091 review: 220 branches each share a different ~8k-instruction
+    // procedure, then fail (an `exit` with no loop). None of them counts
+    // against the kernel's size, but they are all kept (a later call could
+    // reuse one): ~1.8M made, past the 1.6M cap on what subroutines may
+    // hold. Past it the branches fail as too large; the image stays exact.
+    let unrolled = "16 { 16 { 16 { 1.0000001 mul 0.37 add } repeat } repeat } repeat";
+    let mut procs = String::new();
+    let mut tries = String::new();
+    for p in 0..220 {
+        procs += &format!("/q{p} {{ {p} add {unrolled} }} def\n");
+        tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
+    }
+    let prog = format!(
+        "/all .kernelshare {SHOW} {procs}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           {tries}
+           x show3 }} def"
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(
+        why.contains("instructions made in subroutines, cap 1,600,000"),
+        "{why}"
+    );
+    assert!(render("auto", &prog) == render("interpret", &prog));
+}
+
+#[test]
+fn a_shared_retry_with_more_branches_but_none_too_large_is_kept() {
+    // #1091 review: inlined, the whole branch (17 calls of a ~30k `s`) is
+    // one too-large abort. Shared it compiles, and only `u` and `v` (an
+    // `exit` with no loop) inside it abort: more soft branches, far fewer
+    // pixels in the interpreter. `/auto` must keep the shared kernel.
+    let calls = "s ".repeat(17);
+    let prog = format!(
+        "{}
+         /u {{ i 999 eq {{ exit }} if }} def /v {{ i 998 eq {{ exit }} if }} def
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           j 1 ge {{ x {calls} /x exch def u v }} if
+           x 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("s", "", 1, 15_000).replace("/s0 ", "/s ")
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(why.contains("shared subroutines"), "{why}");
+    assert!(!why.contains("too large"), "{why}");
+}
+
+#[test]
+fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
+    // #1091: inlined, the branch (17 calls of a ~30k-instruction `s`) is
+    // too large and becomes an abort; the rest, ~380k instructions called
+    // once each, fits. Shared, the branch fits (~60k), and the rest then
+    // goes over the cap: that kernel is refused. `/auto` keeps the first.
+    let calls = "s ".repeat(17);
+    let once: String = (0..19).map(|p| format!("t{p} ")).collect();
+    let prog = format!(
+        "{} {}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           j 1 ge {{ x {calls} /x exch def }} if
+           x {once} 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("s", "", 1, 15_000).replace("/s0 ", "/s "),
+        big_procs("t", "", 19, 10_000)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    let why = why.replace('\\', "");
+    assert!(!why.contains("shared subroutines"), "{why}");
+    assert_eq!(why.matches("the kernel is too large").count(), 1, "{why}");
 }
 
 // --- soft branches: per-pixel or whole-image fallback (#1093) ----------------
