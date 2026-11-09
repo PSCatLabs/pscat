@@ -28,9 +28,10 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::exec::{INT_LIMIT_I, IOut, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
+use super::exec::{INT_LIMIT_I, IOut, Why, lane_bin, lane_ibin, lane_iun, lane_un, real_to_int};
 use super::ir::{
-    BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Sub, Table, TableData, TableKind, UnOp,
+    BinOp, IBinOp, IUnOp, Ins, Kernel, NoiseKind, Op, Reg, Site, Sub, Table, TableData, TableKind,
+    UnOp,
 };
 use crate::interp::Interp;
 use crate::name::PsName;
@@ -656,6 +657,9 @@ struct SubDef {
 const MAX_INLINE: usize = 48;
 /// Upper bound on emitted instructions, so a pathological program cannot
 /// make the compiler itself expensive.
+/// Retire-site texts used more than once.
+const INDEX: &str = "a constant index out of range";
+const RESTORE: &str = "an rrand value given to srand under --sweep-seed (a restore)";
 const MAX_INSNS: usize = 200_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
@@ -703,6 +707,13 @@ pub(crate) struct Compiler<'a> {
     seeded: std::collections::HashSet<Reg>,
     /// The procedures being inlined, by name, for error messages.
     trail: Vec<String>,
+    /// The operator being compiled, for retire sites.
+    cur_op: &'static str,
+    /// What each `Abort`/`Assert` site stands for (`Kernel::sites`), and
+    /// each text's site, so a site repeated in a loop or a shared body is
+    /// stored once.
+    sites: Vec<String>,
+    site_ids: HashMap<String, Site>,
     /// `[ ]` arrays merged at a join: no longer to be changed.
     frozen: std::collections::HashSet<usize>,
     /// Weak references to the frozen arrays: a weak reference keeps the
@@ -718,8 +729,12 @@ pub(crate) struct Compiler<'a> {
     /// A limit fired while compiling: reported as that limit's error.
     pub(crate) limit: Option<crate::error::PsError>,
     /// Branches that did not compile and abort to the interpreter when a
-    /// lane takes them (why, for `kernelcompile`); with `strict`, refused.
-    pub(crate) soft: Vec<String>,
+    /// lane takes them: each one's `Abort` site, and why (for the notes and
+    /// `kernelcompile`); with `strict`, refused. The kernel's soft branches
+    /// are the ones whose site is still in its code (`soft_in`): a pass
+    /// that is redone or rolled back leaves entries here, and a shared body
+    /// compiled in such a pass can still be called afterwards (#1092).
+    soft: HashMap<Site, String>,
     strict: bool,
     share: ShareMode,
     /// Shared subroutines made so far (some may end up unused).
@@ -816,9 +831,12 @@ fn compile_with(
         uses_rand: false,
         seeded: std::collections::HashSet::new(),
         trail: Vec::new(),
+        cur_op: "",
+        sites: Vec::new(),
+        site_ids: HashMap::new(),
         frozen: std::collections::HashSet::new(),
         frozen_keep: Vec::new(),
-        soft: Vec::new(),
+        soft: HashMap::new(),
         strict,
         work: 0,
         deadline: it.remaining_budget().1,
@@ -879,7 +897,6 @@ fn compile_with(
             outputs = vec![Op::Imm(0.0); ncomp];
         }
         let noise = c.uses_noise;
-        let soft = std::mem::take(&mut c.soft);
         let mut owner = std::mem::take(&mut c.owner);
         owner.resize(c.nregs as usize, 0);
         let mut kernel = Kernel {
@@ -894,9 +911,11 @@ fn compile_with(
             tables: std::mem::take(&mut c.tables),
             larrays: std::mem::take(&mut c.larrays),
             perm: it.noise_perm,
+            sites: std::mem::take(&mut c.sites),
         };
         super::opt::prune_subs(&mut kernel);
         super::opt::dce(&mut kernel);
+        let soft = c.soft_in(&kernel);
         if cfg!(debug_assertions) {
             super::check::kinds(&kernel, &c.kinds)
                 .map_err(|e| NotCompilable(format!("internal: {e}")))?;
@@ -999,7 +1018,7 @@ impl<'a> Compiler<'a> {
         match t {
             NT::Int => Ok(Some(o)),
             NT::Real => {
-                self.abort_path()?;
+                self.abort_path("a real where an integer is needed")?;
                 Ok(None)
             }
             NT::Dyn(tag) => {
@@ -1045,7 +1064,7 @@ impl<'a> Compiler<'a> {
                         IBinOp::Add => fx + fy,
                         IBinOp::Sub => fx - fy,
                         IBinOp::Mul => fx * fy,
-                        _ => return self.abort_path(),
+                        _ => return self.abort_path(Why::IntDivide.text()),
                     };
                     self.push_num(Op::Imm(r), NT::Real);
                     Ok(())
@@ -1254,11 +1273,71 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Mark the current path dead because every lane on it errors.
-    fn abort_path(&mut self) -> CResult<()> {
-        self.emit(Ins::Abort)?;
+    /// Mark the current path dead because every lane on it errors (`what`
+    /// says how, for the retire report).
+    fn abort_path(&mut self, what: &str) -> CResult<()> {
+        let s = self.site(what);
+        self.abort_at(s)
+    }
+
+    fn abort_at(&mut self, s: Site) -> CResult<()> {
+        self.emit(Ins::Abort(s))?;
         self.st.dead = true;
         Ok(())
+    }
+
+    /// Retire the lanes where `c` is false (`what` says what that means).
+    fn assert(&mut self, c: Op, what: &str) -> CResult<()> {
+        let s = self.site(what);
+        self.emit(Ins::Assert(c, s))
+    }
+
+    /// The retire site for `what` here: with the operator being compiled
+    /// and the innermost named procedures being inlined.
+    fn site(&mut self, what: &str) -> Site {
+        let t = &self.trail;
+        let at = t[t.len().saturating_sub(3)..].join(" > ");
+        let mut text = what.to_string();
+        if !self.cur_op.is_empty() {
+            text.push_str(" (");
+            text.push_str(self.cur_op);
+            text.push(')');
+        }
+        if !at.is_empty() {
+            text.push_str(", in ");
+            text.push_str(&at);
+        }
+        self.site_text(text)
+    }
+
+    /// Why each branch of `k` that did not compile did not, in the order
+    /// the branches were met.
+    fn soft_in(&self, k: &Kernel) -> Vec<String> {
+        let mut at = std::collections::BTreeSet::new();
+        let mut see = |i: &Ins| {
+            if let Ins::Abort(s) = i
+                && self.soft.contains_key(s)
+            {
+                at.insert(*s);
+            }
+        };
+        super::ir::walk(&k.body, &mut see);
+        for sub in &k.subs {
+            super::ir::walk(&sub.body, &mut see);
+        }
+        at.iter()
+            .filter_map(|s| self.soft.get(s).cloned())
+            .collect()
+    }
+
+    fn site_text(&mut self, text: String) -> Site {
+        if let Some(&s) = self.site_ids.get(&text) {
+            return s;
+        }
+        let s = self.sites.len() as Site;
+        self.sites.push(text.clone());
+        self.site_ids.insert(text, s);
+        s
     }
 
     // --- execution --------------------------------------------------------
@@ -1388,7 +1467,12 @@ impl<'a> Compiler<'a> {
     /// Read a partly defined name: abort the lanes where it is undefined;
     /// past here it is defined on this path.
     fn read_partial(&mut self, n: &PsName, v: SVal, flag: Reg, uid: u32) -> CResult<SVal> {
-        self.emit(Ins::Assert(Op::R(flag)))?;
+        // A name read is not part of the operator being compiled (that is
+        // the `if` or loop around it, if any).
+        let op = std::mem::take(&mut self.cur_op);
+        let s = self.site(&format!("/{n} read where this pixel has not defined it"));
+        self.cur_op = op;
+        self.emit(Ins::Assert(Op::R(flag), s))?;
         if let Some(s) = self.st.scopes.iter_mut().find(|s| s.uid == uid) {
             s.set(n.id(), Binding::Val(v.clone()));
         }
@@ -2343,12 +2427,14 @@ impl<'a> Compiler<'a> {
                 let t = &self.trail;
                 let at = t[t.len().saturating_sub(3)..].join(" > ");
                 self.rollback(cp);
-                self.soft.push(if at.is_empty() {
+                let why = if at.is_empty() {
                     why
                 } else {
                     format!("{why}, in {at}")
-                });
-                self.abort_path()
+                };
+                let s = self.site_text(format!("a branch that did not compile ({why})"));
+                self.soft.insert(s, why);
+                self.abort_at(s)
             }
             Err(e) => Err(e),
         }
@@ -2380,11 +2466,11 @@ impl<'a> Compiler<'a> {
         let mut carried: Vec<Carried> = Vec::new();
         let mut maybe: Vec<Slot> = Vec::new();
         for _pass in 0..12 {
-            // Branches a pass gave up on: forgotten if the pass is redone.
-            // On the first pass a name the body defines is not bound yet, so
-            // a read of it before the def (`k 0 gt { hx } if`) gives up
-            // where the next pass, with the name carried, compiles it.
-            let soft = self.soft.len();
+            // Branches a pass gave up on are forgotten if the pass is
+            // redone, with its code (`soft_in`). On the first pass a name the
+            // body defines is not bound yet, so a read of it before the def
+            // (`k 0 gt { hx } if`) gives up where the next pass, with the
+            // name carried, compiles it.
             let hstate = Self::with_carried(&entry, &carried, &maybe);
             self.st = hstate.clone();
             self.loops.push(LoopCtx {
@@ -2510,7 +2596,6 @@ impl<'a> Compiler<'a> {
             }
             if grew {
                 self.emitted = saved_emitted;
-                self.soft.truncate(soft);
                 continue;
             }
             if ctx.mismatch {
@@ -2758,7 +2843,7 @@ impl<'a> Compiler<'a> {
         };
         if let (Op::Imm(x), Op::Imm(y), NT::Real) = (a, b, rt) {
             let Some(r) = lane_bin(op, x, y) else {
-                return self.abort_path();
+                return self.abort_path(Why::bin(op).text());
             };
             self.push_num(Op::Imm(r), rt);
             return Ok(());
@@ -2802,7 +2887,7 @@ impl<'a> Compiler<'a> {
                     self.push(out(Op::Imm(r)));
                     Ok(())
                 }
-                None => self.abort_path(),
+                None => self.abort_path(Why::bin(op).text()),
             };
         }
         let d = self.reg();
@@ -2818,7 +2903,7 @@ impl<'a> Compiler<'a> {
                     self.push(out(Op::Imm(r)));
                     Ok(())
                 }
-                None => self.abort_path(),
+                None => self.abort_path(Why::un(op).text()),
             };
         }
         let d = self.reg();
@@ -2832,7 +2917,7 @@ impl<'a> Compiler<'a> {
         match t {
             NT::Int => Ok(true),
             NT::Real => {
-                self.abort_path()?;
+                self.abort_path("a real where an integer is needed")?;
                 Ok(false)
             }
             NT::Dyn(r) => {
@@ -2845,6 +2930,13 @@ impl<'a> Compiler<'a> {
     // --- operators --------------------------------------------------------
 
     fn apply(&mut self, op: &Operator) -> CResult<()> {
+        let prev = std::mem::replace(&mut self.cur_op, op.name);
+        let r = self.apply_op(op);
+        self.cur_op = prev;
+        r
+    }
+
+    fn apply_op(&mut self, op: &Operator) -> CResult<()> {
         let name = op.name;
         let real = |o: Op| SVal::Num(o, NT::Real);
         let boolean = SVal::Bool;
@@ -3010,7 +3102,7 @@ impl<'a> Compiler<'a> {
                     (NT::Int, _) => self.push_num(a, t),
                     (_, Op::Imm(x)) => match real_to_int(x) {
                         Some(v) => self.push_int(v)?,
-                        None => self.abort_path()?,
+                        None => self.abort_path(Why::CviRange.text())?,
                     },
                     _ => {
                         let d = self.ireg();
@@ -3182,7 +3274,7 @@ impl<'a> Compiler<'a> {
                 if let Op::Imm(v) = n
                     && v < 0.0
                 {
-                    return self.abort_path();
+                    return self.abort_path("a negative repeat count");
                 }
                 let trips = match n {
                     Op::Imm(v) if v as usize <= UNROLL_MAX => Some(vec![None; v as usize]),
@@ -3192,7 +3284,7 @@ impl<'a> Compiler<'a> {
                     let n = c.as_f(n, t)?;
                     let ok = c.reg();
                     c.emit(Ins::Bin(BinOp::Ge, ok, n, Op::Imm(0.0)))?;
-                    c.emit(Ins::Assert(Op::R(ok)))?;
+                    c.assert(Op::R(ok), "a negative repeat count")?;
                     let k = c.reg();
                     c.emit(Ins::Mov(k, n))?;
                     c.compile_loop(LoopHead::Repeat { k }, body)
@@ -3323,7 +3415,7 @@ impl<'a> Compiler<'a> {
             "dict" => {
                 let n = self.pop_const_int("dict's size")?;
                 if n < 0 {
-                    return self.abort_path();
+                    return self.abort_path("a negative size");
                 }
                 self.next_uid += 1;
                 let id = self.next_uid;
@@ -3359,7 +3451,7 @@ impl<'a> Compiler<'a> {
             "array" => {
                 let n = self.pop_const_int("array's size")?;
                 if n < 0 {
-                    return self.abort_path();
+                    return self.abort_path("a negative size");
                 }
                 if n as usize > MAX_LOCAL_ARRAY {
                     return nc("a local array is too large");
@@ -3418,7 +3510,7 @@ impl<'a> Compiler<'a> {
                         if self.tables[*table as usize].strings {
                             // `aload` takes arrays only: a string row is
                             // the interpreter's typecheck.
-                            return self.abort_path();
+                            return self.abort_path("aload of a string");
                         }
                         self.emit(Ins::RowCheck(*table, *row))?;
                         *cols
@@ -3530,7 +3622,10 @@ impl<'a> Compiler<'a> {
             Op::R(r) if !self.seeded.contains(&r) => {
                 self.ibin(IBinOp::Ne, Op::R(r), Op::Imm(UNSEEDED as f64))?;
                 match self.pop_bool()? {
-                    Op::R(c) => self.emit(Ins::Assert(Op::R(c)))?,
+                    Op::R(c) => self.assert(
+                        Op::R(c),
+                        "rand or rrand before this pixel's srand (it reads the previous pixel's state)",
+                    )?,
                     Op::Imm(_) => return nc("internal: the random state folded"),
                 }
                 Ok(Some(Op::R(r)))
@@ -3556,9 +3651,9 @@ impl<'a> Compiler<'a> {
                 let hi = self.ibin_int(IBinOp::And, x, Op::Imm(!RAND_MASK as f64))?;
                 self.ibin(IBinOp::Ne, hi, Op::Imm(RRAND_TAG as f64))?;
                 match self.pop_bool()? {
-                    Op::Imm(0.0) => return self.abort_path(),
+                    Op::Imm(0.0) => return self.abort_path(RESTORE),
                     Op::Imm(_) => {}
-                    c => self.emit(Ins::Assert(c))?,
+                    c => self.assert(c, RESTORE)?,
                 }
                 Op::Imm((forced & RAND_MASK) as f64)
             }
@@ -3580,7 +3675,7 @@ impl<'a> Compiler<'a> {
             let (gain, gt) = self.pop_num()?;
             let (oct, ot) = self.pop_num()?;
             if ot == NT::Real {
-                return self.abort_path();
+                return self.abort_path("a real octave count");
             }
             octtag = ot.tag();
             a[dims] = self.as_f(oct, ot)?;
@@ -3602,7 +3697,7 @@ impl<'a> Compiler<'a> {
     /// Index `c` at `i`; pushes the element.
     fn get(&mut self, c: SVal, i: Op, it_: NT) -> CResult<()> {
         if it_ == NT::Real {
-            return self.abort_path();
+            return self.abort_path("a real index");
         }
         // Indices are read as f64 (with their integer tag).
         let i = self.as_f(i, it_)?;
@@ -3611,12 +3706,12 @@ impl<'a> Compiler<'a> {
                 if let Op::Imm(k) = i {
                     let len = cap_len(&o);
                     if k < 0.0 || k as usize >= len {
-                        return self.abort_path();
+                        return self.abort_path(INDEX);
                     }
                     let v = match &o.value {
                         Value::Array(a) => {
                             let Some(el) = a.get(k as usize) else {
-                                return self.abort_path();
+                                return self.abort_path(INDEX);
                             };
                             self.cap_to_sval(&el)?
                         }
@@ -3641,7 +3736,7 @@ impl<'a> Compiler<'a> {
                     self.emit(Ins::Bin(BinOp::Ge, lo, i, Op::Imm(0.0)))?;
                     self.emit(Ins::Bin(BinOp::Lt, hi, i, Op::Imm(rows as f64)))?;
                     self.emit(Ins::Bin(BinOp::BAnd, ok, Op::R(lo), Op::R(hi)))?;
-                    self.emit(Ins::Assert(Op::R(ok)))?;
+                    self.assert(Op::R(ok), Why::TableIndex.text())?;
                     self.push(SVal::Row {
                         table: t,
                         row: i,
@@ -3662,7 +3757,7 @@ impl<'a> Compiler<'a> {
                 match i {
                     Op::Imm(k) => {
                         if k < 0.0 || k as usize >= items.len() {
-                            return self.abort_path();
+                            return self.abort_path(INDEX);
                         }
                         self.push(items[k as usize].clone());
                     }
@@ -3693,12 +3788,12 @@ impl<'a> Compiler<'a> {
             SVal::Proc(p) => match i {
                 Op::Imm(k) if k >= 0.0 && (k as usize) < p.len() => {
                     let Some(el) = p.get(k as usize) else {
-                        return self.abort_path();
+                        return self.abort_path(INDEX);
                     };
                     let v = self.cap_to_sval(&el)?;
                     self.push(v);
                 }
-                Op::Imm(_) => return self.abort_path(),
+                Op::Imm(_) => return self.abort_path(INDEX),
                 Op::R(_) => return nc("run-time index into a procedure"),
             },
             other => return nc(format!("get on {}", describe(&other))),
@@ -3738,6 +3833,10 @@ impl<'a> Compiler<'a> {
             col,
             ctag,
         })?;
+        if self.tables[table as usize].bools {
+            self.push(SVal::Bool(Op::R(d)));
+            return Ok(());
+        }
         if nt == NT::Int {
             // Tables hold f64s; an integer table's elements are exact.
             let di = self.ireg();
@@ -3751,7 +3850,7 @@ impl<'a> Compiler<'a> {
 
     fn put(&mut self, c: SVal, i: Op, it_: NT, v: SVal) -> CResult<()> {
         if it_ == NT::Real {
-            return self.abort_path();
+            return self.abort_path("a real index");
         }
         match c {
             SVal::Tuple(t, b) => {
@@ -3766,7 +3865,7 @@ impl<'a> Compiler<'a> {
                 }
                 let len = t.borrow().len();
                 if k < 0.0 || k as usize >= len {
-                    return self.abort_path();
+                    return self.abort_path(INDEX);
                 }
                 t.borrow_mut()[k as usize] = v;
             }
@@ -3824,6 +3923,7 @@ impl<'a> Compiler<'a> {
                         kind: TableKind::Int,
                         null_rows: Vec::new(),
                         strings: false,
+                        bools: false,
                     },
                     false,
                 )
@@ -3863,14 +3963,28 @@ impl<'a> Compiler<'a> {
                         kind: TableKind::Int,
                         null_rows: Vec::new(),
                         strings: true,
+                        bools: false,
                     };
                     let id = self.tables.len() as u32;
                     self.tables.push(t);
                     self.table_ids.insert(key, (id, true));
                     return Ok((id, true));
                 }
+                // An array of booleans (#1092: fractal_clouds' per-species
+                // flags): a table of 0 and 1 whose elements are booleans.
+                let bools: Option<Vec<(f64, bool)>> = items
+                    .iter()
+                    .map(|o| match o.value {
+                        Value::Boolean(b) => Some((f64::from(u8::from(b)), false)),
+                        _ => None,
+                    })
+                    .collect();
                 if let Some(nums) = nums {
                     (table_of(1, nums.len(), nums), false)
+                } else if let Some(b) = bools {
+                    let mut t = table_of(1, b.len(), b);
+                    t.bools = true;
+                    (t, false)
                 } else {
                     // An array of equal-length numeric arrays (rows that
                     // are null are allowed, and abort if read).
@@ -4013,6 +4127,7 @@ fn table_of(rows: usize, cols: usize, nums: Vec<(f64, bool)>) -> Table {
         kind,
         null_rows: Vec::new(),
         strings: false,
+        bools: false,
     }
 }
 

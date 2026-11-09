@@ -469,7 +469,7 @@ fn block(
                     "{pad}r{d} = b2f(select(({c}) < ({lim}), ({c}) > ({lim}), ({inc}) >= 0.0));"
                 );
             }
-            Ins::CheckInt(..) | Ins::NeedInt(_) | Ins::Assert(_) | Ins::RowCheck(..) => {}
+            Ins::CheckInt(..) | Ins::NeedInt(_) | Ins::Assert(..) | Ins::RowCheck(..) => {}
             Ins::Gather {
                 d,
                 dtag,
@@ -591,7 +591,7 @@ fn block(
             Ins::Break => {
                 let _ = writeln!(s, "{pad}break;");
             }
-            Ins::Abort => {
+            Ins::Abort(_) => {
                 let _ = writeln!(s, "{pad}OUT[oi] = 0x00ff00ffu; return;");
             }
         }

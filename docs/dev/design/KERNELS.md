@@ -127,6 +127,7 @@ registers.
 | `N array` (N constant) with run-time `get`/`put` | a per-lane local array |
 | `get` on a captured array or string of numbers with a run-time index | a gather from a snapshot table |
 | `get` on a captured array of equal-length numeric arrays | a row reference; then `aload` or a constant `get` gathers |
+| `get` on a captured array of booleans with a run-time index | a gather from a 0/1 table, a boolean (#1092) |
 | `gnoise2 gnoise3 vnoise2 vnoise3 fbm2 fbm3 vfbm2 vfbm3 ridged2 ridged3 gnoise2d` | calls to the same Rust functions, with the table snapshotted at compile time |
 | `srand`, then `rand rrand` | the LCG on a per-lane random state (#1063, below) |
 
@@ -238,7 +239,14 @@ interpreter.
 - **Errors.** A compiled pixel never raises an error: it retires. So the
   first pixel in raster order to error is a retired one, and the retired
   pixels run in raster order with the state the whole image would give them:
-  the same error at the same pixel, with the same operand stack.
+  the same error at the same pixel, with the same operand stack. The
+  per-pixel driver also runs a pixel as many execution-stack frames deep as
+  the whole-image driver does, so a deep recursion overflows in both or in
+  neither.
+- **`--bands`.** A band computes only its own rows, so a soft pixel in
+  another band's rows would not run at all, though it can still raise an
+  error or change the operand stack. With a soft branch under bands, a band
+  that retires a pixel runs the whole image, as before #1093.
 - **`srand`.** A seeding kernel (`Kernel::rand`) keeps the whole image for
   any retired pixel, as above; `srand` and `rand` are not on the allowlist.
 
@@ -246,6 +254,18 @@ The scan is conservative by construction: anything reachable counts, used
 or not. fractal_clouds' `golden_coast` reaches `put`, `copy`, `cvx`,
 `begin` and more (its cloud compiler and scratch tables are in reach), so
 it still runs in the interpreter when a pixel takes a soft branch.
+
+**Why pixels retire (#1092).** Each retired lane is counted under a reason:
+the failing instruction's kind and operator (`exec::Why`: an integer
+overflow, a zero divisor, the 2^53 check, a table index, ...), or, for
+`Abort` and `Assert`, a site (`Kernel::sites`) naming what it stands for, the
+operator, and the named procedures it was compiled in ("/x read where this
+pixel has not defined it, in a > b > c"; a branch that did not compile, and
+why). The note names the commonest reason and says whether the whole image
+reruns; `PSCAT_KERNEL_TIMING` lists every reason with its count. A kernel's
+soft branches are read off its finished code, so a branch is reported (and
+makes the side-effect scan above decide) exactly when its `Abort` is in the
+kernel.
 
 ### Large kernels: shared subroutines and dead code (#1064)
 
