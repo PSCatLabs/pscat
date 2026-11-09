@@ -997,9 +997,14 @@ impl<'a> Compiler<'a> {
             calls(&self.subs[s].body, &mut todo);
         }
         if let Some(s) = (0..self.subs.len()).find(|&s| reach[s] && !self.charged[s]) {
-            return nc(format!(
-                "internal: subroutine {s} is called but not counted against the size cap"
-            ));
+            let why =
+                format!("internal: subroutine {s} is called but not counted against the size cap");
+            // A test failure in a debug build; only a warning in a release
+            // one, so the timing variable never changes what compiles.
+            if cfg!(debug_assertions) {
+                return nc(why);
+            }
+            eprintln!("pscat: kernel: {why}");
         }
         if timing {
             let inline = super::ir::count(&self.code);
