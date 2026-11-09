@@ -467,6 +467,47 @@ fn a_long_chain_of_merges_compiles_in_linear_time() {
     );
 }
 
+/// A join costs about the names in scope, not their square (#1094): a
+/// pixel dictionary of thousands of names (fractal_clouds' scenes) made
+/// every `if` join and loop fixpoint scan it once per name. 2,000 names
+/// and 2,000 joins took 7 s; it is now tens of milliseconds. Shared bodies
+/// (`/large`) take the sharing frames' path through the joins too.
+#[test]
+fn joins_over_many_names_compile_in_linear_time() {
+    let n = 2000;
+    let mut prog = String::from("/pixel { /j exch def /i exch def /c i 1 gt def ");
+    for k in 0..n {
+        prog.push_str(&format!("/v{k} 0 def "));
+    }
+    // A shared body that defines names under a branch: its joins consult
+    // the sharing frames.
+    prog.push_str("/f { c { /v1 v1 1 add def } if ");
+    for k in 0..48 {
+        prog.push_str(&format!("v{k} add "));
+    }
+    prog.push_str("} def 0 ");
+    for k in 0..n {
+        prog.push_str(&format!("c {{ /v{k} {k} def }} if "));
+        if k % 100 == 0 {
+            prog.push_str(&format!("0 1 3 {{ /v{k} exch def }} for f "));
+        }
+    }
+    prog.push_str("v0 v1 v2 add add add 1000 div dup dup } def");
+    for mode in ["auto", "large"] {
+        let src = format!("/{mode} .kernelshare {prog}");
+        common::within_cpu_budget(
+            &format!("kernelcompile of {n} joins over {n} names, /{mode}"),
+            Duration::from_millis(400),
+            3,
+            || {
+                let (ok, why) = compiles(&src);
+                assert!(ok, "{why}");
+            },
+        );
+    }
+    same_small(&prog);
+}
+
 #[test]
 fn stack_carried_loop_state() {
     // The fractal_clouds style: the running state lives on the stack.

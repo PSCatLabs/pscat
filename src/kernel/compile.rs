@@ -34,7 +34,7 @@ use super::ir::{
     UnOp,
 };
 use crate::interp::Interp;
-use crate::name::PsName;
+use crate::name::{IdHashBuilder, PsName};
 use crate::object::{Dict, Object, Operator, PsArray, Value};
 use crate::ops::arith::{RAND_INC, RAND_MASK, RAND_MUL, RRAND_TAG};
 
@@ -185,18 +185,50 @@ enum ScopeKind {
 struct Scope {
     uid: u32,
     kind: ScopeKind,
-    names: Vec<(u32, Binding)>,
+    /// Shared between clones until one changes (#1094): the state is
+    /// cloned for every branch, checkpoint and shared body, and most of
+    /// those change few names or none.
+    names: Rc<Names>,
+}
+
+/// A scope's names, in the order first defined (the order a join numbers
+/// the registers it makes in), and where each one is (#1094: a pixel
+/// dictionary of a few thousand names, scanned at every lookup and join,
+/// made compiling quadratic). A name is never removed, so a scope only
+/// grows, at the end.
+#[derive(Clone, Default)]
+struct Names {
+    list: Vec<(u32, Binding)>,
+    at: HashMap<u32, usize, IdHashBuilder>,
 }
 
 impl Scope {
+    fn new(uid: u32, kind: ScopeKind) -> Scope {
+        Scope {
+            uid,
+            kind,
+            names: Rc::default(),
+        }
+    }
+
+    /// The names, in the order first defined.
+    fn names(&self) -> &[(u32, Binding)] {
+        &self.names.list
+    }
+
     fn get(&self, id: u32) -> Option<&Binding> {
-        self.names.iter().find(|(k, _)| *k == id).map(|(_, b)| b)
+        let p = *self.names.at.get(&id)?;
+        self.names.list.get(p).map(|(_, b)| b)
     }
 
     fn set(&mut self, id: u32, b: Binding) {
-        match self.names.iter_mut().find(|(k, _)| *k == id) {
-            Some(slot) => slot.1 = b,
-            None => self.names.push((id, b)),
+        let names = Rc::make_mut(&mut self.names);
+        match names.at.get(&id) {
+            Some(&p) => names.list[p].1 = b,
+            None => {
+                names.at.insert(id, names.list.len());
+                names.list.push((id, b));
+            }
         }
     }
 }
@@ -207,6 +239,96 @@ struct State {
     scopes: Vec<Scope>,
     /// No lane reaches here (after `exit` or a certain error).
     dead: bool,
+}
+
+/// The slots a join compares across its states (#1094): the stack entries,
+/// then each name of each scope of the first state, then those of the next
+/// state not seen yet, and so on. This order numbers the registers a join
+/// makes, so it is fixed.
+struct Joined {
+    slots: Vec<Slot>,
+    /// A name slot's scope index (a stack slot's is unused).
+    scope: Vec<usize>,
+    /// Per state: it has the first state's scopes, so `scope` applies.
+    valid: Vec<bool>,
+}
+
+impl Joined {
+    /// The slots of the first `n` of `states`, which must agree in stack
+    /// depth and scopes; the states after them (a loop's entry) are only
+    /// looked up in.
+    fn new(states: &[&State], n: usize) -> CResult<Joined> {
+        let first = states[0];
+        for st in &states[..n] {
+            if st.stack.len() != first.stack.len() {
+                return nc("paths leave different stack depths");
+            }
+            if !same_scopes(st, first) {
+                return nc("paths leave different dictionaries begun");
+            }
+        }
+        let names: usize = first.scopes.iter().map(|s| s.names().len()).sum();
+        let mut j = Joined {
+            slots: Vec::with_capacity(first.stack.len() + names),
+            scope: Vec::with_capacity(first.stack.len() + names),
+            valid: states.iter().map(|st| same_scopes(st, first)).collect(),
+        };
+        j.slots.extend((0..first.stack.len()).map(Slot::Stack));
+        j.scope.resize(first.stack.len(), 0);
+        for (k, sc) in first.scopes.iter().enumerate() {
+            for (id, _) in sc.names() {
+                j.slots.push(Slot::Bind(sc.uid, *id));
+                j.scope.push(k);
+            }
+        }
+        let mut new: HashSet<(usize, u32)> = HashSet::new();
+        for st in &states[1..n] {
+            for (k, sc) in st.scopes.iter().enumerate() {
+                let f = &first.scopes[k];
+                // The names both have in the same places (all of them when
+                // shared): a scope only grows, so the states a join compares,
+                // all from one state before the branch or loop, agree on a
+                // long prefix. Only the names past it can be new.
+                let l = if Rc::ptr_eq(&sc.names, &f.names) {
+                    sc.names().len()
+                } else {
+                    sc.names()
+                        .iter()
+                        .zip(f.names())
+                        .take_while(|(a, b)| a.0 == b.0)
+                        .count()
+                };
+                for (id, _) in &sc.names()[l..] {
+                    if f.get(*id).is_none() && new.insert((k, *id)) {
+                        j.slots.push(Slot::Bind(sc.uid, *id));
+                        j.scope.push(k);
+                    }
+                }
+            }
+        }
+        Ok(j)
+    }
+
+    /// The binding name slot `i` finds in `st`, the `s`th state, when it is
+    /// in the slot's own scope, a kernel one (what `slot_val` then finds).
+    fn binding<'s>(&self, i: usize, s: usize, st: &'s State) -> Option<&'s Binding> {
+        let Slot::Bind(_, id) = self.slots[i] else {
+            return None;
+        };
+        if !self.valid[s] {
+            return None;
+        }
+        let sc = &st.scopes[self.scope[i]];
+        match sc.kind {
+            ScopeKind::Local => sc.get(id),
+            ScopeKind::Captured(_) => None,
+        }
+    }
+}
+
+/// Do `a` and `b` have the same scopes, by uid?
+fn same_scopes(a: &State, b: &State) -> bool {
+    a.scopes.len() == b.scopes.len() && a.scopes.iter().zip(&b.scopes).all(|(x, y)| x.uid == y.uid)
 }
 
 /// A place a value lives in the state.
@@ -792,6 +914,34 @@ pub(crate) fn compile(
     strict: bool,
     share: ShareMode,
 ) -> Result<Compiled, Refusal> {
+    let mut r = choose(it, proc, ncomp, strict, share);
+    // Register allocation, for the kernel chosen only: under `/auto` the
+    // first pass's kernel is often thrown away (#1094). Nothing about which
+    // kernel is chosen depends on it.
+    if let Ok(c) = &mut r {
+        let kernel = &mut c.kernel;
+        super::regalloc::drop_dead_moves(kernel);
+        if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
+            super::regalloc::allocate(kernel);
+        }
+        if std::env::var_os("PSCAT_KERNEL_DUMP").is_some() {
+            eprintln!(
+                "--- after ---\n{:#?}\noutputs {:?}",
+                kernel.body, kernel.outputs
+            );
+        }
+    }
+    r
+}
+
+/// The kernel `compile` gives, before register allocation.
+fn choose(
+    it: &Interp,
+    proc: &PsArray,
+    ncomp: usize,
+    strict: bool,
+    share: ShareMode,
+) -> Result<Compiled, Refusal> {
     let first = if share == ShareMode::Auto {
         ShareMode::Never
     } else {
@@ -854,13 +1004,13 @@ fn compile_with(
         kinds: Vec::new(),
         st: State {
             stack: Vec::new(),
-            scopes: vec![Scope {
-                uid: 0,
-                kind: ScopeKind::Local,
-                names: vec![(
+            scopes: vec![{
+                let mut s = Scope::new(0, ScopeKind::Local);
+                s.set(
                     RAND_ID,
                     Binding::Val(SVal::Num(Op::Imm(UNSEEDED as f64), NT::Int)),
-                )],
+                );
+                s
             }],
             dead: false,
         },
@@ -973,19 +1123,8 @@ fn compile_with(
             super::check::kinds(&kernel, &c.kinds)
                 .map_err(|e| NotCompilable(format!("internal: {e}")))?;
         }
-        let dump = std::env::var_os("PSCAT_KERNEL_DUMP").is_some();
-        if dump {
+        if std::env::var_os("PSCAT_KERNEL_DUMP").is_some() {
             eprintln!("--- kernel before allocation ---\n{:#?}", kernel.body);
-        }
-        super::regalloc::drop_dead_moves(&mut kernel);
-        if std::env::var_os("PSCAT_KERNEL_NO_REGALLOC").is_none() {
-            super::regalloc::allocate(&mut kernel);
-        }
-        if dump {
-            eprintln!(
-                "--- after ---\n{:#?}\noutputs {:?}",
-                kernel.body, kernel.outputs
-            );
         }
         Ok((kernel, noise, soft))
     })(&mut c);
@@ -1396,11 +1535,10 @@ impl<'a> Compiler<'a> {
             } else {
                 f.entry.scopes.last().map_or(0, |s| s.uid)
             };
-            let same = self
+            let same_or_unknown = self
                 .slot_val(&f.entry, Slot::Bind(euid, id))
-                .is_ok_and(|ev| ev == *v);
-            let unknown = self.slot_val(&f.entry, Slot::Bind(euid, id)).is_err();
-            if same || unknown {
+                .map_or(true, |ev| ev == *v);
+            if same_or_unknown {
                 f.ids.insert(id);
             }
         }
@@ -1842,10 +1980,10 @@ impl<'a> Compiler<'a> {
         if !x.dead {
             out_stack = x.stack[f.low..].to_vec();
             for (si, (xs, es)) in x.scopes.iter().zip(&e.scopes).enumerate() {
-                if xs.names.len() < es.names.len() {
+                if xs.names().len() < es.names().len() {
                     return Ok(false);
                 }
-                for (nid, b) in &xs.names {
+                for (nid, b) in xs.names() {
                     let defined = f.wids.contains(&(xs.uid, *nid));
                     if !defined && binding_eq(es.get(*nid), Some(b)) {
                         continue;
@@ -2198,36 +2336,24 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    // --- joins ------------------------------------------------------------
-
-    /// The slots to compare across `states` (same scope structure).
-    fn slots_of(states: &[&State]) -> CResult<Vec<Slot>> {
-        let first = states[0];
-        let mut out: Vec<Slot> = (0..first.stack.len()).map(Slot::Stack).collect();
-        for st in states {
-            if st.stack.len() != first.stack.len() {
-                return nc("paths leave different stack depths");
-            }
-            if st.scopes.len() != first.scopes.len()
-                || st
-                    .scopes
-                    .iter()
-                    .zip(&first.scopes)
-                    .any(|(a, b)| a.uid != b.uid)
-            {
-                return nc("paths leave different dictionaries begun");
-            }
-            for s in &st.scopes {
-                for (id, _) in &s.names {
-                    let sl = Slot::Bind(s.uid, *id);
-                    if !out.contains(&sl) {
-                        out.push(sl);
-                    }
-                }
-            }
+    /// `touch_equal_join` for a name slot holding binding `b` on every
+    /// path; `b` is copied out only if a sharing frame needs it.
+    fn touch_equal_join_b(&mut self, sl: Slot, b: &Binding) -> CResult<()> {
+        let Slot::Bind(_, id) = sl else {
+            return Ok(());
+        };
+        if !self.frames.iter().any(|f| f.wnames.contains(&id)) {
+            return Ok(());
         }
-        Ok(out)
+        let v = match b {
+            Binding::Val(v) => Lk::Val(v.clone()),
+            Binding::Maybe => Lk::Maybe,
+            Binding::Partial(v, f) => Lk::Partial(v.clone(), *f),
+        };
+        self.touch_equal_join(sl, &v)
     }
+
+    // --- joins ------------------------------------------------------------
 
     fn set_slot(st: &mut State, slot: Slot, v: Binding) {
         match slot {
@@ -2396,11 +2522,21 @@ impl<'a> Compiler<'a> {
         if b.dead {
             return Ok((a, ca, cb));
         }
-        let slots = Self::slots_of(&[&a, &b])?;
-        let mut out = a.clone();
+        let j = Joined::new(&[&a, &b], 2)?;
+        // The merged slots, set on `a` once the slots are all read.
+        let mut sets: Vec<(Slot, Binding)> = Vec::new();
         let (mut ma, mut mb) = (Moves::default(), Moves::default());
-        for sl in slots {
-            let (va, vb) = (self.slot_val(&a, sl)?, self.slot_val(&b, sl)?);
+        for (i, &sl) in j.slots.iter().enumerate() {
+            // Most names hold the same binding on both paths: compared in
+            // place, not copied out.
+            if let (Some(x), Some(y)) = (j.binding(i, 0, &a), j.binding(i, 1, &b))
+                && binding_eq(Some(x), Some(y))
+            {
+                self.touch_equal_join_b(sl, x)?;
+                continue;
+            }
+            let va = self.slot_val(&a, sl)?;
+            let vb = self.slot_val(&b, sl)?;
             if va == vb {
                 self.touch_equal_join(sl, &va)?;
                 continue;
@@ -2494,6 +2630,10 @@ impl<'a> Compiler<'a> {
             if let (Slot::Stack(_), Binding::Maybe) = (sl, &merged) {
                 return nc("a stack entry differs between the branches of an if");
             }
+            sets.push((sl, merged));
+        }
+        let mut out = a;
+        for (sl, merged) in sets {
             Self::set_slot(&mut out, sl, merged);
         }
         self.par_moves(ma, &mut ca)?;
@@ -2703,16 +2843,33 @@ impl<'a> Compiler<'a> {
                 states.push(&end);
             }
             states.extend(ctx.exits.iter());
-            let slots = Self::slots_of(&states)?;
+            let n = states.len();
+            states.push(&entry);
+            let j = Joined::new(&states, n)?;
             let mut grew = false;
-            for sl in slots {
+            for (i, &sl) in j.slots.iter().enumerate() {
                 if maybe.contains(&sl) {
+                    continue;
+                }
+                // The same binding on every path, compared in place (the
+                // entry's value is read only for a slot that changes, and
+                // cannot fail to be read when `valid`).
+                if j.valid[n]
+                    && let Some(h) = j.binding(i, 0, &hstate)
+                    && states[1..n].iter().enumerate().all(|(s, st)| {
+                        j.binding(i, s + 1, st)
+                            .is_some_and(|b| binding_eq(Some(h), Some(b)))
+                    })
+                {
+                    for _ in 1..n {
+                        self.touch_equal_join_b(sl, h)?;
+                    }
                     continue;
                 }
                 let hv = self.slot_val(&hstate, sl)?;
                 let ev = self.slot_val(&entry, sl)?;
-                for s in &states[1..] {
-                    let sv = self.slot_val(s, sl)?;
+                for st in &states[1..n] {
+                    let sv = self.slot_val(st, sl)?;
                     if sv == hv {
                         self.touch_equal_join(sl, &hv)?;
                         continue;
@@ -3636,11 +3793,7 @@ impl<'a> Compiler<'a> {
                 };
                 self.next_uid += 1;
                 let uid = self.next_uid;
-                self.st.scopes.push(Scope {
-                    uid,
-                    kind,
-                    names: Vec::new(),
-                });
+                self.st.scopes.push(Scope::new(uid, kind));
             }
             "end" => {
                 if self.st.scopes.len() <= 1 {
