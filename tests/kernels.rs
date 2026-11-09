@@ -2001,6 +2001,35 @@ fn a_subroutine_counts_what_it_keeps() {
 }
 
 #[test]
+fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
+    // #1091 review: 220 branches each share a different ~8k-instruction
+    // procedure, then fail (an `exit` with no loop). None of them counts
+    // against the kernel's size, but they are all kept (a later call could
+    // reuse one): ~1.8M made, past the 1.6M cap on what subroutines may
+    // hold. Past it the branches fail as too large; the image stays exact.
+    let unrolled = "16 { 16 { 16 { 1.0000001 mul 0.37 add } repeat } repeat } repeat";
+    let mut procs = String::new();
+    let mut tries = String::new();
+    for p in 0..220 {
+        procs += &format!("/q{p} {{ {p} add {unrolled} }} def\n");
+        tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
+    }
+    let prog = format!(
+        "/all .kernelshare {SHOW} {procs}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           {tries}
+           x show3 }} def"
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(
+        why.contains("instructions made in subroutines, cap 1,600,000"),
+        "{why}"
+    );
+    assert!(render("auto", &prog) == render("interpret", &prog));
+}
+
+#[test]
 fn a_shared_retry_with_more_branches_but_none_too_large_is_kept() {
     // #1091 review: inlined, the whole branch (17 calls of a ~30k `s`) is
     // one too-large abort. Shared it compiles, and only `u` and `v` (an

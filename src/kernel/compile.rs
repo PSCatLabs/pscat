@@ -669,6 +669,13 @@ const RESTORE: &str = "an rrand value given to srand under --sweep-seed (a resto
 /// (#1091): fractal_clouds' evening_lake holds 299k before DCE,
 /// golden_coast 236k.
 const MAX_INSNS: usize = 400_000;
+/// Upper bound on all the instructions a compile puts in subroutines, as
+/// made (before their DCE), the discarded ones included: subroutines made
+/// in code later rolled back stay for reuse, uncounted by `MAX_INSNS`, so
+/// this bounds what they hold (#1091). 1.6M, 4 x `MAX_INSNS`, about
+/// 205 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
+/// 274k (evening_lake), the kernel gallery none.
+const MAX_SUB_MADE: usize = 1_600_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
@@ -1054,7 +1061,7 @@ impl<'a> Compiler<'a> {
             let inline = super::ir::count(&self.code);
             eprintln!(
                 "pscat: kernel size counted: {} ({} inline, {} in {} of {} subroutines), cap {}; \
-                 reachable: {} ({} inline, {} in {} subroutines)",
+                 reachable: {} ({} inline, {} in {} subroutines); made in subroutines: {}, cap {}",
                 grouped(self.emitted + self.sub_insns),
                 grouped(self.emitted),
                 grouped(self.sub_insns),
@@ -1065,6 +1072,8 @@ impl<'a> Compiler<'a> {
                 grouped(inline),
                 grouped(sub_reach),
                 reach.iter().filter(|&&r| r).count(),
+                grouped(self.sub_made),
+                grouped(MAX_SUB_MADE),
             );
         }
         Ok(())
@@ -1923,6 +1932,17 @@ impl<'a> Compiler<'a> {
         if !ok || !plain_ok {
             return Ok(false);
         }
+        // All the subroutines a compile makes stay (a later call may reuse
+        // one made in code since discarded), counted or not: their total
+        // has a looser cap of its own.
+        let made = super::ir::count(&self.code[f.code_start..]);
+        if self.sub_made + made > MAX_SUB_MADE {
+            return nc(format!(
+                "{TOO_LARGE}: {} instructions made in subroutines, cap {}",
+                grouped(self.sub_made + made),
+                grouped(MAX_SUB_MADE)
+            ));
+        }
         // Move the code out, the inputs it reads renamed to parameters.
         let mut body = self.code.split_off(f.code_start);
         let mut pmap: HashMap<Reg, Reg> = HashMap::new();
@@ -1961,7 +1981,6 @@ impl<'a> Compiler<'a> {
                 owner[r as usize] = sid + 1;
             }
         }
-        let made = super::ir::count(&body);
         self.emitted = self.emitted.saturating_sub(made);
         self.sub_made += made;
         // What the cap counts is what the subroutine keeps (#1091): the

@@ -325,13 +325,19 @@ is used with the same symbolic context.
   every subroutine reached is counted.
 - **The cap** (`MAX_INSNS`, 400,000) bounds the kernel being compiled:
   its inline code and the subroutines that code reaches. An `Ins` is at
-  most 128 bytes, so that is about 51 MB at the cap. It does not bound
-  everything a compile holds: subroutines made in discarded code stay,
-  uncounted, for reuse, and `/auto` keeps its first pass while it
-  retries. Those, and the compiler's time, are bounded only by
-  `MAX_WORK` and the program's time and step limits. fractal_clouds'
+  most 128 bytes, so that is about 51 MB at the cap. fractal_clouds'
   evening_lake holds 299k instructions before the final DCE (82k
   after), golden_coast 236k (74k).
+- **A second cap** (`MAX_SUB_MADE`, 1,600,000, 4 × `MAX_INSNS`, about
+  205 MB) bounds every instruction a compile puts in subroutines, as
+  made, discarded ones included: subroutines made in code later
+  discarded stay, uncounted by `MAX_INSNS`, for reuse. Past it a body is
+  not shared but refused, "the kernel is too large: N instructions made
+  in subroutines, cap 1,600,000", so the branch aborts or the kernel
+  falls back like any too-large one. fractal_clouds' scenes make at most
+  274k (evening_lake); the kernel gallery pieces make none. `/auto` also keeps its
+  first pass while it retries. The compiler's time is bounded by
+  `MAX_WORK` and the program's time and step limits.
 - **Executor and allocation.**
   - The executor runs a call like an `If` that every active lane takes.
   - The register allocator packs each body on its own, into a region past
