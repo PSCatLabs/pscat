@@ -131,7 +131,8 @@ except item 7, which is GPU-only and was checked by hand.
    side effects (`store` in an uncompiled branch) that compiled pixels did not
    see. Per-pixel fallback is now used only when the kernel has no uncompiled
    branch (compiled code has no side effects). Otherwise the whole image is
-   interpreted.
+   interpreted. (#1093: also with uncompiled branches, when nothing the
+   procedure can reach has side effects; see `KERNELS.md`.)
 6. **Exact integers in mixed values.** An integer meeting a mixed value (an
    integer on some lanes, a real on others) was rounded past 2^53. It now
    converts exactly, retiring the lane if it cannot, in arithmetic and in

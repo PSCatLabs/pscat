@@ -176,10 +176,11 @@ so it is still a pure function of `i` and `j`.
   multiply-add, no fast-math, no cross-lane reduction, and nothing depends on
   thread count.
 
-**Error rule.** The compiled path never raises a PostScript error itself. If
-any lane would raise one, the kernel aborts, and the whole image reruns
-through the interpreter fallback, which raises the real error with the real
-operand stack and error command. That covers:
+**Error rule.** The compiled path never raises a PostScript error itself. A
+lane that would raise one retires, and the retired pixels run in the
+interpreter, one by one in raster order after the compiled ones (the whole
+image, when a soft branch below rules that out). The interpreter raises the
+real error with the real operand stack and error command. That covers:
 
 - `rangecheck`, `typecheck` (a real used as an index, an int-only op given a
   real), `undefinedresult`;
@@ -188,6 +189,63 @@ operand stack and error command. That covers:
 
 Errors are rare in finished art, so this keeps the semantics exact without
 modelling error states.
+
+### Soft branches: per pixel or the whole image (#1093)
+
+A branch of an `if` that does not compile becomes an `Abort` (a *soft*
+branch): the lanes that take it retire. Pixels compiled from the snapshot
+are exact only if no interpreted pixel changes anything they read, so the
+retired pixels run one by one after the compiled ones only when the
+procedure is *pure* (`pure.rs`). Otherwise the whole image runs in the
+interpreter.
+
+- **What is scanned.** Not the soft branches alone. A retired pixel runs the
+  whole procedure again, and past its soft branch it runs code the compiler
+  checked only for the paths it compiled: a soft branch can rebind a name
+  that the compiled rest then writes through (`/buf G def`, then `buf 0 x
+  put` on a `buf` that is a local array on every compiled path). So the
+  scan covers the universe of the procedure, everything it can reach: every
+  element of every array or procedure reached, every key and value of every
+  dictionary reached, the binding now of every executable name reached, and
+  the operand stack under the call (a pixel can `index` into it).
+- **Why that is enough.** A pure pixel cannot write any dictionary but its
+  own, so a name resolves to its binding now or to a value the pixel
+  defined. That value was on its operand stack: in the universe, or a fresh
+  array or dictionary of such values. Nothing it can run turns data into
+  code. So every object a pixel can execute is in the universe.
+- **The rule.** Every operator in the universe is on an allowlist, and
+  nothing in it is an executable string or file. The allowlist has stack
+  operators, arithmetic, compare and logic, control (`if` to `forall`,
+  `exec`, `exit`), `def`, `dict`, `array`, `>>`, the reads (`get`,
+  `getinterval`, `length`, `aload`, `known`) and the noise operators. Left
+  out are any write into an existing object (`put`, `putinterval`, `astore`,
+  `copy`, `store`, `undef`, `cvs`, `bind`), the random state, graphics and
+  files, the dictionary stack (`begin`, `end`: without them every `def`
+  lands in the pixel's own dictionary), the execution stack, and data to
+  code (`cvx`, `load`, `where`, `token`). `copy` is out because its
+  composite form writes into its operand, and the stack form cannot be told
+  apart from the text (a procedure's elements can be fetched with `get`).
+  An operator not on the list is impure, whatever it does.
+- **Under its operands.** Uncompiled code can reach under `i j`. The
+  per-pixel driver shows a pixel `i mark i j` on the caller's operands, as
+  the whole-image driver does, and pops what that driver pops, so a change
+  there lasts the same way in both. Two things differ: a pixel that `exit`s
+  out of the procedure (out of the row's `for` in the whole-image driver),
+  and one that changes the `i` under its mark (the column that driver stores
+  the pixel in). The per-pixel driver checks both after each pixel; on
+  either, it puts the caller's operands back and runs the whole image
+  instead. No pixel before changed anything else.
+- **Errors.** A compiled pixel never raises an error: it retires. So the
+  first pixel in raster order to error is a retired one, and the retired
+  pixels run in raster order with the state the whole image would give them:
+  the same error at the same pixel, with the same operand stack.
+- **`srand`.** A seeding kernel (`Kernel::rand`) keeps the whole image for
+  any retired pixel, as above; `srand` and `rand` are not on the allowlist.
+
+The scan is conservative by construction: anything reachable counts, used
+or not. fractal_clouds' `golden_coast` reaches `put`, `copy`, `cvx`,
+`begin` and more (its cloud compiler and scratch tables are in reach), so
+it still runs in the interpreter when a pixel takes a soft branch.
 
 ### Large kernels: shared subroutines and dead code (#1064)
 
