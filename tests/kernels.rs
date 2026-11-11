@@ -2668,3 +2668,42 @@ fn a_certain_error_names_its_operator() {
         "{err}"
     );
 }
+
+/// A write that starts a register's live interval covers every lane, not
+/// only the running ones (#1101). Lanes the write skips must still see
+/// their own values: a name merged from both branches, one defined in a
+/// branch and read behind its flag, a loop some lanes leave early, and a
+/// shared procedure's results, with every pixel taking its own path.
+#[test]
+fn writes_that_cover_every_lane_keep_each_lanes_values() {
+    let prog = format!(
+        "{SHOW} /f {{ /a exch def a a mul 0.37 mul a floor cvi 3 mod add }} bind def
+         /pixel {{ /j exch def /i exch def
+           /m i 3 mod 0 eq {{ i 0.5 mul f }} {{ j 7 add f 1 add }} ifelse def
+           i 5 mod 1 eq {{ /p m i add def }} if
+           /s 0 def
+           0 1 i 9 mod 4 add {{ /k exch def
+             k i j add 7 mod eq {{ exit }} if
+             /t k m mul 0.01 mul def
+             k 2 mod 0 eq {{ /s s t add def }} {{ /s s t sub j f 0.001 mul add def }} ifelse
+           }} for
+           i 5 mod 1 eq {{ p }} {{ m }} ifelse s add show3 }} bind def"
+    );
+    for mode in ["never", "all"] {
+        same(&format!("/{mode} .kernelshare {prog}"));
+    }
+}
+
+/// A table read with a constant column and a huge row index: the bad
+/// lanes' index arithmetic must not overflow (a panic under
+/// overflow checks), and they retire as the interpreter's rangecheck
+/// (#1101 review).
+#[test]
+fn a_huge_row_index_into_a_fixed_column_is_a_rangecheck() {
+    same_error(
+        "/aa [[1 2 3] [4 5 6]] def
+         /pixel { /j exch def /i exch def
+           aa i 1000000 mul 1000000 mul 1000000 mul get 0 get 0.1 mul dup dup } bind def",
+        "rangecheck",
+    );
+}
