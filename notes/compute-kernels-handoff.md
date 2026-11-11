@@ -1,76 +1,87 @@
-# Handoff: compute-kernels epic (2026-11-11)
+# Handoff: compute-kernels epic (2026-11-11, evening)
 
 Session: https://claude.ai/code/session_016y8NtRr7b9NWRg1SctzFfp. It wrote
 both the 2026-11-10 handoff and this update. The 2026-11-09 handoff was
 session_016y8NtToNBqdyScG3LMGriu.
 
-## Where things stand
+## Where things stand (end of 2026-11-11)
 
-- **The epic.** `feature/compute-kernels` is pushed. It is
+- **The epic.** `feature/compute-kernels` is at `4953e28` and pushed. It is
   PR PSCatLabs/pscat#1061 (open, owner-merge, because it touches
-  `Cargo.toml`). Every CI workflow on `46ad11b` is green.
-- **#1101 (faster executor) is done.** It was merged into the epic at
-  `46ad11b` from `feature/compute-kernels-1101-executor`. Details and
-  numbers are in `notes/1101-faster-executor.md`.
-  - The executor runs a flat 16-byte lowered form (`kernel/code.rs`), with
-    branch-free vectorised fallible ops, blend and full-width stores
-    (`Kernel::fresh`), `Gather1`, add/sub/mul opcodes and 8×2 batches.
-  - The bytes and step counts are unchanged. An independent review found
-    one bug, an overflow panic under overflow checks in `Gather1`. It is
-    fixed, with a test.
-  - fractal_clouds' check (fc#117 comment 6793642064, pscat#1101 comment
-    6793646852) found every render byte-identical. golden_coast is 1.56×
-    faster with the builds interleaved: 1280×800 from 22.1 to 14.1 s, and
-    the 2× yardstick (a 2560×1600 kernel) from 84.9 to 54.3 s.
-    fractal_clouds is satisfied, and its `fastrender.sh` now defaults to
-    the CI build below.
-  - **Not yet done on GitHub** (this session's permissions blocked GitHub
-    writes):
-    - add `Closes #1101` to #1061's body, plus a line on the executor;
-    - move #1101 from `in-progress` to `in-review`, with a comment naming
-      `46ad11b`.
-- **What the PR closes.** It lists `Closes` for #742, #1062–#1066,
-  #1091–#1094 and #1099 (and #1101 once added). It lists `Refs` for #1044
-  and #1100. These issues close when #1061 merges.
-- **CI artifact.** The release dry run on `46ad11b` is run 43000416269,
-  green. Its artifacts expire 2027-02-09. The manifest's commit is
-  `809f906`, the PR merge onto main.
-  - aarch64-apple-darwin tar.gz SHA-256:
-    `5e1b0cbf454ba2f0be2b11b07b338ef54f2899f9ff8413531a357ca2b08be52d`.
-  - It renders mountains and golden_coast `cmp`-identical (checked here and
-    by fractal_clouds).
-  - The local build of the same commit is
-    `kernels/build2-46ad11b/pscat` (SHA-256 `47238116…7972`).
-- **Earlier follow-ups** (#1091, #1093, #1099, compile time) are in
-  `notes/1091-1093-1099-kernel-followups.md`. The purity forms "told from
-  the text" were shown unsound. Don't retry them.
+  `Cargo.toml`). The ci, release and other workflows on `8df943d` were
+  green, and the release dry run on `4953e28` is too.
+- **#1101 (faster executor)** was merged at `46ad11b` and signed off by
+  fractal_clouds (fc#117). See `notes/1101-faster-executor.md`.
+- **#1102 (`kernelarray`/`kernelarrays`)** was merged at `08bf53a`. See
+  `notes/1102-kernelarray.md`.
+  - fractal_clouds' 512² erosion sample went from 4.35 s to 25 ms.
+  - A fuzz that compares type and bits found a compiler bug the bytes had
+    hidden: a Dyn integer zero could be -0.0. It is fixed with no added
+    instruction (`IntZeroCheck`/`NegIntZero`).
+- **#1100 (x86 tiers, `.kernelmath /fast`)** was merged at `8df943d`. See
+  `notes/1100-simd-and-vector-math.md`.
+  - The executor runs SSE2, v2 or v3 (AVX2, no FMA) copies. CI's x86 runners
+    ran the v3 tier test, so the AVX2 code has executed on real hardware
+    with the baseline's bytes.
+  - `/fast` vectorises `sin`, `cos` and `atan`, bit-exact in the tests.
+  - Still open on #1100, so it is `Refs`, not `Closes`:
+    - AVX2 and AVX-512 timings (no x86 machine here; the note gives the
+      commands);
+    - AVX-512 needs Rust 1.89, above `rust-version` 1.88: the owner's call;
+    - whether `/fast` becomes the default.
+- **Codex review 3** (adversarial, `main...feature/compute-kernels`) found
+  two exactness bugs, fixed in `99d666b` and merged at `4953e28`:
+  - branch joins took 0.0 for -0.0, because `Op` compared immediates as
+    floats;
+  - x86 NaN payloads. `kernelarray` now stores every NaN as the quiet NaN.
 
-## Next executor levers (only if wanted; fractal_clouds asks for nothing now)
+  A Codex review of the fix diff was clean.
+- **The test release for fractal_clouds** is CI run 43108195586 (artifacts
+  expire 2027-02-09), manifest commit `a50dcd6`.
+  - aarch64-apple-darwin tar.gz SHA-256: `e3a56280…7e2d`.
+  - Its binary's SHA-256 is `ddb75c5d…1382`, extracted to
+    `kernels/ci-43108195586/x/`.
+  - The local build of `4953e28` is `kernels/build3-4953e28/pscat`
+    (`c9a928c1…ca4a`).
+  - It was sent to fractal_clouds on 2026-11-11, and the **validation is
+    pending**. fc main stays at `3c64dcb` until then. After validation, the
+    owner wants the gallery switched to the native noise operators (fc#16).
+- **Local gate.** Two tests fail on this machine since the afternoon of
+  2026-11-11, on `8df943d` too, which had passed: `mcp
+  concurrent_replies_never_interleave` (broken pipe) and `subcommands
+  typewrite_refuses_an_output_name_it_cannot_pick_a_format_for`. Both are
+  environmental (the handoff already listed them as known), and CI runs
+  them green.
 
-- **Divergence.** 8.3–12.3 of 16 lanes are active on average, so about a
-  third of the lane-work is masked. Coherence or compaction are the
-  candidates. `PSCAT_KERNEL_TIMING=1` prints the figure (`kernel batches:`).
-- **Moves.** They are 19% of dispatches. Coalescing in the allocator is
-  safe only in the plain case, worth about 3%.
+## Not yet done on GitHub (this session's permissions blocked GitHub writes)
+
+- **PR #1061's body.** A ready version is at
+  `/Volumes/YOTUO/dev-cache/pscat_gpu/tmp/body1061.md`. It has `Closes`
+  #1101 and #1102, `Refs` #1100, bullets for each, and the Dyn -0.0 note in
+  Review.
+- **Labels.** Move #1101 and #1102 to `in-review` (they close with
+  #1061), and #1100 to `in-review`, leaving it open for the items above.
+
+## Next executor levers (only if wanted)
+
+- **Exact vector noise.** fractal_clouds' cost is mostly noise and the
+  block loop, not trigonometry.
+- **Divergence.** 8.3–12.3 of 16 lanes are active on average. Coherence or
+  compaction are the candidates.
+- **Moves.** Coalescing them is worth about 3%.
 - **`Gather1`** is still scalar inside its handler.
-- The rest of what was learnt, so it isn't re-measured, is in
-  `notes/1101-faster-executor.md`:
-  - The cost is instructions per dispatch, not memory. The register file
-    size does not matter.
-  - By-value lane arrays get scalarised inside `Machine::block`.
-  - Out-of-line handlers are slower.
+- **`pow`/`ln`/`log` vectorised.** They are table-driven, about 2–3% of the
+  pieces measured.
+- What was learnt is in `notes/1101-faster-executor.md`: the cost is
+  instructions per dispatch, and lane arrays get scalarised inside
+  `Machine::block`. Keep new handlers' bodies out of `block`: inline, they
+  made it 6% larger (#1100).
 
 ## Still to do before #1061 merges
 
-1. **Codex review of the whole branch** (the user's plan), now that Codex
-   is back after Nov 11 9:34 AM. Use `/codex:rescue` or the codex plugin's
-   review path, against `main...feature/compute-kernels`. It now includes
-   #1101.
-2. **Full `cargo test --profile ci`.** CI on each push runs it. Check
-   the `ci` run for the latest push. The Windows budget flake is fixed. Two known failures are not from this work: a
-   typewrite test that also fails on clean main, and the MCP concurrent
-   test, which depends on the environment.
-3. **Owner merge of #1061** (CODEOWNERS path). Then delete the remote
+1. fractal_clouds' validation of the test release.
+2. The GitHub edits above.
+3. The owner's merge of #1061. Then delete the remote
    `feature/compute-kernels-*` branches and confirm the issues closed.
 
 ## How to test against fractal_clouds
@@ -97,6 +108,12 @@ session_016y8NtToNBqdyScG3LMGriu.
       golden_coast and 49G for mountains: subtract it.
     - `ab/baseline.sh BIN TAG` runs the whole #1101 acceptance set, and
       `ab/gal.sh` the gallery pieces.
+    - `ab/fc9.sh BASE NEW TAG` renders the 9 fractal_clouds scenes at
+      160×100 with both builds, then compares the PNGs and the step
+      counts.
+  - An x86_64 build runs here under Rosetta (SSE4.2, no AVX):
+    `rustup target add x86_64-apple-darwin`, then build or test with
+    `--target x86_64-apple-darwin`. Use a separate `CARGO_TARGET_DIR`.
   - `microbench/microbench.rs` is a ns-per-dispatch harness. Copy it into
     `src/kernel/` and add `mod microbench;` to use it, then remove it again.
 - **Drivers** come from fractal_clouds' `renders/k117b/mk.sh` and `mk2.sh`:
