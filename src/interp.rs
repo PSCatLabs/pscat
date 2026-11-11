@@ -497,7 +497,7 @@ impl Interp {
     /// `None` if `scale` is not a positive finite number, or if the
     /// page is more than 8000 pixels on a side at that scale (about 10.1
     /// for Letter). A program that then asks for a larger page at that
-    /// scale gets `limitcheck` from `setpagedevice`, as under `new`.
+    /// scale gets `configurationerror` from `setpagedevice`, as under `new`.
     ///
     /// ```
     /// let mut interp = pscat::Interp::new_scaled(2.0).expect("valid scale");
