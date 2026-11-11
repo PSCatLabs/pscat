@@ -40,9 +40,17 @@ selected, searched or copied.
 - `charpath`, `stringwidth`, glyphs under painting suppression (Type 3
   metrics runs, `nulldevice`).
 - Per glyph: a name with no Unicode value (`name_to_char` is `None`),
-  `.notdef`, a glyph the face lacks, and characters a browser would not draw
-  where the outline is (controls, soft hyphen, combining marks, zero-width
-  and bidi format characters, U+FEFF/FFFE/FFFF).
+  `.notdef`, a glyph the face lacks, and any character outside an
+  allowlist of left-to-right spacing blocks (Latin, Greek, Cyrillic without
+  its combining marks, punctuation, currency, symbols, Latin ligatures).
+  Controls and format characters draw nothing in a browser, combining marks
+  (in any block) attach to the previous character, and right-to-left
+  letters are reordered by the viewer's bidi pass. Any of these would move
+  a glyph. The first version had a denylist, which missed marks outside
+  U+0300-036F (Codex round 2).
+- A glyph painted with alpha or a blend mode is its own `<text>`, never part
+  of a run. The raster composites each glyph separately, so overlapping
+  glyphs blend twice; a viewer composites one element once (Codex round 1).
 - A blank glyph (space) that would open a new page after `showpage` is
   dropped. It draws nothing, and recording it would put it on the old page's
   body just before the erase.
@@ -86,10 +94,11 @@ dry-media output (chalk, crayon, charcoal: tens of MB). It is a proposed
 follow-up, not part of this change.
 
 **Evidence.**
-- `tests/svg_text.rs` (16 tests): default equals explicit `Paths` and
+- `tests/svg_text.rs` (19 tests): default equals explicit `Paths` and
   has no `<text>`; positions, styles, escaping, ISOLatin1 re-encoding, run
   splitting, rotation (origin maps back), fallbacks (Symbol, Palatino,
-  charpath, Type 3), paint order, mid-run reads, clip/alpha, page count,
+  charpath, Type 3, a combining mark mid-show, marks outside U+0300-036F and
+  a right-to-left letter), alpha/blend glyphs one element each, paint order, mid-run reads, clip/alpha, page count,
   raster and PDF byte-equal across modes, the CLI flag.
 - `tests/wasm.rs` `wasm_svg_text_matches_the_cli`: with text on, the CLI,
   the raw wasm ABI and the npm Renderer give byte-equal SVG at 72 and 144
