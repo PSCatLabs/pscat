@@ -1648,10 +1648,7 @@ impl Interp {
                     return Ok(None);
                 };
                 match frame {
-                    Frame::Scanner(lexer) => match {
-                        lexer.binary_tokens = *object_format != 0;
-                        lexer.next_token()?
-                    } {
+                    Frame::Scanner(lexer) => match lexer.next_token_in(*object_format != 0)? {
                         None => {
                             if lexer.pop_systemdict {
                                 Action::PopScannerAndDict

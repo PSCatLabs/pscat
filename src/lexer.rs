@@ -175,6 +175,13 @@ impl Lexer {
         }
     }
 
+    /// `next_token` with binary object sequences switched on or off first
+    /// (off while the object format is 0, #733).
+    pub(crate) fn next_token_in(&mut self, binary: bool) -> Result<Option<Token>, PsError> {
+        self.binary_tokens = binary;
+        self.next_token()
+    }
+
     fn dispatch_token(&mut self) -> Result<Option<Token>, PsError> {
         let Some(b) = self.peek()? else {
             return Ok(None);
