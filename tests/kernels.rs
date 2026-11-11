@@ -3142,6 +3142,31 @@ fn kernelmath_checks_its_operand() {
     assert_eq!(it.run_str("1 .kernelmath").unwrap_err().name(), "typecheck");
 }
 
+/// The instruction-set tier a kernel in `src` ran in, under
+/// `PSCAT_KERNEL_ISA=isa`: `PSCAT_KERNEL_TIMING`'s batches line.
+#[cfg(target_arch = "x86_64")]
+fn cli_tier(src: &str, isa: &str) -> String {
+    let dir = common::scratch_dir("kernels");
+    let ps = dir.join("tier.ps");
+    std::fs::write(&ps, src).expect("write");
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["--page", "200x130", "--png"])
+        .arg(dir.join("tier.png"))
+        .arg(&ps)
+        .env("PSCAT_KERNEL_ISA", isa)
+        .env("PSCAT_KERNEL_TIMING", "1");
+    let out = common::wait_output(
+        cmd.stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    err.lines()
+        .find(|l| l.contains("kernel batches"))
+        .unwrap_or("no batches line")
+        .to_string()
+}
+
 /// Every instruction-set tier the executor has gives the same bytes
 /// (#1100): on x86_64 the baseline, x86-64-v2 and x86-64-v3 copies, each
 /// run where the CPU has it (a tier it lacks runs the best one it has, so
@@ -3154,6 +3179,25 @@ fn bytes_do_not_depend_on_the_instruction_set() {
   i j mul 0.013 mul floor 0.1 mul i 0.5 mul round 0.01 mul add } bind def
 gsave 200 130 scale 200 130 [200 0 0 -130 0 130] { pixel pop } bind 3 kernelimage grestore showpage
 ";
+    // A tier the CPU has really runs: the timing line names it.
+    #[cfg(target_arch = "x86_64")]
+    for (isa, name, has) in [
+        (
+            "v2",
+            "x86-64-v2",
+            std::arch::is_x86_feature_detected!("sse4.1"),
+        ),
+        (
+            "v3",
+            "x86-64-v3",
+            std::arch::is_x86_feature_detected!("avx2"),
+        ),
+    ] {
+        if has {
+            let ran = cli_tier(trig, isa);
+            assert!(ran.contains(name), "{isa}: {ran}");
+        }
+    }
     for src in [
         SCENE.to_string(),
         trig.to_string(),
