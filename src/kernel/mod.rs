@@ -38,6 +38,7 @@ pub(crate) mod ir;
 pub(crate) mod opt;
 pub(crate) mod pure;
 pub(crate) mod regalloc;
+pub(crate) mod vmath;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -123,6 +124,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, ".kernelshare", kernelshare);
     op(dict, ".kernelcaps", kernelcaps);
     op(dict, ".kernelmode", kernelmode);
+    op(dict, ".kernelmath", kernelmath);
     op(dict, ".kernelstats", kernelstats);
     // The drivers' own helpers (`.kfstore` and the rest) are not installed:
     // `substitute` puts them into the driver procedures as operator
@@ -268,13 +270,21 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                         }
                     }
                 }
-                let r = run(it, &k, a.w, a.h, a.ncomp, rows, |m, l, out| m.pixel(l, out));
+                let fast = it.kernel_fast_math;
+                let g = Grid {
+                    w: a.w,
+                    h: a.h,
+                    ncomp: a.ncomp,
+                    rows,
+                    fast,
+                };
+                let r = run(it, &k, g, |m, l, out| m.pixel(l, out));
                 lap("cpu run", t1);
                 match r {
                     Ok(ran) if ran.pixels.is_empty() => {
                         // The random state after the call: what the last
                         // pixel in raster order leaves (#1063).
-                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows) {
+                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows, fast) {
                             Ok(Some(found)) => {
                                 if let Some(s) = found {
                                     it.rand_state = s;
@@ -495,7 +505,15 @@ fn cells(it: &mut Interp, a: Cells) -> Result<(), PsError> {
                 // Every row, under `--bands` too: the array is the result.
                 let rows = (0, a.h);
                 let t1 = crate::clock::Clock::mono_ns();
-                let r = run(it, &k, a.w, a.h, a.n, rows, |m, l, out| m.cell(l, out));
+                // Always the exact path: `.kernelmath` is `kernelimage`'s.
+                let g = Grid {
+                    w: a.w,
+                    h: a.h,
+                    ncomp: a.n,
+                    rows,
+                    fast: false,
+                };
+                let r = run(it, &k, g, |m, l, out| m.cell(l, out));
                 if timing {
                     eprintln!(
                         "pscat: kernel cpu run: {:.2} ms",
@@ -506,7 +524,7 @@ fn cells(it: &mut Interp, a: Cells) -> Result<(), PsError> {
                     Ok(ran) if ran.pixels.is_empty() => {
                         // As `kernelimage`: the random state the last cell
                         // in raster order leaves (#1063).
-                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows) {
+                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows, false) {
                             Ok(Some(found)) => {
                                 if let Some(s) = found {
                                     it.rand_state = s;
@@ -689,23 +707,32 @@ fn rows_needed(it: &Interp, w: usize, h: usize, matrix: [f64; 6]) -> (usize, usi
     if lo >= hi { (0, 0) } else { (lo, hi) }
 }
 
+/// What [`run`] computes: a `w` by `h` grid of `ncomp` outputs each, the
+/// rows `rows` of it, and with `.kernelmath /fast` or not.
+struct Grid {
+    w: usize,
+    h: usize,
+    ncomp: usize,
+    rows: (usize, usize),
+    fast: bool,
+}
+
 /// Run a compiled kernel over the grid, `emit` writing a pixel's `ncomp`
 /// outputs (bytes for `kernelimage`, [`Num`]s for `kernelarray`). Rows are
 /// dealt to the workers one at a time; the result does not depend on which
 /// worker computes a row.
-fn run<T, F>(
-    it: &mut Interp,
-    k: &Kernel,
-    w: usize,
-    h: usize,
-    ncomp: usize,
-    (j0, j1): (usize, usize),
-    emit: F,
-) -> Result<Ran<T>, Stop>
+fn run<T, F>(it: &mut Interp, k: &Kernel, g: Grid, emit: F) -> Result<Ran<T>, Stop>
 where
     T: Copy + Default + Send,
     F: Fn(&Machine, usize, &mut [T]) + Sync,
 {
+    let Grid {
+        w,
+        h,
+        ncomp,
+        rows: (j0, j1),
+        fast,
+    } = g;
     let row_bytes = w * ncomp;
     let total = row_bytes
         .checked_mul(h)
@@ -746,7 +773,7 @@ where
         .map(|(b, rows)| (j0 + b * th, rows))
         .collect();
     let queue = Mutex::new(bands.into_iter());
-    let code = code::Code::new(k);
+    let code = code::Code::new(k, fast);
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
     let retired: Mutex<Retired> = Mutex::new((Vec::new(), Vec::new()));
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
@@ -901,6 +928,7 @@ fn final_rand_state(
     h: usize,
     seeds: &[(usize, i64)],
     (j0, j1): (usize, usize),
+    fast: bool,
 ) -> Result<Option<Option<i64>>, Stop> {
     match k.rand {
         None => return Ok(Some(None)),
@@ -909,7 +937,7 @@ fn final_rand_state(
     }
     let (steps_left, deadline) = it.remaining_budget();
     let ctl = RunCtl::new(deadline, steps_left);
-    let code = code::Code::new(k);
+    let code = code::Code::new(k, fast);
     let mut m = Machine::new(k, &code, &ctl);
     let mut at = [(0i64, 0i64); LANES];
     let mut scan = || -> Result<Option<Option<i64>>, Stop> {
@@ -1094,6 +1122,24 @@ fn kernelmode(it: &mut Interp) -> Result<(), PsError> {
         "auto" => KernelMode::Auto,
         "interpret" => KernelMode::Interpret,
         "strict" => KernelMode::Strict,
+        _ => return Err(PsError::Rangecheck),
+    };
+    Ok(())
+}
+
+/// `name .kernelmath -` (#1100): `/exact` (the default) runs `sin`, `cos`
+/// and `atan` in `kernelimage`'s compiled kernels one lane at a time
+/// through `fmath`; `/fast` runs them vectorised (`vmath`), libm's
+/// algorithms lane by lane, checked bit for bit against `/exact` but kept
+/// opt-in. `kernelarray` always runs `/exact`.
+fn kernelmath(it: &mut Interp) -> Result<(), PsError> {
+    let v = it.pop()?;
+    let Value::Name(n) = &v.value else {
+        return Err(PsError::Typecheck);
+    };
+    it.kernel_fast_math = match &**n {
+        "exact" => false,
+        "fast" => true,
         _ => return Err(PsError::Rangecheck),
     };
     Ok(())

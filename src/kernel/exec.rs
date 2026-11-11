@@ -43,7 +43,7 @@ pub(crate) const INT_LIMIT_I: u64 = 1 << 53;
 /// Element tag of a local array slot that holds PostScript's null.
 const NULL_TAG: f64 = 2.0;
 
-type Lane = [f64; LANES];
+pub(crate) type Lane = [f64; LANES];
 
 /// Why an instruction retired a lane, for the instructions whose reason
 /// is fixed by their kind and operator. `Abort` and `Assert` carry a site
@@ -529,6 +529,40 @@ impl<'k> Machine<'k> {
                 L::Ext(n) => {
                     let c = self.c;
                     self.ext(&c.ext[n as usize], mask);
+                }
+                L::SinF(d, a) | L::CosF(d, a) => {
+                    let cos = matches!(*ins, L::CosF(..));
+                    let mut buf = [0.0; LANES];
+                    let x = *self.w(a).lane(&mut buf);
+                    let mut t = [0.0; LANES];
+                    let mut cold = super::vmath::sin_cos_deg(&x, &mut t, cos) & mask;
+                    // Out of the vector code's range: the exact code.
+                    while cold != 0 {
+                        let l = cold.trailing_zeros() as usize;
+                        cold &= cold - 1;
+                        let op = if cos { UnOp::Cos } else { UnOp::Sin };
+                        t[l] = lane_un(op, x[l]).unwrap_or(f64::NAN);
+                    }
+                    self.store(d, &t, mask);
+                }
+                L::AtanF(d, a, b) => {
+                    let (mut ba, mut bb) = ([0.0; LANES], [0.0; LANES]);
+                    let y = *self.w(a).lane(&mut ba);
+                    let x = *self.w(b).lane(&mut bb);
+                    let mut t = [0.0; LANES];
+                    let mut cold = super::vmath::atan_deg(&y, &x, &mut t) & mask;
+                    // Out of range, and `0 0 atan`: the exact code decides.
+                    let mut bad = 0u64;
+                    while cold != 0 {
+                        let l = cold.trailing_zeros() as usize;
+                        cold &= cold - 1;
+                        match lane_bin(BinOp::Atan, y[l], x[l]) {
+                            Some(r) => t[l] = r,
+                            None => bad |= 1 << l,
+                        }
+                    }
+                    self.kill(bad, Why::Atan00 as u32);
+                    self.store(d, &t, mask & !bad);
                 }
                 L::Gather1(d, g, col) => {
                     let g = self.c.gathers[g as usize];

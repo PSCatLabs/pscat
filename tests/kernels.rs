@@ -3067,3 +3067,68 @@ fn kernelarray_differential_fuzz() {
     }
     assert!(compiled * 2 >= cases, "only {compiled} of {cases} compiled");
 }
+
+// --- .kernelmath /fast (#1100) -------------------------------------------------
+
+/// Render `prog` (a `/pixel` program, as `render`) under `/strict` with
+/// `.kernelmath` set to `math` first.
+fn render_math(math: &str, prog: &str) -> Result<Vec<u8>, String> {
+    render("strict", &format!("/{math} .kernelmath {prog}"))
+}
+
+#[test]
+fn fast_math_gives_the_exact_paths_bytes() {
+    for body in [
+        // Small and large angles, every quadrant, multiples of 90.
+        "i j mul 7.3 mul sin  i 45 mul j 90 mul add cos  i 0.37 mul j sub 1e5 mul sin",
+        // atan: every quadrant, a 1.0 denominator, tiny and huge ratios.
+        "i 35.5 sub j 4 sub atan 360 div  j 4 sub 1.0 atan 360 div  i 1e-25 mul 1 i sub 1e25 mul atan 360 div",
+        // Out of the vector code's range: huge, infinite and NaN angles.
+        "i 1e12 mul sin  i 1e308 mul 10 mul j 1e308 mul 10 mul dup sub add cos 0 max 1 min  j 1e300 mul 1 add i atan 360 div",
+    ] {
+        let prog = format!("{SHOW} /pixel {{ /j exch def /i exch def {body} }} def");
+        let exact = render_math("exact", &prog);
+        assert!(exact.is_ok(), "{exact:?}\n{prog}");
+        assert!(render_math("fast", &prog) == exact, "{prog}");
+        assert!(render("interpret", &prog) == exact, "{prog}");
+    }
+    // `0 0 atan` is still the error, at the same pixel.
+    let prog = "/pixel { /j exch def /i exch def i 3 sub j 2 sub atan 360 div dup dup } def";
+    assert_eq!(render_math("fast", prog), Err("undefinedresult".into()));
+}
+
+#[test]
+fn the_math_mode_is_per_call_and_kernelarray_is_always_exact() {
+    // The same procedure exact, fast, then exact: each run is lowered for
+    // its own mode, so the last is the exact path's again.
+    let prog = format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def i 13 mul sin j 7 mul cos i 1 add j atan 360 div }} def"
+    );
+    let reference = render("interpret", &prog);
+    for math in ["exact", "fast", "exact"] {
+        assert!(render_math(math, &prog) == reference, "{math}");
+    }
+    // kernelarray's values, bit for bit, whatever `.kernelmath` says.
+    let src = "/fast .kernelmath 11 5 { /j exch def /i exch def i 17 mul sin j i 1 add atan } 2 kernelarray";
+    let (out, stats) = same_cells(src);
+    assert!(out.is_ok() && stats == [1, 0, 0], "{out:?} {stats:?}");
+    assert_eq!(
+        cells_run(
+            "interpret",
+            "/exact .kernelmath 1 1 { pop pop 1 } 1 kernelarray"
+        )
+        .0
+        .map(|v| v.len()),
+        Ok(1)
+    );
+}
+
+#[test]
+fn kernelmath_checks_its_operand() {
+    let mut it = Interp::new();
+    assert_eq!(
+        it.run_str("/sloppy .kernelmath").unwrap_err().name(),
+        "rangecheck"
+    );
+    assert_eq!(it.run_str("1 .kernelmath").unwrap_err().name(), "typecheck");
+}
