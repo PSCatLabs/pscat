@@ -945,6 +945,9 @@
 } bind def
 
 % str x y opts -   (dctext's body, inside dcscratch)
+% An executable text (a procedure, or a string made executable) is refused:
+% sgpath takes only literal strings and glyph-name arrays. The text and
+% /Align are reused with `load`, never by bare name, so nothing is ever run.
 % @internal
 /dctextbody {
     /dcQO exch def
@@ -953,26 +956,27 @@
     /dcQy exch def /dcQx exch def
     /dcQs exch def
     /dcQs load type dup /stringtype ne exch /arraytype ne and { dctext-text-must-be-a-string } if
+    /dcQs load xcheck { dctext-text-must-be-a-string } if  % sgpath takes no procedure
     /sgpath where { pop } { dctext-needs-strokeglyphs } ifelse
     /dcQsz dcQO /Size 36 1e-6 1e6 /dctext-size-must-be-positive dcoptnum def
     /dcQal dcQO /Align /left dcget def
     /dcQal load type /nametype ne { dctext-align-must-be-left-center-or-right } if
-    dcQal /left ne dcQal /center ne and dcQal /right ne and
+    /dcQal load /left ne /dcQal load /center ne and /dcQal load /right ne and
         { dctext-align-must-be-left-center-or-right } if
     /dcQg dcQO dcQsz dcsgopts def
     % /Fit sets the size that makes the measured width exactly the fit
     dcQO /Fit known {
         /dcQfit dcQO /Fit 0 1e-6 1e6 /dctext-fit-must-be-positive dcoptnum def
-        /dcQw dcQs dcQg sgwidth def
+        /dcQw /dcQs load dcQg sgwidth def
         dcQw 0 gt {
             /dcQsz dcQsz dcQfit mul dcQw div def
             dcQg /Size dcQsz put
         } if
     } if
-    /dcQw dcQs dcQg sgwidth def
+    /dcQw /dcQs load dcQg sgwidth def
     newpath
-    dcQs
-    dcQx dcQal /center eq { dcQw 2 div sub } if dcQal /right eq { dcQw sub } if
+    /dcQs load
+    dcQx /dcQal load /center eq { dcQw 2 div sub } if /dcQal load /right eq { dcQw sub } if
     dcQy dcQg sgpath
     % everything else is chalk; the lettering's strokes stay joined
     /dcQc dcQO [ /Size /Align /Fit /Slant /Jitter /Strict /Corners ] dcwithout def
@@ -994,6 +998,11 @@
 %   { (a) 0 0 << /Fit -5 >> dctext } /dctext-fit-must-be-positive (/Fit -5) mustguard
 %   { gsave (Menu) 50 20 << /Align /center /Fit 60 /Hand 1 /Seed 4 >> dctext grestore } (centred and fitted) mustpass
 %   { gsave () 50 20 << /Fit 60 >> dctext grestore } (an empty string) mustpass
+%   /stran false def
+%   { { userdict /stran true put (x) } 50 20 << >> dctext } /dctext-text-must-be-a-string (a procedure for the text) mustguard
+%   stran false eq (and the procedure was never run) mustbe
+%   { (x) cvx 50 20 << >> dctext } /dctext-text-must-be-a-string (an executable string) mustguard
+%   { gsave [ /A /B ] 50 20 << /Size 20 >> dctext grestore } (a literal glyph-name array) mustpass
 %   count 0 eq (and the operand stack is left empty) mustbe
 %%EndSelfTest
 %
@@ -1035,7 +1044,8 @@
     /dcRy exch def /dcRx2 exch def /dcRx1 exch def
     /dcRr exch def /dcRl exch def
     [ /dcRl load /dcRr load ] {
-        type dup /stringtype ne exch /arraytype ne and { dcleader-text-must-be-a-string } if
+        dup type dup /stringtype ne exch /arraytype ne and { dcleader-text-must-be-a-string } if
+        xcheck { dcleader-text-must-be-a-string } if  % sgpath takes no procedure
     } forall
     /sgpath where { pop } { dcleader-needs-strokeglyphs } ifelse
     /dcRsz dcRO /Size 36 1e-6 1e6 /dcleader-size-must-be-positive dcoptnum def
@@ -1048,11 +1058,11 @@
     /dcRseed dcRO /Seed known dup { dcRO /Seed get dcisnum and } if def
     % the two widths, measured before anything is drawn
     /dcRg dcRt dcRsz dcsgopts def
-    /dcRwl dcRl dcRg sgwidth def
-    /dcRwr dcRr dcRg sgwidth def
-    dcRl dcRx1 dcRy dcRt dup /Align /left put dctextbody
+    /dcRwl /dcRl load dcRg sgwidth def
+    /dcRwr /dcRr load dcRg sgwidth def
+    /dcRl load dcRx1 dcRy dcRt dup /Align /left put dctextbody
     dcRseed { dcRt /Seed dcRO /Seed get 101 dcseedplus put } if
-    dcRr dcRx2 dcRy dcRt dup /Align /right put dctextbody
+    /dcRr load dcRx2 dcRy dcRt dup /Align /right put dctextbody
     % the leader: dots at whole multiples of /Pitch from x = 0, so rows
     % with the same pitch line their dots up, as typeset leaders do
     /dcRa dcRx1 dcRwl add dcRgap add dcRpitch div ceiling def
@@ -1088,6 +1098,10 @@
 %   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Seed 9 /Leader << /Strength 0.3 >> >> dcleader grestore }
 %   (a menu row) mustpass
 %   { gsave (Long dish name) (9) 10 60 20 << /Size 14 >> dcleader grestore } (a row with no room for dots) mustpass
+%   /stran false def
+%   { (a) { userdict /stran true put (x) } 0 100 0 << >> dcleader } /dcleader-text-must-be-a-string (a procedure for the right text) mustguard
+%   stran false eq (and the procedure was never run) mustbe
+%   { gsave [ /T /e /a ] [ /two ] 10 190 20 << /Size 14 >> dcleader grestore } (literal glyph-name arrays) mustpass
 %   count 0 eq (and the operand stack is left empty) mustbe
 %%EndSelfTest
 %
