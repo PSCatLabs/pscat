@@ -368,10 +368,36 @@ proc --compile--> IR (structured: Seq / If / Loop / Break)
 
 The CPU executor:
 
-- It interprets the IR over a **batch** of lanes, one lane per pixel, a run
-  of up to 256 pixels of one row. Each instruction is a tight loop over the
-  batch's registers (`[f64; LANES]`), which LLVM vectorises to NEON or AVX.
-  Dispatch costs once per instruction per batch, not once per pixel.
+- It interprets the IR over a **batch** of 16 lanes, one lane per pixel,
+  an 8×2 tile of pixels (#1101; `PSCAT_KERNEL_TILE=WxH` overrides it for
+  measuring). Neighbouring rows mostly take the same branches, so a tile runs
+  about 5% fewer instructions than a run of 16 pixels of one row. Each
+  instruction is a tight loop over the batch's registers (`[f64; LANES]`),
+  which LLVM vectorises to NEON or AVX. Dispatch costs once per instruction
+  per batch, not once per pixel.
+- It runs a **lowered form** of the IR (`kernel/code.rs`, #1101), not the IR
+  tree. That form is one flat array of 16-byte instructions, with nested
+  blocks inline and subroutines before the body. Immediates sit in a constant
+  pool, so integer ops still read them as `v as i64`. The lowering also
+  makes these instructions:
+  - add, sub and mul get their own opcodes;
+  - a table read with constant tags and one good constant index becomes
+    `Gather1`;
+  - the wide, rare instructions keep their IR form in a side table.
+
+  On large kernels the executor is bound by instructions per dispatch, not
+  by memory: golden_coast (170k instructions, 4.4k registers) and mountains
+  (96 registers) cost the same per dispatch. Its loops are written so LLVM
+  vectorises them inside one large function:
+  - operands are read in place, one loop per operand shape (register or
+    immediate); by-value lane arrays get split into scalars;
+  - a failing lane is found with one OR across the batch, and the mask is
+    built only when some lane failed;
+  - nothing selects a value for a failing lane, which is retired anyway.
+- **Masked writes.** A write stores only the running lanes, as a blend, not
+  a branch per lane. The exception is a write that starts its register's
+  live interval (`Kernel::fresh`, from the register allocator). It may cover
+  every lane, because on the lanes it skips the register holds nothing live.
 - `If` evaluates a mask. When all lanes agree, it runs one branch, which is
   the coherent fast path. Otherwise it runs both, with masked register
   writes.
