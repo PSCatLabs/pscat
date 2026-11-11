@@ -809,6 +809,48 @@ impl<'k> Machine<'k> {
             BinOp::BXor => lanes!(|a: f64, b: f64| f64::from(u8::from((a != 0.0) ^ (b != 0.0)))),
             BinOp::Eq => lanes!(|a: f64, b: f64| f64::from(u8::from(a == b))),
             BinOp::Ne => lanes!(|a: f64, b: f64| f64::from(u8::from(a != b))),
+            // The fallible ops the hot paths use (#1099): the whole batch
+            // branch-free, the failing lanes found with a compare, so they
+            // vectorize. A failing lane holds 0.0, as `lane_bin` leaves it.
+            BinOp::Div => {
+                let (xs, ys) = (x.splat(), y.splat());
+                let mut t = [0.0; LANES];
+                let mut z = [false; LANES];
+                for l in 0..LANES {
+                    // Divide every lane, then select: a division under the
+                    // branch stays scalar.
+                    let q = xs[l] / ys[l];
+                    z[l] = ys[l] == 0.0;
+                    t[l] = if z[l] { 0.0 } else { q };
+                }
+                bad = lane_mask(&z);
+                t
+            }
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                let (xs, ys) = (x.splat(), y.splat());
+                let mut t = [0.0; LANES];
+                let mut z = [false; LANES];
+                macro_rules! cmp {
+                    ($c:tt) => {
+                        for l in 0..LANES {
+                            z[l] = xs[l].is_nan() | ys[l].is_nan();
+                            t[l] = if z[l] {
+                                0.0
+                            } else {
+                                f64::from(u8::from(xs[l] $c ys[l]))
+                            };
+                        }
+                    };
+                }
+                match op {
+                    BinOp::Lt => cmp!(<),
+                    BinOp::Le => cmp!(<=),
+                    BinOp::Gt => cmp!(>),
+                    _ => cmp!(>=),
+                }
+                bad = lane_mask(&z);
+                t
+            }
             _ => {
                 // The ops that can fail or need per-lane integer work.
                 let mut t = [0.0; LANES];
@@ -829,21 +871,36 @@ impl<'k> Machine<'k> {
         let x = self.opnd(a);
         let mut t = [0.0; LANES];
         let mut bad = 0u64;
+        // Over a whole lane array, so the plain ops vectorize (#1099).
+        let xs = x.splat();
+        macro_rules! each {
+            ($f:expr) => {{
+                let f = $f;
+                for l in 0..LANES {
+                    t[l] = f(xs[l]);
+                }
+            }};
+        }
         match op {
-            UnOp::Neg => {
-                for (l, v) in t.iter_mut().enumerate() {
-                    *v = -x.at(l);
+            UnOp::Neg => each!(|v: f64| -v),
+            UnOp::Abs => each!(f64::abs),
+            UnOp::Floor => each!(f64::floor),
+            UnOp::Ceil => each!(f64::ceil),
+            UnOp::Trunc => each!(f64::trunc),
+            UnOp::Round => each!(|v: f64| {
+                let f = v.floor();
+                if v - f >= 0.5 { f + 1.0 } else { f }
+            }),
+            UnOp::BNot => each!(|v: f64| f64::from(u8::from(v == 0.0))),
+            UnOp::Sqrt => {
+                // `fmath::sqrt` is `f64::sqrt`; a negative lane fails and
+                // holds 0.0, as `lane_un` leaves it.
+                let mut z = [false; LANES];
+                for l in 0..LANES {
+                    z[l] = xs[l] < 0.0;
+                    t[l] = if z[l] { 0.0 } else { xs[l].sqrt() };
                 }
-            }
-            UnOp::Abs => {
-                for (l, v) in t.iter_mut().enumerate() {
-                    *v = x.at(l).abs();
-                }
-            }
-            UnOp::Floor => {
-                for (l, v) in t.iter_mut().enumerate() {
-                    *v = x.at(l).floor();
-                }
+                bad = lane_mask(&z);
             }
             _ => {
                 for (l, v) in t.iter_mut().enumerate() {
@@ -864,7 +921,26 @@ enum OpRef<'a> {
     Imm(f64),
 }
 
+/// The lanes set in `z`, as a mask.
+#[inline(always)]
+fn lane_mask(z: &[bool; LANES]) -> u64 {
+    let mut m = 0u64;
+    for (l, &b) in z.iter().enumerate() {
+        m |= u64::from(b) << l;
+    }
+    m
+}
+
 impl OpRef<'_> {
+    /// The operand as a whole lane array (an immediate repeated).
+    #[inline(always)]
+    fn splat(&self) -> Lane {
+        match self {
+            OpRef::Lane(x) => **x,
+            OpRef::Imm(x) => [*x; LANES],
+        }
+    }
+
     #[inline(always)]
     fn at(&self, l: usize) -> f64 {
         match self {
