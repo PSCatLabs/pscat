@@ -37,7 +37,7 @@
 //!     vec![CellSize::new((cell.width(), cell.height()), (0, 0))],
 //! );
 //! let layout = SheetLayout::new(&[row])?;
-//! let mut sheet = Sheet::new(layout)?;
+//! let mut sheet = Sheet::new(&layout)?;
 //! sheet.put_header(0, &label)?;
 //! sheet.put_image(0, 0, &cell)?;
 //! let png = sheet.into_page().to_png().expect("PNG encoding");
@@ -165,7 +165,7 @@ impl RowSize {
 /// Where everything on a sheet goes. Positions are the top-left corner of
 /// each piece, in pixels from the sheet's top-left; an image's position is
 /// inside its hairline.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SheetLayout {
     inner: cs::Layout,
     rows: Vec<RowSize>,
@@ -261,14 +261,18 @@ pub struct Sheet {
 }
 
 impl Sheet {
-    /// A blank sheet for `layout`. This allocates the sheet's pixels:
-    /// check [`SheetLayout::size`] against your budget first.
-    pub fn new(layout: SheetLayout) -> Result<Sheet, SheetError> {
+    /// A blank sheet for `layout` (the sheet keeps a copy of it). This
+    /// allocates the sheet's pixels: check [`SheetLayout::size`] against
+    /// your budget first.
+    pub fn new(layout: &SheetLayout) -> Result<Sheet, SheetError> {
         let canvas = layout
             .inner
             .new_sheet()
             .map_err(|m| SheetError::new(SheetErrorKind::TooLarge, m))?;
-        Ok(Sheet { layout, canvas })
+        Ok(Sheet {
+            layout: layout.clone(),
+            canvas,
+        })
     }
 
     /// The layout this sheet draws.

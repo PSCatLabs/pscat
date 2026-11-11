@@ -10,8 +10,11 @@ a documented, semver-covered API for the four, in pscat-mcp's priority order.
 
 - `Page::halftone(&self) -> Page` and `Page::blank(w, h) -> Option<Page>`.
 - `Interp::page_count()`, `Interp::page(i) -> Option<Page>` (one copy at a
-  time) and `Interp::into_last_page(self) -> Page` (no copy). These sit in an
-  `impl Interp` block in `src/page.rs`, so `interp.rs` is untouched.
+  time) and `Interp::into_last_page(self) -> Page` (no copy), plus
+  `Interp::set_transparent_background()` and
+  `Interp::set_pdf_info_from_dsc(source)` (what `pscat --transparent` and
+  `pscat --pdf` do). These sit in an `impl Interp` block in `src/page.rs`,
+  so `interp.rs` is untouched.
 - `pscat::sheet`: `SheetLayout`, `RowSize`, `CellSize`, `Sheet`,
   `text_strip`, `zoom`, `SheetError`/`SheetErrorKind`, `MAX_SIDE_PX`,
   `MAX_TEXT_CHARS`, `MAX_TEXT_PX`. A facade over `contact_sheet`.
@@ -61,7 +64,12 @@ pscat-mcp's pinned build still uses them.
   (`chalk.color must be one of ...`), which pscat-mcp rewrites into its own
   flat argument names. `Display` adds `config: ` in front.
 - `Driver::prepare` must run after `enable_pdf`, because `Gfx::set_pdf_info`
-  does nothing without a PDF recorder. This is documented and tested.
+  does nothing without a PDF recorder. This is documented and tested. The two
+  `Interp` methods it uses are public too: pscat-mcp's worker applies them to
+  every generated program (chalkboards and handwriting), not only through a
+  chalk driver.
+- `Sheet::new` borrows the layout and keeps a copy (so `contact_sheet::Layout`
+  gained `Clone`), so the caller can still read positions while drawing.
 - `sheet::zoom` records `k` times the page's resolution, so a zoomed page
   prints at the same physical size.
 
@@ -80,12 +88,26 @@ checks the before and after give the same bytes):
 | `chalk::Config::{default, from_value, apply, check}`, `.width/.height/.dpi/.board` | `chalkboard::BoardConfig::{default, from_value, apply, check, page_size, dpi, has_board}` |
 | `chalk::driver`, `chalk::Driver` fields | `BoardConfig::driver`, `Driver::{source, page_size, dpi, transparent}` |
 | `chalk::explain`, matching `ChalkError` variants | `chalkboard::explain`, `ChalkError::{code, token, message, is_input_error}` |
-| `Gfx::set_transparent_background`, `pdf::scan_document_info` + `Gfx::set_pdf_info` | `Driver::prepare(&mut interp)` |
+| `Gfx::set_transparent_background` | `Interp::set_transparent_background` (or `Driver::prepare`) |
+| `pdf::scan_document_info` + `Gfx::set_pdf_info` | `Interp::set_pdf_info_from_dsc` (or `Driver::prepare`) |
 | `chalk::CHALK_COLORS` | `chalkboard::CHALK_COLORS` |
 | `capabilities::payload_json` | `catalog::capabilities` |
 
 The syntax scan (`lexer`, #1096) and the default page size
 (`PageSizeSource`, #1097) are covered by those issues' PRs.
+
+**Checked against pscat-mcp itself.** pscat-mcp `a9a019d` was cloned into a
+scratch directory with its `pscat` dependency pointed at this branch, and
+`src/pscat_extras.rs` was ported to the API above. The port keeps the
+module's own interface, except that `SheetCanvas` takes row and cell indices
+instead of positions, which changes three call sites in its `src/sheet.rs`.
+It compiles with its `tiny-skia` dependency removed, and every hidden item
+it uses is gone apart from `lexer` and `PageSizeSource`. On the port, its
+unit tests (63, including its chalk config error tests), `tests/backend.rs`,
+the end-to-end `tests/chalkboard.rs` and `tests/eval_replay.rs` pass.
+`tests/eval_server.rs` fails only because it reads pscat's git `source` from
+`Cargo.lock`, which a path dependency has none of. The rest of its
+integration tests were not run.
 
 **Deferred:**
 

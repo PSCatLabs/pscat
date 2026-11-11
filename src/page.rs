@@ -144,10 +144,50 @@ impl Page {
 /// `--page`'s ceiling).
 const MAX_SIDE_PX: u32 = 8000;
 
-// Page access on `Interp` beyond `pages()`. These live here, beside `Page`,
-// rather than in `interp.rs`: they are about the rendered rasters, and need
-// nothing of the machine but the canvas and the pages it has shown.
+// Page access and output setup on `Interp` beyond `pages()` and
+// `enable_svg`/`enable_pdf` (issue #1098). These live here, beside `Page`,
+// rather than in `interp.rs`: they are about the rendered output, and need
+// nothing of the machine but its graphics device.
 impl crate::Interp {
+    /// Make the page background transparent instead of opaque white: PNG
+    /// pages get a real alpha channel, and SVG pages leave out their white
+    /// backdrop. For artwork that is placed on something else (a garment, a
+    /// slide). Call it before the program paints anything: it clears the
+    /// page. `pscat --transparent` does this.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::with_page(10, 10).expect("valid page size");
+    /// interp.set_transparent_background();
+    /// interp.run_str("0 0 5 5 rectfill")?;
+    /// let page = interp.into_last_page();
+    /// assert_eq!(page.rgba8()[3], 0); // the top-left corner is clear
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn set_transparent_background(&mut self) {
+        self.gfx_mut().set_transparent_background();
+    }
+
+    /// Give the PDF being recorded the title and author in `source`'s DSC
+    /// header comments (`%%Title:`, and `%%For:` or else `%%Author:`, read
+    /// up to `%%EndComments`), as `pscat --pdf` does for the program it
+    /// runs. Call it after [`enable_pdf`](crate::Interp::enable_pdf):
+    /// without a PDF being recorded it does nothing.
+    ///
+    /// ```
+    /// let src = "%!PS\n%%Title: Quarterly report\n%%EndComments\nshowpage\n";
+    /// let mut interp = pscat::Interp::with_page(10, 10).expect("valid page size");
+    /// interp.enable_pdf();
+    /// interp.set_pdf_info_from_dsc(src.as_bytes());
+    /// interp.run_str(src)?;
+    /// let pdf = interp.pdf_document().expect("PDF enabled");
+    /// assert!(String::from_utf8_lossy(&pdf).contains("/Title (Quarterly report)"));
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn set_pdf_info_from_dsc(&mut self, source: &[u8]) {
+        let (title, author) = crate::pdf::scan_document_info(source);
+        self.gfx_mut().set_pdf_info(title, author);
+    }
+
     /// How many pages [`pages`](crate::Interp::pages) would return, without
     /// copying any of them.
     ///

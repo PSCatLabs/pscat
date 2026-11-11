@@ -61,7 +61,7 @@ fn halftone_pages_match_the_hidden_screen_and_encoder() {
 #[test]
 fn halftone_of_a_transparent_page_is_on_white() {
     let mut clear = pscat::Interp::with_page(40, 40).unwrap();
-    clear.gfx_mut().set_transparent_background();
+    clear.set_transparent_background();
     clear.run_str("0 0 10 10 rectfill").unwrap();
     let screened = clear.into_last_page().halftone();
     let px = screened.rgba8();
@@ -256,7 +256,7 @@ fn sheet_matches_the_hidden_contact_sheet() {
         assert_eq!(layout.image_xy(r, c), Some(layout_h.image_xy[r][c]));
         assert_eq!(layout.caption_xy(r, c), Some(layout_h.caption_xy[r][c]));
     }
-    let mut sheet = Sheet::new(layout).unwrap();
+    let mut sheet = Sheet::new(&layout).unwrap();
     sheet.put_header(0, &label).unwrap();
     for (n, cell) in cells.iter().enumerate() {
         let (r, c) = slots[n];
@@ -293,7 +293,7 @@ fn sheet_errors() {
     assert!(!err.to_string().contains("--dpi"), "{err}");
 
     let row = RowSize::new((50, 20), vec![CellSize::new((30, 20), (40, 12))]);
-    let mut sheet = Sheet::new(SheetLayout::new(&[row]).unwrap()).unwrap();
+    let mut sheet = Sheet::new(&SheetLayout::new(&[row]).unwrap()).unwrap();
     let page = |w, h| pscat::Page::blank(w, h).unwrap();
     // Wrong slots.
     for e in [

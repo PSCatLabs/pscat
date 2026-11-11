@@ -156,12 +156,10 @@ impl Driver {
     /// it would be lost) and before running anything: a transparent
     /// background clears the page.
     pub fn prepare(&self, interp: &mut Interp) {
-        let gfx = interp.gfx_mut();
         if self.0.transparent {
-            gfx.set_transparent_background();
+            interp.set_transparent_background();
         }
-        let (title, author) = crate::pdf::scan_document_info(self.0.source.as_bytes());
-        gfx.set_pdf_info(title, author);
+        interp.set_pdf_info_from_dsc(self.0.source.as_bytes());
     }
 }
 

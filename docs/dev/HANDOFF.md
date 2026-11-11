@@ -1697,8 +1697,8 @@ renders eight examples in both and compares block-downsampled output).
   Since #1098 the supported surface also has `pscat::sheet`,
   `pscat::chalkboard` and `pscat::catalog` (facades over the hidden
   `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
-  `Interp::page_count`/`page`/`into_last_page` (in `src/page.rs`, not
-  `interp.rs`). They take and return `Page`, never a tiny-skia type, so
+  `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
+  `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so
   tiny-skia (0.x) stays a private dependency and its upgrades are not pscat
   API breaks; keep it that way (no `pub use tiny_skia`). pscat-mcp still
   calls the hidden items from before (its `src/pscat_extras.rs`), so do not

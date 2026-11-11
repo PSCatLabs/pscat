@@ -69,6 +69,11 @@ and does not have to match pscat's version of one.
   `interp.into_last_page()` takes the last page out of the interpreter without
   a copy, the page `pscat sheet` uses for a cell. `Page::blank(w, h)` is a
   white page.
+- **Output setup.** `interp.set_transparent_background()` before running
+  gives PNG pages an alpha channel and SVG pages no white backdrop
+  (`pscat --transparent`). After `enable_pdf()`,
+  `interp.set_pdf_info_from_dsc(source)` gives the PDF the title and author in
+  the program's `%%Title:` and `%%For:` comments (`pscat --pdf` does this).
 - **Halftone.** `page.halftone()` screens a page to pure black and white,
   45 degree clustered dots, as `pscat --halftone` does:
   `page.halftone().to_png()` is the same file `pscat --halftone --png` writes.
@@ -87,7 +92,7 @@ and does not have to match pscat's version of one.
       (label.width(), label.height()),
       vec![CellSize::new((cell.width(), cell.height()), (0, 0))],
   );
-  let mut sheet = Sheet::new(SheetLayout::new(&[row])?)?;
+  let mut sheet = Sheet::new(&SheetLayout::new(&[row])?)?;
   sheet.put_header(0, &label)?;
   sheet.put_image(0, 0, &cell)?;
   sheet.into_page().save_png("sheet.png")?;

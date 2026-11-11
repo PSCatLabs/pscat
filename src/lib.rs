@@ -59,7 +59,9 @@
 //! - [`Interp::page`] and [`Interp::page_count`] read the pages one at a
 //!   time, and [`Interp::into_last_page`] takes the last one out without a
 //!   copy. [`Page::halftone`] screens a page as `pscat --halftone` does;
-//!   [`Page::to_png`] encodes it.
+//!   [`Page::to_png`] encodes it. [`Interp::set_transparent_background`] and
+//!   [`Interp::set_pdf_info_from_dsc`] set the output up as `pscat
+//!   --transparent` and `pscat --pdf` do.
 //! - [`sheet`] lays out and draws a labelled review sheet (`pscat sheet`)
 //!   around cells the caller renders.
 //! - [`chalkboard`] turns LaTeX and a board config into the PostScript
