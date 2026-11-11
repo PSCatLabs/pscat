@@ -73,22 +73,35 @@ pub(crate) fn standard_face(fid: i64) -> Option<StandardFace> {
     })
 }
 
-/// Whether `ch` can stand for its glyph as text: printable, allowed in
-/// XML 1.0, and drawn by a browser where the outline would be. Format
-/// characters (soft hyphen, zero-width and bidi controls) render as
-/// nothing and combining marks attach to the previous character, so
-/// those keep their outlines.
+/// Whether `ch` can stand for its glyph as text. A viewer must draw it
+/// on its own, left to right, at the glyph's x: an allowlist of spacing,
+/// left-to-right blocks the standard faces cover (Latin, Greek, Cyrillic,
+/// punctuation, symbols). Everything else keeps its outline: controls and
+/// format characters (soft hyphen, zero-width and bidi controls) draw
+/// nothing; combining marks attach to the previous character in any
+/// block; right-to-left letters are reordered by the viewer's bidi pass.
+/// An allowlist, because std has no Unicode category or bidi tables and a
+/// denylist missed marks outside U+0300-036F (Codex review, #1119).
 pub(crate) fn text_safe(ch: char) -> bool {
+    const SPACING_LTR: &[(u32, u32)] = &[
+        (0x20, 0x7E),     // Basic Latin
+        (0xA0, 0xAC),     // Latin-1 punctuation (U+00AD soft hyphen left out)
+        (0xAE, 0x2FF),    // Latin-1 letters, Latin Extended-A/B, IPA, spacing modifiers
+        (0x370, 0x3FF),   // Greek and Coptic
+        (0x400, 0x482),   // Cyrillic (U+0483-0489 combining left out)
+        (0x48A, 0x52F),   // Cyrillic and its supplement
+        (0x1E00, 0x1FFF), // Latin Extended Additional, Greek Extended
+        (0x2010, 0x2027), // General Punctuation up to the line/paragraph separators
+        (0x2030, 0x205E), // ... after the bidi embedding controls
+        (0x2070, 0x209F), // superscripts and subscripts
+        (0x20A0, 0x20CF), // currency
+        (0x2100, 0x218F), // letterlike, number forms
+        (0x2190, 0x23FF), // arrows, mathematical and technical symbols
+        (0x2500, 0x25FF), // box drawing, block elements, geometric shapes
+        (0xFB00, 0xFB06), // Latin ligatures
+    ];
     let c = u32::from(ch);
-    !(ch.is_control()
-        || c == 0xAD
-        || (0x300..=0x36F).contains(&c)
-        || (0x200B..=0x200F).contains(&c)
-        || (0x2028..=0x202E).contains(&c)
-        || (0x2060..=0x206F).contains(&c)
-        || c == 0xFEFF
-        || c == 0xFFFE
-        || c == 0xFFFF)
+    SPACING_LTR.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
 }
 
 /// Where one glyph sits in its run's text frame.
@@ -300,10 +313,15 @@ mod tests {
     }
 
     #[test]
-    fn invisible_and_combining_characters_keep_outlines() {
-        assert!(text_safe('A') && text_safe(' ') && text_safe('&') && text_safe('\u{e9}'));
+    fn invisible_combining_and_rtl_characters_keep_outlines() {
         for c in [
-            '\u{9}', '\u{ad}', '\u{301}', '\u{200b}', '\u{feff}', '\u{ffff}',
+            'A', ' ', '&', '\u{e9}', '\u{3a9}', '\u{416}', '\u{2019}', '\u{20ac}', '\u{fb01}',
+        ] {
+            assert!(text_safe(c), "{c:?}");
+        }
+        for c in [
+            '\u{9}', '\u{7f}', '\u{ad}', '\u{301}', '\u{483}', '\u{5b0}', '\u{5d0}', '\u{627}',
+            '\u{200b}', '\u{202e}', '\u{20d7}', '\u{feff}', '\u{ffff}', '\u{e000}',
         ] {
             assert!(!text_safe(c), "{c:?}");
         }

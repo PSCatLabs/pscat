@@ -374,3 +374,20 @@ fn blended_or_translucent_glyphs_stay_one_element_each() {
     );
     assert_eq!(texts(&svg).len(), 1, "{svg}");
 }
+
+#[test]
+fn combining_marks_and_right_to_left_letters_never_become_text() {
+    // A combining mark outside U+0300-036F (Cyrillic titlo, Hebrew sheva)
+    // and a right-to-left letter (alef): a viewer would attach or reorder
+    // them, so they stay outlines (or nothing, if the face lacks them),
+    // never characters in a run (Codex review, #1119).
+    let svg = text_svg(
+        "/Helvetica findfont dup length dict begin { 1 index /FID ne { def } { pop pop } ifelse } forall \
+         /Encoding StandardEncoding 256 array copy dup 128 /uni0483 put dup 129 /uni05B0 put \
+         dup 130 /uni05D0 put def currentdict end \
+         /HM exch definefont pop /HM findfont 20 scalefont setfont 10 50 moveto (a\\200b\\201c\\202d) show",
+    );
+    let t = texts(&svg);
+    let all: String = t.iter().map(|t| content(t)).collect();
+    assert_eq!(all, "abcd", "{svg}");
+}
