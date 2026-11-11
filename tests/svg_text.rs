@@ -326,3 +326,25 @@ fn the_cli_flag_writes_text_and_needs_svg() {
         String::from_utf8_lossy(&alone.stderr)
     );
 }
+
+#[test]
+fn a_glyph_that_falls_back_mid_show_splits_the_run_in_paint_order() {
+    // Code 128 is a combining acute (U+0301): it has an outline in the face
+    // but would attach to the previous character as text, so it stays a path
+    // between two text runs.
+    let svg = text_svg(
+        "/Helvetica findfont dup length dict begin { 1 index /FID ne { def } { pop pop } ifelse } forall \
+         /Encoding StandardEncoding 256 array copy dup 128 /uni0301 put def currentdict end \
+         /HA exch definefont pop /HA findfont 20 scalefont setfont 10 50 moveto (a\\200b) show",
+    );
+    let t = texts(&svg);
+    assert_eq!(
+        t.iter().map(|t| content(t)).collect::<Vec<_>>(),
+        ["a", "b"],
+        "{svg}"
+    );
+    let first = svg.find("<text ").expect("first run");
+    let path = svg.find("<path ").expect("the accent's outline");
+    let second = svg.rfind("<text ").expect("second run");
+    assert!(first < path && path < second, "{svg}");
+}

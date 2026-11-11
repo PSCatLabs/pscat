@@ -77,9 +77,13 @@ already export as native `<linearGradient>`/`<radialGradient>` (since #20).
 Large SVGs come from other things. The 400x200 `pscat chalk 'E = mc^2'` board
 is 5.1 MB, of which 36 `<clipPath>` defs are 3.3 MB, plus 2782 small paths
 (chalk dabs inside glyph-shaped clips). It has no standard-font text and no
-gradients, so `--svg-text` does not shrink it. Library ramps drawn as many
-bands (artkit/paintkit) would need a `lib/` change to `shfill` and are a
-visible change. Both are proposed follow-ups, not part of this change.
+gradients, so `--svg-text` does not shrink it. The libraries' own gradient
+helpers (artkit's `gradfill`/`axialsh`/`radialsh`) already go through
+`shfill`, so they are native gradients in SVG too. A gradient drawn as many
+separate shapes is a program looping `rectfill`s itself, which an exporter
+cannot recognise reliably. The SVG-size lever left is the clip-heavy
+dry-media output (chalk, crayon, charcoal: tens of MB). It is a proposed
+follow-up, not part of this change.
 
 **Evidence.**
 - `tests/svg_text.rs` (16 tests): default equals explicit `Paths` and
@@ -91,7 +95,8 @@ visible change. Both are proposed follow-ups, not part of this change.
   the raw wasm ABI and the npm Renderer give byte-equal SVG at 72 and 144
   dpi, including rotated, skewed and stretched text.
 - Default output: every `gallery/*.ps` and `examples/*.ps`, rendered to SVG
-  by the merge-base binary and by this branch's, RESULT_PLACEHOLDER
+  by the merge-base binary and by this branch's,
+  is byte-identical (127 of 127 files, every page).
 - Browser (Chromium via Playwright, macOS fonts): a page of Times, Helvetica
   and Courier in all styles, with a rotated and a letter-spaced line, looks
   the same as the outline SVG side by side, and the two coincide when
@@ -100,7 +105,26 @@ visible change. Both are proposed follow-ups, not part of this change.
   and copy return the text with its spaces and line breaks; find-in-page
   finds words.
 
-SIZE_TABLE_PLACEHOLDER
+**Sizes** (`--svg` vs `--svg --svg-text`, this branch, every page of the
+file summed; 63 of the 127 corpus files contain standard-font text):
+
+| page | outlines | `--svg-text` | smaller by |
+|---|---:|---:|---:|
+| 600x400 scene, three strings (the issue's case) | 52,414 B | 1,536 B | 34x |
+| a letter page in Times/Helvetica/Courier (perceptual check) | 364,504 B | 7,911 B | 46x |
+| `examples/pdf_document.ps` | 244,818 B | 5,151 B | 48x |
+| `examples/template_letter.ps` | 153,824 B | 3,414 B | 45x |
+| `examples/specimen.ps` | 163,334 B | 6,379 B | 26x |
+| `examples/postcard.ps` | 57,100 B | 3,318 B | 17x |
+| `gallery/pscat_card.ps` | 186,558 B | 66,249 B | 2.8x |
+| `gallery/ring_of_type.ps` (1226 rotated runs) | 520,830 B | 277,925 B | 1.9x |
+| `gallery/keepin_it_real.ps` | 592,401 B | 538,649 B | 1.1x |
+| `pscat chalk 'E = mc^2'`, 400x200 | 5,146,969 B | unchanged | 1x |
+
+Text-led pages shrink 17-48x. Art with a few labels shrinks little, because
+the art is the bytes. The largest outputs (`gallery/released_memo.ps` 131 MB,
+the dry-media specimens 64-95 MB) are set in typewriter/handwriting faces
+or are paint texture, and stay as they were.
 
 **How #1026 builds on this.** #1026 asks for real text in PDF (and SVG) with
 embedded subset fonts. The capture it needs exists now:

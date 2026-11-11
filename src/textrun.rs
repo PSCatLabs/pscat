@@ -232,6 +232,11 @@ impl TextRun {
             && same_chain
     }
 
+    /// Upright, unskewed text: the run needs no transform.
+    pub(crate) fn upright(&self) -> bool {
+        is_identity(self.frame)
+    }
+
     pub(crate) fn push(&mut self, g: &GlyphText, p: &Placement) {
         self.glyphs.push(RunGlyph {
             ch: g.ch,

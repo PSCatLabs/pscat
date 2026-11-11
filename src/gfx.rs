@@ -924,9 +924,8 @@ pub struct Gfx {
     suppress_paint: u32,
     /// SVG export recorder (`--svg`); mirrors every paint when on.
     svg: Option<Box<crate::svg::SvgRecorder>>,
-    /// How the SVG recorder writes standard-font text (`--svg-text`,
-    /// #1119). Kept here as well as in the recorder so it can be set
-    /// before or after `enable_svg`.
+    /// How SVG output writes standard-font text (`--svg-text`, #1119).
+    /// The recorder never needs it: `paint_glyph` decides per glyph.
     svg_text: crate::svg::SvgText,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
@@ -2090,9 +2089,10 @@ impl Gfx {
 
     /// Turn on SVG recording (`--svg`).
     pub fn enable_svg(&mut self) {
-        let mut svg = crate::svg::SvgRecorder::new(self.pixmap.width(), self.pixmap.height());
-        svg.set_text(self.svg_text);
-        self.svg = Some(Box::new(svg));
+        self.svg = Some(Box::new(crate::svg::SvgRecorder::new(
+            self.pixmap.width(),
+            self.pixmap.height(),
+        )));
         if self.background.alpha() == 0.0 {
             self.svg_mut_transparent();
         }
@@ -2124,9 +2124,6 @@ impl Gfx {
     /// PDF output are unaffected.
     pub fn set_svg_text(&mut self, mode: crate::svg::SvgText) {
         self.svg_text = mode;
-        if let Some(svg) = &mut self.svg {
-            svg.set_text(mode);
-        }
     }
 
     /// Whether a glyph shown now should reach the SVG recorder as text.

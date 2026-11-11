@@ -68,7 +68,6 @@ pub struct SvgRecorder {
     pages: Vec<String>,
     /// Omit the white backdrop rect (`--transparent`).
     transparent: bool,
-    text: SvgText,
     /// The text run still taking glyphs (#1119), with its clip-group
     /// open/close strings and leftover blend style, fixed when the run
     /// opened. Written to `body` when anything else is drawn, so paint
@@ -110,13 +109,8 @@ impl SvgRecorder {
             next_grad: 0,
             pages: Vec::new(),
             transparent: false,
-            text: SvgText::Paths,
             run: None,
         }
-    }
-
-    pub(crate) fn set_text(&mut self, text: SvgText) {
-        self.text = text;
     }
 
     /// One glyph as text (#1119): continue the open run, or close it and
@@ -176,14 +170,7 @@ impl SvgRecorder {
                 c => chars.push(c),
             }
         }
-        let transform = if (Placement {
-            size: run.size,
-            frame: run.frame,
-            x: 0.0,
-            y: 0.0,
-        })
-        .upright()
-        {
+        let transform = if run.upright() {
             String::new()
         } else {
             let f = |v: f64| fmt_frame(v);
