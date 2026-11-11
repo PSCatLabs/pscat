@@ -30,7 +30,8 @@
 % kernelarray and kernelarrays run `proc` once per cell, in raster order,
 % each as if by `8 dict begin mark i j proc end`, and keep the n values it
 % leaves above the mark as they are (integers and reals): one array of
-% w*h*n, cell (i, j)'s values at (j*w + i)*n, or n arrays of w*h. A wrong
+% w*h*n, cell (i, j)'s values at (j*w + i)*n, or n arrays of w*h. (pscat
+% stores any NaN as one quiet NaN; here a NaN is kept as computed.) A wrong
 % count is a rangecheck, a value that is not a number a typecheck, and a
 % cell that leaves with `exit` an invalidexit.
 %

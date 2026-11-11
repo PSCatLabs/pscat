@@ -64,6 +64,12 @@ pub(crate) enum Num {
 }
 
 impl Num {
+    /// A real as `kernelarray` keeps it: a NaN as the one quiet NaN
+    /// ([`canon_nan`]).
+    pub(crate) fn real(r: f64) -> Num {
+        Num::Real(canon_nan(r))
+    }
+
     fn object(self) -> Object {
         match self {
             Num::Int(i) => Object::int(i),
@@ -71,6 +77,18 @@ impl Num {
             Num::Null => Object::lit(Value::Null),
         }
     }
+}
+
+/// `r`, or for any NaN the quiet NaN `0x7ff8000000000000`. A NaN's sign
+/// and payload are not the same from one path to another: x86 arithmetic
+/// passes on one operand's NaN, and which one depends on the order the
+/// compiler put the operands in; Apple silicon returns its default NaN.
+/// Nothing else can tell NaNs apart (comparisons with one retire the lane,
+/// `cvi` of one is an error, `kernelimage` paints any as 0), so
+/// `kernelarray` stores every NaN as this one, compiled and interpreted
+/// (Codex review 3).
+pub(crate) fn canon_nan(r: f64) -> f64 {
+    if r.is_nan() { f64::NAN } else { r }
 }
 
 /// Most values one `kernelarray` may return: `array`'s own limit.
@@ -1675,7 +1693,9 @@ fn kaput(it: &mut Interp) -> Result<(), PsError> {
         let o = it.pop()?;
         match o.value {
             Value::Mark => break,
-            Value::Integer(_) | Value::Real(_) => vals.push(o),
+            Value::Integer(_) => vals.push(o),
+            // Every NaN as one (`canon_nan`).
+            Value::Real(r) => vals.push(Object::real(canon_nan(r))),
             _ => return Err(PsError::Typecheck),
         }
         if vals.len() > n {

@@ -22,10 +22,24 @@ pub(crate) type Reg = u32;
 pub(crate) type Site = u32;
 
 /// An instruction operand: a register or an immediate.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Op {
     R(Reg),
     Imm(f64),
+}
+
+/// Immediates are equal when their bits are: 0.0 and -0.0 are different
+/// values (`-1 exp` of them is inf and -inf), so the compiler must never
+/// take one for the other (a branch join that kept one of them on every
+/// lane: Codex review 3). A NaN equals the same NaN.
+impl PartialEq for Op {
+    fn eq(&self, o: &Op) -> bool {
+        match (self, o) {
+            (Op::R(a), Op::R(b)) => a == b,
+            (Op::Imm(a), Op::Imm(b)) => a.to_bits() == b.to_bits(),
+            _ => false,
+        }
+    }
 }
 
 impl Op {
