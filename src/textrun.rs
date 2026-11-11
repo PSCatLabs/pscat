@@ -133,10 +133,6 @@ impl Placement {
         };
         Some(Placement { size, frame, x, y })
     }
-
-    pub(crate) fn upright(&self) -> bool {
-        is_identity(self.frame)
-    }
 }
 
 fn is_identity(f: [f64; 4]) -> bool {
@@ -263,7 +259,7 @@ mod tests {
     fn upright_text_places_in_device_coordinates() {
         // 12 pt at 72 dpi on a y-down device: glyph y up becomes device y down.
         let p = Placement::of(&glyph([12.0, 0.0, 0.0, -12.0, 30.0, 50.0])).expect("placement");
-        assert!(p.upright());
+        assert!(is_identity(p.frame));
         assert!((p.size - 12.0).abs() < 1e-12);
         assert_eq!((p.x, p.y), (30.0, 50.0));
     }
@@ -272,7 +268,7 @@ mod tests {
     fn rotated_text_gets_a_frame_and_local_coordinates() {
         // 90° counter-clockwise on the page: glyph x runs up the device (−y).
         let p = Placement::of(&glyph([0.0, -10.0, -10.0, 0.0, 40.0, 60.0])).expect("placement");
-        assert!(!p.upright());
+        assert!(!is_identity(p.frame));
         assert!((p.size - 10.0).abs() < 1e-12);
         // The frame maps (x, y) local back to the device pen.
         let [a, b, c, d] = p.frame;

@@ -96,7 +96,9 @@ follow-up, not part of this change.
   dpi, including rotated, skewed and stretched text.
 - Default output: every `gallery/*.ps` and `examples/*.ps`, rendered to SVG
   by the merge-base binary and by this branch's,
-  is byte-identical (127 of 127 files, every page).
+  is byte-identical (127 of 127 files, every page). PNG, the same two
+  binaries, gallery at 144 dpi plus `selftest/drivers/*.ps`: 138 of 138
+  identical, and the drivers' SVGs 11 of 11.
 - Browser (Chromium via Playwright, macOS fonts): a page of Times, Helvetica
   and Courier in all styles, with a rotated and a letter-spaced line, looks
   the same as the outline SVG side by side, and the two coincide when
