@@ -49,11 +49,14 @@ export class Pscat {
    * Queue a program (a string, or the bytes of one) on a fresh
    * width x height point page, at `scale` device pixels per point
    * (dpi / 72). `record.svg` / `record.pdf` also record the run as
-   * SVG / PDF, read with svg() / pdf(). Throws on unusable page sizes.
+   * SVG / PDF, read with svg() / pdf(). `record.svgText` (with
+   * `record.svg`) writes Helvetica, Times and Courier text as SVG <text>
+   * rather than glyph outlines, as `pscat --svg-text` does. Throws on
+   * unusable page sizes.
    */
   begin(source, width = 612, height = 792, scale = 1, record = {}) {
     const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
-    const flags = (record.svg ? 1 : 0) | (record.pdf ? 2 : 0);
+    const flags = (record.svg ? 1 : 0) | (record.pdf ? 2 : 0) | (record.svg && record.svgText ? 4 : 0);
     const ptr = this.#copyIn(bytes);
     const rc = flags !== 0
       ? this.ex.ps_begin_vector(ptr, bytes.length, width, height, scale, flags)

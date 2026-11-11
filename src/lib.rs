@@ -40,6 +40,8 @@
 //! operation as it happens: call [`Interp::enable_svg`] or
 //! [`Interp::enable_pdf`] before running the program, then read
 //! [`Interp::svg_pages`] or [`Interp::pdf_document`].
+//! [`Interp::set_svg_text`] with [`SvgText::Text`] makes SVG output write
+//! text set in the standard fonts as `<text>` rather than glyph outlines.
 //!
 //! # Running a program you do not trust
 //!
@@ -151,6 +153,7 @@ pub(crate) mod shading;
 pub mod spool;
 #[doc(hidden)]
 pub mod svg;
+pub(crate) mod textrun;
 pub(crate) mod type1;
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
@@ -174,3 +177,4 @@ pub use memtrack::TrackingAllocator;
 #[doc(hidden)]
 pub use object::{Object, Value};
 pub use page::Page;
+pub use svg::SvgText;

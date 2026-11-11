@@ -35,6 +35,12 @@ export interface PageOptions {
   svg?: boolean;
   /** Also record the run as PDF, read with pdf(). Default false. */
   pdf?: boolean;
+  /**
+   * With svg: write Helvetica, Times and Courier text as SVG <text>
+   * (selectable, much smaller) rather than glyph outlines, as
+   * `pscat --svg-text` does. Default false.
+   */
+  svgText?: boolean;
 }
 
 export interface FrameOptions extends PageOptions {

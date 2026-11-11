@@ -131,7 +131,7 @@ as Ghostscript does.
 | | |
 |---|---|
 | `createRenderer({ wasm }?)` | Load the interpreter and return a `Renderer`. Each one is a separate interpreter. `wasm` overrides where the module comes from: a URL, a `Response`, bytes or a `WebAssembly.Module` (in Node, also a file path). By default it is the package's `pscat.wasm`, found through `new URL('./pscat.wasm', import.meta.url)`. Bundlers that rewrite that pattern handle it; if yours does not (Vite's dependency pre-bundling, for one: add `pscat` to `optimizeDeps.exclude`), pass `wasm` the module's URL. |
-| `render(source, { width, height, dpi, svg, pdf }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF. |
+| `render(source, { width, height, dpi, svg, pdf }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF; `svgText: true` (with `svg`) writes Helvetica, Times and Courier text as selectable SVG `<text>` instead of glyph outlines, like `pscat --svg-text`. |
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
 | `frames(source, { budget, ...page }?)` | A generator of `begin` plus one `step` per iteration. |

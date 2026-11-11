@@ -50,12 +50,20 @@ function pageOf(options = {}) {
     }
   }
   if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`pscat: dpi must be a positive number, got ${dpi}`);
-  for (const k of ['svg', 'pdf']) {
+  for (const k of ['svg', 'pdf', 'svgText']) {
     if (options[k] !== undefined && typeof options[k] !== 'boolean') {
       throw new TypeError(`pscat: ${k} must be true or false, got ${options[k]}`);
     }
   }
-  return { width, height, scale: dpi / 72, record: { svg: options.svg === true, pdf: options.pdf === true } };
+  if (options.svgText === true && options.svg !== true) {
+    throw new TypeError('pscat: svgText needs svg: true');
+  }
+  return {
+    width,
+    height,
+    scale: dpi / 72,
+    record: { svg: options.svg === true, pdf: options.pdf === true, svgText: options.svgText === true },
+  };
 }
 
 /** One interpreter in its own WebAssembly instance. Make one with createRenderer(). */
