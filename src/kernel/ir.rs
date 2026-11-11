@@ -500,6 +500,7 @@ pub(crate) enum TableData {
 }
 
 impl TableData {
+    #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn at(&self, i: usize) -> f64 {
         match self {

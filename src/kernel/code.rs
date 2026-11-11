@@ -50,6 +50,25 @@ pub(crate) enum L {
     Abort(Site),
     /// [`Code::ext`]`[n]`, run from its IR form.
     Ext(u32),
+    /// `d = table[row][col]` where both index tags are known constants and
+    /// one index is a good constant, so only the other can be bad:
+    /// [`Code::gathers`]`[n]`, then the varying index's operand. Most of a
+    /// large kernel's table reads (#1101).
+    Gather1(Reg, u32, u32),
+}
+
+/// A [`L::Gather1`]: element `x * scale + base` of `table`, for an index
+/// `x` that must be below `bound`, and the register for the element's tag
+/// (for a table mixing integers and reals). `rows` is set when `x` is the
+/// row, so a null row retires the lane.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct G1 {
+    pub table: u32,
+    pub base: u32,
+    pub scale: u32,
+    pub bound: u32,
+    pub rows: bool,
+    pub dtag: Option<Reg>,
 }
 
 /// A kernel lowered for the CPU executor. Built once per run and shared,
@@ -58,6 +77,7 @@ pub(crate) struct Code {
     pub ins: Vec<L>,
     pub consts: Vec<f64>,
     pub ext: Vec<Ins>,
+    pub gathers: Vec<G1>,
     /// Where the kernel body is in `ins`.
     pub body: (u32, u32),
 }
@@ -65,6 +85,8 @@ pub(crate) struct Code {
 impl Code {
     pub(crate) fn new(k: &Kernel) -> Code {
         let mut lw = Lower {
+            k,
+            gathers: Vec::new(),
             ins: Vec::with_capacity(k.size()),
             consts: Vec::new(),
             seen: HashMap::new(),
@@ -85,12 +107,15 @@ impl Code {
             ins: lw.ins,
             consts: lw.consts,
             ext: lw.ext,
+            gathers: lw.gathers,
             body,
         }
     }
 }
 
-struct Lower {
+struct Lower<'k> {
+    k: &'k Kernel,
+    gathers: Vec<G1>,
     ins: Vec<L>,
     consts: Vec<f64>,
     /// Each immediate's index by its bits (so 0.0 and -0.0 stay apart).
@@ -99,7 +124,7 @@ struct Lower {
     subs: Vec<(u32, u32)>,
 }
 
-impl Lower {
+impl Lower<'_> {
     fn konst(&mut self, bits: u64) -> u32 {
         let n = self.consts.len() as u32;
         let i = *self.seen.entry(bits).or_insert(n);
@@ -118,6 +143,28 @@ impl Lower {
             }
             Op::Imm(x) => self.konst(x.to_bits()),
         }
+    }
+
+    /// `table`'s element indices fit a u32.
+    fn fits(&self, table: u32) -> bool {
+        self.k
+            .tables
+            .get(table as usize)
+            .is_some_and(|tb| tb.rows.saturating_mul(tb.cols) < u32::MAX as usize)
+    }
+
+    /// A constant index below `n`.
+    fn good(&self, x: f64, n: usize) -> bool {
+        x >= 0.0 && x.fract() == 0.0 && (x as usize) < n
+    }
+
+    /// Row `r` of `table` is null.
+    fn null(&self, table: u32, r: f64) -> bool {
+        self.k.tables[table as usize]
+            .null_rows
+            .get(r as usize)
+            .copied()
+            .unwrap_or(false)
     }
 
     fn block(&mut self, b: &[Ins]) {
@@ -165,6 +212,52 @@ impl Lower {
             }
             Ins::Break => L::Break,
             Ins::Abort(s) => L::Abort(s),
+            Ins::Gather {
+                d,
+                dtag,
+                table,
+                row,
+                rtag: Op::Imm(rt),
+                col,
+                ctag: Op::Imm(ct),
+            } if rt != 0.0 && ct != 0.0 && self.fits(table) => {
+                let tb = &self.k.tables[table as usize];
+                let g = match (row, col) {
+                    (Op::Imm(r), x) if self.good(r, tb.rows) && !self.null(table, r) => Some((
+                        x,
+                        G1 {
+                            table,
+                            base: (r as usize * tb.cols) as u32,
+                            scale: 1,
+                            bound: tb.cols as u32,
+                            rows: false,
+                            dtag,
+                        },
+                    )),
+                    (x, Op::Imm(c)) if self.good(c, tb.cols) => Some((
+                        x,
+                        G1 {
+                            table,
+                            base: c as u32,
+                            scale: tb.cols as u32,
+                            bound: tb.rows as u32,
+                            rows: true,
+                            dtag,
+                        },
+                    )),
+                    _ => None,
+                };
+                match g {
+                    Some((x, g)) => {
+                        self.gathers.push(g);
+                        L::Gather1(d, self.gathers.len() as u32 - 1, self.op(x))
+                    }
+                    None => {
+                        self.ext.push(i.clone());
+                        L::Ext(self.ext.len() as u32 - 1)
+                    }
+                }
+            }
             Ins::ForFin(..)
             | Ins::Gather { .. }
             | Ins::RowCheck(..)

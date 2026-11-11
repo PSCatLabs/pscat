@@ -389,6 +389,21 @@ fn paint(it: &mut Interp, a: &Args, bytes: Vec<u8>) -> Result<(), PsError> {
     ))
 }
 
+/// The batch's tile, columns by rows (#1101). `PSCAT_KERNEL_TILE=WxH`
+/// overrides it, for measuring.
+fn tile_shape() -> (usize, usize) {
+    if let Some((w, h)) = std::env::var("PSCAT_KERNEL_TILE").ok().and_then(|s| {
+        let (w, h) = s.split_once('x')?;
+        Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?))
+    }) && w >= 1
+        && h >= 1
+        && w * h <= LANES
+    {
+        return (w, h);
+    }
+    (LANES, 1)
+}
+
 /// Worker threads for a kernel: `PSCAT_KERNEL_THREADS`, else the cores;
 /// one under `--bands` (the bands are already one thread each) and on wasm.
 fn thread_count(it: &Interp) -> usize {
@@ -477,50 +492,69 @@ fn run(
     {
         return Err(Stop::Cancelled);
     }
-    let rows: Vec<(usize, &mut [u8])> = out
-        .chunks_mut(row_bytes)
+    // A batch is a tile of TW x TH pixels (#1101): nearby pixels mostly
+    // take the same branches.
+    let (tw, th) = tile_shape();
+    let bands: Vec<(usize, &mut [u8])> = out[j0 * row_bytes..j1.max(j0) * row_bytes]
+        .chunks_mut(row_bytes * th)
         .enumerate()
-        .skip(j0)
-        .take(j1.saturating_sub(j0))
+        .map(|(b, rows)| (j0 + b * th, rows))
         .collect();
-    let queue = Mutex::new(rows.into_iter());
+    let queue = Mutex::new(bands.into_iter());
     let code = code::Code::new(k);
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
     let retired: Mutex<Retired> = Mutex::new((Vec::new(), Vec::new()));
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
+    let dispatched = std::sync::atomic::AtomicU64::new(0);
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, &code, ctl);
         let mut mine: Vec<(usize, usize)> = Vec::new();
         let mut my_seeds: Vec<(usize, i64)> = Vec::new();
+        let mut at = [(0i64, 0i64); LANES];
         loop {
             let next = match queue.lock() {
                 Ok(mut q) => q.next(),
                 Err(_) => None,
             };
-            let Some((j, row)) = next else { break };
+            let Some((jb, rows)) = next else { break };
+            let nrows = rows.len() / row_bytes;
             let mut i0 = 0;
             let mut r = Ok(());
-            // The state the row's last seeding pixel left (`Kernel::rand`).
-            let mut row_seed = None;
+            // The state each row's last seeding pixel left (`Kernel::rand`).
+            let mut row_seed = [None; LANES];
             while i0 < w {
-                let n = (w - i0).min(LANES);
-                match m.run_batch(
-                    j as i64,
-                    i0 as i64,
-                    n,
-                    &mut row[i0 * ncomp..(i0 + n) * ncomp],
-                ) {
+                let cols = (w - i0).min(tw);
+                let mut n = 0;
+                for y in 0..nrows {
+                    for x in 0..cols {
+                        at[n] = ((i0 + x) as i64, (jb + y) as i64);
+                        n += 1;
+                    }
+                }
+                match m.run_lanes(&at[..n]) {
                     Ok(killed) => {
-                        for l in (0..n).filter(|l| killed >> l & 1 != 0) {
-                            mine.push((j, i0 + l));
+                        for (l, &(i, j)) in at[..n].iter().enumerate() {
+                            let (i, j) = (i as usize, j as usize);
+                            if killed >> l & 1 != 0 {
+                                mine.push((j, i));
+                            } else {
+                                let o = (j - jb) * row_bytes + i * ncomp;
+                                m.pixel(l, &mut rows[o..o + ncomp]);
+                            }
                         }
-                        if k.rand.is_some()
-                            && let Some(s) = (0..n)
-                                .rev()
-                                .filter(|l| killed >> l & 1 == 0)
-                                .find_map(|l| m.rand_state(l))
-                        {
-                            row_seed = Some(s);
+                        if k.rand.is_some() {
+                            // Raster order: the tile's rightmost seeding
+                            // pixel in each row, later tiles winning.
+                            for (y, seed) in row_seed.iter_mut().enumerate().take(nrows) {
+                                if let Some(s) = (0..cols)
+                                    .rev()
+                                    .map(|x| y * cols + x)
+                                    .filter(|l| killed >> l & 1 == 0)
+                                    .find_map(|l| m.rand_state(l))
+                                {
+                                    *seed = Some(s);
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -528,10 +562,12 @@ fn run(
                         break;
                     }
                 }
-                i0 += n;
+                i0 += cols;
             }
-            if let Some(s) = row_seed {
-                my_seeds.push((j, s));
+            for (y, s) in row_seed.iter().enumerate().take(nrows) {
+                if let Some(s) = s {
+                    my_seeds.push((jb + y, *s));
+                }
             }
             if let Err(e) = r {
                 ctl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -546,6 +582,7 @@ fn run(
         if let Ok(mut sd) = seeds.lock() {
             sd.extend(my_seeds);
         }
+        dispatched.fetch_add(m.dispatched, std::sync::atomic::Ordering::Relaxed);
         if let Ok(mut rt) = retired.lock() {
             rt.0.extend(mine);
             if rt.1.len() < m.retired.len() {
@@ -568,6 +605,13 @@ fn run(
     let steps = ctl.steps.load(std::sync::atomic::Ordering::Relaxed);
     if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
         eprintln!("pscat: kernel steps: {steps} lane-instructions");
+        let d = dispatched.load(std::sync::atomic::Ordering::Relaxed);
+        if d > 0 {
+            eprintln!(
+                "pscat: kernel batches: {tw}x{th} pixels, {d} instructions run, {:.1} of {LANES} lanes active on average",
+                steps as f64 / d as f64
+            );
+        }
     }
     it.charge_steps(steps);
     if let Ok(mut fe) = first_err.lock()

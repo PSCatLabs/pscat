@@ -21,7 +21,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::code::{Code, IMM, L};
-use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, TableKind, UnOp};
+use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, TableData, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
 
@@ -244,6 +244,10 @@ pub(crate) struct Machine<'k> {
     /// Lanes retired so far (every batch this machine ran), by reason code
     /// (see [`Why`]).
     pub(crate) retired: Vec<u64>,
+    /// Instructions run (each once per batch, whatever its mask), for the
+    /// lane occupancy `PSCAT_KERNEL_TIMING` reports: the steps over this
+    /// times `LANES` (#1101).
+    pub(crate) dispatched: u64,
 }
 
 impl<'k> Machine<'k> {
@@ -262,6 +266,7 @@ impl<'k> Machine<'k> {
             pending: 0,
             killed: 0,
             retired: vec![0; NWHY as usize + k.sites.len()],
+            dispatched: 0,
         }
     }
 
@@ -276,32 +281,52 @@ impl<'k> Machine<'k> {
         out: &mut [u8],
     ) -> Result<u64, Stop> {
         debug_assert!(n <= LANES);
+        let mut at = [(0, 0); LANES];
+        for (l, p) in at.iter_mut().enumerate().take(n) {
+            *p = (i0 + l as i64, j);
+        }
+        let killed = self.run_lanes(&at[..n])?;
+        let nc = self.k.outputs.len();
+        for l in (0..n).filter(|l| killed >> l & 1 == 0) {
+            self.pixel(l, &mut out[l * nc..(l + 1) * nc]);
+        }
+        Ok(killed)
+    }
+
+    /// Run the kernel for the pixels `(i, j)` in `at`, one a lane. Returns
+    /// the lanes retired to the interpreter; [`Machine::pixel`] reads the
+    /// others' bytes.
+    pub(crate) fn run_lanes(&mut self, at: &[(i64, i64)]) -> Result<u64, Stop> {
+        let n = at.len();
+        debug_assert!(n > 0 && n <= LANES);
         let mask = if n == LANES { FULL } else { (1u64 << n) - 1 };
         let (ri, rj) = (self.k.in_i as usize, self.k.in_j as usize);
         for l in 0..LANES {
-            // The inputs are integers: I64 registers hold their bits.
-            self.regs[ri][l] = f64::from_bits((i0 + l as i64) as u64);
+            // The inputs are integers: I64 registers hold their bits. A
+            // lane past `n` is never run.
+            let (i, j) = at[l.min(n - 1)];
+            self.regs[ri][l] = f64::from_bits(i as u64);
             self.regs[rj][l] = f64::from_bits(j as u64);
         }
         self.alive.clear();
         self.killed = 0;
-        let (k, c) = (self.k, self.c);
+        let c = self.c;
         let (b0, bn) = (c.body.0 as usize, c.body.1 as usize);
         self.block(&c.ins[b0..b0 + bn], mask)?;
-        let killed = self.killed;
-        let nc = k.outputs.len();
-        for (c, o) in k.outputs.iter().enumerate() {
-            for l in (0..n).filter(|l| killed >> l & 1 == 0) {
-                let v = match *o {
-                    Op::R(r) => self.regs[r as usize][l],
-                    Op::Imm(x) => x,
-                };
-                out[l * nc + c] = super::quantize(v);
-            }
-        }
         let charged = std::mem::take(&mut self.pending);
         self.ctl.poll(charged)?;
-        Ok(killed)
+        Ok(self.killed)
+    }
+
+    /// Lane `l`'s output bytes after [`Machine::run_lanes`].
+    pub(crate) fn pixel(&self, l: usize, out: &mut [u8]) {
+        for (b, o) in out.iter_mut().zip(&self.k.outputs) {
+            let v = match *o {
+                Op::R(r) => self.regs[r as usize][l],
+                Op::Imm(x) => x,
+            };
+            *b = super::quantize(v);
+        }
     }
 
     /// The random state lane `l` of the last batch left, if it seeded
@@ -335,6 +360,14 @@ impl<'k> Machine<'k> {
     }
 
     #[inline(always)]
+    fn o(&self, o: Op) -> OpRef<'_> {
+        match o {
+            Op::R(r) => OpRef::Lane(&self.regs[r as usize]),
+            Op::Imm(x) => OpRef::Imm(x),
+        }
+    }
+
+    #[inline(always)]
     fn get(&self, o: Op, l: usize) -> f64 {
         match o {
             Op::R(r) => self.regs[r as usize][l],
@@ -357,10 +390,14 @@ impl<'k> Machine<'k> {
         if mask == FULL {
             *dst = *t;
         } else {
+            // A blend, not a branch per lane: a divergent kernel's masks
+            // are unpredictable (#1101).
+            let mut m = [0u64; LANES];
+            for (l, m) in m.iter_mut().enumerate() {
+                *m = 0u64.wrapping_sub(mask >> l & 1);
+            }
             for l in 0..LANES {
-                if mask >> l & 1 != 0 {
-                    dst[l] = t[l];
-                }
+                dst[l] = f64::from_bits((t[l].to_bits() & m[l]) | (dst[l].to_bits() & !m[l]));
             }
         }
     }
@@ -368,6 +405,17 @@ impl<'k> Machine<'k> {
     /// Run a block for the lanes in `mask`. Returns the lanes still running
     /// at its end (a `Break` inside takes lanes out).
     fn block(&mut self, b: &[L], mut mask: u64) -> Result<u64, Stop> {
+        // The step and dispatch counts, kept local between the points that
+        // read them (a nested block, a poll, the return): moved into `self`
+        // before each, so every poll sees the same count as before (#1101).
+        let mut steps = 0u64;
+        let mut disp = 0u64;
+        macro_rules! flush {
+            () => {
+                self.pending += std::mem::take(&mut steps);
+                self.dispatched += std::mem::take(&mut disp);
+            };
+        }
         let mut pc = 0;
         while let Some(ins) = b.get(pc) {
             pc += 1;
@@ -375,7 +423,8 @@ impl<'k> Machine<'k> {
             if mask == 0 {
                 break;
             }
-            self.pending += u64::from(mask.count_ones());
+            steps += u64::from(mask.count_ones());
+            disp += 1;
             match *ins {
                 L::Mov(d, s) => {
                     let t = self.w(s).splat();
@@ -387,33 +436,7 @@ impl<'k> Machine<'k> {
                 }
                 L::IBin(op, d, a, b) => {
                     let mut t = [0.0; LANES];
-                    let mut bad = 0u64;
-                    match op {
-                        IBinOp::Add | IBinOp::Sub | IBinOp::Mul => {
-                            // The common hash/arith case: tight loop.
-                            for (l, v) in t.iter_mut().enumerate() {
-                                let (x, y) = (self.wi(a, l), self.wi(b, l));
-                                let r = match op {
-                                    IBinOp::Add => x.checked_add(y),
-                                    IBinOp::Sub => x.checked_sub(y),
-                                    _ => x.checked_mul(y),
-                                };
-                                match r {
-                                    Some(r) => *v = f64::from_bits(r as u64),
-                                    None => bad |= 1 << l,
-                                }
-                            }
-                        }
-                        _ => {
-                            for (l, v) in t.iter_mut().enumerate() {
-                                match lane_ibin(op, self.wi(a, l), self.wi(b, l)) {
-                                    Some(r) => *v = r.bits(),
-                                    None => bad |= 1 << l,
-                                }
-                            }
-                        }
-                    }
-                    let bad = bad & mask;
+                    let bad = ibin(op, self.w(a), self.w(b), &mut t) & mask;
                     let why = match op {
                         IBinOp::Add | IBinOp::Sub | IBinOp::Mul => Why::IntOverflow,
                         _ => Why::IntDivide,
@@ -435,98 +458,69 @@ impl<'k> Machine<'k> {
                     self.store(d, &t, mask & !bad);
                 }
                 L::I2F(d, a) => {
-                    let mut t = [0.0; LANES];
-                    for (l, v) in t.iter_mut().enumerate() {
-                        *v = self.wi(a, l) as f64;
-                    }
+                    let x = self.wis(a);
+                    let t = x.map(|v| v as f64);
                     self.store(d, &t, mask);
                 }
                 L::I2FExact(d, a) => {
-                    let mut t = [0.0; LANES];
-                    let mut bad = 0u64;
-                    for (l, v) in t.iter_mut().enumerate() {
-                        let x = self.wi(a, l);
-                        *v = x as f64;
-                        // Checked as an integer: converting first would
-                        // round 2^53 + 1 to 2^53 and pass.
-                        if x.unsigned_abs() > INT_LIMIT_I {
-                            bad |= 1 << l;
-                        }
-                    }
-                    let bad = bad & mask;
+                    let x = self.wis(a);
+                    let t = x.map(|v| v as f64);
+                    // Checked as an integer: converting first would round
+                    // 2^53 + 1 to 2^53 and pass.
+                    let z = x.map(|v| u64::from(v.unsigned_abs() > INT_LIMIT_I));
+                    let bad = fails(&z) & mask;
                     self.kill(bad, Why::IntInexact as u32);
                     self.store(d, &t, mask & !bad);
                 }
                 L::F2I(d, a) => {
+                    // `real_to_int` over the batch: a failing lane is retired,
+                    // so what it holds does not matter.
                     let mut t = [0.0; LANES];
-                    let mut bad = 0u64;
-                    let x = self.w(a);
-                    for (l, v) in t.iter_mut().enumerate() {
-                        match real_to_int(x.at(l)) {
-                            Some(r) => *v = f64::from_bits(r as u64),
-                            None => bad |= 1 << l,
-                        }
-                    }
-                    let bad = bad & mask;
+                    let bad = f2i(self.w(a), &mut t) & mask;
                     self.kill(bad, Why::CviRange as u32);
                     self.store(d, &t, mask & !bad);
                 }
                 L::Bin(op, d, a, b) => {
-                    let (t, bad) = bin(op, self.w(a), self.w(b), mask);
+                    let mut t = [0.0; LANES];
+                    let bad = bin(op, self.w(a), self.w(b), &mut t) & mask;
                     self.kill(bad, Why::bin(op) as u32);
                     self.store(d, &t, mask & !bad);
                 }
                 L::Un(op, d, a) => {
-                    let (t, bad) = un(op, self.w(a), mask);
+                    let mut t = [0.0; LANES];
+                    let bad = un(op, self.w(a), &mut t) & mask;
                     self.kill(bad, Why::un(op) as u32);
                     self.store(d, &t, mask & !bad);
                 }
                 L::CheckInt(v, tag) => {
-                    let (v, tag) = (self.w(v), self.w(tag));
-                    let mut bad = 0;
-                    for l in 0..LANES {
-                        if mask >> l & 1 != 0 && tag.at(l) != 0.0 && !within_int(v.at(l)) {
-                            bad |= 1 << l;
-                        }
-                    }
-                    self.kill(bad, Why::IntPast53 as u32);
+                    let bad = check(self.w(v), self.w(tag), |v, tag| {
+                        (tag != 0.0) & !within_int(v)
+                    });
+                    self.kill(bad & mask, Why::IntPast53 as u32);
                 }
                 L::NeedInt(tag) => {
-                    let tag = self.w(tag);
-                    let mut bad = 0;
-                    for l in 0..LANES {
-                        if mask >> l & 1 != 0 && tag.at(l) == 0.0 {
-                            bad |= 1 << l;
-                        }
-                    }
-                    self.kill(bad, Why::NeedInt as u32);
+                    let bad = check(self.w(tag), OpRef::Imm(0.0), |t, _| t == 0.0);
+                    self.kill(bad & mask, Why::NeedInt as u32);
                 }
                 L::Assert(c, s) => {
-                    let c = self.w(c);
-                    let mut bad = 0;
-                    for l in 0..LANES {
-                        if mask >> l & 1 != 0 && c.at(l) == 0.0 {
-                            bad |= 1 << l;
-                        }
-                    }
-                    self.kill(bad, site(s));
+                    let bad = check(self.w(c), OpRef::Imm(0.0), |t, _| t == 0.0);
+                    self.kill(bad & mask, site(s));
                 }
                 L::Ext(n) => {
                     let c = self.c;
                     self.ext(&c.ext[n as usize], mask);
                 }
+                L::Gather1(d, g, col) => {
+                    let g = self.c.gathers[g as usize];
+                    self.gather1(d, g, col, mask);
+                }
                 L::If(c, tl, el) => {
-                    let mut cm = 0u64;
-                    let cr = &self.regs[c as usize];
-                    for (l, v) in cr.iter().enumerate() {
-                        if *v != 0.0 {
-                            cm |= 1 << l;
-                        }
-                    }
+                    let cm = nonzero(&self.regs[c as usize]);
                     let (tl, el) = (tl as usize, el as usize);
                     let (t, e) = (&b[pc..pc + tl], &b[pc + tl..pc + tl + el]);
                     pc += tl + el;
                     let (mt, me) = (mask & cm, mask & !cm);
+                    flush!();
                     if mt != 0 {
                         self.block(t, mt)?;
                     }
@@ -538,6 +532,7 @@ impl<'k> Machine<'k> {
                 L::Loop(n) => {
                     let body = &b[pc..pc + n as usize];
                     pc += n as usize;
+                    flush!();
                     self.alive.push(mask);
                     let mut iters = 0u32;
                     loop {
@@ -565,6 +560,7 @@ impl<'k> Machine<'k> {
                     // Calls nest, so a compact call graph can run far more
                     // instructions than it holds with no loop in it: look
                     // at the limits here too.
+                    flush!();
                     if self.pending >= POLL_STEPS {
                         let charged = std::mem::take(&mut self.pending);
                         self.ctl.poll(charged)?;
@@ -574,18 +570,31 @@ impl<'k> Machine<'k> {
                     mask = self.live(mask);
                 }
                 L::Break => {
+                    flush!();
                     if let Some(a) = self.alive.last_mut() {
                         *a &= !mask;
                     }
                     return Ok(0);
                 }
                 L::Abort(s) => {
+                    flush!();
                     self.kill(mask, site(s));
                     return Ok(0);
                 }
             }
         }
+        flush!();
         Ok(mask)
+    }
+
+    /// A lowered integer operand over the batch (as [`Machine::wi`]).
+    #[inline(always)]
+    fn wis(&self, w: u32) -> [i64; LANES] {
+        if w & IMM != 0 {
+            [self.c.consts[(w & !IMM) as usize] as i64; LANES]
+        } else {
+            self.regs[w as usize].map(|v| v.to_bits() as i64)
+        }
     }
 
     /// A lowered operand ([`IMM`]).
@@ -606,6 +615,47 @@ impl<'k> Machine<'k> {
             self.c.consts[(w & !IMM) as usize] as i64
         } else {
             self.regs[w as usize][l].to_bits() as i64
+        }
+    }
+
+    /// [`L::Gather1`]: as [`Ins::Gather`] with one good constant index, so
+    /// only the other (`x`) can be bad.
+    #[inline(never)]
+    fn gather1(&mut self, d: Reg, g: super::code::G1, x: u32, mask: u64) {
+        let tb = &self.k.tables[g.table as usize];
+        let mut t = [0.0; LANES];
+        let mut tt = [0.0; LANES];
+        let tags = match (g.dtag, &tb.kind) {
+            (Some(_), TableKind::Mixed(tags)) => Some(&tags[..]),
+            _ => None,
+        };
+        let xv = self.w(x);
+        let bad = match &tb.data {
+            TableData::F64(v) => gather1(&g, xv, v, tags, &mut t, &mut tt),
+            TableData::U8(v) => gather1(&g, xv, v, tags, &mut t, &mut tt),
+        } & mask;
+        let mut null = 0u64;
+        if g.rows && !tb.null_rows.is_empty() {
+            let mut m = mask & !bad;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                if tb
+                    .null_rows
+                    .get(xv.at(l) as usize)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    null |= 1 << l;
+                }
+            }
+        }
+        self.kill(bad, Why::TableIndex as u32);
+        self.kill(null, Why::TableNull as u32);
+        let ok = mask & !bad & !null;
+        self.store(d, &t, ok);
+        if let Some(dt) = g.dtag {
+            self.store(dt, &tt, ok);
         }
     }
 
@@ -632,39 +682,40 @@ impl<'k> Machine<'k> {
                 ctag,
             } => {
                 let tb = &self.k.tables[*table as usize];
+                let (rv, rt) = (self.o(*row), self.o(*rtag));
+                let (cv, ct) = (self.o(*col), self.o(*ctag));
                 let mut t = [0.0; LANES];
                 let mut tt = [0.0; LANES];
-                let mut bad = 0u64;
+                let tags = match (dtag, &tb.kind) {
+                    (Some(_), TableKind::Mixed(tags)) => Some(&tags[..]),
+                    _ => None,
+                };
+                let bad = match &tb.data {
+                    TableData::F64(v) => gather(tb, rv, rt, cv, ct, v, tags, &mut t, &mut tt),
+                    TableData::U8(v) => gather(tb, rv, rt, cv, ct, v, tags, &mut t, &mut tt),
+                } & mask;
                 let mut null = 0u64;
-                for l in 0..LANES {
-                    if mask >> l & 1 == 0 {
-                        continue;
-                    }
-                    let (r, c) = (self.get(*row, l), self.get(*col, l));
-                    if self.get(*rtag, l) == 0.0
-                        || self.get(*ctag, l) == 0.0
-                        || !(r >= 0.0 && (r as usize) < tb.rows)
-                        || !(c >= 0.0 && (c as usize) < tb.cols)
-                    {
-                        bad |= 1 << l;
-                        continue;
-                    }
-                    if tb.null_rows.get(r as usize).copied().unwrap_or(false) {
-                        null |= 1 << l;
-                        continue;
-                    }
-                    let ix = r as usize * tb.cols + c as usize;
-                    t[l] = tb.data.at(ix);
-                    if let TableKind::Mixed(tags) = &tb.kind {
-                        tt[l] = tags[ix];
+                if !tb.null_rows.is_empty() {
+                    let mut m = mask & !bad;
+                    while m != 0 {
+                        let l = m.trailing_zeros() as usize;
+                        m &= m - 1;
+                        if tb
+                            .null_rows
+                            .get(rv.at(l) as usize)
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            null |= 1 << l;
+                        }
                     }
                 }
+                let ok = mask & !bad & !null;
                 self.kill(bad, Why::TableIndex as u32);
                 self.kill(null, Why::TableNull as u32);
-                let bad = bad | null;
-                self.store(*d, &t, mask & !bad);
+                self.store(*d, &t, ok);
                 if let Some(dt) = dtag {
-                    self.store(*dt, &tt, mask & !bad);
+                    self.store(*dt, &tt, ok);
                 }
             }
             Ins::RowCheck(table, row) => {
@@ -803,154 +854,191 @@ impl<'k> Machine<'k> {
     }
 }
 
-/// The op over the batch, and the active lanes it fails on.
+/// The op over the batch into `t`, and the lanes it fails on (the caller
+/// masks them).
 #[inline(always)]
-fn bin(op: BinOp, x: OpRef<'_>, y: OpRef<'_>, mask: u64) -> (Lane, u64) {
-    {
-        macro_rules! lanes {
-            ($f:expr) => {{
-                let f = $f;
-                let mut t = [0.0; LANES];
-                match (x, y) {
-                    (OpRef::Lane(x), OpRef::Lane(y)) => {
-                        for l in 0..LANES {
-                            t[l] = f(x[l], y[l]);
-                        }
-                    }
-                    (OpRef::Lane(x), OpRef::Imm(y)) => {
-                        for l in 0..LANES {
-                            t[l] = f(x[l], y);
-                        }
-                    }
-                    (OpRef::Imm(x), OpRef::Lane(y)) => {
-                        for l in 0..LANES {
-                            t[l] = f(x, y[l]);
-                        }
-                    }
-                    (OpRef::Imm(x), OpRef::Imm(y)) => t = [f(x, y); LANES],
-                }
-                t
-            }};
-        }
-        let mut bad = 0u64;
-        let t = match op {
-            BinOp::Add => lanes!(|a: f64, b: f64| a + b),
-            BinOp::Sub => lanes!(|a: f64, b: f64| a - b),
-            BinOp::Mul => lanes!(|a: f64, b: f64| a * b),
-            BinOp::Min => lanes!(f64::min),
-            BinOp::Max => lanes!(f64::max),
-            BinOp::TagAnd => lanes!(|a: f64, b: f64| a * b),
-            BinOp::BAnd => lanes!(|a: f64, b: f64| f64::from(u8::from(a != 0.0 && b != 0.0))),
-            BinOp::BOr => lanes!(|a: f64, b: f64| f64::from(u8::from(a != 0.0 || b != 0.0))),
-            BinOp::BXor => lanes!(|a: f64, b: f64| f64::from(u8::from((a != 0.0) ^ (b != 0.0)))),
-            BinOp::Eq => lanes!(|a: f64, b: f64| f64::from(u8::from(a == b))),
-            BinOp::Ne => lanes!(|a: f64, b: f64| f64::from(u8::from(a != b))),
-            // The fallible ops the hot paths use (#1099): the whole batch
-            // branch-free, the failing lanes found with a compare, so they
-            // vectorize. A failing lane holds 0.0, as `lane_bin` leaves it.
-            BinOp::Div => {
-                let (xs, ys) = (x.splat(), y.splat());
-                let mut t = [0.0; LANES];
-                let mut z = [false; LANES];
-                for l in 0..LANES {
-                    // Divide every lane, then select: a division under the
-                    // branch stays scalar.
-                    let q = xs[l] / ys[l];
-                    z[l] = ys[l] == 0.0;
-                    t[l] = if z[l] { 0.0 } else { q };
-                }
-                bad = lane_mask(&z);
-                t
-            }
-            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                let (xs, ys) = (x.splat(), y.splat());
-                let mut t = [0.0; LANES];
-                let mut z = [false; LANES];
-                macro_rules! cmp {
-                    ($c:tt) => {
-                        for l in 0..LANES {
-                            z[l] = xs[l].is_nan() | ys[l].is_nan();
-                            t[l] = if z[l] {
-                                0.0
-                            } else {
-                                f64::from(u8::from(xs[l] $c ys[l]))
-                            };
-                        }
-                    };
-                }
-                match op {
-                    BinOp::Lt => cmp!(<),
-                    BinOp::Le => cmp!(<=),
-                    BinOp::Gt => cmp!(>),
-                    _ => cmp!(>=),
-                }
-                bad = lane_mask(&z);
-                t
-            }
-            _ => {
-                // The ops that can fail or need per-lane integer work.
-                let mut t = [0.0; LANES];
-                for (l, v) in t.iter_mut().enumerate() {
-                    let (p, q) = (x.at(l), y.at(l));
-                    match lane_bin(op, p, q) {
-                        Some(r) => *v = r,
-                        None => bad |= 1 << l,
-                    }
-                }
-                t
-            }
-        };
-        (t, bad & mask)
+fn bin(op: BinOp, x: OpRef<'_>, y: OpRef<'_>, t: &mut Lane) -> u64 {
+    let c = |v: bool| f64::from(u8::from(v));
+    let ok = |v: f64| (v, false);
+    // What a failing lane holds does not matter: it is retired, and the
+    // caller stores only the others. Selecting a value for it would keep
+    // the loop from vectorising.
+    let ord = |v: bool, p: f64, q: f64| (c(v), p.is_nan() | q.is_nan());
+    match op {
+        BinOp::Add => flanes(x, y, t, |p, q| ok(p + q)),
+        BinOp::Sub => flanes(x, y, t, |p, q| ok(p - q)),
+        BinOp::Mul | BinOp::TagAnd => flanes(x, y, t, |p, q| ok(p * q)),
+        BinOp::Min => flanes(x, y, t, |p, q| ok(p.min(q))),
+        BinOp::Max => flanes(x, y, t, |p, q| ok(p.max(q))),
+        BinOp::BAnd => flanes(x, y, t, |p, q| ok(c(p != 0.0 && q != 0.0))),
+        BinOp::BOr => flanes(x, y, t, |p, q| ok(c(p != 0.0 || q != 0.0))),
+        BinOp::BXor => flanes(x, y, t, |p, q| ok(c((p != 0.0) ^ (q != 0.0)))),
+        BinOp::Eq => flanes(x, y, t, |p, q| ok(c(p == q))),
+        BinOp::Ne => flanes(x, y, t, |p, q| ok(c(p != q))),
+        BinOp::Div => flanes(x, y, t, |p, q| (p / q, q == 0.0)),
+        BinOp::Lt => flanes(x, y, t, |p, q| ord(p < q, p, q)),
+        BinOp::Le => flanes(x, y, t, |p, q| ord(p <= q, p, q)),
+        BinOp::Gt => flanes(x, y, t, |p, q| ord(p > q, p, q)),
+        BinOp::Ge => flanes(x, y, t, |p, q| ord(p >= q, p, q)),
+        BinOp::Atan | BinOp::Pow => flanes(x, y, t, |p, q| match lane_bin(op, p, q) {
+            Some(r) => (r, false),
+            None => (0.0, true),
+        }),
     }
 }
 
+/// A unary op over the batch into `t`, and the lanes it fails on.
 #[inline(always)]
-fn un(op: UnOp, x: OpRef<'_>, mask: u64) -> (Lane, u64) {
-    {
-        let mut t = [0.0; LANES];
-        let mut bad = 0u64;
-        // Over a whole lane array, so the plain ops vectorize (#1099).
-        let xs = x.splat();
-        macro_rules! each {
-            ($f:expr) => {{
-                let f = $f;
-                for l in 0..LANES {
-                    t[l] = f(xs[l]);
-                }
-            }};
-        }
-        match op {
-            UnOp::Neg => each!(|v: f64| -v),
-            UnOp::Abs => each!(f64::abs),
-            UnOp::Floor => each!(f64::floor),
-            UnOp::Ceil => each!(f64::ceil),
-            UnOp::Trunc => each!(f64::trunc),
-            UnOp::Round => each!(|v: f64| {
-                let f = v.floor();
-                if v - f >= 0.5 { f + 1.0 } else { f }
-            }),
-            UnOp::BNot => each!(|v: f64| f64::from(u8::from(v == 0.0))),
-            UnOp::Sqrt => {
-                // `fmath::sqrt` is `f64::sqrt`; a negative lane fails and
-                // holds 0.0, as `lane_un` leaves it.
-                let mut z = [false; LANES];
-                for l in 0..LANES {
-                    z[l] = xs[l] < 0.0;
-                    t[l] = if z[l] { 0.0 } else { xs[l].sqrt() };
-                }
-                bad = lane_mask(&z);
-            }
-            _ => {
-                for (l, v) in t.iter_mut().enumerate() {
-                    match lane_un(op, x.at(l)) {
-                        Some(r) => *v = r,
-                        None => bad |= 1 << l,
-                    }
-                }
-            }
-        }
-        (t, bad & mask)
+fn un(op: UnOp, x: OpRef<'_>, t: &mut Lane) -> u64 {
+    let ok = |v: f64| (v, false);
+    let y = OpRef::Imm(0.0);
+    match op {
+        UnOp::Neg => flanes(x, y, t, |v, _| ok(-v)),
+        UnOp::Abs => flanes(x, y, t, |v, _| ok(v.abs())),
+        UnOp::Floor => flanes(x, y, t, |v, _| ok(v.floor())),
+        UnOp::Ceil => flanes(x, y, t, |v, _| ok(v.ceil())),
+        UnOp::Trunc => flanes(x, y, t, |v, _| ok(v.trunc())),
+        UnOp::Round => flanes(x, y, t, |v, _| {
+            let f = v.floor();
+            ok(if v - f >= 0.5 { f + 1.0 } else { f })
+        }),
+        UnOp::BNot => flanes(x, y, t, |v, _| ok(f64::from(u8::from(v == 0.0)))),
+        // `fmath::sqrt` is `f64::sqrt`; a negative lane fails.
+        UnOp::Sqrt => flanes(x, y, t, |v, _| (v.sqrt(), v < 0.0)),
+        _ => flanes(x, y, t, |v, _| match lane_un(op, v) {
+            Some(r) => (r, false),
+            None => (0.0, true),
+        }),
     }
+}
+
+/// A table read over the batch ([`Ins::Gather`]): the elements into `t`
+/// (and their tags into `tt`), and the lanes whose row or column is out of
+/// range or not an integer. Every lane loads, from element 0 where its
+/// index is bad, so the loop has no branch on the lanes; the index is
+/// computed in f64, which vectorises (NEON has no 64-bit multiply), and is
+/// exact: a good lane's row and column are integers below the table's size
+/// (#1101).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn gather<E: Copy + Into<f64>>(
+    tb: &super::ir::Table,
+    rv: OpRef<'_>,
+    rt: OpRef<'_>,
+    cv: OpRef<'_>,
+    ct: OpRef<'_>,
+    v: &[E],
+    tags: Option<&[f64]>,
+    t: &mut Lane,
+    tt: &mut Lane,
+) -> u64 {
+    if v.is_empty() {
+        return FULL;
+    }
+    let (mut b0, mut b1, mut b2, mut b3) = ([0.0; LANES], [0.0; LANES], [0.0; LANES], [0.0; LANES]);
+    let (rv, rt) = (rv.lane(&mut b0), rt.lane(&mut b1));
+    let (cv, ct) = (cv.lane(&mut b2), ct.lane(&mut b3));
+    // `(r as usize) < rows` for an r >= 0 is `r < rows` (NaN fails both).
+    let (rows, cols) = (tb.rows as f64, tb.cols as f64);
+    let m = |b: bool| 0u64.wrapping_sub(u64::from(b));
+    let mut okm = [0u64; LANES];
+    let mut ix = [0u64; LANES];
+    for l in 0..LANES {
+        let (r, c) = (rv[l], cv[l]);
+        let ok = m(rt[l] != 0.0)
+            & m(ct[l] != 0.0)
+            & m(r >= 0.0)
+            & m(r < rows)
+            & m(c >= 0.0)
+            & m(c < cols);
+        okm[l] = ok;
+        ix[l] = ((r * cols + c) as u64) & ok;
+    }
+    // A bad lane's index is 0; the clamp only tells the compiler so.
+    let last = (v.len() - 1) as u64;
+    for l in 0..LANES {
+        t[l] = v[ix[l].min(last) as usize].into();
+    }
+    if let Some(tags) = tags
+        && !tags.is_empty()
+    {
+        let last = (tags.len() - 1) as u64;
+        for l in 0..LANES {
+            tt[l] = tags[ix[l].min(last) as usize];
+        }
+    }
+    if okm.iter().fold(!0u64, |a, b| a & b) != 0 {
+        return 0;
+    }
+    okm.iter()
+        .enumerate()
+        .fold(0, |bad, (l, &ok)| bad | (!ok & 1) << l)
+}
+
+/// [`gather`] with one index a good constant: element `x * scale + base`,
+/// and only `x` is checked (#1101).
+#[inline(always)]
+fn gather1<E: Copy + Into<f64>>(
+    g: &super::code::G1,
+    xv: OpRef<'_>,
+    v: &[E],
+    tags: Option<&[f64]>,
+    t: &mut Lane,
+    tt: &mut Lane,
+) -> u64 {
+    if v.is_empty() {
+        return FULL;
+    }
+    let mut buf = [0.0; LANES];
+    let xv = xv.lane(&mut buf);
+    let bound = f64::from(g.bound);
+    let (scale, base) = (u64::from(g.scale), u64::from(g.base));
+    let m = |b: bool| 0u64.wrapping_sub(u64::from(b));
+    let mut okm = [0u64; LANES];
+    let mut ix = [0u64; LANES];
+    for l in 0..LANES {
+        let x = xv[l];
+        let ok = m(x >= 0.0) & m(x < bound);
+        okm[l] = ok;
+        ix[l] = ((x as u64) * scale + base) & ok;
+    }
+    let last = (v.len() - 1) as u64;
+    for l in 0..LANES {
+        t[l] = v[ix[l].min(last) as usize].into();
+    }
+    if let Some(tags) = tags
+        && !tags.is_empty()
+    {
+        let last = (tags.len() - 1) as u64;
+        for l in 0..LANES {
+            tt[l] = tags[ix[l].min(last) as usize];
+        }
+    }
+    if okm.iter().fold(!0u64, |a, b| a & b) != 0 {
+        return 0;
+    }
+    okm.iter()
+        .enumerate()
+        .fold(0, |bad, (l, &ok)| bad | (!ok & 1) << l)
+}
+
+/// `cvi` of a real over the batch ([`real_to_int`]): the bits into `t`,
+/// and the lanes out of range.
+#[inline(always)]
+fn f2i(x: OpRef<'_>, t: &mut Lane) -> u64 {
+    flanes(x, OpRef::Imm(0.0), t, |v, _| {
+        let r = v.trunc();
+        let ok = r.is_finite() && r >= i64::MIN as f64 && r <= i64::MAX as f64;
+        (f64::from_bits((r as i64) as u64), !ok)
+    })
+}
+
+/// `f` over the batch as a check (it writes nothing): the lanes where it
+/// is true.
+#[inline(always)]
+fn check(x: OpRef<'_>, y: OpRef<'_>, f: fn(f64, f64) -> bool) -> u64 {
+    let mut t = [0.0; LANES];
+    flanes(x, y, &mut t, |p, q| (0.0, f(p, q)))
 }
 
 #[derive(Clone, Copy)]
@@ -959,17 +1047,202 @@ enum OpRef<'a> {
     Imm(f64),
 }
 
-/// The lanes set in `z`, as a mask.
+/// The lanes where `z` is 1 (each 0 or 1), as a mask. Almost always none
+/// fail: that is one OR across the batch, and the mask is built only when
+/// some lane fails (#1101).
 #[inline(always)]
-fn lane_mask(z: &[bool; LANES]) -> u64 {
+fn fails(z: &[u64; LANES]) -> u64 {
+    if z.iter().fold(0, |a, b| a | b) == 0 {
+        return 0;
+    }
+    fails_slow(z)
+}
+
+#[cold]
+#[inline(never)]
+fn fails_slow(z: &[u64; LANES]) -> u64 {
+    z.iter().enumerate().fold(0, |m, (l, &b)| m | b << l)
+}
+
+/// The lanes of `x` that are not 0.0, as a mask: branch-free, so it
+/// vectorises (an `If`'s condition).
+#[inline(always)]
+fn nonzero(x: &Lane) -> u64 {
+    let mut z = [0u64; LANES];
+    for l in 0..LANES {
+        z[l] = 0u64.wrapping_sub(u64::from(x[l] != 0.0)) & (1u64 << l);
+    }
+    z.iter().fold(0, |a, b| a | b)
+}
+
+/// An integer op over the batch: register bits out in `t`, and the lanes
+/// it fails on (`lane_ibin`'s `None`). The common ops run branch-free, so
+/// the add and the bitwise ops vectorise (#1101).
+#[inline(always)]
+fn ibin(op: IBinOp, x: OpRef<'_>, y: OpRef<'_>, t: &mut Lane) -> u64 {
+    let b = |v: i64| v as u64;
+    let c = |v: bool| f64::from(u8::from(v)).to_bits();
+    match op {
+        // Overflow: both operands' signs differ from the result's.
+        IBinOp::Add => ilanes(x, y, t, |p, q| {
+            let r = p.wrapping_add(q);
+            (b(r), ((p ^ r) & (q ^ r)) < 0)
+        }),
+        IBinOp::Sub => ilanes(x, y, t, |p, q| {
+            let r = p.wrapping_sub(q);
+            (b(r), ((p ^ q) & (p ^ r)) < 0)
+        }),
+        IBinOp::Mul => ilanes(x, y, t, |p, q| {
+            let (r, o) = p.overflowing_mul(q);
+            (b(r), o)
+        }),
+        IBinOp::And => ilanes(x, y, t, |p, q| (b(p & q), false)),
+        IBinOp::Or => ilanes(x, y, t, |p, q| (b(p | q), false)),
+        IBinOp::Xor => ilanes(x, y, t, |p, q| (b(p ^ q), false)),
+        IBinOp::Min => ilanes(x, y, t, |p, q| (b(p.min(q)), false)),
+        IBinOp::Max => ilanes(x, y, t, |p, q| (b(p.max(q)), false)),
+        IBinOp::Lt => ilanes(x, y, t, |p, q| (c(p < q), false)),
+        IBinOp::Le => ilanes(x, y, t, |p, q| (c(p <= q), false)),
+        IBinOp::Gt => ilanes(x, y, t, |p, q| (c(p > q), false)),
+        IBinOp::Ge => ilanes(x, y, t, |p, q| (c(p >= q), false)),
+        IBinOp::Eq => ilanes(x, y, t, |p, q| (c(p == q), false)),
+        IBinOp::Ne => ilanes(x, y, t, |p, q| (c(p != q), false)),
+        IBinOp::Idiv | IBinOp::Mod | IBinOp::Shift => {
+            ilanes(x, y, t, |p, q| match lane_ibin(op, p, q) {
+                Some(r) => (r.bits().to_bits(), false),
+                None => (0, true),
+            })
+        }
+    }
+}
+
+/// `f` over the batch's integer operands (an I64 register's bits, or an
+/// immediate's value as `v as i64`), writing bits into `t`; returns the
+/// lanes where `f` says it failed. The loops read the operands in place,
+/// one per operand shape, so they vectorise; the failing lanes are found
+/// again only when some lane failed.
+#[inline(always)]
+fn ilanes(
+    x: OpRef<'_>,
+    y: OpRef<'_>,
+    t: &mut Lane,
+    f: impl Fn(i64, i64) -> (u64, bool) + Copy,
+) -> u64 {
+    let i = |v: f64| v.to_bits() as i64;
+    let mut any = false;
+    match (x, y) {
+        (OpRef::Lane(x), OpRef::Lane(y)) => {
+            for l in 0..LANES {
+                let (r, o) = f(i(x[l]), i(y[l]));
+                t[l] = f64::from_bits(r);
+                any |= o;
+            }
+        }
+        (OpRef::Lane(x), OpRef::Imm(y)) => {
+            let y = y as i64;
+            for l in 0..LANES {
+                let (r, o) = f(i(x[l]), y);
+                t[l] = f64::from_bits(r);
+                any |= o;
+            }
+        }
+        (OpRef::Imm(x), OpRef::Lane(y)) => {
+            let x = x as i64;
+            for l in 0..LANES {
+                let (r, o) = f(x, i(y[l]));
+                t[l] = f64::from_bits(r);
+                any |= o;
+            }
+        }
+        (OpRef::Imm(x), OpRef::Imm(y)) => {
+            let (r, o) = f(x as i64, y as i64);
+            *t = [f64::from_bits(r); LANES];
+            any = o;
+        }
+    }
+    if !any {
+        return 0;
+    }
     let mut m = 0u64;
-    for (l, &b) in z.iter().enumerate() {
-        m |= u64::from(b) << l;
+    for l in 0..LANES {
+        m |= u64::from(f(x.int_at(l), y.int_at(l)).1) << l;
     }
     m
 }
 
-impl OpRef<'_> {
+/// As [`ilanes`] for f64 operands, writing f64 values.
+#[inline(always)]
+fn flanes(
+    x: OpRef<'_>,
+    y: OpRef<'_>,
+    t: &mut Lane,
+    f: impl Fn(f64, f64) -> (f64, bool) + Copy,
+) -> u64 {
+    let mut any = false;
+    match (x, y) {
+        (OpRef::Lane(x), OpRef::Lane(y)) => {
+            for l in 0..LANES {
+                let (r, o) = f(x[l], y[l]);
+                t[l] = r;
+                any |= o;
+            }
+        }
+        (OpRef::Lane(x), OpRef::Imm(y)) => {
+            for l in 0..LANES {
+                let (r, o) = f(x[l], y);
+                t[l] = r;
+                any |= o;
+            }
+        }
+        (OpRef::Imm(x), OpRef::Lane(y)) => {
+            for l in 0..LANES {
+                let (r, o) = f(x, y[l]);
+                t[l] = r;
+                any |= o;
+            }
+        }
+        (OpRef::Imm(x), OpRef::Imm(y)) => {
+            let (r, o) = f(x, y);
+            *t = [r; LANES];
+            any = o;
+        }
+    }
+    if !any {
+        return 0;
+    }
+    let mut m = 0u64;
+    for l in 0..LANES {
+        m |= u64::from(f(x.at(l), y.at(l)).1) << l;
+    }
+    m
+}
+
+impl<'a> OpRef<'a> {
+    /// The operand as a lane array: a register in place, an immediate
+    /// repeated into `buf`.
+    #[inline(always)]
+    fn lane<'b>(&self, buf: &'b mut Lane) -> &'b Lane
+    where
+        'a: 'b,
+    {
+        match *self {
+            OpRef::Lane(x) => x,
+            OpRef::Imm(x) => {
+                *buf = [x; LANES];
+                buf
+            }
+        }
+    }
+
+    /// Lane `l` as an integer operand ([`Machine::geti`]).
+    #[inline(always)]
+    fn int_at(&self, l: usize) -> i64 {
+        match self {
+            OpRef::Lane(x) => x[l].to_bits() as i64,
+            OpRef::Imm(x) => *x as i64,
+        }
+    }
+
     /// The operand as a whole lane array (an immediate repeated).
     #[inline(always)]
     fn splat(&self) -> Lane {
