@@ -3295,14 +3295,22 @@ impl<'a> Compiler<'a> {
             self.push_num(Op::Imm(r), rt);
             return Ok(());
         }
-        let d = self.reg();
+        let mut d = self.reg();
         self.emit(Ins::Bin(op, d, a, b))?;
         let rt = match rt {
             NT::Dyn(_) => {
                 let t = self.reg();
                 self.emit(Ins::Bin(BinOp::TagAnd, t, at.tag(), bt.tag()))?;
-                // Integer lanes of a Dyn value are exact f64s.
-                if !matches!(op, BinOp::Min | BinOp::Max) {
+                // Integer lanes of a Dyn value are exact f64s, and a
+                // product's has no -0.0 (`BinOp::IntZeroCheck`: `0 -2 mul` gives
+                // -0.0 in an f64, and read later as a real, by `cvr`,
+                // `2.5 mul` or `0 -1 exp`, the sign would show where the
+                // interpreter's integer 0 has none): one check does both.
+                if op == BinOp::Mul {
+                    let z = self.reg();
+                    self.emit(Ins::Bin(BinOp::IntZeroCheck, z, Op::R(d), Op::R(t)))?;
+                    d = z;
+                } else if !matches!(op, BinOp::Min | BinOp::Max) {
                     self.emit(Ins::CheckInt(Op::R(d), Op::R(t)))?;
                 }
                 NT::Dyn(t)
@@ -3516,6 +3524,11 @@ impl<'a> Compiler<'a> {
                         UnOp::Abs => self.iun(IUnOp::Abs, a)?,
                         _ => self.push_num(a, t),
                     }
+                } else if let (UnOp::Neg, NT::Dyn(tag), Op::R(_)) = (op, t, a) {
+                    // An integer 0 negated is 0, not -0.0 (`IntZeroCheck`).
+                    let d = self.reg();
+                    self.emit(Ins::Bin(BinOp::NegIntZero, d, a, Op::R(tag)))?;
+                    self.push_num(Op::R(d), t);
                 } else {
                     self.un_to(op, a, move |o| SVal::Num(o, t))?;
                 }

@@ -141,7 +141,9 @@ end`, and takes the `n` values above the mark: a wrong count is a
 leaves with `exit` an `invalidexit`. That is the same as a nested `for` loop
 that `put`s each value whenever the procedure is pure, as a compiled one is.
 Everything below about what compiles, how it degrades, `.kernelmode` and the
-limits applies to `kernelarray` too. `kernelcompile` answers for it as well.
+limits applies to `kernelarray` too. `kernelcompile` answers for it as well
+(it compiles for `kernelimage`; the kernel for `kernelarray` differs only in
+how it keeps its outputs).
 `--gpu-preview` does not apply: its values would not be exact. Under
 `--bands` every band computes the whole grid, since the array is the result.
 There is no form that fills an existing array: a procedure that read the

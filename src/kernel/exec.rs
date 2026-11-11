@@ -140,6 +140,7 @@ impl Why {
             BinOp::Div => Why::DivZero,
             BinOp::Atan => Why::Atan00,
             BinOp::Pow => Why::ExpUndefined,
+            BinOp::IntZeroCheck => Why::IntPast53,
             _ => Why::CompareNan,
         }
     }
@@ -887,6 +888,10 @@ fn bin(op: BinOp, x: OpRef<'_>, y: OpRef<'_>, t: &mut Lane) -> u64 {
         BinOp::Add => flanes(x, y, t, |p, q| ok(p + q)),
         BinOp::Sub => flanes(x, y, t, |p, q| ok(p - q)),
         BinOp::Mul | BinOp::TagAnd => flanes(x, y, t, |p, q| ok(p * q)),
+        BinOp::NegIntZero => flanes(x, y, t, |p, q| ok(int_zero(-p, q))),
+        BinOp::IntZeroCheck => flanes(x, y, t, |p, q| {
+            (int_zero(p, q), (q != 0.0) & !within_int(p))
+        }),
         BinOp::Min => flanes(x, y, t, |p, q| ok(p.min(q))),
         BinOp::Max => flanes(x, y, t, |p, q| ok(p.max(q))),
         BinOp::BAnd => flanes(x, y, t, |p, q| ok(c(p != 0.0 && q != 0.0))),
@@ -1358,6 +1363,13 @@ fn within_int(x: f64) -> bool {
     x.abs() < INT_LIMIT
 }
 
+/// `x` with tag `tag`: on an integer lane +0.0 for a -0.0 (an integer has
+/// no sign of zero), else `x` as it is (`BinOp::IntZeroCheck`).
+#[inline(always)]
+fn int_zero(x: f64, tag: f64) -> f64 {
+    if tag != 0.0 { x + 0.0 } else { x }
+}
+
 /// One lane of a binary op, `None` where PostScript would raise an error.
 /// Also the compiler's constant folder, so folding and running agree.
 pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
@@ -1369,6 +1381,13 @@ pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
         BinOp::Min => a.min(b),
         BinOp::Max => a.max(b),
         BinOp::TagAnd => a * b,
+        BinOp::NegIntZero => int_zero(-a, b),
+        BinOp::IntZeroCheck => {
+            if b != 0.0 && !within_int(a) {
+                return None;
+            }
+            int_zero(a, b)
+        }
         BinOp::Div => {
             if b == 0.0 {
                 return None;

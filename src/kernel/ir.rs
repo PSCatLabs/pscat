@@ -60,6 +60,15 @@ pub(crate) enum BinOp {
     Pow,
     /// The integer tag of a result from two operand tags (both 0/1).
     TagAnd,
+    /// A Dyn `mul`'s result `a` with tag `b`: a lane whose integer (`b`
+    /// 1.0) is not exact in an f64 fails, as `Ins::CheckInt`, and an
+    /// integer lane's -0.0 becomes +0.0, since an integer has no negative
+    /// zero (#1102): `a + 0.0` there, `a` untouched on a real lane (whose
+    /// -0.0 or NaN must keep its bits; arithmetic on a NaN may not).
+    IntZeroCheck,
+    /// A Dyn `neg`: `-a`, plus 0.0 on an integer lane, so an integer 0
+    /// negated is 0.
+    NegIntZero,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

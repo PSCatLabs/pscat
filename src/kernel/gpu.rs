@@ -384,6 +384,8 @@ fn block(
                     BinOp::Add => format!("{a} + {b}"),
                     BinOp::Sub => format!("{a} - {b}"),
                     BinOp::Mul | BinOp::TagAnd => format!("{a} * {b}"),
+                    BinOp::IntZeroCheck => format!("select({a}, {a} + 0.0, {b} != 0.0)"),
+                    BinOp::NegIntZero => format!("select(-({a}), -({a}) + 0.0, {b} != 0.0)"),
                     BinOp::Div => format!("{a} / {b}"),
                     BinOp::Min => format!("min({a}, {b})"),
                     BinOp::Max => format!("max({a}, {b})"),

@@ -2879,6 +2879,70 @@ fn kernelarray_errors_match_the_interpreter() {
 }
 
 #[test]
+fn kernelarray_edge_values_keep_their_bits() {
+    for (n, body) in [
+        (1, "i 1e308 mul 10 mul"),
+        (1, "i 1e308 mul 10 mul dup sub"),
+        (1, "i 1e308 mul 10 mul neg 1 add"),
+        (1, "i 2 mod 0 eq { 0.0 neg } { 0 } ifelse"),
+        (1, "i 2 mod 0 eq { 0.0 neg } { 0 } ifelse 0.0 min"),
+        (1, "0.0 neg i add"),
+        (1, "i neg 0.0 mul"),
+        (2, "-0.4 round -0.6 truncate"),
+        (2, "0.0 neg floor 0.0 neg sqrt"),
+        (1, "1e-300 i mul 1e-300 mul neg"),
+    ] {
+        same_cells_compiled(&cells_of(n, body));
+    }
+}
+
+/// An integer 0 made by a Dyn `mul` or `neg` (an integer on some lanes)
+/// is 0, not the f64's -0.0: read later as a real it must not carry a
+/// sign (found by the #1102 fuzz; `0 -1 exp` showed it in kernelimage's
+/// pixels too, inf against -inf).
+#[test]
+fn a_dyn_integer_zero_has_no_sign() {
+    for (n, body) in [
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse -2 mul -1 exp"),
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse neg 2.5 mul"),
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse -3 mul 5 atan neg"),
+        // A real lane's -0.0, and its NaN, keep their bits.
+        (1, "i 2 mod 0 eq { 0 } { 1e308 10 mul dup sub } ifelse neg"),
+        (
+            1,
+            "i 2 mod 0 eq { 0 } { 1e308 10 mul dup sub neg } ifelse -2 mul",
+        ),
+        (2, "i 2 mod 0 eq { 0.0 } { 2 } ifelse neg dup -1 mul"),
+        (1, "i 2 mod 0 eq { 0.0 } { 0 } ifelse -2 mul"),
+    ] {
+        same_cells_compiled(&cells_of(n, body));
+    }
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           i 2 mod 0 eq {{ 0 }} {{ 0.5 }} ifelse j 1 add neg mul -1 exp 1e-300 mul show3 }} def"
+    ));
+}
+
+#[test]
+fn tables_of_integers_past_2_pow_53_are_not_compiled() {
+    // An integer past 2^53 is not exact in a table's f64s: such a table
+    // is refused, and the interpreter gives the exact integers.
+    for defs in [
+        "/T [9007199254740993 1 -9223372036854775807] def",
+        "/T [9007199254740993 0.5 7] def",
+    ] {
+        let src = format!("{defs} 3 1 {{ pop T exch get }} 1 kernelarray");
+        let (out, stats) = same_cells(&src);
+        assert_eq!(stats, WHOLE, "{src}");
+        assert!(
+            out.as_ref()
+                .is_ok_and(|v| v[0].contains("i9007199254740993")),
+            "{out:?}"
+        );
+    }
+}
+
+#[test]
 fn an_empty_grid_is_an_empty_array() {
     let (out, _) = same_cells("0 5 { pop pop 1 } 2 kernelarray 3 0 { pop pop 1 } 2 kernelarrays");
     assert_eq!(out, Ok(vec!["[]".into(), "[]".into(), "[]".into()]));
@@ -2946,22 +3010,52 @@ gsave 200 130 scale 64 48 8 [64 0 0 -48 0 48] { S } image grestore showpage
     assert_eq!(cli_png(&interp, &[], None), one, "interpreted");
 }
 
+/// `e` pushed to an edge a painted component never showed: infinity,
+/// NaN, a negative zero, an integer past 2^53, or its sign and type
+/// changed (#1102).
+fn edge(r: &mut Rng, e: String) -> String {
+    match r.below(12) {
+        0 => format!("{e} 1e308 mul 10 mul"),
+        1 => format!("{e} 1e308 mul 10 mul dup sub"),
+        2 => format!("{e} 0.0 neg mul"),
+        3 => format!("{e} neg"),
+        4 => format!("{e} abs"),
+        5 => format!("{e} 0.0 neg {}", ["min", "max"][r.below(2) as usize]),
+        6 => format!("{e} cvi 16#45D9F3B mul 16#45D9F3B mul"),
+        7 => format!("{e} 1e-300 mul 1e-300 mul"),
+        8 => format!("{e} 0 gt {{ 7 }} {{ {e} }} ifelse"),
+        9 => format!("{e} cvr"),
+        _ => e,
+    }
+}
+
 #[test]
 fn kernelarray_differential_fuzz() {
-    let cases = if cfg!(debug_assertions) { 100 } else { 300 };
-    let mut r = Rng(0x5eed_1102);
+    // `KERNEL_FUZZ_CASES` runs more, and `KERNEL_FUZZ_SEED` others, for a
+    // deeper look by hand.
+    let cases = std::env::var("KERNEL_FUZZ_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) { 100 } else { 300 });
+    let seed = std::env::var("KERNEL_FUZZ_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x5eed_1102);
+    let mut r = Rng(seed);
     let mut compiled = 0;
     for case in 0..cases {
         let mut body = String::from("/j exch def /i exch def\n");
         let mut vars: Vec<String> = Vec::new();
         for k in 0..r.below(3) {
             let e = expr(&mut r, 3, &vars);
+            let e = edge(&mut r, e);
             body += &format!("/v{k} {e} def\n");
             vars.push(format!("v{k}"));
         }
         let n = 1 + r.below(3) as usize;
         for _ in 0..n {
-            body += &format!("{}\n", expr(&mut r, 3, &vars));
+            let e = expr(&mut r, 3, &vars);
+            body += &format!("{}\n", edge(&mut r, e));
         }
         let src = format!(
             "5 noiseseed /Tbl [ 3 1.5 -2 7 0.25 9 4 4.5 ] def
