@@ -1863,6 +1863,9 @@ impl Interp {
                     }
                 }
                 Action::RunSequence(bytes) => {
+                    // The scanner is still the top frame: errors from running
+                    // the sequence belong to its line, as for a plain token.
+                    self.sync_scan_line();
                     let items = self.decode_sequence(&bytes)?;
                     // A scanned executable string runs, as a token read from
                     // a file would; a procedure body only pushes it. So each

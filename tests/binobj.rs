@@ -489,6 +489,22 @@ fn writer_stops_a_huge_array_of_one_big_string_early() {
     assert!(matches!(e, PsError::Limitcheck), "{e:?}");
 }
 
+#[test]
+fn an_error_inside_a_sequence_reports_its_own_line() {
+    // `/nope` as an executable name, scanned straight from the program
+    // source on line 3: the report names line 3, not the line of `1 pop`.
+    let s = seq(&[[0x83, 0, 0, 4, 0, 0, 0, 8]], b"nope");
+    let mut src = b"%!PS\n1 pop\n".to_vec();
+    src.extend_from_slice(&s);
+    let mut it = Interp::with_page(50, 50).unwrap();
+    let e = it.run_source(&src).expect_err("undefined");
+    assert!(
+        it.error_report(&e).contains("Line: 3"),
+        "{}",
+        it.error_report(&e)
+    );
+}
+
 // ------------------------------------------------------------ Ghostscript
 
 fn gs_available() -> bool {

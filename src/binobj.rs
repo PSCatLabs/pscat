@@ -323,7 +323,7 @@ struct Writer {
 
 /// Encode one object as a sequence in the byte order of `fmt`
 /// (a `setobjectformat` value, 1 to 4), with `tag` in its tag byte.
-/// `charge` hears about the bytes produced so far after each array, so
+/// `charge` hears about the bytes produced as they pile up, so
 /// the caller can apply its step, time and memory limits.
 pub fn encode(
     obj: &Object,
@@ -369,6 +369,8 @@ pub fn encode(
     let payload = slots_len + w.chars.len();
     let short = SHORT_HEADER + payload <= 0xFFFF;
     let hdr = if short { SHORT_HEADER } else { LONG_HEADER };
+    // The output copies every byte while `body` and `chars` are still live.
+    charge(hdr + payload)?;
     let mut out = Vec::with_capacity(hdr + payload);
     out.push(127 + fmt);
     if short {
