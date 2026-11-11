@@ -430,6 +430,10 @@ impl<'k> Machine<'k> {
                     let t = self.w(s).splat();
                     self.store(d, &t, mask);
                 }
+                L::MovR(d, s) => {
+                    let t = self.regs[s as usize];
+                    self.store(d, &t, mask);
+                }
                 L::MovI(d, v) => {
                     let t = [self.c.consts[(v & !IMM) as usize]; LANES];
                     self.store(d, &t, mask);

@@ -50,6 +50,8 @@ pub(crate) fn dest(i: &Ins) -> Option<Reg> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum L {
     Mov(Reg, u32),
+    /// `Mov` from a register (#1101).
+    MovR(Reg, Reg),
     /// The operand's constant holds the integer's bits.
     MovI(Reg, u32),
     Bin(BinOp, Reg, u32, u32),
@@ -233,11 +235,13 @@ impl Lower<'_> {
         let fresh = !matches!(i, Ins::If(..) | Ins::Loop(_)) && self.is_fresh(p);
         let fr = |d: Reg| if fresh { d | FRESH } else { d };
         let l = match *i {
+            Ins::Mov(d, Op::R(s)) => L::MovR(fr(d), s),
             Ins::Mov(d, a) => L::Mov(fr(d), self.op(a)),
             Ins::MovI(d, v) => L::MovI(fr(d), self.konst(v as u64)),
             Ins::Bin(BinOp::Add, d, a, b) => L::Add(fr(d), self.op(a), self.op(b)),
             Ins::Bin(BinOp::Sub, d, a, b) => L::Sub(fr(d), self.op(a), self.op(b)),
-            Ins::Bin(BinOp::Mul, d, a, b) => L::Mul(fr(d), self.op(a), self.op(b)),
+            // An integer tag's `and` of two 0/1 tags is their product.
+            Ins::Bin(BinOp::Mul | BinOp::TagAnd, d, a, b) => L::Mul(fr(d), self.op(a), self.op(b)),
             Ins::Bin(op, d, a, b) => L::Bin(op, fr(d), self.op(a), self.op(b)),
             Ins::Un(op, d, a) => L::Un(op, fr(d), self.op(a)),
             Ins::IBin(op, d, a, b) => L::IBin(op, fr(d), self.op(a), self.op(b)),
