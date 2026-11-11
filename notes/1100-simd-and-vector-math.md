@@ -47,9 +47,16 @@ So vector math matters for ray-marched pieces, not for fractal_clouds.
   - **Rare paths on demand.** The reduction's later rounds, and the
     no-reduction path below pi/4, are computed only when some lane of the
     batch needs them.
-  - **Not inside `block`.** The handlers' bodies also had to stay out of
-    `block`. Inline, they made it 6% larger, and mochi_in_oils ran 2.9% more
-    instructions in exact mode.
+  - **Not inside `block` at all.** Inline handlers made `block` 6% larger
+    (mochi_in_oils: 2.9% more instructions in exact mode). Even as calls,
+    three new opcodes in the block loop's dispatch cost about 6% of the
+    kernel's cycles on fractal_clouds' scenes, though those kernels never
+    run them. fractal_clouds measured the slowdown on the test release, and
+    the cycle counts confirmed it: mountains at 640×400 took 107–109G cycles
+    against build2's 105–107G. So the fast forms now lower to the existing
+    `L::Ext` side table, and `Machine::ext` vectorises them. The block
+    loop's opcodes are #1102's again, at 103–105G, and golden_coast is at
+    163G against build2's 164–165G.
 - **Speed, per lane on an M4** (NEON, 2 f64s a vector):
 
   | | vector | scalar |
@@ -57,8 +64,9 @@ So vector math matters for ray-marched pieces, not for fractal_clouds.
   | `sin` | 5.9 ns | 9.5 ns |
   | `atan` | 6.1 ns | 13.7 ns |
 
-  Mandelbulb, one thread, measured in cycles because the machine was loaded:
-  85–96G exact against 71–72G fast. Dreaming Network and Mirror Garden were
+  Mandelbulb, one thread, measured in cycles: 85–96G exact against 71–72G
+  fast with the machine loaded; on a quieter one, 68.6G against 54.9G (21%
+  fewer), through the side table. Dreaming Network and Mirror Garden were
   unchanged. Every picture tested was byte-identical.
 - **Per run.** The mode is chosen in `Code::new` for each run, never stored
   in a kernel. `kernelarray` always runs exact.

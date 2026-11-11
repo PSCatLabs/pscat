@@ -480,6 +480,9 @@ The CPU executor:
   - `rem_pio2`'s medium and small-multiple cases;
   - `atan`, `atan2`.
 
+  The fast forms lower to `L::Ext`, the side table, not opcodes of their
+  own: three more arms in the block loop's dispatch cost about 6% of the
+  kernel time on fractal_clouds' scenes, run or not.
   Every path is computed on every lane and the lane's own one selected,
   using 64-bit integers only, so the loops vectorise. Lanes libm
   special-cases go to the exact scalar code, and `0 0 atan`'s error is
