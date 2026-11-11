@@ -1049,6 +1049,14 @@ impl Interp {
     }
 
     /// Heap bytes the process has gained since `set_limits`.
+    /// The heap has grown past `--max-memory` (the kernel compiler's look,
+    /// between interpreter steps).
+    pub(crate) fn memory_exceeded(&self) -> bool {
+        self.limits
+            .max_memory
+            .is_some_and(|max| self.heap_growth() > max)
+    }
+
     fn heap_growth(&self) -> usize {
         crate::memtrack::live_bytes().saturating_sub(self.mem_base)
     }

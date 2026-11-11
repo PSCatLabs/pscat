@@ -2377,29 +2377,17 @@ fn a_soft_branch_under_bands_runs_the_whole_image() {
 }
 
 #[test]
-fn forms_told_from_the_text_keep_a_soft_branch_pure() {
-    // #1093 follow-up (fractal_clouds): stack `n copy`, `n array astore`,
-    // `/x load`, and a branch a boolean guard never takes.
+fn load_keeps_a_soft_branch_pure() {
+    // #1093 follow-up: `load` gives the binding of a name in reach, and
+    // every such binding is scanned, literal names' included.
     for (pre, body) in [
-        (
-            "",
-            "i 2 lt { count pop 0.1 0.2 2 copy pop pop pop } { i 0.25 mul } ifelse",
-        ),
-        (
-            "",
-            "i 2 lt { count pop 1 2 3 3 array astore length 0.1 mul } { 0.5 } ifelse",
-        ),
         (
             "/f { 0.5 mul } def",
             "i 2 lt { count pop 0.4 /f load exec } { 0.3 } ifelse",
         ),
         (
-            "/G [0.5] def /Done true def",
-            "Done not { G 0 0.9 put } if i 2 lt { count pop 0.3 } { G 0 get } ifelse",
-        ),
-        (
-            "/G [0.5] def /Off false def",
-            "Off { G 0 0.9 put } { i 2 lt { count pop 0.3 } { G 0 get } ifelse } ifelse",
+            "/f { 0.5 mul } def",
+            "/g /f def i 2 lt { count pop 0.4 g load exec } { 0.3 } ifelse",
         ),
     ] {
         let src = soft_prog(pre, body);
@@ -2407,20 +2395,30 @@ fn forms_told_from_the_text_keep_a_soft_branch_pure() {
         assert!(out.is_ok(), "{out:?}\n{src}");
         assert_eq!(stats, PER_PIXEL, "{src}");
     }
-    // The same forms where the write is real: composite `copy`, `load` of
-    // a procedure that writes, a guard a pixel can rebind.
+    // `load` of a procedure that writes, reached by a literal name only;
+    // and the forms the review showed cannot be told from the text: a
+    // rebound `array`, a guard rebound through a string key or a name
+    // fetched from a procedure, an operator fetched with `get`.
     for (pre, body) in [
-        (
-            "/G [0 0] def",
-            "i 0 eq { count pop [0.7 0.7] G copy pop } if G 0 get",
-        ),
         (
             "/G [0.5] def /f { G 0 0.9 put } def",
             "i 0 eq { count pop /f load exec } if G 0 get",
         ),
         (
-            "/G [0.5] def /Done true def",
-            "i 0 eq { count pop /Done false def } if Done not { G 0 0.9 put } if G 0 get",
+            "/G [0.5] def",
+            "i 0 eq { count pop /array { pop G } def } if 0.9 1 array astore pop G 0 get",
+        ),
+        (
+            "/G [0.5] def /Done false def",
+            "i 0 eq { count pop (Done) true def } if Done { G 0 0.9 put } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /Done false def",
+            "i 0 eq { count pop {Done} 0 get true def } if Done { G 0 0.9 put } if G 0 get",
+        ),
+        (
+            "/G [0 0] def",
+            "i 0 eq { count pop [0.7 0.7] G {2 copy} 1 get exec pop } if G 0 get",
         ),
     ] {
         let src = soft_prog(pre, body);

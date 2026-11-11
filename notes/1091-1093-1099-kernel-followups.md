@@ -34,21 +34,35 @@ guessed on #1091.
 
 **Peak RSS** at 160×100 is now 324–439 MB on the three largest scenes.
 
-### #1093: forms told from the text
+### #1093: what the purity scan allows
 
 On unpatched pnw_coast the "cannot run alone" list had 16 reasons. About
 half came from one dead branch: `FcClCompiled not { fc-clouds-compile } if`
-with `FcClCompiled` true. The scan now allows:
+with `FcClCompiled` true.
 
-- stack `n copy`, with an integer literal just before it;
+A first version allowed four forms read from the text:
+- stack `n copy`;
 - `n array astore`;
-- `/x load`, scanning `x`'s binding;
-- a branch that a boolean guard never takes. This holds only while no
-  literal `/guard` is in reach; if one turns up, the branch is scanned
-  after all.
+- `/x load`;
+- a branch that a constant boolean guard never takes.
 
-`PSCAT_KERNEL_TIMING=1` lists every reason instead of "and N more". The
-16 reasons shrank to 3: `rand`, `where` and `put`, all genuinely impure.
+The independent review found it unsound, with repros that differ from
+`/interpret`:
+- a pixel can rebind `not` or `array`;
+- it can rebind the guard with a string key, `(Done) true def`;
+- it can rebind it with a name fetched from a procedure,
+  `{Done} 0 get true def`;
+- it can fetch `copy` or `astore` out of a procedure with `get` and run it
+  on anything (why the original scan refused `copy`).
+
+What stayed:
+
+- **`load` is pure, done soundly.** The scan now adds the current binding
+  of *every* name in reach, literal ones included. Whatever a `load` (or a
+  `load` fetched with `get`) can return is then in the universe.
+- **`PSCAT_KERNEL_TIMING=1` lists every reason** instead of "and N more".
+
+The review's repros are tests (`load_keeps_a_soft_branch_pure`).
 
 fractal_clouds fixed the uncompiled branches themselves (#142 `FsMixWt`,
 #143 the trunk `aload`). With those, no scene has a soft branch, so the

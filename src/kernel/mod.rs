@@ -812,8 +812,9 @@ fn kernelshare(it: &mut Interp) -> Result<(), PsError> {
 
 /// `inline shared made .kernelcaps -`: the compiler's size caps, in
 /// instructions (#1091): an inlining compile's, a sharing compile's, and
-/// what subroutines may hold as made. 0 restores a cap's default. A test
-/// hook, so the tests reach the caps with small programs.
+/// what subroutines may hold as made. 0 restores a cap's default, and none
+/// may exceed it, so a program cannot raise what a compile may hold. A
+/// test hook, so the tests reach the caps with small programs.
 fn kernelcaps(it: &mut Interp) -> Result<(), PsError> {
     let mut caps = [0usize; 3];
     for k in (0..3).rev() {
@@ -823,7 +824,7 @@ fn kernelcaps(it: &mut Interp) -> Result<(), PsError> {
         };
         caps[k] = match n {
             0 => compile::DEFAULT_CAPS[k],
-            n if n > 0 => n as usize,
+            n if n > 0 => (n as usize).min(compile::DEFAULT_CAPS[k]),
             _ => return Err(PsError::Rangecheck),
         };
     }

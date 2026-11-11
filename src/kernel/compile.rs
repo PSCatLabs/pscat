@@ -806,11 +806,12 @@ const MAX_INSNS_SHARED: usize = 2_000_000;
 /// in code later rolled back stay for reuse, uncounted by the size cap, so
 /// this bounds what they hold (#1091). 4M, 2 x `MAX_INSNS_SHARED`, about
 /// 512 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
-/// 900k (tropical_island), the kernel gallery none. `--max-memory` holds
-/// during compilation too.
+/// 900k (tropical_island), the kernel gallery none. `--max-memory` is
+/// looked at during compilation too (`Compiler::charge`).
 const MAX_SUB_MADE: usize = 4_000_000;
 /// The three caps above, the default of `.kernelcaps` (a test hook: the
-/// tests reach the caps with small programs, not with half a gigabyte).
+/// tests reach the caps with small programs, not with half a gigabyte; it
+/// can only lower them).
 pub(crate) const DEFAULT_CAPS: [usize; 3] = [MAX_INSNS, MAX_INSNS_SHARED, MAX_SUB_MADE];
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
@@ -1710,6 +1711,12 @@ impl<'a> Compiler<'a> {
                 && crate::clock::Clock::mono_ns() >= d
             {
                 self.limit = Some(crate::error::PsError::TimeExceeded);
+                return nc("limit");
+            }
+            // The caps bound what a compile holds (hundreds of MB at most),
+            // `--max-memory` what this program may.
+            if self.it.memory_exceeded() {
+                self.limit = Some(crate::error::PsError::MemoryExceeded);
                 return nc("limit");
             }
         }
