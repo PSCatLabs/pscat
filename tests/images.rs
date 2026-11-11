@@ -110,6 +110,75 @@ fn file_source_reads_inline_data() {
     assert_eq!(pixel(&it, 5, 5), (0, 0, 255), "program resumed after data");
 }
 
+// ---- #896: `fill` reads a file source in bulk ----
+
+#[test]
+fn raw_currentfile_source_takes_exactly_its_bytes() {
+    // Two 8-bit samples straight from the program text ("\377\000" would
+    // need escapes, so printable bytes: 'A' is 65, 'z' 122), then the
+    // program carries on from the very next byte.
+    const SRC: &str = "10 10 translate 80 80 scale
+         2 1 8 [2 0 0 -1 0 1] currentfile image
+Az currentfile fileposition (tail) length";
+    let mut it = run(SRC);
+    assert_eq!(it.pop().expect("length").repr(), "4");
+    // `fileposition` runs once the scanner has taken the token and its
+    // delimiter, so the samples were exactly "Az" and nothing more.
+    let upto = SRC.find("fileposition").expect("token") + "fileposition ".len();
+    assert_eq!(it.pop().expect("position").repr(), upto.to_string());
+    assert_eq!(pixel(&it, 30, 50), (65, 65, 65));
+    assert_eq!(pixel(&it, 70, 50), (122, 122, 122));
+}
+
+#[test]
+fn raw_currentfile_source_running_out_renders_what_arrived() {
+    // The program ends two bytes into four samples: no error, the two
+    // delivered samples paint, the missing ones read as 0.
+    let it = run("10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2] currentfile image
+Az");
+    assert_eq!(pixel(&it, 30, 30), (65, 65, 65));
+    assert_eq!(pixel(&it, 70, 30), (122, 122, 122));
+    assert_eq!(pixel(&it, 30, 70), BLACK, "missing sample reads as 0");
+    assert_eq!(pixel(&it, 70, 70), BLACK, "missing sample reads as 0");
+}
+
+#[test]
+fn filter_ending_mid_row_renders_what_arrived() {
+    // Three of four samples, then the filter's EOD: the last reads as 0,
+    // and the program resumes after the `>`.
+    let it = run("10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2]
+         currentfile /ASCIIHexDecode filter image
+         ffffff>
+         initmatrix 0 0 1 setrgbcolor 4 setlinewidth
+         newpath 2 95 moveto 8 95 lineto stroke");
+    assert_eq!(pixel(&it, 30, 30), WHITE);
+    assert_eq!(pixel(&it, 30, 70), WHITE);
+    assert_eq!(pixel(&it, 70, 70), BLACK, "missing sample reads as 0");
+    assert_eq!(pixel(&it, 5, 5), (0, 0, 255), "program resumed after data");
+}
+
+#[test]
+fn closed_file_source_is_end_of_data_not_an_error() {
+    // A closed file reads as end of data (as `read` gives false), so the
+    // image renders with every sample 0 instead of raising `ioerror`.
+    let it = run("/F (ffff>) /ASCIIHexDecode filter def F closefile
+         10 10 translate 80 80 scale
+         2 1 8 [2 0 0 -1 0 1] F image");
+    assert_eq!(pixel(&it, 30, 50), BLACK);
+    assert_eq!(pixel(&it, 70, 50), BLACK);
+}
+
+#[test]
+fn bad_filter_data_is_ioerror() {
+    let mut it = Interp::with_page(100, 100).expect("page");
+    assert_eq!(
+        it.run_str("2 1 8 [2 0 0 -1 0 1] (ffxx>) /ASCIIHexDecode filter image"),
+        Err(PsError::Io)
+    );
+}
+
 #[test]
 fn proc_source_called_per_chunk() {
     // The proc returns one row per call; a counter proves it ran
@@ -216,12 +285,12 @@ fn image_argument_errors() {
     assert_eq!(
         it.run_str("2 2 3 [2 0 0 -2 0 2] {<00>} image"),
         Err(PsError::Rangecheck),
-        "bits must be 1/2/4/8"
+        "bits must be 1/2/4/8/12/16"
     );
     assert_eq!(
-        it.run_str("2 2 8 [2 0 0 -2 0 2] {<00>} true 3 colorimage"),
-        Err(PsError::Limitcheck),
-        "multi-source colorimage is a documented gap"
+        it.run_str("2 2 3 [2 0 0 -2 0 2] {<00>} false 1 colorimage"),
+        Err(PsError::Rangecheck),
+        "bits must be 1/2/4/8/12/16"
     );
 }
 
@@ -387,4 +456,75 @@ fn singular_image_matrix_is_undefinedresult_before_any_data() {
     ] {
         assert_eq!(it.run_str(bad), Err(PsError::UndefinedResult), "{bad}");
     }
+}
+
+// ---- setalpha / setblendmode reach images (#766) ---------------------------
+
+#[test]
+fn image_takes_alpha_and_resets_with_grestore() {
+    // The black checker cells at 0.5 over white are mid grey; the white
+    // cells stay white; after `grestore` the image is opaque again.
+    let it = run(&format!("gsave 0.5 setalpha {CHECKER} grestore"));
+    let (r, g, b) = pixel(&it, 30, 30);
+    assert!((126..=129).contains(&r) && r == g && g == b, "{r} {g} {b}");
+    assert_eq!(pixel(&it, 70, 30), WHITE);
+    let it = run(&format!("gsave 0.5 setalpha grestore {CHECKER}"));
+    assert_eq!(pixel(&it, 30, 30), BLACK);
+}
+
+#[test]
+fn imagemask_takes_alpha_and_multiply() {
+    // A red stencil over a cyan ground (0,255,255). At alpha 0.5 Normal
+    // gives (128,128,128); Multiply of pure red on cyan is black.
+    let ground = "0 1 1 setrgbcolor 0 0 100 100 rectfill 1 0 0 setrgbcolor";
+    let mask = "10 10 translate 80 80 scale 1 1 true [1 0 0 -1 0 1] {<80>} imagemask";
+    let it = run(&format!("{ground} 0.5 setalpha {mask}"));
+    let (r, g, b) = pixel(&it, 50, 50);
+    assert!(
+        (126..=129).contains(&r) && (126..=129).contains(&g) && (126..=129).contains(&b),
+        "{r} {g} {b}"
+    );
+    assert_eq!(pixel(&it, 5, 5), (0, 255, 255));
+    let it = run(&format!("{ground} /Multiply setblendmode {mask}"));
+    assert_eq!(pixel(&it, 50, 50), BLACK);
+}
+
+#[test]
+fn translucent_image_on_a_transparent_page_stays_translucent() {
+    let mut it = Interp::with_page(100, 100).expect("test page");
+    it.gfx_mut().set_transparent_background();
+    it.run_str(&format!("0.5 setalpha {CHECKER}"))
+        .expect("runs");
+    let p = it.gfx().pixmap.pixel(30, 30).unwrap();
+    assert!((126..=129).contains(&p.alpha()), "alpha {}", p.alpha());
+}
+
+#[test]
+fn bitmap_glyph_stamp_takes_alpha_and_does_not_leak_it() {
+    // A bitmap-font glyph (imagemask in a Type 3 BuildChar) is text, and
+    // text takes alpha: 0.5 gives mid grey, and the same glyph shown at
+    // alpha 1 straight after is fully black (nothing cached or kept).
+    let font = "/BitFont 6 dict def
+         BitFont begin
+           /FontType 3 def
+           /FontMatrix [0.001 0 0 0.001 0 0] def
+           /Encoding 256 array def 0 1 255 { Encoding exch /.notdef put } for
+           Encoding 97 /blk put
+           /BuildChar {
+             exch begin
+               1000 0 0 0 800 800 setcachedevice
+               800 800 scale
+               2 2 true [2 0 0 -2 0 2] {<c0 00>} imagemask
+             end
+           } def
+         end
+         /BitFont BitFont definefont pop
+         /BitFont findfont 40 scalefont setfont";
+    let it = run(&format!("{font} 0.5 setalpha 10 10 moveto (a) show"));
+    let (r, g, b) = pixel(&it, 25, 100 - 35);
+    assert!((126..=129).contains(&r) && r == g && g == b, "{r} {g} {b}");
+    let it = run(&format!(
+        "{font} 0.5 setalpha 10 10 moveto (a) show 1 setalpha 10 10 moveto (a) show"
+    ));
+    assert_eq!(pixel(&it, 25, 100 - 35), BLACK);
 }

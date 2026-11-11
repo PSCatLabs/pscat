@@ -76,6 +76,13 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   (value), `gnoise2d` (with derivatives) and the fBm sums `fbm2`, `fbm3`,
   `vfbm2`, `vfbm3`, `ridged2`, `ridged3`. `lib/noiseref.ps` documents the
   algorithm and reproduces every operator bit for bit in plain PostScript.
+  `--sweep-seed` seeds the noise table too (as `N noiseseed`), unless the
+  program calls `noiseseed` itself.
+  *Basin and Range* (`gallery/basin_and_range.ps`) is the worked example: a
+  shaded-relief map whose `colorimage` data procedure builds every pixel from
+  `fbm2` and `ridged2`, in about 1.6 seconds. It reads `/BandBBox`, so
+  `pscat --bands 4` computes a quarter of the rows per thread and renders it
+  in about 0.6 seconds (see *Parallel bands* in the getting-started guide).
 - **Scatter.** The area-shaped counterpart to `alongpath`. `screct` and
   `scpath` build a region from a rectangle or from the current path (flattened
   and closed the way `fill` sees it; `clippath scpath` captures the clip

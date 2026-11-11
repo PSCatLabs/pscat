@@ -5,6 +5,19 @@
 > [`README.md`](README.md)) in `docs/dev/`, and history, including the frozen
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
+>
+> In progress: `lib/qr.ps` is a native QR Model 2 encoder (byte mode,
+> versions 1–40, levels L/M/Q/H, automatic or forced masks) with a public
+> `qrencode`/`qrdraw` vector API ([guide](../guides/qr-codes.md)). Every
+> version and level is checked against an independent encoder, and its
+> PNG, SVG and PDF exports, drawn on the pixel grid, decode with two
+> independent decoders
+> ([testing](design/QR_CODE_TESTING.md)). The gallery's two-sided printable
+> business card, `gallery/pscat_card.ps` (#974), carries the repository URL.
+> Its exported sides decode and are size-checked in `tests/qr_card.rs`.
+> Gotcha: its still is rendered at 300 dpi, not 2x, so the QR stays on whole
+> pixels (command in its header). Continue from
+> [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II
@@ -35,7 +48,10 @@ crate, drafts the GitHub Release and publishes from the approval-gated
 different one, so a failed release resumes by re-running; since #635 the
 `publish` job signs build-provenance attestations, and since #638
 `release-check.yml` installs every published release from the public
-channels; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
+channels; since #854 a `vX.Y.Z-rc.N` tag publishes a GitHub pre-release
+only, never crates.io/npm/MCP Registry or "latest"; since #1006 every
+release, candidates included, carries the npm tarball `pscat-X.Y.Z.tgz` as
+an asset in `SHA256SUMS`, the way to test a candidate from npm/the browser; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
 the font catalog reaches installs as downloadable font packs on their
 own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
 install`, `.github/workflows/release-fonts.yml`,
@@ -60,7 +76,7 @@ has the full story). Also done: issue #20, axial/radial gradient
 (shading) fill support — the `shfill` operator (`src/shading.rs`,
 `src/ops/shading.rs`, `Gfx::shfill`), `ShadingType` 2/3 with
 `FunctionType` 2/3, native SVG `<linearGradient>`/`<radialGradient>`
-export, a PDF average-color-fill approximation, and `lib/artkit.ps`'s
+export, a PDF average-color-fill approximation (real PDF shadings since #1028), and `lib/artkit.ps`'s
 "gradients" section (`gradfn`/`axialsh`/`radialsh`/`gradfill`) on top of it
 (docs/archive/NOTES.md's entry has the full story). Also done: issue #9, a tiling/tessellation
 library for artkit — `lattice`/`hex`/`tri`/`hexgrid`/`trigrid`/
@@ -169,7 +185,9 @@ review caught before any template code existed -- artkit's `fitfont`
 enlarging as well as shrinking, and two of artkit's mood palettes not
 actually being ordered dark-to-light despite looking like they were --
 and one real implementation bug `--lint` caught on the first rendered
-example, a copy-paste-misaligned `tfblock` call in `pgletter`). Also
+example, a copy-paste-misaligned `tfblock` call in `pgletter`;
+`pgcertificate`'s spacing is laid out by measured ink since #954,
+`notes/954-pgcertificate-spacing.md`). Also
 done: issue #19, noise and flow-field procedures for artkit —
 `noiseinit`/`noise2` (2D gradient/Perlin noise off a `srand`-shuffled
 permutation table), `curl2` (turns any `{x y -> n}` scalar field into
@@ -223,7 +241,7 @@ name still exists, and every name a source file actually defines is
 either cataloged or on an explicit internal-helper allowlist. See
 docs/dev/CAPABILITIES.md for the payload shape and how to register a new
 capability (docs/archive/NOTES.md's entry has the full story). Since #94,
-files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md.
+files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md. Native pscat-extension operators are `kind: "operator"` rows (#754).
 Also done: issue
 #48, deterministic scatter and distribution primitives for artkit --
 the area-shaped counterpart to `alongpath`: `screct`/`scpath` build a
@@ -509,12 +527,24 @@ renders eight examples in both and compares block-downsampled output).
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
 - Access control (`executeonly` etc.) is not modeled — identities.
 - Filter parameter dicts accepted and ignored; no encode filters.
-- Images: nearest-neighbor, no `/Interpolate`, no 12-bit samples, no
-  MultipleDataSources colorimage (limitcheck). `ImageType 3` has
+- Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
+  bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
+  colour images only; PDF key and SVG `image-rendering="auto"` follow;
+  `notes/730-image-interpolate.md`). Samples are 1, 2, 4, 8, 12 or 16
+  bits, `colorimage` `multi true` and `/MultipleDataSources true` read one
+  source per component (#781, `notes/781-image-wide-samples-multi-source.md`);
+  wide samples are reduced to 8 bits in PNG, SVG and PDF alike. `ImageType 3` has
   `InterleaveType 3` only (types 1 and 2 are limitcheck) and no
   `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
   Adobe inverted-CMYK JPEGs untested.
+  `ImageCtx::rgb_at` is the one place a sample becomes a colour; for 8 bits
+  or fewer it reads a per-component decode table built from the same
+  expression (`decode_value`), so a speed-up there must stay bit-identical
+  (#793, #835; `notes/835-image-rgb-at-decode-table.md`).
+  `ImageCtx::fill` reads a file source with one `PsFile::read_into` per call
+  (#896, `notes/896-image-bulk-read.md`); the decoders under a filter still
+  pull their own input one byte at a time, so they never read past EOD.
 - errordict holds a handler per error name (#372, so `errordict /name
   get exec` re-raises), but a handler a program installs there is not
   consulted on a real error; error-time operand-stack restoration not
@@ -591,9 +621,14 @@ renders eight examples in both and compares block-downsampled output).
   `[true true]` — the `gsave <path> clip shfill grestore` idiom
   already bounds the painted region, so `false`'s "transparent beyond
   the axis" is an edge case that idiom never hits. SVG export gets
-  real `<linearGradient>`/`<radialGradient>`; PDF export approximates
-  a shading as a flat fill in the ramp's *position-weighted* average
-  color (no pattern-colorspace machinery). SVG's two-circle radial
+  real `<linearGradient>`/`<radialGradient>`; PDF export writes a real
+  `sh` on a `/Shading` resource (#1028: before, a flat fill in the
+  ramp's average colour), its Function built from the same RGB stops the
+  raster and SVG paint, with `/Extend [true true]` to match the raster
+  and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`).
+  ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
+  `/Pattern` colour spaces) are not implemented at all, in any output.
+  SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
   off-center `ShadingType` 3 that fails that (valid PostScript; no
@@ -606,12 +641,15 @@ renders eight examples in both and compares block-downsampled output).
   `.setstrokeconstantalpha`, `setalpha` are all `where`-undefined on
   gs 10.x; gs's transparency lives inside its PDF interpreter). Two
   consequences worth knowing before touching either:
-    * **Alpha does not reach `image`/`imagemask`.** `src/image.rs`
-      blits samples straight into the pixmap rather than going through
-      `Gfx::paint()`, so a translucent `image` silently paints opaque.
-      Documented at the field, the operator, README and the tests;
-      closing it means teaching the image blitter about the graphics
-      state, not just adding a call.
+    * **Alpha reaches `image`/`imagemask`/`colorimage` since #766.**
+      `src/image.rs` blits samples straight into the pixmap rather than
+      through `Gfx::paint()`, so it composites itself: `blend_pixel`
+      (premultiplied, tiny-skia's Normal and Multiply formulas, pinned
+      by a unit test against a real tiny-skia fill). The default (alpha 1,
+      Normal) keeps the old arithmetic verbatim, so existing renders are
+      byte-identical. SVG gives the `<image>` `opacity` and the blend on
+      the outermost clip group; PDF selects the `ExtGState` before `Do`.
+      `selftest/drivers/image_alpha.ps` covers it.
     * **A program using them will not render the same under plain `gs
       file.ps`.** The verification route for alpha-bearing content is
       `--pdf` plus gs rasterizing that PDF back (`tests/pdf.rs`'s
@@ -642,10 +680,16 @@ renders eight examples in both and compares block-downsampled output).
   holds every operator bit-equal to it and pins a few exact values.
   **Changing any constant or operation order changes every seeded render
   that uses them.** The table lives in `Interp::noise_perm`, apart from
-  `rand_state`. `x y perm .permnoise2` is artkit's `noise2` formula
+  `rand_state`. `Interp::set_seed_override` (`--sweep-seed`, #753) also builds
+  it from the sweep seed (`noise_from_override`); a program's `noiseseed`
+  clears that and wins; sampling it counts as the override firing. `x y perm .permnoise2` is artkit's `noise2` formula
   computed with PostScript's int/real promotion, so artkit's `noise2`
   (now `{ Perm .permnoise2 }` when the operator exists) stays
   bit-identical, type included (`notes/734-native-noise.md`).
+  `gallery/basin_and_range.ps` (#755) is the visible example: a shaded-relief
+  map from `fbm2`/`ridged2` through a `colorimage` procedure that reads
+  `/BandBBox` in device space (so it also holds under the 2x still), and is
+  the picture where a change to the noise constants shows up (`notes/755-basin-and-range-noise-example.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
@@ -666,7 +710,8 @@ renders eight examples in both and compares block-downsampled output).
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,
   must update it in the same PR; #568 added the MCP bounds and #604 the
-  interpreter limits (below). `docs/STABILITY.md` says which surfaces need a deprecation
+  interpreter limits (below), #740 and #763 the write and read roots (#772
+  brought the file current for 0.7.0). `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
 - **Visible changes merge without the owner mid-cycle** (#674). A PR that
@@ -676,6 +721,39 @@ renders eight examples in both and compares block-downsampled output).
   `docs/dev/review-log/pending/` for the owner's read before the release
   (`SDLC.md`, "Who merges"). Agents propose follow-ups instead of filing
   them; running many issues at once is `docs/dev/DISPATCH.md`.
+
+- **Tool-choice claims live in one guide** (#994).
+  `docs/guides/when-to-use-pscat.md` says when to use pscat, an image model or
+  an LLM's own SVG/matplotlib; `site/when-to-use.html` repeats its decision
+  table (keep the rows identical), and README, AGENTS.md, CLAUDE.md and the
+  plugin skills only point to it. Every pscat claim in it traces to a shipped
+  feature (`notes/994-when-to-use-pscat.md`); update it when a capability it
+  names changes. Its "Combining them" section links the hybrid guide.
+
+- **The hybrid guide states checked facts, pinned by a test** (#995).
+  `docs/guides/pscat-with-image-models.md` (site: `site/hybrid.html`) compares
+  an image model alone, pscat alone and the two together on two examples in
+  `examples/hybrid/`. `tests/hybrid.rs` decodes every pscat QR code (PNG and
+  PDF), checks the painted copy string by string, and pins that the image
+  model's own QR codes do not decode. The image-model JPEGs are frozen
+  assets with their prompts in `examples/hybrid/README.md`: do not regenerate
+  them to change a poster; edit the pscat layer. If one is ever replaced,
+  re-check the facts on the comparison sheets (`compare_*.ps`) and the guide.
+  The layouts were redesigned in #998 (`notes/998-hybrid-showcase-layouts.md`)
+  and use catalog faces (`extras` pack); their tracked labels are `ashow`,
+  which the copy test captures alongside `show`.
+  #999 added a repeat-run test (results stated by date in the guide; the
+  repeat images are not committed, their prompts are in the examples README)
+  and a third example, `ferry_timetable.ps`, whose times are computed.
+
+- **The reversed hybrid pins its layout fidelity** (#1001).
+  `examples/hybrid/alpine_trail.ps` draws a layout reference
+  (`/Stage /Reference`), an image model made it a photograph, and the program
+  lays its exact layer on at the reference's coordinates. `alpine_trail_ref.png`
+  is the reference exactly as sent; `tests/hybrid_reverse.rs` checks the
+  program still draws it and pins the measured drift of both photographs.
+  Moving a shape in the block-in means a new photograph: the exact layer's
+  coordinates and the photograph must come from the same reference.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
@@ -856,6 +934,28 @@ renders eight examples in both and compares block-downsampled output).
    (default `/relation`, so `align` and every other caller is unchanged); one
    row, or any other wrapper, never gets the option
    (`notes/699-chalk-gather-centred.md`).
+   #936: a `[...]` after a top-level `\\` is TeX's row spacing (dropped)
+   only when `chalk::is_tex_length` reads it as a length (`2pt`, `-1.5em`,
+   `0.5\baselineskip`); otherwise it is the next row's content, so a
+   commutator `\\ [x,y] = 0` survives (`notes/936-chalk-row-bracket.md`).
+   #950: the same rule for the `\\` left inside `pmatrix`/`cases`/`\substack`
+   (`chalk::drop_row_break_options`, Rust side, before mathkit sees the
+   row): the spacing and `*` go, consumed, not honoured. A direct `mkpath`
+   caller still gets `[2pt]` as ink (`notes/950-chalk-matrix-row-spacing.md`).
+   #934/#935: logic, set and geometry symbols (∧ ∨ ⊢ ⊬ ⊨ ⊤ ↔ ∄ ⊕ ⊗ † ‡ ∅ ∠
+   △ ≅ ℜ ℑ) and `\mathbf`/`\mathbb`/`\mathcal`: strokeglyphs' `/x.bf` (each
+   stroke re-traced, derived at load), `/R.bb` (a doubled stem from
+   `sgbbextra`) and authored `/L.cal`; mathkit's alphabet is `mkFont`, reset
+   per formula by `mkparsetop`. `pscat chalk --help` prints the subset
+   (`SUBSET`, checked against `mkcmds` by tests/chalk.rs)
+   (`notes/934-chalk-logic-symbols-math-alphabets.md`).
+   #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
+   long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
+   byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the
+   taper and lift to the last ten widths, fades the tired middle on long
+   strokes and presses short ones harder. `chalk::driver` passes `/Firm 1`
+   only with no board, so the board pins never move; the overlay has its own
+   (`notes/713-chalk-firm-overlay.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -1063,6 +1163,45 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **The page size has a precedence** (#921, #909): `--page` (MCP
+  `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
+  /PageSize` > `%%BoundingBox` > letter. The
+  box is read for an EPSF header by default, and for any header with
+  `--bbox`. A box origin other than (0, 0) moves the device's base CTM
+  (`Gfx::set_page_origin`), and `Gfx::page_size_source` says which rule chose
+  the size. Code that makes a CLI interpreter goes through
+  `Options::new_interp` after `Options::resolve_page`. See
+  `notes/921-boundingbox-page-size.md`.
+- **The page can change size mid-job** (#909, `src/ops/pagedevice.rs`).
+  `setpagedevice` installs a new `PageDevice` (`Gfx::install_device`: new
+  canvas, erased, base CTM rebuilt), and the graphics state holds the device
+  it was made under, so `grestore`/`restore`/`setgstate` and a bottom
+  `grestore` bring an older one back (`Gfx::sync_device`), as in gs. Anything
+  that sizes a buffer from the page must take each page's own size: the PDF
+  and SVG recorders keep per-page sizes, `--bands` cuts each page by its own
+  height and redefines `/BandBBox` on a resize, and a sweep's contact sheet
+  waits for the first frame unless `--page` fixed the size. `Interp::with_page*` is `Explicit`;
+  only `Interp::new` and the CLI's `Options::new_interp` let a program resize.
+  See `notes/909-setpagedevice-pagesize.md`.
+
+- **Fills don't use tiny-skia's anti-aliasing** (#692). `fill`, `eofill`,
+  `rectfill` and glyph fills rasterise through `src/coverage.rs`, an
+  exact-area accumulation rasteriser. Its coverage goes into a page-sized
+  mask that `Gfx::fill_coverage` composites with `fill_rect`, AA off, one
+  call per run. Fully covered runs go without the mask. tiny-skia's own path
+  AA supersamples 4x4, so a shape thinner than a quarter pixel vanished.
+  Strokes, clip masks and `shfill` still use tiny-skia's rasteriser. A
+  consequence for libraries: a 0.01 pt overlap meant to hide a seam is now
+  visible as a 1-2% tint (`lib/drychalk.ps`'s tray had one). Overlap away
+  from what must stay clean. See `notes/692-subpixel-fill-coverage.md`.
+
+- **Every paint runs tiny-skia's f32 pipeline** (`force_hq_pipeline`, #731).
+  The default lowp pipeline rounds each blend with a bias, so a stack of
+  faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
+  `Paint` built anywhere in pscat must set the flag too, or its pixels drift
+  by a level from the rest. Storage is still 8-bit, rounded per blend (the
+  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
   wasm, and seeded noise/erosion grows that last bit into visible pixels
@@ -1124,6 +1263,12 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+  Output names (#938): `typewrite`, `photo-etch` and `chalk` pick the format
+  from `-o`'s extension (`subcmd::output_format`); `--png`, `--svg`, `--pdf` and
+  `handwrite -o` always write one format, so they run `subcmd::check_output_name`
+  and refuse a name for another known image or document type (no extension or
+  an unknown one still works). `photo-etch` sniffs the photo's first bytes and
+  names a non-JPEG (#939); it has no PNG input.
 - **Interpreter execution limits (#604).** `Limits` (`src/limits.rs`) via
   `Interp::set_limits`; CLI `--max-steps/--max-time/--max-memory`; on by default
   in `pscat-mcp`. The design points that are easy to break:
@@ -1157,8 +1302,21 @@ renders eight examples in both and compares block-downsampled output).
   - Fuzzing: `fuzz/` (own workspace; `cargo +nightly fuzz run interp fuzz/corpus/interp fuzz/seeds/interp`),
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
-    input goes in `fuzz/regressions/<target>/`.
-  - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
+    input goes in `fuzz/regressions/<target>/`. Seven targets (#604, #704): `lexer`,
+    `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
+    `type1_charstring` (decrypted charstring bytes into `type1::run`), `type1_font` (a
+    whole PFA through `eexec`/`definefont`, then text in every defined font), `filters`
+    (ASCIIHex/85, RunLength, eexec, Flate, LZW, DCT, chained) and `image` (a `%!`
+    program runs as PostScript; anything else is a recipe that builds an
+    `image`/`colorimage`/dict/multi-source/ImageType 3 call). A new loader gets a
+    function in `src/fuzzing.rs`, a `fuzz/fuzz_targets/` file, a `[[bin]]`, seeds,
+    a replay test, and a line in the workflow's matrix (an owner path). The replay
+    runs each input on a thread under a 30 s deadline, so a hang fails the test.
+    A font loader must use `font::parse_face`, not `Face::parse`. Not fuzzed:
+    `readreals` (a path API; its parser is `from_le_bytes` on exact chunks).
+  - `--spool` and the subcommands take the limits (#701): one budget per
+    program run (`subcmd::Confine`, `take_limit_flag`, `limit_flag` in
+    `main.rs`, `window::run_spool_with_limits`, `chalk::run_with_limits`).
 - **File writing (#740).** Off by default: `Interp::set_write_roots` (CLI
   `--allow-write DIR`) names the directories, and `src/write_roots.rs` is the
   one place that decides whether a path is writable (`WriteRoots::open`,
@@ -1167,8 +1325,129 @@ renders eight examples in both and compares block-downsampled output).
   the flag: `pscat-mcp`'s children inherit the environment, and the MCP layer
   must never write from PostScript (`tests/file_write.rs` asserts it). Output
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
-  captured stdout keeps order with `print`. Disk writes are unbuffered because
-  the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+  captured stdout keeps order with `print`. Disk writes are buffered (#762,
+  `file::DiskSink`, 64 KiB): the interpreter keeps weak handles to the open
+  files (`Interp::flush_outputs`, cap `MAX_OPEN_OUTPUT_FILES` = 64) and the CLI
+  flushes them on every exit path (`flush_outputs_or_report` in `main.rs`,
+  `window.rs`), because it never tears down the dictionary graph that may hold
+  an open file. A new CLI exit path must flush too; `Drop for Interp` is only the
+  backstop. `--max-write-bytes` is `Interp::set_max_write_bytes` (1 GiB with
+  `--allow-write`). See `notes/740-file-writing.md` and
+  `notes/762-file-hardening.md`.
+- **`pscat-mcp` limits from the environment (#756).** Every numeric flag has a
+  `PSCAT_MCP_<FLAG>` variable, from one table (`NUMERIC_OPTIONS` in
+  `src/mcp_server.rs`) that also holds the ranges and defaults, so the two
+  cannot drift. Env is read after the flags (so `--help` ignores it), a flag
+  wins, a bad value is a startup error. Never add a variable for
+  `--allow-read` or `--out-root` (same rule as #740); a hosted server (#689)
+  must not read these. Tests build a `Config` with an injected lookup, never
+  `std::env::set_var`. See `notes/756-mcp-env-limits.md`.
+- **PNGs record their resolution (#982).** Every PNG pscat writes goes through
+  `src/png.rs`, which splices one `pHYs` chunk (unit 1, round(dpi / 0.0254)
+  pixels per metre, both axes) in before the first `IDAT` of tiny-skia's output.
+  `IDAT` is untouched, so decoded pixels never change. Never call
+  `Pixmap::save_png` / `encode_png` for a file pscat writes: `clippy.toml` bans
+  them, and an SVG-embedded image is the one allowed exception. A `Page` carries
+  its scale (dpi / 72), the CLI passes `Options::scale()`, and composite sheets
+  (`pscat sheet`, `review_sheet`) mix dpis so they record a nominal 72. A PNG
+  made before #982 has no chunk: `scripts/identity_check.sh` ignores `pHYs` when it
+  compares the committed gallery still, and a base-versus-head byte comparison
+  across that change needs the chunk stripped from the head files. See
+  `notes/982-png-phys.md`.
+- **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
+  (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
+  `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte
+  identity with a plain render rests on one rule: the only per-band shortcut
+  allowed is one that leaves the band's own rows exactly as a full render paints
+  them. Today that is just image rasterization (`Gfx::set_band_rows`, read in
+  `image.rs`). Never add a PostScript-visible clip or a tiny-skia mask for it. A
+  new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
+  conservative bound and a run of `tests/bands.rs`. See
+  `notes/736-bands-parallel-render.md`. Since #844 bands are queued work units,
+  not threads: `bands::plan` cuts K bands (default 2 per thread, min 8 rows;
+  `--band-rows`) and the N threads pull them from an atomic counter, so the
+  band names describe the queued band. `--max-memory` uses one shared base
+  (`MemoryBase`), which replaced #736's two start gates. The tracking
+  allocator batches its count per thread (`memtrack.rs`, 64 KiB): a shared
+  atomic per allocation cost band threads ~2.8x CPU. Don't put a per-allocation
+  shared atomic back. See `notes/844-bands-work-queue.md`. The band names are
+  plain `userdict` entries, so a program that hashes, serialises or `forall`s
+  userdict sees per-band values: fractal_clouds' bake cache keyed on userdict
+  and missed in every band ([#844 re-test](https://github.com/PSCatLabs/pscat/issues/844#issuecomment-6429744992)).
+  The docs tell programs to leave them out of such keys. The preamble
+  runs inside `name::detached` (#868): its new names take ids from a separate
+  range and no sequential slot until the program first interns them, so the
+  program's own names keep a plain run's ids and `forall` order. A new
+  per-run preamble that defines names should do the same
+  (`notes/868-band-preamble-name-ids.md`). `--sweep NAME=` and `pscat sheet
+  --sweep` now do, and every sweep frame and sheet cell runs on a fresh thread
+  (`run_on_fresh_thread` in `main.rs`), so names an earlier frame made with
+  `cvn` don't shift the next frame's ids (#891,
+  `notes/891-sweep-frame-name-isolation.md`). Each `--spool` job runs on a
+  thread of its own too (`window.rs` `JobThread`, #895): the event loop
+  can't hand the job to `run_on_fresh_thread`, since it steps it a frame at
+  a time, so it sends the job's thread one call per step or draw and waits
+  (`notes/895-spool-fresh-threads.md`). A new loop that runs several
+  programs in one process and promises standalone output needs the same. The
+  backup-task / `--band-cuts` work for the tail (#869) was measured, then
+  shelved once the re-test showed the queue already beats a cost-balanced
+  split there (data on #869). `pscat-mcp` exposes it as a `bands` argument on
+  `render_postscript` and `start_render` (#843), capped by `--max-bands`;
+  a banded run drops the server's `--progress`, which `--bands` refuses, but
+  passes `--lint` again since #847 (see below). `--band-rows` is deliberately
+  not exposed. See
+  `notes/843-mcp-bands.md`. Bands above 0 also drop stderr
+  (`Interp::quiet_stderr`; every program stderr write goes through
+  `Interp::write_stderr`, so a new one must too), and their font notes are
+  printed once at the end (#877, `notes/877-bands-stderr-once.md`).
+  `--lint`/`--lint-strict` work with `--bands` (#847, `notes/847-lint-with-bands.md`):
+  band 0 runs `lint::check_band` in its own thread (the `Interp` can't leave
+  it) and `bands.rs` runs the blank-page check on the *stitched* pages with the
+  ink flag OR'ed across bands, because a band-aware program leaves its own
+  canvas empty outside the band. The output is one report after the run
+  headed by a `pscat: lint: note:` line (not a finding, so not counted by
+  `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
+  beside findings. A new lint check that reads the canvas must go through
+  the stitched pages, not `check_band`.
+- **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
+  on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
+  the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
+  profiling on, `prof_call` plants a `Frame::ProfReturn` marker under the body's
+  `Proc` frame. The marker is reached after the body and its tail call (a `Proc`
+  frame is popped *before* its last element runs, so the frame itself cannot mark
+  the return), and `cleanup_unwound_frame` / `exit_loop` close it on `stop`,
+  errors, `exit` and `quit`. A call to a name already among the markers on top of
+  the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
+  stack at about half the plain depth, since a marker takes a slot). Keep the
+  hot path as it is: the only cost off is one `profile.is_some()` in
+  `execute_resolved`'s `Array` arm (plus, from #799, one operators-on check per
+  `step_n` slice), and everything else is `#[cold]`. A first
+  version that made `step_n_inner` generic, or added a second caller of
+  `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
+  with `scripts/bench_compare.sh` after touching `interp.rs`. See
+  `notes/737-pscat-profile.md`. #799 added `--profile-graph` (caller -> callee
+  edges, gated by `Profiler::graph`, recorded in `enter`/`exit`/`count_only`),
+  `--profile-json PATH` (main.rs: pre-checked and written through
+  `Interp::writable_path`; the path is the next argument only if it ends in
+  `.json`), and `--profile-ops` (per-operator time: `step_n` routes to
+  `step_n_timed`, a copy of the loop, once per slice when it is on; operators
+  are bare `fn` pointers, so `proc_step::<true>` leaves the operator's name in
+  `Interp::op_name` and rows are keyed by `Operator::name`, #885). The
+  copy is a second caller of `next_item`/`execute_resolved`/`push_proc_frame`/
+  `recover`/`execute_element`, which is what cost 19% in #737 until those were
+  made `#[inline(always)]`; re-measure `fib` with `bench_compare.sh` if you
+  touch them. See `notes/799-profile-followups.md`.
+- **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
+  (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
+  `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a
+  disk candidate outside the roots is skipped (the embedded `lib/` still answers) and
+  a name that only resolved outside is `invalidfileaccess`; `filenameforall` filters
+  through `ReadRoots::admit`. Every operator that reads a program-named path must go
+  through `ops::file::read_resource` (or `open_confined`), never `std::fs` directly.
+  `pscat-mcp` always passes `--confine-reads` plus its roots (cwd unless `/`,
+  `$PSCAT_HOME`, the per-user data dir, `--allow-read`) to `pscat` and `pscat
+  handwrite` children. Font lookup matches names against file stems and isn't gated.
+  See `notes/763-read-roots.md`.
 - **`writereals` / `readreals` (#735).** Packed little-endian float64 (or `/f32`) save and
   load of a numeric array, in `src/ops/realsio.rs` (module doc has the error table and the
   `/f32` rules). The writer opens through `WriteRoots::open` like `file` does, and checks every
@@ -1177,7 +1456,12 @@ renders eight examples in both and compares block-downsampled output).
   one fixed 64 KiB buffer; the reader `check_alloc`s file plus array before reading. A short file
   is `rangecheck`, not `ioerror` (the PLRM keeps `ioerror` for non-EOF failures). Tests:
   `tests/realsio.rs`, and `tests/realsio_memory.rs` (own binary, tracking allocator). See
-  `notes/735-readreals-writereals.md`.
+  `notes/735-readreals-writereals.md`. #773 added `(path) /all readreals`, `(path) offset n
+  readreals` (offset in values) and the file-object forms `array file writereals` / `file
+  n|/all readreals`, in the same module (`tests/realsio_files.rs`;
+  `notes/773-readreals-all-offset-file.md`). The bulk read is `PsFile::read_into`, which keeps
+  `consumed`/`line` exactly as `read_byte` does (for a filter too since #896; the `filters`
+  fuzz target reads every chain both ways and asserts they agree).
 - **Binary object sequences (#733).** `setobjectformat`/`currentobjectformat`/`printobject`/
   `writeobject` in `src/ops/binobj.rs`, the format itself in `src/binobj.rs` (module doc: header,
   slot layout, what is representable, limits). The lexer frames a token whose first byte is
@@ -1266,9 +1550,9 @@ renders eight examples in both and compares block-downsampled output).
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is
   byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
-  `review_sheet` (#708) is the pattern for a tool whose CLI twin has no limits:
-  `pscat sheet` runs its programs in-process with no step, time or memory
-  limit, so the tool does not shell out to it. It renders each cell in its
+  `review_sheet` (#708) is the pattern for a tool whose CLI twin cannot share
+  one `--timeout` across cells (`pscat sheet` takes the limits since #701, but
+  per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
   with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
@@ -1279,28 +1563,35 @@ renders eight examples in both and compares block-downsampled output).
   fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
   composer in the library (see `notes/708-mcp-review-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
-  psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
+  psviz, functional-postscript; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
-  holds the repo-development skills plus symlinks to those three, so a
+  holds the repo-development skills plus symlinks to the first three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
   `SKILL.md` and puts each medium in `references/`; add new media there.
+  pscat does the same since #922: `SKILL.md` is the common path (install,
+  render, show the result, debug and lint, fonts, pitfalls, an index) and
+  `references/` holds bands/profile, sheets, handwriting and chalk, typewriter,
+  extensions and MCP details. `tests/skill_blocks.rs` runs the code fences in the
+  reference files too, and fails on a reference file `SKILL.md` does not link.
+  The skill loads in full on every request, so put new material in a reference
+  file and add one index line to `SKILL.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a
   symlink to `../skills`, so there is one copy of the skill text). Install
   copies only `plugin/` into the user's plugin cache, following the
   symlink; a repo-root plugin would copy all 136 MB. The MCP server is
-  declared inline in plugin.json (`command: pscat-mcp`, found on PATH), not
+  declared inline in plugin.json (the launcher, #853), not
   in a root `.mcp.json`, which would also register it for every checkout
-  session. A SessionStart hook prints an install hint when `pscat` or
-  `pscat-mcp` is missing. plugin.json's `version` must equal `Cargo.toml`'s
+  session. A SessionStart hook says where pscat is, or that the server will
+  download it (#853, below). plugin.json's `version` must equal `Cargo.toml`'s
   (`scripts/plugin_check.py`, workflow `plugin`); the release script bumps
   it, and the marketplace entry carries no version. A new skill needs only
   a `plugin/skills/<name>/` directory. See `notes/569-claude-code-plugin.md`.
 - **The Codex plugin (#569 part b) is the same `plugin/` directory.** The
   marketplace is `.agents/plugins/marketplace.json`; Codex reads
   `plugin/plugin.json` (portable manifest, version = Cargo's) and
-  `plugin/mcp.json` (`type: "stdio"`, `command: pscat-mcp`); Claude Code
+  `plugin/mcp.json` (`type: "stdio"`, the launcher below); Claude Code
   ignores both. **Codex skips symlinks when it copies a plugin**, so the
   skills moved from `skills/` into `plugin/skills/` as real files (the
   old `plugin/skills -> ../skills` symlink installed zero skills in
@@ -1308,13 +1599,76 @@ renders eight examples in both and compares block-downsampled output).
   now symlinks into it, and `scripts/plugin_check.py` rejects any symlink
   inside a plugin directory. The missing-pscat SessionStart hook moved from
   Claude's plugin.json to `plugin/hooks/hooks.json`, the default path both
-  agents read (never declare it in a manifest too: Claude loads both). Its
-  logic lives in `plugin/hooks/check-pscat.sh`, run as `sh
-  "${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh"` (the directory portal blocks
-  an inline command in a subfolder plugin; Codex sets that variable too;
-  #684, `notes/684-plugin-hook-script.md`).
+  agents read (never declare it in a manifest too: Claude loads both).
+- **The plugin installs pscat itself (#853).** Both manifests start the
+  server as `sh <root>/scripts/pscat-mcp.sh`, where `<root>` is
+  `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `${PLUGIN_ROOT}`
+  in `mcp.json`, because Codex expands only the latter and only in args
+  (`plugin_check.py` enforces each host's spelling and that both run the same
+  thing). The POSIX sh launcher uses an installed `pscat-mcp` (env, PATH,
+  `~/.cargo/bin`, Homebrew) if `--version` is at least the pin. Otherwise it
+  downloads the archive for the platform from the release tag in
+  `plugin/pscat-release` (matched by suffix in `SHA256SUMS`, so an rc's
+  file names don't matter), verifies it, and publishes it into
+  `~/Library/Caches/pscat/plugin` or `~/.cache/pscat/plugin` with one
+  `ln -sn` (atomic; a mkdir lock only avoids duplicate downloads). stdout
+  is the MCP channel: it logs only to stderr. **Paths (#919, #920):**
+  `$CACHE/bin/{pscat,pscat-mcp}` are the one stable path (symlinks the
+  launcher re-points to the release in use on every lookup); `--locate`,
+  the hook and the skills all name them, never the versioned directory. The
+  launcher also links both into `~/.local/bin` or `~/bin` (only if already on
+  PATH and writable; never a system dir, never overwriting a pscat that is
+  not a symlink to `$CACHE/bin/<name>` or the marked shim). Before the first
+  download the hook leaves a shim as `pscat` that downloads on first use,
+  then swaps itself for the symlink. `PSCAT_NO_PATH_LINK=1` opts out
+  (`notes/919-plugin-pscat-on-path.md`). The SessionStart hook is the
+  same script with `--hook` (it never downloads), which replaced
+  `hooks/check-pscat.sh` (#684); both are held for portal review now
+  ("Scripts the validator couldn't follow"). **Never add a top-level
+  `plugin/bin/`**: claude.ai and Cowork refuse the plugin. The pin must
+  equal the crate version, or name a newer pre-release for a trial;
+  `release_stages.py bump-manifests` (so `release.sh`) sets it to
+  `v<version>`, rc included (#867). Tests:
+  `scripts/test_plugin_launcher.py` (fake file:// release); both install
+  checks download from `scripts/fake_plugin_release.py`.
+  See `notes/853-plugin-launcher.md`.
+  **Output root (#910):** Codex starts a plugin server with cwd
+  `${PLUGIN_ROOT}` (the installed copy), so the launcher, not the server,
+  picks `--out-root` unless the args name one: Claude Code's `output_dir`
+  userConfig (passed as the launcher-only `--plugin-out-root=`), `out-root`
+  in `~/.config/pscat/plugin.conf`, `--plugin-project-dir=${CLAUDE_PROJECT_DIR}`,
+  the cwd, then `<user data dir>/renders`; never `/` or inside the plugin.
+  The `--plugin-*=` args are Claude-only (`plugin_check.py` sets them aside
+  when comparing the two manifests). Still no env var for the root.
+  `notes/910-plugin-output-root.md`.
+  `plugin_check.py` also fails a plugin `.md` that writes a bundled or
+  repo-relative image/font path in backticks or a code block (the
+  directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
+- **The tagline is "PostScript for precision and imagination." (#927)**,
+  and every public description leads with it: `Cargo.toml`, `npm/package.json`,
+  `server.json` (100-character limit, tested), the plugin manifests, the README
+  opening and the site's title, meta and hero. Documents and art are equal
+  halves; the live window is a feature, not the headline. Say pscat aims to
+  replace Ghostscript for most work and uses it as its correctness reference;
+  no speed or memory claims until #929's benchmarks. The social preview is
+  `art/brand/social-preview.ps` (it runs the logo, a certificate and Evening
+  Stream in cards, so no pixel is pasted); `build_site.sh` copies it and the
+  logo into `_site/assets/brand/` for `og:image` and the favicon. The org
+  profile draft is `docs/brand/org-profile-README.md`. See
+  `notes/927-branding.md`.
+- **The plugin icon (#683) is `plugin/.claude-plugin/icon.png`**, the
+  1024 px render of `art/logo/pscat-logo-d.ps` (command in its header;
+  512 and 48 px renders in `art/logo/renders/`). Claude's plugin.json sets
+  `icon` to it (Anthropic's directory reads that field; Claude Code
+  ignores it; it is not allowed in a marketplace entry) and Codex's
+  `extensions.com.openai.interface` points `composerIcon` and `logo` at
+  the same file. The directory takes the icon only once, at the first
+  portal save or submit, so redrawing the logo later changes the file but
+  not the listing. Never write the icon's path in backticks in the plugin
+  README or a SKILL.md: the portal holds that for review. See
+  `notes/683-plugin-icon.md`.
 - **The MCP Registry entry (#569 part c) is root `server.json`**
   (`io.github.PSCatLabs/pscat`, case-sensitive: it must match the GitHub
   owner login, the README's visible `mcp-name:` line and the OIDC grant).
@@ -1370,16 +1724,86 @@ renders eight examples in both and compares block-downsampled output).
 - `Interp` split-borrows fields in `next_item` (`estack`, `dstack`,
   `gfx`, `ostack`); new frame types plug in there and must decide
   their action before any stack mutation (the `Action` enum).
-- **`next_item` yields an `Item`, not an `Object`** (#323). A procedure
-  element is inspected in place with `PsArray::peek` (one borrow,
-  released before anything executes, so a `put` into the running
-  procedure still works): an executable operator comes back as its fn
-  pointer, an executable name as its interned id, and only the rest is
-  cloned. Don't turn the fetch back into `body.get(pc)`; that clone and
-  its drop were the largest cost of a bound library run. In the same
-  spirit, code holding a `PsName` must not go through `&str` (`define`,
-  `load`, `Dict::put`): that allocates and re-interns. Use
-  `define_name`, `load_id` and `put_name`.
+- **Procedure elements are dispatched by `proc_step`, not `next_item`**
+  (#323, #863). Both step loops (`step_n_inner`, `step_n_timed`) look at
+  a `Frame::Proc` on top first: the element is inspected in place with
+  `PsArray::peek` (one borrow, released before anything executes, so a
+  `put` into the running procedure still works); a literal is pushed
+  right there (numbers copied by `Object::clone_inline`), and an operator
+  or executable name comes back as a fn pointer or interned id. The frame
+  is popped as it yields its last element, before that element runs.
+  `next_item` never runs a procedure element: when a loop iteration or a
+  finished frame leaves a `Proc` on top, it returns `Item::Proc` and the
+  loop calls `proc_step` in the same step, so `step_n(1)` granularity
+  and the step limit are unchanged (`tests/dispatch_semantics.rs` pins
+  step counts and error states). Don't turn the fetch back into
+  `body.get(pc)`; that clone and its drop were the largest cost of a
+  bound library run. In the same spirit, code holding a `PsName` must not
+  go through `&str` (`define`, `load`, `Dict::put`): that allocates and
+  re-interns. Use `define_name`, `load_id` and `put_name`.
+- **Operator fast paths must succeed or defer, never fail** (#863). The
+  arithmetic and relational operators (`binary`, `div`, `relational`,
+  `eq`/`ne`) first look at the top two operands with `top2_nums` without
+  popping; two numbers (a nonzero divisor, no NaN) are combined in place
+  with `replace_top2`. Anything else runs the general path on an
+  untouched stack, which pops and checks one operand at a time, so a
+  failed `1 (a) add` still leaves `1`. A new fast path must keep that
+  shape. `Object::drop_inline` skips the out-of-line `Value` drop glue
+  for plain data; `PsArray`'s `Drop` checks the refcount inline and only
+  the last handle's teardown is out of line. Measure such changes in
+  instructions retired (`/usr/bin/time -l`), not time: two attempts that
+  looked obvious (resolving names under the dict borrow, an inline `Array`
+  arm in `clone_inline`) made the hot loop slower through inlining and
+  register pressure (`notes/863-dispatch-cost.md`).
+- **Fused conditionals read the live body; there is no compiled form**
+  (#864). In a procedure, `{ } if` and `{ } { } ifelse` with a boolean
+  under the first literal run as one step (`Interp::proc_literal`,
+  `fused_conditional`). The elements are read from the array at that
+  moment, so `put`, `putinterval`, an aliasing `getinterval` view and
+  `restore` need no invalidation. Keep these rules if you add a fusion:
+  - Fuse only where the run cannot fail (the operand types are checked
+    first, and room on the execution stack), so every error comes from
+    the unfused elements.
+  - Charge each element to `slice_left`, and fuse only when the slice
+    has that many steps left, so `step_n(1)`, slice ends and
+    `--max-steps` count as before.
+  - Never fuse in `step_n_timed` (`--profile-ops` counts operators).
+  - Recognise an operator by its registered name (`runs_operator`),
+    never by `fn_addr_eq`: function addresses are not unique, and a trial
+    fusion matched in the test binary but never in the release build.
+    The same rule holds everywhere: `eq`/`ne` on operators and an
+    operator as a dictionary key go by `Operator::name` too (#881,
+    `notes/881-operator-identity-by-name.md`). Several operators share one
+    function body (`readonly`/`noaccess`), so address identity was wrong
+    even in a build where addresses were stable.
+  - The literal reaches the plain loop as `ProcStep::Op(proc_literal_op)`,
+    with no arm of its own: a new arm in `step_n_inner` cost every element
+    about 5 instructions.
+
+  A fusion that pulls a common literal (a literal name) out of
+  `proc_step`'s inline push costs more than it saves: `/name exch def`
+  was measured and dropped (`notes/864-fused-conditionals.md`).
+  `tests/dispatch_semantics.rs` pins every case with a positive control
+  (`Interp::fused_steps`).
+- **Loop bodies keep their per-iteration procedure frame** (#875,
+  measured and dropped). Running a `repeat`/`for`/`loop`/`forall` body in
+  place saves only 20–35 instructions an iteration: the `Rc` clone and the
+  frame push and pop are a small part of an iteration's cost. Every
+  variant tried moved register allocation in `step_n`'s hot loop and made
+  short loops dearer, so every real file got slower. Don't redo it
+  without a new idea for the iteration path itself; see
+  `notes/875-loop-frames-in-place.md`. Its loop pins in
+  `tests/dispatch_semantics.rs` (`exit`/`stop`/error unwinding, step counts,
+  the `execstackoverflow` depth through loop bodies, profiles, a body
+  changed mid-loop) hold for any later change to the loop frames.
+- **Every `step_n` slice is bounded, empty loop bodies included** (#900).
+  An iteration of an empty body yields nothing, so `next_item` runs a row
+  of them inside one step; after `EMPTY_RUN` (1024) it returns `Item::Proc`
+  with the loop frame on top, which both step loops take as a step that did
+  nothing. Before this, `{ } loop` with no limits never left `next_item`,
+  freezing the window and `--spool` (only `tick`'s limit poll could stop
+  it). Any new path that loops inside `next_item` without yielding needs
+  the same bound; see `notes/900-empty-loop-slices.md`.
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
@@ -1694,10 +2118,17 @@ renders eight examples in both and compares block-downsampled output).
   commit. Exit 1 = a page differs or pscat errored; exit 2 = the negative
   control rendered identically, so the pages prove nothing. Write the
   control as a tiny driver using a key only the branch has.
+  A change to the limit paths (`--max-time`/`--max-memory`/`--max-steps`,
+  #604) acts only under those flags: pass them with `--pscat-args "--max-steps
+  10000000"` (#724), which goes to the base, head and control renders alike.
   Since #303 it fits any lib change that must render identically:
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
   (`page-001.png`, ...) is compared page by page.
+  Two-binary runs (`--base-bin/--head-bin`) also always compare the
+  `selftest/drivers/image_*.ps` drivers (header `%%IdentityCorpus: always`,
+  #776), the only tracked programs that call `image`, `colorimage` and
+  `imagemask`, so an image-code change is checked whatever `--loader` was.
   **An interpreter (`src/`) change uses `--base-bin PATH --head-bin PATH`**
   (issue #335) instead of the shared binary: the base tree renders with the
   base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
@@ -1764,23 +2195,58 @@ renders eight examples in both and compares block-downsampled output).
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
   in the browser.
-- **The `--pstack-on-error` CLI dump is bounded (#703)**: it goes through
-  `object::stack_repr_bounded` with `STACK_DUMP_LIMITS`. `repr()`, `==` and
-  the `pstack` operator stay unbounded, so a program's own output can still
-  hit MCP's 4 MiB cap.
+- **Printed stack and operand output is bounded (#703, #745)**: one writer,
+  `Object::write_repr` in src/object.rs, spells every `==`-syntax value, so
+  `repr()` (unbounded but for depth 32, `UNBOUNDED_LIMITS`), `==` and
+  `pstack` (`OPERATOR_LIMITS`: depth 32, 1024 elements, 4096 bytes per
+  string/name, 16 KiB per operand; `OPERATOR_STACK_BYTES` 32 KiB across the
+  stack, then one `... truncated` line) and the `--pstack-on-error` dump
+  (`stack_repr_bounded`, `STACK_DUMP_LIMITS`) cannot drift. `stack` cuts
+  strings via `text_bounded`. `=` and `print` are deliberately not bounded
+  (a program's own text output). The undefined/offending name in an error
+  line is cut to `ERROR_NAME_LIMIT` (512) by `cap_text`. `cvs` and
+  `format_real` digits are untouched. Notes: `notes/745-bound-operator-output.md`.
 - **The npm package (`npm/`, #566) is that wasm build plus a JS API.**
   `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to
   `web/pscat.js` ships in the package too: keep `npm/renderer.js` and
   `npm/index.d.ts` in step, and run the `npm` workflow's steps
   (`build_npm.sh --pack`, `npm test` in `npm/`, `cargo test --test wasm`,
-  `test_npm_tarball.sh`). Fonts beyond the Liberation core reach wasm only
-  through `ps_add_font` (`font::register_font_bytes`), keyed by font pack
-  file stem like the disk catalog. `npm/package.json` moves in lockstep with
+  `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
+  Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond
+  them reach wasm only through `ps_add_font` (`font::register_font_bytes`),
+  keyed by font pack file stem like the disk catalog. A pack face not added
+  that way gets the same stand-in as native (#728) and its note, worded for
+  `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
+  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750);
+  `PostScriptError.warnings` and `web/index.html` show them too (#804).
+  Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
+  `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
+  DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:
+  `wasm_vector_output_matches_the_cli` in `tests/wasm.rs` holds that, and
+  a change to what the CLI does around the recorders (src/main.rs) must be
+  mirrored in `ps_begin_vector`. It started as PSCatLabs/print-shop's
+  adapter patch; print-shop has run on this ABI since its #16, and on the released rc.4
+  package since its #28. Release-status
+  sentences go stale: `docs/guides/when-to-use-pscat.md`,
+  `site/when-to-use.html` and `docs/guides/browser.md` say SVG/PDF from wasm
+  first ships in 0.7.0-rc.4 (npm at 0.7.0), and that print-shop runs on the
+  rc.4 package (#1007). At 0.7.0 final, say it is on npm, and update the
+  print-shop line once print-shop#29 moves it to `pscat@0.7.0`.
+  `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed
   (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as
   a size-budget failure in `build_npm.sh`.
+- **The standard 35 are all compiled in (#757), but not all in
+  `BUILTINS`.** The twelve Liberation faces are builtins (fixed FIDs,
+  StandardEncoding, `FontName` = the PostScript name). The other 23
+  (`fonts/base35/`, `font::EMBEDDED`) register as catalog faces on first
+  use, after the disk lookup, so they keep the encodings and `FontName`
+  the `texgyre`/`extras` packs gave them; routing them through
+  `BUILTINS` would break Symbol's encoding and every render that names
+  them. `fonts/base35/` is in the crate's `include`; `fonts/catalog/` must
+  never be (`scripts/check_licences.py package`).
 - **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
   plus `NN-name.out` with exactly what it prints. `site/learn.html` names
   them with `<!--@example NAME "alt text"-->` markers that
@@ -1790,6 +2256,24 @@ renders eight examples in both and compares block-downsampled output).
   build. Change an example's output and you must change its `.out` and
   the prose around it. `playground.html?example=learn/NAME.ps` is how
   the "Try it" links open them.
+- **The front page's `pscat chalk` boards are a list plus a build step**
+  (#849). `site/chalk/boards.json` holds each board's id, LaTeX and extra
+  flags; `scripts/site_chalk.py render` draws them with the release binary
+  into `_site/assets/chalk/` (the exact argv the page prints), and `expand`
+  fills `<!--@chalk-showcase-->` in `index.html` with a figure and the
+  `shlex`-quoted command per board, before `site_pages.py` runs. No PNG is
+  committed, so the boards re-render with every renderer change. The
+  README's picture is `assets/chalk/quadratic.png` on the Pages site (an
+  absolute URL, as crates.io needs; the crate's `include` has no images).
+  Add a board by adding an entry; `tests/site.rs` checks each is drawn.
+- **`tests/site.rs` builds into its own scratch dir** (#767). `build_site.sh`
+  wipes and rebuilds its output directory, so two runs in one worktree (the
+  gate beside a hand-run `cargo test`) used to delete each other's `_site/`
+  and fail with "examples no page shows". The test now sets
+  `PSCAT_SITE_OUT` (a `common::scratch_dir`) and `PSCAT_BIN` (its own
+  `CARGO_BIN_EXE_pscat`, so the script skips `cargo build --release`); both
+  default to the old behaviour for CI and the Pages workflow. Run
+  `build_site.sh` by hand with the defaults and it still writes `_site/`.
 - **`screct`/`scpath` stamp their region, and `scin` trusts the stamp**
   (#503, `notes/503-artkit-scin-region-stamp.md`). `/Checked` holds the very
   array in the region's `/Edges` (path) or `/BBox` (rect); `scin` skips its

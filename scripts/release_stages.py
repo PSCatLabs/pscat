@@ -3,8 +3,9 @@
 
     python3 scripts/release_stages.py check-pin
     python3 scripts/release_stages.py bump-manifests 0.6.0
+    python3 scripts/release_stages.py version-info 0.7.0-rc.1
     python3 scripts/release_stages.py manifest --tag v0.6.0 --commit SHA \\
-        --dist dist --crate target/package/pscat-0.6.0.crate
+        --dist dist --crate target/package/pscat-0.6.0.crate [--npm-from release-inputs]
     python3 scripts/release_stages.py run --dist dist --crate FILE \\
         --stage draft --stage crates --stage npm --stage publish --stage plugin \\
         --stage registry [--plan] [--fake DIR] [--report-dir DIR]
@@ -27,13 +28,14 @@ that already finished skip, and the rest run.
 
 Stages, in release order:
 
-- `draft`: a draft GitHub Release for the tag holding the archives,
+- `draft`: a draft GitHub Release for the tag holding the archives, the
+  npm tarball when the npm channel is on (#1006; release candidates too),
   SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
   without one is known to be incomplete).
 - `crates`: `cargo publish` to crates.io.
 - `npm`: `npm publish` of the tarball scripts/build_npm.sh packed beside the
-  .crate (release-inputs/<name>-<version>.tgz); enabled only when
-  npm/package.json exists.
+  .crate (release-inputs/<name>-<version>.tgz), after checking it is the
+  file the manifest lists; enabled only when npm/package.json exists.
 - `publish`: makes the draft GitHub Release public, after re-checking it.
 - `plugin`: checks every plugin manifest (Claude Code and Codex) carries
   the release version; enabled only when a plugin manifest exists.
@@ -48,6 +50,13 @@ each stage would do. `--fake DIR` swaps every registry for a directory
 (tests, and the release workflow's dry run). `rehearse` runs the
 end-to-end, partial-failure and mismatch scenarios against fresh fake
 registries with real artifacts.
+
+Release candidates (#854): a version `X.Y.Z-rc.N` (tag `vX.Y.Z-rc.N`) is
+a GitHub **pre-release** only. `draft` creates it with prerelease=true and
+make_latest=false, `publish` makes it public without ever making it the
+latest release, and `crates`, `npm` and `registry` report "disabled" for it
+whatever stages are asked for, so a release candidate can never reach
+crates.io, npm or the MCP Registry.
 
 Exit status: 0 done, 1 error (network, auth, a tool failed: safe to
 retry), 3 halted (a mismatch: do not retry until a human looks).
@@ -78,9 +87,13 @@ MANIFEST_NAME = "release-manifest.json"
 SUMS_NAME = "SHA256SUMS"
 ARCHIVE_EXTS = (".tar.gz", ".zip")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+# The one pre-release form a release may carry: a release candidate (#854).
+VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 USER_AGENT = "pscat-release (https://github.com/PSCatLabs/pscat)"
 STAGES = ("draft", "crates", "npm", "publish", "plugin", "registry")
+# What a release candidate runs: the GitHub pre-release, nothing else public.
+PRERELEASE_STAGES = ("draft", "publish", "plugin")
 REGISTRY_API = "https://registry.modelcontextprotocol.io/v0.1/servers"
 
 EXIT_OK = 0
@@ -139,6 +152,32 @@ def cargo_version(root=ROOT):
                 if m:
                     return m.group(1)
     raise SystemExit("no [package] version in Cargo.toml")
+
+
+def parse_version(version):
+    """A sortable key for X.Y.Z or X.Y.Z-rc.N (semver precedence: an rc
+    comes before its release), or None for anything else."""
+    m = VERSION_RE.match(version or "")
+    if not m:
+        return None
+    major, minor, patch, rc = m.groups()
+    return (int(major), int(minor), int(patch), 0 if rc else 1, int(rc or 0))
+
+
+def is_prerelease(version):
+    """True for X.Y.Z-rc.N, False for X.Y.Z; exits on anything else."""
+    if parse_version(version) is None:
+        raise SystemExit(f"{version} is not X.Y.Z or X.Y.Z-rc.N")
+    return "-" in version
+
+
+def release_stages_for(version):
+    """The stages release.yml runs for this version."""
+    return list(PRERELEASE_STAGES if is_prerelease(version) else STAGES)
+
+
+# The plugin launcher's release pin, relative to the repo root (#853).
+PLUGIN_PIN = os.path.join("plugin", "pscat-release")
 
 
 def pinned_index(root=ROOT):
@@ -255,13 +294,38 @@ def set_cargo_version(root, version):
 
 def bump_manifests(root, version):
     """Set every manifest's version; returns the files changed (relative)."""
-    if not SEMVER_RE.match(version):
-        raise SystemExit(f"{version} is not X.Y.Z")
+    if not VERSION_RE.match(version):
+        raise SystemExit(f"{version} is not X.Y.Z or X.Y.Z-rc.N")
     set_cargo_version(root, version)
     changed = ["Cargo.toml"]
     if set_lock_version(root, version):
         changed.append("Cargo.lock")
+    if set_release_pin(root, version):
+        changed.append(PLUGIN_PIN)
     return changed + bump_manifests_json_only(root, version)
+
+
+def set_release_pin(root, version):
+    """The release tag the plugin launcher downloads (#853, #867):
+    `plugin/pscat-release` is set to `v<version>`, rc included, so a release
+    PR needs no hand edit. Comments and the trailing newline are kept. A
+    tree without the file (none before #853) is left alone; returns whether
+    the file changed."""
+    path = os.path.join(root, PLUGIN_PIN)
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+    tags = [i for i, ln in enumerate(lines) if ln.strip() and not ln.lstrip().startswith("#")]
+    if len(tags) != 1:
+        raise SystemExit(f"{PLUGIN_PIN}: expected exactly one release tag line, found {len(tags)}")
+    new = f"v{version}\n"
+    if lines[tags[0]] == new:
+        return False
+    lines[tags[0]] = new
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return True
 
 
 def set_lock_version(root, version):
@@ -385,15 +449,57 @@ def registry_identity(server):
     return server.get("name"), server.get("version"), pkgs
 
 
-def build_manifest(tag, commit, dist, crate_path):
+def find_npm_tarball(root, src_dir, version):
+    """The npm tarball verify packed into `src_dir` for this release, or None
+    when the npm channel is off (no npm/package.json). Its name is npm pack's
+    for package.json's name, as the npm stage looks it up; a missing tarball,
+    or one holding another package or version, is an error, so a release
+    cannot quietly ship without it (#1006)."""
+    pkg = npm_manifest(root)
+    if not pkg:
+        return None
+    with open(pkg, encoding="utf-8") as f:
+        name = json.load(f).get("name")
+    path = os.path.join(src_dir, npm_tarball_name(name, version))
+    if not os.path.isfile(path):
+        raise SystemExit(f"npm/package.json exists but there is no npm tarball {path}; "
+                         "the verify job packs it (scripts/build_npm.sh --pack release-inputs)")
+    inner = npm_tarball_manifest(path) or {}
+    if inner.get("name") != name:
+        raise SystemExit(f"{os.path.basename(path)} holds package {inner.get('name')!r}, not {name!r}")
+    return path
+
+
+def npm_asset(manifest):
+    """The name of the npm tarball a release carries as an asset, or None
+    (releases before #1006, or with the npm channel off)."""
+    names = [a["name"] for a in manifest["assets"] if a["name"].endswith(".tgz")]
+    return names[0] if names else None
+
+
+def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
+    """The manifest of the archives in `dist` and the .crate. With
+    `npm_tarball`, that file is copied into `dist` and listed after the
+    archives, so it is uploaded to the GitHub Release (release candidates
+    included) and recorded in SHA256SUMS (#1006)."""
     version = tag[1:] if tag.startswith("v") else tag
-    if not SEMVER_RE.match(version) or tag != f"v{version}":
-        raise SystemExit(f"{tag} is not vX.Y.Z")
+    if not VERSION_RE.match(version) or tag != f"v{version}":
+        raise SystemExit(f"{tag} is not vX.Y.Z or vX.Y.Z-rc.N")
     if not SHA1_RE.match(commit):
         raise SystemExit(f"{commit} is not a full commit SHA")
     assets = []
     for name in archives_in(dist):
         p = os.path.join(dist, name)
+        assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
+    if npm_tarball:
+        name = os.path.basename(npm_tarball)
+        inner = npm_tarball_manifest(npm_tarball)
+        if not name.endswith(".tgz") or not inner or inner.get("version") != version:
+            got = inner.get("version") if inner else "no readable package/package.json"
+            raise SystemExit(f"{name} is not the npm tarball of {version} ({got})")
+        p = os.path.join(dist, name)
+        if os.path.abspath(npm_tarball) != os.path.abspath(p):
+            shutil.copyfile(npm_tarball, p)
         assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
     content, sha1 = crate_identity(crate_path)
     if sha1 != commit:
@@ -439,20 +545,33 @@ def release_files(manifest):
     return [a["name"] for a in manifest["assets"]] + [SUMS_NAME, MANIFEST_NAME]
 
 
-def changelog_notes(version, root=ROOT):
+def changelog_notes(version, root=ROOT, npm_tarball=None):
     path = os.path.join(root, "CHANGELOG.md")
     body = ""
+    if is_prerelease(version):
+        final = version.split("-")[0]
+        body = (f"**Release candidate for {final}, for testing.** It is a GitHub pre-release only: "
+                f"it is not on crates.io, npm or the MCP Registry, and `cargo install pscat` still "
+                f"installs the latest stable version. The changes are listed in CHANGELOG.md when "
+                f"{final} is released.\n\n")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             text = f.read()
         m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
         if m:
             body = m.group(1).strip() + "\n\n"
+    npm = ""
+    if npm_tarball:
+        where = ("it is not on npm" if is_prerelease(version)
+                 else "the same file that is published to npm")
+        npm = (f"{npm_tarball} is the npm package (WebAssembly, for the browser and Node); {where}. "
+               f"Install it from this release with `npm install https://github.com/PSCatLabs/pscat/releases/"
+               f"download/v{version}/{npm_tarball}`. ")
     return (
         f"{body}Each archive carries the licences (LICENSE-MIT, LICENSE-APACHE, LICENSE-OFL), "
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
-        f"{SUMS_NAME} has the SHA-256 of every archive; {MANIFEST_NAME} records the commit "
-        "they were built from. Install guide: "
+        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}; "
+        f"{MANIFEST_NAME} records the commit they were built from. Install guide: "
         "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )
 
@@ -488,7 +607,7 @@ class RealGitHub:
             "--paginate",
             f"repos/{self.repo}/releases?per_page=100",
             "--jq",
-            ".[] | {id, tag_name, draft, assets: [.assets[] | {id, name, digest}]} | tojson",
+            ".[] | {id, tag_name, draft, prerelease, assets: [.assets[] | {id, name, digest}]} | tojson",
         )
         found = []
         for line in out.splitlines():
@@ -499,10 +618,12 @@ class RealGitHub:
                 found.append(r)
         return found
 
-    def create_draft(self, tag, title, notes):
+    def create_draft(self, tag, title, notes, prerelease=False):
+        extra = ["-F", "prerelease=true", "-f", "make_latest=false"] if prerelease else []
         out = self._api(
             "-X", "POST", f"repos/{self.repo}/releases",
             "-f", f"tag_name={tag}", "-f", f"name={title}", "-f", f"body={notes}", "-F", "draft=true",
+            *extra,
         )
         return json.loads(out)["id"]
 
@@ -528,8 +649,11 @@ class RealGitHub:
             return digest[len("sha256:"):]
         return sha256_bytes(self.asset_bytes(asset))
 
-    def publish(self, release_id):
-        self._api("-X", "PATCH", f"repos/{self.repo}/releases/{release_id}", "-F", "draft=false")
+    def publish(self, release_id, prerelease=False):
+        # A pre-release can never be "latest" on GitHub; make_latest=false
+        # says so again rather than rely on that rule.
+        extra = ["-F", "prerelease=true", "-f", "make_latest=false"] if prerelease else []
+        self._api("-X", "PATCH", f"repos/{self.repo}/releases/{release_id}", "-F", "draft=false", *extra)
 
 
 class RealCrates:
@@ -769,16 +893,18 @@ class Fake:
         for r in self._load("github/releases.json", []):
             if r["tag_name"] == tag:
                 out.append({"id": r["id"], "tag_name": tag, "draft": r["draft"],
+                            "prerelease": r.get("prerelease", False),
                             "assets": [{"id": a["id"], "name": a["name"], "digest": None} for a in r["assets"]]})
         return out
 
-    def create_draft(self, tag, title, notes):
+    def create_draft(self, tag, title, notes, prerelease=False):
         self._maybe_fail("github.create")
         rels = self._load("github/releases.json", [])
         rid = 1 + max([r["id"] for r in rels] or [0])
-        rels.append({"id": rid, "tag_name": tag, "title": title, "draft": True, "assets": []})
+        rels.append({"id": rid, "tag_name": tag, "title": title, "draft": True, "prerelease": prerelease,
+                     "latest": False, "assets": []})
         self._save("github/releases.json", rels)
-        self.log(f"github.create {tag}")
+        self.log(f"github.create {tag}" + (" prerelease" if prerelease else ""))
         return rid
 
     def upload(self, release_id, path, name):
@@ -802,15 +928,25 @@ class Fake:
     def asset_sha256(self, asset):
         return sha256_bytes(self.asset_bytes(asset))
 
-    def publish(self, release_id):
+    def publish(self, release_id, prerelease=False):
         self._maybe_fail("github.publish")
         rels = self._load("github/releases.json", [])
         r = next(r for r in rels if r["id"] == release_id)
         if not r["draft"]:
             raise StageError("fake: already published")
         r["draft"] = False
+        r["prerelease"] = prerelease
+        # GitHub's rule: a newly published release becomes latest unless it
+        # is a pre-release.
+        if not prerelease:
+            for x in rels:
+                x["latest"] = False
+            r["latest"] = True
         self._save("github/releases.json", rels)
-        self.log(f"github.publish {r['tag_name']}")
+        self.log(f"github.publish {r['tag_name']}" + (" prerelease" if prerelease else ""))
+
+    def latest(self):
+        return next((r["tag_name"] for r in self._load("github/releases.json", []) if r.get("latest")), None)
 
     # -- crates.io
     def version(self, name, version):
@@ -923,6 +1059,7 @@ class Ctx:
         self.npm = npm
         self.plan = plan
         self.registry = registry
+        self.prerelease = is_prerelease(manifest["version"])
         self.local = {a["name"]: a["sha256"] for a in manifest["assets"]}
         self.local[SUMS_NAME] = sha256_file(os.path.join(dist, SUMS_NAME))
         self.local[MANIFEST_NAME] = sha256_file(os.path.join(dist, MANIFEST_NAME))
@@ -999,16 +1136,32 @@ def release_files_from(ref):
     return sorted(names) + [SUMS_NAME, MANIFEST_NAME]
 
 
+def check_prerelease_flag(ctx, rel):
+    """A release for an rc tag must be a pre-release, and one for X.Y.Z
+    must not be: anything else was made or edited by hand."""
+    got = bool(rel.get("prerelease"))
+    if got != ctx.prerelease:
+        want = "a pre-release" if ctx.prerelease else "not a pre-release"
+        raise Halt(f"release {ctx.m['tag']} (id {rel['id']}) has prerelease={str(got).lower()}; "
+                   f"this release must be {want}. Fix the flag or delete the draft by hand")
+
+
+PRERELEASE_OFF = "a release candidate is a GitHub pre-release only (#854)"
+
+
 def stage_draft(ctx):
     check_tag(ctx)
     rel = the_release(ctx)
     if rel is None:
         if ctx.plan:
             return "would create", f"a draft release {ctx.m['tag']} with {len(release_files(ctx.m))} assets"
-        rid = ctx.github.create_draft(ctx.m["tag"], f"pscat {ctx.m['version']}", changelog_notes(ctx.m["version"], ctx.root))
+        rid = ctx.github.create_draft(ctx.m["tag"], f"pscat {ctx.m['version']}",
+                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m)),
+                                      prerelease=ctx.prerelease)
         for name in release_files(ctx.m):
             ctx.github.upload(rid, os.path.join(ctx.dist, name), name)
         return "published", f"draft release {ctx.m['tag']} (id {rid})"
+    check_prerelease_flag(ctx, rel)
     missing, adopted = verify_release_assets(ctx, rel, allow_missing=rel["draft"])
     state = "draft" if rel["draft"] else "published release"
     if not missing:
@@ -1044,6 +1197,8 @@ def check_crate_matches(ctx, remote_checksum, local_path, what):
 
 
 def stage_crates(ctx):
+    if ctx.prerelease:
+        return "disabled", f"{CRATE} {ctx.m['version']} is not published to crates.io: {PRERELEASE_OFF}"
     v = ctx.crates.version(CRATE, ctx.m["version"])
     if v is not None:
         how = check_crate_matches(ctx, v["checksum"], ctx.crate_path, "existing version")
@@ -1064,6 +1219,8 @@ def stage_crates(ctx):
 
 
 def stage_npm(ctx):
+    if ctx.prerelease:
+        return "disabled", f"{ctx.m['version']} is not published to npm: {PRERELEASE_OFF}"
     pkg = npm_manifest(ctx.root)
     if not pkg:
         return "disabled", "no npm/package.json (the npm channel is not enabled)"
@@ -1083,6 +1240,21 @@ def stage_npm(ctx):
     if not inner or (inner.get("name"), inner.get("version")) != (meta["name"], ctx.m["version"]):
         got = f"{inner.get('name')}@{inner.get('version')}" if inner else "no readable package.json"
         raise Halt(f"{os.path.basename(tarball)} holds {got}, not {meta['name']}@{ctx.m['version']}")
+    # The GitHub Release carries the same file (#1006): what npm gets must
+    # be the bytes SHA256SUMS lists. A draft that already exists is judged
+    # by its own manifest, as the draft stage adopts it on a rerun whose
+    # rebuilt artifacts differ, so compare against that, not this run's.
+    if npm_asset(ctx.m):
+        name = os.path.basename(tarball)
+        listed, where = ctx.local.get(name), MANIFEST_NAME
+        rel = the_release(ctx)
+        if rel is not None:
+            ref, adopted = reference_digests(ctx, rel)
+            if adopted:
+                listed, where = ref.get(name), f"release {ctx.m['tag']}'s {MANIFEST_NAME}"
+        if listed != sha256_file(tarball):
+            raise Halt(f"{name} beside the .crate is not the npm tarball {where} lists "
+                       f"(sha256 {listed}); npm and the GitHub Release must carry the same bytes")
     local = npm_integrity(tarball)
     remote = ctx.npm.view(meta["name"], ctx.m["version"])
     if remote is not None:
@@ -1109,13 +1281,15 @@ def stage_publish(ctx):
         if ctx.plan:
             return "would publish", f"the draft release {ctx.m['tag']} (after the draft stage creates it)"
         raise Halt(f"no release exists for {ctx.m['tag']}; run the draft stage first")
+    check_prerelease_flag(ctx, rel)
     missing, _ = verify_release_assets(ctx, rel, allow_missing=ctx.plan and rel["draft"])
+    kind = "pre-release" if ctx.prerelease else "release"
     if not rel["draft"]:
-        return "skipped", f"release {ctx.m['tag']} is already published and matches"
+        return "skipped", f"{kind} {ctx.m['tag']} is already published and matches"
     if ctx.plan:
-        return "would publish", f"the draft release {ctx.m['tag']}"
-    ctx.github.publish(rel["id"])
-    return "published", f"release {ctx.m['tag']} is public"
+        return "would publish", f"the draft {kind} {ctx.m['tag']}"
+    ctx.github.publish(rel["id"], prerelease=ctx.prerelease)
+    return "published", f"{kind} {ctx.m['tag']} is public" + (" (not latest)" if ctx.prerelease else "")
 
 
 def stage_plugin(ctx):
@@ -1134,6 +1308,8 @@ def stage_plugin(ctx):
 
 
 def stage_registry(ctx):
+    if ctx.prerelease:
+        return "disabled", f"{ctx.m['version']} is not published to the MCP Registry: {PRERELEASE_OFF}"
     path = server_manifest(ctx.root)
     if not path:
         return "disabled", "no server.json (the MCP Registry channel is not enabled)"
@@ -1280,6 +1456,8 @@ def altered_crate(src, dest):
 def rehearse(dist, crate_path, repo_root, log=print):
     """Run every scenario; returns a list of (name, ok, detail)."""
     m = load_manifest(dist)
+    if is_prerelease(m["version"]):
+        return rehearse_prerelease(dist, crate_path, repo_root, log)
     outcomes = []
     all_stages = list(STAGES)
 
@@ -1379,6 +1557,91 @@ def rehearse(dist, crate_path, repo_root, log=print):
     return outcomes
 
 
+def rehearse_prerelease(dist, crate_path, repo_root, log=print):
+    """The scenarios for a release candidate (#854): it becomes a GitHub
+    pre-release that is never latest, and nothing reaches crates.io, npm or
+    the MCP Registry, even when every stage is asked for."""
+    m = load_manifest(dist)
+    outcomes = []
+    rc_stages = release_stages_for(m["version"])
+
+    def ctx_for(d, plan=False):
+        fake = Fake(d)
+        return fake, Ctx(m, dist, crate_path, repo_root, fake, FakeCrates(fake), FakeNpm(fake), plan,
+                         FakeRegistry(fake))
+
+    def results_of(results):
+        return {r["stage"]: r["result"] for r in results}
+
+    def expect(name, cond, detail):
+        outcomes.append((name, bool(cond), detail))
+        log(f"{'PASS' if cond else 'FAIL'}  {name}: {detail}")
+
+    def off_github(fake):
+        return [e for e in fake.events() if not e.startswith("github.")]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # 1. Plan, publish, re-run.
+        d = os.path.join(tmp, "e2e")
+        fake, ctx = ctx_for(d, plan=True)
+        fake.set_tag(m["tag"], m["commit"])
+        st, res = run_stages(ctx, rc_stages)
+        expect("rc: plan changes nothing", st == EXIT_OK and fake.events() == [], f"exit {st}, {results_of(res)}")
+        fake, ctx = ctx_for(d)
+        fake.set_tag("v0.0.1", m["commit"])
+        rid = fake.create_draft("v0.0.1", "stable", "x")
+        fake.publish(rid)
+        st, res = run_stages(ctx, rc_stages)
+        r = results_of(res)
+        rel = fake.releases(m["tag"])
+        expect("rc: published as a GitHub pre-release",
+               st == EXIT_OK and r["draft"] == r["publish"] == "published"
+               and len(rel) == 1 and rel[0]["prerelease"] and not rel[0]["draft"], f"exit {st}, {r}")
+        expect("rc: never the latest release", fake.latest() == "v0.0.1", f"latest is {fake.latest()}")
+        before = fake.events()
+        st, res = run_stages(ctx, rc_stages)
+        r = results_of(res)
+        expect("rc: re-run skips every stage",
+               st == EXIT_OK and fake.events() == before and "published" not in r.values(), f"exit {st}, {r}")
+
+        # 2. Every stage asked for, a different crate already at the
+        # version: still nothing but GitHub, and no halt on the crate.
+        d = os.path.join(tmp, "all-stages")
+        fake, ctx = ctx_for(d)
+        fake.set_tag(m["tag"], m["commit"])
+        altered_crate(crate_path, os.path.join(d, "crates", f"{CRATE}-{m['version']}.crate"))
+        st, res = run_stages(ctx, list(STAGES))
+        r = results_of(res)
+        expect("rc: crates, npm and registry stay disabled when asked for",
+               st == EXIT_OK and r["crates"] == r["npm"] == r["registry"] == "disabled"
+               and off_github(fake) == [], f"exit {st}, {r}, other events {off_github(fake)}")
+
+        # 3. A failure publishing the pre-release, then a resume.
+        d = os.path.join(tmp, "partial")
+        fake, ctx = ctx_for(d)
+        fake.set_tag(m["tag"], m["commit"])
+        with open(os.path.join(d, "fail-once"), "w", encoding="utf-8") as f:
+            f.write("github.publish")
+        st, res = run_stages(ctx, rc_stages)
+        r1 = results_of(res)
+        st2, res = run_stages(ctx, rc_stages)
+        r2 = results_of(res)
+        expect("rc: failed publish resumes", st == EXIT_ERROR and r1["publish"] == "error"
+               and st2 == EXIT_OK and r2["draft"] == "skipped" and r2["publish"] == "published",
+               f"exit {st} {r1}, then exit {st2} {r2}")
+
+        # 4. A draft for the rc tag that is not marked pre-release halts.
+        d = os.path.join(tmp, "not-prerelease")
+        fake, ctx = ctx_for(d)
+        fake.set_tag(m["tag"], m["commit"])
+        fake.create_draft(m["tag"], "x", "x", prerelease=False)
+        st, res = run_stages(ctx, rc_stages)
+        r = results_of(res)
+        expect("rc: a draft not marked pre-release halts", st == EXIT_HALT and r["draft"] == "halted",
+               f"exit {st}, {r}")
+    return outcomes
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -1393,11 +1656,19 @@ def main(argv=None):
     b = sub.add_parser("bump-manifests", help="set every manifest's version")
     b.add_argument("version")
 
+    v = sub.add_parser("version-info", help="print prerelease=true|false and the stages for VERSION "
+                       "(GITHUB_OUTPUT lines; release.yml reads them)")
+    v.add_argument("version")
+
     mf = sub.add_parser("manifest", help="write release-manifest.json and SHA256SUMS into --dist")
     mf.add_argument("--tag", required=True)
     mf.add_argument("--commit", required=True)
     mf.add_argument("--dist", required=True)
     mf.add_argument("--crate", required=True)
+    mf.add_argument("--npm-from", metavar="DIR",
+                    help="also attach the npm tarball verify packed into DIR (required there when "
+                         "npm/package.json exists; ignored when it does not)")
+    mf.add_argument("--repo-root", default=ROOT)
 
     for name in ("run", "rehearse"):
         p = sub.add_parser(name)
@@ -1427,8 +1698,17 @@ def main(argv=None):
             print(f)
         return EXIT_OK
 
+    if args.cmd == "version-info":
+        pre = is_prerelease(args.version)
+        print(f"prerelease={str(pre).lower()}")
+        print("stages=" + " ".join(f"--stage {s}" for s in release_stages_for(args.version)))
+        return EXIT_OK
+
     if args.cmd == "manifest":
-        m = build_manifest(args.tag, args.commit, args.dist, args.crate)
+        tarball = None
+        if args.npm_from:
+            tarball = find_npm_tarball(args.repo_root, args.npm_from, args.tag.removeprefix("v"))
+        m = build_manifest(args.tag, args.commit, args.dist, args.crate, tarball)
         write_manifest(m, args.dist)
         print(json.dumps(m, indent=2))
         return EXIT_OK

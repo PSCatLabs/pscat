@@ -11,10 +11,11 @@ const DEFAULT_PAGE = { width: 612, height: 792, dpi: 72 };
 /**
  * A PostScript error (`undefined`, `typecheck`, `stackunderflow`, ...),
  * raised by render() and step(). The renderer stays usable, and the
- * page drawn before the error is still readable.
+ * page drawn before the error, its output and its font warnings are still
+ * readable.
  */
 export class PostScriptError extends Error {
-  constructor(report, output = '') {
+  constructor(report, output = '', warnings = []) {
     const m = /Error:\s*([A-Za-z]+)/.exec(report);
     // One unambiguous run of characters, trimmed after: no backtracking
     // over the report's spaces.
@@ -32,6 +33,8 @@ export class PostScriptError extends Error {
     this.report = report;
     /** What the program printed before the error. */
     this.output = output;
+    /** Font substitution notes up to the error, as in RenderResult.warnings. */
+    this.warnings = warnings;
   }
 }
 
@@ -47,12 +50,19 @@ function pageOf(options = {}) {
     }
   }
   if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`pscat: dpi must be a positive number, got ${dpi}`);
-  return { width, height, scale: dpi / 72 };
+  for (const k of ['svg', 'pdf']) {
+    if (options[k] !== undefined && typeof options[k] !== 'boolean') {
+      throw new TypeError(`pscat: ${k} must be true or false, got ${options[k]}`);
+    }
+  }
+  return { width, height, scale: dpi / 72, record: { svg: options.svg === true, pdf: options.pdf === true } };
 }
 
 /** One interpreter in its own WebAssembly instance. Make one with createRenderer(). */
 export class Renderer {
   #ps;
+  // What the current program records besides pixels: { svg, pdf }.
+  #record = { svg: false, pdf: false };
 
   /** @internal Use createRenderer(). */
   constructor(core) {
@@ -75,8 +85,10 @@ export class Renderer {
     if (typeof source !== 'string' && !(source instanceof Uint8Array)) {
       throw new TypeError('pscat: the program must be a string or a Uint8Array');
     }
-    const { width, height, scale } = pageOf(options);
-    this.#ps.begin(source, width, height, scale);
+    const { width, height, scale, record } = pageOf(options);
+    this.#record = { svg: false, pdf: false };
+    this.#ps.begin(source, width, height, scale, record);
+    this.#record = record;
   }
 
   /**
@@ -92,7 +104,7 @@ export class Renderer {
     const status = this.#ps.step(budget);
     if (status === 1) return true;
     if (status === 0) return false;
-    if (status === -1) throw new PostScriptError(this.#ps.error, this.#ps.output);
+    if (status === -1) throw new PostScriptError(this.#ps.error, this.#ps.output, this.#ps.warnings);
     throw new Error('pscat: step() called before begin()');
   }
 
@@ -126,14 +138,63 @@ export class Renderer {
     return this.#ps.output;
   }
 
+  /**
+   * Notes about fonts the program asked for that were replaced since
+   * begin(): a face from a font pack (display, Korean, Japanese, Thai,
+   * typewriter) that was not given to addFont stands in as Helvetica or
+   * Courier. The same one-line note the command-line tool prints on
+   * stderr, once per face, saying what to pass to addFont; [] when
+   * nothing was replaced. Readable after a PostScriptError too.
+   */
+  get warnings() {
+    return this.#ps.warnings;
+  }
+
   /** A copy of the page as RGBA bytes, row by row from the top. */
   pixels() {
     return new Uint8ClampedArray(this.#ps.pixels().buffer);
   }
 
-  /** The page as { width, height, data, output }: data is RGBA, ImageData-shaped. */
+  /** The page as { width, height, data, output, warnings }: data is RGBA, ImageData-shaped. */
   image() {
-    return { width: this.width, height: this.height, data: this.pixels(), output: this.output };
+    return {
+      width: this.width,
+      height: this.height,
+      data: this.pixels(),
+      output: this.output,
+      warnings: this.warnings,
+    };
+  }
+
+  /**
+   * SVG page `page` (from 0) as a string: the bytes `pscat --svg` writes
+   * for the same program, page size and dpi. Needs begin()/render() with
+   * { svg: true }. Mid-run (between step() calls) it is the page so far.
+   */
+  svg(page = 0) {
+    if (!this.#record.svg) throw new Error('pscat: svg() needs a program begun with { svg: true }');
+    if (!Number.isInteger(page) || page < 0 || page >= this.#ps.svgCount()) {
+      throw new RangeError(`pscat: no SVG page ${page} (the document has ${this.#ps.svgCount()})`);
+    }
+    return this.#ps.svg(page);
+  }
+
+  /** Every SVG page, in order, as svg(page) returns each. Needs { svg: true }. */
+  svgPages() {
+    if (!this.#record.svg) throw new Error('pscat: svgPages() needs a program begun with { svg: true }');
+    const pages = [];
+    for (let i = 0, n = this.#ps.svgCount(); i < n; i++) pages.push(this.#ps.svg(i));
+    return pages;
+  }
+
+  /**
+   * The whole document as one PDF, a page per page: the bytes `pscat --pdf`
+   * writes for the same program, page size and dpi (a %%Title: or %%For:
+   * comment becomes the document's title or author). Needs { pdf: true }.
+   */
+  pdf() {
+    if (!this.#record.pdf) throw new Error('pscat: pdf() needs a program begun with { pdf: true }');
+    return this.#ps.pdf();
   }
 
   /** The page as an ImageData (browsers, workers; needs a global ImageData). */
@@ -151,7 +212,8 @@ export class Renderer {
    * Make a TrueType/OpenType font available to findfont. `name` is the
    * font pack's file stem, e.g. 'EBGaramond-Regular' (which /Garamond
    * then finds too); the face's own PostScript name also finds it.
-   * Only the Liberation faces behind the base fonts are built in.
+   * The PostScript standard 35 are built in; any other face needs this,
+   * and without it findfont substitutes (see `warnings`).
    */
   addFont(name, bytes) {
     if (typeof name !== 'string' || name === '') throw new TypeError('pscat: addFont needs a font name');

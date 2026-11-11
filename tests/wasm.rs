@@ -8,6 +8,8 @@
 
 use std::process::Command;
 
+use common::CommandDeadline as _;
+
 mod common;
 
 fn have(cmd: &str, args: &[&str], needle: &str) -> bool {
@@ -230,5 +232,162 @@ for (const [w, h, scale, src, out] of [{jobs}]) {{
             differing * 200 <= pixels && worst <= 8,
             "page {i} ({src:?}): {differing} of {pixels} pixels differ from native, by up to {worst}"
         );
+    }
+}
+
+/// A two-page document for the vector tests (#1003): text in two built-in
+/// faces, an arc, strokes under rotation (trig, where native and wasm libm
+/// could round apart), a curve, and the DSC comments the CLI turns into
+/// the PDF's /Info. No %%BoundingBox: `--page` sets the page, as in wasm.
+const VECTOR_DOC: &str = "%!PS-Adobe-3.0
+%%Title: Vector parity
+%%For: pscat tests
+/Times-Roman findfont 24 scalefont setfont
+72 700 moveto (Page one: Hamburgefons) show
+newpath 300 400 120 0 360 arc 0.8 0.2 0.1 setrgbcolor fill
+0 setgray 2 setlinewidth
+0 15 345 { gsave 300 400 translate rotate 0 0 moveto 150 0 lineto stroke grestore } for
+showpage
+/Helvetica-Bold findfont 18 scalefont setfont
+72 700 moveto (Page two) show
+0.1 0.5 0.3 setrgbcolor 100 100 moveto 400 300 lineto 200 50 lineto closepath fill
+gsave 37 rotate 200 200 translate 0 0 50 30 rectstroke grestore
+100 500 moveto 150 600 250 450 300 550 curveto stroke
+gsave newpath 400 500 80 0 360 arc clip
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [380 520 5 400 500 80]
+   /Function << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1]
+     /Functions [ << /FunctionType 2 /Domain [0 1] /C0 [1 1 0.8] /C1 [0.9 0.4 0.1] /N 1 >>
+                  << /FunctionType 2 /Domain [0 1] /C0 [0.9 0.4 0.1] /C1 [0.2 0 0.3] /N 1 >> ] >> >> shfill
+grestore
+showpage
+";
+
+/// SVG and PDF from the wasm build equal `pscat --svg`/`--pdf` byte for
+/// byte (#1003), through the raw C ABI wrapper (web/pscat.js) and through
+/// the npm package's Renderer, at 72 and 144 dpi; and a run is
+/// repeatable: twice in one module instance, and in a fresh one.
+#[test]
+fn wasm_vector_output_matches_the_cli() {
+    if !wasm_ready() {
+        return;
+    }
+    let root = root();
+    let dir = common::scratch_dir("pscat-wasm-vector");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let doc = dir.join("doc.ps");
+    std::fs::write(&doc, VECTOR_DOC).expect("write doc");
+
+    for dpi in [72, 144] {
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .args(["--page", "612x792", "--dpi", &dpi.to_string()])
+            .arg("--svg")
+            .arg(dir.join(format!("native-{dpi}.svg")))
+            .arg("--pdf")
+            .arg(dir.join(format!("native-{dpi}.pdf")))
+            .arg(&doc)
+            .output_deadline()
+            .expect("run pscat");
+        assert!(
+            out.status.success(),
+            "pscat --svg/--pdf failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // The npm Renderer imports ./core.js, the copy of web/pscat.js that
+    // build_npm.sh makes; give it one here without building the package.
+    let npm = dir.join("npm");
+    std::fs::create_dir_all(&npm).expect("npm dir");
+    std::fs::copy(root.join("npm/renderer.js"), npm.join("renderer.js")).expect("renderer.js");
+    std::fs::copy(root.join("web/pscat.js"), npm.join("core.js")).expect("core.js");
+
+    let driver = format!(
+        r#"
+import {{ readFileSync, writeFileSync }} from 'node:fs';
+import {{ Pscat }} from 'file://{lib}';
+import {{ instantiate }} from 'file://{renderer}';
+const bytes = readFileSync('{wasm}');
+const src = readFileSync('{doc}');
+const out = (name, data) => writeFileSync('{dir}/' + name, data);
+// Raw ABI: instances a and b, two runs each, at both resolutions.
+for (const inst of ['a', 'b']) {{
+  const ps = await Pscat.instantiate(bytes);
+  for (const run of [1, 2]) for (const dpi of [72, 144]) {{
+    if (ps.run(src, 612, 792, dpi / 72, {{ svg: true, pdf: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+    const n = ps.svgCount();
+    if (n !== 2) {{ console.error('svgCount ' + n); process.exit(1); }}
+    for (let i = 0; i < n; i++) out(`abi-${{inst}}${{run}}-${{dpi}}-${{i + 1}}.svg`, ps.svg(i));
+    out(`abi-${{inst}}${{run}}-${{dpi}}.pdf`, ps.pdf());
+    if (ps.svg(n) !== null) {{ console.error('page past the end'); process.exit(1); }}
+  }}
+}}
+// Recording is opt-in: a plain run has neither.
+const plain = await Pscat.instantiate(bytes);
+plain.run(src, 612, 792);
+if (plain.svgCount() !== 0 || plain.svg(0) !== null || plain.pdf() !== null) {{
+  console.error('a plain run recorded vectors'); process.exit(1);
+}}
+// The npm API, over the same module.
+const r = await instantiate(await WebAssembly.compile(bytes));
+for (const dpi of [72, 144]) {{
+  r.render(src, {{ width: 612, height: 792, dpi, svg: true, pdf: true }});
+  r.svgPages().forEach((svg, i) => out(`npm-${{dpi}}-${{i + 1}}.svg`, svg));
+  out(`npm-${{dpi}}.pdf`, r.pdf());
+}}
+console.log('VECTOR_OK');
+"#,
+        lib = root.join("web/pscat.js").display(),
+        renderer = npm.join("renderer.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+        doc = doc.display(),
+        dir = dir.display(),
+    );
+    let script = dir.join("vector.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output_deadline()
+        .expect("run node");
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("VECTOR_OK"),
+        "node vector driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let read = |name: String| {
+        std::fs::read(dir.join(&name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
+    };
+    for dpi in [72, 144] {
+        let pdf = read(format!("native-{dpi}.pdf"));
+        assert!(pdf.starts_with(b"%PDF-"), "native PDF at {dpi} dpi");
+        let title = b"/Title (Vector parity)";
+        assert!(
+            pdf.windows(title.len()).any(|w| w == title),
+            "the CLI's PDF lost its %%Title"
+        );
+        let mut produced = vec![format!("npm-{dpi}.pdf")];
+        for run in ["a1", "a2", "b1", "b2"] {
+            produced.push(format!("abi-{run}-{dpi}.pdf"));
+        }
+        for name in produced {
+            assert!(
+                read(name.clone()) == pdf,
+                "{name} differs from pscat --pdf at {dpi} dpi"
+            );
+        }
+        for page in 1..=2 {
+            let svg = read(format!("native-{dpi}-{page:03}.svg"));
+            assert!(svg.starts_with(b"<svg"), "native SVG page {page}");
+            let mut produced = vec![format!("npm-{dpi}-{page}.svg")];
+            for run in ["a1", "a2", "b1", "b2"] {
+                produced.push(format!("abi-{run}-{dpi}-{page}.svg"));
+            }
+            for name in produced {
+                assert!(
+                    read(name.clone()) == svg,
+                    "{name} differs from pscat --svg page {page} at {dpi} dpi"
+                );
+            }
+        }
     }
 }

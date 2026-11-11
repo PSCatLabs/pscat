@@ -1,7 +1,8 @@
 //! Downloadable font packs (issue #599): the font catalog ships as
 //! separately versioned `.tar.zst` packs on their own `fonts-YYYY.MM`
-//! release train, and only the twelve Liberation faces stay compiled
-//! into pscat.
+//! release train. The standard 35 stay compiled into pscat: the twelve
+//! Liberation faces and, since issue #757, the TeX Gyre and URW faces
+//! that were the `texgyre` pack and part of `extras`.
 //!
 //! This module holds the parts every build needs: the pack table
 //! (`fonts/packs.json`, compiled in, so a missing face can name the
@@ -89,6 +90,24 @@ fn parse_table(src: &str) -> Vec<PackDef> {
                 .collect(),
         })
         .collect()
+}
+
+/// Packs that no longer exist, with the reason: their faces moved into
+/// the binary. Older indexes (the pinned `fonts-2026.10` among them)
+/// still list them; `pscat fonts install` skips them with this note.
+pub const RETIRED_PACKS: &[(&str, &str)] = &[(
+    "texgyre",
+    "its faces (Palatino, Bookman, New Century Schoolbook, Avant Garde, \
+     Zapf Chancery, Helvetica-Narrow) are built into pscat since issue #757",
+)];
+
+/// The line `pscat fonts install` prints for a retired pack, or `None`
+/// for any other name.
+pub fn retired_note(name: &str) -> Option<String> {
+    RETIRED_PACKS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(n, why)| format!("pscat: the {n} font pack is retired: {why}; nothing to install"))
 }
 
 /// The pack shipping the font file whose stem is `stem`, matched
@@ -324,15 +343,19 @@ mod tests {
             "fonts/packs.json is out of step with fonts/catalog/"
         );
         let names: Vec<&str> = packs().iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["extras", "texgyre", "cjk-thai"]);
+        assert_eq!(names, ["extras", "cjk-thai"]);
+        for (retired, _) in RETIRED_PACKS {
+            assert!(!names.contains(retired), "{retired} is retired");
+        }
     }
 
     #[test]
     fn faces_map_to_their_packs() {
-        assert_eq!(pack_for_stem("StandardSymbolsPS"), Some("extras"));
-        assert_eq!(pack_for_stem("d050000l"), Some("extras"));
         assert_eq!(pack_for_stem("SpecialElite-Regular"), Some("extras"));
-        assert_eq!(pack_for_stem("texgyrepagella-regular"), Some("texgyre"));
+        // Compiled in since issue #757: no pack.
+        assert_eq!(pack_for_stem("StandardSymbolsPS"), None);
+        assert_eq!(pack_for_stem("d050000l"), None);
+        assert_eq!(pack_for_stem("texgyrepagella-regular"), None);
         assert_eq!(pack_for_stem("NotoSansJP-Regular"), Some("cjk-thai"));
         assert_eq!(pack_for_stem("Helvetica"), None);
         assert_eq!(pack_for_stem("NoSuchFace"), None);

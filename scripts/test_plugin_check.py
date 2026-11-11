@@ -93,6 +93,9 @@ class Fixture(unittest.TestCase):
         self.plugin["mcpServers"]["s"]["args"] = ["--out-root", "./out"]
         self.assertIn("path", " ".join(self.errors()))
         self.plugin["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/x"]
+        self.mcp["mcpServers"]["s"]["args"] = ["${PLUGIN_ROOT}/x"]
+        self.assertIn("'x' is not a file", " ".join(self.errors()))
+        self.write("plugin/x", "#!/bin/sh\n")
         self.assertEqual(self.errors(), [])
 
     def test_component_path_must_exist(self):
@@ -127,6 +130,35 @@ class Fixture(unittest.TestCase):
         self.plugin["hooks"] = {"SessionStart": []}
         self.assertIn("loads both", " ".join(self.errors()))
 
+    def asset_errors(self):
+        return [e for e in self.errors() if "backticks or a code block" in e]
+
+    def test_asset_paths_in_backticks(self):
+        self.write("plugin/skills/demo/logo.png", "x")
+        self.write("plugin/README.md", "Run `pscat --png out.png f.ps`, "
+                   "see ![logo](skills/demo/logo.png) and https://x.org/a.png.\n")
+        self.write("plugin/skills/demo/ref.md", "Bare `.png`, `out-001.png`, "
+                   "`https://x.org/a.png` and an indented block:\n\n    docs/a.png\n")
+        self.assertEqual(self.asset_errors(), [])
+        # A bundled file named by basename, by path, with double backticks.
+        for body in ("See `logo.png`.", "See ``skills/demo/logo.png``."):
+            self.write("plugin/README.md", body + "\n")
+            errs = self.asset_errors()
+            self.assertEqual(len(errs), 1, errs)
+            self.assertIn("plugin/README.md:1", errs[0])
+            self.assertIn("names a bundled file", errs[0])
+
+    def test_asset_paths_outside_bundle_and_fences(self):
+        self.write("plugin/skills/demo/ref.md", "x\n\n```sh\nopen ../x.png\n```\n"
+                   "~~~\ncp /tmp/f.ttf .\n~~~\nafter `out.png`\n")
+        errs = self.asset_errors()
+        self.assertEqual(len(errs), 2, errs)
+        self.assertIn("ref.md:4", errs[0])
+        self.assertIn("path outside the bundle", errs[0])
+        self.assertIn("ref.md:7", errs[1])
+        self.write("plugin/skills/demo/ref.md", "[massing](https://github.com/o/r/blob/main/a.png)\n")
+        self.assertEqual(self.asset_errors(), [])
+
     def test_codex_version_must_match_cargo(self):
         self.codex_plugin["version"] = "1.2.4"
         self.assertIn("plugin/plugin.json: version", " ".join(self.errors()))
@@ -158,8 +190,60 @@ class Fixture(unittest.TestCase):
         self.assertIn("type None", " ".join(self.errors()))
         self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "../bin/pscat-mcp"}
         self.assertIn("bare executable", " ".join(self.errors()))
-        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "${PLUGIN_ROOT}/bin/x"}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "${PLUGIN_ROOT}/x"}
+        self.assertIn("does not expand placeholders in command", " ".join(self.errors()))
+
+    def test_each_host_its_own_placeholder(self):
+        self.write("plugin/scripts/l.sh", "#!/bin/sh\n")
+        self.plugin["mcpServers"]["s"] = {"command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "sh",
+                                       "args": ["${PLUGIN_ROOT}/scripts/l.sh"]}
         self.assertEqual(self.errors(), [])
+        self.plugin["mcpServers"]["s"]["args"] = ["${PLUGIN_ROOT}/scripts/l.sh"]
+        self.assertIn("not expanded by Claude Code", " ".join(self.errors()))
+        self.plugin["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]
+        self.mcp["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+
+    def test_both_hosts_run_the_same_server(self):
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "other"}
+        self.assertIn("keep them the same", " ".join(self.errors()))
+
+    def test_launcher_host_bindings_are_claude_only(self):
+        # #910: Claude Code passes its userConfig and project directory to the
+        # launcher as --plugin-NAME=VALUE; Codex expands neither.
+        self.write("plugin/scripts/l.sh", "#!/bin/sh\n")
+        self.plugin["mcpServers"]["s"] = {"command": "sh", "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/l.sh", "--plugin-out-root=${user_config.output_dir}",
+            "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"]}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "sh",
+                                       "args": ["${PLUGIN_ROOT}/scripts/l.sh"]}
+        self.assertEqual(self.errors(), [])
+        self.mcp["mcpServers"]["s"]["args"].append("--plugin-out-root=${user_config.output_dir}")
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+        self.mcp["mcpServers"]["s"]["args"][-1] = "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+        # Any other extra argument still makes the two servers differ.
+        self.mcp["mcpServers"]["s"]["args"][-1] = "--timeout"
+        self.assertIn("keep them the same", " ".join(self.errors()))
+
+    def test_no_top_level_bin(self):
+        self.write("plugin/bin/tool", "#!/bin/sh\n")
+        self.assertIn("top-level bin/", " ".join(self.errors()))
+
+    def test_release_pin(self):
+        for tag, ok in (("v1.2.3", True), ("v1.2.4-rc.1", True), ("v1.2.3-rc.2", True),
+                        ("v1.2.4", False), ("v1.2.2-rc.1", False), ("1.2.3", False),
+                        ("v1.2.3\nv1.2.4", False)):
+            self.write("plugin/pscat-release", "# a comment\n" + tag + "\n")
+            errs = [e for e in self.errors() if "pscat-release" in e]
+            self.assertEqual(errs == [], ok, (tag, errs))
+        self.write("Cargo.toml", '[package]\nname = "x"\nversion = "1.2.4-rc.1"\n')
+        self.plugin["version"] = self.codex_plugin["version"] = "1.2.4-rc.1"
+        for tag, ok in (("v1.2.4-rc.1", True), ("v1.2.4-rc.2", True), ("v1.2.3", False)):
+            self.write("plugin/pscat-release", tag + "\n")
+            errs = [e for e in self.errors() if "pscat-release" in e]
+            self.assertEqual(errs == [], ok, (tag, errs))
 
     def test_codex_extension_paths(self):
         self.codex_plugin["extensions"] = {"com.openai": {"onboardingSkill": "./skills/none/SKILL.md"}}

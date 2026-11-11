@@ -46,7 +46,7 @@ pub fn check_with_pages(
 ) -> Vec<LintFinding> {
     let mut findings = Vec::new();
     if render_checks {
-        check_blank_pages(interp, &mut findings);
+        check_blank_pages(&pages_with_ink_flags(interp), &mut findings);
         check_declared_pages(interp, declared_pages, &mut findings);
     }
     check_gsave_balance(interp, &mut findings);
@@ -54,11 +54,36 @@ pub fn check_with_pages(
     findings
 }
 
+/// What `--lint` finds in one `--bands` band's interpreter (issue #847):
+/// [`check_with_pages`] with `render_checks` on and without the blank-page
+/// check. A band-aware program skips the work outside its band, so one
+/// band's canvas can be empty when the page isn't; `bands.rs` runs
+/// [`blank_page_findings`] on the stitched pages instead. What is left
+/// (the declared page count, `gsave` depth, the operand and dictionary
+/// stacks) is program behaviour, the same in every band unless the program
+/// branches on `/BandIndex`.
+pub fn check_band(interp: &Interp, declared_pages: &DeclaredPages) -> Vec<LintFinding> {
+    let mut findings = Vec::new();
+    check_declared_pages(interp, declared_pages, &mut findings);
+    check_gsave_balance(interp, &mut findings);
+    check_stack_leaks(interp, true, &mut findings);
+    findings
+}
+
+/// The blank-page check over finished pages, each with whether anything was
+/// painted on it since the previous page (the ink flag).
+pub fn blank_page_findings(pages: &[(&Pixmap, bool)]) -> Vec<LintFinding> {
+    let mut findings = Vec::new();
+    check_blank_pages(pages, &mut findings);
+    findings
+}
+
 /// The pages `--png` would write: every emitted page, plus the live
 /// canvas whenever nothing has emitted it yet (`has_trailing_art`) or
 /// nothing was ever emitted at all — the same rule `finish_headless`
 /// uses to decide what a `--png` without a `showpage` should write.
-fn pages_with_ink_flags(interp: &Interp) -> Vec<(&Pixmap, bool)> {
+/// (Public so `bands.rs`, in the binary crate, can read each band's ink flags.)
+pub fn pages_with_ink_flags(interp: &Interp) -> Vec<(&Pixmap, bool)> {
     let gfx = interp.gfx();
     let mut pages: Vec<(&Pixmap, bool)> = gfx
         .pages()
@@ -178,10 +203,9 @@ fn check_declared_pages(
     }
 }
 
-fn check_blank_pages(interp: &Interp, findings: &mut Vec<LintFinding>) {
-    let pages = pages_with_ink_flags(interp);
+fn check_blank_pages(pages: &[(&Pixmap, bool)], findings: &mut Vec<LintFinding>) {
     let total = pages.len();
-    for (i, (page, had_ink)) in pages.into_iter().enumerate() {
+    for (i, &(page, had_ink)) in pages.iter().enumerate() {
         // `had_ink` catches a page that's a lazy-erase repeat of the
         // previous one (two showpages with nothing painted between
         // them snapshot the identical, non-blank pixmap twice) even

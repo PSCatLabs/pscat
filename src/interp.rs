@@ -25,7 +25,9 @@ use crate::gfx::{DEFAULT_PAGE, Gfx, GraphicsState};
 use crate::image::{ImageCtx, ImageStep};
 use crate::lexer::{Lexer, Token};
 use crate::limits::{Limits, LimitsError};
-use crate::object::{Dict, Num, Object, PsArray, PsString, SaveHandle, Value};
+use crate::object::{
+    Dict, ERROR_NAME_LIMIT, Num, Object, PsArray, PsString, SaveHandle, Value, cap_text,
+};
 use crate::ops;
 
 /// Generous enough for any sane program (procedure calls in tail position
@@ -36,6 +38,65 @@ const EXEC_STACK_LIMIT: usize = 10_000;
 /// Nesting cap for `{ { { ... } } }` at scan time; the scanner recurses per
 /// nesting level, so this bounds Rust stack use on malicious input.
 const PROC_NESTING_LIMIT: usize = 500;
+
+/// `execute_resolved`'s `via` for an object that was not reached through a
+/// name. No interned name has this id.
+const NO_NAME: u32 = u32::MAX;
+
+/// What a procedure literal (an executable array met in a body) runs as,
+/// so the step loop dispatches it like any operator (#864).
+#[inline(never)]
+fn proc_literal_op(it: &mut Interp) -> Result<(), PsError> {
+    it.proc_literal()
+}
+
+/// A procedure literal (an executable array met in a body).
+#[inline(always)]
+fn is_proc_literal(o: &Object) -> bool {
+    o.executable && matches!(o.value, Value::Array(_))
+}
+
+/// The body of procedure literal `o`, for a fused conditional to run.
+#[inline(always)]
+fn proc_body(o: &Object) -> Option<PsArray> {
+    match &o.value {
+        Value::Array(a) => Some(a.clone()),
+        _ => None,
+    }
+}
+
+/// Whether procedure element `o` runs the operator named `op` (#864): `Some(
+/// NO_NAME)` if it is that operator, `Some(id)` if it is the executable name
+/// `name_id` and that name resolves to the operator in `dstack` right now,
+/// `None` otherwise. Only the operator's own name is looked up, so other
+/// names cost one compare.
+#[inline(always)]
+fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u32) -> Option<u32> {
+    if !o.executable {
+        return None;
+    }
+    // By the operator's name, not its function's address: the same
+    // function can have several addresses, and two functions one. Every
+    // operator object carries the name it is registered under in
+    // systemdict. `op` is the name systemdict's own object carries, and
+    // any copy of that object holds the same `&'static str`: equal
+    // pointers (and lengths) mean equal names, so the fast check is never
+    // wrong, and the text compare covers any other operator object.
+    let is_op = |o: &Object| {
+        o.executable
+            && matches!(&o.value, Value::Operator(f) if std::ptr::eq(f.name, op) || f.name == op)
+    };
+    match &o.value {
+        Value::Operator(_) => is_op(o).then_some(NO_NAME),
+        Value::Name(n) if n.id() == name_id => dstack
+            .iter()
+            .rev()
+            .find_map(|d| d.borrow().get_id_ref(name_id).map(is_op))
+            .is_some_and(|b| b)
+            .then_some(name_id),
+        _ => None,
+    }
+}
 
 enum Frame {
     /// Tokens being scanned incrementally from program source.
@@ -76,31 +137,42 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
+    /// `--profile` (issue #737): planted under the body of a procedure
+    /// called through a name. Reached, or unwound, it closes that call in
+    /// the profiler. Only exists while profiling.
+    ProfReturn,
 }
 
-/// One unit of work `next_item` hands the step loop. A procedure's
-/// operators and executable names, almost every element a bound
-/// library runs, arrive as a plain fn pointer or name id: no `Object`
-/// clone, no refcount traffic, no drop (#323).
+/// What `next_item` hands the step loop.
 enum Item {
-    Op(crate::object::OpFn),
-    Name(u32),
+    /// An object scanned from source, to execute (or push).
     Obj(Object),
+    /// A procedure frame with an element left is on top: the step loop
+    /// runs that element with [`Interp::proc_step`], in this same step
+    /// (#863). Procedure elements never pass through `next_item`'s
+    /// `Action` machinery. Also returned, with a loop frame on top, when a
+    /// run of `EMPTY_RUN` empty-body iterations pauses (#900); `proc_step`
+    /// then finds no procedure and the step does nothing more.
+    Proc,
 }
 
-impl Item {
-    /// Decide what a procedure element is, from a borrow of it.
-    #[inline]
-    fn fetch(o: &Object) -> Item {
-        if o.executable {
-            match &o.value {
-                Value::Operator(op) => return Item::Op(op.func),
-                Value::Name(n) => return Item::Name(n.id()),
-                _ => {}
-            }
-        }
-        Item::Obj(o.clone())
-    }
+/// What [`Interp::proc_step`] did with the top of the execution stack.
+enum ProcStep {
+    /// A procedure element that is an operator: call it. In the plain loop
+    /// a procedure literal comes as `Op(proc_literal_op)` too (#864).
+    Op(crate::object::OpFn),
+    /// A procedure element that is an executable name: look it up and run it.
+    Name(u32),
+    /// A procedure literal, to push with [`Interp::proc_literal`]: what
+    /// `proc_step::<true>` returns for one, so `--profile-ops` can tell it
+    /// from an operator. The plain loop gets it as
+    /// `Op(proc_literal_op)` (#864), so it has no arm of its own there.
+    Lit,
+    /// A procedure element that is pushed (a literal other than a
+    /// procedure body): already on the operand stack.
+    Pushed,
+    /// The top frame is not a procedure: take the general path.
+    Other,
 }
 
 pub(crate) enum PostOp {
@@ -236,6 +308,22 @@ pub struct Interp {
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
     last_name: Option<u32>,
+    /// The interned ids of the names `if` and `ifelse` (#864's fused
+    /// conditionals).
+    if_id: u32,
+    ifelse_id: u32,
+    /// The names systemdict's `if` and `ifelse` operator objects carry:
+    /// every copy of them (a bound body's) holds the same `&'static str`,
+    /// so [`runs_operator`] matches them by pointer before comparing text.
+    if_name: &'static str,
+    ifelse_name: &'static str,
+    /// Fused steps run (#864); see [`Interp::fused_steps`].
+    fused_steps: u64,
+    /// Steps left in the running slice after the current one (#864): a
+    /// fused run of several elements is charged here. Each step loop sets
+    /// it on entry (`step_n_timed` to zero, so it never fuses); nothing
+    /// runs a step loop from inside an operator, so it is not reentered.
+    slice_left: usize,
     /// The error most recently caught by a `stopped`, kept so that a
     /// `stop` which reaches the top level can report it the way
     /// Ghostscript's outermost job wrapper does (issue #142).
@@ -265,6 +353,10 @@ pub struct Interp {
     /// (issue #728), so a `save`/`restore` loop warns once per name per
     /// interpreter, not once per call.
     pub(crate) font_notes_shown: std::collections::HashSet<String>,
+    /// The notes `findfont` raised for substituted pack faces this run,
+    /// one per name, newline-joined. The wasm build has no stderr, so
+    /// the npm package reads them here (`Renderer.warnings`, issue #750).
+    pub(crate) font_warnings: String,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
     pub(crate) rand_state: i64,
@@ -275,14 +367,20 @@ pub struct Interp {
     /// `srand` of a value `rrand` handed out under the override (a
     /// saved stream coming back, issue #202), which restores it exactly.
     /// `seed_override_fired`
-    /// records whether an override actually intercepted a call, so a
-    /// sweep over a script that never calls `srand` can be flagged
-    /// instead of silently producing identical frames.
+    /// records whether an override actually intercepted a call (or
+    /// sampled the override-seeded noise table, see `noise_from_override`),
+    /// so a sweep over a script that never calls `srand` or samples noise
+    /// can be flagged instead of silently producing identical frames.
     pub(crate) seed_override: Option<i64>,
     /// The permutation table the noise operators sample (`noiseseed`,
     /// issue #734). Separate from `rand_state`, so noise never moves a
     /// `rand` sequence.
     pub(crate) noise_perm: [u8; 256],
+    /// `noise_perm` was built from the seed override (issue #753), and the
+    /// program has not called `noiseseed` since. A program's own
+    /// `noiseseed` clears it and keeps its own table; sampling the table
+    /// while it is set counts as the override firing.
+    pub(crate) noise_from_override: bool,
     pub(crate) seed_override_fired: bool,
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
@@ -308,9 +406,20 @@ pub struct Interp {
     /// Set once the capture buffer has dropped output and carries the
     /// truncation note; later writes are discarded.
     stdout_truncated: bool,
+    /// When set, what the program writes to stderr (`(%stderr)` files,
+    /// `handleerror`, `findfont`'s stand-in notes) is dropped; the notes
+    /// still collect in `font_warnings`. `pscat --bands` sets it on every
+    /// band but the top one (#877).
+    quiet_stderr: bool,
     /// Caps on the running program (issue #604); `Limits::none()` unless
     /// `set_limits` was called, and then every limit check is skipped.
     limits: Limits,
+    /// The most device pixels a page `setpagedevice` makes may have
+    /// (`--max-pixels`, #909); `None` leaves only the 8000-a-side ceiling.
+    pub(crate) max_page_pixels: Option<u64>,
+    /// `setpagedevice` keys already warned about as unsupported, and
+    /// whether an explicit page's refusal was noted (#909): each once.
+    pub(crate) page_device_notes: std::collections::HashSet<String>,
     /// Steps run by the current program (`begin_source` zeroes it).
     steps_used: u64,
     /// Starts when the current program does; read only when `limits` has a
@@ -324,6 +433,28 @@ pub struct Interp {
     /// Directories the program may write files in (issue #740); empty
     /// unless `set_write_roots` was called.
     write_roots: crate::write_roots::WriteRoots,
+    /// Directories the program may read files from (issue #763); `None`
+    /// (the default) reads wherever the search order finds a file.
+    read_roots: Option<crate::read_roots::ReadRoots>,
+    /// Disk files the program has open for writing (issue #762), weakly:
+    /// a file nothing refers to any more drops, closing its descriptor and
+    /// flushing itself. Counted against [`MAX_OPEN_OUTPUT_FILES`] and
+    /// flushed together by [`Interp::flush_outputs`].
+    open_outputs: Vec<std::rc::Weak<RefCell<crate::file::PsFile>>>,
+    /// Set by a disk file dropped with bytes it could not write; shared
+    /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
+    lost_write: Rc<Cell<bool>>,
+    /// Bytes the program has handed to disk files so far (issue #762).
+    bytes_written: u64,
+    /// The most bytes it may hand to disk files; `None` for no cap.
+    max_write_bytes: Option<u64>,
+    /// `--profile` (issue #737): `Some` while profiling. A program that
+    /// is not profiled never looks at it per step (see `step_n`).
+    profile: Option<Box<crate::profile::Profiler>>,
+    /// `--profile-ops`: the name of the operator `proc_step::<true>` last
+    /// returned as `ProcStep::Op`, for `step_n_timed` to label its row with
+    /// (the step itself carries only the function). Written only there.
+    op_name: &'static str,
     pub(crate) gfx: Gfx,
 }
 
@@ -336,20 +467,38 @@ pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
 /// that the clock read is lost in the noise.
 const LIMITED_SLICE: usize = 512;
 
+/// The most disk files a program may have open for writing at once
+/// (issue #762); one more is `limitcheck`.
+pub const MAX_OPEN_OUTPUT_FILES: usize = 64;
+
 /// Loop iterations between looks at the limits from inside `next_item`.
 const POLL_PERIOD: u32 = 1024;
+
+/// The most iterations of an empty loop body (`{ } loop`, `1 1 1e9 { } for`)
+/// one step runs; they are free up to there, as they always were, so a short
+/// empty loop keeps its step count (#900).
+const EMPTY_RUN: u32 = 1024;
 const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
+    /// Nothing chose that size, so a program's `setpagedevice /PageSize`
+    /// may replace it ([`PageSizeSource::Default`](crate::gfx::PageSizeSource)).
     pub fn new() -> Self {
         // The default page size is a nonzero constant; this cannot fail.
-        Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid")
+        let mut interp =
+            Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid");
+        interp
+            .gfx
+            .set_page_size_source(crate::gfx::PageSizeSource::Default);
+        interp
     }
 
     /// An interpreter with a `width`x`height`-point page at 72 dpi (one
     /// pixel per point). `None` if the size is unusable: zero, or more than
-    /// 8000 pixels on a side.
+    /// 8000 pixels on a side. The caller chose the size, so it is
+    /// [`PageSizeSource::Explicit`](crate::gfx::PageSizeSource): a program's
+    /// `setpagedevice` cannot change it (#909).
     pub fn with_page(width: u32, height: u32) -> Option<Self> {
         Self::with_page_scaled(width, height, 1.0)
     }
@@ -357,6 +506,9 @@ impl Interp {
     /// A page of `width`x`height` *points* rendered at `scale` device
     /// pixels per point: `scale` is dpi / 72, so 2.0 renders at 144 dpi.
     /// `None` if the page is more than 8000 pixels on a side at that scale.
+    /// Explicit, like [`with_page`](Self::with_page); a host that wants the
+    /// program's `setpagedevice` to size the page sets another source with
+    /// [`Gfx::set_page_size_source`](crate::gfx::Gfx::set_page_size_source).
     pub fn with_page_scaled(width: u32, height: u32, scale: f32) -> Option<Self> {
         let px = |points: u32| ((points as f32 * scale).round() as u32).max(1);
         let (pw, ph) = (px(width), px(height));
@@ -365,9 +517,16 @@ impl Interp {
         if pw > 8000 || ph > 8000 {
             return None;
         }
-        let gfx = Gfx::with_scale(pw, ph, scale)?;
+        let mut gfx = Gfx::with_scale(pw, ph, scale)?;
+        gfx.set_page_points(f64::from(width), f64::from(height));
+        gfx.set_page_size_source(crate::gfx::PageSizeSource::Explicit);
         let mut system = Dict::new();
         ops::install_all(&mut system);
+        let op_name = |name: &'static str| match system.get(name).map(|o| o.value) {
+            Some(Value::Operator(op)) => op.name,
+            _ => name,
+        };
+        let (if_name, ifelse_name) = (op_name("if"), op_name("ifelse"));
         // Error machinery: $error is where recovered errors are recorded;
         // errordict holds a handler per error name, so a program can
         // re-raise a caught error with `errordict /name get exec` (issue
@@ -406,13 +565,21 @@ impl Interp {
             save_stack: Vec::new(),
             quit_requested: false,
             last_name: None,
+            if_id: crate::name::intern("if").id(),
+            if_name,
+            ifelse_name,
+            ifelse_id: crate::name::intern("ifelse").id(),
+            fused_steps: 0,
+            slice_left: 0,
             caught_error: None,
             error_command: None,
             last_line: None,
             font_notes_shown: std::collections::HashSet::new(),
+            font_warnings: String::new(),
             rand_state: 1,
             seed_override: None,
             noise_perm: crate::ops::noise::perm_from_seed(0),
+            noise_from_override: false,
             seed_override_fired: false,
             packing: false,
             object_format: 2,
@@ -421,12 +588,22 @@ impl Interp {
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
+            quiet_stderr: false,
             limits: Limits::none(),
+            max_page_pixels: None,
+            page_device_notes: std::collections::HashSet::new(),
             steps_used: 0,
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,
             poll_in: POLL_PERIOD,
             write_roots: Default::default(),
+            read_roots: None,
+            open_outputs: Vec::new(),
+            lost_write: Rc::new(Cell::new(false)),
+            bytes_written: 0,
+            max_write_bytes: None,
+            profile: None,
+            op_name: "",
             gfx,
         })
     }
@@ -474,10 +651,33 @@ impl Interp {
         }
         self.limits = limits;
         self.mem_base = crate::memtrack::live_bytes();
+        self.gfx
+            .set_memory_budget(limits.max_memory.map(|max| (self.mem_base, max)));
         self.steps_used = 0;
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
         Ok(())
+    }
+
+    /// Cap the pages `setpagedevice` may make at `max` device pixels
+    /// (`pscat --max-pixels`, #909); `None` (the default) leaves only the
+    /// 8000-pixels-a-side ceiling every page has. A larger `/PageSize` is a
+    /// `configurationerror`, with a stderr line saying why. The page the
+    /// interpreter was made with is the host's to check.
+    pub fn set_max_page_pixels(&mut self, max: Option<u64>) {
+        self.max_page_pixels = max;
+    }
+
+    /// Count the memory cap's heap growth from `base` bytes (a
+    /// [`memtrack::live_bytes`](crate::memtrack::live_bytes) level) instead
+    /// of the level when [`set_limits`](Self::set_limits) ran. For a host
+    /// that runs several interpreters under one budget: `pscat --bands`
+    /// gives every band the same base, taken before any band starts (#844).
+    /// Call it after `set_limits`, which resets the base.
+    pub fn set_memory_base(&mut self, base: usize) {
+        self.mem_base = base;
+        self.gfx
+            .set_memory_budget(self.limits.max_memory.map(|max| (base, max)));
     }
 
     /// The limits in force ([`Limits::none`] by default).
@@ -514,6 +714,132 @@ impl Interp {
         &self.write_roots
     }
 
+    /// Cap the bytes a program may write to disk files (issue #762; the
+    /// CLI's `--max-write-bytes`); `None` removes the cap, and it is off by
+    /// default. The count is for the interpreter's whole life, starts at
+    /// zero, and is the bytes handed to `write`, `writestring`,
+    /// `writehexstring` and `writereals`, so overwriting a file after
+    /// `setfileposition` counts again. A write that would pass the cap
+    /// writes nothing and raises `limitcheck`. Calling this again also
+    /// starts the count again.
+    pub fn set_max_write_bytes(&mut self, max: Option<u64>) {
+        self.max_write_bytes = max;
+        self.bytes_written = 0;
+    }
+
+    /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
+    pub fn max_write_bytes(&self) -> Option<u64> {
+        self.max_write_bytes
+    }
+
+    /// Whether `n` more bytes fit under the write cap.
+    pub(crate) fn check_write_bytes(&self, n: u64) -> Result<(), PsError> {
+        match self.max_write_bytes {
+            Some(max) if self.bytes_written.saturating_add(n) > max => Err(PsError::Limitcheck),
+            _ => Ok(()),
+        }
+    }
+
+    /// Count `n` bytes against the write cap, or `limitcheck`.
+    pub(crate) fn charge_write_bytes(&mut self, n: u64) -> Result<(), PsError> {
+        self.check_write_bytes(n)?;
+        self.bytes_written = self.bytes_written.saturating_add(n);
+        Ok(())
+    }
+
+    /// Forget output files that are closed or gone, and refuse (with
+    /// `limitcheck`) another one when [`MAX_OPEN_OUTPUT_FILES`] are open.
+    /// Called before a disk file is opened, so a refusal truncates nothing.
+    pub(crate) fn check_output_slot(&mut self) -> Result<(), PsError> {
+        self.open_outputs.retain(|w| {
+            w.upgrade()
+                .is_some_and(|f| f.try_borrow().map_or(true, |f| f.is_open()))
+        });
+        if self.open_outputs.len() >= MAX_OPEN_OUTPUT_FILES {
+            return Err(PsError::Limitcheck);
+        }
+        Ok(())
+    }
+
+    /// The note a [`DiskSink`](crate::file::DiskSink) sets when it is dropped
+    /// with bytes it could not write.
+    pub(crate) fn lost_write_note(&self) -> Rc<Cell<bool>> {
+        self.lost_write.clone()
+    }
+
+    /// Track a disk output file just opened (after `check_output_slot`).
+    pub(crate) fn register_output(&mut self, f: &crate::file::FileHandle) {
+        self.open_outputs.push(Rc::downgrade(f));
+    }
+
+    /// Write out the buffered bytes of every open disk file, and report a
+    /// failure: a file whose write failed, or one that was dropped without
+    /// being closed and could not write (disk full), is `ioerror`. Every
+    /// file is flushed regardless. The `pscat` binary calls this on every
+    /// exit path, so a program that lost data exits non-zero; an embedder
+    /// that leaves files open should call it before it drops the `Interp`
+    /// (the drop flushes too, but cannot tell anyone). The note about a
+    /// dropped file is cleared by this call.
+    pub fn flush_outputs(&mut self) -> Result<(), PsError> {
+        let flushed = self.flush_files();
+        if self.lost_write.replace(false) {
+            return Err(PsError::Io);
+        }
+        flushed
+    }
+
+    /// [`Interp::flush_outputs`] for the places that cannot raise (`showpage`,
+    /// `quit`, `flush`, before a read): the bytes go out, and a failure stays
+    /// on the file (or in the dropped-file note) for the exit flush to report.
+    pub(crate) fn flush_files(&mut self) -> Result<(), PsError> {
+        let mut result = Ok(());
+        for w in &self.open_outputs {
+            if let Some(f) = w.upgrade()
+                && let Ok(mut f) = f.try_borrow_mut()
+                && let Err(e) = f.flush_disk()
+            {
+                result = Err(e);
+            }
+        }
+        result
+    }
+
+    /// Confine reads to `dirs` (issue #763; the CLI's `--read-root DIR`,
+    /// and what `pscat-mcp` always does): `(path) (r) file`, `run`,
+    /// `readreals` and `filenameforall` read and list only files that
+    /// resolve inside one of them, and refuse the rest with
+    /// `invalidfileaccess`, `..` and symlink escapes included
+    /// (`src/read_roots.rs`). The embedded copy of `lib/` stays available.
+    /// An empty slice confines reads to that embedded copy alone. Fails,
+    /// changing nothing, if a directory doesn't exist.
+    ///
+    /// ```no_run
+    /// let mut interp = pscat::Interp::new();
+    /// interp.set_read_roots(&["."])?;
+    /// assert!(interp.run_str("(/etc/hosts) (r) file").is_err());
+    /// # Ok::<(), String>(())
+    /// ```
+    pub fn set_read_roots<P: AsRef<std::path::Path>>(&mut self, dirs: &[P]) -> Result<(), String> {
+        self.read_roots = Some(crate::read_roots::ReadRoots::new(dirs)?);
+        Ok(())
+    }
+
+    /// Lift the read confinement again: reads are open, the default.
+    pub fn clear_read_roots(&mut self) {
+        self.read_roots = None;
+    }
+
+    /// The canonical read roots, or `None` when reads are open (the
+    /// default).
+    pub fn read_roots(&self) -> Option<&[std::path::PathBuf]> {
+        self.read_roots.as_ref().map(|r| r.dirs())
+    }
+
+    /// The read policy, for the operators that read from disk.
+    pub(crate) fn read_policy(&self) -> Option<&crate::read_roots::ReadRoots> {
+        self.read_roots.as_ref()
+    }
+
     /// Where writing to `name` would go: a path inside the write roots, or
     /// the PostScript error the program gets (`invalidfileaccess` outside
     /// them or with none set). Operators that open files for writing use
@@ -536,6 +862,9 @@ impl Interp {
     /// run a slice, look at the page, run the next.
     pub fn begin_source(&mut self, src: &[u8]) {
         self.quit_requested = false;
+        // A canvas the last program could not restore within the memory cap
+        // stopped that program; it does not stop this one (#909).
+        self.gfx.clear_memory_refused();
         self.last_name = None;
         self.last_line = None;
         if !self.limits.is_none() {
@@ -547,7 +876,10 @@ impl Interp {
             .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
     }
 
-    /// Execute up to `budget` objects. `Ok(true)` means work remains. On
+    /// Execute up to `budget` objects. A step that executes no object, such
+    /// as a run of up to `EMPTY_RUN` iterations of an empty loop body,
+    /// counts as one, so the call always returns after bounded work (#900).
+    /// `Ok(true)` means work remains. On
     /// error (or `quit`) the execution stack is cleared — the program is
     /// aborted — but the operand stack and canvas are left for inspection.
     pub fn step_n(&mut self, budget: usize) -> Result<bool, PsError> {
@@ -566,7 +898,13 @@ impl Interp {
         } else {
             budget
         };
-        let mut result = self.step_n_inner(budget);
+        // `--profile-ops` times every operator, in its own copy of the loop
+        // (checked once per slice, so the plain loop carries no per-step test).
+        let mut result = if self.profile.as_deref().is_some_and(|p| p.ops_on()) {
+            self.step_n_timed(budget)
+        } else {
+            self.step_n_inner(budget)
+        };
         if limited {
             result = self.after_slice(result, budget);
         }
@@ -622,6 +960,11 @@ impl Interp {
     }
 
     fn check_time_and_memory(&self) -> Result<(), PsError> {
+        // A page device a restore could not bring back within the memory
+        // cap (#909): the canvas was refused, and the run stops here.
+        if self.gfx.memory_refused() {
+            return Err(PsError::MemoryExceeded);
+        }
         if let Some(max) = self.limits.max_time
             && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
         {
@@ -636,9 +979,9 @@ impl Interp {
     }
 
     /// Called once per loop iteration, from inside `next_item`. A loop whose
-    /// body is empty (`{ } loop`, `1 1 1000000000 { } for`) never yields an
-    /// object, so it never returns to `step_n` where the limits are read;
-    /// this counts the iterations itself. One decrement and a branch per
+    /// body is empty (`{ } loop`, `1 1 1000000000 { } for`) yields no object,
+    /// so it runs up to `EMPTY_RUN` iterations before it returns to `step_n`
+    /// where the limits are read; this counts the iterations itself. One decrement and a branch per
     /// iteration; the slow part runs once per `POLL_PERIOD`.
     #[inline]
     fn tick(&mut self) -> Result<(), PsError> {
@@ -722,7 +1065,13 @@ impl Interp {
         match frame {
             // Type 3 glyph contexts' graphics-state snapshot and paint
             // suppression must not leak past the show that created them.
-            Frame::Show(mut ctx) => ctx.cleanup(&mut self.gfx),
+            Frame::Show(mut ctx) => {
+                ctx.cleanup(&mut self.gfx);
+                self.after_device_change();
+            }
+            // A profiled call unwound by `stop`, an error, `exit` or `quit`
+            // ends here.
+            Frame::ProfReturn => self.prof_exit(),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -755,27 +1104,58 @@ impl Interp {
         }
     }
 
-    fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
+    /// [`step_n_inner`](Self::step_n_inner) with a clock read around each
+    /// operator (`--profile-ops`). Kept as a copy of the loop, not a generic
+    /// parameter of it: the plain loop must stay exactly as the compiler
+    /// had it (#737 measured a generic version 19% slower on `fib`). The
+    /// helpers it shares with that loop are `#[inline(always)]` so the
+    /// second call site does not cost them their inlining.
+    ///
+    /// Time is taken only for operators the loop reaches by pointer or by
+    /// name. An operator's own work is what is timed: `for`, `if` and
+    /// `repeat` only push a frame (their bodies run as later steps, and
+    /// are timed there), and `show` and `image` do their work in later
+    /// frame steps of `next_item`, so they show only their set-up here.
+    #[cold]
+    #[inline(never)]
+    fn step_n_timed(&mut self, budget: usize) -> Result<bool, PsError> {
+        // No steps to spare: a procedure literal is pushed alone, never
+        // fused, so every operator is still timed and counted on its own.
+        self.slice_left = 0;
         for _ in 0..budget {
             if self.quit_requested {
                 return Ok(false);
             }
-            let item = match self.next_item() {
-                Ok(None) => return Ok(false),
-                Ok(Some(item)) => item,
-                Err(e) => {
-                    // A scan/syntax error short-circuits out of
-                    // next_item before any Action ran, so the failing
-                    // Scanner frame is still on top with its line set.
-                    self.sync_scan_line();
-                    self.recover(e)?;
-                    continue;
+            let mut step = self.proc_step::<true>();
+            if let ProcStep::Other = step {
+                match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
+                    Ok(Some(Item::Obj(obj))) => {
+                        let done = match (&obj.value, obj.executable) {
+                            (Value::Name(n), true) => self.execute_name_timed(n.id()),
+                            (Value::Operator(op), true) => self.timed_op(op.name, op.func),
+                            _ => self.execute_element(obj),
+                        };
+                        if let Err(e) = done {
+                            self.recover(e)?;
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
+                    }
                 }
-            };
-            let done = match item {
-                Item::Op(func) => func(self),
-                Item::Name(id) => self.execute_name(id),
-                Item::Obj(obj) => self.execute_element(obj),
+            }
+            let done = match step {
+                // A procedure literal is not an operator: not timed
+                // (and never fused here, `slice_left` being zero).
+                ProcStep::Lit => self.proc_literal(),
+                ProcStep::Op(func) => self.timed_op(self.op_name, func),
+                ProcStep::Name(id) => self.execute_name_timed(id),
+                ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
                 self.recover(e)?;
@@ -784,9 +1164,262 @@ impl Interp {
         Ok(!self.estack.is_empty())
     }
 
+    #[inline(never)]
+    fn timed_op(&mut self, name: &'static str, func: crate::object::OpFn) -> Result<(), PsError> {
+        let t0 = crate::clock::Clock::mono_ns();
+        let r = func(self);
+        let ns = crate::clock::Clock::mono_ns().saturating_sub(t0);
+        if let Some(p) = self.profile.as_mut() {
+            p.record_op(name, ns);
+        }
+        r
+    }
+
+    /// `execute_name`, timing the operator if the name resolves to one.
+    fn execute_name_timed(&mut self, id: u32) -> Result<(), PsError> {
+        self.last_name = Some(id);
+        let resolved = self
+            .load_id(id)
+            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
+        if resolved.executable
+            && let Value::Operator(op) = &resolved.value
+        {
+            return self.timed_op(op.name, op.func);
+        }
+        self.execute_resolved(resolved, id)
+    }
+
+    // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
+    fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
+        // An explicit count of the steps left, so a fused run of several
+        // elements (#864) can charge each of them.
+        self.slice_left = budget;
+        while self.slice_left > 0 {
+            self.slice_left -= 1;
+            if self.quit_requested {
+                return Ok(false);
+            }
+            // A procedure element (nearly every step of a bound library)
+            // is dispatched straight from the frame. Anything else goes
+            // through `next_item`, which hands back `Item::Proc` when a
+            // loop iteration (or a frame finishing) leaves a procedure on
+            // top: its first element runs in this same step, as it always
+            // has.
+            let done = match self.proc_step::<false>() {
+                ProcStep::Op(func) => func(self),
+                ProcStep::Name(id) => self.execute_name(id),
+                ProcStep::Pushed | ProcStep::Lit => continue,
+                ProcStep::Other => match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
+                    Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
+                        ProcStep::Op(func) => func(self),
+                        ProcStep::Name(id) => self.execute_name(id),
+                        // `Other`: a run of empty loop iterations paused
+                        // with no procedure on top (#900), a step that
+                        // did nothing.
+                        ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
+                    },
+                    Err(e) => {
+                        // A scan/syntax error short-circuits out of
+                        // next_item before any Action ran, so the failing
+                        // Scanner frame is still on top with its line set.
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
+                    }
+                },
+            };
+            if let Err(e) = done {
+                self.recover(e)?;
+            }
+        }
+        Ok(!self.estack.is_empty())
+    }
+
+    /// One step of a procedure frame on top of the execution stack, taken
+    /// without going through `next_item` (#863): the element is looked at
+    /// in place (one momentary borrow, released before anything executes,
+    /// so a `put` into the running procedure is still seen, #323). A
+    /// literal is pushed right here, numbers copied without the
+    /// out-of-line `clone`; an operator or executable name comes back for
+    /// the caller to run. As in `next_item`, the frame is popped as it
+    /// yields its last element, before that element runs (tail calls).
+    /// `sync_scan_line` is not needed: the top frame is not a scanner.
+    #[inline(always)]
+    fn proc_step<const TIMED: bool>(&mut self) -> ProcStep {
+        let Interp {
+            estack,
+            ostack,
+            op_name,
+            ..
+        } = self;
+        let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
+            return ProcStep::Other;
+        };
+        let i = *pc;
+        // `pc` is advanced in here, except for a procedure literal, which
+        // `proc_literal` takes from where it is; `pc` then still points
+        // inside the body, so the tail pop below is not taken.
+        let Some(step) = body.peek(i, |o| {
+            if o.executable {
+                match &o.value {
+                    Value::Operator(op) => {
+                        *pc = i + 1;
+                        if TIMED {
+                            *op_name = op.name;
+                        }
+                        return ProcStep::Op(op.func);
+                    }
+                    Value::Name(n) => {
+                        *pc = i + 1;
+                        return ProcStep::Name(n.id());
+                    }
+                    Value::Array(_) => {
+                        return if TIMED {
+                            ProcStep::Lit
+                        } else {
+                            ProcStep::Op(proc_literal_op)
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            ostack.push(o.clone_inline());
+            *pc = i + 1;
+            ProcStep::Pushed
+        }) else {
+            // Not reached (an exhausted frame is popped as it yields its
+            // last element), but `next_item` knows what to do with one.
+            return ProcStep::Other;
+        };
+        if *pc >= body.len() {
+            // Known to be this `Proc` frame: drop just its body, not
+            // through the general frame drop glue.
+            if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
+                drop(body);
+            }
+        }
+        step
+    }
+
+    /// The procedure literal at the top frame's `pc` (#864): push it, or
+    /// run it fused with the elements after it, as one step, when they are
+    /// `{ } if` or `{ } { } ifelse` and the operand under the literal is a
+    /// boolean ([`fused_conditional`](Self::fused_conditional)); a fused
+    /// run's extra steps are charged to `slice_left`. Never fails: a fused
+    /// run is only taken where it cannot.
+    fn proc_literal(&mut self) -> Result<(), PsError> {
+        let left = self.slice_left;
+        if left > 0
+            && let Some(Object {
+                value: Value::Boolean(c),
+                ..
+            }) = self.ostack.last()
+            && let Some(extra) = self.fused_conditional(left, *c)
+        {
+            self.slice_left -= extra;
+            return Ok(());
+        }
+        let Some(Frame::Proc { body, pc }) = self.estack.last_mut() else {
+            unreachable!("a procedure literal with no procedure frame on top")
+        };
+        let i = *pc;
+        // The body's handle copied in place, not through `Value::clone`.
+        if let Some(Some(lit)) = body.peek(i, proc_body) {
+            self.ostack.push(Object::exec(Value::Array(lit)));
+        }
+        *pc = i + 1;
+        if *pc >= body.len() {
+            // Known to be this `Proc` frame: drop just its body.
+            if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
+                drop(body);
+            }
+        }
+        Ok(())
+    }
+
+    /// The procedure literal at the top frame's `pc` and the elements after
+    /// it, as one step, if they are `{ } if` or `{ } { } ifelse`; `c` is the
+    /// boolean on top of the operand stack. A fused run of `n` elements
+    /// takes `n - 1` of the `left` steps, so it runs only when that many
+    /// are left, and the step count is the same either way. Returns those
+    /// extra steps, or `None` if nothing fuses (nothing is done then).
+    ///
+    /// Nothing is compiled or remembered: the elements are read from the
+    /// body as it is now, under one borrow. That is the same as reading
+    /// them a step apart, since pushing a literal runs no code that could
+    /// change the body or the dictionaries in between. A run fuses only
+    /// where the conditional cannot fail (a boolean and procedure literals
+    /// as its operands, and room on the execution stack for the branch), so
+    /// every error is raised by unfused elements, exactly as before.
+    /// The conditional counts when it is the operator itself (a bound body)
+    /// or the name `if` or `ifelse` resolving to it now (an unbound one);
+    /// then `last_name` is set as running the name would set it.
+    #[inline(never)]
+    fn fused_conditional(&mut self, left: usize, c: bool) -> Option<usize> {
+        let Interp {
+            estack,
+            ostack,
+            dstack,
+            if_id,
+            ifelse_id,
+            if_name,
+            ifelse_name,
+            ..
+        } = self;
+        let depth = estack.len();
+        let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
+            return None;
+        };
+        let i = *pc;
+        // (elements fused, the branch to run, the name it ran through)
+        let (n, branch, via) = body.with_slice(|els| {
+            let lit = els.get(i)?;
+            let next = els.get(i + 1)?;
+            if let Some(via) = runs_operator(next, dstack, if_name, *if_id) {
+                return Some((2, if c { proc_body(lit) } else { None }, via));
+            }
+            if left < 2 || !is_proc_literal(next) {
+                return None;
+            }
+            let via = runs_operator(els.get(i + 2)?, dstack, ifelse_name, *ifelse_id)?;
+            Some((3, proc_body(if c { lit } else { next }), via))
+        })?;
+        let tail = i + n >= body.len();
+        // The branch's frame goes where `if` would put it, after the tail
+        // pop. If that would overflow the execution stack, nothing fuses:
+        // the elements run one at a time and `if` raises the error.
+        let branch = branch.filter(|b| !b.is_empty());
+        if branch.is_some() && depth - usize::from(tail) >= EXEC_STACK_LIMIT {
+            return None;
+        }
+        ostack.pop();
+        *pc = i + n;
+        if tail {
+            self.estack.pop();
+        }
+        if via != NO_NAME {
+            self.last_name = Some(via);
+        }
+        self.fused_steps += 1;
+        if let Some(b) = branch {
+            self.estack.push(Frame::Proc { body: b, pc: 0 });
+        }
+        Some(n - 1)
+    }
+
+    /// The number of fused steps run so far (#864): a test's check that a
+    /// fused path was taken at all.
+    #[doc(hidden)]
+    pub fn fused_steps(&self) -> u64 {
+        self.fused_steps
+    }
+
     /// If a `stopped` context encloses the error, record it in `$error`,
     /// unwind to the context, and push `true` — errors are catchable.
     /// Otherwise propagate; the front end reports it.
+    #[inline(always)]
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
         let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
@@ -944,10 +1577,11 @@ impl Interp {
             },
         };
         let command = match err {
-            PsError::Undefined(name) => name.clone(),
-            _ => self
-                .last_executed_name()
-                .unwrap_or_else(|| "--none--".to_string()),
+            PsError::Undefined(name) => cap_text(name, ERROR_NAME_LIMIT),
+            _ => self.last_executed_name().map_or_else(
+                || "--none--".to_string(),
+                |n| cap_text(&n, ERROR_NAME_LIMIT),
+            ),
         };
         match self.last_line {
             Some(line) => {
@@ -959,12 +1593,12 @@ impl Interp {
 
     /// Pull the next object to execute off the execution stack, popping
     /// exhausted frames and iterating loop frames as needed.
+    #[inline(always)]
     fn next_item(&mut self) -> Result<Option<Item>, PsError> {
         // Frame inspection and stack mutation can't overlap borrows, so
         // each pass decides on an action first, then applies it.
         enum Action {
             Yield(Item),
-            PopThenYield(Item),
             Pop,
             PopThenPush(Object),
             PopThenPush2(Object, Object),
@@ -983,8 +1617,19 @@ impl Interp {
             /// and run its top-level objects in order, as if each had been
             /// a token (#733).
             RunSequence(Vec<u8>),
+            /// A profiled call returned (`--profile`).
+            ProfExit,
         }
+        // Iterations of an empty body yield nothing, so they run here, in a
+        // row, inside one step. After `EMPTY_RUN` of them the call returns
+        // `Item::Proc` with no procedure on top, which the step loops take
+        // as a step that did nothing; so `step_n` always gets back control
+        // and every slice is bounded (#900).
+        let mut empty_run = 0u32;
         loop {
+            // A Type 3 glyph's end restores its graphics state, which can
+            // bring an older page device back (#909).
+            let mut stepped_show = false;
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -1020,25 +1665,16 @@ impl Interp {
                         Some(Token::BinarySeq(bytes)) => Action::RunSequence(bytes),
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
-                    // The element is inspected in place (one momentary
-                    // borrow, released before it executes, so a `put`
-                    // into the running procedure still works): an
-                    // operator or executable name yields without
-                    // cloning the object (#323).
-                    Frame::Proc { body, pc } => match body.peek(*pc, Item::fetch) {
-                        None => Action::Pop,
-                        Some(o) => {
-                            *pc += 1;
-                            // Tail call: the frame is finished the moment
-                            // it yields its last element, so drop it
-                            // before executing.
-                            if *pc >= body.len() {
-                                Action::PopThenYield(o)
-                            } else {
-                                Action::Yield(o)
-                            }
+                    // The step loop runs procedure elements itself
+                    // (`proc_step`, #863). An exhausted frame is popped
+                    // as it yields its last element, so this `Pop` is
+                    // only a safeguard.
+                    Frame::Proc { body, pc } => {
+                        if *pc < body.len() {
+                            return Ok(Some(Item::Proc));
                         }
-                    },
+                        Action::Pop
+                    }
                     Frame::Repeat { body, remaining } => {
                         if *remaining <= 0 {
                             Action::Pop
@@ -1104,14 +1740,21 @@ impl Interp {
                     // Reached from above means the stopped procedure ran
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
-                    Frame::Show(ctx) => match ctx.step(gfx)? {
-                        ShowStep::Pop => Action::Pop,
-                        ShowStep::PopPushWidth(wx, wy) => {
-                            Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                    Frame::ProfReturn => Action::ProfExit,
+                    Frame::Show(ctx) => {
+                        stepped_show = true;
+                        let step = ctx.step(gfx)?;
+                        match step {
+                            ShowStep::Pop => Action::Pop,
+                            ShowStep::PopPushWidth(wx, wy) => {
+                                Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                            }
+                            ShowStep::Exec { operands, target } => {
+                                Action::ExecWith(operands, target)
+                            }
+                            ShowStep::Again => Action::Nothing,
                         }
-                        ShowStep::Exec { operands, target } => Action::ExecWith(operands, target),
-                        ShowStep::Again => Action::Nothing,
-                    },
+                    }
                     Frame::PostOp(op) => {
                         match op {
                             PostOp::SeparationColor { alt_ncomp } => {
@@ -1147,13 +1790,13 @@ impl Interp {
                     }
                 }
             };
+            if stepped_show {
+                self.after_device_change();
+                self.device_restore_result()?;
+            }
             match action {
                 Action::Yield(o) => {
                     self.sync_scan_line();
-                    return Ok(Some(o));
-                }
-                Action::PopThenYield(o) => {
-                    self.estack.pop();
                     return Ok(Some(o));
                 }
                 Action::Pop => {
@@ -1170,17 +1813,38 @@ impl Interp {
                 }
                 Action::Iterate(body) => {
                     self.tick()?;
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::IterateWith(v, body) => {
                     self.tick()?;
                     self.push(v);
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::IterateWith2(a, b, body) => {
                     self.tick()?;
                     self.push(a);
                     self.push(b);
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::ExecWith(operands, target) => {
@@ -1199,6 +1863,10 @@ impl Interp {
                     let items = self.decode_sequence(&bytes)?;
                     self.push_proc_frame(PsArray::from_vec(items))?;
                 }
+                Action::ProfExit => {
+                    self.estack.pop();
+                    self.prof_exit();
+                }
             }
         }
     }
@@ -1207,6 +1875,7 @@ impl Interp {
     /// Only executable names and operators actually execute here; an
     /// executable array in this position is *pushed* (that's what makes
     /// `{...}` a deferred procedure), as is everything literal.
+    #[inline(always)]
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
             (Value::Name(n), true) => self.execute_name(n.id()),
@@ -1218,20 +1887,115 @@ impl Interp {
         }
     }
 
+    /// Run procedure `body` as a call of `id`: plant a [`Frame::ProfReturn`]
+    /// below its frame and open the call in the profiler.
+    ///
+    /// A procedure whose last element calls another (or itself) drops its
+    /// frame first, so a chain of tail calls leaves a run of markers on top
+    /// of the exec stack, one per procedure in tail position. A call to a
+    /// name already in that run counts but plants no new marker, which keeps
+    /// tail recursion at constant depth, as it is without `--profile`. (The
+    /// time then belongs to the innermost open call, the last procedure of
+    /// the chain to plant a marker: with mutual tail recursion `ping` <->
+    /// `pong`, the body of both counts as `pong`'s exclusive time.)
+    ///
+    /// Each open call holds two exec-stack slots (marker and body frame),
+    /// so non-tail recursion runs out at about half the depth it does in a
+    /// plain run (`execstackoverflow`, about 5,000 levels instead of 10,000).
+    #[cold]
+    #[inline(never)]
+    fn prof_call(&mut self, id: u32, body: PsArray) -> Result<(), PsError> {
+        let run = self
+            .estack
+            .iter()
+            .rev()
+            .take_while(|f| matches!(f, Frame::ProfReturn))
+            .count();
+        let Some(p) = self.profile.as_mut() else {
+            return self.push_proc_frame(body);
+        };
+        if run > 0 && p.tail_has(run, id) {
+            p.count_only(id);
+            return self.push_proc_frame(body);
+        }
+        self.push_frame(Frame::ProfReturn)?;
+        if let Some(p) = self.profile.as_mut() {
+            p.enter(id);
+        }
+        let pushed = self.push_proc_frame(body);
+        if pushed.is_err() {
+            self.estack.pop();
+            if let Some(p) = self.profile.as_mut() {
+                p.abort_enter();
+            }
+        }
+        pushed
+    }
+
+    fn prof_exit(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.exit();
+        }
+    }
+
+    /// Turn on the per-procedure profile (`pscat --profile`, issue #737)
+    /// for the programs this interpreter runs from now on. Call it before
+    /// the program starts: a call already running is not counted.
+    #[doc(hidden)]
+    pub fn enable_profile(&mut self) {
+        self.profile = Some(Box::new(crate::profile::Profiler::new()));
+    }
+
+    /// Also record who called whom (`--profile-graph`); call it right
+    /// after [`enable_profile`](Self::enable_profile).
+    #[doc(hidden)]
+    pub fn enable_profile_graph(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.set_graph();
+        }
+    }
+
+    /// Also time each built-in operator (`--profile-ops`); call it right
+    /// after [`enable_profile`](Self::enable_profile). Slows the run more
+    /// than `--profile` alone: two clock reads per operator. Rows are
+    /// keyed by `Operator::name`, as operator identity is (#881, #885).
+    #[doc(hidden)]
+    pub fn enable_profile_ops(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.set_ops();
+        }
+    }
+
+    /// What the profile has recorded so far (finished calls only), or
+    /// `None` if [`enable_profile`](Self::enable_profile) was not called.
+    #[doc(hidden)]
+    pub fn profile_report(&self) -> Option<crate::profile::ProfileReport> {
+        self.profile.as_ref().map(|p| p.report())
+    }
+
     /// Execute the executable name with interned id `id`: look it up on
-    /// the dictionary stack and run what it resolves to.
+    /// the dictionary stack and run what it resolves to. Numbers come out
+    /// of the dictionary copied inline (#863).
     #[inline]
     fn execute_name(&mut self, id: u32) -> Result<(), PsError> {
         self.last_name = Some(id);
         let resolved = self
-            .load_id(id)
-            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
-        self.execute_resolved(resolved)
+            .dstack
+            .iter()
+            .rev()
+            .find_map(|d| d.borrow().get_id_ref(id).map(Object::clone_inline))
+            .ok_or_else(|| undefined(id))?;
+        self.execute_resolved(resolved, id)
     }
 
     /// Execute the object a name resolved to. Unlike `execute_element`,
     /// an executable array here *runs* — this is a procedure call.
-    fn execute_resolved(&mut self, mut obj: Object) -> Result<(), PsError> {
+    ///
+    /// `via` is the name the object was reached through, or [`NO_NAME`]
+    /// (`exec`, a conditional's branch): `--profile` attributes a
+    /// procedure body to the name it ran through (#737).
+    #[inline(always)]
+    fn execute_resolved(&mut self, mut obj: Object, via: u32) -> Result<(), PsError> {
         // A name may resolve to another executable name; follow the chain
         // with a budget so `a -> b -> a` cycles error out instead of
         // spinning forever.
@@ -1249,6 +2013,9 @@ impl Interp {
                     let Value::Array(body) = obj.value else {
                         unreachable!()
                     };
+                    if via != NO_NAME && self.profile.is_some() {
+                        return self.prof_call(via, body);
+                    }
                     return self.push_proc_frame(body);
                 }
                 // An executable string runs as source — the `(...) cvx
@@ -1281,6 +2048,7 @@ impl Interp {
         }
     }
 
+    #[inline(always)]
     fn push_proc_frame(&mut self, body: PsArray) -> Result<(), PsError> {
         if body.is_empty() {
             return Ok(());
@@ -1325,7 +2093,7 @@ impl Interp {
     /// `exec` and the conditional operators: run an object with full
     /// executable semantics (procedures run rather than being pushed).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
-        self.execute_resolved(obj)
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The `token` operator on a file: one token scanned in place — the
@@ -1494,6 +2262,11 @@ impl Interp {
                 Some(Frame::Proc { .. }) => {
                     self.estack.pop();
                 }
+                // A profiled call `exit` leaves: close it.
+                Some(Frame::ProfReturn) => {
+                    self.estack.pop();
+                    self.prof_exit();
+                }
             }
         }
     }
@@ -1580,6 +2353,14 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
+        // With no save open there is nothing to journal, so the top dict
+        // is borrowed where it is, without an `Rc` clone (#863).
+        if self.save_stack.is_empty() {
+            if let Some(top) = self.dstack.last() {
+                top.borrow_mut().put_name(name, obj);
+            }
+            return;
+        }
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_name(name, obj);
@@ -1708,7 +2489,8 @@ impl Interp {
         // pinned against gs (`save gsave gsave 5 setlinewidth restore`).
         self.gfx
             .restore_glyph_snapshot(rec.gfx_depth, rec.gfx_state);
-        Ok(())
+        self.after_device_change();
+        self.device_restore_result()
     }
 
     /// `vmstatus`'s save-nesting level.
@@ -1730,6 +2512,7 @@ impl Interp {
         // gs's grestoreall ends in a fresh gsave level, so no clipsave
         // entries survive it (#494).
         self.gfx.clear_clip_stack();
+        self.after_device_change();
     }
 
     /// `grestore` (#505): at the innermost save's boundary it restores
@@ -1740,6 +2523,56 @@ impl Interp {
             .last()
             .map(|rec| (rec.gfx_depth, &*rec.gfx_state));
         self.gfx.grestore_at(boundary);
+        self.after_device_change();
+    }
+
+    /// After anything that can install a page device (`setpagedevice`, or
+    /// a restore that brings an older one back, #909): a `--bands` run
+    /// redefines `/BandBBox` for the new page, so a band-aware program
+    /// reads the area its band keeps of the page it now has.
+    /// `limitexceeded (memory)` when a restore could not bring its page
+    /// device back within `--max-memory` (#909): raised by the operator
+    /// that restored, before the program goes on.
+    pub(crate) fn device_restore_result(&self) -> Result<(), PsError> {
+        if self.gfx.memory_refused() {
+            Err(PsError::MemoryExceeded)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn after_device_change(&mut self) {
+        if !self.gfx.take_device_changed() {
+            return;
+        }
+        let Some((index, count)) = self.gfx.band() else {
+            return;
+        };
+        let (w, h) = (self.gfx.pixmap.width(), self.gfx.pixmap.height());
+        let (top, bottom) = crate::gfx::band_rows_of(index, count, h);
+        let scale = self.gfx.scale();
+        let (llx, lly) = self.gfx.page_origin();
+        // The same f32 arithmetic, and the same numbers once printed and
+        // scanned, as the `/BandBBox` `pscat --bands` defines first.
+        let user_y = |row: u32| lly + (h - row) as f32 / scale;
+        let number = |v: f32| {
+            let text = format!("{v}");
+            match text.parse::<i64>() {
+                Ok(i) => Object::int(i),
+                Err(_) => Object::real(text.parse().unwrap_or(f64::from(v))),
+            }
+        };
+        let bbox = Object::array(vec![
+            number(llx),
+            number(user_y(bottom)),
+            number(llx + w as f32 / scale),
+            number(user_y(top)),
+        ]);
+        let user = self.dstack[1].clone();
+        self.journal_dict(&user);
+        // Detached, as the band names were first defined (#868).
+        let key = crate::name::detached(|| crate::name::intern("BandBBox"));
+        user.borrow_mut().put_name(&key, bbox);
     }
 
     /// `cliprestore` (#494): this needs the innermost save's snapshot,
@@ -1791,15 +2624,34 @@ impl Interp {
     /// leaves `srand` and `rrand` alone. Also clears the fired flag, so a caller
     /// re-arming this on a fresh `Interp` starts from a clean read of
     /// [`seed_override_fired`](Self::seed_override_fired).
+    ///
+    /// The seed also builds the noise table (issue #753), as `seed
+    /// noiseseed` would, so art built on the native noise operators
+    /// varies with the sweep too. A program that calls `noiseseed`
+    /// itself keeps its own table. `None` puts the default table back,
+    /// but only while the table is still the override's.
     pub fn set_seed_override(&mut self, seed: Option<i64>) {
         self.seed_override = seed;
         self.seed_override_fired = false;
+        match seed {
+            Some(s) => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(s);
+                self.noise_from_override = true;
+            }
+            None if self.noise_from_override => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(0);
+                self.noise_from_override = false;
+            }
+            None => {}
+        }
     }
 
     /// Whether [`set_seed_override`](Self::set_seed_override)'s
-    /// override has actually intercepted a `srand` call since it was
-    /// set. `false` means the source never called `srand`, so the
-    /// override had no effect on this run.
+    /// override has actually taken effect since it was set: it
+    /// intercepted a `srand` call, or a noise operator sampled the table
+    /// it built (issue #753). `false` means the source never called
+    /// `srand` and never sampled override-seeded noise, so the override
+    /// had no effect on this run.
     pub fn seed_override_fired(&self) -> bool {
         self.seed_override_fired
     }
@@ -1827,6 +2679,30 @@ impl Interp {
     #[doc(hidden)]
     pub fn pop(&mut self) -> Result<Object, PsError> {
         self.ostack.pop().ok_or(PsError::StackUnderflow)
+    }
+
+    /// The top two operands, if both are numbers (deeper one first). The
+    /// arithmetic and comparison operators' fast path (#863): it looks
+    /// without popping, so when it says no, the operator's general path
+    /// runs on an untouched stack and fails exactly as it always has.
+    #[inline(always)]
+    pub(crate) fn top2_nums(&self) -> Option<(Num, Num)> {
+        let [.., a, b] = self.ostack.as_slice() else {
+            return None;
+        };
+        Some((a.num()?, b.num()?))
+    }
+
+    /// Replace the top two operands with the literal `v`. For the fast
+    /// paths above, once `top2_nums` has said both are numbers.
+    #[inline(always)]
+    pub(crate) fn replace_top2(&mut self, v: Value) {
+        if let Some(b) = self.ostack.pop() {
+            b.drop_inline();
+        }
+        if let Some(a) = self.ostack.last_mut() {
+            std::mem::replace(a, Object::lit(v)).drop_inline();
+        }
     }
 
     #[doc(hidden)]
@@ -1860,10 +2736,37 @@ impl Interp {
         self.stdout_truncated = false;
     }
 
+    /// Drop what the program writes to stderr from now on: `(%stderr)`
+    /// files, `handleerror` and `findfont`'s stand-in notes, which
+    /// [`font_warnings`](Self::font_warnings) still collects. For a host
+    /// running several copies of one program (`pscat --bands`, #877).
+    pub fn quiet_stderr(&mut self) {
+        self.quiet_stderr = true;
+    }
+
+    /// Program output to stderr, unless [`quiet_stderr`](Self::quiet_stderr)
+    /// is on.
+    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+        use std::io::Write;
+        if self.quiet_stderr {
+            return Ok(());
+        }
+        let mut err = std::io::stderr();
+        err.write_all(bytes)?;
+        if flush { err.flush() } else { Ok(()) }
+    }
+
     /// What has been printed since [`Interp::capture_stdout`]; empty when
     /// capture is off.
     pub fn captured_stdout(&self) -> &[u8] {
         self.stdout_capture.as_deref().unwrap_or(&[])
+    }
+
+    /// The one-line notes `findfont` raised for pack faces it replaced
+    /// with a built-in one, newline-joined, once per name (the lines the
+    /// native binary prints on stderr); empty when nothing was replaced.
+    pub fn font_warnings(&self) -> &str {
+        &self.font_warnings
     }
 
     /// Program output: to the capture buffer when one is on, else stdout
@@ -1902,10 +2805,10 @@ impl Interp {
             .pages()
             .iter()
             .cloned()
-            .map(crate::Page::new)
+            .map(|pixmap| crate::Page::new(pixmap, self.gfx.scale()))
             .collect();
         if pages.is_empty() || self.gfx.has_trailing_art() {
-            pages.push(crate::Page::new(self.gfx.pixmap.clone()));
+            pages.push(crate::Page::new(self.gfx.pixmap.clone(), self.gfx.scale()));
         }
         pages
     }
@@ -1964,6 +2867,9 @@ impl Interp {
 /// [`leave_dicts_to_process_exit`](Interp::leave_dicts_to_process_exit).
 impl Drop for Interp {
     fn drop(&mut self) {
+        // Before the early return below: a file kept alive by the leaked
+        // dictionary graph would otherwise never be flushed.
+        let _ = self.flush_files();
         if self.keep_dicts_on_drop {
             return;
         }
@@ -1987,6 +2893,13 @@ impl Default for Interp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The `undefined` error for name `id`, out of the name lookup's way.
+#[cold]
+#[inline(never)]
+fn undefined(id: u32) -> PsError {
+    PsError::Undefined(crate::name::resolve(id).to_string())
 }
 
 fn token_to_object(tok: Token) -> Object {

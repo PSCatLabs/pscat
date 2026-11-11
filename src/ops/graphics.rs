@@ -276,6 +276,9 @@ fn erasepage(it: &mut Interp) -> Result<(), PsError> {
 /// the window keeps showing it — resolving the Stage 2 deviation
 /// without defeating the point of watching.
 fn showpage(it: &mut Interp) -> Result<(), PsError> {
+    // Buffered disk files go out with each page (issue #762); a failure is
+    // kept on the file and reported by its own `closefile`.
+    let _ = it.flush_files();
     it.gfx.showpage();
     it.gfx.init_graphics();
     it.gfx.dirty = true;
@@ -309,6 +312,7 @@ fn gsave(it: &mut Interp) -> Result<(), PsError> {
 /// that save's restore), or to the bottom when no save is live.
 fn grestoreall(it: &mut Interp) -> Result<(), PsError> {
     it.do_grestoreall();
+    it.device_restore_result()?;
     Ok(())
 }
 
@@ -352,6 +356,10 @@ fn setgstate(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     *it.gfx.state_mut() = g.borrow().clone();
+    // A gstate made under another page device brings it back (#909).
+    it.gfx.sync_device();
+    it.after_device_change();
+    it.device_restore_result()?;
     Ok(())
 }
 
@@ -378,6 +386,7 @@ fn sameclip(it: &mut Interp) -> Result<(), PsError> {
 /// initial state (Ghostscript's behaviour, #505).
 fn grestore(it: &mut Interp) -> Result<(), PsError> {
     it.do_grestore();
+    it.device_restore_result()?;
     Ok(())
 }
 
@@ -431,9 +440,8 @@ fn setlinewidth(it: &mut Interp) -> Result<(), PsError> {
 /// Clamped rather than range-checked, matching how the color operators
 /// here already treat out-of-range components. Snapshotted by
 /// `gsave`/`grestore` and reset by `initgraphics`, like every other
-/// paint attribute. Reaches `fill`, `stroke`, shown text, and `shfill`;
-/// **not** `image`/`imagemask`, which blit their own samples straight
-/// into the pixmap (documented gap -- see `GraphicsState::alpha`).
+/// paint attribute. Reaches `fill`, `stroke`, shown text, `shfill` and, since
+/// #766, `image`/`imagemask`/`colorimage` (see `GraphicsState::alpha`).
 fn setalpha(it: &mut Interp) -> Result<(), PsError> {
     let a = it.pop_f64()?;
     it.gfx.state_mut().alpha = a.clamp(0.0, 1.0) as f32;

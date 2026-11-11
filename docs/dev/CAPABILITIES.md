@@ -50,7 +50,14 @@ byte-for-byte regardless of directory-scan or hashmap iteration order
 upstream.
 
 `kind` is one of `font`, `type3_face`, `palette`, `template`,
-`procedure`, `dial`. `dial` is a mutable global config variable (e.g.
+`procedure`, `operator`, `dial`. `operator` (#754) is a native
+interpreter operator, pscat's own extension to the PLRM set (`gnoise2`,
+`setalpha`, `.sameclip`, `writereals`, ...): bound in `systemdict`, not
+defined by any `.ps` file, so `source` is `systemdict`, `load` is empty
+(nothing to `run`), and `example` is its stack signature
+(`x y gnoise2 n`). A `procedure` is a library routine loaded from a
+`.ps` file. Adding a kind is additive: a consumer that only looks at
+`procedure` rows is unaffected. `dial` is a mutable global config variable (e.g.
 `lib/styles/steampunk.ps`'s `/spmetal`, read by `gear`/`rivet`/etc.
 for which mood palette to draw with) — not executable, so it's split
 out from `procedure` rather than counted as one: a consumer that
@@ -227,20 +234,21 @@ that `/Spread` and `/Load` keep their one shared meaning.
   reasoning doesn't extend to graph/dataviz/etching, which aren't font
   or handwriting families. A reasonable follow-up, not silently
   dropped.
-- **Renderer operators aren't cataloged.** Issue #47 added
-  `setalpha`/`currentalpha` and `setblendmode`/`currentblendmode` —
-  pscat's own painting extensions, implemented in Rust rather than in a
-  `lib/*.ps` file. Every discovery mechanism this catalog has is
-  PostScript-source-driven (`% @...` tags parsed out of `lib/*.ps` at
-  build time, or the hand-written `ENTRIES` rows), with no `kind` that
-  means "interpreter operator", so adding one would mean a new
-  discovery path, not a new row. An agent finds those two the way it
-  finds any other interpreter operator: `plugin/skills/pscat/SKILL.md`
-  and README. The *library* built on them (`pkwash`, `pkpaper`,
-  `pkalphaok`) is cataloged normally, and its summaries name the
-  operators, so a catalog-only reader isn't left unaware they exist.
-  The same holds for `.sameclip` (#488), a clip identity query drykit
-  probes for (`dkbatch`'s summary names it).
+- **Only pscat-extension operators are cataloged, not all of
+  `systemdict`.** Since #754 the catalog lists the operators pscat adds
+  beyond the PLRM, as hand-written `ENTRIES` rows with `kind: "operator"`:
+  the noise operators (#734), `setalpha`/`currentalpha`/`setblendmode`/
+  `currentblendmode` (#47), `.sameclip` (#488) and `writereals`/
+  `readreals` (#735, #773). Not listed: PLRM Level 1/2/3 operators (the catalog
+  has no PLRM coverage; `renamefile`, `deletefile` and `filenameforall`
+  from #740 are PLRM Level 2), Ghostscript-compatibility `min`/`max`/
+  `.min`/`.max`, and `.permnoise2`, an internal hook for artkit's
+  `noise2`. To add an operator, add an `Operator` row (source
+  `SYSTEMDICT`, stack signature as `example`);
+  `tests/capabilities.rs::every_cataloged_operator_exists_in_systemdict`
+  fails if the name is not a real operator in `systemdict`. The `nr*`
+  procedures in `lib/noiseref.ps` name their native twin in their
+  summary, and a test keeps that pointer honest.
 - **No `--capabilities <kind>` filter.** The CLI always prints the
   full payload; an agent that wants just palettes filters the JSON
   itself. Simpler for a first version — revisit if the payload size

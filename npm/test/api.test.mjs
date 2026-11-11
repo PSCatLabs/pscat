@@ -62,6 +62,7 @@ test('a PostScript error is a PostScriptError naming the error, and the renderer
     assert.equal(e.line, 1);
     assert.equal(e.output, 'before');
     assert.match(e.report, /^%%\[ Error: undefined;/);
+    assert.deepEqual(e.warnings, []);
     return true;
   });
   assert.throws(() => r.render('1 0 div'), { errorName: 'undefinedresult' });
@@ -90,20 +91,121 @@ test('the stepped API ends on the same page render() draws', async () => {
   assert.deepEqual(r.pixels(), full.data);
 });
 
+test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async () => {
+  // Byte equality with `pscat --svg`/`--pdf` is checked in tests/wasm.rs.
+  const r = await createRenderer();
+  const doc = '%%Title: Two pages\n0 0 1 setrgbcolor 10 10 50 30 rectfill showpage\n'
+    + '/Helvetica findfont 12 scalefont setfont 10 40 moveto (two) show showpage';
+  const page = { width: 100, height: 80, svg: true, pdf: true };
+  const img = r.render(doc, page);
+  assert.equal(img.width, 100);
+  const svgs = r.svgPages();
+  assert.equal(svgs.length, 2);
+  for (const svg of svgs) assert.match(svg, /^<svg [^>]*width="100pt" height="80pt"/);
+  assert.match(svgs[0], /fill="#0000ff"/);
+  assert.equal(r.svg(1), svgs[1]);
+  assert.equal(r.svg(), svgs[0]);
+  assert.throws(() => r.svg(2), RangeError);
+  assert.throws(() => r.svg(-1), RangeError);
+  const pdf = r.pdf();
+  assert.ok(pdf instanceof Uint8Array);
+  const text = new TextDecoder('latin1').decode(pdf);
+  assert.ok(text.startsWith('%PDF-'));
+  assert.equal(text.match(/\/Type \/Page\b/g).length, 2);
+  assert.match(text, /\/Title \(Two pages\)/);
+  // The same program again gives the same bytes.
+  r.render(doc, page);
+  assert.deepEqual(r.svgPages(), svgs);
+  assert.deepEqual(r.pdf(), pdf);
+  // Only what was asked for is recorded.
+  r.render(doc, { width: 100, height: 80, svg: true });
+  assert.equal(r.svgPages().length, 2);
+  assert.throws(() => r.pdf(), /pdf: true/);
+  r.render(doc, { width: 100, height: 80 });
+  assert.throws(() => r.svg(), /svg: true/);
+  assert.throws(() => r.svgPages(), /svg: true/);
+  assert.throws(() => r.render('', { svg: 'yes' }), TypeError);
+});
+
+test('svg and pdf mid-run show the document so far, then the finished one', async () => {
+  const r = await createRenderer();
+  const doc = '0 1 199 { dup 2 mul 0 moveto 0 100 rlineto stroke pop } for';
+  const page = { width: 400, height: 100, svg: true, pdf: true };
+  r.render(doc, page);
+  const [full, fullPdf] = [r.svgPages(), r.pdf()];
+  r.begin(doc, page);
+  for (let i = 0; i < 5; i++) r.step(40);
+  const partial = r.svgPages();
+  const partialPdf = r.pdf();
+  assert.equal(partial.length, 1);
+  assert.ok(partial[0].length < full[0].length, 'mid-run SVG should be partial');
+  assert.notDeepEqual(partialPdf, fullPdf);
+  while (r.step(1000));
+  assert.deepEqual(r.svgPages(), full);
+  assert.deepEqual(r.pdf(), fullPdf);
+});
+
 test('the libraries in lib/ are embedded', async () => {
   const r = await createRenderer();
   const img = r.render('(lib/artkit.ps) run /frnd where { pop (ok) print } if', { width: 10, height: 10 });
   assert.equal(img.output, 'ok');
 });
 
-test('the Liberation base fonts are built in; other faces come from addFont', async () => {
+test('the standard 35 are built in; other faces come from addFont', async () => {
   const r = await createRenderer();
+  const std = '/Palatino-Italic findfont /FontName get == /Symbol findfont /FontName get == /ZapfDingbats findfont /FontName get ==';
+  assert.equal(
+    r.render(std, { width: 10, height: 10 }).output,
+    '/texgyrepagella-italic\n/StandardSymbolsPS\n/D050000L\n',
+  );
   const name = '/Helvetica findfont /FontName get == /Garamond findfont /FontName get ==';
   assert.equal(r.render(name, { width: 10, height: 10 }).output, '/Helvetica\n/Helvetica\n');
   r.addFont('EBGaramond-Regular', await font('EBGaramond/EBGaramond-Regular.ttf'));
   assert.equal(r.render(name, { width: 10, height: 10 }).output, '/Helvetica\n/EBGaramond-Regular\n');
   const text = '/Garamond findfont 40 scalefont setfont 10 20 moveto (Garamond) show';
   assert.ok(count(r.render(text, { width: 300, height: 80 }), dark) > 500);
+});
+
+test('a pack face that was not added is reported in warnings, once, naming the stand-in', async () => {
+  const r = await createRenderer();
+  const page = { width: 10, height: 10 };
+  const name = '/Bangers findfont /FontName get ==';
+  const img = r.render(name, page);
+  assert.equal(img.output, '/Helvetica\n');
+  assert.equal(img.warnings.length, 1);
+  const [note] = img.warnings;
+  assert.match(note, /^pscat: warning: font \/Bangers is in the extras font pack/);
+  assert.match(note, /using Helvetica/);
+  assert.match(note, /addFont\('Bangers-Regular', bytes\)/);
+  // A browser cannot run `pscat fonts install`: the note must not say to.
+  assert.doesNotMatch(note, /fonts install/);
+  assert.ok(!note.includes('\n'));
+  assert.deepEqual(r.warnings, img.warnings);
+  // One note per face, however often the program asks, and a face with a
+  // different stand-in (the typewriter faces become Courier) gets its own.
+  const again = r.render(`${name} ${name} /CourierPrime findfont pop /Bangers findfont pop`, page);
+  assert.equal(again.warnings.length, 2);
+  assert.match(again.warnings[1], /\/CourierPrime is in the extras font pack.*using Courier\. Load.*addFont\('CourierPrime-Regular', bytes\)/);
+  // Each run starts clean, and programs that need nothing warn about nothing.
+  assert.deepEqual(r.render('/Palatino-Italic findfont pop /Nonesuch findfont pop', page).warnings, []);
+  assert.deepEqual(r.warnings, []);
+  // The notes survive a PostScript error, like the page.
+  let caught;
+  assert.throws(() => r.render('/Bangers findfont pop bogus', page), (e) => {
+    caught = e;
+    return e instanceof PostScriptError;
+  });
+  assert.equal(r.warnings.length, 1);
+  // The error carries them too, as a snapshot a later run does not change.
+  assert.deepEqual(caught.warnings, r.warnings);
+  assert.match(caught.warnings[0], /\/Bangers .*addFont\('Bangers-Regular'/);
+  r.render('', page);
+  assert.equal(caught.warnings.length, 1);
+  // With the face added there is nothing to say, and it is the real face.
+  r.addFont('Bangers-Regular', await font('Bangers/Bangers-Regular.ttf'));
+  const real = r.render(name, page);
+  assert.deepEqual(real.warnings, []);
+  assert.equal(real.output, '/Bangers-Regular\n');
 });
 
 test('addFont: a Unicode-mode face (Thai) shows UTF-8 text by its pack name', async () => {

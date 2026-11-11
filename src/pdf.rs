@@ -38,10 +38,19 @@
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
 //!   1-bit `/ImageMask` stencils painted in the current fill color,
 //!   which is precisely PostScript's own semantics.
+//! - `shfill` becomes the `sh` operator on a `/Shading` resource
+//!   (issue #1028; before it, a flat fill in the ramp's average colour).
+//!   The shading keeps its Coords in user space and the CTM goes in a
+//!   `cm` (the page's flip `cm` is already in force); its colour ramp is
+//!   the same pre-sampled RGB stop list the raster and SVG paint, written
+//!   as a FunctionType 2 (one leg) or 3 (stitching N-1 legs) function, so
+//!   all three outputs interpolate the same stops. Function and shading
+//!   objects are document-global and deduped by content.
 //!
 //! Verified end-to-end by rasterizing the output with gs and
 //! block-comparing against our own canvas (tests/pdf.rs).
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::rc::Rc;
 
@@ -57,6 +66,9 @@ pub struct PdfRecorder {
     content: String,
     /// Finished pages' content streams.
     pages: Vec<String>,
+    /// Parallel to `pages`: each finished page's size, since
+    /// `setpagedevice` can change it between pages (#909).
+    page_sizes: Vec<(u32, u32)>,
     /// Image XObjects (raw stream bytes, already entity-complete),
     /// document-global; pages reference them by index.
     images: Vec<PdfImage>,
@@ -81,6 +93,26 @@ pub struct PdfRecorder {
     /// `content`, if one is open. Compared by `Rc` identity; held here,
     /// so the address can't be recycled while the group is open.
     open_clip: Option<Rc<ClipNode>>,
+    /// Function dict bodies for shadings (#1028), deduped by content so a
+    /// ramp reused by many `shfill`s is written once.
+    functions: Vec<String>,
+    /// `functions` by body, so interning is one hash lookup: a generative
+    /// piece may `shfill` thousands of times.
+    function_ids: HashMap<String, usize>,
+    /// The function index each stop list (as bits) already produced, so a
+    /// repeated ramp skips building and merging its function text.
+    stops_ids: HashMap<Vec<[u32; 4]>, usize>,
+    /// Shading dicts: the body (minus `/Function`) and the index of its
+    /// function in `functions`, deduped; pages reference them by index,
+    /// like `images`. Empty for a program that never calls `shfill`, so
+    /// such documents are byte-identical to what came before.
+    shadings: Vec<(String, usize)>,
+    shading_ids: HashMap<(String, usize), usize>,
+    /// Which shadings each finished page references.
+    page_shadings: Vec<Vec<usize>>,
+    current_shadings: Vec<usize>,
+    /// `current_shadings` as a set, for the per-`shfill` membership test.
+    current_shading_set: HashSet<usize>,
 }
 
 impl PdfRecorder {
@@ -90,6 +122,7 @@ impl PdfRecorder {
             height,
             content: String::new(),
             pages: Vec::new(),
+            page_sizes: Vec::new(),
             images: Vec::new(),
             page_images: Vec::new(),
             current_images: Vec::new(),
@@ -99,6 +132,14 @@ impl PdfRecorder {
             title: None,
             author: None,
             open_clip: None,
+            functions: Vec::new(),
+            function_ids: HashMap::new(),
+            stops_ids: HashMap::new(),
+            shadings: Vec::new(),
+            shading_ids: HashMap::new(),
+            page_shadings: Vec::new(),
+            current_shadings: Vec::new(),
+            current_shading_set: HashSet::new(),
         }
     }
 
@@ -267,6 +308,115 @@ Q",
         );
     }
 
+    /// `shfill` (#1028): paint `kind` with the colour ramp `stops`
+    /// (`(position, r, g, b)`, positions non-decreasing over 0..1) under
+    /// `ctm` (user space to device space, `[a b c d e f]`). `region` is the
+    /// device-space `/BBox` parallelogram when the shading has one; it
+    /// becomes a clip before the `cm`, the same region the raster fills.
+    /// Without it `sh` paints the whole clip, as the raster's page rect
+    /// does.
+    ///
+    /// `/Extend` is always `[true true]`: the raster pads both ends
+    /// (`Gfx::shfill`'s documented deviation), and the PDF must look like
+    /// the PNG. `/Background` is ignored by `shfill` (PLRM), so it is not
+    /// written either.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn shfill(
+        &mut self,
+        kind: &crate::svg::ShKind,
+        ctm: [f32; 6],
+        stops: &[(f32, f32, f32, f32)],
+        region: Option<&crate::gfx::PsPath>,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        // A non-finite number has no PDF spelling; writing `inf` would make
+        // the whole file invalid. Every caller keeps these finite, so this
+        // is a last guard, not a path content takes.
+        let geometry = match *kind {
+            crate::svg::ShKind::Axial { x0, y0, x1, y1 } => vec![x0, y0, x1, y1],
+            crate::svg::ShKind::Radial {
+                x0,
+                y0,
+                r0,
+                x1,
+                y1,
+                r1,
+            } => vec![x0, y0, r0, x1, y1, r1],
+        };
+        if !geometry.iter().chain(ctm.iter()).all(|v| v.is_finite()) {
+            return;
+        }
+        let stops_key: Vec<[u32; 4]> = stops
+            .iter()
+            .map(|s| [s.0.to_bits(), s.1.to_bits(), s.2.to_bits(), s.3.to_bits()])
+            .collect();
+        let fidx = match self.stops_ids.get(&stops_key) {
+            Some(&i) => i,
+            None => {
+                let func = stops_function(stops);
+                let i = intern(&mut self.functions, &mut self.function_ids, func);
+                self.stops_ids.insert(stops_key, i);
+                i
+            }
+        };
+        let body = match *kind {
+            crate::svg::ShKind::Axial { x0, y0, x1, y1 } => format!(
+                "/ShadingType 2 /ColorSpace /DeviceRGB /Coords [{} {} {} {}] /Extend [true true]",
+                p(x0),
+                p(y0),
+                p(x1),
+                p(y1)
+            ),
+            crate::svg::ShKind::Radial {
+                x0,
+                y0,
+                r0,
+                x1,
+                y1,
+                r1,
+            } => format!(
+                "/ShadingType 3 /ColorSpace /DeviceRGB /Coords [{} {} {} {} {} {}] /Extend [true true]",
+                p(x0),
+                p(y0),
+                p(r0),
+                p(x1),
+                p(y1),
+                p(r1)
+            ),
+        };
+        let key = (body, fidx);
+        let sidx = match self.shading_ids.get(&key) {
+            Some(&i) => i,
+            None => {
+                let i = self.shadings.len();
+                self.shadings.push(key.clone());
+                self.shading_ids.insert(key, i);
+                i
+            }
+        };
+        if self.current_shading_set.insert(sidx) {
+            self.current_shadings.push(sidx);
+        }
+        self.enter_clip(chain);
+        let gs = self.gs_ref(comp);
+        let clip = match region {
+            Some(path) => format!("{} W n ", path_ops(path, true)),
+            None => String::new(),
+        };
+        let _ = writeln!(
+            self.content,
+            "q {gs}{clip}{} {} {} {} {} {} cm /Sh{sidx} sh
+Q",
+            p(ctm[0]),
+            p(ctm[1]),
+            p(ctm[2]),
+            p(ctm[3]),
+            p(ctm[4]),
+            p(ctm[5]),
+        );
+    }
+
     /// An image: `rgb_or_mask` is either interleaved RGB samples or,
     /// for masks, packed 1-bit rows; `t` maps sample coords to device
     /// space (the rasterizer's own transform).
@@ -278,13 +428,23 @@ Q",
         data: ImageData,
         t: [f32; 6],
         fill_rgb: (f32, f32, f32),
+        interpolate: bool,
+        comp: Composite,
         chain: &Chain,
     ) {
+        // `/Interpolate true` (#730): a viewer hint on the colour image
+        // only. Never on an imagemask, nor on an ImageType 3 soft mask
+        // (the raster keeps the stencil edge hard).
+        let hint = if interpolate {
+            " /Interpolate true"
+        } else {
+            ""
+        };
         // A soft mask is its own image entry (never in a page's XObject
         // resources), referenced from the main image by index.
         let (dict_extra, raw, smask): (String, Vec<u8>, Option<usize>) = match data {
             ImageData::Rgb(px) => (
-                "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                format!("/ColorSpace /DeviceRGB /BitsPerComponent 8{hint}"),
                 px,
                 None,
             ),
@@ -308,7 +468,7 @@ Q",
                 let at = self.images.len();
                 self.images.push(mask);
                 (
-                    "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                    format!("/ColorSpace /DeviceRGB /BitsPerComponent 8{hint}"),
                     rgb,
                     Some(at),
                 )
@@ -327,9 +487,12 @@ Q",
             t[0], t[1], t[2], t[3], t[4], t[5],
         ));
         self.enter_clip(chain);
+        // `ca` and `BM` apply to images and stencils alike (#766); an
+        // SMask's own alpha multiplies with `ca`. Empty for the default.
+        let gs = self.gs_ref(comp);
         let _ = writeln!(
             self.content,
-            "q {} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
+            "q {gs}{} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
 Q",
             f(fill_rgb.0),
             f(fill_rgb.1),
@@ -375,12 +538,23 @@ Q",
         self.open_clip = None;
         self.current_images.clear();
         self.current_gstates.clear();
+        self.current_shadings.clear();
+        self.current_shading_set.clear();
+    }
+
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
     }
 
     pub(crate) fn end_page(&mut self) {
         self.pages.push(self.snapshot());
+        self.page_sizes.push((self.width, self.height));
         self.page_images.push(self.current_images.clone());
         self.page_gstates.push(self.current_gstates.clone());
+        self.page_shadings.push(self.current_shadings.clone());
     }
 
     /// Serialize the whole document.
@@ -388,10 +562,14 @@ Q",
         let mut pages = self.pages.clone();
         let mut page_images = self.page_images.clone();
         let mut page_gstates = self.page_gstates.clone();
+        let mut page_sizes = self.page_sizes.clone();
+        let mut page_shadings = self.page_shadings.clone();
         if pages.is_empty() || trailing_art {
             pages.push(self.snapshot());
+            page_sizes.push((self.width, self.height));
             page_images.push(self.current_images.clone());
             page_gstates.push(self.current_gstates.clone());
+            page_shadings.push(self.current_shadings.clone());
         }
         let npages = pages.len();
 
@@ -408,10 +586,16 @@ Q",
             .into_bytes(),
         );
         let image_base = 3 + npages * 2;
-        for (i, ((content, imgs), gss)) in pages
+        // Shading functions, then shadings, follow the images (#1028), so a
+        // document without shadings keeps every object number it had.
+        let function_base = image_base + self.images.len();
+        let shading_base = function_base + self.functions.len();
+        for (i, ((((content, imgs), gss), shs), &(width, height))) in pages
             .iter()
             .zip(&page_images)
             .zip(&page_gstates)
+            .zip(&page_shadings)
+            .zip(&page_sizes)
             .enumerate()
         {
             let xobjects: Vec<String> = imgs
@@ -434,6 +618,13 @@ Q",
             if !extgstates.is_empty() {
                 let _ = write!(parts, " /ExtGState << {} >>", extgstates.join(" "));
             }
+            if !shs.is_empty() {
+                let list: Vec<String> = shs
+                    .iter()
+                    .map(|&idx| format!("/Sh{idx} {} 0 R", shading_base + idx))
+                    .collect();
+                let _ = write!(parts, " /Shading << {} >>", list.join(" "));
+            }
             let resources = if parts.is_empty() {
                 String::new()
             } else {
@@ -443,8 +634,8 @@ Q",
                 format!(
                     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}]{resources} \
                      /Contents {} 0 R >>",
-                    self.width,
-                    self.height,
+                    width,
+                    height,
                     3 + i * 2 + 1,
                 )
                 .into_bytes(),
@@ -455,7 +646,7 @@ Q",
             // deflated; issue #244). The `cm` prefix is part of the
             // compressed stream. If the encoder ever failed (it can't
             // on a `Vec` sink) the stream is written plain instead.
-            let prefix = format!("1 0 0 -1 0 {} cm\n", self.height);
+            let prefix = format!("1 0 0 -1 0 {height} cm\n");
             let mut stream = match deflate(&[prefix.as_bytes(), content.as_bytes()]) {
                 Some(z) => {
                     let mut st =
@@ -483,6 +674,13 @@ Q",
             }
             obj.extend_from_slice(&img.tail);
             objects.push(obj);
+        }
+        for func in &self.functions {
+            objects.push(func.clone().into_bytes());
+        }
+        for (body, fidx) in &self.shadings {
+            objects
+                .push(format!("<< {body} /Function {} 0 R >>", function_base + fidx).into_bytes());
         }
 
         // /Info is appended last, after every page/image object, so it
@@ -556,6 +754,135 @@ fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     enc.finish().ok()
 }
 
+/// Index of `body` in `list` (looked up through `ids`), appending it if new.
+fn intern(list: &mut Vec<String>, ids: &mut HashMap<String, usize>, body: String) -> usize {
+    if let Some(&i) = ids.get(&body) {
+        return i;
+    }
+    let i = list.len();
+    list.push(body.clone());
+    ids.insert(body, i);
+    i
+}
+
+/// The PDF function for a shading's RGB stop list (#1028): linear
+/// interpolation between consecutive stops, which is what tiny-skia and
+/// SVG do with the same list. One leg is a FunctionType 2 (`N 1`); more
+/// are a FunctionType 3 stitching inline type 2 legs at the interior stop
+/// positions. A zero-width leg (two stops at one position: a hard edge)
+/// is dropped, which leaves the jump between its neighbours and keeps
+/// `/Bounds` strictly increasing, as PDF requires. Positions are compared
+/// as written, so two that print the same count as one.
+fn stops_function(stops: &[(f32, f32, f32, f32)]) -> String {
+    let rgb = |s: &(f32, f32, f32, f32)| format!("{} {} {}", f(s.1), f(s.2), f(s.3));
+    let leg = |a: &(f32, f32, f32, f32), b: &(f32, f32, f32, f32)| {
+        format!(
+            "<< /FunctionType 2 /Domain [0 1] /C0 [{}] /C1 [{}] /N 1 >>",
+            rgb(a),
+            rgb(b)
+        )
+    };
+    let stops = merge_collinear_stops(stops);
+    type Stop = (f32, f32, f32, f32);
+    // (end position, from, to) for every leg of positive width; each
+    // starts where the previous one ended (the first at 0).
+    let mut spans: Vec<(f32, Stop, Stop)> = Vec::new();
+    for w in stops.windows(2) {
+        if w[1].0 > w[0].0 {
+            spans.push((w[1].0.clamp(0.0, 1.0), w[0], w[1]));
+        }
+    }
+    // A hard edge at either end of the axis (two stops at 0, or at 1, in
+    // different colours) has no leg of its own, but the raster pads with
+    // the outermost stop's colour, so the PDF must end on it too: give it
+    // a sliver leg, `EDGE` wide, or recolour a leg already that narrow.
+    const EDGE: f32 = 1e-6;
+    let same = |a: &Stop, b: &Stop| a.1 == b.1 && a.2 == b.2 && a.3 == b.3;
+    if let (Some(&last), Some(&(_, _, to))) = (stops.last(), spans.last())
+        && !same(&last, &to)
+    {
+        let n = spans.len();
+        let start = if n >= 2 { spans[n - 2].0 } else { 0.0 };
+        if start < 1.0 - EDGE {
+            spans[n - 1].0 = 1.0 - EDGE;
+            spans.push((1.0, to, last));
+        } else {
+            spans[n - 1].2 = last;
+        }
+    }
+    if let (Some(&first), Some(&(end, from, _))) = (stops.first(), spans.first())
+        && !same(&first, &from)
+    {
+        if end > EDGE {
+            spans.insert(0, (EDGE, first, from));
+        } else {
+            spans[0].1 = first;
+        }
+    }
+    // (end position as written, leg); a leg whose end prints the same as
+    // its start is dropped, so `/Bounds` stays strictly increasing.
+    let mut legs: Vec<(String, String)> = Vec::new();
+    let mut start = "0".to_string();
+    for (end, from, to) in &spans {
+        let end = p(*end);
+        if end == start {
+            continue;
+        }
+        legs.push((end.clone(), leg(from, to)));
+        start = end;
+    }
+    match legs.len() {
+        0 => {
+            // No positive-width leg (one stop, or all at one position): a
+            // constant, the last stop's colour (what a pad gradient shows).
+            let last = stops.last().copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            leg(&last, &last)
+        }
+        1 => legs.pop().map(|l| l.1).unwrap_or_default(),
+        n => {
+            let bounds: Vec<&str> = legs[..n - 1].iter().map(|l| l.0.as_str()).collect();
+            let fns: Vec<&str> = legs.iter().map(|l| l.1.as_str()).collect();
+            let encode = vec!["0 1"; n].join(" ");
+            format!(
+                "<< /FunctionType 3 /Domain [0 1] /Functions [{}] /Bounds [{}] /Encode [{encode}] >>",
+                fns.join(" "),
+                bounds.join(" ")
+            )
+        }
+    }
+}
+
+/// Drop the stops that lie on the straight line between their neighbours
+/// (to within `TOL` per channel, far below the 3-decimal colour the PDF
+/// writes and the 1/255 a raster resolves), so a constant or linear run of
+/// a densely sampled ramp is one leg, not dozens. Greedy: from each kept
+/// stop, extend the segment while every stop it skips stays on the line.
+/// A hard edge (two stops at one position) is never merged across.
+fn merge_collinear_stops(stops: &[(f32, f32, f32, f32)]) -> Vec<(f32, f32, f32, f32)> {
+    const TOL: f32 = 1e-4;
+    let on_line = |a: &(f32, f32, f32, f32), b: &(f32, f32, f32, f32), m: &(f32, f32, f32, f32)| {
+        if !(a.0 < m.0 && m.0 < b.0) {
+            return false;
+        }
+        let t = (m.0 - a.0) / (b.0 - a.0);
+        let near = |ca: f32, cb: f32, cm: f32| (ca + t * (cb - ca) - cm).abs() <= TOL;
+        near(a.1, b.1, m.1) && near(a.2, b.2, m.2) && near(a.3, b.3, m.3)
+    };
+    let mut out = Vec::with_capacity(stops.len());
+    let mut i = 0;
+    while i < stops.len() {
+        out.push(stops[i]);
+        let mut j = i + 1;
+        while j + 1 < stops.len()
+            && (i + 1..=j).all(|m| on_line(&stops[i], &stops[j + 1], &stops[m]))
+        {
+            j += 1;
+        }
+        i = j;
+    }
+    out
+}
+
 /// PDF path-construction operators for a device-space path. `area` is
 /// true for a fill or a clip, false for a stroke (see `to_pdf_ops`).
 fn path_ops(path: &crate::gfx::PsPath, area: bool) -> String {
@@ -591,6 +918,17 @@ fn f(v: f32) -> String {
 /// shared an edge still share it. Roughly -20% on a speck-heavy page.
 pub(crate) fn path_coord(v: f32) -> String {
     fmt_num(v, 2)
+}
+
+/// Shading geometry and its `cm` (#1028): the shortest text that reads
+/// back as the same `f32` (Rust's `Display` never uses an exponent, which
+/// PDF numbers cannot have), so a rotated or finely scaled CTM keeps all
+/// its precision; never `-0`.
+fn p(v: f32) -> String {
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    format!("{v}")
 }
 
 /// Encode a PDF text-string object. Printable-ASCII input becomes an

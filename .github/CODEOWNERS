@@ -40,6 +40,10 @@
 /plugin/plugin.json         @jeromebanks
 /plugin/mcp.json            @jeromebanks
 /plugin/hooks/              @jeromebanks
+# The launcher downloads and runs a binary on users' machines, from the
+# release the pin names (#853).
+/plugin/scripts/            @jeromebanks
+/plugin/pscat-release       @jeromebanks
 # The MCP Registry entry (it names the command registry clients run).
 /server.json                @jeromebanks
 

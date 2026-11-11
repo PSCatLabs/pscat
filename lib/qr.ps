@@ -1,0 +1,1128 @@
+%!PS-Adobe-3.0
+% Native QR Model 2 library: byte-mode data, versions 1-40, all four
+% error-correction levels, automatic or forced masks, vector drawing.
+% Load with (lib/qr.ps) run. No dependencies and no drawing on load.
+% Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
+%
+% Public API (docs/guides/qr-codes.md):
+%   payload opts qrencode -> symbol   << /Version /Level /Mask /Size /Modules >>
+%   symbol opts qrdraw -              draws at the current point
+% Everything named qr--* is internal and may change.
+%
+% qr--byte-data: readable-string version data-capacity -> fresh-string
+% Internal seam: capacity is supplied by the future version/ECC planner.
+% It is NOT checked against a version/ECC table here. Version is 1..40;
+% capacity is a positive integer <=2956 (the largest Model 2 data area).
+% Input is raw bytes; no Unicode conversion, ECI or mode optimization.
+%
+% Validate before begin: named failures must leave no private dictionary open.
+%%SelfTest: qr-byte-data-invalid-arguments
+% { () 1 19.0 qr--byte-data } /qr-data-capacity-must-be-integer (real capacity) mustguard
+% { () 1 0 qr--byte-data } /qr-data-capacity-must-be-in-1-2956 (zero capacity) mustguard
+% { () 1 2957 qr--byte-data } /qr-data-capacity-must-be-in-1-2956 (large capacity) mustguard
+% { () 1.0 19 qr--byte-data } /qr-data-version-must-be-integer (real version) mustguard
+% { () 0 19 qr--byte-data } /qr-data-version-must-be-in-1-40 (zero version) mustguard
+% { () 41 19 qr--byte-data } /qr-data-version-must-be-in-1-40 (large version) mustguard
+% { [] 1 19 qr--byte-data } /qr-data-must-be-a-string (array payload) mustguard
+% { 256 string 9 300 qr--byte-data } /qr-data-count-does-not-fit-version (8-bit count overflow) mustguard
+% { (AB) 1 3 qr--byte-data } /qr-data-does-not-fit-capacity (payload overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qr-byte-data-packing
+% () 1 2 qr--byte-data <4000> eq (empty byte segment) mustbe
+% (A) 1 3 qr--byte-data <401410> eq (exact fit and terminator) mustbe
+% () 1 5 qr--byte-data <4000ec11ec> eq (alternating pad bytes) mustbe
+% <00ff> 10 5 qr--byte-data <4000200ff0> eq (16-bit count and raw bytes) mustbe
+% () cvx 1 2 qr--byte-data <4000> eq (executable empty string is data) mustbe
+% (pop) cvx 1 5 qr--byte-data <403706f700> eq (executable program is data) mustbe
+%%EndSelfTest
+% @internal
+/qr--byte-data {
+  dup type /integertype ne { qr-data-capacity-must-be-integer } if
+  dup 1 lt 1 index 2956 gt or { qr-data-capacity-must-be-in-1-2956 } if
+  1 index type /integertype ne { qr-data-version-must-be-integer } if
+  1 index dup 1 lt exch 40 gt or { qr-data-version-must-be-in-1-40 } if
+  2 index type /stringtype ne { qr-data-must-be-a-string } if
+  2 index rcheck not { qr-data-must-be-readable } if
+  1 index 10 lt {
+    2 index length 255 gt { qr-data-count-does-not-fit-version } if
+  } if
+  2 index length 2 index 10 lt { 2 } { 3 } ifelse add
+  1 index gt { qr-data-does-not-fit-capacity } if
+
+  12 dict begin
+    /capacity exch def /version exch def /data exch cvlit def
+    /out capacity string def /n data length def
+    /header version 10 lt { 2 } { 3 } ifelse def
+    % Mode 0100 plus an 8/16-bit count leaves the stream nibble-aligned.
+    header 2 eq {
+      out 0 64 n -4 bitshift or put
+      out 1 n 15 and 4 bitshift put
+    } {
+      out 0 64 n -12 bitshift or put
+      out 1 n -4 bitshift 255 and put
+      out 2 n 15 and 4 bitshift put
+    } ifelse
+    0 1 n 1 sub {
+      /i exch def /b data i get def /at header 1 sub i add def
+      out at out at get b -4 bitshift or put
+      out at 1 add b 15 and 4 bitshift put
+    } for
+    % Four zero terminator bits complete alignment for one byte segment.
+    % The low nibble is already zero; this also completes byte alignment.
+    /used n header add def
+    used 1 capacity 1 sub {
+      /i exch def
+      out i i used sub 2 mod 0 eq { 236 } { 17 } ifelse put
+    } for
+    out
+  end
+} bind def
+
+% Build finite-field lookup tables once, using QR's polynomial x^8+x^4+x^3+x^2+1.
+% Table construction is pure PostScript; no interpreter extension is involved.
+% @internal
+/qr--make-gf {
+  5 dict begin
+    /exps 512 string def /logs 256 string def /x 1 def
+    0 1 254 {
+      /i exch def exps i x put logs x i put
+      /x x 1 bitshift dup 256 and 0 ne { 285 xor } if def
+    } for
+    255 1 511 { /i exch def exps i exps i 255 sub get put } for
+    [exps readonly logs readonly] readonly
+  end
+} bind def
+% @internal
+/qr--gf qr--make-gf def
+
+% Trusted internal byte operands, obtained from strings. Zero has no logarithm.
+% @internal
+/qr--gf-mul {
+  2 copy 0 eq exch 0 eq or { pop pop 0 } {
+    qr--gf 1 get exch get
+    exch qr--gf 1 get exch get add
+    qr--gf 0 get exch get
+  } ifelse
+} bind def
+
+% qr--rs-divisor: degree -> fresh coefficient string (leading monic term omitted).
+%%SelfTest: qr-rs-divisor-guards
+% { 7.0 qr--rs-divisor } /qr-ecc-degree-must-be-integer (real degree) mustguard
+% { 0 qr--rs-divisor } /qr-ecc-degree-must-be-in-1-30 (zero degree) mustguard
+% { 31 qr--rs-divisor } /qr-ecc-degree-must-be-in-1-30 (large degree) mustguard
+% 1 qr--rs-divisor <01> eq (degree-one polynomial) mustbe
+% 2 128 qr--gf-mul 29 eq (QR polynomial, not AES polynomial) mustbe
+%%EndSelfTest
+% @internal
+/qr--rs-divisor {
+  dup type /integertype ne { qr-ecc-degree-must-be-integer } if
+  dup 1 lt 1 index 30 gt or { qr-ecc-degree-must-be-in-1-30 } if
+  6 dict begin
+    /degree exch def /result degree string def
+    result degree 1 sub 1 put /root 1 def
+    degree {
+      0 1 degree 1 sub {
+        /j exch def /value result j get root qr--gf-mul def
+        j degree 1 sub lt { /value value result j 1 add get xor def } if
+        result j value put
+      } for
+      /root root 2 qr--gf-mul def
+    } repeat
+    result
+  end
+} bind def
+
+% qr--rs-remainder: readable-data readable-divisor -> fresh parity string.
+%%SelfTest: qr-rs-remainder-guards
+% { () [] qr--rs-remainder } /qr-ecc-divisor-must-be-a-string (array divisor) mustguard
+% { () () qr--rs-remainder } /qr-ecc-divisor-length-must-be-in-1-30 (empty divisor) mustguard
+% { [] <01> qr--rs-remainder } /qr-data-must-be-a-string (array data) mustguard
+% { 2957 string <01> qr--rs-remainder } /qr-ecc-data-too-long (long data) mustguard
+% <010203> <01> qr--rs-remainder <00> eq (degree-one parity) mustbe
+% () cvx <01> cvx qr--rs-remainder <00> eq (executable strings stay data) mustbe
+%%EndSelfTest
+% @internal
+/qr--rs-remainder {
+  dup type /stringtype ne { qr-ecc-divisor-must-be-a-string } if
+  dup rcheck not { qr-ecc-divisor-must-be-readable } if
+  dup length dup 1 lt exch 30 gt or { qr-ecc-divisor-length-must-be-in-1-30 } if
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  1 index length 2956 gt { qr-ecc-data-too-long } if
+  7 dict begin
+    /divisor exch cvlit def /data exch cvlit def
+    /degree divisor length def /result degree string def
+    data {
+      /factor exch result 0 get xor def
+      result 0 result 1 degree 1 sub getinterval putinterval
+      result degree 1 sub 0 put
+      0 1 degree 1 sub {
+        /j exch def
+        result j result j get divisor j get factor qr--gf-mul xor put
+      } for
+    } forall
+    result
+  end
+} bind def
+
+% Model 2 block-layout facts (versions 1..40); independently checked against
+% pinned reference fixtures. Keep only correction/block counts, deriving data
+% capacity from symbol geometry so the planner and future interleaver agree.
+% @internal
+/qr--ecc-per-block <<
+  /L [7 10 15 20 26 18 20 24 30 18 20 24 26 30 22 24 28 30 28 28
+      28 28 30 30 26 28 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+  /M [10 16 26 18 24 16 18 22 22 26 30 22 22 24 24 28 28 26 26 26
+      26 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28] readonly
+  /Q [13 22 18 26 18 24 18 22 20 24 28 26 24 20 30 24 28 28 26 30
+      28 30 30 30 30 28 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+  /H [17 28 22 16 22 28 26 26 24 28 24 28 22 24 24 30 28 28 26 28
+      30 24 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+>> def
+qr--ecc-per-block readonly pop
+% @internal
+/qr--block-count <<
+  /L [1 1 1 1 1 2 2 2 2 4 4 4 4 4 6 6 6 6 7 8
+      8 9 9 10 12 12 12 13 14 15 16 17 18 19 19 20 21 22 24 25] readonly
+  /M [1 1 1 2 2 4 4 4 5 5 5 8 9 9 10 10 11 13 14 16
+      17 17 18 20 21 23 25 26 28 29 31 33 35 37 38 40 43 45 47 49] readonly
+  /Q [1 1 2 2 4 4 6 6 8 8 8 10 12 16 12 17 16 18 21 20
+      23 23 25 27 29 34 34 35 38 40 43 45 48 51 53 56 59 62 65 68] readonly
+  /H [1 1 2 4 4 4 5 6 8 8 11 11 16 16 18 16 19 21 25 25
+      25 34 30 32 35 37 40 42 45 48 51 54 57 60 63 66 70 74 77 81] readonly
+>> def
+qr--block-count readonly pop
+
+% Accept executable names as values too, but never execute a stored level.
+% @internal
+/qr--check-level {
+  dup type /nametype ne { qr-level-must-be-L-M-Q-or-H } if
+  cvlit
+  qr--ecc-per-block 1 index known not { qr-level-must-be-L-M-Q-or-H } if
+} bind def
+
+% Trusted integer version 1..40 -> data-area module count, remainder bits
+% included. Shared by the layout planner and matrix placement so the two can
+% never disagree about how many codeword bits a symbol holds.
+% Base layout removes finder/separator/timing/format areas. Alignment
+% intersections depend on version; version metadata consumes 36 more bits.
+% @internal
+/qr--raw-modules {
+  dup dup 16 mul 128 add mul 64 add exch
+  dup 2 ge {
+    dup 7 idiv 2 add dup 25 mul 10 sub mul 55 sub
+    3 -1 roll exch sub exch
+    7 ge { 36 sub } if
+  } { pop } ifelse
+} bind def
+
+% qr--block-spec: version level -> fresh-layout-dict
+% RawCodewords excludes remainder bits; ECCodewordsPerBlock is per block.
+%%SelfTest: qr-block-spec-invalid-arguments
+% { 1 /X qr--block-spec } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% { 1 (L) qr--block-spec } /qr-level-must-be-L-M-Q-or-H (string ECC) mustguard
+% { 1.0 /M qr--block-spec } /qr-version-must-be-integer (real version) mustguard
+% { 0 /L qr--block-spec } /qr-version-must-be-in-1-40 (zero version) mustguard
+% { 41 /H qr--block-spec } /qr-version-must-be-in-1-40 (large version) mustguard
+%%EndSelfTest
+% @internal
+/qr--block-spec {
+  qr--check-level
+  1 index type /integertype ne { qr-version-must-be-integer } if
+  1 index dup 1 lt exch 40 gt or { qr-version-must-be-in-1-40 } if
+  10 dict begin
+    /level exch def /version exch def
+    /size version 4 mul 17 add def
+    /raw version qr--raw-modules def
+    /ec qr--ecc-per-block level get version 1 sub get def
+    /blocks qr--block-count level get version 1 sub get def
+    << /Version version /Level level /Size size
+       /RawCodewords raw 8 idiv /RemainderBits raw 8 mod
+       /DataCodewords raw 8 idiv ec blocks mul sub
+       /ECCodewordsPerBlock ec /Blocks blocks >>
+  end
+} bind def
+
+% qr--byte-plan: readable-string level -> fresh-layout-dict-with-Data
+% Exact requested ECC; select the smallest fitting version, with no boosting.
+%%SelfTest: qr-byte-plan-invalid-arguments
+% { [] /M qr--byte-plan } /qr-data-must-be-a-string (array payload) mustguard
+% { () /low qr--byte-plan } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% { 2954 string /L qr--byte-plan } /qr-data-too-long-for-level (largest overflow) mustguard
+% { 1274 string /H qr--byte-plan } /qr-data-too-long-for-level (H overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qr-byte-plan-smallest-version
+% () /M qr--byte-plan /Version get 1 eq (empty segment version) mustbe
+% (https://github.com/PSCatLabs/pscat) /M qr--byte-plan /Version get 3 eq (GitHub version at M) mustbe
+% (A) cvx /L cvx qr--byte-plan /Data get length 19 eq (executable values stay data) mustbe
+%%EndSelfTest
+% @internal
+/qr--byte-plan {
+  qr--check-level
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  % Refuse before opening the planner frame, so ordinary caught errors do not
+  % retain scratch bindings. The version-40 bound also bounds the search loop.
+  1 index length 40 2 index qr--block-spec /DataCodewords get 3 sub gt {
+    qr-data-too-long-for-level
+  } if
+  8 dict begin
+    /level exch def /data exch cvlit def /n data length def /version 1 def
+    {
+      /spec version level qr--block-spec def
+      /header version 10 lt { 2 } { 3 } ifelse def
+      n header add spec /DataCodewords get le
+      n version 10 lt { 255 } { 65535 } ifelse le and {
+        spec /Data data version spec /DataCodewords get qr--byte-data put
+        spec exit
+      } if
+      /version version 1 add def
+    } loop
+  end
+} bind def
+
+% qr--interleave: padded-data version level -> fresh full codeword string.
+% Padded data must exactly fill the selected layout. Short blocks precede long
+% blocks; correction columns follow all data columns. Remainder bits stay out.
+%%SelfTest: qr-interleave-guards
+% { () 1 /L qr--interleave } /qr-ecc-data-length-must-match-capacity (short data) mustguard
+% { [] 1 /M qr--interleave } /qr-data-must-be-a-string (array data) mustguard
+% { 19 string 1 /X qr--interleave } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% 19 string 1 /L qr--interleave length 26 eq (complete version-one stream) mustbe
+%%EndSelfTest
+% @internal
+/qr--interleave {
+  qr--block-spec
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  1 index length 1 index /DataCodewords get ne {
+    qr-ecc-data-length-must-match-capacity
+  } if
+  16 dict begin
+    /spec exch def /data exch cvlit def
+    /blocks spec /Blocks get def /ec spec /ECCodewordsPerBlock get def
+    /short spec /RawCodewords get blocks idiv ec sub def
+    /short-count blocks spec /RawCodewords get blocks mod sub def
+    /divisor ec qr--rs-divisor def
+    /parts blocks array def /parity blocks array def /offset 0 def
+    0 1 blocks 1 sub {
+      /b exch def /len short b short-count ge { 1 } { 0 } ifelse add def
+      parts b data offset len getinterval put
+      parity b parts b get divisor qr--rs-remainder put
+      /offset offset len add def
+    } for
+    /out spec /RawCodewords get string def /pos 0 def
+    0 1 short {
+      /j exch def
+      0 1 blocks 1 sub {
+        /b exch def
+        j parts b get length lt {
+          out pos parts b get j get put /pos pos 1 add def
+        } if
+      } for
+    } for
+    0 1 ec 1 sub {
+      /j exch def
+      0 1 blocks 1 sub {
+        /b exch def out pos parity b get j get put /pos pos 1 add def
+      } for
+    } for
+    out
+  end
+} bind def
+
+% ---- Matrix construction (QR-3) ----
+%
+% Internal matrix: << /Version v /Size s /Cells string /Mask null|0..7 >>.
+% /Cells holds s*s bytes, row-major from the top-left module: x is the column,
+% y the row, index y*s+x, no quiet zone. Each byte is a set of flags:
+%   1 dark, 2 function (never placed or masked), 4 metadata (format/version
+%   cells, reserved light here; the BCH stage writes them).
+% So data cells are 0/1, fixed patterns 2/3 (the dark module is 3) and
+% unwritten metadata 6. Bytes keep a v40 grid at 31 KB and make mask trials
+% cheap string copies; the public API converts to booleans.
+
+% Validate before any frame opens, mirroring qr--block-spec's version guards.
+% @internal
+/qr--check-version {
+  dup type /integertype ne { qr-version-must-be-integer } if
+  dup dup 1 lt exch 40 gt or { qr-version-must-be-in-1-40 } if
+} bind def
+
+% qr--alignment-centers: version -> fresh ascending array of row/column centers.
+% Evenly spaced from the far side, step rounded up to even, then 6; this
+% reproduces ISO/IEC 18004 Annex E, including version 32's irregular gap.
+%%SelfTest: qr-alignment-centers
+% 1 qr--alignment-centers length 0 eq (version one has none) mustbe
+% 2 qr--alignment-centers aload pop 18 eq exch 6 eq and (version two) mustbe
+% 7 qr--alignment-centers aload pop 38 eq exch 22 eq and exch 6 eq and (version seven) mustbe
+% 32 qr--alignment-centers 1 get 34 eq (version 32 irregular step) mustbe
+% 40 qr--alignment-centers dup length 7 eq exch 6 get 170 eq and (version forty) mustbe
+% { 0 qr--alignment-centers } /qr-version-must-be-in-1-40 (zero version) mustguard
+% { 2.0 qr--alignment-centers } /qr-version-must-be-integer (real version) mustguard
+%%EndSelfTest
+% @internal
+/qr--alignment-centers {
+  qr--check-version
+  dup 1 eq { pop [] } {
+    6 dict begin
+      /version exch def /n version 7 idiv 2 add def
+      /size version 4 mul 17 add def
+      /step version 8 mul n 3 mul add 5 add n 4 mul 4 sub idiv 2 mul def
+      /out n array def out 0 6 put
+      1 1 n 1 sub { /i exch def out n i sub size 7 sub i 1 sub step mul sub put } for
+      out
+    end
+  } ifelse
+} bind def
+
+% qr--function-matrix: version -> fresh unmasked matrix with every function
+% module and metadata reservation set and all data cells light (0).
+%%SelfTest: qr-function-matrix
+% 1 qr--function-matrix /Cells get length 441 eq (version one grid) mustbe
+% 1 qr--function-matrix /Cells get 13 21 mul 8 add get 3 eq (dark module) mustbe
+% 1 qr--function-matrix /Cells get 8 21 mul 8 add get 6 eq (format reservation) mustbe
+% 7 qr--function-matrix /Cells get 34 get 6 eq (version reservation) mustbe
+% 1 qr--function-matrix /Mask get null eq (unmasked) mustbe
+% { 41 qr--function-matrix } /qr-version-must-be-in-1-40 (large version) mustguard
+%%EndSelfTest
+% @internal
+/qr--function-matrix {
+  qr--check-version
+  12 dict begin
+    /version exch def /size version 4 mul 17 add def
+    /cells size dup mul string def
+    % x y value -> -, writing one cell flag byte.
+    /cell { 3 1 roll size mul add exch cells 3 1 roll put } def
+    0 1 size 1 sub {
+      /i exch def /v i 2 mod 0 eq { 3 } { 2 } ifelse def
+      6 i v cell i 6 v cell
+    } for
+    % Finder centers; the 9x9 square includes the light separator ring and
+    % is clipped at the symbol edge.
+    [[3 3] [size 4 sub 3] [3 size 4 sub]] {
+      aload pop /cy exch def /cx exch def
+      -4 1 4 { /dy exch def
+        -4 1 4 { /dx exch def
+          /x cx dx add def /y cy dy add def
+          x 0 ge x size lt and y 0 ge and y size lt and {
+            /d dx abs dy abs 2 copy lt { exch } if pop def
+            x y d 2 eq d 4 eq or { 2 } { 3 } ifelse cell
+          } if
+        } for
+      } for
+    } forall
+    /centers version qr--alignment-centers def /last centers length 1 sub def
+    0 1 last { /i exch def
+      0 1 last { /j exch def
+        % Skip the three corners occupied by finder patterns.
+        i 0 eq j 0 eq and i 0 eq j last eq and or i last eq j 0 eq and or not {
+          -2 1 2 { /dy exch def
+            -2 1 2 { /dx exch def
+              /d dx abs dy abs 2 copy lt { exch } if pop def
+              centers i get dx add centers j get dy add
+              d 1 eq { 2 } { 3 } ifelse cell
+            } for
+          } for
+        } if
+      } for
+    } for
+    % Format information: two 15-cell copies around the finders.
+    0 1 5 { 8 exch 6 cell } for
+    8 7 6 cell 8 8 6 cell 7 8 6 cell
+    0 1 5 { 8 6 cell } for
+    0 1 7 { size 1 sub exch sub 8 6 cell } for
+    size 7 sub 1 size 1 sub { 8 exch 6 cell } for
+    8 size 8 sub 3 cell
+    % Version information (v>=7): two 6x3 blocks beside the far finders.
+    version 7 ge {
+      0 1 5 { /b exch def
+        size 11 sub 1 size 9 sub { /a exch def a b 6 cell b a 6 cell } for
+      } for
+    } if
+    << /Version version /Size size /Cells cells /Mask null >>
+  end
+} bind def
+
+% qr--matrix: codewords version -> fresh unmasked matrix with every codeword
+% bit placed. Codewords are the complete interleaved stream (qr--interleave's
+% output). Bits go most significant first in the two-column zigzag, upward
+% from the bottom-right, skipping function cells and the vertical timing
+% column. Remainder cells (0-7) stay light data cells and are still masked.
+%%SelfTest: qr-matrix-guards
+% { () 1 qr--matrix } /qr-codewords-length-must-match-version (empty stream) mustguard
+% { 27 string 1 qr--matrix } /qr-codewords-length-must-match-version (long stream) mustguard
+% { [] 1 qr--matrix } /qr-codewords-must-be-a-string (array stream) mustguard
+% { 26 string 1.0 qr--matrix } /qr-version-must-be-integer (real version) mustguard
+% { 26 string 0 qr--matrix } /qr-version-must-be-in-1-40 (zero version) mustguard
+%%EndSelfTest
+%%SelfTest: qr-matrix-placement
+% 26 string 1 qr--matrix /Cells get 440 get 0 eq (light first bit) mustbe
+% 26 string dup 0 128 put 1 qr--matrix /Cells get 440 get 1 eq (first bit bottom right) mustbe
+% 26 string dup 0 64 put 1 qr--matrix /Cells get 439 get 1 eq (second bit left of first) mustbe
+% 26 string cvx 1 qr--matrix /Size get 21 eq (executable stream is data) mustbe
+%%EndSelfTest
+% @internal
+/qr--matrix {
+  qr--check-version
+  1 index type /stringtype ne { qr-codewords-must-be-a-string } if
+  1 index rcheck not { qr-codewords-must-be-readable } if
+  1 index length 1 index qr--raw-modules 8 idiv ne {
+    qr-codewords-length-must-match-version
+  } if
+  qr--function-matrix
+  12 dict begin
+    /m exch def /data exch cvlit def
+    /cells m /Cells get def /size m /Size get def
+    /nbits data length 8 mul def /i 0 def
+    size 1 sub -2 1 { /right exch def
+      right 6 le { /right right 1 sub def } if
+      /upward right 1 add 2 and 0 eq def
+      0 1 size 1 sub { /vert exch def
+        /row upward { size 1 sub vert sub } { vert } ifelse size mul def
+        0 1 1 { /j exch def /at row right add j sub def
+          cells at get 2 and 0 eq i nbits lt and {
+            cells at data i -3 bitshift get i 7 and 7 sub bitshift 1 and put
+            /i i 1 add def
+          } if
+        } for
+      } for
+    } for
+    m
+  end
+} bind def
+
+% Mask predicates, indexed by mask number, with x the column and y the row.
+% Each leaves 0 exactly where a data cell is inverted.
+% @internal
+/qr--mask-predicates [
+  { x y add 2 mod } bind
+  { y 2 mod } bind
+  { x 3 mod } bind
+  { x y add 3 mod } bind
+  { x 3 idiv y 2 idiv add 2 mod } bind
+  { x y mul dup 2 mod exch 3 mod add } bind
+  { x y mul dup 2 mod exch 3 mod add 2 mod } bind
+  { x y add 2 mod x y mul 3 mod add 2 mod } bind
+] def
+
+% Shape check shared by matrix consumers; leaves the matrix on the stack.
+% @internal
+/qr--check-matrix {
+  dup type /dicttype ne { qr-matrix-must-be-a-matrix } if
+  dup /Version known 1 index /Size known and
+  1 index /Cells known and 1 index /Mask known and not { qr-matrix-must-be-a-matrix } if
+  dup /Version get dup type /integertype eq { dup 1 ge exch 40 le and } { pop false } ifelse
+  not { qr-matrix-must-be-a-matrix } if
+  dup /Size get 1 index /Version get 4 mul 17 add ne { qr-matrix-must-be-a-matrix } if
+  dup /Cells get dup type /stringtype eq {
+    length 1 index /Size get dup mul eq
+  } { pop false } ifelse
+  not { qr-matrix-must-be-a-matrix } if
+  dup /Cells get rcheck not { qr-matrix-must-be-a-matrix } if
+} bind def
+
+% qr--apply-mask: unmasked-matrix mask -> fresh matrix with that one mask
+% applied to every non-function cell and /Mask set. The input is unchanged.
+% Re-masking is refused: masks are XORs, so a second one silently corrupts.
+%%SelfTest: qr-apply-mask
+% { 1 qr--function-matrix 8 qr--apply-mask } /qr-mask-must-be-in-0-7 (large mask) mustguard
+% { 1 qr--function-matrix -1 qr--apply-mask } /qr-mask-must-be-in-0-7 (negative mask) mustguard
+% { 1 qr--function-matrix 1.0 qr--apply-mask } /qr-mask-must-be-integer (real mask) mustguard
+% { 1 dict 0 qr--apply-mask } /qr-matrix-must-be-a-matrix (empty dictionary) mustguard
+% { 1 qr--function-matrix 0 qr--apply-mask 1 qr--apply-mask } /qr-matrix-already-masked (double mask) mustguard
+% 1 qr--function-matrix 0 qr--apply-mask /Cells get 440 get 1 eq (mask 0 inverts even sum) mustbe
+% 1 qr--function-matrix 1 qr--apply-mask /Cells get 439 get 1 eq (mask 1 inverts even rows) mustbe
+% 1 qr--function-matrix 7 qr--apply-mask /Mask get 7 eq (mask recorded) mustbe
+%%EndSelfTest
+% @internal
+/qr--apply-mask {
+  dup type /integertype ne { qr-mask-must-be-integer } if
+  dup dup 0 lt exch 7 gt or { qr-mask-must-be-in-0-7 } if
+  1 index qr--check-matrix /Mask get null ne { qr-matrix-already-masked } if
+  10 dict begin
+    /mask exch def /src exch def /size src /Size get def
+    /cells src /Cells get dup length string copy def
+    /test qr--mask-predicates mask get def
+    0 1 size 1 sub { /y exch def
+      0 1 size 1 sub { /x exch def /at y size mul x add def
+        cells at get 2 and 0 eq { test 0 eq { cells at cells at get 1 xor put } if } if
+      } for
+    } for
+    << /Version src /Version get /Size size /Cells cells /Mask mask >>
+  end
+} bind def
+
+% ---- Format/version metadata, penalty scoring and mask selection (QR-4) ----
+%
+% Format information is 15 bits: the two-bit level code (L 1, M 0, Q 3, H 2)
+% and the three-bit mask, a BCH(15,5) remainder over x^10+x^8+x^5+x^4+x^2+x+1
+% (16#537), then XOR 16#5412 so no format word is all light. Version
+% information (v>=7) is 18 bits: the version and a BCH(18,6) remainder over
+% 16#1F25, unmasked. Bit 0 is the least significant bit.
+
+% @internal
+/qr--level-bits << /L 1 /M 0 /Q 3 /H 2 >> def
+qr--level-bits readonly pop
+
+% qr--format-bits: level mask -> 15-bit integer.
+%%SelfTest: qr-format-bits
+% /M 0 qr--format-bits 16#5412 eq (level M mask 0 is the bare XOR mask) mustbe
+% /L 0 qr--format-bits 16#77C4 eq (level L mask 0) mustbe
+% /H 7 qr--format-bits 16#083B eq (level H mask 7) mustbe
+% { /M 8 qr--format-bits } /qr-mask-must-be-in-0-7 (large mask) mustguard
+% { /M 1.0 qr--format-bits } /qr-mask-must-be-integer (real mask) mustguard
+% { /X 0 qr--format-bits } /qr-level-must-be-L-M-Q-or-H (unknown level) mustguard
+%%EndSelfTest
+% @internal
+/qr--format-bits {
+  dup type /integertype ne { qr-mask-must-be-integer } if
+  dup dup 0 lt exch 7 gt or { qr-mask-must-be-in-0-7 } if
+  exch qr--check-level qr--level-bits exch get 3 bitshift or
+  dup 10 { dup 1 bitshift exch -9 bitshift 16#537 mul xor } repeat
+  exch 10 bitshift or 16#5412 xor
+} bind def
+
+% qr--version-bits: version -> 18-bit integer; versions 7..40 only.
+%%SelfTest: qr-version-bits
+% 7 qr--version-bits 16#07C94 eq (version seven) mustbe
+% 40 qr--version-bits 16#28C69 eq (version forty) mustbe
+% { 6 qr--version-bits } /qr-version-bits-need-version-7-40 (small version) mustguard
+% { 41 qr--version-bits } /qr-version-must-be-in-1-40 (large version) mustguard
+%%EndSelfTest
+% @internal
+/qr--version-bits {
+  qr--check-version
+  dup 7 lt { qr-version-bits-need-version-7-40 } if
+  dup 12 { dup 1 bitshift exch -11 bitshift 16#1F25 mul xor } repeat
+  exch 12 bitshift or
+} bind def
+
+% Masked-matrix shape check: a well-formed matrix whose /Mask is 0..7.
+% @internal
+/qr--check-masked {
+  qr--check-matrix
+  dup /Mask get dup null eq { qr-matrix-must-be-masked } if
+  dup type /integertype eq { dup 0 ge exch 7 le and } { pop false } ifelse
+  not { qr-matrix-must-be-a-matrix } if
+} bind def
+
+% qr--draw-metadata: masked-matrix level -> fresh matrix with both format
+% copies and (v>=7) both version blocks written, plus /Level. Each metadata
+% byte is overwritten as 6 or the bit, so it keeps its metadata flag and a
+% second call simply rewrites it. Format bit i sits at (8,i) i<6, (8,7),
+% (8,8), (7,8), (14-i,8) i>8; and at (size-1-i,8) i<8, (8,size-15+i) i>=8.
+% Version bit i sits at (size-11+i mod 3, i div 3) and its transpose.
+%%SelfTest: qr-draw-metadata
+% 1 qr--function-matrix 0 qr--apply-mask /M qr--draw-metadata /Cells get 8 get 6 eq (M0 bit 0 light) mustbe
+% 1 qr--function-matrix 0 qr--apply-mask /M qr--draw-metadata /Cells get 8 21 mul 7 add get 6 eq (M0 bit 8 light) mustbe
+% 1 qr--function-matrix 0 qr--apply-mask /M qr--draw-metadata /Cells get 4 21 mul 8 add get 7 eq (M0 bit 4 dark) mustbe
+% 1 qr--function-matrix 0 qr--apply-mask /M qr--draw-metadata /Cells get 8 21 mul 16 add get 7 eq (second copy bit 4 dark) mustbe
+% 1 qr--function-matrix 5 qr--apply-mask /Q qr--draw-metadata /Level get /Q eq (level recorded) mustbe
+% 7 qr--function-matrix 0 qr--apply-mask /L qr--draw-metadata /Cells get 34 get 6 eq (version bit 0 light) mustbe
+% 7 qr--function-matrix 0 qr--apply-mask /L qr--draw-metadata /Cells get 45 34 mul get 6 eq (version transpose bit 0 light) mustbe
+% 7 qr--function-matrix 0 qr--apply-mask /L qr--draw-metadata /Cells get 80 get 7 eq (version bit 4 dark) mustbe
+% { 1 qr--function-matrix /M qr--draw-metadata } /qr-matrix-must-be-masked (unmasked) mustguard
+% { 1 qr--function-matrix 0 qr--apply-mask /low qr--draw-metadata } /qr-level-must-be-L-M-Q-or-H (unknown level) mustguard
+% { 1 dict /M qr--draw-metadata } /qr-matrix-must-be-a-matrix (empty dictionary) mustguard
+%%EndSelfTest
+% @internal
+/qr--draw-metadata {
+  qr--check-level
+  1 index qr--check-masked pop
+  12 dict begin
+    /level exch def /src exch def /size src /Size get def
+    /cells src /Cells get dup length string copy def
+    % x y bits i -> -, writing bit i of bits at (x, y).
+    /bit { neg bitshift 1 and 6 or 3 1 roll size mul add exch cells 3 1 roll put } def
+    /bits level src /Mask get qr--format-bits def
+    0 1 5 { /i exch def 8 i bits i bit } for
+    8 7 bits 6 bit 8 8 bits 7 bit 7 8 bits 8 bit
+    9 1 14 { /i exch def 14 i sub 8 bits i bit } for
+    0 1 7 { /i exch def size 1 sub i sub 8 bits i bit } for
+    8 1 14 { /i exch def 8 size 15 sub i add bits i bit } for
+    src /Version get 7 ge {
+      /bits src /Version get qr--version-bits def
+      0 1 17 { /i exch def
+        /a size 11 sub i 3 mod add def /b i 3 idiv def
+        a b bits i bit b a bits i bit
+      } for
+    } if
+    << /Version src /Version get /Level level /Size size /Cells cells
+       /Mask src /Mask get >>
+  end
+} bind def
+
+% qr--penalty: matrix -> integer mask-selection score of its dark modules,
+% the four rules as computed by the reference encoder:
+%   N1  each row/column run of five or more equal modules: 3 + (length - 5);
+%   N2  each 2x2 block of equal modules (overlapping blocks all count): 3;
+%   N3  each 1:1:3:1:1 dark:light:dark:light:dark run with a light run of at
+%       least four times the unit on one side and at least the unit on the
+%       other, counted once per qualifying side: 40. The line is treated as
+%       padded with Size light modules at both ends, so a pattern at the
+%       symbol edge has its light run;
+%   N4  10 per full 5% step the dark share lies outside 45%..55%.
+% Every cell counts, function and metadata cells included.
+%%SelfTest: qr-penalty
+% << /Version 1 /Size 21 /Cells 441 string /Mask null >> qr--penalty 2088 eq (all light: N1 21x2x19, N2 400x3, N4 90) mustbe
+% << /Version 1 /Size 21 /Cells 441 string 0 1 440 { 1 index exch dup 2 mod put } for /Mask null >> qr--penalty 0 eq (alternating cells score nothing) mustbe
+% { 1 dict qr--penalty } /qr-matrix-must-be-a-matrix (empty dictionary) mustguard
+%%EndSelfTest
+% @internal
+/qr--penalty {
+  qr--check-matrix
+  24 dict begin
+    /src exch def /size src /Size get def /cells src /Cells get def
+    /n size size mul def /score 0 def /dark 0 def
+    % 0/1 dark planes: rows row-major, cols its transpose, so both line
+    % scans read one contiguous getinterval.
+    /rows n string def /cols n string def
+    0 1 size 1 sub { /y exch def /base y size mul def
+      0 1 size 1 sub { /x exch def
+        /v cells base x add get 1 and def
+        rows base x add v put cols x size mul y add v put
+        /dark dark v add def
+      } for
+    } for
+    % length -> -, pushing a finished run; the first run gains the light border.
+    /push {
+      h0 0 eq { size add } if
+      /h6 h5 def /h5 h4 def /h4 h3 def /h3 h2 def /h2 h1 def /h1 h0 def /h0 exch def
+    } def
+    % - -> 0|1|2, finder-like patterns ending at the light run just pushed.
+    /finders {
+      h1 0 gt h2 h1 eq and h4 h1 eq and h5 h1 eq and h3 h1 3 mul eq and {
+        0
+        h0 h1 4 mul ge h6 h1 ge and { 1 add } if
+        h6 h1 4 mul ge h0 h1 ge and { 1 add } if
+      } { 0 } ifelse
+    } def
+    % line-string -> -, adding N1 and N3 for one row or column.
+    /line {
+      /tone 0 def /len 0 def
+      /h0 0 def /h1 0 def /h2 0 def /h3 0 def /h4 0 def /h5 0 def /h6 0 def
+      {
+        dup tone eq {
+          pop /len len 1 add def
+          len 5 ge { /score score len 5 eq { 3 } { 1 } ifelse add def } if
+        } {
+          len push
+          tone 0 eq { /score finders 40 mul score add def } if
+          /tone exch def /len 1 def
+        } ifelse
+      } forall
+      tone 1 eq { len push /len 0 def } if
+      len size add push
+      /score finders 40 mul score add def
+    } def
+    0 1 size 1 sub { /y exch def
+      rows y size mul size getinterval line
+      cols y size mul size getinterval line
+    } for
+    0 1 size 2 sub { /y exch def
+      /a rows y size mul size getinterval def
+      /b rows y 1 add size mul size getinterval def
+      /p a 0 get b 0 get add def
+      1 1 size 1 sub { /x exch def
+        /q a x get b x get add def
+        p q add dup 0 eq exch 4 eq or { /score score 3 add def } if
+        /p q def
+      } for
+    } for
+    /k dark 20 mul n 10 mul sub abs n add 1 sub n idiv 1 sub def
+    score k 10 mul add
+  end
+} bind def
+
+% qr--mask-penalties: unmasked-matrix level -> fresh array of the eight
+% scores, mask 0 first, each taken with that mask's format bits drawn.
+%%SelfTest: qr-mask-penalties
+% 1 qr--function-matrix /M qr--mask-penalties length 8 eq (eight scores) mustbe
+% { 1 qr--function-matrix 0 qr--apply-mask /M qr--mask-penalties } /qr-matrix-already-masked (masked input) mustguard
+%%EndSelfTest
+% @internal
+/qr--mask-penalties {
+  qr--check-level
+  1 index qr--check-matrix /Mask get null ne { qr-matrix-already-masked } if
+  4 dict begin
+    /level exch def /src exch def
+    [ 0 1 7 { src exch qr--apply-mask level qr--draw-metadata qr--penalty } for ]
+  end
+} bind def
+
+% qr--best-mask: scores -> index of the lowest; the lowest index wins a tie.
+%%SelfTest: qr-best-mask
+% [9 4 4 7 5 6 8 9] qr--best-mask 1 eq (tie goes to the lower mask) mustbe
+% [3 3 3 3 3 3 3 3] qr--best-mask 0 eq (all tied) mustbe
+% [9 9 9 9 9 9 9 2] qr--best-mask 7 eq (last mask) mustbe
+% { [1 2 3] qr--best-mask } /qr-penalties-must-be-eight-integers (short array) mustguard
+%%EndSelfTest
+% @internal
+/qr--best-mask {
+  dup type /arraytype ne { qr-penalties-must-be-eight-integers } if
+  dup length 8 ne { qr-penalties-must-be-eight-integers } if
+  dup { type /integertype ne { qr-penalties-must-be-eight-integers } if } forall
+  0 1 1 7 {
+    % scores best i
+    2 index 1 index get 3 index 3 index get lt { exch } if pop
+  } for
+  exch pop
+} bind def
+
+% qr--finish: unmasked-matrix level -> complete symbol, with the
+% lowest-penalty mask applied and its metadata written:
+% << /Version /Level /Size /Cells /Mask >>.
+%%SelfTest: qr-finish
+% 26 string 1 qr--matrix /M qr--finish /Mask get type /integertype eq (mask chosen) mustbe
+% 26 string 1 qr--matrix dup /M qr--mask-penalties qr--best-mask exch /M qr--finish /Mask get eq (finish takes the best mask) mustbe
+%%EndSelfTest
+% @internal
+/qr--finish {
+  qr--check-level
+  2 copy qr--mask-penalties qr--best-mask
+  exch 3 1 roll qr--apply-mask exch qr--draw-metadata
+} bind def
+
+% qr--codeword-symbol: padded-data version level -> complete symbol.
+% Fixed version: the seam for whole-symbol reference checks.
+% @internal
+/qr--codeword-symbol {
+  qr--check-level
+  3 copy qr--interleave
+  4 1 roll 3 -1 roll pop
+  3 1 roll qr--matrix exch qr--finish
+} bind def
+
+% qr--symbol: readable-string level -> complete symbol, smallest fitting
+% version at exactly that level, automatic mask. The public qrencode (#972)
+% wraps this.
+%%SelfTest: qr-symbol
+% (https://github.com/PSCatLabs/pscat) /M qr--symbol /Version get 3 eq (GitHub at M) mustbe
+% { [] /M qr--symbol } /qr-data-must-be-a-string (array payload) mustguard
+%%EndSelfTest
+% @internal
+/qr--symbol {
+  qr--byte-plan
+  dup /Data get exch dup /Version get exch /Level get qr--codeword-symbol
+} bind def
+
+% ---- Public interface: qrencode and qrdraw (QR-5) ----
+%
+% A public symbol is a fresh dictionary the caller owns:
+%   << /Version 1..40 /Level /L|/M|/Q|/H /Mask 0..7 /Size n /Modules rows >>
+% /Modules is an array of n rows, the top row first; each row is an array of
+% n booleans, the leftmost module first, true for a dark module. The quiet
+% zone is not included. The arrays are mutable and shared with nothing.
+% Every argument is checked before a private frame or gsave opens, so a
+% named failure leaves the dictionary stack and graphics state alone.
+
+% opts key default -> value: the option, or default when it is absent.
+% get never executes, so a procedure value arrives as a value.
+% @internal
+/qr--opt {
+  2 index 2 index known { pop get } { exch pop exch pop } ifelse
+} bind def
+
+% any -> any bool: a number in 0..1, or a literal array of 1, 3 or 4 of
+% them. A procedure is refused, not taken for an array.
+% @internal
+/qr--color-ok {
+  dup type dup /integertype eq exch /realtype eq or {
+    dup dup 0 ge exch 1 le and
+  } {
+    dup type /arraytype eq 1 index xcheck not and {
+      dup length dup 1 eq exch dup 3 eq exch 4 eq or or {
+        true 1 index {
+          dup type dup /integertype eq exch /realtype eq or {
+            dup 0 ge exch 1 le and
+          } { pop false } ifelse and
+        } forall
+      } { false } ifelse
+    } { false } ifelse
+  } ifelse
+} bind def
+
+% Checked color -> fresh literal array of 1 (gray), 3 (RGB) or 4 (CMYK).
+% @internal
+/qr--color-array {
+  dup type /arraytype eq { [ exch aload pop ] } { [ exch ] } ifelse
+} bind def
+
+% color-array additive? -> luminance 0..1 (Rec. 601 weights). CMYK has no
+% single RGB meaning: the PLRM (and Ghostscript) convert it additively,
+% 1-min(1,c+k), pscat multiplicatively, (1-c)(1-k), and a PDF viewer through
+% its own profile. qrdraw therefore weighs CMYK both ways.
+% @internal
+/qr--luma {
+  exch dup length 1 eq { 0 get exch pop } {
+    dup length 3 eq { aload pop 4 -1 roll pop } {
+      aload pop 5 -1 roll {
+        % c m y k -> 1-min(1,c+k) 1-min(1,m+k) 1-min(1,y+k)
+        4 1 roll 3 { 3 index add dup 1 gt { pop 1 } if 1 exch sub 3 1 roll } repeat
+      } {
+        % c m y k -> (1-c)(1-k) (1-m)(1-k) (1-y)(1-k)
+        4 1 roll 3 { 1 exch sub 3 index 1 exch sub mul 3 1 roll } repeat
+      } ifelse
+      4 -1 roll pop
+    } ifelse
+    0.114 mul exch 0.587 mul add exch 0.299 mul add
+  } ifelse
+} bind def
+
+% dark-array light-array -> dark-array light-array bool: true unless the
+% dark color is darker under both CMYK conversions.
+% @internal
+/qr--not-darker {
+  1 index true qr--luma 1 index true qr--luma ge
+  2 index false qr--luma 2 index false qr--luma ge or
+} bind def
+
+% color-array -> -, set as the current color.
+% @internal
+/qr--setcolor {
+  dup length 1 eq { aload pop setgray } {
+    dup length 3 eq { aload pop setrgbcolor } { aload pop setcmykcolor } ifelse
+  } ifelse
+} bind def
+
+% qrencode: payload opts -> symbol
+%%SelfTest: qrencode-invalid-arguments
+% { (A) [] qrencode } /qr-options-must-be-a-dict (array options) mustguard
+% { (A) << /Level /X >> qrencode } /qr-level-must-be-L-M-Q-or-H (unknown level) mustguard
+% { (A) << /Level (M) >> qrencode } /qr-level-must-be-L-M-Q-or-H (string level) mustguard
+% { (A) << /Version 41 >> qrencode } /qr-version-must-be-in-1-40 (large version) mustguard
+% { (A) << /Version 2.0 >> qrencode } /qr-version-must-be-integer (real version) mustguard
+% { (A) << /Mask 8 >> qrencode } /qr-mask-must-be-in-0-7 (large mask) mustguard
+% { (A) << /Mask (0) >> qrencode } /qr-mask-must-be-integer (string mask) mustguard
+% { [] << >> qrencode } /qr-data-must-be-a-string (array payload) mustguard
+% { 18 string << /Level /H /Version 1 >> qrencode } /qr-data-too-long-for-version (version one at H) mustguard
+% { 1274 string << /Level /H >> qrencode } /qr-data-too-long-for-level (H overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qrencode-symbols
+% (https://github.com/PSCatLabs/pscat) << >> qrencode /Version get 3 eq (smallest version at default M) mustbe
+% (https://github.com/PSCatLabs/pscat) << >> qrencode /Level get /M eq (default level M) mustbe
+% (https://github.com/PSCatLabs/pscat) << /Level /H >> qrencode /Version get 4 eq (H needs version four) mustbe
+% (A) << /Version 5 >> qrencode /Size get 37 eq (fixed version) mustbe
+% (A) << /Mask 6 >> qrencode /Mask get 6 eq (forced mask) mustbe
+% (A) << /Version null /Mask null >> qrencode /Version get 1 eq (null means automatic) mustbe
+% (A) << >> qrencode /Modules get dup length 21 eq exch 0 get length 21 eq and (21 rows of 21) mustbe
+% (A) << >> qrencode /Modules get 0 get dup 0 get exch 6 get and (finder top row dark) mustbe
+% (A) << >> qrencode /Modules get 7 get 0 get not (separator light) mustbe
+% (A) << >> qrencode /Modules get 6 get dup 8 get exch 9 get not and (timing row alternates) mustbe
+% (A) << >> qrencode /Modules get 13 get 8 get (dark module above the bottom-left finder) mustbe
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Encode a byte string as a QR Model 2 symbol (byte mode, versions 1-40) and return a fresh dictionary << /Version /Level /Mask /Size /Modules >>. /Modules is an array of /Size rows, top row first, each an array of /Size booleans, leftmost first, true for dark; it excludes the quiet zone and is the caller's to keep or change. Strings are raw bytes (no Unicode conversion or ECI). Raises named errors such as qr-data-too-long-for-level.
+% @example: (https://github.com/PSCatLabs/pscat) << /Level /M >> qrencode /Size get =
+% @param: /Level [name] Error-correction level /L, /M, /Q or /H, used exactly as given, never raised (default /M)
+% @param: /Version [integer] Fixed version 1..40, raising qr-data-too-long-for-version if the payload does not fit; null picks the smallest version that fits (default null)
+% @param: /Mask [integer] Forced data mask 0..7; null picks the lowest-penalty mask, as the standard requires (default null)
+/qrencode {
+  dup type /dicttype ne { qr-options-must-be-a-dict } if
+  dup /Level /M qr--opt qr--check-level
+  1 index /Version null qr--opt dup null ne { qr--check-version } if
+  2 index /Mask null qr--opt dup null ne {
+    dup type /integertype ne { qr-mask-must-be-integer } if
+    dup dup 0 lt exch 7 gt or { qr-mask-must-be-in-0-7 } if
+  } if
+  4 -1 roll pop
+  % payload level version mask
+  3 index type /stringtype ne { qr-data-must-be-a-string } if
+  3 index rcheck not { qr-data-must-be-readable } if
+  1 index null eq {
+    3 index length 40 4 index qr--block-spec /DataCodewords get 3 sub gt {
+      qr-data-too-long-for-level
+    } if
+  } {
+    % Byte header plus payload must fit the fixed version. Versions 1-9 hold
+    % at most 230 data bytes, so their 8-bit count can never overflow here.
+    3 index length 2 index 10 lt { 2 } { 3 } ifelse add
+    2 index 4 index qr--block-spec /DataCodewords get gt {
+      qr-data-too-long-for-version
+    } if
+  } ifelse
+  qr--encode
+} bind def
+
+% qr--encode: payload level version|null mask|null -> public symbol (checked).
+% @internal
+/qr--encode {
+  10 dict begin
+    /mask exch def /ver exch def /level exch def /data exch cvlit def
+    ver null eq {
+      /plan data level qr--byte-plan def
+      /ver plan /Version get def /padded plan /Data get def
+    } {
+      /padded data ver ver level qr--block-spec /DataCodewords get qr--byte-data def
+    } ifelse
+    /grid padded ver level qr--interleave ver qr--matrix def
+    mask null eq { grid level qr--finish } {
+      grid mask qr--apply-mask level qr--draw-metadata
+    } ifelse
+    qr--public
+  end
+} bind def
+
+% qr--public: internal symbol -> public symbol with boolean /Modules rows.
+% @internal
+/qr--public {
+  8 dict begin
+    /src exch def /n src /Size get def /cells src /Cells get def
+    /rows n array def
+    0 1 n 1 sub { /y exch def
+      /row n array def
+      0 1 n 1 sub { /x exch def row x cells y n mul x add get 1 and 1 eq put } for
+      rows y row put
+    } for
+    << /Version src /Version get /Level src /Level get /Mask src /Mask get
+       /Size n /Modules rows >>
+  end
+} bind def
+
+% Public-symbol shape check; leaves the symbol. qrdraw reads only /Size and
+% /Modules, so a symbol whose modules the caller edited still draws.
+% @internal
+/qr--check-symbol {
+  dup type /dicttype ne { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size known 1 index /Modules known and not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size get dup type /integertype eq {
+    dup 21 ge exch dup 177 le exch 17 sub 4 mod 0 eq and and
+  } { pop false } ifelse
+  not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Modules get dup type /arraytype eq {
+    length 1 index /Size get eq
+  } { pop false } ifelse
+  not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size get 1 index /Modules get {
+    dup type /arraytype ne { qr-symbol-must-be-a-qr-symbol } if
+    dup length 2 index ne { qr-symbol-must-be-a-qr-symbol } if
+    { type /booleantype ne { qr-symbol-must-be-a-qr-symbol } if } forall
+  } forall
+  pop
+} bind def
+
+% qrdraw: symbol opts -> -
+%%SelfTest: qrdraw-invalid-arguments
+% { 0 0 moveto (A) << >> qrencode [] qrdraw } /qr-options-must-be-a-dict (array options) mustguard
+% { 0 0 moveto << /Size 21 >> << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (no modules) mustguard
+% { 0 0 moveto << /Size 22 /Modules [] >> << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (impossible size) mustguard
+% { 0 0 moveto (A) << >> qrencode dup /Modules get 3 get 3 0 put << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (non-boolean module) mustguard
+% { 0 0 moveto (A) << >> qrencode << >> qrdraw } /qr-draw-needs-modulesize-or-side (no size) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Side 29 >> qrdraw } /qr-draw-takes-modulesize-or-side-not-both (both sizes) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 0 >> qrdraw } /qr-module-size-must-be-a-positive-number (zero module) mustguard
+% { 0 0 moveto (A) << >> qrencode << /Side (1) >> qrdraw } /qr-side-must-be-a-positive-number (string side) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /QuietZone 3 >> qrdraw } /qr-quiet-zone-must-be-at-least-4 (thin quiet zone) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /QuietZone 4.0 >> qrdraw } /qr-quiet-zone-must-be-an-integer (real quiet zone) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0 0] >> qrdraw } /qr-dark-must-be-a-color (two components) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 1.5 >> qrdraw } /qr-dark-must-be-a-color (gray out of range) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Light /white >> qrdraw } /qr-light-must-be-a-color-or-null (name light) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark { 0 } >> qrdraw } /qr-dark-must-be-a-color (procedure dark) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 1 /Light 0 >> qrdraw } /qr-dark-must-be-darker-than-light (inverted) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0 0 0 0] /Light [0 0 0 1] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK black light) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 0.1 /Light [0.5 0.5 0.5 0.5] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK light black when added) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0.5 0.5 0.5 0.5] /Light 0.2 >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK dark lighter when multiplied) mustguard
+% { newpath (A) << >> qrencode << /ModuleSize 1 >> qrdraw } /qr-draw-needs-a-current-point (no current point) mustguard
+%%EndSelfTest
+%%SelfTest: qrdraw-preserves-state
+% 0.2 0.4 0.6 setrgbcolor 3 setlinewidth 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw currentpoint 40 eq exch 30 eq and (current point kept) mustbe
+% 0.2 0.4 0.6 setrgbcolor 10 20 moveto (A) << >> qrencode << /Side 58 /Dark [1 0 0 0] /Light null >> qrdraw currentrgbcolor 0.6 eq exch 0.4 eq and exch 0.2 eq and (color kept) mustbe
+% 3 setlinewidth 10 20 moveto (A) << >> qrencode << /ModuleSize 2 /QuietZone 6 >> qrdraw currentlinewidth 3 eq (line width kept) mustbe
+% [0.5 0.5 0.5 0.5] false qr--luma 0.25 sub abs 1e-6 lt (multiplicative CMYK) mustbe
+% [0.5 0.5 0.5 0.5] true qr--luma 0 eq (additive CMYK) mustbe
+% [0.2 0.4 0.6] true qr--luma 0.2 0.299 mul 0.4 0.587 mul add 0.6 0.114 mul add sub abs 1e-6 lt (RGB weights) mustbe
+% 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw pathbbox 40 eq exch 30 eq and exch 20 eq and exch 10 eq and (path kept) mustbe
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Draw a qrencode symbol as vector geometry with the lower-left corner of its quiet zone at the current point: a light square (unless /Light is null), then one filled path holding one rectangle per horizontal run of dark modules, with every edge shared exactly by its neighbors, so no hairline gaps appear at any scale. Exactly one of /ModuleSize and /Side is required. The caller's graphics state, path, current point and dictionary stack are unchanged; arguments are checked first, with named errors (qr-quiet-zone-must-be-at-least-4, qr-dark-must-be-darker-than-light, ...).
+% @example: 72 72 moveto (https://github.com/PSCatLabs/pscat) << >> qrencode << /ModuleSize 4 >> qrdraw
+% @param: /ModuleSize [points] Side of one module; the whole drawing is (Size + 2 * QuietZone) * ModuleSize square. Give this or /Side, not both
+% @param: /Side [points] Side of the whole drawing, quiet zone included; the module size is derived from it. Give this or /ModuleSize, not both
+% @param: /QuietZone [count] Light margin in modules on every side, at least 4 as the standard requires (default 4)
+% @param: /Dark [0..1 or array of 0..1] Dark-module color: a gray level, or [gray], [r g b] or [c m y k] (default 0)
+% @param: /Light [0..1 or array of 0..1] Light-module and quiet-zone color, same forms as /Dark and lighter than it; null paints nothing, leaving the surface below to show through (default 1)
+/qrdraw {
+  dup type /dicttype ne { qr-options-must-be-a-dict } if
+  1 index qr--check-symbol pop
+  % symbol opts
+  dup /ModuleSize known 1 index /Side known and {
+    qr-draw-takes-modulesize-or-side-not-both
+  } if
+  dup /ModuleSize known {
+    dup /ModuleSize get
+    dup type dup /integertype ne exch /realtype ne and {
+      qr-module-size-must-be-a-positive-number
+    } if
+    dup 0 le { qr-module-size-must-be-a-positive-number } if
+  } {
+    dup /Side known not { qr-draw-needs-modulesize-or-side } if
+    dup /Side get
+    dup type dup /integertype ne exch /realtype ne and {
+      qr-side-must-be-a-positive-number
+    } if
+    dup 0 le { qr-side-must-be-a-positive-number } if
+  } ifelse
+  % symbol opts length
+  1 index /QuietZone 4 qr--opt
+  dup type /integertype ne { qr-quiet-zone-must-be-an-integer } if
+  dup 4 lt { qr-quiet-zone-must-be-at-least-4 } if
+  % symbol opts length quiet
+  2 index /ModuleSize known not {
+    % A /Side was given: module = side / (Size + 2 * quiet).
+    exch 1 index 2 mul 4 index /Size get add div exch
+  } if
+  exch
+  % symbol opts quiet module
+  2 index /Dark 0 qr--opt qr--color-ok not { qr-dark-must-be-a-color } if
+  qr--color-array
+  3 index /Light 1 qr--opt dup null ne {
+    qr--color-ok not { qr-light-must-be-a-color-or-null } if
+    qr--color-array
+    qr--not-darker { qr-dark-must-be-darker-than-light } if
+  } if
+  % symbol opts quiet module dark light
+  { currentpoint } stopped { qr-draw-needs-a-current-point } if
+  7 -1 roll pop
+  qr--draw
+} bind def
+
+% qr--draw: symbol quiet module dark light x0 y0 -> - (checked arguments).
+% Every corner is origin + k * module for an integer k, computed by one
+% expression, so modules that touch share bit-identical edges, and all dark
+% runs are one path filled once: no seams between neighbors at any scale.
+% @internal
+/qr--draw {
+  gsave newpath
+  16 dict begin
+    /y0 exch def /x0 exch def /light exch def /dark exch def
+    /unit exch def /quiet exch def /sym exch def
+    /n sym /Size get def /rows sym /Modules get cvlit def
+    /far n quiet 2 mul add def
+    % k -> user-space coordinate of edge k.
+    /ex { unit mul x0 add } def
+    /ey { unit mul y0 add } def
+    light null ne {
+      light qr--setcolor
+      0 ex 0 ey moveto far ex 0 ey lineto far ex far ey lineto 0 ex far ey lineto
+      closepath fill
+    } if
+    0 1 n 1 sub { /r exch def
+      /row rows r get cvlit def
+      % Row r (0 at the top) spans edges bot..bot+1, counted from the bottom.
+      /bot quiet n add 1 sub r sub def
+      /yb bot ey def /yt bot 1 add ey def
+      /c 0 def
+      {
+        c n ge { exit } if
+        row c get {
+          /c0 c def
+          { c n ge { exit } if row c get not { exit } if /c c 1 add def } loop
+          /xa c0 quiet add ex def /xb c quiet add ex def
+          xa yb moveto xb yb lineto xb yt lineto xa yt lineto closepath
+        } { /c c 1 add def } ifelse
+      } loop
+    } for
+    dark qr--setcolor fill
+  end
+  grestore
+} bind def

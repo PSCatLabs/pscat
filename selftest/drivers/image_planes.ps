@@ -1,0 +1,150 @@
+%!PS-Adobe-3.0
+%%Title: image separate-source and wide-sample driver (issue #781)
+%%Pages: 2
+%%BoundingBox: 0 0 260 50
+%%SelfTestPage: 260x50
+%%IdentityCorpus: always
+%%EndComments
+
+% Run with:  pscat --page 260x50 --lint-strict selftest/drivers/image_planes.ps
+%
+% The last of the five image_*.ps drivers (see image_formats.ps for why they exist
+% and how scripts/identity_check.sh picks them up). Issue #781 added three
+% features that used to be refused, and this file is where they are covered
+% beyond the one cell each that image_formats.ps and image_sources.ps carry:
+%
+%   * `colorimage` with `multi true`: one data source per component, the
+%     first source is the first component (red, cyan)
+%   * `/MultipleDataSources true` in an image dictionary: DataSource is an
+%     array of one source per component of the current colour space
+%   * `/BitsPerComponent 16` (and 12), samples read as big-endian values
+%
+% Samples wider than 8 bits are reduced to 8 on output, in PNG, SVG and PDF.
+%
+%   1. multi-source `colorimage`: RGB strings at 8 bits, RGB at 16 bits, CMYK
+%      (four sources), Gray (one source), RGB from three row procedures
+%      (called red, green, blue, red, green, blue, ...)
+%   2. dict `image`: /MultipleDataSources over procedures, over strings with
+%      an inverted Decode, over an Indexed space (one source), 12-bit RGB
+%      interleaved, and ImageType 3 whose DataDict has separate sources
+%
+% CMYK cells differ from Ghostscript by pscat's own CMYK conversion, not by
+% anything here; every other cell matches Ghostscript 10.07 pixel for pixel,
+% except the ImageType 3 cell (gs paints the left cell black, with or without
+% separate sources; notes/781-image-wide-samples-multi-source.md).
+
+/W 8 def  /H 6 def
+/_n 0 def
+/mk { % n -> a string of n bytes (a fixed, busy pattern)
+  /_n exch def
+  _n string
+  0 1 _n 1 sub {
+    dup dup 97 mul exch 5 idiv 41 mul add 11 add 256 mod
+    2 index 3 1 roll put
+  } for
+} def
+
+% One long busy string; the planes are cut from it at different offsets so
+% they differ. Plane k of n bytes: bytes (k*29) .. (k*29 + n).
+/_pool 300 mk def
+/_ip () def
+/plane { % k n -> string (a copy)
+  exch 29 mul exch _pool 3 1 roll getinterval dup length string copy
+} def
+
+% A plane whose bytes are all in 0..3 (indices into a 4-colour palette).
+/idxplane { % k n -> string
+  plane /_ip exch def
+  0 1 _ip length 1 sub { dup _ip exch get 3 and _ip 3 1 roll put } for
+  _ip
+} def
+
+% Three row procedures with their own counters: one W-byte row per call.
+% (Each keeps its own counter and plane, so the picture does not depend on
+% the order they are called in; that order, red 0 green 0 blue 0 red 1 ...,
+% is pinned by the shared `currentfile readhexstring` cell on page 3 of
+% image_sources.ps and by tests/image_planes.rs.)
+/_cR 0 def  /_cG 0 def  /_cB 0 def
+/_dR () def /_dG () def /_dB () def
+/pR { _cR H ge { () } { _dR _cR W mul W getinterval /_cR _cR 1 add def } ifelse } def
+/pG { _cG H ge { () } { _dG _cG W mul W getinterval /_cG _cG 1 add def } ifelse } def
+/pB { _cB H ge { () } { _dB _cB W mul W getinterval /_cB _cB 1 add def } ifelse } def
+/resetprocs {
+  /_cR 0 def /_cG 0 def /_cB 0 def
+  /_dR 0 W H mul plane def /_dG 1 W H mul plane def /_dB 2 W H mul plane def
+} def
+
+% x cell: translate to a 40-point cell at x (caller does gsave/grestore)
+/cell { 5 translate 40 40 scale } def
+
+% ---- 1. multi-source colorimage ------------------------------------------------
+gsave 5 cell     % three 8-bit strings
+  W H 8 [W 0 0 H neg 0 H]
+  0 W H mul plane  1 W H mul plane  2 W H mul plane  true 3 colorimage
+grestore
+gsave 55 cell    % three 16-bit strings (two bytes a sample)
+  W H 16 [W 0 0 H neg 0 H]
+  0 W H mul 2 mul plane  1 W H mul 2 mul plane  2 W H mul 2 mul plane  true 3 colorimage
+grestore
+gsave 105 cell   % CMYK: four sources, K last
+  W H 8 [W 0 0 H neg 0 H]
+  0 W H mul plane  1 W H mul plane  2 W H mul plane  3 W H mul plane  true 4 colorimage
+grestore
+gsave 155 cell   % one component: multi true with ncomp 1 is a gray image
+  W H 8 [W 0 0 H neg 0 H] 0 W H mul plane true 1 colorimage
+grestore
+resetprocs
+gsave 205 cell   % row procedures, called red, green, blue, red, ... per row
+  W H 8 [W 0 0 H neg 0 H] /pR load /pG load /pB load true 3 colorimage
+grestore
+showpage
+
+% ---- 2. dict image: MultipleDataSources, 12 and 16 bits, ImageType 3 --------------
+/DeviceRGB setcolorspace
+resetprocs
+gsave 5 cell     % /MultipleDataSources with procedures
+  8 dict begin
+    /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
+    /MultipleDataSources true def
+    /ImageMatrix [W 0 0 H neg 0 H] def
+    /DataSource [ /pR load /pG load /pB load ] def
+  currentdict end image
+grestore
+gsave 55 cell    % three strings, Decode inverting red and blue
+  8 dict begin
+    /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
+    /MultipleDataSources true def
+    /Decode [1 0 0 1 1 0] def
+    /ImageMatrix [W 0 0 H neg 0 H] def
+    /DataSource [ 0 W H mul plane 1 W H mul plane 2 W H mul plane ] def
+  currentdict end image
+grestore
+% Indexed: one source (an array of one) of 8-bit indices into a 4-colour palette
+[/Indexed /DeviceRGB 3 <ff0000 00ff00 0000ff ffff00>] setcolorspace
+gsave 105 cell
+  8 dict begin
+    /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
+    /MultipleDataSources true def
+    /Decode [0 255] def   % explicit, so Ghostscript agrees (without it gs reads the sample as 0..1)
+    /ImageMatrix [W 0 0 H neg 0 H] def
+    /DataSource [ 0 W H mul idxplane ] def
+  currentdict end image
+grestore
+/DeviceRGB setcolorspace
+gsave 155 cell   % 12 bits a sample, interleaved (W*3*12/8 = 36 bytes a row)
+  8 dict begin
+    /ImageType 1 def /Width W def /Height H def /BitsPerComponent 12 def
+    /ImageMatrix [W 0 0 H neg 0 H] def
+    /DataSource 0 36 H mul plane def
+  currentdict end image
+grestore
+gsave 205 cell   % ImageType 3: separate sources in DataDict, a 4x3 stencil
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width W /Height H /BitsPerComponent 8
+                  /ImageMatrix [W 0 0 H neg 0 H] /MultipleDataSources true
+                  /DataSource [ 0 W H mul plane 1 W H mul plane 2 W H mul plane ] >>
+     /MaskDict << /ImageType 1 /Width 4 /Height 3 /BitsPerComponent 1
+                  /Decode [1 0] /ImageMatrix [4 0 0 -3 0 3]
+                  /DataSource <a0 50 a0> >> >> image
+grestore
+showpage

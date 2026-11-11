@@ -9,6 +9,9 @@
 //! `scripts/check_learn_examples.mjs` (run by `build_site.sh`), and placed
 //! into `site/learn.html` by `scripts/site_examples.py`.
 
+mod common;
+use common::CommandDeadline as _;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -48,7 +51,7 @@ fn every_example_prints_what_its_out_file_says() {
         let run = Command::new(env!("CARGO_BIN_EXE_pscat"))
             .arg("--headless")
             .arg(&ps)
-            .output()
+            .output_deadline()
             .expect("run pscat");
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(

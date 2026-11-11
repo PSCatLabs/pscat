@@ -6,6 +6,7 @@
 //! `src/write_roots.rs`; the ones here run through PostScript.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -75,10 +76,11 @@ fn write_then_append_then_read_back() {
 fn write_low_byte_and_unclosed_file_is_on_disk() {
     let (root, mut it) = setup("fw-byte");
     let f = ps(&root.join("b.bin"));
-    // No closefile: writes go straight through, since the CLI exits
-    // without dropping the interpreter.
+    // No closefile: the interpreter's drop writes the buffered bytes out
+    // (the CLI's exit paths flush explicitly, `tests/file_hardening.rs`).
     it.run_str(&format!("{f} (w) file dup 321 write -1 write"))
         .unwrap();
+    drop(it);
     assert_eq!(std::fs::read(root.join("b.bin")).unwrap(), [65, 255]);
 }
 
@@ -273,7 +275,7 @@ fn cli_allow_write() {
 
     let refused = Command::new(pscat)
         .args(["--headless", "-e", &prog])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(!refused.status.success());
     let said = [refused.stdout, refused.stderr].concat();
@@ -287,7 +289,7 @@ fn cli_allow_write() {
         .arg("--allow-write")
         .arg(&root)
         .args(["--headless", "-e", &prog])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(ok.status.success(), "{ok:?}");
     assert_eq!(std::fs::read(&f).unwrap(), b"cli");
@@ -296,11 +298,11 @@ fn cli_allow_write() {
         .args(["--allow-write"])
         .arg(root.join("missing"))
         .args(["--headless", "-e", "1"])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(!missing.status.success());
 
-    let help = Command::new(pscat).arg("--help").output().unwrap();
+    let help = Command::new(pscat).arg("--help").output_deadline().unwrap();
     assert!(String::from_utf8_lossy(&help.stdout).contains("--allow-write DIR"));
 }
 
@@ -321,6 +323,8 @@ fn pscat_mcp_never_writes_files() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    // A hung server fails the test (EOF on `out`) instead of hanging it.
+    let watchdog = common::Watchdog::new(&child, common::default_deadline());
     let mut stdin = child.stdin.take().unwrap();
     let mut out = BufReader::new(child.stdout.take().unwrap());
     // The handshake: initialize, then the notification (no reply).
@@ -367,6 +371,7 @@ fn pscat_mcp_never_writes_files() {
             }
         }
     }
+    drop(watchdog);
     let _ = child.kill();
     let _ = child.wait();
     assert!(!cwd.join("rel.txt").exists() && !abs.exists());

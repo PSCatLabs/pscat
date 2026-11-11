@@ -1,7 +1,7 @@
 {
   "name": "pscat",
-  "version": "0.6.3",
-  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
+  "version": "0.7.0-rc.4",
+  "description": "PostScript for precision and imagination: render documents, charts and generative art to PNG, SVG and PDF with the pscat interpreter. Agent skills plus the pscat-mcp server. Uses your installed pscat, or downloads the prebuilt one from the project's GitHub releases on first start.",
   "author": {
     "name": "Jerome Banks",
     "url": "https://github.com/jeromebanks"
@@ -9,6 +9,7 @@
   "homepage": "https://github.com/PSCatLabs/pscat",
   "repository": "https://github.com/PSCatLabs/pscat",
   "license": "MIT OR Apache-2.0",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "postscript",
     "rendering",
@@ -19,7 +20,20 @@
   ],
   "mcpServers": {
     "pscat": {
-      "command": "pscat-mcp"
+      "command": "sh",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh",
+        "--plugin-out-root=${user_config.output_dir}",
+        "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"
+      ]
+    }
+  },
+  "userConfig": {
+    "output_dir": {
+      "type": "directory",
+      "title": "Render output folder",
+      "description": "Where the pscat tools may save PNG, SVG and PDF files (out_path). Leave empty to use the project directory. The folder must exist. Applies after the server restarts.",
+      "default": ""
     }
   }
 }

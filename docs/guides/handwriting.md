@@ -59,4 +59,4 @@ seed. The gallery piece *Hundred Lines* uses it to write punishment lines on a
 chalkboard, with the jitter climbing line by line.
 
 The `pscat-mcp` server exposes the same tool, so an agent can ask for a
-handwritten note directly (see the [agents guide](agents.md)).
+handwriting-style note directly (see the [agents guide](agents.md)).

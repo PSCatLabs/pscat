@@ -2867,8 +2867,23 @@ fn multiply_washes_commute_and_normal_ones_do_not() {
         let p = it.gfx().pixmap.pixel(100, 100).expect("pixel");
         (p.red(), p.green(), p.blue())
     };
-    assert_eq!(overlap("Multiply", false), overlap("Multiply", true));
-    assert_ne!(overlap("Normal", false), overlap("Normal", true));
+    // Each layer is rounded to 8 bits as it lands, so the two orders can
+    // round differently by one level (#731: tiny-skia's f32 pipeline rounds
+    // to nearest, and lowp's biased rounding happened to agree here).
+    let (m1, m2) = (overlap("Multiply", false), overlap("Multiply", true));
+    for (a, b) in [(m1.0, m2.0), (m1.1, m2.1), (m1.2, m2.2)] {
+        assert!(
+            a.abs_diff(b) <= 1,
+            "Multiply should commute: {m1:?} vs {m2:?}"
+        );
+    }
+    let (n1, n2) = (overlap("Normal", false), overlap("Normal", true));
+    let spread = [(n1.0, n2.0), (n1.1, n2.1), (n1.2, n2.2)]
+        .iter()
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(spread > 1, "Normal should not commute: {n1:?} vs {n2:?}");
 }
 
 #[test]
@@ -11087,19 +11102,21 @@ fn loading_unset_is_byte_identical() {
         ("pktrowel", RTL, "/Width 50 /Coverage 0.5 /ColorJitter 0.4"),
     ];
     // Taken from the pre-slice library (origin/main at cb6ea9a).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 12] = [
-        0x73b394f50545ceef,
-        0x5133bbe36c8d4454,
-        0xfecbdd420cd20804,
-        0x433493d736ec9b25,
-        0x4aada6d9a098010b,
-        0xac1243e829b0cc19,
-        0x51070daefd97b15d,
-        0x5e85c7541e2404b4,
-        0x2751217334039e1c,
-        0xf0a2afa46cf62f01,
-        0x4f7a4f6a93cf5c2c,
-        0x4c0f8fadd7cb1985,
+        0xd7ac1a58bc31246b,
+        0x1c54b3258a072779,
+        0x4543eb35c6262046,
+        0x75fd7021157e0d3d,
+        0xd15bce842b1387bc,
+        0x8d14a8f0789ba4f8,
+        0x78140e9faf4e5ac9,
+        0x4a7d658c5c34b2a0,
+        0xf20ef564d3bcfe0b,
+        0xf89a991835f81935,
+        0xb7d1250596be7763,
+        0x19a860afdb957f1c,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -11332,8 +11349,12 @@ fn colormix_grades_between_bands() {
         let mid = hard.iter().filter(|&&b| b > 30 && b < 225).count();
         assert_eq!(steps, 1, "{preset} /ColorMix 0 should step once: {hard:?}");
         assert!(mid <= 2, "{preset} /ColorMix 0 has a gradient: {hard:?}");
+        // Near, not exactly, 0 and 255: the strips of a trowel band abut
+        // at fractional positions, and an exact-area seam (#692) lets a
+        // few percent of the white page through, as such seams always could.
+        let near = |v: Option<&i32>, t: i32| v.is_some_and(|&v| (v - t).abs() <= 16);
         assert!(
-            hard.first() == Some(&0) && hard.last() == Some(&255),
+            near(hard.first(), 0) && near(hard.last(), 255),
             "{preset} /ColorMix 0 runs from the first to the last colour: {hard:?}"
         );
 
@@ -12172,11 +12193,12 @@ fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
 
 /// Test 10. Growing pkwet's frames changes neither specimen: both render
 /// to the hashes they had before the slice (origin/main at 91013c3).
+/// Both re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline).
 #[test]
 fn wet_frame_slots_do_not_change_pkwet() {
     for (name, w, h, pinned) in [
-        ("paintkit_wet_demo.ps", 620, 560, 0x3630377195f88462u64),
-        ("paintkit_wet_pull_demo.ps", 780, 640, 0xa62c781c86c3d4b1u64),
+        ("paintkit_wet_demo.ps", 620, 560, 0xbf1de29ac6f50258u64),
+        ("paintkit_wet_pull_demo.ps", 780, 640, 0xd710397bbaa70e03u64),
     ] {
         let source = std::fs::read(format!("examples/{name}"))
             .unwrap_or_else(|e| panic!("read {name}: {e}"));
@@ -12235,16 +12257,18 @@ fn fan_loading_unset_is_byte_identical() {
         ),
     ];
     // Taken from the pre-slice library (origin/main at f1eae7d).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 9] = [
-        0xf7ef80bc0b23ca71,
-        0x7cdfaa0c31a7c794,
-        0x830531bee9375807,
-        0x7fc96f52f0a5684b,
-        0x94e4a48f1eb7c069,
-        0xdae8c82e0bb24eb6,
-        0x31c2b8442b2c8929,
-        0x339352382952a962,
-        0xe1f458abc251262f,
+        0x190888b8fe7434bb,
+        0xb1e913f0c75dae75,
+        0x687fa38e24f52894,
+        0x147e637857fa85a7,
+        0xaf0df839e21a1cf9,
+        0x4fef25d37ef8e350,
+        0x9f5414f14f67173b,
+        0x486df36c95fd0565,
+        0x64dc6102c94ef2ac,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12486,20 +12510,22 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
         ),
     ];
     // Taken from the pre-slice library (origin/main at ebebfed).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 9] = [
-        0x5898eb949b9a9cc4,
-        0x87591e4410f1fba3,
-        0x7da7b90d0c8b14d9,
-        0x03f0f5f6044c25a2,
-        0xbb7c94385aebe42e,
-        0x46cf174a8c23e026,
-        0x4afeceacd6e421ce,
-        0xe659b4013bfc5106,
+        0x608dc8717057489c,
+        0x78dbd2d867a477ea,
+        0xd2e4ff5ee13d6fc6,
+        0x2fcca87b4b9da47f,
+        0x727505e8d3e8bfbf,
+        0xfd357e86461cc921,
+        0x6b08330e3edde42c,
+        0xd12a257bbb29232c,
         // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
         // Apple's libm and glibc's (musl's gave this value already); it moved
         // when math went through src/fmath (#738), whose results are musl's on
         // every platform.
-        0x5beb8a707c78323e,
+        0xa692610578b5794b,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12679,19 +12705,34 @@ fn dab_and_oil_loading_keys_take_no_random_draws() {
             "pkdab {knob} changed how many draws a clump takes"
         );
     }
-    // The same dabs land in the same places, just in other colours.
-    let mask = |opts: &str| {
+    // The same dabs land in the same places, just in other colours. Each
+    // pixel is ink (some channel under 250), clear (pure white), or a faint
+    // edge pixel in between: exact-area coverage (#692) leaves edge pixels
+    // a level or two off white or off the threshold, and a recoloured
+    // shadow or highlight layer can nudge them by a level. So the test is
+    // that neither render has ink where the other is clear.
+    let marks = |opts: &str| {
         let it = dab_with("0 0 0", DAB_PATH, &format!("/Size 6 /Scatter 20 {opts}"));
         pixels(&it)
             .chunks(4)
-            .map(|p| p[..3] != [255, 255, 255])
+            .map(|p| {
+                let lo = *p[..3].iter().min().unwrap();
+                (lo < 250, lo < 255)
+            })
             .collect::<Vec<_>>()
     };
-    let plain = mask("");
+    let plain = marks("");
+    assert!(plain.iter().filter(|m| m.0).count() > 100, "no dabs");
     // (/Light is left out: on pkdab it moves the shadow and highlight layers
     // by design, which is its existing meaning.)
     for knob in knobs.iter().filter(|k| !k.contains("/Light")) {
-        assert_eq!(mask(knob), plain, "pkdab {knob} moved the dabs");
+        let got = marks(knob);
+        let moved = got
+            .iter()
+            .zip(&plain)
+            .filter(|(g, p)| (g.0 && !p.1) || (p.0 && !g.1))
+            .count();
+        assert_eq!(moved, 0, "pkdab {knob} moved the dabs");
     }
 
     let oil_next = |extra: &str| {

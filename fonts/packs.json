@@ -4,7 +4,7 @@
   "packs": [
     {
       "name": "extras",
-      "description": "Display, text and mood faces (OFL and Apache-2.0), Courier Prime, Special Elite, and the URW Symbol/ZapfDingbats faces.",
+      "description": "Display, text and mood faces (OFL and Apache-2.0), Courier Prime and Special Elite.",
       "families": {
         "AbrilFatface": [
           "AbrilFatface-Regular.ttf"
@@ -117,10 +117,6 @@
         "StardosStencil": [
           "StardosStencil-Regular.ttf"
         ],
-        "URW-symbols": [
-          "D050000L.otf",
-          "StandardSymbolsPS.otf"
-        ],
         "UnifrakturMaguntia": [
           "UnifrakturMaguntia-Book.ttf"
         ],
@@ -129,45 +125,6 @@
         ],
         "ZillaSlab": [
           "ZillaSlab-Regular.ttf"
-        ]
-      }
-    },
-    {
-      "name": "texgyre",
-      "description": "TeX Gyre faces behind the standard-35 names Palatino, Bookman, New Century Schoolbook, Avant Garde, Zapf Chancery and Helvetica-Narrow (GUST Font License).",
-      "families": {
-        "TeXGyre-adventor": [
-          "texgyreadventor-bold.otf",
-          "texgyreadventor-bolditalic.otf",
-          "texgyreadventor-italic.otf",
-          "texgyreadventor-regular.otf"
-        ],
-        "TeXGyre-bonum": [
-          "texgyrebonum-bold.otf",
-          "texgyrebonum-bolditalic.otf",
-          "texgyrebonum-italic.otf",
-          "texgyrebonum-regular.otf"
-        ],
-        "TeXGyre-chorus": [
-          "texgyrechorus-mediumitalic.otf"
-        ],
-        "TeXGyre-heroscn": [
-          "texgyreheroscn-bold.otf",
-          "texgyreheroscn-bolditalic.otf",
-          "texgyreheroscn-italic.otf",
-          "texgyreheroscn-regular.otf"
-        ],
-        "TeXGyre-pagella": [
-          "texgyrepagella-bold.otf",
-          "texgyrepagella-bolditalic.otf",
-          "texgyrepagella-italic.otf",
-          "texgyrepagella-regular.otf"
-        ],
-        "TeXGyre-schola": [
-          "texgyreschola-bold.otf",
-          "texgyreschola-bolditalic.otf",
-          "texgyreschola-italic.otf",
-          "texgyreschola-regular.otf"
         ]
       }
     },

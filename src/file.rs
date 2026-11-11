@@ -15,7 +15,7 @@
 //! after the encrypted region must remain unread until the outer
 //! scanner gets there).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -60,9 +60,120 @@ enum Kind {
 pub enum Sink {
     Stdout,
     Stderr,
-    /// A disk file, written through unbuffered: the CLI ends the process
-    /// without dropping the interpreter, so nothing may sit in a buffer.
-    Disk(std::fs::File),
+    /// A disk file, buffered ([`DiskSink`]); the interpreter flushes every
+    /// open one at `showpage`, `quit`, `flush` and before a read, and the
+    /// CLI flushes them all on every exit path (issue #762).
+    Disk(DiskSink),
+}
+
+/// Bytes a [`DiskSink`] holds before it writes them out.
+const DISK_BUFFER: usize = 64 * 1024;
+
+/// A buffered disk file (issue #762). Not `BufWriter`, because
+/// `resetfile` must be able to throw the pending bytes away, and
+/// `fileposition` must know the real position, buffer included.
+///
+/// A failed write leaves a sticky error, as C's `ferror` does: the next
+/// write or flush (and so `closefile`) reports `ioerror`, so a deferred
+/// failure is not lost when the flush came from `showpage` or `quit`,
+/// which cannot raise it. `resetfile` clears it. Dropping a sink flushes
+/// it, so a file the program never closed (or dropped unreferenced) still
+/// reaches the disk.
+pub struct DiskSink {
+    file: std::fs::File,
+    buf: Vec<u8>,
+    failed: bool,
+    /// The opening interpreter's note: set when this sink is dropped with
+    /// bytes it could not write, for `Interp::flush_outputs` to report.
+    lost: Rc<Cell<bool>>,
+}
+
+impl DiskSink {
+    pub fn new(file: std::fs::File, lost: Rc<Cell<bool>>) -> Self {
+        DiskSink {
+            file,
+            buf: Vec::new(),
+            failed: false,
+            lost,
+        }
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), PsError> {
+        use std::io::Write;
+        if self.failed {
+            return Err(PsError::Io);
+        }
+        if self.buf.len() + bytes.len() <= DISK_BUFFER {
+            self.buf.extend_from_slice(bytes);
+            return Ok(());
+        }
+        self.flush()?;
+        if bytes.len() >= DISK_BUFFER {
+            return self.file.write_all(bytes).map_err(|_| {
+                self.failed = true;
+                PsError::Io
+            });
+        }
+        self.buf.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// Write out what is buffered. The buffer is emptied even on failure.
+    pub fn flush(&mut self) -> Result<(), PsError> {
+        use std::io::Write;
+        if self.failed {
+            self.buf.clear();
+            return Err(PsError::Io);
+        }
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let wrote = self.file.write_all(&self.buf);
+        self.buf.clear();
+        wrote.map_err(|_| {
+            self.failed = true;
+            PsError::Io
+        })
+    }
+
+    /// `resetfile`: drop the pending bytes and the sticky error.
+    pub fn reset(&mut self) {
+        self.buf.clear();
+        self.failed = false;
+    }
+
+    /// The position the next write lands at (after a flush).
+    fn position(&mut self) -> Result<u64, PsError> {
+        use std::io::Seek;
+        self.flush()?;
+        self.file.stream_position().map_err(|_| PsError::Io)
+    }
+
+    /// Seek to `pos`, which must lie within the file: `0..=length`, so a
+    /// seek never leaves a hole (a sparse file would cost no counted
+    /// bytes). A file opened for append still writes at its end.
+    fn seek(&mut self, pos: u64) -> Result<(), PsError> {
+        use std::io::{Seek, SeekFrom};
+        self.flush()?;
+        let len = self.file.metadata().map_err(|_| PsError::Io)?.len();
+        if pos > len {
+            return Err(PsError::Rangecheck);
+        }
+        self.file
+            .seek(SeekFrom::Start(pos))
+            .map(|_| ())
+            .map_err(|_| PsError::Io)
+    }
+}
+
+impl Drop for DiskSink {
+    fn drop(&mut self) {
+        // Nobody can be told now, so remember it: the interpreter that
+        // opened the file reports it at its final `flush_outputs`.
+        if self.flush().is_err() {
+            self.lost.set(true);
+        }
+    }
 }
 
 impl PsFile {
@@ -167,6 +278,77 @@ impl PsFile {
         Ok(b)
     }
 
+    /// Append up to `max` bytes to `buf` and return how many were added
+    /// (fewer only at end of data). `ioerror` for a closed file or an output
+    /// file. The position, byte count and line count move exactly as that
+    /// many [`Self::read_byte`] calls would move them (issue #773). A filter
+    /// copies whole runs of its decoded output at a time (issue #896); an
+    /// error from the decoder leaves the bytes read before it in `buf`,
+    /// counted, as a `read_byte` loop would.
+    pub fn read_into(&mut self, buf: &mut Vec<u8>, max: usize) -> Result<usize, PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        let start = buf.len();
+        let mut result = Ok(());
+        match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let take = max.min(data.len() - *pos);
+                buf.extend_from_slice(&data[*pos..*pos + take]);
+                *pos += take;
+            }
+            Kind::Filter {
+                source,
+                dec,
+                out,
+                eod,
+            } => {
+                while buf.len() - start < max {
+                    if let Err(e) = Self::ensure_output(source, dec, out, eod) {
+                        result = Err(e);
+                        break;
+                    }
+                    if out.is_empty() {
+                        break;
+                    }
+                    let take = out.len().min(max - (buf.len() - start));
+                    if let (1, Some(b)) = (take, out.front()) {
+                        // ASCIIHex decodes one byte per pull: skip the
+                        // slice copy for a lone byte.
+                        buf.push(*b);
+                        out.pop_front();
+                    } else {
+                        let (a, b) = out.as_slices();
+                        let from_a = take.min(a.len());
+                        buf.extend_from_slice(&a[..from_a]);
+                        buf.extend_from_slice(&b[..take - from_a]);
+                        out.drain(..take);
+                    }
+                }
+            }
+            Kind::Output(_) => return Err(PsError::Io),
+        }
+        self.count_read(&buf[start..]);
+        result.map(|()| buf.len() - start)
+    }
+
+    /// The bookkeeping [`Self::read_byte`] does, over bytes just handed out:
+    /// every CR and every LF ends a line, except the LF of a CR LF pair
+    /// (one straddling the previous read included). One pass without
+    /// branches, since it runs over every sample of an image (#896).
+    fn count_read(&mut self, bytes: &[u8]) {
+        self.consumed += bytes.len();
+        let mut prev_cr = self.last_was_cr;
+        let mut lines = 0;
+        for &b in bytes {
+            let cr = b == b'\r';
+            lines += usize::from(cr | (b == b'\n' && !prev_cr));
+            prev_cr = cr;
+        }
+        self.line += lines;
+        self.last_was_cr = prev_cr;
+    }
+
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
         if self.closed {
             return Ok(None);
@@ -209,6 +391,78 @@ impl PsFile {
 
     pub fn is_open(&self) -> bool {
         !self.closed
+    }
+
+    /// `fileposition`: the byte offset of the next read or write.
+    /// `ioerror` for a file that cannot be positioned (a filter, `%stdout`,
+    /// `%stderr`) and for a closed one.
+    pub fn file_position(&mut self) -> Result<u64, PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        match &mut self.kind {
+            Kind::Bytes { pos, .. } => Ok(*pos as u64),
+            Kind::Output(Some(Sink::Disk(d))) => d.position(),
+            Kind::Filter { .. } | Kind::Output(_) => Err(PsError::Io),
+        }
+    }
+
+    /// `setfileposition`: move the next read or write to `to`.
+    /// `rangecheck` for a position outside `0..=length`; `ioerror` as for
+    /// [`Self::file_position`]. The line count follows the new position.
+    pub fn set_file_position(&mut self, to: i64) -> Result<(), PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let to = usize::try_from(to)
+                    .ok()
+                    .filter(|t| *t <= data.len())
+                    .ok_or(PsError::Rangecheck)?;
+                *pos = to;
+                self.consumed = to;
+                // Recount lines up to here: CR, LF and CRLF end one each.
+                let mut line = 1;
+                let mut prev_cr = false;
+                for &b in &data[..to] {
+                    match b {
+                        b'\r' => line += 1,
+                        b'\n' if !prev_cr => line += 1,
+                        _ => {}
+                    }
+                    prev_cr = b == b'\r';
+                }
+                self.line = line;
+                self.last_was_cr = prev_cr;
+                Ok(())
+            }
+            Kind::Output(Some(Sink::Disk(d))) => {
+                d.seek(u64::try_from(to).map_err(|_| PsError::Rangecheck)?)
+            }
+            Kind::Filter { .. } | Kind::Output(_) => Err(PsError::Io),
+        }
+    }
+
+    /// `resetfile`: an output file throws away what it has buffered and
+    /// forgets a write error; an input file holds no buffer of its own
+    /// (its bytes are in memory), so nothing changes. A closed file is not
+    /// an error, as in Ghostscript.
+    pub fn reset(&mut self) {
+        if self.closed {
+            return;
+        }
+        if let Kind::Output(Some(Sink::Disk(d))) = &mut self.kind {
+            d.reset();
+        }
+    }
+
+    /// Flush a disk output file's buffer (no-op for anything else).
+    pub fn flush_disk(&mut self) -> Result<(), PsError> {
+        match self.sink_mut() {
+            Some(Sink::Disk(d)) => d.flush(),
+            _ => Ok(()),
+        }
     }
 
     /// `bytesavailable`: None means unknown (filters), per the PLRM's -1.
@@ -508,9 +762,17 @@ impl Decoder {
                             return Err(PsError::Io);
                         };
                         if let Some(prev) = st.prev.take() {
-                            let mut new = prev;
-                            new.push(entry[0]);
-                            st.table.push(new);
+                            // A 12-bit code names 4096 entries at most, so a
+                            // full table takes no more: without this a stream
+                            // that never sends a clear code grows the table
+                            // for as long as it runs, each entry up to ~4 KB
+                            // for a 1.5-byte code (found reading the decoder
+                            // for the `filters` fuzz target, issue #704).
+                            if st.table.len() + 258 < 4096 {
+                                let mut new = prev;
+                                new.push(entry[0]);
+                                st.table.push(new);
+                            }
                         }
                         // EarlyChange=1: widen one code early.
                         let filled = st.table.len() + 258;
@@ -524,25 +786,19 @@ impl Decoder {
                 }
             },
             Decoder::Dct { done } => {
-                use zune_jpeg::zune_core::{colorspace::ColorSpace, options::DecoderOptions};
                 if *done {
                     *eod = true;
                     return Ok(());
                 }
                 *done = true;
                 let data = buffer_jpeg(source)?;
-                let mut dec = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(data));
-                dec.decode_headers().map_err(|_| PsError::Io)?;
-                // One output byte per PostScript sample: grayscale JPEGs
-                // yield 1 component, CMYK/YCCK 4; everything else (the
-                // usual YCbCr) converts to RGB triples.
-                let want = match dec.input_colorspace() {
-                    Some(ColorSpace::Luma) => ColorSpace::Luma,
-                    Some(ColorSpace::CMYK | ColorSpace::YCCK) => ColorSpace::CMYK,
-                    _ => ColorSpace::RGB,
-                };
-                dec.set_options(DecoderOptions::default().jpeg_set_out_colorspace(want));
-                out.extend(dec.decode().map_err(|_| PsError::Io)?);
+                // zune-jpeg is third-party code on untrusted bytes, and a
+                // crafted progressive JPEG can trip an `assert!` in its NEON
+                // upsampler (aarch64; found by the `filters` fuzz target,
+                // issue #704). A panic there must be an `ioerror` like any
+                // other undecodable image, not the end of the process.
+                let decoded = crate::guard::catch(|| decode_jpeg(data)).ok_or(PsError::Io)??;
+                out.extend(decoded);
                 *eod = true;
                 Ok(())
             }
@@ -588,6 +844,22 @@ impl Decoder {
             }
         }
     }
+}
+
+/// Decode one buffered JPEG to one byte per PostScript sample: grayscale
+/// yields 1 component, CMYK/YCCK 4, and everything else (the usual YCbCr)
+/// RGB triples.
+fn decode_jpeg(data: Vec<u8>) -> Result<Vec<u8>, PsError> {
+    use zune_jpeg::zune_core::{colorspace::ColorSpace, options::DecoderOptions};
+    let mut dec = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(data));
+    dec.decode_headers().map_err(|_| PsError::Io)?;
+    let want = match dec.input_colorspace() {
+        Some(ColorSpace::Luma) => ColorSpace::Luma,
+        Some(ColorSpace::CMYK | ColorSpace::YCCK) => ColorSpace::CMYK,
+        _ => ColorSpace::RGB,
+    };
+    dec.set_options(DecoderOptions::default().jpeg_set_out_colorspace(want));
+    dec.decode().map_err(|_| PsError::Io)
 }
 
 /// Read one complete JPEG from `source`, consuming exactly through its
@@ -878,6 +1150,129 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_file_that_could_not_write_leaves_a_note() {
+        let path = std::env::temp_dir().join(format!("pscat-lost-{}", std::process::id()));
+        std::fs::write(&path, b"x").unwrap();
+        // A read-only handle: buffering succeeds, the flush at drop cannot.
+        let lost = Rc::new(Cell::new(false));
+        let mut sink = DiskSink::new(std::fs::File::open(&path).unwrap(), lost.clone());
+        sink.write(b"data").unwrap();
+        assert!(!lost.get());
+        drop(sink);
+        assert!(lost.get());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn setting_the_position_recounts_lines_and_the_consumed_count() {
+        let f = PsFile::from_bytes(b"a\r\nb\rc\nd".to_vec());
+        let at = |pos: i64| {
+            f.borrow_mut().set_file_position(pos).unwrap();
+            (f.borrow().line(), f.borrow().pos())
+        };
+        // After the CR of a CRLF pair the LF half must not count again.
+        assert_eq!(at(2), (2, 2));
+        assert_eq!(at(3), (2, 3));
+        f.borrow_mut().read_byte().unwrap();
+        assert_eq!(f.borrow().line(), 2);
+        assert_eq!(at(4), (2, 4));
+        assert_eq!(at(5), (3, 5));
+        assert_eq!(at(0), (1, 0));
+        assert_eq!(at(7), (4, 7));
+        // Reading on from a CR whose LF follows counts one line ending.
+        f.borrow_mut().set_file_position(2).unwrap();
+        assert_eq!(drain(&f), b"\nb\rc\nd");
+        assert_eq!(f.borrow().line(), 4);
+        assert_eq!(
+            f.borrow_mut().set_file_position(9),
+            Err(PsError::Rangecheck)
+        );
+        assert_eq!(
+            f.borrow_mut().set_file_position(-1),
+            Err(PsError::Rangecheck)
+        );
+    }
+
+    /// `read_into` against a `read_byte` loop (#896), through
+    /// [`crate::fuzzing::filters`], which builds the chain twice and panics
+    /// on any difference in bytes, error, byte and line counts or the
+    /// bottom file's position. Every committed filter seed (DCT included),
+    /// at each of the four chunk sizes, plus decoded output full of CR and
+    /// LF (so the line counts are exercised), errors after some output,
+    /// and pseudo-random bytes for every decoder pair.
+    #[test]
+    fn bulk_reads_match_byte_reads_through_every_filter() {
+        let check = |sel: u8, payload: &[u8]| {
+            for size in 0..4u8 {
+                let mut input = vec![(sel & 0x3f) | (size << 6)];
+                input.extend_from_slice(payload);
+                crate::fuzzing::filters(&input);
+            }
+        };
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+        let mut seeds = 0;
+        for kind in ["seeds", "regressions"] {
+            let Ok(dir) = std::fs::read_dir(root.join(kind).join("filters")) else {
+                continue;
+            };
+            for entry in dir.flatten() {
+                let data = std::fs::read(entry.path()).expect("seed");
+                if let Some((&sel, payload)) = data.split_first() {
+                    check(sel, payload);
+                    seeds += 1;
+                }
+            }
+        }
+        assert!(seeds >= 8, "filter seeds went missing");
+        // Single decoders (the second slot 7 is none): selector = code | 7 << 3.
+        let one = |code: u8| code | (7 << 3);
+        let crlf = b"0d0a0d0d0a0a 41 0a 0d 42>tail\r\n";
+        check(one(0), crlf);
+        check(one(0), b"0d0a0dzz>"); // ioerror after three bytes
+        check(one(1), b"!<N?+\"\n!<N?+~>\rrest");
+        check(
+            one(2),
+            &[3, b'\r', b'\n', b'\r', b'x', 252, b'\n', 128, b'\r'],
+        );
+        check(one(5), &lzw_pack(&[256, 13, 10, 13, 258, 259, 10, 257]));
+        {
+            use std::io::Write;
+            let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            let text: Vec<u8> = (0..5000u32)
+                .map(|i| b"ab\r\n\rc\n"[(i % 7) as usize])
+                .collect();
+            z.write_all(&text).unwrap();
+            let mut packed = z.finish().unwrap();
+            packed.extend_from_slice(b"\nafter");
+            check(one(4), &packed);
+            packed.truncate(packed.len() / 2); // data runs out mid-stream
+            check(one(4), &packed);
+        }
+        // Hex over hex: a chain, the inner layer's lines counted too.
+        check(0, b"3044 3041 3044 3e>\n");
+        // Pseudo-random bytes for every decoder pair (xorshift, fixed seed).
+        let mut x: u32 = 0x9e37_79b9;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x
+        };
+        for sel in 0..64u8 {
+            for len in [0usize, 1, 5, 40, 700] {
+                let payload: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+                check(sel, &payload);
+                // The same, as ASCII hex digits and line ends only.
+                let hexish: Vec<u8> = payload
+                    .iter()
+                    .map(|b| b"0123456789abcdef\r\n> "[usize::from(b % 20)])
+                    .collect();
+                check(sel, &hexish);
+            }
+        }
+    }
+
+    #[test]
     fn ascii_hex_decodes_and_stops_at_eod() {
         let src = PsFile::from_bytes(b"48 65 6c6C6f>tail".to_vec());
         let f = PsFile::filtered(src.clone(), Decoder::ascii_hex());
@@ -901,6 +1296,65 @@ mod tests {
         let f = PsFile::filtered(src.clone(), Decoder::RunLength);
         assert_eq!(drain(&f), b"abcccc");
         assert_eq!(src.borrow_mut().read_byte().expect("read"), Some(b'X'));
+    }
+
+    /// Pack LZW codes MSB-first at the widths the decoder expects (9 bits,
+    /// widening one code early as the table fills, EarlyChange=1).
+    fn lzw_pack(codes: &[u32]) -> Vec<u8> {
+        let (mut acc, mut nbits, mut width, mut entries) = (0u64, 0u32, 9u32, 0usize);
+        let mut first = true;
+        let mut out = Vec::new();
+        for &c in codes {
+            acc = (acc << width) | u64::from(c);
+            nbits += width;
+            while nbits >= 8 {
+                out.push((acc >> (nbits - 8)) as u8);
+                nbits -= 8;
+            }
+            acc &= (1 << nbits) - 1;
+            if c == 256 {
+                (width, entries, first) = (9, 0, true);
+            } else if c != 257 {
+                if first {
+                    first = false;
+                } else {
+                    entries += 1;
+                }
+                if entries + 258 + 1 >= 1 << width && width < 12 {
+                    width += 1;
+                }
+            }
+        }
+        if nbits > 0 {
+            out.push((acc << (8 - nbits)) as u8);
+        }
+        out
+    }
+
+    #[test]
+    fn lzw_table_stops_growing_when_full() {
+        // 'a', then each next code is the slot about to be defined, so every
+        // entry is one byte longer than the last; then the longest valid
+        // code, over and over, with no clear code in sight.
+        let mut codes = vec![256, 97];
+        codes.extend(258..4096);
+        codes.extend(std::iter::repeat_n(4095, 500));
+        let f = PsFile::filtered(PsFile::from_bytes(lzw_pack(&codes)), Decoder::lzw());
+        let out = drain(&f);
+        // 'a' + entries of length 2..=3839 for the ramp + 500 x 3839.
+        assert!(out.len() > 500 * 3800, "decoded {} bytes", out.len());
+        let Kind::Filter {
+            dec: Decoder::Lzw(st),
+            ..
+        } = &f.borrow().kind
+        else {
+            panic!("not an LZW filter");
+        };
+        assert_eq!(
+            st.table.len(),
+            4096 - 258,
+            "the table is capped at 4096 codes"
+        );
     }
 
     #[test]

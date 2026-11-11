@@ -1,7 +1,7 @@
 {
   "name": "pscat",
-  "version": "0.6.3",
-  "description": "A PostScript interpreter in WebAssembly: render PostScript to pixels in the browser or Node, step by step if you like",
+  "version": "0.7.0-rc.4",
+  "description": "PostScript for precision and imagination, in WebAssembly: render PostScript documents and art to pixels in the browser or Node, step by step if you like",
   "keywords": [
     "postscript",
     "interpreter",
@@ -20,7 +20,7 @@
     "url": "git+https://github.com/PSCatLabs/pscat.git",
     "directory": "npm"
   },
-  "license": "(MIT OR Apache-2.0) AND OFL-1.1",
+  "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
   "author": "Jerome Banks",
   "type": "module",
   "sideEffects": false,
@@ -49,6 +49,7 @@
     "LICENSE-APACHE",
     "LICENSE-OFL",
     "fonts/LICENSE",
+    "fonts/base35",
     "THIRD_PARTY_NOTICES.md",
     "THIRD_PARTY_LICENSES.html",
     "licenses/assets.json"

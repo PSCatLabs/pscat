@@ -587,14 +587,12 @@ fn shfill_short_but_distinct_axial_still_paints_under_a_large_ctm() {
 }
 
 #[test]
-fn shfill_pdf_fallback_weights_by_stop_position_not_a_flat_mean() {
-    // A stitching function that's constant red for 99% of the axis
-    // then constant blue for the last 1% -- the position-weighted
-    // average must land close to red, not the ~50/50 purple an
-    // unweighted mean over the stop list would give (the stop list
-    // has only a handful of samples near the bound, not one per unit
-    // of position).
-    let (pdf, _) = {
+fn shfill_pdf_keeps_a_hard_edge_near_the_end_of_the_axis() {
+    // A stitching function that's constant red for 99% of the axis then
+    // constant blue for the last 1%. Before #1028 the PDF got one flat
+    // fill in the position-weighted average; now it is a real shading
+    // whose function keeps both constant legs and the jump between them.
+    let pdf = {
         let mut it = Interp::with_page(100, 100).expect("page");
         it.gfx_mut().enable_pdf();
         it.run_str(
@@ -606,28 +604,18 @@ fn shfill_pdf_fallback_weights_by_stop_position_not_a_flat_mean() {
              ] >> >> shfill",
         )
         .expect("shfill");
-        (
-            it.gfx().pdf_document().expect("recording on"),
-            it.gfx().pixmap.clone(),
-        )
+        it.gfx().pdf_document().expect("recording on")
     };
     let text = common::pdf_text(&pdf);
-    // Parse the "R G B rg" fill color out of the content stream: the
-    // three whitespace-separated tokens immediately before the "rg"
-    // operator.
-    let tokens: Vec<&str> = text.split_whitespace().collect();
-    let rg_idx = tokens
-        .iter()
-        .position(|&t| t == "rg")
-        .expect("an rg fill-color operator");
-    let nums: Vec<f64> = tokens[rg_idx - 3..rg_idx]
-        .iter()
-        .map(|t| t.parse::<f64>().expect("numeric rg operand"))
-        .collect();
-    assert!(
-        nums[0] > 0.9 && nums[2] < 0.1,
-        "expected a near-red average (R>0.9, B<0.1), got {nums:?}"
-    );
+    assert!(text.contains("/ShadingType 2 "), "{text}");
+    assert!(!text.contains(" rg "), "no flat fill: {text}");
+    // Constant red, the sliver jump at 0.99, constant blue.
+    let red = "/C0 [1 0 0] /C1 [1 0 0] /N 1";
+    let jump = "/C0 [1 0 0] /C1 [0 0 1] /N 1";
+    let blue = "/C0 [0 0 1] /C1 [0 0 1] /N 1";
+    let (r, j, b) = (text.find(red), text.find(jump), text.find(blue));
+    assert!(r.is_some() && j.is_some() && b.is_some(), "{text}");
+    assert!(r < j && j < b, "legs in axis order: {text}");
 }
 
 #[test]
@@ -769,4 +757,79 @@ fn shfill_honors_a_domain_span_far_smaller_than_the_old_epsilon() {
     );
     assert_eq!(pixel(&it, 10, 50), (255, 0, 0), "first leg: red");
     assert_eq!(pixel(&it, 90, 50), (0, 0, 255), "second leg: blue");
+}
+
+/// Mean of the red channel over the whole canvas.
+fn mean_red(it: &Interp) -> f64 {
+    let px = it.gfx().pixmap.pixels();
+    px.iter().map(|p| p.red() as f64).sum::<f64>() / px.len() as f64
+}
+
+/// Issue #692: a filled shape thinner than a pixel keeps a coverage
+/// proportional to its area. tiny-skia's 4x4 supersampler dropped rules
+/// under a quarter pixel and drew every rule from 0.25 to 0.5 px the same
+/// gray. Rules every 4 px, so no two share a pixel.
+#[test]
+fn thin_fills_cover_their_area() {
+    for &(h, op) in &[
+        (0.05, "rectfill"),
+        (0.1, "rectfill"),
+        (0.2, "rectfill"),
+        (0.3, "rectfill"),
+        (0.45, "rectfill"),
+        (0.6, "rectfill"),
+        (0.3, "path"),
+        (0.3, "eopath"),
+    ] {
+        let body = match op {
+            "rectfill" => format!("0 exch 100 {h} rectfill"),
+            "path" => {
+                format!("0 exch moveto 100 0 rlineto 0 {h} rlineto -100 0 rlineto closepath fill")
+            }
+            _ => {
+                format!("0 exch moveto 100 0 rlineto 0 {h} rlineto -100 0 rlineto closepath eofill")
+            }
+        };
+        let it = render(&format!("0 setgray 0.37 4 99 {{ {body} }} for"));
+        let expected = 255.0 * (1.0 - h / 4.0);
+        let got = mean_red(&it);
+        assert!(
+            (got - expected).abs() < 1.0,
+            "{op} h={h}: mean {got:.2}, area says {expected:.2}"
+        );
+    }
+}
+
+/// The same thin rules under a clip: coverage is the rule's area times
+/// the clip's, and nothing outside the clip is touched.
+#[test]
+fn thin_fills_respect_the_clip() {
+    let it = render("0 0 50 100 rectclip 0 setgray 0.37 4 99 { 0 exch 100 0.3 rectfill } for");
+    let px = it.gfx().pixmap.pixels();
+    let (mut left, mut right) = (0.0, 0.0);
+    for (i, p) in px.iter().enumerate() {
+        if i % 100 < 50 {
+            left += p.red() as f64;
+        } else {
+            right += p.red() as f64;
+        }
+    }
+    let n = (px.len() / 2) as f64;
+    assert!(
+        (left / n - 255.0 * (1.0 - 0.3 / 4.0)).abs() < 1.0,
+        "{}",
+        left / n
+    );
+    assert_eq!(right / n, 255.0);
+}
+
+/// Even-odd and nonzero still differ on a self-overlapping path.
+#[test]
+fn fill_rules_still_differ() {
+    let ring = "newpath 50 50 40 0 360 arc 50 50 20 0 360 arc";
+    let nz = render(&format!("{ring} fill"));
+    let eo = render(&format!("{ring} eofill"));
+    assert_eq!(pixel(&nz, 50, 50), BLACK);
+    assert_eq!(pixel(&eo, 50, 50), WHITE);
+    assert_eq!(pixel(&eo, 50, 20), BLACK);
 }

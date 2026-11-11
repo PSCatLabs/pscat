@@ -1,12 +1,33 @@
 # pscat
 
-pscat is a PostScript interpreter written in Rust. PostScript is a programming
-language for drawing pages; pscat runs your program and shows the picture as it
-is drawn, in a live window, or renders it to PNG, SVG or PDF. It also runs in a
-browser tab, and it ships with PostScript libraries for making art:
-generative patterns, paint and watercolor, printmaking, lettering, charts and
-more. It was built for fun, not as a Ghostscript replacement, though it aims
-for broad PostScript coverage over time.
+<p>
+  <a href="art/logo/pscat-logo-d.ps"><img src="art/logo/renders/pscat-logo-d-512.png" width="96" align="left" alt="The pscat logo: a cream sheet of paper with cat ears and a turned-down corner, with %! as its face, on a gold square"/></a>
+  <b>PostScript for precision and imagination.</b><br/>
+  <sub>The logo is drawn by pscat from <a href="art/logo/pscat-logo-d.ps">its PostScript source</a>.</sub>
+</p>
+<br clear="left"/>
+
+pscat is a modern PostScript interpreter written in Rust for reliable document
+rendering and creative graphics. It renders PostScript and EPS to PNG, SVG and
+PDF from the command line, as an embeddable Rust library, in the browser via
+WebAssembly, or through MCP for AI agents.
+
+- **Documents:** letters, certificates, invitations and posters from page
+  templates, charts and plots for papers, typewritten memos, and multi-page PDFs.
+- **Art:** generative patterns, watercolor and oil paint, printmaking,
+  handwriting, chalkboards and display type.
+
+pscat aims to replace Ghostscript for most PostScript work, and uses Ghostscript
+as its correctness reference: test expectations are pinned against
+Ghostscript's output. It can also show a program drawing, stroke by stroke, in
+a live window or in a browser tab.
+
+<p>
+  <img src="art/brand/renders/certificate.png" width="42%" alt="A certificate of achievement for Ada Lovelace, typeset in serif type inside a double rule on cream paper, from the pagekit certificate template"/>
+  <a href="https://pscatlabs.github.io/pscat/gallery-evening-stream.html"><img src="gallery/renders/evening_stream.png" width="54%" alt="Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window"/></a>
+</p>
+
+<sub>Both drawn by pscat: <a href="examples/template_certificate.ps">a certificate</a> from the page templates, and <a href="gallery/evening_stream.ps">Evening Stream</a>, painted with the paint library.</sub>
 
 **[pscatlabs.github.io/pscat](https://pscatlabs.github.io/pscat/)** has the docs, the full gallery, a specimen of every font,
 and a live playground that runs the interpreter in your browser, no install.
@@ -23,6 +44,20 @@ and a live playground that runs the interpreter in your browser, no install.
   <a href="https://pscatlabs.github.io/pscat/gallery-alpine-lake.html"><img src="gallery/renders/alpine_lake.png" width="32%" alt="Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground"/></a>
 </p>
 <!-- gallery:highlights:end -->
+
+## When to use pscat
+
+Use an image model (FLUX, Nano Banana, gpt-image and the like) for
+photorealism and loose painterly mood, where nothing has to be exact. Use
+pscat when the output must be exact and checkable: text spelled right, a QR
+code that scans, a chart that matches the data, a layout that prints at size
+as vector PDF or SVG, from a seeded program you can diff, edit and re-render,
+locally and free per image. Its watercolor and oil are deterministic,
+editable source too, and share a page with exact type and QR codes. It also
+gives a model with no image output of its own (as of November 2026, Claude)
+a way to draw real pictures and look at them.
+[When to use pscat](docs/guides/when-to-use-pscat.md) has the honest
+comparison and a decision table.
 
 ## Install
 
@@ -69,6 +104,23 @@ To try it with nothing installed, open the
 [Learn PostScript](https://pscatlabs.github.io/pscat/learn.html). More sample programs live in `examples/`, and finished pieces in
 [`gallery/`](gallery/README.md).
 
+## LaTeX on a chalkboard
+
+`pscat chalk` writes a formula on a chalkboard from plain LaTeX, with no
+PostScript. The same LaTeX and seed give the same picture:
+
+```sh
+pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o quadratic.png
+```
+
+<img src="https://pscatlabs.github.io/pscat/assets/chalk/quadratic.png" width="640" alt="x = (-b plus or minus the square root of b squared minus 4ac) over 2a, in white chalk on a slate board"/>
+
+More boards, each with its command, are
+[on the site](https://pscatlabs.github.io/pscat/#chalkboard); the options and
+the supported LaTeX are in the
+[dry-media guide](docs/guides/dry-media.md#from-latex-to-a-board-pscat-chalk).
+MCP clients get the same board from the `chalkboard_math` tool.
+
 ## Guides
 
 Everything else is in [`docs/guides/`](docs/guides/README.md):
@@ -81,11 +133,13 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 - [Printmaking and etching](docs/guides/printmaking.md) and [dry media](docs/guides/dry-media.md)
 - [Lettering, headlines and apparel](docs/guides/lettering.md)
 - [Charts and plots](docs/guides/charts.md)
+- [QR codes](docs/guides/qr-codes.md): encode a URL or other text as a QR symbol, drawn as vector geometry
+- [Functional PostScript](docs/guides/functional.md): map, filter, fold and composed procedures for art built from lists of records
 
 ## For AI agents
 
 pscat works well from a coding agent. The skills in `plugin/skills/` (`pscat`,
-`psart`, `psviz`) are plain Markdown any agent can read, and `pscat-mcp` is an
+`psart`, `psviz`, `functional-postscript`) are plain Markdown any agent can read, and `pscat-mcp` is an
 MCP server with ten tools. In Claude Code, both come as one plugin:
 `/plugin install pscat --marketplace PSCatLabs/pscat`
 (after installing pscat; see [plugin/README.md](plugin/README.md)). In Codex:
@@ -120,9 +174,11 @@ live, without depending on a decades-old C codebase to do it.
 
 pscat's code is dual-licensed under [MIT](LICENSE-MIT) or
 [Apache-2.0](LICENSE-APACHE), at your option. The package also embeds font
-data: the Liberation faces and the Courier Prime-derived typewriter outlines,
-both under the [SIL Open Font License 1.1](LICENSE-OFL). That's why
-`Cargo.toml` says `(MIT OR Apache-2.0) AND OFL-1.1`. The OFL term covers only
+data: the Liberation faces, the URW Symbol and ZapfDingbats faces and the
+Courier Prime-derived typewriter outlines, under the
+[SIL Open Font License 1.1](LICENSE-OFL), and the TeX Gyre faces, under the
+GUST Font License (LPPL-1.3c). That's why `Cargo.toml` says
+`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. The font terms cover only
 the embedded font data, not pscat's code.
 
 The fonts in `fonts/catalog/` keep their own upstream licences. The original

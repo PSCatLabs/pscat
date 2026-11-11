@@ -1,0 +1,23 @@
+{
+  "browser": "Chrome/156.0.8078.48",
+  "offline": true,
+  "checks": [
+    "desktop: no horizontal overflow; all images loaded",
+    "mobile: no horizontal overflow; all images loaded",
+    "no JavaScript exceptions",
+    "no HTTP/HTTPS requests"
+  ],
+  "screenshots": [
+    "target/functional-html-desktop.png",
+    "target/functional-html-desktop-studio.png",
+    "target/functional-html-mobile.png",
+    "target/functional-html-mobile-studio.png"
+  ],
+  "interactions": {
+    "sun": true,
+    "ground": true,
+    "blue": true,
+    "stack": true,
+    "reset": true
+  }
+}

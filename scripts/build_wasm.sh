@@ -13,5 +13,15 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cargo rustc --lib --release --target wasm32-unknown-unknown \
   --no-default-features --crate-type cdylib \
   --manifest-path "$ROOT/Cargo.toml"
-cp "$ROOT/target/wasm32-unknown-unknown/release/pscat.wasm" "$ROOT/web/pscat.wasm"
+# Copy atomically: a concurrent reader (another `cargo test` in this worktree,
+# tests/wasm.rs) must never see a half-written module. The temp file is in
+# web/ so the rename stays on one filesystem, and its name has no `.wasm`
+# suffix, so a `web/*.wasm` glob never picks it up.
+WASM_TMP=""
+trap 'if [[ -n "$WASM_TMP" ]]; then rm -f "$WASM_TMP"; fi' EXIT
+WASM_TMP=$(mktemp "$ROOT/web/.pscat.wasm.XXXXXX")
+cp "$ROOT/target/wasm32-unknown-unknown/release/pscat.wasm" "$WASM_TMP"
+chmod a+r "$WASM_TMP" # mktemp creates 0600; cp would have given the usual 0644
+mv -f "$WASM_TMP" "$ROOT/web/pscat.wasm"
+WASM_TMP=""
 ls -lh "$ROOT/web/pscat.wasm"

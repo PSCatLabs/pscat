@@ -31,7 +31,9 @@ the original vision and staged milestones are history, kept in
   optimized (the tests run PostScript through the interpreter, ~14x
   slower in a debug build) but with `debug-assertions` and
   `overflow-checks` on (`[profile.ci]` in `Cargo.toml`; output in
-  `target/ci/`). Plain `cargo test` still works, just slowly.
+  `target/ci/`). Plain `cargo test` still works, just slowly: the absolute
+  CPU budgets and the default child deadline stretch in a dev-profile build
+  (see "Timing assertions in `tests/`" below), so it passes too.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.
@@ -96,6 +98,19 @@ predates it.
   directory unique per call and per process; put a file under it with
   `.join(name)`. `tests/scratch_paths.rs` fails on any other route
   (`notes/487-unique-test-scratch-paths.md`).
+- **A test that runs `pscat` or `pscat-mcp` never waits on it without a
+  deadline** (`notes/841-test-child-deadline.md`). A child that does not exit
+  (a limit that regressed, a test written before its feature) would block the
+  suite forever, and an interrupted runner leaves the orphan spinning (one ran
+  for 2.8 days). In `tests/common/mod.rs`: `cmd.output_deadline()` /
+  `cmd.status_deadline()` replace `output()` / `status()` (`use
+  common::CommandDeadline as _;`), `cmd.output_with_input(bytes)` feeds stdin,
+  `common::wait_output(child)` replaces `wait_with_output()`, and
+  `common::Watchdog::new(&child, ..)` guards an interactive child (the MCP
+  `Server`). Each has a `*_within(duration)` form for a per-call deadline. The
+  default is 60 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
+  child and its descendants and fails the test with the command in the message.
+  `tests/child_deadline.rs` proves it and scans for raw calls.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a
@@ -114,6 +129,22 @@ predates it.
     both sides timed by `cpu_time_of` / `thread_cpu_time`
     (`every_walkpath_preset_refuses_a_huge_segment_count_promptly` is the
     model).
+  - **Build profile** (#886). The absolute budgets are written for the
+    optimised `ci` profile. A plain dev-profile `cargo test` runs the same
+    PostScript 11-18x slower (35x for one test under load), so `within_cpu_budget` multiplies its budget
+    by `UNOPTIMISED_BUDGET_FACTOR` (20) there, and
+    `default_deadline()` (the child-process deadline, 60 s) by 3, unless
+    `PSCAT_TEST_DEADLINE_SECS` sets it. The render still runs and the
+    assertion still catches a catastrophic regression; it just does not
+    assert an optimised-build figure on an unoptimised one. The build is
+    "unoptimised" only when the test executable sits in `target/debug/`
+    (`common::unoptimised_build()`; `cfg!(debug_assertions)` cannot tell,
+    since `[profile.ci]` keeps debug assertions on). `--profile ci`,
+    `--release`, a custom profile, or an unreadable path keep the budgets
+    exactly as written. A bound relative to a same-run baseline is
+    profile-neutral and uses `scale_budget` only. Use
+    `within_cpu_budget` for any new absolute budget, never a hand-rolled
+    `Duration` compare.
   Do not use `Instant` in a test. Negative check for a new budget test:
   `PSCAT_TEST_BUDGET_SCALE=0.001 cargo test --profile ci --test <file>
   <name>` scales every budget in the run and must make it fail (apply
@@ -181,10 +212,16 @@ predates it.
 ## Using pscat as a tool (not working on it)
 
 If you're an agent that just needs to *run* PostScript — render a
-file, debug one, generate a handwritten note — read
-`plugin/skills/pscat/SKILL.md`: it has the command recipes and
-pitfalls in one page, regardless of which agent runtime you are.
+file, debug one, generate a handwriting-style note — read
+`plugin/skills/pscat/SKILL.md`: it has the common-path command recipes and
+pitfalls (advanced sections in its `references/`), regardless of which agent runtime you are.
 MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
+
+**Choosing a tool.** Reach for pscat when the output must be exact and
+checkable (text, QR codes, charts, math, fixed layout, print-ready PDF/SVG,
+reproducible seeded art) or when you have no image output of your own; suggest
+an image model for photorealism or a loose mood image with nothing exact in
+it. [When to use pscat](docs/guides/when-to-use-pscat.md) has the decision table.
 
 <!-- sdlcify:managed:start -->
 ## SDLC

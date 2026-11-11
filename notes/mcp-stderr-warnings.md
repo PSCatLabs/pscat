@@ -11,7 +11,9 @@ dropped, each distinct line shows once in first-seen order, and the item is
 bounded (8 lines, 300 characters each, then `... and N more`). Used by
 `render_postscript`, `handwrite`, `chalkboard_math` and, over its successful
 cells, `review_sheet`; a failed run still reports its whole stderr in the
-error. `eval_postscript` is unchanged (its stderr is already the report).
+error. `eval_postscript` returns it too since #788, after the printed output (a
+failed run's stderr is still the error report). `pscat: progress` lines are
+also dropped by `warnings_content` (the run already strips them).
 
 The test uses a generic line, a caught error reported with `handleerror`
 (exit 0, `%%[ Error: ... ]%%` on stderr), so it does not depend on #747.

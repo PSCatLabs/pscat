@@ -3,7 +3,8 @@
   "mcpServers": {
     "pscat": {
       "type": "stdio",
-      "command": "pscat-mcp"
+      "command": "sh",
+      "args": ["${PLUGIN_ROOT}/scripts/pscat-mcp.sh"]
     }
   }
 }

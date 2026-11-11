@@ -340,3 +340,46 @@ fn bad_operands_raise_the_usual_errors() {
     ));
     assert!(matches!(err("1.5 2.5 5 .permnoise2"), PsError::Typecheck));
 }
+
+// --- issue #753: a seed override also seeds noise ----------------------
+
+fn fbm_at(it: &mut Interp) -> Vec<String> {
+    run(it, "1.3 2.7 3 0.5 2 fbm2")
+}
+
+#[test]
+fn a_seed_override_builds_the_noise_table_like_noiseseed() {
+    let mut it = Interp::new();
+    it.set_seed_override(Some(5));
+    let swept = fbm_at(&mut it);
+    assert!(
+        it.seed_override_fired(),
+        "sampling swept noise is the override firing"
+    );
+    assert_eq!(swept, eval("5 noiseseed 1.3 2.7 3 0.5 2 fbm2"));
+    assert_ne!(swept, eval("1.3 2.7 3 0.5 2 fbm2"));
+}
+
+#[test]
+fn a_programs_own_noiseseed_beats_the_override() {
+    let mut it = Interp::new();
+    it.set_seed_override(Some(5));
+    it.run_str("9 noiseseed").unwrap();
+    assert_eq!(fbm_at(&mut it), eval("9 noiseseed 1.3 2.7 3 0.5 2 fbm2"));
+    assert!(!it.seed_override_fired());
+    // `rand` is still its own stream: the override reaches `srand` only.
+    it.run_str("1 srand rand").unwrap();
+    assert!(it.seed_override_fired());
+}
+
+#[test]
+fn clearing_the_override_restores_the_default_table_only_if_it_was_the_overrides() {
+    let mut it = Interp::new();
+    it.set_seed_override(Some(5));
+    it.set_seed_override(None);
+    assert_eq!(fbm_at(&mut it), eval("1.3 2.7 3 0.5 2 fbm2"));
+    let mut it = Interp::new();
+    it.run_str("9 noiseseed").unwrap();
+    it.set_seed_override(None);
+    assert_eq!(fbm_at(&mut it), eval("9 noiseseed 1.3 2.7 3 0.5 2 fbm2"));
+}

@@ -54,6 +54,18 @@ exemplary PostScript — but it means adding a lint check means running
 is local to this directory: the scenarios are laid out for a specific
 canvas, and the script has to know which one.
 
+```postscript
+%%IdentityCorpus: always   % optional: scripts/identity_check.sh always compares this file
+```
+
+`%%IdentityCorpus: always` (#776) is for a driver that exercises the
+interpreter rather than a library, so no `--loader` finds it. In two-binary
+mode (`--base-bin/--head-bin`, the check for a change under `src/`) the
+file is rendered from both trees whatever else was picked; with one shared
+binary it is left out, since only files could differ there. The
+`image_*.ps` drivers carry it: they are the only tracked programs that call
+`image`, `colorimage` and `imagemask`.
+
 ## Choosing scenarios
 
 Prefer geometries that have *actually* rendered blank under a real

@@ -16,6 +16,7 @@ SCRIPTS = Path(__file__).resolve().parent
 PARTIALS = SCRIPTS.parent / "site" / "_partials"
 sys.path.insert(0, str(SCRIPTS))
 import check_site_links  # noqa: E402
+import site_chalk  # noqa: E402
 import site_examples  # noqa: E402
 import site_pages  # noqa: E402
 
@@ -29,6 +30,8 @@ def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
     site.mkdir()
     for f in extra_files:
         (site / f).write_text("")
+    (site / "assets/brand").mkdir(parents=True)  # the favicon every page links (#927)
+    (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
     for name, (key, body) in pages.items():
         (site / name).write_text(PAGE % (key, body))
     partials = site_pages.load_partials(PARTIALS)
@@ -37,8 +40,8 @@ def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
     return site
 
 
-# every nav destination must exist, so a fixture has all nine slots' pages
-NAV = {"index.html": "home", "learn.html": "learn", "gallery.html": "gallery",
+# every nav destination must exist, so a fixture has every slot's page
+NAV = {"index.html": "home", "when-to-use.html": "when-to-use", "learn.html": "learn", "gallery.html": "gallery",
        "fonts.html": "fonts", "playground.html": "playground", "guides.html": "guides",
        "agents.html": "agents", "contribute.html": "contribute"}
 
@@ -160,6 +163,27 @@ class SiteScripts(unittest.TestCase):
             site_examples.expand("<!--@example b-->", ex, site, set())
         with self.assertRaises(ValueError):
             site_examples.expand("<!--@example zz-->", ex, site, set())
+
+    def test_chalk_showcase(self):
+        boards = site_chalk.load()
+        self.assertGreaterEqual(len(boards), 3)
+        out = site_chalk.expand("<main>%s</main>" % site_chalk.MARKER, boards)
+        self.assertNotIn("<!--@", out)
+        for b in boards:
+            self.assertIn('src="assets/chalk/%s.png"' % b["id"], out)
+        # the command is shell-quoted LaTeX, `&` and `\\` included, then `-o <id>.png`
+        cmd = site_chalk.command(next(b for b in boards if b["id"] == "derivation"))
+        self.assertIn(r"'f(x) &= \int_0^x \frac{dt}{1+t^2} \\ &= \arctan x' --seed 7 -o derivation.png", cmd)
+        # a page without the marker is untouched; two markers on one page fail
+        self.assertEqual(site_chalk.expand("<p>x</p>", boards), "<p>x</p>")
+        with self.assertRaises(ValueError):
+            site_chalk.expand(site_chalk.MARKER * 2, boards)
+        # a board needs every field, and ids are unique slugs
+        for bad in ([{"id": "a"}], [dict(boards[0]), dict(boards[0])]):
+            f = Path(self.tmp.name) / "boards.json"
+            f.write_text(site_chalk.json.dumps(bad))
+            with self.assertRaises(ValueError):
+                site_chalk.load(f)
 
     def test_missing_nav_marker_fails_the_build(self):
         with self.assertRaises(ValueError):

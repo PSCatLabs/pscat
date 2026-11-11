@@ -29,7 +29,7 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 
-use crate::{Interp, PsError};
+use crate::{Interp, Limits, PsError};
 
 /// The chalk colours drychalk's `dcchalkcolor` knows.
 pub const CHALK_COLORS: [&str; 6] = ["white", "yellow", "pink", "blue", "green", "orange"];
@@ -184,7 +184,7 @@ pub enum ChalkError {
     /// The TeX is outside mathkit's subset or malformed. `kind` is
     /// mathkit's error without its `mk-` prefix (`unsupported-command`,
     /// `unsupported-character`, `missing-argument`, ...), `token` what it
-    /// named (`\oplus`, `@`; empty if nothing).
+    /// named (`\aleph`, `@`; empty if nothing).
     Latex {
         /// mathkit's error name, without `mk-`.
         kind: String,
@@ -217,7 +217,7 @@ impl fmt::Display for ChalkError {
             ChalkError::Latex { kind, token } => match kind.as_str() {
                 "unsupported-command" => write!(
                     f,
-                    "unsupported LaTeX command {token} (the supported subset is listed at the top of lib/mathkit.ps)"
+                    "unsupported LaTeX command {token} (`pscat chalk --help` lists the supported subset)"
                 ),
                 "unsupported-character" => {
                     write!(f, "unsupported character: {token}")?;
@@ -610,7 +610,8 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
 /// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
-/// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
+/// `cases`). A `*` or a `[length]` after a row break goes at both levels.
+/// Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     layout(latex).map(|(rows, _)| rows)
 }
@@ -665,7 +666,7 @@ fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
     }
     let rows: Vec<String> = split_rows(&s)
         .into_iter()
-        .map(|r| r.trim().to_string())
+        .map(|r| drop_row_break_options(r.trim()))
         .filter(|r| !r.is_empty())
         .collect();
     if rows.is_empty() {
@@ -963,16 +964,7 @@ fn split_rows(s: &str) -> Vec<String> {
                 if b.get(i + 1) == Some(&b'\\') {
                     if braces == 0 && envs == 0 {
                         rows.push(s[start..i].to_string());
-                        let mut j = i + 2;
-                        if b.get(j) == Some(&b'*') {
-                            j += 1;
-                        }
-                        let k = j + s[j..].len() - s[j..].trim_start_matches(' ').len();
-                        if b.get(k) == Some(&b'[')
-                            && let Some(close) = s[k..].find(']')
-                        {
-                            j = k + close + 1;
-                        }
+                        let j = row_break_options_end(s, i + 2);
                         start = j;
                         i = j;
                         continue;
@@ -1002,6 +994,140 @@ fn split_rows(s: &str) -> Vec<String> {
     }
     rows.push(s[start..].to_string());
     rows
+}
+
+/// Where the options of a `\\` row break end, given `j` just past the two
+/// backslashes: a `*`, then TeX's `[2pt]` row spacing. A bracket that holds
+/// no length is the next row's content (`\\ [x,y] = 0`, a commutator), where
+/// LaTeX would stop with an error, so it is left where it is.
+fn row_break_options_end(s: &str, mut j: usize) -> usize {
+    let b = s.as_bytes();
+    if b.get(j) == Some(&b'*') {
+        j += 1;
+    }
+    let k = j + s[j..].len() - s[j..].trim_start().len();
+    if b.get(k) == Some(&b'[')
+        && let Some(close) = s[k..].find(']')
+        && is_tex_glue(&s[k + 1..k + close])
+    {
+        j = k + close + 1;
+    }
+    j
+}
+
+/// A row with the options dropped from the `\\` breaks left in it, those
+/// inside `pmatrix`, `cases` or `\substack{}` that mathkit splits itself
+/// (issue #950): `\\[2pt]` and `\\*` become `\\`, as at the top level. The
+/// spacing is not honoured there either; mathkit spaces the rows by their
+/// content.
+fn drop_row_break_options(row: &str) -> String {
+    let b = row.as_bytes();
+    let mut out = String::with_capacity(row.len());
+    let mut last = 0;
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        if b[i + 1] == b'\\' {
+            let j = row_break_options_end(row, i + 2);
+            out.push_str(&row[last..i + 2]);
+            last = j;
+            i = j;
+            continue;
+        }
+        // a control word or symbol: its first byte is never a break (a
+        // multi-byte character's later bytes are never a backslash)
+        i += 2;
+    }
+    out.push_str(&row[last..]);
+    out
+}
+
+/// TeX's units of length (TeXbook p. 57).
+const TEX_UNITS: [&str; 11] = [
+    "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
+];
+
+/// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
+/// register: plain TeX's and LaTeX's are named for what they measure
+/// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
+/// `\linewidth`, `\parindent`, `\medskipamount`, `\unitlength`, `\fboxrule`,
+/// `\lineskiplimit`), and `\jot` and `\fill` are the two common exceptions. No mathkit command is named so, so `\pi`
+/// or `\alpha` in a bracket stays content.
+fn is_length_register(name: &str) -> bool {
+    const ENDS: [&str; 10] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount", "length", "rule", "limit",
+    ];
+    name.chars().all(|c| c.is_ascii_alphabetic())
+        && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
+}
+
+/// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
+/// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
+/// factor and a length register (`\baselineskip`, `0.5\jot`). Anything else,
+/// `x,y` or `\pi` among them, is not.
+fn is_tex_length(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t).trim_start();
+    let digits = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .unwrap_or(t.len());
+    let (num, rest) = t.split_at(digits);
+    let has_num = num.chars().any(|c| c.is_ascii_digit());
+    if !num.is_empty() && !has_num {
+        return false;
+    }
+    let rest = rest.trim_start();
+    if let Some(reg) = rest.strip_prefix('\\') {
+        // `\dimen0`, `\skip12`: TeX's numbered registers
+        let reg = reg.trim_end();
+        let name = reg
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end();
+        return if name.len() < reg.len() {
+            matches!(name, "dimen" | "skip")
+        } else {
+            is_length_register(reg)
+        };
+    }
+    let unit = rest.to_ascii_lowercase();
+    let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
+    has_num && TEX_UNITS.contains(&unit.trim_end())
+}
+
+/// Whether `t` is a length with optional `plus` and `minus` parts
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue, or an e-TeX
+/// `\dimexpr`/`\glueexpr` expression.
+fn is_tex_glue(t: &str) -> bool {
+    // an e-TeX expression is spacing whatever it holds
+    let head = t.trim_start();
+    let head = head.strip_prefix(['+', '-']).unwrap_or(head).trim_start();
+    if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
+    let (plus, minus) = (cut("plus"), cut("minus"));
+    let stretch = |from: usize, key: &str, to: usize| {
+        from == lower.len() || from > to || {
+            let part = &lower[from + key.len()..to];
+            is_tex_length(part) || is_fil(part)
+        }
+    };
+    is_tex_length(&lower[..plus.min(minus)])
+        && (plus == lower.len() || plus < minus)
+        && stretch(plus, "plus", minus)
+        && stretch(minus, "minus", lower.len())
+}
+
+/// `1fil`, `-2 fill`, `fill`: TeX's infinite stretch (lowercase input).
+fn is_fil(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let t = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    matches!(t.trim(), "fil" | "fill" | "filll")
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1099,7 +1225,7 @@ pub fn driver(latex: &str, cfg: &Config) -> Result<Driver, ChalkError> {
     p.push_str("%%EndComments\n\n");
     p.push_str("% Generated by `pscat chalk` (src/chalk.rs). The TeX subset is mathkit's.\n");
     p.push_str("(lib/handscript.ps) run\n(lib/strokeglyphs.ps) run\n(lib/mathkit.ps) run\n\n");
-    p.push_str("/ckdict 40 dict def\nckdict begin\n");
+    p.push_str("/ckdict 80 dict def\nckdict begin\n");
     p.push_str("/cklines [\n");
     for r in &rows {
         p.push_str("  ");
@@ -1196,10 +1322,12 @@ ckmeasure
                 n(b.ledge)
             ));
             if b.ghosting > 0.0 {
+                // placed now, clear of the measured writing, as plain
+                // numbers: /Ghost only draws them
+                p.push_str(&ghost_placement(cfg, w, h));
                 bo.push_str(&format!(
-                    "\n   /Erased {} /Ghost {{\n{}   }}",
-                    n(1.0 - b.ghosting),
-                    ghost_paths(cfg, w, h)
+                    "\n   /Erased {} /Ghost {{ ckghostdraw }}",
+                    n(1.0 - b.ghosting)
                 ));
             }
             p.push_str(&format!("0 0 {} {} << {bo} >> dcboard\n", n(w), n(h)));
@@ -1209,7 +1337,15 @@ ckmeasure
             // chalk blended against its own colour, so every mark is the
             // stick's colour and the gaps between are transparent.
             p.push_str(&format!("<< /Surface /slate /Seed {seed} >> dksurface\n"));
-            under = format!(" /Under [{} {} {}]", n(rgb[0]), n(rgb[1]), n(rgb[2]));
+            // /Firm: with no board the marks have no grey levels, so a
+            // stroke that tires and thins over its length (the radical's
+            // bar) or is small (a superscript) breaks into gaps (#713)
+            under = format!(
+                " /Firm 1 /Under [{} {} {}]",
+                n(rgb[0]),
+                n(rgb[1]),
+                n(rgb[2])
+            );
         }
     }
     p.push_str(&format!("/{} dcchalkcolor\n", cfg.color));
@@ -1234,38 +1370,130 @@ ckmeasure
     })
 }
 
-/// Two or three ghost formulas for the board's `/Ghost`, at sizes and
-/// places picked from the seed.
-fn ghost_paths(cfg: &Config, w: f64, h: f64) -> String {
+/// The PostScript that places the board's ghost writing (issue #698): two
+/// or three formulas from [`GHOSTS`], at sizes and places picked from the
+/// seed, each kept clear of the writing's measured box.
+///
+/// Rust only draws the dice; the writing's box exists only once the driver's
+/// measuring pass has run (`ckx0`..`cky1`, `ckox`, `ckoy`), so the placing is
+/// PostScript. The free board around that box (inflated by a margin) is four
+/// regions, top, bottom, left and right; each ghost tries its regions in its
+/// own order, at its size and then at smaller ones, takes the first it
+/// fits in (and that no earlier ghost occupies), and is dropped when none
+/// does: a crowded board has fewer ghosts, never one against the maths.
+/// The ghost's box is its real path's (`pathbbox`, tilt and all), padded for
+/// the chalk's width and dust. Leaves `ckghostdraw` for the `/Ghost`.
+fn ghost_placement(cfg: &Config, w: f64, h: f64) -> String {
     let mut rng = Lcg(cfg.seed as u64 ^ 0x9e37_79b9_7f4a_7c15);
     rng.next();
     let count = 2 + (rng.next() * 2.0) as usize;
     let first = (rng.next() * GHOSTS.len() as f64) as usize;
     let mut out = String::new();
+    out.push_str(&format!(
+        "/ckgw {} def /ckgh {} def /ckgl {} def\n",
+        n(w),
+        n(h),
+        n(cfg.ledge())
+    ));
+    out.push_str("/ckgspecs [\n");
     for k in 0..count {
         let tex = GHOSTS[(first + k * 3) % GHOSTS.len()];
         let size = (cfg.size * (0.6 + 0.3 * rng.next())).max(8.0);
-        // along the top and bottom of the board, where the centred
-        // formula seldom is, a random way across (and partly off the
-        // edge sometimes, as erased writing is)
-        let x = (w * (0.02 + 0.55 * rng.next())).round();
-        let y = if k % 2 == 0 {
-            h - size * (1.0 + 0.4 * rng.next())
-        } else {
-            cfg.ledge() + size * (0.4 + 0.4 * rng.next())
-        }
-        .round();
+        // the top and the bottom of the board first, in turns, where the
+        // centred formula seldom is; the sides only when those are full
+        let (u, v, flip) = (rng.next(), rng.next(), rng.next() < 0.5);
+        let order = match (k % 2 == 0, flip) {
+            (true, false) => "[0 1 2 3]",
+            (true, true) => "[0 1 3 2]",
+            (false, false) => "[1 0 2 3]",
+            (false, true) => "[1 0 3 2]",
+        };
         let gseed = cfg.seed.rem_euclid(MAX_SEED) + 7 * k as i64 + 9001;
         out.push_str(&format!(
-            "     {} {} {} << /Size {} /Seed {gseed} /Irregular 1.3 >> mkpath\n",
+            "  [{} {} {gseed} {} {} {order}]\n",
             ps_string(tex),
-            n(x),
-            n(y),
-            n(size.round())
+            n(size),
+            n(u),
+            n(v)
         ));
     }
+    out.push_str("] def\n");
+    out.push_str(GHOST_PLACER);
     out
 }
+
+/// The placing half of [`ghost_placement`], in `ckdict` after the measuring
+/// pass (and ahead of the writing, which it measures along its path). Each spec is `[tex size seed u v [regions]]`; `ckgplaced` ends as
+/// `[tex x y size seed]` for the ghosts that found room.
+const GHOST_PLACER: &str = "\
+% the writing's box, inflated: ghosts keep outside it, by 0.6 of the
+% writing size above and below and 0.9 beside it (a ghost just past the end
+% of a row reads as the row going on). The box is that of
+% the strokes actually drawn (tilt included): the path the writing is inked
+% along. Writing with no ink (a bare space) falls back to the line boxes.
+/ckgm cksize 0.6 mul def /ckgmx cksize 0.9 mul def
+gsave newpath cklines ckox ckoy ckopts mkalign pop
+{ pathbbox } stopped {
+  ckox ckx0 add ckoy cky0 add ckox ckx1 add ckoy cky1 add
+} if
+grestore
+/ckgfy1 exch ckgm add def /ckgfx1 exch ckgmx add def
+/ckgfy0 exch ckgm sub def /ckgfx0 exch ckgmx sub def
+/ckgov ckgw 0.06 mul def /ckglo ckgl cksize 0.1 mul add def
+% free regions [x0 y0 x1 y1]: top, bottom, left, right (the top and the
+% bottom may hang a little off the sides, as erased writing does)
+/ckgreg [
+  [ ckgov neg ckgfy1 ckgw ckgov add ckgh ]
+  [ ckgov neg ckglo ckgw ckgov add ckgfy0 ]
+  [ ckgov neg ckglo ckgfx0 ckgh ]
+  [ ckgfx1 ckglo ckgw ckgov add ckgh ]
+] def
+/ckgbox [ ] def
+/ckgplaced [
+  ckgspecs {
+    /ckgs exch def
+    /ckgdone false def
+    [ 1 0.82 0.66 0.52 ] {
+      ckgdone { pop exit } if
+      ckgs 1 get mul round 6 max /ckgsz exch def
+      gsave newpath
+      ckgs 0 get 0 0 << /Size ckgsz /Seed ckgs 2 get /Irregular 1.3 >> mkpath
+      pathbbox grestore
+      /ckgby1 exch def /ckgbx1 exch def /ckgby0 exch def /ckgbx0 exch def
+      % the box, padded for the chalk's width and dust
+      /ckgp ckgsz 0.08 mul 3 add def
+      /ckgbw ckgbx1 ckgbx0 sub ckgp 2 mul add def
+      /ckgbh ckgby1 ckgby0 sub ckgp 2 mul add def
+      ckgs 5 get {
+        ckgdone { pop exit } if
+        ckgreg exch get aload pop
+        /ckgry1 exch def /ckgrx1 exch def /ckgry0 exch def /ckgrx0 exch def
+        ckgrx1 ckgrx0 sub ckgbw ge ckgry1 ckgry0 sub ckgbh ge and {
+          /ckgx ckgrx0 ckgrx1 ckgrx0 sub ckgbw sub ckgs 3 get mul add def
+          /ckgy ckgry0 ckgry1 ckgry0 sub ckgbh sub ckgs 4 get mul add def
+          true ckgbox {
+            aload pop /ckgoy1 exch def /ckgox1 exch def /ckgoy0 exch def /ckgox0 exch def
+            ckgox1 ckgx le ckgox0 ckgx ckgbw add ge or
+            ckgoy1 ckgy le or ckgoy0 ckgy ckgbh add ge or
+            not { pop false } if
+          } forall
+          {
+            [ ckgs 0 get ckgx ckgbx0 sub ckgp add ckgy ckgby0 sub ckgp add ckgsz ckgs 2 get ]
+            /ckgbox [ ckgbox aload pop [ ckgx ckgy ckgx ckgbw add ckgy ckgbh add ] ] def
+            /ckgdone true def
+          } if
+        } if
+      } forall
+    } forall
+  } forall
+] def
+/ckghostdraw {
+  ckgplaced {
+    aload pop /ckgsd exch def /ckgsz exch def
+    << /Size ckgsz /Seed ckgsd /Irregular 1.3 >> mkpath
+  } forall
+} bind def
+";
 
 /// Render `latex` on a board as `cfg` says, as PNG, SVG or PDF bytes.
 pub fn render(latex: &str, cfg: &Config, format: Format) -> Result<Vec<u8>, ChalkError> {
@@ -1273,8 +1501,27 @@ pub fn render(latex: &str, cfg: &Config, format: Format) -> Result<Vec<u8>, Chal
     run(&d, format)
 }
 
+/// [`render`] under `limits` (issue #701): the whole board is one program
+/// run, so the limits cover it as they cover one `pscat` render. A program
+/// that passes one comes back as [`ChalkError::Render`] carrying the
+/// interpreter's `limitexceeded (steps|time|memory)` report.
+pub fn render_with_limits(
+    latex: &str,
+    cfg: &Config,
+    format: Format,
+    limits: Limits,
+) -> Result<Vec<u8>, ChalkError> {
+    let d = driver(latex, cfg)?;
+    run_with_limits(&d, format, limits)
+}
+
 /// Run a generated program and return the page in `format`.
 pub fn run(d: &Driver, format: Format) -> Result<Vec<u8>, ChalkError> {
+    run_with_limits(d, format, Limits::none())
+}
+
+/// [`run`] under `limits` (issue #701).
+pub fn run_with_limits(d: &Driver, format: Format, limits: Limits) -> Result<Vec<u8>, ChalkError> {
     let mut interp =
         Interp::with_page_scaled(d.width, d.height, d.dpi / 72.0).ok_or_else(|| {
             ChalkError::Config(format!("unusable page size {}x{}", d.width, d.height))
@@ -1291,6 +1538,9 @@ pub fn run(d: &Driver, format: Format) -> Result<Vec<u8>, ChalkError> {
     if d.transparent {
         interp.gfx_mut().set_transparent_background();
     }
+    interp
+        .set_limits(limits)
+        .map_err(|e| ChalkError::Config(e.to_string()))?;
     // Nothing the program prints may reach the caller's stdout: an MCP
     // server speaks JSON-RPC on it.
     interp.capture_stdout();
@@ -1326,6 +1576,43 @@ mod tests {
     fn rows_split_only_at_top_level_breaks() {
         assert_eq!(l(r"a &= b \\ c &= d"), ["a &= b", "c &= d"]);
         assert_eq!(l(r"a \\* b \\[2pt] c\\"), ["a", "b", "c"]);
+        // a bracket after `\\` is spacing only when it holds a length (#936)
+        assert_eq!(l(r"a \\ [x,y] = 0"), ["a", "[x,y] = 0"]);
+        assert_eq!(
+            l(r"i\hbar \\ [\hat{x},\hat{p}] = i\hbar"),
+            [r"i\hbar", r"[\hat{x},\hat{p}] = i\hbar"]
+        );
+        assert_eq!(l(r"a \\ [\pi] = 0"), ["a", r"[\pi] = 0"]);
+        assert_eq!(l(r"a \\[1] b"), ["a", "[1] b"]);
+        assert_eq!(l("a \\\\\n[2pt] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(l(r"a \\[-\dimexpr 2pt+1pt\relax] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
+        assert_eq!(
+            l(r"a \\ [\alpha, \beta] = 0"),
+            ["a", r"[\alpha, \beta] = 0"]
+        );
+        assert_eq!(
+            l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(l(r"a \\[2pt plus x] b"), ["a", "[2pt plus x] b"]);
+        // inside display delimiters too
+        assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(
             l(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"),
             [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"]
@@ -1340,6 +1627,36 @@ mod tests {
         );
         // escaped braces are not grouping
         assert_eq!(l(r"\{ a \\ b \}"), [r"\{ a", r"b \}"]);
+    }
+
+    #[test]
+    fn row_spacing_inside_matrices_goes_too() {
+        // the same rule as at the top level (issue #950)
+        assert_eq!(
+            l(r"\begin{pmatrix} a & b \\[4pt] c & d \end{pmatrix}"),
+            [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}"]
+        );
+        assert_eq!(
+            l(r"f = \begin{cases} 1 \\*[0.5\baselineskip] 0 \\* 2 \end{cases} \\[2pt] g"),
+            [r"f = \begin{cases} 1 \\ 0 \\ 2 \end{cases}", "g"]
+        );
+        assert_eq!(
+            l(r"\sum_{\substack{i<m \\ [2pt] j<n}} a"),
+            [r"\sum_{\substack{i<m \\ j<n}} a"]
+        );
+        // a bracket that holds no length is the next row's content
+        assert_eq!(
+            l(r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"),
+            [r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"]
+        );
+        // an unclosed bracket, a control word, a row break at the very end
+        assert_eq!(
+            l(r"\begin{vmatrix} a \\[2pt \end{vmatrix}"),
+            [r"\begin{vmatrix} a \\[2pt \end{vmatrix}"]
+        );
+        assert_eq!(drop_row_break_options(r"\alpha\\[2pt]"), r"\alpha\\");
+        assert_eq!(drop_row_break_options(r"é\\[2pt]ü \,"), r"é\\ü \,");
+        assert_eq!(drop_row_break_options("\\"), "\\");
     }
 
     #[test]
@@ -1582,11 +1899,11 @@ mod tests {
 
     #[test]
     fn mathkit_errors_become_named_latex_errors() {
-        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\oplus".into())).unwrap();
+        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\aleph".into())).unwrap();
         assert_eq!(e.code(), "unsupported_command");
         assert!(
             e.to_string()
-                .starts_with(r"unsupported LaTeX command \oplus")
+                .starts_with(r"unsupported LaTeX command \aleph")
         );
         let e = explain(&PsError::Undefined("mk-unsupported-character:@".into())).unwrap();
         assert_eq!(e.to_string(), "unsupported character: @");

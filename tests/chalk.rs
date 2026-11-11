@@ -15,6 +15,7 @@ use pscat::chalk::{self, Config, Format};
 use tiny_skia::Pixmap;
 
 mod common;
+use common::CommandDeadline as _;
 
 const PSCAT: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -35,11 +36,14 @@ fn pscat(dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     match stdin {
-        None => cmd.stdin(Stdio::null()).output().expect("run pscat"),
+        None => cmd
+            .stdin(Stdio::null())
+            .output_deadline()
+            .expect("run pscat"),
         Some(bytes) => {
             let mut child = cmd.stdin(Stdio::piped()).spawn().expect("spawn pscat");
             common::feed_stdin(&mut child, bytes);
-            child.wait_with_output().expect("wait pscat")
+            common::wait_output(child)
         }
     }
 }
@@ -97,20 +101,23 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 /// and if they are right, re-pin from this test's failure message.
 #[test]
 fn the_five_formulas_render_as_pinned() {
+    // All five re-pinned for #692 (exact-area fill coverage), then for #731
+    // (tiny-skia f32 pipeline); the Windows cases value is from #731's
+    // windows-latest CI run.
     let pinned: [u64; 5] = [
-        0xba9ec8c0d6b5ce8b,
-        0x7a44813f3b5333f6,
-        0xc4e1565651ddb417,
+        0x7746bc8158136515,
+        0xbd469dc457c6ec34,
+        0x76fd19b982eacda1,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x947a44d3fe0c77a0
+            0x95f4ff7905b0d31c
         } else {
-            0x4e4af37ee4b73245
+            0x573d23cd11025399
         },
-        0x9784ab110d43edb5,
+        0x669f03b794585f39,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -125,6 +132,31 @@ fn the_five_formulas_render_as_pinned() {
         })
         .collect();
     assert_eq!(got, pinned, "a chalk board moved: {got:#x?}");
+}
+
+/// The no-board overlay (#713), pinned like the boards. It draws with
+/// drychalk's /Firm, which the boards do not, so the boards' pins above are the
+/// proof that /Firm touches nothing else. The quadratic's √ and its
+/// superscript are the glyphs the pin was made to keep solid: look at the
+/// overlay (`pscat chalk --no-board ... --width 400 --height 200 --dpi 72
+/// --size 40 --seed 1`, over a dark page) before re-pinning.
+#[test]
+fn the_overlay_renders_as_pinned() {
+    let mut cfg = small();
+    cfg.board = None;
+    cfg.seed = 1;
+    let png = chalk::render(FORMULAS[0].1, &cfg, Format::Png).expect("overlay");
+    let pm = Pixmap::decode_png(&png).expect("decode");
+    assert_eq!((pm.width(), pm.height()), (400, 200));
+    // Re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline):
+    // the √ and the superscript checked over a dark page each time, as solid
+    // as before or fuller.
+    assert_eq!(
+        fnv1a(pm.data()),
+        0xb7eb785d15bdb85b,
+        "the overlay moved: {:#x}",
+        fnv1a(pm.data())
+    );
 }
 
 /// Same LaTeX, config and seed: the same bytes, from two separate
@@ -206,6 +238,84 @@ fn irregular_zero_is_a_clean_untilted_layout() {
     );
 }
 
+/// Each row's width as `mkalign` lays it out, in points.
+fn row_widths(tex: &str, cfg: &Config) -> Vec<f64> {
+    let d = chalk::driver(tex, cfg).unwrap();
+    let cut = d.source.find("(lib/artkit.ps) run").expect("board half");
+    let mut src = d.source[..cut].to_string();
+    src.push_str(
+        "ckdict begin newpath cklines ckox ckoy ckopts mkalign end
+         { /Width get = } forall",
+    );
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&src)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    String::from_utf8_lossy(it.captured_stdout())
+        .split_whitespace()
+        .map(|t| t.parse().unwrap())
+        .collect()
+}
+
+/// A row that starts with a bracket after `\\` is written in full: the
+/// bracket is TeX's row spacing only when it holds a length (issue #936).
+/// Before the fix `[x,y]` was swallowed and the row read `= 0`.
+#[test]
+fn a_row_starting_with_a_bracket_keeps_it() {
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"a \\ [x,y] = 0", &clean);
+    let cut = row_widths(r"a \\ = 0", &clean);
+    assert_eq!(full.len(), 2);
+    assert!(
+        full[1] > 1.8 * cut[1],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+    // a real length is still spacing, never ink
+    assert_eq!(row_widths(r"a \\[2pt] = 0", &clean), cut);
+    // and the issue's commutator renders
+    let png = chalk::render(
+        r"i\hbar\partial_t\Psi = \hat{H}\Psi \\ [\hat{x},\hat{p}] = i\hbar",
+        &small(),
+        Format::Png,
+    )
+    .unwrap();
+    assert!(Pixmap::decode_png(&png).is_ok());
+}
+
+/// Inside a matrix or `cases`, `\\[4pt]` is row spacing too, never ink
+/// (issue #950): the board is the one without it, byte for byte. A bracket
+/// that holds no length stays the row's content there as well.
+#[test]
+fn row_spacing_inside_a_matrix_draws_nothing() {
+    let spaced = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\[4pt] 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\*[0.5\baselineskip] -x & x < 0 \end{cases}"
+    );
+    let plain = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\ 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\ -x & x < 0 \end{cases}"
+    );
+    let cfg = small();
+    let (a, b) = (
+        chalk::driver(spaced, &cfg).unwrap(),
+        chalk::driver(plain, &cfg).unwrap(),
+    );
+    assert!(a.source == b.source, "the spacing changed the board");
+    assert_eq!(
+        chalk::render(spaced, &cfg, Format::Png).unwrap(),
+        chalk::render(plain, &cfg, Format::Png).unwrap()
+    );
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"\begin{bmatrix} a & b \\ [x,y] & c \end{bmatrix}", &clean);
+    let cut = row_widths(r"\begin{bmatrix} a & b \\ & c \end{bmatrix}", &clean);
+    assert!(
+        full[0] > cut[0],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+}
+
 /// LaTeX centres each `gather` row on its own width (issue #699); `align`
 /// keeps its rows on one relation column, and its driver never asks for the
 /// centring.
@@ -275,6 +385,91 @@ fn the_block_is_fitted_inside_the_margins() {
     );
 }
 
+/// The ghost writing never touches the formula (issue #698): the driver is
+/// run up to the board, which is when the ghosts are placed, and each
+/// placed ghost's real path box is compared with the formula's box. The
+/// board keeps a margin of 0.6 of the writing size around the maths, so a
+/// faint fragment can never pass for a superscript. Many seeds on formulas
+/// that fill the board and ones that do not; no render.
+#[test]
+fn ghost_writing_keeps_clear_of_the_formula() {
+    let cases: [(&str, &str, u32, u32, f64); 5] = [
+        ("x = 1", "x = 1", 800, 400, 64.0),
+        ("F = ma", "F = ma", 800, 400, 64.0),
+        ("f(x)", r"f(x) = \int_0^1 g(t)\,dt", 800, 400, 64.0),
+        (
+            "quadratic",
+            r"x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}",
+            600,
+            300,
+            64.0,
+        ),
+        ("small", r"e^{i\pi} + 1 = 0", 400, 200, 40.0),
+    ];
+    let mut placed_total = 0;
+    for (name, tex, w, h, size) in cases {
+        for seed in 1..=12 {
+            let mut cfg = small();
+            cfg.width = w;
+            cfg.height = h;
+            cfg.size = size;
+            cfg.seed = seed;
+            let d = chalk::driver(tex, &cfg).unwrap();
+            let end = d.source.find("dcboard\n").expect("the board line");
+            let cut = d.source[..end].rfind('\n').expect("a line before it") + 1;
+            let mut src = d.source[..cut].to_string();
+            src.push_str(
+                "ckdict begin
+                 cksize =
+                 gsave newpath cklines ckox ckoy ckopts mkalign pop pathbbox grestore
+                 4 { = } repeat
+                 ckgplaced {
+                   aload pop /ckgsd exch def /ckgsz exch def
+                   gsave newpath << /Size ckgsz /Seed ckgsd /Irregular 1.3 >> mkpath
+                   pathbbox grestore 4 { = } repeat
+                 } forall end",
+            );
+            let mut it = Interp::new();
+            it.capture_stdout();
+            it.run_str(&src)
+                .unwrap_or_else(|e| panic!("{name} {seed}: {}", it.error_report(&e)));
+            let v: Vec<f64> = String::from_utf8_lossy(it.captured_stdout())
+                .split_whitespace()
+                .map(|t| t.parse().unwrap())
+                .collect();
+            // the writing's path box, printed from the top of the stack down
+            let (cksize, f) = (v[0], [v[4], v[2], v[3], v[1]]);
+            for g in v[5..].chunks(4) {
+                // `=` printed the bbox from the top of the stack down
+                let (ury, urx, lly, llx) = (g[0], g[1], g[2], g[3]);
+                let gap_x = (f[0] - urx).max(llx - f[1]).max(0.0);
+                let gap_y = (f[2] - ury).max(lly - f[3]).max(0.0);
+                let gap = gap_x.max(gap_y);
+                assert!(
+                    gap >= 0.6 * cksize,
+                    "{name} seed {seed}: a ghost at [{llx} {lly} {urx} {ury}] is {gap:.1} from \
+                     the formula {f:?} (writing size {cksize})"
+                );
+                placed_total += 1;
+            }
+        }
+    }
+    // the board is still used: most boards keep some ghosts
+    assert!(
+        placed_total >= 40,
+        "ghosts all but vanished: {placed_total}"
+    );
+}
+
+/// Writing with no ink (a bare space) has no path to measure: the ghosts
+/// fall back to the line boxes, and the board still renders (issue #698).
+#[test]
+fn a_formula_with_no_ink_still_gets_a_board() {
+    for tex in [r"\quad", "~", r"\,"] {
+        chalk::render(tex, &small(), Format::Png).unwrap_or_else(|e| panic!("{tex}: {e}"));
+    }
+}
+
 /// TeX outside the subset fails with one line naming the command or
 /// character, exits non-zero and writes no file.
 #[test]
@@ -282,8 +477,8 @@ fn unsupported_input_fails_with_the_named_error() {
     let dir = scratch("errors");
     for (tex, says, code) in [
         (
-            r"a \oplus b",
-            r"unsupported LaTeX command \oplus",
+            r"a \aleph b",
+            r"unsupported LaTeX command \aleph",
             "unsupported_command",
         ),
         ("a @ b", "unsupported character: @", "unsupported_character"),
@@ -339,6 +534,48 @@ fn separate_inline_pairs_render_as_one_formula() {
         let png = chalk::render(tex, &small(), Format::Png).unwrap();
         assert_eq!(png, bare, "{tex}: not the board of `a + b`");
     }
+}
+
+/// `pscat chalk --help` lists the LaTeX it knows (issue #934): every
+/// control word it names is a command mathkit's table has, so the list
+/// never promises one that fails.
+#[test]
+fn help_lists_only_supported_commands() {
+    let dir = scratch("help");
+    let out = pscat(&dir, &["chalk", "--help"], None);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let list = &text[text.find("Supported LaTeX").expect("the subset in --help")..];
+    let mut words: Vec<&str> = list
+        .split('\\')
+        .skip(1)
+        .map(|w| {
+            w.split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or("")
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    assert!(words.len() > 100, "too few commands listed: {words:?}");
+    // handled by the parser itself, not the command table
+    let parser = ["right", "end"];
+    let src: String = words
+        .iter()
+        .filter(|w| !parser.contains(w))
+        .map(|w| format!("mkcmds /{w} known not {{ ({w}) = }} if\n"))
+        .collect();
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&format!(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run\n{src}"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let missing = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    assert!(
+        missing.is_empty(),
+        "--help lists unknown commands: {missing}"
+    );
 }
 
 /// Single-backslash LaTeX works end to end: the commands whose first

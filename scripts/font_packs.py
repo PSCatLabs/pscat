@@ -14,9 +14,8 @@ its plain `pscat fonts install` downloads.
 
 A pack holds, for each of its families, the font files fonts/packs.json
 lists and the licence files licenses/assets.json lists for that
-family, copied verbatim (so URW-symbols ships LICENSE.md, LICENSE.OFL
-and PROVENANCE.md, the OFL route chosen in #563, and not the AGPL/LPPL
-texts beside them), plus `manifest.json`: for every file its SPDX id,
+family, copied verbatim (SpecialElite ships its Apache-2.0
+LICENSE.txt, the others their OFL.txt), plus `manifest.json`: for every file its SPDX id,
 copyright line and SHA-256, taken from assets.json. Nothing is
 relicensed here.
 

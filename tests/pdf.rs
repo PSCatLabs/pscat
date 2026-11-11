@@ -301,23 +301,354 @@ fn rounding_collapsed_linetos_are_dropped_in_strokes_unless_alone() {
     assert_eq!(t.matches(" l ").count(), 3, "{t}");
 }
 
-/// Issue #20: real PDF shading dictionaries need pattern-colorspace
-/// machinery this exporter doesn't have, so `shfill` approximates as a
-/// flat fill in the ramp's average color -- deliberately, so a
-/// `--pdf`-only export gets *something* rather than the shading
-/// silently vanishing (the same failure class `strokes_appear_in_pdf_
-/// only_export` above guards, which is exactly why this needs its own
-/// regression test rather than trusting the raster/SVG coverage).
-#[test]
-fn shfill_appears_as_an_average_color_fill_in_pdf_only_export() {
-    let (pdf, _) = pdf_and_canvas(
-        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0]
-             /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >> >> shfill",
+// --- shfill becomes a real PDF shading (issue #1028; before it, one flat
+// fill in the ramp's average colour) ---
+
+const AXIAL: &[u8] = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [50 0 450 0]
+     /Extend [true true]
+     /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+
+const RADIAL: &[u8] = b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [220 260 10 250 250 200]
+     /Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 0.6] /C1 [0.1 0.2 0.5] /N 1 >> >> shfill";
+
+/// Three legs, the middle one a hard edge (constant red, then constant
+/// blue), plus a gamma leg that the stop list samples densely.
+const STITCHED: &[u8] = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 0 500]
+     /Function << /FunctionType 3 /Domain [0 1] /Bounds [0.3 0.6] /Encode [0 1 0 1 0 1]
+       /Functions [
+         << /FunctionType 2 /Domain [0 1] /C0 [0 0.6 0.2] /C1 [1 0 0] /N 1 >>
+         << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >>
+         << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [1 1 1] /N 2.2 >> ] >> >> shfill";
+
+/// The page content streams, inflated.
+fn page_content(pdf: &[u8]) -> String {
+    let text = pdf_text(pdf);
+    text.split("stream\n")
+        .skip(1)
+        .filter_map(|c| c.split("endstream").next())
+        .filter(|b| b.starts_with("1 0 0 -1"))
+        .collect()
+}
+
+/// A shading written as `sh` on a resource, with no flat-fill remnant.
+fn assert_real_shading(pdf: &[u8], shading_type: u8) {
+    let text = pdf_text(pdf);
+    let content = page_content(pdf);
+    assert!(
+        text.contains(&format!("/ShadingType {shading_type} ")),
+        "{text}"
     );
+    assert!(text.contains("/Shading << /Sh0 "), "page resource: {text}");
+    assert!(content.contains(" cm /Sh0 sh\n"), "{content}");
+    assert!(!content.contains(" rg "), "a flat fill is left: {content}");
+    assert_q_balanced(pdf);
+}
+
+fn assert_gs_matches(pdf: &[u8], canvas: &Pixmap, name: &str) {
+    if !gs_available() {
+        eprintln!("skipping gs round trip: gs not installed");
+        return;
+    }
+    let theirs = gs_rasterize(pdf, name);
+    let mean = mean_block_diff(canvas, &theirs);
+    eprintln!("{name}: mean block diff {mean:.3}");
+    assert!(
+        mean < 3.0,
+        "{name}: gs render of the PDF diverges: mean {mean:.2}"
+    );
+}
+
+#[test]
+fn axial_shfill_is_a_real_pdf_shading() {
+    let (pdf, canvas) = pdf_and_canvas(AXIAL);
+    assert_real_shading(&pdf, 2);
     let text = pdf_text(&pdf);
-    assert!(text.contains(" f\n") || text.contains(" f\r"), "{text}");
-    // Average of a black-to-white ramp lands at mid-gray.
-    assert!(text.contains("0.5 0.5 0.5 rg"), "{text}");
+    assert!(
+        text.contains("/Coords [50 0 450 0] /Extend [true true]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("<< /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>"),
+        "{text}"
+    );
+    // The user-to-device CTM: y flipped onto the page's own flip `cm`.
+    assert!(page_content(&pdf).contains("q 1 0 0 -1 0 500 cm /Sh0 sh\n"));
+    assert_gs_matches(&pdf, &canvas, "sh_axial");
+}
+
+#[test]
+fn radial_shfill_is_a_real_pdf_shading() {
+    let (pdf, canvas) = pdf_and_canvas(RADIAL);
+    assert_real_shading(&pdf, 3);
+    assert!(pdf_text(&pdf).contains("/Coords [220 260 10 250 250 200]"));
+    assert_gs_matches(&pdf, &canvas, "sh_radial");
+}
+
+#[test]
+fn stitched_shfill_keeps_its_legs_and_hard_edge() {
+    let (pdf, canvas) = pdf_and_canvas(STITCHED);
+    assert_real_shading(&pdf, 2);
+    let text = pdf_text(&pdf);
+    assert!(
+        text.contains("/FunctionType 3 /Domain [0 1] /Functions ["),
+        "{text}"
+    );
+    let bounds = text
+        .split("/Bounds [")
+        .nth(1)
+        .and_then(|r| r.split(']').next())
+        .expect("a /Bounds array");
+    let bounds: Vec<f64> = bounds
+        .split_whitespace()
+        .map(|b| b.parse().expect("number"))
+        .collect();
+    assert!(
+        bounds.windows(2).all(|w| w[0] < w[1]),
+        "strictly increasing: {bounds:?}"
+    );
+    assert!(bounds.iter().all(|&b| b > 0.0 && b < 1.0), "{bounds:?}");
+    // The red-to-blue jump at 0.6 is a sliver leg straddling the bound, as
+    // in the raster's stop list; the constant red leg is one leg.
+    assert!(text.contains("/C0 [1 0 0] /C1 [0 0 1] /N 1"), "{text}");
+    assert_eq!(text.matches("/C0 [1 0 0] /C1 [1 0 0]").count(), 1, "{text}");
+    assert_gs_matches(&pdf, &canvas, "sh_stitched");
+}
+
+/// A hard edge at each end of the axis (a zero-width first and last leg,
+/// in other colours than their neighbours): the raster pads with the
+/// outermost stops' colours, so the PDF function must start red and end
+/// blue, not green (a Codex review of #1028 found the end dropped).
+#[test]
+fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
+    let src = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [100 0 400 0]
+       /Function << /FunctionType 3 /Domain [0 1] /Bounds [0 0.99999988 1] /Encode [0 1 0 1 0 1 0 1]
+         /Functions [
+           << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [0 1 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [0 1 0] /N 1 >>
+           << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> ] >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 2);
+    let px = |x: u32| {
+        let c = canvas.pixel(x, 250).expect("pixel");
+        (c.red(), c.green(), c.blue())
+    };
+    let text = pdf_text(&pdf);
+    let func = text
+        .split("/FunctionType 3")
+        .nth(1)
+        .expect("a stitching function");
+    let first_c0 = func.split("/C0 [").nth(1).and_then(|r| r.split(']').next());
+    let last_c1 = func
+        .rsplit("/C1 [")
+        .next()
+        .and_then(|r| r.split(']').next());
+    let as_rgb = |(r, g, b): (u8, u8, u8)| format!("{} {} {}", r / 255, g / 255, b / 255);
+    assert_eq!(first_c0, Some(as_rgb(px(20)).as_str()), "left pad: {func}");
+    assert_eq!(last_c1, Some(as_rgb(px(480)).as_str()), "right pad: {func}");
+    assert_gs_matches(&pdf, &canvas, "sh_end_edges");
+}
+
+/// Two coincident circles of one radius: the raster paints the first
+/// colour inside and the last outside; written as is, a PDF reader paints
+/// nothing (CoreGraphics) or only the disk (gs). The PDF records the
+/// raster's picture as a hairline ring (a Codex review of #1028).
+#[test]
+fn equal_coincident_circles_export_the_rasters_disk_and_surround() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill
+      << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150 250 250 150]
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let px = |x: u32, y: u32| {
+        let c = canvas.pixel(x, y).expect("pixel");
+        (c.red(), c.green(), c.blue())
+    };
+    assert_eq!(px(250, 250), (255, 0, 0), "raster: first colour inside");
+    assert_eq!(px(20, 20), (0, 0, 255), "raster: last colour outside");
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/Coords [125 125 0 125 125 150]"), "{text}");
+    assert!(
+        text.contains("/Bounds [0.5]"),
+        "a hard edge, not a ramp: {text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_equal_circles");
+}
+
+/// The same fallback for circles only nearly equal (tiny-skia's tolerance),
+/// and with no ramp at the edge however far the circle is magnified.
+#[test]
+fn nearly_equal_and_huge_equal_circles_keep_a_hard_edge() {
+    for (name, src) in [
+        (
+            "sh_near_equal",
+            &b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150.00001 250 250 150]
+               /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+        ),
+        (
+            "sh_max_equal",
+            &b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 0 2e38 0 0 2e38]
+               /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+        ),
+        (
+            "sh_huge_equal",
+            &b"-999800 0 translate
+               << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 250 1000000 0 250 1000000]
+               /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+        ),
+    ] {
+        let (pdf, canvas) = pdf_and_canvas(src);
+        let text = pdf_text(&pdf);
+        assert!(text.contains("/Bounds [0.5]"), "{name}");
+        assert!(!text.contains("inf") && !text.contains("NaN"), "{name}: {text}");
+        assert_gs_matches(&pdf, &canvas, name);
+    }
+}
+
+/// Coords distinct in f64 but one point in f32: the raster paints the last
+/// colour solid (tiny-skia's degenerate axis), so the PDF must too, not a
+/// zero-length shading readers skip (a Codex review of #1028).
+#[test]
+fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
+    let (pdf, canvas) = pdf_and_canvas(
+        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
+             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    );
+    let c = canvas.pixel(100, 100).expect("pixel");
+    assert_eq!(
+        (c.red(), c.green(), c.blue()),
+        (0, 0, 255),
+        "raster: solid C1"
+    );
+    let content = page_content(&pdf);
+    assert!(
+        content.contains("0 0 1 rg") && !content.contains(" sh"),
+        "{content}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_collapsed_axis");
+}
+
+#[test]
+fn clipped_shfill_paints_inside_the_clip_group() {
+    let src = [
+        b"newpath 250 250 150 0 360 arc closepath gsave clip ".as_slice(),
+        AXIAL,
+        b" grestore 0 setgray 10 10 50 50 rectfill",
+    ]
+    .concat();
+    let (pdf, canvas) = pdf_and_canvas(&src);
+    assert_real_shading_with_fill(&pdf);
+    let content = page_content(&pdf);
+    let clip_at = content.find(" W n").expect("a clip");
+    let sh_at = content.find("/Sh0 sh").expect("sh");
+    assert!(clip_at < sh_at, "{content}");
+    assert_gs_matches(&pdf, &canvas, "sh_clipped");
+}
+
+/// As `assert_real_shading`, for a page that also has ordinary fills.
+fn assert_real_shading_with_fill(pdf: &[u8]) {
+    let text = pdf_text(pdf);
+    assert!(text.contains("/ShadingType 2 "), "{text}");
+    assert!(page_content(pdf).contains(" cm /Sh0 sh\n"));
+    assert_q_balanced(pdf);
+}
+
+/// `/BBox` bounds the painted region (user space, through the CTM): a clip
+/// on the device-space parallelogram, inside the element's own `q`.
+#[test]
+fn bbox_becomes_a_clip_inside_the_shading_element() {
+    let src = b"30 rotate << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 300 0]
+       /BBox [100 -50 300 100]
+       /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 0] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 2);
+    let content = page_content(&pdf);
+    let line = content
+        .lines()
+        .find(|l| l.contains("/Sh0 sh"))
+        .expect("sh line");
+    assert!(line.starts_with("q ") && line.contains(" h W n "), "{line}");
+    assert!(
+        line.find(" W n ") < line.find(" cm "),
+        "clip before cm: {line}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_bbox");
+}
+
+/// A ramp used twice is one Function object and one Shading object, and a
+/// page without a `shfill` gets no `/Shading` resource.
+#[test]
+fn shared_ramps_are_written_once_and_only_where_used() {
+    let src = [
+        b"1 0 0 setrgbcolor 10 10 50 50 rectfill showpage ".as_slice(),
+        AXIAL,
+        b" 0 100 translate ",
+        AXIAL,
+        b" showpage",
+    ]
+    .concat();
+    let (pdf, _) = pdf_and_canvas(&src);
+    let text = pdf_text(&pdf);
+    assert_eq!(text.matches("/FunctionType 2").count(), 1, "{text}");
+    assert_eq!(text.matches("/ShadingType 2").count(), 1, "{text}");
+    assert_eq!(
+        text.matches("/Shading << ").count(),
+        1,
+        "page 1 has none: {text}"
+    );
+    assert_eq!(page_content(&pdf).matches("/Sh0 sh").count(), 2);
+    assert_q_balanced(&pdf);
+}
+
+/// The shading's alpha goes through the ExtGState, like any paint.
+#[test]
+fn translucent_shfill_selects_the_alpha_extgstate() {
+    let src = [b"0.5 setalpha ".as_slice(), AXIAL].concat();
+    let (pdf, canvas) = pdf_and_canvas(&src);
+    let content = page_content(&pdf);
+    assert!(
+        content.contains("q /GS0 gs 1 0 0 -1 0 500 cm /Sh0 sh"),
+        "{content}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_alpha");
+}
+
+/// Tiny geometry under a huge CTM (the raster's SAFE_LEN case): the PDF
+/// carries rescaled numbers, not 1e-7, and still means the same picture.
+#[test]
+fn tiny_coords_under_a_huge_ctm_survive() {
+    let src = b"1e8 1e8 scale << /ShadingType 2 /ColorSpace /DeviceRGB
+       /Coords [5e-7 0 4.5e-6 0]
+       /Function << /FunctionType 2 /Domain [0 1] /C0 [1 1 0] /C1 [0 0.5 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 2);
+    assert!(
+        !pdf_text(&pdf).contains("0.000000"),
+        "unscaled tiny numbers"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_tiny");
+}
+
+/// The specimen sheet: raw and artkit-built axial, a burst and an
+/// off-centre two-circle radial, through gs against our own canvas.
+#[test]
+fn gradient_specimen_sheet_round_trips_through_gs() {
+    let src = std::fs::read("examples/gradients.ps").expect("example");
+    let (pdf, canvas) = pdf_and_canvas(&src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ShadingType 2 ") && text.contains("/ShadingType 3 "));
+    assert_q_balanced(&pdf);
+    assert_gs_matches(&pdf, &canvas, "sh_specimen");
+}
+
+/// Programs that never call `shfill` carry no shading machinery.
+#[test]
+fn ordinary_programs_get_no_shading_resources() {
+    let (pdf, _) = pdf_and_canvas(b"0 0 1 setrgbcolor 10 10 80 80 rectfill");
+    let text = pdf_text(&pdf);
+    assert!(
+        !text.contains("/Shading") && !text.contains("/FunctionType"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -424,6 +755,35 @@ fn multiply_blending_survives_the_round_trip_through_gs() {
     let theirs = gs_rasterize(&pdf, "multiply");
     let mean = mean_block_diff(&canvas, &theirs);
     assert!(mean < 6.0, "Multiply diverges through gs: mean {mean:.2}");
+}
+
+/// Images and stencils take the ExtGState too (#766); an opaque Normal one
+/// emits none.
+#[test]
+fn images_and_masks_select_the_alpha_extgstate() {
+    let (pdf, _) = pdf_and_canvas(
+        b"/Multiply setblendmode 0.4 setalpha
+          10 10 translate 80 80 scale
+          2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ca 0.4 /CA 0.4 /BM /Multiply"), "{text}");
+    assert!(text.contains("/GS0 gs "), "{text}");
+    let (pdf, _) = pdf_and_canvas(
+        b"0.6 setalpha 1 0 0 setrgbcolor 10 40 translate 80 20 scale
+          2 1 true [2 0 0 -1 0 1] {<80>} imagemask",
+    );
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ca 0.6"), "{text}");
+    let (pdf, _) = pdf_and_canvas(
+        b"10 10 translate 80 80 scale
+          2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let text = pdf_text(&pdf);
+    assert!(
+        !text.contains("/ExtGState") && !text.contains(" gs "),
+        "{text}"
+    );
 }
 
 /// The other half of the contract: a program that never asks for

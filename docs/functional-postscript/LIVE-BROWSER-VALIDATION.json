@@ -1,0 +1,51 @@
+{
+  "browser": "Chrome/156.0.8078.48",
+  "transport": "file://",
+  "checks": [
+    "real local WASM typography execution",
+    "six distinct print treatments; automatic selection rerenders",
+    "eight bundled font choices; automatic selection rerenders",
+    "text edit changes glyph count and canvas",
+    "palette changes rendered pixels",
+    "invalid input rejected before PS execution",
+    "AOP inspection toggle changes only diagnostic mode",
+    "fault toggle changes actual entry/return/rejection counts",
+    "changed proof text changes counts",
+    "watch / stop / restart",
+    "actual Blob PNG download",
+    "desktop 1440x1100 and mobile 390x844 without horizontal overflow",
+    "introduction links and saved images",
+    "zero JavaScript exceptions",
+    "zero page HTTP(S) requests"
+  ],
+  "screenshots": [
+    "target/functional-live-type-desktop.png",
+    "target/functional-live-neon-desktop.png",
+    "target/functional-live-press-desktop.png",
+    "target/functional-live-press-mobile.png",
+    "target/functional-live-type-mobile.png"
+  ],
+  "output": {
+    "terrain": "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+    "edited": "enter type-terrain\nleave type-terrain\nglyphs=14\n",
+    "press": "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
+    "changedProof": "enter proof\nleave proof\nattempted=6\ncompleted=5\nrejected=1\nfault=obs-font-size-must-be-number\n"
+  },
+  "treatments": 6,
+  "fonts": [
+    "Helvetica-Bold",
+    "Helvetica-BoldOblique",
+    "Times-Bold",
+    "Times-BoldItalic",
+    "Courier-Bold",
+    "Palatino-Bold",
+    "Bookman-Demi",
+    "AvantGarde-Demi"
+  ],
+  "source_sha256": {
+    "live-studio.html": "6064aef50b6766856b0ceea67330605ee335c18716d4ad4b161e049c2868facc",
+    "studio.js": "db739cd73a09bde4bbd6344c2c4fd5a1e571f98f2853c26edf8db2ab5fda4710",
+    "studio.css": "8f48e321641bd43c7ca2933e9a3757337405c569d224cc687a7f871465dea725",
+    "index.html": "6db1f2b3874af13f17a754e103c9d9c88472f569ba19d7ecf5bcf4b23394cd18"
+  }
+}

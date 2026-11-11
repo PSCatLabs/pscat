@@ -24,7 +24,7 @@ fn run(args: &[&str], stdin: &str) -> (bool, String, String) {
         .spawn()
         .expect("spawn pscat");
     common::feed_stdin(&mut child, stdin.as_bytes());
-    let out = child.wait_with_output().expect("wait");
+    let out = common::wait_output(child);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -128,14 +128,56 @@ fn lint_strict_footer_counts_real_findings_not_the_run_error() {
     let (ok, _out, stderr) = run(&["--lint-strict", "-e", "pop"], "");
     assert!(!ok);
     assert!(!stderr.contains("because --lint-strict"), "{stderr}");
-    // Error plus a real finding (the blank page): footer says 1, not 2.
+    // An error plus what its abort left behind (the blank page): the abort
+    // is not counted either, so there is still no footer (#947).
     let (ok, _out, stderr) = run(&["--lint-strict", "-"], "pop\nshowpage");
+    assert!(!ok);
+    assert!(stderr.contains("pscat: lint: [run-error]"), "{stderr}");
+    assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    // A real finding in a run that did not error still gets the footer.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-"], "showpage");
     assert!(!ok);
     assert!(stderr.contains("pscat: lint: [blank-page]"), "{stderr}");
     assert!(
         stderr.contains("pscat: lint: 1 finding(s) \u{2014} failing because --lint-strict"),
         "{stderr}"
     );
+}
+
+/// #947: after an error every other end-of-run check reports the abort, not
+/// the program, so `--lint` says only `[run-error]` (as `pscat-mcp` does
+/// since #942). The same programs without the error are still flagged.
+#[test]
+fn lint_after_an_error_reports_no_consequence_findings() {
+    for src in [
+        "1 0 div",
+        "pop showpage",
+        "gsave 5 dict begin 1 0 div",
+        "1 2 3 1 0 div",
+        "(unterminated",
+    ] {
+        for flag in ["--lint", "--lint-strict"] {
+            let (ok, _out, stderr) = run(&[flag, "-"], src);
+            assert!(!ok, "{src}: an errored run exits non-zero: {stderr}");
+            assert!(
+                stderr.contains("pscat: lint: [run-error]"),
+                "{src}: {stderr}"
+            );
+            for check in ["blank-page", "gsave-imbalance", "dict-leak", "stack-leak"] {
+                assert!(
+                    !stderr.contains(&format!("[{check}]")),
+                    "{flag} {src}: [{check}] is a consequence of the error: {stderr}"
+                );
+            }
+            assert!(!stderr.contains("lint: clean"), "{src}: {stderr}");
+        }
+    }
+    // Without the error, the real findings are still reported.
+    let (_ok, _out, stderr) = run(&["--lint", "-"], "gsave 5 dict begin showpage");
+    assert!(stderr.contains("[gsave-imbalance]"), "{stderr}");
+    assert!(stderr.contains("[dict-leak]"), "{stderr}");
+    let (_ok, _out, stderr) = run(&["--lint", "-"], "showpage");
+    assert!(stderr.contains("[blank-page]"), "{stderr}");
 }
 
 #[test]
@@ -289,6 +331,39 @@ fn sweep_seed_produces_different_frames_from_a_hardcoded_srand() {
     let a = std::fs::read(out.with_file_name("sweep-differ-001.png")).unwrap();
     let b = std::fs::read(out.with_file_name("sweep-differ-002.png")).unwrap();
     assert_ne!(a, b, "different seeds must render different pixels");
+}
+
+/// Issue #753: the flag CLI's sweep also seeds the native noise table, so a
+/// noise-only piece (no `srand`) differs per seed and repeats per seed, and
+/// does not trigger the "had no effect" warning.
+#[test]
+fn sweep_seed_varies_native_noise() {
+    let out = tmp("sweep-noise.png");
+    let source = "0 1 9 { /i exch def 0 1 9 { /j exch def \
+        i 0.37 mul j 0.37 mul 3 0.5 2 fbm2 0.5 add setgray \
+        i 2 mul j 2 mul 2 2 rectfill } for } for";
+    let (ok, _out_text, stderr) = run(
+        &[
+            "--page",
+            "20x20",
+            "--sweep-seed",
+            "1,2,1",
+            "--png",
+            out.to_str().unwrap(),
+            "-",
+        ],
+        source,
+    );
+    assert!(ok, "stderr: {stderr}");
+    assert!(!stderr.contains("never called"), "stderr: {stderr}");
+    let frame =
+        |n: u32| std::fs::read(out.with_file_name(format!("sweep-noise-00{n}.png"))).unwrap();
+    assert_ne!(
+        frame(1),
+        frame(2),
+        "different seeds must give different noise"
+    );
+    assert_eq!(frame(1), frame(3), "the same seed must give the same frame");
 }
 
 /// The reproducible-art doctrine, through a sweep: the same seed
@@ -899,8 +974,8 @@ fn usage_lists_the_new_flags() {
 }
 
 #[test]
-fn version_flag_prints_the_crate_version_and_exits_clean() {
-    let want = format!("pscat {}\n", env!("CARGO_PKG_VERSION"));
+fn version_flag_prints_the_build_version_and_exits_clean() {
+    let want = format!("pscat {}\n", common::built_version());
     for flag in ["--version", "-V"] {
         let (ok, out, err) = run(&[flag], "");
         assert!(ok, "{flag} must exit 0; stderr: {err}");
@@ -1063,13 +1138,16 @@ fn bad_limit_values_are_refused() {
 }
 
 #[test]
-fn limits_do_not_combine_with_modes_that_cannot_honour_them() {
-    // The spool builds its own interpreters; refusing beats ignoring.
-    let dir = tmp("limit-spool-dir");
-    std::fs::create_dir_all(&dir).unwrap();
+fn spool_takes_the_limits_and_the_selftest_modes_refuse_them() {
+    // `--spool` takes the limits since #701 (each job runs under them): the
+    // run gets as far as the directory, which is missing here, so no window
+    // opens, and the error is about the directory, not the flags.
+    let dir = tmp("limit-spool-missing");
+    let _ = std::fs::remove_dir_all(&dir);
     let (ok, _out, stderr) = run(&["--spool", dir.to_str().unwrap(), "--max-steps", "9"], "");
     assert!(!ok);
-    assert!(stderr.contains("--spool"), "{stderr}");
+    assert!(stderr.contains("cannot watch"), "{stderr}");
+    assert!(!stderr.contains("--max-"), "{stderr}");
     // The self-test modes run alone.
     let (ok, _out, stderr) = run(&["--selftest", "lib/artkit.ps", "--max-steps", "9"], "");
     assert!(!ok);

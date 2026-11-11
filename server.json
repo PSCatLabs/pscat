@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.PSCatLabs/pscat",
   "title": "pscat",
-  "description": "Render and debug PostScript to PNG, SVG or PDF, write handwritten notes, and make generative art",
+  "description": "PostScript for precision and imagination: render PostScript documents and art to PNG, SVG or PDF",
   "repository": {
     "url": "https://github.com/PSCatLabs/pscat",
     "source": "github"
   },
   "websiteUrl": "https://pscatlabs.github.io/pscat/",
-  "version": "0.6.3",
+  "version": "0.7.0-rc.4",
   "packages": [
     {
       "registryType": "cargo",
       "identifier": "pscat",
-      "version": "0.6.3",
+      "version": "0.7.0-rc.4",
       "transport": {
         "type": "stdio"
       },

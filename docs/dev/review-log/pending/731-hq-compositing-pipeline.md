@@ -1,0 +1,14 @@
+## render: composite through tiny-skia's f32 pipeline, #731 part 1 (PR #852, issue #731, 2026-10-26)
+
+- **What changed / what to look at:** stacks of faint layers (low `setalpha`, or sub-pixel shapes) now reach the 8-bit model's level instead of stalling early. On the issue's program, the 0.01 x 200 square goes from 192 to 213. Across the corpus, 153 of 196 pages move by a few levels on anti-aliased edges and glyphs. The largest change is the typewriter pages, slightly lighter, max 37 levels. Nothing should look different at normal size.
+- **Perceptual check:** the issue has none. Judged against part 1's intent from triage: "find that extra loss and remove it, so pscat at least matches the 8-bit model". Reaching the float value (221) is part 2, still open on #731.
+- **Reviewer:** PASS, round 2 (https://github.com/PSCatLabs/pscat/pull/852, "Perceptual review, round 2"). Round 1 was a FAIL judged against the full float target (part 2), with no in-scope defect; see "Perceptual review, round 1" on the PR.
+
+| image | before | after |
+|---|---|---|
+| issue program (0.01x200, 0.05x40, 0.002x1000) | ![before](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/issue-stack-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/issue-stack-after.png?raw=true) |
+| opaque sub-pixel rectangles | ![before](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/subpixel-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/subpixel-after.png?raw=true) |
+| examples/released_pages.ps p1, 3x crop | ![before](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/released_pages-p1-crop-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/released_pages-p1-crop-after.png?raw=true) |
+| gallery/evening_stream.ps, crop at 2x | ![before](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/evening_stream-crop-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/8c8753795360635774505a5d8c49f0d83a55a7ee/docs/dev/review-log/pending/731-hq-compositing-pipeline/evening_stream-crop-after.png?raw=true) |
+
+Reviewer polish note: released_pages p1 brightens slightly on average (+0.5 levels) along glyph anti-aliasing; not visible.

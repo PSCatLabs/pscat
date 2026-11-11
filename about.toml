@@ -2,9 +2,9 @@
 # release archive as THIRD_PARTY_LICENSES.html. scripts/package_release.sh runs
 #   cargo about generate --all-features --fail about.hbs -o THIRD_PARTY_LICENSES.html
 # The accepted list mirrors deny.toml's [licenses] allow list (which CI's `deny`
-# job enforces), plus OFL-1.1 for pscat's own embedded fonts. A dependency under
-# any other licence fails the generate step, so the archive can never ship
-# without its notice.
+# job enforces), plus OFL-1.1 and LPPL-1.3c (the GUST Font License, #757) for
+# pscat's own embedded fonts. A dependency under any other licence fails the
+# generate step, so the archive can never ship without its notice.
 accepted = [
     "MIT",
     "Apache-2.0",
@@ -17,6 +17,7 @@ accepted = [
     "0BSD",
     "Unlicense",
     "OFL-1.1",
+    "LPPL-1.3c",
 ]
 # Only what ends up in a shipped binary: no dev-dependencies (tests, benches).
 ignore-dev-dependencies = true

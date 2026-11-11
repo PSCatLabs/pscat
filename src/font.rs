@@ -32,9 +32,9 @@ struct Builtin {
     data: &'static [u8],
 }
 
-/// The standard base-13 names minus Symbol (no metric-compatible open
-/// TTF exists; see docs/dev/FONTS.md), backed by Liberation faces, which are
-/// metric-compatible with the Adobe originals.
+/// The standard base-13 names minus Symbol, backed by Liberation faces,
+/// which are metric-compatible with the Adobe originals. Symbol and the
+/// rest of the standard 35 are in [`EMBEDDED`].
 static BUILTINS: [Builtin; 12] = [
     Builtin {
         ps_name: "Helvetica",
@@ -84,6 +84,110 @@ static BUILTINS: [Builtin; 12] = [
         ps_name: "Courier-BoldOblique",
         data: include_bytes!("../fonts/LiberationMono-BoldItalic.ttf"),
     },
+];
+
+/// The other 23 faces of the standard 35 (issue #757): the six TeX Gyre
+/// families behind Palatino, Bookman, New Century Schoolbook, Avant
+/// Garde, Zapf Chancery and Helvetica-Narrow (GUST Font License), and
+/// the URW Symbol and ZapfDingbats faces (OFL-1.1). Keyed by file stem,
+/// the same key a pack file of that name loads under, so `ALIASES`, the
+/// Symbol/Dingbats encodings and `FontName` are what an installed pack
+/// gave. They register as catalog faces on first use
+/// ([`embedded_fid`]), after any font file on disk: an override or an
+/// installed pack holding the same stem still wins.
+static EMBEDDED: [(&str, &[u8]); 23] = [
+    (
+        "texgyrepagella-regular",
+        include_bytes!("../fonts/base35/TeXGyre-pagella/texgyrepagella-regular.otf"),
+    ),
+    (
+        "texgyrepagella-bold",
+        include_bytes!("../fonts/base35/TeXGyre-pagella/texgyrepagella-bold.otf"),
+    ),
+    (
+        "texgyrepagella-italic",
+        include_bytes!("../fonts/base35/TeXGyre-pagella/texgyrepagella-italic.otf"),
+    ),
+    (
+        "texgyrepagella-bolditalic",
+        include_bytes!("../fonts/base35/TeXGyre-pagella/texgyrepagella-bolditalic.otf"),
+    ),
+    (
+        "texgyrebonum-regular",
+        include_bytes!("../fonts/base35/TeXGyre-bonum/texgyrebonum-regular.otf"),
+    ),
+    (
+        "texgyrebonum-bold",
+        include_bytes!("../fonts/base35/TeXGyre-bonum/texgyrebonum-bold.otf"),
+    ),
+    (
+        "texgyrebonum-italic",
+        include_bytes!("../fonts/base35/TeXGyre-bonum/texgyrebonum-italic.otf"),
+    ),
+    (
+        "texgyrebonum-bolditalic",
+        include_bytes!("../fonts/base35/TeXGyre-bonum/texgyrebonum-bolditalic.otf"),
+    ),
+    (
+        "texgyreschola-regular",
+        include_bytes!("../fonts/base35/TeXGyre-schola/texgyreschola-regular.otf"),
+    ),
+    (
+        "texgyreschola-bold",
+        include_bytes!("../fonts/base35/TeXGyre-schola/texgyreschola-bold.otf"),
+    ),
+    (
+        "texgyreschola-italic",
+        include_bytes!("../fonts/base35/TeXGyre-schola/texgyreschola-italic.otf"),
+    ),
+    (
+        "texgyreschola-bolditalic",
+        include_bytes!("../fonts/base35/TeXGyre-schola/texgyreschola-bolditalic.otf"),
+    ),
+    (
+        "texgyreadventor-regular",
+        include_bytes!("../fonts/base35/TeXGyre-adventor/texgyreadventor-regular.otf"),
+    ),
+    (
+        "texgyreadventor-bold",
+        include_bytes!("../fonts/base35/TeXGyre-adventor/texgyreadventor-bold.otf"),
+    ),
+    (
+        "texgyreadventor-italic",
+        include_bytes!("../fonts/base35/TeXGyre-adventor/texgyreadventor-italic.otf"),
+    ),
+    (
+        "texgyreadventor-bolditalic",
+        include_bytes!("../fonts/base35/TeXGyre-adventor/texgyreadventor-bolditalic.otf"),
+    ),
+    (
+        "texgyrechorus-mediumitalic",
+        include_bytes!("../fonts/base35/TeXGyre-chorus/texgyrechorus-mediumitalic.otf"),
+    ),
+    (
+        "texgyreheroscn-regular",
+        include_bytes!("../fonts/base35/TeXGyre-heroscn/texgyreheroscn-regular.otf"),
+    ),
+    (
+        "texgyreheroscn-bold",
+        include_bytes!("../fonts/base35/TeXGyre-heroscn/texgyreheroscn-bold.otf"),
+    ),
+    (
+        "texgyreheroscn-italic",
+        include_bytes!("../fonts/base35/TeXGyre-heroscn/texgyreheroscn-italic.otf"),
+    ),
+    (
+        "texgyreheroscn-bolditalic",
+        include_bytes!("../fonts/base35/TeXGyre-heroscn/texgyreheroscn-bolditalic.otf"),
+    ),
+    (
+        "StandardSymbolsPS",
+        include_bytes!("../fonts/base35/URW-symbols/StandardSymbolsPS.otf"),
+    ),
+    (
+        "D050000L",
+        include_bytes!("../fonts/base35/URW-symbols/D050000L.otf"),
+    ),
 ];
 
 pub(crate) fn builtin_index(name: &str) -> Option<i64> {
@@ -190,9 +294,10 @@ impl Resolved {
 }
 
 /// findfont's name resolution: builtins, then the disk catalog (via
-/// aliases and file stems), then a stand-in face. The catalog is
-/// filesystem-backed, so wasm builds resolve builtins-or-substitute
-/// only.
+/// aliases and file stems), then the embedded rest of the standard 35
+/// ([`EMBEDDED`]), then a stand-in face. The disk catalog is
+/// filesystem-backed, so wasm builds check the faces registered with
+/// [`register_font_bytes`] in its place.
 ///
 /// A name that belongs to a font pack (`fonts/packs.json`, issue #599)
 /// but is not on disk gets the closest built-in face instead of an error
@@ -205,18 +310,8 @@ pub(crate) fn resolve(requested: &str) -> Resolved {
         return Resolved::found(fid);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        if let Some(fid) = catalog_fid(requested) {
-            return Resolved::found(fid);
-        }
-        if let Some(pack) = missing_pack(requested) {
-            let stand_in = stand_in_for(requested);
-            let fid = builtin_index(stand_in).unwrap_or(SUBSTITUTE);
-            return Resolved {
-                fid,
-                stand_in_note: Some(stand_in_note(requested, pack, stand_in)),
-            };
-        }
+    if let Some(fid) = catalog_fid(requested) {
+        return Resolved::found(fid);
     }
     // wasm has no disk catalog; its catalog is only the faces the caller
     // registered with `register_font_bytes` (the npm package's
@@ -230,7 +325,41 @@ pub(crate) fn resolve(requested: &str) -> Resolved {
             return Resolved::found(fid);
         }
     }
+    if let Some(fid) = embedded_fid(requested) {
+        return Resolved::found(fid);
+    }
+    if let Some((pack, stem)) = missing_face(requested) {
+        let stand_in = stand_in_for(requested);
+        let fid = builtin_index(stand_in).unwrap_or(SUBSTITUTE);
+        return Resolved {
+            fid,
+            stand_in_note: Some(stand_in_note(requested, pack, &stem, stand_in)),
+        };
+    }
     Resolved::found(SUBSTITUTE)
+}
+
+/// The embedded standard-35 face ([`EMBEDDED`]) for a requested name,
+/// registering it on first use. Looked up by the same stems as the disk
+/// catalog, case-insensitively, so `/Palatino-Roman`, `/Symbol` and
+/// `/texgyrepagella-regular` all find their face.
+/// Whether `stem` names an embedded standard-35 face, case-insensitively
+/// (for `--capabilities`: an alias to one resolves everywhere).
+pub(crate) fn is_embedded_stem(stem: &str) -> bool {
+    EMBEDDED.iter().any(|(k, _)| k.eq_ignore_ascii_case(stem))
+}
+
+fn embedded_fid(requested: &str) -> Option<i64> {
+    let (stem, fallback) = wanted_stems(requested);
+    let (key, data) = EMBEDDED
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(stem))
+        .or_else(|| {
+            EMBEDDED
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(&fallback))
+        })?;
+    loaded_fid(key, key).or_else(|| register_face((*key).to_string(), data))
 }
 
 /// Whether the face `requested` names has a glyph for `c`, by the
@@ -243,7 +372,7 @@ pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
     r.stand_in_note.is_none()
         && face_for(r.fid)
             .ok()
-            .is_some_and(|face| face.glyph_index(c).is_some())
+            .is_some_and(|face| glyph_for_char(face, c).is_some())
 }
 
 /// The FID of an already-registered catalog face whose key is `want`
@@ -270,26 +399,30 @@ fn wanted_stems(requested: &str) -> (&str, String) {
 /// The pack holding the face `requested` names, if any pack does.
 #[cfg(not(target_arch = "wasm32"))]
 fn missing_pack(requested: &str) -> Option<&'static str> {
+    missing_face(requested).map(|(pack, _)| pack)
+}
+
+/// The pack holding the face `requested` names and the font file stem
+/// it matched (`Bangers-Regular` for `/Bangers`): what `addFont` must
+/// be given to supply the face.
+fn missing_face(requested: &str) -> Option<(&'static str, String)> {
     let (stem, fallback) = wanted_stems(requested);
-    crate::fontpacks::pack_for_stem(stem).or_else(|| crate::fontpacks::pack_for_stem(&fallback))
+    [stem.to_string(), fallback]
+        .into_iter()
+        .find_map(|s| crate::fontpacks::pack_for_stem(&s).map(|pack| (pack, s)))
 }
 
 /// The built-in face standing in for `requested`, a name whose font
 /// pack is not installed (issue #728). The closest family keeping the
 /// weight and slant, the way Ghostscript's Fontmap does:
 ///
-/// - serif faces (Palatino, Bookman, New Century Schoolbook) become
-///   Times;
-/// - Avant Garde and Helvetica Narrow become Helvetica;
-/// - Zapf Chancery, which has one face, becomes Times-Italic;
 /// - the monospaced faces (Courier Prime, Special Elite, JetBrains Mono)
 ///   become Courier, so column layouts hold;
-/// - Symbol and ZapfDingbats become Helvetica: no built-in face has
-///   their glyphs, so the same character codes draw Latin letters, not
-///   Greek letters or dingbats (the note says so);
 /// - every other pack face (display, Korean, Japanese, Thai) becomes
 ///   Helvetica, as an unknown name does.
-#[cfg(not(target_arch = "wasm32"))]
+///
+/// The standard 35 never get here: all of them are compiled in
+/// (`BUILTINS` and [`EMBEDDED`], issue #757).
 fn stand_in_for(requested: &str) -> &'static str {
     let (stem, _) = wanted_stems(requested);
     let stem = stem.to_ascii_lowercase();
@@ -300,14 +433,6 @@ fn stand_in_for(requested: &str) -> &'static str {
         (true, false) => b,
         (false, true) => i,
         (true, true) => bi,
-    };
-    let times = || {
-        pick(
-            "Times-Roman",
-            "Times-Bold",
-            "Times-Italic",
-            "Times-BoldItalic",
-        )
     };
     let courier = || {
         pick(
@@ -325,20 +450,13 @@ fn stand_in_for(requested: &str) -> &'static str {
             "Helvetica-BoldOblique",
         )
     };
-    if ["pagella", "bonum", "schola"]
-        .iter()
-        .any(|f| stem.contains(f))
-    {
-        times()
-    } else if stem.contains("chorus") {
-        "Times-Italic"
-    } else if ["courierprime", "specialelite", "jetbrainsmono"]
+    if ["courierprime", "specialelite", "jetbrainsmono"]
         .iter()
         .any(|f| stem.starts_with(f))
     {
         courier()
     } else {
-        // adventor, heroscn, Symbol, Dingbats, display and CJK faces.
+        // Display, Korean, Japanese and Thai faces.
         helvetica()
     }
 }
@@ -366,17 +484,30 @@ pub(crate) fn uninstalled_pack_hint(_requested: &str) -> Option<String> {
     None
 }
 
-/// The one-line note for a face whose pack is not installed.
+/// The one-line note for a face whose pack is not installed. The wasm
+/// build has no packs to install (and no stderr): its note, which the
+/// npm package returns in `warnings` (issue #750), says to load the
+/// face with `addFont` under its file stem instead.
 #[cfg(not(target_arch = "wasm32"))]
-fn stand_in_note(requested: &str, pack: &str, stand_in: &str) -> String {
-    let glyphs = if matches!(requested, "Symbol" | "ZapfDingbats") {
-        " (its glyphs differ: letters, not symbols)"
-    } else {
-        ""
-    };
+fn stand_in_note(requested: &str, pack: &str, _stem: &str, stand_in: &str) -> String {
     format!(
         "pscat: warning: font /{requested} is in the {pack} font pack, which is not installed; \
-         using {stand_in}{glyphs}. Run `pscat fonts install --pack {pack}` (or `pscat fonts install`) for the real face"
+         using {stand_in}. Run `pscat fonts install --pack {pack}` (or `pscat fonts install`) for the real face"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn stand_in_note(requested: &str, pack: &str, stem: &str, stand_in: &str) -> String {
+    browser_stand_in_note(requested, pack, stem, stand_in)
+}
+
+/// The browser build's note (see [`stand_in_note`]); not target-gated so
+/// a native test can pin its wording.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn browser_stand_in_note(requested: &str, pack: &str, stem: &str, stand_in: &str) -> String {
+    format!(
+        "pscat: warning: font /{requested} is in the {pack} font pack, which is not built into the browser build; \
+         using {stand_in}. Load the real face with addFont('{stem}', bytes)"
     )
 }
 
@@ -469,17 +600,65 @@ pub(crate) fn register_font_bytes(name: &str, data: Vec<u8>) -> Result<i64, Stri
     if let Some(fid) = loaded_fid(name, name) {
         return Ok(fid);
     }
-    if Face::parse(&data, 0).is_err() {
+    if parse_face(&data, 0).is_none() {
         return Err(format!("{name}: not a TrueType/OpenType font"));
     }
     let data: &'static [u8] = Box::leak(data.into_boxed_slice());
     register_face(name.to_string(), data).ok_or_else(|| format!("{name}: cannot parse the font"))
 }
 
+/// `Face::parse` for bytes we did not ship (a found font file, `addFont`).
+///
+/// A collection (`ttcf`) header that claims more offsets than the file has
+/// bytes is refused here, before ttf-parser sees it: its offset-table read
+/// carries a `debug_assert!` that a hostile count trips (found by the
+/// `truetype` fuzz target, issue #704). A release build would return `None`
+/// anyway; a debug build, which is what `cargo test` and the fuzzer run,
+/// panicked.
+fn parse_face(data: &[u8], index: u32) -> Option<Face<'_>> {
+    if data.starts_with(b"ttcf") {
+        let count = data.get(8..12)?;
+        let count = u64::from(u32::from_be_bytes([count[0], count[1], count[2], count[3]]));
+        if 12 + 4 * count > data.len() as u64 {
+            return None;
+        }
+    }
+    // A panic inside the parser (a `debug_assert!` on an offset in a debug
+    // build; the fuzzer found several) is a font that does not load, not a
+    // dead interpreter. Release builds compile those asserts out.
+    crate::guard::catch(|| Face::parse(data, index).ok()).flatten()
+}
+
 /// Parse, pin a variable font to Regular, classify, register. Shared by
 /// the disk catalog and `register_font_bytes`.
 fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
-    let mut boxed = Box::new(Face::parse(data, 0).ok()?);
+    let (face, encoding, ps_name) = prepare_face(&key, data)?;
+    let face: &'static Face<'static> = Box::leak(Box::new(face));
+    let mut cat = CATALOG.write().unwrap();
+    cat.push(CatalogFace {
+        key,
+        ps_name,
+        face,
+        encoding,
+    });
+    Some((BUILTINS.len() + cat.len() - 1) as i64)
+}
+
+/// The pure half of [`register_face`]: parse `data` as face 0, pin a
+/// variable font's `wght` axis to Regular, and work out the encoding mode
+/// and `FontName` for the file stem `key`. Nothing is leaked or registered,
+/// so the fuzz target (`fuzzing::truetype`) can run it on every input
+/// without growing the process.
+fn prepare_face<'a>(key: &str, data: &'a [u8]) -> Option<(Face<'a>, CatalogEncoding, String)> {
+    // The axis, name and variation calls below read the same hostile tables.
+    crate::guard::catch(|| prepare_face_unguarded(key, data)).flatten()
+}
+
+fn prepare_face_unguarded<'a>(
+    key: &str,
+    data: &'a [u8],
+) -> Option<(Face<'a>, CatalogEncoding, String)> {
+    let mut face = parse_face(data, 0)?;
     // Some catalog files are variable fonts whose *default* named
     // instance isn't Regular — Noto Sans KR/JP ship with wght's default
     // at Thin (100), not 400. Without pinning it, the catalog would
@@ -487,15 +666,16 @@ fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
     // than the Regular cut the `-Regular` filename promises. This is a
     // general policy for any variable-font catalog addition, not
     // special-cased to today's three files.
-    if boxed.is_variable() {
+    if face.is_variable() {
         let wght = ttf_parser::Tag::from_bytes(b"wght");
-        if let Some(axis) = boxed.variation_axes().into_iter().find(|a| a.tag == wght) {
-            let target = 400.0f32.clamp(axis.min_value, axis.max_value);
-            boxed.set_variation(wght, target);
+        if let Some(axis) = face.variation_axes().into_iter().find(|a| a.tag == wght) {
+            // Not `f32::clamp`: it panics when a hostile `fvar` has min > max
+            // (or a NaN bound). Taking the bounds one at a time cannot.
+            let target = 400.0f32.max(axis.min_value).min(axis.max_value);
+            face.set_variation(wght, target);
         }
     }
-    let face: &'static Face<'static> = Box::leak(boxed);
-    let encoding = match key.as_str() {
+    let encoding = match key {
         "StandardSymbolsPS" => CatalogEncoding::Symbol,
         "D050000L" => CatalogEncoding::Dingbats,
         "NotoSansKR-Regular"
@@ -511,22 +691,82 @@ fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
     // stem (our own naming convention) is the honest `FontName` for
     // those; everything else keeps trusting the face's own name table.
     let ps_name = if matches!(encoding, CatalogEncoding::Unicode) {
-        key.clone()
+        key.to_string()
     } else {
         face.names()
             .into_iter()
             .find(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
             .and_then(|n| n.to_string())
-            .unwrap_or_else(|| key.clone())
+            .unwrap_or_else(|| key.to_string())
     };
-    let mut cat = CATALOG.write().unwrap();
-    cat.push(CatalogFace {
-        key,
-        ps_name,
-        face,
-        encoding,
-    });
-    Some((BUILTINS.len() + cat.len() - 1) as i64)
+    Some((face, encoding, ps_name))
+}
+
+/// What the `truetype` fuzz target runs on a font file's bytes: the load
+/// path (`prepare_face`, as `register_font_bytes` and the catalog do it),
+/// then glyph lookup by name, by code point and by id, widths, and a sample of
+/// outlines (about 24 glyph ids spread over the face, plus a few names and code
+/// points) painted, appended to a path and measured through the same
+/// pipeline `show`, `charpath` and `stringwidth` use. Registers nothing.
+pub(crate) fn fuzz_exercise_face(gfx: &mut Gfx, data: &[u8], key: &str) {
+    if let Some((face, encoding, _name)) = prepare_face(key, data) {
+        exercise_face(gfx, &face, encoding);
+    }
+    // `prepare_face` loads face 0 only, as the catalog does; the other
+    // faces of a collection get the plain parse.
+    for index in 1..ttf_parser::fonts_in_collection(data).unwrap_or(1).min(4) {
+        if let Some(face) = parse_face(data, index) {
+            exercise_face(gfx, &face, CatalogEncoding::Standard);
+        }
+    }
+}
+
+fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
+    let n = face.number_of_glyphs();
+    let step = (n / 24).max(1);
+    let fm = [0.01, 0.0, 0.0, 0.01, 0.0, 0.0];
+    for (i, g) in (0..n).step_by(usize::from(step)).enumerate() {
+        let mode = match i % 3 {
+            0 => ShowMode::Paint,
+            1 => ShowMode::Charpath,
+            _ => ShowMode::Width,
+        };
+        let pen = DevPoint { x: 8.0, y: 40.0 };
+        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen);
+    }
+    // Names the encodings resolve, and code points through the cmap.
+    for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
+        let gid = resolve_glyph(face, name);
+        paint_resolved_glyph(
+            gfx,
+            face,
+            fm,
+            gid,
+            &ShowMode::Charpath,
+            DevPoint { x: 8.0, y: 40.0 },
+        );
+    }
+    for c in [
+        'A',
+        'z',
+        '\u{e9}',
+        '\u{3042}',
+        '\u{ac00}',
+        '\u{0e01}',
+        '\u{10ffff}',
+    ] {
+        let gid = glyph_for_char(face, c);
+        if matches!(encoding, CatalogEncoding::Unicode) || gid.is_some() {
+            paint_resolved_glyph(
+                gfx,
+                face,
+                fm,
+                gid,
+                &ShowMode::Paint,
+                DevPoint { x: 8.0, y: 40.0 },
+            );
+        }
+    }
 }
 
 /// Whether `fid` names a Unicode-mode catalog face (see the
@@ -577,8 +817,10 @@ pub enum FontOrigin {
     /// A file found under the catalog directory at findfont time —
     /// desktop/bundle only (`#[cfg(not(target_arch = "wasm32"))]`).
     Catalog,
-    /// A `findfont` name in `ALIASES` that resolves to a catalog
-    /// stem; same environment dependency as `Catalog`.
+    /// A `findfont` name in `ALIASES` (or a family name with its
+    /// `-Regular` dropped) that resolves to a catalog stem, with the
+    /// same environment dependency as `Catalog`, or to an embedded
+    /// standard-35 face, which resolves everywhere.
     Alias,
 }
 
@@ -598,8 +840,8 @@ pub struct FontEntry {
 }
 
 /// Every face findfont can currently reach without substitution:
-/// builtins, then loadable catalog files (sorted), then aliases — same
-/// order `--fonts` has always printed in.
+/// builtins (the twelve Liberation faces, then the embedded rest of the
+/// standard 35), then loadable catalog files (sorted), then aliases.
 ///
 /// One known-and-accepted gap against `catalog_fid`'s exact
 /// resolution behavior (raised in cross-model review, PR #74, not
@@ -615,8 +857,6 @@ pub struct FontEntry {
 /// (An unreadable family subdirectory used to be a third: both scans
 /// now skip it, since issue #599 made them walk several roots.)
 pub fn catalog_entries() -> Vec<FontEntry> {
-    // Only the non-wasm catalog scan below pushes more entries.
-    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut entries: Vec<FontEntry> = BUILTINS
         .iter()
         .map(|b| FontEntry {
@@ -625,9 +865,11 @@ pub fn catalog_entries() -> Vec<FontEntry> {
             alias_target: None,
         })
         .collect();
+    // Font files on disk; only native builds have them.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut stems: Vec<String> = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let mut stems: Vec<String> = Vec::new();
         let mut stems_seen = std::collections::HashSet::new();
         for family in catalog_roots()
             .iter()
@@ -659,6 +901,23 @@ pub fn catalog_entries() -> Vec<FontEntry> {
             }
         }
         stems.sort();
+    }
+    // The embedded standard-35 faces (issue #757) resolve after any file
+    // on disk, so a disk file with the same stem shadows one and is the
+    // entry listed (as `Catalog`).
+    let disk: std::collections::HashSet<String> =
+        stems.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let embedded: Vec<String> = EMBEDDED
+        .iter()
+        .map(|(k, _)| (*k).to_string())
+        .filter(|k| !disk.contains(&k.to_ascii_lowercase()))
+        .collect();
+    entries.extend(embedded.iter().map(|name| FontEntry {
+        name: name.clone(),
+        origin: FontOrigin::Builtin,
+        alias_target: None,
+    }));
+    {
         // An alias only actually resolves (see catalog_fid's own stem/
         // -Regular-fallback lookup) when its target file is present —
         // an incomplete catalog install can have the directory but be
@@ -667,8 +926,11 @@ pub fn catalog_entries() -> Vec<FontEntry> {
         // is deliberately built from *every* scanned stem (regardless
         // of the shadowing filter just below): a stem can be a valid
         // alias *target* even if it's unreachable under its own name.
-        let stem_set: std::collections::HashSet<String> =
-            stems.iter().map(|s| s.to_ascii_lowercase()).collect();
+        let stem_set: std::collections::HashSet<String> = stems
+            .iter()
+            .chain(&embedded)
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
         // resolve() checks builtins, then ALIASES-key remapping,
         // before ever reaching a catalog stem directly — so a stem
         // whose own name exactly matches a builtin's ps_name or an
@@ -737,7 +999,7 @@ pub fn catalog_entries() -> Vec<FontEntry> {
         // catches the case where the curated entry *was* added).
         let mut seen: std::collections::HashSet<String> =
             entries.iter().map(|e| e.name.clone()).collect();
-        for stem in &stems {
+        for stem in stems.iter().chain(&embedded) {
             // Lowercasing preserves byte length and every char boundary
             // (ASCII case-folding never changes which bytes are UTF-8
             // continuation bytes), so `short_len` below is guaranteed a
@@ -765,7 +1027,7 @@ pub fn catalog_entries() -> Vec<FontEntry> {
 /// `load_catalog_face`'s own convention.
 #[cfg(not(target_arch = "wasm32"))]
 fn parses_as_font(path: &std::path::Path) -> bool {
-    std::fs::read(path).is_ok_and(|data| Face::parse(&data, 0).is_ok())
+    std::fs::read(path).is_ok_and(|data| parse_face(&data, 0).is_some())
 }
 
 /// Names of every face findfont can currently reach without
@@ -994,8 +1256,20 @@ fn resolve_glyph(face: &Face, name: &str) -> Option<GlyphId> {
     if name == ".notdef" {
         return None;
     }
-    face.glyph_index_by_name(name)
-        .or_else(|| encodings::name_to_char(name).and_then(|c| face.glyph_index(c)))
+    crate::guard::catch(|| face.glyph_index_by_name(name))
+        .flatten()
+        .or_else(|| encodings::name_to_char(name).and_then(|c| glyph_for_char(face, c)))
+}
+
+/// `Face::glyph_index`, for a face from a file we did not ship: a panic in
+/// the `cmap` parser (see [`parse_face`]) is a missing glyph.
+fn glyph_for_char(face: &Face, c: char) -> Option<GlyphId> {
+    crate::guard::catch(|| face.glyph_index(c)).flatten()
+}
+
+/// `Face::glyph_hor_advance`, likewise guarded.
+fn advance_of(face: &Face, gid: GlyphId) -> Option<u16> {
+    crate::guard::catch(|| face.glyph_hor_advance(gid)).flatten()
 }
 
 /// CTM linear part in f64 (tiny-skia rows: sx ky kx sy tx ty), applied
@@ -1082,8 +1356,8 @@ fn paint_resolved_glyph(
     // interpreter showing an unencoded character. Width is in raw glyph
     // units; `g` already carries the em normalization.
     let w = f64::from(
-        gid.and_then(|g| face.glyph_hor_advance(g))
-            .or_else(|| face.glyph_hor_advance(GlyphId(0)))
+        gid.and_then(|g| advance_of(face, g))
+            .or_else(|| advance_of(face, GlyphId(0)))
             .unwrap_or(0),
     );
     (g[0] * w, g[1] * w)
@@ -1117,7 +1391,7 @@ fn unicode_glyph(
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
-    let gid = char::from_u32(code).and_then(|c| face.glyph_index(c));
+    let gid = char::from_u32(code).and_then(|c| glyph_for_char(face, c));
     Ok(paint_resolved_glyph(gfx, face, fs.matrix, gid, mode, pen))
 }
 
@@ -1595,23 +1869,6 @@ mod tests {
     #[test]
     fn pack_faces_stand_in_with_the_closest_builtin() {
         for (name, pack, stand_in) in [
-            ("Palatino-Roman", "texgyre", "Times-Roman"),
-            ("Palatino", "texgyre", "Times-Roman"),
-            ("Palatino-Italic", "texgyre", "Times-Italic"),
-            ("Palatino-BoldItalic", "texgyre", "Times-BoldItalic"),
-            ("Bookman-Demi", "texgyre", "Times-Bold"),
-            ("Bookman-LightItalic", "texgyre", "Times-Italic"),
-            ("NewCenturySchlbk-Bold", "texgyre", "Times-Bold"),
-            ("NewCenturySchoolbook", "texgyre", "Times-Roman"),
-            ("AvantGarde-Book", "texgyre", "Helvetica"),
-            ("AvantGarde-DemiOblique", "texgyre", "Helvetica-BoldOblique"),
-            ("ZapfChancery", "texgyre", "Times-Italic"),
-            ("ZapfChancery-MediumItalic", "texgyre", "Times-Italic"),
-            ("Helvetica-Narrow-Bold", "texgyre", "Helvetica-Bold"),
-            ("Helvetica-Narrow-Oblique", "texgyre", "Helvetica-Oblique"),
-            ("TeXGyrePagella-Bold", "texgyre", "Times-Bold"),
-            ("Symbol", "extras", "Helvetica"),
-            ("ZapfDingbats", "extras", "Helvetica"),
             ("Bangers", "extras", "Helvetica"),
             ("bangers-regular", "extras", "Helvetica"),
             ("CourierPrime", "extras", "Courier"),
@@ -1620,7 +1877,7 @@ mod tests {
         ] {
             assert_eq!(missing_pack(name), Some(pack), "{name}");
             assert_eq!(stand_in_for(name), stand_in, "{name}");
-            let note = stand_in_note(name, pack, stand_in);
+            let note = stand_in_note(name, pack, "stem", stand_in);
             assert!(
                 !note.contains('\n')
                     && note.contains(&format!("/{name} is in the {pack} font pack"))
@@ -1631,6 +1888,78 @@ mod tests {
         }
         for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
             assert_eq!(missing_pack(name), None, "{name}");
+        }
+    }
+
+    /// The browser build's note (issue #750): one line naming the face,
+    /// the stand-in and the `addFont` stem, with no `pscat fonts install`
+    /// advice, which a browser cannot follow.
+    #[test]
+    fn the_browser_note_says_to_use_addfont_with_the_file_stem() {
+        assert_eq!(
+            missing_face("Bangers"),
+            Some(("extras", "Bangers-Regular".to_string()))
+        );
+        assert_eq!(
+            missing_face("NotoSansKR-Regular"),
+            Some(("cjk-thai", "NotoSansKR-Regular".to_string()))
+        );
+        let note = browser_stand_in_note("Bangers", "extras", "Bangers-Regular", "Helvetica");
+        assert!(
+            !note.contains('\n')
+                && note.contains("/Bangers is in the extras font pack")
+                && note.contains("using Helvetica")
+                && note.contains("addFont('Bangers-Regular', bytes)")
+                && !note.contains("fonts install"),
+            "{note}"
+        );
+    }
+
+    /// All of the standard 35 resolve with no font on disk (issue #757):
+    /// no pack lists them, and each name lands on its own embedded face,
+    /// registered under the pack file's stem, not on the substitute or a
+    /// stand-in.
+    #[test]
+    fn the_standard_35_are_compiled_in() {
+        let names = [
+            ("Palatino-Roman", "texgyrepagella-regular"),
+            ("Palatino-Bold", "texgyrepagella-bold"),
+            ("Palatino-Italic", "texgyrepagella-italic"),
+            ("Palatino-BoldItalic", "texgyrepagella-bolditalic"),
+            ("Bookman-Light", "texgyrebonum-regular"),
+            ("Bookman-Demi", "texgyrebonum-bold"),
+            ("Bookman-LightItalic", "texgyrebonum-italic"),
+            ("Bookman-DemiItalic", "texgyrebonum-bolditalic"),
+            ("NewCenturySchlbk-Roman", "texgyreschola-regular"),
+            ("NewCenturySchlbk-Bold", "texgyreschola-bold"),
+            ("NewCenturySchlbk-Italic", "texgyreschola-italic"),
+            ("NewCenturySchlbk-BoldItalic", "texgyreschola-bolditalic"),
+            ("AvantGarde-Book", "texgyreadventor-regular"),
+            ("AvantGarde-Demi", "texgyreadventor-bold"),
+            ("AvantGarde-BookOblique", "texgyreadventor-italic"),
+            ("AvantGarde-DemiOblique", "texgyreadventor-bolditalic"),
+            ("ZapfChancery-MediumItalic", "texgyrechorus-mediumitalic"),
+            ("Helvetica-Narrow", "texgyreheroscn-regular"),
+            ("Helvetica-Narrow-Bold", "texgyreheroscn-bold"),
+            ("Helvetica-Narrow-Oblique", "texgyreheroscn-italic"),
+            ("Helvetica-Narrow-BoldOblique", "texgyreheroscn-bolditalic"),
+            ("Symbol", "StandardSymbolsPS"),
+            ("ZapfDingbats", "D050000L"),
+        ];
+        assert_eq!(names.len() + BUILTINS.len(), 35);
+        for (name, stem) in names {
+            assert_eq!(missing_pack(name), None, "{name}");
+            let fid = embedded_fid(name).unwrap_or_else(|| panic!("{name} is not embedded"));
+            assert!(fid >= BUILTINS.len() as i64, "{name}");
+            let cat = CATALOG.read().unwrap();
+            let face = &cat[fid as usize - BUILTINS.len()];
+            assert_eq!(face.key, stem, "{name}");
+        }
+        for (k, _) in &EMBEDDED {
+            assert!(
+                names.iter().any(|(_, s)| s == k),
+                "{k} has no standard name"
+            );
         }
     }
 

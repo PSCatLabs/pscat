@@ -265,6 +265,20 @@ the twelve builtins into a **runtime catalog** loaded from
   `font::stand_in_for`; #728 replaced the `invalidfont` this used to
   raise); names no pack lists substitute Helvetica silently. Release procedure: `docs/dev/RELEASING-FONTS.md`.
 
+- **The standard 35 compiled in (#757)**: the 23 TeX Gyre and URW faces
+  behind the alias table moved out of the catalog into `fonts/base35/`
+  and are embedded (`font::EMBEDDED`, `include_bytes!`, native and wasm).
+  They are not builtins: `font::embedded_fid` registers one through
+  `register_face` under the pack file's stem the first time a name needs
+  it, exactly as a disk file of that stem would load, so `FontName`, the
+  Symbol/Dingbats encodings and the pixels are what the `texgyre` pack
+  gave. It runs after the disk lookup (an override or installed pack of
+  the same stem still wins) and before the stand-in. `--fonts` and
+  `--capabilities` list them as `builtin`. Cost: +3.3 MiB binary and
+  wasm, +1.7 MiB crate. The `texgyre` pack is retired
+  (`fontpacks::RETIRED_PACKS`); `pscat fonts install` skips it with a
+  note.
+
 `fonts/catalog/README.md` is the curated manifest with licenses;
 `examples/font_catalog.ps` renders the specimen sheets. The library
 of *programmatic* faces lives on in `lib/fonts/` (seven now: Neon,

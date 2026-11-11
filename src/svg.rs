@@ -240,18 +240,38 @@ impl SvgRecorder {
     /// An image (or imagemask) as embedded PNG: `png` is the encoded
     /// W×H source raster, `t` the device transform mapping source
     /// pixel coordinates to device space.
-    pub(crate) fn image(&mut self, png: &[u8], w: usize, h: usize, t: [f32; 6], chain: &Chain) {
-        // No blend style: `image`/`imagemask` don't go through
-        // `Gfx::paint()` at all, so alpha and blend never reached them
-        // in the raster either (documented gap, issue #47) -- passing
-        // one here would make the SVG *more* translucent than the PNG.
-        let (open, close, _) = self.clip_wrappers(chain, "");
+    ///
+    /// `interpolate` (`/Interpolate true`, #730) emits
+    /// `image-rendering="auto"`, the viewer's smooth scaling; otherwise
+    /// `pixelated` keeps the hard cell edges (the SVG default would smooth).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn image(
+        &mut self,
+        png: &[u8],
+        w: usize,
+        h: usize,
+        t: [f32; 6],
+        interpolate: bool,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        // `setalpha` / `setblendmode` reach images since #766. The blend
+        // goes on the outermost wrapper (see `clip_wrappers`); an image
+        // takes `opacity`, not `fill-opacity`. Nothing is emitted at the
+        // default, so existing exports are unchanged.
+        let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let opacity = if comp.alpha >= 1.0 {
+            String::new()
+        } else {
+            format!(" opacity=\"{}\"", fmt_f32(comp.alpha))
+        };
         let _ = write!(
             self.body,
             "{open}<image width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\" \
-             image-rendering=\"pixelated\" \
+             image-rendering=\"{}\"{opacity}{leftover} \
              transform=\"matrix({} {} {} {} {} {})\" \
              xlink:href=\"data:image/png;base64,{}\"/>{close}",
+            if interpolate { "auto" } else { "pixelated" },
             fmt_f32(t[0]),
             fmt_f32(t[1]),
             fmt_f32(t[2]),
@@ -412,6 +432,13 @@ impl SvgRecorder {
         );
     }
 
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     /// The lazy showpage erase (or an explicit erasepage): the new
     /// page starts blank.
     pub(crate) fn erase(&mut self) {
@@ -424,7 +451,7 @@ impl SvgRecorder {
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
              xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
-             width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">\
+             width=\"{w}pt\" height=\"{h}pt\" viewBox=\"0 0 {w} {h}\">\
              {backdrop}{defs}{body}</svg>\n",
             backdrop = if self.transparent {
                 String::new()

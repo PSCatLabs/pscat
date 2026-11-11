@@ -7,7 +7,7 @@
 #
 # Checks: it installs with no install scripts; `import 'pscat'` resolves
 # through the exports map to the Node entry and renders a page (pixels and
-# output); the embedded lib/ loads; a PostScript error is a PostScriptError;
+# output) and records SVG and PDF; the embedded lib/ loads; a PostScript error is a PostScriptError;
 # `pscat/pscat.wasm` and `pscat/package.json` resolve. Unless --no-types,
 # a TypeScript consumer type-checks against index.d.ts (needs the network
 # once, for the pinned typescript).
@@ -52,6 +52,9 @@ assert.ok(blue > 6000, `blue ${blue}`);
 assert.ok(black > 20, `text ${black}`);
 assert.equal(r.render('(lib/mathkit.ps) run (lib) print', { width: 10, height: 10 }).output, 'lib');
 assert.throws(() => r.render('nosuchop'), (e) => e instanceof PostScriptError && e.errorName === 'undefined');
+r.render('0 0 1 setrgbcolor 10 10 50 50 rectfill', { width: 100, height: 100, svg: true, pdf: true });
+assert.match(r.svg(0), /^<svg /);
+assert.ok(new TextDecoder().decode(r.pdf().slice(0, 5)) === '%PDF-');
 assert.ok(import.meta.resolve('pscat/pscat.wasm').endsWith('/node_modules/pscat/pscat.wasm'));
 console.log(`pscat ${pkg.version} from the tarball: rendered ${img.width}x${img.height}, ${blue} blue pixels`);
 EOF
@@ -84,6 +87,11 @@ try {
     void name; void line;
   }
 }
+r.render('0 0 10 10 rectfill', { svg: true, pdf: true });
+const svgs: string[] = r.svgPages();
+const first: string = r.svg(0);
+const pdf: Uint8Array = r.pdf();
+void svgs; void first; void pdf;
 // @ts-expect-error the page options are numbers
 r.render('', { width: '100' });
 void data; void more;

@@ -7,13 +7,17 @@
 //! dimensions (from its SOF marker, no decode), sizing the output page to
 //! match its aspect ratio; the real render then reads and hatches it. JPEG
 //! input only: this interpreter has no PNG decode path in PostScript (see
-//! `lib/etching.ps`'s header comment for why that is not a gap).
+//! `lib/etching.ps`'s header comment for why that is not a gap), so any other
+//! format is refused up front by its first bytes (#939).
 
 use super::{
-    Args, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape, render, rgb,
+    Args, Confine, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape,
+    render, rgb, take_limit_flag,
 };
 
 const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
+
+  The photo must be a JPEG; a PNG or other format is refused (convert it first).
 
   -o, --out PATH     output file; format from extension: .png/.svg/.pdf
                       (default etching.png)
@@ -25,6 +29,12 @@ const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
       --ink R,G,B     stroke color, components 0..1 (default 0.08,0.07,0.05)
       --paper R,G,B   background color, components 0..1 (default 0.96,0.94,0.88)
       --dpi N         render resolution (default 72)
+      --max-steps N     stop a program after N interpreter steps (0 = no limit)
+      --max-time SECS   stop a program after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a program that grows the heap by more than MIB
+                        (0 = no limit). They apply to each of the two programs
+                        this runs, the dimensions pass and the render, not to the
+                        pair; a stop exits non-zero with `limitexceeded`
   -h, --help          this text"#;
 
 struct Opts {
@@ -37,6 +47,8 @@ struct Opts {
     ink: String,
     paper: String,
     dpi: f32,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #701).
+    confine: Confine,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -49,6 +61,12 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     let format = output_format(&o.out).map_err(usage)?;
     if !std::path::Path::new(&o.photo).is_file() {
         return Err(Failure::Msg(format!("no such file: {}", o.photo)));
+    }
+    if let Some(found) = not_a_jpeg(&o.photo) {
+        return Err(Failure::Msg(format!(
+            "{} is {found}; only JPEG photos are supported (convert it to JPEG first)",
+            o.photo
+        )));
     }
     // Absolute: a relative name would be looked up by the resolver
     // (`$PSCAT_HOME` first), not against the directory the user is in.
@@ -70,7 +88,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     dims.extend(b"<< /Photo ");
     dims.extend(&photo);
     dims.extend(b" >> et-dims\n/n exch def /h exch def /w exch def\nw == h == n ==\n");
-    let printed = measure(&dims)?;
+    let printed = measure(&dims, &o.confine)?;
     let sizes: Vec<f64> = printed
         .split_whitespace()
         .filter_map(|t| t.parse().ok())
@@ -97,7 +115,57 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         )
         .into_bytes(),
     );
-    render(&driver, (page_w, page_h), o.dpi, false, format, &o.out)
+    render(
+        &driver,
+        (page_w, page_h),
+        o.dpi,
+        false,
+        format,
+        &o.out,
+        &o.confine,
+    )
+}
+
+/// What a file is, when its first bytes are not a JPEG's: the library's own
+/// check (`et-scan`) fails on a PNG with an internal procedure name, which
+/// tells the user nothing. `None` for a JPEG (`FF D8`, all `et-scan` looks
+/// at, so this is never stricter than the library) or a file that cannot be
+/// read, which the render reports as before.
+fn not_a_jpeg(photo: &str) -> Option<String> {
+    use std::io::Read as _;
+    let mut head = Vec::with_capacity(12);
+    std::fs::File::open(photo)
+        .ok()?
+        .take(12)
+        .read_to_end(&mut head)
+        .ok()?;
+    sniff_non_jpeg(&head)
+}
+
+fn sniff_non_jpeg(head: &[u8]) -> Option<String> {
+    if head.starts_with(&[0xFF, 0xD8]) {
+        return None;
+    }
+    let kind = if head.is_empty() {
+        "an empty file"
+    } else if head.starts_with(b"\x89PNG") {
+        "a PNG"
+    } else if head.starts_with(b"GIF8") {
+        "a GIF"
+    } else if head.starts_with(b"BM") {
+        "a BMP"
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        "a WebP"
+    } else if head.starts_with(b"II*\0") || head.starts_with(b"MM\0*") {
+        "a TIFF"
+    } else if head.get(4..8) == Some(b"ftyp") {
+        "an ISO media file (HEIC, AVIF or similar)"
+    } else if head.starts_with(b"%PDF") {
+        "a PDF"
+    } else {
+        "not a JPEG (it does not start with the JPEG marker)"
+    };
+    Some(kind.to_string())
 }
 
 /// The output page: the longer side `max_dim`, the other scaled to the
@@ -123,6 +191,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         ink: "0.08 0.07 0.05".into(),
         paper: "0.96 0.94 0.88".into(),
         dpi: 72.0,
+        confine: Confine::default(),
     };
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
     while let Some(arg) = args.next() {
@@ -136,6 +205,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--ink" => o.ink = rgb(&arg, &args.value(&arg)?)?,
             "--paper" => o.paper = rgb(&arg, &args.value(&arg)?)?,
             "--dpi" => o.dpi = dpi(&args.value(&arg)?)?,
+            _ if take_limit_flag(&mut o.confine.limits, &arg, &mut args)? => {}
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => {
                 if !o.photo.is_empty() {

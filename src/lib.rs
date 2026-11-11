@@ -90,12 +90,15 @@ pub mod page;
 // and out of cargo-semver-checks' view of the API (issue #565).
 pub(crate) mod binobj;
 #[doc(hidden)]
+pub mod bbox;
+#[doc(hidden)]
 pub mod capabilities;
 #[doc(hidden)]
 pub mod chalk;
 pub(crate) mod clock;
 #[doc(hidden)]
 pub mod contact_sheet;
+pub(crate) mod coverage;
 #[doc(hidden)]
 pub mod encodings;
 #[doc(hidden)]
@@ -112,6 +115,7 @@ pub mod fontpacks;
 pub mod fuzzing;
 #[doc(hidden)]
 pub mod gfx;
+pub(crate) mod guard;
 #[doc(hidden)]
 pub mod halftone;
 pub(crate) mod image;
@@ -129,6 +133,12 @@ pub mod ops;
 pub mod paths;
 #[doc(hidden)]
 pub mod pdf;
+#[doc(hidden)]
+pub mod png;
+#[doc(hidden)]
+pub mod profile;
+#[doc(hidden)]
+pub mod read_roots;
 #[doc(hidden)]
 pub mod repl;
 // Reads library files off disk to run their `%%SelfTest` blocks —

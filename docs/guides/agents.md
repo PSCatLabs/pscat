@@ -8,7 +8,8 @@ and both work against an **installed** pscat (no checkout needed):
   reachable as `skills/` in a checkout), one directory
   per skill, each with a `SKILL.md` (Claude Code's skill format; any agent
   can read it). [`pscat`](../../plugin/skills/pscat/SKILL.md) is the tool
-  reference, [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
+  reference (the common path, with `references/` for sweeps and sheets, handwriting
+  and chalk, typewriter pages, `--bands`/`--profile`, extensions and MCP details), [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
   loop for art (a short page plus `references/` for paint, dry media,
   board math and style packs, read only when needed), and
   [`psviz`](../../plugin/skills/psviz/SKILL.md) paper-ready charts. They call the
@@ -19,9 +20,21 @@ and both work against an **installed** pscat (no checkout needed):
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
   with ten tools (below).
 
+Which tool to pick for a picture (pscat, an image model, or an LLM's own
+SVG or matplotlib), and how pscat lets a model with no image output of its
+own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+
 In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step (install pscat first; the plugin
-uses the binaries on your PATH):
+skills and registers `pscat-mcp` in one step. No separate install is needed
+on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
+uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
+downloads the pinned GitHub release once, checks it against the release's
+`SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin` or
+`~/.cache/pscat/plugin`; the stable path of the command-line tool is `bin/pscat`
+there). It also links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`
+when that directory is already on `PATH`, so a plain `pscat` works. The same plugin installs in the Claude desktop app
+(Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
+the server on your computer. In Claude Code:
 
 ```text
 /plugin install pscat --marketplace PSCatLabs/pscat
@@ -73,7 +86,7 @@ sessions in a checkout still load them.
 | Lettering, headlines, apparel mockups | `render_postscript` | — | psart: Media and kits |
 | Style packs (steampunk, psychedelic, sci-fi, toon), Type 3 faces | `render_postscript` | — | psart: references/styles-and-type.md |
 | Korean, Japanese, Thai text | `render_postscript` (needs the font catalog) | — | pscat: Fonts |
-| What fonts, palettes, templates, procedures exist | `describe_art_capabilities` | `pscat --capabilities`, `--fonts` | pscat: Capabilities |
+| What fonts, palettes, templates, procedures, native operators exist | `describe_art_capabilities` | `pscat --capabilities`, `--fonts` | pscat: Capabilities |
 | PDF retype | planned (#559, #560) | — | — |
 
 Task-level MCP tools are added only where agents clearly do better with
@@ -86,11 +99,15 @@ PIL composite. A one-call typewriter or chart is not added yet.
 ## The MCP server
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
-  or a PDF written to `out_path`), with page size, `dpi` and `halftone`
-  options. Errors still return the partial render with the error text.
+  or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
+  `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack).
-  `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet` also
+  (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
+  ended in a PostScript error gets the `PostScript error:` block and the
+  partly drawn page but no `Lint:` block: those findings describe where the
+  run stopped, so they would only be consequences of the error (#942).
+  `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
+  `eval_postscript` also
   return what a *successful* run wrote to stderr (a font falling back to a
   built-in face, say) as a `Warnings:` text item: each distinct line once, at
   most 8 lines of 300 characters, without the child's own receipt.
@@ -106,7 +123,7 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
   outside mathkit's subset is a one-line `latex_error` naming it (`code`
-  `unsupported_command`, `token` `\oplus`). The input is LaTeX, never
+  `unsupported_command`, `token` `\aleph`). The input is LaTeX, never
   PostScript. By default `latex` is capped at 4096 bytes and the board at 40
   million pixels (`--max-latex-bytes`, `--max-pixels`; see the limits below); svg and pdf go to `out_path` only.
 - `review_sheet` — several programs in, one labelled PNG out: the
@@ -130,8 +147,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
   [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)).
-- `eval_postscript` — run headlessly, get back what the program printed,
-  or the error (name, offending command, line) plus an operand-stack
+- `eval_postscript` — run headlessly, get back what the program printed
+  (plus a `Warnings:` item for anything it wrote to stderr), or the error (name, offending command, line) plus an operand-stack
   post-mortem.
 
 ### Tool annotations
@@ -158,10 +175,22 @@ replaces only an existing render file of the same extension (see below).
 The PostScript itself can never write a file: the server never passes the CLI's
 `--allow-write`, so `(path) (w) file`, `writereals`, `renamefile` and `deletefile` fail with
 `invalidfileaccess` (#740). `%stdout` writes come back as printed output.
-Reading follows the CLI's policy (any file the server's user can read), and so does
-`filenameforall`: a program can list a readable directory, not just guess names in it.
-`read-only` here means the tool writes nothing; `eval_postscript`'s program (and
-a render's) can still *read* any local file you can, which each description says.
+Reading is confined to the server's **read roots** (#763): its working directory
+(unless that is `/`), the pscat data directories (`$PSCAT_HOME` and the per-user one,
+where font packs install) when they exist, and each `--allow-read DIR`.
+`(path) (r) file`, `run`, `readreals` and image or data sources opened by name
+read only files that resolve inside one of them; anything else, a `..` anywhere in
+the name, a symlink leading out, or `/dev/zero`, is `invalidfileaccess`, and so is
+a missing file named by an absolute path outside (the error never says whether
+it exists). `filenameforall`
+lists only inside the roots: an absolute template elsewhere, or one with `..`,
+yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
+Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
+`lib/` is not a disk read and always works. The server passes the roots to each
+render as the CLI's `--confine-reads` and `--read-root DIR`; the CLI itself reads
+openly unless given those. `read-only` here means the tool writes nothing.
+No tool takes an input file path: `review_sheet` and the rest take PostScript
+source, not files, so the roots are the only way in.
 `tests/mcp.rs` keeps the same table and fails for a tool missing from it.
 
 The Claude Code plugin registers it for you. To register it by hand instead
@@ -187,16 +216,47 @@ For OpenClaw, Hermes, or any other MCP client, the generic stdio config:
 
 Set by whoever registers the server; no tool argument can change them.
 
+Every numeric option below can also be set with an environment variable, so a
+plugin user can change a limit without registering the server by hand (see
+"Raising the time limit"): `PSCAT_MCP_` plus the flag name in capitals with
+underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
+`PSCAT_MCP_MAX_JOBS`, `PSCAT_MCP_JOB_TTL`, `PSCAT_MCP_MAX_BANDS`, `PSCAT_MCP_MAX_INPUT_BYTES`,
+`PSCAT_MCP_MAX_IMAGE_BYTES`, `PSCAT_MCP_MAX_PIXELS`,
+`PSCAT_MCP_MAX_LATEX_BYTES`, `PSCAT_MCP_MAX_STEPS` and `PSCAT_MCP_MAX_MEMORY`.
+A variable takes the same values as its flag, and a flag overrides its
+variable. A value outside the flag's range (or not a whole number) stops the
+server at startup, naming the variable; an empty value counts as unset.
+**The plugin chooses the output root at launch** (#910). Hosts start the
+plugin's server in different places: Claude Code in the project, Codex inside
+the installed plugin, the Claude desktop app sometimes in `/`. So unless its
+arguments name `--out-root`, the launcher passes the first usable one of:
+Claude Code's **Render output folder** plugin option (`output_dir`), `out-root =
+DIR` in `~/.config/pscat/plugin.conf` (any host; the way to set it under
+Codex), the project Claude Code names, the working directory, and `renders/`
+in pscat's per-user data directory. A directory inside the installed plugin, or
+`/`, is never used, so nothing is written into the plugin. The server's
+instructions name the root; when the user's workspace is elsewhere the agent
+saves there and copies the file. The plugin README's "Where saved renders go"
+has the details.
+
+**`--out-root` and `--allow-read` have no `PSCAT_MCP_*` variable, on
+purpose**: these variables set only numeric limits, and none adds a read root
+or moves the output root, so a settings file cannot widen file access through
+them (the same rule as for writes from PostScript, #740). Because they can
+raise the caps (or turn the step and memory limits off), set them only in
+settings you trust.
+
 | Option | Default | What it bounds |
 |---|---|---|
 | `--timeout SECS` | 60 | Wall-clock time per tool call, 1 to 86400 (the 60 is only the default; see "Raising the time limit" below). The interpreter stops a program a margin before it (a quarter of it, at most 5 s: 55 s by default; `limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
 | `--max-steps N` | 25000000000 | Interpreter steps per program (objects executed, plus loop iterations). Past it the interpreter stops and the call fails with `limit_exceeded`, `limit: "steps"`. `0` = off. |
 | `--max-memory MIB` | 1024 | Heap the program may grow by, in MiB (`limit_exceeded`, `limit: "memory"`). `0` = off. |
 | `--max-input-bytes N` | 1048576 | `source` / `text` size (`input_too_large`). |
-| `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`). 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
+| `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`); for `render_postscript` also in the child, for a page the program's `setpagedevice /PageSize` asks for. 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
 | `--max-latex-bytes N` | 4096 | `chalkboard_math`'s `latex` size (`input_too_large`, with `limit`); about 40 rows. |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
-| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
+| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. The plugin's launcher always chooses one (see below). |
+| `--allow-read DIR` | none (repeatable) | Another directory programs may read from, besides the working directory (not `/`) and the pscat data directories. A directory that doesn't exist stops the server at startup. |
 
 `chalkboard_math` checks its caps before anything runs: `latex` at most
 `--max-latex-bytes` (default 4096: about 40 rows, four times a long
@@ -221,7 +281,10 @@ for a long time (an enormous fill, a read of a device file) is outside them;
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
-Program output is capped at 4 MiB per stream (`output_too_large`). A failed
+Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `pstack`
+and `stack` truncate their own output well below that (1024 elements per array,
+4096 bytes per string, 16 KiB per operand, 32 KiB for a whole stack, ending in
+`... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
 PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
@@ -252,16 +315,38 @@ The 60 s is a default, not a fixed limit. For a render that takes minutes
   60 s by default.
 - **One long call**, once all three of the following allow it:
 
-1. **The server's `--timeout SECS`** (1 to 86400), the time limit above.
-   Register the server with it, for example
-   `claude mcp add pscat -- pscat-mcp --timeout 1800 --max-steps 0`.
+1. **The server's `--timeout SECS`** (1 to 86400), the time limit above, or
+   its environment variable `PSCAT_MCP_TIMEOUT`.
+   - *With the plugin installed (Claude Code), no hand registration:* put the
+     variables in your Claude Code settings (`~/.claude/settings.json` for
+     every project, or `.claude/settings.local.json` for one) and restart Claude
+     Code, because the server reads them when it starts:
+     ```json
+     { "env": { "PSCAT_MCP_TIMEOUT": "1800", "PSCAT_MCP_MAX_STEPS": "0" } }
+     ```
+     Claude Code copies the `env` block into its own environment, and a stdio
+     MCP server inherits it (exporting the variables in the shell that starts
+     `claude` does the same). The one exception is if
+     `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1` is set: Claude Code then starts stdio
+     servers with only a safe baseline environment plus the server's own
+     configured `env`, so the variables never arrive.
+   - *Registering the server by hand* takes the flags, for example
+     `claude mcp add pscat -- pscat-mcp --timeout 1800 --max-steps 0`, and a
+     flag overrides a variable.
+   - *Codex:* the plugin route does not work. Codex starts a stdio server with
+     only a short list of variables (`HOME`, `PATH`, `LANG`, `TERM`, `TMPDIR`
+     and the like) plus the `env`/`env_vars` named in that server's own
+     `config.toml` entry, and user config cannot add `env` to a plugin's
+     server (as of October 2026, from the Codex docs and its `rmcp-client`
+     source). Use a hand-registered `[mcp_servers.pscat]` with `args`, below.
    The interpreter's own stop moves with it (a quarter of it, at most 5 s,
    before `--timeout`).
 2. **The other interpreter limits.** `--max-steps` defaults to 25 billion,
    which at about 60 million steps a second is roughly seven minutes: a long
    `--timeout` alone ends in `limit_exceeded` with `limit: "steps"` long
-   before the time is up. Raise it, or `--max-steps 0` for none. A big canvas
-   may also want `--max-memory` (MiB, default 1024) and `--max-pixels`.
+   before the time is up. Raise it (`PSCAT_MCP_MAX_STEPS`), or `--max-steps 0`
+   for none. A big canvas may also want `--max-memory` (MiB, default 1024) and
+   `--max-pixels` (`PSCAT_MCP_MAX_MEMORY`, `PSCAT_MCP_MAX_PIXELS`).
 3. **The MCP client's own tool-call timeout**, which cuts a call off whatever
    the server allows:
    - *Claude Code*: `MCP_TOOL_TIMEOUT`, in milliseconds, defaults to about 28
@@ -285,7 +370,10 @@ The 60 s is a default, not a fixed limit. For a render that takes minutes
    - *Any other client*: look for its tool-call or request timeout.
 
 The plugins' bundled server is registered without options, so it keeps the
-60 s default per call (and the hour per job). To raise it, register the server by hand as above and, so the
+60 s default per call (and the hour per job) unless the `PSCAT_MCP_*`
+variables above reach it: under Claude Code, a settings `env` block does that
+with the plugin installed as it is. To use flags instead, or under Codex,
+register the server by hand as above and, so the
 tools are not listed twice, toggle the plugin's server off in `/mcp` (Claude
 Code), or in Codex's `config.toml` set `enabled = false` under
 `[plugins."pscat@pscat".mcp_servers.pscat]` (documented by Codex for plugin
@@ -323,6 +411,7 @@ For a render longer than one call may take (#741). A job is
 |---|---|---|
 | `--job-timeout SECS` | 3600 | Wall-clock time per job, 1 to 86400, in place of `--timeout` (the interpreter stops it a margin before, as for a call). `--max-steps`, `--max-memory` and `--max-pixels` apply as to a call: raise `--max-steps` (or `0`) for a long render. |
 | `--max-jobs N` | 2 | Jobs running at once, 1 to 16; more wait, `queued`, and start in the order they were asked for. |
+| `--max-bands N` | 4 | Most threads one render may ask for with `bands` (on `render_postscript` and `start_render`), 1 to 64; 1 turns banded renders off. A larger request is refused, not lowered. At most `--max-jobs` jobs plus 4 calls run at once, so the worst case is (`--max-jobs` + 4) x `--max-bands` render threads. |
 | `--job-ttl SECS` | 3600 | How long a finished job (its result) is kept, 1 to 86400. At most 16 jobs are kept in all: a new job drops the oldest finished one, and is refused with `busy` when none has finished. |
 
 Results are held in the server's memory, and no job outlives the server:
@@ -359,6 +448,42 @@ the [2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07
 [Claude Code's MCP docs](https://code.claude.com/docs/en/mcp), and a search
 of the Codex source at `rust-v0.164.0`.
 
+### Banded renders
+
+`render_postscript` and `start_render` take `bands` (#843): the PNG is
+rendered as `pscat --bands N` does (see the getting-started guide), on N
+threads. The page is cut into about 2 bands per thread (none under 8 device
+rows), and each band runs the whole program with `/BandIndex`, `/BandCount`
+and `/BandBBox` defined in `userdict`. Only a program that reads `/BandBBox`
+and skips work outside its band gets faster; any other pays for the whole
+program once per band, about 2 x `bands` times the work. The image is byte
+for byte the one `bands: 1` gives, unless the program reads the clock.
+
+- **Limits.** The server's `--max-time` (derived from `--timeout` or
+  `--job-timeout`) and `--max-steps` apply to **each band**; `--max-memory`
+  to all bands together, though not to each running band's own canvas, so
+  a banded render can hold up to `bands` canvases (each up to `--max-pixels`
+  x 4 bytes) beyond the budget. The first band to hit a limit stops the queue, so a
+  runaway program still stops after about one limit's worth of time. The
+  server's wall-clock kill (`--timeout` for a call, `--job-timeout` for a
+  job) covers the **whole** render: with about 2 bands per thread queued,
+  bands that each take most of the per-band time limit can add up past it,
+  and the kill returns `timeout` with no partial page. Size such a render to
+  finish well inside the call's or job's limit.
+- **What it gives up.** PNG only: `bands` above 1 with `format` `svg` or
+  `pdf` is refused (`invalid_argument`), as is a value over `--max-bands` or
+  over the page's device rows. A banded job's `pages_done` stays 0 until it
+  ends: `pscat --bands` refuses `--progress`, so the server leaves it off.
+  The `Lint:` block is there as for a plain render (#847): the server passes
+  `--lint`, which checks band 0 (page count, gsave, stack) and the stitched
+  page (blank page), and the block opens with a line saying so when there
+  is a finding. Errors come back as for a plain render, from the first band
+  that failed.
+- **No `band_rows`.** `pscat --band-rows R` is not exposed. The default split
+  measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
+  CPU (18x at one row per band), and a large band count multiplies the
+  per-band step and time budgets. An agent has no measurement to tune it by.
+
 ### Protocol
 
 The legacy `initialize` handshake, for the revisions the server has been
@@ -373,8 +498,8 @@ signal to fall back to `initialize`. CI drives the server with the
 official MCP Inspector CLI (`.github/workflows/mcp.yml`,
 `scripts/mcp_inspector_check.sh`).
 
-**Safety.** The tools run arbitrary PostScript as you, which can read any
-file you can read, and return what it printed. Writes are confined as
+**Safety.** The tools run arbitrary PostScript as you and return what it
+printed. Reads are confined to the read roots and writes to `out_path`, as
 above. Read [`SECURITY.md`](../../SECURITY.md) before you hand the server
 to an agent you do not trust.
 

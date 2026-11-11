@@ -2,8 +2,17 @@
 //! complete `_site/` — pages, wasm, playground sources, renders.
 //! Skips gracefully when the wasm target isn't installed (gs-test
 //! style); the Pages workflow runs the same script in CI.
+//!
+//! Safe beside other cargo runs and other copies of this test (#767): the
+//! site is built into its own scratch directory, not the shared `_site/`
+//! (a second run deleted it mid-build), and the script renders with this
+//! test's own binary instead of nesting a `cargo build --release`. The
+//! wasm build is the one nested cargo call left; it only waits on cargo's
+//! lock. Nothing here has a timeout or reads the clock.
 
 use std::process::Command;
+
+mod common;
 
 #[test]
 fn build_site_assembles_everything() {
@@ -18,7 +27,10 @@ fn build_site_assembles_everything() {
     }
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = common::scratch_dir("site");
     let build = Command::new(root.join("scripts/build_site.sh"))
+        .env("PSCAT_SITE_OUT", &out)
+        .env("PSCAT_BIN", env!("CARGO_BIN_EXE_pscat"))
         .output()
         .expect("run build_site.sh");
     assert!(
@@ -27,7 +39,6 @@ fn build_site_assembles_everything() {
         String::from_utf8_lossy(&build.stderr)
     );
 
-    let out = root.join("_site");
     for page in [
         "index.html",
         "playground.html",
@@ -36,6 +47,8 @@ fn build_site_assembles_everything() {
         "extending.html",
         "javascript.html",
         "agents.html",
+        "when-to-use.html",
+        "hybrid.html",
         "guides.html",
         "contribute.html",
         "learn.html",
@@ -68,6 +81,25 @@ fn build_site_assembles_everything() {
         assert!(
             out.join("assets/renders").join(name).exists(),
             "gallery shows {name} but it wasn't rendered"
+        );
+    }
+    // The `pscat chalk` boards on the front page (#849) must be drawn.
+    let index = std::fs::read_to_string(out.join("index.html")).expect("read");
+    assert!(
+        index.contains("<pre><code>pscat chalk "),
+        "no chalk commands"
+    );
+    assert!(
+        !index.contains("<!--@chalk-showcase-->"),
+        "chalk marker left"
+    );
+    let boards = index.split("assets/chalk/").skip(1).count();
+    assert!(boards >= 3, "front page shows only {boards} chalk boards");
+    for piece in index.split("assets/chalk/").skip(1) {
+        let name = piece.split('"').next().expect("img src");
+        assert!(
+            out.join("assets/chalk").join(name).exists(),
+            "front page shows chalk board {name} but it wasn't rendered"
         );
     }
     // One generated page per gallery piece (#251), linked from the gallery.
@@ -103,4 +135,6 @@ fn build_site_assembles_everything() {
         "site link check failed:\n{}",
         String::from_utf8_lossy(&check.stdout)
     );
+    // Only a passing run cleans up; a failing one leaves the site to look at.
+    let _ = std::fs::remove_dir_all(&out);
 }

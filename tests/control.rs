@@ -194,6 +194,7 @@ fn an_errordict_handler_re_raises_under_its_own_name() {
         "ioerror",
         "invalidrestore",
         "undefinedresource",
+        "configurationerror",
     ] {
         assert_eq!(
             eval(&format!(

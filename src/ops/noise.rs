@@ -26,9 +26,16 @@
 //! Fisher-Yates shuffle of 0..255 (`i` from 255 down to 1, swap `P[i]`
 //! with `P[j]`) driven by its own LCG, `s = (s * 1103515245 + 12345) & 2^31-1`
 //! starting from `s = seed & 2^31-1`, with `j = (s >> 16) mod (i + 1)`
-//! after each step. It never reads or advances `rand`'s state, and
-//! `--sweep-seed` does not reach it. A fresh interpreter behaves as if
-//! `0 noiseseed` had run.
+//! after each step. It never reads or advances `rand`'s state. A fresh
+//! interpreter behaves as if `0 noiseseed` had run.
+//!
+//! **Sweeps (issue #753).** `--sweep-seed N` also builds the table from
+//! `N`, as `N noiseseed` would, before the program runs, so a seed sweep
+//! varies noise art too. A program that calls `noiseseed` keeps its own
+//! table, as one that calls `srand` does not (the override replaces that
+//! seed): noise seeds are chosen by the art, rand seeds by the sweep.
+//! Sampling the table counts as the override firing, so the "had no
+//! effect" warning stays quiet for a noise-only piece.
 //!
 //! **Lattice.** `xi = floor(x)` as an integer (a value out of integer
 //! range is a `rangecheck`, as `floor cvi` gives), `xf = x - xi`, and
@@ -108,7 +115,17 @@ pub(crate) fn perm_from_seed(seed: i64) -> [u8; 256] {
 fn noiseseed(it: &mut Interp) -> Result<(), PsError> {
     let seed = it.pop_int()?;
     it.noise_perm = perm_from_seed(seed);
+    // The program's own seed wins over a sweep's (issue #753).
+    it.noise_from_override = false;
     Ok(())
+}
+
+/// Called by every operator that samples `noise_perm`: sampling the table
+/// a seed override built is the override taking effect (issue #753).
+fn sampled(it: &mut Interp) {
+    if it.noise_from_override {
+        it.seed_override_fired = true;
+    }
 }
 
 // --- PostScript-typed arithmetic, for artkit's exact noise2 ----------
@@ -425,6 +442,7 @@ fn pop_xyz(it: &mut Interp) -> Result<(f64, f64, f64), PsError> {
 }
 
 fn gnoise2(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
     let (x, y) = pop_xy(it)?;
     let n = g2(&it.noise_perm, x, y)?;
     it.push(Object::real(n));
@@ -432,6 +450,7 @@ fn gnoise2(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn gnoise3(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
     let (x, y, z) = pop_xyz(it)?;
     let n = g3(&it.noise_perm, x, y, z)?;
     it.push(Object::real(n));
@@ -439,6 +458,7 @@ fn gnoise3(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn gnoise2d(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
     let (x, y) = pop_xy(it)?;
     let (n, dx, dy) = gnoise2_derivs(&it.noise_perm, x, y)?;
     it.push(Object::real(n));
@@ -448,6 +468,7 @@ fn gnoise2d(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn vnoise2(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
     let (x, y) = pop_xy(it)?;
     let n = v2(&it.noise_perm, x, y)?;
     it.push(Object::real(n));
@@ -455,6 +476,7 @@ fn vnoise2(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn vnoise3(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
     let (x, y, z) = pop_xyz(it)?;
     let n = v3(&it.noise_perm, x, y, z)?;
     it.push(Object::real(n));
@@ -475,6 +497,7 @@ fn octaves<const N: usize>(
     shape: Shape,
     sample: fn(&[u8; 256], [f64; N]) -> Result<f64, PsError>,
 ) -> Result<(), PsError> {
+    sampled(it);
     let lac = it.pop_f64()?;
     let gain = it.pop_f64()?;
     let oct = it.pop_int()?;

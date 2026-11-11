@@ -113,6 +113,9 @@ pub struct Request<'a> {
 #[derive(Debug)]
 pub struct Done {
     pub installed: Vec<Installed>,
+    /// Retired packs ([`super::RETIRED_PACKS`]) asked for or listed in
+    /// the index and skipped, each with the line saying why.
+    pub retired: Vec<String>,
 }
 
 pub fn valid_tag(tag: &str) -> bool {
@@ -429,6 +432,27 @@ pub fn install(req: &Request, fetch: &dyn Fetch) -> Result<Done, String> {
         }
         return Ok(Done {
             installed: commit(Staging(vec![s]))?,
+            retired: Vec::new(),
+        });
+    }
+
+    // A retired pack's faces are compiled in now: asking for one is not
+    // an error (scripts that install it keep working), and nothing is
+    // fetched when every pack asked for is retired.
+    let mut retired: Vec<String> = req
+        .packs
+        .iter()
+        .filter_map(|n| super::retired_note(n))
+        .collect();
+    let asked: Vec<&String> = req
+        .packs
+        .iter()
+        .filter(|n| super::retired_note(n).is_none())
+        .collect();
+    if !req.packs.is_empty() && asked.is_empty() {
+        return Ok(Done {
+            installed: Vec::new(),
+            retired,
         });
     }
 
@@ -494,13 +518,25 @@ pub fn install(req: &Request, fetch: &dyn Fetch) -> Result<Done, String> {
     {
         return Err(format!("asked for {t}, but the index says {}", index.tag));
     }
-    let wanted: Vec<&IndexPack> = if req.packs.is_empty() {
-        index.packs.iter().collect()
+    let wanted: Vec<&IndexPack> = if asked.is_empty() {
+        // An index cut before a pack retired (the pinned fonts-2026.10
+        // lists texgyre) still installs everything else.
+        retired.extend(
+            index
+                .packs
+                .iter()
+                .filter_map(|p| super::retired_note(&p.name)),
+        );
+        index
+            .packs
+            .iter()
+            .filter(|p| super::retired_note(&p.name).is_none())
+            .collect()
     } else {
-        req.packs
+        asked
             .iter()
             .map(|n| {
-                index.packs.iter().find(|p| &p.name == n).ok_or_else(|| {
+                index.packs.iter().find(|p| &p.name == *n).ok_or_else(|| {
                     let names: Vec<&str> = index.packs.iter().map(|p| p.name.as_str()).collect();
                     format!(
                         "{} has no pack {n} (it has {})",
@@ -533,6 +569,7 @@ pub fn install(req: &Request, fetch: &dyn Fetch) -> Result<Done, String> {
     }
     Ok(Done {
         installed: commit(staging)?,
+        retired,
     })
 }
 
@@ -696,6 +733,57 @@ pub(crate) mod tests {
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// A retired pack (issue #757): asked for alone, nothing is fetched
+    /// and the run succeeds with a note; listed in an older index, a
+    /// plain install skips it and installs the rest.
+    #[test]
+    fn retired_packs_are_skipped_with_a_note() {
+        let dest = scratch("retired");
+        let mut r = req(Source::Pinned, &dest, None);
+        r.packs = vec!["texgyre".into()];
+        let done = install(&r, &Fake(HashMap::new())).unwrap();
+        assert!(done.installed.is_empty());
+        assert_eq!(done.retired.len(), 1);
+        assert!(
+            done.retired[0].contains("texgyre font pack is retired"),
+            "{:?}",
+            done.retired
+        );
+        assert!(leftovers(&dest).is_empty());
+
+        let tag = "fonts-2026.10";
+        let a = pack("alpha", tag, &[("A/a-Regular.ttf", b"alpha font")]);
+        let t = pack("texgyre", tag, &[("T/t-regular.otf", b"gyre font")]);
+        let idx = index(tag, &[("alpha", &a), ("texgyre", &t)]);
+        let mut m = HashMap::new();
+        m.insert(
+            format!("{REPO}/releases/download/{tag}/font-index.json"),
+            idx,
+        );
+        m.insert(
+            format!("{REPO}/releases/download/{tag}/alpha-{tag}.tar.zst"),
+            a,
+        );
+        m.insert(
+            format!("{REPO}/releases/download/{tag}/texgyre-{tag}.tar.zst"),
+            t,
+        );
+        let fake = Fake(m);
+        let done = install(&req(Source::Tag(tag.into()), &dest, None), &fake).unwrap();
+        let names: Vec<&str> = done.installed.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["alpha"]);
+        assert_eq!(done.retired.len(), 1);
+        assert_eq!(leftovers(&dest), ["alpha"]);
+
+        // Asked for with a live pack: the live one installs, the retired one is noted.
+        let mut r = req(Source::Tag(tag.into()), &dest, None);
+        r.packs = vec!["texgyre".into(), "alpha".into()];
+        let done = install(&r, &fake).unwrap();
+        assert_eq!(done.installed.len(), 1);
+        assert_eq!(done.retired.len(), 1);
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]

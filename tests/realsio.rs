@@ -3,6 +3,7 @@
 //! (issue #740); reading follows the normal read policy.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -181,7 +182,7 @@ fn errors() {
         format!("3 {p} writereals"),
         "[1] 5 writereals".to_string(),
         format!("{p} (3) readreals"),
-        "5 5 readreals".to_string(),
+        "5 5 5 readreals".to_string(),
     ] {
         assert_eq!(it.run_str(&src), Err(PsError::Typecheck), "{src}");
     }
@@ -300,14 +301,14 @@ fn cli_round_trip() {
     let pscat = env!("CARGO_BIN_EXE_pscat");
     let refused = Command::new(pscat)
         .args(["--headless", "-e", &prog])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(!refused.status.success());
     let ok = Command::new(pscat)
         .arg("--allow-write")
         .arg(&root)
         .args(["--headless", "-e", &prog])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(ok.status.success(), "{ok:?}");
     assert_eq!(String::from_utf8_lossy(&ok.stdout), "0.1\n2.0\n-0.0\n");

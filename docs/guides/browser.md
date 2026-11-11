@@ -31,16 +31,59 @@ filesystem, and no clock (`usertime`/`realtime` read 0 — the one
 documented deviation). Works under node too — `tests/wasm.rs` drives
 the real module through the same JS library.
 
+### SVG and PDF
+
+The wasm build writes the same vector output as `pscat --svg` and
+`pscat --pdf` (#1003, since 0.7.0-rc.4). Ask for it when
+the program begins: recording is off by default, so a pixels-only page
+pays nothing.
+
+```js
+ps.run(source, 612, 792, 1, { svg: true, pdf: true });
+const pages = ps.svgCount();        // one SVG document per page
+const first = ps.svg(0);            // a string; null if not recorded
+const doc = ps.pdf();               // Uint8Array, every page in one PDF
+```
+
+For the same program, page size and dpi, the bytes are the ones the
+command-line tool writes: `tests/wasm.rs` compares them at 72 and 144 dpi
+and checks that a second run, in the same instance or a fresh one, gives
+the same bytes. A `%%Title:` or `%%For:` comment becomes the PDF's title
+or author, as for a file on the command line. As there, SVG and PDF are
+sized in device pixels, so keep the default 72 dpi (scale 1) for a
+print-size vector page. The C ABI is `ps_begin_vector(src, len, w, h,
+scale, flags)` (flag 1 SVG, 2 PDF), `ps_svg_count()`, `ps_svg(page)`,
+`ps_pdf()` and `ps_vector_ptr()`/`ps_vector_len()`; `src/wasm.rs` has the
+contract. It began as the vector adapter that
+[print-shop](https://github.com/PSCatLabs/print-shop) carried as a patch.
+
 ## The npm package
 
-From 0.6.2 the same module is published to npm as **`pscat`**
-(not on npm yet; until then, build it from a checkout as below). It
+From 0.6.2 the same module is published to npm as **`pscat`**. SVG and
+PDF output arrive on npm with 0.7.0; until then, install the 0.7.0-rc.4
+package from its
+[GitHub pre-release](https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.4)
+(`npm install https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.4/pscat-0.7.0-rc.4.tgz`)
+or build it from a checkout as below. It
 works in browsers (with or without a bundler) and in Node 22 or later,
 and ships TypeScript types.
 
 ```sh
 npm install pscat                  # from 0.6.2
 ```
+
+From 0.7.0-rc.4 on, every GitHub release also carries the same package as a file,
+`pscat-X.Y.Z.tgz`, listed in its `SHA256SUMS`. Release candidates are
+never published to npm, so this is how to try one: install it from its
+URL, for example
+
+```sh
+npm install https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z-rc.N/pscat-X.Y.Z-rc.N.tgz
+```
+
+and change the dependency to `pscat@X.Y.Z` once that is released
+([RELEASING.md](../dev/RELEASING.md#testing-a-candidates-npm-package)
+has the checksum and attestation checks).
 
 ```js
 import { createRenderer, PostScriptError } from 'pscat';
@@ -64,29 +107,39 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   the page; `begin` + `step(budget)` or the `frames()` generator drive it
   step by step. Page sizes are in points (default US Letter, 612x792) at
   `dpi` (default 72, one pixel per point). `source` is a string or bytes.
+- **SVG and PDF** (since 0.7.0-rc.4): add `svg: true` and/or
+  `pdf: true` to the page options, then `r.svg(page)` (from 0) or
+  `r.svgPages()` give the SVG pages as strings and `r.pdf()` the whole
+  document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see
+  [SVG and PDF](#svg-and-pdf) above).
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
-  offending `command`, the `line`, the full `report`, and what the
-  program printed first. The renderer stays usable afterwards.
+  offending `command`, the `line`, the full `report`, what the
+  program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - The `lib/` libraries are embedded: `(lib/artkit.ps) run` works with no
   fetches.
-- **Fonts:** only the Liberation faces behind the base fonts (Helvetica,
-  Times, Courier) are built in. Load any other face with
+- **Fonts:** all of the PostScript standard 35 are built in (Liberation,
+  TeX Gyre and URW faces, as on native builds). Load any other face with
   `r.addFont(name, bytes)`, named by its font pack file stem, for example
   `r.addFont('EBGaramond-Regular', bytes)`; `/Garamond findfont` then finds
   it, exactly as with the installed pack. The font files are in the
   `fonts-*` pack archives on the
   [releases page](https://github.com/PSCatLabs/pscat/releases), each with its
-  licence.
+  licence. A pack face you have not added stands in (Helvetica, or Courier
+  for the typewriter faces) and `render()`'s result, and `r.warnings`, carry
+  the same one-line note the command-line tool prints on stderr, naming the
+  face, the stand-in and the `addFont` call that supplies it (#750).
 - Each `createRenderer()` is its own interpreter (its own wasm instance and
   fonts). `createRenderer({ wasm })` loads the module from a URL, a
   `Response`, bytes or a compiled `WebAssembly.Module` instead. The default
   is `new URL('./pscat.wasm', import.meta.url)`; CI tests the package in
   Node, and a bundler and headless-browser test is #660 (with Vite, add
   `pscat` to `optimizeDeps.exclude`).
-- Licence: `(MIT OR Apache-2.0) AND OFL-1.1`, the crate's: the OFL covers
-  the embedded font data (Liberation, and the Courier Prime outlines in
-  `lib/typewriter_outlines.ps`). The package carries the licence texts,
+- Licence: `(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`, the crate's:
+  the OFL covers the embedded font data (Liberation, the URW Symbol and
+  ZapfDingbats faces, and the Courier Prime outlines in
+  `lib/typewriter_outlines.ps`), and LPPL-1.3c (the GUST Font License)
+  the embedded TeX Gyre faces. The package carries the licence texts,
   `THIRD_PARTY_NOTICES.md`, and the Rust dependencies' notices
   (`THIRD_PARTY_LICENSES.html`).
 

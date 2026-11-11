@@ -100,6 +100,9 @@ fn cmd_install(args: &[String]) -> Result<(), String> {
         repo: env!("CARGO_PKG_REPOSITORY"),
     };
     let done = install::install(&req, &Curl)?;
+    for note in &done.retired {
+        eprintln!("{note}");
+    }
     for p in &done.installed {
         println!(
             "installed {} {} ({}) in {}",

@@ -14,16 +14,20 @@
   agents differ: instruction files for agents that read docs, and an
   MCP server for agents that call tools.</p>
 
+  <p>Not sure pscat is the right tool for a picture? <a href="when-to-use.html">When to use pscat</a>
+  compares it with image models and an LLM's own SVG or matplotlib, and
+  explains how it lets a model with no image output of its own draw.</p>
+
   <h2>Build once</h2>
 <pre><code>git clone https://github.com/PSCatLabs/pscat
 cd pscat
 cargo build --release      # → target/release/pscat and target/release/pscat-mcp</code></pre>
 
   <h2>Surface 1 — the docs path (skill)</h2>
-  <p><code>skills/pscat/SKILL.md</code> is a one-page tool
-  reference: command recipes for rendering (PNG/SVG/PDF, page size,
+  <p><code>skills/pscat/SKILL.md</code> is a short tool
+  reference (advanced sections sit in its <code>references/</code> folder, read only when needed): command recipes for rendering (PNG/SVG/PDF, page size,
   dpi, halftone), debugging (<code>--headless</code>,
-  <code>--pstack-on-error</code>, exit codes), handwritten-note
+  <code>--pstack-on-error</code>, exit codes), handwriting-style note
   generation, typewritten pages, and the pitfalls, written for an installed
   <code>pscat</code>. Claude Code picks it up automatically
   as a skill; it's plain markdown, so any docs-reading agent can use
@@ -33,8 +37,8 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
   <p><code>skills/psviz/SKILL.md</code> is the paper-viz companion to <code>pscat</code>/<code>psart</code>: it teaches agents to reach for <code>lib/graph.ps</code> (plotfn/plotparam/plotpolar/plotsurface) and <code>lib/dataviz.ps</code> (bar/line/area/scatter/pie) for documents, with calling conventions and copy-paste templates — so a “make me a chart for my paper” request goes straight to a clean figure instead of the generative-art loop. The interactive counterpart lives at <a href="charts.html">Charts</a>.</p>
 
   <h2>Surface 2 — the MCP server</h2>
-  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes six
-  tools. It shells out to the pscat CLI (found next to it) rather
+  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes ten
+  tools (the table below shows the main ones). It shells out to the pscat CLI (found next to it) rather
   than linking the interpreter — PostScript's <code>=</code> and
   <code>print</code> write to stdout, which is the JSON-RPC channel,
   so in-process execution could corrupt the protocol. The tools stay
@@ -50,8 +54,8 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
     <tr><td><code>handwrite</code></td>
         <td>text; optional size, width, paper (plain/ruled), ink
         "r,g,b", jitter, seed, dpi, out_path</td>
-        <td>a handwritten-note PNG — the /HandScript dynamic font,
-        word-wrapped and auto-sized; same seed, same page</td></tr>
+        <td>a handwriting-style note PNG — the /HandScript dynamic font,
+        word-wrapped and auto-sized; same seed, same page. A set of hand-drawn styles for notes, cards and art, not for imitating a specific person's handwriting</td></tr>
     <tr><td><code>review_sheet</code></td>
         <td>entries (each: source, optional label, width, height, dpi list);
         optional width, height, dpi, labels, sizes, out_path</td>
@@ -64,7 +68,7 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
         jitter, align, color, board (or false), ghosting, seed,
         width/height, dpi, format, config, out_path</td>
         <td>a chalkboard PNG of the formula, the <code>pscat chalk</code>
-        board; same seed, same image. A command outside the TeX subset
+        board (<a href="index.html#chalkboard">examples</a>); same seed, same image. A command outside the TeX subset
         comes back as a one-line error naming it</td></tr>
     <tr><td><code>describe_art_capabilities</code></td>
         <td>none</td>
@@ -92,7 +96,7 @@ codex mcp add pscat -- pscat-mcp</code></pre>
   <p>The server needs only the two binaries side by side: the
   <code>handwrite</code> tool runs <code>pscat handwrite</code>, with no
   checkout or shell script.</p>
-  <p>Each call is bounded: a time limit (<code>--timeout</code>, default
+  <p>Each call is bounded: a <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/agents.md#raising-the-time-limit">time limit</a> (<code>--timeout</code>, default
   60 s), interpreter step and memory limits, capped input, output and inline
   image sizes, and
   <code>out_path</code> confined to the server's output root (its working
@@ -107,7 +111,7 @@ pscat --page 500x500 --dpi 300 ...       # canvas in points; dpi scales pixels
 generate | pscat --png out.png -         # '-' reads the program from stdin
 pscat --headless --pstack-on-error f.ps  # debug: error name + stack post-mortem
 pscat -e '3 4 add ='                     # one-liner eval
-pscat handwrite "note text"               # string → handwritten PNG</code></pre>
+pscat handwrite "note text"               # string → handwriting-style PNG</code></pre>
   <p>Exit code 0 means a clean run; nonzero means a PostScript error,
   named on stderr. <code>--png</code> writes the partial canvas even
   after an error — usually exactly what you want when debugging.</p>

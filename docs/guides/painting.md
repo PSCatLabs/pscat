@@ -662,8 +662,7 @@ than PLRM operators, living on the graphics state so `gsave`/`grestore`
 snapshot them like any other paint attribute, and exported by `--svg`
 (`fill-opacity`/`stroke-opacity`, `mix-blend-mode`) and `--pdf` (an
 `ExtGState`'s `ca`/`CA`/`BM`) as well as `--png`. They reach fills,
-strokes, text and `shfill`; they do **not** reach `image`/`imagemask`,
-which blit their own samples. The wash itself is still pure vector
+strokes, text, `shfill` and (since #766) `image`/`imagemask`/`colorimage`. The wash itself is still pure vector
 geometry: `/Layers` translucent passes, each with its own boundary
 wobbled off the given path by `/Wet` (a harmonic ladder at integer
 multiples of path progress, so a closed boundary joins seamlessly),
