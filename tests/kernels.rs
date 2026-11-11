@@ -2707,3 +2707,363 @@ fn a_huge_row_index_into_a_fixed_column_is_a_rangecheck() {
         "rangecheck",
     );
 }
+
+// --- kernelarray (#1102) -----------------------------------------------------
+
+/// A value as its type and exact bits (`eq` would call -0.0 and 0.0 the
+/// same, and 1 and 1.0).
+fn exact(o: &pscat::object::Object) -> String {
+    use pscat::object::Value;
+    match &o.value {
+        Value::Integer(i) => format!("i{i}"),
+        Value::Real(r) => format!("r{:016x}", r.to_bits()),
+        Value::Array(a) => {
+            let items: Vec<String> = a.snapshot().iter().map(exact).collect();
+            format!(
+                "{}[{}]",
+                if o.executable { "x" } else { "" },
+                items.join(" ")
+            )
+        }
+        _ => o.repr(),
+    }
+}
+
+/// The operand stack (exactly) or the error, and `.kernelstats`.
+type CellRun = (Result<Vec<String>, String>, [i64; 3]);
+
+/// Run `src` on a fresh interpreter in `mode`.
+fn cells_run(mode: &str, src: &str) -> CellRun {
+    let mut it = Interp::new();
+    let r = it.run_str(&format!("/{mode} .kernelmode\n{src}"));
+    let stack: Vec<String> = it.operand_stack().iter().map(exact).collect();
+    it.run_str("clear .kernelstats").expect("stats");
+    let st = it.operand_stack();
+    let n = |k: usize| st[k].repr().parse::<i64>().expect("count");
+    let stats = [n(0), n(1), n(2)];
+    let out = match r {
+        Ok(()) => Ok(stack),
+        Err(e) => Err(format!("{} ({e}) {stack:?}", e.name())),
+    };
+    (out, stats)
+}
+
+/// `src` under `/auto` and under `/interpret` leave the same operands, or
+/// raise the same error with the same operands; the `/auto` stats.
+#[track_caller]
+fn same_cells(src: &str) -> CellRun {
+    let auto = cells_run("auto", src);
+    let interp = cells_run("interpret", src);
+    assert_eq!(auto.0, interp.0, "{src}");
+    auto
+}
+
+/// `src` compiles wholly (every `kernelarray` in it) and matches.
+#[track_caller]
+fn same_cells_compiled(src: &str) -> Vec<String> {
+    let (out, stats) = same_cells(src);
+    let out = out.unwrap_or_else(|e| panic!("{e}\n{src}"));
+    assert_eq!(stats[1..], [0, 0], "not wholly compiled: {stats:?}\n{src}");
+    assert!(stats[0] > 0, "{src}");
+    // And under `/strict`.
+    assert_eq!(cells_run("strict", src).0.as_ref(), Ok(&out), "{src}");
+    out
+}
+
+/// A `kernelarray` of `{ /j exch def /i exch def <body> }` over 11x5.
+fn cells_of(n: usize, body: &str) -> String {
+    format!("11 5 {{ /j exch def /i exch def {body} }} {n} kernelarray")
+}
+
+#[test]
+fn kernelarray_keeps_each_values_type_and_bits() {
+    for (n, body) in [
+        (1, "i j mul"),
+        (1, "i 0.5 mul j add"),
+        // -0.0 stays a negative zero.
+        (1, "i 0 eq { 0.0 neg } { i neg 0.25 mul } ifelse"),
+        // An integer on some cells, a real on others (a Dyn value).
+        (1, "i 2 mod 0 eq { i j add } { i 0.25 add } ifelse"),
+        (
+            2,
+            "i 3 mod 0 eq { j } { j 0.5 mul } ifelse i 2 mod 0 eq { 7 } { 7.0 } ifelse",
+        ),
+        // Integers past 2^53, exact.
+        (1, "i 16#45D9F3B mul 16#45D9F3B mul 9 mul j add"),
+        (1, "i 1 add 16#2545F491 mul dup 13 bitshift xor 255 and"),
+        // cvi, floor, round: integer and real results.
+        (3, "i 0.7 mul j add cvi i 0.7 mul floor i -0.5 mul round"),
+        (1, "i j add 3 idiv"),
+    ] {
+        same_cells_compiled(&cells_of(n, body));
+    }
+}
+
+#[test]
+fn kernelarray_reads_tables_of_each_kind() {
+    let defs = "/TI [3 1 -4 1 5 9] def /TR [0.5 2.5 -1.25] def /TM [1 2.5 3 -4 0.0 7] def";
+    for body in [
+        "TI i 6 mod get",
+        "TR j 3 mod get",
+        "TM i j add 6 mod get",
+        "TM i 6 mod get TI j get add",
+    ] {
+        same_cells_compiled(&format!("{defs} {}", cells_of(1, body)));
+    }
+}
+
+#[test]
+fn kernelarrays_is_kernelarray_split() {
+    let body = "i j mul i 0.5 mul i 2 mod 0 eq { j } { 0.5 } ifelse";
+    let one = same_cells_compiled(&cells_of(3, body));
+    let split = same_cells_compiled(&format!(
+        "11 5 {{ /j exch def /i exch def {body} }} 3 kernelarrays"
+    ));
+    assert_eq!(split.len(), 3);
+    let all = one[0].trim_start_matches('[').trim_end_matches(']');
+    let vals: Vec<&str> = all.split(' ').collect();
+    for (c, a) in split.iter().enumerate() {
+        let want: Vec<&str> = vals.iter().skip(c).step_by(3).copied().collect();
+        assert_eq!(*a, format!("[{}]", want.join(" ")), "array {c}");
+    }
+}
+
+#[test]
+fn a_dyn_output_survives_register_pressure() {
+    // The tag register of a value computed first must stay live to the
+    // end, past many temporaries that could take its register.
+    let mut body = String::from("/d i 2 mod 0 eq { i j add } { 0.5 } ifelse def /s 0 def\n");
+    for k in 0..40 {
+        body += &format!("/t{k} i {k} add j mul 0.1 mul sin def /s s t{k} add def\n");
+    }
+    body += "d s";
+    same_cells_compiled(&cells_of(2, &body));
+}
+
+#[test]
+fn a_later_pass_reads_an_earlier_grid_and_the_result_is_writable() {
+    let src = "/A 6 4 { /j exch def /i exch def i j 10 mul add } 1 kernelarray def
+       /B 6 4 { /j exch def /i exch def
+         A j 6 mul i add get A j 6 mul 5 i sub add get add 2 div } 1 kernelarray def
+       A 0 99 put A 0 get A 1 get B 0 get B";
+    let out = same_cells_compiled(src);
+    assert_eq!(out[0], "i99");
+    assert_eq!(out[1], "i1");
+}
+
+#[test]
+fn kernelarray_errors_match_the_interpreter() {
+    for (src, err) in [
+        (
+            cells_of(1, "i 3 eq j 2 eq and { 1 0 div } { i } ifelse"),
+            "undefinedresult",
+        ),
+        (cells_of(1, "i j"), "rangecheck"),
+        (cells_of(2, "i"), "rangecheck"),
+        (cells_of(1, "true"), "typecheck"),
+        (cells_of(1, "exit"), "invalidexit"),
+        // Overflow past 64 bits: a real, through the interpreter.
+        (cells_of(1, "i 16#40000000 mul 16#40000000 mul 4 mul"), ""),
+        ("0 11 5 { pop pop 1 } 0 kernelarray".into(), "rangecheck"),
+        ("11 5 { pop pop 1 } 65 kernelarray".into(), "rangecheck"),
+        ("-1 5 { pop pop 1 } 1 kernelarray".into(), "rangecheck"),
+        ("5000 5000 { pop pop 1 } 1 kernelarray".into(), "limitcheck"),
+        ("11 5 [ 1 ] 1 kernelarray".into(), "typecheck"),
+    ] {
+        let (out, _) = same_cells(&src);
+        match out {
+            Err(e) => assert!(e.starts_with(err) && !err.is_empty(), "{src}: {e}"),
+            Ok(_) => assert!(err.is_empty(), "{src}: expected {err}"),
+        }
+    }
+}
+
+#[test]
+fn kernelarray_edge_values_keep_their_bits() {
+    for (n, body) in [
+        (1, "i 1e308 mul 10 mul"),
+        (1, "i 1e308 mul 10 mul dup sub"),
+        (1, "i 1e308 mul 10 mul neg 1 add"),
+        (1, "i 2 mod 0 eq { 0.0 neg } { 0 } ifelse"),
+        (1, "i 2 mod 0 eq { 0.0 neg } { 0 } ifelse 0.0 min"),
+        (1, "0.0 neg i add"),
+        (1, "i neg 0.0 mul"),
+        (2, "-0.4 round -0.6 truncate"),
+        (2, "0.0 neg floor 0.0 neg sqrt"),
+        (1, "1e-300 i mul 1e-300 mul neg"),
+    ] {
+        same_cells_compiled(&cells_of(n, body));
+    }
+}
+
+/// An integer 0 made by a Dyn `mul` or `neg` (an integer on some lanes)
+/// is 0, not the f64's -0.0: read later as a real it must not carry a
+/// sign (found by the #1102 fuzz; `0 -1 exp` showed it in kernelimage's
+/// pixels too, inf against -inf).
+#[test]
+fn a_dyn_integer_zero_has_no_sign() {
+    for (n, body) in [
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse -2 mul -1 exp"),
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse neg 2.5 mul"),
+        (1, "i 2 mod 0 eq { 0 } { 0.5 } ifelse -3 mul 5 atan neg"),
+        // A real lane's -0.0, and its NaN, keep their bits.
+        (1, "i 2 mod 0 eq { 0 } { 1e308 10 mul dup sub } ifelse neg"),
+        (
+            1,
+            "i 2 mod 0 eq { 0 } { 1e308 10 mul dup sub neg } ifelse -2 mul",
+        ),
+        (2, "i 2 mod 0 eq { 0.0 } { 2 } ifelse neg dup -1 mul"),
+        (1, "i 2 mod 0 eq { 0.0 } { 0 } ifelse -2 mul"),
+    ] {
+        same_cells_compiled(&cells_of(n, body));
+    }
+    same(&format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def
+           i 2 mod 0 eq {{ 0 }} {{ 0.5 }} ifelse j 1 add neg mul -1 exp 1e-300 mul show3 }} def"
+    ));
+}
+
+#[test]
+fn tables_of_integers_past_2_pow_53_are_not_compiled() {
+    // An integer past 2^53 is not exact in a table's f64s: such a table
+    // is refused, and the interpreter gives the exact integers.
+    for defs in [
+        "/T [9007199254740993 1 -9223372036854775807] def",
+        "/T [9007199254740993 0.5 7] def",
+    ] {
+        let src = format!("{defs} 3 1 {{ pop T exch get }} 1 kernelarray");
+        let (out, stats) = same_cells(&src);
+        assert_eq!(stats, WHOLE, "{src}");
+        assert!(
+            out.as_ref()
+                .is_ok_and(|v| v[0].contains("i9007199254740993")),
+            "{out:?}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_grid_is_an_empty_array() {
+    let (out, _) = same_cells("0 5 { pop pop 1 } 2 kernelarray 3 0 { pop pop 1 } 2 kernelarrays");
+    assert_eq!(out, Ok(vec!["[]".into(), "[]".into(), "[]".into()]));
+}
+
+#[test]
+fn kernelarray_cells_that_take_an_uncompiled_branch() {
+    // Pure: only those cells run in the interpreter.
+    for body in [
+        "i 2 lt { count pop 0.5 } { i 0.25 mul } ifelse",
+        "i j add 7 gt { /k 5 dict length def k } { j } ifelse",
+        "i 3 eq j 1 eq and { count pop 1 0 div } if i",
+    ] {
+        let (_, stats) = same_cells(&cells_of(1, body));
+        assert_eq!(stats, PER_PIXEL, "{body}");
+    }
+    // Impure, or a cell that leaves the driver with `exit`: the whole
+    // grid there.
+    for src in [
+        format!(
+            "/Gx 0 def {}",
+            cells_of(1, "i 3 eq { /Gx Gx 1 add store } if Gx i add")
+        ),
+        cells_of(1, "i 5 eq { count pop exit } if i"),
+    ] {
+        let (_, stats) = same_cells(&src);
+        assert_eq!(stats, WHOLE, "{src}");
+    }
+}
+
+#[test]
+fn kernelarray_seeded_cells_and_the_state_after() {
+    // The values, then `rand` after the call: the state the last cell
+    // to seed left.
+    for (n, body) in [
+        (2, "i j 7 mul add srand rand 1000 mod rand"),
+        (1, "i 2 mod 0 eq { i j add srand } if rand"),
+        (1, "i 4 lt { i j add srand } if 5"),
+    ] {
+        let src = format!("{} rand", cells_of(n, body));
+        let (out, _) = same_cells(&src);
+        assert!(out.is_ok(), "{src}: {out:?}");
+    }
+}
+
+#[test]
+fn kernelarray_does_not_depend_on_threads_or_bands() {
+    // The grid as a picture, so `--bands` (each band its own run) shows
+    // every value: a band must compute the rows outside its own.
+    let src = "%!PS
+/A 64 48 { /j exch def /i exch def
+  i 3 mod 0 eq { i j mul } { i 0.37 mul j add sin } ifelse
+  i 16#45D9F3B mul j add 16#7fffffff and } 2 kernelarray def
+/S 64 48 mul string def
+0 1 64 48 mul 1 sub { /k exch def
+  S k A k 2 mul get 1000 mul cvi A k 2 mul 1 add get xor 255 and put } for
+gsave 200 130 scale 64 48 8 [64 0 0 -48 0 48] { S } image grestore showpage
+";
+    let one = cli_png(src, &[], Some("1"));
+    assert_eq!(cli_png(src, &[], Some("7")), one, "7 threads");
+    for n in ["2", "3"] {
+        assert_eq!(cli_png(src, &["--bands", n], None), one, "--bands {n}");
+    }
+    let interp = format!("/interpret .kernelmode\n{src}");
+    assert_eq!(cli_png(&interp, &[], None), one, "interpreted");
+}
+
+/// `e` pushed to an edge a painted component never showed: infinity,
+/// NaN, a negative zero, an integer past 2^53, or its sign and type
+/// changed (#1102).
+fn edge(r: &mut Rng, e: String) -> String {
+    match r.below(12) {
+        0 => format!("{e} 1e308 mul 10 mul"),
+        1 => format!("{e} 1e308 mul 10 mul dup sub"),
+        2 => format!("{e} 0.0 neg mul"),
+        3 => format!("{e} neg"),
+        4 => format!("{e} abs"),
+        5 => format!("{e} 0.0 neg {}", ["min", "max"][r.below(2) as usize]),
+        6 => format!("{e} cvi 16#45D9F3B mul 16#45D9F3B mul"),
+        7 => format!("{e} 1e-300 mul 1e-300 mul"),
+        8 => format!("{e} 0 gt {{ 7 }} {{ {e} }} ifelse"),
+        9 => format!("{e} cvr"),
+        _ => e,
+    }
+}
+
+#[test]
+fn kernelarray_differential_fuzz() {
+    // `KERNEL_FUZZ_CASES` runs more, and `KERNEL_FUZZ_SEED` others, for a
+    // deeper look by hand.
+    let cases = std::env::var("KERNEL_FUZZ_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) { 100 } else { 300 });
+    let seed = std::env::var("KERNEL_FUZZ_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x5eed_1102);
+    let mut r = Rng(seed);
+    let mut compiled = 0;
+    for case in 0..cases {
+        let mut body = String::from("/j exch def /i exch def\n");
+        let mut vars: Vec<String> = Vec::new();
+        for k in 0..r.below(3) {
+            let e = expr(&mut r, 3, &vars);
+            let e = edge(&mut r, e);
+            body += &format!("/v{k} {e} def\n");
+            vars.push(format!("v{k}"));
+        }
+        let n = 1 + r.below(3) as usize;
+        for _ in 0..n {
+            let e = expr(&mut r, 3, &vars);
+            body += &format!("{}\n", edge(&mut r, e));
+        }
+        let src = format!(
+            "5 noiseseed /Tbl [ 3 1.5 -2 7 0.25 9 4 4.5 ] def
+             9 4 {{ {body} }} {n} kernelarray"
+        );
+        let (_, stats) = same_cells(&src);
+        compiled += usize::from(stats[0] + stats[1] > 0);
+        let _ = case;
+    }
+    assert!(compiled * 2 >= cases, "only {compiled} of {cases} compiled");
+}

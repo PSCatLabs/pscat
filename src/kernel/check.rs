@@ -148,8 +148,23 @@ pub(crate) fn kinds(k: &Kernel, kinds: &[bool]) -> Result<(), String> {
     for s in &k.subs {
         walk(&s.body, &mut g)?;
     }
-    for o in &k.outputs {
-        f(o, "an output")?;
+    if k.typed {
+        // Values then tags (`Kernel::typed`): an integer under the tag 1.0
+        // is I64; any other value, and every tag, is an f64.
+        let n = k.outputs.len() / 2;
+        let (vals, tags) = k.outputs.split_at(n);
+        for (o, t) in vals.iter().zip(tags) {
+            if *t == Op::Imm(1.0) {
+                i(o, "an integer output")?;
+            } else {
+                f(o, "an output")?;
+            }
+            f(t, "an output's tag")?;
+        }
+    } else {
+        for o in &k.outputs {
+            f(o, "an output")?;
+        }
     }
     if let Some(o) = &k.rand {
         i(o, "the random state")?;

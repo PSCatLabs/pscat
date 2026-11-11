@@ -74,6 +74,8 @@ pscat extensions, probed with `where` (#646 discussion):
 | operator | stack | what |
 |---|---|---|
 | `kernelimage` | `w h matrix proc ncomp -` | the above |
+| `kernelarray` | `w h proc n - array` | the values as numbers (#1102, below) |
+| `kernelarrays` | `w h proc n - a1 .. an` | the same, one array per value |
 | `kernelcompile` | `proc ninputs noutputs - bool string` | compile only: does the proc compile, and if not, why |
 | `.kernelmode` | `name -` | `/auto` (default), `/interpret` (always the fallback), `/strict` (an uncompilable proc is an error, not a fallback) |
 | `.kernelshare` | `name -` | `/auto` (default: share procedure bodies as subroutines only when inlining makes the kernel too large), `/never`, `/large`, `/all` (see "Large kernels") |
@@ -81,6 +83,41 @@ pscat extensions, probed with `where` (#646 discussion):
 The fallback a portable program writes for other interpreters is a
 `colorimage` loop that calls the same proc in a fresh dict (the
 `kernelimage` shim in `lib/kernel.ps`).
+
+### `kernelarray`: typed outputs (#1102)
+
+`kernelarray` keeps the compiler, the executor, its batches and threads,
+the soft branches and the retired lanes. Only the two ends differ:
+
+- **Outputs.** `compile` takes an `Out { n, typed }`. For `kernelimage` each
+  output is converted to an f64 (`as_f`) and quantised, as before: its code
+  is unchanged. A typed kernel (`Kernel::typed`) keeps each value as it is,
+  and `outputs` holds the `n` values and then a tag for each, `NT::tag`'s:
+  1.0 for an integer (an I64 register, or an immediate), 0.0 for a real, or
+  the F64 tag register of a Dyn value. The tags sit in `outputs`, so the
+  allocator, dead-code removal and the kind check treat them as the roots
+  the outputs are. `Machine::cell` reads a lane's values as `Num`s; a Dyn
+  integer is exact in its f64 (at most 2^53).
+- **The interpreter path.** `CELL_DRIVER` is one driver for the whole grid
+  and for the cells a compiled run retired: `.kanext` pushes `mark i j` for
+  the next cell (raster order, or the next retired one), and `.kaput` pops
+  the values back to the mark (a `typecheck` for a non-number, a
+  `rangecheck` for a wrong count) into the result. Both runs therefore show
+  a cell the same operand stack and execution-stack depth. A cell that
+  leaves with `exit` ends the driver's loop unfinished: `.kadone` raises
+  `invalidexit` for the whole grid, or, among retired cells, puts the
+  caller's operands back and runs the whole grid instead. Whether retired
+  cells may run alone is decided as for `kernelimage` (`srand`, and soft
+  branches with side effects in reach).
+- Every row is computed, under `--bands` too: the array is the result. There
+  is no GPU path, since f32 is not exact.
+
+`run` is generic over what a pixel writes (bytes or `Num`s), so
+`kernelimage` monomorphises back to its own loop.
+
+A form that fills an existing array (`kernelfill`) is left out: a
+procedure that read the array it fills would see it change under the
+interpreter, but compiled it reads a snapshot.
 
 ### Per-pixel semantics: a fresh local dict
 

@@ -418,9 +418,27 @@ static ENTRIES: &[Entry] = &[
         BUILTIN
     ),
     entry!(
+        "kernelarray",
+        CapabilityKind::Operator,
+        "pscat extension (#1102). Runs a per-cell procedure i j -> v1..vn over a w by h grid, compiled and on every core like kernelimage, and returns the values as numbers: one array of w*h*n, cell (i, j)'s at (j*w + i)*n. Each value is the integer or real the interpreter would leave. For grids a program bakes before it draws (height maps, lookup tables). docs/guides/kernels.md.",
+        &[],
+        SYSTEMDICT,
+        "w h proc n kernelarray array",
+        BUILTIN
+    ),
+    entry!(
+        "kernelarrays",
+        CapabilityKind::Operator,
+        "pscat extension (#1102). kernelarray with the values as n arrays of w*h, one per value the procedure leaves, in order.",
+        &[],
+        SYSTEMDICT,
+        "w h proc n kernelarrays a1 .. an",
+        BUILTIN
+    ),
+    entry!(
         "kernelcompile",
         CapabilityKind::Operator,
-        "pscat extension (#742). Would kernelimage compile proc? Returns true and the kernel's size, or false and the reason (naming the procedures involved).",
+        "pscat extension (#742). Would kernelimage (or kernelarray) compile proc? Returns true and the kernel's size, or false and the reason (naming the procedures involved).",
         &[],
         SYSTEMDICT,
         "proc ncomp kernelcompile bool string",

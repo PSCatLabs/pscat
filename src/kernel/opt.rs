@@ -90,6 +90,7 @@ fn pure(i: &Ins) -> bool {
                 | BinOp::Min
                 | BinOp::Max
                 | BinOp::TagAnd
+                | BinOp::NegIntZero
                 | BinOp::BAnd
                 | BinOp::BOr
                 | BinOp::BXor

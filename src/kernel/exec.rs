@@ -140,6 +140,7 @@ impl Why {
             BinOp::Div => Why::DivZero,
             BinOp::Atan => Why::Atan00,
             BinOp::Pow => Why::ExpUndefined,
+            BinOp::IntZeroCheck => Why::IntPast53,
             _ => Why::CompareNan,
         }
     }
@@ -270,32 +271,9 @@ impl<'k> Machine<'k> {
         }
     }
 
-    /// Run the kernel for pixels `i0..i0+n` of row `j`, writing `ncomp`
-    /// bytes per pixel into `out`. Returns the lanes retired to the
-    /// interpreter (bit `l` is pixel `i0 + l`); their bytes are left 0.
-    pub(crate) fn run_batch(
-        &mut self,
-        j: i64,
-        i0: i64,
-        n: usize,
-        out: &mut [u8],
-    ) -> Result<u64, Stop> {
-        debug_assert!(n <= LANES);
-        let mut at = [(0, 0); LANES];
-        for (l, p) in at.iter_mut().enumerate().take(n) {
-            *p = (i0 + l as i64, j);
-        }
-        let killed = self.run_lanes(&at[..n])?;
-        let nc = self.k.outputs.len();
-        for l in (0..n).filter(|l| killed >> l & 1 == 0) {
-            self.pixel(l, &mut out[l * nc..(l + 1) * nc]);
-        }
-        Ok(killed)
-    }
-
     /// Run the kernel for the pixels `(i, j)` in `at`, one a lane. Returns
-    /// the lanes retired to the interpreter; [`Machine::pixel`] reads the
-    /// others' bytes.
+    /// the lanes retired to the interpreter; [`Machine::pixel`] (or
+    /// [`Machine::cell`]) reads the others' outputs.
     pub(crate) fn run_lanes(&mut self, at: &[(i64, i64)]) -> Result<u64, Stop> {
         let n = at.len();
         debug_assert!(n > 0 && n <= LANES);
@@ -326,6 +304,29 @@ impl<'k> Machine<'k> {
                 Op::Imm(x) => x,
             };
             *b = super::quantize(v);
+        }
+    }
+
+    /// Lane `l`'s typed values after [`Machine::run_lanes`], for a
+    /// [`Kernel::typed`] kernel (`kernelarray`, #1102): each the integer or
+    /// the real the interpreter would leave.
+    pub(crate) fn cell(&self, l: usize, out: &mut [super::Num]) {
+        let n = self.k.outputs.len() / 2;
+        let (vals, tags) = self.k.outputs.split_at(n);
+        for ((c, &v), &t) in out.iter_mut().zip(vals).zip(tags) {
+            let f = |o: Op| match o {
+                Op::R(r) => self.regs[r as usize][l],
+                Op::Imm(x) => x,
+            };
+            *c = match t {
+                // An integer: an I64 register's bits, or an immediate.
+                Op::Imm(1.0) => super::Num::Int(self.geti(v, l)),
+                Op::Imm(_) => super::Num::Real(f(v)),
+                // A Dyn value: an f64, an integer (exact: a Dyn integer
+                // is at most 2^53) where the tag says so.
+                Op::R(r) if self.regs[r as usize][l] == 1.0 => super::Num::Int(f(v) as i64),
+                Op::R(_) => super::Num::Real(f(v)),
+            };
         }
     }
 
@@ -887,6 +888,10 @@ fn bin(op: BinOp, x: OpRef<'_>, y: OpRef<'_>, t: &mut Lane) -> u64 {
         BinOp::Add => flanes(x, y, t, |p, q| ok(p + q)),
         BinOp::Sub => flanes(x, y, t, |p, q| ok(p - q)),
         BinOp::Mul | BinOp::TagAnd => flanes(x, y, t, |p, q| ok(p * q)),
+        BinOp::NegIntZero => flanes(x, y, t, |p, q| ok(int_zero(-p, q))),
+        BinOp::IntZeroCheck => flanes(x, y, t, |p, q| {
+            (int_zero(p, q), (q != 0.0) & !within_int(p))
+        }),
         BinOp::Min => flanes(x, y, t, |p, q| ok(p.min(q))),
         BinOp::Max => flanes(x, y, t, |p, q| ok(p.max(q))),
         BinOp::BAnd => flanes(x, y, t, |p, q| ok(c(p != 0.0 && q != 0.0))),
@@ -1358,6 +1363,13 @@ fn within_int(x: f64) -> bool {
     x.abs() < INT_LIMIT
 }
 
+/// `x` with tag `tag`: on an integer lane +0.0 for a -0.0 (an integer has
+/// no sign of zero), else `x` as it is (`BinOp::IntZeroCheck`).
+#[inline(always)]
+fn int_zero(x: f64, tag: f64) -> f64 {
+    if tag != 0.0 { x + 0.0 } else { x }
+}
+
 /// One lane of a binary op, `None` where PostScript would raise an error.
 /// Also the compiler's constant folder, so folding and running agree.
 pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
@@ -1369,6 +1381,13 @@ pub(crate) fn lane_bin(op: BinOp, a: f64, b: f64) -> Option<f64> {
         BinOp::Min => a.min(b),
         BinOp::Max => a.max(b),
         BinOp::TagAnd => a * b,
+        BinOp::NegIntZero => int_zero(-a, b),
+        BinOp::IntZeroCheck => {
+            if b != 0.0 && !within_int(a) {
+                return None;
+            }
+            int_zero(a, b)
+        }
         BinOp::Div => {
             if b == 0.0 {
                 return None;

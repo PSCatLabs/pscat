@@ -612,6 +612,7 @@ mod tests {
             owner: Vec::new(),
             sites: vec![String::new()],
             fresh: Vec::new(),
+            typed: false,
         }
     }
 

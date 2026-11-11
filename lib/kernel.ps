@@ -1,5 +1,5 @@
 %!PS-Adobe-3.0
-%%Title: kernel.ps -- a kernelimage shim for other PostScript interpreters
+%%Title: kernel.ps -- a kernelimage and kernelarray shim for other PostScript interpreters
 %%EndComments
 % Issue #1066. `kernelimage` and `kernelcompile` are pscat extensions
 % (docs/guides/kernels.md). This file defines them for an interpreter that
@@ -10,6 +10,8 @@
 %
 %   width height matrix proc ncomp kernelimage -
 %   proc ncomp kernelcompile false string
+%   w h proc n kernelarray array          (#1102)
+%   w h proc n kernelarrays a1 .. an      (#1102)
 %
 % The shim runs `proc` (i j -> c1 .. cn) once per sample through
 % `colorimage`, the way pscat's interpreter path does:
@@ -24,6 +26,13 @@
 %   [0, 1], then floor(c * 255 + 0.5);
 % - a procedure that leaves the wrong number of components is a
 %   rangecheck, and a component that is not a number a typecheck.
+%
+% kernelarray and kernelarrays run `proc` once per cell, in raster order,
+% each as if by `8 dict begin mark i j proc end`, and keep the n values it
+% leaves above the mark as they are (integers and reals): one array of
+% w*h*n, cell (i, j)'s values at (j*w + i)*n, or n arrays of w*h. A wrong
+% count is a rangecheck, a value that is not a number a typecheck, and a
+% cell that leaves with `exit` an invalidexit.
 %
 % The kernel--* helpers below are defined in every interpreter (they are
 % what the %%SelfTest blocks exercise under pscat). Only kernelimage and
@@ -144,6 +153,110 @@
   } ifelse
 } bind def
 
+%%SelfTest: kernel-shim-cells
+% { 3 2 { pop pop 1 } 0 false kernel--cells } /rangecheck (n 0) mustfail
+% { 3 2 { pop pop 1 } 65 false kernel--cells } /rangecheck (n 65) mustfail
+% { -1 2 { pop pop 1 } 1 false kernel--cells } /rangecheck (a negative width) mustfail
+% { 3 2 [ 1 ] 1 false kernel--cells } /typecheck (a literal array) mustfail
+% { 5000 5000 { pop pop 1 } 1 false kernel--cells } /limitcheck (too many values) mustfail
+% { 3 2 { pop pop 1 2 } 1 false kernel--cells } /rangecheck (too many values in a cell) mustfail
+% { 3 2 { pop pop (x) } 1 false kernel--cells } /typecheck (a string) mustfail
+% { 3 2 { pop pop exit } 1 false kernel--cells } /invalidexit (exit) mustfail
+% 0 2 { pop pop 1 } 1 false kernel--cells length 0 eq (an empty grid) mustbe
+% /kc-f { /j exch def /i exch def i j 10 mul add i 0.5 mul } def
+% 3 2 /kc-f load 2 false kernel--cells
+%   dup length 12 eq exch dup 2 get 1 eq exch dup 3 get 0.5 eq exch
+%   dup 10 get 12 eq exch 11 get type /realtype eq and and and and (interleaved, typed) mustbe
+% 3 2 /kc-f load 2 true kernel--cells
+%   length 6 eq exch dup 4 get 11 eq exch length 6 eq and and (split) mustbe
+% /kernelarray where { pop
+%   3 2 /kc-f load 2 kernelarray 3 2 /kc-f load 2 false kernel--cells
+%   true 0 1 11 { 3 index 1 index get 3 index 3 -1 roll get
+%     2 copy type exch type eq 3 1 roll eq and and } for 3 1 roll pop pop
+% } { true } ifelse (the same values and types as the native operator) mustbe
+%%EndSelfTest
+% mark v1 .. vn D kernel--put -: one cell's values into D's Buf, checked
+% from the top as pscat does (a non-number a typecheck, more than n a
+% rangecheck; then fewer than n a rangecheck).
+% @internal
+/kernel--put {
+  counttomark 1 sub                          % mark v1 .. vn D c
+  0 1 2 index 1 sub {                        % ... D c k
+    dup 3 add index type dup /integertype ne exch /realtype ne and
+      { 2 index /Name get errordict /typecheck get exec } if
+    1 add 2 index /N get gt { 1 index /Name get errordict /rangecheck get exec } if
+  } for
+  1 index /N get ne { dup /Name get errordict /rangecheck get exec } if
+  dup /Busy false put
+  dup /Buf get exch                          % mark v1 .. vn Buf D
+  dup /J get 1 index /W get mul 1 index /I get add 1 index /N get mul
+  exch /N get add 1 sub                      % mark v1 .. vn Buf last
+  { counttomark 2 eq { exit } if
+    3 -1 roll 2 index 2 index 3 -1 roll put
+    1 sub } loop
+  pop pop pop
+} bind def
+
+% D kernel--result r..: Buf, or (Split) its N arrays.
+% @internal
+/kernel--result {
+  dup /Split get not { /Buf get } {
+    dup /W get 1 index /H get mul            % D cells
+    0 1 3 index /N get 1 sub {               % D cells c
+      1 index array                          % D cells c A
+      0 1 4 index 1 sub {                    % D cells c A x
+        1 index exch                         % D cells c A A x
+        5 index /Buf get 1 index 7 index /N get mul 5 index add get put
+      } for
+      4 1 roll pop                           % A D cells
+    } for
+    pop pop
+  } ifelse
+} bind def
+
+% w h proc n split kernel--cells r..: kernelarray (split false) or
+% kernelarrays (true), the interpreted way.
+% @internal
+/kernel--cells {
+  dup { /kernelarrays } { /kernelarray } ifelse
+  6 1 roll                                   % name w h proc n split
+  1 index type /integertype ne { 5 index errordict /typecheck get exec } if
+  1 index dup 1 lt exch 64 gt or { 5 index errordict /rangecheck get exec } if
+  2 index dup type dup /arraytype ne exch /packedarraytype ne and exch xcheck not or
+    { 5 index errordict /typecheck get exec } if
+  3 index type /integertype ne 4 index type /integertype ne or
+    { 5 index errordict /typecheck get exec } if
+  3 index 0 lt 4 index 0 lt or { 5 index errordict /rangecheck get exec } if
+  4 index 4 index mul 2 index mul 16777216 gt { 5 index errordict /limitcheck get exec } if
+  12 dict                                    % name w h proc n split D
+  dup /Split 4 -1 roll put dup /N 4 -1 roll put dup /P 4 -1 roll put
+  dup /H 4 -1 roll put dup /W 4 -1 roll put dup /Name 4 -1 roll put
+  dup /Buf 1 index /W get 2 index /H get mul 2 index /N get mul array put
+  dup /Busy false put dup /I 0 put dup /J 0 put
+  dup /W get 1 index /H get mul 0 eq { //kernel--result exec } {
+    % A cell: `mark i j`, in a fresh dict.
+    { KS /I 2 index put mark exch KS /J get KS /Busy true put
+      KS /P get 8 dict begin exec end KS //kernel--put exec }
+    2 dict dup /KS 4 index put //kernel--subst exec
+    % A row; a cell that left it with `exit` is an invalidexit.
+    { KS exch /J exch put 0 1 KS /W get 1 sub CB for
+      KS /Busy get KS /Name get exch { errordict /invalidexit get exec } { pop } ifelse }
+    2 dict dup /KS 5 index put dup /CB 5 -1 roll put //kernel--subst exec
+    % The grid, with nothing of the shim's on the operand stack.
+    { 0 1 KS /H get 1 sub RB for KS //kernel--result exec }
+    2 dict dup /KS 5 index put dup /RB 5 -1 roll put //kernel--subst exec
+    exch pop exec
+  } ifelse
+} bind def
+
+% w h proc n kernel--array array: kernelarray, the interpreted way.
+% @internal
+/kernel--array { false //kernel--cells exec } bind def
+
+% w h proc n kernel--arrays a1 .. an: kernelarrays, the interpreted way.
+% @internal
+/kernel--arrays { true //kernel--cells exec } bind def
+
 % proc ncomp kernel--compile false string: nothing compiles here.
 % @internal
 /kernel--compile {
@@ -152,3 +265,5 @@
 
 /kernelimage where { pop } { /kernelimage //kernel--image def } ifelse
 /kernelcompile where { pop } { /kernelcompile //kernel--compile def } ifelse
+/kernelarray where { pop } { /kernelarray //kernel--array def } ifelse
+/kernelarrays where { pop } { /kernelarrays //kernel--arrays def } ifelse
