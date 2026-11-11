@@ -2377,33 +2377,12 @@ fn a_soft_branch_under_bands_runs_the_whole_image() {
 }
 
 #[test]
-fn load_keeps_a_soft_branch_pure() {
-    // #1093 follow-up: `load` gives the binding of a name in reach, and
-    // every such binding is scanned, literal names' included.
+fn forms_that_cannot_be_told_from_the_text_interpret_the_whole_image() {
+    // #1093 follow-up review: each looks harmless as text, and each writes
+    // a global through a rebound `array`, a guard rebound with a string key
+    // or a name fetched from a procedure, an operator fetched with `get`,
+    // or `load` of a string.
     for (pre, body) in [
-        (
-            "/f { 0.5 mul } def",
-            "i 2 lt { count pop 0.4 /f load exec } { 0.3 } ifelse",
-        ),
-        (
-            "/f { 0.5 mul } def",
-            "/g /f def i 2 lt { count pop 0.4 g load exec } { 0.3 } ifelse",
-        ),
-    ] {
-        let src = soft_prog(pre, body);
-        let (out, _, stats) = soft_same(&src);
-        assert!(out.is_ok(), "{out:?}\n{src}");
-        assert_eq!(stats, PER_PIXEL, "{src}");
-    }
-    // `load` of a procedure that writes, reached by a literal name only;
-    // and the forms the review showed cannot be told from the text: a
-    // rebound `array`, a guard rebound through a string key or a name
-    // fetched from a procedure, an operator fetched with `get`.
-    for (pre, body) in [
-        (
-            "/G [0.5] def /f { G 0 0.9 put } def",
-            "i 0 eq { count pop /f load exec } if G 0 get",
-        ),
         (
             "/G [0.5] def",
             "i 0 eq { count pop /array { pop G } def } if 0.9 1 array astore pop G 0 get",
@@ -2419,6 +2398,14 @@ fn load_keeps_a_soft_branch_pure() {
         (
             "/G [0 0] def",
             "i 0 eq { count pop [0.7 0.7] G {2 copy} 1 get exec pop } if G 0 get",
+        ),
+        (
+            "/G [0.5] def",
+            "i 0 eq { count pop G 0 0.9 (put) load exec } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /F { G 0 0.9 put } def",
+            "i 0 eq { count pop (F) load exec } if G 0 get",
         ),
     ] {
         let src = soft_prog(pre, body);

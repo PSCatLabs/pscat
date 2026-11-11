@@ -15,8 +15,8 @@
 //! **The universe.** Start from the procedure and the operand stack under it
 //! (a pixel can reach that with `index`). Add every element of every array or
 //! procedure reached, every key and value of every dictionary reached, and,
-//! for every name reached, executable or literal, what the dictionary stack
-//! binds it to now. Every object a pixel can execute is in that set:
+//! for every executable name reached, what the dictionary stack binds it to
+//! now. Every object a pixel can execute is in that set:
 //!
 //! - its procedure text is;
 //! - a name resolves either to its binding now (in the set) or to a value the
@@ -35,14 +35,11 @@
 //! pixel's own dictionary), or the execution stack (`stop`, `stopped`,
 //! `execstack`), or turns data into code.
 //!
-//! Since every name the pixel can hold has its binding in the set, `load`
-//! is pure (#1093 follow-up): it gives such a binding, or one the pixel
-//! made itself. (`copy` and `astore` stay out even where the text looks
-//! like the stack form or a fresh array: a pixel can rebind `array`, or
-//! fetch the operator out of its procedure with `get` and run it on
-//! anything. A branch behind a constant guard is scanned too, since the
-//! guard can be rebound with a key made from a string, or fetched from a
-//! procedure.)
+//! Nothing is told from the text (#1093 follow-up, after review): `n copy`
+//! may be fetched with `get` and run on composites, `array` and a branch's
+//! guard may be rebound (a string key, or a name fetched from a
+//! procedure), and `load` takes strings and numbers as keys, so each could
+//! reach or write what no scan has seen.
 //!
 //! What a pure pixel can still do is reach under its own operands, or `exit`
 //! out of the procedure. The per-pixel driver shows a pixel the operands the
@@ -132,8 +129,6 @@ const PURE: &[&str] = &[
     "get",
     "getinterval",
     "aload",
-    // a binding of a name in the universe (all of them are scanned)
-    "load",
     // noise: reads of the table `noiseseed` set
     "gnoise2",
     "gnoise3",
@@ -197,7 +192,7 @@ struct Scan<'a> {
     /// whole storage: `getinterval` shares it).
     arrays: HashSet<usize>,
     dicts: HashSet<usize>,
-    /// Names (executable or literal) whose binding has been added.
+    /// Executable names whose binding has been added.
     names: HashSet<u32>,
     work: usize,
     /// Objects to look at, each with the innermost named procedure it was
@@ -231,9 +226,8 @@ impl Scan<'_> {
                 | Value::Mark
                 | Value::Null => {}
                 Value::Name(n) => {
-                    // Literal names too: `load` (or a `get` from a
-                    // dictionary in the universe) can fetch their binding.
-                    if self.names.insert(n.id())
+                    if o.executable
+                        && self.names.insert(n.id())
                         && let Some(b) = self.it.load_id(n.id())
                     {
                         self.todo.push((b, Some(n.text_rc())));

@@ -159,7 +159,7 @@ How it degrades:
   changes what another pixel reads. That rules out writing into anything the
   pixel did not make (`put`, `putinterval`, `astore`, `copy`, `store`,
   `begin`), `srand` and `rand`, files and graphics, and turning data into
-  code (`cvx`). Any of those anywhere in reach, even in code the pixels never
+  code (`cvx`, `load`). Any of those anywhere in reach, even in code the pixels never
   run, and a pixel that takes such a branch sends the whole image to the
   interpreter. The stderr note names what was found and where (the first
   four; `PSCAT_KERNEL_TIMING=1` lists all), and `kernelcompile` says which

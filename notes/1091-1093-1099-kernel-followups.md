@@ -55,14 +55,15 @@ The independent review found it unsound, with repros that differ from
 - it can fetch `copy` or `astore` out of a procedure with `get` and run it
   on anything (why the original scan refused `copy`).
 
-What stayed:
+A second version made `load` pure by scanning the binding of every name
+in reach. Re-review found that unsound too: `load` also takes a string or
+a number as its key. `(put) load` returns the `put` operator, and a
+substring made with `getinterval` can name anything.
 
-- **`load` is pure, done soundly.** The scan now adds the current binding
-  of *every* name in reach, literal ones included. Whatever a `load` (or a
-  `load` fetched with `get`) can return is then in the universe.
-- **`PSCAT_KERNEL_TIMING=1` lists every reason** instead of "and N more".
-
-The review's repros are tests (`load_keeps_a_soft_branch_pure`).
+What stayed is only the reason list: `PSCAT_KERNEL_TIMING=1` lists every
+reason instead of "and N more". The scan is otherwise as it was. All the
+reviewers' repros are a test
+(`forms_that_cannot_be_told_from_the_text_interpret_the_whole_image`).
 
 fractal_clouds fixed the uncompiled branches themselves (#142 `FsMixWt`,
 #143 the trunk `aload`). With those, no scene has a soft branch, so the
