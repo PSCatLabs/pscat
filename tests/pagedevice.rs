@@ -999,6 +999,14 @@ fn new_scaled_is_a_default_page_at_a_scale() {
     let mut fixed = Interp::with_page_scaled(612, 792, 2.0).expect("page");
     eval(&mut fixed, "<< /PageSize [200 100] >> setpagedevice");
     assert_eq!(size(&fixed.gfx().pixmap), (1224, 1584));
+
+    // pscat-mcp's current spelling (hidden gfx API) keeps working.
+    let mut legacy = Interp::with_page_scaled(612, 792, 2.0).expect("page");
+    legacy
+        .gfx_mut()
+        .set_page_size_source(PageSizeSource::Default);
+    eval(&mut legacy, "<< /PageSize [200 100] >> setpagedevice");
+    assert_eq!(size(&legacy.gfx().pixmap), (400, 200));
 }
 
 /// `new()` is `new_scaled(1.0)`, and an unusable scale is `None`: not a
