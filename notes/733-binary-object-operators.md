@@ -71,6 +71,11 @@ an array holds at most 65535 elements. A long numeric array should go through `w
 as one array either.
 
 **Not done (follow-ups).**
+- Executable strings (and executable files from a type-6 name) inside a sequence run when the
+  scanner reads the sequence as a program (`run`, `cvx exec`), but the array that `token` returns
+  holds them as ordinary elements, so `<seq> token pop exec` pushes the string where Ghostscript
+  runs it (Codex round 3). Matching it needs the returned array to carry gs's run-the-elements
+  mark; rare enough to leave.
 - Binary tokens 132 to 159 (a lone 32-bit integer, 16-bit and 8-bit integers, a real, a boolean,
   a string, a system name index). They still scan as names. Rare in files; the object sequence
   is what these operators produce.
