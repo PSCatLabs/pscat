@@ -96,6 +96,26 @@ Gallery kernel pieces, `kernel cpu run`:
 `scripts/bench_kernels.sh` showed no slowdown. The one-thread `kernel1`
 column went 0.197 → 0.122 s on mandel, and 0.049 → 0.039 s on spheres.
 
+### fractal_clouds' check (fc#117, on 46ad11b and its CI build 809f906)
+
+- **Bytes.** All 8 scenes at 160×100 match fresh `/interpret` renders.
+  mountains and golden_coast at 640×400 match `/interpret`. At 1280×800 and
+  at golden's 2560×1600 kernel, the new build matches build1, which matched
+  `/interpret`. A 16×1 tile gives the same bytes as 8×2. Nothing retires.
+- **Speed.** `cpu run`, with build1 and the new build interleaved, two
+  rounds each, at load 5–20:
+
+  | golden_coast | build1 | new |
+  |---|---:|---:|
+  | 1280×800 | 22.1 s | 14.1 s |
+  | 2560×1600 (the 2× yardstick) | 84.9 s | 54.3 s |
+
+  That is 1.56× at both sizes. Tiles alone: 14.9 s at 16×1 against 14.2 s
+  at 8×2.
+- **Verdict.** Satisfied. On average 8.3–12.3 of 16 lanes are active, so
+  about a third of the lane-work is masked. Reducing that is the next
+  executor lever, if any.
+
 ### What did not pay
 
 - **Sharing registers across subroutines** (candidate 2). The register file
