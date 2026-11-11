@@ -85,11 +85,6 @@ pub(crate) enum L {
     /// [`Code::gathers`]`[n]`, then the varying index's operand. Most of a
     /// large kernel's table reads (#1101).
     Gather1(Reg, u32, u32),
-    /// `Un` `sin` and `cos`, and `Bin` `atan`, vectorised (`vmath`):
-    /// `.kernelmath /fast` (#1100).
-    SinF(Reg, u32),
-    CosF(Reg, u32),
-    AtanF(Reg, u32, u32),
 }
 
 /// A [`L::Gather1`]: element `x * scale + base` of `table`, for an index
@@ -253,10 +248,15 @@ impl Lower<'_> {
             Ins::Bin(BinOp::Sub, d, a, b) => L::Sub(fr(d), self.op(a), self.op(b)),
             // An integer tag's `and` of two 0/1 tags is their product.
             Ins::Bin(BinOp::Mul | BinOp::TagAnd, d, a, b) => L::Mul(fr(d), self.op(a), self.op(b)),
-            Ins::Bin(BinOp::Atan, d, a, b) if self.fast => L::AtanF(fr(d), self.op(a), self.op(b)),
+            // `.kernelmath /fast` (#1100): run from the side table, where
+            // `Machine::ext` vectorises them. Not opcodes of their own: three
+            // more arms in the block loop's dispatch cost 6% of the kernel
+            // time on fractal_clouds' scenes, run or not.
+            Ins::Bin(BinOp::Atan, ..) | Ins::Un(UnOp::Sin | UnOp::Cos, ..) if self.fast => {
+                self.ext.push(i.clone());
+                L::Ext(self.ext.len() as u32 - 1)
+            }
             Ins::Bin(op, d, a, b) => L::Bin(op, fr(d), self.op(a), self.op(b)),
-            Ins::Un(UnOp::Sin, d, a) if self.fast => L::SinF(fr(d), self.op(a)),
-            Ins::Un(UnOp::Cos, d, a) if self.fast => L::CosF(fr(d), self.op(a)),
             Ins::Un(op, d, a) => L::Un(op, fr(d), self.op(a)),
             Ins::IBin(op, d, a, b) => L::IBin(op, fr(d), self.op(a), self.op(b)),
             Ins::IUn(op, d, a) => L::IUn(op, fr(d), self.op(a)),

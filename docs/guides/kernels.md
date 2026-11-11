@@ -264,7 +264,7 @@ instructions.
   one-at-a-time code over millions of inputs, and every picture tested
   matched. It stays opt-in until it has had more use.
 - **Speed.** On an Apple M4, per pixel, `sin` takes 5.9 ns instead of 9.5,
-  and `atan` 6.1 instead of 13.7. The Mandelbulb took about 15–25% fewer
+  and `atan` 6.1 instead of 13.7. The Mandelbulb took about 20% fewer
   cycles. A kernel with little trigonometry gains nothing, and x86 CPUs
   with AVX2 should gain more, since their vectors hold four numbers.
 - **Where it applies.** Only `kernelimage`. `kernelarray` always uses the

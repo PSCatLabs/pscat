@@ -537,19 +537,19 @@ impl<'k> Machine<'k> {
     }
 
     isa_dispatch! {
-        /// [`L::SinF`] and [`L::CosF`] (`.kernelmath /fast`).
-        fn vtrig / vtrig_base, vtrig_v2, vtrig_v3 (d: Reg, a: u32, cos: bool, mask: u64) -> () = vtrig_impl
+        /// `sin` and `cos` under `.kernelmath /fast`, from [`Machine::ext`].
+        fn vtrig / vtrig_base, vtrig_v2, vtrig_v3 (d: Reg, a: Op, cos: bool, mask: u64) -> () = vtrig_impl
     }
 
     isa_dispatch! {
-        /// [`L::AtanF`] (`.kernelmath /fast`).
-        fn vatan / vatan_base, vatan_v2, vatan_v3 (d: Reg, a: u32, b: u32, mask: u64) -> () = vatan_impl
+        /// `atan` under `.kernelmath /fast`, from [`Machine::ext`].
+        fn vatan / vatan_base, vatan_v2, vatan_v3 (d: Reg, a: Op, b: Op, mask: u64) -> () = vatan_impl
     }
 
     #[inline(always)]
-    fn vtrig_impl(&mut self, d: Reg, a: u32, cos: bool, mask: u64) {
+    fn vtrig_impl(&mut self, d: Reg, a: Op, cos: bool, mask: u64) {
         let mut buf = [0.0; LANES];
-        let x = *self.w(a).lane(&mut buf);
+        let x = *self.o(a).lane(&mut buf);
         let mut t = [0.0; LANES];
         let mut cold = super::vmath::sin_cos_deg(&x, &mut t, cos) & mask;
         // Out of the vector code's range: the exact code.
@@ -563,10 +563,10 @@ impl<'k> Machine<'k> {
     }
 
     #[inline(always)]
-    fn vatan_impl(&mut self, d: Reg, a: u32, b: u32, mask: u64) {
+    fn vatan_impl(&mut self, d: Reg, a: Op, b: Op, mask: u64) {
         let (mut ba, mut bb) = ([0.0; LANES], [0.0; LANES]);
-        let y = *self.w(a).lane(&mut ba);
-        let x = *self.w(b).lane(&mut bb);
+        let y = *self.o(a).lane(&mut ba);
+        let x = *self.o(b).lane(&mut bb);
         let mut t = [0.0; LANES];
         let mut cold = super::vmath::atan_deg(&y, &x, &mut t) & mask;
         // Out of range, and `0 0 atan`: the exact code decides.
@@ -710,11 +710,6 @@ impl<'k> Machine<'k> {
                     let c = self.c;
                     self.ext(&c.ext[n as usize], mask);
                 }
-                // Out of line, so the block loop's own code is as it was
-                // without them.
-                L::SinF(d, a) => self.vtrig(d, a, false, mask),
-                L::CosF(d, a) => self.vtrig(d, a, true, mask),
-                L::AtanF(d, a, b) => self.vatan(d, a, b, mask),
                 L::Gather1(d, g, col) => {
                     let g = self.c.gathers[g as usize];
                     self.gather1(d, g, col, mask);
@@ -870,6 +865,11 @@ impl<'k> Machine<'k> {
     #[inline(always)]
     fn ext_impl(&mut self, ins: &Ins, mask: u64) {
         match ins {
+            // Only `.kernelmath /fast` puts these here (`Code::new`).
+            Ins::Un(op @ (UnOp::Sin | UnOp::Cos), d, a) => {
+                self.vtrig(*d, *a, *op == UnOp::Cos, mask);
+            }
+            Ins::Bin(BinOp::Atan, d, a, b) => self.vatan(*d, *a, *b, mask),
             Ins::ForFin(d, c, inc, lim) => {
                 let mut t = [0.0; LANES];
                 for (l, v) in t.iter_mut().enumerate() {
