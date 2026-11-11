@@ -27,9 +27,12 @@
 //! if they were program text and may report a syntax error inside them that
 //! the real run would never hit. Treat a failure as "the scanner cannot read
 //! this as written", which for ordinary programs is a mistake and for programs
-//! with embedded data is a prompt to look closer. Binary object sequences
-//! (token types 128 to 131) count as a token when the program's text starts
-//! one; a truncated sequence is an error like any other.
+//! with embedded data is a prompt to look closer. The check scans the way a
+//! fresh interpreter does: once the scanner reads binary object sequences
+//! (token types 128 to 131, #733), one counts as a single token and a
+//! truncated one is reported as a [`Lexical`](SyntaxErrorKind::Lexical)
+//! error. A program that switches that scanning off with `0 setobjectformat`
+//! is not modelled, since nothing runs.
 //!
 //! # Example
 //!

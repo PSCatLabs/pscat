@@ -709,7 +709,7 @@ renders eight examples in both and compares block-downsampled output).
 - **`pscat::syntax::check_syntax` is the supported way to ask "does this
   scan?"** (#1096, `src/syntax.rs`): token count or the first syntax error
   with byte offset and line, braces balanced, nothing executed. pscat-mcp's
-  `validate_postscript` moves onto it from the `#[doc(hidden)]` `lexer`
+  `validate_postscript` can move onto it from the `#[doc(hidden)]` `lexer`
   module, which stays public for now. A scanner change that alters what
   counts as a token or where an error starts shows up in `tests/syntax.rs`,
   which pins the old pscat-mcp loop against it.

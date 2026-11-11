@@ -67,7 +67,7 @@ use pscat::syntax::check_syntax;
 
 match check_syntax(source.as_bytes()) {
     Ok(summary) => println!("{} tokens", summary.tokens),
-    Err(e) => eprintln!("{e}"), // "unterminated string (line 3, byte 41)"
+    Err(e) => eprintln!("{e}"), // "syntaxerror: unterminated string (line 3, byte 41)"
 }
 ```
 
