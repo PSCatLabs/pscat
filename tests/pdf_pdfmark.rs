@@ -268,6 +268,18 @@ fn reference_names_and_keys_are_counted_per_copy() {
 }
 
 #[test]
+fn repeated_objdef_references_are_counted_per_copy() {
+    // `/_objdef {name}` copies the name each time it is given: a mark that
+    // repeats a 1 MiB name 100 times copies 100 MiB, past the 64 MiB a
+    // mark may copy for a while.
+    let src = "/n 1048576 string dup 0 1 1048575 { 97 put dup } for pop cvn def \
+               /r [ n ] cvx def \
+               { mark 1 1 100 { pop /_objdef /r load } for /type /array /OBJ pdfmark } stopped \
+               { $error /errorname get = } if";
+    assert_eq!(eval(src, true), "limitcheck\n");
+}
+
+#[test]
 fn decodeparms_without_filter_is_not_given_pscats_flate() {
     let src = "[ /_objdef {s} /type /stream /OBJ pdfmark \
                [ {s} << /DecodeParms << /Columns 4 >> >> /PUT pdfmark [ {s} (abcd) /PUT pdfmark \

@@ -172,7 +172,7 @@ fn apply_kind(
             let (mut name, mut kind) = (None, None);
             for (key, value) in pairs(args, budget)? {
                 match key.as_str() {
-                    "_objdef" => name = Some(reference(value)?),
+                    "_objdef" => name = Some(reference(value, budget)?),
                     "type" => {
                         kind = Some(match &value.value {
                             Value::Name(n) => match &**n {
@@ -194,7 +194,7 @@ fn apply_kind(
         }
         "PUT" => match args {
             [target, value] => {
-                let target = reference(target)?;
+                let target = reference(target, budget)?;
                 // A mark that fails must leave no trace, so the kind is
                 // checked before `named_ref` makes a missing target.
                 let kind = pdf.kind_of(&target);
@@ -239,7 +239,7 @@ fn apply_kind(
                 }
             }
             [target, index, value] => {
-                let target = reference(target)?;
+                let target = reference(target, budget)?;
                 let Value::Integer(i) = index.value else {
                     return Err(PsError::Typecheck.into());
                 };
@@ -261,7 +261,7 @@ fn apply_kind(
             let [target, value] = args else {
                 return Err(PsError::Rangecheck.into());
             };
-            let target = reference(target)?;
+            let target = reference(target, budget)?;
             if pdf.kind_of(&target) != ObjKind::Array {
                 return Err(PsError::Typecheck.into());
             }
@@ -273,7 +273,7 @@ fn apply_kind(
             let [target] = args else {
                 return Err(PsError::Rangecheck.into());
             };
-            reference(target)?;
+            reference(target, budget)?;
         }
         "EMBED" => {
             let (mut name, mut fs) = (None, None);
@@ -322,11 +322,16 @@ fn pairs<'a>(args: &'a [Object], budget: &mut Budget) -> Result<Vec<(String, &'a
 
 /// The name in a `{name}` named-object reference. A reserved name
 /// (`{Catalog}`, `{ThisPage}`, `{Page2}` …) is a pdfmark pscat does not
-/// support, so the whole mark is skipped.
-fn reference(obj: &Object) -> Result<String, Skip> {
+/// support, so the whole mark is skipped. The copy is checked against the
+/// scratch budget here, so no caller can copy a name unbudgeted (a mark that
+/// repeats `/_objdef {x}` copies `x` each time).
+fn reference(obj: &Object, budget: &mut Budget) -> Result<String, Skip> {
     let name = match &obj.value {
         Value::Array(a) if obj.executable && a.len() == 1 => match a.get(0).map(|o| o.value) {
-            Some(Value::Name(n)) => n.to_string(),
+            Some(Value::Name(n)) => {
+                budget.scratch(n.len())?;
+                n.to_string()
+            }
             _ => return Err(PsError::Typecheck.into()),
         },
         _ => return Err(PsError::Typecheck.into()),
@@ -361,11 +366,7 @@ fn convert(obj: &Object, depth: usize, budget: &mut Budget) -> Result<PdfValue, 
         Value::Real(_) => return Err(PsError::Rangecheck.into()),
         Value::Name(n) => PdfValue::Name(budget.name(n)?),
         Value::String(s) => PdfValue::Str(budget.string(s)?),
-        Value::Array(_) if obj.executable => {
-            let name = reference(obj)?;
-            budget.scratch(name.len())?;
-            PdfValue::Named(name)
-        }
+        Value::Array(_) if obj.executable => PdfValue::Named(reference(obj, budget)?),
         Value::Array(a) => {
             let mut items = Vec::with_capacity(a.len());
             for i in 0..a.len() {
