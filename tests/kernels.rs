@@ -448,7 +448,9 @@ fn a_value_carried_round_a_loop_keeps_its_register() {
 
 /// The dead-move pass is linear: a long chain of branch merges, each
 /// moving the last one's defined-flag on, compiles well inside a budget
-/// (propagating liveness by repeated scans was quadratic here: seconds).
+/// (propagating liveness by repeated scans was quadratic here: seconds on
+/// an M4). Linear, it takes ~0.07 s on an M4 and 0.38-0.51 s on GitHub's
+/// Windows runners, so the budget is 1.5 s: past 300 ms Windows flaked.
 #[test]
 fn a_long_chain_of_merges_compiles_in_linear_time() {
     let mut prog = String::from("/pixel { /j exch def /i exch def /c i 1 gt def ");
@@ -458,7 +460,7 @@ fn a_long_chain_of_merges_compiles_in_linear_time() {
     prog.push_str("x dup dup } def");
     common::within_cpu_budget(
         "kernelcompile of 35,000 merges",
-        Duration::from_millis(300),
+        Duration::from_millis(1500),
         3,
         || {
             let (ok, why) = compiles(&prog);

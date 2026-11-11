@@ -1,104 +1,130 @@
-# Handoff: compute-kernels epic (2026-11-09)
+# Handoff: compute-kernels epic (2026-11-10)
 
-Session: https://claude.ai/code/session_016y8NtToNBqdyScG3LMGriu
+Session: https://claude.ai/code/session_016y8NtRr7b9NWRg1SctzFfp
+(the earlier handoff, 2026-11-09, was session_016y8NtToNBqdyScG3LMGriu).
 
 ## Where things stand
 
-- Epic branch `feature/compute-kernels` is at `8d75160` and pushed. It is
-  PR PSCatLabs/pscat#1061 (open), which addresses #742 (GPU/SIMD
-  acceleration, asked for by ArtColony/fractal_clouds).
-- Workflow: each follow-up is a feature branch off the epic, done by a
-  subagent in a worktree, reviewed, then merged back into the epic. Codex
-  is usage-limited until **Nov 11, 9:34 AM**; until then a fresh-agent
-  review stood in.
-- Merged follow-ups: #1062 (loop names), #1063 (rand), #1064 (shared
-  subroutines, `.kernelshare`), #1065 (MCP/CLI `--gpu-preview`), #1066
-  (`lib/kernel.ps` shim), and the four filed by the fractal_clouds
-  session: #1091–#1094. Each has a `notes/NNNN-*.md` file.
-- #1091–#1094 are still **open** on GitHub: they are merged into the
-  epic, not into main. Close them when #1061 merges, or comment with
-  the merge commit if you prefer.
+- **The epic.** `feature/compute-kernels` is at `7afa9f9` and pushed. It is
+  PR PSCatLabs/pscat#1061 (open, owner-merge: it touches `Cargo.toml`).
+- **What the PR closes.** It now lists `Closes` for #742, #1062–#1066,
+  #1091–#1094 and #1099, and `Refs` for #1044 and #1100. All eleven carry
+  `in-review` plus a comment naming their epic merge commit, and they close
+  when #1061 merges. #742 is no longer `deferred`.
+- **This session's follow-ups,** from fractal_clouds' fc#117 rerun, all
+  merged into the epic at `7afa9f9`. Details and numbers are in
+  `notes/1091-1093-1099-kernel-followups.md`.
+  - **#1091:** sharing compiles get their own 2M size cap (the inlined pass
+    keeps 400k). `MAX_SUB_MADE` is 4M, `--max-memory` is checked while
+    compiling, and `.kernelcaps` is a test hook that can only lower the
+    caps.
+  - **#1093:** `PSCAT_KERNEL_TIMING=1` lists every "cannot run alone"
+    reason. The purity forms told from the text were tried and **removed**:
+    two independent reviews showed each one unsound. Don't retry them
+    without reading that note.
+  - **#1099:** SIMD for div, sqrt, the compares and the rounding ops,
+    byte-identical.
+  - **Compile time:** joins about 30% cheaper.
+- **fractal_clouds result.** At fc ea18d58, all 8 scenes compile, nothing
+  retires, and every render is `cmp`-identical to `/interpret`, 23–83×
+  faster. fractal_clouds says it is satisfied. Its owner's `fastrender.sh`
+  uses the build: first `/tmp/pscat-build1` (local build1 = `747ccee`,
+  same code), then the CI artifact once fractal_clouds verifies it.
+- **CI artifact.** The release dry run on `7afa9f9` is run 42959822321,
+  green. Its artifacts expire 2027-02-09. The manifest's commit is
+  `1d2b8d5`, the PR merge onto main.
+  - aarch64-apple-darwin tar.gz SHA-256: `502584b56db16a94f144b565f652e0ed9c6f0c33a363fc34a5a6c556cf10bb2d`.
+  - Its binary renders mountains `cmp`-identical to `/interpret` (checked).
+- **CI on `7afa9f9`.** `test` and every other job pass except two Windows
+  jobs: `a_long_chain_of_merges_compiles_in_linear_time` ran 0.38–0.51 s
+  against a 300 ms budget. That flake predates this session (it failed at
+  `b959248` too). The budget is now 1.5 s, in the commit after this note.
+- **Filed this session:**
+  - #1099 (done);
+  - #1100: wider x86 SIMD, plus an opt-in, documented approximate-math
+    mode. Low value for fractal_clouds, whose math is under 4% of a frame;
+  - #1101: a faster executor for large kernels. **This is next.**
 
-| issue | what changed | branch tip |
-|---|---|---|
-| #1091 | Size cap counts only subs charged on the kept path; DCE per sub; `MAX_INSNS` 400k; `MAX_SUB_MADE` 1.6M (bounds memory); `/auto` falls back to the first pass | `feature/compute-kernels-1091-size-count` |
-| #1092 | Retire reasons per site (`exec::Why`, `Kernel::sites`); soft branches read off the finished kernel; bool arrays compile as 0/1 tables. It also fixed a bug that could give wrong output | `feature/compute-kernels-1092-retire-reasons` |
-| #1093 | Per-pixel fallback when the kernel's reachable code is pure (`src/kernel/pure.rs`) | `feature/compute-kernels-1093-pure-fallback` |
-| #1094 | Compile time 8–14× faster: indexed scopes, copy-on-write scope names, one register allocation | `feature/compute-kernels-1094-compile-time` (`8d75160`) |
+## Next: #1101 (start in a new session)
 
-#1093 has no effect on the fractal_clouds scenes yet: their setup helpers
-are reachable by name and use `copy`, `astore`, `cvx` and `begin`, so
-the kernel's code counts as impure.
+The owner iterates at 1280×800, often with 2× supersampling, one frame per
+process. At those sizes compile time is noise and `kernel cpu run` is
+everything. fractal_clouds' measurements on build1:
 
-## Last verification (on `8d75160`, release build)
+| frame | cpu run |
+|---|---:|
+| mountains 1280×800 | 14.8 s |
+| golden_coast 640×400 | 5.7–7.5 s |
+| golden_coast 1280×800 | 26.6 s |
 
-- `--test kernels` (89 tests) and `--test kernel_shim` (11) pass.
-- `fmt --check`, `clippy --all-targets --release -D warnings` and
-  `build --release --features gpu` are clean.
-- All four gallery kernel pieces are byte-identical to `gallery/renders`.
-- fractal_clouds at `34a977f`, 160×100, each `cmp`-identical to a fresh
-  `/interpret .kernelmode` render:
-  - golden_coast: compile 605 ms, 74,066 instructions in 182 shared
-    subroutines, frame 0.99 s (about 28 s interpreted; 9.1 s before
-    #1094).
-  - mountains: compile 25 ms, 35,636 instructions, frame 233 ms.
-- **Always compare against a fresh interpreted render** made from the
-  same fractal_clouds commit. An old reference caused one false alarm.
-  Verify before pushing.
+A golden_coast 2560×1600 kernel would take about 110 s. fractal_clouds
+wants golden_coast 1280×800 at 2× as the yardstick.
 
-## To do
+What is already known (don't re-measure):
 
-1. **Full `cargo test --profile ci`** on the epic. It has not run since
-   these merges; the earlier attempt and its watchers were killed under
-   memory pressure. Two failures are known and are not from this work:
-   - a typewrite test that also fails on clean `origin/main`;
-   - the MCP concurrent test, which depends on the environment.
-2. **Codex review of #1091–#1094**, and #1064's last round, after
-   Nov 11 9:34 AM. Use `/codex:rescue`, or the codex plugin's review
-   path.
-3. **fractal_clouds-side changes, not yet filed.** Ask the user before
-   filing an issue there. Two places in `lib/fc_trees.ps` make pixels
-   retire to the interpreter:
-   - `fc-tree-species` / `fc-crowns` write into the outside array
-     `FsMixWt`. Make it a per-call local array. The note reads "put into
-     an outside array or string … in fc-crowns > fc-tree-cell >
-     fc-tree-species".
-   - At about line 1618, an `ifelse` in `fc-tree-shade-trunk` leaves
-     different stack types on its two branches. Rewrite it in the
-     `aload pop` form.
-   - Effect: pnw_coast retires 5,596 pixels and tropical_island retires
-     all 16,000. golden_coast also reports the first note, but it costs
-     little there.
-   - `notes/1092-kernel-retire-reasons.md` has the exact rewrites.
-4. **Blocked comment on ArtColony/fractal_clouds#124.** The auto-mode
-   permission check denied it as an external write. The user needs to
-   post it, or allow it.
-5. **Optional: a new test build for fractal_clouds.** The existing one is
-   dry-run release run 42407578124, built from `34e9d58`; its artifacts
-   expire 2027-02-05. It predates #1091–#1094. A new
-   `workflow_dispatch` dry run of `release.yml` on the epic would give
-   fractal_clouds the fixes, and fc#117 holds the test steps to reuse.
-   A dry run makes artifacts only, no release. Real releases come only
-   from a `v*` tag on main, with owner approval.
-6. Clean up the agent worktrees under `.claude/worktrees/` (some are
-   locked) once their branches are no longer needed.
+- `sample` on golden_coast 640×400 puts almost all of the run in
+  `Machine::block` itself. Math functions are under 4%.
+- 8 and 32 lanes are both slower than 16.
+- The GPU is not an option for the shared-subroutine scenes:
+  - inlined, they pass the 1M-instruction limit;
+  - as WGSL functions, Metal's compiler ran for over 10 minutes (reverted);
+  - mountains alone works and passes SAME-LOOK, but naga's WGSL front end
+    costs 5–12 s per process.
 
-## Useful paths
+  fractal_clouds agreed to park it.
+- golden_coast is 170k instructions, 222 shared subroutines and 4.4k
+  registers. An `Ins` is up to 128 bytes.
 
-These are in the session scratchpad and may be gone:
-`/private/tmp/claude-501/-Volumes-YOTUO-dev-pscat-gpu/eec74d6d-79d7-4148-a83c-3ce46938927c/scratchpad/`.
+The candidates, each measured one at a time, are in #1101:
+- a compact instruction encoding;
+- registers shared across subroutines that are never live together;
+- 2D pixel tiles;
+- divergence accounting.
 
-- `fc/`: a fractal_clouds clone. It holds the drivers `t_km_160.ps` and
-  `t_km_160_interp.ps` (mountains), and `renders/k117/` with
-  `gc.ps`/`gc_interp.ps` (golden_coast), the other scenes, and the
-  driver generators `mk.sh`/`mk2.sh`.
-- `w1094/`: bench and IR-dump compare scripts (`bench.sh`,
-  `dumpcmp.py`, `gallery.sh`).
+## Still to do before #1061 merges
 
-The mountains driver recipe is in fc#117, step 3. Build it again from
-there if the scratchpad is gone.
+1. **Codex review of the whole branch** (the user's plan), now that Codex
+   is back after Nov 11 9:34 AM. Use `/codex:rescue` or the codex plugin's
+   review path, against `main...feature/compute-kernels`.
+2. **Full `cargo test --profile ci`.** CI on each push runs it. Check
+   the `ci` run for the latest push. The Windows budget flake is fixed. Two known failures are not from this work: a
+   typewrite test that also fails on clean main, and the MCP concurrent
+   test, which depends on the environment.
+3. **Owner merge of #1061** (CODEOWNERS path). Then delete the remote
+   `feature/compute-kernels-*` branches and confirm the issues closed.
 
-Useful environment variables:
-- `PSCAT_KERNEL_TIMING=1`: compile and run timings, plus size notes.
-- `PSCAT_KERNEL_DUMP`: dumps the IR.
-- `/interpret .kernelmode`: gives the interpreter reference.
+## How to test against fractal_clouds
+
+- **Temp files go on external storage,** under
+  `/Volumes/YOTUO/dev-cache/pscat_gpu/`, not `/tmp` or the session
+  scratchpad (the user's rule; the scratchpad was wiped mid-session).
+  `env.sh` there sets `TMPDIR`. The test kit is in `kernels/`:
+  - `bench.sh PSCAT W H SCENE...` renders compiled and `/interpret`
+    versions, then runs `cmp` and prints compile, run, total time and RSS.
+    Run it from a fractal_clouds checkout made with `git -C
+    ~/dev/fractal_clouds archive <commit> | tar -x -C <dir>`, plus `mk.sh`
+    and `mk2.sh` copied into its `renders/k117b/`. `NOINTERP=1` reuses
+    existing references.
+  - `samelook.py a.png b.png [diff.png]` is fractal_clouds' SAME-LOOK
+    metric: PSNR ≥ 40 dB, p99.9 ≤ 8, mean ≤ 1.5.
+  - `build1-747ccee/` is the build fractal_clouds verified (SHA-256
+    `9adc198b…b4f`).
+- **Drivers** come from fractal_clouds' `renders/k117b/mk.sh` and `mk2.sh`:
+  `mk2.sh SCENE NAME W H`. A `_interp` twin appends `/interpret
+  .kernelmode` to line 1.
+- **Always compare** against a fresh `/interpret` render from the same
+  fractal_clouds commit.
+- **fractal_clouds' bar is now "looks the same"** (SAME-LOOK), not exact
+  bytes. The user agreed that close output is fine when the deviation is
+  understood and documented. But pscat's default path stays exact, so any
+  approximation must be opt-in.
+- **The fractal-clouds Claude session** has been the test partner. It runs
+  the 8-scene check plus 640×400 and 1280×800 of mountains and golden_coast
+  on any build path and SHA-256 you send it. It can also change
+  fractal_clouds PostScript (the owner allowed it) when a branch won't
+  compile. Its fixes so far: fc#142 (`FsMixWt`) and fc#143 (the trunk
+  `aload`).
+
+Environment variables: `PSCAT_KERNEL_TIMING=1` (timings, sizes, every
+fallback reason), `PSCAT_KERNEL_DUMP` (the IR), `PSCAT_KERNEL_THREADS=N`,
+and `/interpret .kernelmode` for the reference.
