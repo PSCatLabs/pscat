@@ -44,6 +44,11 @@ pub struct Lexer {
     /// 1, and reporting it as a line of the submitted program would be
     /// actively misleading).
     is_main: bool,
+    /// Byte offset the token most recently returned (or failed) by
+    /// `next_token` started at, for `syntax::check_syntax` (#1096): after
+    /// an unterminated string the file position is at EOF, which is no help
+    /// to the person who has to find the opening `(`.
+    token_start_pos: usize,
     /// eexec pushed systemdict for this source's duration; pop it when
     /// the source is exhausted or closed.
     pub(crate) pop_systemdict: bool,
@@ -81,6 +86,7 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: false,
             is_main: false,
+            token_start_pos: 0,
             pop_systemdict: false,
             token_start_line: None,
         }
@@ -92,6 +98,7 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: true,
             is_main: true,
+            token_start_pos: 0,
             pop_systemdict: false,
             token_start_line: None,
         }
@@ -104,6 +111,7 @@ impl Lexer {
             file,
             is_file: true,
             is_main: false,
+            token_start_pos: 0,
             pop_systemdict: false,
             token_start_line: None,
         }
@@ -127,6 +135,12 @@ impl Lexer {
         self.is_main.then_some(self.token_start_line).flatten()
     }
 
+    /// The byte offset the last-returned token (or the failed scan) started
+    /// at, past any leading whitespace and comments.
+    pub(crate) fn token_start(&self) -> usize {
+        self.token_start_pos
+    }
+
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
         self.file.borrow_mut().peek_byte()
     }
@@ -141,6 +155,7 @@ impl Lexer {
         // syntax error gets the line it actually happened on rather than
         // the previous good token's line.
         self.token_start_line = Some(self.file.borrow().line());
+        self.token_start_pos = self.file.borrow().pos();
         self.dispatch_token()
     }
 

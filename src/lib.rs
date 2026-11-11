@@ -49,6 +49,20 @@
 //! with `stopped`. See the [`limits`] module for what each limit can and cannot
 //! stop.
 //!
+//! # Checking syntax without running a program
+//!
+//! [`syntax::check_syntax`] tokenizes a program with the interpreter's own
+//! scanner and balances its braces, executing nothing, and reports the token
+//! count or the first syntax error with its byte offset and line:
+//!
+//! ```
+//! let summary = pscat::syntax::check_syntax(b"/box { 10 10 rectfill } def")?;
+//! assert_eq!(summary.tokens, 7);
+//! let err = pscat::syntax::check_syntax(b"1 2 add (oops").unwrap_err();
+//! assert_eq!((err.line, err.offset), (1, 8));
+//! # Ok::<(), pscat::syntax::SyntaxError>(())
+//! ```
+//!
 //! # Threads
 //!
 //! An [`Interp`] is neither `Send` nor `Sync`: PostScript objects share
@@ -70,11 +84,11 @@
 //! # Supported API and stability
 //!
 //! The supported API is what this documentation shows: [`Interp`], [`Page`],
-//! [`PsError`] and [`Limits`]. The crate has other public modules that the `pscat` and
-//! `pscat-mcp` binaries, the browser build and the test suite use; they are
-//! hidden from the documentation and can change in any release. Before 1.0,
-//! a minor version (0.6 to 0.7) may break the supported API and a patch
-//! version does not.
+//! [`PsError`], [`Limits`] and [`syntax::check_syntax`]. The crate has other
+//! public modules that the `pscat` and `pscat-mcp` binaries, the browser
+//! build and the test suite use; they are hidden from the documentation and
+//! can change in any release. Before 1.0, a minor version (0.6 to 0.7) may
+//! break the supported API and a patch version does not.
 
 #![deny(missing_docs)]
 
@@ -84,6 +98,7 @@ pub mod interp;
 pub mod limits;
 pub mod memtrack;
 pub mod page;
+pub mod syntax;
 
 // Everything below is public only so the binaries, the wasm build and the
 // integration tests can reach it. `#[doc(hidden)]` keeps it out of the docs
