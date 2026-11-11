@@ -11314,7 +11314,8 @@ systemdict /setalpha known /pwhasalpha exch def
 % cells and in points, and the ways out. The text has no `;` or `]`, which
 % pscat's own error report and the MCP server split on. A box so far off
 % the page that pjcells could not count it (`pjhuge`) says so instead of
-% giving a number.
+% giving a number. Integers fit 12 bytes (cvi caps them at 32 bits); the
+% weave is any real, so its buffer is 40 bytes, enough for any real's cvs.
 % @internal
 /pjtoucherr {
     /pjebox exch def /pjename exch def
@@ -11328,7 +11329,7 @@ systemdict /setalpha known /pwhasalpha exch def
         [ pjename (: /Touch is limited to ) pjbudget 12 string cvs
           ( weave cells per stroke \(about ) pjbudget sqrt pjew mul cvi 12 string cvs
           ( x ) pjbudget sqrt pjew mul cvi 12 string cvs
-          ( pt at /Weave ) pjew 12 string cvs
+          ( pt at /Weave ) pjew 40 string cvs
           (\) and this stroke reaches ) pjecells cvi 12 string cvs
           ( cells \(about ) pji1 pji0 sub 1 add pjew mul cvi 12 string cvs
           ( x ) pjj1 pjj0 sub 1 add pjew mul cvi 12 string cvs

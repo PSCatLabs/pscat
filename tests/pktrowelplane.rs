@@ -349,6 +349,28 @@ fn a_touch_budget_error_leaves_the_state_alone() {
 }
 
 #[test]
+fn a_touch_budget_error_with_a_long_weave_is_still_a_limitcheck() {
+    // The message prints the weave. A valid /Weave whose decimal form is
+    // longer than an integer's (0.0123456789012345) must not turn the
+    // limitcheck into a rangecheck from too small a cvs buffer.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "<< /Weave 0.0123456789012345 >> pkcanvas {TRI_PAGE} \
+             {{ << /Width 12 /Direction 30 /Touch 0.5 >> pktrowelplane }} stopped \
+             {{ $error /errorname get /limitcheck eq }} {{ false }} ifelse \
+             {{ 1 }} {{ 0 }} ifelse"
+        ),
+    );
+    assert_eq!(
+        it.pop_int().ok(),
+        Some(1),
+        "a long /Weave value turned the /Touch limitcheck into another error"
+    );
+}
+
+#[test]
 fn a_pressure_that_stops_is_passed_on_as_a_stop() {
     // A /Pressure procedure may `stop`. That is no error: the plane must undo
     // its clip and rotation and stop too, without replaying an old error.
