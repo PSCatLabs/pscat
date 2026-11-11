@@ -11314,25 +11314,25 @@ systemdict /setalpha known /pwhasalpha exch def
 % cells and in points, and the ways out. The text has no `;` or `]`, which
 % pscat's own error report and the MCP server split on. A box so far off
 % the page that pjcells could not count it (`pjhuge`) says so instead of
-% giving a number. Integers fit 12 bytes (cvi caps them at 32 bits); the
-% weave is any real, so its buffer is 40 bytes, enough for any real's cvs.
+% giving a number. pscat integers are 64-bit, so each integer gets 24 bytes
+% (20 digits and a sign fit); the weave is any real and gets 40.
 % @internal
 /pjtoucherr {
     /pjebox exch def /pjename exch def
     pjebox aload pop pjcells /pjecells exch def
     /pjew userdict /pjW get def
     pjhuge {
-        [ pjename (: /Touch is limited to ) pjbudget 12 string cvs
+        [ pjename (: /Touch is limited to ) pjbudget 24 string cvs
           ( weave cells per stroke, and this stroke reaches far beyond that \(past 1e9 cells\). )
           (Drop /Touch from it, split it into separate strokes that each reach less, or set a coarser /Weave in pkcanvas) ]
     } {
-        [ pjename (: /Touch is limited to ) pjbudget 12 string cvs
-          ( weave cells per stroke \(about ) pjbudget sqrt pjew mul cvi 12 string cvs
-          ( x ) pjbudget sqrt pjew mul cvi 12 string cvs
+        [ pjename (: /Touch is limited to ) pjbudget 24 string cvs
+          ( weave cells per stroke \(about ) pjbudget sqrt pjew mul cvi 24 string cvs
+          ( x ) pjbudget sqrt pjew mul cvi 24 string cvs
           ( pt at /Weave ) pjew 40 string cvs
-          (\) and this stroke reaches ) pjecells cvi 12 string cvs
-          ( cells \(about ) pji1 pji0 sub 1 add pjew mul cvi 12 string cvs
-          ( x ) pjj1 pjj0 sub 1 add pjew mul cvi 12 string cvs
+          (\) and this stroke reaches ) pjecells cvi 24 string cvs
+          ( cells \(about ) pji1 pji0 sub 1 add pjew mul cvi 24 string cvs
+          ( x ) pjj1 pjj0 sub 1 add pjew mul cvi 24 string cvs
           ( pt\). Drop /Touch from it, split it into separate strokes that each reach less, )
           (or set a coarser /Weave in pkcanvas) ]
     } ifelse

@@ -371,6 +371,26 @@ fn a_touch_budget_error_with_a_long_weave_is_still_a_limitcheck() {
 }
 
 #[test]
+fn a_touch_budget_error_with_a_huge_cell_count_is_still_a_limitcheck() {
+    // A fine weave on a modest stroke counts trillions of cells without any
+    // one cell index passing pjhuge's 1e9 line. pscat integers are 64-bit, so
+    // the count needs more than a 32-bit integer's 12 bytes to print.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        "<< /Weave 0.0001 >> pkcanvas newpath 10 10 moveto 110 110 lineto \
+         { << /Touch 0.5 >> pkbroad } stopped \
+         { $error /errorname get /limitcheck eq } { false } ifelse \
+         { 1 } { 0 } ifelse",
+    );
+    assert_eq!(
+        it.pop_int().ok(),
+        Some(1),
+        "a large cell count turned the /Touch limitcheck into another error"
+    );
+}
+
+#[test]
 fn a_pressure_that_stops_is_passed_on_as_a_stop() {
     // A /Pressure procedure may `stop`. That is no error: the plane must undo
     // its clip and rotation and stop too, without replaying an old error.
