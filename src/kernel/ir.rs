@@ -542,8 +542,16 @@ pub(crate) struct Kernel {
     /// Register holding `i` (column) and `j` (row).
     pub in_i: Reg,
     pub in_j: Reg,
-    /// The output components, in order.
+    /// The output components, in order. A [`Kernel::typed`] kernel's has
+    /// `n` values then their `n` tags.
     pub outputs: Vec<Op>,
+    /// The outputs are typed values (`kernelarray`, #1102), not components
+    /// to paint: `outputs` holds the `n` values, then a tag for each (as
+    /// `NT::tag`: 1.0 an integer, 0.0 a real, or an F64 register holding
+    /// that per lane). An integer value whose tag is the immediate 1.0 is
+    /// an I64 register's bits (or an immediate); under a tag register it is
+    /// an F64 holding the integer exactly (a Dyn value).
+    pub typed: bool,
     /// The kernel calls `srand` (issue #1063): the random state a pixel
     /// leaves (an integer, I64), or -1 where it never seeded. A pixel that
     /// seeds draws only from its own seed, so pixels stay independent; the

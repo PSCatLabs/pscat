@@ -1,4 +1,4 @@
-# Compiled per-pixel kernels: `kernelimage`
+# Compiled per-pixel kernels: `kernelimage` and `kernelarray`
 
 Some pictures are computed one pixel at a time: ray tracers, fractals,
 noise landscapes, image filters, a small neural network run at every
@@ -62,8 +62,8 @@ too, Ghostscript for instance, can load the shim
 /kernelimage where { pop } { (lib/kernel.ps) run } ifelse
 ```
 
-The shim defines `kernelimage` and `kernelcompile` only when they are not
-defined already, so under pscat the native operators win. Its `kernelimage`
+The shim defines `kernelimage` and `kernelcompile` (and `kernelarray` and
+`kernelarrays`, below) only when they are not defined already, so under pscat the native operators win. Its `kernelimage`
 runs the same procedure through `colorimage`, one fresh dict per pixel and
 quantized as above, so the picture matches pscat's up to the other
 interpreter's arithmetic (Ghostscript's reals are 32-bit). Its
@@ -96,6 +96,59 @@ neighbour's height again.
 A one-time setup done lazily inside the procedure (`Ready not { setup /Ready
 true def } if`) runs on *every* pixel. Do it once before calling
 `kernelimage`.
+
+## Grids of numbers: `kernelarray`
+
+```
+w h proc n kernelarray array
+w h proc n kernelarrays a1 … an
+```
+
+Many programs compute a grid of numbers before they draw: a height map
+sampled from a terrain function, a slope or density map built from it, a
+lookup table. `kernelarray` compiles that per-cell procedure as
+`kernelimage` does and returns the values as numbers instead of painting
+them.
+
+- `proc` is called as **`i j proc v1 … vn`** for every cell of a `w` by `h`
+  grid, `n` from 1 to 64, with the same fresh dictionary per cell.
+- `kernelarray` returns a new array of `w × h × n` numbers, row-major with
+  the `n` values of a cell together: cell `(i, j)`'s values start at
+  `(j × w + i) × n`.
+- `kernelarrays` returns them as `n` arrays of `w × h` instead, `a1` holding
+  every cell's `v1` (at `j × w + i`). Use it when a pass makes several maps
+  at once.
+- Each value is exactly what the interpreter leaves: the same integer or
+  real, bit for bit. The results are ordinary new arrays, writable, and a
+  later pass can read them (as a table, so that compiles too).
+- `w × h × n` may be at most 16,777,216 (`array`'s own limit); past that it
+  is a `limitcheck`.
+
+```postscript
+/N 512 def
+/Height N N { /j exch def /i exch def        % one height per cell
+  i 0.01 mul j 0.01 mul 6 0.5 2 fbm2 } 1 kernelarray def
+/Slope N N { /j exch def /i exch def         % a second pass reads the first
+  /c j N mul i add def
+  Height c get  Height c i N 1 sub lt { 1 } { 0 } ifelse add get  sub abs
+} 1 kernelarray def
+```
+
+The reference, under `/interpret .kernelmode`, runs the procedure for each
+cell in raster order (row 0 first), each as if by `8 dict begin mark i j proc
+end`, and takes the `n` values above the mark: a wrong count is a
+`rangecheck`, a value that is not a number a `typecheck`, and a cell that
+leaves with `exit` an `invalidexit`. That is the same as a nested `for` loop
+that `put`s each value whenever the procedure is pure, as a compiled one is.
+Everything below about what compiles, how it degrades, `.kernelmode` and the
+limits applies to `kernelarray` too. `kernelcompile` answers for it as well.
+`--gpu-preview` does not apply: its values would not be exact. Under
+`--bands` every band computes the whole grid, since the array is the result.
+There is no form that fills an existing array: a procedure that read the
+array it fills would see it change under the interpreter but not compiled.
+
+The shim [`lib/kernel.ps`](../../lib/kernel.ps) defines `kernelarray` and
+`kernelarrays` too, the interpreted way.
 
 ## What compiles
 

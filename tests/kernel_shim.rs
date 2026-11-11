@@ -3,8 +3,8 @@
 //!
 //! Under pscat the native operators win: loading the shim defines neither
 //! name. To test the shim itself here, the tests load it with `where`
-//! answering false for `/kernelimage` and `/kernelcompile` (the only way the
-//! file asks), so it defines both in userdict, where they shadow
+//! answering false for `/kernelimage`, `/kernelcompile`, `/kernelarray` and
+//! `/kernelarrays` (the only way the file asks), so it defines them in userdict, where they shadow
 //! systemdict's. Every picture is then rendered both ways and must match
 //! byte for byte: pscat's reals are 64-bit in both paths, and the shim
 //! quantizes as `src/kernel/mod.rs::quantize` does.
@@ -25,6 +25,7 @@ const LOAD: &str = "/kernelimage where { pop } { (lib/kernel.ps) run } ifelse";
 
 /// `where` answering false for the two kernel names, for the shim's load.
 const MASK: &str = "/where { dup /kernelimage eq 1 index /kernelcompile eq or \
+                    1 index /kernelarray eq or 1 index /kernelarrays eq or \
                     { pop false } { //where } ifelse } bind def\n";
 const UNMASK: &str = "\nuserdict /where undef\n";
 
@@ -33,8 +34,11 @@ fn interp(w: u32, h: u32, shim: bool) -> Interp {
     if shim {
         it.run_str(&format!("{MASK}{SHIM}{UNMASK}"))
             .unwrap_or_else(|e| panic!("masked shim load: {}", it.error_report(&e)));
-        it.run_str("/kernelimage load type /arraytype eq { } { kernel-shim-not-defined } ifelse")
-            .expect("the masked load defines the shim");
+        it.run_str(
+            "/kernelimage load type /arraytype eq /kernelarray load type /arraytype eq and \
+             /kernelarrays load type /arraytype eq and { } { kernel-shim-not-defined } ifelse",
+        )
+        .expect("the masked load defines the shim");
     }
     it
 }
@@ -277,4 +281,50 @@ fn ghostscript_renders_what_pscat_does() {
     let (max, n, mean) = gs_against_native(MANDEL);
     eprintln!("mandelbrot: max {max}, {n}/4096 pixels differ, mean {mean:.4}");
     assert!(n * 50 <= 4096, "mandelbrot: {n} of 4096 pixels differ");
+}
+
+/// The operand stack after `prog`, each number as its type and exact
+/// bits, or the error's name.
+fn cells(prog: &str, shim: bool) -> Result<Vec<String>, String> {
+    fn exact(o: &pscat::object::Object) -> String {
+        use pscat::object::Value;
+        match &o.value {
+            Value::Integer(i) => format!("i{i}"),
+            Value::Real(r) => format!("r{:016x}", r.to_bits()),
+            Value::Array(a) => {
+                let v: Vec<String> = a.snapshot().iter().map(exact).collect();
+                format!("[{}]", v.join(" "))
+            }
+            _ => o.repr(),
+        }
+    }
+    let mut it = interp(4, 4, shim);
+    match it.run_str(prog) {
+        Ok(()) => Ok(it.operand_stack().iter().map(exact).collect()),
+        Err(e) => Err(e.name().to_string()),
+    }
+}
+
+#[test]
+fn the_shims_kernelarray_is_the_native_ones() {
+    // #1102: values, types, layout and errors.
+    for prog in [
+        "7 3 { /j exch def /i exch def i j mul i 0.5 mul } 2 kernelarray",
+        "7 3 { /j exch def /i exch def i 2 mod 0 eq { i } { 0.25 } ifelse j } 2 kernelarrays",
+        "/T [1 2.5 -3] def 4 2 { add 3 mod T exch get } 1 kernelarray",
+        "1 2 4 3 { pop pop count } 1 kernelarray",
+        "0 3 { pop pop 1 } 2 kernelarray 3 0 { pop pop 1 } 2 kernelarrays",
+        "4 2 { pop pop 1 2 } 1 kernelarray",
+        "4 2 { pop pop } 1 kernelarray",
+        "4 2 { pop pop (x) 1 } 1 kernelarray",
+        "4 2 { pop pop exit } 1 kernelarray",
+        "4 2 { 1 0 div } 1 kernelarray",
+        "4 2 { pop pop 1 } 0 kernelarray",
+        "-1 2 { pop pop 1 } 1 kernelarray",
+        "4 2 [ 1 ] 1 kernelarray",
+        "5000 5000 { pop pop 1 } 1 kernelarray",
+    ] {
+        let native = cells(prog, false);
+        assert_eq!(cells(prog, true), native, "{prog}");
+    }
 }

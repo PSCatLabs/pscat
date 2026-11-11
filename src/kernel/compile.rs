@@ -922,17 +922,35 @@ pub(crate) struct Compiler<'a> {
     share_fails: HashMap<ProcId, u32>,
 }
 
-/// Compile `proc` as a kernel taking `i j` and leaving `ncomp` numbers.
+/// What a kernel leaves: `n` numbers, as components to paint
+/// (`kernelimage`: reals) or as typed values (`kernelarray`, #1102: each
+/// an integer or a real, as the interpreter's; see [`Kernel::typed`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Out {
+    pub n: usize,
+    pub typed: bool,
+}
+
+impl Out {
+    pub(crate) fn image(n: usize) -> Self {
+        Out { n, typed: false }
+    }
+    pub(crate) fn array(n: usize) -> Self {
+        Out { n, typed: true }
+    }
+}
+
+/// Compile `proc` as a kernel taking `i j` and leaving `out.n` numbers.
 /// With `strict`, a branch that does not compile fails the whole kernel
 /// instead of aborting to the interpreter when taken.
 pub(crate) fn compile(
     it: &Interp,
     proc: &PsArray,
-    ncomp: usize,
+    out: Out,
     strict: bool,
     share: ShareMode,
 ) -> Result<Compiled, Refusal> {
-    let mut r = choose(it, proc, ncomp, strict, share);
+    let mut r = choose(it, proc, out, strict, share);
     // Register allocation, for the kernel chosen only: under `/auto` the
     // first pass's kernel is often thrown away (#1094). Nothing about which
     // kernel is chosen depends on it.
@@ -956,7 +974,7 @@ pub(crate) fn compile(
 fn choose(
     it: &Interp,
     proc: &PsArray,
-    ncomp: usize,
+    out: Out,
     strict: bool,
     share: ShareMode,
 ) -> Result<Compiled, Refusal> {
@@ -965,7 +983,7 @@ fn choose(
     } else {
         share
     };
-    let r = compile_with(it, proc, ncomp, strict, first, 0);
+    let r = compile_with(it, proc, out, strict, first, 0);
     if share != ShareMode::Auto {
         return r;
     }
@@ -983,7 +1001,7 @@ fn choose(
     // interpreter), the first
     // attempt's kernel stands (#1091): sharing lets branches that were too
     // large compile, and their code can then push what follows over.
-    let retry = compile_with(it, proc, ncomp, strict, ShareMode::Large, spent);
+    let retry = compile_with(it, proc, out, strict, ShareMode::Large, spent);
     match (r, retry) {
         (Ok(mut first), Err(Refusal::Not(_, n))) => {
             first.work += n;
@@ -1011,7 +1029,7 @@ fn choose(
 fn compile_with(
     it: &Interp,
     proc: &PsArray,
-    ncomp: usize,
+    out: Out,
     strict: bool,
     share: ShareMode,
     spent: u64,
@@ -1103,14 +1121,22 @@ fn compile_with(
             if c.st.scopes.len() != 1 {
                 return nc("the procedure leaves a dictionary begun (begin without end)");
             }
-            if c.st.stack.len() != ncomp {
+            if c.st.stack.len() != out.n {
                 return nc(format!(
-                    "the procedure must consume i and j and leave {ncomp} numbers; it leaves {} values",
+                    "the procedure must consume i and j and leave {} numbers; it leaves {} values",
+                    out.n,
                     c.st.stack.len()
                 ));
             }
+            let mut tags = Vec::new();
             for v in c.st.stack.clone() {
                 match v {
+                    // Typed (#1102): the value as it is (an integer's I64
+                    // bits, a real's or a Dyn's f64), and its type.
+                    SVal::Num(o, t) if out.typed => {
+                        outputs.push(o);
+                        tags.push(t.tag());
+                    }
                     SVal::Num(o, t) => {
                         let o = c.as_f(o, t)?;
                         outputs.push(o);
@@ -1118,8 +1144,9 @@ fn compile_with(
                     _ => return nc("an output component is not a number"),
                 }
             }
+            outputs.extend(tags);
         } else {
-            outputs = vec![Op::Imm(0.0); ncomp];
+            outputs = vec![Op::Imm(0.0); if out.typed { 2 * out.n } else { out.n }];
         }
         c.size_accounting()?;
         let noise = c.uses_noise;
@@ -1139,6 +1166,7 @@ fn compile_with(
             perm: it.noise_perm,
             sites: std::mem::take(&mut c.sites),
             fresh: Vec::new(),
+            typed: out.typed,
         };
         super::opt::prune_subs(&mut kernel);
         super::opt::dce(&mut kernel);

@@ -270,32 +270,9 @@ impl<'k> Machine<'k> {
         }
     }
 
-    /// Run the kernel for pixels `i0..i0+n` of row `j`, writing `ncomp`
-    /// bytes per pixel into `out`. Returns the lanes retired to the
-    /// interpreter (bit `l` is pixel `i0 + l`); their bytes are left 0.
-    pub(crate) fn run_batch(
-        &mut self,
-        j: i64,
-        i0: i64,
-        n: usize,
-        out: &mut [u8],
-    ) -> Result<u64, Stop> {
-        debug_assert!(n <= LANES);
-        let mut at = [(0, 0); LANES];
-        for (l, p) in at.iter_mut().enumerate().take(n) {
-            *p = (i0 + l as i64, j);
-        }
-        let killed = self.run_lanes(&at[..n])?;
-        let nc = self.k.outputs.len();
-        for l in (0..n).filter(|l| killed >> l & 1 == 0) {
-            self.pixel(l, &mut out[l * nc..(l + 1) * nc]);
-        }
-        Ok(killed)
-    }
-
     /// Run the kernel for the pixels `(i, j)` in `at`, one a lane. Returns
-    /// the lanes retired to the interpreter; [`Machine::pixel`] reads the
-    /// others' bytes.
+    /// the lanes retired to the interpreter; [`Machine::pixel`] (or
+    /// [`Machine::cell`]) reads the others' outputs.
     pub(crate) fn run_lanes(&mut self, at: &[(i64, i64)]) -> Result<u64, Stop> {
         let n = at.len();
         debug_assert!(n > 0 && n <= LANES);
@@ -326,6 +303,29 @@ impl<'k> Machine<'k> {
                 Op::Imm(x) => x,
             };
             *b = super::quantize(v);
+        }
+    }
+
+    /// Lane `l`'s typed values after [`Machine::run_lanes`], for a
+    /// [`Kernel::typed`] kernel (`kernelarray`, #1102): each the integer or
+    /// the real the interpreter would leave.
+    pub(crate) fn cell(&self, l: usize, out: &mut [super::Num]) {
+        let n = self.k.outputs.len() / 2;
+        let (vals, tags) = self.k.outputs.split_at(n);
+        for ((c, &v), &t) in out.iter_mut().zip(vals).zip(tags) {
+            let f = |o: Op| match o {
+                Op::R(r) => self.regs[r as usize][l],
+                Op::Imm(x) => x,
+            };
+            *c = match t {
+                // An integer: an I64 register's bits, or an immediate.
+                Op::Imm(1.0) => super::Num::Int(self.geti(v, l)),
+                Op::Imm(_) => super::Num::Real(f(v)),
+                // A Dyn value: an f64, an integer (exact: a Dyn integer
+                // is at most 2^53) where the tag says so.
+                Op::R(r) if self.regs[r as usize][l] == 1.0 => super::Num::Int(f(v) as i64),
+                Op::R(_) => super::Num::Real(f(v)),
+            };
         }
     }
 

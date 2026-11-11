@@ -4,6 +4,8 @@
 //! width height matrix proc ncomp kernelimage -
 //! proc ncomp kernelcompile bool string
 //! name .kernelmode -        /auto, /interpret or /strict
+//! w h proc n kernelarray array          (#1102)
+//! w h proc n kernelarrays a1 .. an      (#1102)
 //! ```
 //!
 //! `proc` is called as `i j proc c1 ... cn` for every sample of a `width`
@@ -18,6 +20,13 @@
 //! runs through the interpreter, pixel by pixel, in a fresh dict each
 //! ([`fallback`]): the reference the compiled path is tested against.
 //! The design and its measurements: `docs/dev/design/KERNELS.md`.
+//!
+//! `kernelarray` runs the same kind of procedure over a `w` by `h` grid and
+//! returns its `n` values per cell as numbers, each the integer or real the
+//! interpreter would leave (cell `(i, j)` at `(j * w + i) * n`);
+//! `kernelarrays` returns them as `n` arrays of `w * h`. Their reference is
+//! [`CELL_DRIVER`], which runs the procedure cell by cell in raster order,
+//! each in a fresh dict.
 
 pub(crate) mod check;
 pub(crate) mod code;
@@ -39,8 +48,32 @@ use crate::error::PsError;
 use crate::image::{ImageColor, ImageCtx, ImageSource};
 use crate::interp::Interp;
 use crate::object::{Dict, Object, PsArray, PsString, Value};
+use compile::Out;
 use exec::{LANES, Machine, RunCtl, Stop};
 use ir::Kernel;
+
+/// One value a `kernelarray` cell leaves: what the interpreter would leave
+/// on the stack. (`Object` holds `Rc`s, so the workers make these.)
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Num {
+    Int(i64),
+    #[default]
+    Null,
+    Real(f64),
+}
+
+impl Num {
+    fn object(self) -> Object {
+        match self {
+            Num::Int(i) => Object::int(i),
+            Num::Real(r) => Object::real(r),
+            Num::Null => Object::lit(Value::Null),
+        }
+    }
+}
+
+/// Most values one `kernelarray` may return: `array`'s own limit.
+const MAX_CELLS: usize = 16_777_216;
 
 /// How `kernelimage` runs its procedure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +117,8 @@ pub fn set_gpu_preview(on: bool) -> Result<(), String> {
 pub fn install(dict: &mut Dict) {
     use crate::ops::op;
     op(dict, "kernelimage", kernelimage);
+    op(dict, "kernelarray", kernelarray);
+    op(dict, "kernelarrays", kernelarrays);
     op(dict, "kernelcompile", kernelcompile);
     op(dict, ".kernelshare", kernelshare);
     op(dict, ".kernelcaps", kernelcaps);
@@ -105,6 +140,9 @@ fn helper(name: &str) -> Option<Object> {
         // (a wrong component count) reads the same either way.
         ".kfput" => (".kfstore", kfput),
         ".kfpaint" => (".kfpaint", kfpaint),
+        ".kanext" => (".kanext", kanext),
+        ".kaput" => (".kaput", kaput),
+        ".kadone" => (".kadone", kadone),
         _ => return None,
     };
     Some(Object::exec(Value::Operator(Operator { name, func })))
@@ -177,29 +215,8 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
         }
     };
     if it.kernel_mode != KernelMode::Interpret {
-        let strict = it.kernel_mode == KernelMode::Strict;
-        let compiled = compile::compile(it, &a.proc, a.ncomp, strict, it.kernel_share);
+        let compiled = compile_noted(it, "kernelimage", &a.proc, Out::image(a.ncomp));
         lap("compile", t0);
-        if let Ok(c) = &compiled {
-            it.charge_steps(c.work);
-            for why in &c.soft {
-                if it.kernel_notes.insert(why.clone()) {
-                    let note = format!(
-                        "pscat: kernelimage: a branch runs in the interpreter when taken ({why})\n"
-                    );
-                    let _ = it.write_stderr(note.as_bytes(), true);
-                }
-            }
-        }
-        if let Ok(c) = &compiled
-            && timing
-        {
-            eprintln!(
-                "pscat: kernel size: {}, {} registers",
-                size_note(&c.kernel),
-                c.kernel.nregs
-            );
-        }
         let t1 = crate::clock::Clock::mono_ns();
         match compiled {
             Ok(compile::Compiled {
@@ -251,13 +268,13 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                         }
                     }
                 }
-                let r = run(it, &k, a.w, a.h, a.ncomp, rows);
+                let r = run(it, &k, a.w, a.h, a.ncomp, rows, |m, l, out| m.pixel(l, out));
                 lap("cpu run", t1);
                 match r {
                     Ok(ran) if ran.pixels.is_empty() => {
                         // The random state after the call: what the last
                         // pixel in raster order leaves (#1063).
-                        match final_rand_state(it, &k, &a, &ran.seeds, rows) {
+                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows) {
                             Ok(Some(found)) => {
                                 if let Some(s) = found {
                                     it.rand_state = s;
@@ -313,7 +330,7 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                         } else {
                             None
                         };
-                        retire_note(it, &k, &ran, whole.as_deref(), timing);
+                        retire_note(it, "kernelimage", &k, &ran, whole.as_deref(), timing);
                         if whole.is_some() {
                             it.kernel_stats.2 += 1;
                             return fallback(it, a);
@@ -326,22 +343,238 @@ fn kernelimage(it: &mut Interp) -> Result<(), PsError> {
                 }
             }
             Err(compile::Refusal::Limit(e)) => return Err(e),
-            Err(compile::Refusal::Not(why, work)) => {
-                it.charge_steps(work);
-                if it.kernel_mode == KernelMode::Strict {
-                    return Err(PsError::Undefined(format!(
-                        "kernelimage: not compiled: {why}"
-                    )));
-                }
-                if it.kernel_notes.insert(why.clone()) {
-                    let note = format!("pscat: kernelimage: running in the interpreter ({why})\n");
-                    let _ = it.write_stderr(note.as_bytes(), true);
-                }
-            }
+            Err(compile::Refusal::Not(..)) => {}
         }
     }
     it.kernel_stats.2 += 1;
     fallback(it, a)
+}
+
+/// Compile `proc` for operator `name`, saying what the user should know:
+/// branches left to the interpreter, or why it did not compile (an error
+/// under `/strict`). The steps it took are charged.
+fn compile_noted(
+    it: &mut Interp,
+    name: &str,
+    proc: &PsArray,
+    out: Out,
+) -> Result<compile::Compiled, compile::Refusal> {
+    let strict = it.kernel_mode == KernelMode::Strict;
+    let compiled = compile::compile(it, proc, out, strict, it.kernel_share);
+    match &compiled {
+        Ok(c) => {
+            it.charge_steps(c.work);
+            for why in &c.soft {
+                if it.kernel_notes.insert(why.clone()) {
+                    let note = format!(
+                        "pscat: {name}: a branch runs in the interpreter when taken ({why})\n"
+                    );
+                    let _ = it.write_stderr(note.as_bytes(), true);
+                }
+            }
+            if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+                eprintln!(
+                    "pscat: kernel size: {}, {} registers",
+                    size_note(&c.kernel),
+                    c.kernel.nregs
+                );
+            }
+        }
+        Err(compile::Refusal::Not(why, work)) => {
+            it.charge_steps(*work);
+            if strict {
+                return Err(compile::Refusal::Limit(PsError::Undefined(format!(
+                    "{name}: not compiled: {why}"
+                ))));
+            }
+            if it.kernel_notes.insert(why.clone()) {
+                let note = format!("pscat: {name}: running in the interpreter ({why})\n");
+                let _ = it.write_stderr(note.as_bytes(), true);
+            }
+        }
+        Err(compile::Refusal::Limit(_)) => {}
+    }
+    compiled
+}
+
+/// `kernelarray`'s and `kernelarrays`' operands.
+struct Cells {
+    w: usize,
+    h: usize,
+    proc: PsArray,
+    n: usize,
+    /// `kernelarrays`: `n` arrays of `w * h`, not one of `w * h * n`.
+    split: bool,
+}
+
+impl Cells {
+    fn name(&self) -> &'static str {
+        if self.split {
+            "kernelarrays"
+        } else {
+            "kernelarray"
+        }
+    }
+}
+
+fn pop_cells(it: &mut Interp, split: bool) -> Result<Cells, PsError> {
+    let n = it.pop_int()?;
+    if !(1..=64).contains(&n) {
+        return Err(PsError::Rangecheck);
+    }
+    let p = it.pop()?;
+    let proc = match &p.value {
+        Value::Array(a) if p.executable => a.clone(),
+        _ => return Err(PsError::Typecheck),
+    };
+    let h = it.pop_int()?;
+    let w = it.pop_int()?;
+    if w < 0 || h < 0 {
+        return Err(PsError::Rangecheck);
+    }
+    // Every size computed from these must fit (untrusted input).
+    let cells = (w as u64)
+        .checked_mul(h as u64)
+        .and_then(|x| x.checked_mul(n as u64));
+    if cells.is_none_or(|c| c > MAX_CELLS as u64) {
+        return Err(PsError::Limitcheck);
+    }
+    Ok(Cells {
+        w: w as usize,
+        h: h as usize,
+        proc,
+        n: n as usize,
+        split,
+    })
+}
+
+/// `w h proc n kernelarray array` (#1102): `i j proc v1 .. vn` for every
+/// cell of a `w` by `h` grid, in a fresh dict each, as `kernelimage` calls
+/// its procedure; the values, exactly as the interpreter leaves them, in a
+/// new array, cell `(i, j)`'s at `(j * w + i) * n`.
+fn kernelarray(it: &mut Interp) -> Result<(), PsError> {
+    let a = pop_cells(it, false)?;
+    cells(it, a)
+}
+
+/// `w h proc n kernelarrays a1 .. an` (#1102): as `kernelarray`, the
+/// values as `n` arrays, `ak` holding each cell's `vk` at `j * w + i`.
+fn kernelarrays(it: &mut Interp) -> Result<(), PsError> {
+    let a = pop_cells(it, true)?;
+    cells(it, a)
+}
+
+fn cells(it: &mut Interp, a: Cells) -> Result<(), PsError> {
+    let total = a.w * a.h * a.n;
+    // The result, made up front as the interpreter's path makes it.
+    it.check_alloc(total.saturating_mul(std::mem::size_of::<Object>()))?;
+    if total == 0 {
+        return push_cells(it, &a, Vec::new());
+    }
+    let timing = std::env::var_os("PSCAT_KERNEL_TIMING").is_some();
+    let name = a.name();
+    if it.kernel_mode != KernelMode::Interpret {
+        let t0 = crate::clock::Clock::mono_ns();
+        let compiled = compile_noted(it, name, &a.proc, Out::array(a.n));
+        if timing {
+            eprintln!(
+                "pscat: kernel compile: {:.2} ms",
+                (crate::clock::Clock::mono_ns() - t0) as f64 / 1e6
+            );
+        }
+        match compiled {
+            Ok(compile::Compiled {
+                kernel: k,
+                noise,
+                soft,
+                ..
+            }) => {
+                if noise {
+                    crate::ops::noise::note_sampled(it);
+                }
+                // Every row, under `--bands` too: the array is the result.
+                let rows = (0, a.h);
+                let t1 = crate::clock::Clock::mono_ns();
+                let r = run(it, &k, a.w, a.h, a.n, rows, |m, l, out| m.cell(l, out));
+                if timing {
+                    eprintln!(
+                        "pscat: kernel cpu run: {:.2} ms",
+                        (crate::clock::Clock::mono_ns() - t1) as f64 / 1e6
+                    );
+                }
+                match r {
+                    Ok(ran) if ran.pixels.is_empty() => {
+                        // As `kernelimage`: the random state the last cell
+                        // in raster order leaves (#1063).
+                        match final_rand_state(it, &k, a.w, a.h, &ran.seeds, rows) {
+                            Ok(Some(found)) => {
+                                if let Some(s) = found {
+                                    it.rand_state = s;
+                                    if it.seed_override.is_some() {
+                                        it.seed_override_fired = true;
+                                    }
+                                }
+                                it.kernel_stats.0 += 1;
+                                return push_cells(it, &a, ran.bytes);
+                            }
+                            Ok(None) | Err(Stop::Cancelled) => {
+                                it.kernel_stats.2 += 1;
+                                return cells_fallback(it, a, None);
+                            }
+                            Err(Stop::Limit(e)) => return Err(e),
+                        }
+                    }
+                    Ok(ran) => {
+                        // Cells that would raise an error, or took a branch
+                        // that did not compile: the interpreter does those,
+                        // in raster order, unless only the whole grid there
+                        // is exact (as for `kernelimage`).
+                        let whole = if k.rand.is_some() {
+                            Some("a retired cell's rand may read state a compiled one left".into())
+                        } else if !soft.is_empty() {
+                            side_effect(it, &a.proc).map(|why| {
+                                format!(
+                                    "a cell that takes a branch that did not compile \
+                                     cannot run alone: {why}"
+                                )
+                            })
+                        } else {
+                            None
+                        };
+                        retire_note(it, name, &k, &ran, whole.as_deref(), timing);
+                        if whole.is_some() {
+                            it.kernel_stats.2 += 1;
+                            return cells_fallback(it, a, None);
+                        }
+                        it.kernel_stats.1 += 1;
+                        return cells_fallback(it, a, Some((ran.bytes, ran.pixels)));
+                    }
+                    Err(Stop::Limit(e)) => return Err(e),
+                    Err(Stop::Cancelled) => {}
+                }
+            }
+            Err(compile::Refusal::Limit(e)) => return Err(e),
+            Err(compile::Refusal::Not(..)) => {}
+        }
+    }
+    it.kernel_stats.2 += 1;
+    cells_fallback(it, a, None)
+}
+
+/// Push the result: one array of the values, or (`kernelarrays`) `n`.
+fn push_cells(it: &mut Interp, a: &Cells, vals: Vec<Num>) -> Result<(), PsError> {
+    if !a.split {
+        it.push(Object::array(vals.into_iter().map(Num::object).collect()));
+        return Ok(());
+    }
+    let cells = a.w * a.h;
+    for c in 0..a.n {
+        let col: Vec<Object> = (0..cells)
+            .map(|x| vals.get(x * a.n + c).copied().unwrap_or_default().object())
+            .collect();
+        it.push(Object::array(col));
+    }
+    Ok(())
 }
 
 /// Why the pixels a soft branch retires cannot be interpreted one by one
@@ -456,24 +689,34 @@ fn rows_needed(it: &Interp, w: usize, h: usize, matrix: [f64; 6]) -> (usize, usi
     if lo >= hi { (0, 0) } else { (lo, hi) }
 }
 
-/// Run a compiled kernel over the grid. Rows are dealt to the workers one
-/// at a time; the bytes do not depend on which worker computes a row.
-fn run(
+/// Run a compiled kernel over the grid, `emit` writing a pixel's `ncomp`
+/// outputs (bytes for `kernelimage`, [`Num`]s for `kernelarray`). Rows are
+/// dealt to the workers one at a time; the result does not depend on which
+/// worker computes a row.
+fn run<T, F>(
     it: &mut Interp,
     k: &Kernel,
     w: usize,
     h: usize,
     ncomp: usize,
     (j0, j1): (usize, usize),
-) -> Result<Ran, Stop> {
+    emit: F,
+) -> Result<Ran<T>, Stop>
+where
+    T: Copy + Default + Send,
+    F: Fn(&Machine, usize, &mut [T]) + Sync,
+{
     let row_bytes = w * ncomp;
     let total = row_bytes
         .checked_mul(h)
         .ok_or(Stop::Limit(PsError::Limitcheck))?;
-    if it.check_alloc(total).is_err() {
+    if it
+        .check_alloc(total.saturating_mul(std::mem::size_of::<T>()))
+        .is_err()
+    {
         return Err(Stop::Cancelled);
     }
-    let mut out = vec![0u8; total];
+    let mut out = vec![T::default(); total];
     let (steps_left, deadline) = it.remaining_budget();
     let ctl = RunCtl::new(deadline, steps_left);
     let threads = thread_count(it).min(j1.saturating_sub(j0)).max(1);
@@ -497,7 +740,7 @@ fn run(
     // A batch is a tile of TW x TH pixels (#1101): nearby pixels mostly
     // take the same branches.
     let (tw, th) = tile_shape();
-    let bands: Vec<(usize, &mut [u8])> = out[j0 * row_bytes..j1.max(j0) * row_bytes]
+    let bands: Vec<(usize, &mut [T])> = out[j0 * row_bytes..j1.max(j0) * row_bytes]
         .chunks_mut(row_bytes * th)
         .enumerate()
         .map(|(b, rows)| (j0 + b * th, rows))
@@ -541,7 +784,7 @@ fn run(
                                 mine.push((j, i));
                             } else {
                                 let o = (j - jb) * row_bytes + i * ncomp;
-                                m.pixel(l, &mut rows[o..o + ncomp]);
+                                emit(&m, l, &mut rows[o..o + ncomp]);
                             }
                         }
                         if k.rand.is_some() {
@@ -654,7 +897,8 @@ fn run(
 fn final_rand_state(
     it: &mut Interp,
     k: &Kernel,
-    a: &Args,
+    w: usize,
+    h: usize,
     seeds: &[(usize, i64)],
     (j0, j1): (usize, usize),
 ) -> Result<Option<Option<i64>>, Stop> {
@@ -667,9 +911,9 @@ fn final_rand_state(
     let ctl = RunCtl::new(deadline, steps_left);
     let code = code::Code::new(k);
     let mut m = Machine::new(k, &code, &ctl);
-    let mut buf = vec![0u8; LANES * a.ncomp];
+    let mut at = [(0i64, 0i64); LANES];
     let mut scan = || -> Result<Option<Option<i64>>, Stop> {
-        for j in (0..a.h).rev() {
+        for j in (0..h).rev() {
             if (j0..j1).contains(&j) {
                 // Computed, with no pixel retired.
                 match seeds.binary_search_by_key(&j, |&(r, _)| r) {
@@ -677,11 +921,14 @@ fn final_rand_state(
                     Err(_) => continue,
                 }
             }
-            let mut hi = a.w;
+            let mut hi = w;
             while hi > 0 {
                 let i0 = hi.saturating_sub(LANES);
                 let n = hi - i0;
-                let killed = m.run_batch(j as i64, i0 as i64, n, &mut buf[..n * a.ncomp])?;
+                for (l, p) in at.iter_mut().enumerate().take(n) {
+                    *p = ((i0 + l) as i64, j as i64);
+                }
+                let killed = m.run_lanes(&at[..n])?;
                 for l in (0..n).rev() {
                     if killed >> l & 1 != 0 {
                         return Ok(None);
@@ -706,8 +953,8 @@ type Retired = (Vec<(usize, usize)>, Vec<u64>);
 
 /// A compiled run's result: the image, and the pixels (row, column) that
 /// left the compiled path, for the interpreter to finish.
-struct Ran {
-    bytes: Vec<u8>,
+struct Ran<T> {
+    bytes: Vec<T>,
     pixels: Vec<(usize, usize)>,
     /// How many pixels retired for each reason code, most first.
     why: Vec<(u64, usize)>,
@@ -722,8 +969,20 @@ struct Ran {
 ///
 /// `whole` says why, when it is so, the whole image reruns in the
 /// interpreter rather than only the retired pixels.
-fn retire_note(it: &mut Interp, k: &Kernel, ran: &Ran, whole: Option<&str>, timing: bool) {
+fn retire_note<T>(
+    it: &mut Interp,
+    name: &str,
+    k: &Kernel,
+    ran: &Ran<T>,
+    whole: Option<&str>,
+    timing: bool,
+) {
     let n = ran.pixels.len();
+    let (what, whole_of) = if name == "kernelimage" {
+        ("pixels", "image")
+    } else {
+        ("cells", "grid")
+    };
     let Some(&(top_n, top)) = ran.why.first() else {
         return;
     };
@@ -734,18 +993,18 @@ fn retire_note(it: &mut Interp, k: &Kernel, ran: &Ran, whole: Option<&str>, timi
     {
         let rest = ran.why.len() - 1;
         let mut line = if rest == 0 {
-            format!("pscat: kernelimage: {n} pixels retired: {top_text}")
+            format!("pscat: {name}: {n} {what} retired: {top_text}")
         } else {
             let s = if rest == 1 { "" } else { "s" };
             format!(
-                "pscat: kernelimage: {n} pixels retired: {top_n} for {top_text}, {} for \
+                "pscat: {name}: {n} {what} retired: {top_n} for {top_text}, {} for \
                  {rest} other reason{s} (PSCAT_KERNEL_TIMING=1 lists them)",
                 n as u64 - top_n
             )
         };
         match whole {
             Some(why) => line.push_str(&format!(
-                "; the whole image runs in the interpreter ({why})\n"
+                "; the whole {whole_of} runs in the interpreter ({why})\n"
             )),
             None => line.push_str("; those run in the interpreter\n"),
         }
@@ -754,7 +1013,7 @@ fn retire_note(it: &mut Interp, k: &Kernel, ran: &Ran, whole: Option<&str>, timi
     if timing {
         for &(c, code) in &ran.why {
             eprintln!(
-                "pscat: kernel retired: {c} pixels: {}",
+                "pscat: kernel retired: {c} {what}: {}",
                 exec::why_text(k, code)
             );
         }
@@ -776,7 +1035,7 @@ fn kernelcompile(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     }
     let t0 = crate::clock::Clock::mono_ns();
-    let compiled = compile::compile(it, proc, ncomp as usize, false, it.kernel_share);
+    let compiled = compile::compile(it, proc, Out::image(ncomp as usize), false, it.kernel_share);
     if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
         eprintln!(
             "pscat: kernelcompile: {:.2} ms",
@@ -1242,5 +1501,240 @@ fn kfrow(it: &mut Interp) -> Result<(), PsError> {
         ks.get("Row").ok_or(PsError::Typecheck)?
     };
     it.push(row);
+    Ok(())
+}
+
+// --- kernelarray's interpreter path (#1102) -----------------------------
+
+/// The reference for `kernelarray`: the procedure per cell, in raster
+/// order, in a fresh dict, its values above a mark (`.kanext` pushes
+/// `mark i j`; `.kaput` pops back to the mark). The same driver finishes
+/// the cells a compiled run retired (`Pix`, in raster order), so a cell
+/// sees the same operand stack and execution-stack depth either way. A
+/// cell that leaves the driver's loop with `exit` is an `invalidexit`
+/// (`.kadone` sees it unfinished); among retired cells it first sends the
+/// whole grid back to the interpreter, as one that cannot run alone.
+const CELL_DRIVER: &str = "{ { KS .kanext not { exit } if \
+    KS /P get 8 dict begin exec end KS .kaput } loop KS .kadone }";
+
+/// A compiled run's values, and the cells (row, column) it left to the
+/// interpreter.
+type Partial = (Vec<Num>, Vec<(usize, usize)>);
+
+/// Run [`CELL_DRIVER`] over every cell, or (`part`: the compiled values,
+/// and the cells (row, column) left to the interpreter) over those.
+fn cells_fallback(it: &mut Interp, a: Cells, part: Option<Partial>) -> Result<(), PsError> {
+    let mut ks = Dict::new();
+    ks.put("P".into(), Object::exec(Value::Array(a.proc.clone())));
+    ks.put("N".into(), Object::int(a.n as i64));
+    ks.put("W".into(), Object::int(a.w as i64));
+    ks.put("H".into(), Object::int(a.h as i64));
+    ks.put("Split".into(), Object::bool(a.split));
+    ks.put("K".into(), Object::int(0));
+    ks.put("Busy".into(), Object::bool(false));
+    ks.put("Fail".into(), Object::bool(false));
+    ks.put("Depth".into(), Object::int(it.dict_stack_len() as i64));
+    let total = a.w * a.h * a.n;
+    let vals = match part {
+        None => vec![Object::lit(Value::Null); total],
+        Some((vals, pixels)) => {
+            // The caller's operands, to put back for the whole grid.
+            it.check_alloc(
+                it.operand_stack()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Object>()),
+            )?;
+            let base = it.operand_stack().to_vec();
+            ks.put(
+                "Base".into(),
+                Object::lit(Value::Array(PsArray::from_vec(base))),
+            );
+            it.check_alloc(
+                pixels
+                    .len()
+                    .saturating_mul(2 * std::mem::size_of::<Object>()),
+            )?;
+            let flat: Vec<Object> = pixels
+                .iter()
+                .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)])
+                .collect();
+            ks.put(
+                "Pix".into(),
+                Object::lit(Value::Array(PsArray::from_vec(flat))),
+            );
+            vals.into_iter().map(Num::object).collect()
+        }
+    };
+    ks.put("Buf".into(), Object::array(vals));
+    let ks = Object::lit(Value::Dict(Rc::new(RefCell::new(ks))));
+    let Some((driver, _)) = it.scan_token_from(CELL_DRIVER.as_bytes().to_vec())? else {
+        return Err(PsError::Undefined("kernelarray driver".into()));
+    };
+    let sys = it.systemdict();
+    let driver = substitute(&driver, &ks, &sys.borrow());
+    let Value::Array(body) = &driver.value else {
+        return Err(PsError::Undefined("kernelarray driver".into()));
+    };
+    it.exec_object(Object::exec(Value::Array(body.clone())))
+}
+
+/// `KS .kanext mark i j true` for the next cell to interpret, or `false`.
+fn kanext(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let mut ks = ks.borrow_mut();
+    let k = uint_of(&ks, "K")?;
+    let (w, h) = (uint_of(&ks, "W")?, uint_of(&ks, "H")?);
+    let (i, j) = match ks.get("Pix").map(|o| o.value) {
+        Some(Value::Array(pix)) => {
+            if k.saturating_mul(2).saturating_add(1) >= pix.len() {
+                it.push(Object::bool(false));
+                return Ok(());
+            }
+            match (pix.get(2 * k), pix.get(2 * k + 1)) {
+                (Some(i), Some(j)) => (i, j),
+                _ => return Err(PsError::Rangecheck),
+            }
+        }
+        _ => {
+            if w == 0 || k >= w.saturating_mul(h) {
+                it.push(Object::bool(false));
+                return Ok(());
+            }
+            (Object::int((k % w) as i64), Object::int((k / w) as i64))
+        }
+    };
+    ks.put("K".into(), Object::int(k as i64 + 1));
+    ks.put("Busy".into(), Object::bool(true));
+    it.push(Object::lit(Value::Mark));
+    it.push(i);
+    it.push(j);
+    it.push(Object::bool(true));
+    Ok(())
+}
+
+/// `mark v1 .. vn KS .kaput -`: the current cell's values, each the
+/// integer or real it is (a `typecheck` for anything else, a `rangecheck`
+/// for a wrong count).
+fn kaput(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let mut ks = ks.borrow_mut();
+    let n = uint_of(&ks, "N")?;
+    let w = uint_of(&ks, "W")?;
+    let k = uint_of(&ks, "K")?
+        .checked_sub(1)
+        .ok_or(PsError::Rangecheck)?;
+    let mut vals = Vec::with_capacity(n);
+    loop {
+        let o = it.pop()?;
+        match o.value {
+            Value::Mark => break,
+            Value::Integer(_) | Value::Real(_) => vals.push(o),
+            _ => return Err(PsError::Typecheck),
+        }
+        if vals.len() > n {
+            return Err(PsError::Rangecheck);
+        }
+    }
+    if vals.len() != n {
+        return Err(PsError::Rangecheck);
+    }
+    vals.reverse();
+    ks.put("Busy".into(), Object::bool(false));
+    let cell = match ks.get("Pix").map(|o| o.value) {
+        Some(Value::Array(pix)) => {
+            let at = |x: usize| match pix.get(x).map(|o| o.value) {
+                Some(Value::Integer(v)) => usize::try_from(v).map_err(|_| PsError::Rangecheck),
+                _ => Err(PsError::Typecheck),
+            };
+            at(2 * k + 1)?
+                .checked_mul(w)
+                .and_then(|x| x.checked_add(at(2 * k).ok()?))
+                .ok_or(PsError::Rangecheck)?
+        }
+        _ => k,
+    };
+    let Some(Value::Array(buf)) = ks.get("Buf").map(|o| o.value) else {
+        return Err(PsError::Typecheck);
+    };
+    for (c, v) in vals.into_iter().enumerate() {
+        let x = cell
+            .checked_mul(n)
+            .and_then(|x| x.checked_add(c))
+            .ok_or(PsError::Rangecheck)?;
+        if x < buf.len() {
+            buf.put(x, v)?;
+        }
+    }
+    Ok(())
+}
+
+/// `KS .kadone -`: push the result. A cell left unfinished (`Busy`: it
+/// left the driver's loop with `exit`) is an `invalidexit`, unless only
+/// some cells were being interpreted: then the caller's operands and
+/// dictionaries are put back and the whole grid runs in the interpreter.
+fn kadone(it: &mut Interp) -> Result<(), PsError> {
+    let ks = state(it)?;
+    let busy = matches!(
+        ks.borrow().get("Busy").map(|o| o.value),
+        Some(Value::Boolean(true))
+    );
+    let part = matches!(
+        ks.borrow().get("Pix").map(|o| o.value),
+        Some(Value::Array(_))
+    );
+    let (a, buf) = {
+        let ks = ks.borrow();
+        let Some(Value::Array(buf)) = ks.get("Buf").map(|o| o.value) else {
+            return Err(PsError::Typecheck);
+        };
+        let Some(Value::Array(p)) = ks.get("P").map(|o| o.value) else {
+            return Err(PsError::Typecheck);
+        };
+        let split = matches!(ks.get("Split").map(|o| o.value), Some(Value::Boolean(true)));
+        (
+            Cells {
+                w: uint_of(&ks, "W")?,
+                h: uint_of(&ks, "H")?,
+                proc: p,
+                n: uint_of(&ks, "N")?,
+                split,
+            },
+            buf,
+        )
+    };
+    let need = a.w.checked_mul(a.h).and_then(|x| x.checked_mul(a.n));
+    if !(1..=64).contains(&a.n) || need != Some(buf.len()) {
+        return Err(PsError::Rangecheck);
+    }
+    if busy && part {
+        let mut ks = ks.borrow_mut();
+        let Some(Value::Array(base)) = ks.get("Base").map(|o| o.value) else {
+            return Err(PsError::Typecheck);
+        };
+        let depth = uint_of(&ks, "Depth")?;
+        while it.dict_stack_len() > depth {
+            it.pop_dict()?;
+        }
+        it.ostack.clear();
+        it.ostack.extend(base.snapshot());
+        ks.put("Busy".into(), Object::bool(false));
+        drop(ks);
+        it.kernel_stats.1 -= 1;
+        it.kernel_stats.2 += 1;
+        return cells_fallback(it, a, None);
+    }
+    if busy {
+        return Err(PsError::InvalidExit);
+    }
+    if !a.split {
+        it.push(Object::lit(Value::Array(buf)));
+        return Ok(());
+    }
+    let all = buf.snapshot();
+    let cells = a.w * a.h;
+    for c in 0..a.n {
+        let col: Vec<Object> = (0..cells).map(|x| all[x * a.n + c].clone()).collect();
+        it.push(Object::array(col));
+    }
     Ok(())
 }
