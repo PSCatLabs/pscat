@@ -20,6 +20,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use super::code::{Code, IMM, L};
 use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
@@ -226,6 +227,8 @@ const POLL_STEPS: u64 = 1 << 16;
 /// One worker's machine: a register file and local-array storage.
 pub(crate) struct Machine<'k> {
     k: &'k Kernel,
+    /// The kernel as the executor runs it (#1101).
+    c: &'k Code,
     regs: Vec<Lane>,
     /// Per local array: element values then element tags, `n` lanes each.
     larr: Vec<(Vec<Lane>, Vec<Lane>)>,
@@ -244,9 +247,10 @@ pub(crate) struct Machine<'k> {
 }
 
 impl<'k> Machine<'k> {
-    pub(crate) fn new(k: &'k Kernel, ctl: &'k RunCtl) -> Self {
+    pub(crate) fn new(k: &'k Kernel, c: &'k Code, ctl: &'k RunCtl) -> Self {
         Machine {
             k,
+            c,
             regs: vec![[0.0; LANES]; k.nregs.max(1)],
             larr: k
                 .larrays
@@ -281,8 +285,9 @@ impl<'k> Machine<'k> {
         }
         self.alive.clear();
         self.killed = 0;
-        let k = self.k;
-        self.block(&k.body, mask)?;
+        let (k, c) = (self.k, self.c);
+        let (b0, bn) = (c.body.0 as usize, c.body.1 as usize);
+        self.block(&c.ins[b0..b0 + bn], mask)?;
         let killed = self.killed;
         let nc = k.outputs.len();
         for (c, o) in k.outputs.iter().enumerate() {
@@ -330,14 +335,6 @@ impl<'k> Machine<'k> {
     }
 
     #[inline(always)]
-    fn opnd(&self, o: Op) -> OpRef<'_> {
-        match o {
-            Op::R(r) => OpRef::Lane(&self.regs[r as usize]),
-            Op::Imm(x) => OpRef::Imm(x),
-        }
-    }
-
-    #[inline(always)]
     fn get(&self, o: Op, l: usize) -> f64 {
         match o {
             Op::R(r) => self.regs[r as usize][l],
@@ -370,33 +367,32 @@ impl<'k> Machine<'k> {
 
     /// Run a block for the lanes in `mask`. Returns the lanes still running
     /// at its end (a `Break` inside takes lanes out).
-    fn block(&mut self, b: &[Ins], mut mask: u64) -> Result<u64, Stop> {
-        for ins in b {
+    fn block(&mut self, b: &[L], mut mask: u64) -> Result<u64, Stop> {
+        let mut pc = 0;
+        while let Some(ins) = b.get(pc) {
+            pc += 1;
             mask &= !self.killed;
             if mask == 0 {
                 break;
             }
             self.pending += u64::from(mask.count_ones());
-            match ins {
-                Ins::Mov(d, s) => {
-                    let t = match self.opnd(*s) {
-                        OpRef::Lane(x) => *x,
-                        OpRef::Imm(x) => [x; LANES],
-                    };
-                    self.store(*d, &t, mask);
+            match *ins {
+                L::Mov(d, s) => {
+                    let t = self.w(s).splat();
+                    self.store(d, &t, mask);
                 }
-                Ins::MovI(d, v) => {
-                    let t = [f64::from_bits(*v as u64); LANES];
-                    self.store(*d, &t, mask);
+                L::MovI(d, v) => {
+                    let t = [self.c.consts[(v & !IMM) as usize]; LANES];
+                    self.store(d, &t, mask);
                 }
-                Ins::IBin(op, d, a, b) => {
+                L::IBin(op, d, a, b) => {
                     let mut t = [0.0; LANES];
                     let mut bad = 0u64;
                     match op {
                         IBinOp::Add | IBinOp::Sub | IBinOp::Mul => {
                             // The common hash/arith case: tight loop.
                             for (l, v) in t.iter_mut().enumerate() {
-                                let (x, y) = (self.geti(*a, l), self.geti(*b, l));
+                                let (x, y) = (self.wi(a, l), self.wi(b, l));
                                 let r = match op {
                                     IBinOp::Add => x.checked_add(y),
                                     IBinOp::Sub => x.checked_sub(y),
@@ -410,7 +406,7 @@ impl<'k> Machine<'k> {
                         }
                         _ => {
                             for (l, v) in t.iter_mut().enumerate() {
-                                match lane_ibin(*op, self.geti(*a, l), self.geti(*b, l)) {
+                                match lane_ibin(op, self.wi(a, l), self.wi(b, l)) {
                                     Some(r) => *v = r.bits(),
                                     None => bad |= 1 << l,
                                 }
@@ -423,33 +419,33 @@ impl<'k> Machine<'k> {
                         _ => Why::IntDivide,
                     };
                     self.kill(bad, why as u32);
-                    self.store(*d, &t, mask & !bad);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::IUn(op, d, a) => {
+                L::IUn(op, d, a) => {
                     let mut t = [0.0; LANES];
                     let mut bad = 0u64;
                     for (l, v) in t.iter_mut().enumerate() {
-                        match lane_iun(*op, self.geti(*a, l)) {
+                        match lane_iun(op, self.wi(a, l)) {
                             Some(r) => *v = f64::from_bits(r as u64),
                             None => bad |= 1 << l,
                         }
                     }
                     let bad = bad & mask;
                     self.kill(bad, Why::IntNeg as u32);
-                    self.store(*d, &t, mask & !bad);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::I2F(d, a) => {
+                L::I2F(d, a) => {
                     let mut t = [0.0; LANES];
                     for (l, v) in t.iter_mut().enumerate() {
-                        *v = self.geti(*a, l) as f64;
+                        *v = self.wi(a, l) as f64;
                     }
-                    self.store(*d, &t, mask);
+                    self.store(d, &t, mask);
                 }
-                Ins::I2FExact(d, a) => {
+                L::I2FExact(d, a) => {
                     let mut t = [0.0; LANES];
                     let mut bad = 0u64;
                     for (l, v) in t.iter_mut().enumerate() {
-                        let x = self.geti(*a, l);
+                        let x = self.wi(a, l);
                         *v = x as f64;
                         // Checked as an integer: converting first would
                         // round 2^53 + 1 to 2^53 and pass.
@@ -459,246 +455,77 @@ impl<'k> Machine<'k> {
                     }
                     let bad = bad & mask;
                     self.kill(bad, Why::IntInexact as u32);
-                    self.store(*d, &t, mask & !bad);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::F2I(d, a) => {
+                L::F2I(d, a) => {
                     let mut t = [0.0; LANES];
                     let mut bad = 0u64;
+                    let x = self.w(a);
                     for (l, v) in t.iter_mut().enumerate() {
-                        match real_to_int(self.get(*a, l)) {
+                        match real_to_int(x.at(l)) {
                             Some(r) => *v = f64::from_bits(r as u64),
                             None => bad |= 1 << l,
                         }
                     }
                     let bad = bad & mask;
                     self.kill(bad, Why::CviRange as u32);
-                    self.store(*d, &t, mask & !bad);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::Bin(op, d, a, b) => {
-                    let (t, bad) = self.bin(*op, *a, *b, mask);
-                    self.kill(bad, Why::bin(*op) as u32);
-                    self.store(*d, &t, mask & !bad);
+                L::Bin(op, d, a, b) => {
+                    let (t, bad) = bin(op, self.w(a), self.w(b), mask);
+                    self.kill(bad, Why::bin(op) as u32);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::Un(op, d, a) => {
-                    let (t, bad) = self.un(*op, *a, mask);
-                    self.kill(bad, Why::un(*op) as u32);
-                    self.store(*d, &t, mask & !bad);
+                L::Un(op, d, a) => {
+                    let (t, bad) = un(op, self.w(a), mask);
+                    self.kill(bad, Why::un(op) as u32);
+                    self.store(d, &t, mask & !bad);
                 }
-                Ins::ForFin(d, c, inc, lim) => {
-                    let mut t = [0.0; LANES];
-                    for (l, v) in t.iter_mut().enumerate() {
-                        let (c, inc, lim) = (self.get(*c, l), self.get(*inc, l), self.get(*lim, l));
-                        let fin = if inc >= 0.0 { c > lim } else { c < lim };
-                        *v = f64::from(u8::from(fin));
-                    }
-                    self.store(*d, &t, mask);
-                }
-                Ins::CheckInt(v, tag) => {
+                L::CheckInt(v, tag) => {
+                    let (v, tag) = (self.w(v), self.w(tag));
                     let mut bad = 0;
                     for l in 0..LANES {
-                        if mask >> l & 1 != 0
-                            && self.get(*tag, l) != 0.0
-                            && !within_int(self.get(*v, l))
-                        {
+                        if mask >> l & 1 != 0 && tag.at(l) != 0.0 && !within_int(v.at(l)) {
                             bad |= 1 << l;
                         }
                     }
                     self.kill(bad, Why::IntPast53 as u32);
                 }
-                Ins::NeedInt(tag) => {
+                L::NeedInt(tag) => {
+                    let tag = self.w(tag);
                     let mut bad = 0;
                     for l in 0..LANES {
-                        if mask >> l & 1 != 0 && self.get(*tag, l) == 0.0 {
+                        if mask >> l & 1 != 0 && tag.at(l) == 0.0 {
                             bad |= 1 << l;
                         }
                     }
                     self.kill(bad, Why::NeedInt as u32);
                 }
-                Ins::Assert(c, s) => {
+                L::Assert(c, s) => {
+                    let c = self.w(c);
                     let mut bad = 0;
                     for l in 0..LANES {
-                        if mask >> l & 1 != 0 && self.get(*c, l) == 0.0 {
+                        if mask >> l & 1 != 0 && c.at(l) == 0.0 {
                             bad |= 1 << l;
                         }
                     }
-                    self.kill(bad, site(*s));
+                    self.kill(bad, site(s));
                 }
-                Ins::Gather {
-                    d,
-                    dtag,
-                    table,
-                    row,
-                    rtag,
-                    col,
-                    ctag,
-                } => {
-                    let tb = &self.k.tables[*table as usize];
-                    let mut t = [0.0; LANES];
-                    let mut tt = [0.0; LANES];
-                    let mut bad = 0u64;
-                    let mut null = 0u64;
-                    for l in 0..LANES {
-                        if mask >> l & 1 == 0 {
-                            continue;
-                        }
-                        let (r, c) = (self.get(*row, l), self.get(*col, l));
-                        if self.get(*rtag, l) == 0.0
-                            || self.get(*ctag, l) == 0.0
-                            || !(r >= 0.0 && (r as usize) < tb.rows)
-                            || !(c >= 0.0 && (c as usize) < tb.cols)
-                        {
-                            bad |= 1 << l;
-                            continue;
-                        }
-                        if tb.null_rows.get(r as usize).copied().unwrap_or(false) {
-                            null |= 1 << l;
-                            continue;
-                        }
-                        let ix = r as usize * tb.cols + c as usize;
-                        t[l] = tb.data.at(ix);
-                        if let TableKind::Mixed(tags) = &tb.kind {
-                            tt[l] = tags[ix];
-                        }
-                    }
-                    self.kill(bad, Why::TableIndex as u32);
-                    self.kill(null, Why::TableNull as u32);
-                    let bad = bad | null;
-                    self.store(*d, &t, mask & !bad);
-                    if let Some(dt) = dtag {
-                        self.store(*dt, &tt, mask & !bad);
-                    }
+                L::Ext(n) => {
+                    let c = self.c;
+                    self.ext(&c.ext[n as usize], mask);
                 }
-                Ins::RowCheck(table, row) => {
-                    let tb = &self.k.tables[*table as usize];
-                    let mut bad = 0u64;
-                    for l in 0..LANES {
-                        if mask >> l & 1 == 0 {
-                            continue;
-                        }
-                        let r = self.get(*row, l);
-                        if !(r >= 0.0 && (r as usize) < tb.rows)
-                            || tb.null_rows.get(r as usize).copied().unwrap_or(false)
-                        {
-                            bad |= 1 << l;
-                        }
-                    }
-                    self.kill(bad, Why::RowBad as u32);
-                }
-                Ins::LNew(a) => {
-                    let (vals, tags) = &mut self.larr[*a as usize];
-                    for (v, t) in vals.iter_mut().zip(tags.iter_mut()) {
-                        for l in 0..LANES {
-                            if mask >> l & 1 != 0 {
-                                v[l] = 0.0;
-                                t[l] = NULL_TAG;
-                            }
-                        }
-                    }
-                }
-                Ins::LGet {
-                    d,
-                    dtag,
-                    arr,
-                    idx,
-                    itag,
-                } => {
-                    let mut t = [0.0; LANES];
-                    let mut tt = [0.0; LANES];
-                    let mut bad = 0u64;
-                    let mut null = 0u64;
-                    {
-                        let (vals, tags) = &self.larr[*arr as usize];
-                        for l in 0..LANES {
-                            if mask >> l & 1 == 0 {
-                                continue;
-                            }
-                            let i = self.get(*idx, l);
-                            if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < vals.len())
-                            {
-                                bad |= 1 << l;
-                                continue;
-                            }
-                            let i = i as usize;
-                            if tags[i][l] == NULL_TAG {
-                                null |= 1 << l;
-                                continue;
-                            }
-                            t[l] = vals[i][l];
-                            tt[l] = tags[i][l];
-                        }
-                    }
-                    self.kill(bad, Why::LocalIndex as u32);
-                    self.kill(null, Why::LocalNull as u32);
-                    let bad = bad | null;
-                    self.store(*d, &t, mask & !bad);
-                    self.store(*dtag, &tt, mask & !bad);
-                }
-                Ins::LPut {
-                    arr,
-                    idx,
-                    itag,
-                    v,
-                    vtag,
-                } => {
-                    let n = self.larr[*arr as usize].0.len();
-                    let mut bad = 0u64;
-                    for l in 0..LANES {
-                        if mask >> l & 1 == 0 {
-                            continue;
-                        }
-                        let i = self.get(*idx, l);
-                        if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < n) {
-                            bad |= 1 << l;
-                            continue;
-                        }
-                        let (val, tag) = (self.get(*v, l), self.get(*vtag, l));
-                        let (vals, tags) = &mut self.larr[*arr as usize];
-                        vals[i as usize][l] = val;
-                        tags[i as usize][l] = tag;
-                    }
-                    self.kill(bad, Why::LocalPutIndex as u32);
-                }
-                Ins::Noise { kind, d, a, octtag } => {
-                    let mut outs = [[0.0; LANES]; 3];
-                    let mut bad = 0u64;
-                    let mut real_oct = 0u64;
-                    #[allow(clippy::needless_range_loop)] // lanes index three outputs
-                    for l in 0..LANES {
-                        if mask >> l & 1 == 0 {
-                            continue;
-                        }
-                        if kind.octaves() && self.get(*octtag, l) == 0.0 {
-                            real_oct |= 1 << l;
-                            continue;
-                        }
-                        let mut args = [0.0; 6];
-                        for (x, o) in args.iter_mut().zip(a.iter()) {
-                            *x = self.get(*o, l);
-                        }
-                        match crate::ops::noise::kernel_noise(&self.k.perm, *kind, &args) {
-                            Ok(r) => {
-                                for c in 0..3 {
-                                    outs[c][l] = r[c];
-                                }
-                            }
-                            Err(_) => bad |= 1 << l,
-                        }
-                    }
-                    self.kill(bad, Why::NoiseOperand as u32);
-                    self.kill(real_oct, Why::NeedInt as u32);
-                    let bad = bad | real_oct;
-                    for (c, reg) in d.iter().enumerate().take(kind.outputs()) {
-                        self.store(*reg, &outs[c], mask & !bad);
-                    }
-                }
-                Ins::If(c, t, e) => {
+                L::If(c, tl, el) => {
                     let mut cm = 0u64;
-                    let cr = &self.regs[*c as usize];
+                    let cr = &self.regs[c as usize];
                     for (l, v) in cr.iter().enumerate() {
                         if *v != 0.0 {
                             cm |= 1 << l;
                         }
                     }
+                    let (tl, el) = (tl as usize, el as usize);
+                    let (t, e) = (&b[pc..pc + tl], &b[pc + tl..pc + tl + el]);
+                    pc += tl + el;
                     let (mt, me) = (mask & cm, mask & !cm);
                     if mt != 0 {
                         self.block(t, mt)?;
@@ -708,7 +535,9 @@ impl<'k> Machine<'k> {
                     }
                     mask = self.live(mask);
                 }
-                Ins::Loop(body) => {
+                L::Loop(n) => {
+                    let body = &b[pc..pc + n as usize];
+                    pc += n as usize;
                     self.alive.push(mask);
                     let mut iters = 0u32;
                     loop {
@@ -729,7 +558,7 @@ impl<'k> Machine<'k> {
                     // that left an *outer* loop meanwhile are still out.
                     mask = self.live(mask);
                 }
-                Ins::Call(id) => {
+                L::Call(s, n) => {
                     // A subroutine has no `Break` of its own loops' caller:
                     // the lanes it leaves running are the active ones less
                     // any it retired, as after an `If`.
@@ -740,23 +569,228 @@ impl<'k> Machine<'k> {
                         let charged = std::mem::take(&mut self.pending);
                         self.ctl.poll(charged)?;
                     }
-                    let k = self.k;
-                    self.block(&k.subs[*id as usize].body, mask)?;
+                    let c = self.c;
+                    self.block(&c.ins[s as usize..(s + n) as usize], mask)?;
                     mask = self.live(mask);
                 }
-                Ins::Break => {
+                L::Break => {
                     if let Some(a) = self.alive.last_mut() {
                         *a &= !mask;
                     }
                     return Ok(0);
                 }
-                Ins::Abort(s) => {
-                    self.kill(mask, site(*s));
+                L::Abort(s) => {
+                    self.kill(mask, site(s));
                     return Ok(0);
                 }
             }
         }
         Ok(mask)
+    }
+
+    /// A lowered operand ([`IMM`]).
+    #[inline(always)]
+    fn w(&self, w: u32) -> OpRef<'_> {
+        if w & IMM != 0 {
+            OpRef::Imm(self.c.consts[(w & !IMM) as usize])
+        } else {
+            OpRef::Lane(&self.regs[w as usize])
+        }
+    }
+
+    /// A lowered integer operand: an I64 register's bits, or an
+    /// immediate's value (as [`Machine::geti`]).
+    #[inline(always)]
+    fn wi(&self, w: u32, l: usize) -> i64 {
+        if w & IMM != 0 {
+            self.c.consts[(w & !IMM) as usize] as i64
+        } else {
+            self.regs[w as usize][l].to_bits() as i64
+        }
+    }
+
+    /// Run one of the wide, rarely run instructions ([`L::Ext`]) from its
+    /// IR form for the lanes in `mask`.
+    fn ext(&mut self, ins: &Ins, mask: u64) {
+        match ins {
+            Ins::ForFin(d, c, inc, lim) => {
+                let mut t = [0.0; LANES];
+                for (l, v) in t.iter_mut().enumerate() {
+                    let (c, inc, lim) = (self.get(*c, l), self.get(*inc, l), self.get(*lim, l));
+                    let fin = if inc >= 0.0 { c > lim } else { c < lim };
+                    *v = f64::from(u8::from(fin));
+                }
+                self.store(*d, &t, mask);
+            }
+            Ins::Gather {
+                d,
+                dtag,
+                table,
+                row,
+                rtag,
+                col,
+                ctag,
+            } => {
+                let tb = &self.k.tables[*table as usize];
+                let mut t = [0.0; LANES];
+                let mut tt = [0.0; LANES];
+                let mut bad = 0u64;
+                let mut null = 0u64;
+                for l in 0..LANES {
+                    if mask >> l & 1 == 0 {
+                        continue;
+                    }
+                    let (r, c) = (self.get(*row, l), self.get(*col, l));
+                    if self.get(*rtag, l) == 0.0
+                        || self.get(*ctag, l) == 0.0
+                        || !(r >= 0.0 && (r as usize) < tb.rows)
+                        || !(c >= 0.0 && (c as usize) < tb.cols)
+                    {
+                        bad |= 1 << l;
+                        continue;
+                    }
+                    if tb.null_rows.get(r as usize).copied().unwrap_or(false) {
+                        null |= 1 << l;
+                        continue;
+                    }
+                    let ix = r as usize * tb.cols + c as usize;
+                    t[l] = tb.data.at(ix);
+                    if let TableKind::Mixed(tags) = &tb.kind {
+                        tt[l] = tags[ix];
+                    }
+                }
+                self.kill(bad, Why::TableIndex as u32);
+                self.kill(null, Why::TableNull as u32);
+                let bad = bad | null;
+                self.store(*d, &t, mask & !bad);
+                if let Some(dt) = dtag {
+                    self.store(*dt, &tt, mask & !bad);
+                }
+            }
+            Ins::RowCheck(table, row) => {
+                let tb = &self.k.tables[*table as usize];
+                let mut bad = 0u64;
+                for l in 0..LANES {
+                    if mask >> l & 1 == 0 {
+                        continue;
+                    }
+                    let r = self.get(*row, l);
+                    if !(r >= 0.0 && (r as usize) < tb.rows)
+                        || tb.null_rows.get(r as usize).copied().unwrap_or(false)
+                    {
+                        bad |= 1 << l;
+                    }
+                }
+                self.kill(bad, Why::RowBad as u32);
+            }
+            Ins::LNew(a) => {
+                let (vals, tags) = &mut self.larr[*a as usize];
+                for (v, t) in vals.iter_mut().zip(tags.iter_mut()) {
+                    for l in 0..LANES {
+                        if mask >> l & 1 != 0 {
+                            v[l] = 0.0;
+                            t[l] = NULL_TAG;
+                        }
+                    }
+                }
+            }
+            Ins::LGet {
+                d,
+                dtag,
+                arr,
+                idx,
+                itag,
+            } => {
+                let mut t = [0.0; LANES];
+                let mut tt = [0.0; LANES];
+                let mut bad = 0u64;
+                let mut null = 0u64;
+                {
+                    let (vals, tags) = &self.larr[*arr as usize];
+                    for l in 0..LANES {
+                        if mask >> l & 1 == 0 {
+                            continue;
+                        }
+                        let i = self.get(*idx, l);
+                        if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < vals.len()) {
+                            bad |= 1 << l;
+                            continue;
+                        }
+                        let i = i as usize;
+                        if tags[i][l] == NULL_TAG {
+                            null |= 1 << l;
+                            continue;
+                        }
+                        t[l] = vals[i][l];
+                        tt[l] = tags[i][l];
+                    }
+                }
+                self.kill(bad, Why::LocalIndex as u32);
+                self.kill(null, Why::LocalNull as u32);
+                let bad = bad | null;
+                self.store(*d, &t, mask & !bad);
+                self.store(*dtag, &tt, mask & !bad);
+            }
+            Ins::LPut {
+                arr,
+                idx,
+                itag,
+                v,
+                vtag,
+            } => {
+                let n = self.larr[*arr as usize].0.len();
+                let mut bad = 0u64;
+                for l in 0..LANES {
+                    if mask >> l & 1 == 0 {
+                        continue;
+                    }
+                    let i = self.get(*idx, l);
+                    if self.get(*itag, l) == 0.0 || !(i >= 0.0 && (i as usize) < n) {
+                        bad |= 1 << l;
+                        continue;
+                    }
+                    let (val, tag) = (self.get(*v, l), self.get(*vtag, l));
+                    let (vals, tags) = &mut self.larr[*arr as usize];
+                    vals[i as usize][l] = val;
+                    tags[i as usize][l] = tag;
+                }
+                self.kill(bad, Why::LocalPutIndex as u32);
+            }
+            Ins::Noise { kind, d, a, octtag } => {
+                let mut outs = [[0.0; LANES]; 3];
+                let mut bad = 0u64;
+                let mut real_oct = 0u64;
+                #[allow(clippy::needless_range_loop)] // lanes index three outputs
+                for l in 0..LANES {
+                    if mask >> l & 1 == 0 {
+                        continue;
+                    }
+                    if kind.octaves() && self.get(*octtag, l) == 0.0 {
+                        real_oct |= 1 << l;
+                        continue;
+                    }
+                    let mut args = [0.0; 6];
+                    for (x, o) in args.iter_mut().zip(a.iter()) {
+                        *x = self.get(*o, l);
+                    }
+                    match crate::ops::noise::kernel_noise(&self.k.perm, *kind, &args) {
+                        Ok(r) => {
+                            for c in 0..3 {
+                                outs[c][l] = r[c];
+                            }
+                        }
+                        Err(_) => bad |= 1 << l,
+                    }
+                }
+                self.kill(bad, Why::NoiseOperand as u32);
+                self.kill(real_oct, Why::NeedInt as u32);
+                let bad = bad | real_oct;
+                for (c, reg) in d.iter().enumerate().take(kind.outputs()) {
+                    self.store(*reg, &outs[c], mask & !bad);
+                }
+            }
+            _ => unreachable!("lowered inline: {ins:?}"),
+        }
     }
 
     /// `mask` less the lanes that have left the innermost running loop.
@@ -767,10 +801,12 @@ impl<'k> Machine<'k> {
             None => mask,
         }
     }
+}
 
-    /// The op over the batch, and the active lanes it fails on.
-    fn bin(&self, op: BinOp, a: Op, b: Op, mask: u64) -> (Lane, u64) {
-        let (x, y) = (self.opnd(a), self.opnd(b));
+/// The op over the batch, and the active lanes it fails on.
+#[inline(always)]
+fn bin(op: BinOp, x: OpRef<'_>, y: OpRef<'_>, mask: u64) -> (Lane, u64) {
+    {
         macro_rules! lanes {
             ($f:expr) => {{
                 let f = $f;
@@ -866,9 +902,11 @@ impl<'k> Machine<'k> {
         };
         (t, bad & mask)
     }
+}
 
-    fn un(&self, op: UnOp, a: Op, mask: u64) -> (Lane, u64) {
-        let x = self.opnd(a);
+#[inline(always)]
+fn un(op: UnOp, x: OpRef<'_>, mask: u64) -> (Lane, u64) {
+    {
         let mut t = [0.0; LANES];
         let mut bad = 0u64;
         // Over a whole lane array, so the plain ops vectorize (#1099).

@@ -20,6 +20,7 @@
 //! The design and its measurements: `docs/dev/design/KERNELS.md`.
 
 pub(crate) mod check;
+pub(crate) mod code;
 pub(crate) mod compile;
 pub(crate) mod exec;
 #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
@@ -483,11 +484,12 @@ fn run(
         .take(j1.saturating_sub(j0))
         .collect();
     let queue = Mutex::new(rows.into_iter());
+    let code = code::Code::new(k);
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
     let retired: Mutex<Retired> = Mutex::new((Vec::new(), Vec::new()));
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
     let work = |ctl: &RunCtl| {
-        let mut m = Machine::new(k, ctl);
+        let mut m = Machine::new(k, &code, ctl);
         let mut mine: Vec<(usize, usize)> = Vec::new();
         let mut my_seeds: Vec<(usize, i64)> = Vec::new();
         loop {
@@ -617,7 +619,8 @@ fn final_rand_state(
     }
     let (steps_left, deadline) = it.remaining_budget();
     let ctl = RunCtl::new(deadline, steps_left);
-    let mut m = Machine::new(k, &ctl);
+    let code = code::Code::new(k);
+    let mut m = Machine::new(k, &code, &ctl);
     let mut buf = vec![0u8; LANES * a.ncomp];
     let mut scan = || -> Result<Option<Option<i64>>, Stop> {
         for j in (0..a.h).rev() {
