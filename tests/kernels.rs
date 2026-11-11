@@ -2693,3 +2693,17 @@ fn writes_that_cover_every_lane_keep_each_lanes_values() {
         same(&format!("/{mode} .kernelshare {prog}"));
     }
 }
+
+/// A table read with a constant column and a huge row index: the bad
+/// lanes' index arithmetic must not overflow (a panic under
+/// overflow checks), and they retire as the interpreter's rangecheck
+/// (#1101 review).
+#[test]
+fn a_huge_row_index_into_a_fixed_column_is_a_rangecheck() {
+    same_error(
+        "/aa [[1 2 3] [4 5 6]] def
+         /pixel { /j exch def /i exch def
+           aa i 1000000 mul 1000000 mul 1000000 mul get 0 get 0.1 mul dup dup } bind def",
+        "rangecheck",
+    );
+}

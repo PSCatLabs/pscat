@@ -1019,7 +1019,9 @@ fn gather1<E: Copy + Into<f64>>(
         let x = xv[l];
         let ok = m(x >= 0.0) & m(x < bound);
         okm[l] = ok;
-        ix[l] = ((x as u64) * scale + base) & ok;
+        // Wrapping: a bad lane's x may be huge (the cast saturates), and
+        // its index is masked to 0 anyway; a good lane's cannot wrap.
+        ix[l] = (x as u64).wrapping_mul(scale).wrapping_add(base) & ok;
     }
     let last = (v.len() - 1) as u64;
     for l in 0..LANES {
