@@ -556,6 +556,12 @@ pub(crate) struct Kernel {
     /// What each `Abort` or `Assert` site stands for, with the named
     /// procedures it was compiled in: the report of why pixels retired.
     pub sites: Vec<String>,
+    /// Per body (0 the kernel's, `s + 1` subroutine `s`'s), the positions
+    /// (numbered as `regalloc` numbers them) of the writes that start a
+    /// register's live interval. On the lanes such a write leaves alone the
+    /// register holds nothing live, so the executor may write every lane
+    /// (#1101). Empty when the registers were not allocated.
+    pub fresh: Vec<Vec<u32>>,
 }
 
 impl Kernel {

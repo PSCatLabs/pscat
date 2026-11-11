@@ -1138,6 +1138,7 @@ fn compile_with(
             larrays: std::mem::take(&mut c.larrays),
             perm: it.noise_perm,
             sites: std::mem::take(&mut c.sites),
+            fresh: Vec::new(),
         };
         super::opt::prune_subs(&mut kernel);
         super::opt::dce(&mut kernel);

@@ -389,8 +389,10 @@ fn paint(it: &mut Interp, a: &Args, bytes: Vec<u8>) -> Result<(), PsError> {
     ))
 }
 
-/// The batch's tile, columns by rows (#1101). `PSCAT_KERNEL_TILE=WxH`
-/// overrides it, for measuring.
+/// The batch's tile, columns by rows (#1101): 8x2 ran fewest instructions
+/// on fractal_clouds' scenes (golden_coast: 5% fewer than a row of 16, and
+/// 4x4 in between) and on the gallery's. `PSCAT_KERNEL_TILE=WxH` overrides
+/// it, for measuring.
 fn tile_shape() -> (usize, usize) {
     if let Some((w, h)) = std::env::var("PSCAT_KERNEL_TILE").ok().and_then(|s| {
         let (w, h) = s.split_once('x')?;
@@ -401,7 +403,7 @@ fn tile_shape() -> (usize, usize) {
     {
         return (w, h);
     }
-    (LANES, 1)
+    (LANES / 2, 2)
 }
 
 /// Worker threads for a kernel: `PSCAT_KERNEL_THREADS`, else the cores;

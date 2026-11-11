@@ -21,6 +21,29 @@ use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, UnOp};
 /// Set in an operand for an immediate: the rest indexes [`Code::consts`].
 pub(crate) const IMM: u32 = 1 << 31;
 
+/// Set in a destination register for a write that may cover every lane
+/// ([`Kernel::fresh`]): the executor then skips the blend that keeps the
+/// lanes it does not run.
+pub(crate) const FRESH: u32 = 1 << 31;
+
+/// The one register a straight-line instruction the lowering marks
+/// [`FRESH`] writes.
+pub(crate) fn dest(i: &Ins) -> Option<Reg> {
+    match *i {
+        Ins::Mov(d, _)
+        | Ins::MovI(d, _)
+        | Ins::Bin(_, d, ..)
+        | Ins::Un(_, d, _)
+        | Ins::IBin(_, d, ..)
+        | Ins::IUn(_, d, _)
+        | Ins::I2F(d, _)
+        | Ins::I2FExact(d, _)
+        | Ins::F2I(d, _)
+        | Ins::Gather { d, .. } => Some(d),
+        _ => None,
+    }
+}
+
 /// A lowered instruction. Fields as in [`Ins`]; operands are words (see
 /// [`IMM`]). A block's length counts its instructions, nested ones
 /// included, so the instruction after it is at `pc + 1 + len`.
@@ -92,14 +115,18 @@ impl Code {
             seen: HashMap::new(),
             ext: Vec::new(),
             subs: Vec::with_capacity(k.subs.len()),
+            pos: 1,
+            fresh: &[],
         };
         // A subroutine calls only lower-numbered ones: lowering them in
         // order places each callee before its callers need its address.
-        for s in &k.subs {
+        for (n, s) in k.subs.iter().enumerate() {
+            lw.body(n + 1);
             let start = lw.ins.len() as u32;
             lw.block(&s.body);
             lw.subs.push((start, lw.ins.len() as u32 - start));
         }
+        lw.body(0);
         let start = lw.ins.len() as u32;
         lw.block(&k.body);
         let body = (start, lw.ins.len() as u32 - start);
@@ -115,6 +142,10 @@ impl Code {
 
 struct Lower<'k> {
     k: &'k Kernel,
+    /// The position of the next instruction, numbered as `regalloc` does.
+    pos: usize,
+    /// The current body's [`Kernel::fresh`] positions not yet passed.
+    fresh: &'k [u32],
     gathers: Vec<G1>,
     ins: Vec<L>,
     consts: Vec<f64>,
@@ -167,6 +198,24 @@ impl Lower<'_> {
             .unwrap_or(false)
     }
 
+    /// Start lowering body `g` (see [`Kernel::fresh`]).
+    fn body(&mut self, g: usize) {
+        self.pos = 1;
+        self.fresh = self.k.fresh.get(g).map_or(&[], Vec::as_slice);
+    }
+
+    /// Whether the write at the current position covers every lane.
+    fn is_fresh(&mut self, p: usize) -> bool {
+        while let Some((&f, rest)) = self.fresh.split_first() {
+            if (f as usize) < p {
+                self.fresh = rest;
+            } else {
+                return f as usize == p;
+            }
+        }
+        false
+    }
+
     fn block(&mut self, b: &[Ins]) {
         for i in b {
             self.one(i);
@@ -174,16 +223,20 @@ impl Lower<'_> {
     }
 
     fn one(&mut self, i: &Ins) {
+        let p = self.pos;
+        self.pos += 1;
+        let fresh = !matches!(i, Ins::If(..) | Ins::Loop(_)) && self.is_fresh(p);
+        let fr = |d: Reg| if fresh { d | FRESH } else { d };
         let l = match *i {
-            Ins::Mov(d, a) => L::Mov(d, self.op(a)),
-            Ins::MovI(d, v) => L::MovI(d, self.konst(v as u64)),
-            Ins::Bin(op, d, a, b) => L::Bin(op, d, self.op(a), self.op(b)),
-            Ins::Un(op, d, a) => L::Un(op, d, self.op(a)),
-            Ins::IBin(op, d, a, b) => L::IBin(op, d, self.op(a), self.op(b)),
-            Ins::IUn(op, d, a) => L::IUn(op, d, self.op(a)),
-            Ins::I2F(d, a) => L::I2F(d, self.op(a)),
-            Ins::I2FExact(d, a) => L::I2FExact(d, self.op(a)),
-            Ins::F2I(d, a) => L::F2I(d, self.op(a)),
+            Ins::Mov(d, a) => L::Mov(fr(d), self.op(a)),
+            Ins::MovI(d, v) => L::MovI(fr(d), self.konst(v as u64)),
+            Ins::Bin(op, d, a, b) => L::Bin(op, fr(d), self.op(a), self.op(b)),
+            Ins::Un(op, d, a) => L::Un(op, fr(d), self.op(a)),
+            Ins::IBin(op, d, a, b) => L::IBin(op, fr(d), self.op(a), self.op(b)),
+            Ins::IUn(op, d, a) => L::IUn(op, fr(d), self.op(a)),
+            Ins::I2F(d, a) => L::I2F(fr(d), self.op(a)),
+            Ins::I2FExact(d, a) => L::I2FExact(fr(d), self.op(a)),
+            Ins::F2I(d, a) => L::F2I(fr(d), self.op(a)),
             Ins::CheckInt(v, t) => L::CheckInt(self.op(v), self.op(t)),
             Ins::NeedInt(t) => L::NeedInt(self.op(t)),
             Ins::Assert(c, s) => L::Assert(self.op(c), s),
@@ -203,6 +256,7 @@ impl Lower<'_> {
                 let at = self.ins.len();
                 self.ins.push(L::Break);
                 self.block(body);
+                self.pos += 1;
                 self.ins[at] = L::Loop((self.ins.len() - at - 1) as u32);
                 return;
             }
@@ -250,7 +304,7 @@ impl Lower<'_> {
                 match g {
                     Some((x, g)) => {
                         self.gathers.push(g);
-                        L::Gather1(d, self.gathers.len() as u32 - 1, self.op(x))
+                        L::Gather1(fr(d), self.gathers.len() as u32 - 1, self.op(x))
                     }
                     None => {
                         self.ext.push(i.clone());

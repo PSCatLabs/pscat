@@ -95,6 +95,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
     }
     let mut local = vec![0u32; n];
     let mut count = Vec::with_capacity(groups);
+    let mut fresh = Vec::with_capacity(groups);
     for (g, members) in members.iter().enumerate() {
         let (body, entry, exit): (&Vec<Ins>, Vec<Reg>, Vec<Reg>) = if g == 0 {
             let outs = k
@@ -117,7 +118,9 @@ pub(crate) fn allocate(k: &mut Kernel) {
             members,
             gidx: &gidx,
         };
-        count.push(pack(body, &entry, &exit, &body_of, &mut local));
+        let (c, f) = pack(body, &entry, &exit, &body_of, &mut local);
+        count.push(c);
+        fresh.push(f);
     }
     // Lay the regions out: each past every caller's (callers come first:
     // the kernel's body, then subroutines from the last made).
@@ -154,6 +157,7 @@ pub(crate) fn allocate(k: &mut Kernel) {
         k.owner = own;
     }
     k.nregs = nregs;
+    k.fresh = fresh;
 }
 
 /// Linear scan over the registers of body `g` (those `owner` gives it):
@@ -167,7 +171,9 @@ struct Body<'a> {
     gidx: &'a [u32],
 }
 
-fn pack(body: &[Ins], entry: &[Reg], exit: &[Reg], b: &Body, local: &mut [u32]) -> u32 {
+/// Also returns the positions of the writes that start an interval
+/// ([`Kernel::fresh`]).
+fn pack(body: &[Ins], entry: &[Reg], exit: &[Reg], b: &Body, local: &mut [u32]) -> (u32, Vec<u32>) {
     let Body {
         owner,
         g,
@@ -228,6 +234,28 @@ fn pack(body: &[Ins], entry: &[Reg], exit: &[Reg], b: &Body, local: &mut [u32]) 
             break;
         }
     }
+    // The writes that start an interval. Its register then holds nothing
+    // live on any lane (an interval sharing it ended before; a lane that
+    // reads this value later is one the write, or a later write on that
+    // lane, covers: every read is dominated by a write on its lanes), so
+    // the write may cover every lane. Not a write that also reads its
+    // destination, nor an input's (live from the start).
+    let mut fresh = Vec::new();
+    let mut pos = 1usize;
+    positions(body, &mut pos, &mut |ins, p| {
+        let Some(d) = super::code::dest(ins) else {
+            return;
+        };
+        let du = d as usize;
+        if owner[du] != g || first[gidx[du] as usize] != p {
+            return;
+        }
+        let mut reads_d = false;
+        ins.regs(&mut |r, w| reads_d |= !w && r == d);
+        if !reads_d && let Ok(p) = u32::try_from(p) {
+            fresh.push(p);
+        }
+    });
     // Linear scan.
     let mut order = regs;
     order.sort_by_key(|&r| (first[r], last[r]));
@@ -251,7 +279,27 @@ fn pack(body: &[Ins], entry: &[Reg], exit: &[Reg], b: &Body, local: &mut [u32]) 
         local[members[r]] = reg;
         active.push(std::cmp::Reverse((last[r], reg)));
     }
-    count
+    (count, fresh)
+}
+
+/// Each straight-line instruction of `b` with its position, numbered as
+/// [`walk`] numbers them.
+pub(crate) fn positions(b: &[Ins], pos: &mut usize, f: &mut impl FnMut(&Ins, usize)) {
+    for ins in b {
+        let p = *pos;
+        *pos += 1;
+        match ins {
+            Ins::If(_, t, e) => {
+                positions(t, pos, f);
+                positions(e, pos, f);
+            }
+            Ins::Loop(body) => {
+                positions(body, pos, f);
+                *pos += 1;
+            }
+            other => f(other, p),
+        }
+    }
 }
 
 /// Remove moves into registers nothing reads. A name a loop defines is
@@ -563,6 +611,7 @@ mod tests {
             subs: Vec::new(),
             owner: Vec::new(),
             sites: vec![String::new()],
+            fresh: Vec::new(),
         }
     }
 

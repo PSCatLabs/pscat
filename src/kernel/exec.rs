@@ -20,7 +20,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use super::code::{Code, IMM, L};
+use super::code::{Code, FRESH, IMM, L};
 use super::ir::{BinOp, IBinOp, IUnOp, Ins, Kernel, Op, Reg, Site, TableData, TableKind, UnOp};
 use crate::error::PsError;
 use crate::fmath;
@@ -386,8 +386,8 @@ impl<'k> Machine<'k> {
 
     #[inline(always)]
     fn store(&mut self, d: Reg, t: &Lane, mask: u64) {
-        let dst = &mut self.regs[d as usize];
-        if mask == FULL {
+        let dst = &mut self.regs[(d & !FRESH) as usize];
+        if mask == FULL || d & FRESH != 0 {
             *dst = *t;
         } else {
             // A blend, not a branch per lane: a divergent kernel's masks
