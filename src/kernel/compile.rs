@@ -789,15 +789,26 @@ const RESTORE: &str = "an rrand value given to srand under --sweep-seed (a resto
 /// its first pass while it retries; that, and the compiler's time, are
 /// bounded by `MAX_WORK` and the program's time and step limits. 400k
 /// (#1091): fractal_clouds' evening_lake holds 299k before DCE,
-/// golden_coast 236k.
+/// golden_coast 236k. This is the cap of a compile that inlines everything
+/// (`/never`, and `/auto`'s first pass, which only asks whether the kernel
+/// fits inlined: a larger cap there only makes a kernel too large to
+/// inline fail later, and slower).
 const MAX_INSNS: usize = 400_000;
+/// The same cap for a compile that shares bodies (`/large`, `/all`, and
+/// `/auto`'s retry). It counts code before dead-code removal, and shared
+/// bodies compile without their callers' constants, so it runs well above
+/// the kernel finally kept: fractal_clouds' pnw_coast counts 874k for a
+/// 251k kernel, tropical_island 971k for 232k (#1091 follow-up). 2M, about
+/// 256 MB at 128 bytes an `Ins`.
+const MAX_INSNS_SHARED: usize = 2_000_000;
 /// Upper bound on all the instructions a compile puts in subroutines, as
 /// made (before their DCE), the discarded ones included: subroutines made
-/// in code later rolled back stay for reuse, uncounted by `MAX_INSNS`, so
-/// this bounds what they hold (#1091). 1.6M, 4 x `MAX_INSNS`, about
-/// 205 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
-/// 274k (evening_lake), the kernel gallery none.
-const MAX_SUB_MADE: usize = 1_600_000;
+/// in code later rolled back stay for reuse, uncounted by the size cap, so
+/// this bounds what they hold (#1091). 4M, 2 x `MAX_INSNS_SHARED`, about
+/// 512 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
+/// 900k (tropical_island), the kernel gallery none. `--max-memory` holds
+/// during compilation too.
+const MAX_SUB_MADE: usize = 4_000_000;
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
@@ -874,6 +885,9 @@ pub(crate) struct Compiler<'a> {
     soft: HashMap<Site, String>,
     strict: bool,
     share: ShareMode,
+    /// The size cap for this compile: `MAX_INSNS`, or `MAX_INSNS_SHARED`
+    /// when it shares bodies.
+    max_insns: usize,
     /// Shared subroutines made so far (some may end up unused).
     subs: Vec<Sub>,
     /// How deep calls nest from each subroutine, itself included.
@@ -1041,6 +1055,11 @@ fn compile_with(
         steps_left: it.remaining_budget().0.map(|s| s.saturating_sub(spent)),
         limit: None,
         share,
+        max_insns: if share == ShareMode::Never {
+            MAX_INSNS
+        } else {
+            MAX_INSNS_SHARED
+        },
         subs: Vec::new(),
         sub_depth: Vec::new(),
         owner: Vec::new(),
@@ -1206,7 +1225,7 @@ impl<'a> Compiler<'a> {
                 grouped(self.sub_insns),
                 self.charged.iter().filter(|&&c| c).count(),
                 self.subs.len(),
-                grouped(MAX_INSNS),
+                grouped(self.max_insns),
                 grouped(inline + sub_reach),
                 grouped(inline),
                 grouped(sub_reach),
@@ -1378,13 +1397,13 @@ impl<'a> Compiler<'a> {
     /// subroutines they can reach.
     fn check_size(&self) -> CResult<()> {
         let n = self.emitted + self.sub_insns;
-        if n > MAX_INSNS {
+        if n > self.max_insns {
             return nc(format!(
                 "{TOO_LARGE}: {} instructions counted ({} inline, {} in subroutines), cap {}",
                 grouped(n),
                 grouped(self.emitted),
                 grouped(self.sub_insns),
-                grouped(MAX_INSNS)
+                grouped(self.max_insns)
             ));
         }
         Ok(())

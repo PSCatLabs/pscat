@@ -161,8 +161,13 @@ How it degrades:
   `begin`), `srand` and `rand`, files and graphics, and turning data into
   code (`cvx`, `load`). Any of those anywhere in reach, even in code the
   pixels never run, and a pixel that takes such a branch sends the whole
-  image to the interpreter. The stderr note names what was found and where,
-  and `kernelcompile` says which of the two it will be.
+  image to the interpreter. A few forms are told apart from the text and
+  allowed: stack `3 copy` (an integer just before), `4 array astore` (into
+  the array just made), `/x load`, and a branch a boolean guard never takes,
+  such as `Ready not { setup } if` with `Ready` true, as long as the
+  procedure never defines `/Ready` itself. The stderr note names what was
+  found and where (the first four; `PSCAT_KERNEL_TIMING=1` lists all), and
+  `kernelcompile` says which of the two it will be.
 - **A pixel would raise an error** (a division by zero, a table index out of
   range) **or overflow a 64-bit integer:** only that pixel is interpreted. It
   then raises the real error, at the same pixel, or makes the real result.
@@ -177,9 +182,11 @@ So the picture is always exactly the interpreter's. Only the speed changes.
   that names the reason. `/interpret .kernelmode` always uses the
   interpreter, the reference to compare a render against. `/auto
   .kernelmode` is the default.
-- A very large procedure (past 200,000 compiled instructions, all calls
+- A very large procedure (past 400,000 instructions as compiled, all calls
   inlined) is compiled again with the bodies it calls often shared as
-  subroutines. `/large .kernelshare` asks for that sharing always, and
+  subroutines, with a cap of 2,000,000 instructions as compiled. The count is
+  of code before dead-code removal, so the kernel kept is usually far
+  smaller. `/large .kernelshare` asks for that sharing always, and
   `/never .kernelshare` turns it off. `kernelcompile` reports the
   subroutine count.
 - `PSCAT_KERNEL_TIMING=1` prints the compile and run times and the kernel's

@@ -35,6 +35,23 @@
 //! pixel's own dictionary), or the execution stack (`stop`, `stopped`,
 //! `execstack`), or turns data into code.
 //!
+//! **Three forms are told from the text** (#1093 follow-up, from
+//! fractal_clouds), each by the elements just before it in a procedure:
+//!
+//! - `n copy` with `n` an integer literal is the stack form;
+//! - `n array astore` stores into the array just made;
+//! - `/x load` reads `x`'s binding now, which is added to the universe as
+//!   for an executable `x`;
+//! - `b {..} if`, `b not {..} if` and `b {..} {..} ifelse` with `b` an
+//!   executable name bound to a boolean now: the branch that is not taken
+//!   is left out of the universe, so long as no literal `/b` is in it (a
+//!   pure pixel can only rebind `b` with `def`, which needs one). If one
+//!   turns up, the branches left out are scanned after all.
+//!
+//! Each holds unless a pixel fetches the `copy`, `astore`, `load` or branch out of
+//! its procedure with `get` and runs it apart from what precedes it; a
+//! procedure that does that is not one anyone writes for `kernelimage`.
+//!
 //! What a pure pixel can still do is reach under its own operands, or `exit`
 //! out of the procedure. The per-pixel driver shows a pixel the operands the
 //! whole-image driver does, so the first does the same in both, except when
@@ -154,6 +171,8 @@ pub(crate) fn impurity(it: &Interp, proc: &PsArray, below: &[Object]) -> Option<
         work: 0,
         todo: Vec::new(),
         found: Vec::new(),
+        literals: HashSet::new(),
+        deferred: Vec::new(),
     };
     let top: Option<Rc<str>> = None;
     s.todo
@@ -162,10 +181,32 @@ pub(crate) fn impurity(it: &Interp, proc: &PsArray, below: &[Object]) -> Option<
         s.todo.push((o.clone(), top.clone()));
     }
     s.run();
+    // A branch left out as not taken whose guard a pixel could rebind:
+    // scan it after all, and what it reaches, until nothing changes.
+    loop {
+        let (back, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut s.deferred)
+            .into_iter()
+            .partition(|d| s.literals.contains(&d.0));
+        s.deferred = keep;
+        if back.is_empty() || !s.found.is_empty() {
+            break;
+        }
+        for (_, o, at) in back {
+            s.todo.push((o, at));
+        }
+        s.run();
+    }
+    // `PSCAT_KERNEL_TIMING` lists every reason (#1093 follow-up: the
+    // "and N more" hid which ones a program had left to fix).
+    let max = if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+        usize::MAX
+    } else {
+        MAX_REASONS
+    };
     match s.found.len() {
         0 => None,
-        n if n > MAX_REASONS => Some(format!(
-            "{}; and {} more",
+        n if n > max => Some(format!(
+            "{}; and {} more (PSCAT_KERNEL_TIMING=1 lists them)",
             s.found[..MAX_REASONS].join("; "),
             n - MAX_REASONS
         )),
@@ -188,6 +229,11 @@ struct Scan<'a> {
     /// What makes it impure: one entry per operator (or kind of object).
     found: Vec<String>,
     seen: HashSet<String>,
+    /// Literal names in the universe: a `def` can rebind only these.
+    literals: HashSet<u32>,
+    /// Branches left out as not taken: the guard's name, the branch, and
+    /// where it was reached.
+    deferred: Vec<(u32, Object, Option<Rc<str>>)>,
 }
 
 impl Scan<'_> {
@@ -213,6 +259,9 @@ impl Scan<'_> {
                 | Value::Mark
                 | Value::Null => {}
                 Value::Name(n) => {
+                    if !o.executable {
+                        self.literals.insert(n.id());
+                    }
                     if o.executable
                         && self.names.insert(n.id())
                         && let Some(b) = self.it.load_id(n.id())
@@ -230,8 +279,9 @@ impl Scan<'_> {
                     if self.arrays.insert(id) {
                         let items: Vec<Object> = a.data_rc().borrow().clone();
                         self.work += items.len();
-                        for el in items {
-                            if !is_scalar(&el) {
+                        let skip = self.told(&items, &at);
+                        for (k, el) in items.into_iter().enumerate() {
+                            if !is_scalar(&el) && !skip.contains(&k) {
                                 self.todo.push((el, at.clone()));
                             }
                         }
@@ -260,6 +310,91 @@ impl Scan<'_> {
                 }
             }
         }
+    }
+}
+
+impl Scan<'_> {
+    /// The operator `o` runs: itself, or an executable name's binding now.
+    fn op_of(&self, o: &Object) -> Option<&'static str> {
+        match &o.value {
+            Value::Operator(op) => Some(op.name),
+            Value::Name(n) if o.executable => match self.it.load_id(n.id())?.value {
+                Value::Operator(op) => Some(op.name),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The elements of a procedure that the forms told from the text (see
+    /// the module docs) leave out of the scan; a branch not taken is
+    /// deferred, not dropped.
+    fn told(&mut self, items: &[Object], at: &Option<Rc<str>>) -> HashSet<usize> {
+        let mut skip = HashSet::new();
+        let int = |o: &Object| matches!(o.value, Value::Integer(_));
+        let proc = |o: &Object| o.executable && matches!(o.value, Value::Array(_));
+        for (k, el) in items.iter().enumerate() {
+            match self.op_of(el) {
+                Some("copy") if k >= 1 && int(&items[k - 1]) => {
+                    skip.insert(k);
+                }
+                Some("astore")
+                    if k >= 2
+                        && int(&items[k - 2])
+                        && self.op_of(&items[k - 1]) == Some("array") =>
+                {
+                    skip.insert(k);
+                }
+                Some("load") if k >= 1 => {
+                    if let Value::Name(n) = &items[k - 1].value
+                        && !items[k - 1].executable
+                    {
+                        skip.insert(k);
+                        if self.names.insert(n.id())
+                            && let Some(b) = self.it.load_id(n.id())
+                        {
+                            self.todo.push((b, Some(n.text_rc())));
+                        }
+                    }
+                }
+                Some(op @ ("if" | "ifelse")) => {
+                    let n = if op == "if" { 1 } else { 2 };
+                    if k < n || !items[k - n..k].iter().all(proc) {
+                        continue;
+                    }
+                    let mut g = k - n;
+                    let negate = g >= 1 && self.op_of(&items[g - 1]) == Some("not");
+                    if negate {
+                        g -= 1;
+                    }
+                    let Some(Object {
+                        value: Value::Name(name),
+                        executable: true,
+                        ..
+                    }) = g.checked_sub(1).map(|g| &items[g])
+                    else {
+                        continue;
+                    };
+                    let Some(Value::Boolean(b)) = self.it.load_id(name.id()).map(|o| o.value)
+                    else {
+                        continue;
+                    };
+                    let taken = b != negate;
+                    // `if`: the branch, run when taken. `ifelse`: the first
+                    // when taken, else the second.
+                    let dead = match (n, taken) {
+                        (1, true) => continue,
+                        (1, false) | (2, true) => k - 1,
+                        _ => k - 2,
+                    };
+                    skip.insert(dead);
+                    self.deferred
+                        .push((name.id(), items[dead].clone(), at.clone()));
+                }
+                _ => {}
+            }
+        }
+        skip
     }
 }
 

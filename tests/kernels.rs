@@ -2043,15 +2043,15 @@ fn a_subroutine_counts_what_it_keeps() {
 
 #[test]
 fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
-    // #1091 review: 220 branches each share a different ~8k-instruction
+    // #1091 review: 540 branches each share a different ~8k-instruction
     // procedure, then fail (an `exit` with no loop). None of them counts
     // against the kernel's size, but they are all kept (a later call could
-    // reuse one): ~1.8M made, past the 1.6M cap on what subroutines may
+    // reuse one): ~4.4M made, past the 4M cap on what subroutines may
     // hold. Past it the branches fail as too large; the image stays exact.
     let unrolled = "16 { 16 { 16 { 1.0000001 mul 0.37 add } repeat } repeat } repeat";
     let mut procs = String::new();
     let mut tries = String::new();
-    for p in 0..220 {
+    for p in 0..540 {
         procs += &format!("/q{p} {{ {p} add {unrolled} }} def\n");
         tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
     }
@@ -2064,7 +2064,7 @@ fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
     let (ok, why) = compiles(&prog);
     assert!(ok, "{why}");
     assert!(
-        why.contains("instructions made in subroutines, cap 1,600,000"),
+        why.contains("instructions made in subroutines, cap 4,000,000"),
         "{why}"
     );
     assert!(render("auto", &prog) == render("interpret", &prog));
@@ -2092,11 +2092,14 @@ fn a_shared_retry_with_more_branches_but_none_too_large_is_kept() {
 }
 
 #[test]
-fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
-    // #1091: inlined, the branch (17 calls of a ~30k-instruction `s`) is
-    // too large and becomes an abort; the rest, ~380k instructions called
-    // once each, fits. Shared, the branch fits (~60k), and the rest then
-    // goes over the cap: that kernel is refused. `/auto` keeps the first.
+fn a_shared_retry_has_a_cap_of_its_own() {
+    // #1091 follow-up (fractal_clouds' pnw_coast): inlined, the branch (17
+    // calls of a ~30k-instruction `s`) is too large and becomes an abort;
+    // the rest, ~380k instructions called once each, fits. Shared, the
+    // branch fits (~60k), and the whole (~440k) is over the inlined cap but
+    // under the shared one, so `/auto` keeps the shared kernel, with no
+    // branch too large. (Under one cap for both it was refused, and the
+    // first pass's abort stood.)
     let calls = "s ".repeat(17);
     let once: String = (0..19).map(|p| format!("t{p} ")).collect();
     let prog = format!(
@@ -2109,9 +2112,8 @@ fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
     );
     let (ok, why) = compiles(&prog);
     assert!(ok, "{why}");
-    let why = why.replace('\\', "");
-    assert!(!why.contains("shared subroutines"), "{why}");
-    assert_eq!(why.matches("the kernel is too large").count(), 1, "{why}");
+    assert!(why.contains("shared subroutines"), "{why}");
+    assert!(!why.contains("too large"), "{why}");
 }
 
 // --- soft branches: per-pixel or whole-image fallback (#1093) ----------------
@@ -2346,6 +2348,59 @@ fn a_soft_branch_under_bands_runs_the_whole_image() {
             (out.status.success(), err, std::fs::read(&png).ok())
         };
         assert_eq!(run("auto"), run("interpret"), "{body}");
+    }
+}
+
+#[test]
+fn forms_told_from_the_text_keep_a_soft_branch_pure() {
+    // #1093 follow-up (fractal_clouds): stack `n copy`, `n array astore`,
+    // `/x load`, and a branch a boolean guard never takes.
+    for (pre, body) in [
+        (
+            "",
+            "i 2 lt { count pop 0.1 0.2 2 copy pop pop pop } { i 0.25 mul } ifelse",
+        ),
+        (
+            "",
+            "i 2 lt { count pop 1 2 3 3 array astore length 0.1 mul } { 0.5 } ifelse",
+        ),
+        (
+            "/f { 0.5 mul } def",
+            "i 2 lt { count pop 0.4 /f load exec } { 0.3 } ifelse",
+        ),
+        (
+            "/G [0.5] def /Done true def",
+            "Done not { G 0 0.9 put } if i 2 lt { count pop 0.3 } { G 0 get } ifelse",
+        ),
+        (
+            "/G [0.5] def /Off false def",
+            "Off { G 0 0.9 put } { i 2 lt { count pop 0.3 } { G 0 get } ifelse } ifelse",
+        ),
+    ] {
+        let src = soft_prog(pre, body);
+        let (out, _, stats) = soft_same(&src);
+        assert!(out.is_ok(), "{out:?}\n{src}");
+        assert_eq!(stats, PER_PIXEL, "{src}");
+    }
+    // The same forms where the write is real: composite `copy`, `load` of
+    // a procedure that writes, a guard a pixel can rebind.
+    for (pre, body) in [
+        (
+            "/G [0 0] def",
+            "i 0 eq { count pop [0.7 0.7] G copy pop } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /f { G 0 0.9 put } def",
+            "i 0 eq { count pop /f load exec } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /Done true def",
+            "i 0 eq { count pop /Done false def } if Done not { G 0 0.9 put } if G 0 get",
+        ),
+    ] {
+        let src = soft_prog(pre, body);
+        let (_, _, stats) = soft_same(&src);
+        assert_eq!(stats, WHOLE, "{src}");
     }
 }
 
