@@ -85,6 +85,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "kernelimage", kernelimage);
     op(dict, "kernelcompile", kernelcompile);
     op(dict, ".kernelshare", kernelshare);
+    op(dict, ".kernelcaps", kernelcaps);
     op(dict, ".kernelmode", kernelmode);
     op(dict, ".kernelstats", kernelstats);
     // The drivers' own helpers (`.kfstore` and the rest) are not installed:
@@ -806,6 +807,28 @@ fn kernelshare(it: &mut Interp) -> Result<(), PsError> {
         "all" => compile::ShareMode::All,
         _ => return Err(PsError::Rangecheck),
     };
+    Ok(())
+}
+
+/// `inline shared made .kernelcaps -`: the compiler's size caps, in
+/// instructions (#1091): an inlining compile's, a sharing compile's, and
+/// what subroutines may hold as made. 0 restores a cap's default, and none
+/// may exceed it, so a program cannot raise what a compile may hold. A
+/// test hook, so the tests reach the caps with small programs.
+fn kernelcaps(it: &mut Interp) -> Result<(), PsError> {
+    let mut caps = [0usize; 3];
+    for k in (0..3).rev() {
+        let v = it.pop()?;
+        let Value::Integer(n) = v.value else {
+            return Err(PsError::Typecheck);
+        };
+        caps[k] = match n {
+            0 => compile::DEFAULT_CAPS[k],
+            n if n > 0 => (n as usize).min(compile::DEFAULT_CAPS[k]),
+            _ => return Err(PsError::Rangecheck),
+        };
+    }
+    it.kernel_caps = caps;
     Ok(())
 }
 

@@ -2043,20 +2043,21 @@ fn a_subroutine_counts_what_it_keeps() {
 
 #[test]
 fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
-    // #1091 review: 220 branches each share a different ~8k-instruction
+    // #1091 review: 60 branches each share a different ~8k-instruction
     // procedure, then fail (an `exit` with no loop). None of them counts
     // against the kernel's size, but they are all kept (a later call could
-    // reuse one): ~1.8M made, past the 1.6M cap on what subroutines may
-    // hold. Past it the branches fail as too large; the image stays exact.
+    // reuse one): ~490k made, past a cap of 400k (`.kernelcaps`; 4M by
+    // default) on what subroutines may hold. Past it the branches fail as
+    // too large; the image stays exact.
     let unrolled = "16 { 16 { 16 { 1.0000001 mul 0.37 add } repeat } repeat } repeat";
     let mut procs = String::new();
     let mut tries = String::new();
-    for p in 0..220 {
+    for p in 0..60 {
         procs += &format!("/q{p} {{ {p} add {unrolled} }} def\n");
         tries += &format!("i {p} eq {{ x q{p} exit }} if\n");
     }
     let prog = format!(
-        "/all .kernelshare {SHOW} {procs}
+        "/all .kernelshare 0 0 400000 .kernelcaps {SHOW} {procs}
          /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
            {tries}
            x show3 }} def"
@@ -2064,7 +2065,7 @@ fn subroutines_made_in_discarded_code_have_a_cap_of_their_own() {
     let (ok, why) = compiles(&prog);
     assert!(ok, "{why}");
     assert!(
-        why.contains("instructions made in subroutines, cap 1,600,000"),
+        why.contains("instructions made in subroutines, cap 400,000"),
         "{why}"
     );
     assert!(render("auto", &prog) == render("interpret", &prog));
@@ -2092,15 +2093,41 @@ fn a_shared_retry_with_more_branches_but_none_too_large_is_kept() {
 }
 
 #[test]
-fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
-    // #1091: inlined, the branch (17 calls of a ~30k-instruction `s`) is
-    // too large and becomes an abort; the rest, ~380k instructions called
-    // once each, fits. Shared, the branch fits (~60k), and the rest then
-    // goes over the cap: that kernel is refused. `/auto` keeps the first.
+fn a_shared_retry_has_a_cap_of_its_own() {
+    // #1091 follow-up (fractal_clouds' pnw_coast): inlined, the branch (17
+    // calls of a ~30k-instruction `s`) is too large and becomes an abort;
+    // the rest, ~380k instructions called once each, fits. Shared, the
+    // branch fits (~60k), and the whole (~440k) is over the inlined cap but
+    // under the shared one, so `/auto` keeps the shared kernel, with no
+    // branch too large. (Under one cap for both it was refused, and the
+    // first pass's abort stood.)
     let calls = "s ".repeat(17);
     let once: String = (0..19).map(|p| format!("t{p} ")).collect();
     let prog = format!(
         "{} {}
+         /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
+           j 1 ge {{ x {calls} /x exch def }} if
+           x {once} 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
+        big_procs("s", "", 1, 15_000).replace("/s0 ", "/s "),
+        big_procs("t", "", 19, 10_000)
+    );
+    let (ok, why) = compiles(&prog);
+    assert!(ok, "{why}");
+    assert!(why.contains("shared subroutines"), "{why}");
+    assert!(!why.contains("too large"), "{why}");
+}
+
+#[test]
+fn a_shared_retry_that_is_refused_keeps_the_inlined_kernel() {
+    // #1091: inlined, the branch (17 calls of a ~30k-instruction `s`) is
+    // too large and becomes an abort; the rest, ~380k instructions called
+    // once each, fits. Shared, the branch fits (~60k), and the rest then
+    // goes over the shared cap, here set to the inlined one's 400k
+    // (`.kernelcaps`): that kernel is refused. `/auto` keeps the first.
+    let calls = "s ".repeat(17);
+    let once: String = (0..19).map(|p| format!("t{p} ")).collect();
+    let prog = format!(
+        "0 400000 0 .kernelcaps {} {}
          /pixel {{ /j exch def /i exch def /x i j add 0.5 mul def
            j 1 ge {{ x {calls} /x exch def }} if
            x {once} 0.001 mul dup floor sub i 0.01 mul j 0.1 mul }} def",
@@ -2346,6 +2373,44 @@ fn a_soft_branch_under_bands_runs_the_whole_image() {
             (out.status.success(), err, std::fs::read(&png).ok())
         };
         assert_eq!(run("auto"), run("interpret"), "{body}");
+    }
+}
+
+#[test]
+fn forms_that_cannot_be_told_from_the_text_interpret_the_whole_image() {
+    // #1093 follow-up review: each looks harmless as text, and each writes
+    // a global through a rebound `array`, a guard rebound with a string key
+    // or a name fetched from a procedure, an operator fetched with `get`,
+    // or `load` of a string.
+    for (pre, body) in [
+        (
+            "/G [0.5] def",
+            "i 0 eq { count pop /array { pop G } def } if 0.9 1 array astore pop G 0 get",
+        ),
+        (
+            "/G [0.5] def /Done false def",
+            "i 0 eq { count pop (Done) true def } if Done { G 0 0.9 put } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /Done false def",
+            "i 0 eq { count pop {Done} 0 get true def } if Done { G 0 0.9 put } if G 0 get",
+        ),
+        (
+            "/G [0 0] def",
+            "i 0 eq { count pop [0.7 0.7] G {2 copy} 1 get exec pop } if G 0 get",
+        ),
+        (
+            "/G [0.5] def",
+            "i 0 eq { count pop G 0 0.9 (put) load exec } if G 0 get",
+        ),
+        (
+            "/G [0.5] def /F { G 0 0.9 put } def",
+            "i 0 eq { count pop (F) load exec } if G 0 get",
+        ),
+    ] {
+        let src = soft_prog(pre, body);
+        let (_, _, stats) = soft_same(&src);
+        assert_eq!(stats, WHOLE, "{src}");
     }
 }
 

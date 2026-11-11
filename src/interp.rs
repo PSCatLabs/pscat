@@ -420,6 +420,8 @@ pub struct Interp {
     pub(crate) kernel_mode: crate::kernel::KernelMode,
     /// `.kernelshare`: when the kernel compiler shares procedure bodies.
     pub(crate) kernel_share: crate::kernel::compile::ShareMode,
+    /// `.kernelcaps`: the kernel compiler's size caps (a test hook).
+    pub(crate) kernel_caps: [usize; 3],
     /// Reasons a `kernelimage` procedure did not compile, each noted once.
     pub(crate) kernel_notes: std::collections::HashSet<String>,
     /// `kernelimage` calls finished by the compiled path, by it with some
@@ -599,6 +601,7 @@ impl Interp {
             page_device_notes: std::collections::HashSet::new(),
             kernel_mode: crate::kernel::KernelMode::Auto,
             kernel_share: crate::kernel::compile::ShareMode::Auto,
+            kernel_caps: crate::kernel::compile::DEFAULT_CAPS,
             kernel_notes: std::collections::HashSet::new(),
             kernel_stats: (0, 0, 0),
             steps_used: 0,
@@ -1048,6 +1051,14 @@ impl Interp {
     /// Heap bytes the process has gained since `set_limits`.
     fn heap_growth(&self) -> usize {
         crate::memtrack::live_bytes().saturating_sub(self.mem_base)
+    }
+
+    /// The heap has grown past `--max-memory` (the kernel compiler's look,
+    /// between interpreter steps).
+    pub(crate) fn memory_exceeded(&self) -> bool {
+        self.limits
+            .max_memory
+            .is_some_and(|max| self.heap_growth() > max)
     }
 
     /// The limits' look during a whole-file read (issue #702, `file::

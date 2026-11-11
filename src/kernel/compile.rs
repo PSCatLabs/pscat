@@ -731,14 +731,14 @@ struct Frame {
     low: usize,
     /// Deepest stack the body made (checked against the symbolic cap).
     high: usize,
-    ids: HashSet<u32>,
+    ids: HashSet<u32, IdHashBuilder>,
     /// Names it defined without reading them first: not part of the
     /// key (a `def` does not look at what it replaces), but outputs.
     /// (by scope uid and name: a def lands in the scope then on top, and
     /// is an output even when it writes the value already there).
     wids: HashSet<(u32, u32)>,
     /// The names in `wids`.
-    wnames: HashSet<u32>,
+    wnames: HashSet<u32, IdHashBuilder>,
     /// Registers made before the body.
     reg_base: u32,
     loops: usize,
@@ -789,15 +789,30 @@ const RESTORE: &str = "an rrand value given to srand under --sweep-seed (a resto
 /// its first pass while it retries; that, and the compiler's time, are
 /// bounded by `MAX_WORK` and the program's time and step limits. 400k
 /// (#1091): fractal_clouds' evening_lake holds 299k before DCE,
-/// golden_coast 236k.
+/// golden_coast 236k. This is the cap of a compile that inlines everything
+/// (`/never`, and `/auto`'s first pass, which only asks whether the kernel
+/// fits inlined: a larger cap there only makes a kernel too large to
+/// inline fail later, and slower).
 const MAX_INSNS: usize = 400_000;
+/// The same cap for a compile that shares bodies (`/large`, `/all`, and
+/// `/auto`'s retry). It counts code before dead-code removal, and shared
+/// bodies compile without their callers' constants, so it runs well above
+/// the kernel finally kept: fractal_clouds' pnw_coast counts 874k for a
+/// 251k kernel, tropical_island 971k for 232k (#1091 follow-up). 2M, about
+/// 256 MB at 128 bytes an `Ins`.
+const MAX_INSNS_SHARED: usize = 2_000_000;
 /// Upper bound on all the instructions a compile puts in subroutines, as
 /// made (before their DCE), the discarded ones included: subroutines made
-/// in code later rolled back stay for reuse, uncounted by `MAX_INSNS`, so
-/// this bounds what they hold (#1091). 1.6M, 4 x `MAX_INSNS`, about
-/// 205 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
-/// 274k (evening_lake), the kernel gallery none.
-const MAX_SUB_MADE: usize = 1_600_000;
+/// in code later rolled back stay for reuse, uncounted by the size cap, so
+/// this bounds what they hold (#1091). 4M, 2 x `MAX_INSNS_SHARED`, about
+/// 512 MB at 128 bytes an `Ins`; fractal_clouds' scenes make at most
+/// 900k (tropical_island), the kernel gallery none. `--max-memory` is
+/// looked at during compilation too (`Compiler::charge`).
+const MAX_SUB_MADE: usize = 4_000_000;
+/// The three caps above, the default of `.kernelcaps` (a test hook: the
+/// tests reach the caps with small programs, not with half a gigabyte; it
+/// can only lower them).
+pub(crate) const DEFAULT_CAPS: [usize; 3] = [MAX_INSNS, MAX_INSNS_SHARED, MAX_SUB_MADE];
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
@@ -874,6 +889,9 @@ pub(crate) struct Compiler<'a> {
     soft: HashMap<Site, String>,
     strict: bool,
     share: ShareMode,
+    /// The size cap for this compile: `MAX_INSNS`, or `MAX_INSNS_SHARED`
+    /// when it shares bodies.
+    max_insns: usize,
     /// Shared subroutines made so far (some may end up unused).
     subs: Vec<Sub>,
     /// How deep calls nest from each subroutine, itself included.
@@ -1041,6 +1059,11 @@ fn compile_with(
         steps_left: it.remaining_budget().0.map(|s| s.saturating_sub(spent)),
         limit: None,
         share,
+        max_insns: if share == ShareMode::Never {
+            it.kernel_caps[0]
+        } else {
+            it.kernel_caps[1]
+        },
         subs: Vec::new(),
         sub_depth: Vec::new(),
         owner: Vec::new(),
@@ -1206,13 +1229,13 @@ impl<'a> Compiler<'a> {
                 grouped(self.sub_insns),
                 self.charged.iter().filter(|&&c| c).count(),
                 self.subs.len(),
-                grouped(MAX_INSNS),
+                grouped(self.max_insns),
                 grouped(inline + sub_reach),
                 grouped(inline),
                 grouped(sub_reach),
                 reach.iter().filter(|&&r| r).count(),
                 grouped(self.sub_made),
-                grouped(MAX_SUB_MADE),
+                grouped(self.it.kernel_caps[2]),
             );
         }
         Ok(())
@@ -1378,13 +1401,13 @@ impl<'a> Compiler<'a> {
     /// subroutines they can reach.
     fn check_size(&self) -> CResult<()> {
         let n = self.emitted + self.sub_insns;
-        if n > MAX_INSNS {
+        if n > self.max_insns {
             return nc(format!(
                 "{TOO_LARGE}: {} instructions counted ({} inline, {} in subroutines), cap {}",
                 grouped(n),
                 grouped(self.emitted),
                 grouped(self.sub_insns),
-                grouped(MAX_INSNS)
+                grouped(self.max_insns)
             ));
         }
         Ok(())
@@ -1690,6 +1713,12 @@ impl<'a> Compiler<'a> {
                 self.limit = Some(crate::error::PsError::TimeExceeded);
                 return nc("limit");
             }
+            // The caps bound what a compile holds (hundreds of MB at most),
+            // `--max-memory` what this program may.
+            if self.it.memory_exceeded() {
+                self.limit = Some(crate::error::PsError::MemoryExceeded);
+                return nc("limit");
+            }
         }
         Ok(())
     }
@@ -1921,9 +1950,9 @@ impl<'a> Compiler<'a> {
             entry: self.st.clone(),
             low: len,
             high: len,
-            ids: HashSet::new(),
+            ids: HashSet::default(),
             wids: HashSet::new(),
-            wnames: HashSet::new(),
+            wnames: HashSet::default(),
             reg_base: self.nregs,
             loops: self.loops.len(),
             larrays: self.larrays.len(),
@@ -2074,11 +2103,11 @@ impl<'a> Compiler<'a> {
         // one made in code since discarded), counted or not: their total
         // has a looser cap of its own.
         let made = super::ir::count(&self.code[f.code_start..]);
-        if self.sub_made + made > MAX_SUB_MADE {
+        if self.sub_made + made > self.it.kernel_caps[2] {
             return nc(format!(
                 "{TOO_LARGE}: {} instructions made in subroutines, cap {}",
                 grouped(self.sub_made + made),
-                grouped(MAX_SUB_MADE)
+                grouped(self.it.kernel_caps[2])
             ));
         }
         // Move the code out, the inputs it reads renamed to parameters.
@@ -2485,9 +2514,18 @@ impl<'a> Compiler<'a> {
             .into_iter()
             .filter(|(d, s, _)| *s != Op::R(*d))
             .collect();
-        let hazard = pairs
-            .iter()
-            .any(|(_, s, _)| pairs.iter().any(|(d, _, _)| s.uses(*d)));
+        // A source some move writes first (linear: a join can merge
+        // hundreds of names).
+        let hazard = if pairs.len() < 16 {
+            pairs
+                .iter()
+                .any(|(_, s, _)| pairs.iter().any(|(d, _, _)| s.uses(*d)))
+        } else {
+            let dests: HashSet<Reg> = pairs.iter().map(|p| p.0).collect();
+            pairs
+                .iter()
+                .any(|(_, s, _)| matches!(s, Op::R(r) if dests.contains(r)))
+        };
         if hazard {
             let mut tmps = Vec::new();
             for (_, s, int) in &pairs {
@@ -2526,7 +2564,29 @@ impl<'a> Compiler<'a> {
         // The merged slots, set on `a` once the slots are all read.
         let mut sets: Vec<(Slot, Binding)> = Vec::new();
         let (mut ma, mut mb) = (Moves::default(), Moves::default());
+        // Kernel scopes neither branch changed (still sharing their names):
+        // every name there holds one binding on both paths.
+        let untouched: Vec<bool> = a
+            .scopes
+            .iter()
+            .zip(&b.scopes)
+            .map(|(x, y)| {
+                j.valid[1] && matches!(x.kind, ScopeKind::Local) && Rc::ptr_eq(&x.names, &y.names)
+            })
+            .collect();
+        let sharing = !self.frames.is_empty();
         for (i, &sl) in j.slots.iter().enumerate() {
+            if let Slot::Bind(_, id) = sl
+                && untouched.get(j.scope[i]).copied().unwrap_or(false)
+            {
+                if sharing
+                    && self.frames.iter().any(|f| f.wnames.contains(&id))
+                    && let Some(x) = j.binding(i, 0, &a)
+                {
+                    self.touch_equal_join_b(sl, x)?;
+                }
+                continue;
+            }
             // Most names hold the same binding on both paths: compared in
             // place, not copied out.
             if let (Some(x), Some(y)) = (j.binding(i, 0, &a), j.binding(i, 1, &b))

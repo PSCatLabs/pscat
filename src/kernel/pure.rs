@@ -35,6 +35,12 @@
 //! pixel's own dictionary), or the execution stack (`stop`, `stopped`,
 //! `execstack`), or turns data into code.
 //!
+//! Nothing is told from the text (#1093 follow-up, after review): `n copy`
+//! may be fetched with `get` and run on composites, `array` and a branch's
+//! guard may be rebound (a string key, or a name fetched from a
+//! procedure), and `load` takes strings and numbers as keys, so each could
+//! reach or write what no scan has seen.
+//!
 //! What a pure pixel can still do is reach under its own operands, or `exit`
 //! out of the procedure. The per-pixel driver shows a pixel the operands the
 //! whole-image driver does, so the first does the same in both, except when
@@ -162,10 +168,17 @@ pub(crate) fn impurity(it: &Interp, proc: &PsArray, below: &[Object]) -> Option<
         s.todo.push((o.clone(), top.clone()));
     }
     s.run();
+    // `PSCAT_KERNEL_TIMING` lists every reason (#1093 follow-up: the
+    // "and N more" hid which ones a program had left to fix).
+    let max = if std::env::var_os("PSCAT_KERNEL_TIMING").is_some() {
+        usize::MAX
+    } else {
+        MAX_REASONS
+    };
     match s.found.len() {
         0 => None,
-        n if n > MAX_REASONS => Some(format!(
-            "{}; and {} more",
+        n if n > max => Some(format!(
+            "{}; and {} more (PSCAT_KERNEL_TIMING=1 lists them)",
             s.found[..MAX_REASONS].join("; "),
             n - MAX_REASONS
         )),
