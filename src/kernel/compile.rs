@@ -731,14 +731,14 @@ struct Frame {
     low: usize,
     /// Deepest stack the body made (checked against the symbolic cap).
     high: usize,
-    ids: HashSet<u32>,
+    ids: HashSet<u32, IdHashBuilder>,
     /// Names it defined without reading them first: not part of the
     /// key (a `def` does not look at what it replaces), but outputs.
     /// (by scope uid and name: a def lands in the scope then on top, and
     /// is an output even when it writes the value already there).
     wids: HashSet<(u32, u32)>,
     /// The names in `wids`.
-    wnames: HashSet<u32>,
+    wnames: HashSet<u32, IdHashBuilder>,
     /// Registers made before the body.
     reg_base: u32,
     loops: usize,
@@ -1940,9 +1940,9 @@ impl<'a> Compiler<'a> {
             entry: self.st.clone(),
             low: len,
             high: len,
-            ids: HashSet::new(),
+            ids: HashSet::default(),
             wids: HashSet::new(),
-            wnames: HashSet::new(),
+            wnames: HashSet::default(),
             reg_base: self.nregs,
             loops: self.loops.len(),
             larrays: self.larrays.len(),
@@ -2504,9 +2504,18 @@ impl<'a> Compiler<'a> {
             .into_iter()
             .filter(|(d, s, _)| *s != Op::R(*d))
             .collect();
-        let hazard = pairs
-            .iter()
-            .any(|(_, s, _)| pairs.iter().any(|(d, _, _)| s.uses(*d)));
+        // A source some move writes first (linear: a join can merge
+        // hundreds of names).
+        let hazard = if pairs.len() < 16 {
+            pairs
+                .iter()
+                .any(|(_, s, _)| pairs.iter().any(|(d, _, _)| s.uses(*d)))
+        } else {
+            let dests: HashSet<Reg> = pairs.iter().map(|p| p.0).collect();
+            pairs
+                .iter()
+                .any(|(_, s, _)| matches!(s, Op::R(r) if dests.contains(r)))
+        };
         if hazard {
             let mut tmps = Vec::new();
             for (_, s, int) in &pairs {
@@ -2545,7 +2554,29 @@ impl<'a> Compiler<'a> {
         // The merged slots, set on `a` once the slots are all read.
         let mut sets: Vec<(Slot, Binding)> = Vec::new();
         let (mut ma, mut mb) = (Moves::default(), Moves::default());
+        // Kernel scopes neither branch changed (still sharing their names):
+        // every name there holds one binding on both paths.
+        let untouched: Vec<bool> = a
+            .scopes
+            .iter()
+            .zip(&b.scopes)
+            .map(|(x, y)| {
+                j.valid[1] && matches!(x.kind, ScopeKind::Local) && Rc::ptr_eq(&x.names, &y.names)
+            })
+            .collect();
+        let sharing = !self.frames.is_empty();
         for (i, &sl) in j.slots.iter().enumerate() {
+            if let Slot::Bind(_, id) = sl
+                && untouched.get(j.scope[i]).copied().unwrap_or(false)
+            {
+                if sharing
+                    && self.frames.iter().any(|f| f.wnames.contains(&id))
+                    && let Some(x) = j.binding(i, 0, &a)
+                {
+                    self.touch_equal_join_b(sl, x)?;
+                }
+                continue;
+            }
             // Most names hold the same binding on both paths: compared in
             // place, not copied out.
             if let (Some(x), Some(y)) = (j.binding(i, 0, &a), j.binding(i, 1, &b))
