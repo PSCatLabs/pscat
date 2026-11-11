@@ -348,3 +348,29 @@ fn a_glyph_that_falls_back_mid_show_splits_the_run_in_paint_order() {
     let second = svg.rfind("<text ").expect("second run");
     assert!(first < path && path < second, "{svg}");
 }
+
+#[test]
+fn blended_or_translucent_glyphs_stay_one_element_each() {
+    // The raster composites glyph by glyph, so an overlap blends twice.
+    // One element per glyph keeps that in the SVG (Codex review, #1119).
+    for (what, setup) in [
+        ("multiply", "/Multiply setblendmode"),
+        ("alpha", "0.5 setalpha"),
+    ] {
+        let svg = text_svg(&format!(
+            "{setup} 0.5 setgray /Helvetica findfont 40 scalefont setfont \
+             30 50 moveto (H) show 30 50 moveto (H) show 30 100 moveto (ab) show"
+        ));
+        let t = texts(&svg);
+        assert_eq!(
+            t.iter().map(|t| content(t)).collect::<Vec<_>>(),
+            ["H", "H", "a", "b"],
+            "{what}: {svg}"
+        );
+    }
+    // Opaque Normal text still runs together.
+    let svg = text_svg(
+        "0.5 setgray /Helvetica findfont 40 scalefont setfont 30 50 moveto (H) show 30 50 moveto (H) show",
+    );
+    assert_eq!(texts(&svg).len(), 1, "{svg}");
+}

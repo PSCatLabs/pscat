@@ -202,6 +202,12 @@ impl TextRun {
     /// continues this run. Anything that changes how the run renders
     /// (face, size, frame, colour, alpha or blend, clip, baseline) starts
     /// a new one.
+    ///
+    /// A glyph painted with alpha or a blend mode never joins a run. The
+    /// raster composites each glyph on its own, so where two glyphs overlap
+    /// the second blends over the first; a viewer composites one element (or
+    /// its blend group) once, which would lose that overlap. One element per
+    /// glyph keeps it, as one `<path>` per glyph did.
     pub(crate) fn accepts(
         &self,
         g: &GlyphText,
@@ -215,7 +221,8 @@ impl TextRun {
             (Some(a), Some(b)) => Rc::ptr_eq(a, b),
             _ => false,
         };
-        self.fid == g.fid
+        comp.is_default()
+            && self.fid == g.fid
             && (self.size - p.size).abs() <= self.size * FRAME_EPS
             && self
                 .frame
