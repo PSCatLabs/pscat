@@ -202,10 +202,10 @@ fn sin_cos_lanes<const COS: bool>(xd: &Lane, t: &mut Lane) -> u64 {
 /// `sin` (`cos`) of degrees over the batch, as `lane_un`: `fmath::sin` of
 /// `to_radians`. Returns the lanes left for the exact code: NaN, the
 /// infinities and |x| past about 9.4e7 degrees.
-// Out of line: inside `Machine::block` the lane arrays are split into
-// scalars, and these loops vectorise only in a function of their own
-// (#1101).
-#[inline(never)]
+// Always called out of line, in a function of its own per instruction set
+// (`Machine::vtrig`): inside `Machine::block` the lane arrays would be split
+// into scalars (#1101).
+#[inline(always)]
 pub(crate) fn sin_cos_deg(x: &Lane, t: &mut Lane, cos: bool) -> u64 {
     if cos {
         sin_cos_lanes::<true>(x, t)
@@ -316,7 +316,7 @@ fn atan_lanes(num: &Lane, den: &Lane, t: &mut Lane) -> u64 {
 /// PostScript's `num den atan` over the batch, as `lane_bin`: degrees in
 /// [0, 360). Returns the lanes left for the exact code: a NaN, an
 /// infinity, a zero (`0 0 atan` is its error), and a `den` of 1.0.
-#[inline(never)]
+#[inline(always)]
 pub(crate) fn atan_deg(num: &Lane, den: &Lane, t: &mut Lane) -> u64 {
     atan_lanes(num, den, t)
 }

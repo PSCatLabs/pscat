@@ -837,6 +837,11 @@ const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
 /// Render `src` with the CLI: the PNG bytes.
 fn cli_png(src: &str, args: &[&str], threads: Option<&str>) -> Vec<u8> {
+    cli_png_isa(src, args, threads, None)
+}
+
+/// As `cli_png`, with `PSCAT_KERNEL_ISA` set to `isa` (#1100).
+fn cli_png_isa(src: &str, args: &[&str], threads: Option<&str>, isa: Option<&str>) -> Vec<u8> {
     let dir = common::scratch_dir("kernels");
     let ps = dir.join("k.ps");
     let png = dir.join("k.png");
@@ -849,6 +854,10 @@ fn cli_png(src: &str, args: &[&str], threads: Option<&str>) -> Vec<u8> {
     match threads {
         Some(t) => cmd.env("PSCAT_KERNEL_THREADS", t),
         None => cmd.env_remove("PSCAT_KERNEL_THREADS"),
+    };
+    match isa {
+        Some(t) => cmd.env("PSCAT_KERNEL_ISA", t),
+        None => cmd.env_remove("PSCAT_KERNEL_ISA"),
     };
     let out = common::wait_output(
         cmd.stderr(std::process::Stdio::piped())
@@ -3131,4 +3140,34 @@ fn kernelmath_checks_its_operand() {
         "rangecheck"
     );
     assert_eq!(it.run_str("1 .kernelmath").unwrap_err().name(), "typecheck");
+}
+
+/// Every instruction-set tier the executor has gives the same bytes
+/// (#1100): on x86_64 the baseline, x86-64-v2 and x86-64-v3 copies, each
+/// run where the CPU has it (a tier it lacks runs the best one it has, so
+/// CI's x86 runners exercise their own). Elsewhere all three are one.
+#[test]
+fn bytes_do_not_depend_on_the_instruction_set() {
+    let trig = "%!PS
+/pixel { /j exch def /i exch def
+  i 0.37 mul j add sin  j 7.1 mul i sub cos  i 100 sub 0.5 add j 65 sub atan 360 div
+  i j mul 0.013 mul floor 0.1 mul i 0.5 mul round 0.01 mul add } bind def
+gsave 200 130 scale 200 130 [200 0 0 -130 0 130] { pixel pop } bind 3 kernelimage grestore showpage
+";
+    for src in [
+        SCENE.to_string(),
+        trig.to_string(),
+        format!("/fast .kernelmath\n{trig}"),
+    ] {
+        let base = cli_png_isa(&src, &[], Some("3"), Some("base"));
+        for isa in ["v2", "v3"] {
+            assert_eq!(
+                cli_png_isa(&src, &[], Some("3"), Some(isa)),
+                base,
+                "{isa}\n{src}"
+            );
+        }
+        let interp = format!("/interpret .kernelmode\n{src}");
+        assert_eq!(cli_png(&interp, &[], None), base, "interpreted\n{src}");
+    }
 }

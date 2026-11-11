@@ -225,6 +225,121 @@ const POLL_ITERS: u32 = 256;
 /// Lane-instructions run between polls at subroutine calls.
 const POLL_STEPS: u64 = 1 << 16;
 
+/// The instruction set the executor's hot code runs in (#1100). A release
+/// build targets each architecture's baseline: SSE2 on x86_64, two f64s a
+/// vector. On x86_64 the block loop, `Gather1`, the wide instructions and
+/// the vectorised math are compiled again for x86-64-v2 (SSE4.1: `floor`
+/// and `round` in vectors) and x86-64-v3 (AVX2: four f64s), and the best
+/// the CPU has runs. FMA is never enabled: a fused multiply-add rounds once
+/// where the interpreter rounds twice, so the bytes are the same in every
+/// tier. Elsewhere there is one tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Isa {
+    Base,
+    #[cfg(target_arch = "x86_64")]
+    V2,
+    #[cfg(target_arch = "x86_64")]
+    V3,
+}
+
+impl Isa {
+    /// The best tier this CPU has, or the one `PSCAT_KERNEL_ISA` (`base`,
+    /// `v2` or `v3`) names when the CPU has it (a test hook).
+    pub(crate) fn chosen() -> Isa {
+        let best = Isa::best();
+        let want = match std::env::var("PSCAT_KERNEL_ISA").ok().as_deref() {
+            Some("base") => Isa::Base,
+            #[cfg(target_arch = "x86_64")]
+            Some("v2") => Isa::V2,
+            #[cfg(target_arch = "x86_64")]
+            Some("v3") => Isa::V3,
+            _ => best,
+        };
+        want.min(best)
+    }
+
+    fn best() -> Isa {
+        #[cfg(target_arch = "x86_64")]
+        {
+            static BEST: std::sync::OnceLock<Isa> = std::sync::OnceLock::new();
+            *BEST.get_or_init(|| {
+                use std::arch::is_x86_feature_detected as has;
+                let v2 = has!("sse3")
+                    && has!("ssse3")
+                    && has!("sse4.1")
+                    && has!("sse4.2")
+                    && has!("popcnt");
+                let v3 = v2
+                    && has!("avx")
+                    && has!("avx2")
+                    && has!("bmi1")
+                    && has!("bmi2")
+                    && has!("lzcnt");
+                if v3 {
+                    Isa::V3
+                } else if v2 {
+                    Isa::V2
+                } else {
+                    Isa::Base
+                }
+            })
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        Isa::Base
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Isa::Base => "base",
+            #[cfg(target_arch = "x86_64")]
+            Isa::V2 => "x86-64-v2",
+            #[cfg(target_arch = "x86_64")]
+            Isa::V3 => "x86-64-v3",
+        }
+    }
+}
+
+/// A method `$disp` that runs `$imp` compiled for the machine's [`Isa`]:
+/// `$imp` is `#[inline(always)]`, and each tier's copy is a function of
+/// its own with that tier's target features.
+macro_rules! isa_dispatch {
+    ($(#[$doc:meta])* fn $disp:ident / $base:ident, $v2:ident, $v3:ident
+        ($($arg:ident : $ty:ty),*) -> $ret:ty = $imp:ident) => {
+        $(#[$doc])*
+        #[inline(always)]
+        fn $disp(&mut self, $($arg: $ty),*) -> $ret {
+            match self.isa {
+                Isa::Base => self.$base($($arg),*),
+                // SAFETY: `Isa::chosen` picks a tier only on a CPU that has
+                // every feature it enables.
+                #[cfg(target_arch = "x86_64")]
+                Isa::V2 => unsafe { self.$v2($($arg),*) },
+                #[cfg(target_arch = "x86_64")]
+                Isa::V3 => unsafe { self.$v3($($arg),*) },
+            }
+        }
+
+        #[inline(never)]
+        fn $base(&mut self, $($arg: $ty),*) -> $ret {
+            self.$imp($($arg),*)
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        #[inline(never)]
+        #[target_feature(enable = "sse3,ssse3,sse4.1,sse4.2,popcnt")]
+        fn $v2(&mut self, $($arg: $ty),*) -> $ret {
+            self.$imp($($arg),*)
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        #[inline(never)]
+        #[target_feature(enable = "sse3,ssse3,sse4.1,sse4.2,popcnt,avx,avx2,bmi1,bmi2,lzcnt")]
+        fn $v3(&mut self, $($arg: $ty),*) -> $ret {
+            self.$imp($($arg),*)
+        }
+    };
+}
+
 /// One worker's machine: a register file and local-array storage.
 pub(crate) struct Machine<'k> {
     k: &'k Kernel,
@@ -249,6 +364,8 @@ pub(crate) struct Machine<'k> {
     /// lane occupancy `PSCAT_KERNEL_TIMING` reports: the steps over this
     /// times `LANES` (#1101).
     pub(crate) dispatched: u64,
+    /// The instruction set the hot code runs in.
+    pub(crate) isa: Isa,
 }
 
 impl<'k> Machine<'k> {
@@ -268,6 +385,7 @@ impl<'k> Machine<'k> {
             killed: 0,
             retired: vec![0; NWHY as usize + k.sites.len()],
             dispatched: 0,
+            isa: Isa::chosen(),
         }
     }
 
@@ -403,9 +521,71 @@ impl<'k> Machine<'k> {
         }
     }
 
-    /// Run a block for the lanes in `mask`. Returns the lanes still running
-    /// at its end (a `Break` inside takes lanes out).
-    fn block(&mut self, b: &[L], mut mask: u64) -> Result<u64, Stop> {
+    isa_dispatch! {
+        /// Run a block for the lanes in `mask`. Returns the lanes still
+        /// running at its end (a `Break` inside takes lanes out).
+        fn block / block_base, block_v2, block_v3 (b: &[L], mask: u64) -> Result<u64, Stop> = block_impl
+    }
+
+    isa_dispatch! {
+        fn gather1 / gather1_base, gather1_v2, gather1_v3
+            (d: Reg, g: super::code::G1, x: u32, mask: u64) -> () = gather1_impl
+    }
+
+    isa_dispatch! {
+        fn ext / ext_base, ext_v2, ext_v3 (ins: &Ins, mask: u64) -> () = ext_impl
+    }
+
+    isa_dispatch! {
+        /// [`L::SinF`] and [`L::CosF`] (`.kernelmath /fast`).
+        fn vtrig / vtrig_base, vtrig_v2, vtrig_v3 (d: Reg, a: u32, cos: bool, mask: u64) -> () = vtrig_impl
+    }
+
+    isa_dispatch! {
+        /// [`L::AtanF`] (`.kernelmath /fast`).
+        fn vatan / vatan_base, vatan_v2, vatan_v3 (d: Reg, a: u32, b: u32, mask: u64) -> () = vatan_impl
+    }
+
+    #[inline(always)]
+    fn vtrig_impl(&mut self, d: Reg, a: u32, cos: bool, mask: u64) {
+        let mut buf = [0.0; LANES];
+        let x = *self.w(a).lane(&mut buf);
+        let mut t = [0.0; LANES];
+        let mut cold = super::vmath::sin_cos_deg(&x, &mut t, cos) & mask;
+        // Out of the vector code's range: the exact code.
+        while cold != 0 {
+            let l = cold.trailing_zeros() as usize;
+            cold &= cold - 1;
+            let op = if cos { UnOp::Cos } else { UnOp::Sin };
+            t[l] = lane_un(op, x[l]).unwrap_or(f64::NAN);
+        }
+        self.store(d, &t, mask);
+    }
+
+    #[inline(always)]
+    fn vatan_impl(&mut self, d: Reg, a: u32, b: u32, mask: u64) {
+        let (mut ba, mut bb) = ([0.0; LANES], [0.0; LANES]);
+        let y = *self.w(a).lane(&mut ba);
+        let x = *self.w(b).lane(&mut bb);
+        let mut t = [0.0; LANES];
+        let mut cold = super::vmath::atan_deg(&y, &x, &mut t) & mask;
+        // Out of range, and `0 0 atan`: the exact code decides.
+        let mut bad = 0u64;
+        while cold != 0 {
+            let l = cold.trailing_zeros() as usize;
+            cold &= cold - 1;
+            match lane_bin(BinOp::Atan, y[l], x[l]) {
+                Some(r) => t[l] = r,
+                None => bad |= 1 << l,
+            }
+        }
+        self.kill(bad, Why::Atan00 as u32);
+        self.store(d, &t, mask & !bad);
+    }
+
+    /// [`Machine::block`]'s body.
+    #[inline(always)]
+    fn block_impl(&mut self, b: &[L], mut mask: u64) -> Result<u64, Stop> {
         // The step and dispatch counts, kept local between the points that
         // read them (a nested block, a poll, the return): moved into `self`
         // before each, so every poll sees the same count as before (#1101).
@@ -530,40 +710,11 @@ impl<'k> Machine<'k> {
                     let c = self.c;
                     self.ext(&c.ext[n as usize], mask);
                 }
-                L::SinF(d, a) | L::CosF(d, a) => {
-                    let cos = matches!(*ins, L::CosF(..));
-                    let mut buf = [0.0; LANES];
-                    let x = *self.w(a).lane(&mut buf);
-                    let mut t = [0.0; LANES];
-                    let mut cold = super::vmath::sin_cos_deg(&x, &mut t, cos) & mask;
-                    // Out of the vector code's range: the exact code.
-                    while cold != 0 {
-                        let l = cold.trailing_zeros() as usize;
-                        cold &= cold - 1;
-                        let op = if cos { UnOp::Cos } else { UnOp::Sin };
-                        t[l] = lane_un(op, x[l]).unwrap_or(f64::NAN);
-                    }
-                    self.store(d, &t, mask);
-                }
-                L::AtanF(d, a, b) => {
-                    let (mut ba, mut bb) = ([0.0; LANES], [0.0; LANES]);
-                    let y = *self.w(a).lane(&mut ba);
-                    let x = *self.w(b).lane(&mut bb);
-                    let mut t = [0.0; LANES];
-                    let mut cold = super::vmath::atan_deg(&y, &x, &mut t) & mask;
-                    // Out of range, and `0 0 atan`: the exact code decides.
-                    let mut bad = 0u64;
-                    while cold != 0 {
-                        let l = cold.trailing_zeros() as usize;
-                        cold &= cold - 1;
-                        match lane_bin(BinOp::Atan, y[l], x[l]) {
-                            Some(r) => t[l] = r,
-                            None => bad |= 1 << l,
-                        }
-                    }
-                    self.kill(bad, Why::Atan00 as u32);
-                    self.store(d, &t, mask & !bad);
-                }
+                // Out of line, so the block loop's own code is as it was
+                // without them.
+                L::SinF(d, a) => self.vtrig(d, a, false, mask),
+                L::CosF(d, a) => self.vtrig(d, a, true, mask),
+                L::AtanF(d, a, b) => self.vatan(d, a, b, mask),
                 L::Gather1(d, g, col) => {
                     let g = self.c.gathers[g as usize];
                     self.gather1(d, g, col, mask);
@@ -673,9 +824,10 @@ impl<'k> Machine<'k> {
     }
 
     /// [`L::Gather1`]: as [`Ins::Gather`] with one good constant index, so
-    /// only the other (`x`) can be bad.
-    #[inline(never)]
-    fn gather1(&mut self, d: Reg, g: super::code::G1, x: u32, mask: u64) {
+    /// only the other (`x`) can be bad. (Out of line, per tier:
+    /// [`Machine::gather1`].)
+    #[inline(always)]
+    fn gather1_impl(&mut self, d: Reg, g: super::code::G1, x: u32, mask: u64) {
         let tb = &self.k.tables[g.table as usize];
         let mut t = [0.0; LANES];
         let mut tt = [0.0; LANES];
@@ -715,7 +867,8 @@ impl<'k> Machine<'k> {
 
     /// Run one of the wide, rarely run instructions ([`L::Ext`]) from its
     /// IR form for the lanes in `mask`.
-    fn ext(&mut self, ins: &Ins, mask: u64) {
+    #[inline(always)]
+    fn ext_impl(&mut self, ins: &Ins, mask: u64) {
         match ins {
             Ins::ForFin(d, c, inc, lim) => {
                 let mut t = [0.0; LANES];

@@ -880,8 +880,9 @@ where
         let d = dispatched.load(std::sync::atomic::Ordering::Relaxed);
         if d > 0 {
             eprintln!(
-                "pscat: kernel batches: {tw}x{th} pixels, {d} instructions run, {:.1} of {LANES} lanes active on average",
-                steps as f64 / d as f64
+                "pscat: kernel batches: {tw}x{th} pixels, {d} instructions run, {:.1} of {LANES} lanes active on average, {}",
+                steps as f64 / d as f64,
+                exec::Isa::chosen().name()
             );
         }
     }

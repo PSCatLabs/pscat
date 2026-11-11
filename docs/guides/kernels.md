@@ -244,6 +244,40 @@ So the picture is always exactly the interpreter's. Only the speed changes.
   size. `PSCAT_KERNEL_THREADS=N` sets the number of worker threads (the
   default is every core; one under `--bands`).
 
+### Faster `sin`, `cos` and `atan`: `.kernelmath`
+
+```postscript
+/fast .kernelmath      % or /exact, the default
+```
+
+By default a compiled kernel computes `sin`, `cos` and `atan` one pixel at a
+time through pscat's own math library, as the interpreter does. `/fast
+.kernelmath` runs them on a whole batch of pixels at once, with vector
+instructions.
+
+- **The results are the same bits.** The batch code is the same library's
+  algorithms, written for vectors. It is checked bit for bit against the
+  one-at-a-time code over millions of inputs, and every picture tested
+  matched. It stays opt-in until it has had more use.
+- **Speed.** On an Apple M4, per pixel, `sin` takes 5.9 ns instead of 9.5,
+  and `atan` 6.1 instead of 13.7. The Mandelbulb took about 15–25% fewer
+  cycles. A kernel with little trigonometry gains nothing, and x86 CPUs
+  with AVX2 should gain more, since their vectors hold four numbers.
+- **Where it applies.** Only `kernelimage`. `kernelarray` always uses the
+  default. `exp`, `ln` and `log` are unchanged.
+- **Unusual angles.** Infinite and NaN angles, angles past about 94 million
+  degrees, and `atan` with a zero, an infinite operand or a denominator of
+  1.0 use the one-at-a-time code. So `0 0 atan` is still the error it is.
+
+### Instruction sets
+
+On x86_64, compiled kernels use the best vector instructions the CPU has:
+the baseline SSE2, SSE4.1 (x86-64-v2) or AVX2 (x86-64-v3). The pictures are
+the same in each, since fused multiply-add is never used.
+`PSCAT_KERNEL_TIMING=1` names the one in use, and `PSCAT_KERNEL_ISA=base`
+(or `v2`, `v3`) asks for a lower one. Other CPUs, Apple silicon among them,
+have one set.
+
 Tips:
 
 - Write the per-pixel procedure as a pure function of `i` and `j`, and keep
