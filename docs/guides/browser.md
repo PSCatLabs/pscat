@@ -48,11 +48,13 @@ const doc = ps.pdf();               // Uint8Array, every page in one PDF
 For the same program, page size and dpi, the bytes are the ones the
 command-line tool writes: `tests/wasm.rs` compares them at 72 and 144 dpi
 and checks that a second run, in the same instance or a fresh one, gives
-the same bytes. A `%%Title:` or `%%For:` comment becomes the PDF's title
+the same bytes. `{ svg: true, svgText: true }` writes standard-font text
+as selectable `<text>` rather than outlines, the bytes `pscat --svg
+--svg-text` writes ([getting started](getting-started.md)). A `%%Title:` or `%%For:` comment becomes the PDF's title
 or author, as for a file on the command line. As there, SVG and PDF are
 sized in device pixels, so keep the default 72 dpi (scale 1) for a
 print-size vector page. The C ABI is `ps_begin_vector(src, len, w, h,
-scale, flags)` (flag 1 SVG, 2 PDF), `ps_svg_count()`, `ps_svg(page)`,
+scale, flags)` (flag 1 SVG, 2 PDF, 4 SVG text, which needs flag 1), `ps_svg_count()`, `ps_svg(page)`,
 `ps_pdf()` and `ps_vector_ptr()`/`ps_vector_len()`; `src/wasm.rs` has the
 contract. It began as the vector adapter that
 [print-shop](https://github.com/PSCatLabs/print-shop) carried as a patch.
@@ -111,7 +113,8 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   `pdf: true` to the page options, then `r.svg(page)` (from 0) or
   `r.svgPages()` give the SVG pages as strings and `r.pdf()` the whole
   document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see
-  [SVG and PDF](#svg-and-pdf) above).
+  [SVG and PDF](#svg-and-pdf) above). `svgText: true` (with `svg`) writes
+  Helvetica, Times and Courier text as `<text>`, like `--svg-text`.
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
   offending `command`, the `line`, the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.

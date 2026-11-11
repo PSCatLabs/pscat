@@ -391,3 +391,108 @@ console.log('VECTOR_OK');
         }
     }
 }
+
+/// Standard-font text in several sizes, styles and angles, for the
+/// `--svg-text` parity check (#1119).
+const TEXT_DOC: &str = "%!PS
+/Times-Roman findfont 24 scalefont setfont 72 700 moveto (Selectable <text> & more) show
+/Helvetica-Bold findfont 14 scalefont setfont
+0 30 330 { gsave 300 400 translate rotate 40 0 moveto 0.2 0.3 0.6 setrgbcolor (Hamburgefons) show grestore } for
+/Courier-Oblique findfont [10 0 3 12 0 0] makefont setfont 72 100 moveto (skewed and stretched) show
+showpage
+";
+
+/// `--svg-text` SVG from the wasm build equals the CLI's byte for byte,
+/// through the raw ABI (`record.svgText`) and the npm Renderer
+/// (`svgText: true`), at 72 and 144 dpi; and the flag really changes the
+/// output (#1119).
+#[test]
+fn wasm_svg_text_matches_the_cli() {
+    if !wasm_ready() {
+        return;
+    }
+    let root = root();
+    let dir = common::scratch_dir("pscat-wasm-svg-text");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let doc = dir.join("doc.ps");
+    std::fs::write(&doc, TEXT_DOC).expect("write doc");
+    for dpi in [72, 144] {
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .args(["--page", "612x792", "--dpi", &dpi.to_string(), "--svg-text"])
+            .arg("--svg")
+            .arg(dir.join(format!("native-{dpi}.svg")))
+            .arg(&doc)
+            .output_deadline()
+            .expect("run pscat");
+        assert!(
+            out.status.success(),
+            "pscat --svg-text failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let npm = dir.join("npm");
+    std::fs::create_dir_all(&npm).expect("npm dir");
+    std::fs::copy(root.join("npm/renderer.js"), npm.join("renderer.js")).expect("renderer.js");
+    std::fs::copy(root.join("web/pscat.js"), npm.join("core.js")).expect("core.js");
+    let driver = format!(
+        r#"
+import {{ readFileSync, writeFileSync }} from 'node:fs';
+import {{ Pscat }} from 'file://{lib}';
+import {{ instantiate }} from 'file://{renderer}';
+const bytes = readFileSync('{wasm}');
+const src = readFileSync('{doc}');
+const out = (name, data) => writeFileSync('{dir}/' + name, data);
+const ps = await Pscat.instantiate(bytes);
+for (const dpi of [72, 144]) {{
+  if (ps.run(src, 612, 792, dpi / 72, {{ svg: true, svgText: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+  out(`abi-${{dpi}}.svg`, ps.svg(0));
+  if (ps.run(src, 612, 792, dpi / 72, {{ svg: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+  out(`abi-paths-${{dpi}}.svg`, ps.svg(0));
+}}
+const r = await instantiate(await WebAssembly.compile(bytes));
+for (const dpi of [72, 144]) {{
+  r.render(src, {{ width: 612, height: 792, dpi, svg: true, svgText: true }});
+  out(`npm-${{dpi}}.svg`, r.svg(0));
+}}
+try {{ r.render(src, {{ svgText: true }}); console.error('svgText without svg was accepted'); process.exit(1); }}
+catch (e) {{ if (!(e instanceof TypeError)) throw e; }}
+console.log('TEXT_OK');
+"#,
+        lib = root.join("web/pscat.js").display(),
+        renderer = npm.join("renderer.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+        doc = doc.display(),
+        dir = dir.display(),
+    );
+    let script = dir.join("text.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output_deadline()
+        .expect("run node");
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("TEXT_OK"),
+        "node svg-text driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let read = |name: String| {
+        std::fs::read_to_string(dir.join(&name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
+    };
+    for dpi in [72, 144] {
+        let native = read(format!("native-{dpi}.svg"));
+        assert!(
+            native.contains("<text "),
+            "the CLI wrote no <text> at {dpi} dpi"
+        );
+        for name in [format!("abi-{dpi}.svg"), format!("npm-{dpi}.svg")] {
+            assert!(
+                read(name.clone()) == native,
+                "{name} differs from pscat --svg-text at {dpi} dpi"
+            );
+        }
+        assert!(
+            !read(format!("abi-paths-{dpi}.svg")).contains("<text "),
+            "a run without svgText wrote <text>"
+        );
+    }
+}

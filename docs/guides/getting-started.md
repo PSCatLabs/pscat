@@ -67,6 +67,19 @@ More on the less obvious ones:
   document: `%%Title:` and `%%For:` header comments become its title and
   author metadata, so a multi-page piece opens in any reader or e-reader with
   a proper title.
+- **SVG text (`--svg-text`).** By default SVG draws every glyph as its
+  outline, which looks exact everywhere but is large: a 600x400 pt page
+  with three short lines is about 52 KB. With `--svg-text`, text set in
+  Helvetica, Times or Courier (any style) becomes `<text>`, which you can
+  select, search and copy, and which is far smaller (the same page is
+  1.5 KB). The browser draws it in a metric-compatible face (Arial,
+  Times New Roman, Courier New or Liberation), and every glyph sits at the
+  position pscat computed, so the layout, baselines and sizes match
+  the outline version. The letter shapes are the viewer's own face, not
+  the ones in the PNG. Other fonts (the rest of the standard 35, Symbol,
+  font packs, Type 3 and Type 1 fonts from a program) and `charpath` text
+  stay outlines. PNG and PDF output are not affected
+  (`notes/1119-svg-text.md`).
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
