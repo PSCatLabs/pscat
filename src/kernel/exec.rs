@@ -486,6 +486,21 @@ impl<'k> Machine<'k> {
                     self.kill(bad, Why::bin(op) as u32);
                     self.store(d, &t, mask & !bad);
                 }
+                L::Add(d, a, b) => {
+                    let mut t = [0.0; LANES];
+                    flanes(self.w(a), self.w(b), &mut t, |p, q| (p + q, false));
+                    self.store(d, &t, mask);
+                }
+                L::Sub(d, a, b) => {
+                    let mut t = [0.0; LANES];
+                    flanes(self.w(a), self.w(b), &mut t, |p, q| (p - q, false));
+                    self.store(d, &t, mask);
+                }
+                L::Mul(d, a, b) => {
+                    let mut t = [0.0; LANES];
+                    flanes(self.w(a), self.w(b), &mut t, |p, q| (p * q, false));
+                    self.store(d, &t, mask);
+                }
                 L::Un(op, d, a) => {
                     let mut t = [0.0; LANES];
                     let bad = un(op, self.w(a), &mut t) & mask;

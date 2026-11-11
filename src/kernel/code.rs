@@ -53,6 +53,11 @@ pub(crate) enum L {
     /// The operand's constant holds the integer's bits.
     MovI(Reg, u32),
     Bin(BinOp, Reg, u32, u32),
+    /// `Bin` add, sub and mul (#1101): the commonest instructions, with
+    /// no second dispatch on the operator, and they cannot fail.
+    Add(Reg, u32, u32),
+    Sub(Reg, u32, u32),
+    Mul(Reg, u32, u32),
     Un(UnOp, Reg, u32),
     IBin(IBinOp, Reg, u32, u32),
     IUn(IUnOp, Reg, u32),
@@ -230,6 +235,9 @@ impl Lower<'_> {
         let l = match *i {
             Ins::Mov(d, a) => L::Mov(fr(d), self.op(a)),
             Ins::MovI(d, v) => L::MovI(fr(d), self.konst(v as u64)),
+            Ins::Bin(BinOp::Add, d, a, b) => L::Add(fr(d), self.op(a), self.op(b)),
+            Ins::Bin(BinOp::Sub, d, a, b) => L::Sub(fr(d), self.op(a), self.op(b)),
+            Ins::Bin(BinOp::Mul, d, a, b) => L::Mul(fr(d), self.op(a), self.op(b)),
             Ins::Bin(op, d, a, b) => L::Bin(op, fr(d), self.op(a), self.op(b)),
             Ins::Un(op, d, a) => L::Un(op, fr(d), self.op(a)),
             Ins::IBin(op, d, a, b) => L::IBin(op, fr(d), self.op(a), self.op(b)),
