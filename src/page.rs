@@ -110,25 +110,28 @@ impl Page {
     /// # Ok::<(), pscat::PsError>(())
     /// ```
     pub fn halftone(&self) -> Page {
-        let opaque = self.pixmap.pixels().iter().all(|p| p.alpha() == 255);
-        let screened = if opaque {
-            crate::halftone::screen(&self.pixmap)
-        } else {
-            // The screen reads its input as opaque RGB; a premultiplied
-            // transparent pixel is (0, 0, 0, 0), which it would ink solid.
-            // Composite onto white first: premultiplied source-over white
-            // is `c + (255 - a)` per channel, which stays within 255.
-            let mut paper = self.pixmap.clone();
-            for px in paper.data_mut().as_chunks_mut::<4>().0 {
-                let under = 255 - px[3];
-                for c in &mut px[..3] {
-                    *c = c.saturating_add(under);
-                }
-                px[3] = 255;
+        Page::new(crate::halftone::screen(&self.on_white()), self.scale)
+    }
+
+    /// The pixels as if printed on white paper: the page itself when it is
+    /// opaque (no copy), else a copy composited onto white. The halftone
+    /// screen and the sheet's byte copy both read pixels as opaque colour,
+    /// and a premultiplied transparent pixel is (0, 0, 0, 0): black.
+    pub(crate) fn on_white(&self) -> std::borrow::Cow<'_, tiny_skia::Pixmap> {
+        if self.pixmap.pixels().iter().all(|p| p.alpha() == 255) {
+            return std::borrow::Cow::Borrowed(&self.pixmap);
+        }
+        // Premultiplied source-over white is `c + (255 - a)` per channel,
+        // which stays within 255.
+        let mut paper = self.pixmap.clone();
+        for px in paper.data_mut().as_chunks_mut::<4>().0 {
+            let under = 255 - px[3];
+            for c in &mut px[..3] {
+                *c = c.saturating_add(under);
             }
-            crate::halftone::screen(&paper)
-        };
-        Page::new(screened, self.scale)
+            px[3] = 255;
+        }
+        std::borrow::Cow::Owned(paper)
     }
 
     pub(crate) fn pixmap(&self) -> &tiny_skia::Pixmap {

@@ -380,6 +380,42 @@ fn sheet_errors() {
     assert!(zoom(&page(2, 2), 0).is_none());
 }
 
+/// A transparent cell or strip is drawn on the white sheet, not copied in
+/// with its alpha (which would punch holes in the sheet); an opaque one is
+/// copied as is (the byte-for-byte test above).
+#[test]
+fn sheet_flattens_transparent_pieces_onto_white() {
+    use pscat::sheet::{CellSize, RowSize, Sheet, SheetLayout};
+    let mut clear = pscat::Interp::with_page(20, 10).unwrap();
+    clear.set_transparent_background();
+    clear
+        .run_str("0 0 1 setrgbcolor 0 0 5 10 rectfill")
+        .unwrap();
+    let cell = clear.into_last_page();
+    assert_eq!(
+        cell.rgba8()[19 * 4 + 3],
+        0,
+        "the cell's right edge is clear"
+    );
+
+    let row = RowSize::new((20, 10), vec![CellSize::new((20, 10), (20, 10))]);
+    let layout = SheetLayout::new(&[row]).unwrap();
+    let (x, y) = layout.image_xy(0, 0).unwrap();
+    let mut sheet = Sheet::new(&layout).unwrap();
+    sheet.put_header(0, &cell).unwrap();
+    sheet.put_image(0, 0, &cell).unwrap();
+    sheet.put_caption(0, 0, &cell).unwrap();
+    let page = sheet.into_page();
+    let px = page.rgba8();
+    assert!(px.chunks(4).all(|p| p[3] == 255), "the sheet is opaque");
+    let at = |x: u32, y: u32| {
+        let i = ((y * page.width() + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2]]
+    };
+    assert_eq!(at(x + 19, y + 5), [255, 255, 255], "clear is white");
+    assert_eq!(at(x + 2, y + 5), [0, 0, 255], "ink is ink");
+}
+
 // --- 3. chalkboards -------------------------------------------------------
 
 /// Before: `chalk::Config` built with `from_value`/`apply`/`check`, then

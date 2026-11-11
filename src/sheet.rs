@@ -292,12 +292,15 @@ impl Sheet {
             ));
         };
         fits("label", row, None, strip, planned)?;
-        cs::blit_at(&mut self.canvas, at.0, at.1, strip.pixmap());
+        cs::blit_at(&mut self.canvas, at.0, at.1, &strip.on_white());
         Ok(())
     }
 
     /// Draw the image of row `row`, cell `cell`, with its hairline around
-    /// it. It must be exactly the size the layout planned for it.
+    /// it. It must be exactly the size the layout planned for it. A page
+    /// with a transparent background (see
+    /// [`Interp::set_transparent_background`]) is drawn as if on the white
+    /// sheet; so is a transparent label or caption.
     pub fn put_image(&mut self, row: usize, cell: usize, image: &Page) -> Result<(), SheetError> {
         let planned = self.layout.cell(row, cell)?.image;
         let got = (image.width(), image.height());
@@ -318,7 +321,7 @@ impl Sheet {
             ));
         };
         cs::frame(&mut self.canvas, x, y, got.0, got.1);
-        cs::blit_at(&mut self.canvas, x, y, image.pixmap());
+        cs::blit_at(&mut self.canvas, x, y, &image.on_white());
         Ok(())
     }
 
@@ -333,7 +336,7 @@ impl Sheet {
                 format!("contact sheet: no cell {cell} in row {row}"),
             ));
         };
-        cs::blit_at(&mut self.canvas, x, y, strip.pixmap());
+        cs::blit_at(&mut self.canvas, x, y, &strip.on_white());
         Ok(())
     }
 
