@@ -10,6 +10,8 @@
 
 use serde_json::json;
 
+mod common;
+
 /// A program with two shown pages and art after the last `showpage`.
 const THREE_PAGES: &str = "0.2 setgray 0 0 30 30 rectfill showpage \
      1 0 0 setrgbcolor 10 10 40 20 rectfill showpage \
@@ -54,6 +56,46 @@ fn halftone_pages_match_the_hidden_screen_and_encoder() {
             .collect();
         assert_eq!(all, one_by_one);
     }
+}
+
+/// `Page::halftone().to_png()` is the file `pscat --halftone --png` writes,
+/// byte for byte (the claim in its documentation).
+#[test]
+fn halftone_png_is_what_the_cli_writes() {
+    use common::CommandDeadline as _;
+    let src = "%!PS\n0.3 0.6 0.9 setrgbcolor 5 5 40 25 rectfill \
+               0.7 setgray 30 10 moveto 55 35 lineto 6 setlinewidth stroke showpage\n";
+    let dir = common::scratch_dir("library-api-halftone");
+    let (ps, png) = (dir.join("in.ps"), dir.join("out.png"));
+    std::fs::write(&ps, src).unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args([
+            "--headless",
+            "--halftone",
+            "--page",
+            "60x40",
+            "--dpi",
+            "150",
+            "--png",
+        ])
+        .arg(&png)
+        .arg(&ps)
+        .output_deadline()
+        .expect("run pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let cli = std::fs::read(&png).expect("pscat wrote the PNG");
+
+    let interp = interp(src, 60, 40, 150.0 / 72.0);
+    assert_eq!(interp.page_count(), 1);
+    let library = interp.page(0).unwrap().halftone().to_png().unwrap();
+    assert!(
+        cli == library,
+        "the library's halftone PNG differs from the CLI's"
+    );
 }
 
 /// A transparent page is screened as if on white paper, not read as solid

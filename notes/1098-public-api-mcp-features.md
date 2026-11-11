@@ -50,7 +50,9 @@ pscat-mcp's pinned build still uses them.
   solid ink. Opaque pages come out byte-identical to `pscat --halftone`. The
   CLI refuses `--transparent` with `--halftone` instead. A library caller
   can hold a transparent `Page` (from `Driver::prepare`), and screening it
-  as print on paper is the useful reading.
+  as print on paper is the useful reading. One change pscat-mcp will see
+  when it ports: its `halftone` option on a `"board": false` chalkboard
+  screens onto white, where the hidden path inked the whole background black.
 - `Sheet` keeps the `RowSize`s its layout was made from. `put_image` refuses
   an image that is not the planned size, and `put_header`/`put_caption` refuse
   a strip larger than its slot. A strip may be smaller than its slot, so a
@@ -109,7 +111,8 @@ the end-to-end `tests/chalkboard.rs` and `tests/eval_replay.rs` pass.
 `Cargo.lock`, which a path dependency has none of. The rest of its
 integration tests were not run.
 
-**Deferred:**
+**Deferred** (the PR says `Refs #1098`, not `Closes`, because handwriting is
+in the issue's ask and not here):
 
 - Handwriting. The issue lists it, and pscat-mcp does not use it today.
   Its argument handling lives in the binary (`src/subcmd/handwrite.rs`), so a
