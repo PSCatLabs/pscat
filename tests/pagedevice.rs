@@ -972,3 +972,54 @@ fn a_refitted_clip_is_bounded_geometry_and_nulldevice_keeps_identity() {
         ]
     );
 }
+
+/// `Interp::new_scaled` (#1097): the default page, rendered at a scale, that
+/// a program's `setpagedevice` may still replace; the new page keeps the
+/// scale. `with_page_scaled` at the same scale stays fixed.
+#[test]
+fn new_scaled_is_a_default_page_at_a_scale() {
+    let mut it = Interp::new_scaled(2.0).expect("scale");
+    assert_eq!(it.gfx().page_size_source(), PageSizeSource::Default);
+    assert_eq!(size(&it.gfx().pixmap), (1224, 1584));
+    eval(&mut it, "0 0 10 10 rectfill showpage");
+    assert_eq!(
+        (it.pages()[0].width(), it.pages()[0].height()),
+        (1224, 1584)
+    );
+
+    let mut it = Interp::new_scaled(2.0).expect("scale");
+    eval(
+        &mut it,
+        "<< /PageSize [200 100] >> setpagedevice 1 0 0 setrgbcolor \
+         0 0 100 50 rectfill showpage",
+    );
+    let page = &it.pages()[0];
+    assert_eq!((page.width(), page.height()), (400, 200));
+
+    let mut fixed = Interp::with_page_scaled(612, 792, 2.0).expect("page");
+    eval(&mut fixed, "<< /PageSize [200 100] >> setpagedevice");
+    assert_eq!(size(&fixed.gfx().pixmap), (1224, 1584));
+}
+
+/// `new()` is `new_scaled(1.0)`, and an unusable scale is `None`: not a
+/// positive finite number, or a Letter page past 8000 pixels on a side.
+#[test]
+fn new_scaled_refuses_an_unusable_scale() {
+    assert_eq!(
+        size(&Interp::new_scaled(1.0).expect("scale").gfx().pixmap),
+        (612, 792)
+    );
+    assert_eq!(size(&Interp::new().gfx().pixmap), (612, 792));
+    for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, 10.2, 1000.0] {
+        assert!(Interp::new_scaled(scale).is_none(), "scale {scale}");
+    }
+    assert!(Interp::new_scaled(10.0).is_some());
+    // A page the program asks for past the ceiling at that scale is refused
+    // as it is at scale 1.
+    let mut it = Interp::new_scaled(10.0).expect("scale");
+    let stack = eval(
+        &mut it,
+        "{ << /PageSize [900 100] >> setpagedevice } stopped $error /errorname get",
+    );
+    assert_eq!(stack[stack.len() - 2..], ["true", "/configurationerror"]);
+}

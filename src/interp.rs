@@ -479,15 +479,42 @@ const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
     /// Nothing chose that size, so a program's `setpagedevice /PageSize`
-    /// may replace it ([`PageSizeSource::Default`](crate::gfx::PageSizeSource)).
+    /// may replace it. Equivalent to [`new_scaled(1.0)`](Self::new_scaled).
     pub fn new() -> Self {
-        // The default page size is a nonzero constant; this cannot fail.
-        let mut interp =
-            Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid");
+        // A scale of 1 gives the 612x792-pixel default page; this cannot fail.
+        Self::new_scaled(1.0).expect("default page size is valid")
+    }
+
+    /// The same interpreter as [`new`](Self::new), rendered at `scale`
+    /// device pixels per point (`scale` is dpi / 72, so 2.0 renders at
+    /// 144 dpi). The page is US Letter (612x792 points) until something
+    /// chooses another size: a program's `setpagedevice /PageSize` may
+    /// replace it, and the replacement page keeps `scale`. This is the
+    /// constructor for a host that picks a resolution but leaves the page
+    /// size to the program; [`with_page_scaled`](Self::with_page_scaled)
+    /// fixes the size instead, so `setpagedevice` cannot change it.
+    ///
+    /// `None` if `scale` is not a positive finite number, or if the
+    /// page is more than 8000 pixels on a side at that scale (about 10.1
+    /// for Letter). A program that then asks for a larger page at that
+    /// scale gets `limitcheck` from `setpagedevice`, as under `new`.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::new_scaled(2.0).expect("valid scale");
+    /// interp.run_str("<< /PageSize [200 100] >> setpagedevice showpage")?;
+    /// let page = &interp.pages()[0];
+    /// assert_eq!((page.width(), page.height()), (400, 200));
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn new_scaled(scale: f32) -> Option<Self> {
+        if !(scale.is_finite() && scale > 0.0) {
+            return None;
+        }
+        let mut interp = Self::with_page_scaled(DEFAULT_PAGE.0, DEFAULT_PAGE.1, scale)?;
         interp
             .gfx
             .set_page_size_source(crate::gfx::PageSizeSource::Default);
-        interp
+        Some(interp)
     }
 
     /// An interpreter with a `width`x`height`-point page at 72 dpi (one
@@ -503,8 +530,8 @@ impl Interp {
     /// pixels per point: `scale` is dpi / 72, so 2.0 renders at 144 dpi.
     /// `None` if the page is more than 8000 pixels on a side at that scale.
     /// Explicit, like [`with_page`](Self::with_page); a host that wants the
-    /// program's `setpagedevice` to size the page sets another source with
-    /// [`Gfx::set_page_size_source`](crate::gfx::Gfx::set_page_size_source).
+    /// program's `setpagedevice` to size the page uses
+    /// [`new_scaled`](Self::new_scaled) instead.
     pub fn with_page_scaled(width: u32, height: u32, scale: f32) -> Option<Self> {
         let px = |points: u32| ((points as f32 * scale).round() as u32).max(1);
         let (pw, ph) = (px(width), px(height));
