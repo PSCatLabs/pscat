@@ -439,11 +439,11 @@ impl<'k> Machine<'k> {
             *c = match t {
                 // An integer: an I64 register's bits, or an immediate.
                 Op::Imm(1.0) => super::Num::Int(self.geti(v, l)),
-                Op::Imm(_) => super::Num::Real(f(v)),
+                Op::Imm(_) => super::Num::real(f(v)),
                 // A Dyn value: an f64, an integer (exact: a Dyn integer
                 // is at most 2^53) where the tag says so.
                 Op::R(r) if self.regs[r as usize][l] == 1.0 => super::Num::Int(f(v) as i64),
-                Op::R(_) => super::Num::Real(f(v)),
+                Op::R(_) => super::Num::real(f(v)),
             };
         }
     }

@@ -3215,3 +3215,53 @@ gsave 200 130 scale 200 130 [200 0 0 -130 0 130] { pixel pop } bind 3 kernelimag
         assert_eq!(cli_png(&interp, &[], None), base, "interpreted\n{src}");
     }
 }
+
+// --- Codex review 3 ------------------------------------------------------------
+
+/// A join of 0.0 and -0.0 keeps each lane's own zero: the compiler took
+/// immediates that compare equal as the same value, and `-1 exp` of them
+/// is inf against -inf, paint 255 against 0.
+#[test]
+fn joins_keep_the_sign_of_zero() {
+    for body in [
+        // A branch's value,
+        "i 2 mod 0 eq { 0.0 } { 0.0 neg } ifelse",
+        // a name each branch defines,
+        "i 2 mod 0 eq { /v 0.0 def } { /v 0.0 neg def } ifelse v",
+        // a value carried round a loop,
+        "/v 0.0 def 0 1 i { pop /v v neg def } for v",
+        // an array's element.
+        "i 2 mod 0 eq { [0.0 1] } { [0.0 neg 1] } ifelse 0 get",
+    ] {
+        same_cells_compiled(&cells_of(1, body));
+        same_cells_compiled(&cells_of(1, &format!("{body} -1 exp")));
+        same(&format!(
+            "/pixel {{ /j exch def /i exch def {body} -1 exp 0 max 1 min dup dup }} def"
+        ));
+    }
+}
+
+/// `kernelarray` keeps every NaN as the one quiet NaN, compiled and
+/// interpreted: which operand's NaN x86 arithmetic passes on depends on
+/// the order the compiler put them in.
+#[test]
+fn kernelarray_stores_one_nan() {
+    // Two quiet NaNs with different payloads, and their sums and products
+    // both ways round; a negated NaN; a computed one.
+    let src = "/T (010000000000f87f020000000000f87f>) /ASCIIHexDecode filter /all readreals def
+      2 1 { pop /i exch def
+        T i get T i 1 add 2 mod get add
+        T i get T i 1 add 2 mod get mul
+        T i get neg
+        1e308 10 mul dup sub
+        T i get } 5 kernelarray";
+    let (out, stats) = same_cells(src);
+    let out = out.expect("runs");
+    assert_eq!(stats[0], 1, "compiled");
+    let nan = format!("r{:016x}", f64::NAN.to_bits());
+    let vals: Vec<&str> = out[0]
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(' ')
+        .collect();
+    assert!(vals.iter().all(|v| *v == nan), "{vals:?}");
+}

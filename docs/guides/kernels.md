@@ -119,8 +119,12 @@ them.
   every cell's `v1` (at `j × w + i`). Use it when a pass makes several maps
   at once.
 - Each value is exactly what the interpreter leaves: the same integer or
-  real, bit for bit. The results are ordinary new arrays, writable, and a
-  later pass can read them (as a table, so that compiles too).
+  real, bit for bit, -0.0 included. The one exception is NaN: any NaN is
+  stored as the quiet NaN `0x7ff8000000000000`, in both modes. A NaN's sign
+  and payload depend on the CPU and the compiler, and nothing else in
+  PostScript can tell NaNs apart.
+- The results are ordinary new arrays, writable, and a later pass can read
+  them (as a table, so that compiles too).
 - `w × h × n` may be at most 16,777,216 (`array`'s own limit); past that it
   is a `limitcheck`.
 

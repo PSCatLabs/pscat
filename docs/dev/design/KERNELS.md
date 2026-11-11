@@ -111,6 +111,13 @@ the soft branches and the retired lanes. Only the two ends differ:
   branches with side effects in reach).
 - Every row is computed, under `--bands` too: the array is the result. There
   is no GPU path, since f32 is not exact.
+- **NaNs.** Every NaN is stored as `f64::NAN` (`canon_nan`, in
+  `Machine::cell` and `.kaput`). A NaN's sign and payload differ between
+  paths: x86 passes on one operand's NaN, chosen by the compiler's operand
+  order, and Apple silicon returns its default NaN. Nothing but the stored
+  bits can tell NaNs apart.
+- **Constants compare by their bits** (`impl PartialEq for Op`). Float `==`
+  let a branch join keep 0.0 for -0.0 on every lane (Codex review 3).
 
 `run` is generic over what a pixel writes (bytes or `Num`s), so
 `kernelimage` monomorphises back to its own loop.

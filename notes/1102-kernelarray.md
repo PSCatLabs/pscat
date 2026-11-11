@@ -54,6 +54,20 @@ integer lanes only, and select the value untouched on real ones.
 - **Test.** `a_dyn_integer_zero_has_no_sign` fails without the fix, and it
   covers a real lane's -0.0 and NaN.
 
+### Codex review 3 (the whole branch)
+
+Two findings, both fixed, each with a test that fails without its fix:
+
+- **Branch joins took 0.0 for -0.0.** `Op`'s derived equality compared
+  immediates as floats, so a join of `{0.0}` and `{0.0 neg}` kept one zero
+  on every lane. This affected `kernelimage` too: `-1 exp` turns it into
+  255 against 0. `Op` now compares immediates by their bits. The test is
+  `joins_keep_the_sign_of_zero` (branch, binding, loop and array element).
+- **NaN payloads on x86.** Arithmetic passes on one operand's NaN, and which
+  one depends on the operand order the compiler chose. That can differ
+  between the vector and scalar code. `kernelarray` now stores every NaN as
+  the quiet NaN, in both paths. The test is `kernelarray_stores_one_nan`.
+
 ### Checks
 
 - `tests/kernels.rs`, `kernelarray` section:
