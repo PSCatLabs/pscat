@@ -119,7 +119,7 @@ impl Page {
             // Composite onto white first: premultiplied source-over white
             // is `c + (255 - a)` per channel, which stays within 255.
             let mut paper = self.pixmap.clone();
-            for px in paper.data_mut().chunks_exact_mut(4) {
+            for px in paper.data_mut().as_chunks_mut::<4>().0 {
                 let under = 255 - px[3];
                 for c in &mut px[..3] {
                     *c = c.saturating_add(under);
