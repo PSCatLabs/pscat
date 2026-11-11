@@ -418,6 +418,9 @@ pub struct Interp {
     pub(crate) page_device_notes: std::collections::HashSet<String>,
     /// How `kernelimage` runs its procedure (`.kernelmode`, #742).
     pub(crate) kernel_mode: crate::kernel::KernelMode,
+    /// `.kernelmath /fast` (#1100): `sin`, `cos` and `atan` vectorised
+    /// in `kernelimage`'s compiled kernels.
+    pub(crate) kernel_fast_math: bool,
     /// `.kernelshare`: when the kernel compiler shares procedure bodies.
     pub(crate) kernel_share: crate::kernel::compile::ShareMode,
     /// `.kernelcaps`: the kernel compiler's size caps (a test hook).
@@ -600,6 +603,7 @@ impl Interp {
             max_page_pixels: None,
             page_device_notes: std::collections::HashSet::new(),
             kernel_mode: crate::kernel::KernelMode::Auto,
+            kernel_fast_math: false,
             kernel_share: crate::kernel::compile::ShareMode::Auto,
             kernel_caps: crate::kernel::compile::DEFAULT_CAPS,
             kernel_notes: std::collections::HashSet::new(),

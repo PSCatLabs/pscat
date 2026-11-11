@@ -448,6 +448,44 @@ The CPU executor:
   reaches its band (plus one row of margin), on one thread. An unaware
   program gets the band speedup too.
 
+### Instruction sets and vector math (#1100)
+
+- **Tiers.** On x86_64 the executor's hot code (the block loop, `Gather1`,
+  the `Ext` instructions and the vector math) is compiled three times:
+  - the baseline, SSE2;
+  - x86-64-v2, SSE4.1, which puts `floor` and `round` in vectors;
+  - x86-64-v3, AVX2, with four f64s a vector.
+
+  `exec::Isa::chosen` picks the best the CPU has, detected once, and
+  `PSCAT_KERNEL_ISA` can force a lower one.
+- **How each copy is built.** The `isa_dispatch!` macro wraps an
+  `#[inline(always)]` body in one `#[inline(never)]` function per tier,
+  each with its `#[target_feature]`. A nested block dispatches on
+  `Machine::isa`, so it stays in its tier.
+- **FMA is never enabled.** A fused multiply-add rounds once where the
+  interpreter rounds twice. The emitted x86 assembly has no `vfmadd` in any
+  kernel function, and the v3 copies use `ymm` registers throughout.
+- **AVX-512 is not a tier.** Its target features need Rust 1.89, above the
+  1.88 `rust-version`.
+- **Vector math (`.kernelmath /fast`, `kernel/vmath.rs`).** `sin`, `cos`
+  and `atan` are libm's algorithms:
+  - `k_sin`, `k_cos`;
+  - `rem_pio2`'s medium and small-multiple cases;
+  - `atan`, `atan2`.
+
+  Every path is computed on every lane and the lane's own one selected,
+  using 64-bit integers only, so the loops vectorise. Lanes libm
+  special-cases go to the exact scalar code, and `0 0 atan`'s error is
+  decided there too.
+  - **Rare paths.** Two paths are computed only when some lane of the batch
+    needs them: the reduction's later rounds, and the no-reduction path
+    below pi/4.
+  - **Mode per run.** The mode is chosen per run in `Code::new`, never
+    stored in a kernel, and `kernelarray` always runs exact.
+  - **Exactness.** The tests compare every lane the vector code did against
+    `fmath`, over 4M random inputs and the range boundaries, on arm64 and on
+    x86_64.
+
 ### Limits
 
 pscat-mcp runs untrusted programs under `--max-time`/`--max-steps`/

@@ -837,6 +837,11 @@ const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
 /// Render `src` with the CLI: the PNG bytes.
 fn cli_png(src: &str, args: &[&str], threads: Option<&str>) -> Vec<u8> {
+    cli_png_isa(src, args, threads, None)
+}
+
+/// As `cli_png`, with `PSCAT_KERNEL_ISA` set to `isa` (#1100).
+fn cli_png_isa(src: &str, args: &[&str], threads: Option<&str>, isa: Option<&str>) -> Vec<u8> {
     let dir = common::scratch_dir("kernels");
     let ps = dir.join("k.ps");
     let png = dir.join("k.png");
@@ -849,6 +854,10 @@ fn cli_png(src: &str, args: &[&str], threads: Option<&str>) -> Vec<u8> {
     match threads {
         Some(t) => cmd.env("PSCAT_KERNEL_THREADS", t),
         None => cmd.env_remove("PSCAT_KERNEL_THREADS"),
+    };
+    match isa {
+        Some(t) => cmd.env("PSCAT_KERNEL_ISA", t),
+        None => cmd.env_remove("PSCAT_KERNEL_ISA"),
     };
     let out = common::wait_output(
         cmd.stderr(std::process::Stdio::piped())
@@ -3066,4 +3075,143 @@ fn kernelarray_differential_fuzz() {
         let _ = case;
     }
     assert!(compiled * 2 >= cases, "only {compiled} of {cases} compiled");
+}
+
+// --- .kernelmath /fast (#1100) -------------------------------------------------
+
+/// Render `prog` (a `/pixel` program, as `render`) under `/strict` with
+/// `.kernelmath` set to `math` first.
+fn render_math(math: &str, prog: &str) -> Result<Vec<u8>, String> {
+    render("strict", &format!("/{math} .kernelmath {prog}"))
+}
+
+#[test]
+fn fast_math_gives_the_exact_paths_bytes() {
+    for body in [
+        // Small and large angles, every quadrant, multiples of 90.
+        "i j mul 7.3 mul sin  i 45 mul j 90 mul add cos  i 0.37 mul j sub 1e5 mul sin",
+        // atan: every quadrant, a 1.0 denominator, tiny and huge ratios.
+        "i 35.5 sub j 4 sub atan 360 div  j 4 sub 1.0 atan 360 div  i 1e-25 mul 1 i sub 1e25 mul atan 360 div",
+        // Out of the vector code's range: huge, infinite and NaN angles.
+        "i 1e12 mul sin  i 1e308 mul 10 mul j 1e308 mul 10 mul dup sub add cos 0 max 1 min  j 1e300 mul 1 add i atan 360 div",
+    ] {
+        let prog = format!("{SHOW} /pixel {{ /j exch def /i exch def {body} }} def");
+        let exact = render_math("exact", &prog);
+        assert!(exact.is_ok(), "{exact:?}\n{prog}");
+        assert!(render_math("fast", &prog) == exact, "{prog}");
+        assert!(render("interpret", &prog) == exact, "{prog}");
+    }
+    // `0 0 atan` is still the error, at the same pixel.
+    let prog = "/pixel { /j exch def /i exch def i 3 sub j 2 sub atan 360 div dup dup } def";
+    assert_eq!(render_math("fast", prog), Err("undefinedresult".into()));
+}
+
+#[test]
+fn the_math_mode_is_per_call_and_kernelarray_is_always_exact() {
+    // The same procedure exact, fast, then exact: each run is lowered for
+    // its own mode, so the last is the exact path's again.
+    let prog = format!(
+        "{SHOW} /pixel {{ /j exch def /i exch def i 13 mul sin j 7 mul cos i 1 add j atan 360 div }} def"
+    );
+    let reference = render("interpret", &prog);
+    for math in ["exact", "fast", "exact"] {
+        assert!(render_math(math, &prog) == reference, "{math}");
+    }
+    // kernelarray's values, bit for bit, whatever `.kernelmath` says.
+    let src = "/fast .kernelmath 11 5 { /j exch def /i exch def i 17 mul sin j i 1 add atan } 2 kernelarray";
+    let (out, stats) = same_cells(src);
+    assert!(out.is_ok() && stats == [1, 0, 0], "{out:?} {stats:?}");
+    assert_eq!(
+        cells_run(
+            "interpret",
+            "/exact .kernelmath 1 1 { pop pop 1 } 1 kernelarray"
+        )
+        .0
+        .map(|v| v.len()),
+        Ok(1)
+    );
+}
+
+#[test]
+fn kernelmath_checks_its_operand() {
+    let mut it = Interp::new();
+    assert_eq!(
+        it.run_str("/sloppy .kernelmath").unwrap_err().name(),
+        "rangecheck"
+    );
+    assert_eq!(it.run_str("1 .kernelmath").unwrap_err().name(), "typecheck");
+}
+
+/// The instruction-set tier a kernel in `src` ran in, under
+/// `PSCAT_KERNEL_ISA=isa`: `PSCAT_KERNEL_TIMING`'s batches line.
+#[cfg(target_arch = "x86_64")]
+fn cli_tier(src: &str, isa: &str) -> String {
+    let dir = common::scratch_dir("kernels");
+    let ps = dir.join("tier.ps");
+    std::fs::write(&ps, src).expect("write");
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["--page", "200x130", "--png"])
+        .arg(dir.join("tier.png"))
+        .arg(&ps)
+        .env("PSCAT_KERNEL_ISA", isa)
+        .env("PSCAT_KERNEL_TIMING", "1");
+    let out = common::wait_output(
+        cmd.stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    err.lines()
+        .find(|l| l.contains("kernel batches"))
+        .unwrap_or("no batches line")
+        .to_string()
+}
+
+/// Every instruction-set tier the executor has gives the same bytes
+/// (#1100): on x86_64 the baseline, x86-64-v2 and x86-64-v3 copies, each
+/// run where the CPU has it (a tier it lacks runs the best one it has, so
+/// CI's x86 runners exercise their own). Elsewhere all three are one.
+#[test]
+fn bytes_do_not_depend_on_the_instruction_set() {
+    let trig = "%!PS
+/pixel { /j exch def /i exch def
+  i 0.37 mul j add sin  j 7.1 mul i sub cos  i 100 sub 0.5 add j 65 sub atan 360 div
+  i j mul 0.013 mul floor 0.1 mul i 0.5 mul round 0.01 mul add } bind def
+gsave 200 130 scale 200 130 [200 0 0 -130 0 130] { pixel pop } bind 3 kernelimage grestore showpage
+";
+    // A tier the CPU has really runs: the timing line names it.
+    #[cfg(target_arch = "x86_64")]
+    for (isa, name, has) in [
+        (
+            "v2",
+            "x86-64-v2",
+            std::arch::is_x86_feature_detected!("sse4.1"),
+        ),
+        (
+            "v3",
+            "x86-64-v3",
+            std::arch::is_x86_feature_detected!("avx2"),
+        ),
+    ] {
+        if has {
+            let ran = cli_tier(trig, isa);
+            assert!(ran.contains(name), "{isa}: {ran}");
+        }
+    }
+    for src in [
+        SCENE.to_string(),
+        trig.to_string(),
+        format!("/fast .kernelmath\n{trig}"),
+    ] {
+        let base = cli_png_isa(&src, &[], Some("3"), Some("base"));
+        for isa in ["v2", "v3"] {
+            assert_eq!(
+                cli_png_isa(&src, &[], Some("3"), Some(isa)),
+                base,
+                "{isa}\n{src}"
+            );
+        }
+        let interp = format!("/interpret .kernelmode\n{src}");
+        assert_eq!(cli_png(&interp, &[], None), base, "interpreted\n{src}");
+    }
 }

@@ -85,6 +85,11 @@ pub(crate) enum L {
     /// [`Code::gathers`]`[n]`, then the varying index's operand. Most of a
     /// large kernel's table reads (#1101).
     Gather1(Reg, u32, u32),
+    /// `Un` `sin` and `cos`, and `Bin` `atan`, vectorised (`vmath`):
+    /// `.kernelmath /fast` (#1100).
+    SinF(Reg, u32),
+    CosF(Reg, u32),
+    AtanF(Reg, u32, u32),
 }
 
 /// A [`L::Gather1`]: element `x * scale + base` of `table`, for an index
@@ -113,9 +118,13 @@ pub(crate) struct Code {
 }
 
 impl Code {
-    pub(crate) fn new(k: &Kernel) -> Code {
+    /// `fast`: `sin`, `cos` and `atan` vectorised (`.kernelmath /fast`).
+    /// Chosen here, per run, not in the kernel, so no kernel carries one
+    /// call's mode into another.
+    pub(crate) fn new(k: &Kernel, fast: bool) -> Code {
         let mut lw = Lower {
             k,
+            fast,
             gathers: Vec::new(),
             ins: Vec::with_capacity(k.size()),
             consts: Vec::new(),
@@ -149,6 +158,8 @@ impl Code {
 
 struct Lower<'k> {
     k: &'k Kernel,
+    /// `.kernelmath /fast`.
+    fast: bool,
     /// The position of the next instruction, numbered as `regalloc` does.
     pos: usize,
     /// The current body's [`Kernel::fresh`] positions not yet passed.
@@ -242,7 +253,10 @@ impl Lower<'_> {
             Ins::Bin(BinOp::Sub, d, a, b) => L::Sub(fr(d), self.op(a), self.op(b)),
             // An integer tag's `and` of two 0/1 tags is their product.
             Ins::Bin(BinOp::Mul | BinOp::TagAnd, d, a, b) => L::Mul(fr(d), self.op(a), self.op(b)),
+            Ins::Bin(BinOp::Atan, d, a, b) if self.fast => L::AtanF(fr(d), self.op(a), self.op(b)),
             Ins::Bin(op, d, a, b) => L::Bin(op, fr(d), self.op(a), self.op(b)),
+            Ins::Un(UnOp::Sin, d, a) if self.fast => L::SinF(fr(d), self.op(a)),
+            Ins::Un(UnOp::Cos, d, a) if self.fast => L::CosF(fr(d), self.op(a)),
             Ins::Un(op, d, a) => L::Un(op, fr(d), self.op(a)),
             Ins::IBin(op, d, a, b) => L::IBin(op, fr(d), self.op(a), self.op(b)),
             Ins::IUn(op, d, a) => L::IUn(op, fr(d), self.op(a)),
