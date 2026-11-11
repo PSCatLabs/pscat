@@ -809,6 +809,9 @@ const MAX_INSNS_SHARED: usize = 2_000_000;
 /// 900k (tropical_island), the kernel gallery none. `--max-memory` holds
 /// during compilation too.
 const MAX_SUB_MADE: usize = 4_000_000;
+/// The three caps above, the default of `.kernelcaps` (a test hook: the
+/// tests reach the caps with small programs, not with half a gigabyte).
+pub(crate) const DEFAULT_CAPS: [usize; 3] = [MAX_INSNS, MAX_INSNS_SHARED, MAX_SUB_MADE];
 /// Procedure elements a compile may execute (inlining can multiply a
 /// short program's work: `{p p}` nested 30 deep).
 const MAX_WORK: u64 = 20_000_000;
@@ -1056,9 +1059,9 @@ fn compile_with(
         limit: None,
         share,
         max_insns: if share == ShareMode::Never {
-            MAX_INSNS
+            it.kernel_caps[0]
         } else {
-            MAX_INSNS_SHARED
+            it.kernel_caps[1]
         },
         subs: Vec::new(),
         sub_depth: Vec::new(),
@@ -1231,7 +1234,7 @@ impl<'a> Compiler<'a> {
                 grouped(sub_reach),
                 reach.iter().filter(|&&r| r).count(),
                 grouped(self.sub_made),
-                grouped(MAX_SUB_MADE),
+                grouped(self.it.kernel_caps[2]),
             );
         }
         Ok(())
@@ -2093,11 +2096,11 @@ impl<'a> Compiler<'a> {
         // one made in code since discarded), counted or not: their total
         // has a looser cap of its own.
         let made = super::ir::count(&self.code[f.code_start..]);
-        if self.sub_made + made > MAX_SUB_MADE {
+        if self.sub_made + made > self.it.kernel_caps[2] {
             return nc(format!(
                 "{TOO_LARGE}: {} instructions made in subroutines, cap {}",
                 grouped(self.sub_made + made),
-                grouped(MAX_SUB_MADE)
+                grouped(self.it.kernel_caps[2])
             ));
         }
         // Move the code out, the inputs it reads renamed to parameters.
