@@ -275,6 +275,8 @@ struct SaveRecord {
     /// restore = grestoreall to the save point.
     gfx_depth: usize,
     gfx_state: Box<GraphicsState>,
+    /// `setobjectformat` is VM state: `restore` brings the old value back.
+    object_format: u8,
 }
 
 /// A PostScript interpreter with its own page, stacks and virtual memory.
@@ -1639,13 +1641,17 @@ impl Interp {
                     dstack,
                     gfx,
                     ostack,
+                    object_format,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
                     return Ok(None);
                 };
                 match frame {
-                    Frame::Scanner(lexer) => match lexer.next_token()? {
+                    Frame::Scanner(lexer) => match {
+                        lexer.binary_tokens = *object_format != 0;
+                        lexer.next_token()?
+                    } {
                         None => {
                             if lexer.pop_systemdict {
                                 Action::PopScannerAndDict
@@ -1861,7 +1867,22 @@ impl Interp {
                 }
                 Action::RunSequence(bytes) => {
                     let items = self.decode_sequence(&bytes)?;
-                    self.push_proc_frame(PsArray::from_vec(items))?;
+                    // A scanned executable string runs, as a token read from
+                    // a file would; a procedure body only pushes it. So each
+                    // one is followed by `exec` (the operator itself, not a
+                    // lookup a program could have redefined).
+                    let mut run = Vec::with_capacity(items.len());
+                    for o in items {
+                        let exec_string = o.executable && matches!(o.value, Value::String(_));
+                        run.push(o);
+                        if exec_string {
+                            run.push(Object::exec(Value::Operator(crate::object::Operator {
+                                name: "exec",
+                                func: crate::ops::control::exec,
+                            })));
+                        }
+                    }
+                    self.push_proc_frame(PsArray::from_vec(run))?;
                 }
                 Action::ProfExit => {
                     self.estack.pop();
@@ -2125,6 +2146,7 @@ impl Interp {
     }
 
     fn scan_one(&self, lexer: &mut Lexer) -> Result<Option<(Object, usize)>, PsError> {
+        lexer.binary_tokens = self.object_format != 0;
         let obj = match lexer.next_token()? {
             None => return Ok(None),
             Some(Token::RBrace) => {
@@ -2451,6 +2473,7 @@ impl Interp {
             seen: HashSet::new(),
             gfx_depth,
             gfx_state,
+            object_format: self.object_format,
         });
         Object::lit(Value::Save(handle))
     }
@@ -2485,6 +2508,7 @@ impl Interp {
                 JEntry::GState { gs, old } => *gs.borrow_mut() = *old,
             }
         }
+        self.object_format = rec.object_format;
         // grestoreall to the save point, then drop the saved state —
         // pinned against gs (`save gsave gsave 5 setlinewidth restore`).
         self.gfx

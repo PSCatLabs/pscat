@@ -16,7 +16,7 @@
 //!
 //! `printobject` and `writeobject` write the binary object sequence of one
 //! object; the tag (0 to 255) goes in the top-level object's tag byte. The
-//! layout and the limits are described in [`crate::binobj`]. `writeobject`
+//! layout and the limits are described in `crate::binobj`. `writeobject`
 //! needs an output file from `file` (so `--allow-write`, except for
 //! `%stdout` and `%stderr`).
 //!

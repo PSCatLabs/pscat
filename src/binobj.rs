@@ -177,6 +177,12 @@ struct Reader<'a> {
     body: &'a [u8],
     /// Slots still allowed to be decoded: one per 8 bytes of body.
     budget: usize,
+    /// Characters of strings and names still allowed to be copied. Several
+    /// slots may point at the same bytes, and each copy is new storage, so
+    /// without this a 73 KB sequence could ask for 64 MiB of strings. A
+    /// writer lays every string's characters out once, so the total can
+    /// never legitimately exceed the body.
+    chars_left: usize,
 }
 
 /// Decode a whole sequence (header included) into its top-level objects.
@@ -198,6 +204,7 @@ pub fn decode(
         order,
         body,
         budget: body.len() / 8,
+        chars_left: body.len(),
     };
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
@@ -208,13 +215,17 @@ pub fn decode(
 
 impl Reader<'_> {
     /// Characters at `off` (relative to the body), `len` of them.
-    fn chars(&self, off: usize, len: usize) -> Result<&[u8], PsError> {
+    fn chars(&mut self, off: usize, len: usize) -> Result<&[u8], PsError> {
+        self.chars_left = self
+            .chars_left
+            .checked_sub(len)
+            .ok_or_else(|| syntax("strings overlap or repeat"))?;
         off.checked_add(len)
             .and_then(|end| self.body.get(off..end))
             .ok_or_else(|| syntax("offset out of range"))
     }
 
-    fn name_text(&self, len: usize, off: usize) -> Result<String, PsError> {
+    fn name_text(&mut self, len: usize, off: usize) -> Result<String, PsError> {
         if len == 0 || len == 0xFFFF {
             return Err(syntax(
                 "system and user name table indices are not supported",
@@ -337,14 +348,17 @@ pub fn encode(
         for i in 0..arr.len() {
             let el = arr.get(i).ok_or(PsError::Rangecheck)?;
             w.slot(&el, depth + 1)?;
-        }
-        let used = w.body.len() + w.chars.len();
-        if used > MAX_BYTES {
-            return Err(PsError::Limitcheck);
-        }
-        if used - charged >= 1024 {
-            charge(used - charged)?;
-            charged = used;
+            // After every element, not every array: one array can name the
+            // same 65535-byte string 65535 times, which is 4 GiB of copies
+            // if the check waits for the array's end.
+            let used = w.body.len() + w.chars.len();
+            if used > MAX_BYTES {
+                return Err(PsError::Limitcheck);
+            }
+            if used - charged >= 1024 {
+                charge(used - charged)?;
+                charged = used;
+            }
         }
     }
     let slots_len = w.body.len();

@@ -410,6 +410,85 @@ fn a_high_byte_inside_a_name_is_still_a_name() {
     assert_eq!(st[2], "true");
 }
 
+#[test]
+fn format_zero_turns_binary_scanning_off() {
+    // With format 0 a token that starts with byte 128 is an ordinary name,
+    // as in Ghostscript; with any other format it is a sequence.
+    let s = seq(&[[1, 0, 0, 0, 0, 0, 0, 7]], b"");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!(
+        "0 setobjectformat ({}) token pop type",
+        escaped(&s)
+    ))
+    .unwrap();
+    assert_eq!(stack(&it).last().unwrap(), "nametype");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!(
+        "2 setobjectformat ({}) token pop type",
+        escaped(&s)
+    ))
+    .unwrap();
+    assert_eq!(stack(&it), ["()", "arraytype"]);
+}
+
+#[test]
+fn a_scanned_executable_string_runs() {
+    // Slot type 5 with the executable bit: the string "1 2" runs, so its
+    // numbers are pushed rather than the string itself.
+    let s = seq(&[[0x85, 0, 0, 3, 0, 0, 0, 8]], b"1 2");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!("({}) cvx exec", escaped(&s))).unwrap();
+    assert_eq!(stack(&it), ["1", "2"]);
+    // A literal string is pushed.
+    let s = seq(&[[0x05, 0, 0, 3, 0, 0, 0, 8]], b"1 2");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!("({}) cvx exec", escaped(&s))).unwrap();
+    assert_eq!(stack(&it), ["(1 2)"]);
+    // And what printobject writes for an executable string runs the same way.
+    let bytes = printed("(3 4 add) cvx 0 printobject");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!("({}) cvx exec", escaped(&bytes)))
+        .unwrap();
+    assert_eq!(stack(&it), ["7"]);
+}
+
+#[test]
+fn restore_brings_back_the_object_format() {
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str("save 4 setobjectformat currentobjectformat exch restore currentobjectformat")
+        .unwrap();
+    assert_eq!(stack(&it), ["4", "2"]);
+}
+
+#[test]
+fn strings_that_share_characters_run_out_of_budget() {
+    // An array of four strings of 40 bytes that all point at the same 40
+    // characters: 160 bytes of copies from an 80-byte body.
+    let slots = [
+        [9, 0, 0, 4, 0, 0, 0, 8],
+        [5, 0, 0, 40, 0, 0, 0, 40],
+        [5, 0, 0, 40, 0, 0, 0, 40],
+        [5, 0, 0, 40, 0, 0, 0, 40],
+        [5, 0, 0, 40, 0, 0, 0, 40],
+    ];
+    let mut s = seq(&slots, &[b'x'; 40]);
+    s[1] = 1; // one top-level object, the array
+    let mut it = Interp::with_page(50, 50).unwrap();
+    let e = it
+        .run_str(&format!("({}) cvx exec", escaped(&s)))
+        .expect_err("shared characters");
+    assert!(matches!(e, PsError::Syntax(_)), "{e:?}");
+}
+
+#[test]
+fn writer_stops_a_huge_array_of_one_big_string_early() {
+    // 65535 references to one 65535-byte string would be 4 GiB of copies.
+    let e = err(
+        "/s 65535 string def 65535 array dup 0 1 65534 { 1 index exch s put } for 0 printobject",
+    );
+    assert!(matches!(e, PsError::Limitcheck), "{e:?}");
+}
+
 // ------------------------------------------------------------ Ghostscript
 
 fn gs_available() -> bool {

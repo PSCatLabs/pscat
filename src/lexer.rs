@@ -58,6 +58,11 @@ pub struct Lexer {
     /// same call — see `eat_token_delimiter` — so reading the file's
     /// live line position afterward would often be off by one).
     token_start_line: Option<usize>,
+    /// Whether a token starting with 128 to 131 is a binary object
+    /// sequence. The interpreter clears it while the object format is 0
+    /// (`0 setobjectformat`), when those bytes are ordinary name characters
+    /// (#733).
+    pub(crate) binary_tokens: bool,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -88,6 +93,7 @@ impl Lexer {
             is_main: false,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
     }
 
@@ -99,6 +105,7 @@ impl Lexer {
             is_main: true,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
     }
 
@@ -111,6 +118,7 @@ impl Lexer {
             is_main: false,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
     }
 
@@ -173,7 +181,7 @@ impl Lexer {
         };
         // A token that starts with 128 to 131 is a binary object sequence.
         // (Inside a name such a byte is still an ordinary character.)
-        if (128..=131).contains(&b) {
+        if self.binary_tokens && (128..=131).contains(&b) {
             return Ok(Some(Token::BinarySeq(self.read_binary_sequence()?)));
         }
         if is_regular(b) {

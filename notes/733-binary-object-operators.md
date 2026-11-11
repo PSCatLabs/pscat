@@ -54,6 +54,17 @@ bytes gs writes for 19 objects in all four formats (local only; CI has no gs).
   that range inside a name is still an ordinary character (gs agrees), and the full test suite
   and selftest show no program in the repo relied on the old behaviour.
 
+**Codex round 1 (PR #1103).**
+- The writer checks the 64 MiB cap and charges the memory limit after every element, not every
+  array (one array can name one 65535-byte string 65535 times). The reader allows at most as many
+  copied string and name bytes as the body holds, since slots may share characters and each copy is
+  new storage (`syntaxerror` past that).
+- `0 setobjectformat` turns binary scanning off: a token starting with 128 to 131 is then an
+  ordinary name, as in gs (`Lexer::binary_tokens`, set from the format before each token).
+- A scanned executable string runs (an `exec` follows it in the frame the scanner builds); inside a
+  procedure body it is still only pushed.
+- The object format is saved by `save` and brought back by `restore`.
+
 **Scope note: this cannot save a million-element array.** The slot's length field is 16 bits, so
 an array holds at most 65535 elements. A long numeric array should go through `writereals`
 (#735); a million reals could only be written here as nested arrays, which gs would not read
