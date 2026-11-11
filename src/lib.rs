@@ -88,9 +88,9 @@ pub mod page;
 // Everything below is public only so the binaries, the wasm build and the
 // integration tests can reach it. `#[doc(hidden)]` keeps it out of the docs
 // and out of cargo-semver-checks' view of the API (issue #565).
-pub(crate) mod binobj;
 #[doc(hidden)]
 pub mod bbox;
+pub(crate) mod binobj;
 #[doc(hidden)]
 pub mod capabilities;
 #[doc(hidden)]
