@@ -1744,6 +1744,16 @@ renders eight examples in both and compares block-downsampled output).
   needs a doc comment or `#[doc(hidden)]`, or the build fails. `missing_docs`
   does not look inside hidden modules, and it does not check a re-export
   of a hidden item either, so supported items must live in a visible module.
+  Since #1098 the supported surface also has `pscat::sheet`,
+  `pscat::chalkboard` and `pscat::catalog` (facades over the hidden
+  `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
+  `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
+  `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so
+  tiny-skia (0.x) stays a private dependency and its upgrades are not pscat
+  API breaks; keep it that way (no `pub use tiny_skia`). pscat-mcp still
+  calls the hidden items from before (its `src/pscat_extras.rs`), so do not
+  rename or remove them until it has moved. `tests/library_api.rs` pins each
+  facade to the hidden path it wraps, byte for byte.
   The `window` feature (default) gates `src/window.rs`; without it
   `src/window_stub.rs` stands in with the same signatures, returning an
   error. The crate is rlib-only: `scripts/build_wasm.sh` asks for the cdylib
