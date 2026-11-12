@@ -1,0 +1,94 @@
+%!PS-Adobe-3.0
+%%Title: Mochi in Oils
+%%BoundingBox: 0 0 600 800
+%%Creator: Claude
+%%EndComments
+
+% A photograph turned into a painting by an image filter written in
+% PostScript. The 3000x4000 photo (gallery/references/mochi.jpg, the same
+% dog as "Mochi in Denim Blue") is decoded with /DCTDecode into an array of
+% row strings, 36 MB in all; then every pixel of the 1200x1600 result
+% runs the Kuwahara filter (Kuwahara et al., 1976) over it:
+%
+%   - look at four overlapping square windows around the point (above
+%     left, above right, below left, below right), 49 samples each;
+%   - in each, the mean colour and how much the brightness varies;
+%   - paint the mean colour of the calmest window.
+%
+% An edge always has one window entirely on one side of it, so edges
+% stay sharp while fur and denim flatten into flat, brush-like patches:
+% the look of paint laid on with a knife. A faint canvas weave and a warm
+% grade finish it.
+%
+% That is 196 samples and 588 table reads a pixel, about 1.1 billion
+% reads for the picture. pscat compiles /pixel and runs it on every core
+% (`kernelimage`, docs/guides/kernels.md); the photo's rows are read
+% straight from the strings the program decoded. Any other interpreter
+% runs the same procedure through `colorimage`, by lib/kernel.ps.
+%
+%   pscat --page 600x800 --dpi 144 --png mochi_in_oils.png gallery/mochi_in_oils.ps
+%
+% (Run from the repo root: the photo is read from gallery/references/.)
+% Render time (release build, 10-core M4 laptop): about 2.7 s with
+% kernelimage, decoding included; the same procedure in the interpreter
+% (`/interpret .kernelmode` first) takes 273 s and gives the same bytes.
+
+/kernelimage where { pop } { (lib/kernel.ps) run } ifelse
+
+/W 1200 def /H 1600 def                       % the painting
+/SW 3000 def /SH 4000 def                     % the photograph
+/R 6 def                                      % window radius, in painting pixels
+5 noiseseed
+
+% --- read the photo: one string per row ----------------------------------------
+/Src [ SH { SW 3 mul string } repeat ] def
+(gallery/references/mochi.jpg) (r) file /DCTDecode filter /Jpg exch def
+0 1 SH 1 sub { Src exch get Jpg exch readstring pop pop } for
+
+/Sc SW W div def                              % photo pixels per painting pixel
+/SW1 SW 1 sub def /SH1 SH 1 sub def
+
+% --- the filter ------------------------------------------------------------------
+% i j di dj -> mean r g b and the brightness variance of the window that
+% starts at (i, j) and runs R pixels in the direction (di, dj)
+/window {
+  /wdj exch def /wdi exch def /wj exch def /wi exch def
+  /sr 0 def /sg 0 def /sb 0 def /sl 0 def /sl2 0 def
+  0 1 R { /a exch def
+    0 1 R { /b exch def
+      wi a wdi mul add 0.5 add Sc mul cvi 0 max SW1 min 3 mul /x exch def
+      wj b wdj mul add 0.5 add Sc mul cvi 0 max SH1 min /y exch def
+      Src y get dup x get /r exch def dup x 1 add get /g exch def x 2 add get /bb exch def
+      /sr sr r add def /sg sg g add def /sb sb bb add def
+      r 0.299 mul g 0.587 mul add bb 0.114 mul add
+      dup sl add /sl exch def dup mul sl2 add /sl2 exch def
+    } for
+  } for
+  /nn R 1 add dup mul def
+  sr nn div sg nn div sb nn div
+  sl2 nn div sl nn div dup mul sub
+} bind def
+
+/pixel {
+  /pj exch def /pi exch def
+  /best 1e30 def /br 0 def /bg 0 def /bb2 0 def
+  [ -1 -1  1 -1  -1 1  1 1 ] /Dirs exch def
+  0 1 3 { /q exch def
+    pi pj Dirs q 2 mul get Dirs q 2 mul 1 add get window
+    /v exch def /mb exch def /mg exch def /mr exch def
+    v best lt { /best v def /br mr def /bg mg def /bb2 mb def } if
+  } for
+  % canvas weave: a fine crossed ripple, broken by noise
+  pi 1.9 mul 57.3 mul sin pj 1.9 mul 57.3 mul sin mul 0.5 mul
+  pi 0.05 mul pj 0.05 mul 3 0.5 2.0 fbm2 add 0.035 mul 1 add /tex exch def
+  % a warm grade, a little lifted in the shadows
+  br 255 div 1.04 mul 0.02 add tex mul
+  bg 255 div 1.00 mul 0.015 add tex mul
+  bb2 255 div 0.90 mul 0.03 add tex mul
+} bind def
+
+gsave
+600 800 scale
+W H [W 0 0 H neg 0 H] /pixel load 3 kernelimage
+grestore
+showpage

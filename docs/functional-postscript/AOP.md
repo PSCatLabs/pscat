@@ -1,9 +1,13 @@
 # Aspect-oriented instrumentation
 
-[aspect.ps](../../lib/aspect.ps) has five public constructors. Their join point
-is one explicitly captured target quotation. There is no aspect registry,
-pointcut expression language, automatic interception, or replacement of
-standard operators. See [API](API.md) for exact signatures and guards.
+[aspect.ps](../../lib/aspect.ps) has five public constructors and one opt-in
+rebinding helper. Strictly, these are **decorators**, higher-order wrappers
+around one explicitly captured target, rather than AOP in the AspectJ sense.
+There is no aspect registry, pointcut expression language, automatic weaving,
+or replacement of standard operators. `aop-before` and `aop-after` are
+`fp-compose` with named argument order; the value is in `aop-around`,
+`aop-count`, `aop-trace` and `aop-wrap-def`. See [API](API.md) for exact
+signatures and guards.
 
 ## Advice and ordering
 
@@ -74,6 +78,23 @@ Replacing a user dictionary binding explicitly can intercept dynamic calls:
 3 paint == % 6, counted
 3 old ==   % 6, not counted
 counter /Calls get == % 1
+```
+
+`aop-wrap-def` is that pattern as one call, and also accepts operators. It
+defines in the current dictionary, so wrapping inside a `begin`/`end` scope
+instruments only that scope, and systemdict is never written:
+
+```postscript
+(lib/functional.ps) run
+(lib/aspect.ps) run
+/fills << /Calls 0 >> def
+1 dict begin
+  /fill {fills aop-count} aop-wrap-def
+  0 0 10 10 rectfill % rectfill is not fill: not counted
+  newpath 0 0 moveto 5 0 lineto 0 5 lineto fill
+end
+newpath 0 0 moveto 5 0 lineto 0 5 lineto fill % outside the scope
+fills /Calls get == % 1
 ```
 
 `bind` replaces names resolving to native **operators**, not ordinary procedure

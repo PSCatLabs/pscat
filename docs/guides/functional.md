@@ -48,6 +48,25 @@ Stack effects below put the top of the stack on the right.
 An empty array gives an empty result (or `init`, for a fold) without calling
 q. `fp-fold` always takes an explicit starting value.
 
+Helpers for building and ordering the data (contracts in
+[API](../functional-postscript/API.md)):
+
+| Call | Result | Callback |
+|---|---|---|
+| `array q fp-map-indexed` | like `fp-map`, with the zero-based index above each element | `( x i -- y )` |
+| `n fp-range` | the array `[0 1 ... n-1]` | |
+| `a b fp-zip` | an array of `[x y]` pairs; the lengths must match | |
+| `a b q fp-map2` | `fp-zip`, then map | `( x y -- z )` |
+| `array key fp-sort-by`, `array fp-sort` | a stable sorted copy; keys all numbers or all strings | key `( x -- number/string )` |
+| `key fp-field` | a getter procedure `( container -- value )` | |
+
+```postscript
+(lib/functional.ps) run
+5 fp-range {dup mul} fp-map ==                     % [0 1 4 9 16]
+[3 1 2] fp-sort ==                                 % [1 2 3]
+[<< /r 2 >> << /r 5 >>] /r fp-field fp-map ==      % [2 5]
+```
+
 The callback runs in your own dictionary, with nothing of the library's on
 either stack, so a `def` inside it lands where it would in a plain loop and
 it can read values you left below its input. The library checks the stack
@@ -61,6 +80,7 @@ too many or too few values.
 | `p q fp-compose` | a procedure that runs p, then q |
 | `value q fp-curry` | a procedure that pushes `value`, then runs q |
 | `value q fp-dip` | runs q with `value` set aside, then puts `value` back |
+| `value q fp-keep` | runs q on `value`, then pushes `value` again, so one record can feed several drawing steps |
 
 `fp-curry` is how a callback gets its settings: capture a palette, a size or
 a counter once, and pass the result to `fp-each`. The captured value is
@@ -121,6 +141,10 @@ behind your back. To change what a name does, `def` the result yourself.
 | `target advice aop-around` | runs advice with target pushed as data; advice calls it with `exec`, or skips it |
 | `target counter aop-count` | adds 1 to `counter`'s `/Calls` entry, then runs target |
 | `target (label) aop-trace` | prints `enter label`, runs target, prints `leave label` |
+
+`/name {decorator} aop-wrap-def` runs the decorator on the current meaning of
+`name` and defines the result back as `name` in the current dictionary, like
+`def`; operators are wrapped as `{op}` first.
 
 ```postscript
 (lib/functional.ps) run

@@ -432,6 +432,13 @@ without the limits above:
   service the answer to anything that gets through is the outer kill: the MCP
   server kills its child at `--timeout`, and anything else should run the
   process under `ulimit`, a container's limits or `timeout`.
+- **A GPU dispatch runs to completion** (`--gpu-preview`, MCP `gpu_preview`,
+  a build with the `gpu` feature, #1065). The time and step limits are read
+  before each dispatch of 65536 pixels. A dispatch is charged only the
+  kernel's straight-line size per pixel in steps, not its loop trips: those
+  are capped at 2^20 per pixel instead. So one dispatch's work is bounded,
+  but not by `--max-steps`, and it can run past `--max-time`; the outer
+  kill covers it.
 - **Memory is looked at once per slice**, so a program can pass its cap by
   what 512 steps (when a time or memory limit is set) can allocate before the
   next look. With a 256 MiB cap, an operand-stack, graphics-state-stack and

@@ -31,6 +31,7 @@ Open the guide that matches the job.
 - [Printmaking and etching](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/printmaking.md): engraving, hatching, stipple, halftone, woodcut and linocut
 - [Dry media](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/dry-media.md): chalk, crayon, charcoal, single-stroke glyphs, and LaTeX math on a chalkboard (`pscat chalk`)
 - [Functional PostScript](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/functional.md): map, filter and fold over lists of records, composed procedures, and wrappers that count or trace calls
+- [Compiled per-pixel kernels](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/kernels.md): `kernelimage` and `kernelarray` compile a per-pixel PostScript procedure to native code on every core, byte for byte what the interpreter gives, for ray tracers, fractals, noise landscapes and image filters
 - [pscat with an image model](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/pscat-with-image-models.md): the image model paints the background once, pscat sets the exact layer on top
 - [All guides](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/README.md): the index of the guides, grouped by topic
 

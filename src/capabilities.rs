@@ -411,6 +411,42 @@ static ENTRIES: &[Entry] = &[
     // internal artkit hook .permnoise2. tests/capabilities.rs checks
     // every row here is a real operator in systemdict.
     entry!(
+        "kernelimage",
+        CapabilityKind::Operator,
+        "pscat extension (#742). Like colorimage, but the data is a per-pixel procedure i j -> c1..cn (components 0..1) that pscat compiles and runs on every core, byte for byte as the interpreter would: ray tracers, fractals, image filters, neural networks. Each pixel gets a fresh dict; uncompilable procedures or pixels fall back to the interpreter. docs/guides/kernels.md.",
+        &[],
+        SYSTEMDICT,
+        "width height matrix proc ncomp kernelimage -",
+        BUILTIN
+    ),
+    entry!(
+        "kernelarray",
+        CapabilityKind::Operator,
+        "pscat extension (#1102). Runs a per-cell procedure i j -> v1..vn over a w by h grid, compiled and on every core like kernelimage, and returns the values as numbers: one array of w*h*n, cell (i, j)'s at (j*w + i)*n. Each value is the integer or real the interpreter would leave. For grids a program bakes before it draws (height maps, lookup tables). docs/guides/kernels.md.",
+        &[],
+        SYSTEMDICT,
+        "w h proc n kernelarray array",
+        BUILTIN
+    ),
+    entry!(
+        "kernelarrays",
+        CapabilityKind::Operator,
+        "pscat extension (#1102). kernelarray with the values as n arrays of w*h, one per value the procedure leaves, in order.",
+        &[],
+        SYSTEMDICT,
+        "w h proc n kernelarrays a1 .. an",
+        BUILTIN
+    ),
+    entry!(
+        "kernelcompile",
+        CapabilityKind::Operator,
+        "pscat extension (#742). Would kernelimage (or kernelarray) compile proc? Returns true and the kernel's size, or false and the reason (naming the procedures involved).",
+        &[],
+        SYSTEMDICT,
+        "proc ncomp kernelcompile bool string",
+        BUILTIN
+    ),
+    entry!(
         "noiseseed",
         CapabilityKind::Operator,
         "pscat extension. Seeds the native noise table from an integer; never touches rand. A fresh interpreter behaves as if 0 noiseseed had run. nrseed is the PostScript twin.",

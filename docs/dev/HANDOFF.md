@@ -18,6 +18,18 @@
 > Gotcha: its still is rendered at 300 dpi, not 2x, so the QR stays on whole
 > pixels (command in its header). Continue from
 > [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
+>
+> Also in progress, on branch `feature/compute-kernels` (#742): compiled
+> per-pixel kernels. `kernelimage` compiles a per-pixel procedure
+> (`src/kernel/`: an abstract-interpreting compiler, a 16-lane masked
+> executor on all cores, an opt-in wgpu GPU preview) and matches the
+> interpreter byte for byte, falling back to it per pixel. Design:
+> [`design/KERNELS.md`](design/KERNELS.md); measurements and follow-ups:
+> `notes/742-compiled-kernels.md`; guide:
+> [kernels](../guides/kernels.md). Gotcha: `tests/kernels.rs` compares every
+> case against `/interpret .kernelmode`, and a debug-build validator
+> (`src/kernel/check.rs`) checks register kinds, so a change to the
+> compiler that drops an int/real conversion fails loudly.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II
