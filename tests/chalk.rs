@@ -627,6 +627,44 @@ fn structural_errors_join_the_list_and_a_long_list_is_cut() {
     assert!(shown.lines().count() < 30, "{shown}");
 }
 
+/// A stepped-over one-token argument does not end the line, and a missing
+/// argument is still reported when something else on the line was stepped
+/// over (Codex batch 3, round 1).
+#[test]
+fn a_stepped_over_argument_neither_hides_nor_fakes_a_missing_one() {
+    let kinds_tokens = |tex: &str| -> Vec<(String, String)> {
+        let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
+        let chalk::ChalkError::Problems(ps) = &e else {
+            panic!("{tex}: {e:?}");
+        };
+        ps.iter()
+            .map(|p| (p.kind.clone(), p.token.clone()))
+            .collect()
+    };
+    let cmd = |t: &str| ("unsupported-command".to_string(), t.to_string());
+    let chr = |t: &str| ("unsupported-character".to_string(), t.to_string());
+    // later problems on the line are still found
+    assert_eq!(
+        kinds_tokens(r"x^\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\sqrt\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\vec@ + \frac@\beth + ☃"),
+        [chr("@"), chr("@"), cmd(r"\beth"), chr("☃")]
+    );
+    // a genuinely missing argument is not swallowed by an earlier step-over
+    let got = kinds_tokens(r"@ + \frac{1}");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0], chr("@"));
+    assert_eq!(got[1].0, "missing-argument", "{got:?}");
+    // and a stepped-over argument alone is one problem, not two
+    assert_eq!(kinds_tokens(r"x^\aleph"), [cmd(r"\aleph")]);
+}
+
 /// Separate inline pairs (the issue's `\(a\) + \(b\)`, in all four delimiter
 /// forms) are one formula with the delimiters gone: the same board as the
 /// bare formula, not a mathkit error about a stray `\)`.

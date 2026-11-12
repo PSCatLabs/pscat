@@ -665,14 +665,23 @@
 
 % (label) -> list   A script's or command's argument: a {group}, or one
 % token. The label names the command in the error when it is missing.
+% While mkproblems is checking, a one-token argument that was stepped over
+% (x^\aleph, \sqrt@) stands in as an empty group, so the line goes on and
+% the problems after it are found; only an argument that is really missing
+% is reported as missing (#1080).
 % @internal
 /mkarg {
   mkskip
   mkpeek 123 eq { pop mkadv /group mkparse pop } {
+    mkCollect { mkpn } { -1 } ifelse exch
     dup 4 dict begin /mkarglabel exch def /mkmode /arg def
     [ mkparseone pop ]
     end
-    dup length 0 eq { pop (mk-missing-argument:) exch mkfail } { exch pop } ifelse
+    dup length 0 eq {
+      2 index 0 ge { mkpn 3 index gt } { false } ifelse
+      { pop pop pop [ << /T /group /L [ ] /C /ord /K mknewk >> ] }
+      { pop exch pop (mk-missing-argument:) exch mkfail } ifelse
+    } { exch pop exch pop } ifelse
   } ifelse
 } bind def
 
@@ -3316,8 +3325,9 @@
   } { () false } ifelse
   { mksplitname
     mkpos mklen min dup
-    % a missing argument after a step-over is that step-over's echo
-    mkpn mkpn0 gt 4 index (missing-argument) eq and { pop pop pop pop } { mkaddprob } ifelse
+    % mkarg stands a stepped-over argument in, so a missing argument here is
+    % a real one, whatever else the line had (#1080)
+    mkaddprob
   } { pop stop } ifelse
 } bind def
 
@@ -3334,7 +3344,6 @@
   /mkCollect true mkset
   0 1 mkplines length 1 sub {
     /mkli exch mkset
-    /mkpn0 mkpn mkset
     count /mkpc0 exch mkset countdictstack /mkpd0 exch mkset
     { mkplines mkli get mkparsetop pop } stopped { mkpfatal } if
   } for
