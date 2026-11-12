@@ -22,12 +22,15 @@ rem A program or root is an environment variable name, a bar and the rest of
 rem the path below that variable's directory (so only the ASCII rest goes
 rem through the console code page and any user name survives), or a dash, a
 rem bar and the whole path.
+rem The arguments go to pscat-mcp.ps1 in an environment variable, not on its
+rem command line (see ModeArgs there).
+set "PSCAT_LAUNCH_ARGS=%*"
 set "PSCAT_BASE="
 set "PSCAT_REL="
 set "PSCAT_RBASE="
 set "PSCAT_RREL="
 set "PSCAT_ARGS="
-for /f "usebackq tokens=1,2,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe %* ^<NUL`) do (
+for /f "usebackq tokens=1,2,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe ^<NUL`) do (
   if "%%a"=="E" (
     set "PSCAT_BASE=%%b"
     set "PSCAT_REL=%%c"
@@ -38,6 +41,7 @@ for /f "usebackq tokens=1,2,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfi
   )
   if "%%a"=="A" set "PSCAT_ARGS=%%b"
 )
+set "PSCAT_LAUNCH_ARGS="
 if not defined PSCAT_REL exit /b 1
 if not "%PSCAT_BASE%"=="-" goto based
 set "PSCAT_EXE=%PSCAT_REL%"

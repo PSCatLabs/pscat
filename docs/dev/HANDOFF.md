@@ -1771,7 +1771,7 @@ renders eight examples in both and compares block-downsampled output).
   --hook`, valid in sh, Git Bash and PowerShell. `.gitattributes` pins LF
   for the sh files and CRLF for `.cmd`/`.ps1`. The twin keeps the output-root
   contract below (#910): `pscat-mcp.cmd` passes its arguments to
-  `pscat-mcp.ps1 --exe`, which drops the launcher-only `--plugin-*` ones,
+  `pscat-mcp.ps1 --exe` (in `PSCAT_LAUNCH_ARGS`), which drops the launcher-only `--plugin-*` ones,
   picks the root the same way (plugin.conf is `%APPDATA%\pscat\plugin.conf`,
   the default root `%APPDATA%\pscat\renders`) and hands it back with the
   exe path; the `.cmd` then runs `pscat-mcp.exe --out-root DIR`. No PATH

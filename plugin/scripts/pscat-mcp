@@ -16,8 +16,10 @@ HERE=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P) || HERE=$(dirname "$0")
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)
     ps1=$(cygpath -w "$HERE/pscat-mcp.ps1" 2>/dev/null) || ps1=$HERE/pscat-mcp.ps1
+    q=
+    for a in "$@"; do q="$q \"$a\""; done
     run_ps1() {
-      env -u PSModulePath powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$ps1" "$@" </dev/null
+      env -u PSModulePath PSCAT_LAUNCH_ARGS="$q" powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$ps1" "$@" </dev/null
     }
     case "${1:-}" in
       --hook|--locate) run_ps1 "$@"; exit $? ;;
@@ -25,7 +27,7 @@ case "$(uname -s 2>/dev/null)" in
     # The server's path (line 1) and the output root to pass, if any (line 2),
     # as UTF-8 (what Git Bash reads). The launcher-only --plugin-* arguments
     # (#910) were read by pscat-mcp.ps1 and are not passed on.
-    out=$(run_ps1 --exe-utf8 "$@" | tr -d '\r') || exit 1
+    out=$(run_ps1 --exe-utf8 | tr -d '\r') || exit 1
     exe=$(printf '%s\n' "$out" | sed -n 1p)
     root=$(printf '%s\n' "$out" | sed -n 2p)
     [ -n "$exe" ] || exit 1

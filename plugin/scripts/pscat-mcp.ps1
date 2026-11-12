@@ -430,6 +430,22 @@ function SplitArgs([object[]]$List) {
     }
 }
 
+# The arguments the launcher was given. pscat-mcp.cmd and the sh entry point
+# put them, quoted as on a command line, in PSCAT_LAUNCH_ARGS instead of on
+# PowerShell's own command line, whose parsing of a bare `--name=` or `--name=C:\`
+# argument is not ours to rely on. Without that variable, the arguments after
+# the mode are used.
+function ModeArgs([object[]]$Given) {
+    if ($null -ne $env:PSCAT_LAUNCH_ARGS) {
+        $list = New-Object System.Collections.ArrayList
+        foreach ($m in [regex]::Matches($env:PSCAT_LAUNCH_ARGS, '(?:[^\s"]+|"[^"]*")+')) {
+            $null = $list.Add($m.Value.Replace('"', ''))
+        }
+        return $list.ToArray()
+    }
+    return @($Given | Select-Object -Skip 1)
+}
+
 # UsableRoot VALUE [WHAT]: VALUE as a full directory path if it may be the
 # output root, else ''. WHAT names the setting in the warning; without it, quiet.
 function UsableRoot([string]$Value, [string]$What) {
@@ -569,7 +585,7 @@ switch ($mode) {
         # For the sh entry point under Git Bash, which reads UTF-8: the exe's
         # path on the first line and the output root to pass (or nothing) on
         # the second, both losslessly.
-        SplitArgs @($args | Select-Object -Skip 1)
+        SplitArgs @(ModeArgs $args)
         if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
         if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
         Out-Utf8 ($script:FoundBin + "`n" + (ChooseOutRoot $false))
@@ -583,9 +599,9 @@ switch ($mode) {
         #   R|VAR|REST or R|-|PATH   the output root, if one is to be passed
         #   A|drop or A|keep         drop the .cmd's own arguments (they were
         #                            all launcher-only) or pass them on
-        SplitArgs @($args | Select-Object -Skip 1)
+        SplitArgs @(ModeArgs $args)
         if ($script:Dropped -gt 0 -and $script:Rest.Count -gt 0) {
-            Say 'pscat-mcp.cmd takes the --plugin-* options alone; to give pscat-mcp other arguments, register pscat-mcp.exe directly'
+            Say "pscat-mcp.cmd takes the --plugin-* options alone; to give pscat-mcp other arguments ($($script:Rest -join ' ')), register pscat-mcp.exe directly"
             exit 1
         }
         while ($true) {

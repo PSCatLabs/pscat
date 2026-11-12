@@ -211,7 +211,9 @@ Main gained the output root (#910), the stable `bin/` and PATH linking (#919,
 - **Output root on Windows.** The Windows hosts hand the `--plugin-*` args to
   `pscat-mcp.cmd`, and pscat-mcp.exe rejects unknown flags, so the twin has to
   take them out. `pscat-mcp.cmd` now passes its arguments to
-  `pscat-mcp.ps1 --exe`, which picks the root the way `pscat-mcp.sh` does
+  `pscat-mcp.ps1 --exe` (in the `PSCAT_LAUNCH_ARGS` environment variable, as
+  on a command line: the first CI run showed a bare `--name=` argument did not
+  survive PowerShell's own command-line parsing), which picks the root the way `pscat-mcp.sh` does
   (the plugin option, `out-root` in `%APPDATA%\pscat\plugin.conf` or under
   `XDG_CONFIG_HOME`, the project, the working directory, then
   `%APPDATA%\pscat\renders`) and prints three kinds of line: `E|` the program,
