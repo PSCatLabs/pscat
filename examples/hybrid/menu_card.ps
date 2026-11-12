@@ -78,12 +78,15 @@
 /leader { 0.55 0.55 0.42 setrgbcolor } def       % the dot leaders
 
 % ----------------------------------------------------------------- grid
-% US Letter. One text column on the left, from L to R: a 64 pt margin and
-% a 252 pt measure, the prices right-aligned on R. R stops short of the
-% painted leaves (their nearest edge is about x 350 at the height of the
-% Drinks section) and the menu ends above them. A 23 pt line for the
-% dishes; an 18 pt gap between sections.
-/L 64 def /R 316 def
+% US Letter. One text column on the left, from L to R: a 40 pt margin and
+% a 278 pt measure, the prices right-aligned on R. The dishes are set at
+% 15 pt, on a 23 pt line, with 14 pt between sections. R stops short of
+% the painted leaves: their edge, read off the painting, is at x 323 at the
+% height of the last Drinks row (y 338) and creeps left below it, so the
+% menu ends there and the leaves never touch a price. The measure is wide
+% enough that the longest dish still has dot leaders (four on the pancakes
+% row, the tightest).
+/L 40 def /R 318 def
 
 % ------------------------------------------------------------- the layer
 PscatOnly {
@@ -181,22 +184,22 @@ PscatOnly {
 ink
 /Name-M 60 font
 L 3 sub 712 moveto (The Lantern Pear) show
-rust /Caps-M 13 font
+rust /Caps-M 14 font
 L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 
-/y 632 def
+/y 640 def
 /section { % (title) -
-  rust /Caps-M 16 font L y moveto dup 2.4 tshow
+  rust /Caps-M 17 font L y moveto dup 2.4 tshow
   % a hairline from the end of the head to the price column
   2.4 twidth L add 10 add /hx exch def
   0.5 setlinewidth leader newpath hx y 4 add moveto R y 4 add lineto stroke
-  /y y 32 sub def } def
+  /y y 30 sub def } def
 /item { % (dish) (price) -
   /pr exch def /di exch def
-  ink /Body-M 14 font L y moveto di show
-  currentpoint pop 4 add /lx exch def
+  ink /Body-M 15 font L y moveto di show
+  currentpoint pop 3 add /lx exch def
   R y moveto pr rshow
-  pr stringwidth pop R exch sub 4 sub /rx exch def
+  pr stringwidth pop R exch sub 3 sub /rx exch def
   % dot leaders on a 4.5 pt pitch, aligned to R so they line up row to row
   leader
   R 4.5 sub { dup lx lt { pop exit } if dup rx le { dup y 2.6 add 0.55 0 360 arc fill } if
@@ -207,12 +210,12 @@ L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 (Buttermilk pancakes, maple butter) (9.50) item
 (Shakshuka with sourdough) (11.25) item
 (Bircher muesli, poached pear) (7.75) item
-/y y 18 sub def
+/y y 14 sub def
 (Lunch, 12\2003) section
 (Roast squash and farro salad) (12.50) item
 (Leek and Gruy\350re tart) (13.00) item
 (Soup of the day with bread) (8.25) item
-/y y 18 sub def
+/y y 14 sub def
 (Drinks) section
 (Flat white) (3.80) item
 (Pot of tea) (3.20) item
@@ -220,14 +223,15 @@ L 682 moveto (Caf\351 \267 14 Mill Lane) 3 tshow
 
 % The URL is 44 bytes: version 5 at level H, 2-point modules on whole
 % points, so every module edge is a pixel edge at 72 and 144 dpi. Dark
-% olive on the paper's own cream, with the quiet zone painted. The
-% caption sits beside it, level with its middle.
-/QX 56 def /QY 56 def
+% olive on the paper's own cream, with the quiet zone painted, its modules
+% on the text column's edge. The caption sits under it, clear of the pears,
+% which came up to the end of a caption set beside it.
+/QX L 8 sub def /QY 56 def
 QX QY moveto URL << /Level /H >> qrencode
 % the light modules in the paper's own tone under the code, so it shows
 % no box: the painting's warm cream, or paintkit's paper
 /QLight PscatOnly { [0.98 0.955 0.89] } { [0.975 0.915 0.79] } ifelse def
 << /ModuleSize 2 /Dark [0.12 0.14 0.06] /Light QLight >> qrdraw
-ink /Ital-M 12 font
-QX 102 add QY 41 add moveto (Scan: how this menu was made) show
+ink /Ital-M 13 font
+L QY 14 sub moveto (Scan: how this menu was made) show
 showpage

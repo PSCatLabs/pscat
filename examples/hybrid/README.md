@@ -4,9 +4,9 @@ Worked examples for [pscat with image models](../../docs/guides/pscat-with-image
 
 | Program | Page | Background (frozen) | Image model alone (for comparison) |
 |---|---|---|---|
-| [`sky_talk.ps`](sky_talk.ps), a public-talk poster | A4, 595 x 842 pt | [`sky_talk_bg.jpg`](sky_talk_bg.jpg) | [`sky_talk_model.jpg`](sky_talk_model.jpg) |
-| [`menu_card.ps`](menu_card.ps), a café menu | US Letter, 612 x 792 pt | [`menu_card_bg.jpg`](menu_card_bg.jpg) | [`menu_card_model.jpg`](menu_card_model.jpg) |
-| [`ferry_timetable.ps`](ferry_timetable.ps), a ferry timetable (#999) | A4, 595 x 842 pt | [`ferry_bg.jpg`](ferry_bg.jpg) | [`ferry_model.jpg`](ferry_model.jpg) |
+| [`sky_talk.ps`](sky_talk.ps), a public-talk poster | A4, 595 × 842 pt | [`sky_talk_bg.jpg`](sky_talk_bg.jpg) | [`sky_talk_model.jpg`](sky_talk_model.jpg) |
+| [`menu_card.ps`](menu_card.ps), a café menu | US Letter, 612 × 792 pt | [`menu_card_bg.jpg`](menu_card_bg.jpg) | [`menu_card_model.jpg`](menu_card_model.jpg) |
+| [`ferry_timetable.ps`](ferry_timetable.ps), a ferry timetable (#999) | A4, 595 × 842 pt | [`ferry_bg.jpg`](ferry_bg.jpg) | [`ferry_model.jpg`](ferry_model.jpg) |
 
 Render from the repository root (the programs read their JPEGs by a relative
 path):
@@ -77,20 +77,20 @@ codex exec --skip-git-repo-check -s workspace-write "<instruction>" < /dev/null
 The instructions, verbatim (the generation prompt is everything between
 "create the following image." and "Save it as"):
 
-**`sky_talk_bg.jpg`** (original 1024 x 1536 px PNG; Codex reported passing
+**`sky_talk_bg.jpg`** (original 1024 × 1536 px PNG; Codex reported passing
 the prompt to its image tool unchanged)
 
 > Use your image generation tool to create the following image. A painterly oil painting of a wide evening sky over a calm sea and a low dark headland, portrait orientation (2:3). Deep clear blue at the top of the sky, fading through soft lavender to warm peach and gold near the horizon; a few soft cumulus clouds in the middle catch the last light. Visible brushwork and canvas texture. Keep the top third open, calm sky with little detail, and the bottom quarter a dark, quiet sea, so the picture works as a poster background with type laid over it. No text, no letters, no numbers, no logos, no people, no frame. Save it as sky_bg.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool.
 
-**`menu_card_bg.jpg`** (original 1102 x 1427 px PNG; prompt passed unchanged)
+**`menu_card_bg.jpg`** (original 1102 × 1427 px PNG; prompt passed unchanged)
 
 > Use your image generation tool to create the following image. A loose watercolour painting on cream cold-pressed paper for the background of a café menu card, portrait orientation (US Letter proportions, about 8.5 by 11). Two ripe pears and a few pear leaves on a sprig sit in the bottom right corner, painted with soft wet-in-wet washes of green, gold and a little rose; a pale sage wash bleeds in from the top left corner. The whole middle and left of the sheet stays almost bare cream paper with only the faintest wash, so menu text can be printed over it. Visible paper grain and soft blooms. No text, no letters, no numbers, no logos, no frame or border. Save it as menu_bg.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool.
 
-**`sky_talk_model.jpg`** (original 1055 x 1491 px PNG)
+**`sky_talk_model.jpg`** (original 1055 × 1491 px PNG)
 
 > Use your image generation tool to create the following image. Design a complete A4 portrait event poster as one image. Background: a painterly oil painting of an evening sky over a calm sea, deep blue above fading to peach and gold at the horizon. The poster must contain exactly this text, spelled exactly as given: the title "Why Is the Sky Blue?"; the subtitle "A free public talk on light, air and colour"; "Dr. Imogen Hartley, atmospheric physicist"; "Thursday 3 December 2026 · 7:30 pm"; "Harbourside Library, Lecture Room 2". Include the Rayleigh scattering formula "I ∝ 1/λ⁴". Include a small bar chart titled "Scattering relative to red light (700 nm)" with six bars labelled 400 nm 9.4×, 450 nm 5.9×, 500 nm 3.8×, 550 nm 2.6×, 600 nm 1.9× and 700 nm 1.0×, each bar's height in proportion to its value. Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this poster was made" beside it. Save it as sky_model.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool.
 
-**`menu_card_model.jpg`** (original 1103 x 1426 px PNG)
+**`menu_card_model.jpg`** (original 1103 × 1426 px PNG)
 
 > Use your image generation tool to create the following image. Design a complete café menu card as one image, US Letter portrait. Background: a loose watercolour of two pears and pear leaves on cream paper. The menu must contain exactly this text, spelled exactly as given, with the prices exactly as given: the name "The Lantern Pear" and the line "Café · 14 Mill Lane". A section "Breakfast, 8–11" with "Buttermilk pancakes, maple butter 9.50", "Shakshuka with sourdough 11.25" and "Bircher muesli, poached pear 7.75". A section "Lunch, 12–3" with "Roast squash and farro salad 12.50", "Leek and Gruyère tart 13.00" and "Soup of the day with bread 8.25". A section "Drinks" with "Flat white 3.80", "Pot of tea 3.20" and "Pear and ginger soda 4.10". Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this menu was made" beside it. Save it as menu_model.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool.
 
@@ -149,7 +149,7 @@ codex exec --skip-git-repo-check -s workspace-write -- "<instruction>" < /dev/nu
   `ferry_model.jpg` as on its PNG original, and `tests/hybrid.rs` pins that
   verdict.
 
-**`ferry_bg.jpg`** (original 1055 x 1491 px PNG). The instruction:
+**`ferry_bg.jpg`** (original 1055 × 1491 px PNG). The instruction:
 
 > Use your image generation tool to create the following image. A loose watercolour painting on cream cold-pressed paper for the header of a ferry timetable, portrait orientation (A4 proportions, 1 by 1.414). Only the top third of the sheet is painted: a small blue-and-white passenger ferry crossing a calm harbour on a clear winter morning, a red-and-white lighthouse on a low headland at the right, a few gulls, soft wet-in-wet washes of blue, teal and sand. The painting fades out softly into the paper; the bottom two-thirds of the sheet stay bare cream paper with only the faintest wash, so a timetable can be printed over it. Visible paper grain. No text, no letters, no numbers, no logos, no frame or border. Save it as ferry_bg.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool. Do not check, edit or post-process the image after generating it.
 
@@ -157,7 +157,7 @@ The prompt Codex passed to the tool:
 
 > A loose watercolour painting on cream cold-pressed paper for the header of a ferry timetable, portrait orientation (A4 proportions, 1 by 1.414). Only the top third of the sheet is painted: a small blue-and-white passenger ferry crossing a calm harbour on a clear winter morning, a red-and-white lighthouse on a low headland at the right, a few gulls, soft wet-in-wet washes of blue, teal and sand. The painting fades out softly into the paper; the bottom two-thirds of the sheet stay bare cream paper with only the faintest wash, so a timetable can be printed over it. Visible paper grain. No text, no letters, no numbers, no logos, no frame or border.
 
-**`ferry_model.jpg`** and the other four whole-timetable runs (each 1055 x 1491 px). The instruction, the same for all five:
+**`ferry_model.jpg`** and the other four whole-timetable runs (each 1055 × 1491 px). The instruction, the same for all five:
 
 > Use your image generation tool to create the following image. Design a complete A4 portrait ferry timetable as one image. Background: a loose watercolour of a small passenger ferry crossing a harbour, with a lighthouse, across the top of the sheet, on cream paper. The timetable must contain exactly this text, spelled exactly as given, with every time and price exactly as given: the title "Harbour Ferry" and the line "Winter timetable from Tuesday 1 December 2026". A table of departures, Monday to Saturday, with one row per stop and one column per sailing: "Harbourside Pier" 07:15, 08:45, 10:15, 11:45, 13:15, 14:45, 16:15, 17:45; "Mill Lane Steps" 07:22, 08:52, 10:22, 11:52, 13:22, 14:52, 16:22, 17:52; "Lighthouse Point" 07:31, 09:01, 10:31, 12:01, 13:31, 15:01, 16:31, 18:01; "Gull Island" 07:44, 09:14, 10:44, 12:14, 13:44, 15:14, 16:44, 18:14; "Westbay" 07:56, 09:26, 10:56, 12:26, 13:56, 15:26, 16:56, 18:26. A fares table with columns "Single" and "Return": "Adult" 3.40 and 6.20; "Child (5–15)" 1.70 and 3.10; "Concession" 2.30 and 4.20; "Bicycle" 1.00 and 1.80. The small print "Children under 5 travel free. Tickets on board, card or cash." and "Sailings may be cancelled in high winds; check the board at each pier." Include a scannable QR code that encodes exactly https://pscatlabs.github.io/pscat/hybrid.html, with the caption "Scan: how this timetable was made" beside it. Save it as ferry_model.png in the current directory at full resolution; do not resize or recompress it. Print the path and pixel dimensions, and print verbatim the exact prompt you passed to the image generation tool. Do not check, edit or post-process the image after generating it.
 
@@ -822,11 +822,11 @@ Change only the price of "Flat white" in the Drinks section from "3.80" to "3.95
 
 ## The reversed hybrid: pscat sets the layout (#1001)
 
-[`alpine_trail.ps`](alpine_trail.ps), a 2:3 travel poster (576 x 864 pt, 8 x 12 in), turns the hybrid round. pscat draws the composition first, the image model makes that drawing a photograph, and pscat lays the exact layer back on at the coordinates it drew:
+[`alpine_trail.ps`](alpine_trail.ps), a 2:3 travel poster (576 × 864 pt, 8 × 12 in), turns the hybrid round. pscat draws the composition first, the image model makes that drawing a photograph, and pscat lays the exact layer back on at the coordinates it drew:
 
 | Stage | File |
 |---|---|
-| 1. The layout reference pscat draws (`/Stage /Reference`, 128 dpi) | [`alpine_trail_ref.png`](alpine_trail_ref.png), 1024 x 1536 px, as sent |
+| 1. The layout reference pscat draws (`/Stage /Reference`, 128 dpi) | [`alpine_trail_ref.png`](alpine_trail_ref.png), 1024 × 1536 px, as sent |
 | 2. The photograph the image model made from it (frozen) | [`alpine_trail_photo.jpg`](alpine_trail_photo.jpg) |
 | 3. The poster: the photograph and pscat's exact layer | `alpine_trail.ps` (the default stage) |
 | A second photograph from the same reference | [`alpine_trail_autumn.jpg`](alpine_trail_autumn.jpg) (`/Season /Autumn`) |
@@ -857,6 +857,8 @@ pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
   --label "Piz Calderan: one layout, two photographs, one exact layer" \
   examples/hybrid/compare_alpine_trail.ps
 ```
+
+The route above the hut follows the zigzag trail as **the photographs** show it (`RouteHigh` in the program): the model kept the trail but moved its turns up to 6 px from the layout's, so the corners were read off the photographs on a 4x grid (the same in both; no test pins this, the overlay is `docs/dev/review-log/pending/1029-hybrid-showcase-polish/alpine-route-trace-overlay.jpg`). The reference PNG is still the one that was sent, with its sky in 64 flat bands; today's program draws that sky as one smooth shading, within 3 levels of it per channel.
 
 `tests/hybrid_reverse.rs` checks the facts: the program still draws the reference that was sent; the layout drift of both photographs (ridge, shade edge, hut) and how quiet the type zones stayed, measured on the committed files; the QR code in both decoders from the PNG and the PDF, framed as a scanner frames it (the page's bottom-right quarter), for the summer and autumn hybrids and for pscat alone; the brief, string by string; and the decoders' verdict on the image model's own QR code.
 
@@ -1007,4 +1009,4 @@ Use an elegant, polished travel-poster hierarchy with a prominent title, fine le
 
 </details>
 
-The originals are 1024 x 1536 px PNGs, committed as JPEGs with `sips -s format jpeg -s formatOptions 85` (the two photographs) and `90` (the whole poster). The decoders gave the same verdict on the image model's QR code in the PNG original as in the JPEG.
+The originals are 1024 × 1536 px PNGs, committed as JPEGs with `sips -s format jpeg -s formatOptions 85` (the two photographs) and `90` (the whole poster). The decoders gave the same verdict on the image model's QR code in the PNG original as in the JPEG.

@@ -777,7 +777,11 @@ renders eight examples in both and compares block-downsampled output).
   is the reference exactly as sent; `tests/hybrid_reverse.rs` checks the
   program still draws it and pins the measured drift of both photographs.
   Moving a shape in the block-in means a new photograph: the exact layer's
-  coordinates and the photograph must come from the same reference.
+  coordinates and the photograph must come from the same reference. The one
+  deliberate exception (#1029) is the route above the hut: `RouteHigh` is
+  read off the photographs, not the layout's `TrailHigh`, because the model
+  moved the trail's turns a few pixels. `/Season /Autumn` also changes the
+  hut row, since the hut is shut in October.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
