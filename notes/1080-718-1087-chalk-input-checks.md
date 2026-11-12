@@ -20,3 +20,13 @@ Behaviour change (inputs that rendered before now fail; say so in the release no
   and `\right`: `\bigl\(` is mathkit's "unsupported delimiter: \(", not an unclosed pair.
 - The change is in `chalk::lines` (Rust). mathkit still ignores `$`, so a direct `mkpath`
   caller is unchanged.
+
+## #1087: `\varphi` no longer reads as psi
+
+`/phi.loopy` (mathkit's `\varphi`) was one slanted stroke with a small loop low on its left,
+which at 22 to 30 pt looked like half a psi. It is now a closed loop with a near-vertical,
+slightly leaning stem running through it (two strokes, advance 580), with the loop's end
+overshooting into a small hook so it stays hand-drawn. A psi's cup is open at the top; this
+loop is closed. `\phi` (the circle and bar) is untouched. The committed
+`strokeglyphs_subscripts_greek_specimen.png` was already stale against `main` (a re-render of
+the example at the merge-base differs from it everywhere), so it is not regenerated here.
