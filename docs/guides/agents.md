@@ -27,8 +27,8 @@ An assistant that wants a map of the docs can read the site's
 [`llms.txt`](https://pscatlabs.github.io/pscat/llms.txt)
 (source: [`site/llms.txt`](../../site/llms.txt)), which links the guides, the skills and the install steps.
 
-In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step. No separate install is needed
+In Claude Code the easiest route is the **plugin**, which installs the four
+skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
 on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
 uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
 downloads the pinned GitHub release once, checks it against the release's

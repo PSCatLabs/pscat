@@ -32,9 +32,9 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
 - **`[ (line) ... ] x y opts mkalign`** writes a derivation, aligned at x
   on each line's `&` or before its first `=`. It returns one record per
   line: `/Origin /Angle /Width /Height /Depth /Align /BBox`.
-  `/Ink { pop ... dcchalk }` inks each line as it is written, so pressure
-  or colour can change down the board. Several `&` on a line give TeX
-  align's columns (right, left, right, left ...), the pairs `/ColumnGap`
+  `/Ink` inks each line as it is written, so pressure or colour can change
+  down the board (see "Line spacing and `/Ink`" below). Several `&` on a
+  line give TeX align's columns (right, left, right, left ...), the pairs `/ColumnGap`
   apart (multiples of `/Size`, default 2): `(f(x) &= x^2 & f'(x) &= 2x)`.
   `/ColumnGap 0` is `alignat`; `/ColumnWander 1` lets the later columns
   drift down the lines as a hand's do (default 0). `/LineAlign /center`
@@ -51,6 +51,51 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
   follow its slope. Inside a formula, `\\boxed{...}` and
   `\\underline{...}` do the same.
 - A side note is plain `sgpath` text, or `\\text{...}` inside a formula.
+
+**Line spacing and `/Ink`.** `mkalign` puts each baseline `/Leading` times
+`/Size` below the one above (`/Leading` defaults to 1.9, so 32.3 pt at
+`/Size 17`), or further down when a line is tall enough to need it (a
+fraction or a matrix: the step is never less than the depth of the line
+above plus this line's height plus 0.35 `/Size`). `/Irregular` adds a small
+wobble to each step. `mkalign` does not know about other blocks, so place one
+block under another from the last record: its `/Origin` y minus its `/Depth`,
+as below. `/Ink` is a procedure called after each line's path is appended,
+with the line's index (an integer, 0 for the first line) on the stack; it
+must consume the index and paint or clear the path. Use the index to vary
+the `/Seed` of `dcchalk` from line to line (`1000 mul 5 add` is any offset
+you like). Without `/Ink` the lines stay on the current path for one
+`stroke`.
+
+```postscript
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/drychalk.ps) run
+(lib/mathkit.ps) run
+20 20 560 250 << /Surface /greenboard >> dcboard
+/white dcchalkcolor
+
+% /Ink is called after each line's path is made, with the line's index
+% (0 for the first line) on the stack. Use it to seed the chalk.
+/ink { 1000 mul 5 add << /Seed 3 -1 roll /Width 1.4 >> dcchalk } bind def
+
+% A block of three lines: baselines 1.9 x /Size apart (the default /Leading)
+newpath [ (3x + 2y &= 7) (x - y &= 1) (5x &= 15) ] 160 235
+  << /Size 20 /Ink /ink load >> mkalign
+/recs exch def
+
+% The next block starts below the last line: that line's baseline y, less its
+% /Depth, less a gap (here 3 x /Size) that clears the new block's first line.
+recs dup length 1 sub get dup /Origin get 1 get exch /Depth get sub
+/y exch 60 sub def
+
+% Tighter, with /Leading 1.5; a taller line (the fraction) still gets its room.
+newpath [ (x &= 3) (y &= \\frac{1}{2}) ] 160 y
+  << /Size 20 /Leading 1.5 /Ink /ink load >> mkalign pop
+showpage
+```
+
+`pscat chalk --print-ps 'a &= b \\ c &= d'` prints the complete PostScript
+of a finished board, `mkalign` and `/Ink` included: a working composition to
+read and copy.
 
 Supported TeX:
 

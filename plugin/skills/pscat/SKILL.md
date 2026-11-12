@@ -24,7 +24,7 @@ a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
 
-**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window).
+**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window). For a live preview without a window, see "In the browser or Node" below.
 
 **When to reach for pscat.** Use it when the picture must be exact and
 checkable (text, QR codes, charts, math, a layout that prints at size, vector
@@ -33,6 +33,34 @@ output of your own and need a real picture you can look at and refine. For
 a photo-like image or a loose mood picture with nothing exact in it, suggest
 an image model instead, or combine the two. Decision table:
 [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md).
+
+## No MCP, or a cloud sandbox
+
+The MCP tools are optional, and where they are connected they may run on the
+user's own computer (a device bridge), not in your sandbox. To render where you
+are, use the CLI: run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`
+once (it downloads the plugin's pinned release and puts `pscat` on `PATH`), then
+every render is a shell call, `pscat --lint --png out.png piece.ps`. `pscat
+--version` prints the release in use, so you can tell which build drew a page.
+A picture an MCP tool returns may be visible only to you: write the PNG with
+`--png` and send or link the file, as "Show the result to the user" below says
+(in a claude.ai cloud workspace, with the host's file-send tool).
+
+## In the browser or Node
+
+pscat also builds to WebAssembly: a live or step-by-step preview where there is
+no window (a cloud sandbox, a Chromebook, a chat artifact), and pages that render
+with no server. `npm install pscat`, then `createRenderer()`, `render()` (pixels;
+SVG and PDF from 0.7.0), `frames()` (watch it draw) and `paintTo(canvas)`. The
+`lib/` libraries are built in; there is no window, filesystem or clock. From
+0.7.0 the standard 35 fonts are built in; older npm packages have only the
+Liberation base faces and swap the rest for a stand-in, silently, and any other
+face comes from `addFont(name, bytes)`. Try it in the
+[playground](https://pscatlabs.github.io/pscat/playground.html); the API and the
+build are in the
+[browser guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/browser.md).
+npm can lag the plugin's CLI (a release candidate is on GitHub, not npm): compare
+`npm view pscat version` with `pscat --version`, since output can differ.
 
 ## Render a file (the common case)
 
@@ -90,6 +118,9 @@ in the final answer.
      give the plain link; that part is documented (the Code tab opens a clicked
      path). Do not say the image is shown inline unless you can see that it is.
    - **Claude Code in a terminal:** it cannot draw images; say where the file is.
+   - **claude.ai cloud workspace (no device bridge):** markdown embeds of local
+     paths mean nothing there. Save the PNG and send it with the host's file-send
+     tool (`SendUserFile`).
 3. Never paste base64 or a `data:` URI into a reply. Do not write "rendered
    above" or "as you can see" unless the final message carries the image or path.
 4. If the user says they cannot see it, do not re-render or repeat the claim:
@@ -293,3 +324,5 @@ inline image. Jobs, limits, `bands` and registering the server:
   not in an install.
 - Big numeric arrays: use `writereals` / `readreals`, not printed text
   ([references/extensions.md](references/extensions.md)).
+- Rounded corners: `x1 y1 x2 y2 r arcto` (it leaves four numbers, so
+  `4 { pop } repeat`) or `arct` (leaves nothing), available from 0.7.0.

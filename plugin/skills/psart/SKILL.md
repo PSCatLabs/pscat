@@ -58,8 +58,10 @@ name from prose.
   `arr oneof`. All flow from `srand`.
 - **Palettes**: `/dusk /ember /tide /meadow /carnival /parchment
   /nocturne /stone` — `/name palpick` → r g b; `/name pal` → the
-  five-color array. `[rgb] [rgb] t mix3` lerps; `[rgb] k shade`
-  darkens (k<1) or lifts toward white (k>1).
+  five-color array. `[rgb] [rgb] t mix3` → r g b lerps; `[rgb] k shade`
+  → r g b darkens (k<1) or lifts toward white (k>1). Both take arrays but
+  leave three numbers, not an array: follow with `setrgbcolor`, or wrap
+  in `[ ... ]` to keep it (`aload pop` on the result is a `typecheck`).
 - **Turtle**: `x y heading thome`, `d fd` (draws), `d hop` (pen up),
   `a tl` / `a tr` (turn; NOT lt/rt — those are comparisons),
   `tpush`/`tpop` (pose stack). Build path, then `stroke` yourself.
