@@ -9,7 +9,8 @@ around that by treating a path as data:
    as records: `[/m x y]` for a moveto, `[/l x y]` for a lineto, `[/z]` for
    a closepath.
 2. `wp-subdivide` splits every edge, closing edges included, into steps no
-   longer than a given length, so there are points to bend.
+   longer than a given length, so there are points to bend. A closing edge
+   becomes `[/l x y]` records followed by its `[/z]`.
 3. A **point warp**, any quotation `( x y -- x' y' )`, is lifted with
    `wp-lift` and mapped over the records with `fp-map`.
 4. `wp-emit` rebuilds the path, and you fill or stroke it as usual.
@@ -83,18 +84,25 @@ showpage
 | `wp-run-decorated` | `program decorators --` |
 
 `program` is a file name, or a procedure to execute in the same scope.
+The program sees the caller's operand stack as it was below `program`, so
+a procedure can take operands and leave results.
 
 `wp-decorators` builds a dictionary of decorators, quotations
 `( target -- wrapper )` in the sense of `aop-wrap-def`, keyed by operator
 name:
 - `fill`, `eofill`, `clip` and `eoclip` warp the current path, then call
-  the real operator.
+  the real operator. An open subpath is closed first, as these operators
+  close it, so its closing edge bends too.
+- `clip` and `eoclip` then put the original, unwarped path back, as the real
+  operators leave the current path in place. Painting it afterwards warps
+  it once.
 - `stroke` first converts the stroke to its outline with `strokepath`, so
   line weight and dashes bend with the shape, then fills that.
 - `rectfill`, `rectstroke` and `rectclip` do the same for rectangles, with
   the operator given four numbers.
-- `show` draws the string's glyph outlines (`charpath`) through the warp
-  and leaves the current point where `show` would.
+- `show` draws the string's glyph outlines (`charpath`) through the warp.
+  Like the real `show`, it keeps the current path and only moves the
+  current point to where `show` would leave it.
 
 The coordinate space a warp works in is the one in force when
 `wp-decorators` runs, so place the program with `translate`/`scale` before

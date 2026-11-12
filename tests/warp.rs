@@ -183,3 +183,142 @@ fn an_identity_warp_redraws_an_unmodified_gallery_piece_faithfully() {
         .count();
     assert!(moved > 200, "the lens moved only {moved} blocks");
 }
+
+/// Worst per-block difference of mean RGB between two renders.
+fn worst_block_diff(a: &Interp, b: &Interp, block: usize) -> f64 {
+    block_means(a, block)
+        .iter()
+        .zip(&block_means(b, block))
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f64::max)
+}
+
+/// Render `src` on a 400 x 400 page with the libraries loaded, user space
+/// scaled 4x so a 100-unit drawing fills it.
+fn render(src: &str) -> Interp {
+    let mut it = interpreter(400, 400);
+    it.run_str(&format!("4 4 scale {src}"))
+        .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    it
+}
+
+/// Grey level (0 black, 255 white) at user point x y of a `render`.
+fn grey_at(it: &Interp, x: f64, y: f64) -> u8 {
+    let pixmap = &it.gfx().pixmap;
+    let (w, h) = (pixmap.width() as usize, pixmap.height() as usize);
+    let (px, py) = ((x * 4.0) as usize, h - 1 - (y * 4.0) as usize);
+    let i = (py * w + px) * 4;
+    let d = pixmap.data();
+    ((u32::from(d[i]) + u32::from(d[i + 1]) + u32::from(d[i + 2])) / 3) as u8
+}
+
+// A triangle whose last edge runs along y = 20 from x = 20 to x = 80. The
+// ripple lifts that edge into a wave (y = 25 at x = 50), so the straight
+// chord between its warped ends (y = 20 at x = 50) is the visible bug.
+const TRIANGLE: &str = "newpath 80 20 moveto 50 80 lineto 20 20 lineto";
+const RIPPLE: &str = "10 120 wp-ripple";
+
+#[test]
+fn a_closepath_record_follows_the_samples_of_its_closing_edge() {
+    let it = run("newpath 0 0 moveto 10 0 lineto 10 10 lineto closepath \
+                  wp-path 4 wp-subdivide dup dup length 1 sub get 0 get \
+                  exch dup length 2 sub get aload pop");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["/z", "/l", "0.0", "0.0"]);
+
+    // so a closed shape bends along its closing edge exactly as if that
+    // edge had been drawn with lineto
+    let closed = render(&format!("{TRIANGLE} closepath {RIPPLE} 2 wp-warppath fill"));
+    let explicit = render(&format!(
+        "{TRIANGLE} 80 20 lineto closepath {RIPPLE} 2 wp-warppath fill"
+    ));
+    let worst = worst_block_diff(&closed, &explicit, 8);
+    assert!(
+        worst < 4.0,
+        "closing edge drawn from the wrong point: {worst}"
+    );
+    assert!(
+        grey_at(&closed, 50.0, 22.0) > 200,
+        "a straight chord was filled"
+    );
+    assert!(grey_at(&closed, 50.0, 28.0) < 60, "the wave was not filled");
+}
+
+#[test]
+fn fill_and_clip_bend_the_implicit_closing_edge_of_an_open_path() {
+    let explicit = render(&format!(
+        "{{ {TRIANGLE} 80 20 lineto closepath fill }} {RIPPLE} 2 wp-run"
+    ));
+    for op in ["fill", "eofill"] {
+        let open = render(&format!("{{ {TRIANGLE} {op} }} {RIPPLE} 2 wp-run"));
+        let worst = worst_block_diff(&open, &explicit, 8);
+        assert!(worst < 4.0, "{op}: implicit closing edge not bent: {worst}");
+        assert!(grey_at(&open, 50.0, 22.0) > 200, "{op}: straight chord");
+    }
+    // clipping to the open triangle, then painting the whole page
+    let page = "newpath -50 -50 moveto 150 -50 lineto 150 150 lineto -50 150 lineto fill";
+    for op in ["clip", "eoclip"] {
+        let open = render(&format!("{{ {TRIANGLE} {op} {page} }} {RIPPLE} 2 wp-run"));
+        let worst = worst_block_diff(&open, &explicit, 8);
+        assert!(worst < 4.0, "{op}: implicit closing edge not bent: {worst}");
+    }
+}
+
+#[test]
+fn clip_keeps_the_unwarped_path_as_the_real_clip_does() {
+    // the path survives clip unwarped, so the fill after it is warped once
+    let square = "newpath 20 20 moveto 40 0 rlineto 0 40 rlineto -40 0 rlineto closepath";
+    let native = render(&format!("30 0 translate {square} clip fill"));
+    for op in ["clip", "eoclip"] {
+        let warped = render(&format!("{{ {square} {op} fill }} 30 0 wp-shift 2 wp-run"));
+        let worst = worst_block_diff(&warped, &native, 8);
+        assert!(worst < 4.0, "{op} left a warped path behind: {worst}");
+    }
+    // and keeps its curves: one moveto and four curvetos for a circle
+    let it = run("{ newpath 50 50 20 0 360 arc clip \
+                  0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 100 add } {} \
+                  pathforall } {} 2 wp-run");
+    assert_eq!(it.operand_stack()[0].repr(), "401");
+}
+
+#[test]
+fn show_keeps_the_current_path_as_the_real_show_does() {
+    // a line, a label, then the line stroked: the label must not erase it
+    let program = "/Helvetica findfont 20 scalefont setfont \
+                   newpath 10 10 moveto 90 10 lineto 30 50 moveto (A) show \
+                   4 setlinewidth stroke";
+    let native = render(program);
+    let warped = render(&format!("{{ {program} }} {{}} 2 wp-run"));
+    let worst = worst_block_diff(&warped, &native, 8);
+    assert!(worst < 4.0, "identity warp changed line-then-show: {worst}");
+    assert!(grey_at(&warped, 50.0, 10.0) < 60, "the line was lost");
+    // the current point advances as it would
+    assert_eq!(
+        numbers(
+            "/Helvetica findfont 20 scalefont setfont \
+                 { newpath 30 50 moveto (A) show currentpoint } {} 2 wp-run \
+                 newpath 30 50 moveto (A) show currentpoint"
+        ),
+        numbers(
+            "/Helvetica findfont 20 scalefont setfont \
+                 newpath 30 50 moveto (A) show currentpoint \
+                 newpath 30 50 moveto (A) show currentpoint"
+        ),
+    );
+}
+
+#[test]
+fn a_decorated_program_can_take_operands_and_leave_results() {
+    assert_eq!(numbers("{ 42 } << >> wp-run-decorated"), [42.0]);
+    assert_eq!(numbers("5 { 2 mul } << >> wp-run-decorated"), [10.0]);
+    assert!(numbers("1 2 { clear } << >> wp-run-decorated").is_empty());
+    // an error is still re-raised after the scope is closed
+    let it = run(
+        "{ { 7 5 dict begin 1 0 div } << >> wp-run-decorated } stopped \
+                  countdictstack $error /errorname get",
+    );
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack.last().map(String::as_str), Some("/undefinedresult"));
+    assert_eq!(&stack[stack.len() - 3..stack.len() - 1], ["true", "2"]);
+}

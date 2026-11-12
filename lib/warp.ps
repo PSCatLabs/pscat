@@ -35,7 +35,8 @@
     {} {[/z]} pathforall ]
 } bind def
 
-% Closing edges become explicit lines, so they bend too.
+% Closing edges become explicit lines, so they bend too: a closepath
+% record follows its edge's samples.
 % @kind: Procedure
 % @summary: Split every edge into steps no longer than step user units.
 % @example: newpath 0 0 moveto 10 0 lineto wp-path 2 wp-subdivide
@@ -59,7 +60,7 @@
       dup /m eq {
         pop dup aload pop /py exch def /px exch def pop /sy py def /sx px def
       } {
-        /l eq { aload pop 3 -1 roll pop line-to } { sx sy line-to } ifelse
+        /l eq { aload pop 3 -1 roll pop line-to } { pop sx sy line-to [/z] } ifelse
       } ifelse
   } forall ]
   end
@@ -216,15 +217,49 @@
 
 % ---- Running an unmodified program through decorators ----
 
+% ( records -- records ): close every open subpath, as fill and clip do
+% implicitly, so the closing edge is subdivided and bends with the rest.
+% @internal
+/wp--close-subpaths {
+  [ exch false exch
+    { dup 0 get
+      dup /m eq { pop exch { [/z] exch } if true }
+        { /z eq { exch pop false } { exch pop true } ifelse } ifelse
+    } forall
+    { [/z] } if ]
+} bind def
+
 % ( transform step base -- ): rebuild the current path under a path
 % transform, in the base coordinate space captured when the run began,
-% then restore the CTM.
+% then restore the CTM. Every caller fills or clips the result, so open
+% subpaths are closed first.
 % @internal
 /wp--rebuild {
   matrix currentmatrix 4 1 roll setmatrix
-  //wp-path exec exch //wp-subdivide exec exch exec
+  //wp-path exec //wp--close-subpaths exec
+  exch //wp-subdivide exec exch exec
   newpath //wp-emit exec
   setmatrix
+} bind def
+
+% ( -- records ): the current path as it stands, curves kept, for
+% wp--restore-path. Curves are [/c x1 y1 x2 y2 x3 y3].
+% @internal
+/wp--save-path {
+  [ {/m 3 1 roll 3 array astore} {/l 3 1 roll 3 array astore}
+    {/c 7 1 roll 7 array astore} {[/z]} pathforall ]
+} bind def
+
+% ( records -- ): replace the current path with wp--save-path records.
+% @internal
+/wp--restore-path {
+  newpath
+  { dup 0 get
+    dup /m eq { pop aload pop 3 -1 roll pop moveto } {
+    dup /l eq { pop aload pop 3 -1 roll pop lineto } {
+    /c eq { aload pop 7 -1 roll pop curveto } { pop closepath } ifelse
+    } ifelse } ifelse
+  } forall
 } bind def
 
 % ( x y w h -- ): a rectangle as a closed path, for the rect operators.
@@ -248,8 +283,15 @@
   % prefix: { warp step base rebuild } -- run it to warp the current path
   8 dict begin /prefix exch def /realfill systemdict /fill get def
   % operators that consume or clip the current path keep their own target
-  [ /fill /eofill /clip /eoclip ] {
+  [ /fill /eofill ] {
     [ /prefix load /exch load //fp-compose /exec load ] cvx def
+  } forall
+  % clip and eoclip keep the current path: clip to the warped copy, then
+  % put the original back so later painting warps it only once
+  [ /clip /eoclip ] {
+    [ //wp--save-path /prefix load //fp-compose /exec load
+      /exch load //fp-compose /exec load
+      //wp--restore-path //fp-compose /exec load ] cvx def
   } forall
   /stroke [ /pop load
     [ /strokepath load /prefix load /exec load /realfill load ] cvx ] cvx def
@@ -263,14 +305,22 @@
   /rectclip [ /pop load
     [ /newpath load //wp--rect /exec load /prefix load /exec load
       systemdict /clip get /newpath load ] cvx ] cvx def
-  % show: glyph outlines filled through the warp; the current point still
-  % advances as if the string had been shown.
+  % show: glyph outlines filled through the warp. As with the real show,
+  % the current path is kept and only the current point advances.
   /show [ /pop load
-    [ /currentpoint load /newpath load /moveto load true /charpath load
-      /currentpoint load /prefix load /exec load /realfill load
-      /moveto load ] cvx ] cvx def
+    [ /currentpoint load /gsave load /newpath load /moveto load
+      true /charpath load /currentpoint load
+      /prefix load /exec load /realfill load
+      /grestore load /moveto load ] cvx ] cvx def
   currentdict /prefix undef currentdict /realfill undef
   currentdict end
+} bind def
+
+% ( stopped depth -- ): close the dictionaries a program left open down to
+% depth, then re-raise its error, if any.
+% @internal
+/wp--unwind {
+  countdictstack exch sub 0 max { end } repeat { stop } if
 } bind def
 
 % Decorators are ( target -- wrapper ) quotations keyed by operator name,
@@ -287,9 +337,11 @@
   64 dict begin
   { //aop-wrap-def exec } forall
   /showpage {} def /copypage {} def /erasepage {} def
-  { dup type /stringtype eq { run } { exec } ifelse } stopped
-  { countdictstack exch sub { end } repeat stop }
-  { countdictstack exch sub { end } repeat } ifelse
+  % depth program: the depth goes into the procedure that runs the
+  % program, not under it on the operand stack, so the program can take
+  % operands from its caller and leave results.
+  { dup type /stringtype eq { run } { exec } ifelse } /exec load 3 array astore cvx
+  /stopped load 3 -1 roll //wp--unwind /exec load 5 array astore cvx exec
 } bind def
 
 % @kind: Procedure

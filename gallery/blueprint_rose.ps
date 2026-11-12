@@ -56,10 +56,11 @@ grestore
 ] cvx def
 decs /fill /outline-fill load put
 decs /eofill /outline-fill load put
+% (like show, it keeps the current path and only moves the current point)
 decs /show [ /pop load
-  [ /currentpoint load /newpath load /moveto load true /charpath load
-    /currentpoint load /gsave load /hairline load /exec load /through-stroke load /exec load
-    /grestore load /newpath load /moveto load ] cvx ] cvx put
+  [ /currentpoint load /gsave load /newpath load /moveto load true /charpath load
+    /currentpoint load /hairline load /exec load /through-stroke load /exec load
+    /grestore load /moveto load ] cvx ] cvx put
 % colour and weight belong to the blueprint now
 decs /setrgbcolor { pop {pop pop pop} } put
 decs /sethsbcolor { pop {pop pop pop} } put
