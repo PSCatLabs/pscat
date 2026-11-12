@@ -428,13 +428,6 @@ fn a_small_board_renders_within_the_ci_budget() {
     assert!(!data(&it).is_empty());
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// One file holding every library and `body`, rendered by Ghostscript under
 /// its default -dSAFER (so no `run` of library files), as RGB rows.
 fn gs_rgb(body: &str, w: u32, h: u32, scale: u32, tag: &str) -> Vec<[u8; 3]> {
@@ -474,8 +467,7 @@ fn gs_rgb(body: &str, w: u32, h: u32, scale: u32, tag: &str) -> Vec<[u8; 3]> {
 /// Runs locally only: CI has no gs.
 #[test]
 fn ghostscript_agrees_on_a_board() {
-    if !gs_available() {
-        eprintln!("skipping gs board check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: u32 = 2;
@@ -528,8 +520,7 @@ fn ghostscript_agrees_on_a_board() {
 /// under `true setpacking`.
 #[test]
 fn ghostscript_accepts_a_packed_ghost_procedure() {
-    if !gs_available() {
-        eprintln!("skipping gs packed-procedure check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let body = "true setpacking /pk { 20 60 moveto 180 64 lineto } def false setpacking \

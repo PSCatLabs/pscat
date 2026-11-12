@@ -5,6 +5,8 @@
 //! file, every glyph's path survives a real path consumer (paintkit's
 //! `pkribbon`), and Ghostscript builds the same path from the same seed.
 
+mod common;
+
 use pscat::Interp;
 
 fn load(it: &mut Interp, files: &[&str]) {
@@ -27,13 +29,6 @@ fn ink_count(it: &Interp) -> usize {
         .iter()
         .filter(|p| p.red() < 128)
         .count()
-}
-
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
 }
 
 #[test]
@@ -179,8 +174,7 @@ fn every_glyph_path_survives_a_paintkit_stroke() {
 /// integer-keyed code-point map are all plain integer PostScript.
 #[test]
 fn ghostscript_builds_the_same_path_from_the_same_seed() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

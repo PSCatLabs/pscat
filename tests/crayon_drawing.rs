@@ -5,6 +5,8 @@
 //! band along the bottom, the air between them left as paper, and the name
 //! in the corner.
 
+mod common;
+
 use pscat::Interp;
 
 const PIECE: &str = "gallery/crayon_drawing.ps";
@@ -85,12 +87,7 @@ fn the_drawing_builds_in_pscat_with_its_parts_where_the_composition_puts_them() 
 
 #[test]
 fn the_drawing_runs_in_ghostscript() {
-    let have_gs = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !have_gs {
-        eprintln!("no gs here, skipping");
+    if !common::gs_available() {
         return;
     }
     // The piece loads its libraries with relative `run`s from the repo

@@ -48,13 +48,6 @@ const EXPECT: &[(&str, Expect)] = &[
     ("vasarely.ps", Expect::RunsDiffers("rand-driven art")),
 ];
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn fetch(name: &str) -> Option<Vec<u8>> {
     let dir = std::path::Path::new("tests/corpus");
     let path = dir.join(name);
@@ -151,8 +144,7 @@ fn compare(name: &str, ours: &Pixmap, theirs: &Pixmap) -> Result<(), String> {
 
 #[test]
 fn corpus_round2_matches_ghostscript() {
-    if !gs_available() {
-        eprintln!("skipping corpus tests: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     let mut failures = Vec::new();

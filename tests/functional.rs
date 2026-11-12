@@ -279,12 +279,7 @@ fn observation_advice_preserves_graphics_state_and_pixels() {
 
 #[test]
 fn ghostscript_matches_the_semantics_corpus_including_packed_quotations() {
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable: semantic cross-check skipped");
+    if !common::gs_available() {
         return;
     }
     let corpus = include_str!("data/functional_semantics.ps");

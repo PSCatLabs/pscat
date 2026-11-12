@@ -730,12 +730,7 @@ fn truchet_randomizes_the_rotation_across_cells() {
 
 #[test]
 fn ghostscript_accepts_artkit() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let lib = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -3458,12 +3453,7 @@ fn ghostscript_accepts_the_scatter_specimen_sheet() {
     // is needed because the file does `(lib/artkit.ps) run` from disk,
     // which gs's default sandbox blocks (same reasoning as the
     // paintkit demo checks).
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

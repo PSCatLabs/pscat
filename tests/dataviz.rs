@@ -432,12 +432,7 @@ fn dvcolor_cycles_through_the_default_palette() {
 
 #[test]
 fn ghostscript_accepts_dataviz() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let lib = std::fs::read_to_string("lib/dataviz.ps").expect("dataviz.ps");

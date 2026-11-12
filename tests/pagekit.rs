@@ -220,12 +220,7 @@ fn new_palettes_are_ordered_dark_to_light() {
 
 #[test]
 fn ghostscript_accepts_pagekit() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");

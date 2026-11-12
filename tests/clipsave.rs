@@ -218,19 +218,10 @@ fn cliprestore_brings_back_a_nested_eoclip_exactly() {
     assert!(direct.gfx().pixmap.data() != kept.gfx().pixmap.data());
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The pinned lines are gs's own (local only; CI has no gs).
 #[test]
 fn ghostscript_prints_the_pinned_lines() {
-    if !gs_available() {
-        eprintln!("skipping gs clipsave check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-clipsave-gs");

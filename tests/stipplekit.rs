@@ -9,6 +9,8 @@
 //! constant/callback `/Density` split, the default dot `/Mark`, and
 //! the option conflicts only `stipple` can catch.
 
+mod common;
+
 use pscat::{Interp, PsError};
 
 fn load(it: &mut Interp) {
@@ -588,12 +590,7 @@ fn the_stippling_specimen_sheet_renders_ink_in_every_panel() {
 
 #[test]
 fn ghostscript_accepts_the_stippling_specimen_sheet() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

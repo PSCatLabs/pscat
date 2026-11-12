@@ -52,6 +52,80 @@ pub fn pdf_text(pdf: &[u8]) -> String {
 }
 
 // ---------------------------------------------------------------------
+// Ghostscript (issue #985)
+//
+// Many tests compare pscat with a real Ghostscript. Without `gs` on PATH
+// they used to skip with an `eprintln!`, which libtest hides for a passing
+// test, so a CI log could not say whether the parity checks ran at all.
+// Every such test now starts with
+//
+//     if !common::gs_available() { return; }
+//
+// and the rule lives here:
+//   - `gs` runs: true. If `PSCAT_GS_LOG` names a file, `ran <test>` is
+//     appended to it (CI counts the lines).
+//   - `gs` missing, `PSCAT_REQUIRE_GS` unset: false, after a `SKIPPED` line
+//     written straight to stderr (not through `eprintln!`, so libtest's
+//     capture cannot swallow it) and logged as `skipped <test>`.
+//   - `gs` missing, `PSCAT_REQUIRE_GS` set (CI jobs that install gs):
+//     panic, so a runner image that loses gs fails instead of passing
+//     every parity test as a skip.
+// ---------------------------------------------------------------------
+
+/// What a test does about Ghostscript, as a pure decision (no logging, no
+/// environment) so tests/gs_helper.rs can cover every case. `Ok(true)`:
+/// run the gs check. `Ok(false)`: skip. `Err`: the requirement is on and
+/// gs is missing.
+pub fn gs_decision(have_gs: bool, require_gs: bool) -> Result<bool, &'static str> {
+    match (have_gs, require_gs) {
+        (true, _) => Ok(true),
+        (false, false) => Ok(false),
+        (false, true) => Err(
+            "PSCAT_REQUIRE_GS is set but `gs` is not runnable; this test would have been \
+             skipped. Install Ghostscript on this runner, or unset PSCAT_REQUIRE_GS.",
+        ),
+    }
+}
+
+/// True when `gs` is on PATH and runs; the one skip rule for Ghostscript
+/// tests (see the section comment above).
+pub fn gs_available() -> bool {
+    use std::io::Write as _;
+    let have = std::process::Command::new("gs")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let require = std::env::var_os("PSCAT_REQUIRE_GS").is_some_and(|v| !v.is_empty() && v != "0");
+    let thread = std::thread::current();
+    let test = thread.name().unwrap_or("(unnamed test)");
+    let log = |what: &str| {
+        let file = std::env::var_os("PSCAT_GS_LOG").and_then(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
+        });
+        if let Some(mut f) = file {
+            let _ = writeln!(f, "{what} {test}");
+        }
+    };
+    match gs_decision(have, require) {
+        Ok(true) => {
+            log("ran");
+            true
+        }
+        Ok(false) => {
+            log("skipped");
+            let _ = writeln!(std::io::stderr(), "SKIPPED (gs not installed): {test}");
+            false
+        }
+        Err(why) => panic!("{test}: {why}"),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Scratch paths (issue #487)
 //
 // Agents run `cargo test` in several worktrees at once, and the tests
