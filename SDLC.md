@@ -29,7 +29,7 @@ light_gate:
   exclude: ["docs/guides/*"]
   command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check && python3 scripts/check_licences.py all"
 independent_review:
-  cross_family_paths: ["/src/", "/build.rs", "/Cargo.toml", "/Cargo.lock", "/npm/*.js", "/npm/*.d.ts", "/plugin/scripts/", "/scripts/release.sh", "/scripts/package_release.sh", "/.github/workflows/release.yml", "/.github/workflows/npm.yml"]
+  cross_family_paths: ["/src/", "/build.rs", "/Cargo.toml", "/Cargo.lock", "/npm/*.js", "/npm/*.d.ts", "/npm/package.json", "/scripts/build_npm.sh", "/scripts/build_npm_global.mjs", "/scripts/build_wasm.sh", "/web/pscat.js", "/plugin/scripts/", "/plugin/hooks/", "/plugin/pscat-release", "/plugin/mcp.json", "/server.json", "/scripts/release.sh", "/scripts/release_stages.py", "/scripts/package_release.sh", "/.github/workflows/release.yml", "/.github/workflows/release-fonts.yml", "/.github/workflows/pages.yml", "/scripts/review_tier.py", "/scripts/codeowners_check.py"]
   max_rounds: 2
   wave_batch_max_prs: 5
   wave_batch_max_changed_lines: 2000
@@ -78,22 +78,30 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    partial or related work, since GitHub closes an issue on any closing
    keyword, even in "does not fix #N"), with a summary and a test plan.
 8. **Independent review** — a reviewer with no context from
-   implementation checks the diff cold. Must come back clean to proceed.
+   implementation checks the diff cold. Must come back clean to proceed:
+   **clean** means no open blocking finding, and every other finding has a
+   written response.
    Which reviewer depends on risk, not size (`independent_review` in the
    frontmatter; `python3 scripts/review_tier.py --base origin/main`
-   decides):
+   decides, and an error from it means Codex):
    - **Cross-family (Codex)** when the diff touches a
      `cross_family_paths` entry: the engine and library (`src/`), the npm
-     runtime, dependencies, the launchers that run on users' machines, and
-     the release scripts. The dispatcher may also ask for it on any PR.
+     runtime and its build, dependencies, the files that decide what runs on
+     users' machines (plugin launchers, hooks, `mcp.json`, `server.json`),
+     the release scripts and the workflows that publish. The dispatcher may
+     also ask for it on any PR. A `bot_merge_authors` PR (Dependabot) is
+     exempt: green CI is its review ("Who merges", the standing exception).
    - **Agent** (a same-family, blank-context reviewer) for everything else:
      docs, skills, PostScript libraries, gallery, tests, CI. A visible
      render change still gets the perceptual review (tier (b) below).
 
-   **At most `max_rounds` (2) review rounds.** After the last round, only a
-   finding that is a real correctness, security or data-loss defect
-   blocks the merge. Every other open finding is answered in the round's
-   table and listed as a proposed follow-up. When a finding turns on what
+   **At most `max_rounds` (2) review rounds**, counting from 1. After the
+   last round, only a finding that is a real correctness, security or
+   data-loss defect blocks the merge. Every other open finding is answered
+   in the round's table and listed as a proposed follow-up. A fix for a
+   blocking finding made after the last round is pushed, and gets one
+   confirmation review limited to that fix; if that one still finds a
+   blocking defect, the PR stops without merging and goes to the owner. When a finding turns on what
    PostScript does, a Ghostscript run settles it: quote the `gs` output in
    the response instead of arguing it over another round.
    In a dispatched wave, the dispatcher runs one combined Codex review for
