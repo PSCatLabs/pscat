@@ -246,7 +246,8 @@ fn arcto_user(m: Transform, q: (f64, f64)) -> Result<(f64, f64), PsError> {
 /// a large page translation along one axis does not widen the test
 /// across the other, a far p2 only sets the direction, and the CTM's
 /// scale moves the bound with the noise. The corner must also be nearly
-/// straight, so a short leg into a real corner is never swallowed.
+/// straight in user space, so a short leg into a real corner, or a corner
+/// a non-uniform CTM squashes in device space, is never swallowed.
 /// Without the bound a rotated
 /// fold-back (which a program means as collinear) would ask for a
 /// tangent length of ~1/sin of a noise-sized corner.
@@ -270,11 +271,19 @@ fn arcto_collinear(
     let bx = (sx * p0.0).abs() + (kx * p0.1).abs() + tx.abs();
     let by = (ky * p0.0).abs() + (sy * p0.1).abs() + ty.abs();
     let ulps = 4.0 * f64::from(f32::EPSILON);
-    // Both: within the rounding, and a nearly straight corner (the angle
-    // off the line under ~1e-4 rad), so the bound never swallows a whole
-    // short leg of a real corner (a right angle has dist equal to the leg).
-    let l0 = fmath::hypot(q0.0 - q1.0, q0.1 - q1.1);
-    dist <= ulps * (nx.abs() * bx + ny.abs() * by) && dist <= 1e-4 * l0
+    // Both: within the rounding, and a nearly straight corner in user
+    // space (sine of the angle off the line under 1e-4), so the bound
+    // never swallows a short leg of a real corner, and a non-uniform CTM
+    // that squashes a corner flat in device space keeps it.
+    let (e0x, e0y) = (p0.0 - p1.0, p0.1 - p1.1);
+    let (e2x, e2y) = (p2.0 - p1.0, p2.1 - p1.1);
+    let (m0, m2) = (fmath::hypot(e0x, e0y), fmath::hypot(e2x, e2y));
+    let sine = if m0 > 0.0 && m2 > 0.0 {
+        ((e0x * e2y - e0y * e2x) / (m0 * m2)).abs()
+    } else {
+        0.0
+    };
+    dist <= ulps * (nx.abs() * bx + ny.abs() * by) && sine <= 1e-4
 }
 
 /// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and

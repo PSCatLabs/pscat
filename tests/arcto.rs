@@ -260,6 +260,26 @@ fn a_short_first_leg_keeps_its_corner() {
 }
 
 #[test]
+fn an_anisotropic_ctm_keeps_a_user_space_corner() {
+    // 1 x 0.000001 squashes a right angle nearly flat in device space;
+    // the corner is still a corner in user space (Codex, combined review
+    // batch 1, round 6). gs 10.07.1 gives about 92.93 92.93 107.07 92.93.
+    let got = run_case("{ 1 0.000001 scale 0 0 moveto 100 100 200 0 10 arcto }");
+    assert!(got.contains(" c "), "{got}");
+    let stack: Vec<f64> = got
+        .split("stack: ")
+        .nth(1)
+        .and_then(|s| s.split(" path:").next())
+        .unwrap()
+        .split_whitespace()
+        .map(|w| w.parse().unwrap())
+        .collect();
+    for (g, w) in stack.iter().zip([92.93, 92.93, 107.07, 92.93]) {
+        assert!((g - w).abs() < 0.05, "{got}");
+    }
+}
+
+#[test]
 fn a_coincident_corner_is_undefinedresult_under_a_rotation() {
     // The current point comes back through the inverse CTM, so p0 = p1
     // has to be decided in device space (Codex, combined review batch 1,

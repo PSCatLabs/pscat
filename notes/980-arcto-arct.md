@@ -28,8 +28,9 @@ gs leaves them. (2) "Collinear" allows for the current point's single-precision
 storage: arcto reads the stored device point exactly (inverse CTM in f64) and
 treats it as on the line p1-p2 when its device-space distance is within 4 f32
 ulps of the terms that made each coordinate, projected on the line's normal,
-and the corner is nearly straight (under ~1e-4 rad), so a short leg into a
-real corner is never swallowed.
+and the corner is nearly straight in user space (sine under 1e-4), so a short
+leg into a real corner, or a corner a non-uniform CTM squashes in device
+space, is never swallowed.
 So a rotated fold-back (meant as collinear) is a line, while a far p2, a
 magnifying or shrinking CTM, a large page translation or a 0.0001-long leg
 keep their corner, and p0 = p1 is compared in device space (all from the
