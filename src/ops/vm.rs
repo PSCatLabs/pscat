@@ -6,7 +6,7 @@
 //! flag only: pscat has one VM, so nothing is allocated elsewhere, but the
 //! bracketed idiom `currentglobal true setglobal ... setglobal` reads back
 //! what it set, and `restore` treats the mode as Ghostscript does (see
-//! [`VmMode`]).
+//! `VmMode`).
 //!
 //! Documented deviation: no invalidrestore scan of the stacks for
 //! composites created since the save — under `Rc` such objects simply
