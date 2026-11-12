@@ -559,6 +559,125 @@ fn shapes_fill() {
     }
 }
 
+/// A ring built from `ellipse` (rim) and `ellipsen` (hole) must leave the
+/// hole unpainted under the nonzero rule: that is what the reversed
+/// winding is for. Two `ellipse`s of the same winding would fill it. The
+/// even-odd rule, a clip, and a rotated ring are checked too.
+#[test]
+fn ellipse_and_ellipsen_build_a_ring() {
+    let render = |body: &str| {
+        let mut it = Interp::with_page(200, 200).expect("page");
+        load(&mut it);
+        it.run_str(&format!("newpath {body}"))
+            .unwrap_or_else(|e| panic!("{body} failed: {}", it.error_report(&e)));
+        it
+    };
+    // The page is y-down on the device: (100, 100) is the centre either way.
+    let ring = render("100 100 80 50 ellipse 100 100 40 20 ellipsen fill");
+    assert_eq!(
+        pixel(&ring, 100, 100),
+        (255, 255, 255),
+        "nonzero ring: the hole stays open"
+    );
+    assert!(pixel(&ring, 100 + 60, 100).0 < 128, "the rim is inked");
+    let same = render("100 100 80 50 ellipse 100 100 40 20 ellipse fill");
+    assert!(
+        pixel(&same, 100, 100).0 < 128,
+        "same winding fills the hole under nonzero"
+    );
+    let eo = render("100 100 80 50 ellipse 100 100 40 20 ellipse eofill");
+    assert_eq!(
+        pixel(&eo, 100, 100),
+        (255, 255, 255),
+        "even-odd: any two nest"
+    );
+    // A rotated ring: 90 degrees swaps the radii, so (100, 100 + 70) is
+    // inside a 20-by-80 ellipse but (100 + 70, 100) is not.
+    let tall = render("100 100 80 20 90 ellipserot fill");
+    assert!(
+        pixel(&tall, 100, 100 + 70).0 < 128,
+        "rot 90: long axis vertical"
+    );
+    assert!(
+        pixel(&tall, 100 + 70, 100).0 > 128,
+        "rot 90: short axis horizontal"
+    );
+    // As a clip, the ring keeps the rim and drops the hole.
+    let clip =
+        render("100 100 80 50 ellipse 100 100 40 20 ellipsen clip newpath 0 0 200 200 rectfill");
+    assert_eq!(
+        pixel(&clip, 100, 100),
+        (255, 255, 255),
+        "the clip excludes the hole"
+    );
+    assert!(pixel(&clip, 100 + 60, 100).0 < 128);
+}
+
+/// An elliptical arc reaches its parametric end point, and the arc forms
+/// differ by direction; nothing is painted until the caller strokes.
+#[test]
+fn ellipsearc_is_parametric_and_directed() {
+    // 0..90 counterclockwise ends at the top of the ellipse (cx, cy+ry).
+    let got = eval("newpath 100 100 60 20 0 90 ellipsearc currentpoint");
+    let (x, y): (f64, f64) = (got[0].parse().unwrap(), got[1].parse().unwrap());
+    assert!(
+        (x - 100.0).abs() < 1e-6 && (y - 120.0).abs() < 1e-6,
+        "got ({x}, {y})"
+    );
+    // 90..0 clockwise ends at the right (cx+rx, cy).
+    let got = eval("newpath 100 100 60 20 90 0 ellipsearcn currentpoint");
+    let (x, y): (f64, f64) = (got[0].parse().unwrap(), got[1].parse().unwrap());
+    assert!(
+        (x - 160.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6,
+        "got ({x}, {y})"
+    );
+    // Rotated by 90, the top becomes the left: (cx - ry, cy).
+    let got = eval("newpath 100 100 60 20 0 90 90 ellipsearcrot currentpoint");
+    let (x, y): (f64, f64) = (got[0].parse().unwrap(), got[1].parse().unwrap());
+    assert!(
+        (x - 80.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6,
+        "got ({x}, {y})"
+    );
+    // 0..270 counterclockwise (three quarters, through the top and left) and
+    // clockwise (one quarter, down to the bottom) end at the same point by
+    // different ways round: the bounding boxes tell the directions apart.
+    let ccw = eval("newpath 100 100 60 20 0 270 ellipsearc pathbbox");
+    let cw = eval("newpath 100 100 60 20 0 270 ellipsearcn pathbbox");
+    let f = |v: &[String]| -> Vec<f64> { v.iter().map(|x| x.parse().unwrap()).collect() };
+    let (ccw, cw) = (f(&ccw), f(&cw));
+    assert!(
+        ccw[0] < 45.0 && ccw[3] > 119.0,
+        "ccw reaches the left and the top: {ccw:?}"
+    );
+    assert!(
+        cw[0] > 95.0 && cw[3] < 101.0,
+        "cw is the quarter below the right end: {cw:?}"
+    );
+}
+
+/// A second ellipse in one path starts its own subpath: no connecting
+/// line from the first, which a bare `arc` would draw.
+#[test]
+fn ellipse_starts_a_new_subpath_and_keeps_the_ctm() {
+    let mut it = Interp::with_page(300, 100).expect("page");
+    load(&mut it);
+    it.run_str(
+        "matrix currentmatrix /m0 exch def
+         newpath 50 50 20 10 ellipse 250 50 20 10 ellipse 4 setlinewidth stroke
+         matrix currentmatrix /m1 exch def
+         true 0 1 5 { dup m0 exch get exch m1 exch get eq and } for",
+    )
+    .unwrap_or_else(|e| panic!("failed: {}", it.error_report(&e)));
+    assert_eq!(
+        it.operand_stack().last().map(|o| o.repr()).as_deref(),
+        Some("true"),
+        "CTM restored"
+    );
+    // Nothing between the two ellipses: the middle of the page is blank.
+    assert_eq!(pixel(&it, 150, 50), (255, 255, 255), "no stray connector");
+    assert!(pixel(&it, 70, 50).0 < 128, "the first ellipse is stroked");
+}
+
 #[test]
 fn hex_and_tri_fill() {
     for shape in [

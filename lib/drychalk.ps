@@ -476,6 +476,218 @@
     counttomark 4 lt { cleartomark dctp } { dctomark } ifelse
 } bind def
 
+% ------------------------------------------------------------ the hand
+%
+% /Hand (#1049): a path drawn freehand is never the path it was meant to
+% be. A hand drifts slowly to either side over a long line, barely
+% trembles, runs straight on past the end of a stroke and starts a
+% little before it, and closes an outline a little past or short of
+% where it began. The wobble is a pre-pass over dcsubs, before any
+% stroke is drawn, so the dust follows the drawn line and /Seed's
+% subpath i stays subpath i. Its amplitude is in stroke widths and grows
+% with the stroke's length, so a scaled drawing wobbles in proportion;
+% a stroke shorter than about four widths (a dot, most of a glyph from
+% sgpath) is left exactly as it is.
+
+% Seed salt for the wobble, apart from the stroke's (0), the dust's
+% (104729, or 13 with /Seed) and the lanes' (31 a lane), so the drift
+% never correlates with the texture.
+% @internal
+/dcHwsalt 250007 def
+
+% pts i step -> ux uy   (the unit vector toward point i from the nearest
+% point past it, stepping by step, that differs from it; 1 0 if none)
+% @internal
+/dcHwdir {
+    /dcHws exch def /dcHwi exch def /dcHwq exch def
+    /dcHwux 1 def /dcHwuy 0 def
+    /dcHwj dcHwi dcHws add def
+    {
+        dcHwj 0 lt dcHwj dcHwq length 2 idiv ge or { exit } if
+        dcHwq dcHwi 2 mul get dcHwq dcHwj 2 mul get sub
+        dcHwq dcHwi 2 mul 1 add get dcHwq dcHwj 2 mul 1 add get sub
+        2 copy dup mul exch dup mul add sqrt
+        dup 1e-9 gt {
+            /dcHwl exch def
+            dcHwl div /dcHwuy exch def dcHwl div /dcHwux exch def exit
+        } { pop pop pop } ifelse
+        /dcHwj dcHwj dcHws add def
+    } loop
+    dcHwux dcHwuy
+} bind def
+
+% pts e0 e1 -> pts'   (straight runs of e0 before the start and e1 past
+% the end, along the stroke's own heading there: no hook)
+% @internal
+/dcHwextend {
+    /dcHwe1 exch def /dcHwe0 exch def /dcHwr exch def
+    /dcHwn dcHwr length 2 idiv def
+    [
+        dcHwr 0 1 dcHwdir
+        dcHwe0 mul dcHwr 1 get add exch dcHwe0 mul dcHwr 0 get add exch
+        dcHwr aload pop
+        dcHwr dcHwn 1 sub -1 dcHwdir
+        dcHwe1 mul dcHwr dcHwn 2 mul 1 sub get add exch
+        dcHwe1 mul dcHwr dcHwn 2 mul 2 sub get add exch
+    ]
+} bind def
+
+% pts step -> pts'   (every segment longer than step cut into equal
+% pieces no longer than it; the vertices themselves are kept, so a
+% flattened curve keeps its detail)
+% @internal
+/dcHwsubdivide {
+    /dcHwst exch def /dcHwr exch def
+    [
+        dcHwr 0 get dcHwr 1 get
+        2 2 dcHwr length 2 sub {
+            /dcHwi exch def
+            /dcHwx0 dcHwr dcHwi 2 sub get def /dcHwy0 dcHwr dcHwi 1 sub get def
+            /dcHwdx dcHwr dcHwi get dcHwx0 sub def
+            /dcHwdy dcHwr dcHwi 1 add get dcHwy0 sub def
+            /dcHwm dcHwdx dup mul dcHwdy dup mul add sqrt dcHwst div ceiling cvi 1 dcmax def
+            1 1 dcHwm {
+                dcHwm div /dcHwf exch def
+                dcHwx0 dcHwdx dcHwf mul add dcHwy0 dcHwdy dcHwf mul add
+            } for
+        } for
+    ]
+} bind def
+
+% s -> offset   (the hand's drift at distance s along the stroke: two
+% waves under a third, slower one, so the wander never settles into a
+% ripple; dywobble's shape, without its hook)
+% @internal
+/dcHwwave {
+    /dcHws exch def
+    dcHwp1 dcHws dcHwlam div 360 mul add sin 0.65 mul
+    dcHwp2 dcHws dcHwlam 0.43 mul div 360 mul add sin 0.2 mul add
+    dcHwp3 dcHws dcHwlam 2.7 mul div 360 mul add sin 0.45 mul 0.75 add mul
+    dcHwamp mul
+} bind def
+
+% pts -> pts'   (one subpath as the hand draws it, from dcHand, dcw and
+% the stroke's own seed; a stroke too short to wobble comes back as it is)
+% @internal
+/dchandpath {
+    /dcHwP exch def
+    /dcHwL dcHwP dcplen def
+    % the wobble fades in between 4 and 44 widths of stroke
+    /dcHwk dcHwL dcw 4 mul sub dcw 40 mul div 0 dcmax 1 dcmin dcHand mul def
+    dcHwk 0 le { dcHwP } {
+        dcHwP 0 get dcHwP 1 get dcposseed dcHwsalt add
+            dcSeedOn { pop dcSeed dcSi 7919 mul add 29 add } if
+        dcsrand dcrand pop
+        /dcHwp1 dcrand 360 mul def /dcHwp2 dcrand 360 mul def
+        /dcHwp3 dcrand 360 mul def
+        /dcHwfe dcrand def /dcHwfs dcrand def /dcHwfc dcrand def
+        % a closed outline ends where it began
+        /dcHwn dcHwP length def
+        /dcHwclosed dcHwn 6 ge {
+            dcHwP 0 get dcHwP dcHwn 2 sub get eq
+            dcHwP 1 get dcHwP dcHwn 1 sub get eq and
+        } { false } ifelse def
+        /dcHwLc dcHwL def
+        dcHwclosed {
+            % the hand closes it up to two widths past its start, or up to
+            % one short
+            /dcHwe dcHwfc 3 mul 1 sub dcw mul dcHwk mul def
+            dcHwe 0 gt {
+                [ dcHwP aload pop
+                  dcHwP 0 dcHwL dcHwe sub dctrim
+                  dup length 2 sub 2 exch getinterval aload pop ]
+            } { dcHwP 0 dcHwe neg dctrim } ifelse
+        } {
+            % an open stroke starts up to half a width early and runs on up
+            % to a width and a half
+            dcHwP dcw dcHwk mul 0.5 mul dcHwfs mul
+                  dcw dcHwk mul 1.5 mul dcHwfe mul dcHwextend
+        } ifelse
+        /dcHwP exch def
+        /dcHwL dcHwP dcplen def
+        % a sample every two widths (at most 20000 a stroke)
+        /dcHwP dcHwP dcw 2 mul dcHwL 20000 div dcmax dcHwsubdivide def
+        % the drift: a slow wander, wider and longer on a longer stroke;
+        % the tremor is a twentieth of a width at most
+        /dcHwamp dcw 0.5 mul dcHwL 0.005 mul add dcHwk mul def
+        /dcHwlam dcw 24 mul dcHwL 0.6 mul add def
+        /dcHwtr dcw 0.05 mul dcHwk mul def
+        /dcHwR dcw 10 mul dcHwLc 0.5 mul dcmin def
+        /dcHwd dcrand 0.5 sub dcw mul dcHwk mul def
+        /dcHwo0 0 dcHwwave def
+        /dcHwn dcHwP length 2 idiv def
+        /dcHwQ dcHwn 2 mul array def
+        /dcHwsx 0 def
+        dcHwP 0 1 dcHwdir neg exch neg exch /dcHwty exch def /dcHwtx exch def
+        0 1 dcHwn 1 sub {
+            /dcHwi exch def
+            /dcHwx dcHwP dcHwi 2 mul get def /dcHwy dcHwP dcHwi 2 mul 1 add get def
+            dcHwi 0 gt {
+                /dcHwsx dcHwsx
+                    dcHwx dcHwP dcHwi 2 mul 2 sub get sub dup mul
+                    dcHwy dcHwP dcHwi 2 mul 1 sub get sub dup mul add sqrt
+                add def
+            } if
+            % the tangent from the neighbours (one-sided at the ends); where
+            % both neighbours sit on this point (repeated points), the last
+            % tangent holds
+            /dcHwa dcHwi 1 sub 0 dcmax def /dcHwb dcHwi 1 add dcHwn 1 sub dcmin def
+            /dcHwgx dcHwP dcHwb 2 mul get dcHwP dcHwa 2 mul get sub def
+            /dcHwgy dcHwP dcHwb 2 mul 1 add get dcHwP dcHwa 2 mul 1 add get sub def
+            /dcHwtl dcHwgx dup mul dcHwgy dup mul add sqrt def
+            dcHwtl 1e-9 gt {
+                /dcHwtx dcHwgx dcHwtl div def /dcHwty dcHwgy dcHwtl div def
+            } if
+            /dcHwo dcHwsx dcHwwave dcrand 2 mul 1 sub dcHwtr mul add def
+            % a closed outline eases its drift over the last ten widths to
+            % the start's, give or take dcHwd, so the end crosses the start
+            % at a shallow angle instead of stepping beside it
+            dcHwclosed {
+                dcHwsx dcHwLc dcHwR sub sub dcHwR div 0 dcmax 1 dcmin
+                dup 3 2 2 index mul sub mul mul
+                dcHwo0 dcHwd add dcHwLc dcHwwave sub mul
+                /dcHwo exch dcHwo add def
+            } if
+            dcHwQ dcHwi 2 mul dcHwx dcHwty dcHwo mul sub put
+            dcHwQ dcHwi 2 mul 1 add dcHwy dcHwtx dcHwo mul add put
+        } for
+        dcHwQ
+    } ifelse
+} bind def
+
+% -> subs'   (/Corners /separate: every subpath in dcsubs cut at each
+% vertex that turns by more than 50 degrees between two legs at least
+% ten widths long, so a box is drawn as four strokes, each landing and
+% lifting on its own; a flattened curve's short segments never split)
+% @internal
+/dcsplitcorners {
+    [
+        dcsubs {
+            /dcKp exch def
+            /dcKn dcKp length 2 idiv def
+            dcKn 3 lt { dcKp } {
+                /dcKs 0 def
+                1 1 dcKn 2 sub {
+                    /dcKi exch def
+                    /dcKax dcKp dcKi 2 mul get dcKp dcKi 2 mul 2 sub get sub def
+                    /dcKay dcKp dcKi 2 mul 1 add get dcKp dcKi 2 mul 1 sub get sub def
+                    /dcKbx dcKp dcKi 2 mul 2 add get dcKp dcKi 2 mul get sub def
+                    /dcKby dcKp dcKi 2 mul 3 add get dcKp dcKi 2 mul 1 add get sub def
+                    /dcKla dcKax dup mul dcKay dup mul add sqrt def
+                    /dcKlb dcKbx dup mul dcKby dup mul add sqrt def
+                    dcKla dcw 10 mul ge dcKlb dcw 10 mul ge and {
+                        dcKax dcKbx mul dcKay dcKby mul add dcKla dcKlb mul div 0.643 lt {
+                            dcKp dcKs 2 mul dcKi dcKs sub 1 add 2 mul getinterval
+                            /dcKs dcKi def
+                        } if
+                    } if
+                } for
+                dcKp dcKs 2 mul dcKn dcKs sub 2 mul getinterval
+            } ifelse
+        } forall
+    ]
+} bind def
+
 % opts -   (validates dcchalk's keys into dc* globals)
 % @internal
 /dcchalkopts {
@@ -513,6 +725,12 @@
         /dcSeedOn true def /dcSeed dcO /Seed get cvi 2147483 mod def
     } { /dcSeedOn false def } ifelse
     /dcTiltS dcTilt sin def
+    /dcHand dcO /Hand 0 0 1 /dcchalk-hand-must-be-0-to-1 dcoptnum def
+    dcO /Corners /joined dcget
+    dup /joined eq { pop false } {
+        /separate eq { true } { dcchalk-corners-must-be-joined-or-separate } ifelse
+    } ifelse
+    /dcSplit exch def
 } bind def
 
 % -   (the loose dust of every stroke in dcsubs: specks beside the line,
@@ -575,6 +793,14 @@
     dcSo /Streak dcStreak put
     dcSo /Halo dcDust 0.1 mul put
     /dcsubs dcsubpaths def
+    % the hand's pre-pass: the strokes as drawn, before any is stroked, so
+    % the dust follows them and /Seed's subpath i is the i-th stroke drawn
+    dcSplit { /dcsubs dcsplitcorners def } if
+    dcHand 0 gt {
+        /dcsubs [ 0 1 dcsubs length 1 sub {
+            /dcSi exch def dcsubs dcSi get dchandpath
+        } for ] def
+    } if
     0 1 dcsubs length 1 sub {
         /dcSi exch def
         dcsubs dcSi get
@@ -602,6 +828,12 @@
 %   { << /Under [1 1] >> dcchalk } /dcchalk-under-must-be-an-rgb-array (a two-entry /Under) mustguard
 %   { << /Seed (s) >> dcchalk } /dcchalk-seed-must-be-a-number (a string /Seed) mustguard
 %   { << /Seed 1e12 >> dcchalk } /dcchalk-seed-must-be-within-integer-range (/Seed 1e12) mustguard
+%   { << /Hand 1.5 >> dcchalk } /dcchalk-hand-must-be-0-to-1 (/Hand 1.5) mustguard
+%   { << /Corners /round >> dcchalk } /dcchalk-corners-must-be-joined-or-separate (/Corners /round) mustguard
+%   { gsave newpath 0 0 moveto 90 0 lineto 90 60 lineto 0 60 lineto closepath
+%     << /Hand 1 /Corners /separate >> dcchalk grestore } (a hand-drawn box in four strokes) mustpass
+%   { gsave newpath 0 0 moveto 90 0 lineto 5 5 moveto 5 5 lineto << /Hand 1 /Tilt 70 >> dcchalk grestore }
+%   (a hand-drawn side stroke and a dot) mustpass
 %   { gsave newpath 0 0 moveto 50 0 lineto << >> dcchalk grestore } (the defaults) mustpass
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Tilt 80 >> dcchalk grestore } (a side stroke) mustpass
 %   { gsave newpath 5 5 moveto << >> dcchalk grestore } (a bare moveto) mustpass
@@ -614,9 +846,11 @@
 %   1 srand
 %   gsave newpath 10 10 moveto 90 40 lineto 30 80 moveto 31 80 lineto
 %   << /Width 3 /Dust 1 >> dcchalk
-%   newpath 10 10 moveto 90 40 lineto << /Tilt 85 /Side 8 >> dcchalk grestore
+%   newpath 10 10 moveto 90 40 lineto << /Tilt 85 /Side 8 >> dcchalk
+%   newpath 10 10 moveto 290 40 lineto 290 200 lineto closepath
+%   << /Hand 1 /Corners /separate >> dcchalk grestore
 %   rand sttaken eq
-%   (dcchalk, tip and side, leaves the caller's stream untouched) mustbe
+%   (dcchalk, tip, side and hand, leaves the caller's stream untouched) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
@@ -635,6 +869,8 @@
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, 1..4: skipped valleys streak with the travel (default 1.6)
 % @param: /Under [rgb array] What lies beneath (default the board tone dcboard set, else the dksurface ground)
 % @param: /Seed [integer] Seed for every stroke's variation and texture; subpath i uses Seed + 7919 i. Leaves the caller's rand stream untouched (default from each stroke's position on the board)
+% @param: /Hand [0..1] Draws the path freehand rather than ruled: a slow drift to either side that grows with the stroke's length, a straight run past each end, and a closed outline that ends a little past or short of its start. 0 follows the path exactly; strokes shorter than about four widths (dots, ticks) are left as they are, and the drift fades in up to about 44 widths, so lettering moves far less than a long line (default 0)
+% @param: /Corners [name] /joined draws each subpath as one stroke; /separate cuts it at every sharp corner between long legs, so a box is four strokes that land, lift and (with /Hand) overshoot on their own (default /joined)
 /dcchalk {
     dcscratch begin
     {
@@ -665,6 +901,222 @@
     dup type /nametype ne { pop dcchalkcolor-needs-a-name } if
     dcchalks 1 index known not { pop dcchalkcolor-unknown-colour } if
     dcchalks exch get aload pop setrgbcolor
+} bind def
+
+% ------------------------------------------------------------- lettering
+%
+% dctext and dcleader (#1054) set chalk lettering from strokeglyphs'
+% sgpath, measured with sgwidth (fixed advances, never the jittered ink),
+% so a layout agrees with the drawing. They need lib/handscript.ps and
+% lib/strokeglyphs.ps loaded; drychalk itself does not load them.
+
+% The chalk width a line of lettering gets by default, per point of
+% /Size: pscat chalk's (chalk.width, 0.048 x size).
+% @internal
+/dcTextW 0.048 def
+
+% opts size -> dict   (the sgpath options: /Size, and /Slant /Jitter
+% /Strict /Seed when given; sgpath takes an integer seed)
+% @internal
+/dcsgopts {
+    /dcGs exch def /dcGo exch def
+    /dcGd 5 dict def
+    dcGd /Size dcGs put
+    [ /Slant /Jitter /Strict ] {
+        dup dcGo exch known { dcGd exch dcGo 1 index get put } { pop } ifelse
+    } forall
+    dcGo /Seed known { dcGd /Seed dcGo /Seed get dup dcisnum { cvi } if put } if
+    dcGd
+} bind def
+
+% dict [keys] -> dict'   (a copy of dict without keys)
+% @internal
+/dcwithout {
+    /dcGk exch def
+    dup length dict exch { 2 index 3 1 roll put } forall
+    dcGk { 1 index exch undef } forall
+} bind def
+
+% seed n -> seed'   (a derived seed for the n-th part of a row, inside
+% both sgpath's and dcchalk's range)
+% @internal
+/dcseedplus {
+    exch cvi 1000003 mod add
+} bind def
+
+% str x y opts -   (dctext's body, inside dcscratch)
+% An executable text (a procedure, or a string made executable) is refused:
+% sgpath takes only literal strings and glyph-name arrays. The text and
+% /Align are reused with `load`, never by bare name, so nothing is ever run.
+% @internal
+/dctextbody {
+    /dcQO exch def
+    /dcQO load type /dicttype ne { dctext-options-must-be-a-dict } if
+    2 copy dcisnum exch dcisnum and not { dctext-xy-must-be-numbers } if
+    /dcQy exch def /dcQx exch def
+    /dcQs exch def
+    /dcQs load type dup /stringtype ne exch /arraytype ne and { dctext-text-must-be-a-string } if
+    /dcQs load xcheck { dctext-text-must-be-a-string } if  % sgpath takes no procedure
+    /sgpath where { pop } { dctext-needs-strokeglyphs } ifelse
+    /dcQsz dcQO /Size 36 1e-6 1e6 /dctext-size-must-be-positive dcoptnum def
+    /dcQal dcQO /Align /left dcget def
+    /dcQal load type /nametype ne { dctext-align-must-be-left-center-or-right } if
+    /dcQal load /left ne /dcQal load /center ne and /dcQal load /right ne and
+        { dctext-align-must-be-left-center-or-right } if
+    /dcQg dcQO dcQsz dcsgopts def
+    % /Fit sets the size that makes the measured width exactly the fit
+    dcQO /Fit known {
+        /dcQfit dcQO /Fit 0 1e-6 1e6 /dctext-fit-must-be-positive dcoptnum def
+        /dcQw /dcQs load dcQg sgwidth def
+        dcQw 0 gt {
+            /dcQsz dcQsz dcQfit mul dcQw div def
+            dcQg /Size dcQsz put
+        } if
+    } if
+    /dcQw /dcQs load dcQg sgwidth def
+    newpath
+    /dcQs load
+    dcQx /dcQal load /center eq { dcQw 2 div sub } if /dcQal load /right eq { dcQw sub } if
+    dcQy dcQg sgpath
+    % everything else is chalk; the lettering's strokes stay joined
+    /dcQc dcQO [ /Size /Align /Fit /Slant /Jitter /Strict /Corners ] dcwithout def
+    dcQc /Width known not { dcQc /Width dcQsz dcTextW mul put } if
+    dcQc dcchalk
+} bind def
+
+%%SelfTest: dctext-rejects-malformed-options
+%   << /Surface /slate >> dksurface
+%   { (a) 0 0 << >> dctext } /dctext-needs-strokeglyphs (lettering before strokeglyphs) mustguard
+%   { (a) (b) 0 9 0 << >> dcleader } /dcleader-needs-strokeglyphs (a row before strokeglyphs) mustguard
+%   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+%   { (a) 0 0 5 dctext } /dctext-options-must-be-a-dict (a number for the options) mustguard
+%   { (a) (x) 0 << >> dctext } /dctext-xy-must-be-numbers (a string x) mustguard
+%   { 7 0 0 << >> dctext } /dctext-text-must-be-a-string (a number for the text) mustguard
+%   { (a) 0 0 << /Size 0 >> dctext } /dctext-size-must-be-positive (/Size 0) mustguard
+%   { (a) 0 0 << /Align /middle >> dctext } /dctext-align-must-be-left-center-or-right (/Align /middle) mustguard
+%   { (a) 0 0 << /Align (left) >> dctext } /dctext-align-must-be-left-center-or-right (a string /Align) mustguard
+%   { (a) 0 0 << /Fit -5 >> dctext } /dctext-fit-must-be-positive (/Fit -5) mustguard
+%   { gsave (Menu) 50 20 << /Align /center /Fit 60 /Hand 1 /Seed 4 >> dctext grestore } (centred and fitted) mustpass
+%   { gsave () 50 20 << /Fit 60 >> dctext grestore } (an empty string) mustpass
+%   /stran false def
+%   { { userdict /stran true put (x) } 50 20 << >> dctext } /dctext-text-must-be-a-string (a procedure for the text) mustguard
+%   stran false eq (and the procedure was never run) mustbe
+%   { (x) cvx 50 20 << >> dctext } /dctext-text-must-be-a-string (an executable string) mustguard
+%   { gsave [ /A /B ] 50 20 << /Size 20 >> dctext grestore } (a literal glyph-name array) mustpass
+%   count 0 eq (and the operand stack is left empty) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dctext-and-dcleader-take-no-draws-from-the-callers-stream
+%   << /Surface /slate >> dksurface
+%   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+%   1 srand rand /sttaken exch def
+%   1 srand
+%   gsave (Soup) 100 50 << /Size 20 /Align /right >> dctext
+%   (Tea) (2.50) 10 190 20 << /Size 14 >> dcleader grestore
+%   rand sttaken eq (dctext and dcleader leave the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Writes a string in chalk at x y: sgpath's single-stroke lettering, measured with sgwidth and drawn with dcchalk, aligned left, centred or right on x, or sized so it fills a width exactly. Every key it does not use itself (/Hand, /Touch, /Strength, ...) goes to dcchalk; /Seed goes to both. Needs lib/handscript.ps and lib/strokeglyphs.ps. Replaces the current path; takes no rand draws from the caller's stream.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run 40 40 520 300 << /Surface /slate >> dcboard /white dcchalkcolor (Today's Specials) 300 280 << /Align /center /Fit 400 >> dctext
+% @param: /Size [points] The em size, as for sgpath (default 36)
+% @param: /Align [name] Where x sits: /left (the start), /center or /right (the end) of the measured width (default /left)
+% @param: /Fit [points] Sets /Size so the measured width is exactly this, for a title that fills a line (default none: /Size as given)
+% @param: /Slant [degrees] Forward lean, as for sgpath (default 0)
+% @param: /Jitter [fraction of /Size] Each point's wobble, as for sgpath (default 0.016)
+% @param: /Strict [boolean] As for sgpath: true raises sg-missing-glyph:<char> for a character with no glyph (default true)
+% @param: /Seed [integer] Seed for both the lettering's jitter and the chalk (default from the position)
+% @param: /Width [points] The chalk's width (default 0.048 of /Size, as pscat chalk)
+/dctext {
+    dcscratch begin
+    { dctextbody } stopped
+    end
+    { stop } if
+} bind def
+
+% left right x1 x2 y opts -   (dcleader's body, inside dcscratch)
+% @internal
+/dcleaderbody {
+    /dcRO exch def
+    /dcRO load type /dicttype ne { dcleader-options-must-be-a-dict } if
+    3 copy dcisnum 3 1 roll dcisnum 3 1 roll dcisnum and and
+        not { dcleader-positions-must-be-numbers } if
+    /dcRy exch def /dcRx2 exch def /dcRx1 exch def
+    /dcRr exch def /dcRl exch def
+    [ /dcRl load /dcRr load ] {
+        dup type dup /stringtype ne exch /arraytype ne and { dcleader-text-must-be-a-string } if
+        xcheck { dcleader-text-must-be-a-string } if  % sgpath takes no procedure
+    } forall
+    /sgpath where { pop } { dcleader-needs-strokeglyphs } ifelse
+    /dcRsz dcRO /Size 36 1e-6 1e6 /dcleader-size-must-be-positive dcoptnum def
+    /dcRpitch dcRO /Pitch dcRsz 0.4 mul 1e-6 1e6 /dcleader-pitch-must-be-positive dcoptnum def
+    /dcRgap dcRO /Gap dcRsz 0.3 mul 0 1e6 /dcleader-gap-must-not-be-negative dcoptnum def
+    /dcRlead dcRO /Leader 0 dict dcget def
+    /dcRlead load type /dicttype ne { dcleader-leader-must-be-a-dict } if
+    % the texts' options: the row's, less its own keys
+    /dcRt dcRO [ /Pitch /Gap /Leader /Align /Fit ] dcwithout def
+    /dcRseed dcRO /Seed known dup { dcRO /Seed get dcisnum and } if def
+    % the two widths, measured before anything is drawn
+    /dcRg dcRt dcRsz dcsgopts def
+    /dcRwl /dcRl load dcRg sgwidth def
+    /dcRwr /dcRr load dcRg sgwidth def
+    /dcRl load dcRx1 dcRy dcRt dup /Align /left put dctextbody
+    dcRseed { dcRt /Seed dcRO /Seed get 101 dcseedplus put } if
+    /dcRr load dcRx2 dcRy dcRt dup /Align /right put dctextbody
+    % the leader: dots at whole multiples of /Pitch from x = 0, so rows
+    % with the same pitch line their dots up, as typeset leaders do
+    /dcRa dcRx1 dcRwl add dcRgap add dcRpitch div ceiling def
+    /dcRb dcRx2 dcRwr sub dcRgap sub dcRpitch div floor def
+    dcRb dcRa sub 20000 gt { dcleader-too-many-dots } if
+    dcRa dcRb le {
+        % thinner and fainter than the lettering, then the caller's /Leader
+        /dcRd dcRt [ /Size /Slant /Jitter /Strict /Corners ] dcwithout def
+        dcRd /Width dcRd /Width dcRsz dcTextW mul dcget dup dcisnum { 0.8 mul } if put
+        dcRd /Strength dcRd /Strength 0.55 dcget dup dcisnum { 0.8 mul } if put
+        dcRseed { dcRd /Seed dcRO /Seed get 211 dcseedplus put } if
+        dcRlead { dcRd 3 1 roll put } forall
+        /dcRdy dcRy dcRd /Width get dcisnum { dcRd /Width get 0.75 mul } { 0 } ifelse add def
+        newpath
+        dcRa cvi 1 dcRb cvi {
+            dcRpitch mul dcRdy 2 copy moveto lineto
+        } for
+        dcRd dcchalk
+    } if
+} bind def
+
+%%SelfTest: dcleader-rejects-malformed-options
+%   << /Surface /slate >> dksurface
+%   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+%   { (a) (b) 0 100 0 5 dcleader } /dcleader-options-must-be-a-dict (a number for the options) mustguard
+%   { (a) (b) 0 (x) 0 << >> dcleader } /dcleader-positions-must-be-numbers (a string x2) mustguard
+%   { 5 (b) 0 100 0 << >> dcleader } /dcleader-text-must-be-a-string (a number for the left text) mustguard
+%   { (a) (b) 0 100 0 << /Size -1 >> dcleader } /dcleader-size-must-be-positive (/Size -1) mustguard
+%   { (a) (b) 0 100 0 << /Pitch 0 >> dcleader } /dcleader-pitch-must-be-positive (/Pitch 0) mustguard
+%   { (a) (b) 0 100 0 << /Gap -1 >> dcleader } /dcleader-gap-must-not-be-negative (/Gap -1) mustguard
+%   { (a) (b) 0 100 0 << /Leader 3 >> dcleader } /dcleader-leader-must-be-a-dict (a number /Leader) mustguard
+%   { (a) (b) 0 1e6 0 << /Pitch 0.01 >> dcleader } /dcleader-too-many-dots (a tiny pitch on a long row) mustguard
+%   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Seed 9 /Leader << /Strength 0.3 >> >> dcleader grestore }
+%   (a menu row) mustpass
+%   { gsave (Long dish name) (9) 10 60 20 << /Size 14 >> dcleader grestore } (a row with no room for dots) mustpass
+%   /stran false def
+%   { (a) { userdict /stran true put (x) } 0 100 0 << >> dcleader } /dcleader-text-must-be-a-string (a procedure for the right text) mustguard
+%   stran false eq (and the procedure was never run) mustbe
+%   { gsave [ /T /e /a ] [ /two ] 10 190 20 << /Size 14 >> dcleader grestore } (literal glyph-name arrays) mustpass
+%   count 0 eq (and the operand stack is left empty) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A row of a chalk menu, price list or table of contents: the left string starts at x1, the right one ends at x2, both on baseline y, and a dotted leader of pressed chalk dots fills the gap between them, thinner and fainter than the lettering. The dots sit on whole multiples of /Pitch, so rows with the same pitch line their dots up. Other keys go to both strings as for dctext (and to the dots, under /Leader's). Needs lib/handscript.ps and lib/strokeglyphs.ps; takes no rand draws from the caller's stream.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run 40 40 520 300 << /Surface /slate >> dcboard /white dcchalkcolor (Espresso) (2.80) 80 520 200 << /Size 24 >> dcleader
+% @param: /Size [points] The lettering's em size, as for dctext (default 36)
+% @param: /Pitch [points] Distance between leader dots (default 0.4 of /Size)
+% @param: /Gap [points] Clear space between each string and the nearest dot (default 0.3 of /Size)
+% @param: /Leader [dict] dcchalk options for the dots, over their defaults: 0.8 of the lettering's /Width and /Strength (default none)
+/dcleader {
+    dcscratch begin
+    { dcleaderbody } stopped
+    end
+    { stop } if
 } bind def
 
 % ----------------------------------------------------------------- board

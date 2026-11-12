@@ -119,6 +119,19 @@ pub fn ps_path(p: &std::path::Path) -> String {
     p.to_str().expect("utf-8 path").replace('\\', "/")
 }
 
+/// `pscat-mcp` reads its limits from `PSCAT_MCP_*` variables (#756). A
+/// developer's own settings must not change what a test sees, so every test
+/// that starts the server strips whatever the parent process carries (#800).
+/// A test that wants one sets it after this call.
+pub fn without_mcp_env(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("PSCAT_MCP_") {
+            cmd.env_remove(name);
+        }
+    }
+    cmd
+}
+
 /// A new, already created directory that no other call shares, in this
 /// process or any other: `<temp>/pscat-test-<pid>/<tag>-<n>`. `tag` only
 /// helps a human reading the temp dir; put a file under it with

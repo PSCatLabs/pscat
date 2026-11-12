@@ -116,6 +116,11 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   offending `command`, the `line`, the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
+- `pageCount()` is the number of pages the run holds now: those `showpage`
+  or `copypage` emitted, plus the page being drawn when it has art on it (or
+  is the only page). It works between `step()` calls and after the run, with
+  or without `svg`/`pdf`, and equals `svgPages().length` when SVG is recorded
+  (#1011).
 - The `lib/` libraries are embedded: `(lib/artkit.ps) run` works with no
   fetches.
 - **Fonts:** all of the PostScript standard 35 are built in (Liberation,
@@ -143,12 +148,47 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   `THIRD_PARTY_NOTICES.md`, and the Rust dependencies' notices
   (`THIRD_PARTY_LICENSES.html`).
 
+### A plain `<script>` tag (no modules, no bundler)
+
+The package also ships **`pscat.global.js`**, the same API as one classic
+script: no `import`, no `export`, no `import.meta`. It defines one global,
+`pscat = { createRenderer, PostScriptError, Renderer }`, so a page needs no
+bundler and no module support, and the script can be inlined into a single
+HTML file or used from a classic worker.
+
+```html
+<script src="pscat.global.js"></script>
+<script>
+  pscat.createRenderer().then((r) => {
+    r.render('0 0 1 setrgbcolor 20 20 100 60 rectfill', { width: 160, height: 100 });
+    r.paintTo(document.querySelector('canvas'));
+  });
+</script>
+```
+
+By default `pscat.wasm` is fetched from next to the script, so serve the two
+files together (`node_modules/pscat/pscat.global.js` and `pscat.wasm`; from a CDN once a
+release is on npm, name the file: `https://unpkg.com/pscat@X.Y.Z/pscat.global.js`,
+not the bare package URL). Where the
+script cannot tell where it was loaded from (an inline `<script>`, a
+`blob:` URL, a worker), `createRenderer()` rejects and says so; pass the
+module yourself: `createRenderer({ wasm: url })`, or `{ wasm: bytes }`
+for a page that carries the module with it. A page opened from `file://`
+cannot `fetch` its neighbours in Chrome, so it needs the bytes route too
+(read the file with an `<input type="file">`, or embed it as base64).
+`scripts/build_npm_global.mjs` generates the script from `web/pscat.js` and
+`npm/renderer.js`, and `npm test` loads it as a classic script and compares
+its pages with the ES module's. There is no inlined-wasm build: the module
+is 11 MB (5.4 MB gzipped, 7.2 MB as base64 of that), more than the whole
+package, so a self-contained page embeds it itself
+(`createRenderer({ wasm })` takes the bytes).
+
 The package's README ([`npm/README.md`](../../npm/README.md)) has the
 full API. To build and test it from a checkout:
 
 ```sh
 ./scripts/build_npm.sh --pack dist-npm    # npm/ built in place, plus dist-npm/pscat-X.Y.Z.tgz
-(cd npm && npm test)                       # API tests against npm/
+(cd npm && npm test)                       # API tests (and the classic-script build) against npm/
 ./scripts/test_npm_tarball.sh dist-npm/pscat-*.tgz   # install it into a fresh project, render
 ```
 

@@ -9,6 +9,8 @@
 //! valid executable names per the PLRM.
 
 use crate::error::PsError;
+use std::rc::Rc;
+
 use crate::file::{FileHandle, PsFile};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,13 +44,19 @@ pub struct Lexer {
     /// `line()` uses this to avoid attributing an error to the wrong
     /// source (issue #17: a `(lib/artkit.ps) run` file has its own line
     /// 1, and reporting it as a line of the submitted program would be
-    /// actively misleading).
+    /// actively misleading; `run_name` below is how a run file's lines
+    /// are reported instead).
     is_main: bool,
     /// Byte offset the token most recently returned (or failed) by
     /// `next_token` started at, for `syntax::check_syntax` (#1096): after
     /// an unterminated string the file position is at EOF, which is no help
     /// to the person who has to find the opening `(`.
     token_start_pos: usize,
+    /// The name a `run` file was loaded by (issue #1043), so an error in
+    /// it can be reported as `Line: 5 (inner.ps)`. A run file has its
+    /// own line numbers, which is why `is_main` alone leaves it out;
+    /// with its name attached, its lines are no longer ambiguous.
+    run_name: Option<Rc<str>>,
     /// eexec pushed systemdict for this source's duration; pop it when
     /// the source is exhausted or closed.
     pub(crate) pop_systemdict: bool,
@@ -87,6 +95,7 @@ impl Lexer {
             is_file: false,
             is_main: false,
             token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
         }
@@ -99,6 +108,7 @@ impl Lexer {
             is_file: true,
             is_main: true,
             token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
         }
@@ -112,9 +122,25 @@ impl Lexer {
             is_file: true,
             is_main: false,
             token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
         }
+    }
+
+    /// Scan a file loaded by `run` under `name` (issue #1043): its lines
+    /// are reported, tagged with the name.
+    pub(crate) fn run_file(file: FileHandle, name: Rc<str>) -> Self {
+        Lexer {
+            run_name: Some(name),
+            ..Lexer::from_file(file)
+        }
+    }
+
+    /// The name of the `run` file this scanner reads, or `None` for the
+    /// main program and every unnamed source.
+    pub(crate) fn run_name(&self) -> Option<&Rc<str>> {
+        self.run_name.as_ref()
     }
 
     /// The handle `currentfile` returns, if this scanner is a file.
@@ -128,11 +154,13 @@ impl Lexer {
     }
 
     /// The line the last-returned token started on, if this scanner is
-    /// the main program — `None` otherwise (library files, eexec
-    /// streams, executable strings), so callers don't misattribute an
-    /// error to the wrong source.
+    /// the main program or a named `run` file — `None` otherwise (eexec
+    /// streams, executable strings, a file object `exec`ed directly),
+    /// so callers don't misattribute an error to the wrong source.
     pub(crate) fn line(&self) -> Option<usize> {
-        self.is_main.then_some(self.token_start_line).flatten()
+        (self.is_main || self.run_name.is_some())
+            .then_some(self.token_start_line)
+            .flatten()
     }
 
     /// The byte offset the last-returned token (or the failed scan) started

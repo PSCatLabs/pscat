@@ -287,3 +287,183 @@ fn encoding_is_read_live_from_the_font_dict() {
         "x remapped to m must widen: {before} -> {after}"
     );
 }
+
+// --- definefont copies keep their face (issue #1022) ------------------------
+
+/// The Level 1 re-encoding idiom as programs write it: copy every entry
+/// but `FID`, rename, swap in ISOLatin1Encoding, `definefont`.
+const REENCODE: &str = "/reenc { % newname basename -> -
+       findfont dup length dict begin
+         { 1 index /FID ne { def } { pop pop } ifelse } forall
+         /Encoding ISOLatin1Encoding def
+         /FontName 1 index def
+       currentdict end definefont pop
+     } def ";
+
+fn render(page: (u32, u32), src: &str) -> Vec<u8> {
+    let mut it = Interp::with_page(page.0, page.1).expect("test page");
+    it.run_str(src)
+        .unwrap_or_else(|e| panic!("run of {src:?} failed: {e}"));
+    it.gfx().pixmap.data().to_vec()
+}
+
+#[test]
+fn a_forall_copy_measures_like_its_source_face() {
+    // Ghostscript: Times-Roman (Hamburg) at 100 pt is 377.69, Helvetica
+    // 411.28. The copy used to measure as Helvetica.
+    let mut it = run(&format!(
+        "{REENCODE}
+         /Times-Roman-ISO /Times-Roman reenc
+         /Copy /Times-Roman findfont definefont pop
+         /Bookman-ISO /Bookman-Light reenc
+         /Times-Roman findfont 100 scalefont setfont (Hamburg) stringwidth pop
+         /Times-Roman-ISO findfont 100 scalefont setfont (Hamburg) stringwidth pop
+         /Copy findfont 100 scalefont setfont (Hamburg) stringwidth pop
+         /Helvetica findfont 100 scalefont setfont (Hamburg) stringwidth pop
+         /Bookman-Light findfont 100 scalefont setfont (Hamburg) stringwidth pop
+         /Bookman-ISO findfont 100 scalefont setfont (Hamburg) stringwidth pop"
+    ));
+    let bookman_iso = pop_f64(&mut it);
+    let bookman = pop_f64(&mut it);
+    let helvetica = pop_f64(&mut it);
+    let copy = pop_f64(&mut it);
+    let iso = pop_f64(&mut it);
+    let times = pop_f64(&mut it);
+    assert!((times - 377.69).abs() < 0.05, "Times {times}");
+    assert!((helvetica - 411.28).abs() < 0.05, "Helvetica {helvetica}");
+    assert_eq!(iso, times, "re-encoded copy");
+    assert_eq!(copy, times, "plain definefont of the original");
+    assert_eq!(bookman_iso, bookman, "an embedded base-35 face too");
+    assert!(
+        (bookman - helvetica).abs() > 1.0,
+        "Bookman is not Helvetica"
+    );
+}
+
+#[test]
+fn a_forall_copy_renders_like_its_source_face() {
+    let draw = |font: &str| {
+        render(
+            (300, 80),
+            &format!(
+                "{REENCODE} /Times-Roman-ISO /Times-Roman reenc
+                 /{font} findfont 48 scalefont setfont 10 20 moveto (Hamburg) show"
+            ),
+        )
+    };
+    let original = draw("Times-Roman");
+    assert_eq!(draw("Times-Roman-ISO"), original, "copy draws Times");
+    assert_ne!(draw("Helvetica"), original, "the probe tells faces apart");
+}
+
+#[test]
+fn an_isolatin1_reencoded_copy_draws_egrave() {
+    // `(Fr\350re)` through ISOLatin1 must be exactly Fr, è, re in Times:
+    // the same pixels as drawing è by name with glyphshow (#1023), and
+    // not the unaccented word.
+    let page = (300, 80);
+    let reencoded = render(
+        page,
+        &format!(
+            "{REENCODE} /Times-Roman-ISO /Times-Roman reenc
+             /Times-Roman-ISO findfont 48 scalefont setfont 10 20 moveto (Fr\\350re) show"
+        ),
+    );
+    let by_name = render(
+        page,
+        "/Times-Roman findfont 48 scalefont setfont 10 20 moveto
+         (Fr) show /egrave glyphshow (re) show",
+    );
+    let plain = render(
+        page,
+        "/Times-Roman findfont 48 scalefont setfont 10 20 moveto (Frere) show",
+    );
+    assert_eq!(reencoded, by_name, "re-encoded byte 232 is Times' egrave");
+    assert_ne!(reencoded, plain, "the accent is drawn");
+
+    // Ghostscript: 210.988 at 100 pt.
+    let mut it = run(&format!(
+        "{REENCODE} /Times-Roman-ISO /Times-Roman reenc
+         /Times-Roman-ISO findfont 100 scalefont setfont (Fr\\350re) stringwidth pop"
+    ));
+    let w = pop_f64(&mut it);
+    assert!((w - 210.988).abs() < 0.05, "Fr\\350re width {w}");
+}
+
+#[test]
+fn a_bad_face_entry_falls_back_to_the_substitute() {
+    // The face entry is program-writable: anything that does not name a
+    // loaded face gets the substitute (Helvetica), never an error.
+    for bad in ["999999", "-5", "(Times)", "/Times-Roman", "3.5"] {
+        let mut it = run(&format!(
+            "/Helvetica findfont 100 scalefont setfont (Hamburg) stringwidth pop
+             /Times-Roman findfont dup length dict begin
+               {{ 1 index /FID ne {{ def }} {{ pop pop }} ifelse }} forall
+               /PSCatFace {bad} def
+             currentdict end /Bad exch definefont 100 scalefont setfont
+             (Hamburg) stringwidth pop"
+        ));
+        let bad_w = pop_f64(&mut it);
+        let helvetica = pop_f64(&mut it);
+        assert_eq!(bad_w, helvetica, "PSCatFace {bad}");
+    }
+}
+
+// --- glyphshow (issue #1023) -------------------------------------------------
+
+#[test]
+fn glyphshow_paints_a_glyph_the_encoding_lacks() {
+    // StandardEncoding has no eacute; glyphshow reaches it by name and
+    // advances by its width (Ghostscript: 8.88 at 20 pt).
+    let mut it = run("/Times-Roman findfont 20 scalefont setfont
+         10 10 moveto /eacute glyphshow currentpoint pop");
+    let x = pop_f64(&mut it);
+    assert!((x - 18.88).abs() < 0.01, "advance {x}");
+    assert!(ink_count(&it) > 10, "eacute painted");
+}
+
+#[test]
+fn glyphshow_errors() {
+    let mut it = Interp::with_page(100, 100).expect("test page");
+    assert_eq!(
+        it.run_str("0 0 moveto /a glyphshow"),
+        Err(PsError::InvalidFont),
+        "no font"
+    );
+    assert_eq!(
+        it.run_str("/Helvetica 12 selectfont newpath /a glyphshow"),
+        Err(PsError::NoCurrentPoint)
+    );
+    // A name only, as in Ghostscript: a string or an integer is a typecheck.
+    assert_eq!(
+        it.run_str("0 0 moveto (a) glyphshow"),
+        Err(PsError::Typecheck)
+    );
+    assert_eq!(
+        it.run_str("0 0 moveto 97 glyphshow"),
+        Err(PsError::Typecheck)
+    );
+    // An unknown glyph advances by .notdef's width without an error.
+    assert!(it.run_str("0 0 moveto /no-such-glyph glyphshow").is_ok());
+}
+
+#[test]
+fn glyphshow_on_type3_passes_the_name_or_a_code() {
+    // BuildGlyph gets the name, even one the Encoding lacks; a
+    // BuildChar-only font gets the first Encoding slot holding the name,
+    // else 0 (Ghostscript's behaviour).
+    let mut it = run("/T3G << /FontType 3 /FontMatrix [0.001 0 0 0.001 0 0]
+             /FontBBox [0 0 1000 1000] /Encoding StandardEncoding
+             /BuildGlyph { exch pop /seen exch def 600 0 setcharwidth }
+             /BuildChar { pop pop 500 0 setcharwidth } >> definefont 10 scalefont setfont
+         0 0 moveto /zzz glyphshow seen currentpoint pop
+         /T3C << /FontType 3 /FontMatrix [0.001 0 0 0.001 0 0]
+             /FontBBox [0 0 1000 1000] /Encoding StandardEncoding
+             /BuildChar { exch pop /code exch def 500 0 setcharwidth } >> definefont
+           10 scalefont setfont
+         0 0 moveto /A glyphshow code /zzz glyphshow code");
+    assert_eq!(pop_f64(&mut it), 0.0, "unencoded name -> code 0");
+    assert_eq!(pop_f64(&mut it), 65.0, "/A -> 65");
+    assert_eq!(pop_f64(&mut it), 6.0, "BuildGlyph width");
+    assert_eq!(it.pop().expect("name").repr(), "/zzz");
+}

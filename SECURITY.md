@@ -208,7 +208,10 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   was already inside a root. As with the read roots, a *different* local
   process that can already write inside a root could swap a directory for a
   symlink between the check and the open. `std` has no `openat`, so this is
-  accepted rather than closed.
+  accepted rather than closed. The bands of a `--bands` render are threads of
+  one process running the same program, so they are held to a stricter rule
+  (#1045): a process-wide lock covers each check-and-open, `renamefile` and
+  `deletefile`, and one band cannot swap an entry under another.
 - **Bytes written are capped (#762).** `--max-write-bytes N` (`N` bytes, or
   with a `k`, `m` or `g` suffix; `0` for no cap) and
   `Interp::set_max_write_bytes` count the bytes a program hands to `write`,
@@ -216,12 +219,17 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   **1 GiB when `--allow-write` is given** unless the flag says otherwise; the
   library applies none until the embedder sets one. A write that would pass the
   cap writes nothing and raises `limitcheck`; `writereals` checks its whole
-  size before it opens (and so truncates) the file. Unlike `--max-steps`,
+  size before it opens (and so truncates) the file (under `--bands` another band
+  can spend the budget between that check and the write, so the file may be
+  truncated and partly written before the `limitcheck`). Unlike `--max-steps`,
   `--max-time` and `--max-memory`, which end the run with an error `stopped`
   cannot catch, this one is an ordinary, catchable `limitcheck`: a program that
   catches it can only fail to write more, so the disk is still safe, and the
   step and time limits still bound the loop. The count is for the interpreter's
-  whole life (the CLI runs one program), is of bytes handed over and not of
+  whole life (the CLI runs one program; the bands of a `--bands` render
+  share one count, #1045, and each band runs the whole program, so a program
+  that writes in every band spends the budget that many times over), is of
+  bytes handed over and not of
   disk used (overwriting a file after `setfileposition` counts again, and an
   `(a)` or `(w)` of an existing file does not count what was already in it), and
   does not count `%stdout` or `%stderr`.
@@ -478,7 +486,8 @@ without the limits above:
   `web/pscat.js`) so a runaway does not freeze the tab.
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
-  `--bands` band (steps and time; the bands share `--max-memory`) is its own
+  `--bands` band (steps and time; the bands share `--max-memory` and
+  `--max-write-bytes`) is its own
   run with the whole of `--max-steps` and `--max-time`; a page is not a run, so a multi-page program is one. `pscat
   handwrite`, `typewrite` and `photo-etch` run two programs (a measuring pass,
   then the render) and give each the full limits, so their worst case is about
