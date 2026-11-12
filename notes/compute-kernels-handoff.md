@@ -31,8 +31,12 @@ handoff was session_016y8NtToNBqdyScG3LMGriu.
   6810569860). It stays on that release until a real one is cut.
 - **fractal_clouds' fc#16 native-noise notes (2026-11-12):**
   - Its scenes have no interpreter fallbacks.
-  - alpine_forest's forest-bake grid (`kernelarrays`, 4 outputs) is at
-    398,033 of the 400,000 inline cap, with 0 subroutines.
+  - No cap risk. alpine_forest's 398,033-instruction line is the pixel
+    kernel's first, all-inline pass under `/auto`. The kernel that runs is
+    the shared one: 151,368 counted, 129 subroutines. Its bake grids are
+    72–674 instructions. Past 400,000 inline, `kernelarray` retries with
+    sharing exactly as `kernelimage` does: a test grid of about 450k
+    became 7,862 instructions with 1 subroutine.
 - **Follow-ups, not filed:** exact vector noise, divergence, kernelfill,
   two-pass antialiasing, `--gpu-preview` over MCP, and #1044's buffer API.
 
