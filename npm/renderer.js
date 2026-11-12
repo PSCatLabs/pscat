@@ -251,11 +251,18 @@ async function compileResponse(res) {
 // where a Node script that imports index.js by path (the browser entry,
 // skipping the exports map's `node` condition) lands (#1085). Say so, and
 // say what to do. Runtimes whose fetch does read file: URLs never get here.
+// Only Node's own refusal is reworded: its TypeError carries a cause saying
+// "not implemented". Any other failure (a browser's bare "Failed to fetch",
+// which the classic-script build explains for file: pages) passes through.
 async function fetchWasm(src) {
   try {
     return await fetch(src);
   } catch (cause) {
-    if (/^file:/i.test(String(src)) && globalThis.process?.versions?.node) {
+    if (
+      /^file:/i.test(String(src)) &&
+      globalThis.process?.versions?.node &&
+      /not implemented/i.test(String(cause?.cause?.message ?? ''))
+    ) {
       throw new Error(
         "pscat: this is the browser entry point, and Node's fetch cannot read a file: URL. " +
           "In Node, import 'pscat' (it resolves to node.js) or 'pscat/node.js', " +
