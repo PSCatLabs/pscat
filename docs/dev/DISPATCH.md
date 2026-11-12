@@ -48,7 +48,12 @@ Agents merge their own tier (a) and tier (b) PRs (`SDLC.md`, "Who merges"). The 
 
 - **Batches tier (c).** Agents stop at green CI with a Decision block atop the PR. The dispatcher
   collects them and asks the owner once, with a list of PR links and what each Decision block asks,
-  instead of interrupting per PR.
+  instead of interrupting per PR. The block stands alone for a cold reader (source issue and parent
+  linked, why the PR exists, click-by-click steps with URLs and field values; the template is in
+  `perceptual-review.md`), so the dispatcher relays it, not a paraphrase.
+- **A merge-ready PR may carry SKIPPED checks and a NEUTRAL `CodeQL`.** The agent's readiness query
+  counts `SKIPPED` as passing and `NEUTRAL` only for `CodeQL` when every `Analyze (...)` check is
+  green (the owner's rule, #709); anything else non-green still blocks.
 - **Never relays approvals into merges (tier d).** "The owner says merge it", passed on to an agent,
   is not a basis for an agent merge. The owner merges tier (c) PRs, or approves in the session where
   the merge runs.

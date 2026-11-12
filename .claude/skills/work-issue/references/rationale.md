@@ -354,3 +354,24 @@ said a PR "does not fix #N" closed #N on merge: GitHub reads the keyword, not th
 The goals preamble is at the top of `SKILL.md`, not in a reference, because every agent must read it
 and several earlier runs optimised a timing or a byte count at the expense of the picture.
 `SKILL.md` stays at 250 lines (#276's cap); the detail is in `perceptual-review.md`.
+
+## Added in #709 and #859: the readiness rule, the Decision block, the reviewer's scope
+
+- **SKIPPED passes; only `CodeQL` NEUTRAL passes.** The original `all(. == "SUCCESS")` blocked a PR
+  whose release jobs were conditionally skipped (PR #1137) and CodeQL's NEUTRAL conclusion. The owner
+  decided (2026-11-12): skipped counts as passing; a NEUTRAL `CodeQL` is fine because CodeQL's default
+  setup rescans `main` on every push and weekly, "that's a GitHub thing, not our check". The exemption is
+  narrow on purpose: the check must be named `CodeQL`, and the `Analyze (...)` jobs that did run here must
+  all be SUCCESS (and exist), so a broken analysis cannot hide behind the neutral umbrella check. Any other
+  NEUTRAL, CANCELLED or in-progress check still blocks. The query has a test (`scripts/test-merge-ready.sh`)
+  that reads it from SKILL.md, like `test-scan.sh`.
+- **The Decision block stands alone.** The owner reads it cold, days later; an unexplained "run the portal's
+  Validate" on PR #691 cost a round trip. So it links the source issue and parent, says why the PR exists,
+  and gives click-by-click steps with URLs, exact field values and what not to click.
+- **The perceptual reviewer gets the PR's scope, quoted.** A cold reviewer given only the issue body
+  failed a `Part of` PR for the deferred part (#731 part 1, PR #852). The scope is pasted verbatim from the
+  issue's own triage comment and never paraphrased, so the reviewer stays cold (no conclusions) and the
+  PR's author cannot narrow the check by wording.
+- **Non-render `src/` changes have a route.** A `tools/list` or `--help` change cannot meet the
+  PostScript-control rule, and agents were arguing tier (a) by hand (#686). The route is an out-of-band
+  control plus a reduced identity run, written down so it is a rule, not an argument.
