@@ -295,16 +295,10 @@
   } ifelse
 } bind def
 
-% sort-by ( array key-q -- sorted ), key-q: ( x -- number|string ).
-% Keys are computed once through fp-map, so user code never runs inside the
-% merge and the private frame cannot leak. Keys are type-checked up front
-% for the same reason; lt then cannot fail. Stable bottom-up merge sort.
-% @kind: Procedure
-% @summary: Stable ascending sort by a computed number or string key.
-% @example: [(pear) (fig) (apple)] { length } fp-sort-by
-/fp-sort-by {
-  //fp--quote exec exch //fp--array exec
-  dup length array copy exch 1 index exch //fp-map exec
+% ( keys -- keys ) Every key must be a number, or every key a string, so lt
+% cannot fail during the merge.
+% @internal
+/fp--sort-check-keys {
   dup length 0 gt {
     dup 0 get //fp--key-class exec
     dup null eq { fp-sort-keys-must-be-all-numbers-or-all-strings } if
@@ -314,8 +308,13 @@
     } forall
     pop
   } if
-  12 dict begin
-  /fp.keys exch def /fp.seq exch def /fp.n fp.keys length def
+} bind def
+
+% ( keys -- sorted ), run with the sort frame (fp.seq) on the dictionary
+% stack and no user code left to run. Stable bottom-up merge sort.
+% @internal
+/fp--sort-merge {
+  /fp.keys exch def /fp.n fp.keys length def
   /fp.src fp.n //fp-range exec def /fp.dst fp.n array def /fp.w 1 def
   { fp.w fp.n ge { exit } if
     0 fp.w 2 mul fp.n 1 sub {
@@ -338,6 +337,29 @@
   } loop
   [ fp.src { fp.seq exch get } forall ]
   end
+} bind def
+
+% sort-by ( array key-q -- sorted ), key-q: ( x -- number|string ).
+% Keys are computed once through fp-map, so user code never runs inside the
+% merge. The private snapshot of the source lives in a frame dictionary held
+% only by the generated continuation (on the execution stack): it is on
+% neither the operand stack nor the dictionary stack while key-q runs, so
+% key-q sees just the caller's prefix and its element, like every callback.
+% Keys are type-checked before the frame is opened.
+% @kind: Procedure
+% @summary: Stable ascending sort by a computed number or string key.
+% @example: [(pear) (fig) (apple)] { length } fp-sort-by
+/fp-sort-by {
+  //fp--quote exec exch //fp--array exec
+  dup length array copy
+  12 dict begin
+  /fp.seq exch def /fp.q exch def
+  [ /fp.seq load /fp.q load //fp-map //fp--ops 0 get
+    //fp--sort-check-keys //fp--ops 0 get
+    currentdict //fp--ops 3 get
+    //fp--sort-merge //fp--ops 0 get ] cvx
+  currentdict /fp.q undef
+  end exec
 } bind def
 
 % @kind: Procedure
