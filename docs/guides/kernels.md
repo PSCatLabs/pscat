@@ -244,31 +244,33 @@ So the picture is always exactly the interpreter's. Only the speed changes.
   smaller. `/large .kernelshare` asks for that sharing always, and
   `/never .kernelshare` turns it off. `kernelcompile` reports the
   subroutine count.
-- `PSCAT_KERNEL_TIMING=1` prints the compile and run times and the kernel's
-  size. `PSCAT_KERNEL_THREADS=N` sets the number of worker threads (the
+- `PSCAT_KERNEL_TIMING=1` prints the compile and run times, the kernel's
+  size, and the instruction set and math mode in use. `PSCAT_KERNEL_THREADS=N` sets the number of worker threads (the
   default is every core; one under `--bands`).
 
 ### Faster `sin`, `cos` and `atan`: `.kernelmath`
 
 ```postscript
-/fast .kernelmath      % or /exact, the default
+/exact .kernelmath     % or /fast, the default
 ```
 
-By default a compiled kernel computes `sin`, `cos` and `atan` one pixel at a
-time through pscat's own math library, as the interpreter does. `/fast
-.kernelmath` runs them on a whole batch of pixels at once, with vector
-instructions.
+By default a compiled kernel computes `sin`, `cos` and `atan` on a whole
+batch of pixels at once, with vector instructions (`/fast`). `/exact
+.kernelmath` computes them one pixel at a time through pscat's own math
+library, as the interpreter does. The environment variable
+`PSCAT_KERNEL_MATH=exact` starts every program in `/exact`; a program's own
+`.kernelmath` still wins.
 
 - **The results are the same bits.** The batch code is the same library's
   algorithms, written for vectors. It is checked bit for bit against the
   one-at-a-time code over millions of inputs, and every picture tested
-  matched. It stays opt-in until it has had more use.
+  matched. `/exact` is there to rule it out if a picture ever differs.
 - **Speed.** On an Apple M4, per pixel, `sin` takes 5.9 ns instead of 9.5,
   and `atan` 6.1 instead of 13.7. The Mandelbulb took about 20% fewer
   cycles. A kernel with little trigonometry gains nothing, and x86 CPUs
   with AVX2 should gain more, since their vectors hold four numbers.
-- **Where it applies.** Only `kernelimage`. `kernelarray` always uses the
-  default. `exp`, `ln` and `log` are unchanged.
+- **Where it applies.** Only `kernelimage`. `kernelarray` always uses
+  `/exact`. `exp`, `ln` and `log` are unchanged.
 - **Unusual angles.** Infinite and NaN angles, angles past about 94 million
   degrees, and `atan` with a zero, an infinite operand or a denominator of
   1.0 use the one-at-a-time code. So `0 0 atan` is still the error it is.

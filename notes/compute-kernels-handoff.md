@@ -1,78 +1,44 @@
-# Handoff: compute-kernels epic (2026-11-11, evening)
+# Handoff: compute-kernels epic (merged 2026-11-12)
 
 Session: https://claude.ai/code/session_016y8NtRr7b9NWRg1SctzFfp. It wrote
-both the 2026-11-10 handoff and this update. The 2026-11-09 handoff was
-session_016y8NtToNBqdyScG3LMGriu.
+the 2026-11-10 and 2026-11-11 handoffs and this update. The 2026-11-09
+handoff was session_016y8NtToNBqdyScG3LMGriu.
 
-## Where things stand (end of 2026-11-11)
+## Where things stand
 
-- **The epic.** `feature/compute-kernels` is at `6b7b5e5` and pushed. It is
-  PR PSCatLabs/pscat#1061 (open, owner-merge, because it touches
-  `Cargo.toml`). The ci, release and other workflows on `8df943d` were
-  green, and the release dry run on `4953e28` is too.
-- **#1101 (faster executor)** was merged at `46ad11b` and signed off by
-  fractal_clouds (fc#117). See `notes/1101-faster-executor.md`.
-- **#1102 (`kernelarray`/`kernelarrays`)** was merged at `08bf53a`. See
-  `notes/1102-kernelarray.md`.
-  - fractal_clouds' 512² erosion sample went from 4.35 s to 25 ms.
-  - A fuzz that compares type and bits found a compiler bug the bytes had
-    hidden: a Dyn integer zero could be -0.0. It is fixed with no added
-    instruction (`IntZeroCheck`/`NegIntZero`).
-- **#1100 (x86 tiers, `.kernelmath /fast`)** was merged at `8df943d`. See
-  `notes/1100-simd-and-vector-math.md`.
-  - The executor runs SSE2, v2 or v3 (AVX2, no FMA) copies. CI's x86 runners
-    ran the v3 tier test, so the AVX2 code has executed on real hardware
-    with the baseline's bytes.
-  - `/fast` vectorises `sin`, `cos` and `atan`, bit-exact in the tests.
-  - Still open on #1100, so it is `Refs`, not `Closes`:
-    - AVX2 and AVX-512 timings (no x86 machine here; the note gives the
-      commands);
-    - AVX-512 needs Rust 1.89, above `rust-version` 1.88: the owner's call;
-    - whether `/fast` becomes the default.
-- **Codex review 3** (adversarial, `main...feature/compute-kernels`) found
-  two exactness bugs, fixed in `99d666b` and merged at `4953e28`:
-  - branch joins took 0.0 for -0.0, because `Op` compared immediates as
-    floats;
-  - x86 NaN payloads. `kernelarray` now stores every NaN as the quiet NaN.
-
-  A Codex review of the fix diff was clean.
-- **Test releases for fractal_clouds:**
-  - **The first** was CI run 43108195586 (4953e28, manifest `a50dcd6`).
-    fractal_clouds validated its correctness on every scene and size (fc#117
-    comment 6809200666, pscat#1102 comment 6809204375). Its #145 bakes
-    through `kernelarrays` are bit-identical to the loops, and the 512²
-    sample went from 4.3–8.6 s to 21–76 ms.
-  - **It found the release 5–10% slower per step.** The cause was #1100's
-    fast-math opcodes in the block loop's dispatch. They are now in the
-    side table (`5d383b4`), and cycles are back at build2's.
-  - **The current one** is CI run 43122833835 (6b7b5e5, manifest
-    `97b481d`):
-    - aarch64 tar.gz SHA-256 `5662db76…47df`;
-    - its binary's SHA-256 is `0aabf469…3f51`, in
-      `kernels/ci-43122833835/x/`;
-    - the local build is `kernels/build4-6b7b5e5/pscat` (`18aecec9…b3fc`).
-
-    **fractal_clouds validated it** (fc#117 comment 6810569860, pscat#1102
-    comment 6810570206): build2's bytes and steps on all 8 scenes, and
-    build2's speed. Interleaved golden 2560: build2 54.4/57.5 s, a50dcd6
-    60.4/61.1 s, 97b481d 54.6/57.5 s. Its `fastrender` defaults to 97b481d,
-    and fractal_clouds is now switching the gallery to the native noise
-    operators (fc#16).
-- **Local gate.** Two tests fail on this machine since the afternoon of
-  2026-11-11, on `8df943d` too, which had passed: `mcp
-  concurrent_replies_never_interleave` (broken pipe) and `subcommands
-  typewrite_refuses_an_output_name_it_cannot_pick_a_format_for`. Both are
-  environmental (the handoff already listed them as known), and CI runs
-  them green.
-
-## Not yet done on GitHub (this session's permissions blocked GitHub writes)
-
-- **PR #1061's body.** A ready version is at
-  `/Volumes/YOTUO/dev-cache/pscat_gpu/tmp/body1061.md`. It has `Closes`
-  #1101 and #1102, `Refs` #1100, bullets for each, and the Dyn -0.0 note in
-  Review.
-- **Labels.** Move #1101 and #1102 to `in-review` (they close with
-  #1061), and #1100 to `in-review`, leaving it open for the items above.
+- **The epic is merged.** PR #1061 was squash-merged to main on 2026-11-12 as
+  `e68cb99`, with the owner's go-ahead once CI passed. The push-to-main
+  runs were green. It closed #742, #1062–#1066, #1091–#1094, #1099, #1101
+  and #1102. The epic branch and its 13 `feature/compute-kernels-*` side
+  branches are deleted.
+- **Merging main in** brought two fixes: a text conflict in
+  `plugin/skills/pscat/references/mcp.md` (both sides had added a section)
+  and a missing `site/llms.txt` entry for `docs/guides/kernels.md`. Main's
+  site check (#1125) requires every guide to be listed, so it failed.
+- **Notes per issue:** `notes/1101-faster-executor.md`,
+  `notes/1102-kernelarray.md`, `notes/1100-simd-and-vector-math.md`.
+- **#1100 stays open**:
+  - **x86 timings:** to be measured once the cloud MCP server is deployed
+    on x86.
+  - **AVX-512:** it needs Rust 1.89, above `rust-version` 1.88.
+  - **`/fast` is now the default** (owner's decision, 2026-11-12):
+    `.kernelmath /fast` is on unless `PSCAT_KERNEL_MATH=exact`, and a
+    program's own `.kernelmath` wins over either. Its output is the exact
+    path's bits: the four kernel gallery stills are byte-identical, and
+    Mandelbulb runs in 72.8G cycles against 89.2G.
+- **Test release for fractal_clouds:** 97b481d (CI run 43122833835), which
+  fractal_clouds validated for bytes, steps and speed (fc#117 comment
+  6810569860). It stays on that release until a real one is cut.
+- **fractal_clouds' fc#16 native-noise notes (2026-11-12):**
+  - Its scenes have no interpreter fallbacks.
+  - No cap risk. alpine_forest's 398,033-instruction line is the pixel
+    kernel's first, all-inline pass under `/auto`. The kernel that runs is
+    the shared one: 151,368 counted, 129 subroutines. Its bake grids are
+    72–674 instructions. Past 400,000 inline, `kernelarray` retries with
+    sharing exactly as `kernelimage` does: a test grid of about 450k
+    became 7,862 instructions with 1 subroutine.
+- **Follow-ups, not filed:** exact vector noise, divergence, kernelfill,
+  two-pass antialiasing, `--gpu-preview` over MCP, and #1044's buffer API.
 
 ## Next executor levers (only if wanted)
 
@@ -88,13 +54,6 @@ session_016y8NtToNBqdyScG3LMGriu.
   instructions per dispatch, and lane arrays get scalarised inside
   `Machine::block`. Keep new handlers' bodies out of `block`: inline, they
   made it 6% larger (#1100).
-
-## Still to do before #1061 merges
-
-1. ~~fractal_clouds' validation of the test release~~: done (97b481d).
-2. The GitHub edits above.
-3. The owner's merge of #1061. Then delete the remote
-   `feature/compute-kernels-*` branches and confirm the issues closed.
 
 ## How to test against fractal_clouds
 
@@ -136,7 +95,8 @@ session_016y8NtToNBqdyScG3LMGriu.
 - **fractal_clouds' bar is "looks the same"** (SAME-LOOK), not exact
   bytes. The user agreed that close output is fine when the deviation is
   understood and documented. But pscat's default path stays exact, so any
-  approximation must be opt-in.
+  approximation must be opt-in. (`/fast` is the default because it is not
+  an approximation: the same bits.)
 - **The fractal-clouds Claude session** has been the test partner. It runs
   the 8-scene check plus 640×400 and 1280×800 of mountains and golden_coast
   on any build path and SHA-256 you send it. It can also change

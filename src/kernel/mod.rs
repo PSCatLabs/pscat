@@ -898,9 +898,10 @@ where
         let d = dispatched.load(std::sync::atomic::Ordering::Relaxed);
         if d > 0 {
             eprintln!(
-                "pscat: kernel batches: {tw}x{th} pixels, {d} instructions run, {:.1} of {LANES} lanes active on average, {}",
+                "pscat: kernel batches: {tw}x{th} pixels, {d} instructions run, {:.1} of {LANES} lanes active on average, {}, {} math",
                 steps as f64 / d as f64,
-                exec::Isa::chosen().name()
+                exec::Isa::chosen().name(),
+                if fast { "fast" } else { "exact" }
             );
         }
     }
@@ -1146,11 +1147,23 @@ fn kernelmode(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// `name .kernelmath -` (#1100): `/exact` (the default) runs `sin`, `cos`
-/// and `atan` in `kernelimage`'s compiled kernels one lane at a time
-/// through `fmath`; `/fast` runs them vectorised (`vmath`), libm's
-/// algorithms lane by lane, checked bit for bit against `/exact` but kept
-/// opt-in. `kernelarray` always runs `/exact`.
+/// Whether a new interpreter starts in `.kernelmath /fast` (#1100): yes,
+/// unless the environment variable `PSCAT_KERNEL_MATH` is `exact`.
+pub(crate) fn default_fast_math() -> bool {
+    fast_math_from(std::env::var("PSCAT_KERNEL_MATH").ok().as_deref())
+}
+
+/// `PSCAT_KERNEL_MATH`'s value to the starting mode: only `exact` turns
+/// the vector math off; anything else, or no variable, leaves it on.
+fn fast_math_from(v: Option<&str>) -> bool {
+    v != Some("exact")
+}
+
+/// `name .kernelmath -` (#1100): `/fast` (the default, see
+/// [`default_fast_math`]) runs `sin`, `cos` and `atan` in `kernelimage`'s
+/// compiled kernels vectorised (`vmath`), libm's algorithms lane by lane,
+/// checked bit for bit against `/exact`; `/exact` runs them one lane at a
+/// time through `fmath`. `kernelarray` always runs `/exact`.
 fn kernelmath(it: &mut Interp) -> Result<(), PsError> {
     let v = it.pop()?;
     let Value::Name(n) = &v.value else {
@@ -1804,4 +1817,15 @@ fn kadone(it: &mut Interp) -> Result<(), PsError> {
         it.push(Object::array(col));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod math_default_tests {
+    #[test]
+    fn only_exact_turns_the_vector_math_off() {
+        assert!(super::fast_math_from(None));
+        assert!(super::fast_math_from(Some("fast")));
+        assert!(super::fast_math_from(Some("")));
+        assert!(!super::fast_math_from(Some("exact")));
+    }
 }
