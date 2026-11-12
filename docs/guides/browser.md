@@ -34,7 +34,7 @@ the real module through the same JS library.
 ### SVG and PDF
 
 The wasm build writes the same vector output as `pscat --svg` and
-`pscat --pdf` (#1003, since 0.7.0-rc.4). Ask for it when
+`pscat --pdf` (#1003, since 0.7.0; first in the 0.7.0-rc.4 pre-release). Ask for it when
 the program begins: recording is off by default, so a pixels-only page
 pays nothing.
 
@@ -59,12 +59,8 @@ contract. It began as the vector adapter that
 
 ## The npm package
 
-From 0.6.2 the same module is published to npm as **`pscat`**. SVG and
-PDF output arrive on npm with 0.7.0; until then, install the 0.7.0-rc.4
-package from its
-[GitHub pre-release](https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.4)
-(`npm install https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.4/pscat-0.7.0-rc.4.tgz`)
-or build it from a checkout as below. It
+From 0.6.2 the same module is published to npm as **`pscat`**; SVG and PDF
+output are on npm from 0.7.0. It
 works in browsers (with or without a bundler) and in Node 22 or later,
 and ships TypeScript types.
 
@@ -107,7 +103,7 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   the page; `begin` + `step(budget)` or the `frames()` generator drive it
   step by step. Page sizes are in points (default US Letter, 612x792) at
   `dpi` (default 72, one pixel per point). `source` is a string or bytes.
-- **SVG and PDF** (since 0.7.0-rc.4): add `svg: true` and/or
+- **SVG and PDF** (since 0.7.0): add `svg: true` and/or
   `pdf: true` to the page options, then `r.svg(page)` (from 0) or
   `r.svgPages()` give the SVG pages as strings and `r.pdf()` the whole
   document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see

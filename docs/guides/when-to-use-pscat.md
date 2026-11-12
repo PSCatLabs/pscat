@@ -306,7 +306,7 @@ It also runs in the browser. The WebAssembly build (`npm install pscat`, or
 [pscat in the browser](browser.md)) renders client-side, with no server, GPU
 or API call; the site's
 [playground](https://pscatlabs.github.io/pscat/playground.html) is that build.
-From 0.7.0-rc.4 it also writes SVG and PDF; see the next section.
+From 0.7.0 it also writes SVG and PDF; see the next section.
 
 ## Documents from a web page, the same for every user
 
@@ -333,12 +333,12 @@ in the user's browser. What that gives you:
   program decides every mark, and the same input never gives a different
   page.
 
-**What is released.** SVG and PDF from the WebAssembly build first ship in
-0.7.0-rc.4 (#1003), whose npm package is attached to the
-[GitHub pre-release](https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.4)
-and goes to the npm registry at 0.7.0. Earlier releases give a web page RGBA
-pixels only (for a `<canvas>`); the command-line tool has written SVG and PDF
-all along. See
+**What is released.** SVG and PDF from the WebAssembly build (#1003) are in
+0.7.0, which is on the npm registry as `pscat@0.7.0`. They first appeared in
+the 0.7.0-rc.4 [GitHub pre-release](https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.4),
+whose npm package is attached to it. Releases before 0.7.0-rc.4 give a web
+page RGBA pixels only (for a `<canvas>`); the command-line tool has written
+SVG and PDF all along. See
 [pscat in the browser](browser.md#svg-and-pdf) for the API.
 
 ### A worked example: print-shop
@@ -375,10 +375,9 @@ output intent, PDF/X conformance, TrimBox, BleedBox or crop marks, and menus
 have no bleed; the mobile runs are Chrome's device emulation, not a phone or
 Safari. Its print-production notes list these.
 
-print-shop runs on a released engine: the pscat 0.7.0-rc.4 npm package,
-fetched at build time and pinned by version and SHA-256, with no clone and
-no patches. It moves to `pscat@0.7.0` from npm when that ships
-([print-shop#29](https://github.com/PSCatLabs/print-shop/issues/29)).
+print-shop runs on a published pscat package, not a clone or a patched
+copy: the engine is fetched at build time and pinned by exact version and
+SHA-256.
 
 ## Many documents: write the template once, render each one
 
@@ -441,7 +440,7 @@ figures for them.
 | Interactive, animated or reflowing web content | SVG, HTML and CSS | The DOM, CSS layout, scripting and accessibility |
 | An image that must be regenerated identically, in CI or later | pscat (pin the version and font packs) | Same program, seed, version and fonts, same pixels; no model call |
 | Rendering inside a web page, no server or GPU | pscat's WebAssembly build, or SVG | Both render client-side |
-| A web app that must produce identical print-ready documents for every user | pscat's WebAssembly build (SVG and PDF since 0.7.0-rc.4) | Preview, download and print come from one run; same template and data, same bytes; no server ([print-shop](https://github.com/PSCatLabs/print-shop) is an example) |
+| A web app that must produce identical print-ready documents for every user | pscat's WebAssembly build (SVG and PDF since 0.7.0) | Preview, download and print come from one run; same template and data, same bytes; no server ([print-shop](https://github.com/PSCatLabs/print-shop) is an example) |
 | High-volume batch generation of documents (menus, cards, labels, certificates) | pscat, with an LLM to help write the template once | Each document is a deterministic CPU render from data: no per-call cost, rate limit or GPU, and nothing sampled, so nothing to re-roll or spot-check per document |
 | Offline, no GPU, no per-image cost | pscat | One CPU binary, MIT or Apache-2.0 |
 
