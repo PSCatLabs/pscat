@@ -225,6 +225,22 @@ fn coincident_points_are_undefinedresult_and_leave_the_path_alone() {
 }
 
 #[test]
+fn a_coincident_corner_is_undefinedresult_under_a_rotation() {
+    // The current point comes back through the inverse CTM, so p0 = p1
+    // has to be decided in device space (Codex, combined review batch 1,
+    // round 3). gs 10.07.1 raises undefinedresult for both.
+    for op in ["arcto", "arct"] {
+        let got = run_case(&format!(
+            "{{ 30 rotate 100 100 moveto 100 100 200 0 10 {op} }}"
+        ));
+        assert!(
+            got.starts_with("c => undefinedresult") && got.ends_with("path: m 100.0 100.0"),
+            "{op}: {got}"
+        );
+    }
+}
+
+#[test]
 fn errors_are_the_ones_gs_raises() {
     let cases = [
         (

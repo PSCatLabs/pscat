@@ -256,6 +256,11 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
     let (x2, y2) = pop_xy(it)?;
     let (x1, y1) = pop_xy(it)?;
     let p0 = it.gfx.current_user_point()?;
+    // p0 = p1 is checked in device space: p0 came back through the
+    // inverse CTM, so under a rotation it may miss p1 by rounding alone.
+    if it.gfx.current_point_is(x1, y1) {
+        return Err(PsError::UndefinedResult);
+    }
     let collinear = arcto_collinear(it.gfx.ctm(), p0, (x1, y1), (x2, y2));
     let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r, collinear)?;
     match arc {
