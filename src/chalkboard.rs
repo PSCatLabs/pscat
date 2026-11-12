@@ -179,10 +179,26 @@ impl Driver {
     /// [`Interp::capture_stdout`] before running and pass
     /// [`Interp::captured_stdout`] here. With nothing printed this is
     /// [`explain`]`(err)`, which names the first problem without a place.
+    ///
+    /// `printed` may be partial or mixed with the program's own output (a
+    /// time or step limit that fired mid-print, say): lines it cannot read
+    /// are skipped, so a TeX error always comes back, with whatever problems
+    /// parsed, and this never panics. [`ChalkError::code`] is the first
+    /// problem's [`Problem::code`].
+    ///
+    /// The check pass's lines are internal, not API; their format may
+    /// change. Each starts with `CKPROBLEM` and a tab, so a caller that shows
+    /// the program's output to a user can drop the lines that start with
+    /// [`PROBLEM_LINE_PREFIX`].
     pub fn explain(&self, printed: &[u8], err: &PsError) -> Option<ChalkError> {
         self.0.explain(printed, err).map(ChalkError::new)
     }
 }
+
+/// What every line the chalkboard program prints for a problem starts with
+/// ([`Driver::explain`]): strip such lines from program output shown to a
+/// user. The rest of the line's format is internal.
+pub const PROBLEM_LINE_PREFIX: &str = "CKPROBLEM\t";
 
 /// Why a board could not be made.
 #[derive(Clone, Debug, PartialEq)]

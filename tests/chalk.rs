@@ -697,6 +697,33 @@ fn the_library_problem_list_is_the_cli_list() {
     // nothing printed: the same, through the driver
     let e = driver.explain(b"", &run_err).unwrap();
     assert!(e.problems().is_empty());
+
+    // partial or garbled output (a limit that fired mid-print, the program's
+    // own lines first): whatever parses, never a panic, never None
+    let printed = interp.captured_stdout().to_vec();
+    assert!(
+        printed
+            .split(|&b| b == b'\n')
+            .filter(|l| !l.is_empty())
+            .all(|l| l.starts_with(pscat::chalkboard::PROBLEM_LINE_PREFIX.as_bytes())),
+        "every check-pass line carries the prefix"
+    );
+    let cut = printed.len() / 2;
+    let mut garbled = b"hello from the program\nCKPROBLEM\tx\ty\n\xff\xfe\n".to_vec();
+    garbled.extend_from_slice(&printed[..cut]);
+    garbled.extend_from_slice(b"CKPROBLEM\t99\t0\t1\tunsupported-command\t\\q\n");
+    let e = driver
+        .explain(&garbled, &run_err)
+        .expect("still a TeX error");
+    assert!(e.problems().len() <= cli.len(), "{e}");
+    assert_eq!(e.code(), "unsupported_command");
+    for junk in [
+        &b"CKPROBLEM\t"[..],
+        b"CKPROBLEM\t0\t99999\t1\tx\tq\n",
+        b"\xff",
+    ] {
+        assert!(driver.explain(junk, &run_err).is_some());
+    }
 }
 
 /// A structural error (a missing brace) is listed with the unsupported
