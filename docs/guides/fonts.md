@@ -19,10 +19,45 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   and the `N RD <binary>` idiom. Ghostscript accepts the Type 1 file the test
   suite generates, byte for byte.
 
-This guide covers the Type 3 display library, the typewriter, and the runtime
-catalog of 67 outline faces. For the handwriting font see
+This guide covers accented text in the standard fonts, the Type 3 display
+library, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
+
+## Accented Latin text in the standard fonts
+
+The standard fonts come in `StandardEncoding`, which has no `é`, `ñ` or `ü`.
+There are two standard ways to reach them, and both work in every outline face.
+
+Re-encode the font to `ISOLatin1Encoding` (the usual Level 1 idiom), then write
+the Latin-1 byte as an octal escape:
+
+```postscript
+/reencode { % /NewName /BaseName -> -
+  findfont dup length dict begin
+    { 1 index /FID ne { def } { pop pop } ifelse } forall
+    /Encoding ISOLatin1Encoding def
+  currentdict end definefont pop
+} def
+/Times-Roman-ISO /Times-Roman reencode
+/Times-Roman-ISO findfont 24 scalefont setfont
+72 700 moveto (Fr\350re Jacques, caf\351) show
+```
+
+The copy keeps the face's outlines and metrics; only the encoding changes
+(`dup length dict copy` works too). Or draw one glyph by name, whatever the
+encoding holds, with Level 2 `glyphshow`:
+
+```postscript
+/Times-Roman findfont 24 scalefont setfont
+72 650 moveto (caf) show /eacute glyphshow
+```
+
+`glyphshow` takes a glyph name (a string is a `typecheck`); a name the face
+lacks advances by `.notdef`'s width. On a Type 3 font it calls `BuildGlyph`
+with the name. A Type 3 font with only `BuildChar` gets the first Encoding
+slot holding the name, or 0, as in Ghostscript. Latin faces do not read UTF-8:
+a byte is an Encoding slot.
 
 ## The display font library
 
