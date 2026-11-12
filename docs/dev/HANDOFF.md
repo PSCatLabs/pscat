@@ -860,7 +860,11 @@ renders eight examples in both and compares block-downsampled output).
    end_page, plus the image hook in `image.rs`). A third export
    target should promote those seams into a neutral display list
    first — the design note in `src/pdf.rs` says why that wasn't
-   done at two.
+   done at two. Glyphs have a second seam since #1119:
+   `Gfx::paint_glyph` takes the glyph as text (`src/textrun.rs`,
+   renderer-neutral) when `--svg-text` is on, so SVG writes `<text>`
+   runs; PDF still gets the outline. Real PDF text (#1026) should
+   start from that capture (`notes/1119-svg-text.md`).
    An exporter table keyed by clip-node identity must hold the `Rc`
    (SVG's `clip_ids` stores it, PDF's `open_clip` is one), never a bare
    `Rc::as_ptr` address: a freed node's address is recycled and aliases a

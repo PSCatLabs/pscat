@@ -209,6 +209,15 @@ static EMBEDDED: [(&str, &[u8]); 23] = [
     ),
 ];
 
+/// The PostScript name of built-in face `fid` (one of the twelve
+/// Liberation-backed standard faces); `None` for any other FID.
+pub(crate) fn builtin_ps_name(fid: i64) -> Option<&'static str> {
+    usize::try_from(fid)
+        .ok()
+        .and_then(|i| BUILTINS.get(i))
+        .map(|b| b.ps_name)
+}
+
 pub(crate) fn builtin_index(name: &str) -> Option<i64> {
     BUILTINS
         .iter()
@@ -751,7 +760,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             _ => ShowMode::Width,
         };
         let pen = DevPoint { x: 8.0, y: 40.0 };
-        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen);
+        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen, None);
     }
     // Names the encodings resolve, and code points through the cmap.
     for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
@@ -763,6 +772,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             gid,
             &ShowMode::Charpath,
             DevPoint { x: 8.0, y: 40.0 },
+            None,
         );
     }
     for c in [
@@ -783,6 +793,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
                 gid,
                 &ShowMode::Paint,
                 DevPoint { x: 8.0, y: 40.0 },
+                None,
             );
         }
     }
@@ -1328,6 +1339,11 @@ fn encoding_name(fs: &FontState, byte: u8) -> crate::name::PsName {
 /// user-space advance (before per-show extras). Shared by `outline_glyph`
 /// (byte → Encoding name → glyph id) and `unicode_glyph` (codepoint →
 /// `cmap` directly) — everything past glyph-id resolution is identical.
+///
+/// `text` is the FID and character the glyph stands for, when the glyph
+/// was reached through a name that has one; with SVG text output on
+/// (#1119) a glyph of a standard face is recorded as that character
+/// instead of its outline (`crate::textrun`).
 fn paint_resolved_glyph(
     gfx: &mut Gfx,
     face: &Face,
@@ -1335,6 +1351,7 @@ fn paint_resolved_glyph(
     gid: Option<GlyphId>,
     mode: &ShowMode,
     pen: DevPoint,
+    text: Option<(i64, char)>,
 ) -> (f64, f64) {
     let k = 1000.0 / f64::from(face.units_per_em());
     // Glyph-space → user-space linear part (FontMatrix over 1000-unit
@@ -1363,7 +1380,17 @@ fn paint_resolved_glyph(
             cur: (0.0, 0.0),
         };
         face.outline_glyph(gid, &mut sink);
-        if !sink.path.is_empty() {
+        let as_text = match (mode, text) {
+            (ShowMode::Paint, Some((fid, ch))) if gfx.svg_text_wanted() => {
+                glyph_text(fid, ch, gid, &m, face.units_per_em())
+            }
+            _ => None,
+        };
+        if let Some(g) = as_text {
+            // Spaces included: an empty outline still places a character,
+            // which is what keeps the words apart when the text is copied.
+            gfx.paint_glyph(&sink.path, Some(&g));
+        } else if !sink.path.is_empty() {
             match mode {
                 ShowMode::Paint => gfx.fill_path_direct(&sink.path),
                 ShowMode::Charpath => gfx.append_path(&sink.path),
@@ -1383,6 +1410,29 @@ fn paint_resolved_glyph(
     (g[0] * w, g[1] * w)
 }
 
+/// The text form of a glyph (#1119), when its face is a standard one and
+/// its character can stand in for it; `None` keeps the outline.
+fn glyph_text(
+    fid: i64,
+    ch: char,
+    gid: GlyphId,
+    m: &GlyphTransform,
+    units_per_em: u16,
+) -> Option<crate::textrun::GlyphText> {
+    if !crate::textrun::text_safe(ch) {
+        return None;
+    }
+    crate::textrun::standard_face(fid)?;
+    // `m` maps font units to device; an em is `units_per_em` of them.
+    let u = f64::from(units_per_em);
+    Some(crate::textrun::GlyphText {
+        ch,
+        gid: gid.0,
+        fid,
+        em: [m.a * u, m.b * u, m.c * u, m.d * u, m.tx, m.ty],
+    })
+}
+
 /// One outline-font glyph by name: the Encoding name of a shown byte
 /// (live dict read), or `glyphshow`'s operand → glyph id.
 fn outline_glyph(
@@ -1394,7 +1444,10 @@ fn outline_glyph(
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let gid = resolve_glyph(face, name);
-    Ok(paint_resolved_glyph(gfx, face, fs.matrix, gid, mode, pen))
+    let text = encodings::name_to_char(name).map(|c| (fs.fid, c));
+    Ok(paint_resolved_glyph(
+        gfx, face, fs.matrix, gid, mode, pen, text,
+    ))
 }
 
 /// One glyph on a Unicode-mode catalog face (see `CatalogEncoding`):
@@ -1411,7 +1464,10 @@ fn unicode_glyph(
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let gid = char::from_u32(code).and_then(|c| glyph_for_char(face, c));
-    Ok(paint_resolved_glyph(gfx, face, fs.matrix, gid, mode, pen))
+    // Unicode-mode faces are never standard faces: outlines only.
+    Ok(paint_resolved_glyph(
+        gfx, face, fs.matrix, gid, mode, pen, None,
+    ))
 }
 
 /// One Type 1 glyph: decrypt the charstring, interpret it (hints

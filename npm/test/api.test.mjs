@@ -91,6 +91,17 @@ test('the stepped API ends on the same page render() draws', async () => {
   assert.deepEqual(r.pixels(), full.data);
 });
 
+test('svgText: standard-font text as selectable <text>, opt-in, needs svg', async () => {
+  const r = await createRenderer();
+  const doc = '/Helvetica findfont 12 scalefont setfont 10 40 moveto (Hi & bye) show';
+  r.render(doc, { width: 100, height: 80, svg: true, svgText: true });
+  assert.match(r.svg(), /<text [^>]*font-size="12"[^>]*>Hi &amp; bye<\/text>/);
+  r.render(doc, { width: 100, height: 80, svg: true });
+  assert.doesNotMatch(r.svg(), /<text/);
+  assert.throws(() => r.render(doc, { svgText: true }), /svgText needs svg: true/);
+  assert.throws(() => r.render(doc, { svg: true, svgText: 1 }), TypeError);
+});
+
 test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async () => {
   // Byte equality with `pscat --svg`/`--pdf` is checked in tests/wasm.rs.
   const r = await createRenderer();

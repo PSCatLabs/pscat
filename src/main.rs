@@ -133,6 +133,8 @@ struct Options {
     halftone: bool,
     /// Transparent page background instead of opaque white (issue #146).
     transparent: bool,
+    /// `--svg-text`: standard-font text as SVG `<text>` (#1119).
+    svg_text: bool,
     /// The windowed REPL: type PostScript, watch it draw (Stage 8's
     /// last sliver).
     interactive: bool,
@@ -243,6 +245,7 @@ impl Options {
             spool: None,
             halftone: false,
             transparent: false,
+            svg_text: false,
             interactive: false,
             lint: false,
             lint_strict: false,
@@ -482,6 +485,11 @@ fn run_cli() -> ExitCode {
         return run_selftest(std::path::Path::new(path));
     }
 
+    if options.svg_text && options.svg.is_none() {
+        eprintln!("pscat: --svg-text needs --svg output");
+        return ExitCode::FAILURE;
+    }
+
     if options.transparent {
         // The window shows an opaque canvas, and --halftone screens the
         // raster by luminance (transparent black would screen as ink);
@@ -696,6 +704,9 @@ fn run_cli() -> ExitCode {
     }
 
     if options.svg.is_some() {
+        if options.svg_text {
+            interp.gfx_mut().set_svg_text(pscat::SvgText::Text);
+        }
         interp.gfx_mut().enable_svg();
     }
     if options.pdf.is_some() {
@@ -2104,6 +2115,7 @@ fn parse_args() -> Result<Options, String> {
             }
             "--halftone" => options.halftone = true,
             "--transparent" => options.transparent = true,
+            "--svg-text" => options.svg_text = true,
             "-i" | "--interactive" => options.interactive = true,
             "--lint" => options.lint = true,
             // Strict *is* lint, with findings promoted to fatal — set
@@ -2244,6 +2256,9 @@ fn print_usage() {
     println!("      --bbox          take the page from any file's %%BoundingBox, not only an EPSF");
     println!("                      file's (%!PS-Adobe-3.0 EPSF-3.0)");
     println!("      --svg PATH      write the page(s) as SVG (implies --headless)");
+    println!("      --svg-text      with --svg: write Helvetica, Times and Courier text as");
+    println!("                      selectable <text> rather than glyph outlines (smaller;");
+    println!("                      the viewer draws it in a metric-compatible face)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
     println!("      --spool DIR     watch DIR and render each .ps/.eps that lands there");

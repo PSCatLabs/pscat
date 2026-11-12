@@ -37,7 +37,9 @@
 //!   (bit 1), with the same recorders as `pscat --svg`/`--pdf`, so the
 //!   bytes equal the CLI's for the same program, page and dpi (#1003).
 //!   With PDF on, the source's `%%Title:`/`%%For:` become the PDF's
-//!   `/Info`, as the CLI does for a file. -1 also for an unknown flag bit;
+//!   `/Info`, as the CLI does for a file. Bit 2, with bit 0, writes
+//!   standard-font text as SVG `<text>` (`pscat --svg-text`, #1119).
+//!   -1 also for an unknown flag bit, or bit 2 without bit 0;
 //! - `ps_svg_count()` — SVG pages so far (0 when not recording);
 //! - `ps_page_count()` — pages the document holds now, whatever is
 //!   recorded: those `showpage`/`copypage` emitted plus the live page when
@@ -74,6 +76,7 @@ thread_local! {
 /// `ps_begin_vector` flag bits.
 const RECORD_SVG: u32 = 1;
 const RECORD_PDF: u32 = 2;
+const SVG_TEXT: u32 = 4;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_alloc(len: usize) -> *mut u8 {
@@ -137,7 +140,10 @@ pub unsafe extern "C" fn ps_begin_vector(
     scale: f32,
     flags: u32,
 ) -> i32 {
-    if flags & !(RECORD_SVG | RECORD_PDF) != 0 || !(scale.is_finite() && scale > 0.0) {
+    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT) != 0
+        || (flags & SVG_TEXT != 0 && flags & RECORD_SVG == 0)
+        || !(scale.is_finite() && scale > 0.0)
+    {
         return -1;
     }
     let source = unsafe { std::slice::from_raw_parts(src, len) }.to_vec();
@@ -147,6 +153,9 @@ pub unsafe extern "C" fn ps_begin_vector(
     // The CLI's order (src/main.rs): recorders on before the program runs,
     // then the DSC title/author for the PDF's /Info.
     if flags & RECORD_SVG != 0 {
+        if flags & SVG_TEXT != 0 {
+            it.set_svg_text(crate::SvgText::Text);
+        }
         it.enable_svg();
     }
     if flags & RECORD_PDF != 0 {

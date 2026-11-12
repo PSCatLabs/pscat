@@ -3059,6 +3059,15 @@ impl Interp {
         self.gfx.enable_svg();
     }
 
+    /// How SVG output writes text set in the standard fonts:
+    /// [`SvgText::Text`](crate::SvgText::Text) writes selectable `<text>`
+    /// elements instead of glyph outlines (`pscat --svg-text`, #1119).
+    /// The default is [`SvgText::Paths`](crate::SvgText::Paths). Call
+    /// before running the program; PNG and PDF output are unaffected.
+    pub fn set_svg_text(&mut self, mode: crate::SvgText) {
+        self.gfx.set_svg_text(mode);
+    }
+
     /// One SVG document per page (as [`pages`](Self::pages) counts them),
     /// or `None` if [`enable_svg`](Self::enable_svg) was not called.
     pub fn svg_pages(&self) -> Option<Vec<String>> {
