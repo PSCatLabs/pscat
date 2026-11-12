@@ -1375,7 +1375,15 @@ renders eight examples in both and compares block-downsampled output).
   Keep it that way: don't reimplement rendering there. A numeric option
   must pass `subcmd::number` and its original text is what lands in the
   driver (`36` and `36.0` differ in PostScript); never splice a raw
-  option. The `scripts/*.sh` of the same names are thin wrappers, and
+  option. Exception, since #1135: `handwrite` builds no driver of its own.
+  `pscat::handwriting` (`src/handwriting.rs`, supported API) writes both
+  programs from typed values (`HandOptions`; a number is written with
+  Rust's `{}`, so `36.0` becomes `36`), the subcommand parses its flags
+  into a `HandOptions`, calls `validate()` and `measure_source`/
+  `height_pt`/`render_source`, and pscat-mcp's worker can do the same
+  without the child. Change a handwriting default or range there, not in
+  `subcmd/handwrite.rs`; `tests/handwriting_api.rs` pins the library note to
+  the subcommand's PNG. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
   Output names (#938): `typewrite`, `photo-etch` and `chalk` pick the format
@@ -1832,7 +1840,8 @@ renders eight examples in both and compares block-downsampled output).
   does not look inside hidden modules, and it does not check a re-export
   of a hidden item either, so supported items must live in a visible module.
   Since #1098 the supported surface also has `pscat::sheet`,
-  `pscat::chalkboard` and `pscat::catalog` (facades over the hidden
+  `pscat::chalkboard`, `pscat::handwriting` (#1135: written in the open, not a
+  facade) and `pscat::catalog` (facades over the hidden
   `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
   `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
   `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so

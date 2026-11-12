@@ -65,7 +65,7 @@
 //! # Ok::<(), pscat::syntax::SyntaxError>(())
 //! ```
 //!
-//! # Pages, halftone, review sheets, chalkboards and the catalog
+//! # Pages, halftone, review sheets, chalkboards, handwriting and the catalog
 //!
 //! A [`Page`] is pscat's own raster type (the crate does not expose its
 //! rasterizer's types), and the building blocks of `pscat`'s other outputs
@@ -82,6 +82,9 @@
 //!   around cells the caller renders.
 //! - [`chalkboard`] turns LaTeX and a board config into the PostScript
 //!   program `pscat chalk` runs, and explains its TeX errors.
+//! - [`handwriting`] turns text and a few options into the PostScript
+//!   programs `pscat handwrite` runs (one to measure the note, one to write
+//!   it), and sizes the page between them.
 //! - [`catalog::capabilities`] is the art catalog `pscat --capabilities`
 //!   prints.
 //!
@@ -117,9 +120,9 @@
 //!
 //! The supported API is what this documentation shows: [`Interp`], [`Page`],
 //! [`PsError`], [`Limits`], [`syntax::check_syntax`], and the [`sheet`],
-//! [`chalkboard`] and [`catalog`] modules. The crate has other public modules
-//! that the `pscat` and `pscat-mcp` binaries, the browser build and the test
-//! suite use; they are hidden from the documentation and can change in any
+//! [`chalkboard`], [`handwriting`] and [`catalog`] modules. The crate has
+//! other public modules that the `pscat` and `pscat-mcp` binaries, the
+//! browser build and the test suite use; they are hidden from the documentation and can change in any
 //! release. Before 1.0, a minor version (0.6 to 0.7) may break the supported
 //! API and a patch version does not.
 
@@ -129,6 +132,7 @@
 pub mod catalog;
 pub mod chalkboard;
 pub mod error;
+pub mod handwriting;
 pub mod interp;
 pub mod limits;
 pub mod memtrack;
