@@ -505,6 +505,18 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Deliberate deviations (all documented in place)
 
+- `arcto`/`arct` (#980, `ops/graphics.rs`, `notes/980-arcto-arct.md`) match
+  Ghostscript 10.07.1 on the tangent points and the path: one cubic per
+  corner whatever its sweep, a line only for collinear points, a line plus
+  a zero-length cubic for `r = 0`, a negative `r` mirrored through the
+  corner, `undefinedresult` for p0 = p1 or p1 = p2. They differ in two
+  places: a failed call consumes its operands like every pscat operator
+  (gs leaves them), and where rounding decides (short legs or exact
+  fold-backs under a rotation, tiny scales) the f32 device current point
+  and gs's fixed-point grid give different noise. The decision itself is
+  gs's: exact collinearity, no tolerance, `limitcheck` past gs's
+  fixed-point range. `tests/arcto.rs` compares against `gs`, including a
+  sweep over 32 transforms.
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,

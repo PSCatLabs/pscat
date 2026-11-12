@@ -1052,6 +1052,12 @@ impl Gfx {
         ))
     }
 
+    /// The current point as stored, in device space (`arcto` works from
+    /// it exactly, where `current_user_point` adds inverse-CTM rounding).
+    pub(crate) fn current_device_point(&self) -> Option<DevPoint> {
+        self.state.path.current()
+    }
+
     /// The user-space current point, or `nocurrentpoint`.
     pub fn current_user_point(&self) -> Result<(f64, f64), PsError> {
         let p = self.state.path.current().ok_or(PsError::NoCurrentPoint)?;
