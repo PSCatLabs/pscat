@@ -236,6 +236,51 @@ fn sort_is_stable_and_never_runs_keys_as_code() {
 }
 
 #[test]
+fn sort_keys_and_other_helpers_hide_private_state_from_callbacks() {
+    // The key quotation sees the caller prefix and its element, nothing
+    // else: no private snapshot of the source sits under it.
+    assert_eq!(eval("100 [2 1] {1 index add} fp-sort-by"), ["100", "[1 2]"]);
+    assert_eq!(
+        eval("100 [(bb) (a)] {1 index pop length} fp-sort-by"),
+        ["100", "[(a) (bb)]"]
+    );
+    assert_eq!(
+        eval(
+            "100 [3 1 2] {count 2 eq countdictstack 2 eq and {neg} {bad_scope} ifelse} fp-sort-by"
+        ),
+        ["100", "[3 2 1]"],
+        "operand and dictionary stacks are exactly the caller's plus the element"
+    );
+    // Callback edits to the source cannot change what is sorted.
+    assert_eq!(
+        eval("/a [3 1 2] def a {pop a 0 99 put 0} fp-sort-by a 0 get"),
+        ["[3 1 2]", "99"]
+    );
+    // Same reach-below check for the other helpers that take a callback.
+    assert_eq!(
+        eval("100 [1 2] {exch pop 1 index exch pop} fp-map-indexed"),
+        ["100", "[100 100]"]
+    );
+    assert_eq!(
+        eval("100 [1 2] [3 4] {add 1 index add} fp-map2"),
+        ["100", "[104 106]"]
+    );
+    assert_eq!(eval("100 5 {1 index add} fp-keep"), ["100", "105", "5"]);
+    assert_eq!(
+        eval(
+            "100 [1 2] {1 index add} fp-map 100 [1 2] {1 index eq} fp-filter 100 [1 2] 0 {1 index pop add} fp-fold"
+        ),
+        ["100", "[101 102]", "100", "[]", "100", "3"]
+    );
+    assert_eq!(eval("100 [1 2] {1 index pop pop} fp-each"), ["100"]);
+    // fp-sort and fp-zip run no callbacks, so there is nothing to leak to.
+    assert_eq!(
+        eval("100 [2 1] fp-sort [1] [2] fp-zip"),
+        ["100", "[1 2]", "[[1 2]]"]
+    );
+}
+
+#[test]
 fn keep_and_field_build_record_pipelines() {
     assert_eq!(
         eval(

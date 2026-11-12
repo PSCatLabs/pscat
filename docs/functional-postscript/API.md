@@ -215,7 +215,9 @@ fp-map's callback contracts and depth check.
 
 Stable ascending sort into a fresh array; the input is not reordered. Keys are
 computed **once per element** through `fp-map`, so user code never runs inside
-the merge and no private frame is open when a key quotation errors. All keys
+the merge and no private frame is open when a key quotation errors. The
+source snapshot is kept off both the operand and dictionary stacks while the
+key quotation runs, so it sees only the caller's prefix and its element. All keys
 must be numbers, or all strings (`fp-sort-keys-must-be-all-numbers-or-all-strings`).
 Sort descending with a negated numeric key. `fp-sort` is `{} fp-sort-by`.
 
