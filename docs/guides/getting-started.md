@@ -448,8 +448,19 @@ come the installed font packs (`fonts/packs/`, written by `pscat fonts
 install`) in `$PSCAT_HOME`, the per-user data directory and the binary's
 directory. See [Fonts](fonts.md#font-packs-the-catalog-outside-a-checkout).
 
-`PSCAT_TRACE_RESOURCES=1 pscat ...` prints one line per file to stderr,
-naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).
+`PSCAT_TRACE_RESOURCES=1 pscat ...` (any non-empty value except `0`) prints
+one line per file to stderr, naming the step that served it
+(`pscat: resource lib/artkit.ps <- embedded`). `pscat --help` ends with the
+same variables.
+
+**Your own libraries.** A `lib/` directory in the per-user data directory
+(step 4) is a supported place for a library of your own: `(lib/mylib.ps) run`
+finds it from any directory. `$PSCAT_LIB` takes one directory, not a path
+list. The search follows the read roots: with `--read-root` (which `pscat-mcp`
+passes to every render) a `lib/` file is found only inside a read root, the
+per-user data directory and `$PSCAT_HOME` being among the MCP server's. A
+program cannot ask for the name of the file it is running, so a library that
+loads sibling files needs its directory passed in.
 
 ## Error reports
 
