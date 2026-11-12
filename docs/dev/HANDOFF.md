@@ -1163,6 +1163,12 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Ghostscript tests go through `common::gs_available()`** (#985,
+  `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe
+  `gs` ad hoc: the helper prints an uncapturable `SKIPPED` line when gs is
+  missing and panics under `PSCAT_REQUIRE_GS=1`, which the macOS `test` and
+  Linux `cross-platform` CI jobs set after installing gs.
+
 - **The page size has a precedence** (#921, #909): `--page` (MCP
   `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
   /PageSize` > `%%BoundingBox` > letter. The

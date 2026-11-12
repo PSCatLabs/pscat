@@ -79,6 +79,30 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      # Ghostscript for the parity tests (issue #985). About 44 test files
+      # compare pscat with a real gs and used to skip silently without it.
+      # First log whether the runner image already ships gs, then install it
+      # and log the version, so a log answers "did the parity checks run, and
+      # against which gs". PSCAT_REQUIRE_GS=1 on the test step below turns a
+      # missing gs into a failure instead of a skip.
+      - name: Ghostscript
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          echo "before install: $(command -v gs || echo 'gs not on the runner image')"
+          brew install ghostscript
+          command -v gs
+          gs --version
+          {
+            echo "### Ghostscript"
+            echo
+            echo "- runner image: $ImageOS $ImageVersion"
+            echo "- gs: $(gs --version) at $(command -v gs)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       # No separate `cargo build`: clippy type-checks every target, and the
@@ -105,7 +129,16 @@ jobs:
       - name: Run tests
         id: test
         continue-on-error: true
+        env:
+          # A missing gs fails the gs tests instead of skipping them (#985);
+          # PSCAT_GS_LOG records which of them ran, counted just below.
+          PSCAT_REQUIRE_GS: "1"
+          PSCAT_GS_LOG: ${{ github.workspace }}/gs-parity.log
         run: cargo test --profile ci 2>&1 | tee test-output.log
+
+      - name: Ghostscript parity tests that ran
+        if: "!cancelled()"
+        run: ./scripts/gs_parity_summary.sh gs-parity.log "macOS test job" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize test results
         if: "!cancelled()"
@@ -300,8 +333,32 @@ jobs:
         run: ./scripts/selftest.sh
       # --no-fail-fast: one failing test binary must not hide the rest on a
       # platform where nothing has run before.
+      # Ghostscript for the parity tests (issue #985). Linux installs it from
+      # apt and requires it; Windows skips the gs tests visibly (its binary is
+      # gswin64c, which the tests do not look for, and a Chocolatey install is
+      # slow), so PSCAT_REQUIRE_GS stays unset there.
+      - name: Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "before install: $(command -v gs || echo 'gs not on the runner image')"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ghostscript
+          command -v gs
+          gs --version
+          {
+            echo "### Ghostscript"
+            echo
+            echo "- runner image: $ImageOS $ImageVersion"
+            echo "- gs: $(gs --version) at $(command -v gs)"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Run tests
+        env:
+          PSCAT_REQUIRE_GS: ${{ runner.os == 'Linux' && '1' || '' }}
+          PSCAT_GS_LOG: ${{ github.workspace }}/gs-parity.log
         run: cargo test --profile ci --no-fail-fast
+      - name: Ghostscript parity tests that ran
+        if: "!cancelled()"
+        run: ./scripts/gs_parity_summary.sh gs-parity.log "cross-platform ${{ matrix.os }}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The declared minimum supported Rust version (`rust-version` in Cargo.toml,
   # issue #563) really builds the crate, tests included. Read from Cargo.toml

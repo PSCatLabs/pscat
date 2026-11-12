@@ -108,7 +108,8 @@ pub fn gs_available() -> bool {
                 .ok()
         });
         if let Some(mut f) = file {
-            let _ = writeln!(f, "{what} {test}");
+            // One write call, so parallel test binaries cannot interleave a line.
+            let _ = f.write_all(format!("{what} {test}\n").as_bytes());
         }
     };
     match gs_decision(have, require) {
