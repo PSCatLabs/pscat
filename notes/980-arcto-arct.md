@@ -33,3 +33,9 @@ where pscat either draws the large geometry or, inside the tolerance, a line.
 **Not done.** `--capabilities` lists no PLRM operators by design
 (`src/capabilities.rs`), so neither operator is added there. No `%%SelfTest`
 block: those belong to `lib/*.ps` files, and the cargo test covers this.
+
+**Review render.** `notes/980-arcto-arct/roundrects.ps` draws rounded
+rectangles with `arcto` (tangent points in red), a pill, a non-uniform-scale
+version, an `arct` polygon, and the collinear, zero-radius, negative-radius and
+acute cases. `pscat-left-gs-right.png` is pscat (left) beside Ghostscript
+(right); the shapes coincide, only stroke antialiasing differs.
