@@ -50,9 +50,33 @@ grestore
 % Bound now, before the scope exists: inside it, setlinewidth names the
 % decorated version, and a decorator calling that would call itself.
 /hairline { 0.45 setlinewidth [] 0 setdash } bind def
+% A fill closes every open subpath and a stroke does not, so the traced
+% outline closes them first. The path is read into records, a closepath
+% goes before each later moveto and at the end wherever a subpath is
+% open, and the path is rebuilt only if one was. The helper works in its
+% own dictionary, so it never writes into the drawing program's.
+/close-subpaths {
+  4 dict begin /isopen false def /changed false def
+  [ { isopen { [/z] 3 1 roll /changed true def } if /isopen false def
+      /m 3 1 roll 3 array astore }
+    { /isopen true def /l 3 1 roll 3 array astore }
+    { /isopen true def /c 7 1 roll 7 array astore }
+    { /isopen false def [/z] }
+    pathforall isopen { [/z] /changed true def } if ]
+  changed {
+    newpath
+    { dup 0 get
+      dup /m eq { pop aload pop 3 -1 roll pop moveto } {
+      dup /l eq { pop aload pop 3 -1 roll pop lineto } {
+      /c eq { aload pop 7 -1 roll pop curveto } { pop closepath } ifelse
+      } ifelse } ifelse
+    } forall
+  } { pop } ifelse
+  end
+} bind def
 % fills become traced outlines; text is set as outlines too
 /outline-fill [ /pop load
-  [ /gsave load /hairline load /exec load /through-stroke load /exec load /grestore load /newpath load ] cvx
+  [ /gsave load /close-subpaths load /exec load /hairline load /exec load /through-stroke load /exec load /grestore load /newpath load ] cvx
 ] cvx def
 decs /fill /outline-fill load put
 decs /eofill /outline-fill load put
