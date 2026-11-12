@@ -365,8 +365,7 @@ fn a_latin1_string_draws_the_same_path_as_its_utf8_twin() {
 /// UTF-8 string and from a Latin-1 byte string alike.
 #[test]
 fn ghostscript_builds_the_same_accented_path() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let body = "newpath (Łódź Ångström ĳ ď) 10 20 << /Seed 9 /Slant 8 >> sgpath \
