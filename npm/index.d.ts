@@ -116,6 +116,14 @@ export class Renderer {
   /** The page as width, height, RGBA data, output and warnings. */
   image(): RenderResult;
   /**
+   * Pages the run holds now: those showpage/copypage emitted, plus the page
+   * being drawn when it holds art (or is the only one). Works between step()
+   * calls and after the run, whatever is recorded (pixels, SVG, PDF); equals
+   * svgPages().length with { svg: true } and the PDF's page count with
+   * { pdf: true }. 0 before begin().
+   */
+  pageCount(): number;
+  /**
    * SVG page `page` (from 0): the bytes `pscat --svg` writes for the same
    * program, page size and dpi. Needs a program begun with { svg: true };
    * throws RangeError for a page the document does not have.

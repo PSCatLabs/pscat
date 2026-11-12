@@ -23,7 +23,9 @@
   "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
   "author": "Jerome Banks",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./pscat.global.js"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -33,7 +35,12 @@
       "node": "./node.js",
       "default": "./index.js"
     },
+    "./pscat.global.js": "./pscat.global.js",
     "./pscat.wasm": "./pscat.wasm",
+    "./node.js": {
+      "types": "./index.d.ts",
+      "default": "./node.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./node.js",
@@ -43,6 +50,7 @@
     "node.js",
     "renderer.js",
     "core.js",
+    "pscat.global.js",
     "index.d.ts",
     "pscat.wasm",
     "LICENSE-MIT",

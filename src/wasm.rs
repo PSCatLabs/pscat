@@ -41,6 +41,10 @@
 //!   standard-font text as SVG `<text>` (`pscat --svg-text`, #1119).
 //!   -1 also for an unknown flag bit, or bit 2 without bit 0;
 //! - `ps_svg_count()` — SVG pages so far (0 when not recording);
+//! - `ps_page_count()` — pages the document holds now, whatever is
+//!   recorded: those `showpage`/`copypage` emitted plus the live page when
+//!   it holds art or is the only one; what `ps_svg_count` returns with
+//!   SVG on, and the PDF's page count. 0 when no program has begun (#1011);
 //! - `ps_svg(page)` / `ps_pdf()` — finish SVG page `page` (from 0) / the
 //!   PDF document into the vector buffer: 0 = ok, -1 = not recorded (or
 //!   page out of range), -2 = no program begun. Callable mid-run: the
@@ -321,6 +325,19 @@ fn with_svg_pages<R>(f: impl FnOnce(Option<&[String]>) -> R) -> Option<R> {
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_svg_count() -> u32 {
     with_svg_pages(|pages| pages.map_or(0, |p| p.len() as u32)).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_page_count() -> u32 {
+    // The rule svg_pages and pdf_document use: a page the program is still
+    // drawing on counts when it holds art, and an empty document has one.
+    INTERP.with(|s| {
+        s.borrow().as_ref().map_or(0, |it| {
+            let gfx = it.gfx();
+            let shown = gfx.pages().len();
+            (shown + usize::from(shown == 0 || gfx.has_trailing_art())) as u32
+        })
+    })
 }
 
 #[unsafe(no_mangle)]

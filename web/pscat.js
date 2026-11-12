@@ -156,6 +156,15 @@ export class Pscat {
     return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len)).split('\n');
   }
 
+  /**
+   * Pages the document holds now, whatever is recorded: those showpage or
+   * copypage emitted, plus the live page when it holds art or is the only
+   * one. Equals svgCount() with SVG on. 0 before any begin() (#1011).
+   */
+  pageCount() {
+    return this.ex.ps_page_count();
+  }
+
   /** SVG pages recorded so far (0 unless begun with record.svg). */
   svgCount() {
     return this.ex.ps_svg_count();

@@ -1,5 +1,7 @@
 //! Level 2 odds and ends — Stage 8 task 5: packedarray, the clocks,
-//! languagelevel, and resource-category basics.
+//! languagelevel, and resource-category basics; plus the PLRM's
+//! interpreter-identity operators `product`, `version`, `revision` and
+//! `serialnumber` (issue #1048).
 //!
 //! Honest fictions, documented: packed arrays are ordinary arrays
 //! (access control is identities throughout — AGENTS/NOTES), the
@@ -23,6 +25,10 @@ pub fn install(dict: &mut Dict) {
     op(dict, "usertime", usertime);
     op(dict, "realtime", realtime);
     op(dict, "languagelevel", languagelevel);
+    op(dict, "product", product);
+    op(dict, "version", version);
+    op(dict, "revision", revision);
+    op(dict, "serialnumber", serialnumber);
     op(dict, "defineresource", defineresource);
     op(dict, "findresource", findresource);
     op(dict, "resourcestatus", resourcestatus);
@@ -80,6 +86,56 @@ fn realtime(it: &mut Interp) -> Result<(), PsError> {
 
 fn languagelevel(it: &mut Interp) -> Result<(), PsError> {
     it.push(Object::int(2));
+    Ok(())
+}
+
+/// – product → `(pscat)`: the interpreter's name.
+fn product(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::string(b"pscat".to_vec()));
+    Ok(())
+}
+
+/// – version → the crate version, e.g. `(0.7.0)` or `(0.7.0-rc.4)`. The
+/// PLRM only says "a string"; pscat's own version is the useful one,
+/// since it is what a program gates a pscat feature on.
+fn version(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::string(
+        env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
+    ));
+    Ok(())
+}
+
+/// The crate version as one comparable integer, `major*10000 +
+/// minor*100 + patch` (0.7.0 → 700, 1.2.3 → 10203). A pre-release tag is
+/// dropped, so 0.7.0-rc.4 is 700 like 0.7.0: test `revision 700 ge` for
+/// "0.7.0 or later". Two digits each for minor and patch, which holds
+/// while both stay under 100.
+const REVISION: i64 = {
+    const fn parse(s: &str) -> i64 {
+        let b = s.as_bytes();
+        let mut n = 0;
+        let mut i = 0;
+        while i < b.len() {
+            n = n * 10 + (b[i] - b'0') as i64;
+            i += 1;
+        }
+        n
+    }
+    parse(env!("CARGO_PKG_VERSION_MAJOR")) * 10000
+        + parse(env!("CARGO_PKG_VERSION_MINOR")) * 100
+        + parse(env!("CARGO_PKG_VERSION_PATCH"))
+};
+
+/// – revision → int: `REVISION`.
+fn revision(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::int(REVISION));
+    Ok(())
+}
+
+/// – serialnumber → 0. There is no device serial number to report; the
+/// PLRM allows any integer, and 0 says "none".
+fn serialnumber(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::int(0));
     Ok(())
 }
 

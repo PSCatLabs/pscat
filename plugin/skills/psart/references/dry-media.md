@@ -13,7 +13,14 @@ colour (that is `gallery/hundred_lines.ps`'s flat look). Load
 gives skeleton paths, and `dcchalk` inks them. A character with no
 skeleton (a superscript two, say) raises `sg-missing-glyph:<char>` rather
 than vanishing; write it another way, or pass `/Strict false` to let it
-advance blank.
+advance blank. `sgpath` draws the Latin-1 and Latin Extended-A letters
+(`café`, `jalapeño`, `crème brûlée`, `Zoë`, `Ångström`, `Łódź`), so those
+need no workaround: each is the base letter's own skeleton plus accent
+strokes. A string that is valid UTF-8 is read as UTF-8, and any other
+string is read as Latin-1, so `(caf\351)` draws the same `café` (the one
+ambiguity: Latin-1 bytes that happen to form valid UTF-8 are read as
+UTF-8). `sgmetrics` and `lib/mathkit.ps` stay UTF-8 only; in a formula write
+`\text{café}` in UTF-8.
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
@@ -37,7 +44,10 @@ newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
 - **`dcchalk`** treats each subpath as one stroke. It lands heavy, tires in
   the middle, lifts thin, sheds dust and differs a little from its
   neighbours. `/Tilt` 80-90 with `/Side` gives broad side-of-chalk
-  underlines and shading.
+  underlines and shading. `/Hand` 0..1 draws the path freehand: slow drift, a straight run past each end, closed outlines that end a little past or short of the start. 0 (the default) is ruled; 0.5–0.8 reads as a steady hand; strokes under ~4 widths are untouched. `/Corners /separate` draws a box as four strokes that overshoot the corners.
+- **`(text) x y opts dctext`** writes chalk lettering. `/Align /left|/center|/right` places it by its measured width, and `/Fit w` sizes it to exactly w points. Other keys go to dcchalk; `/Width` defaults to 0.048 × `/Size`. It needs handscript and strokeglyphs loaded.
+- **`(left) (right) x1 x2 y opts dcleader`** draws a menu, price-list or contents row with dotted leaders. Use `/Pitch` and `/Gap`; `/Leader << dcchalk opts >>` styles the dots. Rows with the same pitch line their dots up.
+- A sign's frame, nails and doodles belong in the piece's own `dcchalk` calls.
 - **`/name dcchalkcolor`** picks the chalk: `/white /yellow /pink /blue
   /green /orange`.
 - Real chalk is grey, not white: the defaults (`/Strength 0.55`) were
@@ -108,6 +118,9 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   fills the tooth, leaving `/Value` between paper and the current colour.
   drykit cannot read the page, so give `/Under` (the tone beneath) when it
   is not paper. Over hatching, a moderate `/Touch` lets the hatch show.
+  (paintkit's `pkcanvas` `/Touch`, in paint.md, is a different thing and has a
+  limit: one touched stroke may reach at most 60000 weave cells, about a 612 pt
+  square at the default `/Weave 2.5`.)
 - `opts dhlift` — an eraser's track: `/Eraser /kneaded` (grey, soft, never
   back to paper) or `/hard` (a narrow, crisp line). `/Under` defaults to the
   current colour.
