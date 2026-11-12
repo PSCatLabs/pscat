@@ -961,6 +961,20 @@ renders eight examples in both and compares block-downsampled output).
    strokes and presses short ones harder. `chalk::driver` passes `/Firm 1`
    only with no board, so the board pins never move; the overlay has its own
    (`notes/713-chalk-firm-overlay.md`).
+   #1080: one run reports every unsupported character or command, each with
+   its line and column. The driver's check pass (`ckcheck`) calls mathkit's
+   `mkproblems` (a parse-only entry that steps over lexical errors while a
+   flag is set, so `mkpath` and the rest stay fail-fast) and prints one
+   `CKPROBLEM` line per problem; `Driver::explain(printed, err)` turns them,
+   with an origin map threaded through `chalk::layout` (comments, wrappers,
+   delimiters, row breaks), into `ChalkError::Problems`, which the CLI prints
+   and `chalkboard_math` returns as `problems`. `code` and `token` stay the
+   first problem's, and the failing run still ends in the first problem's
+   `mk-` error, so a caller that only reads `chalk::explain` is unchanged.
+   #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
+   inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
+   fence. #1087: `\varphi` is a closed loop on a vertical stem
+   (`notes/1080-718-1087-chalk-input-checks.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

@@ -298,13 +298,28 @@ LaTeX would stop with an error. Write
 `mkalign`: on their relations (or `&`), as `align` sets them, except inside a
 `gather`, `gather*` or `gathered` wrapper, where each row is centred on its
 own width, as LaTeX does. The supported subset is mathkit's, listed above and in full by
-`pscat chalk --help`. Anything else fails with one line naming it,
-exits non-zero and writes no file:
+`pscat chalk --help`. Anything else fails, exits non-zero and writes no
+file. One problem is one line naming it, with where it is; several are all
+listed in one pass (each with its line and column in what you typed, the
+command named as you wrote it), so a board with a few needs one fix, not one
+retry each:
 
 ```text
-pscat chalk: unsupported LaTeX command \aleph (`pscat chalk --help` lists the supported subset)
-pscat chalk: unsupported character: @
+pscat chalk: unsupported LaTeX command \aleph at 1:3 (`pscat chalk --help` lists the supported subset)
 ```
+
+```text
+pscat chalk: 4 problems in the LaTeX (line:column):
+  1:8  unsupported LaTeX command \" (accents are not drawn: write the plain letter, oe for \"o)
+  2:8  unsupported character: ö (U+00F6) (write oe for it)
+  3:3  unsupported character: `` (TeX's `` opening quote is not drawn: leave it out)
+  3:16  unsupported LaTeX command \aleph
+(`pscat chalk --help` lists the supported subset)
+```
+
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; an
+accented letter or a quote inside it is not drawn (`pscat chalk --help` says
+so).
 
 The block is measured first and shrunk, if it must be, to fit inside the
 margins and above the ledge, then centred (or set at the left margin). Same
