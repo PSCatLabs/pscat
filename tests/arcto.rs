@@ -140,7 +140,7 @@ fn collinear_points_draw_a_line_to_the_corner() {
 fn a_distant_direction_point_keeps_the_rounded_corner() {
     // p2 only gives the second leg's direction: moving it far along the
     // same ray must not turn the corner into a collinear line (Codex,
-    // combined review batch 1).
+    // combined review batch 1). gs agrees: see the comparison below.
     for p2 in ["100 100", "100 1000000", "100 1000000000"] {
         assert_eq!(
             run_case(&format!("{{ 0 0 moveto 100 0 {p2} 10 arcto }}")),
@@ -149,6 +149,29 @@ fn a_distant_direction_point_keeps_the_rounded_corner() {
             "{p2}"
         );
     }
+}
+
+#[test]
+fn a_magnified_corner_is_still_a_corner() {
+    // Tiny user coordinates under a huge CTM are the same 100-point
+    // corner as the unscaled one: the collinearity tolerance lives in
+    // device space (Codex, combined review batch 1, round 2). gs 10.07.1
+    // also draws the curve (9e-08 0 1e-07 1e-08). Not in the shared gs
+    // table: `case` does not save the graphics state, so the scale would
+    // leak into the cases after it.
+    let scaled = run_case(
+        "{ 1000000000 1000000000 scale 0 0 moveto 0.0000001 0 0.0000001 0.0000001 0.00000001 arcto }",
+    );
+    assert!(scaled.contains(" c "), "{scaled}");
+    let shrunk = run_case(
+        "{ 0.000001 0.000001 scale 0 0 moveto 100000000 0 100000000 100000000 10000000 arcto }",
+    );
+    assert!(shrunk.contains(" c "), "{shrunk}");
+    // A fold-back is still a plain line under the magnifying CTM.
+    let line = run_case(
+        "{ 1000000000 1000000000 scale 30 rotate 0 0 moveto 0.0000001 0 -0.00000005 0 0.00000001 arcto }",
+    );
+    assert!(line.contains(" l ") && !line.contains(" c "), "{line}");
 }
 
 #[test]

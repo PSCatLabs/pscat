@@ -24,10 +24,12 @@ operand stack and `pathforall`, and rasterises two rounded rectangles in each):
 
 **Deviations from gs.** (1) A failed call consumes its operands, the same as
 `lineto` and every other pscat operator (HANDOFF.md, "Deliberate deviations");
-gs leaves them. (2) "Collinear" is a 1e-6 perpendicular distance relative to
-the coordinates' size, because the current point is read back through f32
-device space; a rotated fold-back would otherwise ask for a tangent length of
-~1e8. gs raises `limitcheck` for a near-fold-back (angle under about 1e-5 rad)
+gs leaves them. (2) "Collinear" is a perpendicular distance, measured in
+device space, of at most 1e-6 of the device size of p0 and p1 (at least one
+device unit), because the current point is read back through f32 device
+space; a rotated fold-back would otherwise ask for a tangent length of ~1e8.
+p2 only sets a direction, so its size never widens the tolerance, and the
+tolerance follows the CTM (both from the combined Codex review, batch 1). gs raises `limitcheck` for a near-fold-back (angle under about 1e-5 rad)
 where pscat either draws the large geometry or, inside the tolerance, a line.
 
 **Not done.** `--capabilities` lists no PLRM operators by design

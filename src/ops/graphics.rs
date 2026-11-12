@@ -179,18 +179,16 @@ enum ArcTo {
 /// tangent to the lines p0-p1 and p1-p2, joined to p0 by a line and
 /// drawn as the one cubic Ghostscript draws, however far it sweeps. A
 /// negative `r` mirrors the circle through p1 (gs does the same). A
-/// zero `r` gives a zero-length cubic at p1; collinear points give a
-/// plain line. `p0` is the current point read back through the CTM, so
-/// it carries single-precision noise: "collinear" is a perpendicular
-/// distance of 1e-6 relative to the size of p0 and p1, not exact zero
-/// (a fold-back, whose tangent length is ~1/sin of the corner, would
-/// otherwise blow up on that noise). `UndefinedResult` when p1 equals
-/// p0 or p2, as gs; `Limitcheck` when a result is not finite.
+/// zero `r` gives a zero-length cubic at p1; `collinear` points (decided
+/// by [`arcto_collinear`], in device space) give a plain line.
+/// `UndefinedResult` when p1 equals p0 or p2, as gs; `Limitcheck` when a
+/// result is not finite.
 fn arcto_geometry(
     p0: (f64, f64),
     p1: (f64, f64),
     p2: (f64, f64),
     r: f64,
+    collinear: bool,
 ) -> Result<ArcTo, PsError> {
     let (d0x, d0y) = (p0.0 - p1.0, p0.1 - p1.1);
     let (d2x, d2y) = (p2.0 - p1.0, p2.1 - p1.1);
@@ -201,16 +199,7 @@ fn arcto_geometry(
     let (u0, u2) = ((d0x / l0, d0y / l0), (d2x / l2, d2y / l2));
     let cross = u0.0 * u2.1 - u0.1 * u2.0;
     let dot = u0.0 * u2.0 + u0.1 * u2.1;
-    // The noise is in p0 alone (the current point, back through device
-    // space), measured against p1; p2 only sets a direction, which the
-    // unit vector already carries exactly, so its size must not widen
-    // the tolerance (a far p2 on the same ray is the same corner).
-    let scale = [p0, p1]
-        .iter()
-        .flat_map(|p| [p.0.abs(), p.1.abs()])
-        .fold(1.0, f64::max);
-    // Perpendicular distance of p0 from the line p1-p2 is |cross| * l0.
-    if cross.abs() * l0 <= 1e-6 * scale {
+    if collinear || cross == 0.0 {
         return Ok(ArcTo::Line);
     }
     // Corner angle at p1 in (0, pi); the arc turns through pi minus it.
@@ -228,6 +217,36 @@ fn arcto_geometry(
     Ok(ArcTo::Arc { t1, c1, c2, t2 })
 }
 
+/// Whether p0, p1 and p2 count as collinear for `arcto`. p0 is the
+/// current point read back from single-precision device space, so it
+/// carries noise there: the test is the perpendicular distance of p0
+/// from the line p1-p2, in device space (an affine CTM keeps lines
+/// lines), against 1e-6 of the device size of p0 and p1 (at least one
+/// device unit). p2 only sets a direction, so its size never widens the
+/// tolerance, and a magnifying or shrinking CTM moves the tolerance
+/// with the noise. Without it a fold-back, whose tangent length is
+/// ~1/sin of the corner, would blow up on that noise.
+fn arcto_collinear(m: Transform, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64)) -> bool {
+    let dev = |p: (f64, f64)| {
+        let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
+        let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
+        (sx * p.0 + kx * p.1 + tx, ky * p.0 + sy * p.1 + ty)
+    };
+    let (q0, q1, q2) = (dev(p0), dev(p1), dev(p2));
+    let (d0x, d0y) = (q0.0 - q1.0, q0.1 - q1.1);
+    let (d2x, d2y) = (q2.0 - q1.0, q2.1 - q1.1);
+    let l2 = fmath::hypot(d2x, d2y);
+    if l2 <= 0.0 || l2.is_nan() {
+        return false; // p1 = p2: arcto_geometry reports it
+    }
+    let dist = (d0x * d2y - d0y * d2x).abs() / l2;
+    let scale = [q0, q1]
+        .iter()
+        .flat_map(|q| [q.0.abs(), q.1.abs()])
+        .fold(1.0, f64::max);
+    dist <= 1e-6 * scale
+}
+
 /// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and
 /// the shared body of `arct`: the tangent points. Operands are popped
 /// first and stay consumed on an error, like every operator here; the
@@ -237,7 +256,8 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
     let (x2, y2) = pop_xy(it)?;
     let (x1, y1) = pop_xy(it)?;
     let p0 = it.gfx.current_user_point()?;
-    let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r)?;
+    let collinear = arcto_collinear(it.gfx.ctm(), p0, (x1, y1), (x2, y2));
+    let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r, collinear)?;
     match arc {
         ArcTo::Line => {
             it.gfx.lineto(x1, y1)?;
