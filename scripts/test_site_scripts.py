@@ -135,6 +135,7 @@ class SiteScripts(unittest.TestCase):
             "- [x](%sdocs/gone.md): d" % raw: "not in the repo",
             "- [x](%sdocs/A.md): d" % raw: "not in the repo",  # case counts
             "- [x](%sdocs/a.md#top): d" % raw: "no anchors",
+            "- [x](%sdocs/a.md): d" % (check_site_links.RAW_URL + "v1.0/"): "not under main",
             "- [x](%s/blob/main/docs/gone.md): d" % check_site_links.REPO_URL: "not in the repo",
             "- [x](docs/a.md): d": "not absolute",
         }

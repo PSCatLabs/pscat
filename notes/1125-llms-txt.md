@@ -22,5 +22,7 @@ every page's `<head>` (`<link rel="alternate">`) point at it, and
 - **Not covered.** The site has no `robots.txt` or sitemap, so there is nothing
   to list it in. The hosted MCP server (epic #689) has no URL yet, so `llms.txt`
   says only that one is planned; the client and route matrix is #1136.
-- **Live only after merge.** The raw links point at `main`, so they resolve once
-  this is merged; the check validates them against the checkout.
+- **Live only after merge.** `llms.txt` itself, and the `agents.md` link to it,
+  return 404 until the Pages deploy after the merge. The raw links to existing
+  files resolve today; the check accepts only a `main` ref and validates the
+  paths against the checkout.

@@ -2271,6 +2271,14 @@ renders eight examples in both and compares block-downsampled output).
   region's array edited in place after the build keeps the stamp
   (`region /Checked undef` re-arms it). `siinside` has no check; paintkit's
   direct callers are #526.
+- **A new `docs/guides/*.md` guide must be added to `site/llms.txt`** (#1125).
+  `check_site_links.py` (run by `tests/site.rs`, `site-check.yml` and
+  `pages.yml`) fails when a guide is not linked there, or when any link in
+  that file is dead. Its links to Markdown use
+  `raw.githubusercontent.com/PSCatLabs/pscat/main/...`; the checker accepts
+  only a `main` ref, and checks them against the checkout, so a link to a file
+  that is not yet on `main` passes in the PR and resolves after the merge.
+  See `notes/1125-llms-txt.md`.
 
 ## Verification checklist before calling any future stage done
 

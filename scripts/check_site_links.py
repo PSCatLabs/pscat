@@ -132,8 +132,10 @@ def raw_repo_path(url):
     """The repo-relative path a raw.githubusercontent.com URL of this repo names, or None."""
     if not url.startswith(RAW_URL):
         return None
-    rest = url[len(RAW_URL):].split("?")[0]
-    _ref, _, tail = rest.partition("/")
+    rest = re.split(r"[?#]", url[len(RAW_URL):])[0]
+    ref, _, tail = rest.partition("/")
+    if ref != "main":  # a pinned ref would be checked against today's checkout
+        return None
     return unquote(tail).rstrip("/")
 
 
@@ -196,7 +198,7 @@ def check_llms(site, repo, pages):
                 problems.append("llms.txt:%d: raw Markdown has no anchors: %s" % (n, url))
             rp = raw_repo_path(url)
             if not rp or not in_repo(repo, rp):
-                problems.append("llms.txt:%d: raw link to a path not in the repo: %s" % (n, url))
+                problems.append("llms.txt:%d: raw link not under main, or to a path not in the repo: %s" % (n, url))
             else:
                 linked.add(rp)
         elif u.scheme in ("http", "https"):
