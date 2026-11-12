@@ -29,12 +29,14 @@ An assistant that wants a map of the docs can read the site's
 
 In Claude Code the easiest route is the **plugin**, which installs the four
 skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
-on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
-uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
-downloads the pinned GitHub release once, checks it against the release's
-`SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin` or
-`~/.cache/pscat/plugin`; the stable path of the command-line tool is `bin/pscat`
-there). It also links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`
+on macOS, Linux or Windows: the plugin's launcher (`plugin/scripts/pscat-mcp`;
+`pscat-mcp.sh` on macOS and Linux, `pscat-mcp.cmd` and `pscat-mcp.ps1` on
+Windows) uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and
+otherwise downloads the pinned GitHub release once, checks it against the
+release's `SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin`,
+`~/.cache/pscat/plugin` or `%LOCALAPPDATA%\pscat\plugin`; the stable path of
+the command-line tool is `bin/pscat` there on macOS and Linux). On macOS and
+Linux it also links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`
 when that directory is already on `PATH`, so a plain `pscat` works. The same plugin installs in the Claude desktop app
 (Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
 the server on your computer. In Claude Code:

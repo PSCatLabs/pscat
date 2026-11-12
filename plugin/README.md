@@ -25,36 +25,44 @@ pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
 It isn't meant for imitating a specific person's handwriting or presenting
 writing as someone else's.
 
-## Requirements: none on macOS and Linux
+## Requirements: none on macOS, Linux and Windows
 
 You don't need Rust, Node or a separate pscat install. The plugin ships no
-binaries; its MCP server entry runs a small launcher,
-`scripts/pscat-mcp.sh` (POSIX `sh`), which:
+binaries; its MCP server entry runs a small launcher, `scripts/pscat-mcp`.
+On macOS and Linux that is a POSIX `sh` script, which hands over to
+`scripts/pscat-mcp.sh`. On Windows the agent runs `scripts/pscat-mcp.cmd`
+beside it instead, and that runs `scripts/pscat-mcp.ps1` in Windows
+PowerShell, which every Windows 10 and 11 has (see [Platforms](#platforms)).
+Either way, the launcher:
 
 1. **Uses pscat if you already have it.** It looks for `pscat-mcp` in
    `$PSCAT_MCP_BIN` (if set), on your `PATH`, then in `~/.cargo/bin`,
-   `/opt/homebrew/bin` and `/usr/local/bin`, because an app started from
-   the Dock often has a shorter `PATH` than your terminal. A copy counts only
+   `/opt/homebrew/bin` and `/usr/local/bin` (on Windows, the Cargo `bin`
+   directory), because an app started from the Dock or Start menu often has
+   a shorter `PATH` than your terminal. A copy counts only
    if `pscat-mcp --version` is at least the version the plugin pins.
 2. **Otherwise downloads it once.** It fetches the archive for your platform
-   (macOS arm64 or x86_64, Linux x86_64 or aarch64) from the GitHub release
+   (macOS arm64 or x86_64, Linux x86_64 or aarch64, Windows x86_64, which
+   Windows on ARM also runs) from the GitHub release
    named in `pscat-release`, about 14 MB, from
    <https://github.com/PSCatLabs/pscat/releases>. It checks the archive
    against that release's `SHA256SUMS` and refuses it on a mismatch. Then
    it unpacks it into a per-user cache and runs it from there. It needs only
    `curl` or `wget`, `tar` and `shasum` or `sha256sum`, all of which macOS and
-   most Linux systems have.
+   most Linux systems have; on Windows, only PowerShell.
 3. **Starts the server.** Later sessions use the cached copy and make no
    network request.
 
-The cache is `~/Library/Caches/pscat/plugin` on macOS and
-`~/.cache/pscat/plugin` on Linux (or `$XDG_CACHE_HOME/pscat/plugin`; set
-`PSCAT_CACHE_DIR` to move it). The `pscat` command-line tool is there too,
-at `bin/pscat`, the one stable path: `bin/` always names the release in
-use, whichever version is pinned. Delete the directory to remove the
-download.
+The cache is `~/Library/Caches/pscat/plugin` on macOS,
+`~/.cache/pscat/plugin` on Linux (or `$XDG_CACHE_HOME/pscat/plugin`) and
+`%LOCALAPPDATA%\pscat\plugin` on Windows; set `PSCAT_CACHE_DIR` to move it.
+The `pscat` command-line tool is there too. On macOS and Linux it is at
+`bin/pscat`, the one stable path: `bin/` always names the release in use,
+whichever version is pinned. On Windows it is in
+`<release>\x86_64-pc-windows-msvc\`, and the launcher links nothing onto
+`PATH`. Delete the directory to remove the download.
 
-**`pscat` on your PATH.** So that a plain `pscat` works in an agent's shell,
+**`pscat` on your PATH (macOS and Linux).** So that a plain `pscat` works in an agent's shell,
 the launcher links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`,
 whichever is already on your `PATH` and writable (the first that is). It
 creates no directory, never touches a system directory such as
@@ -182,7 +190,7 @@ directory, is not `/`, and is not inside the installed plugin:
 1. **Claude Code's plugin option**: **Render output folder** (`output_dir`).
    Set it with `/plugin configure pscat@pscat`, or in `/config`.
 2. **`out-root` in `~/.config/pscat/plugin.conf`** (under
-   `$XDG_CONFIG_HOME` if that is set). This works with every host, and it is
+   `$XDG_CONFIG_HOME` if that is set; on Windows `%APPDATA%\pscat\plugin.conf`). This works with every host, and it is
    the way to set the root under Codex, which passes a plugin's server no
    options of yours:
 
@@ -191,14 +199,15 @@ directory, is not `/`, and is not inside the installed plugin:
    echo 'out-root = ~/Documents/renders' > ~/.config/pscat/plugin.conf
    ```
 
-   The path must be absolute or start with `~/`. The folder must already
+   The path must be absolute (`C:\...` on Windows) or start with `~/`. The folder must already
    exist.
 3. **The project Claude Code names** (`${CLAUDE_PROJECT_DIR}`).
 4. **The directory the host starts the server in**: the project, under
    Claude Code.
 5. **`renders/` in pscat's per-user data directory**, which the launcher
    creates: `~/Library/Application Support/pscat/renders` on macOS,
-   `~/.local/share/pscat/renders` on Linux. Codex starts a plugin's server
+   `~/.local/share/pscat/renders` on Linux, `%APPDATA%\pscat\renders` on
+   Windows. Codex starts a plugin's server
    inside the installed plugin, and the Claude desktop app sometimes starts
    it in `/`, so without a setting their renders go here.
 
@@ -214,14 +223,29 @@ variable for the output root (#756).
 
 ## Platforms
 
-macOS and Linux are tested; Windows is not. The plugin directory has no
-symbolic links, so a Windows checkout no longer loses the skills. But the
-launcher is a POSIX `sh` script and the server entry runs `sh`. Windows
-has no `sh` unless Git for Windows puts one on `PATH`, and the launcher
-downloads nothing there. On Windows, install pscat from the release `.zip`,
-register it by hand (`claude mcp add pscat -- pscat-mcp`, or
-`codex mcp add pscat -- pscat-mcp`), and turn the plugin's own server off
-(#633).
+Linux and Windows are tested in CI with the real Claude Code and Codex
+command-line tools, and macOS by hand with the same checks; Cowork is not,
+since it has no command-line form. One server entry serves every OS. Both manifests name
+`scripts/pscat-mcp` with no extension:
+
+- On macOS and Linux the agent runs that file, so it must keep its exec
+  bit. A git checkout keeps it, and `scripts/plugin_check.py` checks it is
+  committed as executable.
+- On Windows the agent looks the extensionless name up the way Windows
+  finds programs (`PATHEXT`), and so runs `scripts/pscat-mcp.cmd`. Claude
+  Code does this through cross-spawn and Codex through the `which` crate.
+  The `.cmd` asks `pscat-mcp.ps1` for the server's path (finding or
+  downloading it), then runs `pscat-mcp.exe` itself, so PowerShell is not
+  between the agent and the server.
+
+The SessionStart hook is `cd "<plugin>/scripts"; ./pscat-mcp --hook`, which
+runs the same in `sh`, Git Bash and PowerShell, the shells Claude Code uses
+for hooks (Git Bash on Windows when it is installed, else PowerShell).
+
+On Windows the launcher runs PowerShell with `-ExecutionPolicy Bypass`. A
+managed machine whose Group Policy forbids that, or that puts PowerShell in
+Constrained Language mode, stops the launcher. Install pscat from the
+release `.zip` there, put it on `PATH`, and restart.
 
 ## Try it
 
@@ -304,11 +328,13 @@ it names the pre-release (for example `v0.7.0-rc.1`).
 One directory, `plugin/`, is the plugin for both agents. It holds the
 skills as real files in `skills/` (the repository's top-level `skills` is
 a symlink to `plugin/skills`, so there is one copy of the text), the
-shared `hooks/hooks.json`, the launcher `scripts/pscat-mcp.sh` and its pin
-`pscat-release`, Claude Code's `.claude-plugin/plugin.json` (which declares
-the MCP server inline, as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh`), and
-Codex's portable `plugin.json` and `mcp.json` (the same launcher, as
-`${PLUGIN_ROOT}`). Each agent ignores the other's files. There is no
+shared `hooks/hooks.json`, the launcher (the entry point `scripts/pscat-mcp`,
+`scripts/pscat-mcp.sh`, the Windows twin `scripts/pscat-mcp.cmd` and
+`scripts/pscat-mcp.ps1`) and its pin `pscat-release`, Claude Code's
+`.claude-plugin/plugin.json` (which declares the MCP server inline, as
+`${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp`), and Codex's portable
+`plugin.json` and `mcp.json` (the same entry point, as `./scripts/pscat-mcp`,
+the only form Codex accepts for a plugin file). Each agent ignores the other's files. There is no
 top-level `bin/`: claude.ai and Cowork refuse to install a plugin that has
 one.
 

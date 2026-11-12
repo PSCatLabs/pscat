@@ -15,10 +15,14 @@ plugin links it into `~/.local/bin` (or `~/bin`) when that directory is on
 `~/Library/Caches/pscat/plugin/bin/pscat` (macOS) or
 `~/.cache/pscat/plugin/bin/pscat` (Linux); `pscat-mcp` is beside it. The
 plugin's session-start note names it. If that file does not exist yet, run
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`: it downloads
-the plugin's pinned release, links it onto `PATH` and prints the `bin/`
-directory. The first use downloads the release (about 14 MB, a few
-seconds), so a pause then is not a hang; later runs make no request.
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp" --locate` (in PowerShell,
+`& "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.cmd" --locate`): it downloads
+the plugin's pinned release, links it onto `PATH` (macOS and Linux) and
+prints the directory holding `pscat`. On Windows nothing is linked onto
+`PATH`: use that directory's `pscat.exe` by its full path (the download is
+under `%LOCALAPPDATA%\pscat\plugin`). The first use downloads the release
+(about 14 MB, a few seconds), so a pause then is not a hang; later runs
+make no request.
 Without the plugin, install it:
 a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`

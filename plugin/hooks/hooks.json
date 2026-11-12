@@ -1,12 +1,12 @@
 {
-  "description": "Tell the user and Claude where pscat is, or that the plugin will download it (scripts/pscat-mcp.sh --hook; it never downloads itself).",
+  "description": "Tell the user and Claude where pscat is, or that the plugin will download it (scripts/pscat-mcp --hook; it never downloads itself). The command runs in sh, Git Bash and PowerShell alike: `cd` is in all three, and ./pscat-mcp is the sh entry point on macOS and Linux and resolves to pscat-mcp.cmd in PowerShell (#866).",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh\" --hook"
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}/scripts\"; ./pscat-mcp --hook"
           }
         ]
       }

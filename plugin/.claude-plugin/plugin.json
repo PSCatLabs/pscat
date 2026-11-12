@@ -20,9 +20,8 @@
   ],
   "mcpServers": {
     "pscat": {
-      "command": "sh",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh",
         "--plugin-out-root=${user_config.output_dir}",
         "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"
       ]
