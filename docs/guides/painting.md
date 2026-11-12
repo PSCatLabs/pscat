@@ -554,6 +554,21 @@ stroke pulled down inside a directional `pkwet`.
 
 ![The canvas surface specimen](../dev/design/paintkit_canvas_demo.png)
 
+**Size limit.** One touched stroke may reach at most 60000 weave cells: about
+a 612 pt square at the default `/Weave 2.5` (the box is the whole call's
+reach, so a long diagonal counts its bounding box, not its length). Past it
+the brush raises `limitcheck` with the numbers in the message:
+
+```text
+%%[ Error: limitcheck; OffendingCommand: pkbroad: /Touch is limited to 60000 weave cells per stroke (about 612 x 612 pt at /Weave 2.5) and this stroke reaches 80896 cells (about 640 x 790 pt). Drop /Touch from it, split it into separate strokes that each reach less, or set a coarser /Weave in pkcanvas; Line: 4 ]%%
+```
+
+The fixes are in the message: drop `/Touch` on that mass (and let the
+canvas show through some other way), paint it as several strokes that each
+reach less (a big diagonal as two or three short ones), or call `pkcanvas`
+with a larger `/Weave`. There is no automatic tiling of a large stroke. The limit
+applies to `pkdry`, `pktrowel`, `pkfan`, `pkbroad` and `pkliner` alike.
+
 ## Brush motions
 
 The presets above are brush *heads*; a painting is equally made of
@@ -672,6 +687,13 @@ solver anywhere. `/Blend /Multiply` makes wash order commute, which
 plain source-over does not. `pkpaper` lays the ground it sits on: tone
 plus seeded grain and fibers. Both are deterministic under `/Seed`, or
 under the caller's own `srand` without one.
+
+A wash honours the caller's alpha: each layer's alpha is `/Alpha` times the
+`setalpha` in effect when `pkwash` is called, so `gsave 0.6 setalpha ...
+pkwash grestore` fades a whole wash, and a procedure built from washes can
+be faded from outside without reaching into its options. At the default
+alpha 1 nothing changes. (`/Blend` is still the wash's own, and `pkpaper`
+sets its own alpha.)
 
 This is also a part of pscat that does **not** render the
 same way under plain `gs file.ps`: Ghostscript has no

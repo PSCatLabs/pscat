@@ -554,20 +554,12 @@ fn a_stamp_is_uneven_ink_through_which_the_page_shows() {
     assert!(differing(&under, &typed_only) > 0);
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// Ghostscript draws the specimen (a correctness check only; CI has no gs):
 /// its three sheets have the paper, the copies' white and the redaction bars
 /// where pscat has them.
 #[test]
 fn ghostscript_draws_the_specimen_the_way_pscat_does() {
-    if !gs_available() {
-        eprintln!("skipping gs released check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-released");

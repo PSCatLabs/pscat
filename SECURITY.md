@@ -208,7 +208,10 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   was already inside a root. As with the read roots, a *different* local
   process that can already write inside a root could swap a directory for a
   symlink between the check and the open. `std` has no `openat`, so this is
-  accepted rather than closed.
+  accepted rather than closed. The bands of a `--bands` render are threads of
+  one process running the same program, so they are held to a stricter rule
+  (#1045): a process-wide lock covers each check-and-open, `renamefile` and
+  `deletefile`, and one band cannot swap an entry under another.
 - **Bytes written are capped (#762).** `--max-write-bytes N` (`N` bytes, or
   with a `k`, `m` or `g` suffix; `0` for no cap) and
   `Interp::set_max_write_bytes` count the bytes a program hands to `write`,
@@ -216,12 +219,17 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   **1 GiB when `--allow-write` is given** unless the flag says otherwise; the
   library applies none until the embedder sets one. A write that would pass the
   cap writes nothing and raises `limitcheck`; `writereals` checks its whole
-  size before it opens (and so truncates) the file. Unlike `--max-steps`,
+  size before it opens (and so truncates) the file (under `--bands` another band
+  can spend the budget between that check and the write, so the file may be
+  truncated and partly written before the `limitcheck`). Unlike `--max-steps`,
   `--max-time` and `--max-memory`, which end the run with an error `stopped`
   cannot catch, this one is an ordinary, catchable `limitcheck`: a program that
   catches it can only fail to write more, so the disk is still safe, and the
   step and time limits still bound the loop. The count is for the interpreter's
-  whole life (the CLI runs one program), is of bytes handed over and not of
+  whole life (the CLI runs one program; the bands of a `--bands` render
+  share one count, #1045, and each band runs the whole program, so a program
+  that writes in every band spends the budget that many times over), is of
+  bytes handed over and not of
   disk used (overwriting a file after `setfileposition` counts again, and an
   `(a)` or `(w)` of an existing file does not count what was already in it), and
   does not count `%stdout` or `%stderr`.
@@ -318,7 +326,7 @@ output is cut off at 64 KiB.
 | Execution stack depth | 10,000 (`execstackoverflow`) | `src/interp.rs` |
 | Procedure `{ }` nesting while scanning | 500 (`limitcheck`) | `src/interp.rs` |
 | Name-resolution cycles | detected, `limitcheck` | `src/interp.rs` |
-| Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200 | `src/main.rs`, `src/interp.rs` |
+| Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200; a `setpagedevice` page too (#909), and `--max-pixels N` caps it lower | `src/main.rs`, `src/interp.rs`, `src/ops/pagedevice.rs` |
 | Canvas, sheet or board size under the MCP server | at most 40,000,000 device pixels by default (`--max-pixels`, at most 64,000,000) | `src/mcp_server.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
 | Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
@@ -478,7 +486,8 @@ without the limits above:
   `web/pscat.js`) so a runaway does not freeze the tab.
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
-  `--bands` band (steps and time; the bands share `--max-memory`) is its own
+  `--bands` band (steps and time; the bands share `--max-memory` and
+  `--max-write-bytes`) is its own
   run with the whole of `--max-steps` and `--max-time`; a page is not a run, so a multi-page program is one. `pscat
   handwrite`, `typewrite` and `photo-etch` run two programs (a measuring pass,
   then the render) and give each the full limits, so their worst case is about
@@ -575,9 +584,14 @@ an installed build (October 2026, #568).
 
 - **`out_path` writes are confined to one output root.** The root is the
   directory given with `--out-root DIR` when the server is registered, or
-  else the server's working directory (Claude Code and Codex start it in the
+  else the server's working directory (Claude Code starts it in the
   project directory). If that working directory is the filesystem root,
-  `out_path` is switched off. A relative `out_path` starts at the root; an
+  `out_path` is switched off. The pscat plugin's launcher always passes
+  `--out-root` (#910): the user's `output_dir` plugin option (Claude Code),
+  `out-root` in `~/.config/pscat/plugin.conf`, the project, the working
+  directory, or pscat's per-user `renders/` directory. It never passes `/` or
+  a directory inside the installed plugin; Codex starts a plugin's server
+  inside the plugin. No environment variable names the root. A relative `out_path` starts at the root; an
   absolute one must land inside it. Refused: any `..` component, a directory
   that does not exist (the server creates none), a directory that resolves
   outside the root through a symlink, and an existing target that is not a
@@ -780,7 +794,11 @@ an installed build (October 2026, #568).
   shares one cap, `--max-pixels` (#711, default 40,000,000, at most
   64,000,000), and answers `output_too_large` with `limit_pixels`, `pixels`,
   `width_px` and `height_px`: `render_postscript` before the child starts (the
-  page size is fixed by its arguments; a program cannot resize it), `handwrite`
+  page its arguments or the source's bounding box give), and again in the
+  child for a page the program's `setpagedevice /PageSize` asks for (#909: the
+  server passes `pscat --max-pixels`, the operator refuses a larger page with
+  `configurationerror` before allocating it, and the server answers
+  `output_too_large`), `handwrite`
   after the note's height is sized from its text and before it is drawn (the
   server passes `pscat handwrite --max-pixels`, and refuses a width over 8000
   pixels itself), `chalkboard_math` and `review_sheet` as above. An operator

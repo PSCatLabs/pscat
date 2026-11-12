@@ -19,6 +19,7 @@
   --button-hover: #48598f;
   --button-ink: #f1f3ff;
   --err: #ee8b8b;
+  --warn: #d9b96a;           /* amber: font stand-ins and other notes that are not errors */
   --stage: #0e1013;          /* the dark wall behind a rendered page */
   --shadow: rgba(0, 0, 0, .55);
   --header-bg: rgba(20, 22, 28, .92);
@@ -40,6 +41,7 @@
     --button-hover: #2a3866;
     --button-ink: #ffffff;
     --err: #b3261e;
+    --warn: #8a5a00;
     --stage: #e6e2d8;
     --shadow: rgba(40, 30, 10, .25);
     --header-bg: rgba(251, 250, 247, .92);
@@ -255,6 +257,9 @@ html.dialog-open { overflow: hidden; }
   background: var(--stage);
 }
 .landing-hero figcaption { color: var(--dim); font-size: 14px; padding-top: 8px; }
+.landing-hero figure .pair { display: grid; grid-template-columns: 42fr 54fr; gap: 10px; align-items: start; }
+.landing-hero .brandline { display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 14px; margin: 0 0 14px; }
+.landing-hero .brandline img { display: block; border-radius: 8px; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; }
 .cta a {
@@ -343,6 +348,7 @@ body.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction:
 #controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 #status { color: var(--dim); margin-left: auto; white-space: nowrap; }
 #err { color: var(--err); white-space: pre-wrap; margin-top: 8px; max-height: 6em; overflow: auto; }
+#warn { color: var(--warn); white-space: pre-wrap; margin-top: 8px; max-height: 6em; overflow: auto; }
 #out { margin: 8px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; }
 #play-right { display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--stage); }
 #page {

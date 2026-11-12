@@ -2,6 +2,7 @@
 /pscat.wasm
 /.pscat.wasm.*
 /core.js
+/pscat.global.js
 /LICENSE-MIT
 /LICENSE-APACHE
 /LICENSE-OFL

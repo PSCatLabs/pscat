@@ -131,6 +131,7 @@ class WinLauncher(unittest.TestCase):
             "USERPROFILE": self.path("home"),
             "HOME": self.path("home"),
             "LOCALAPPDATA": self.path("localappdata"),
+            "APPDATA": self.path("appdata"),
             "PATH": os.pathsep.join([*path_dirs, os.path.join(sysroot, "System32"), sysroot,
                                      os.path.join(sysroot, "System32", "Wbem"),
                                      os.path.join(sysroot, "System32", "WindowsPowerShell", "v1.0")]),
@@ -140,16 +141,16 @@ class WinLauncher(unittest.TestCase):
         env.update(extra)
         return {k: v for k, v in env.items() if v is not None}
 
-    def run_argv(self, argv, env=None, stdin="", timeout=180):
+    def run_argv(self, argv, env=None, stdin="", timeout=180, cwd=None):
         # stdout (MCP, --hook, --locate) is UTF-8; stderr comes in the console
         # code page, so its non-ASCII letters may not survive (the asserts on
         # it are ASCII).
         return subprocess.run(argv, env=env or self.env(), input=stdin, capture_output=True,
                               encoding="utf-8", errors="replace", timeout=timeout,
-                              cwd=self.path("empty"))
+                              cwd=cwd or self.path("empty"))
 
-    def run_cmd(self, *args, env=None, stdin="", timeout=180):
-        return self.run_argv([self.path("plugin/scripts/pscat-mcp.cmd"), *args], env, stdin, timeout)
+    def run_cmd(self, *args, env=None, stdin="", timeout=180, cwd=None):
+        return self.run_argv([self.path("plugin/scripts/pscat-mcp.cmd"), *args], env, stdin, timeout, cwd)
 
     def tools(self, r):
         """The tool names a handshake's stdout lists; every stdout line must be JSON-RPC."""
@@ -346,6 +347,91 @@ class WinLauncher(unittest.TestCase):
         r = self.run_argv([GIT_SH, entry], env=self.env([inst, git_usr]), stdin=MSGS)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("render_postscript", self.tools(r))
+
+    # --- the output root (#910) ------------------------------------------------
+    # The fake server echoes its arguments. Its stdout goes through the console
+    # code page, so the asserts look at the ASCII end of the path only.
+
+    def fake_server(self):
+        inst = self.path("inst")
+        os.makedirs(inst)
+        with open(os.path.join(inst, "pscat-mcp.cmd"), "w", newline="") as f:
+            f.write(fake_cmd("99.0.0"))
+        return inst
+
+    def served(self, r):
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, r.stdout)
+        self.assertTrue(lines[0].startswith("INSTALLED-FAKE"), r.stdout)
+        return lines[0][len("INSTALLED-FAKE"):].strip()
+
+    def conf(self, text):
+        os.makedirs(self.path("appdata/pscat"), exist_ok=True)
+        with open(self.path("appdata/pscat/plugin.conf"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_plugin_options_set_the_out_root_and_are_not_passed_on(self):
+        env = self.env([self.fake_server()])
+        proj = self.path("home/proj dir")
+        os.makedirs(proj)
+        # An unset output_dir (the empty value) leaves the project directory.
+        args = self.served(self.run_cmd("--plugin-out-root=", f"--plugin-project-dir={proj}", env=env))
+        self.assertTrue(args.startswith('--out-root "') and args.endswith('home\\proj dir"'), args)
+        self.assertNotIn("--plugin", args)
+        # A placeholder the host left unexpanded is the same as unset.
+        args = self.served(self.run_cmd("--plugin-out-root=${user_config.output_dir}",
+                                        f"--plugin-project-dir={proj}", env=env))
+        self.assertTrue(args.endswith('home\\proj dir"'), args)
+        # The plugin option beats the project.
+        opt = self.path("home/chosen")
+        os.makedirs(opt)
+        args = self.served(self.run_cmd(f"--plugin-out-root={opt}", f"--plugin-project-dir={proj}", env=env))
+        self.assertTrue(args.endswith('home\\chosen"'), args)
+
+    def test_out_root_from_the_config_file(self):
+        env = self.env([self.fake_server()])
+        os.makedirs(self.path("home/work dir"))
+        proj = self.path("home/proj")
+        os.makedirs(proj)
+        self.conf('# pscat plugin\nout-root = "~\\work dir"\n')
+        # plugin.conf beats the project directory.
+        args = self.served(self.run_cmd("--plugin-out-root=", f"--plugin-project-dir={proj}", env=env))
+        self.assertTrue(args.endswith('home\\work dir"'), args)
+
+    def test_no_options_leave_the_working_directory_in_charge(self):
+        env = self.env([self.fake_server()])
+        self.assertEqual(self.served(self.run_cmd("q", env=env)), "q")
+        # An explicit --out-root is the caller's.
+        self.assertEqual(self.served(self.run_cmd("--out-root", self.path("empty"), env=env)).count("--out-root"), 1)
+
+    def test_a_working_directory_inside_the_plugin_gets_the_default_root(self):
+        # Codex starts a plugin's server in the plugin itself.
+        env = self.env([self.fake_server()])
+        args = self.served(self.run_cmd(env=env, cwd=self.plugin))
+        self.assertTrue(args.startswith('--out-root "') and args.endswith('appdata\\pscat\\renders"'), args)
+        self.assertTrue(os.path.isdir(self.path("appdata/pscat/renders")))
+
+    def test_an_unusable_out_root_is_skipped_with_a_warning(self):
+        env = self.env([self.fake_server()])
+        proj = self.path("home/proj")
+        os.makedirs(proj)
+        r = self.run_cmd(f"--plugin-out-root={self.path('nowhere')}", f"--plugin-project-dir={proj}", env=env)
+        self.assertTrue(self.served(r).endswith('home\\proj"'), r.stdout)
+        self.assertIn("ignoring the plugin's output_dir setting", r.stderr)
+        # Neither a drive root nor the plugin itself will do: the project is used.
+        drive = os.path.splitdrive(self.tmp)[0] + "\\"
+        r = self.run_cmd(f"--plugin-out-root={drive}", f"--plugin-project-dir={self.plugin}", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("a drive root", r.stderr)
+        self.assertEqual(self.served(r), "")  # the working directory, which is neither
+
+    def test_other_arguments_beside_the_plugin_options_are_refused(self):
+        env = self.env([self.fake_server()])
+        r = self.run_cmd("--plugin-out-root=", "--timeout", "5", env=env)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("takes the --plugin-* options alone", r.stderr)
+        self.assertEqual(r.stdout, "")
 
     def test_pin_with_release_version_matches_plain_asset_names(self):
         self.pin(f"v{VERSION}")

@@ -124,6 +124,7 @@ fn dcchalk_every_documented_parameter_changes_the_render() {
         ("Streak", "/Streak 3"),
         ("Under", "/Under [0.5 0.1 0.1]"),
         ("Seed", "/Seed 6"),
+        ("Hand", "/Hand 1"),
     ];
     for (_, extra) in varied {
         assert_ne!(
@@ -138,7 +139,25 @@ fn dcchalk_every_documented_parameter_changes_the_render() {
         stroke("/Tilt 80"),
         "/Side is a no-op"
     );
+    // /Corners only acts on a sharp corner between long legs: a box.
+    let boxed = |extra: &str| {
+        data(&on_board(
+            140,
+            60,
+            2.0,
+            &format!(
+                "newpath 10 10 moveto 130 10 lineto 130 50 lineto 10 50 lineto closepath \
+                 << {BASE} {extra} >> dcchalk"
+            ),
+        ))
+    };
+    assert_ne!(
+        boxed("/Corners /separate"),
+        boxed(""),
+        "/Corners is a no-op"
+    );
     let mut tested: Vec<String> = varied.iter().map(|(k, _)| k.to_string()).collect();
+    tested.push("Corners".to_string());
     tested.sort_unstable();
     assert_eq!(
         advertised(
@@ -428,13 +447,6 @@ fn a_small_board_renders_within_the_ci_budget() {
     assert!(!data(&it).is_empty());
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// One file holding every library and `body`, rendered by Ghostscript under
 /// its default -dSAFER (so no `run` of library files), as RGB rows.
 fn gs_rgb(body: &str, w: u32, h: u32, scale: u32, tag: &str) -> Vec<[u8; 3]> {
@@ -474,8 +486,7 @@ fn gs_rgb(body: &str, w: u32, h: u32, scale: u32, tag: &str) -> Vec<[u8; 3]> {
 /// Runs locally only: CI has no gs.
 #[test]
 fn ghostscript_agrees_on_a_board() {
-    if !gs_available() {
-        eprintln!("skipping gs board check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: u32 = 2;
@@ -528,8 +539,7 @@ fn ghostscript_agrees_on_a_board() {
 /// under `true setpacking`.
 #[test]
 fn ghostscript_accepts_a_packed_ghost_procedure() {
-    if !gs_available() {
-        eprintln!("skipping gs packed-procedure check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let body = "true setpacking /pk { 20 60 moveto 180 64 lineto } def false setpacking \
@@ -595,4 +605,191 @@ fn landing_presses_dots_harder() {
         hard > soft + 0.2,
         "/Landing did not press the dots ({hard:.2} vs {soft:.2})"
     );
+}
+
+/// Mean device row of the pixels brighter than `above` in column `x`
+/// (rows `y0..y1`), or None if none is.
+fn ink_row(it: &Interp, x: u32, y0: u32, y1: u32, above: f64) -> Option<f64> {
+    let pm = &it.gfx().pixmap;
+    let w = pm.width();
+    let rows: Vec<u32> = (y0..y1)
+        .filter(|&y| luma(pm.pixels()[(y * w + x) as usize]) > above)
+        .collect();
+    (!rows.is_empty()).then(|| rows.iter().map(|&y| f64::from(y)).sum::<f64>() / rows.len() as f64)
+}
+
+/// The leftmost and rightmost device columns with a pixel brighter than
+/// `above` in rows `y0..y1`.
+fn ink_columns(it: &Interp, y0: u32, y1: u32, above: f64) -> (u32, u32) {
+    let pm = &it.gfx().pixmap;
+    let w = pm.width();
+    let lit: Vec<u32> = (0..w)
+        .filter(|&x| (y0..y1).any(|y| luma(pm.pixels()[(y * w + x) as usize]) > above))
+        .collect();
+    (*lit.first().expect("no ink"), *lit.last().expect("no ink"))
+}
+
+/// Issue #1049: an explicit /Hand 0 and /Corners /joined are the defaults
+/// byte for byte. (That the defaults match the renders from before #1049 is
+/// `scripts/identity_check.sh --loader lib/drychalk.ps`'s job, recorded in
+/// the PR: a test in one tree cannot see the old library.)
+#[test]
+fn explicit_hand_zero_is_the_default() {
+    let path = "newpath 10 30 moveto 190 34 lineto 190 80 lineto 20 12 moveto 120 14 lineto";
+    let ruled = data(&on_board(
+        200,
+        100,
+        2.0,
+        &format!("{path} << /Width 2.4 >> dcchalk"),
+    ));
+    let zero = data(&on_board(
+        200,
+        100,
+        2.0,
+        &format!("{path} << /Width 2.4 /Hand 0 /Corners /joined >> dcchalk"),
+    ));
+    assert_eq!(ruled, zero, "/Hand 0 changed the ruled stroke");
+}
+
+/// Issue #1049: a long line drawn with /Hand drifts off the ruler, while
+/// the same line ruled stays on it; a stroke shorter than four widths is
+/// left exactly as it is.
+#[test]
+fn hand_draws_a_long_line_off_the_ruler() {
+    let line = |hand: &str| {
+        on_board(
+            400,
+            100,
+            2.0,
+            &format!(
+                "newpath 20 50 moveto 380 50 lineto << /Width 2.4 /Dust 0 /Hand {hand} /Seed 3 >> dcchalk"
+            ),
+        )
+    };
+    let drift = |it: &Interp| {
+        let rows: Vec<f64> = (0..15)
+            .filter_map(|i| ink_row(it, 100 + i * 40, 40, 160, 110.0))
+            .collect();
+        assert!(rows.len() >= 12, "the line went missing: {rows:?}");
+        let lo = rows.iter().cloned().fold(f64::MAX, f64::min);
+        let hi = rows.iter().cloned().fold(f64::MIN, f64::max);
+        hi - lo
+    };
+    let (ruled, hand) = (drift(&line("0")), drift(&line("1")));
+    eprintln!("line centre drift (device px): ruled {ruled:.2}, hand {hand:.2}");
+    assert!(ruled < 1.5, "the ruled line wandered by {ruled:.2} px");
+    assert!(hand > 3.0, "/Hand 1 left the line ruled ({hand:.2} px)");
+    // the wander stays a hand's, not a scribble's: well under the
+    // stroke-length bound (0.5 width + 0.5% of the length, both sides)
+    assert!(
+        hand < 2.0 * 2.0 * (1.2 + 1.8) + 2.0,
+        "/Hand 1 wandered {hand:.2} px"
+    );
+
+    let short = |hand: &str| {
+        data(&on_board(
+            100,
+            60,
+            2.0,
+            &format!(
+                "newpath 20 30 moveto 28 30 lineto 50 30 moveto 50 30 lineto \
+                 << /Width 2.4 /Hand {hand} >> dcchalk"
+            ),
+        ))
+    };
+    assert_eq!(
+        short("1"),
+        short("0"),
+        "/Hand moved a short stroke or a dot"
+    );
+}
+
+/// Issue #1054: dctext puts the measured width where /Align says, and
+/// /Fit scales the lettering to the width asked for.
+#[test]
+fn dctext_aligns_and_fits() {
+    // 2x supersampled: device x = 2 * user x; ink overhangs the advances by
+    // a little (side bearings, the chalk's width), so allow a few points
+    let at = |opts: &str| {
+        let it = on_board(
+            400,
+            80,
+            2.0,
+            &format!("(Menu) 200 30 << /Size 30 /Seed 5 /Dust 0 {opts} >> dctext"),
+        );
+        let (l, r) = ink_columns(&it, 20, 150, 110.0);
+        (f64::from(l) / 2.0, f64::from(r) / 2.0)
+    };
+    let (ll, _) = at("/Align /left");
+    assert!((ll - 200.0).abs() < 6.0, "left-aligned text starts at {ll}");
+    let (_, rr) = at("/Align /right");
+    assert!((rr - 200.0).abs() < 6.0, "right-aligned text ends at {rr}");
+    let (cl, cr) = at("/Align /center");
+    let mid = (cl + cr) / 2.0;
+    assert!(
+        (mid - 200.0).abs() < 4.0,
+        "centred text is centred on {mid}"
+    );
+    let (fl, fr) = at("/Align /center /Fit 300");
+    let width = fr - fl;
+    assert!(
+        (width - 300.0).abs() < 300.0 * 0.06,
+        "/Fit 300 drew {width} points of ink"
+    );
+    assert!((cr - cl) < width * 0.6, "/Fit did not grow the lettering");
+}
+
+/// Issue #1054: dcleader draws its dots between the two strings, and on a
+/// shared grid, so two rows with different names line their dots up.
+#[test]
+fn dcleader_dots_line_up_between_rows() {
+    let it = on_board(
+        400,
+        120,
+        2.0,
+        "(Tea) (2.50) 20 380 80 << /Size 18 /Seed 1 /Dust 0 >> dcleader \
+         (Hot chocolate) (12.50) 20 380 30 << /Size 18 /Seed 2 /Dust 0 >> dcleader",
+    );
+    let pm = &it.gfx().pixmap;
+    let w = pm.width();
+    // the dots sit just above each baseline: rows within 3 points of it
+    let dot_centres = |base: u32| -> Vec<f64> {
+        let band = (base - 6)..(base + 1);
+        let lit: Vec<bool> = (0..w)
+            .map(|x| {
+                band.clone()
+                    .any(|y| luma(pm.pixels()[(y * w + x) as usize]) > 100.0)
+            })
+            .collect();
+        let mut centres = Vec::new();
+        let mut x = 0;
+        while x < w as usize {
+            if lit[x] {
+                let s = x;
+                while x < w as usize && lit[x] {
+                    x += 1;
+                }
+                centres.push((s + x - 1) as f64 / 4.0);
+            }
+            x += 1;
+        }
+        centres
+    };
+    // device rows of the baselines: (120 - y) * 2
+    let top = dot_centres(80);
+    let bottom = dot_centres(180);
+    // the overlap of the two leaders, clear of every string: 170..300 points
+    let inside = |v: &[f64]| -> Vec<f64> {
+        v.iter()
+            .cloned()
+            .filter(|&c| c > 170.0 && c < 300.0)
+            .collect()
+    };
+    let (t, b) = (inside(&top), inside(&bottom));
+    eprintln!("dots: top {t:?}, bottom {b:?}");
+    assert!(t.len() >= 10, "too few leader dots on the top row: {t:?}");
+    assert_eq!(t.len(), b.len(), "the rows have different dot counts there");
+    for (a, c) in t.iter().zip(&b) {
+        assert!((a - c).abs() < 1.0, "dots at {a} and {c} do not line up");
+    }
 }

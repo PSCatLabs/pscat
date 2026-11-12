@@ -102,6 +102,8 @@ PREFIX=feature   # or "fix" if the issue carries the `bug` label — AGENTS.md's
 BRANCH="${PREFIX}/<N>-${SLUG}"
 WORKTREE_DIR="../${REPO_DIR}-issue-<N>"
 git worktree add --no-track -b "$BRANCH" "$WORKTREE_DIR" origin/main
+# Optional (#1033): build on another disk. A no-op unless PSCAT_TARGET_ROOT names an existing folder.
+[ -n "${PSCAT_TARGET_ROOT:-}" ] && [ -d "$PSCAT_TARGET_ROOT" ] && mkdir -p "$PSCAT_TARGET_ROOT/issue-<N>" && ln -s "$PSCAT_TARGET_ROOT/issue-<N>" "$WORKTREE_DIR/target"
 (cd "$WORKTREE_DIR" && pwd)   # note this absolute path: it is WORKTREE_DIR from now on
 bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 ```
@@ -225,13 +227,12 @@ gh issue comment <N> --body "Opened <PR URL>."
     gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/ci-<N>.log
     ```
     Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. Read only the end of the
-    log (`tail -n 25 <SCRATCH>/ci-<N>.log`); `exit=` is a hint only. Heartbeat after every watch, wait ~10 s,
-    re-run the `merge-tree` line above, then merge only if this prints `true` (a brief post-watch `false` or
-    `UNKNOWN`: re-query up to 3 times, ~10 s apart, before calling it a failure):
-    `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup --jq '(.mergeable == "MERGEABLE" and .mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | (.conclusion // .state)] | (length > 0 and all(. == "SUCCESS")))'`
-    Otherwise see pitfalls.md "CI wait" (pending, infra failure: `gh run
-    rerun --failed`; a failed step: stop and report). Never merge past a failure or use `--admin`.
-    Cannot wait: pitfalls.md "Pending-CI hand-back".
+    log (`tail -n 25 <SCRATCH>/ci-<N>.log`); `exit=` is a hint only. Heartbeat after every watch, wait ~10 s, re-run the
+    `merge-tree` line above, then merge only if this prints `true` (a brief post-watch `false` or `UNKNOWN`: re-query
+    up to 3 times, ~10 s apart, before calling it a failure):
+    `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup --jq '(.mergeable == "MERGEABLE" and .mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | {n: (.name // .context // ""), c: (.conclusion // .state)}] as $r | ($r | length > 0) and all($r[]; .c == "SUCCESS" or .c == "SKIPPED" or (.n == "CodeQL" and .c == "NEUTRAL" and ([$r[] | select(.n | startswith("Analyze ("))] | (length > 0 and all(.c == "SUCCESS"))))))'`
+    SKIPPED passes; NEUTRAL passes only for `CodeQL` with every `Analyze (...)` SUCCESS; anything else blocks (test: `.claude/skills/work-issue/scripts/test-merge-ready.sh`).
+    Otherwise see pitfalls.md "CI wait" (pending, infra failure: `gh run rerun --failed`; a failed step: stop and report). Never merge past a failure or use `--admin`. Cannot wait: pitfalls.md "Pending-CI hand-back".
 13. Immediately before merging, re-run the `merge-tree` check and the query above (state settles late). `gh pr merge <PR#> --squash` (no `--delete-branch`: the repo deletes the remote branch; step 9 the local).
 
 ## 9. Post-merge cleanup

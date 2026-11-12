@@ -6,7 +6,7 @@ installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
 A single formula on a plain board needs no PostScript: `pscat chalk
-'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill),
+'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill's `references/handwriting-chalk.md`),
 or the MCP tool `chalkboard_math` when it is connected.
 Use mathkit directly for a composed piece: several formulas, words,
 annotations, a board of your own.
@@ -32,9 +32,9 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
 - **`[ (line) ... ] x y opts mkalign`** writes a derivation, aligned at x
   on each line's `&` or before its first `=`. It returns one record per
   line: `/Origin /Angle /Width /Height /Depth /Align /BBox`.
-  `/Ink { pop ... dcchalk }` inks each line as it is written, so pressure
-  or colour can change down the board. Several `&` on a line give TeX
-  align's columns (right, left, right, left ...), the pairs `/ColumnGap`
+  `/Ink` inks each line as it is written, so pressure or colour can change
+  down the board (see "Line spacing and `/Ink`" below). Several `&` on a
+  line give TeX align's columns (right, left, right, left ...), the pairs `/ColumnGap`
   apart (multiples of `/Size`, default 2): `(f(x) &= x^2 & f'(x) &= 2x)`.
   `/ColumnGap 0` is `alignat`; `/ColumnWander 1` lets the later columns
   drift down the lines as a hand's do (default 0). `/LineAlign /center`
@@ -52,6 +52,51 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
   `\\underline{...}` do the same.
 - A side note is plain `sgpath` text, or `\\text{...}` inside a formula.
 
+**Line spacing and `/Ink`.** `mkalign` puts each baseline `/Leading` times
+`/Size` below the one above (`/Leading` defaults to 1.9, so 32.3 pt at
+`/Size 17`), or further down when a line is tall enough to need it (a
+fraction or a matrix: the step is never less than the depth of the line
+above plus this line's height plus 0.35 `/Size`). `/Irregular` adds a small
+wobble to each step. `mkalign` does not know about other blocks, so place one
+block under another from the last record: its `/Origin` y minus its `/Depth`,
+as below. `/Ink` is a procedure called after each line's path is appended,
+with the line's index (an integer, 0 for the first line) on the stack; it
+must consume the index and paint or clear the path. Use the index to vary
+the `/Seed` of `dcchalk` from line to line (`1000 mul 5 add` is any offset
+you like). Without `/Ink` the lines stay on the current path for one
+`stroke`.
+
+```postscript
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/drychalk.ps) run
+(lib/mathkit.ps) run
+20 20 560 250 << /Surface /greenboard >> dcboard
+/white dcchalkcolor
+
+% /Ink is called after each line's path is made, with the line's index
+% (0 for the first line) on the stack. Use it to seed the chalk.
+/ink { 1000 mul 5 add << /Seed 3 -1 roll /Width 1.4 >> dcchalk } bind def
+
+% A block of three lines: baselines 1.9 x /Size apart (the default /Leading)
+newpath [ (3x + 2y &= 7) (x - y &= 1) (5x &= 15) ] 160 235
+  << /Size 20 /Ink /ink load >> mkalign
+/recs exch def
+
+% The next block starts below the last line: that line's baseline y, less its
+% /Depth, less a gap (here 3 x /Size) that clears the new block's first line.
+recs dup length 1 sub get dup /Origin get 1 get exch /Depth get sub
+/y exch 60 sub def
+
+% Tighter, with /Leading 1.5; a taller line (the fraction) still gets its room.
+newpath [ (x &= 3) (y &= \\frac{1}{2}) ] 160 y
+  << /Size 20 /Leading 1.5 /Ink /ink load >> mkalign pop
+showpage
+```
+
+`pscat chalk --print-ps 'a &= b \\ c &= d'` prints the complete PostScript
+of a finished board, `mkalign` and `/Ink` included: a working composition to
+read and copy.
+
 Supported TeX:
 
 | Group | Commands |
@@ -62,15 +107,17 @@ Supported TeX:
 | Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \| \langle \rangle` (the characters `⟨ ⟩ ‖ ∥` typed directly work too) and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
 | Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
-| Text | `\text{...}`, `\mathrm{...}` |
+| Text and alphabets | `\text{...}`, `\mathrm{...}`; `\mathbf{...}` (letters and digits re-traced, heavier), `\mathbb{R}` (blackboard bold), `\mathcal{L}` (script); the last two take capital letters only, as in TeX |
 | Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
 | Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}` (`\nolimits` after it: the label beside), `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
 | Styles | `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`: the rest of the group in that style |
 | Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}`, `\mod{n}`, `\pod{n}` |
-| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
+| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\hbar`, `\ell`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\equiv`, `\sim`, `\cong`, `\propto`, `\to`, `\mapsto`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\subseteq`, `\cup`, `\cap`, `\setminus`, `\emptyset`, `\angle`, `\triangle`, `\Re`, `\Im`, `\oplus`, `\otimes`, `\dagger`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂ ∧ ℝ) |
+| Logic | `\forall`, `\exists`, `\nexists`, `\neg`/`\lnot`, `\wedge`/`\land`, `\vee`/`\lor`, `\Rightarrow`, `\Leftrightarrow`, `\leftrightarrow`, `\vdash`, `\nvdash`, `\models`, `\top`, `\bot`, `\therefore` |
 
-Anything else fails with a name saying what it was, for example
-`mk-unsupported-command:\oplus` or `mk-unsupported-character:@`.
+`pscat chalk --help` prints the whole list. Anything else fails with a name
+saying what it was, for example
+`mk-unsupported-command:\aleph` or `mk-unsupported-character:@`.
 
 - **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
   hurried. It varies sizes, gaps and script heights, makes fraction bars
@@ -88,6 +135,11 @@ Anything else fails with a name saying what it was, for example
     `\\left[ 0, 1 \\right\)` with `\)`.
   - Keep each formula on one source line, or end the line with a
     backslash to continue the string.
+  - In `pscat chalk`, a bracket right after a `\\` row break is TeX's row
+    spacing (`\\[2pt]`, dropped) only when it holds a length; `\\ [x,y] = 0`
+    keeps its bracket. `\left[ x, y \right]` is always a bracket. The same
+    rule holds inside `pmatrix` and `cases`. mkpath called from PostScript
+    has no such rule: write no `[2pt]` after `\\\\`, or it is drawn.
   - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
     or `x_{\\text{max}}`.
 

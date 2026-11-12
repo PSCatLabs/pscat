@@ -66,6 +66,7 @@ pub(crate) fn install_errordict(dict: &mut Dict) {
         h_ioerror => "ioerror",
         h_invalidrestore => "invalidrestore",
         h_undefinedresource => "undefinedresource",
+        h_configurationerror => "configurationerror",
     }
     op(dict, "handleerror", handleerror);
 }

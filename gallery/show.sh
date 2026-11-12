@@ -11,9 +11,11 @@ cd "$(dirname "$0")/.."
 
 # The pieces, their page sizes and drawing speeds come from the manifest
 # (gallery/manifest.json), so a new piece shows up here without editing this file.
-PIECES=(); PAGES=(); SPEEDS=()
-while IFS=$'\t' read -r id page speed; do
-  PIECES+=("$id"); PAGES+=("$page"); SPEEDS+=("$speed")
+# Each piece's source is the manifest's path: most are gallery/<id>.ps, but
+# a piece may live elsewhere (examples/hybrid/ reads JPEGs beside it).
+PIECES=(); PAGES=(); SPEEDS=(); SOURCES=()
+while IFS=$'\t' read -r id page speed source; do
+  PIECES+=("$id"); PAGES+=("$page"); SPEEDS+=("$speed"); SOURCES+=("$source")
 done < <(python3 scripts/gallery.py list)
 
 if [[ "${1:-}" == "--live" ]]; then
@@ -21,7 +23,7 @@ if [[ "${1:-}" == "--live" ]]; then
   [[ -x "$BIN" ]] || cargo build --release
   for i in "${!PIECES[@]}"; do
     echo ">> ${PIECES[$i]}  (close the window for the next piece)"
-    "$BIN" --page "${PAGES[$i]}" --speed "${SPEEDS[$i]}" "gallery/${PIECES[$i]}.ps"
+    "$BIN" --page "${PAGES[$i]}" --speed "${SPEEDS[$i]}" "${SOURCES[$i]}"
   done
 else
   for p in "${PIECES[@]}"; do

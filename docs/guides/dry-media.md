@@ -109,13 +109,44 @@ newpath 40 60 moveto 300 80 lineto
     and every other caller render as before).
   - With `/Tilt`, the stick lies on its side for broad underlines and
     shading: two bright edges over a granular face.
+  - `/Hand` (0 to 1) draws the path freehand instead of ruled. Each
+    stroke drifts slowly to either side, more on a longer stroke, and runs
+    straight on a little past its end. A closed outline ends a little past
+    or short of where it began. Strokes shorter than about four widths
+    (dots, ticks) are left as they are, and the drift fades in up to about
+    44 widths, so lettering from `sgpath` moves far less than a long line.
+    The wobble comes from the stroke's own seed, never your `rand`. The
+    default is 0, so existing boards render as before; 0.5 to 0.8 reads
+    as a steady hand.
+  - `/Corners /separate` cuts a path at its sharp corners, so a box is
+    drawn as four strokes. Each one lands and lifts, and with `/Hand` it
+    overshoots the corner a little.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
+- **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
+  (`sgpath` drawn with `dcchalk`). `/Align /left`, `/center` or `/right`
+  places the measured width on x. `/Fit w` sizes the text to fill exactly
+  w points, which suits a title. Any other key (`/Hand`, `/Touch`,
+  `/Strength`) goes to `dcchalk`. `/Width` defaults to 0.048 × `/Size`.
+- **`dcleader`** (`(left) (right) x1 x2 y opts`) is a menu, price-list or
+  contents row. The left string starts at x1 and the right one ends at
+  x2, with a dotted leader of chalk dots between them. The dots are
+  thinner and fainter than the lettering, and `/Leader << ... >>` styles
+  them. They sit on whole multiples of `/Pitch`, so stacked rows line
+  their dots up, as typeset leaders do.
+
+A sign's wood frame, nails and doodles are part of the piece itself, so
+draw them with `dcchalk` in your own PostScript. drychalk keeps to
+general tools.
 
 The defaults were tuned against the photographs in `docs/dev/design/drymedia/refs/`.
 Real chalk reads about halfway from the board to white, not white.
 `examples/drychalk_specimen.ps` shows `gallery/hundred_lines.ps`'s
 pen-stroke chalk before and after, on both boards.
+`examples/drychalk_hand.ps` shows a box, a line and a circle ruled
+and by hand, and a cafe menu set with `dctext` and `dcleader`:
+
+![The same box, diagonal and circle in chalk, ruled and by hand, over a cafe menu with a fitted title and dotted-leader price rows](../dev/design/drymedia/chalk_hand_specimen.png)
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
@@ -123,6 +154,9 @@ pen-stroke chalk before and after, on both boards.
 40 40 520 300 << /Surface /slate /Ghost { (old notes) 60 250 << /Size 30 >> sgpath } >> dcboard
 /white dcchalkcolor
 newpath (fresh notes) 60 180 << /Size 32 >> sgpath << /Width 1.8 >> dcchalk
+newpath 60 90 moveto 300 90 lineto 300 150 lineto 60 150 lineto closepath
+<< /Width 2 /Hand 0.7 /Corners /separate >> dcchalk
+(Espresso) (2.80) 360 520 120 << /Size 20 >> dcleader
 ```
 
 ## Crayon: drycrayon
@@ -182,6 +216,13 @@ variant Greek letters `ϑ ϰ ϱ ϖ ς ϵ ϕ`; `examples/strokeglyphs_subscripts_
 is their specimen. In mathkit `\varphi \vartheta \varkappa \varrho \varpi
 \varsigma` draw the variants, and `\epsilon` is the lunate ϵ while
 `\varepsilon` stays the three-shaped ε, as in TeX.
+It writes accented Latin letters too, every letter of Latin-1 and Latin
+Extended-A (`café`, `jalapeño`, `crème brûlée`, `naïve`, `Ångström`,
+`Łódź`, `Straße`), each the base letter's own skeleton plus accent strokes,
+so the accents keep the hand. A string that is valid UTF-8 is read as
+UTF-8; any other string is read as Latin-1, so `(caf\351)` and `(café)`
+draw the same word. `examples/strokeglyphs_accents.ps` is their specimen,
+with a chalk cafe sign.
 
 ```postscript
 (lib/handscript.ps) run
@@ -211,7 +252,15 @@ skeletons with TeX's box model. The subset covers:
   `\overset`, `\underset`, `\stackrel` and `\substack` limits;
 - `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
 - `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
-  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`.
+  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`;
+- logic and sets: `\wedge` `\vee` (and `\land` `\lor`), `\vdash` `\nvdash`
+  `\models`, `\top` `\bot`, `\leftrightarrow`, `\nexists`, `\oplus`
+  `\otimes`, `\emptyset`, and `\dagger` `\ddagger`, `\angle` `\triangle`
+  `\cong`, `\Re` `\Im`;
+- three alphabets: `\mathbf{v}` re-traces each letter and digit so it reads
+  heavier, `\mathbb{R}` doubles a capital's stem (or stands a short upright
+  in a round letter's bowl), and `\mathcal{L}` writes a script capital.
+  The last two draw capitals only, as in TeX.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -275,20 +324,43 @@ The input may carry `%` comments and newlines, and a display wrapper around
 the whole (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`, or an `align`, `align*`,
 `aligned`, `gather`, `equation` ... environment); `\label{}`, `\notag` and
 `\nonumber` are dropped. Several math pairs, as in `\(a\) + \(b\)`, are
-one formula with the delimiters removed. Words outside the pairs, or a
-delimiter that is never closed or closes nothing, fail with a one-line error
-naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
-`cases` or `\substack{}` stay where they are), and the rows are set with
+one formula with the delimiters removed. Words outside the pairs (write
+them as `\text{...}` inside one pair), a `$` that has no partner (`a $ b`,
+`x = 5$`: LaTeX stops with "Missing $ inserted" too), or a delimiter that is
+never closed or closes nothing, fail with a one-line error naming it.
+`\bigl\(` and the rest of the `\big` family are fences like `\left`, so
+mathkit names the unsupported delimiter. Each top-level `\\` starts a row (those inside `pmatrix`,
+`cases` or `\substack{}` stay where they are). A bracket right after a
+row break, in a `pmatrix` or `cases` too, is TeX's row spacing (`\\[2pt]`,
+`\\[0.5\baselineskip]`, dropped) only when it holds a length; anything else
+(`\\ [\hat{x},\hat{p}] = i\hbar`, a commutator) starts the next row, where
+LaTeX would stop with an error. Write
+`\left[ ... \right]` to be sure of a bracket. The rows are set with
 `mkalign`: on their relations (or `&`), as `align` sets them, except inside a
 `gather`, `gather*` or `gathered` wrapper, where each row is centred on its
-own width, as LaTeX does. The supported subset is mathkit's, listed above and in full at
-the top of `lib/mathkit.ps`. Anything else fails with one line naming it,
-exits non-zero and writes no file:
+own width, as LaTeX does. The supported subset is mathkit's, listed above and in full by
+`pscat chalk --help`. Anything else fails, exits non-zero and writes no
+file. One problem is one line naming it, with where it is; several are all
+listed in one pass (each with its line and column in what you typed, the
+command named as you wrote it), so a board with a few needs one fix, not one
+retry each:
 
 ```text
-pscat chalk: unsupported LaTeX command \oplus (the supported subset is listed at the top of lib/mathkit.ps)
-pscat chalk: unsupported character: @
+pscat chalk: unsupported LaTeX command \aleph at 1:3 (`pscat chalk --help` lists the supported subset)
 ```
+
+```text
+pscat chalk: 4 problems in the LaTeX (line:column):
+  1:8  unsupported LaTeX command \" (accents are not drawn: write the plain letter, oe for \"o)
+  2:8  unsupported character: 日 (U+65E5)
+  3:3  unsupported character: `` (TeX's `` opening quote is not drawn: leave it out)
+  3:16  unsupported LaTeX command \aleph
+(`pscat chalk --help` lists the supported subset)
+```
+
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; accent
+commands (`\"o`) and quotes inside it are not drawn, and a letter the board
+hand lacks is reported (`pscat chalk --help` says so).
 
 The block is measured first and shrunk, if it must be, to fit inside the
 margins and above the ledge, then centred (or set at the left margin). Same

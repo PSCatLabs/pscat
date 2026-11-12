@@ -238,6 +238,84 @@ fn irregular_zero_is_a_clean_untilted_layout() {
     );
 }
 
+/// Each row's width as `mkalign` lays it out, in points.
+fn row_widths(tex: &str, cfg: &Config) -> Vec<f64> {
+    let d = chalk::driver(tex, cfg).unwrap();
+    let cut = d.source.find("(lib/artkit.ps) run").expect("board half");
+    let mut src = d.source[..cut].to_string();
+    src.push_str(
+        "ckdict begin newpath cklines ckox ckoy ckopts mkalign end
+         { /Width get = } forall",
+    );
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&src)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    String::from_utf8_lossy(it.captured_stdout())
+        .split_whitespace()
+        .map(|t| t.parse().unwrap())
+        .collect()
+}
+
+/// A row that starts with a bracket after `\\` is written in full: the
+/// bracket is TeX's row spacing only when it holds a length (issue #936).
+/// Before the fix `[x,y]` was swallowed and the row read `= 0`.
+#[test]
+fn a_row_starting_with_a_bracket_keeps_it() {
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"a \\ [x,y] = 0", &clean);
+    let cut = row_widths(r"a \\ = 0", &clean);
+    assert_eq!(full.len(), 2);
+    assert!(
+        full[1] > 1.8 * cut[1],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+    // a real length is still spacing, never ink
+    assert_eq!(row_widths(r"a \\[2pt] = 0", &clean), cut);
+    // and the issue's commutator renders
+    let png = chalk::render(
+        r"i\hbar\partial_t\Psi = \hat{H}\Psi \\ [\hat{x},\hat{p}] = i\hbar",
+        &small(),
+        Format::Png,
+    )
+    .unwrap();
+    assert!(Pixmap::decode_png(&png).is_ok());
+}
+
+/// Inside a matrix or `cases`, `\\[4pt]` is row spacing too, never ink
+/// (issue #950): the board is the one without it, byte for byte. A bracket
+/// that holds no length stays the row's content there as well.
+#[test]
+fn row_spacing_inside_a_matrix_draws_nothing() {
+    let spaced = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\[4pt] 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\*[0.5\baselineskip] -x & x < 0 \end{cases}"
+    );
+    let plain = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\ 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\ -x & x < 0 \end{cases}"
+    );
+    let cfg = small();
+    let (a, b) = (
+        chalk::driver(spaced, &cfg).unwrap(),
+        chalk::driver(plain, &cfg).unwrap(),
+    );
+    assert!(a.source == b.source, "the spacing changed the board");
+    assert_eq!(
+        chalk::render(spaced, &cfg, Format::Png).unwrap(),
+        chalk::render(plain, &cfg, Format::Png).unwrap()
+    );
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"\begin{bmatrix} a & b \\ [x,y] & c \end{bmatrix}", &clean);
+    let cut = row_widths(r"\begin{bmatrix} a & b \\ & c \end{bmatrix}", &clean);
+    assert!(
+        full[0] > cut[0],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+}
+
 /// LaTeX centres each `gather` row on its own width (issue #699); `align`
 /// keeps its rows on one relation column, and its driver never asks for the
 /// centring.
@@ -399,8 +477,8 @@ fn unsupported_input_fails_with_the_named_error() {
     let dir = scratch("errors");
     for (tex, says, code) in [
         (
-            r"a \oplus b",
-            r"unsupported LaTeX command \oplus",
+            r"a \aleph b",
+            r"unsupported LaTeX command \aleph",
             "unsupported_command",
         ),
         ("a @ b", "unsupported character: @", "unsupported_character"),
@@ -410,7 +488,7 @@ fn unsupported_input_fails_with_the_named_error() {
             "unclosed_math_delimiter",
         ),
         (
-            r"a \left\( b \right\)",
+            r"a \left\( b \right.",
             "unsupported delimiter: \\(",
             "unsupported_delimiter",
         ),
@@ -421,8 +499,25 @@ fn unsupported_input_fails_with_the_named_error() {
         ),
         (
             r"\(x\) where \(y\)",
-            "text outside the math delimiters (w",
+            "text outside the math delimiters (where...)",
             "text_outside_math",
+        ),
+        // issue #718: a lone `$` is LaTeX's "Missing $ inserted", and the
+        // \big family fences a delimiter as \left and \right do
+        (
+            "a $ b",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            "x = 5$",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            r"\bigl\( b \bigr)",
+            "unsupported delimiter: \\(",
+            "unsupported_delimiter",
         ),
     ] {
         let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);
@@ -441,6 +536,135 @@ fn unsupported_input_fails_with_the_named_error() {
     }
 }
 
+/// Every unsupported character and command is reported in one pass, each
+/// with its line and column in the input, and the command is named as the
+/// user wrote it (issue #1080). The input is the issue's: three rounds of
+/// retries in one file.
+#[test]
+fn every_problem_is_reported_at_once_with_its_place() {
+    let dir = scratch("problems");
+    let tex = "\\text{G\\\"odel's First Incompleteness Theorem}\n\
+               \\text{G日del} \\\\\n\
+               x ``quoted'' + \\aleph \\; ☃";
+    std::fs::write(dir.join("in.tex"), tex).unwrap();
+    let out = pscat(&dir, &["chalk", "--file", "in.tex", "-o", "bad.png"], None);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    let want = [
+        r#"1:8  unsupported LaTeX command \" ("#,
+        "2:8  unsupported character: 日 (U+65E5)",
+        "3:3  unsupported character: `` (",
+        r"3:16  unsupported LaTeX command \aleph",
+        "3:26  unsupported character: ☃ (U+2603)",
+    ];
+    assert!(
+        err.starts_with("pscat chalk: 5 problems in the LaTeX (line:column):\n"),
+        "{err}"
+    );
+    for w in want {
+        assert!(err.contains(&format!("\n  {w}")), "{w:?} not in:\n{err}");
+    }
+    assert!(!err.contains("inside-text"), "{err}");
+    assert!(!err.contains("%%[ Error"), "{err}");
+    assert!(!dir.join("bad.png").exists(), "wrote a file");
+
+    // the library: the same list, as data
+    let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
+    let chalk::ChalkError::Problems(ps) = &e else {
+        panic!("{e:?}");
+    };
+    let at: Vec<_> = ps
+        .iter()
+        .map(|p| (p.token.as_str(), p.line, p.column))
+        .collect();
+    assert_eq!(
+        at,
+        [
+            ("\\\"", 1, 8),
+            ("日", 2, 8),
+            ("``", 3, 3),
+            ("\\aleph", 3, 16),
+            ("☃", 3, 26)
+        ]
+    );
+    // byte offsets, for a caller that slices the input
+    for p in ps {
+        assert!(tex[p.offset..].starts_with(&p.token), "{p:?}");
+    }
+    assert_eq!(e.code(), "unsupported_command");
+
+    // one problem stays one line, now with its place
+    let e = chalk::render(r#"a \text{\"o}"#, &small(), Format::Png).unwrap_err();
+    let one = e.to_string();
+    assert!(
+        one.starts_with(r#"unsupported LaTeX command \" at 1:9 (accents are not drawn"#),
+        "{one}"
+    );
+    assert_eq!(one.lines().count(), 1, "{one}");
+}
+
+/// A structural error (a missing brace) is listed with the unsupported
+/// characters before it, and a run of them is capped.
+#[test]
+fn structural_errors_join_the_list_and_a_long_list_is_cut() {
+    let e = chalk::render("a @ \\frac{b}{c", &small(), Format::Png).unwrap_err();
+    let chalk::ChalkError::Problems(ps) = &e else {
+        panic!("{e:?}");
+    };
+    let kinds: Vec<_> = ps.iter().map(|p| p.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["unsupported-character", "missing-closing-brace"],
+        "{e}"
+    );
+    assert_eq!(ps[0].column, 3);
+
+    let many = "@ ".repeat(300);
+    let e = chalk::render(&many, &small(), Format::Png).unwrap_err();
+    let shown = e.to_string();
+    assert!(shown.contains("problems in the LaTeX"), "{shown}");
+    assert!(shown.contains("... and "), "{shown}");
+    assert!(shown.lines().count() < 30, "{shown}");
+}
+
+/// A stepped-over one-token argument does not end the line, and a missing
+/// argument is still reported when something else on the line was stepped
+/// over (Codex batch 3, round 1).
+#[test]
+fn a_stepped_over_argument_neither_hides_nor_fakes_a_missing_one() {
+    let kinds_tokens = |tex: &str| -> Vec<(String, String)> {
+        let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
+        let chalk::ChalkError::Problems(ps) = &e else {
+            panic!("{tex}: {e:?}");
+        };
+        ps.iter()
+            .map(|p| (p.kind.clone(), p.token.clone()))
+            .collect()
+    };
+    let cmd = |t: &str| ("unsupported-command".to_string(), t.to_string());
+    let chr = |t: &str| ("unsupported-character".to_string(), t.to_string());
+    // later problems on the line are still found
+    assert_eq!(
+        kinds_tokens(r"x^\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\sqrt\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\vec@ + \frac@\beth + ☃"),
+        [chr("@"), chr("@"), cmd(r"\beth"), chr("☃")]
+    );
+    // a genuinely missing argument is not swallowed by an earlier step-over
+    let got = kinds_tokens(r"@ + \frac{1}");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0], chr("@"));
+    assert_eq!(got[1].0, "missing-argument", "{got:?}");
+    // and a stepped-over argument alone is one problem, not two
+    assert_eq!(kinds_tokens(r"x^\aleph"), [cmd(r"\aleph")]);
+}
+
 /// Separate inline pairs (the issue's `\(a\) + \(b\)`, in all four delimiter
 /// forms) are one formula with the delimiters gone: the same board as the
 /// bare formula, not a mathkit error about a stray `\)`.
@@ -456,6 +680,88 @@ fn separate_inline_pairs_render_as_one_formula() {
         let png = chalk::render(tex, &small(), Format::Png).unwrap();
         assert_eq!(png, bare, "{tex}: not the board of `a + b`");
     }
+}
+
+/// `pscat chalk --help` lists the LaTeX it knows (issue #934): every
+/// control word it names is a command mathkit's table has, so the list
+/// never promises one that fails.
+#[test]
+fn help_lists_only_supported_commands() {
+    let dir = scratch("help");
+    let out = pscat(&dir, &["chalk", "--help"], None);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let list = &text[text.find("Supported LaTeX").expect("the subset in --help")..];
+    let mut words: Vec<&str> = list
+        .split('\\')
+        .skip(1)
+        .map(|w| {
+            w.split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or("")
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    assert!(words.len() > 100, "too few commands listed: {words:?}");
+    // handled by the parser itself, not the command table
+    let parser = ["right", "end"];
+    let src: String = words
+        .iter()
+        .filter(|w| !parser.contains(w))
+        .map(|w| format!("mkcmds /{w} known not {{ ({w}) = }} if\n"))
+        .collect();
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&format!(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run\n{src}"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let missing = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    assert!(
+        missing.is_empty(),
+        "--help lists unknown commands: {missing}"
+    );
+}
+
+/// `--help` says which characters `\text{}` sets (issue #1080); that list is
+/// what mathkit draws, so it never promises one that fails, or hides one that
+/// works.
+#[test]
+fn help_says_which_characters_text_takes() {
+    let dir = scratch("help-text");
+    let out = pscat(&dir, &["chalk", "--help"], None);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let after = &text[text
+        .find("digits and ")
+        .expect("the \\text{} line in --help")
+        + 11..];
+    let said: String = after[..after.find(" and spaces").expect("end of the list")]
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    // every printable ASCII character but the three that shape a group
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+         33 1 126 {
+           /c exch def
+           c 92 eq c 123 eq or c 125 eq or not {
+             newpath
+             { (\\\\text{x}) dup 6 c put 0 0 << >> mkpath } stopped
+               { clear } { (_) dup 0 c put print } ifelse
+           } if
+         } for",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let drawn = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    let (letters, punct): (String, String) = drawn.chars().partition(char::is_ascii_alphanumeric);
+    assert_eq!(letters.len(), 62, "letters and digits: {letters}");
+    assert_eq!(
+        punct, said,
+        "--help and mathkit disagree on \\text{{}}'s punctuation"
+    );
 }
 
 /// Single-backslash LaTeX works end to end: the commands whose first

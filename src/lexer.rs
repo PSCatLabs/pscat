@@ -9,6 +9,8 @@
 //! valid executable names per the PLRM.
 
 use crate::error::PsError;
+use std::rc::Rc;
+
 use crate::file::{FileHandle, PsFile};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +29,11 @@ pub enum Token {
     ImmediateName(String),
     LBrace,
     RBrace,
+    /// A binary object sequence (token types 128 to 131, PLRM 3.14.4),
+    /// header included. The scanner only frames the bytes; the interpreter
+    /// decodes them (`binobj::decode`) because immediately evaluated names
+    /// need the dictionary stack.
+    BinarySeq(Vec<u8>),
 }
 
 /// The scanner reads through a shared [`FileHandle`], so a program can
@@ -42,8 +49,19 @@ pub struct Lexer {
     /// `line()` uses this to avoid attributing an error to the wrong
     /// source (issue #17: a `(lib/artkit.ps) run` file has its own line
     /// 1, and reporting it as a line of the submitted program would be
-    /// actively misleading).
+    /// actively misleading; `run_name` below is how a run file's lines
+    /// are reported instead).
     is_main: bool,
+    /// Byte offset the token most recently returned (or failed) by
+    /// `next_token` started at, for `syntax::check_syntax` (#1096): after
+    /// an unterminated string the file position is at EOF, which is no help
+    /// to the person who has to find the opening `(`.
+    token_start_pos: usize,
+    /// The name a `run` file was loaded by (issue #1043), so an error in
+    /// it can be reported as `Line: 5 (inner.ps)`. A run file has its
+    /// own line numbers, which is why `is_main` alone leaves it out;
+    /// with its name attached, its lines are no longer ambiguous.
+    run_name: Option<Rc<str>>,
     /// eexec pushed systemdict for this source's duration; pop it when
     /// the source is exhausted or closed.
     pub(crate) pop_systemdict: bool,
@@ -53,6 +71,11 @@ pub struct Lexer {
     /// same call — see `eat_token_delimiter` — so reading the file's
     /// live line position afterward would often be off by one).
     token_start_line: Option<usize>,
+    /// Whether a token starting with 128 to 131 is a binary object
+    /// sequence. The interpreter clears it while the object format is 0
+    /// (`0 setobjectformat`), when those bytes are ordinary name characters
+    /// (#733).
+    pub(crate) binary_tokens: bool,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -81,8 +104,11 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: false,
             is_main: false,
+            token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
     }
 
@@ -92,8 +118,11 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: true,
             is_main: true,
+            token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
     }
 
@@ -104,9 +133,27 @@ impl Lexer {
             file,
             is_file: true,
             is_main: false,
+            token_start_pos: 0,
+            run_name: None,
             pop_systemdict: false,
             token_start_line: None,
+            binary_tokens: true,
         }
+    }
+
+    /// Scan a file loaded by `run` under `name` (issue #1043): its lines
+    /// are reported, tagged with the name.
+    pub(crate) fn run_file(file: FileHandle, name: Rc<str>) -> Self {
+        Lexer {
+            run_name: Some(name),
+            ..Lexer::from_file(file)
+        }
+    }
+
+    /// The name of the `run` file this scanner reads, or `None` for the
+    /// main program and every unnamed source.
+    pub(crate) fn run_name(&self) -> Option<&Rc<str>> {
+        self.run_name.as_ref()
     }
 
     /// The handle `currentfile` returns, if this scanner is a file.
@@ -120,11 +167,19 @@ impl Lexer {
     }
 
     /// The line the last-returned token started on, if this scanner is
-    /// the main program — `None` otherwise (library files, eexec
-    /// streams, executable strings), so callers don't misattribute an
-    /// error to the wrong source.
+    /// the main program or a named `run` file — `None` otherwise (eexec
+    /// streams, executable strings, a file object `exec`ed directly),
+    /// so callers don't misattribute an error to the wrong source.
     pub(crate) fn line(&self) -> Option<usize> {
-        self.is_main.then_some(self.token_start_line).flatten()
+        (self.is_main || self.run_name.is_some())
+            .then_some(self.token_start_line)
+            .flatten()
+    }
+
+    /// The byte offset the last-returned token (or the failed scan) started
+    /// at, past any leading whitespace and comments.
+    pub(crate) fn token_start(&self) -> usize {
+        self.token_start_pos
     }
 
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
@@ -141,6 +196,7 @@ impl Lexer {
         // syntax error gets the line it actually happened on rather than
         // the previous good token's line.
         self.token_start_line = Some(self.file.borrow().line());
+        self.token_start_pos = self.file.borrow().pos();
         self.dispatch_token()
     }
 
@@ -162,10 +218,22 @@ impl Lexer {
         }
     }
 
+    /// `next_token` with binary object sequences switched on or off first
+    /// (off while the object format is 0, #733).
+    pub(crate) fn next_token_in(&mut self, binary: bool) -> Result<Option<Token>, PsError> {
+        self.binary_tokens = binary;
+        self.next_token()
+    }
+
     fn dispatch_token(&mut self) -> Result<Option<Token>, PsError> {
         let Some(b) = self.peek()? else {
             return Ok(None);
         };
+        // A token that starts with 128 to 131 is a binary object sequence.
+        // (Inside a name such a byte is still an ordinary character.)
+        if self.binary_tokens && (128..=131).contains(&b) {
+            return Ok(Some(Token::BinarySeq(self.read_binary_sequence()?)));
+        }
         if is_regular(b) {
             // Number-or-name words dispatch on their whole run; the
             // first byte must not be consumed before reading it.
@@ -217,6 +285,28 @@ impl Lexer {
             // is_regular handled above; whitespace/comments skipped above.
             _ => unreachable!("delimiter byte {b} not dispatched"),
         }
+    }
+
+    /// Read one whole binary object sequence, header included. Nothing
+    /// after it is consumed (no token delimiter), and nothing is
+    /// preallocated from the length the header claims: a short input that
+    /// claims 4 GB is a truncated sequence, not an allocation.
+    fn read_binary_sequence(&mut self) -> Result<Vec<u8>, PsError> {
+        let truncated = || syntax("binary object sequence is truncated");
+        let mut bytes: Vec<u8> = Vec::with_capacity(8);
+        let mut want = 4;
+        while bytes.len() < want {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+            if bytes.len() == 4 && crate::binobj::header_is_long(&bytes) {
+                want = 8;
+            }
+        }
+        let (_, total, _) = crate::binobj::parse_header(&bytes)?;
+        bytes.reserve(total.saturating_sub(bytes.len()).min(1 << 20));
+        while bytes.len() < total {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+        }
+        Ok(bytes)
     }
 
     /// A token terminated *by* whitespace consumes that one whitespace

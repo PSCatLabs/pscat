@@ -116,13 +116,6 @@ fn ink_count(it: &Interp) -> usize {
         .count()
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The acceptance's "layout boxes are computed in a headless pass": every
 /// formula of the test set measures to a sane box with no page at all, and
 /// the path mkpath builds at /Irregular 0 lies inside that box (to the
@@ -217,8 +210,8 @@ fn the_layout_is_deterministic_and_seeded() {
 fn unsupported_tex_fails_with_an_error_that_names_it() {
     for (src, expect) in [
         (
-            r"(\\oplus f) 0 0 << >> mkpath",
-            r"mk-unsupported-command:\oplus",
+            r"(\\hookrightarrow f) 0 0 << >> mkpath",
+            r"mk-unsupported-command:\hookrightarrow",
         ),
         (
             r"(a \\aleph b) 0 0 << >> mkpath",
@@ -250,6 +243,56 @@ fn unsupported_tex_fails_with_an_error_that_names_it() {
             "{src}: expected {expect:?} in the error, got {report}"
         );
     }
+}
+
+/// Issues #934 and #935: the logic, set and geometry symbols and the three
+/// alphabets lay out; `\mathbb` and `\mathcal` name a lowercase letter
+/// they cannot draw; an alphabet never outlives the formula that stopped
+/// inside it; `top` and `bot` stay plain words in a subscript.
+#[test]
+fn logic_symbols_and_alphabets_lay_out() {
+    let mut it = with_libs();
+    for tex in [
+        r"P \\wedge Q \\land R \\vee S \\lor T",
+        r"\\Gamma \\vdash \\phi \\quad \\Gamma \\nvdash \\psi \\quad M \\models \\phi",
+        r"\\top \\ne \\bot \\quad p \\leftrightarrow q \\quad \\nexists x",
+        r"A \\oplus B \\otimes C \\quad A^\\dagger \\psi^\\ddagger",
+        r"S = \\emptyset = \\varnothing \\quad \\angle ABC \\cong \\triangle DEF",
+        r"\\Re z + i \\Im z",
+        r"\\mathbf{v}_i \\cdot \\mathbf{A}^{-1} \\mathbf{x2} \\in \\mathbb{R}^n",
+        r"\\mathbb{NZQRC} \\quad \\mathcal{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+        r"\\mathbf{\\alpha + max} \\quad \\mathcal{L} = T - V \\quad \\mathcal{H}\\psi",
+        r"x_{top} + y_{bot}",
+        "∧ ∨ ⊢ ⊬ ⊨ ⊤ ↔ ∄ ⊕ ⊗ † ‡ ∅ ∠ △ ≅ ℜ ℑ ℂ ℍ ℕ ℙ ℚ ℝ ℤ",
+    ] {
+        run(&mut it, &format!("({tex}) << >> mkmetrics /Width get"));
+        let w = it.pop().expect("a width").repr();
+        assert!(w.parse::<f64>().is_ok_and(|w| w > 0.0), "{tex}: width {w}");
+    }
+    // \mathbf is the letter re-traced: a little wider than the plain one
+    let width = |it: &mut Interp, tex: &str| {
+        run(
+            it,
+            &format!("({tex}) << /Irregular 0 >> mkmetrics /Width get"),
+        );
+        it.pop().expect("a width").repr().parse::<f64>().unwrap()
+    };
+    assert!(width(&mut it, r"\\mathbf{x}") > width(&mut it, r"\\mathrm{x}"));
+    for (tex, expect) in [
+        (r"\\mathbb{x}", "mk-mathbb-takes-capital-letters:x"),
+        (r"\\mathcal{2}", "mk-mathcal-takes-capital-letters:2"),
+    ] {
+        let mut it = with_libs();
+        let err = it
+            .run_str(&format!("({tex}) 0 0 << >> mkpath"))
+            .expect_err(tex);
+        assert!(it.error_report(&err).contains(expect), "{tex}");
+    }
+    // a formula that stops inside \mathbb leaves no alphabet behind
+    let mut fresh = with_libs();
+    let plain = width(&mut fresh, "x + 1");
+    run(&mut it, r"{ (\\mathbb{R x}) 0 0 << >> mkpath } stopped pop");
+    assert_eq!(width(&mut it, "x + 1"), plain);
 }
 
 /// Issue #378: an ASCII `*` inside `\text{}`, `\mathrm{}` and
@@ -314,7 +357,7 @@ fn every_example_tag_runs_clean() {
         .filter_map(|l| l.strip_prefix("% @example:"))
         .map(str::trim)
         .collect();
-    assert_eq!(examples.len(), 7, "one example per public procedure");
+    assert_eq!(examples.len(), 8, "one example per public procedure");
     for example in examples {
         let mut it = Interp::with_page(300, 200).expect("page");
         it.run_str(example)
@@ -457,8 +500,7 @@ fn assert_gs_same_numbers(tex: &str, body: &str) {
 /// seed.
 #[test]
 fn ghostscript_builds_the_same_layout_and_path() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_specimen.ps", "1000x1960");
@@ -470,8 +512,7 @@ fn ghostscript_builds_the_same_layout_and_path() {
 /// substack and \pmod lay out to the same box and path as in pscat.
 #[test]
 fn ghostscript_builds_the_same_structures() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_structures.ps", "1000x1320");
@@ -497,8 +538,7 @@ fn the_structures_specimen_renders_with_ink_and_a_clean_stack() {
 /// and path as in pscat.
 #[test]
 fn ghostscript_builds_the_same_mod_pod_and_side_labels() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_columns_braces.ps", "1000x1180");
@@ -524,8 +564,7 @@ fn the_columns_and_braces_specimen_renders_with_ink_and_a_clean_stack() {
 /// points as in pscat.
 #[test]
 fn ghostscript_builds_the_same_mkbrace() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_same_numbers(

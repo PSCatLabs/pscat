@@ -27,6 +27,50 @@ use crate::font::FontState;
 /// US Letter in points — the default page when none is specified.
 pub const DEFAULT_PAGE: (u32, u32) = (612, 792);
 
+/// Where the page size came from (#921, #909). Precedence, highest first:
+/// an explicit size (`--page`, a tool's width/height, or any
+/// [`Interp::with_page`](crate::Interp::with_page) caller), then the
+/// program's own `setpagedevice /PageSize`, then the file's
+/// `%%BoundingBox`, then [`DEFAULT_PAGE`]. Kept on the device so
+/// `setpagedevice` can tell a size it may replace from one it must not.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PageSizeSource {
+    /// [`DEFAULT_PAGE`]: nothing chose a size.
+    #[default]
+    Default,
+    /// The file's `%%BoundingBox` or `%%HiResBoundingBox`.
+    BoundingBox,
+    /// The program's `setpagedevice /PageSize` (#909).
+    PageDevice,
+    /// The caller's explicit size: it always wins.
+    Explicit,
+}
+
+/// The installed page device (#909): what `setpagedevice` makes and
+/// `currentpagedevice` reports. The graphics state holds the one it was
+/// made under, so `grestore`, `restore` and `setgstate` bring an older
+/// device back, as in Ghostscript: a page size set inside `gsave` ...
+/// `grestore` does not outlive it. Compared by `Rc` identity: every
+/// `setpagedevice` makes a new one, even with the same size.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PageDevice {
+    /// `/PageSize` in points, as asked for (`currentpagedevice` reports it).
+    pub(crate) size: (f64, f64),
+    /// The canvas, in device pixels.
+    pub(crate) px: (u32, u32),
+    /// The default user-space point at the page's lower-left corner.
+    pub(crate) origin: (f32, f32),
+    pub(crate) source: PageSizeSource,
+}
+
+/// The device rows band `index` of `count` owns on a page `height` pixels
+/// tall (`pscat --bands`, #736): `floor(i*H/K) .. floor((i+1)*H/K)`.
+pub fn band_rows_of(index: u32, count: u32, height: u32) -> (u32, u32) {
+    let at = |i: u32| (u64::from(i) * u64::from(height) / u64::from(count.max(1))) as u32;
+    (at(index), at(index + 1))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DevPoint {
     pub x: f32,
@@ -765,6 +809,10 @@ pub struct GraphicsState {
     /// Part of the graphics state, so `grestore` (or `setgstate`) brings
     /// back the page device the matching `gsave` had.
     null_device: bool,
+    /// The page device this state was made under (#909). A restored state
+    /// whose device is not the current one reinstalls it
+    /// ([`Gfx::sync_device`]).
+    device: std::rc::Rc<PageDevice>,
 }
 
 impl GraphicsState {
@@ -825,6 +873,25 @@ pub struct Gfx {
     /// The device CTM before any program transforms — what `initmatrix`
     /// restores and `defaultmatrix` reports.
     base_ctm: Transform,
+    /// Device pixels per point (dpi / 72), fixed for the run.
+    scale: f32,
+    /// The installed page device: its size, origin and where the size came
+    /// from (#909). The page origin is `(0, 0)` unless a bounding box with
+    /// another origin set the page (#921).
+    device: std::rc::Rc<PageDevice>,
+    /// The page device the job started on: a `grestore` or `grestoreall`
+    /// with nothing saved comes back to the job's initial state (#505),
+    /// and that holds this device, as in gs (#909).
+    initial_device: std::rc::Rc<PageDevice>,
+    /// Set when a page device is installed; [`Gfx::take_device_changed`]
+    /// reads and clears it.
+    device_changed: bool,
+    /// `--max-memory` as `(heap base, max bytes)`, so a canvas a restore
+    /// would bring back is refused before it is made (#909).
+    mem_budget: Option<(usize, usize)>,
+    /// A canvas was refused for the budget; the interpreter's next limits
+    /// check stops the run with `limitexceeded (memory)`.
+    mem_refused: bool,
     /// Set by anything that paints; the window loop presents and clears it.
     pub dirty: bool,
     /// Set by `showpage`; lets the front end know the program considers
@@ -857,17 +924,22 @@ pub struct Gfx {
     suppress_paint: u32,
     /// SVG export recorder (`--svg`); mirrors every paint when on.
     svg: Option<Box<crate::svg::SvgRecorder>>,
+    /// How SVG output writes standard-font text (`--svg-text`, #1119).
+    /// The recorder never needs it: `paint_glyph` decides per glyph.
+    svg_text: crate::svg::SvgText,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
     /// Scratch coverage mask for [`Gfx::fill_coverage`], page-sized and
     /// reused across fills; only the filled path's pixel bounds are
     /// written (and read) each time.
     coverage: Option<tiny_skia::Mask>,
-    /// `pscat --bands` (#736): the device rows `top..bottom` this run's
-    /// page is composited from. Work that only touches other rows may be
-    /// skipped; today only image rasterization does. Not a PostScript
-    /// clip: `clippath` and every other operator still see the full page.
-    band_rows: Option<(u32, u32)>,
+    /// `pscat --bands` (#736): this run is band `index` of `count`, so its
+    /// page is composited from [`band_rows_of`] of the page's height (which
+    /// `setpagedevice` can change, #909). Work that only touches other rows
+    /// may be skipped; today only image rasterization does. Not a
+    /// PostScript clip: `clippath` and every other operator still see the
+    /// full page.
+    band: Option<(u32, u32)>,
 }
 
 impl Gfx {
@@ -886,11 +958,26 @@ impl Gfx {
         // CTM flips the axis so user (0,0) is the bottom-left corner, as
         // the LaserWriter intended.
         let base_ctm = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, height as f32);
+        let device = std::rc::Rc::new(PageDevice {
+            size: (
+                f64::from(width) / f64::from(scale),
+                f64::from(height) / f64::from(scale),
+            ),
+            px: (width, height),
+            origin: (0.0, 0.0),
+            source: PageSizeSource::Default,
+        });
         Some(Gfx {
             pixmap,
-            state: Self::initial_state(base_ctm),
+            state: Self::initial_state(base_ctm, device.clone()),
             saved: Vec::new(),
             base_ctm,
+            scale,
+            initial_device: device.clone(),
+            device,
+            device_changed: false,
+            mem_budget: None,
+            mem_refused: false,
             dirty: false,
             page_shown: false,
             completed: Vec::new(),
@@ -899,24 +986,32 @@ impl Gfx {
             background: tiny_skia::Color::WHITE,
             painted_since_page: false,
             svg: None,
+            svg_text: crate::svg::SvgText::Paths,
             pdf: None,
             suppress_paint: 0,
             coverage: None,
-            band_rows: None,
+            band: None,
         })
     }
 
-    /// Mark this run as one band of a `pscat --bands` render (#736): only
-    /// device rows `top..bottom` of each page will be kept, so painting
-    /// that falls wholly outside them may be skipped. Pixels inside the
-    /// rows come out exactly as without a band.
-    pub fn set_band_rows(&mut self, top: u32, bottom: u32) {
-        self.band_rows = Some((top, bottom));
+    /// Mark this run as band `index` of `count` of a `pscat --bands` render
+    /// (#736): only device rows [`band_rows_of`] of each page will be kept,
+    /// so painting that falls wholly outside them may be skipped. Pixels
+    /// inside the rows come out exactly as without a band. The rows follow
+    /// the page's height when `setpagedevice` changes it (#909).
+    pub fn set_band(&mut self, index: u32, count: u32) {
+        self.band = Some((index, count));
     }
 
-    /// The rows set by [`set_band_rows`](Self::set_band_rows), if any.
+    /// This run's band, `(index, count)`, if it is one.
+    pub fn band(&self) -> Option<(u32, u32)> {
+        self.band
+    }
+
+    /// The device rows this band keeps of the current page, if a band.
     pub(crate) fn band_rows(&self) -> Option<(u32, u32)> {
-        self.band_rows
+        self.band
+            .map(|(index, count)| band_rows_of(index, count, self.pixmap.height()))
     }
 
     pub fn state(&self) -> &GraphicsState {
@@ -961,6 +1056,12 @@ impl Gfx {
         ))
     }
 
+    /// The current point as stored, in device space (`arcto` works from
+    /// it exactly, where `current_user_point` adds inverse-CTM rounding).
+    pub(crate) fn current_device_point(&self) -> Option<DevPoint> {
+        self.state.path.current()
+    }
+
     /// The user-space current point, or `nocurrentpoint`.
     pub fn current_user_point(&self) -> Result<(f64, f64), PsError> {
         let p = self.state.path.current().ok_or(PsError::NoCurrentPoint)?;
@@ -979,6 +1080,199 @@ impl Gfx {
 
     pub fn set_ctm(&mut self, m: Transform) {
         self.state.ctm = m;
+    }
+
+    /// Put default user-space point (`llx`, `lly`) at the page's
+    /// lower-left corner, as a bounding box with a non-zero origin asks
+    /// (#921). Part of the default matrix, so `initmatrix`, `initgraphics`
+    /// and the reset after `showpage` keep it. Call before the program runs.
+    pub fn set_page_origin(&mut self, llx: f32, lly: f32) {
+        let origin = self.device.origin;
+        let (dx, dy) = (llx - origin.0, lly - origin.1);
+        if dx == 0.0 && dy == 0.0 {
+            return;
+        }
+        self.base_ctm = self.base_ctm.pre_translate(-dx, -dy);
+        self.state.ctm = self.state.ctm.pre_translate(-dx, -dy);
+        self.describe_device(|d| d.origin = (llx, lly));
+    }
+
+    /// The default user-space point at the page's lower-left corner.
+    pub fn page_origin(&self) -> (f32, f32) {
+        self.device.origin
+    }
+
+    /// Record where the page size came from ([`PageSizeSource`]). Call
+    /// before the program runs.
+    pub fn set_page_size_source(&mut self, source: PageSizeSource) {
+        self.describe_device(|d| d.source = source);
+    }
+
+    /// Where the page size came from.
+    pub fn page_size_source(&self) -> PageSizeSource {
+        self.device.source
+    }
+
+    /// The page size in points: what `currentpagedevice` reports as
+    /// `/PageSize` (#909).
+    pub fn page_size(&self) -> (f64, f64) {
+        self.device.size
+    }
+
+    /// Record the page's size in points, when the canvas was sized from
+    /// whole points rather than pixels (`Interp::with_page_scaled`).
+    pub(crate) fn set_page_points(&mut self, width: f64, height: f64) {
+        self.describe_device(|d| d.size = (width, height));
+    }
+
+    /// Device pixels per point (dpi / 72).
+    pub(crate) fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    pub(crate) fn page_device(&self) -> std::rc::Rc<PageDevice> {
+        self.device.clone()
+    }
+
+    /// Change how the current device is described without installing a
+    /// new one: the canvas and the page stay. Before the program runs only,
+    /// when no saved state can hold the old description.
+    fn describe_device(&mut self, f: impl FnOnce(&mut PageDevice)) {
+        let mut d = (*self.device).clone();
+        f(&mut d);
+        let d = std::rc::Rc::new(d);
+        if std::rc::Rc::ptr_eq(&self.initial_device, &self.device) {
+            self.initial_device = d.clone();
+        }
+        for s in &mut self.saved {
+            if std::rc::Rc::ptr_eq(&s.device, &self.device) {
+                s.device = d.clone();
+            }
+        }
+        self.state.device = d.clone();
+        self.device = d;
+    }
+
+    /// Install `device` as the page device (#909): a new canvas when the
+    /// size changes, erased either way, and the default matrix rebuilt for
+    /// its size and origin. Marks not yet shown are discarded, not emitted
+    /// (the PLRM's `EndPage` reason 2 returns false by default), so the
+    /// page counts as unpainted. The graphics state is the caller's to
+    /// reset. Fails, changing nothing, if the canvas cannot be allocated.
+    pub(crate) fn install_device(
+        &mut self,
+        device: std::rc::Rc<PageDevice>,
+    ) -> Result<(), PsError> {
+        let (w, h) = device.px;
+        if (w, h) != (self.pixmap.width(), self.pixmap.height()) {
+            if let Some((base, max)) = self.mem_budget {
+                let bytes = w as usize * h as usize * 4;
+                let grown = crate::memtrack::live_bytes().saturating_sub(base);
+                if grown.saturating_add(bytes) > max {
+                    self.mem_refused = true;
+                    return Err(PsError::MemoryExceeded);
+                }
+            }
+            self.pixmap = Pixmap::new(w, h).ok_or(PsError::ConfigurationError)?;
+            self.coverage = None;
+            if let Some(svg) = &mut self.svg {
+                svg.set_size(w, h);
+            }
+            if let Some(pdf) = &mut self.pdf {
+                pdf.set_size(w, h);
+            }
+        }
+        self.pixmap.fill(self.background);
+        if let Some(svg) = &mut self.svg {
+            svg.erase();
+        }
+        if let Some(pdf) = &mut self.pdf {
+            pdf.erase();
+        }
+        self.base_ctm = self.default_matrix_of(&device);
+        self.state.device = device.clone();
+        self.device = device;
+        self.pending_erase = false;
+        self.painted_since_page = false;
+        self.dirty = true;
+        self.device_changed = true;
+        Ok(())
+    }
+
+    /// The default matrix of a page device: y up from its lower-left
+    /// corner, at its origin, at this run's scale.
+    fn default_matrix_of(&self, device: &PageDevice) -> Transform {
+        let (scale, (llx, lly)) = (self.scale, device.origin);
+        Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, device.px.1 as f32)
+            .pre_translate(-llx, -lly)
+    }
+
+    /// The graphics state the job started in, on the device it started
+    /// on (#505, #909).
+    fn job_initial_state(&self) -> GraphicsState {
+        let device = self.initial_device.clone();
+        let ctm = if std::rc::Rc::ptr_eq(&device, &self.device) {
+            self.base_ctm
+        } else {
+            self.default_matrix_of(&device)
+        };
+        Self::initial_state(ctm, device)
+    }
+
+    /// After a graphics state came back (`grestore`, `restore`,
+    /// `setgstate`, a glyph's restore): if it was made under another page
+    /// device, reinstall that one, as Ghostscript does, so
+    /// `gsave << /PageSize ... >> setpagedevice ... grestore` leaves the
+    /// page it found (erased, as gs leaves it). The state's own CTM and
+    /// clip were made for that device, so they stay as restored.
+    pub(crate) fn sync_device(&mut self) {
+        if std::rc::Rc::ptr_eq(&self.state.device, &self.device) {
+            return;
+        }
+        let device = self.state.device.clone();
+        let resized = device.px != self.device.px;
+        if self.install_device(device).is_ok() {
+            // gs 10.07.1: a device of another size comes back with the
+            // default matrix and no clip; the rest of the restored state
+            // stays (same size: all of it stays).
+            if resized {
+                // `base_ctm()`: identity when the restored state is on
+                // `nulldevice` (gs).
+                self.state.ctm = self.base_ctm();
+                self.state.clip = None;
+            }
+        } else {
+            // No canvas for the old size: keep the current device, and make
+            // the restored state agree with it. Its CTM and clip were made
+            // for the other canvas, so they go back to the device's defaults
+            // (a clip mask of another size would be read out of bounds).
+            self.state.device = self.device.clone();
+            self.state.ctm = self.base_ctm();
+            self.state.clip = None;
+            self.state.clip_stack.clear();
+        }
+    }
+
+    /// `(heap base, max bytes)` of the run's `--max-memory`, or `None`.
+    pub(crate) fn set_memory_budget(&mut self, budget: Option<(usize, usize)>) {
+        self.mem_budget = budget;
+        self.mem_refused = false;
+    }
+
+    /// Forget a refusal: a new program starts (`Interp::begin_source`).
+    pub(crate) fn clear_memory_refused(&mut self) {
+        self.mem_refused = false;
+    }
+
+    /// Whether a canvas was refused for the budget since the program began.
+    pub(crate) fn memory_refused(&self) -> bool {
+        self.mem_refused
+    }
+
+    /// Whether a page device was installed since the last call (the
+    /// `--bands` host redefines `/BandBBox` then, #909).
+    pub(crate) fn take_device_changed(&mut self) -> bool {
+        std::mem::take(&mut self.device_changed)
     }
 
     pub fn base_ctm(&self) -> Transform {
@@ -1143,7 +1437,10 @@ impl Gfx {
 
     /// Rc clone so the mask can outlive the `&mut self.pixmap` borrow.
     pub(crate) fn clip_mask_data(&self) -> Option<std::rc::Rc<tiny_skia::Mask>> {
+        // Only a mask of the canvas's size: image rasterising indexes it by
+        // the canvas's stride.
         self.clip_mask()
+            .filter(|m| m.width() == self.pixmap.width() && m.height() == self.pixmap.height())
     }
 
     fn clip_mask(&self) -> Option<std::rc::Rc<tiny_skia::Mask>> {
@@ -1435,31 +1732,7 @@ impl Gfx {
                 mask.as_deref(),
             );
             if self.svg.is_some() {
-                let svg_kind = match shading.kind {
-                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                        crate::svg::ShKind::Axial {
-                            x0: x0 as f32,
-                            y0: y0 as f32,
-                            x1: x1 as f32,
-                            y1: y1 as f32,
-                        }
-                    }
-                    crate::shading::ShadingKind::Radial {
-                        x0,
-                        y0,
-                        r0,
-                        x1,
-                        y1,
-                        r1,
-                    } => crate::svg::ShKind::Radial {
-                        x0: x0 as f32,
-                        y0: y0 as f32,
-                        r0: r0 as f32,
-                        x1: x1 as f32,
-                        y1: y1 as f32,
-                        r1: r1 as f32,
-                    },
-                };
+                let svg_kind = sh_kind(shading.kind, 1.0);
                 let svg_ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 // The same device-space path the raster painted with
@@ -1473,37 +1746,111 @@ impl Gfx {
                 }
             }
             if self.pdf.is_some() {
-                // PDF export approximates a shading as a flat fill in
-                // the ramp's *position-weighted* average color — real
-                // PDF shading dictionaries need pattern-colorspace
-                // machinery this exporter doesn't have; documented gap
-                // (docs/dev/HANDOFF.md). Weighted by the position gap between
-                // consecutive stops (trapezoidal integration), not a
-                // flat mean over the stop list: stops aren't evenly
-                // spaced (build_stops packs extra ones at stitching
-                // bounds and domain-clamp corners), so an unweighted
-                // mean lets a tiny sliver of stops dominate the
-                // average — e.g. a ramp that's red through position
-                // 0.99 then blue only has ~4 stops near that boundary,
-                // and an unweighted mean renders 50/50 purple instead
-                // of ~99% red (caught by a Codex review). Stops always
-                // span the full [0,1] position range (`sample_positions`
-                // starts at 0.0 and ends at 1.0), so the weights here
-                // already sum to 1.0 with no separate normalization.
-                let (mut sr, mut sg, mut sb) = (0.0f32, 0.0f32, 0.0f32);
-                for w in shading.stops.windows(2) {
-                    let (p0, r0, g0, b0) = w[0];
-                    let (p1, r1, g1, b1) = w[1];
-                    let width = p1 - p0;
-                    sr += (r0 + r1) * 0.5 * width;
-                    sg += (g0 + g1) * 0.5 * width;
-                    sb += (b0 + b1) * 0.5 * width;
+                // A real PDF shading (#1028): the same stops under the
+                // same CTM. Geometry whose characteristic length is under
+                // SAFE_LEN is rescaled, with the inverse folded into the
+                // `cm`, exactly as for the raster above: the composed map
+                // is unchanged, and the numbers the PDF carries stay in a
+                // range every reader holds precisely.
+                // The same k as the raster's (same f32 arithmetic), so the
+                // degenerate test below sees the numbers tiny-skia saw.
+                let char_len = match shading.kind {
+                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
+                        let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+                        fmath::hypotf(x1 - x0, y1 - y0)
+                    }
+                    crate::shading::ShadingKind::Radial {
+                        x0,
+                        y0,
+                        r0,
+                        x1,
+                        y1,
+                        r1,
+                    } => {
+                        let (x0, y0, r0, x1, y1, r1) = (
+                            x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
+                        );
+                        r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
+                    }
+                };
+                let k = if char_len > 0.0 && char_len < SAFE_LEN {
+                    SAFE_LEN / char_len
+                } else {
+                    1.0
+                };
+                let mut kind = sh_kind(shading.kind, k);
+                // Two (nearly) coincident circles of (nearly) one radius:
+                // tiny-skia's degenerate case, decided with its own
+                // tolerance (`DEGENERATE_THRESHOLD`, 2^-15, on the rescaled
+                // numbers). It paints the first stop's colour inside the end
+                // circle and the last one outside, with a hard edge; a PDF
+                // reader paints those circles as nothing (CoreGraphics) or
+                // just a disk (gs). Record the raster's picture exactly: a
+                // radial from the centre out to twice the radius, constant
+                // first colour to the halfway bound, then constant last
+                // colour, padded (Codex reviews of #1028).
+                const DEGENERATE: f32 = 1.0 / (1 << 15) as f32;
+                let fallback;
+                let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
+                // The scale the recorded geometry carries; the `cm` undoes it.
+                let mut k_pdf = k;
+                if let crate::svg::ShKind::Radial {
+                    x0,
+                    y0,
+                    r0,
+                    x1,
+                    y1,
+                    r1,
+                } = kind
+                    && fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE
+                    && (r0 - r1).abs() <= DEGENERATE
+                    && r1 > DEGENERATE
+                    && let (Some(first), Some(last)) = (stops.first(), stops.last())
+                {
+                    // Twice the radius, written at half scale (the `cm`
+                    // doubles it back), so a radius near f32::MAX stays
+                    // finite.
+                    kind = crate::svg::ShKind::Radial {
+                        x0: x0 * 0.5,
+                        y0: y0 * 0.5,
+                        r0: 0.0,
+                        x1: x0 * 0.5,
+                        y1: y0 * 0.5,
+                        r1,
+                    };
+                    k_pdf = k * 0.5;
+                    let (f, l) = ((first.1, first.2, first.3), (last.1, last.2, last.3));
+                    fallback = [
+                        (0.0, f.0, f.1, f.2),
+                        (0.5, f.0, f.1, f.2),
+                        (0.5, l.0, l.1, l.2),
+                        (1.0, l.0, l.1, l.2),
+                    ];
+                    stops = &fallback;
                 }
-                let avg = (sr, sg, sb);
+                let m = ctm.pre_scale(1.0 / k_pdf, 1.0 / k_pdf);
+                let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+                let region = shading.bbox.map(|_| &path);
+                // An axis that tiny-skia finds degenerate (its tolerance, on
+                // the same f32 numbers: distinct f64 Coords can collapse)
+                // paints the last stop's colour, solid, over the region; a
+                // PDF reader paints such a shading as nothing. Record that
+                // solid fill instead (a Codex review of #1028).
+                let solid = match kind {
+                    crate::svg::ShKind::Axial { x0, y0, x1, y1 }
+                        if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
+                    {
+                        stops.last().map(|l| (l.1, l.2, l.3))
+                    }
+                    _ => None,
+                };
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.fill(&path, FillRule::Winding, avg, comp, &chain);
+                    match solid {
+                        Some(rgb) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
+                        None => pdf.shfill(&kind, pdf_ctm, stops, region, comp, &chain),
+                    }
                 }
             }
             self.dirty = true;
@@ -1774,6 +2121,22 @@ impl Gfx {
         self.svg.is_some() && !self.painting_off()
     }
 
+    /// How SVG output writes text set in the standard fonts (#1119):
+    /// [`SvgText::Paths`](crate::svg::SvgText::Paths), the default, draws
+    /// every glyph as its outline; [`SvgText::Text`](crate::svg::SvgText::Text)
+    /// writes `<text>` elements instead (`pscat --svg-text`). Takes effect
+    /// for glyphs shown after the call, whether recording is already on or
+    /// is turned on later with [`enable_svg`](Self::enable_svg). PNG and
+    /// PDF output are unaffected.
+    pub fn set_svg_text(&mut self, mode: crate::svg::SvgText) {
+        self.svg_text = mode;
+    }
+
+    /// Whether a glyph shown now should reach the SVG recorder as text.
+    pub(crate) fn svg_text_wanted(&self) -> bool {
+        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted()
+    }
+
     /// Turn on PDF recording (`--pdf`).
     pub fn enable_pdf(&mut self) {
         self.pdf = Some(Box::new(crate::pdf::PdfRecorder::new(
@@ -1796,6 +2159,11 @@ impl Gfx {
         if let Some(pdf) = self.pdf.as_mut() {
             pdf.set_info(title, author);
         }
+    }
+
+    /// The PDF recorder, when `--pdf` is on (`pdfmark`, #1032).
+    pub(crate) fn pdf_mut(&mut self) -> Option<&mut crate::pdf::PdfRecorder> {
+        self.pdf.as_deref_mut()
     }
 
     pub(crate) fn pdf_wanted(&self) -> bool {
@@ -1850,15 +2218,25 @@ impl Gfx {
             clip_stack,
             stroke_adjust,
             null_device,
-            ..Self::initial_state(self.base_ctm())
+            ..Self::initial_state(self.base_ctm(), self.device.clone())
         };
+    }
+
+    /// Leave `nulldevice` for the page device: `setpagedevice` (#909). The
+    /// `clipsave` entries stay, as in gs, unless `resized`: their masks
+    /// were made for the old canvas, so a new size drops them.
+    pub(crate) fn leave_null_device(&mut self, resized: bool) {
+        self.state.null_device = false;
+        if resized {
+            self.state.clip_stack.clear();
+        }
     }
 
     /// The graphics state a job starts in: the device CTM, black
     /// DeviceGray, default line parameters, no font, no clip, no current
     /// path and no `clipsave` entries. `grestore` and `grestoreall` with
     /// nothing saved come back to it (#505).
-    fn initial_state(ctm: Transform) -> GraphicsState {
+    fn initial_state(ctm: Transform, device: std::rc::Rc<PageDevice>) -> GraphicsState {
         GraphicsState {
             ctm,
             rgb: (0.0, 0.0, 0.0),
@@ -1879,6 +2257,7 @@ impl Gfx {
             clip: None,
             clip_stack: Vec::new(),
             null_device: false,
+            device,
         }
     }
 
@@ -1906,6 +2285,7 @@ impl Gfx {
     pub fn grestore(&mut self) {
         if let Some(s) = self.saved.pop() {
             self.state = s;
+            self.sync_device();
         }
     }
 
@@ -1925,9 +2305,10 @@ impl Gfx {
             }
             _ => match self.saved.pop() {
                 Some(s) => self.state = s,
-                None => self.state = Self::initial_state(self.base_ctm),
+                None => self.state = self.job_initial_state(),
             },
         }
+        self.sync_device();
     }
 
     /// `grestoreall` with no save active: pop everything and come back to
@@ -1935,7 +2316,8 @@ impl Gfx {
     /// `gsave`'s copy.
     pub(crate) fn grestore_all_bottom(&mut self) {
         self.saved.clear();
-        self.state = Self::initial_state(self.base_ctm);
+        self.state = self.job_initial_state();
+        self.sync_device();
     }
 
     pub fn set_rgb(&mut self, r: f64, g: f64, b: f64) {
@@ -2087,6 +2469,42 @@ impl Gfx {
         }
     }
 
+    /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that the
+    /// SVG recorder takes as text (#1119): the raster and PDF still get the
+    /// outline, SVG gets the character. `path` may be empty (a space),
+    /// which paints nothing but still places a character in the SVG text.
+    pub(crate) fn paint_glyph(&mut self, path: &PsPath, text: Option<&crate::textrun::GlyphText>) {
+        let Some(g) = text.filter(|_| self.svg_text_wanted()) else {
+            if !path.is_empty() {
+                self.fill_path_direct(path);
+            }
+            return;
+        };
+        let skia = path.to_skia();
+        if skia.is_none() && self.pending_erase {
+            // A blank glyph opening a page would otherwise land on the old
+            // page's SVG body, which the erase is about to clear, or start
+            // a page that has no art. It draws nothing, so drop it.
+            return;
+        }
+        if let Some(p) = &skia {
+            self.prepare_paint();
+            self.fill_coverage(p, FillRule::Winding);
+        }
+        let comp = self.composite();
+        let rgb = self.state.rgb;
+        let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+        if let Some(svg) = &mut self.svg {
+            svg.glyph(g, rgb, comp, &chain);
+        }
+        if skia.is_some() {
+            if let Some(pdf) = &mut self.pdf {
+                pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+            }
+            self.dirty = true;
+        }
+    }
+
     /// Splice a glyph outline into the current path (`charpath`).
     pub(crate) fn append_path(&mut self, path: &PsPath) {
         self.state.path.extend_from(path);
@@ -2115,6 +2533,7 @@ impl Gfx {
     pub(crate) fn restore_glyph_snapshot(&mut self, depth: usize, state: Box<GraphicsState>) {
         self.saved.truncate(depth);
         self.state = *state;
+        self.sync_device();
     }
 
     /// True while marking operators must leave page and recorders alone:
@@ -2206,7 +2625,103 @@ impl Gfx {
             Some((depth, state)) if self.saved.len() <= depth => Some(state),
             _ => self.saved.last(),
         };
-        self.state.clip = outer.and_then(|s| s.clip.clone());
+        let Some(outer) = outer else {
+            // The bottom level: the job's initial state, with no clip, on
+            // the device the job started on.
+            self.state.clip = self.fit_clip(None, self.initial_device.px);
+            return;
+        };
+        // Under `nulldevice` the level's clip was empty whatever its `clip`
+        // says: the null device has no area, a 0x0 page here.
+        let from = if outer.null_device && !self.state.null_device {
+            (0, 0)
+        } else {
+            outer.device.px
+        };
+        let clip = outer.clip.clone();
+        // The level may have started on another page device (#909): the clip
+        // it started with is then that device's, remade for this canvas.
+        self.state.clip = self.fit_clip(clip, from);
+    }
+
+    /// A clip made on a canvas of `from` pixels, for the current canvas
+    /// (#909). On the same size it is itself. Otherwise it is what gs
+    /// keeps: the old page's rectangle (its implicit clip) intersected with
+    /// the chain's device-space paths, rasterised again on this canvas.
+    fn fit_clip(&self, clip: Option<ClipState>, from: (u32, u32)) -> Option<ClipState> {
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if from == (w, h) {
+            return clip;
+        }
+        let mut chain = Vec::new();
+        let mut link = clip.as_ref().map(|c| &c.node);
+        while let Some(node) = link {
+            chain.push(node.clone());
+            link = node.parent.as_ref();
+        }
+        let mut page = PsPath::default();
+        let (fw, fh) = (from.0 as f32, from.1 as f32);
+        page.move_to(DevPoint { x: 0.0, y: 0.0 });
+        page.line_to(DevPoint { x: fw, y: 0.0 });
+        page.line_to(DevPoint { x: fw, y: fh });
+        page.line_to(DevPoint { x: 0.0, y: fh });
+        page.close();
+        let mut mask = tiny_skia::Mask::new(w, h)?;
+        let mut node = std::rc::Rc::new(ClipNode {
+            path: page,
+            rule: FillRule::Winding,
+            parent: None,
+        });
+        // A chain of rectangles (the common case) becomes one rectangle: its
+        // intersection with the old page, the clip gs keeps. As a single
+        // clip, `clippath` reports it exactly, off this canvas or not, and
+        // the exporters and a later refit get the same bounded geometry.
+        // Any other chain keeps its paths under the old page as the root.
+        if let Some(first) = chain.first()
+            && let Some((x0, y0, x1, y1)) = Self::chain_rect_intersection(first, (fw, fh))
+        {
+            let path = if x0 < x1 && y0 < y1 {
+                Self::rect_path(x0, y0, x1, y1)
+            } else {
+                PsPath::default()
+            };
+            let mut one = tiny_skia::Mask::new(w, h)?;
+            if let Some(skia) = path.to_skia() {
+                one.fill_path(&skia, FillRule::Winding, true, Transform::identity());
+            }
+            return Some(ClipState {
+                mask: std::rc::Rc::new(one),
+                node: std::rc::Rc::new(ClipNode {
+                    path,
+                    rule: FillRule::Winding,
+                    parent: None,
+                }),
+            });
+        }
+        let mut first = true;
+        for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
+            let mut one = tiny_skia::Mask::new(w, h)?;
+            if let Some(path) = link.path.to_skia() {
+                one.fill_path(&path, link.rule, true, Transform::identity());
+            }
+            if first {
+                mask = one;
+                first = false;
+                continue;
+            }
+            for (m, p) in mask.data_mut().iter_mut().zip(one.data()) {
+                *m = ((u16::from(*m) * u16::from(*p)) / 255) as u8;
+            }
+            node = std::rc::Rc::new(ClipNode {
+                path: link.path.clone(),
+                rule: link.rule,
+                parent: Some(node),
+            });
+        }
+        Some(ClipState {
+            mask: std::rc::Rc::new(mask),
+            node,
+        })
     }
 
     /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);
@@ -2622,6 +3137,35 @@ fn to_u8(v: f32) -> u8 {
     (v * 255.0).round() as u8
 }
 
+/// `shfill` geometry for the vector recorders, its lengths multiplied by
+/// `k` (1 for SVG; the SAFE_LEN rescale for PDF, `Gfx::shfill`).
+fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
+    use crate::shading::ShadingKind as K;
+    match kind {
+        K::Axial { x0, y0, x1, y1 } => crate::svg::ShKind::Axial {
+            x0: x0 as f32 * k,
+            y0: y0 as f32 * k,
+            x1: x1 as f32 * k,
+            y1: y1 as f32 * k,
+        },
+        K::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => crate::svg::ShKind::Radial {
+            x0: x0 as f32 * k,
+            y0: y0 as f32 * k,
+            r0: r0 as f32 * k,
+            x1: x1 as f32 * k,
+            y1: y1 as f32 * k,
+            r1: r1 as f32 * k,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2645,6 +3189,7 @@ mod tests {
     ///   cargo test --release watercolor_prototype_b_alpha_sample -- --ignored
     #[test]
     #[ignore = "writes docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png; issue #46 spike prototype, not a regression test"]
+    #[allow(clippy::disallowed_methods)] // a design-doc image, not pscat output
     fn watercolor_prototype_b_alpha_sample() {
         let mut gfx = Gfx::new(620, 620).expect("620x620 pixmap");
 

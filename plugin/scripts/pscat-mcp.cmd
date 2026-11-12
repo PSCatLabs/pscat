@@ -15,26 +15,53 @@ rem PowerShell 7 (a host started from pwsh) can hide its modules.
 set "PSModulePath="
 if /i "%~1"=="--hook" goto ps1
 if /i "%~1"=="--locate" goto ps1
-rem --exe prints an environment variable name, a bar and the rest of the
-rem path below that variable's directory (so only the ASCII rest goes
-rem through the console code page and any user name survives), or a dash,
-rem a bar and the whole path.
+rem --exe prints one line TAG|... for the program (E), one for the output
+rem root if there is one (R), and A|drop when this file was given only the
+rem launcher's own --plugin-* options (they are not passed on), else A|keep.
+rem A program or root is an environment variable name, a bar and the rest of
+rem the path below that variable's directory (so only the ASCII rest goes
+rem through the console code page and any user name survives), or a dash, a
+rem bar and the whole path.
 set "PSCAT_BASE="
 set "PSCAT_REL="
-for /f "usebackq tokens=1,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe ^<NUL`) do (
-  set "PSCAT_BASE=%%a"
-  set "PSCAT_REL=%%b"
+set "PSCAT_RBASE="
+set "PSCAT_RREL="
+set "PSCAT_ARGS="
+for /f "usebackq tokens=1,2,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe %* ^<NUL`) do (
+  if "%%a"=="E" (
+    set "PSCAT_BASE=%%b"
+    set "PSCAT_REL=%%c"
+  )
+  if "%%a"=="R" (
+    set "PSCAT_RBASE=%%b"
+    set "PSCAT_RREL=%%c"
+  )
+  if "%%a"=="A" set "PSCAT_ARGS=%%b"
 )
 if not defined PSCAT_REL exit /b 1
 if not "%PSCAT_BASE%"=="-" goto based
 set "PSCAT_EXE=%PSCAT_REL%"
-goto run
+goto root
 :based
 rem CALL expands the line twice: the first pass leaves the variable's
 rem reference, the second its value.
 call set "PSCAT_EXE=%%%PSCAT_BASE%%%\%PSCAT_REL%"
+:root
+set "PSCAT_ROOT="
+if not defined PSCAT_RREL goto run
+if not "%PSCAT_RBASE%"=="-" goto rbased
+set "PSCAT_ROOT=%PSCAT_RREL%"
+goto run
+:rbased
+call set "PSCAT_ROOT=%%%PSCAT_RBASE%%%\%PSCAT_RREL%"
 :run
-"%PSCAT_EXE%" %*
+if /i "%PSCAT_ARGS%"=="drop" goto rundrop
+if defined PSCAT_ROOT "%PSCAT_EXE%" --out-root "%PSCAT_ROOT%" %*
+if not defined PSCAT_ROOT "%PSCAT_EXE%" %*
+exit /b %ERRORLEVEL%
+:rundrop
+if defined PSCAT_ROOT "%PSCAT_EXE%" --out-root "%PSCAT_ROOT%"
+if not defined PSCAT_ROOT "%PSCAT_EXE%"
 exit /b %ERRORLEVEL%
 :ps1
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" %* <NUL

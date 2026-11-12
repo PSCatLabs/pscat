@@ -8,7 +8,8 @@ and both work against an **installed** pscat (no checkout needed):
   reachable as `skills/` in a checkout), one directory
   per skill, each with a `SKILL.md` (Claude Code's skill format; any agent
   can read it). [`pscat`](../../plugin/skills/pscat/SKILL.md) is the tool
-  reference, [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
+  reference (the common path, with `references/` for sweeps and sheets, handwriting
+  and chalk, typewriter pages, `--bands`/`--profile`, extensions and MCP details), [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
   loop for art (a short page plus `references/` for paint, dry media,
   board math and style packs, read only when needed), and
   [`psviz`](../../plugin/skills/psviz/SKILL.md) paper-ready charts. They call the
@@ -19,14 +20,24 @@ and both work against an **installed** pscat (no checkout needed):
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
   with ten tools (below).
 
-In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step. No separate install is needed
+Which tool to pick for a picture (pscat, an image model, or an LLM's own
+SVG or matplotlib), and how pscat lets a model with no image output of its
+own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+An assistant that wants a map of the docs can read the site's
+[`llms.txt`](https://pscatlabs.github.io/pscat/llms.txt)
+(source: [`site/llms.txt`](../../site/llms.txt)), which links the guides, the skills and the install steps.
+
+In Claude Code the easiest route is the **plugin**, which installs the four
+skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
 on macOS, Linux or Windows: the plugin's launcher (`plugin/scripts/pscat-mcp`;
 `pscat-mcp.sh` on macOS and Linux, `pscat-mcp.cmd` and `pscat-mcp.ps1` on
 Windows) uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and
 otherwise downloads the pinned GitHub release once, checks it against the
 release's `SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin`,
-`~/.cache/pscat/plugin` or `%LOCALAPPDATA%\pscat\plugin`). The same plugin installs in the Claude desktop app
+`~/.cache/pscat/plugin` or `%LOCALAPPDATA%\pscat\plugin`; the stable path of
+the command-line tool is `bin/pscat` there on macOS and Linux). On macOS and
+Linux it also links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`
+when that directory is already on `PATH`, so a plain `pscat` works. The same plugin installs in the Claude desktop app
 (Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
 the server on your computer. In Claude Code:
 
@@ -96,7 +107,11 @@ PIL composite. A one-call typewriter or chart is not added yet.
   or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
   `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack).
+  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
+  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
+  ended in a PostScript error gets the `PostScript error:` block and the
+  partly drawn page but no `Lint:` block: those findings describe where the
+  run stopped, so they would only be consequences of the error (#942).
   `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
   `eval_postscript` also
   return what a *successful* run wrote to stderr (a font falling back to a
@@ -113,8 +128,10 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `jitter`, `align`, `color`, `board` or `false` for a transparent page,
   `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
-  outside mathkit's subset is a one-line `latex_error` naming it (`code`
-  `unsupported_command`, `token` `\oplus`). The input is LaTeX, never
+  outside mathkit's subset is a `latex_error` naming it (`code`
+  `unsupported_command`, `token` `\aleph`); every unsupported command or
+  character comes back in one call, listed in `problems` with its `line`,
+  `column` and byte `offset`. The input is LaTeX, never
   PostScript. By default `latex` is capped at 4096 bytes and the board at 40
   million pixels (`--max-latex-bytes`, `--max-pixels`; see the limits below); svg and pdf go to `out_path` only.
 - `review_sheet` — several programs in, one labelled PNG out: the
@@ -176,7 +193,9 @@ a missing file named by an absolute path outside (the error never says whether
 it exists). `filenameforall`
 lists only inside the roots: an absolute template elsewhere, or one with `..`,
 yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
-Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
+Ghostscript's `-dSAFER` skips files it may not open the same way). `(path) status`,
+the probe before `run`, answers `false` for any of those names, existing or not,
+instead of raising (#952). The bundled
 `lib/` is not a disk read and always works. The server passes the roots to each
 render as the CLI's `--confine-reads` and `--read-root DIR`; the CLI itself reads
 openly unless given those. `read-only` here means the tool writes nothing.
@@ -217,6 +236,19 @@ underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
 A variable takes the same values as its flag, and a flag overrides its
 variable. A value outside the flag's range (or not a whole number) stops the
 server at startup, naming the variable; an empty value counts as unset.
+**The plugin chooses the output root at launch** (#910). Hosts start the
+plugin's server in different places: Claude Code in the project, Codex inside
+the installed plugin, the Claude desktop app sometimes in `/`. So unless its
+arguments name `--out-root`, the launcher passes the first usable one of:
+Claude Code's **Render output folder** plugin option (`output_dir`), `out-root =
+DIR` in `~/.config/pscat/plugin.conf` (any host; the way to set it under
+Codex), the project Claude Code names, the working directory, and `renders/`
+in pscat's per-user data directory. A directory inside the installed plugin, or
+`/`, is never used, so nothing is written into the plugin. The server's
+instructions name the root; when the user's workspace is elsewhere the agent
+saves there and copies the file. The plugin README's "Where saved renders go"
+has the details.
+
 **`--out-root` and `--allow-read` have no `PSCAT_MCP_*` variable, on
 purpose**: these variables set only numeric limits, and none adds a read root
 or moves the output root, so a settings file cannot widen file access through
@@ -230,10 +262,10 @@ settings you trust.
 | `--max-steps N` | 25000000000 | Interpreter steps per program (objects executed, plus loop iterations). Past it the interpreter stops and the call fails with `limit_exceeded`, `limit: "steps"`. `0` = off. |
 | `--max-memory MIB` | 1024 | Heap the program may grow by, in MiB (`limit_exceeded`, `limit: "memory"`). `0` = off. |
 | `--max-input-bytes N` | 1048576 | `source` / `text` size (`input_too_large`). |
-| `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`). 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
+| `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`); for `render_postscript` also in the child, for a page the program's `setpagedevice /PageSize` asks for. 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
 | `--max-latex-bytes N` | 4096 | `chalkboard_math`'s `latex` size (`input_too_large`, with `limit`); about 40 rows. |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
-| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
+| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. The plugin's launcher always chooses one (see below). |
 | `--allow-read DIR` | none (repeatable) | Another directory programs may read from, besides the working directory (not `/`) and the pscat data directories. A directory that doesn't exist stops the server at startup. |
 
 `chalkboard_math` checks its caps before anything runs: `latex` at most
@@ -265,7 +297,9 @@ and `stack` truncate their own output well below that (1024 elements per array,
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
-PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
+PostScript errors `ps_error`, `offending_command`, `line`; for an error while a
+`run` file was being read, `line` is that file's line, `file` names it and
+`run_chain` lists the open `run` frames, innermost first; a program stopped by
 an interpreter limit has kind `limit_exceeded` and a `limit` field).
 
 **`out_path`** is resolved against the output root (relative paths start

@@ -194,6 +194,7 @@ fn an_errordict_handler_re_raises_under_its_own_name() {
         "ioerror",
         "invalidrestore",
         "undefinedresource",
+        "configurationerror",
     ] {
         assert_eq!(
             eval(&format!(
@@ -354,4 +355,44 @@ fn nested_loops_and_exit_only_leaves_the_innermost() {
         // Inner exit fires once (at 4); outer repeat keeps going.
         ["7"]
     );
+}
+
+/// `setpacking` is VM state, like the rest of what `restore` rolls back:
+/// Ghostscript prints `false` for the first program here (#1124).
+#[test]
+fn restore_brings_back_the_packing_mode() {
+    assert_eq!(
+        eval("false setpacking /s save def true setpacking s restore currentpacking"),
+        ["false"]
+    );
+    assert_eq!(
+        eval("true setpacking /s save def false setpacking s restore currentpacking"),
+        ["true"]
+    );
+    // Restoring an outer save discards the newer ones and takes the mode of
+    // the outer save, not the inner one.
+    assert_eq!(
+        eval(
+            "false setpacking /a save def true setpacking /b save def false setpacking \
+             a restore currentpacking"
+        ),
+        ["false"]
+    );
+    assert_eq!(
+        eval(
+            "true setpacking /a save def false setpacking /b save def true setpacking \
+             a restore currentpacking"
+        ),
+        ["true"]
+    );
+    // An inner restore leaves the outer save's mode for the outer restore.
+    assert_eq!(
+        eval(
+            "false setpacking /a save def true setpacking /b save def false setpacking \
+             b restore currentpacking a restore currentpacking"
+        ),
+        ["true", "false"]
+    );
+    // A save that is never restored leaves the mode alone.
+    assert_eq!(eval("true setpacking save pop currentpacking"), ["true"]);
 }

@@ -288,12 +288,7 @@ fn ghostscript_accepts_the_same_bytes() {
     // The strongest possible check on the generator and on our
     // semantics at once: gs must parse the identical font program and
     // report the same stringwidth.
-    let gs_ok = Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs cross-check: ghostscript not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat_minisquare");
@@ -319,4 +314,23 @@ fn ghostscript_accepts_the_same_bytes() {
         (gs_width - 24.0).abs() < 0.01,
         "gs agrees on 2 x 600/1000 x 20pt: {gs_width}"
     );
+}
+
+#[test]
+fn glyphshow_draws_a_charstring_by_name() {
+    // /slant sits at byte 98 ('b'): by name it must paint the same glyph
+    // and advance the same 12 pt; an unknown name falls back to .notdef.
+    let shown = run_with_font("/MiniSquare findfont 20 scalefont setfont 10 10 moveto (b) show");
+    let mut named = run_with_font(
+        "/MiniSquare findfont 20 scalefont setfont 10 10 moveto /slant glyphshow
+         currentpoint pop /nope glyphshow currentpoint pop",
+    );
+    let after_notdef = pop_f64(&mut named);
+    let x = pop_f64(&mut named);
+    assert!((x - 22.0).abs() < 1e-3, "advance {x}");
+    assert!(
+        (after_notdef - 34.0).abs() < 1e-3,
+        ".notdef advance {after_notdef}"
+    );
+    assert_eq!(shown.gfx().pixmap.data(), named.gfx().pixmap.data());
 }

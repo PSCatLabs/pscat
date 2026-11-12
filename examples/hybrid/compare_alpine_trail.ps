@@ -1,0 +1,122 @@
+%!PS
+% The comparison and process sheets for alpine_trail.ps, the reversed
+% hybrid (576 x 864 pt poster plus a 190 pt strip of checked facts).
+% /Panel comes from `pscat sheet --sweep`. From the repository root:
+%
+%   pscat sheet -o docs/guides/hybrid/alpine_trail_compare.png --page 576x1054 \
+%     --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+%     --label "Piz Calderan: (a) image model alone, (b) pscat alone, (c) reversed hybrid" \
+%     examples/hybrid/compare_alpine_trail.ps
+%   pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
+%     --dpi 36 --no-sizes --sweep Panel=4,5,6,7 \
+%     --label "Piz Calderan: one layout, two photographs, one exact layer" \
+%     examples/hybrid/compare_alpine_trail.ps
+%
+% Panels: 1 the image model's whole-poster attempt, 2 pscat alone, 3 the
+% reversed hybrid; 4 the layout reference pscat drew, 5 the photograph the
+% image model made from it, 6 the summer hybrid, 7 the same exact layer on
+% a second photograph made from the same reference.
+%
+% Every fact below is checked: by tests/hybrid_reverse.rs (the QR codes,
+% two decoders, PNG and PDF; the copy of (b) and (c) string by string; the
+% layout drift, measured on the committed images), except that the route
+% corners above the hut were read off both photographs on a 4x grid (the
+% overlay is docs/dev/review-log/pending/1029-hybrid-showcase-polish/
+% alpine-route-trace-overlay.jpg), and for (a)'s copy and
+% chart by reading and measuring the image at full size.
+% This file draws its own panels (it does not share compare_panel.ps).
+
+/PageW 576 def /PageH 864 def
+/Strip 190 def
+/Panel where { pop } { /Panel 3 def } ifelse
+
+/jpeg { % (file) -> the 1024 x 1536 px image over the poster area
+  /jp-file exch def
+  gsave PageW PageH scale /DeviceRGB setcolorspace
+    << /ImageType 1 /Width 1024 /Height 1536 /BitsPerComponent 8
+       /Decode [0 1 0 1 0 1] /ImageMatrix [1024 0 0 -1536 0 1536]
+       /DataSource jp-file (r) file /DCTDecode filter >> image
+  grestore } def
+/run-example { % prelude-proc -> runs alpine_trail.ps with showpage a no-op
+  userdict /showpage {} put exec (examples/hybrid/alpine_trail.ps) run
+  userdict /showpage undef } def
+
+% The text of a fact is set in a Latin-1 Helvetica, for the multiplication
+% sign in a pixel size (a times sign between the numbers, not a letter x).
+/Helvetica-L1 /Helvetica findfont dup length dict copy dup /Encoding ISOLatin1Encoding put
+definefont pop
+
+% A row of the strip: a mark (/ok, /no or /note), then the text.
+/fact { % /mark (text) -
+  exch
+  dup /ok eq { 0.10 0.50 0.20 setrgbcolor /ZapfDingbats 15 selectfont (4) show } if
+  dup /no eq { 0.75 0.12 0.10 setrgbcolor /ZapfDingbats 15 selectfont (8) show } if
+  /note eq { 0.35 setgray /ZapfDingbats 15 selectfont (l) show } if
+  ( ) show
+  0.12 setgray /Helvetica-L1 15 selectfont show } def
+
+/panel { % (heading) [ [/mark (text)] ... ] {draw the poster} -
+  /pn-draw exch def /pn-facts exch def /pn-head exch def
+  gsave 0 Strip translate 0 0 PageW PageH rectclip
+    save pn-draw restore
+  grestore
+  1 setgray 0 0 PageW Strip rectfill
+  0.75 setgray 0.8 setlinewidth newpath 0 Strip moveto PageW Strip lineto stroke
+  0.05 setgray /Helvetica-Bold 19 selectfont
+  18 Strip 32 sub moveto pn-head show
+  /pn-y Strip 62 sub def
+  pn-facts { 18 pn-y moveto aload pop fact /pn-y pn-y 27 sub def } forall } def
+
+Panel 1 eq {
+  ((a) The image model alone) [
+    [/ok (Text: all 26 strings of the brief spelled right)]
+    [/note (Chart: points up to 0.1 km and 30 m off the data)]
+    [/no (QR code: found, but does not decode)]
+    [/note (Raster only: 1024 \327 1536 px, 128 px/in at 8 \327 12 in)]
+  ] { (examples/hybrid/alpine_trail_model.jpg) jpeg } panel
+} if
+Panel 2 eq {
+  ((b) pscat alone) [
+    [/ok (Text: all 26 strings painted exactly as written)]
+    [/ok (Chart and stats computed from the route data)]
+    [/ok (QR code: decodes to the URL, PNG and PDF)]
+    [/note (Look: paintkit over pscat's flat block-in)]
+  ] { { /PscatOnly true def } run-example } panel
+} if
+Panel 3 eq {
+  ((c) Reversed hybrid: pscat layout, photo, pscat) [
+    [/ok (Text and numbers exact, from the program)]
+    [/ok (Labels on pscat's points, route on the photo's trail)]
+    [/ok (Photo's ridge within 1.2 px of the layout, mean)]
+    [/ok (QR code: decodes to the URL, PNG and PDF)]
+  ] { { } run-example } panel
+} if
+Panel 4 eq {
+  ((1) pscat draws the layout) [
+    [/note (Flat colour block-in, 1024 \327 1536 px)]
+    [/note (Every shape at known coordinates)]
+    [/note (Sent to the image model as its input image)]
+  ] { { /Stage /Reference def } run-example } panel
+} if
+Panel 5 eq {
+  ((2) The image model makes it a photo) [
+    [/note (Same reference, prompt asks to keep the layout)]
+    [/ok (Ridge: mean drift 1.2 px, none over 7 px)]
+    [/ok (Edge of the shade: median drift 4 px)]
+  ] { (examples/hybrid/alpine_trail_photo.jpg) jpeg } panel
+} if
+Panel 6 eq {
+  ((3) pscat lays the exact layer on) [
+    [/ok (Labels end on the summits it drew)]
+    [/ok (Route follows the photo's trail and the ridge it drew)]
+    [/ok (Chart, stats, times and QR in the empty shade)]
+  ] { { } run-example } panel
+} if
+Panel 7 eq {
+  ((4) Same layer, a second photo) [
+    [/note (Same reference; autumn morning in the prompt)]
+    [/ok (Ridge: mean drift 1.1 px, none over 7 px)]
+    [/ok (The exact layer unchanged but for the season: subtitle, hut)]
+  ] { { /Season /Autumn def } run-example } panel
+} if
+showpage

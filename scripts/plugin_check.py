@@ -42,9 +42,11 @@ Claude's schema; Codex has no validator. This checks what neither does:
   `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `.mcp.json`
   (https://code.claude.com/docs/en/plugins-reference#environment-variables);
   Codex expands only `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` in `mcp.json` args,
-  env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs). A server both
+  env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs), not Claude
+  Code's `${CLAUDE_PROJECT_DIR}` or `${user_config.KEY}`. A server both
   manifests declare runs the same command and args in both (the plugin
-  root spelled `${CLAUDE_PLUGIN_ROOT}/` for Claude Code, `./` for Codex);
+  root spelled `${CLAUDE_PLUGIN_ROOT}/` for Claude Code, `./` for Codex),
+  apart from the launcher's `--plugin-NAME=VALUE` host bindings (#910);
 - no top-level `bin/` in a plugin directory: claude.ai and Cowork refuse to
   install a plugin that has one
   (https://claude.com/docs/plugins/platform-support);
@@ -285,7 +287,8 @@ def _command_file(cmd, host):
 
 def _check_placeholders(text, host, where, errors):
     """Claude Code expands ${CLAUDE_PLUGIN_ROOT}; Codex's mcp.json only ${PLUGIN_ROOT}."""
-    wrong = r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude" else r"\$\{CLAUDE_PLUGIN_(ROOT|DATA)\}"
+    wrong = (r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude"
+             else r"\$\{(CLAUDE_PLUGIN_(ROOT|DATA)|CLAUDE_PROJECT_DIR|user_config\.\w+)\}")
     m = re.search(wrong, text)
     if m:
         right = "${CLAUDE_PLUGIN_ROOT}" if host == "claude" else "${PLUGIN_ROOT}"
@@ -299,6 +302,16 @@ def _check_servers(servers, rel, errors, need_type=False, plugin_dir=None, host=
         kind = cfg.get("type")
         if need_type and kind not in ("stdio", "streamable-http"):
             errors.append(f"{where}: type {kind!r} must be \"stdio\" or \"streamable-http\"")
+        if host == "codex" and need_type and kind == "stdio":
+            # Codex parses mcp.json against the Agent Plugins schema, whose stdio
+            # servers allow only these keys (deny_unknown_fields in
+            # codex-rs/codex-mcp/src/agent_plugin_config.rs). An extra key such as
+            # `env_vars` (#800) does not reach the server: Codex 0.167 drops the
+            # whole server from the plugin.
+            extra = sorted(set(cfg) - {"type", "command", "args", "env", "cwd"})
+            if extra:
+                errors.append(f"{where}: {', '.join(extra)}: not in the Agent Plugins stdio "
+                              "schema (type, command, args, env, cwd); Codex drops the server")
         cmd = cfg.get("command", "")
         if need_type and kind == "stdio" and not cmd:
             errors.append(f"{where}: a stdio server needs a command")
@@ -415,7 +428,8 @@ def check_plugin(root, plugin_dir, entry, version, errors):
 def _check_same_servers(plugin_dir, rel, codex_servers, errors):
     """A server in both Codex's mcp.json and Claude Code's plugin.json must run
     the same program: same command, same args once each host's root
-    placeholder is normalized."""
+    placeholder is normalized and the launcher's `--plugin-NAME=VALUE` host
+    bindings are set aside."""
     path = os.path.join(plugin_dir, ".claude-plugin", "plugin.json")
     if not os.path.isfile(path):
         return
@@ -428,7 +442,11 @@ def _check_same_servers(plugin_dir, rel, codex_servers, errors):
         return
 
     def norm(cfg):
-        args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])]
+        # `--plugin-NAME=VALUE` arguments are the launcher's host bindings
+        # (#910: Claude Code's userConfig and project directory), which only
+        # one host can expand; the launcher drops them before pscat-mcp.
+        args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])
+                if not re.match(r"--plugin-[a-z-]+=", a)]
         cmd = re.sub(r"^(\$\{(CLAUDE_)?PLUGIN_ROOT\}|\.)/", "${ROOT}/", cfg.get("command") or "")
         return cmd, args
 

@@ -445,19 +445,11 @@ fn the_catalog_lists_the_pigment_entries() {
     }
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// Ghostscript computes the same mixes, to its 32-bit real precision.
 /// Runs locally only: CI has no gs.
 #[test]
 fn ghostscript_agrees_on_the_numbers() {
-    if !gs_available() {
-        eprintln!("skipping gs pigment check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let specs = [
@@ -504,8 +496,7 @@ fn ghostscript_agrees_on_the_numbers() {
 /// The specimen page runs under Ghostscript too (it uses no alpha).
 #[test]
 fn ghostscript_accepts_the_pigment_demo() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")

@@ -174,7 +174,11 @@ impl Default for Config {
 pub const MAX_SEED: i64 = 1_000_000_000;
 
 /// Why a board could not be made.
+///
+/// `#[non_exhaustive]`: PSCatLabs/pscat-mcp matches on this hidden enum, so a
+/// new variant (like `Problems`, #1080) must not break its build again.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ChalkError {
     /// A config key or value is wrong (the message names it).
     Config(String),
@@ -184,17 +188,56 @@ pub enum ChalkError {
     /// The TeX is outside mathkit's subset or malformed. `kind` is
     /// mathkit's error without its `mk-` prefix (`unsupported-command`,
     /// `unsupported-character`, `missing-argument`, ...), `token` what it
-    /// named (`\oplus`, `@`; empty if nothing).
+    /// named (`\aleph`, `@`; empty if nothing).
     Latex {
         /// mathkit's error name, without `mk-`.
         kind: String,
         /// The command, character or environment it named.
         token: String,
     },
+    /// Every unsupported character or command (and the delimiter problems)
+    /// found in one pass, each with where it is in the input (issue #1080).
+    /// Never empty. [`ChalkError::code`] and the first problem's token are
+    /// those of the first one, so a caller that reads only the first error
+    /// still works.
+    Problems(Vec<Problem>),
     /// The PostScript run failed for another reason: the interpreter's
     /// error report (a bug, not bad input).
     Render(String),
 }
+
+/// One problem in the LaTeX, and where it is (issue #1080).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Problem {
+    /// mathkit's error name without `mk-`, or this module's delimiter
+    /// error (`unsupported-command`, `unsupported-character`,
+    /// `unclosed-math-delimiter`, ...).
+    pub kind: String,
+    /// What it named, as written in the input: `\aleph`, `\"`, `ö`.
+    pub token: String,
+    /// The line of the input it is on, counted from 1.
+    pub line: usize,
+    /// Its column on that line, in characters, counted from 1.
+    pub column: usize,
+    /// Its byte offset into the input.
+    pub offset: usize,
+}
+
+impl Problem {
+    /// The problem as one line, without where it is.
+    pub fn message(&self) -> String {
+        let (core, hint) = latex_parts(&self.kind, &self.token);
+        format!("{core}{hint}")
+    }
+
+    /// A stable code for tools, as [`ChalkError::code`].
+    pub fn code(&self) -> String {
+        self.kind.replace('-', "_")
+    }
+}
+
+/// The most problems [`ChalkError::Problems`] prints; the rest are counted.
+const MAX_SHOWN: usize = 20;
 
 impl ChalkError {
     /// A stable code for tools: `config`, `empty`, `render`, or the
@@ -204,6 +247,7 @@ impl ChalkError {
             ChalkError::Config(_) => "config".into(),
             ChalkError::Empty => "empty".into(),
             ChalkError::Latex { kind, .. } => kind.replace('-', "_"),
+            ChalkError::Problems(ps) => ps.first().map_or_else(|| "latex".into(), Problem::code),
             ChalkError::Render(_) => "render".into(),
         }
     }
@@ -214,49 +258,141 @@ impl fmt::Display for ChalkError {
         match self {
             ChalkError::Config(m) => write!(f, "config: {m}"),
             ChalkError::Empty => write!(f, "no formula given"),
-            ChalkError::Latex { kind, token } => match kind.as_str() {
-                "unsupported-command" => write!(
-                    f,
-                    "unsupported LaTeX command {token} (the supported subset is listed at the top of lib/mathkit.ps)"
-                ),
-                "unsupported-character" => {
-                    write!(f, "unsupported character: {token}")?;
-                    // name an invisible or non-ASCII one by its code point
-                    match token.chars().next() {
-                        Some(c) if !c.is_ascii_graphic() => write!(f, " (U+{:04X})", c as u32),
-                        _ => Ok(()),
-                    }
+            ChalkError::Latex { kind, token } => {
+                let (core, hint) = latex_parts(kind, token);
+                write!(f, "{core}{hint}")?;
+                if kind == "unsupported-command" {
+                    write!(f, "{SUBSET_HINT}")?;
                 }
-                "unsupported-environment" => {
-                    write!(f, "unsupported environment: \\begin{{{token}}}")
-                }
-                "unsupported-delimiter" => write!(f, "unsupported delimiter: {token}"),
-                "missing-argument" => write!(f, "{token} is missing an argument"),
-                "unclosed-math-delimiter" => write!(
-                    f,
-                    "math delimiter {token} is never closed: end it with {}",
-                    closer(token)
-                ),
-                "unmatched-math-delimiter" => write!(
-                    f,
-                    "math delimiter {token} closes nothing: each \\( needs a \\) and each \\[ a \\], in order"
-                ),
-                "text-outside-math" => write!(
-                    f,
-                    "text outside the math delimiters ({token}...): a board sets only the formula, so write one formula, or move the words out"
-                ),
-                _ => {
-                    let what = kind.replace('-', " ");
-                    if token.is_empty() {
-                        write!(f, "LaTeX error: {what}")
-                    } else {
-                        write!(f, "LaTeX error: {what}: {token}")
+                Ok(())
+            }
+            ChalkError::Problems(ps) => match ps.as_slice() {
+                [] => write!(f, "LaTeX error"),
+                [p] => {
+                    let (core, hint) = latex_parts(&p.kind, &p.token);
+                    write!(f, "{core} at {}:{}{hint}", p.line, p.column)?;
+                    if p.kind == "unsupported-command" {
+                        write!(f, "{SUBSET_HINT}")?;
                     }
+                    Ok(())
+                }
+                many => {
+                    write!(f, "{} problems in the LaTeX (line:column):", many.len())?;
+                    for p in many.iter().take(MAX_SHOWN) {
+                        write!(f, "\n  {}:{}  {}", p.line, p.column, p.message())?;
+                    }
+                    if many.len() > MAX_SHOWN {
+                        write!(f, "\n  ... and {} more", many.len() - MAX_SHOWN)?;
+                    }
+                    if many.iter().any(|p| p.kind == "unsupported-command") {
+                        write!(f, "\n{}", SUBSET_HINT.trim_start())?;
+                    }
+                    Ok(())
                 }
             },
             ChalkError::Render(r) => write!(f, "render failed: {r}"),
         }
     }
+}
+
+/// Said after an unsupported command.
+const SUBSET_HINT: &str = " (`pscat chalk --help` lists the supported subset)";
+
+/// What a mathkit error (or a delimiter error of this module) says, on one
+/// line and without where it is: the statement, and what to do about it when
+/// there is something to say (as ` (write oe for it)`, or empty).
+fn latex_parts(kind: &str, token: &str) -> (String, String) {
+    let plain = |m: String| (m, String::new());
+    match kind {
+        "unsupported-command" => {
+            let hint = match token {
+                "\\\"" => " (accents are not drawn: write the plain letter, oe for \\\"o)",
+                "\\'" | "\\`" | "\\^" | "\\~" | "\\=" | "\\." => {
+                    " (accents are not drawn: write the plain letter)"
+                }
+                _ => "",
+            };
+            (format!("unsupported LaTeX command {token}"), hint.into())
+        }
+        "unsupported-character" => {
+            let mut m = format!("unsupported character: {token}");
+            let mut hint = String::new();
+            // name an invisible or non-ASCII one by its code point
+            let c = token.chars().next();
+            if let Some(c) = c.filter(|c| !c.is_ascii_graphic()) {
+                m.push_str(&format!(" (U+{:04X})", c as u32));
+                match translit(c) {
+                    Some(t) => hint = format!(" (write {t} for it)"),
+                    None if is_latin_letter(c) => hint = " (write the plain letter)".into(),
+                    None => {}
+                }
+            } else if c == Some('`') {
+                hint = " (TeX's `` opening quote is not drawn: leave it out)".into();
+            }
+            (m, hint)
+        }
+        "unsupported-environment" => plain(format!("unsupported environment: \\begin{{{token}}}")),
+        "unsupported-delimiter" => plain(format!("unsupported delimiter: {token}")),
+        "missing-argument" => plain(format!("{token} is missing an argument")),
+        "bare-word-needs-a-backslash" => plain(format!(
+            "the word {token} needs a backslash (\\{token}) or \\text{{{token}}}"
+        )),
+        "unclosed-math-delimiter" => {
+            let m = format!(
+                "math delimiter {token} is never closed: end it with {}",
+                closer(token)
+            );
+            let hint = if token == "$" {
+                " (LaTeX also stops with \"Missing $ inserted\")"
+            } else {
+                ""
+            };
+            (m, hint.into())
+        }
+        "unmatched-math-delimiter" => plain(format!(
+            "math delimiter {token} closes nothing: each \\( needs a \\) and each \\[ a \\], in order"
+        )),
+        "text-outside-math" => plain(format!(
+            "text outside the math delimiters ({token}...): a board sets only the formula, so put words inside one pair as \\text{{...}} (\\(x \\text{{ where }} y\\)), or move them out"
+        )),
+        _ => {
+            let what = kind.replace('-', " ");
+            plain(if token.is_empty() {
+                format!("LaTeX error: {what}")
+            } else {
+                format!("LaTeX error: {what}: {token}")
+            })
+        }
+    }
+}
+
+/// An ASCII spelling for a letter the board hand does not draw, for the
+/// ones that have a customary one.
+fn translit(c: char) -> Option<&'static str> {
+    Some(match c {
+        'ä' => "ae",
+        'ö' => "oe",
+        'ü' => "ue",
+        'Ä' => "Ae",
+        'Ö' => "Oe",
+        'Ü' => "Ue",
+        'ß' => "ss",
+        'æ' => "ae",
+        'Æ' => "AE",
+        'œ' => "oe",
+        'Œ' => "OE",
+        'ø' => "o",
+        'Ø' => "O",
+        'å' => "a",
+        'Å' => "A",
+        _ => return None,
+    })
+}
+
+/// A letter of Latin-1 or Latin Extended-A/B (an accented letter, as far as
+/// a board is concerned).
+fn is_latin_letter(c: char) -> bool {
+    c.is_alphabetic() && ('\u{c0}'..='\u{24f}').contains(&c)
 }
 
 impl std::error::Error for ChalkError {}
@@ -610,9 +746,84 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
 /// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
-/// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
+/// `cases`). A `*` or a `[length]` after a row break goes at both levels.
+/// Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
-    layout(latex).map(|(rows, _)| rows)
+    layout(latex).map(|(rows, _)| rows.into_iter().map(|r| r.s).collect())
+}
+
+/// Text and, for each of its bytes, where in the input it came from, so a
+/// problem mathkit finds in a row (a byte offset into the row) can be put
+/// back at its line and column in what the caller wrote (issue #1080).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Src {
+    s: String,
+    /// `at[i]` is the byte offset in the input of the character that byte `i`
+    /// of `s` came from; a space put in for a deleted delimiter takes the
+    /// offset of the delimiter.
+    at: Vec<usize>,
+}
+
+impl Src {
+    #[cfg(test)]
+    fn new(text: &str) -> Src {
+        Src {
+            s: text.to_string(),
+            at: (0..text.len()).collect(),
+        }
+    }
+
+    fn push(&mut self, c: char, from: usize) {
+        self.s.push(c);
+        self.at.extend(std::iter::repeat_n(from, c.len_utf8()));
+    }
+
+    /// Append bytes `a..b` of `src`, keeping where each came from.
+    fn push_from(&mut self, src: &Src, a: usize, b: usize) {
+        self.s.push_str(&src.s[a..b]);
+        self.at.extend_from_slice(&src.at[a..b]);
+    }
+
+    fn sub(&self, a: usize, b: usize) -> Src {
+        let mut out = Src::default();
+        out.push_from(self, a, b);
+        out
+    }
+
+    fn trim(&self) -> Src {
+        let front = self.s.len() - self.s.trim_start().len();
+        self.sub(front, front + self.s.trim().len())
+    }
+
+    /// The input offset of byte `k`; one past the last character for the end.
+    fn origin(&self, k: usize) -> usize {
+        self.at
+            .get(k)
+            .copied()
+            .or_else(|| self.at.last().map(|o| o + 1))
+            .unwrap_or(0)
+    }
+}
+
+impl Problem {
+    /// A problem at byte `offset` of `origin`, as a line and a column.
+    fn at(origin: &str, offset: usize, kind: &str, token: &str) -> Problem {
+        let mut offset = offset.min(origin.len());
+        // one past a multi-byte last character is not a character boundary
+        while !origin.is_char_boundary(offset) {
+            offset += 1;
+        }
+        let before = origin.get(..offset).unwrap_or("");
+        let line = 1 + before.matches('\n').count();
+        let column = 1 + before.rsplit('\n').next().map_or(0, |l| l.chars().count());
+        Problem {
+            kind: kind.to_string(),
+            token: token.to_string(),
+            line,
+            column,
+            offset,
+        }
+    }
 }
 
 /// How the rows of a display sit against each other.
@@ -629,22 +840,25 @@ enum RowAlign {
 /// that sets rows decides (`equation` only holds a display): `gather`,
 /// `gather*` and `gathered` centre each row, as LaTeX does; every other
 /// wrapper, or none, aligns the rows on their relations.
-fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
+fn layout(latex: &str) -> Result<(Vec<Src>, RowAlign), ChalkError> {
     let mut row_align = RowAlign::Relation;
-    let mut s = strip_comments(latex)
-        .chars()
+    let comments = strip_comments(latex);
+    let mut s = Src::default();
+    for (i, c) in comments.s.char_indices() {
         // pasted LaTeX: a BOM and zero-width characters go, and every kind
         // of space (newlines, tabs, NBSP, thin spaces) is a plain space,
         // which mathkit ignores as TeX does
-        .filter(|c| !matches!(c, '\u{feff}' | '\u{200b}'..='\u{200d}' | '\u{2060}'))
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .collect::<String>();
+        if matches!(c, '\u{feff}' | '\u{200b}'..='\u{200d}' | '\u{2060}') {
+            continue;
+        }
+        s.push(if c.is_whitespace() { ' ' } else { c }, comments.at[i]);
+    }
     s = drop_labels(&s);
     loop {
         let t = s.trim();
-        let inner = match unwrap_math(t)? {
+        let inner = match unwrap_math(&t, latex)? {
             Some(i) => Some(i),
-            None => strip_env(t).map(|(name, body)| {
+            None => strip_env(&t.s).map(|(name, from, to)| {
                 if !matches!(name, "equation" | "equation*" | "displaymath" | "math") {
                     row_align = if matches!(name, "gather" | "gather*" | "gathered") {
                         RowAlign::Center
@@ -652,21 +866,21 @@ fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
                         RowAlign::Relation
                     };
                 }
-                body.to_string()
+                t.sub(from, to)
             }),
         };
         match inner {
             Some(i) => s = i,
             None => {
-                s = t.to_string();
+                s = t;
                 break;
             }
         }
     }
-    let rows: Vec<String> = split_rows(&s)
-        .into_iter()
-        .map(|r| r.trim().to_string())
-        .filter(|r| !r.is_empty())
+    let rows: Vec<Src> = split_rows(&s)
+        .iter()
+        .map(|r| drop_row_break_options(&r.trim()))
+        .filter(|r| !r.s.is_empty())
         .collect();
     if rows.is_empty() {
         return Err(ChalkError::Empty);
@@ -677,26 +891,26 @@ fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
 /// `%` to the end of the line goes; `\%` (and the `%` of `\\%`'s row
 /// break followed by a comment) is judged by pairing each backslash with
 /// the character after it.
-fn strip_comments(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars();
-    while let Some(c) = it.next() {
+fn strip_comments(text: &str) -> Src {
+    let mut out = Src::default();
+    let mut it = text.char_indices();
+    while let Some((i, c)) = it.next() {
         match c {
             '\\' => {
-                out.push(c);
-                if let Some(n) = it.next() {
-                    out.push(n);
+                out.push(c, i);
+                if let Some((j, n)) = it.next() {
+                    out.push(n, j);
                 }
             }
             '%' => {
-                for n in it.by_ref() {
+                for (j, n) in it.by_ref() {
                     if n == '\n' {
-                        out.push('\n');
+                        out.push('\n', j);
                         break;
                     }
                 }
             }
-            _ => out.push(c),
+            _ => out.push(c, i),
         }
     }
     out
@@ -704,9 +918,10 @@ fn strip_comments(s: &str) -> String {
 
 /// `\label{...}`, `\nonumber` and `\notag` removed (only as whole control
 /// words: `\notagain` stays).
-fn drop_labels(s: &str) -> String {
+fn drop_labels(src: &Src) -> Src {
+    let s = src.s.as_str();
     let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
+    let mut out = Src::default();
     let mut i = 0;
     'scan: while i < b.len() {
         if b[i] == b'\\' {
@@ -737,7 +952,7 @@ fn drop_labels(s: &str) -> String {
                             }
                         }
                     }
-                    out.push(' ');
+                    out.push(' ', src.at[i]);
                     i = j;
                     continue 'scan;
                 }
@@ -745,12 +960,12 @@ fn drop_labels(s: &str) -> String {
             // keep the backslash and the character after it together, so
             // `\\label` (a row break, then the letters) is not a label
             let ch_len = s[i + 1..].chars().next().map_or(0, char::len_utf8);
-            out.push_str(&s[i..i + 1 + ch_len]);
+            out.push_from(src, i, i + 1 + ch_len);
             i += 1 + ch_len;
             continue;
         }
         let ch = s[i..].chars().next().expect("in bounds");
-        out.push(ch);
+        out.push_from(src, i, i + ch.len_utf8());
         i += ch.len_utf8();
     }
     out
@@ -759,18 +974,19 @@ fn drop_labels(s: &str) -> String {
 /// The opening and closing math delimiters, longest opener first.
 const MATH_DELIMS: [(&str, &str); 4] = [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")];
 
-/// A `ChalkError::Latex` for a delimiter problem (`kind` without `mk-`).
-fn delim_error(kind: &str, token: &str) -> ChalkError {
-    ChalkError::Latex {
-        kind: kind.into(),
-        token: token.into(),
-    }
+/// A delimiter problem (`kind` without `mk-`) at byte `at` of `t`, with its
+/// place in the `origin` text.
+fn delim_error(origin: &str, t: &Src, kind: &str, token: &str, at: usize) -> ChalkError {
+    ChalkError::Problems(vec![Problem::at(origin, t.origin(at), kind, token)])
 }
 
-/// `\left`, `\right` and the `\big` family name a fence, so a `\(` or `\]`
-/// right after one is a (mathkit-unsupported) delimiter, not a math pair.
+/// `\left`, `\right` and the `\big` family (`\big`, `\Big`, `\bigg`,
+/// `\Bigg`, each with an `l`, `r` or `m` form) name a fence, so a `\(` or
+/// `\]` right after one is a (mathkit-unsupported) delimiter, not a math
+/// pair (issue #718).
 fn is_fence(word: &str) -> bool {
-    matches!(word, "left" | "right")
+    let size = word.strip_suffix(['l', 'r', 'm']).unwrap_or(word);
+    matches!(word, "left" | "right") || matches!(size, "big" | "Big" | "bigg" | "Bigg")
 }
 
 /// The length of the control word (`\alpha`) or backslash-and-one-character
@@ -787,13 +1003,18 @@ fn escape_len(rest: &str) -> usize {
     }
 }
 
-/// Whether `t` has an unescaped `\(`, `\)`, `\[` or `\]` that is not
-/// right after `\left` or `\right`: never valid mathkit input, so always a
-/// delimiter. (`\\(` is a row break and `(`.)
-fn has_backslash_delim(t: &str) -> bool {
+/// Whether `t` has an unescaped `$`, or a `\(`, `\)`, `\[` or `\]` that is
+/// not right after a fence (`\left`, `\bigl`, ...): a backslash one is never
+/// valid mathkit input, and LaTeX takes an unpaired `$` for an error
+/// ("Missing $ inserted"), so each is a delimiter. (`\\(` is a row break and
+/// `(`; `\$` is an escaped dollar.)
+fn has_delim(t: &str) -> bool {
     let mut rest = t;
     let mut after_fence = false;
     while let Some(c) = rest.chars().next() {
+        if c == '$' {
+            return true;
+        }
         if c != '\\' {
             after_fence &= c == ' ';
             rest = &rest[c.len_utf8()..];
@@ -817,24 +1038,29 @@ fn has_backslash_delim(t: &str) -> bool {
 /// `\(..\)`, one or several pairs, nested or side by side) replaced by
 /// spaces; `None` when it has none to remove. Each backslash is paired with
 /// the character after it, so `\\(`, `\$` and `\right)` are not
-/// delimiters, nor is a `\(` right after `\left` (mathkit names that one).
-/// A `$` in the middle of plain input is left to mathkit, which
-/// ignores it: the scan starts only for input that begins with `$` or holds a
-/// backslash delimiter. Pieces between pairs are joined (`\(a\) + \(b\)` is
-/// `a + b`), but a letter outside any pair and any `{...}` group is an
-/// error: TeX sets it as text, which a board does not (`\text{and}` is fine).
-fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
-    if !t.starts_with('$') && !has_backslash_delim(t) {
+/// delimiters, nor is a `\(` right after a fence (`\left`, `\bigl`, ...:
+/// mathkit names that one). Any other unescaped `$` is a delimiter: LaTeX
+/// treats an unpaired one as an error ("Missing $ inserted"), so `a $ b` and
+/// `x = 5$` are an unclosed `$` (issue #718), not a dollar sign mathkit
+/// ignores. Pieces between pairs are joined (`\(a\) + \(b\)` is `a + b`),
+/// but a letter outside any pair and any `{...}` group is an error: TeX sets
+/// it as text, which a board does not (`\text{and}` is fine). The pairs are
+/// judged first, so a stray delimiter is named before the words around it.
+fn unwrap_math(t: &Src, origin: &str) -> Result<Option<Src>, ChalkError> {
+    if !has_delim(&t.s) {
         return Ok(None);
     }
-    let mut out = String::with_capacity(t.len());
-    // the open pairs, innermost last, as `MATH_DELIMS` indexes
-    let mut open: Vec<usize> = Vec::new();
+    let mut out = Src::default();
+    // the open pairs, innermost last: a `MATH_DELIMS` index and where it began
+    let mut open: Vec<(usize, usize)> = Vec::new();
     // the depth of `{` groups outside every pair
     let mut braces = 0usize;
+    // the first word outside every pair, reported once the pairs are known good
+    let mut stray: Option<ChalkError> = None;
     let mut after_fence = false;
-    let mut rest = t;
+    let mut rest = t.s.as_str();
     while let Some(c) = rest.chars().next() {
+        let at = t.s.len() - rest.len();
         let fenced = after_fence;
         after_fence &= c == ' ';
         if c == '\\' {
@@ -844,30 +1070,30 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
             let word = &rest[..len];
             if !fenced
                 && matches!(word, "\\)" | "\\]")
-                && open.last().is_none_or(|&i| MATH_DELIMS[i].1 != word)
+                && open.last().is_none_or(|&(i, _)| MATH_DELIMS[i].1 != word)
             {
-                return Err(delim_error("unmatched-math-delimiter", word));
+                return Err(delim_error(origin, t, "unmatched-math-delimiter", word, at));
             }
             if fenced || !matches!(word, "\\(" | "\\[" | "\\)" | "\\]") {
                 after_fence = is_fence(&word[1..]);
-                out.push_str(word);
+                out.push_from(t, at, at + len);
                 rest = &rest[len..];
                 continue;
             }
         }
         let closes = open
             .last()
-            .map(|&i| MATH_DELIMS[i].1)
+            .map(|&(i, _)| MATH_DELIMS[i].1)
             .filter(|cl| rest.starts_with(cl));
         if let Some(cl) = closes {
             open.pop();
-            out.push(' ');
+            out.push(' ', t.origin(at));
             rest = &rest[cl.len()..];
             continue;
         }
         if let Some(i) = MATH_DELIMS.iter().position(|d| rest.starts_with(d.0)) {
-            open.push(i);
-            out.push(' ');
+            open.push((i, at));
+            out.push(' ', t.origin(at));
             rest = &rest[MATH_DELIMS[i].0.len()..];
             continue;
         }
@@ -875,19 +1101,32 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
             match c {
                 '{' => braces += 1,
                 '}' => braces = braces.saturating_sub(1),
-                _ if braces == 0 && c.is_ascii_alphabetic() => {
-                    return Err(delim_error("text-outside-math", &rest[..1]));
+                _ if braces == 0 && c.is_ascii_alphabetic() && stray.is_none() => {
+                    let word = rest.chars().take_while(char::is_ascii_alphabetic).count();
+                    stray = Some(delim_error(
+                        origin,
+                        t,
+                        "text-outside-math",
+                        &rest[..word],
+                        at,
+                    ));
                 }
                 _ => {}
             }
         }
-        out.push(c);
+        out.push_from(t, at, at + c.len_utf8());
         rest = &rest[c.len_utf8()..];
     }
-    if let Some(&i) = open.last() {
-        return Err(delim_error("unclosed-math-delimiter", MATH_DELIMS[i].0));
+    if let Some(&(i, at)) = open.last() {
+        return Err(delim_error(
+            origin,
+            t,
+            "unclosed-math-delimiter",
+            MATH_DELIMS[i].0,
+            at,
+        ));
     }
-    Ok(Some(out))
+    stray.map_or(Ok(Some(out)), Err)
 }
 
 /// The control word starting at byte `i` (just after a backslash), if any.
@@ -910,9 +1149,9 @@ fn env_name(s: &str, i: usize) -> Option<(&str, usize)> {
     Some((&inner[..close], start + 1 + close + 1))
 }
 
-/// The name and the inside of a wrapper environment, when its `\begin`
+/// The name and the byte range of the inside of a wrapper environment, when its `\begin`
 /// opens the input and its matching `\end` closes it.
-fn strip_env(t: &str) -> Option<(&str, &str)> {
+fn strip_env(t: &str) -> Option<(&str, usize, usize)> {
     let b = t.as_bytes();
     if !t.starts_with("\\begin") || word_at(b, 1) != b"begin" {
         return None;
@@ -934,7 +1173,7 @@ fn strip_env(t: &str) -> Option<(&str, &str)> {
                 if depth == 0 {
                     let (end_name, after) = env_name(t, i + 4)?;
                     if end_name == name && t[after..].trim().is_empty() {
-                        return Some((name, &t[body_start..i]));
+                        return Some((name, body_start, i));
                     }
                     return None;
                 }
@@ -948,7 +1187,8 @@ fn strip_env(t: &str) -> Option<(&str, &str)> {
 }
 
 /// Split at `\\` (and `\\*`, `\\[2pt]`) outside braces and environments.
-fn split_rows(s: &str) -> Vec<String> {
+fn split_rows(src: &Src) -> Vec<Src> {
+    let s = src.s.as_str();
     let b = s.as_bytes();
     let mut rows = Vec::new();
     let mut start = 0;
@@ -962,17 +1202,8 @@ fn split_rows(s: &str) -> Vec<String> {
             b'\\' => {
                 if b.get(i + 1) == Some(&b'\\') {
                     if braces == 0 && envs == 0 {
-                        rows.push(s[start..i].to_string());
-                        let mut j = i + 2;
-                        if b.get(j) == Some(&b'*') {
-                            j += 1;
-                        }
-                        let k = j + s[j..].len() - s[j..].trim_start_matches(' ').len();
-                        if b.get(k) == Some(&b'[')
-                            && let Some(close) = s[k..].find(']')
-                        {
-                            j = k + close + 1;
-                        }
+                        rows.push(src.sub(start, i));
+                        let j = row_break_options_end(s, i + 2);
                         start = j;
                         i = j;
                         continue;
@@ -1000,8 +1231,143 @@ fn split_rows(s: &str) -> Vec<String> {
         }
         i += 1;
     }
-    rows.push(s[start..].to_string());
+    rows.push(src.sub(start, s.len()));
     rows
+}
+
+/// Where the options of a `\\` row break end, given `j` just past the two
+/// backslashes: a `*`, then TeX's `[2pt]` row spacing. A bracket that holds
+/// no length is the next row's content (`\\ [x,y] = 0`, a commutator), where
+/// LaTeX would stop with an error, so it is left where it is.
+fn row_break_options_end(s: &str, mut j: usize) -> usize {
+    let b = s.as_bytes();
+    if b.get(j) == Some(&b'*') {
+        j += 1;
+    }
+    let k = j + s[j..].len() - s[j..].trim_start().len();
+    if b.get(k) == Some(&b'[')
+        && let Some(close) = s[k..].find(']')
+        && is_tex_glue(&s[k + 1..k + close])
+    {
+        j = k + close + 1;
+    }
+    j
+}
+
+/// A row with the options dropped from the `\\` breaks left in it, those
+/// inside `pmatrix`, `cases` or `\substack{}` that mathkit splits itself
+/// (issue #950): `\\[2pt]` and `\\*` become `\\`, as at the top level. The
+/// spacing is not honoured there either; mathkit spaces the rows by their
+/// content.
+fn drop_row_break_options(src: &Src) -> Src {
+    let row = src.s.as_str();
+    let b = row.as_bytes();
+    let mut out = Src::default();
+    let mut last = 0;
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        if b[i + 1] == b'\\' {
+            let j = row_break_options_end(row, i + 2);
+            out.push_from(src, last, i + 2);
+            last = j;
+            i = j;
+            continue;
+        }
+        // a control word or symbol: its first byte is never a break (a
+        // multi-byte character's later bytes are never a backslash)
+        i += 2;
+    }
+    out.push_from(src, last, row.len());
+    out
+}
+
+/// TeX's units of length (TeXbook p. 57).
+const TEX_UNITS: [&str; 11] = [
+    "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
+];
+
+/// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
+/// register: plain TeX's and LaTeX's are named for what they measure
+/// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
+/// `\linewidth`, `\parindent`, `\medskipamount`, `\unitlength`, `\fboxrule`,
+/// `\lineskiplimit`), and `\jot` and `\fill` are the two common exceptions. No mathkit command is named so, so `\pi`
+/// or `\alpha` in a bracket stays content.
+fn is_length_register(name: &str) -> bool {
+    const ENDS: [&str; 10] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount", "length", "rule", "limit",
+    ];
+    name.chars().all(|c| c.is_ascii_alphabetic())
+        && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
+}
+
+/// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
+/// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
+/// factor and a length register (`\baselineskip`, `0.5\jot`). Anything else,
+/// `x,y` or `\pi` among them, is not.
+fn is_tex_length(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t).trim_start();
+    let digits = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .unwrap_or(t.len());
+    let (num, rest) = t.split_at(digits);
+    let has_num = num.chars().any(|c| c.is_ascii_digit());
+    if !num.is_empty() && !has_num {
+        return false;
+    }
+    let rest = rest.trim_start();
+    if let Some(reg) = rest.strip_prefix('\\') {
+        // `\dimen0`, `\skip12`: TeX's numbered registers
+        let reg = reg.trim_end();
+        let name = reg
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end();
+        return if name.len() < reg.len() {
+            matches!(name, "dimen" | "skip")
+        } else {
+            is_length_register(reg)
+        };
+    }
+    let unit = rest.to_ascii_lowercase();
+    let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
+    has_num && TEX_UNITS.contains(&unit.trim_end())
+}
+
+/// Whether `t` is a length with optional `plus` and `minus` parts
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue, or an e-TeX
+/// `\dimexpr`/`\glueexpr` expression.
+fn is_tex_glue(t: &str) -> bool {
+    // an e-TeX expression is spacing whatever it holds
+    let head = t.trim_start();
+    let head = head.strip_prefix(['+', '-']).unwrap_or(head).trim_start();
+    if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
+    let (plus, minus) = (cut("plus"), cut("minus"));
+    let stretch = |from: usize, key: &str, to: usize| {
+        from == lower.len() || from > to || {
+            let part = &lower[from + key.len()..to];
+            is_tex_length(part) || is_fil(part)
+        }
+    };
+    is_tex_length(&lower[..plus.min(minus)])
+        && (plus == lower.len() || plus < minus)
+        && stretch(plus, "plus", minus)
+        && stretch(minus, "minus", lower.len())
+}
+
+/// `1fil`, `-2 fill`, `fill`: TeX's infinite stretch (lowercase input).
+fn is_fil(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let t = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    matches!(t.trim(), "fil" | "fill" | "filll")
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1042,6 +1408,92 @@ pub struct Driver {
     pub dpi: f32,
     /// The page background is transparent (no board).
     pub transparent: bool,
+    /// The input and its rows, to put a problem mathkit reports back at its
+    /// line and column (see [`Driver::explain`]).
+    locator: Locator,
+}
+
+/// The LaTeX a [`Driver`] was made from, and the rows it was cut into.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Locator {
+    text: String,
+    rows: Vec<Src>,
+}
+
+/// What the generated program prints for each problem its check pass finds.
+const PROBLEM_TAG: &str = "CKPROBLEM";
+
+impl Driver {
+    /// The problems the program printed (`printed` is its standard output),
+    /// each at its place in the input, in the order found. Empty when it
+    /// printed none.
+    pub fn problems(&self, printed: &[u8]) -> Vec<Problem> {
+        let text = String::from_utf8_lossy(printed);
+        let mut found: Vec<Problem> = Vec::new();
+        for line in text.lines() {
+            let Some(rest) = line
+                .strip_prefix(PROBLEM_TAG)
+                .and_then(|r| r.strip_prefix('\t'))
+            else {
+                continue;
+            };
+            // row, start, end, kind, token (the token may be empty)
+            let mut f = rest.splitn(5, '\t');
+            let (Some(row), Some(start), Some(end), Some(kind)) = (
+                f.next().and_then(|v| v.parse::<usize>().ok()),
+                f.next().and_then(|v| v.parse::<usize>().ok()),
+                f.next().and_then(|v| v.parse::<usize>().ok()),
+                f.next(),
+            ) else {
+                continue;
+            };
+            let Some(src) = self.locator.rows.get(row) else {
+                continue;
+            };
+            // the offending source itself, when mathkit gave a range
+            let named = src.s.get(start..end).filter(|t| !t.is_empty());
+            let token = named.unwrap_or_else(|| f.next().unwrap_or(""));
+            // an error raised after it read its token (an unsupported
+            // delimiter) names the end of it: point at its start
+            let start = match named {
+                None if !token.is_empty()
+                    && src.s.get(..start).is_some_and(|h| h.ends_with(token)) =>
+                {
+                    start - token.len()
+                }
+                _ => start,
+            };
+            let problem = Problem::at(&self.locator.text, src.origin(start), kind, token);
+            // a run of one unsupported character (TeX's ``) is one problem
+            match found.last_mut() {
+                Some(prev)
+                    if kind == "unsupported-character"
+                        && prev.kind == kind
+                        && prev.line == problem.line
+                        && prev.offset + prev.token.len() == problem.offset
+                        && prev.token.chars().all(|c| token.starts_with(c)) =>
+                {
+                    prev.token.push_str(token);
+                }
+                _ => found.push(problem),
+            }
+        }
+        found
+    }
+
+    /// A failed run of [`Driver::source`] as the error to give the user:
+    /// every problem the check pass printed, each with its line and column,
+    /// else what [`explain`] makes of `err`; `None` when `err` is not a TeX
+    /// error. `printed` is the program's standard output.
+    pub fn explain(&self, printed: &[u8], err: &PsError) -> Option<ChalkError> {
+        let first = explain(err)?;
+        let found = self.problems(printed);
+        Some(if found.is_empty() {
+            first
+        } else {
+            ChalkError::Problems(found)
+        })
+    }
 }
 
 /// Erased writing for the board's ghosting: a few formulas from an
@@ -1103,7 +1555,7 @@ pub fn driver(latex: &str, cfg: &Config) -> Result<Driver, ChalkError> {
     p.push_str("/cklines [\n");
     for r in &rows {
         p.push_str("  ");
-        p.push_str(&ps_string(r));
+        p.push_str(&ps_string(&r.s));
         p.push('\n');
     }
     p.push_str("] def\n");
@@ -1127,6 +1579,28 @@ pub fn driver(latex: &str, cfg: &Config) -> Result<Driver, ChalkError> {
         n(bx),
         n(by)
     ));
+    // The check pass (issue #1080): every row parsed, every unsupported
+    // character or command collected with its place, so one run reports them
+    // all. Each is printed for `Driver::problems`; the first then stops the
+    // program with the error mathkit would have raised alone, which is all an
+    // older caller reads.
+    p.push_str(
+        r#"
+/ckcheck {
+  cklines ckopts mkproblems
+  dup length 0 gt {
+    dup {
+      /ckr exch def
+      (CKPROBLEM) print
+      0 1 2 { (\t) print ckr exch get 20 string cvs print } for
+      (\t) print ckr 3 get print (\t) print ckr 4 get print (\n) print
+    } forall
+    0 get dup 3 get (mk-) exch mkcat (:) mkcat exch 4 get mkcat cvn cvx exec
+  } { pop } ifelse
+} bind def
+ckcheck
+"#,
+    );
     // The measuring pass: the lines laid out at 0 0, their ink thrown
     // away, and the union of the records' boxes kept. A TeX error stops
     // the program here, before the board.
@@ -1241,6 +1715,10 @@ ckmeasure
         height: cfg.height,
         dpi: cfg.dpi,
         transparent: cfg.board.is_none(),
+        locator: Locator {
+            text: latex.to_string(),
+            rows,
+        },
     })
 }
 
@@ -1419,7 +1897,9 @@ pub fn run_with_limits(d: &Driver, format: Format, limits: Limits) -> Result<Vec
     // server speaks JSON-RPC on it.
     interp.capture_stdout();
     if let Err(e) = interp.run_source(d.source.as_bytes()) {
-        return Err(explain(&e).unwrap_or_else(|| ChalkError::Render(interp.error_report(&e))));
+        return Err(d
+            .explain(interp.captured_stdout(), &e)
+            .unwrap_or_else(|| ChalkError::Render(interp.error_report(&e))));
     }
     let missing = || ChalkError::Render("the program produced no page".into());
     match format {
@@ -1450,6 +1930,43 @@ mod tests {
     fn rows_split_only_at_top_level_breaks() {
         assert_eq!(l(r"a &= b \\ c &= d"), ["a &= b", "c &= d"]);
         assert_eq!(l(r"a \\* b \\[2pt] c\\"), ["a", "b", "c"]);
+        // a bracket after `\\` is spacing only when it holds a length (#936)
+        assert_eq!(l(r"a \\ [x,y] = 0"), ["a", "[x,y] = 0"]);
+        assert_eq!(
+            l(r"i\hbar \\ [\hat{x},\hat{p}] = i\hbar"),
+            [r"i\hbar", r"[\hat{x},\hat{p}] = i\hbar"]
+        );
+        assert_eq!(l(r"a \\ [\pi] = 0"), ["a", r"[\pi] = 0"]);
+        assert_eq!(l(r"a \\[1] b"), ["a", "[1] b"]);
+        assert_eq!(l("a \\\\\n[2pt] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(l(r"a \\[-\dimexpr 2pt+1pt\relax] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
+        assert_eq!(
+            l(r"a \\ [\alpha, \beta] = 0"),
+            ["a", r"[\alpha, \beta] = 0"]
+        );
+        assert_eq!(
+            l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(l(r"a \\[2pt plus x] b"), ["a", "[2pt plus x] b"]);
+        // inside display delimiters too
+        assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(
             l(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"),
             [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"]
@@ -1464,6 +1981,37 @@ mod tests {
         );
         // escaped braces are not grouping
         assert_eq!(l(r"\{ a \\ b \}"), [r"\{ a", r"b \}"]);
+    }
+
+    #[test]
+    fn row_spacing_inside_matrices_goes_too() {
+        // the same rule as at the top level (issue #950)
+        assert_eq!(
+            l(r"\begin{pmatrix} a & b \\[4pt] c & d \end{pmatrix}"),
+            [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}"]
+        );
+        assert_eq!(
+            l(r"f = \begin{cases} 1 \\*[0.5\baselineskip] 0 \\* 2 \end{cases} \\[2pt] g"),
+            [r"f = \begin{cases} 1 \\ 0 \\ 2 \end{cases}", "g"]
+        );
+        assert_eq!(
+            l(r"\sum_{\substack{i<m \\ [2pt] j<n}} a"),
+            [r"\sum_{\substack{i<m \\ j<n}} a"]
+        );
+        // a bracket that holds no length is the next row's content
+        assert_eq!(
+            l(r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"),
+            [r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"]
+        );
+        // an unclosed bracket, a control word, a row break at the very end
+        assert_eq!(
+            l(r"\begin{vmatrix} a \\[2pt \end{vmatrix}"),
+            [r"\begin{vmatrix} a \\[2pt \end{vmatrix}"]
+        );
+        let drop = |s: &str| drop_row_break_options(&Src::new(s)).s;
+        assert_eq!(drop(r"\alpha\\[2pt]"), r"\alpha\\");
+        assert_eq!(drop(r"é\\[2pt]ü \,"), r"é\\ü \,");
+        assert_eq!(drop("\\"), "\\");
     }
 
     #[test]
@@ -1559,15 +2107,15 @@ mod tests {
         assert_eq!(l(r"\( a \\ (b) \)"), ["a", "(b)"]);
         assert_eq!(l(r"\[ \left( a \right) \]"), [r"\left( a \right)"]);
         assert_eq!(l(r"\( a \$ \)"), [r"a \$"]);
-        // plain input with no delimiter at its start is left alone
-        assert_eq!(l("a $ b"), ["a $ b"]);
+        // plain input with no delimiter is left alone
         assert_eq!(l(r"a \\(b)"), ["a", "(b)"]);
+        assert_eq!(l(r"a \$ b"), [r"a \$ b"]);
         let e = |s: &str| lines(s).unwrap_err();
         let msg = |s: &str| e(s).to_string();
         assert_eq!(e(r"\(a\) + \(b").code(), "unclosed_math_delimiter");
         assert_eq!(
             msg(r"\(a\) + \(b"),
-            r"math delimiter \( is never closed: end it with \)"
+            r"math delimiter \( is never closed: end it with \) at 1:9"
         );
         assert_eq!(e("$a$ + $b").code(), "unclosed_math_delimiter");
         assert_eq!(e(r"1 + 2\)").code(), "unmatched_math_delimiter");
@@ -1582,6 +2130,33 @@ mod tests {
         // control words outside a pair are math, not text
         assert_eq!(l(r"\(a\) \quad \(b\)"), [r"a  \quad  b"]);
         assert_eq!(msg("$$a$$ $b").lines().count(), 1);
+
+        // a bare `$` in plain input is an unclosed delimiter, as in LaTeX
+        // (issue #718): it used to be dropped without a word
+        for tex in ["a $ b", "x = 5$", "$ a", "a $$ b", "a + $b"] {
+            assert_eq!(e(tex).code(), "unclosed_math_delimiter", "{tex}");
+        }
+        assert_eq!(
+            msg("x = 5$"),
+            r#"math delimiter $ is never closed: end it with $ at 1:6 (LaTeX also stops with "Missing $ inserted")"#
+        );
+        // a pair in the middle leaves the words around it outside it
+        assert_eq!(e("a $x$ b").code(), "text_outside_math");
+        // the pairs are judged before the words: the stray `$` is named
+        assert_eq!(e(r"\(x\) where $").code(), "unclosed_math_delimiter");
+        // the message names the whole word and says how to write it
+        assert_eq!(
+            msg(r"\(x\) where \(y\)"),
+            r"text outside the math delimiters (where...): a board sets only the formula, so put words inside one pair as \text{...} (\(x \text{ where } y\)), or move them out at 1:7"
+        );
+        // the \big family fences a delimiter like \left and \right
+        for fence in [
+            "big", "bigl", "bigr", "bigm", "Big", "Bigl", "bigg", "biggr", "Bigg", "Biggm",
+        ] {
+            let tex = format!(r"\{fence}\( b \{fence}\)");
+            assert_eq!(l(&tex), std::slice::from_ref(&tex), "{tex}");
+        }
+        assert_eq!(l(r"\bigl\lbrace a"), [r"\bigl\lbrace a"]);
     }
 
     #[test]
@@ -1704,13 +2279,118 @@ mod tests {
         assert!(e.contains("leaves no room"), "{e}");
     }
 
+    /// Where a row's byte came from, through every stage that rewrites the
+    /// input (issue #1080): comments, wrappers, labels, delimiters, row
+    /// breaks and their options, and non-ASCII spaces.
+    #[test]
+    fn a_problem_is_put_back_at_its_line_and_column_in_the_input() {
+        let place = |tex: &str, row: usize, needle: &str| {
+            let (rows, _) = layout(tex).unwrap();
+            let k = rows[row].s.find(needle).expect("needle in the row");
+            let p = Problem::at(tex, rows[row].origin(k), "x", needle);
+            (p.line, p.column, p.offset)
+        };
+        // plain, and after a comment line with the same word in it
+        assert_eq!(place(r"a \aleph", 0, r"\aleph"), (1, 3, 2));
+        assert_eq!(place("% \\aleph ö\na \\aleph", 0, r"\aleph"), (2, 3, 14));
+        // wrappers, a label, row breaks with options, a non-ASCII space
+        let tex = "\\begin{align}\n  a &= b \\label{l}\\\\[2pt]\n  c\u{a0}&= \\beth\n\\end{align}";
+        assert_eq!(place(tex, 0, "a &= b"), (2, 3, tex.find("a &= b").unwrap()));
+        assert_eq!(place(tex, 1, r"\beth"), (3, 8, tex.find(r"\beth").unwrap()));
+        // delimiters replaced by spaces, a multi-byte character before it
+        assert_eq!(place(r"\(é\) + \(\gamma \foo\)", 0, r"\foo"), (1, 18, 18));
+        // columns count characters, offsets bytes
+        let p = Problem::at("é é\nü ☃", 9, "x", "☃");
+        assert_eq!((p.line, p.column), (2, 3));
+        // a problem past the end is at the end
+        let (rows, _) = layout("ab").unwrap();
+        assert_eq!(rows[0].origin(9), 2);
+        // also when the row ends in a multi-byte character
+        for (tex, line, column) in [("a \\\n x^{α", 2, 6), ("☃", 1, 2)] {
+            let (rows, _) = layout(tex).unwrap();
+            let end = rows.last().unwrap();
+            let p = Problem::at(tex, end.origin(end.s.len()), "x", "");
+            assert_eq!(
+                (p.line, p.column, p.offset),
+                (line, column, tex.len()),
+                "{tex:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hints_say_what_to_write_instead() {
+        let say = |kind: &str, token: &str| Problem::at("", 0, kind, token).message();
+        assert_eq!(
+            say("unsupported-character", "ö"),
+            "unsupported character: ö (U+00F6) (write oe for it)"
+        );
+        assert!(say("unsupported-character", "é").ends_with("(write the plain letter)"));
+        assert_eq!(
+            say("unsupported-character", "日"),
+            "unsupported character: 日 (U+65E5)"
+        );
+        assert!(say("unsupported-command", "\\\"").contains("accents are not drawn"));
+        assert!(say("unsupported-character", "`").contains("opening quote"));
+    }
+
+    #[test]
+    fn a_delimiter_problem_carries_its_place() {
+        let at = |tex: &str| match lines(tex).unwrap_err() {
+            ChalkError::Problems(p) => (p[0].kind.clone(), p[0].line, p[0].column),
+            e => panic!("{e:?}"),
+        };
+        assert_eq!(at("a\n  x = 5$"), ("unclosed-math-delimiter".into(), 2, 8));
+        assert_eq!(at(r"\(a\) where"), ("text-outside-math".into(), 1, 7));
+        assert_eq!(at("1 +\n2\\)"), ("unmatched-math-delimiter".into(), 2, 2));
+    }
+
+    #[test]
+    fn problems_read_back_from_the_programs_output() {
+        let d = driver("a \\aleph \\\\\nb ☃", &Config::default()).unwrap();
+        let out = "CKPROBLEM\t0\t2\t8\tunsupported-command\t\\aleph\nstray line\n\
+                   CKPROBLEM\t1\t2\t5\tunsupported-character\t\n\
+                   CKPROBLEM\t0\t9\t9\tmissing-closing-brace\t\n";
+        let ps = d.problems(out.as_bytes());
+        assert_eq!(ps.len(), 3, "{ps:?}");
+        // the offending text is cut from the input, not taken from the print
+        assert_eq!(
+            (&ps[0].token[..], ps[0].line, ps[0].column),
+            (r"\aleph", 1, 3)
+        );
+        // rows are the input's lines here: one row each
+        assert_eq!((&ps[1].token[..], ps[1].line, ps[1].column), ("☃", 2, 3));
+        let e = ChalkError::Problems(ps.clone());
+        assert_eq!(e.code(), "unsupported_command");
+        let shown = e.to_string();
+        assert!(
+            shown.starts_with("3 problems in the LaTeX (line:column):\n  1:3  "),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("\n  2:3  unsupported character: ☃ (U+2603)\n"),
+            "{shown}"
+        );
+        // one problem is one line; none printed is mathkit's own error
+        let one = ChalkError::Problems(ps[..1].to_vec()).to_string();
+        assert!(
+            one.starts_with(r"unsupported LaTeX command \aleph at 1:3 ("),
+            "{one}"
+        );
+        assert_eq!(one.lines().count(), 1);
+        let err = PsError::Undefined(r"mk-unsupported-command:\aleph".into());
+        assert_eq!(d.explain(b"", &err), explain(&err));
+        assert_eq!(d.explain(out.as_bytes(), &err), Some(e));
+        assert_eq!(d.explain(out.as_bytes(), &PsError::Typecheck), None);
+    }
+
     #[test]
     fn mathkit_errors_become_named_latex_errors() {
-        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\oplus".into())).unwrap();
+        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\aleph".into())).unwrap();
         assert_eq!(e.code(), "unsupported_command");
         assert!(
             e.to_string()
-                .starts_with(r"unsupported LaTeX command \oplus")
+                .starts_with(r"unsupported LaTeX command \aleph")
         );
         let e = explain(&PsError::Undefined("mk-unsupported-character:@".into())).unwrap();
         assert_eq!(e.to_string(), "unsupported character: @");

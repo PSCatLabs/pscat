@@ -4,7 +4,7 @@
 #   ./scripts/build_site.sh
 #   python3 -m http.server -d _site       # preview locally
 #
-# Pieces: the authored pages (site/, with the shared header, footer and
+# Pieces: llms.txt, the authored pages (site/, with the shared header, footer and
 # <head> from site/_partials/ applied last, by scripts/site_pages.py),
 # the wasm build + JS library, the gallery (gallery.html and one page per
 # piece, generated from gallery/manifest.json by scripts/gallery.py), the
@@ -37,7 +37,16 @@ mkdir -p "$OUT/assets/renders" "$OUT/assets/references" "$OUT/assets/learn" \
 
 # 1. the authored pages (the shell is applied in the last step)
 cp "$ROOT"/site/*.html "$ROOT"/site/style.css "$ROOT"/site/source-viewer.js "$OUT/"
+# llms.txt (#1125): the file AI assistants read to find pscat; checked by
+# check_site_links.py (live links, every docs/guides/*.md listed)
+cp "$ROOT"/site/llms.txt "$OUT/"
 cp "$ROOT"/lib/graph.ps "$ROOT"/lib/dataviz.ps "$OUT/lib/"
+# the brand images (#927): the logo (favicon and home page), the social
+# preview (og:image) and the certificate the home page pairs with a painting
+mkdir -p "$OUT/assets/brand"
+cp "$ROOT"/art/logo/renders/pscat-logo-d-512.png "$ROOT"/art/logo/renders/pscat-logo-d-48.png \
+   "$ROOT"/art/brand/renders/social-preview.png "$ROOT"/art/brand/renders/certificate.png \
+   "$OUT/assets/brand/"
 
 # 2. the browser build
 "$ROOT/scripts/build_wasm.sh"

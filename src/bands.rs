@@ -65,10 +65,11 @@
 
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
 
 use pscat::Interp;
+use pscat::PsError;
 use tiny_skia::Pixmap;
 
 use crate::Options;
@@ -88,8 +89,7 @@ pub fn parse_count(n: &str) -> Result<u32, String> {
 /// The device rows band `index` of `count` owns on a canvas `height` pixels
 /// tall: `top..bottom`.
 pub fn rows(index: u32, count: u32, height: u32) -> (u32, u32) {
-    let at = |i: u32| (u64::from(i) * u64::from(height) / u64::from(count)) as u32;
-    (at(index), at(index + 1))
+    pscat::gfx::band_rows_of(index, count, height)
 }
 
 /// Refuse every combination `--bands` can't honour, before anything runs.
@@ -113,15 +113,40 @@ fn check_options(options: &Options) -> Result<(), String> {
             "--bands writes a PNG only; it doesn't combine with {flag}"
         ));
     }
-    if !options.allow_write.is_empty() {
-        // Every band runs the whole program, so each would write the file.
-        return Err("--bands doesn't combine with --allow-write".to_string());
-    }
     if options.png.is_none() {
         return Err("--bands needs --png".to_string());
     }
     if options.file.is_none() && options.eval.is_none() {
         return Err("--bands needs a file, - or -e".to_string());
+    }
+    Ok(())
+}
+
+/// Resolve `--allow-write` and `--read-root` once, before any program runs,
+/// and give every band the resolved directories. Each band resolves the
+/// names it is given, so a root that is a symlink could otherwise be
+/// retargeted by an earlier band (`renamefile` onto it) before a later band
+/// starts, and widen what that band may reach. A resolved path has no
+/// symlink left in it, and directories cannot be renamed or removed.
+fn freeze_roots(options: &mut Options) -> Result<(), String> {
+    fn resolved(dirs: &[std::path::PathBuf]) -> Result<Vec<String>, String> {
+        dirs.iter()
+            .map(|d| {
+                d.to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("{}: not a UTF-8 path", d.display()))
+            })
+            .collect()
+    }
+    if !options.allow_write.is_empty() {
+        let roots = pscat::write_roots::WriteRoots::new(&options.allow_write)
+            .map_err(|e| format!("--allow-write: {e}"))?;
+        options.allow_write = resolved(roots.dirs())?;
+    }
+    if let Some(dirs) = &options.read_roots {
+        let roots =
+            pscat::read_roots::ReadRoots::new(dirs).map_err(|e| format!("--read-root: {e}"))?;
+        options.read_roots = Some(resolved(roots.dirs())?);
     }
     Ok(())
 }
@@ -133,6 +158,10 @@ struct BandOutput {
     /// Per page, the band's device rows (RGBA, premultiplied, as the
     /// page's own bytes).
     rows: Vec<Vec<u8>>,
+    /// Per page of `rows`, the page's size in device pixels: the plan's
+    /// unless the program's `setpagedevice` changed it (#909). A band keeps
+    /// its share of each page's own height.
+    sizes: Vec<(u32, u32)>,
     /// The error report (and operand stack under `--pstack-on-error`) if
     /// the run failed.
     error: Option<String>,
@@ -195,8 +224,12 @@ pub fn parse_rows(n: &str) -> Result<u32, String> {
 }
 
 /// `pscat --bands N`: check the options, run the bands, stitch and write.
-pub fn run(options: &Options, threads: u32) -> ExitCode {
+pub fn run(options: &mut Options, threads: u32) -> ExitCode {
     if let Err(msg) = check_options(options) {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(msg) = freeze_roots(options) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
@@ -211,6 +244,8 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         },
         (None, None) => unreachable!("check_options requires a source"),
     };
+    options.resolve_page(&source);
+    let options = &*options;
     let scale = options.dpi / 72.0;
     // The canvas size, from a probe rather than a copy of
     // `with_page_scaled`'s formula (as `run_sweep` does). Checked here, on
@@ -218,6 +253,10 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
     // probe takes is what one band's fresh interpreter costs: the memory
     // budget leaves that much out for every worker, as a plain render's
     // budget leaves out its own interpreter.
+    if let Err(msg) = options.check_pixel_cap() {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
     let before = pscat::memtrack::live_bytes();
     let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, scale) else {
         eprintln!(
@@ -253,7 +292,7 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         failed = true;
     }
     print_font_notes(&outputs);
-    let pages = match stitch(&outputs, width, height, options.transparent) {
+    let pages = match stitch(&outputs, options.transparent) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -278,7 +317,7 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         .as_deref()
         .expect("check_options requires --png");
     let refs: Vec<&Pixmap> = pages.iter().collect();
-    if !crate::write_pngs(&refs, png, options.halftone) || failed {
+    if !crate::write_pngs(&refs, png, options.halftone, options.scale()) || failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -341,6 +380,9 @@ struct Queue {
     next: AtomicU32,
     stop: AtomicBool,
     count: u32,
+    /// Bytes every band has written to disk files, against the one
+    /// `--max-write-bytes` budget (#1045).
+    written: Arc<AtomicU64>,
 }
 
 impl Queue {
@@ -380,6 +422,7 @@ fn render(
         next: AtomicU32::new(0),
         stop: AtomicBool::new(false),
         count: plan.count,
+        written: Arc::new(AtomicU64::new(0)),
     };
     let base = MemoryBase(
         pscat::memtrack::live_bytes()
@@ -483,14 +526,15 @@ fn run_band(
 ) -> Result<BandOutput, String> {
     let Band { index, plan, width } = band;
     let scale = options.dpi / 72.0;
-    let mut interp = Interp::with_page_scaled(options.page.0, options.page.1, scale)
-        .ok_or("unusable page size")?;
+    let mut interp = options.new_interp()?;
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
     let height = plan.height;
     let (top, bottom) = rows(index, plan.count, height);
-    interp.gfx_mut().set_band_rows(top, bottom);
+    // The band's rows follow the page if `setpagedevice` resizes it, and
+    // `/BandBBox` is redefined for the new page then (#909).
+    interp.gfx_mut().set_band(index, plan.count);
     // Only the top band's output reaches stdout and stderr; the others'
     // stdout is kept in a bounded buffer and dropped, and their stderr is
     // dropped, so an unaware program prints once.
@@ -498,13 +542,16 @@ fn run_band(
         interp.capture_stdout();
         interp.quiet_stderr();
     }
+    // Default user space starts at the page origin, which a bounding box
+    // can move off (0, 0) (#921).
+    let (llx, lly) = interp.gfx().page_origin();
     let width_pt = width as f32 / scale;
-    let user_y = |row: u32| (height - row) as f32 / scale;
+    let user_y = |row: u32| lly + (height - row) as f32 / scale;
     let preamble = format!(
-        "/BandIndex {index} def /BandCount {} def /BandBBox [0 {} {} {}] def",
+        "/BandIndex {index} def /BandCount {} def /BandBBox [{llx} {} {} {}] def",
         plan.count,
         user_y(bottom),
-        width_pt,
+        llx + width_pt,
         user_y(top)
     );
     // Detached, so the band names take none of the name ids a plain run
@@ -525,9 +572,20 @@ fn run_band(
             .set_read_roots(dirs)
             .map_err(|e| format!("--read-root: {e}"))?;
     }
+    // `--allow-write` and `--max-write-bytes` (#1045): the same roots in
+    // every band, and one byte budget for all of them, so a banded run
+    // cannot write `bands` times what the flag allows.
+    options.apply_write_policy(&mut interp)?;
+    interp.share_write_count(Arc::clone(&queue.written));
     let mut hit_limit = false;
-    let error = match interp.run_source(source) {
+    let mut error = match interp.run_source(source) {
         Ok(()) => None,
+        // The reader of stdout went away (`| head`): not a failure to report
+        // (#1059); `main` ends with the status for it.
+        Err(PsError::Io) if interp.stdout_epipe_error() => {
+            crate::note_stdout_closed();
+            None
+        }
         Err(e) => {
             hit_limit = e.limit().is_some();
             let mut report = interp.error_report(&e);
@@ -539,32 +597,40 @@ fn run_band(
         }
     };
     let _ = std::io::stdout().flush();
+    // Files the program left open go out now, and a write that was lost
+    // fails the band, as it fails a plain render (#762).
+    if let Err(e) = interp.flush_outputs() {
+        error.get_or_insert_with(|| {
+            format!("pscat: could not write a file the program left open: {e}")
+        });
+    }
     // The pages `--png` writes, chosen as `finish_headless` chooses them;
-    // only this band's rows of each are kept.
-    let span = top as usize * width as usize * 4..bottom as usize * width as usize * 4;
+    // only this band's rows of each are kept, the rows of that page's own
+    // height (a `setpagedevice` can change it, #909).
     let take = |page: &Pixmap| -> Result<Vec<u8>, String> {
+        let (top, bottom) = rows(index, plan.count, page.height());
+        let row_bytes = page.width() as usize * 4;
         page.data()
-            .get(span.clone())
+            .get(top as usize * row_bytes..bottom as usize * row_bytes)
             .map(<[u8]>::to_vec)
             .ok_or_else(|| "a band's page has the wrong size".to_string())
     };
-    let mut rows = interp
-        .gfx()
-        .pages()
-        .iter()
-        .map(take)
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows.is_empty() || interp.gfx().has_trailing_art() {
-        rows.push(take(&interp.gfx().pixmap)?);
+    let mut kept: Vec<&Pixmap> = interp.gfx().pages().iter().collect();
+    if kept.is_empty() || interp.gfx().has_trailing_art() {
+        kept.push(&interp.gfx().pixmap);
     }
+    let sizes = kept.iter().map(|p| (p.width(), p.height())).collect();
+    let rows = kept.into_iter().map(take).collect::<Result<Vec<_>, _>>()?;
     let had_ink = pscat::lint::pages_with_ink_flags(&interp)
         .iter()
         .map(|(_, ink)| *ink)
         .collect();
     // Lint reads the band's interpreter, which can't leave this thread, so
     // band 0 (the top band, the only one whose stderr is kept) lints here.
-    let lint = (options.lint && index == 0)
-        .then(|| pscat::lint::check_band(&interp, &pscat::lint::scan_declared_pages(source)));
+    let lint = (options.lint && index == 0).then(|| {
+        let found = pscat::lint::check_band(&interp, &pscat::lint::scan_declared_pages(source));
+        pscat::lint::scan_lint_allows(source).filter(found)
+    });
     // The last band a worker runs leaves its dictionaries to the process
     // exit, as a plain render does (`main`); earlier ones free theirs, so
     // a long queue doesn't pile up dead interpreters.
@@ -573,6 +639,7 @@ fn run_band(
     }
     Ok(BandOutput {
         rows,
+        sizes,
         error,
         hit_limit,
         font_notes: interp.font_warnings().to_string(),
@@ -584,12 +651,7 @@ fn run_band(
 /// Page `k` of the result is band `i`'s rows of its page `k`, in band
 /// `i`'s rows. A band that never ran (the queue stopped at a limit) leaves
 /// its rows blank: the page background, white or `transparent`.
-fn stitch(
-    outputs: &[Option<BandOutput>],
-    width: u32,
-    height: u32,
-    transparent: bool,
-) -> Result<Vec<Pixmap>, String> {
+fn stitch(outputs: &[Option<BandOutput>], transparent: bool) -> Result<Vec<Pixmap>, String> {
     let count = outputs.len() as u32;
     let ran = || {
         outputs
@@ -597,7 +659,8 @@ fn stitch(
             .enumerate()
             .filter_map(|(i, o)| Some((i, o.as_ref()?)))
     };
-    let pages = ran().next().map_or(0, |(_, o)| o.rows.len());
+    let sizes = ran().next().map_or(&[][..], |(_, o)| &o.sizes[..]);
+    let pages = sizes.len();
     if let Some((i, o)) = ran().find(|(_, o)| o.rows.len() != pages) {
         return Err(format!(
             "band {}/{count} produced {} page(s) but the first band produced {pages}; \
@@ -606,9 +669,19 @@ fn stitch(
             o.rows.len()
         ));
     }
-    let row_bytes = width as usize * 4;
+    if let Some((i, _)) = ran().find(|(_, o)| o.sizes != sizes) {
+        return Err(format!(
+            "band {}/{count} drew its pages at other sizes than the first band; \
+             a banded program must emit the same pages in every band",
+            i + 1
+        ));
+    }
     (0..pages)
         .map(|k| {
+            // Each page at its own size: `setpagedevice` can change it
+            // between pages (#909).
+            let (width, height) = sizes[k];
+            let row_bytes = width as usize * 4;
             let mut page = Pixmap::new(width, height).ok_or("cannot allocate the page")?;
             if !transparent {
                 page.fill(tiny_skia::Color::WHITE);

@@ -137,6 +137,20 @@ the flag in capitals with underscores (PSCAT_MCP_TIMEOUT, PSCAT_MCP_MAX_STEPS,
 PSCAT_MCP_MAX_PIXELS, ...); a flag overrides it, and a bad value stops the
 server. --allow-read and --out-root have no variable.";
 
+/// Said in the instructions and in every image tool's description (#1055):
+/// the image block reaches the model, not necessarily the user. `out_path`
+/// is how a file comes back (its `wrote <path>` line); when it is off, the
+/// command line is.
+fn preview_note(cfg: &Config) -> &'static str {
+    if cfg.out_root.is_ok() {
+        "The image preview is usually seen by you, not the user: to show them, \
+         pass out_path and send the file named in the `wrote <path>` line."
+    } else {
+        "The image preview is usually seen by you, not the user: to show them a \
+         file, render it with the pscat command line."
+    }
+}
+
 /// The limits and the output root, fixed for the server's lifetime by
 /// whoever registered it. No tool argument can change them. Each call and
 /// job runs on its own copy, which adds that run's cancel flag and, for a
@@ -907,11 +921,13 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
             ));
         }
     };
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "out_path writes only inside {} (relative paths start there), only to a name \
              ending in the output format's extension (.png, .svg, .pdf), and never into \
-             a dot-directory.",
+             a dot-directory. If the user's workspace is outside it, write the file \
+             here and copy it there; don't decode an inline image into a file.",
             root.display()
         ),
         Err(why) => why.clone(),
@@ -934,7 +950,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
              {bands}A page, board or sheet is limited to {} pixels. \
-             {out_path} {reads}",
+             {preview} {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
             cfg.max_pixels,
@@ -1096,6 +1112,7 @@ fn annotations_with(title: &str, read_only: bool, idempotent: bool) -> Value {
 }
 
 fn tool_list(cfg: &Config) -> Value {
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "Also write the file here: a path inside {} (relative paths start there; \
@@ -1110,8 +1127,9 @@ fn tool_list(cfg: &Config) -> Value {
         "type": "object",
         "properties": {
             "source": { "type": "string", "description": "The PostScript program" },
-            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default 612)" },
-            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default 792)" },
+            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points; overrides the program's setpagedevice /PageSize. Default: that /PageSize, else an EPSF file's %%BoundingBox (see bbox), else 612" },
+            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points; overrides the program's setpagedevice /PageSize. Default: that /PageSize, else an EPSF file's %%BoundingBox (see bbox), else 792" },
+            "bbox": { "type": "boolean", "description": "Size the page from the %%BoundingBox of any file, not only an EPSF one (%!PS-Adobe-3.0 EPSF-3.0), with its lower-left corner at the page's. Not with width/height, which always win" },
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
@@ -1144,6 +1162,7 @@ fn tool_list(cfg: &Config) -> Value {
                 a Lint: block when the page looks wrong (blank page, unbalanced gsave, \
                 leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
+                {preview} \
                 Writes a file only when out_path is given (then it replaces an existing render \
                 file of that extension), which is why this tool is not marked read-only. \
                 {READS_BRIEF}",
@@ -1160,7 +1179,7 @@ fn tool_list(cfg: &Config) -> Value {
                 specific person's handwriting or presenting writing as someone else's. \
                 Lowercase letters, digits and .,-'!? only; anything else is invisible. \
                 Writes a file only when out_path is given (then it replaces an existing .png), \
-                which is why this tool is not marked read-only. {limits} {canvas}"),
+                which is why this tool is not marked read-only. {preview} {limits} {canvas}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1187,12 +1206,13 @@ fn tool_list(cfg: &Config) -> Value {
                 backslashes: \\\\ breaks rows, & marks where align, aligned and split rows line up, \
                 gather, gather* and gathered centre each row instead, and an align*/equation \
                 wrapper or $...$ is fine. The subset is mathkit's (fractions, roots, sums, \
-                integrals, Greek, matrices, cases, accents...); a command outside it is a \
-                latex_error naming it. Same input and seed: the same image, byte for byte. \
+                integrals, Greek, matrices, cases, accents...); every command or character \
+                outside it comes back in one latex_error, each with its line and column \
+                (problems). Same input and seed: the same image, byte for byte. \
                 The input is LaTeX only, never PostScript. svg and pdf (megabytes: tens of \
                 thousands of grain marks) are written to out_path only. Writes a file only \
                 when out_path is given (then it replaces an existing file of that \
-                extension), which is why this tool is not marked read-only. Limits: \
+                extension), which is why this tool is not marked read-only. {preview} Limits: \
                 latex at most {max_latex} bytes; the board at most {max_pixels} \
                 pixels (width and height in points times dpi/72) and 8000 a side; \
                 {}s per call (the server's --timeout; its default is 60); the interpreter's step, time and memory limits \
@@ -1253,7 +1273,7 @@ fn tool_list(cfg: &Config) -> Value {
                 error text alongside. Labels in Latin (accents included), Korean, Japanese, \
                 Chinese and Thai are drawn in a face for the script (the last three need the \
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
-                an existing .png), which is why this tool is not marked read-only. Limits: \
+                an existing .png), which is why this tool is not marked read-only. {preview} Limits: \
                 {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
                 side, and the cells rendered at most {max_pixels} pixels in all; labels at \
                 most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
@@ -1483,8 +1503,11 @@ struct RenderPlan {
     source: String,
     format: &'static str,
     flag: &'static str,
-    width: i64,
-    height: i64,
+    /// `Some((width, height))` for an explicit page (`--page`); `None` lets
+    /// the child take it from the source's bounding box or the default.
+    page: Option<(i64, i64)>,
+    /// `--bbox`: any file's bounding box sizes the page, not only an EPSF one.
+    bbox: bool,
     dpi: Option<f64>,
     halftone: bool,
     /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
@@ -1504,14 +1527,37 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
             )));
         }
     };
-    let width = optional_int(args, "width", 1, 8000)?.unwrap_or(612);
-    let height = optional_int(args, "height", 1, 8000)?.unwrap_or(792);
+    let width = optional_int(args, "width", 1, 8000)?;
+    let height = optional_int(args, "height", 1, 8000)?;
+    let bbox = optional_bool(args, "bbox")?.unwrap_or(false);
+    // As `pscat --page` and `--bbox` (#921): an explicit size always wins,
+    // so asking for both would silently drop one.
+    let page = match (width, height) {
+        (None, None) => None,
+        (w, h) if !bbox => Some((w.unwrap_or(612), h.unwrap_or(792))),
+        _ => {
+            return Err(ToolError::invalid(
+                "bbox sizes the page from the source; leave out width and height with it",
+            ));
+        }
+    };
+    // The page the child starts on: the same rule `pscat` applies, so the
+    // pixel cap below checks the canvas that is really made. A program's
+    // `setpagedevice` can change it later (#909); the child gets
+    // `--max-pixels` for that (`render_run`).
+    let size = match page {
+        Some((w, h)) => (w as u32, h as u32),
+        None => match pscat::bbox::page_box(source.as_bytes(), bbox) {
+            Ok(Some(found)) => (found.width, found.height),
+            _ => pscat::gfx::DEFAULT_PAGE,
+        },
+    };
     let dpi = optional_number(args, "dpi", 9.0, 1200.0)?;
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
     // The canvas is allocated before `--max-memory` counts, so a page over
     // the pixel cap is refused before a child starts (#711). Every format
     // draws on the same raster.
-    let (w_px, h_px) = device_pixels((width as u32, height as u32), dpi.unwrap_or(72.0) as f32);
+    let (w_px, h_px) = device_pixels(size, dpi.unwrap_or(72.0) as f32);
     if !pixels_allowed(cfg, w_px, h_px) {
         return Err(too_many_pixels(cfg, "the page", w_px, h_px));
     }
@@ -1529,8 +1575,8 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         source: source.to_string(),
         format,
         flag,
-        width,
-        height,
+        page,
+        bbox,
         dpi,
         halftone,
         bands,
@@ -1583,8 +1629,8 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         source,
         format,
         flag,
-        width,
-        height,
+        page,
+        bbox,
         dpi,
         halftone,
         bands,
@@ -1606,16 +1652,29 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     if banded {
         cmd.arg("--bands").arg(bands.to_string());
     }
-    cmd.arg("--page").arg(format!("{width}x{height}"));
+    if let Some((width, height)) = page {
+        cmd.arg("--page").arg(format!("{width}x{height}"));
+    }
+    if *bbox {
+        cmd.arg("--bbox");
+    }
     if let Some(dpi) = dpi {
         cmd.arg("--dpi").arg(number_arg(dpi));
     }
     if *halftone {
         cmd.arg("--halftone");
     }
+    // A page the program's `setpagedevice` asks for is held to the same cap
+    // as the first one, in the child (#909).
+    cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
     cmd.arg(flag).arg(&out).arg("-");
     cmd.arg("--lint");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
+    if !run.success
+        && let Some((w, h, _)) = pscat::limits::parse_pixel_cap_message(&run.stderr)
+    {
+        return Err(too_many_pixels(cfg, "the page", w, h));
+    }
     let (lint_findings, other_stderr) = split_lint_findings(&run.stderr);
 
     let pages = collect_pages(&out);
@@ -2093,9 +2152,9 @@ const DEFAULT_MAX_PIXELS: u64 = 40_000_000;
 
 /// The pixel size a page of `page` points renders at `dpi`: the interpreter's
 /// own rounding (`Interp::with_page_scaled`), repeated here so that a page
-/// over the cap is refused before any program runs. A child's PNG that comes
-/// back at another size is an internal error, so the two cannot drift apart
-/// unnoticed.
+/// over the cap is refused before any program runs. (A `render_postscript`
+/// child's page can still change size, by the program's `setpagedevice`;
+/// the child holds that page to `--max-pixels` itself, #909.)
 fn device_pixels(page: (u32, u32), dpi: f32) -> (u64, u64) {
     let px = |pt: u32| ((pt as f32 * (dpi / 72.0)).round() as u64).max(1);
     (px(page.0), px(page.1))
@@ -2114,7 +2173,7 @@ fn too_many_pixels(cfg: &Config, what: &str, w: u64, h: u64) -> ToolError {
         ),
     )
     .with("limit_pixels", json!(cfg.max_pixels))
-    .with("pixels", json!(w * h))
+    .with("pixels", json!(w.saturating_mul(h)))
     .with("width_px", json!(w))
     .with("height_px", json!(h))
 }
@@ -2221,7 +2280,32 @@ fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
         ChalkError::Latex { token, .. } => {
             ToolError::new("latex_error", e.to_string()).with("token", json!(token))
         }
+        // Every problem found in one pass (#1080): `token` and `code` are the
+        // first one's, so a caller that reads one error still works, and
+        // `problems` lists them all with their places.
+        ChalkError::Problems(ps) => {
+            let problems: Vec<Value> = ps
+                .iter()
+                .map(|p| {
+                    json!({
+                        "code": p.code(),
+                        "token": p.token,
+                        "line": p.line,
+                        "column": p.column,
+                        "offset": p.offset,
+                        "message": p.message(),
+                    })
+                })
+                .collect();
+            let first = ps.first().map(|p| p.token.clone()).unwrap_or_default();
+            ToolError::new("latex_error", e.to_string())
+                .with("token", json!(first))
+                .with("problems", json!(problems))
+        }
         ChalkError::Render(_) => ToolError::new("render_failed", e.to_string()),
+        // `ChalkError` is `#[non_exhaustive]`; a future variant reports as a
+        // LaTeX error with its message until it gets its own arm.
+        _ => ToolError::new("latex_error", e.to_string()),
     };
     err.with("code", json!(code))
 }
@@ -2294,7 +2378,10 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         if !fields.contains_key("limit")
             && fields.get("ps_error").and_then(Value::as_str) == Some("undefined")
             && let Some(cmd) = fields.get("offending_command").and_then(Value::as_str)
-            && let Some(e) = pscat::chalk::explain(&pscat::PsError::Undefined(cmd.into()))
+            && let Some(e) = driver.explain(
+                run.stdout.as_bytes(),
+                &pscat::PsError::Undefined(cmd.into()),
+            )
         {
             return Err(chalk_error(e));
         }
@@ -2711,8 +2798,8 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         }
     }
     let sheet_png = scratch.path().join("sheet.png");
-    out.save_png(&sheet_png)
-        .map_err(|e| format!("write the sheet: {e}"))?;
+    // A sheet mixes cells of any dpi: nominal 72 dpi, as `pscat sheet`.
+    pscat::png::save(&out, 1.0, &sheet_png).map_err(|e| format!("write the sheet: {e}"))?;
     drop(out);
     let pages = [sheet_png];
     let written = match &dest {
@@ -2762,6 +2849,9 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let source = required_text(cfg, args, "source")?;
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
+    // Letter, as before #921: eval has no page arguments, and an EPSF box
+    // would size a canvas the pixel cap never checked.
+    cmd.arg("--page").arg("612x792");
     cmd.arg("--headless").arg("--pstack-on-error").arg("-");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let mut report = String::new();
@@ -2883,10 +2973,22 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
             }
             "Error" => fields.insert("ps_error".into(), json!(value)),
             "OffendingCommand" => fields.insert("offending_command".into(), json!(value)),
-            "Line" => fields.insert(
-                "line".into(),
-                value.parse::<u64>().map_or(json!(value), |n| json!(n)),
-            ),
+            // `5`, or `5 (inner.ps)` for a line of a `run` file (#1043).
+            "Line" => {
+                let (num, file) = match value.split_once(" (") {
+                    Some((n, f)) if f.ends_with(')') => (n, Some(&f[..f.len() - 1])),
+                    _ => (value, None),
+                };
+                if let Some(file) = file {
+                    fields.insert("file".into(), json!(file));
+                }
+                fields.insert(
+                    "line".into(),
+                    num.parse::<u64>().map_or(json!(value), |n| json!(n)),
+                )
+            }
+            // `inner.ps:5 <- outer.ps:2 <- line 1`, innermost first.
+            "Run chain" => fields.insert("run_chain".into(), json!(value)),
             _ => None,
         };
     }
@@ -2902,6 +3004,15 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// block carries the report, so repeating the verdict under `Lint:`
 /// would only say the same thing twice.
 ///
+/// Every other finding is dropped too when that line is present (#942):
+/// the checks look at where the program *ended* (a page with no ink, a
+/// `gsave` or `begin` still open, values left on the stack), and an aborted
+/// run ends wherever the error hit, so each is a consequence of the error
+/// and not a flaw in the program. Reported under `Lint:` they read as a
+/// second problem ("the program never drew") next to the real one. The
+/// partly drawn page is still returned. The CLI's `--lint` follows the same
+/// rule since #947, so this drop is a safety net for the child's output.
+///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
 /// #847) is not a finding: it is kept, ahead of the findings, only when
 /// there are findings for it to explain, so a clean banded render stays
@@ -2914,8 +3025,11 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
     let mut findings = Vec::new();
     let mut notes = Vec::new();
     let mut rest = Vec::new();
+    let mut errored = false;
     for line in stderr.lines() {
-        if line == CLEAN || line.starts_with(RUN_ERROR) {
+        if line.starts_with(RUN_ERROR) {
+            errored = true;
+        } else if line == CLEAN {
             continue;
         } else if line.starts_with(NOTE) {
             notes.push(line);
@@ -2924,6 +3038,9 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
         } else {
             rest.push(line);
         }
+    }
+    if errored {
+        findings.clear();
     }
     if !findings.is_empty() {
         findings.splice(0..0, notes);
@@ -3744,6 +3861,23 @@ mod tests {
     }
 
     #[test]
+    fn run_file_line_parses_into_line_file_and_chain() {
+        // #1043: an error in a `run` file names it, and the run chain.
+        let f = ps_error_fields(
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); \
+             Run chain: inner3.ps:5 <- lib/a b.ps:2 <- line 2 ]%%",
+        )
+        .unwrap();
+        assert_eq!(f["ps_error"], "undefinedresult");
+        assert_eq!(f["line"], 5);
+        assert_eq!(f["file"], "inner3.ps");
+        assert_eq!(f["run_chain"], "inner3.ps:5 <- lib/a b.ps:2 <- line 2");
+        // A main-program line has no file.
+        let f = ps_error_fields("%%[ Error: undefined; OffendingCommand: x; Line: 2 ]%%").unwrap();
+        assert!(!f.contains_key("file"));
+    }
+
+    #[test]
     fn capped_offending_name_still_parses() {
         // The interpreter cuts a pathological name to 512 bytes plus a
         // marker with no `; ` or ` ]%%`, so the fields stay separable (#745).
@@ -3790,6 +3924,23 @@ mod tests {
         assert_eq!(l, "", "a note alone is not a Lint block");
         let (l, _) = split_lint_findings(&format!("{note}\npscat: lint: [blank-page] b\n"));
         assert_eq!(l, format!("{note}\npscat: lint: [blank-page] b"));
+    }
+
+    #[test]
+    fn an_errored_runs_other_findings_are_consequences_and_are_dropped() {
+        // #942: the end-of-run checks mean nothing for an aborted run.
+        let (l, rest) = split_lint_findings(
+            "%%[ Error: undefinedresult ]%%\npscat: lint: [run-error] e\n\
+             pscat: lint: [blank-page] b\npscat: lint: [stack-leak] s\n\
+             pscat: lint: note: --bands: band 1 of 8 only\n",
+        );
+        assert_eq!(l, "");
+        assert_eq!(rest, "%%[ Error: undefinedresult ]%%");
+        let (l, _) = split_lint_findings("pscat: lint: [gsave-imbalance] g\n");
+        assert_eq!(
+            l, "pscat: lint: [gsave-imbalance] g",
+            "a clean-exit run keeps them"
+        );
     }
 
     #[test]

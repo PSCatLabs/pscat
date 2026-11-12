@@ -215,22 +215,13 @@ fn sameclip_tests_clip_identity() {
     assert_eq!(eval_err(".sameclip"), PsError::StackUnderflow);
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// gs (correctness reference) paints the same replayed region. Its
 /// replay is byte-identical to its own direct clip, and pscat's agrees
 /// with gs block for block. Pixel for pixel they differ at every edge,
 /// with or without gstate: gs clips without anti-aliasing.
 #[test]
 fn ghostscript_agrees_on_a_replayed_nested_eoclip() {
-    if !gs_available() {
-        eprintln!("skipping gs gstate check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let replay = format!(

@@ -9,10 +9,12 @@
 #              acceptance, semver against crates.io once there is a baseline);
 #              cargo-about notices; the .crate
 #   binaries   macOS arm64/x86_64, Linux musl x86_64/aarch64, Windows x86_64
-#   assemble   SHA256SUMS and release-manifest.json (commit + digests); the
-#              resume/mismatch rehearsal against fake registries; a read-only
-#              plan against the real registries
-#   draft      a draft GitHub Release with the archives          (real only)
+#   assemble   SHA256SUMS and release-manifest.json (commit + digests) over
+#              the archives and the npm tarball (#1006); the resume/mismatch
+#              rehearsal against fake registries; a read-only plan against
+#              the real registries
+#   draft      a draft GitHub Release with the archives and the npm
+#              tarball                                            (real only)
 #   publish    environment `release` (owner approval): provenance
 #              attestations, crates.io, npm when npm/package.json exists
 #              (the tarball `verify` packed), publish the GitHub Release,
@@ -27,7 +29,9 @@
 # `publish` runs only the draft, publish and plugin stages: no crates.io
 # token is minted, nothing goes to crates.io, npm or the MCP Registry, and
 # the release never becomes "latest". release_stages.py refuses those
-# channels for an rc version whatever stages it is given. The
+# channels for an rc version whatever stages it is given. The pre-release
+# still carries the npm tarball as an asset (#1006), so a browser or npm
+# consumer can install the candidate from its GitHub URL. The
 # post-publish check installs the archives and skips the crate.
 #
 # Every stage checks its registry first: skip on an identical artifact,
@@ -107,7 +111,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -173,7 +177,7 @@ jobs:
           toolchain: ${{ env.RELEASE_TOOLCHAIN }}
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2
         with:
           tool: cargo-about,cargo-semver-checks
       # The gate, the MCP checks and the crate acceptance run in ci.yml and
@@ -280,7 +284,7 @@ jobs:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -321,7 +325,7 @@ jobs:
         shell: bash
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -340,8 +344,11 @@ jobs:
           COMMIT: ${{ needs.verify.outputs.commit }}
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
+          # --npm-from: the tarball verify packed becomes a release asset,
+          # listed in SHA256SUMS (#1006); missing while npm/package.json
+          # exists is an error.
           python3 scripts/release_stages.py manifest --tag "$TAG" --commit "$COMMIT" \
-            --dist dist --crate "release-inputs/pscat-$VERSION.crate"
+            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs
           N=$(ls dist/*.tar.gz dist/*.zip | wc -l)
           [ "$N" -eq 5 ] || { echo "::error::expected 5 archives, found $N"; exit 1; }
           { echo '### SHA256SUMS'; echo '```'; cat dist/SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -385,7 +392,7 @@ jobs:
       contents: write
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -427,7 +434,7 @@ jobs:
       attestations: write
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -443,7 +450,8 @@ jobs:
           name: release-inputs
           path: release-inputs
       # Signed SLSA build provenance for every archive and the .crate (#635),
-      # before anything goes public, so a published artifact always has one.
+      # and the npm tarball (#1006), before anything goes public, so a
+      # published artifact always has one.
       # `gh attestation verify FILE --repo PSCatLabs/pscat` checks it
       # (RELEASING.md). A re-run attests the same digests again: harmless.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -451,12 +459,13 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.tgz
             release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on
       # crates.io (RELEASING.md, "One-time setup"). Never minted for a
       # release candidate.
-      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1
         if: needs.verify.outputs.prerelease != 'true'
         id: crates-auth
       # The npm channel turns on when npm/package.json exists (#566); npm

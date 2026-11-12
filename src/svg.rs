@@ -9,6 +9,11 @@
 //! clip chain. Images are embedded as base64 PNG `<image>` elements
 //! carrying the exact device transform the rasterizer used.
 //!
+//! Text set in the standard fonts can be written as `<text>` instead
+//! (#1119, [`SvgText::Text`], `pscat --svg-text`): one element per run
+//! of glyphs on a baseline (`crate::textrun`), each glyph at its own
+//! `x`, so the layout is pscat's whatever face the viewer substitutes.
+//!
 //! One SVG document per page, mirroring the multi-page model: the
 //! recorder ends a page when showpage/copypage snapshots one, and a
 //! pending lazy erase clears the body exactly when it clears the
@@ -21,6 +26,27 @@ use std::rc::Rc;
 use tiny_skia::FillRule;
 
 use crate::gfx::{BlendMode, ClipNode, Composite};
+use crate::textrun::{GlyphText, Placement, TextRun};
+
+/// How SVG output writes text set in the standard fonts (#1119).
+///
+/// Set with `Gfx::set_svg_text` (`interp.gfx_mut().set_svg_text(..)`) or
+/// `pscat --svg-text`. Only SVG output reads it: PNG and PDF draw glyph
+/// outlines either way (real text in PDF is #1026).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SvgText {
+    /// Every glyph is its outline, a `<path>`: exact in any viewer. The
+    /// default, and the only form before #1119.
+    #[default]
+    Paths,
+    /// Glyphs of the twelve built-in standard faces (Helvetica, Times and
+    /// Courier, four styles each) become `<text>` elements: selectable,
+    /// searchable and far smaller, drawn by the viewer in a
+    /// metric-compatible face (Arial, Times New Roman, Courier New or
+    /// Liberation), each glyph at pscat's position. Other fonts keep their
+    /// outlines.
+    Text,
+}
 
 pub struct SvgRecorder {
     width: u32,
@@ -42,6 +68,12 @@ pub struct SvgRecorder {
     pages: Vec<String>,
     /// Omit the white backdrop rect (`--transparent`).
     transparent: bool,
+    /// The text run still taking glyphs (#1119), with its clip-group
+    /// open/close strings and leftover blend style, fixed when the run
+    /// opened. Written to `body` when anything else is drawn, so paint
+    /// order holds; `document` writes it after the body, so a page that
+    /// ends in text is whole before the run closes.
+    run: Option<(TextRun, String, String, String)>,
 }
 
 pub(crate) type Chain = Option<Rc<ClipNode>>;
@@ -77,7 +109,99 @@ impl SvgRecorder {
             next_grad: 0,
             pages: Vec::new(),
             transparent: false,
+            run: None,
         }
+    }
+
+    /// One glyph as text (#1119): continue the open run, or close it and
+    /// open a new one. A glyph with no placement (a collapsed font matrix)
+    /// paints nothing in the raster either, so it is dropped.
+    pub(crate) fn glyph(
+        &mut self,
+        g: &GlyphText,
+        rgb: (f32, f32, f32),
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        let Some(p) = Placement::of(g) else {
+            return;
+        };
+        if let Some((run, ..)) = &mut self.run
+            && run.accepts(g, &p, rgb, comp, chain)
+        {
+            run.push(g, &p);
+            return;
+        }
+        self.flush_text();
+        let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        self.run = Some((
+            TextRun::new(g, p, rgb, comp, chain.clone()),
+            open,
+            close,
+            leftover,
+        ));
+    }
+
+    /// Close the open text run into the body.
+    fn flush_text(&mut self) {
+        if let Some(run) = self.run.take() {
+            Self::write_run(&mut self.body, &run);
+        }
+    }
+
+    fn write_run(
+        out: &mut String,
+        (run, open, close, leftover): &(TextRun, String, String, String),
+    ) {
+        let Some(face) = crate::textrun::standard_face(run.fid) else {
+            return;
+        };
+        let mut xs = String::new();
+        let mut chars = String::new();
+        for (i, g) in run.glyphs.iter().enumerate() {
+            if i > 0 {
+                xs.push(' ');
+            }
+            xs.push_str(&fmt_f32(g.x as f32));
+            match g.ch {
+                '&' => chars.push_str("&amp;"),
+                '<' => chars.push_str("&lt;"),
+                '>' => chars.push_str("&gt;"),
+                c => chars.push(c),
+            }
+        }
+        let transform = if run.upright() {
+            String::new()
+        } else {
+            let f = |v: f64| fmt_frame(v);
+            format!(
+                " transform=\"matrix({} {} {} {} 0 0)\"",
+                f(run.frame[0]),
+                f(run.frame[1]),
+                f(run.frame[2]),
+                f(run.frame[3]),
+            )
+        };
+        let _ = write!(
+            out,
+            "{open}<text xml:space=\"preserve\"{transform} x=\"{xs}\" y=\"{}\" \
+             font-family=\"{}\" font-size=\"{}\"{}{} fill=\"{}\"{}{leftover}>{chars}</text>{close}",
+            fmt_f32(run.y as f32),
+            face.css_family,
+            fmt_f32(run.size as f32),
+            if face.bold {
+                " font-weight=\"bold\""
+            } else {
+                ""
+            },
+            if face.italic {
+                " font-style=\"italic\""
+            } else {
+                ""
+            },
+            Self::color(run.rgb),
+            Self::opacity_attr(run.comp, false),
+        );
     }
 
     pub(crate) fn set_transparent(&mut self, transparent: bool) {
@@ -182,6 +306,7 @@ impl SvgRecorder {
         comp: Composite,
         chain: &Chain,
     ) {
+        self.flush_text();
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let _ = write!(
             self.body,
@@ -205,6 +330,7 @@ impl SvgRecorder {
         comp: Composite,
         chain: &Chain,
     ) {
+        self.flush_text();
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let cap = match cap {
             tiny_skia::LineCap::Round => "round",
@@ -259,6 +385,7 @@ impl SvgRecorder {
         // goes on the outermost wrapper (see `clip_wrappers`); an image
         // takes `opacity`, not `fill-opacity`. Nothing is emitted at the
         // default, so existing exports are unchanged.
+        self.flush_text();
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let opacity = if comp.alpha >= 1.0 {
             String::new()
@@ -300,6 +427,7 @@ impl SvgRecorder {
         comp: Composite,
         chain: &Chain,
     ) {
+        self.flush_text();
         let id = self.next_grad;
         self.next_grad += 1;
         let stop_tags = |stops: &[(f32, f32, f32, f32)]| {
@@ -432,19 +560,34 @@ impl SvgRecorder {
         );
     }
 
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.flush_text();
+        self.width = width;
+        self.height = height;
+    }
+
     /// The lazy showpage erase (or an explicit erasepage): the new
     /// page starts blank.
     pub(crate) fn erase(&mut self) {
+        self.run = None;
         self.body.clear();
         self.defs.clear();
         self.clip_ids.clear();
     }
 
     fn document(&self) -> String {
+        let mut body = std::borrow::Cow::Borrowed(self.body.as_str());
+        if let Some(run) = &self.run {
+            let mut b = self.body.clone();
+            Self::write_run(&mut b, run);
+            body = std::borrow::Cow::Owned(b);
+        }
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
              xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
-             width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">\
+             width=\"{w}pt\" height=\"{h}pt\" viewBox=\"0 0 {w} {h}\">\
              {backdrop}{defs}{body}</svg>\n",
             backdrop = if self.transparent {
                 String::new()
@@ -461,13 +604,13 @@ impl SvgRecorder {
             } else {
                 format!("<defs>{}</defs>", self.defs)
             },
-            body = self.body,
         )
     }
 
     /// showpage/copypage: snapshot the page document. (The body is
     /// *not* cleared here — the erase is lazy, same as the canvas.)
     pub(crate) fn end_page(&mut self) {
+        self.flush_text();
         self.pages.push(self.document());
     }
 
@@ -485,6 +628,18 @@ fn fmt_f32(v: f32) -> String {
     // Enough precision for device coordinates, no trailing noise.
     let s = format!("{v:.3}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// A text frame's matrix entries, unit-scale: six decimals keep a
+/// glyph's position across a page-sized coordinate within a thousandth.
+fn fmt_frame(v: f64) -> String {
+    let s = format!("{v:.6}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 /// Full round-trip precision, for values a `gradientTransform` (or

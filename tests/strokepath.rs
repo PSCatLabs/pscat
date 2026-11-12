@@ -45,13 +45,6 @@ fn near(a: [f64; 4], b: [f64; 4], tol: f64) -> bool {
     a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= tol)
 }
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// A scratch path unique per call, in this process and any other.
 fn scratch(name: &str) -> std::path::PathBuf {
     common::scratch_dir("pscat_strokepath").join(name)
@@ -400,8 +393,7 @@ fn fill_of_strokepath_matches_stroke() {
 
 #[test]
 fn strokepath_bbox_matches_ghostscript() {
-    if !gs_available() {
-        eprintln!("skipping: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     for (name, path) in CASES {
@@ -427,8 +419,7 @@ fn strokepath_bbox_matches_ghostscript() {
 
 #[test]
 fn fill_of_strokepath_matches_ghostscript_stroke() {
-    if !gs_available() {
-        eprintln!("skipping: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     for (name, path) in CASES {
@@ -453,8 +444,7 @@ fn fill_of_strokepath_matches_ghostscript_stroke() {
 
 #[test]
 fn ghostscript_accepts_strokepath() {
-    if !gs_available() {
-        eprintln!("skipping: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     // gs must run every case itself, so the programs are valid

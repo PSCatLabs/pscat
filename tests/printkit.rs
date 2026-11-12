@@ -10,6 +10,8 @@
 //! forwarding, the optional `/Paper` pass, and that the three presets
 //! actually read as different techniques.
 
+mod common;
+
 use pscat::gfx::PathElement;
 use pscat::{Interp, PsError};
 
@@ -586,12 +588,7 @@ fn every_example_tag_runs_clean() {
 
 #[test]
 fn ghostscript_accepts_the_printkit_specimen_sheet() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

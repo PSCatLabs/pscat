@@ -383,6 +383,88 @@ class Channels(Base):
         st, r, _ = self.run_all()
         self.assertEqual((st, r["npm"]), (rs.EXIT_HALT, "halted"))
 
+    def _attach(self):
+        """The npm channel on and the tarball listed in the manifest, as
+        assemble's `manifest --npm-from release-inputs` does (#1006)."""
+        self._npm()
+        tarball = rs.find_npm_tarball(self.repo, os.path.dirname(self.crate), VERSION)
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, tarball), self.dist)
+        self.m = rs.load_manifest(self.dist)
+        return tarball
+
+    def test_the_release_carries_the_npm_tarball_npm_publishes(self):
+        tarball = self._attach()
+        name = os.path.basename(tarball)
+        self.assertEqual(rs.npm_asset(self.m), name)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["draft"], r["npm"], r["publish"]), (rs.EXIT_OK, "published", "published", "published"))
+        rel = self.fake.releases(TAG)[0]
+        self.assertIn(name, [a["name"] for a in rel["assets"]])
+        asset = next(a for a in rel["assets"] if a["name"] == name)
+        self.assertEqual(self.fake.asset_sha256(asset), rs.sha256_file(tarball))
+        self.assertEqual(self.fake.npm_view("pscat-wasm", VERSION)["integrity"], rs.npm_integrity(tarball))
+        notes = rs.changelog_notes(VERSION, self.repo, name)
+        self.assertIn(f"npm install https://github.com/PSCatLabs/pscat/releases/download/{TAG}/{name}", notes)
+        self.assertIn("the same file that is published to npm", notes)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["draft"], r["npm"], r["publish"]), (rs.EXIT_OK, "skipped", "skipped", "skipped"))
+
+    def test_npm_tarball_other_than_the_listed_one_halts(self):
+        tarball = self._attach()
+        make_npm_tarball(tarball, extra=b"// rebuilt\n")
+        st, r, res = self.run_all()
+        self.assertEqual((st, r["npm"], r["publish"]), (rs.EXIT_HALT, "halted", "not run"))
+        self.assertIn("is not the npm tarball", {x["stage"]: x["detail"] for x in res}["npm"])
+        self.assertIsNone(self.fake.npm_view("pscat-wasm", VERSION))
+
+    def test_npm_compares_against_an_adopted_draft(self):
+        # A draft from a first run, then a rerun whose rebuilt tarball (and
+        # so its manifest) differs: the draft is adopted, and npm must not
+        # publish bytes the release does not carry (Codex, PR #1008).
+        tarball = self._attach()
+        st, _ = rs.run_stages(self.ctx(), ["draft"])
+        self.assertEqual(st, rs.EXIT_OK)
+        make_npm_tarball(tarball, extra=b"// rebuilt\n")
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, tarball), self.dist)
+        self.m = rs.load_manifest(self.dist)
+        st, r, res = self.run_all()
+        self.assertEqual((st, r["draft"], r["npm"], r["publish"]), (rs.EXIT_HALT, "skipped", "halted", "not run"))
+        self.assertIn("release v9.8.7's release-manifest.json", {x["stage"]: x["detail"] for x in res}["npm"])
+        self.assertIsNone(self.fake.npm_view("pscat-wasm", VERSION))
+
+    def test_find_npm_tarball(self):
+        src = os.path.dirname(self.crate)
+        self.assertIsNone(rs.find_npm_tarball(self.repo, src, VERSION), "npm channel off: nothing to attach")
+        self._npm(tarball=False)
+        with self.assertRaises(SystemExit):  # the channel is on and the tarball is missing
+            rs.find_npm_tarball(self.repo, src, VERSION)
+        make_npm_tarball(self._tarball(), name="someone-else")
+        with self.assertRaises(SystemExit):
+            rs.find_npm_tarball(self.repo, src, VERSION)
+        make_npm_tarball(self._tarball())
+        self.assertEqual(rs.find_npm_tarball(self.repo, src, VERSION), self._tarball())
+
+    def test_manifest_refuses_an_npm_tarball_of_another_version(self):
+        self._npm(tarball_version="0.0.1")
+        with self.assertRaises(SystemExit):
+            rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball())
+
+    def test_manifest_cli_attaches_the_npm_tarball(self):
+        self._npm()
+        subprocess.run([sys.executable, os.path.join(rs.ROOT, "scripts", "release_stages.py"), "manifest",
+                        "--tag", TAG, "--commit", COMMIT, "--dist", self.dist, "--crate", self.crate,
+                        "--npm-from", os.path.dirname(self.crate), "--repo-root", self.repo],
+                       capture_output=True, text=True, check=True)
+        m = rs.load_manifest(self.dist)
+        name = os.path.basename(self._tarball())
+        self.assertEqual([a["name"] for a in m["assets"]][-1], name, "after the archives")
+        self.assertTrue(os.path.isfile(os.path.join(self.dist, name)))
+        with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
+            self.assertIn(f"{rs.sha256_file(self._tarball())}  {name}\n", f.read())
+        # Run again over a dist that already holds the copy: listed once.
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball()), self.dist)
+        self.assertEqual([a["name"] for a in rs.load_manifest(self.dist)["assets"]].count(name), 1)
+
     def test_npm_tarball_name(self):
         self.assertEqual(rs.npm_tarball_name("pscat", "0.6.2"), "pscat-0.6.2.tgz")
         self.assertEqual(rs.npm_tarball_name("@pscat/wasm", "1.0.0"), "pscat-wasm-1.0.0.tgz")
@@ -458,6 +540,59 @@ class Channels(Base):
         self.fake = fake
         st, r, _ = self.run_all()
         self.assertEqual((st, r["plugin"]), (rs.EXIT_OK, "skipped"))
+
+    def test_untracked_nested_checkouts_are_left_alone(self):
+        """In a git checkout only tracked manifests are found and bumped (#959):
+        a nested clone (like codex/) and a scratch directory are not touched."""
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
+        repo = os.path.join(self.tmp, "gitrepo")
+        files = {
+            ".claude-plugin/marketplace.json": {"name": "m", "plugins": [{"name": "p", "version": "0.0.1"}]},
+            "plugin/.claude-plugin/plugin.json": {"name": "p", "version": "0.0.1"},
+            "plugin/plugin.json": {"name": "p", "version": "0.0.1"},
+            ".agents/plugins/marketplace.json": {"name": "m", "plugins": [
+                {"name": "p", "source": {"source": "local", "path": "./plugin"}}]},
+        }
+        untracked = {
+            "nested/.claude-plugin/plugin.json": {"name": "n", "version": "0.0.1"},
+            "scratch/deep/.claude-plugin/plugin.json": {"name": "s", "version": "0.0.1"},
+            "scratch/plugin.json": {"name": "s", "version": "0.0.1"},
+        }
+        for group in (files, untracked):
+            for rel, data in group.items():
+                path = os.path.join(repo, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+        subprocess.run(["git", "init", "--quiet", repo], check=True)
+        subprocess.run(["git", "init", "--quiet", os.path.join(repo, "nested")], check=True)
+        subprocess.run(["git", "-C", repo, "add", *files], check=True)
+        before = {}
+        for rel in untracked:
+            with open(os.path.join(repo, *rel.split("/")), "rb") as f:
+                before[rel] = f.read()
+        found = sorted(os.path.relpath(p, repo).replace(os.sep, "/") for p in rs.plugin_manifests(repo))
+        self.assertEqual(found, sorted(files))
+        changed = sorted(c.replace(os.sep, "/") for c in rs.bump_manifests_json_only(repo, VERSION))
+        # The Codex marketplace carries no version, so only the others change.
+        self.assertEqual(changed, sorted(set(files) - {".agents/plugins/marketplace.json"}))
+        for rel, data in before.items():
+            with open(os.path.join(repo, *rel.split("/")), "rb") as f:
+                self.assertEqual(f.read(), data, f"{rel} was rewritten")
+        # Without a .git (a copied tree, the other fixtures) every file counts.
+        shutil.rmtree(os.path.join(repo, ".git"))
+        shutil.rmtree(os.path.join(repo, "nested", ".git"))
+        self.assertEqual(len(rs.plugin_manifests(repo)), len(files) + 2)
+
+    def test_a_failing_git_in_a_checkout_is_an_error_not_a_glob(self):
+        repo = os.path.join(self.tmp, "brokengit")
+        os.makedirs(os.path.join(repo, ".git"))  # a .git that is not a repository
+        os.makedirs(os.path.join(repo, "x", ".claude-plugin"))
+        with open(os.path.join(repo, "x", ".claude-plugin", "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": "0.0.1"}, f)
+        with self.assertRaises(SystemExit):
+            rs.plugin_manifests(repo)
 
     def test_the_repo_codex_manifest_is_bumped(self):
         files = [os.path.relpath(p, rs.ROOT) for p in rs.plugin_manifests()]
@@ -597,6 +732,9 @@ class ReleaseCandidate(unittest.TestCase):
                        "packages": [{"registryType": "cargo", "identifier": "pscat", "version": RC}]}, f)
         self.dist, self.crate = make_dist(self.tmp, version=RC)
         make_npm_tarball(os.path.join(self.tmp, rs.npm_tarball_name("pscat-wasm", RC)), version=RC)
+        # The pre-release carries the npm tarball as an asset (#1006).
+        self.tarball = rs.find_npm_tarball(self.repo, self.tmp, RC)
+        rs.write_manifest(rs.build_manifest(f"v{RC}", COMMIT, self.dist, self.crate, self.tarball), self.dist)
         self.m = rs.load_manifest(self.dist)
         self.fake = rs.Fake(os.path.join(self.tmp, "fake"))
         self.fake.set_tag(f"v{RC}", COMMIT)
@@ -645,11 +783,19 @@ class ReleaseCandidate(unittest.TestCase):
         self.assertFalse(rel[0]["draft"])
         self.assertEqual(self.fake.latest(), "v9.8.6")
         self.assertIn(f"github.create v{RC} prerelease", self.fake.events())
+        # #1006: the npm tarball is on the pre-release, and only there.
+        name = os.path.basename(self.tarball)
+        self.assertIn(name, [a["name"] for a in rel[0]["assets"]])
+        self.assertIsNone(self.fake.npm_view("pscat-wasm", RC))
 
     def test_rc_release_notes_say_prerelease(self):
         notes = rs.changelog_notes(RC, self.repo)
         self.assertIn("Release candidate for 9.8.7", notes)
         self.assertIn("not on crates.io, npm or the MCP Registry", notes)
+        name = os.path.basename(self.tarball)
+        notes = rs.changelog_notes(RC, self.repo, name)
+        self.assertIn(f"npm install https://github.com/PSCatLabs/pscat/releases/download/v{RC}/{name}", notes)
+        self.assertIn("it is not on npm", notes)
 
     def test_rc_draft_not_marked_prerelease_halts(self):
         self.fake.create_draft(f"v{RC}", "x", "x", prerelease=False)
@@ -714,6 +860,78 @@ class RepoFacts(unittest.TestCase):
             self.assertEqual([n for n, ok, _ in outcomes if not ok], [])
 
 
+class PluginPin(unittest.TestCase):
+    """`bump-manifests` sets plugin/pscat-release (#867), so a release PR,
+    rc or not, needs no hand edit and passes plugin_check.py."""
+
+    PIN = os.path.join("plugin", "pscat-release")
+    CHECK = os.path.join(rs.ROOT, "scripts", "plugin_check.py")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pin-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_pin(self, root, text):
+        os.makedirs(os.path.join(root, "plugin"), exist_ok=True)
+        with open(os.path.join(root, self.PIN), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def read_pin(self, root):
+        with open(os.path.join(root, self.PIN), encoding="utf-8") as f:
+            return f.read()
+
+    def test_sets_the_tag_and_keeps_the_comments(self):
+        self.write_pin(self.tmp, "# the release\n# one tag\nv0.6.3\n")
+        for version in ("0.7.0-rc.1", "0.7.0"):
+            self.assertTrue(rs.set_release_pin(self.tmp, version))
+            self.assertEqual(self.read_pin(self.tmp), f"# the release\n# one tag\nv{version}\n")
+        # Already there: no write, so release.sh does not list it.
+        self.assertFalse(rs.set_release_pin(self.tmp, "0.7.0"))
+
+    def test_no_pin_file_is_left_alone(self):
+        self.assertFalse(rs.set_release_pin(self.tmp, "0.7.0"))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, self.PIN)))
+
+    def test_a_malformed_pin_halts_instead_of_guessing(self):
+        for text in ("# only comments\n", "v0.6.3\nv0.6.4\n", ""):
+            self.write_pin(self.tmp, text)
+            with self.assertRaises(SystemExit):
+                rs.set_release_pin(self.tmp, "0.7.0")
+            self.assertEqual(self.read_pin(self.tmp), text)
+
+    def test_bump_manifests_reports_the_pin(self):
+        # release.sh `git add`s exactly what bump-manifests prints.
+        with open(os.path.join(self.tmp, "Cargo.toml"), "w", encoding="utf-8") as f:
+            f.write('[package]\nname = "pscat"\nversion = "0.6.3"\n')
+        self.write_pin(self.tmp, "v0.6.3\n")
+        self.assertEqual(rs.bump_manifests(self.tmp, "0.7.0-rc.1"), ["Cargo.toml", self.PIN])
+        self.assertEqual(self.read_pin(self.tmp), "v0.7.0-rc.1\n")
+
+    def test_the_real_tree_passes_plugin_check_after_a_bump(self):
+        """The repo's own plugin tree, bumped to an rc and then to the
+        release, still passes plugin_check.py (a hand edit used to be needed:
+        the release pin must equal the crate version)."""
+        clone = os.path.join(self.tmp, "clone")
+        shutil.copytree(rs.ROOT, clone, ignore=shutil.ignore_patterns(
+            ".git", "target", "node_modules", "dist", "release-inputs"), symlinks=True)
+        for version in ("99.0.0-rc.1", "99.0.0"):
+            changed = rs.bump_manifests(clone, version)
+            self.assertIn(self.PIN, changed)
+            self.assertEqual(
+                [ln for ln in self.read_pin(clone).splitlines() if ln and not ln.startswith("#")],
+                [f"v{version}"])
+            self.assertTrue(self.read_pin(clone).startswith("#"), "the comments survive")
+            p = subprocess.run([sys.executable, self.CHECK, clone], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        # Without the pin bump the same tree fails, so the check above is real.
+        self.write_pin(clone, "v0.6.3\n")
+        p = subprocess.run([sys.executable, self.CHECK, clone], capture_output=True, text=True)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("pscat-release", p.stdout + p.stderr)
+
+
 @unittest.skipUnless(shutil.which("git-cliff"), "git-cliff not installed")
 class ReleaseScript(unittest.TestCase):
     """scripts/release.sh --no-push in a scratch clone of this repo."""
@@ -758,6 +976,7 @@ class ReleaseScript(unittest.TestCase):
         changed = subprocess.run(["git", "-C", self.clone, "show", "--name-only", "--format=", "HEAD"],
                                  capture_output=True, text=True, check=True).stdout.split()
         self.assertIn("npm/package.json", changed)
+        self.assertIn("plugin/pscat-release", changed)
         with open(os.path.join(self.clone, "CHANGELOG.md"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("## [99.0.0]", text)
@@ -786,6 +1005,8 @@ class ReleaseScript(unittest.TestCase):
         with open(os.path.join(self.clone, "npm", "package.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["version"], "99.0.0-rc.1")
         changed = self.git("show", "--name-only", "--format=", "HEAD").split()
+        self.assertIn("plugin/pscat-release", changed)
+        self.assertEqual(self.git("show", "HEAD:plugin/pscat-release").splitlines()[-1], "v99.0.0-rc.1")
         self.assertNotIn("CHANGELOG.md", changed)
         if before is not None:
             self.assertEqual(self.git("show", "HEAD:CHANGELOG.md"), before)

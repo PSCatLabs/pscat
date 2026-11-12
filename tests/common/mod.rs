@@ -52,6 +52,102 @@ pub fn pdf_text(pdf: &[u8]) -> String {
 }
 
 // ---------------------------------------------------------------------
+// Ghostscript (issue #985)
+//
+// Many tests compare pscat with a real Ghostscript. Without `gs` on PATH
+// they used to skip with an `eprintln!`, which libtest hides for a passing
+// test, so a CI log could not say whether the parity checks ran at all.
+// Every such test now starts with
+//
+//     if !common::gs_available() { return; }
+//
+// and the rule lives here:
+//   - `gs` runs: true. If `PSCAT_GS_LOG` names a file, `ran <suite>::<test>` is
+//     appended to it (CI counts the lines).
+//   - `gs` missing, `PSCAT_REQUIRE_GS` unset: false, after a `SKIPPED` line
+//     written straight to stderr (not through `eprintln!`, so libtest's
+//     capture cannot swallow it) and logged as `skipped <test>`.
+//   - `gs` missing, `PSCAT_REQUIRE_GS` set (CI jobs that install gs):
+//     panic, so a runner image that loses gs fails instead of passing
+//     every parity test as a skip.
+// ---------------------------------------------------------------------
+
+/// What a test does about Ghostscript, as a pure decision (no logging, no
+/// environment) so tests/gs_helper.rs can cover every case. `Ok(true)`:
+/// run the gs check. `Ok(false)`: skip. `Err`: the requirement is on and
+/// gs is missing.
+pub fn gs_decision(have_gs: bool, require_gs: bool) -> Result<bool, &'static str> {
+    match (have_gs, require_gs) {
+        (true, _) => Ok(true),
+        (false, false) => Ok(false),
+        (false, true) => Err(
+            "PSCAT_REQUIRE_GS is set but `gs` is not runnable; this test would have been \
+             skipped. Install Ghostscript on this runner, or unset PSCAT_REQUIRE_GS.",
+        ),
+    }
+}
+
+/// The log key for one gs probe: `<suite>::<test>`, where the suite is the
+/// test binary's name without cargo's `-<hash>` suffix (`clipsave-1a2b…`
+/// is `clipsave`). Pure, so tests/gs_helper.rs can cover it.
+pub fn gs_log_key(exe: Option<&std::path::Path>, test: &str) -> String {
+    let stem = exe
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("(unknown suite)");
+    let suite = match stem.rsplit_once('-') {
+        Some((name, hash)) if !hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit()) => {
+            name
+        }
+        _ => stem,
+    };
+    format!("{suite}::{test}")
+}
+
+/// True when `gs` is on PATH and runs; the one skip rule for Ghostscript
+/// tests (see the section comment above).
+pub fn gs_available() -> bool {
+    use std::io::Write as _;
+    let have = std::process::Command::new("gs")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let require = std::env::var_os("PSCAT_REQUIRE_GS").is_some_and(|v| !v.is_empty() && v != "0");
+    let thread = std::thread::current();
+    let test = thread.name().unwrap_or("(unnamed test)");
+    // libtest's thread name omits the test binary, and every binary appends
+    // to the same log, so the key carries the suite too: four suites each
+    // have a `ghostscript_prints_the_pinned_lines`.
+    let key = gs_log_key(std::env::current_exe().ok().as_deref(), test);
+    let log = |what: &str| {
+        let file = std::env::var_os("PSCAT_GS_LOG").and_then(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
+        });
+        if let Some(mut f) = file {
+            // One write call, so parallel test binaries cannot interleave a line.
+            let _ = f.write_all(format!("{what} {key}\n").as_bytes());
+        }
+    };
+    match gs_decision(have, require) {
+        Ok(true) => {
+            log("ran");
+            true
+        }
+        Ok(false) => {
+            log("skipped");
+            let _ = writeln!(std::io::stderr(), "SKIPPED (gs not installed): {test}");
+            false
+        }
+        Err(why) => panic!("{test}: {why}"),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Scratch paths (issue #487)
 //
 // Agents run `cargo test` in several worktrees at once, and the tests
@@ -74,11 +170,62 @@ pub fn feed_stdin(child: &mut std::process::Child, bytes: &[u8]) {
     }
 }
 
+/// The chunk types of a PNG file, in order, after checking its signature
+/// and every chunk's length (issue #982).
+pub fn png_chunk_types(png: &[u8]) -> Vec<String> {
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
+    let mut types = Vec::new();
+    let mut at = 8;
+    while at < png.len() {
+        let len = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
+        types.push(String::from_utf8(png[at + 4..at + 8].to_vec()).expect("ascii chunk type"));
+        at += 12 + len;
+    }
+    assert_eq!(at, png.len(), "chunks fill the file");
+    types
+}
+
+/// The `pHYs` chunk of a PNG as `(x pixels per unit, y pixels per unit,
+/// unit)`, after checking there is exactly one, that it comes straight after
+/// `IHDR` (so before `IDAT`) and that the file decodes (the decoder checks
+/// every CRC). Panics when it is missing.
+pub fn png_phys(png: &[u8]) -> (u32, u32, u8) {
+    let types = png_chunk_types(png);
+    assert_eq!(
+        types.iter().filter(|t| *t == "pHYs").count(),
+        1,
+        "exactly one pHYs: {types:?}"
+    );
+    assert_eq!(&types[..2], ["IHDR", "pHYs"], "pHYs right after IHDR");
+    tiny_skia::Pixmap::decode_png(png).expect("the PNG decodes, CRCs included");
+    // IHDR is 13 data bytes: 8 + 12 + 13 = 33 is the start of pHYs.
+    let data = &png[41..50];
+    assert_eq!(&png[33..37], &9u32.to_be_bytes(), "pHYs length");
+    (
+        u32::from_be_bytes(data[..4].try_into().unwrap()),
+        u32::from_be_bytes(data[4..8].try_into().unwrap()),
+        data[8],
+    )
+}
+
 /// A path as it can sit inside a PostScript string literal: `/` separators.
 /// Windows temp paths contain `\`, which a PostScript string reads as an
 /// escape (`\U`, `\t`, ...), and Windows accepts `/` everywhere (issue #601).
 pub fn ps_path(p: &std::path::Path) -> String {
     p.to_str().expect("utf-8 path").replace('\\', "/")
+}
+
+/// `pscat-mcp` reads its limits from `PSCAT_MCP_*` variables (#756). A
+/// developer's own settings must not change what a test sees, so every test
+/// that starts the server strips whatever the parent process carries (#800).
+/// A test that wants one sets it after this call.
+pub fn without_mcp_env(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("PSCAT_MCP_") {
+            cmd.env_remove(name);
+        }
+    }
+    cmd
 }
 
 /// A new, already created directory that no other call shares, in this

@@ -34,7 +34,7 @@
   {
    "id": "apparel",
    "title": "Apparel and design",
-   "blurb": "Print artwork for shirts and jerseys."
+   "blurb": "Print artwork for shirts, jerseys and a business card."
   },
   {
    "id": "drawing",
@@ -130,6 +130,10 @@
   "released": {
    "title": "released",
    "guide": "docs/guides/fonts.md"
+  },
+  "qr": {
+   "title": "qr",
+   "guide": "docs/guides/qr-codes.md"
   }
  },
  "pieces": [
@@ -687,6 +691,28 @@
    "technique": "Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle."
   },
   {
+   "id": "pscat_card",
+   "title": "The Program Card",
+   "category": "apparel",
+   "tags": [
+    "lettering"
+   ],
+   "libraries": [
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 974,
+   "added": "2026-11-02",
+   "source": "gallery/pscat_card.ps",
+   "render": "gallery/renders/pscat_card.png",
+   "page": "252x144",
+   "speed": 100,
+   "alt": "The Program Card, a proof of a two-sided business card: the front has the cat-eared %! logo on a mustard tile, the word pscat and the tagline PostScript for precision and imagination; the back says This card is a program, with the repository address and a navy QR code",
+   "blurb": "A two-sided business card for pscat, ready to print, whose QR code is drawn by the same program as the type.",
+   "technique": "One source draws both 3.5 by 2 inch sides as two pages, so the PDF export carries the front and back at their true size and the PNG and SVG exports write one file per side. The logo is redrawn as paths, the type is set in Courier, Palatino and Helvetica from the standard 35 fonts, and the QR code for the repository is encoded and drawn by `lib/qr.ps` as vector squares. Its modules are 1.68 points, exactly 7 pixels at 300 dpi, so a print PNG puts every module edge on a pixel edge; this proof of both sides is rendered at that resolution for the same reason. Nothing is printed within an eighth of an inch of the trim, so the card needs no bleed."
+  },
+  {
    "id": "alpine_lake",
    "title": "Alpine Lake",
    "category": "painting",
@@ -878,6 +904,104 @@
    "alt": "The Man from 2026, a typed 1962 TOP SECRET memorandum for the record on aged legal paper: red typed classification lines at the head and foot, a control number and copy line, a registry stamp, a paper clip and punch holes, numbered paragraphs with x-outs and a strikeover, a signature block and distribution list, a regrading box and handwritten initials and a margin note",
    "blurb": "A TOP SECRET memorandum of 1962 that was never released: an interviewing officer's flat account of a man who says he came from 2026 and built his time machine by talking to another machine.",
    "technique": "Typed with `tw-type` on the `/Typewriter` font, an elite manual struck at an even hand (`/StrikeWear 0.5`, so the darkness varies without whole letters fading out; every strike is still its own: the weave in the ink, feathered edges, a few light or high letters, the `e` clogged on this machine). The memo-for-the-record header, tab stops, two x-outs, a strikeover (`<o>offcie|office</o>`) and an underscore are markup in one text string. The same machine then types the control lines in black and, with its ribbon lifted to the red half (`tw-set` with a red `/Ink`, and a `/Bleed` from above that puts the black half into the tops of a few letters), the classification at the head and foot of the sheet. `rel-page` with `/Generation 0` makes it the ribbon original, never copied: aged legal paper, two punch holes, a gem clip, the scanner's tilt and lamp. The registry stamp, a regrading box, the routing initials and the margin note (`lib/handscript.ps`) are marks over the page. The office, people and places are invented; the only real names are in the man's own testimony."
+  },
+  {
+   "id": "hybrid_sky_talk",
+   "title": "Why Is the Sky Blue?",
+   "category": "lettering",
+   "tags": [
+    "poster",
+    "hybrid",
+    "qr"
+   ],
+   "libraries": [
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 995,
+   "added": "2026-11-04",
+   "source": "examples/hybrid/sky_talk.ps",
+   "render": "gallery/renders/hybrid_sky_talk.png",
+   "page": "595x842",
+   "speed": 400,
+   "alt": "Why Is the Sky Blue?, an A4 talk poster: white serif title over an oil-painted evening sky, the Rayleigh formula, a six-bar chart of scattering by wavelength in the colours of each light, the date and venue over a dark sea, and a navy QR code on a cream tile",
+   "blurb": "A talk poster made in two layers: an image model painted the sky once, and pscat sets every exact thing on top.",
+   "technique": "The evening sky is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter and scales it to cover the page. Everything exact is drawn by pscat over it on a six-column grid: the title in Abril Fatface, the reading lines in Palatino and every label in tracked Jost (`ashow`), the Rayleigh formula set as a real fraction, a bar chart whose bar heights and labels the program computes from the formula, and a QR code that `lib/qr.ps` encodes and draws as vector squares, which two independent decoders read from the PNG and the PDF. A soft shade built from strips of rising `setalpha` sits under the date and venue on the sea. Changing the copy or the chart re-renders the same sky. Defining `/PscatOnly true` first swaps the painting for a screen-printed vector sky that pscat draws itself: 1 pt gradient strips, three-ink clouds and a low sun.",
+   "reference": {
+    "file": "examples/hybrid/sky_talk_bg.jpg",
+    "alt": "The image model's oil-painted evening sky over a calm sea and a headland, with no text",
+    "caption": "The atmosphere layer: made once by an image model from a prompt that asked for open sky at the top and a quiet sea at the bottom, then frozen.",
+    "render_caption": "The exact layer added by pscat: type, formula, a computed chart and a QR code that scans.",
+    "text": "The image model is good at light, texture and mood, so it paints the background. pscat draws everything that must be exactly right on top of it, as vector type and shapes, so the poster prints sharp at A4 and its QR code scans. To change the date or the chart, edit the program and render again: the painting is never regenerated."
+   }
+  },
+  {
+   "id": "hybrid_menu_card",
+   "title": "The Lantern Pear",
+   "category": "lettering",
+   "tags": [
+    "menu",
+    "hybrid",
+    "qr"
+   ],
+   "libraries": [
+    "artkit",
+    "paintkit",
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 995,
+   "added": "2026-11-04",
+   "source": "examples/hybrid/menu_card.ps",
+   "render": "gallery/renders/hybrid_menu_card.png",
+   "page": "612x792",
+   "speed": 400,
+   "alt": "The Lantern Pear, a US Letter café menu: a dark olive serif name and three sections of dishes with prices on cream watercolour paper, two painted pears and leaves in the lower right, and a QR code in the lower left",
+   "blurb": "A café menu over a watercolour of pears: the painting from an image model, every dish, price and the QR code from pscat.",
+   "technique": "The watercolour is a JPEG made once by an image model and then frozen; the program reads it through the `/DCTDecode` filter. pscat sets the name in Playfair Display, the section heads in tracked Cinzel with hairline rules, and every dish in Palatino with dot leaders to a right-aligned price column that stops where the painted leaves begin, all re-encoded for the accents and the en dash, and draws a QR code with `lib/qr.ps` on the paper's own cream. A price change is one edit and a re-render. Defining `/PscatOnly true` first swaps the painting for a botanical print in flat inks on paintkit's paper.",
+   "reference": {
+    "file": "examples/hybrid/menu_card_bg.jpg",
+    "alt": "The image model's watercolour of two pears and leaves on cream paper, with no text",
+    "caption": "The atmosphere layer: a watercolour made once by an image model, with the middle and left left bare for the menu.",
+    "render_caption": "The exact layer added by pscat: the name, every dish and price, and a QR code that scans.",
+    "text": "The prompt asked for bare paper where the menu goes, so the painting needs no editing. Every word and number on the card comes from the program, so the menu can change without asking the image model for anything again."
+   }
+  },
+  {
+   "id": "hybrid_alpine_trail",
+   "title": "Piz Calderan",
+   "category": "lettering",
+   "tags": [
+    "poster",
+    "hybrid",
+    "qr",
+    "chart"
+   ],
+   "libraries": [
+    "artkit",
+    "paintkit",
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 1001,
+   "added": "2026-11-05",
+   "source": "examples/hybrid/alpine_trail.ps",
+   "render": "gallery/renders/hybrid_alpine_trail.png",
+   "page": "576x864",
+   "speed": 400,
+   "alt": "Piz Calderan, a 2:3 travel poster: a photograph of two granite peaks in late-afternoon light over a lake and a red-roofed hut, white tracked title in the clear sky, summit, col and hut labels on leader lines ending at the points, a dashed yellow route up the path and along the ridge, and in the shaded foreground an elevation profile, trail stats, bus times and a QR code",
+   "blurb": "The hybrid turned round: pscat drew the layout, an image model made it a photograph, and pscat laid the exact layer back on at the same coordinates.",
+   "technique": "pscat first draws a flat block-in of the scene (`/Stage /Reference`): the ridge, two summits and a col, the slopes, the lake, the hut, the trail and a shaded foreground, every shape at coordinates in the program. That 1024 x 1536 px reference went to an image model as its input image, with a prompt to make it a photograph and keep the composition; the result is frozen as a JPEG and placed at exactly 128 dpi, no crop. The photograph's ridge sits a mean of 1.2 px from the reference's (measured and pinned by `tests/hybrid_reverse.rs`), so the exact layer can use the same coordinates: the labels end on the summits, the route runs along the trail and the ridge, and the elevation profile, the stats computed from it (DIN 33466 walking time), the bus times and a QR code that `lib/qr.ps` encodes sit in the shade the layout left empty. `/Season /Autumn` puts the same layer on a second photograph made from the same reference.",
+   "reference": {
+    "file": "examples/hybrid/alpine_trail_ref.png",
+    "alt": "pscat's flat colour block-in of the scene: a sky gradient, two dark peaks with lit west faces, green slopes, a blue lake, a small red-roofed hut, a pale trail and a dark foreground band",
+    "caption": "The layout reference pscat drew and the image model received as its input image.",
+    "render_caption": "The photograph made from it, with pscat's exact layer laid back on at the same coordinates.",
+    "text": "The image model is good at light and surfaces; pscat is exact. Here pscat decides the composition first, so it knows where every summit, the hut and the empty areas are before the photograph exists, and its labels, route, chart and QR code land where the layout says."
+   }
   }
  ],
  "groups": [
@@ -928,6 +1052,12 @@
    "title": "Type 3 fonts",
    "guide": "docs/guides/fonts.md",
    "blurb": "Fonts where every glyph is a PostScript program."
+  },
+  {
+   "id": "hybrid",
+   "title": "pscat with an image model",
+   "guide": "docs/guides/pscat-with-image-models.md",
+   "blurb": "An image model paints the background once; pscat sets the exact layer on top. Each sheet compares the image model alone, pscat alone and the two together, with the facts checked under each panel: whether the QR code decodes, whether the text is spelled right, whether the numbers are right."
   }
  ],
  "specimens": [
@@ -1269,6 +1399,51 @@
    "blurb": "Type 3 fonts where every glyph is invented fresh at show time.",
    "source": "examples/type3_ransom.ps",
    "page": "612x792"
+  },
+  {
+   "id": "compare_sky_talk",
+   "group": "hybrid",
+   "title": "Why Is the Sky Blue?, three ways",
+   "alt": "Three versions of the same talk poster side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "The image model alone got every word and number right, but its QR code does not decode. pscat alone and the hybrid scan; the hybrid keeps the painted sky.",
+   "source": "examples/hybrid/compare_sky_talk.ps",
+   "render": "docs/guides/hybrid/sky_talk_compare.png"
+  },
+  {
+   "id": "compare_menu_card",
+   "group": "hybrid",
+   "title": "The Lantern Pear, three ways",
+   "alt": "Three versions of the same café menu side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "The image model alone set the whole menu correctly, but its QR code does not decode. pscat alone and the hybrid scan; the hybrid keeps the watercolour.",
+   "source": "examples/hybrid/compare_menu_card.ps",
+   "render": "docs/guides/hybrid/menu_card_compare.png"
+  },
+  {
+   "id": "compare_ferry",
+   "group": "hybrid",
+   "title": "Harbour Ferry, three ways",
+   "alt": "Three versions of the same A4 ferry timetable side by side, with checked facts under each: the image model alone, pscat alone, and the hybrid",
+   "blurb": "A denser test: 40 times and 8 fares. The image model alone set every one right in five runs, and its QR code never decoded. pscat computes the times; its QR code scans.",
+   "source": "examples/hybrid/compare_ferry.ps",
+   "render": "docs/guides/hybrid/ferry_compare.png"
+  },
+  {
+   "id": "compare_alpine_trail",
+   "group": "hybrid",
+   "title": "Piz Calderan, three ways",
+   "alt": "Three versions of the same travel poster side by side, with checked facts under each: the image model alone, pscat alone, and the reversed hybrid",
+   "blurb": "The image model alone spelled all 26 strings right, but its chart is off by up to 0.1 km and 30 m and its QR code does not decode. pscat alone is exact but flat; the reversed hybrid is exact and photographic.",
+   "source": "examples/hybrid/compare_alpine_trail.ps",
+   "render": "docs/guides/hybrid/alpine_trail_compare.png"
+  },
+  {
+   "id": "process_alpine_trail",
+   "group": "hybrid",
+   "title": "Piz Calderan: one layout, two photographs",
+   "alt": "Four panels: pscat's flat layout reference, the photograph an image model made from it, the poster with pscat's exact layer, and the same layer on a second, autumn photograph made from the same reference",
+   "blurb": "pscat's layout, the image model's photograph, pscat's exact layer; and the same layer on a second photograph from the same reference.",
+   "source": "examples/hybrid/compare_alpine_trail.ps",
+   "render": "docs/guides/hybrid/alpine_trail_process.png"
   }
  ]
 }

@@ -199,6 +199,41 @@ macOS and Linux then exec it directly.
   symlink, and symlinks need privileges on Windows). The hook names the
   versioned directory instead.
 
+## After main moved on (the 0.7.0 merge)
+
+Main gained the output root (#910), the stable `bin/` and PATH linking (#919,
+#920) in `pscat-mcp.sh` while this branch was open. Merged in:
+
+- **Manifests.** Claude Code's now runs `${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp`
+  with main's `--plugin-out-root=` and `--plugin-project-dir=` args and its
+  `output_dir` userConfig; `plugin_check.py` compares command and args across
+  the two hosts, still setting the `--plugin-*=` args aside.
+- **Output root on Windows.** The Windows hosts hand the `--plugin-*` args to
+  `pscat-mcp.cmd`, and pscat-mcp.exe rejects unknown flags, so the twin has to
+  take them out. `pscat-mcp.cmd` now passes its arguments to
+  `pscat-mcp.ps1 --exe`, which picks the root the way `pscat-mcp.sh` does
+  (the plugin option, `out-root` in `%APPDATA%\pscat\plugin.conf` or under
+  `XDG_CONFIG_HOME`, the project, the working directory, then
+  `%APPDATA%\pscat\renders`) and prints three kinds of line: `E|` the program,
+  `R|` the root, `A|drop` or `A|keep`. The root travels like the program
+  (`VAR|REST`, else the whole path, else its 8.3 name; a root that can do none
+  of these is passed over, in the end for the default root). `A|drop` means
+  every argument was launcher-only, so the `.cmd` passes only
+  `--out-root DIR`; with no `--plugin-*` argument the `.cmd` passes its own
+  arguments on, as before. A mix of the two is refused rather than guessed at.
+  `APPDATA` joins the variables an `ExeHandoff` path may start with.
+- **Git Bash.** `--exe-utf8` takes the same arguments and prints the exe on
+  line 1 and the root on line 2; the sh entry point drops the `--plugin-*`
+  arguments and prepends `--out-root`.
+- **Not ported to Windows:** PATH linking and the stable `bin\pscat` (#919,
+  #920). Symlinks need privileges there, and the hook still names the
+  versioned directory.
+- **The Windows PowerShell and `.cmd` changes in this merge were written on
+  macOS and have not been run.** The new `test_plugin_launcher_windows.py`
+  cases (the plugin options, plugin.conf, the default root under Codex, an
+  unusable root, mixed arguments) are the first thing the `windows` job runs
+  against them.
+
 ## For #904 (WASM fallback)
 
 The "no prebuilt pscat for this platform" case is one branch in each

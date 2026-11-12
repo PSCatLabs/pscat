@@ -8,10 +8,15 @@
 #                                    in the MCP stdio path
 #   pscat-mcp.ps1 --locate           find or install pscat, print its directory
 #   pscat-mcp.ps1 --hook             SessionStart hook: report, never download
-#   pscat-mcp.ps1 --exe              find or install, tell pscat-mcp.cmd the
-#                                    path of pscat-mcp (see ExeHandoff)
-#   pscat-mcp.ps1 --exe-utf8         the same as plain UTF-8 (for Git Bash)
+#   pscat-mcp.ps1 --exe [args]       find or install, tell pscat-mcp.cmd the
+#                                    path of pscat-mcp and the output root to
+#                                    pass it (see ExeHandoff, OutRoot)
+#   pscat-mcp.ps1 --exe-utf8 [args]  the same as plain UTF-8 (for Git Bash)
 #   pscat-mcp.ps1 [pscat-mcp args]   find or install, then run pscat-mcp
+#
+# The launcher-only --plugin-out-root=DIR and --plugin-project-dir=DIR
+# arguments (#910) are taken out before pscat-mcp sees the arguments; the
+# output root is chosen as pscat-mcp.sh chooses it (see "The output root").
 #
 # Lookup, in order: $env:PSCAT_MCP_BIN, pscat-mcp on PATH, the Cargo bin
 # directory. A candidate counts only if `pscat-mcp --version` is at least the
@@ -365,7 +370,7 @@ function Ensure {
 # ASCII rest as text. Any other path goes as itself if the code page can
 # spell it, else as its 8.3 short name (ASCII). '' if neither works.
 function ExeHandoff([string]$Path) {
-    foreach ($var in 'PSCAT_CACHE_DIR', 'LOCALAPPDATA', 'CARGO_HOME', 'USERPROFILE') {
+    foreach ($var in 'PSCAT_CACHE_DIR', 'LOCALAPPDATA', 'APPDATA', 'CARGO_HOME', 'USERPROFILE') {
         $base = [Environment]::GetEnvironmentVariable($var)
         if (-not $base) { continue }
         $base = $base.TrimEnd('\', '/')
@@ -383,6 +388,130 @@ function ExeHandoff([string]$Path) {
         $short = (New-Object -ComObject Scripting.FileSystemObject).GetFile($Path).ShortPath
         if ($short -and $enc.GetString($enc.GetBytes($short)) -eq $short) { return "-|$short" }
     } catch { }
+    return ''
+}
+
+# --- The output root (issue #910) ------------------------------------------------
+# Where the server's out_path may write: one directory, chosen here at
+# registration, never by a tool call, exactly as pscat-mcp.sh chooses it,
+# unless the arguments already hold --out-root. The first usable of:
+#   1. --plugin-out-root=DIR: Claude Code's `output_dir` plugin option;
+#   2. `out-root = DIR` in %APPDATA%\pscat\plugin.conf ($env:XDG_CONFIG_HOME\
+#      pscat\plugin.conf when that is set): every host, and the only way
+#      under Codex, whose plugin servers take no user arguments;
+#   3. --plugin-project-dir=DIR: the project Claude Code names;
+#   4. the working directory, which the server takes by default (so nothing
+#      is passed);
+#   5. renders\ in pscat's per-user data directory (%APPDATA%\pscat\renders),
+#      created if need be.
+# Usable: an absolute path (or ~\...) to an existing directory that is not a
+# drive root and not inside this plugin. The launcher-only --plugin-*
+# arguments are not passed on.
+$ConfFile = ''
+if ($env:XDG_CONFIG_HOME) { $ConfFile = Join-Path $env:XDG_CONFIG_HOME 'pscat\plugin.conf' }
+elseif ($env:APPDATA) { $ConfFile = Join-Path $env:APPDATA 'pscat\plugin.conf' }
+
+$script:PluginOutRoot = ''
+$script:PluginProjectDir = ''
+$script:HaveOutRoot = $false
+$script:Rest = @()      # the arguments for pscat-mcp: all but the --plugin-* ones
+$script:Dropped = 0     # how many --plugin-* arguments there were
+# SplitArgs ARGS: sort the launcher-only --plugin-* arguments from the rest.
+function SplitArgs([object[]]$List) {
+    $script:Rest = @()
+    foreach ($a in $List) {
+        $a = [string]$a
+        if ($a -match '^--plugin-out-root=(.*)$') { $script:PluginOutRoot = $Matches[1]; $script:Dropped++ }
+        elseif ($a -match '^--plugin-project-dir=(.*)$') { $script:PluginProjectDir = $Matches[1]; $script:Dropped++ }
+        else {
+            if ($a -eq '--out-root') { $script:HaveOutRoot = $true }
+            $script:Rest += $a
+        }
+    }
+}
+
+# UsableRoot VALUE [WHAT]: VALUE as a full directory path if it may be the
+# output root, else ''. WHAT names the setting in the warning; without it, quiet.
+function UsableRoot([string]$Value, [string]$What) {
+    $v = $Value
+    if (-not $v -or $v.Contains('${')) { return '' } # unset, or a placeholder the host left unexpanded
+    $userHome = $env:USERPROFILE
+    if (-not $userHome) { $userHome = $env:HOME }
+    if ($v -eq '~') { $v = $userHome }
+    elseif ($v.StartsWith('~\') -or $v.StartsWith('~/')) {
+        if ($userHome) { $v = Join-Path $userHome $v.Substring(2) } else { $v = '' }
+    }
+    $why = ''
+    $d = ''
+    if (-not $v -or $v -notmatch '^([A-Za-z]:[\\/]|\\\\)') { $why = 'not an absolute path' }
+    elseif (-not (Test-Path -LiteralPath $v -PathType Container)) { $why = 'not an existing directory' }
+    else {
+        $full = [IO.Path]::GetFullPath($v)
+        if ($full -eq [IO.Path]::GetPathRoot($full)) { $why = 'a drive root' }
+        else {
+            $d = $full.TrimEnd('\', '/')
+            $plugin = [IO.Path]::GetFullPath($PluginDir).TrimEnd('\', '/')
+            if (($d + '\').StartsWith($plugin + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $why = "inside the plugin's own directory"
+            }
+        }
+    }
+    if ($why) {
+        if ($What) { Say "ignoring $What ${Value}: $why" }
+        return ''
+    }
+    return $d
+}
+
+# The value of the last `out-root = VALUE` line in the config file.
+function ConfOutRoot {
+    if (-not $ConfFile -or -not (Test-Path -LiteralPath $ConfFile -PathType Leaf)) { return '' }
+    $val = ''
+    try {
+        foreach ($line in [IO.File]::ReadAllLines($ConfFile)) {
+            if ($line -match '^\s*out-root\s*=\s*(.*?)\s*$') { $val = $Matches[1] -replace '^"(.*)"$', '$1' }
+        }
+    } catch { }
+    return $val
+}
+
+# renders\ in pscat's per-user data directory (src/paths.rs, user_data_dir).
+function DefaultRoot {
+    if (-not $env:APPDATA) { return '' }
+    $d = Join-Path $env:APPDATA 'pscat\renders'
+    try { $null = New-Item -ItemType Directory -Path $d -Force -ErrorAction Stop }
+    catch { Say "cannot create $d for renders"; return '' }
+    return (UsableRoot $d 'the default output directory')
+}
+
+# ChooseOutRoot HANDOFF: the output root to pass as --out-root, or '' to leave
+# the working directory (or an explicit --out-root) in charge. With HANDOFF,
+# the answer is in ExeHandoff's form and a root that form cannot carry is
+# passed over for the next candidate; without it, the plain path.
+function ChooseOutRoot([bool]$Handoff) {
+    if ($script:HaveOutRoot) { return '' }
+    $candidates = @(
+        @($script:PluginOutRoot, "the plugin's output_dir setting"),
+        @((ConfOutRoot), "out-root in $ConfFile"),
+        @($script:PluginProjectDir, '')
+    )
+    foreach ($c in $candidates) {
+        $d = UsableRoot $c[0] $c[1]
+        if (-not $d) { continue }
+        if (-not $Handoff) { return $d }
+        $h = ExeHandoff $d
+        if ($h) { return $h }
+        Say "passing over the output directory ${d}: cmd.exe cannot be given its path (letters outside the console code page, and no 8.3 short name)"
+    }
+    if (UsableRoot (Get-Location -PSProvider FileSystem).ProviderPath '') { return '' }
+    $d = DefaultRoot
+    if ($d) {
+        if (-not $Handoff) { return $d }
+        $h = ExeHandoff $d
+        if ($h) { return $h }
+        Say "cmd.exe cannot be given the path $d; set APPDATA to a folder whose path has only ASCII letters, or out-root in $ConfFile"
+    }
+    Say 'no usable output directory, so out_path is off'
     return ''
 }
 
@@ -419,7 +548,7 @@ function Hook {
         $ctx = $msg
     } else {
         $t = $Tag; if (-not $t) { $t = '?' }
-        $msg = "pscat plugin: pscat is not installed yet. The pscat MCP server downloads it (release $t, about 6 MB, checked against the release's SHA256SUMS) from $RepoUrl the first time it starts, into $Cache. If the pscat tools do not appear, check the internet connection and restart; or install pscat yourself: cargo install pscat."
+        $msg = "pscat plugin: pscat is not installed yet. The pscat MCP server downloads it (release $t, about 14 MB, checked against the release's SHA256SUMS) from $RepoUrl the first time it starts, into $Cache. If the pscat tools do not appear, check the internet connection and restart; or install pscat yourself: cargo install pscat."
         if ($script:OldSeen) { $msg = "$msg (Found $($script:OldSeen), older than the $MinVersion this plugin needs.)" }
         $ctx = "pscat plugin: pscat is not on PATH. To use the pscat command line, run: $launcher  (it downloads pscat if needed and prints the directory holding pscat.exe and pscat-mcp.exe), then run that directory's pscat.exe by its full path."
     }
@@ -437,17 +566,28 @@ switch ($mode) {
         exit 0
     }
     '--exe-utf8' {
-        # For the sh entry point under Git Bash, which reads UTF-8: the path
-        # itself, losslessly.
+        # For the sh entry point under Git Bash, which reads UTF-8: the exe's
+        # path on the first line and the output root to pass (or nothing) on
+        # the second, both losslessly.
+        SplitArgs @($args | Select-Object -Skip 1)
         if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
         if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
-        Out-Utf8 $script:FoundBin
+        Out-Utf8 ($script:FoundBin + "`n" + (ChooseOutRoot $false))
         exit 0
     }
     '--exe' {
         # For pscat-mcp.cmd; see ExeHandoff. An installed copy whose path cannot be handed over is
         # passed over for the next candidate (in the end the cache, whose
-        # path always can be).
+        # path always can be). Lines, each `TAG|...`:
+        #   E|VAR|REST or E|-|PATH   the program to run
+        #   R|VAR|REST or R|-|PATH   the output root, if one is to be passed
+        #   A|drop or A|keep         drop the .cmd's own arguments (they were
+        #                            all launcher-only) or pass them on
+        SplitArgs @($args | Select-Object -Skip 1)
+        if ($script:Dropped -gt 0 -and $script:Rest.Count -gt 0) {
+            Say 'pscat-mcp.cmd takes the --plugin-* options alone; to give pscat-mcp other arguments, register pscat-mcp.exe directly'
+            exit 1
+        }
         while ($true) {
             if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
             $h = ExeHandoff $script:FoundBin
@@ -460,16 +600,23 @@ switch ($mode) {
             $script:Unusable += $script:FoundBin
         }
         if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
-        [Console]::Out.WriteLine($h)
+        $root = ChooseOutRoot $true
+        [Console]::Out.WriteLine("E|$h")
+        if ($root) { [Console]::Out.WriteLine("R|$root") }
+        if ($script:Dropped -gt 0) { [Console]::Out.WriteLine('A|drop') } else { [Console]::Out.WriteLine('A|keep') }
         exit 0
     }
 }
 
+SplitArgs $args
 if (-not (Ensure)) {
     Say 'pscat-mcp is not available, so the pscat tools cannot start'
     exit 1
 }
 if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
+$root = ChooseOutRoot $false
+$serverArgs = @($script:Rest)
+if ($root) { $serverArgs = @('--out-root', $root) + $serverArgs }
 Remove-Item Env:PSCAT_PLUGIN_LAUNCHER
-& $script:FoundBin @args
+& $script:FoundBin @serverArgs
 exit $LASTEXITCODE

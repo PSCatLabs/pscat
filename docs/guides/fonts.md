@@ -19,10 +19,45 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   and the `N RD <binary>` idiom. Ghostscript accepts the Type 1 file the test
   suite generates, byte for byte.
 
-This guide covers the Type 3 display library, the typewriter, and the runtime
-catalog of 67 outline faces. For the handwriting font see
+This guide covers accented text in the standard fonts, the Type 3 display
+library, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
+
+## Accented Latin text in the standard fonts
+
+The standard fonts come in `StandardEncoding`, which has no `é`, `ñ` or `ü`.
+There are two standard ways to reach them, and both work in every outline face.
+
+Re-encode the font to `ISOLatin1Encoding` (the usual Level 1 idiom), then write
+the Latin-1 byte as an octal escape:
+
+```postscript
+/reencode { % /NewName /BaseName -> -
+  findfont dup length dict begin
+    { 1 index /FID ne { def } { pop pop } ifelse } forall
+    /Encoding ISOLatin1Encoding def
+  currentdict end definefont pop
+} def
+/Times-Roman-ISO /Times-Roman reencode
+/Times-Roman-ISO findfont 24 scalefont setfont
+72 700 moveto (Fr\350re Jacques, caf\351) show
+```
+
+The copy keeps the face's outlines and metrics; only the encoding changes
+(`dup length dict copy` works too). Or draw one glyph by name, whatever the
+encoding holds, with Level 2 `glyphshow`:
+
+```postscript
+/Times-Roman findfont 24 scalefont setfont
+72 650 moveto (caf) show /eacute glyphshow
+```
+
+`glyphshow` takes a glyph name (a string is a `typecheck`); a name the face
+lacks advances by `.notdef`'s width. On a Type 3 font it calls `BuildGlyph`
+with the name. A Type 3 font with only `BuildChar` gets the first Encoding
+slot holding the name, or 0, as in Ghostscript. Latin faces do not read UTF-8:
+a byte is an Encoding slot.
 
 ## The display font library
 
@@ -317,9 +352,14 @@ cargo run -- --png sheets.png examples/font_catalog.ps   # the specimen sheets
 
 [`fonts/catalog/README.md`](../../fonts/catalog/README.md) is the manifest (families, genres,
 licenses — all OFL or Apache 2.0;
-per-family license files ride alongside the fonts). Drop your own
-`.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
-finds it. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
+per-family license files ride alongside the fonts). **Your own fonts:**
+drop a `.ttf`, `.otf` or `.ttc` file into a subdirectory of `fonts/catalog/`
+in the current directory, `$PSCAT_HOME`, the per-user data directory or beside
+the binary (`mkdir -p fonts/catalog/mine && cp SomeFont.ttf fonts/catalog/mine/`),
+and `/<FileStem> findfont` finds it (the file stem, case-insensitive; a
+`.ttc` gives its first face). `pscat --help` and `pscat fonts help` say so, and
+`pscat fonts list` shows the directories in use. The browser build's counterpart
+is `renderer.addFont(name, bytes)`. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
 on the project site shows every face — Type 3 library included, with a card
 for `/Typewriter` (one key struck twenty times) beside Courier Prime's — one
 card at a time.
@@ -395,7 +435,7 @@ over installed packs; among packs, `$PSCAT_HOME` wins over the per-user
 data directory. The compiled-in TeX Gyre and URW faces come after both,
 so a file with the same name on disk (`texgyrepagella-regular.otf`) is
 used instead; the twelve Liberation faces always win. `pscat --fonts` ends with `#` lines saying what is in
-use, and `pscat --capabilities` has the same in `font_packs`.
+use, starting with every directory it searched, in order (`# font-search override|pack-dir exists|missing <path>`), and `pscat --capabilities` has the same in `font_packs`.
 
 **The reproducibility contract.** The same pscat version, with the
 installed and verified pinned packs, and identical render settings,

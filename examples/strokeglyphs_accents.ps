@@ -1,0 +1,90 @@
+%!PS-Adobe-3.0
+%%Title: Accented Latin letters -- the glyphs issue #1051 added to strokeglyphs.ps
+%%BoundingBox: 0 0 900 1180
+%%EndComments
+
+% Specimen for the accented Latin letters added to lib/strokeglyphs.ps in
+% issue #1051: Latin-1 (U+00C0-00FF) and Latin Extended-A (U+0100-017F),
+% each composed from the base letter's own skeleton plus accent strokes,
+% and a few letters drawn whole (ß Æ Þ þ ð ĸ Ŋ ŋ ſ). Top to bottom: test
+% words at sign size with a plain pen, the same words from Latin-1 byte
+% strings, a chalk sign on a slate, and every new letter once. Run from
+% the repo root:
+%
+%   pscat --page 900x1180 examples/strokeglyphs_accents.ps
+%
+% The committed render, docs/dev/design/drymedia/strokeglyphs_accents_specimen.png:
+%
+%   pscat --page 900x1180 --dpi 144 --png docs/dev/design/drymedia/strokeglyphs_accents_specimen.png \
+%     examples/strokeglyphs_accents.ps
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+
+/ink { 0.10 0.12 0.30 setrgbcolor } def
+/pen { ink 1.8 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+/label { /Helvetica findfont exch scalefont setfont 0.45 setgray } def
+/left 40 def
+
+1 1 0.985 setrgbcolor clippath fill
+
+22 label left 1146 moveto (strokeglyphs.ps: accented Latin letters) show
+9 label left 1128 moveto
+(Latin-1 and Latin Extended-A, each the base letter's skeleton plus accent strokes. Plain pen, default /Jitter.) show
+
+% (title) y heading -
+/heading { 11 label left exch moveto show } def
+
+% (text) y seed line -   one line of sgpath text at sign size
+/line {
+  /ls exch def /ly exch def
+  newpath left ly << /Size 40 /Seed ls >> sgpath pen
+} def
+
+% ---- the test words, UTF-8 source
+(TEST WORDS, SIZE 40, FROM UTF-8 STRINGS) 1092 heading
+(café  jalapeño  crème brûlée  naïve) 1040 10 line
+(Zoë  Ångström  façade  Łódź  Dvořák) 984 30 line
+(CAFÉ  CRÈME BRÛLÉE  ÅNGSTRÖM  ŁÓDŹ) 928 50 line
+(Straße  Œuvre  Þór  Gdańsk  Ţară  ţară) 872 70 line
+
+% ---- the same words as Latin-1 bytes
+((caf\\351  cr\\350me br\\373l\\351e  na\\357ve  Zo\\353  fa\\347ade): THE SAME WORDS AS LATIN-1 BYTES) 832 heading
+(caf\351  cr\350me br\373l\351e  na\357ve  Zo\353  fa\347ade) 780 10 line
+
+% ---- a chalk sign on a slate (issue #1051's repro, grown into a menu)
+(A CAFE SIGN IN CHALK: DCCHALK ON A DCBOARD SLATE) 740 heading
+40 440 820 286 << /Surface /slate /Seed 5 /Swipes 3 /Wipes 1 /Ledge 0 >> dcboard
+/white dcchalkcolor
+newpath (Café du Marché) 90 640 << /Size 52 /Seed 11 >> sgpath
+<< /Width 2.4 >> dcchalk
+newpath (crème brûlée · 6) 110 580 << /Size 36 /Seed 31 >> sgpath
+(jalapeño poppers · 5) 110 532 << /Size 36 /Seed 51 >> sgpath
+(smørrebrød · Łódź pierogi) 110 484 << /Size 36 /Seed 71 >> sgpath
+<< /Width 1.9 >> dcchalk
+
+% ---- every new letter once
+(EVERY NEW LETTER, SIZE 30) 400 heading
+/cx left def
+/cy 360 def
+/sd 200 def
+[ 192 1 255 { dup 215 eq 1 index 247 eq or { pop } if } for
+  256 1 383 { } for 536 1 539 { } for ]
+{
+  /cp exch def
+  sgcmap cp known {
+    /nm sgcmap cp get def
+    /w [nm] << /Size 30 >> sgwidth def
+    cx w add 860 gt { /cx left def /cy cy 52 sub def } if
+    newpath [nm] cx cy << /Size 30 /Seed sd >> sgpath pen
+    /sd sd 1 add def
+    /cx cx w add 12 add def
+  } if
+} forall
+
+showpage
+%%EOF

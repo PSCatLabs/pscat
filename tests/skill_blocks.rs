@@ -12,14 +12,19 @@
 //! - the font-pack stand-in note on stderr (`font ... is in the ... font
 //!   pack, which is not installed`). Since #728 a pack face no longer
 //!   raises an error, so without this check a block that only works with
-//!   `pscat fonts install` would pass.
+//!   `pscat fonts install` would pass;
+//! - a `--lint-strict` finding (#940): operands left on the stack at the
+//!   end (`stack-leak`), or a page with no ink (`blank-page`). A block an
+//!   agent copies should leave nothing behind and should draw something.
 //!
 //! ## Marking a block as partial
 //!
 //! A block that cannot run on its own (a fragment that needs the caller's
 //! path or dict, a signature listing, a file that exists only in the
 //! repository) says so in its fence: write ```` ```postscript partial ````.
-//! It is shown as a normal PostScript block and is not run. A fence with
+//! It is shown as a normal PostScript block and is not run. That is also
+//! the opt-out for a block that deliberately draws nothing (a bare library
+//! load, a listing of operators and their results). A fence with
 //! no language, or any other (`sh`, `text`), is never run, so a block that
 //! is not PostScript needs no mark. Prefer making a block runnable to
 //! marking it: the point is that what the skills show works.
@@ -118,12 +123,16 @@ struct Run {
 }
 
 /// Run `code` through `pscat --headless -` with no checkout and no font
-/// packs. `tag` only names the scratch directories.
-fn run_bare(tag: &str, code: &str) -> Run {
+/// packs. `tag` only names the scratch directories. `strict` adds
+/// `--lint-strict`, which prints a verdict line on stderr and fails the run
+/// on a stack-leak or blank-page finding.
+fn run_bare(tag: &str, code: &str, strict: bool) -> Run {
     let home = common::scratch_dir(&format!("skill-home-{tag}"));
     let work = common::scratch_dir(&format!("skill-work-{tag}"));
     let mut child = Command::new(PSCAT)
-        .args(["--headless", "-"])
+        .args(["--headless"])
+        .args(strict.then_some("--lint-strict"))
+        .arg("-")
         .current_dir(&work)
         .env("PSCAT_HOME", &home)
         .env("HOME", home.join("user"))
@@ -166,6 +175,7 @@ fn the_environment_has_no_font_packs() {
         "sentinel",
         "/Bangers findfont /FontName get ==\n\
          /Palatino-Roman findfont /FontName get ==\n/Symbol findfont /FontName get ==\n",
+        false,
     );
     assert!(r.ok, "{}", r.stderr);
     assert_eq!(
@@ -202,10 +212,12 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
         blocks.extend(blocks_of(&rel, &text));
     }
     // The starter sketch and the pscat skill's examples must be in the run,
-    // so renaming a fence cannot quietly empty the guard.
+    // so renaming a fence cannot quietly empty the guard. The pscat skill's
+    // advanced sections live in `references/` (#922), which this test reads
+    // too, so its runnable example is named by its reference file.
     for must in [
         "plugin/skills/psart/SKILL.md",
-        "plugin/skills/pscat/SKILL.md",
+        "plugin/skills/pscat/references/extensions.md",
     ] {
         assert!(
             blocks.iter().any(|b| b.file == must),
@@ -214,10 +226,15 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
     }
     let mut failures = Vec::new();
     for (n, b) in blocks.iter().enumerate() {
-        let r = run_bare(&format!("block{n}"), &b.code);
+        let r = run_bare(&format!("block{n}"), &b.code, true);
         let mut why = Vec::new();
         if !r.ok {
             why.push("exit status is not 0");
+        }
+        if r.stderr.contains("pscat: lint: [") {
+            why.push(
+                "lint finding (stack-leak or blank-page; mark a block that draws nothing partial)",
+            );
         }
         if r.stdout.contains("%%[ Error") || r.stderr.contains("%%[ Error") {
             why.push("PostScript error");
@@ -247,6 +264,39 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
     );
 }
 
+/// The pscat skill keeps only the common path in `SKILL.md` and links each
+/// advanced section's reference file (#922). A reference file nothing links
+/// to is never read, so its examples would be tested but unreachable.
+#[test]
+fn every_pscat_reference_file_is_linked_from_its_skill() {
+    let skill_dir = skills_dir().join("pscat");
+    let skill = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+    let mut refs = Vec::new();
+    markdown_under(&skill_dir.join("references"), &mut refs);
+    assert!(refs.len() >= 5, "pscat references: {refs:?}");
+    for r in refs {
+        let name = r.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            skill.contains(&format!("(references/{name})")),
+            "plugin/skills/pscat/SKILL.md does not link references/{name}"
+        );
+    }
+}
+
+/// The strict lint is really switched on in the fence run: a program that
+/// leaves an operand behind, or shows a blank page, must fail it.
+#[test]
+fn the_fence_run_fails_on_a_stack_leak_and_a_blank_page() {
+    let leak = run_bare("lint-leak", "1 2 3\n0 0 10 10 rectfill\nshowpage\n", true);
+    assert!(!leak.ok, "{}", leak.stderr);
+    assert!(leak.stderr.contains("[stack-leak]"), "{}", leak.stderr);
+    let blank = run_bare("lint-blank", "showpage\n", true);
+    assert!(!blank.ok, "{}", blank.stderr);
+    assert!(blank.stderr.contains("[blank-page]"), "{}", blank.stderr);
+    let clean = run_bare("lint-clean", "0 0 10 10 rectfill\nshowpage\n", true);
+    assert!(clean.ok, "{}", clean.stderr);
+}
+
 #[test]
 fn block_extraction_follows_the_fence_rules() {
     let md = "\
@@ -274,4 +324,113 @@ untagged
     assert_eq!(got.len(), 2, "{got:?}");
     assert_eq!((got[0].line, got[0].code.as_str()), (3, "1 2 add pop\n"));
     assert_eq!(got[1].code, "indented 1\n  deeper\n");
+}
+
+/// The skill counts a text states: every "<number> skill(s)" phrase, where
+/// the number is a digit string or a word from one to twelve. Markdown
+/// emphasis and punctuation around the words are ignored, so `**Three
+/// skills**` counts. A text that gives no count yields nothing.
+fn stated_skill_counts(text: &str) -> Vec<usize> {
+    const WORDS: [&str; 12] = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+        "twelve",
+    ];
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_ascii_lowercase()
+        })
+        .collect();
+    tokens
+        .windows(2)
+        .filter(|w| w[1] == "skill" || w[1] == "skills")
+        .filter_map(|w| {
+            w[0].parse::<usize>()
+                .ok()
+                .or_else(|| WORDS.iter().position(|x| *x == w[0]).map(|i| i + 1))
+        })
+        .collect()
+}
+
+/// Issue #1012: the plugin manifests said "Three skills" for a plugin that
+/// ships four. No manifest or listing text may state a skill count other
+/// than the number of skills in `plugin/skills/` (a directory holding a
+/// `SKILL.md`). Wording without a count is fine; a count must be true.
+#[test]
+fn manifests_and_listings_state_the_real_skill_count() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let actual = std::fs::read_dir(skills_dir())
+        .expect("plugin/skills")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("SKILL.md").is_file())
+        .count();
+    assert!(actual >= 4, "plugin/skills/ lost skills: {actual}");
+    // Each file must exist, so a renamed manifest fails here instead of
+    // quietly leaving the scan empty.
+    for rel in [
+        "plugin/plugin.json",
+        "plugin/.claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json",
+        "server.json",
+        "plugin/README.md",
+        "README.md",
+    ] {
+        let text = std::fs::read_to_string(root.join(rel))
+            .unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
+        for n in stated_skill_counts(&text) {
+            assert_eq!(
+                n, actual,
+                "{rel} says {n} skills but plugin/skills/ has {actual}; fix the text or drop the count"
+            );
+        }
+    }
+}
+
+/// Issue #1030: `.claude/skills/` is what a Claude Code session in this
+/// repo loads, and it holds a symlink to each plugin skill. `functional-postscript`
+/// had none, so sessions here never loaded it. Every skill in `plugin/skills/`
+/// must have its link, pointing back at that directory. (Unix only: Git for
+/// Windows checks a symlink out as a text file.)
+#[cfg(unix)]
+#[test]
+fn claude_skills_mirrors_the_plugin_skills() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<String> = std::fs::read_dir(skills_dir())
+        .expect("plugin/skills")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("SKILL.md").is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert!(names.len() >= 4, "plugin/skills/ lost skills: {names:?}");
+    for name in names {
+        let link = root.join(".claude/skills").join(&name);
+        let meta = std::fs::symlink_metadata(&link).unwrap_or_else(|_| {
+            panic!(".claude/skills/{name} is missing: symlink it to ../../plugin/skills/{name}")
+        });
+        assert!(
+            meta.file_type().is_symlink(),
+            ".claude/skills/{name} must be a symlink to ../../plugin/skills/{name}"
+        );
+        assert_eq!(
+            std::fs::canonicalize(&link).unwrap(),
+            std::fs::canonicalize(skills_dir().join(&name)).unwrap(),
+            ".claude/skills/{name} points somewhere other than plugin/skills/{name}"
+        );
+    }
+}
+
+#[test]
+fn the_skill_count_scanner_reads_words_digits_and_emphasis() {
+    assert_eq!(stated_skill_counts("- **Three skills**: `pscat`"), [3]);
+    assert_eq!(
+        stated_skill_counts("ships 4 skills, and one Skill."),
+        [4, 1]
+    );
+    assert_eq!(
+        stated_skill_counts("Agent skills plus the pscat-mcp server. The skills in plugin/"),
+        Vec::<usize>::new()
+    );
 }

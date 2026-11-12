@@ -132,6 +132,16 @@ oldest `gsave`'s copy. `grestore` with nothing to pop does the same
 here; programs use `vmstatus` for the level or for "is there free
 VM", and 15 MB of headroom answers the latter. Documented constant.
 
+### currentglobal / setglobal
+
+A flag, no second VM (#1146): `setglobal` stores it, `currentglobal` reads
+it, `false` at start; a non-boolean is `typecheck` and leaves it alone.
+`save` records the mode on a small side stack (`VmMode`, keyed by save
+level) rather than in `SaveRecord`. `restore` follows gs, not the PLRM's
+"reset to the saved value": afterwards the mode is global only if it is
+global now AND was global at every save the restore discarded. `vmstatus`
+and `gsave`/`grestore` are unaffected.
+
 ## Deliberate deviations (all safe under Rc)
 
 - **No invalidrestore stack scan.** gs errors when the operand/dict/
@@ -168,4 +178,6 @@ save 3 dict begin restore                        % invalidrestore (we deviate)
 save dup type ==                                 % savetype
 save save restore restore                        % ok (LIFO)
 vmstatus                                         % level used max (3 ints)
+true setglobal save false setglobal restore currentglobal == % false (restore only lowers)
+true setglobal save true setglobal restore currentglobal ==  % true
 ```

@@ -587,14 +587,12 @@ fn shfill_short_but_distinct_axial_still_paints_under_a_large_ctm() {
 }
 
 #[test]
-fn shfill_pdf_fallback_weights_by_stop_position_not_a_flat_mean() {
-    // A stitching function that's constant red for 99% of the axis
-    // then constant blue for the last 1% -- the position-weighted
-    // average must land close to red, not the ~50/50 purple an
-    // unweighted mean over the stop list would give (the stop list
-    // has only a handful of samples near the bound, not one per unit
-    // of position).
-    let (pdf, _) = {
+fn shfill_pdf_keeps_a_hard_edge_near_the_end_of_the_axis() {
+    // A stitching function that's constant red for 99% of the axis then
+    // constant blue for the last 1%. Before #1028 the PDF got one flat
+    // fill in the position-weighted average; now it is a real shading
+    // whose function keeps both constant legs and the jump between them.
+    let pdf = {
         let mut it = Interp::with_page(100, 100).expect("page");
         it.gfx_mut().enable_pdf();
         it.run_str(
@@ -606,28 +604,18 @@ fn shfill_pdf_fallback_weights_by_stop_position_not_a_flat_mean() {
              ] >> >> shfill",
         )
         .expect("shfill");
-        (
-            it.gfx().pdf_document().expect("recording on"),
-            it.gfx().pixmap.clone(),
-        )
+        it.gfx().pdf_document().expect("recording on")
     };
     let text = common::pdf_text(&pdf);
-    // Parse the "R G B rg" fill color out of the content stream: the
-    // three whitespace-separated tokens immediately before the "rg"
-    // operator.
-    let tokens: Vec<&str> = text.split_whitespace().collect();
-    let rg_idx = tokens
-        .iter()
-        .position(|&t| t == "rg")
-        .expect("an rg fill-color operator");
-    let nums: Vec<f64> = tokens[rg_idx - 3..rg_idx]
-        .iter()
-        .map(|t| t.parse::<f64>().expect("numeric rg operand"))
-        .collect();
-    assert!(
-        nums[0] > 0.9 && nums[2] < 0.1,
-        "expected a near-red average (R>0.9, B<0.1), got {nums:?}"
-    );
+    assert!(text.contains("/ShadingType 2 "), "{text}");
+    assert!(!text.contains(" rg "), "no flat fill: {text}");
+    // Constant red, the sliver jump at 0.99, constant blue.
+    let red = "/C0 [1 0 0] /C1 [1 0 0] /N 1";
+    let jump = "/C0 [1 0 0] /C1 [0 0 1] /N 1";
+    let blue = "/C0 [0 0 1] /C1 [0 0 1] /N 1";
+    let (r, j, b) = (text.find(red), text.find(jump), text.find(blue));
+    assert!(r.is_some() && j.is_some() && b.is_some(), "{text}");
+    assert!(r < j && j < b, "legs in axis order: {text}");
 }
 
 #[test]

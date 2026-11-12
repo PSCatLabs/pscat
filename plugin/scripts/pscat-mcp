@@ -22,9 +22,22 @@ case "$(uname -s 2>/dev/null)" in
     case "${1:-}" in
       --hook|--locate) run_ps1 "$@"; exit $? ;;
     esac
-    # The server's path, as UTF-8 (what Git Bash reads).
-    exe=$(run_ps1 --exe-utf8 | tr -d '\r') && [ -n "$exe" ] || exit 1
+    # The server's path (line 1) and the output root to pass, if any (line 2),
+    # as UTF-8 (what Git Bash reads). The launcher-only --plugin-* arguments
+    # (#910) were read by pscat-mcp.ps1 and are not passed on.
+    out=$(run_ps1 --exe-utf8 "$@" | tr -d '\r') || exit 1
+    exe=$(printf '%s\n' "$out" | sed -n 1p)
+    root=$(printf '%s\n' "$out" | sed -n 2p)
+    [ -n "$exe" ] || exit 1
     exe=$(cygpath -u "$exe" 2>/dev/null || printf '%s' "$exe")
+    n=$#
+    while [ "$n" -gt 0 ]; do
+      a=$1
+      shift
+      n=$((n - 1))
+      case "$a" in --plugin-*=*) ;; *) set -- "$@" "$a" ;; esac
+    done
+    [ -n "$root" ] && set -- --out-root "$root" "$@"
     exec "$exe" "$@" ;;
 esac
 exec sh "$HERE/pscat-mcp.sh" "$@"

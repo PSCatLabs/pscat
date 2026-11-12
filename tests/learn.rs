@@ -91,8 +91,7 @@ fn every_drawing_example_draws() {
 
 #[test]
 fn examples_agree_with_ghostscript() {
-    if Command::new("gs").arg("--version").output().is_err() {
-        eprintln!("skipping: gs not installed");
+    if !common::gs_available() {
         return;
     }
     for ps in examples() {

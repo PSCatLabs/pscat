@@ -5,13 +5,16 @@ paper-ready charts from Claude Code or Codex, with the
 [pscat](https://github.com/PSCatLabs/pscat) PostScript
 interpreter. The plugin bundles:
 
-- **Three skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
+- **Four skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
   debug, lint, seed sweeps, handwriting-style notes, typed letters and memos,
   photo-to-engraving), `psart` (the render-look-refine loop for generative
-  art, painting, dry media, chalkboard maths and style packs) and `psviz`
-  (function plots and bar/line/area/scatter/pie charts for papers).
+  art, painting, dry media, chalkboard maths and style packs), `psviz`
+  (function plots and bar/line/area/scatter/pie charts for papers) and
+  `functional-postscript` (map, filter and fold over lists of records, and
+  wrapping procedures to count or trace calls).
 - **The `pscat-mcp` server**, which gives the agent ten tools:
-  `render_postscript` (pages come back as images the agent can look at),
+  `render_postscript` (pages come back as images the agent can look at; the
+  user usually cannot, so the agent saves a file with `out_path` to show one),
   `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
   PNG back), `review_sheet` (several programs at several sizes, labelled, on
   one PNG), `describe_art_capabilities`, and `start_render`,
@@ -41,7 +44,7 @@ Either way, the launcher:
 2. **Otherwise downloads it once.** It fetches the archive for your platform
    (macOS arm64 or x86_64, Linux x86_64 or aarch64, Windows x86_64, which
    Windows on ARM also runs) from the GitHub release
-   named in `pscat-release`, about 6 MB, from
+   named in `pscat-release`, about 14 MB, from
    <https://github.com/PSCatLabs/pscat/releases>. It checks the archive
    against that release's `SHA256SUMS` and refuses it on a mismatch. Then
    it unpacks it into a per-user cache and runs it from there. It needs only
@@ -53,9 +56,25 @@ Either way, the launcher:
 The cache is `~/Library/Caches/pscat/plugin` on macOS,
 `~/.cache/pscat/plugin` on Linux (or `$XDG_CACHE_HOME/pscat/plugin`) and
 `%LOCALAPPDATA%\pscat\plugin` on Windows; set `PSCAT_CACHE_DIR` to move it.
-The `pscat` command-line tool is there too, at `bin/pscat` (on Windows, in
-`<release>\x86_64-pc-windows-msvc\`). Delete the directory to remove the
-download.
+The `pscat` command-line tool is there too. On macOS and Linux it is at
+`bin/pscat`, the one stable path: `bin/` always names the release in use,
+whichever version is pinned. On Windows it is in
+`<release>\x86_64-pc-windows-msvc\`, and the launcher links nothing onto
+`PATH`. Delete the directory to remove the download.
+
+**`pscat` on your PATH (macOS and Linux).** So that a plain `pscat` works in an agent's shell,
+the launcher links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`,
+whichever is already on your `PATH` and writable (the first that is). It
+creates no directory, never touches a system directory such as
+`/usr/local/bin`, and never overwrites a `pscat` it did not make: if one
+is already on your `PATH` it leaves everything alone. Before the first
+download the link is a small shell script that downloads the release when
+you first run `pscat`, then replaces itself with a symlink. If neither
+directory is on `PATH`, nothing is linked and the hook tells Claude the
+`bin/pscat` path instead. Set `PSCAT_NO_PATH_LINK=1` to turn this off. To
+remove the links after uninstalling the plugin, delete `pscat` and
+`pscat-mcp` from that directory (they are symlinks into the cache, or the
+shell script, whose second line is `# pscat-plugin-shim`).
 
 The first start downloads before the server answers, which takes a few
 seconds on a normal connection. If your agent gives up first and lists
@@ -73,7 +92,8 @@ or put the `pscat` and `pscat-mcp` from a release archive on your
 `PATH`. A SessionStart hook (`hooks/hooks.json`, which runs the same launcher
 with `--hook`; both Claude Code and Codex read it) never downloads. When pscat
 isn't on your `PATH` it tells you whether the server will download it, and
-tells Claude the full path of the `pscat` command-line tool.
+tells Claude the stable path of the `pscat` command-line tool. When the
+cached copy is in use it also makes the `PATH` links above.
 
 ## Install in the Claude desktop app (Cowork)
 
@@ -87,6 +107,13 @@ Cowork starts the plugin's MCP server on your computer, so the launcher
 above downloads pscat on the first task (a few seconds). The plugin's
 skills also work in chat, but chat doesn't start local MCP servers
 (<https://claude.com/docs/plugins/platform-support>).
+
+In a session that runs in the cloud (Cowork or Claude Code on the web) the
+skills and the session-start hook load, but the platform table lists a local
+MCP server as loading in Cowork only "when the Cowork session runs on your
+computer", and the v0.7.0-rc.1 trial saw no `pscat-mcp` tools there. The
+skills then use the command line, which is why the launcher puts `pscat` on
+`PATH` (`notes/919-plugin-pscat-on-path.md`).
 
 ## Install in Claude Code
 
@@ -153,6 +180,47 @@ server's tools being absent.
 **Already registered pscat-mcp by hand?** If you ran
 `codex mcp add pscat -- pscat-mcp`, remove it (`codex mcp remove pscat`).
 
+## Where saved renders go
+
+The MCP tools save a file only when asked (`out_path`), and only inside one
+directory, the server's output root, fixed when the server starts. No tool
+call can move it. The launcher picks the first of these that is an existing
+directory, is not `/`, and is not inside the installed plugin:
+
+1. **Claude Code's plugin option**: **Render output folder** (`output_dir`).
+   Set it with `/plugin configure pscat@pscat`, or in `/config`.
+2. **`out-root` in `~/.config/pscat/plugin.conf`** (under
+   `$XDG_CONFIG_HOME` if that is set; on Windows `%APPDATA%\pscat\plugin.conf`). This works with every host, and it is
+   the way to set the root under Codex, which passes a plugin's server no
+   options of yours:
+
+   ```sh
+   mkdir -p ~/.config/pscat
+   echo 'out-root = ~/Documents/renders' > ~/.config/pscat/plugin.conf
+   ```
+
+   The path must be absolute (`C:\...` on Windows) or start with `~/`. The folder must already
+   exist.
+3. **The project Claude Code names** (`${CLAUDE_PROJECT_DIR}`).
+4. **The directory the host starts the server in**: the project, under
+   Claude Code.
+5. **`renders/` in pscat's per-user data directory**, which the launcher
+   creates: `~/Library/Application Support/pscat/renders` on macOS,
+   `~/.local/share/pscat/renders` on Linux, `%APPDATA%\pscat\renders` on
+   Windows. Codex starts a plugin's server
+   inside the installed plugin, and the Claude desktop app sometimes starts
+   it in `/`, so without a setting their renders go here.
+
+A setting takes effect when the server next starts, so restart the agent
+after changing it. A setting that can't be used is
+skipped with a warning in the server's log. The server tells the agent its
+output root. When the task's workspace is somewhere else, the agent saves
+there and copies the file over; set `out-root` to the workspace (or a
+folder above it) to save directly. Nothing is ever written into the plugin's
+own directory, so a read-only install works. If no directory can be used
+(no home directory), `out_path` is off. There is deliberately no environment
+variable for the output root (#756).
+
 ## Platforms
 
 Linux and Windows are tested in CI with the real Claude Code and Codex
@@ -203,6 +271,10 @@ GitHub's download host), once. The other exception is
 packs from the same releases. The plugin collects nothing and sends
 nothing anywhere.
 
+Outside its cache, the plugin itself writes only the `pscat` and
+`pscat-mcp` links described above, in `~/.local/bin` or `~/bin`, and creates
+the default `renders/` directory described above when it is used.
+
 Each MCP call is limited to 60 s by default, a default and not a fixed
 limit: a long render needs the server's `--timeout` (up to 86400), a raised
 `--max-steps`, and the agent's own tool-call timeout raised too. The plugin's
@@ -220,7 +292,8 @@ below); a flag overrides its variable and an invalid value stops the server
 at startup. There is deliberately no variable for `--allow-read` or
 `--out-root`: these variables set only numeric limits, none adds a read root
 or moves where `out_path` writes. Codex starts a
-plugin's server with a short fixed environment, so under Codex (or to use
+plugin's server with a short fixed environment (a plugin's `mcp.json` cannot widen
+it: Codex rejects an `env_vars` key there, which only `config.toml` takes), so under Codex (or to use
 flags) register `pscat-mcp --timeout SECS` by
 hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in
 `/mcp`; Codex: an `[mcp_servers.<name>]` table in `config.toml` with `args` and
@@ -232,7 +305,8 @@ has the settings, including Claude Code's `MCP_TOOL_TIMEOUT` and
 
 The MCP tools run arbitrary PostScript as you. A program reads files only in
 the project directory, the pscat data directories and any `--allow-read DIR`
-the server was given; writes are confined to the project directory. See
+the server was given. A program writes no files itself; the server saves a
+render only inside the output root (see "Where saved renders go"). See
 [SECURITY.md](https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md) and the
 [agents guide](https://pscatlabs.github.io/pscat/agents.html) for the server's limits and
 options.
@@ -246,8 +320,8 @@ CI if any differ). Use the plugin with a pscat of the same version;
 `pscat-mcp --version` prints yours. `/plugin update pscat@pscat` picks up
 a new release in Claude Code; for Codex, see above. The release the
 launcher downloads is the tag in `pscat-release`. It equals the plugin's
-version, except during a pre-release trial, when it names the pre-release
-(for example `v0.7.0-rc.1`).
+version: the release script sets both together, so during a pre-release trial
+it names the pre-release (for example `v0.7.0-rc.1`).
 
 ## Layout
 

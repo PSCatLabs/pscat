@@ -8,7 +8,7 @@
 #
 # 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
-# 3. The installed copy holds the three skills as real files, the shared
+# 3. The installed copy holds every skill in plugin/skills/ as real files, the shared
 #    hooks/hooks.json, the launcher scripts/pscat-mcp.sh, its entry point
 #    scripts/pscat-mcp (executable) with the Windows twin pscat-mcp.cmd and
 #    pscat-mcp.ps1 (#866), and its release pin pscat-release, and nothing
@@ -24,6 +24,8 @@
 #    served from file://) and connects; without it and with the release
 #    unreachable, it fails. HOME and the launcher's cache are temp dirs, so
 #    a pscat in your ~/.cargo/bin is not seen.
+#    With the plugin's output_dir option set (pluginConfigs, #910),
+#    pscat-mcp starts with --out-root that directory.
 set -euo pipefail
 
 bin=${1:?usage: $0 path/to/bin-dir-with-pscat-mcp}
@@ -51,7 +53,7 @@ bad() { echo "FAIL $*" >&2; fail=1; }
 version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
     "$repo/plugin/.claude-plugin/plugin.json")
 copy="$CLAUDE_CONFIG_DIR/plugins/cache/pscat/pscat/$version"
-for s in pscat psart psviz; do
+for s in $(ls "$repo/plugin/skills"); do
     if [ -f "$copy/skills/$s/SKILL.md" ] && [ ! -L "$copy/skills" ]; then
         ok "installed copy has skills/$s/SKILL.md"
     else
@@ -106,6 +108,36 @@ echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' \
     && ok "with pscat-mcp on PATH the server connects" || bad "mcp list: $out"
 [ ! -e "$work/cache-unused" ] && ok "with pscat-mcp on PATH nothing is downloaded" \
     || bad "the launcher downloaded although pscat-mcp is on PATH"
+
+# The plugin's output_dir option (#910), set as /plugin configure saves it
+# (pluginConfigs in the user settings): Claude Code substitutes it into the
+# launcher's arguments and pscat-mcp starts with --out-root that directory.
+# A wrapper named by PSCAT_MCP_BIN records the arguments pscat-mcp gets.
+mkdir -p "$work/renders"
+cat > "$work/record-mcp" <<EOF
+#!/bin/sh
+case "\$1" in --version|-V) ;; *) printf '%s\n' "\$@" > "$work/mcp-args" ;; esac
+exec "$bin/pscat-mcp" "\$@"
+EOF
+chmod +x "$work/record-mcp"
+settings=$CLAUDE_CONFIG_DIR/settings.json
+[ -f "$settings" ] || echo '{}' > "$settings"
+cp "$settings" "$work/settings.saved"
+python3 - "$settings" "$work/renders" <<'EOF'
+import json, sys
+s = json.load(open(sys.argv[1]))
+s.setdefault("pluginConfigs", {})["pscat@pscat"] = {"options": {"output_dir": sys.argv[2]}}
+json.dump(s, open(sys.argv[1], "w"))
+EOF
+out=$(PSCAT_MCP_BIN="$work/record-mcp" mcp_list "$bin:$clean_path" "$work/cache-unused" "$offline")
+want=$(cd "$work/renders" && pwd -P)
+if echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' &&
+    [ "$(cat "$work/mcp-args" 2>/dev/null)" = "$(printf -- '--out-root\n%s' "$want")" ]; then
+    ok "the output_dir option becomes pscat-mcp's --out-root"
+else
+    bad "output_dir option: $out / args: $(cat "$work/mcp-args" 2>&1)"
+fi
+cp "$work/settings.saved" "$settings"
 
 if PATH="$clean_path" command -v pscat-mcp >/dev/null; then
     bad "pscat-mcp is still on the stripped PATH; cannot run the negative cases"

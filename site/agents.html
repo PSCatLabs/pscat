@@ -14,14 +14,18 @@
   agents differ: instruction files for agents that read docs, and an
   MCP server for agents that call tools.</p>
 
+  <p>Not sure pscat is the right tool for a picture? <a href="when-to-use.html">When to use pscat</a>
+  compares it with image models and an LLM's own SVG or matplotlib, and
+  explains how it lets a model with no image output of its own draw.</p>
+
   <h2>Build once</h2>
 <pre><code>git clone https://github.com/PSCatLabs/pscat
 cd pscat
 cargo build --release      # → target/release/pscat and target/release/pscat-mcp</code></pre>
 
   <h2>Surface 1 — the docs path (skill)</h2>
-  <p><code>skills/pscat/SKILL.md</code> is a one-page tool
-  reference: command recipes for rendering (PNG/SVG/PDF, page size,
+  <p><code>skills/pscat/SKILL.md</code> is a short tool
+  reference (advanced sections sit in its <code>references/</code> folder, read only when needed): command recipes for rendering (PNG/SVG/PDF, page size,
   dpi, halftone), debugging (<code>--headless</code>,
   <code>--pstack-on-error</code>, exit codes), handwriting-style note
   generation, typewritten pages, and the pitfalls, written for an installed
