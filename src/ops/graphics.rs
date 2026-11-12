@@ -5,6 +5,7 @@
 use tiny_skia::{FillRule, Transform};
 
 use crate::error::PsError;
+use crate::fmath;
 use crate::interp::Interp;
 use crate::object::{Dict, Object, Value};
 
@@ -20,6 +21,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "rcurveto", rcurveto);
     op(dict, "arc", arc);
     op(dict, "arcn", arcn);
+    op(dict, "arcto", arcto);
+    op(dict, "arct", arct);
     op(dict, "closepath", closepath);
     op(dict, "currentpoint", currentpoint);
     // Painting
@@ -156,6 +159,104 @@ fn arc(it: &mut Interp) -> Result<(), PsError> {
 
 fn arcn(it: &mut Interp) -> Result<(), PsError> {
     arc_common(it, false)
+}
+
+/// What `arcto` does to the path, in user space: a straight line to
+/// (x1, y1) only, or a line to the first tangent point and one cubic
+/// to the second.
+#[derive(Debug, PartialEq)]
+enum ArcTo {
+    Line,
+    Arc {
+        t1: (f64, f64),
+        c1: (f64, f64),
+        c2: (f64, f64),
+        t2: (f64, f64),
+    },
+}
+
+/// The geometry of `arcto`, PLRM 3rd ed. §8.2: the circle of radius `r`
+/// tangent to the lines p0-p1 and p1-p2, joined to p0 by a line and
+/// drawn as the one cubic Ghostscript draws, however far it sweeps. A
+/// negative `r` mirrors the circle through p1 (gs does the same). A
+/// zero `r` gives a zero-length cubic at p1; collinear points give a
+/// plain line. `p0` is the current point read back through the CTM, so
+/// it carries single-precision noise: "collinear" is a perpendicular
+/// distance of 1e-6 relative to the coordinates' size, not exact zero
+/// (a fold-back, whose tangent length is ~1/sin of the corner, would
+/// otherwise blow up on that noise). `UndefinedResult` when p1 equals
+/// p0 or p2, as gs; `Limitcheck` when a result is not finite.
+fn arcto_geometry(
+    p0: (f64, f64),
+    p1: (f64, f64),
+    p2: (f64, f64),
+    r: f64,
+) -> Result<ArcTo, PsError> {
+    let (d0x, d0y) = (p0.0 - p1.0, p0.1 - p1.1);
+    let (d2x, d2y) = (p2.0 - p1.0, p2.1 - p1.1);
+    let (l0, l2) = (fmath::hypot(d0x, d0y), fmath::hypot(d2x, d2y));
+    if !(l0 > 0.0 && l2 > 0.0) {
+        return Err(PsError::UndefinedResult);
+    }
+    let (u0, u2) = ((d0x / l0, d0y / l0), (d2x / l2, d2y / l2));
+    let cross = u0.0 * u2.1 - u0.1 * u2.0;
+    let dot = u0.0 * u2.0 + u0.1 * u2.1;
+    let scale = [p0, p1, p2]
+        .iter()
+        .flat_map(|p| [p.0.abs(), p.1.abs()])
+        .fold(1.0, f64::max);
+    // Perpendicular distance of p0 from the line p1-p2 is |cross| * l0.
+    if cross.abs() * l0 <= 1e-6 * scale {
+        return Ok(ArcTo::Line);
+    }
+    // Corner angle at p1 in (0, pi); the arc turns through pi minus it.
+    let corner = fmath::atan2(cross.abs(), dot);
+    let t = r / fmath::tan(corner / 2.0);
+    let k = 4.0 / 3.0 * fmath::tan((std::f64::consts::PI - corner) / 4.0);
+    let t1 = (p1.0 + t * u0.0, p1.1 + t * u0.1);
+    let t2 = (p1.0 + t * u2.0, p1.1 + t * u2.1);
+    let c1 = (t1.0 - r * k * u0.0, t1.1 - r * k * u0.1);
+    let c2 = (t2.0 - r * k * u2.0, t2.1 - r * k * u2.1);
+    let all = [t1, c1, c2, t2];
+    if all.iter().any(|p| !(p.0.is_finite() && p.1.is_finite())) {
+        return Err(PsError::Limitcheck);
+    }
+    Ok(ArcTo::Arc { t1, c1, c2, t2 })
+}
+
+/// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and
+/// the shared body of `arct`: the tangent points. Operands are popped
+/// first and stay consumed on an error, like every operator here; the
+/// path changes only once nothing can fail any more.
+fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
+    let r = it.pop_f64()?;
+    let (x2, y2) = pop_xy(it)?;
+    let (x1, y1) = pop_xy(it)?;
+    let p0 = it.gfx.current_user_point()?;
+    let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r)?;
+    match arc {
+        ArcTo::Line => {
+            it.gfx.lineto(x1, y1)?;
+            Ok([x1, y1, x1, y1])
+        }
+        ArcTo::Arc { t1, c1, c2, t2 } => {
+            it.gfx.lineto(t1.0, t1.1)?;
+            it.gfx.curveto(c1.0, c1.1, c2.0, c2.1, t2.0, t2.1)?;
+            Ok([t1.0, t1.1, t2.0, t2.1])
+        }
+    }
+}
+
+fn arcto(it: &mut Interp) -> Result<(), PsError> {
+    for v in arcto_common(it)? {
+        it.push(Object::real(v));
+    }
+    Ok(())
+}
+
+/// Level 1's `arct`: `arcto` without the tangent points.
+fn arct(it: &mut Interp) -> Result<(), PsError> {
+    arcto_common(it).map(|_| ())
 }
 
 fn closepath(it: &mut Interp) -> Result<(), PsError> {
