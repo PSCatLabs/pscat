@@ -2927,10 +2927,22 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
             }
             "Error" => fields.insert("ps_error".into(), json!(value)),
             "OffendingCommand" => fields.insert("offending_command".into(), json!(value)),
-            "Line" => fields.insert(
-                "line".into(),
-                value.parse::<u64>().map_or(json!(value), |n| json!(n)),
-            ),
+            // `5`, or `5 (inner.ps)` for a line of a `run` file (#1043).
+            "Line" => {
+                let (num, file) = match value.split_once(" (") {
+                    Some((n, f)) if f.ends_with(')') => (n, Some(&f[..f.len() - 1])),
+                    _ => (value, None),
+                };
+                if let Some(file) = file {
+                    fields.insert("file".into(), json!(file));
+                }
+                fields.insert(
+                    "line".into(),
+                    num.parse::<u64>().map_or(json!(value), |n| json!(n)),
+                )
+            }
+            // `inner.ps:5 <- outer.ps:2 <- line 1`, innermost first.
+            "Run chain" => fields.insert("run_chain".into(), json!(value)),
             _ => None,
         };
     }
@@ -3800,6 +3812,23 @@ mod tests {
         assert_eq!(f["offending_command"], "bogus");
         assert_eq!(f["line"], 3);
         assert!(ps_error_fields("all fine").is_none());
+    }
+
+    #[test]
+    fn run_file_line_parses_into_line_file_and_chain() {
+        // #1043: an error in a `run` file names it, and the run chain.
+        let f = ps_error_fields(
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); \
+             Run chain: inner3.ps:5 <- lib/a b.ps:2 <- line 2 ]%%",
+        )
+        .unwrap();
+        assert_eq!(f["ps_error"], "undefinedresult");
+        assert_eq!(f["line"], 5);
+        assert_eq!(f["file"], "inner3.ps");
+        assert_eq!(f["run_chain"], "inner3.ps:5 <- lib/a b.ps:2 <- line 2");
+        // A main-program line has no file.
+        let f = ps_error_fields("%%[ Error: undefined; OffendingCommand: x; Line: 2 ]%%").unwrap();
+        assert!(!f.contains_key("file"));
     }
 
     #[test]

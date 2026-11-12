@@ -697,13 +697,25 @@ renders eight examples in both and compares block-downsampled output).
   the picture where a change to the noise constants shows up (`notes/755-basin-and-range-noise-example.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
-  reports the line of the most recent token scanned directly from the
-  *top-level* program (`Lexer`'s `is_main` flag) — never a
-  `run`-loaded library file, an eexec stream, or an executable
-  string, which would misattribute to the wrong source entirely — and
-  stays sticky across procedure calls, so an error deep inside a
-  previously defined procedure gets the call site's line, not the
-  procedure's definition site.
+  reports the line of the most recent token scanned from the top-level
+  program or a `run` file (`Lexer::line`) — never an eexec stream, an
+  executable string or a file object `exec`ed directly, which would
+  misattribute to the wrong source — and stays sticky across procedure
+  calls, so an error deep inside a previously defined procedure gets the
+  call site's line, not the procedure's definition site. Since #1043 a
+  `run` file's line names the file, `Line: 5 (inner.ps)`, plus `; Run
+  chain: inner.ps:5 <- outer.ps:2 <- line 1` (the `run` frames open when
+  the error left the machine, snapshotted by `step_n`, capped at 8 named
+  frames); a main-program error's report is unchanged byte for byte, which
+  dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
+  and `run_chain` fields. Tagging procedure bodies with scan positions
+  would mean a position per array element: not done
+  (`notes/1048-identity-operators-run-error-location.md`).
+- `product` `(pscat)`, `version` (the crate version string), `revision`
+  (`major*10000 + minor*100 + patch`, pre-release dropped) and
+  `serialnumber` 0 are the PLRM identity operators (#1048,
+  `src/ops/level2.rs`). As PLRM operators they are not in the
+  capabilities catalog, which lists only pscat extensions.
 
 ## Working conventions that matter (beyond AGENTS.md)
 

@@ -101,9 +101,10 @@ pscat --lint --png out.png file.ps     # self-check the render (see below)
 
 Exit code 0 = clean run; nonzero = a PostScript error, reported on
 stderr as `%%[ Error: undefined; OffendingCommand: bogus; Line: 3 ]%%`
-(the line is given for errors in the top-level program, not inside a
-`run`-loaded library). `--png` still writes the partial canvas after an
-error: useful to see how far a program got.
+(an error while a `run` file is being read gives that file's line and
+name, `Line: 5 (inner.ps); Run chain: inner.ps:5 <- line 2`). `--png`
+still writes the partial canvas after an error: useful to see how far a
+program got.
 
 **`--lint`** catches mistakes that don't *error*: a blank page, an
 unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack.
