@@ -370,6 +370,8 @@ pub fn status_lines() -> Vec<String> {
 mod tests {
     use super::*;
 
+    // Unix-shaped fake roots: a drive-less "/h" counts as relative on Windows.
+    #[cfg(unix)]
     #[test]
     fn search_dirs_follow_the_resolver_order_and_mark_what_exists() {
         let roots = crate::paths::Roots {

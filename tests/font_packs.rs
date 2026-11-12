@@ -162,9 +162,10 @@ fn an_override_beats_an_installed_pack_and_status_is_reported() {
         search.iter().position(|l| *l == want)
     };
     let home_catalog = at("override", "exists", &home.join("fonts/catalog")).expect(&out);
+    let user = home.join("user").display().to_string();
     let user_catalog = search
         .iter()
-        .position(|l| l.starts_with("# font-search override missing ") && l.contains("/user/"))
+        .position(|l| l.starts_with("# font-search override missing ") && l.contains(&user))
         .expect(&out);
     let home_packs = at("pack-dir", "exists", &home.join("fonts/packs")).expect(&out);
     assert!(home_catalog < user_catalog, "{out}");
