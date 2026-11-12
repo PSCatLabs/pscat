@@ -1546,6 +1546,19 @@ renders eight examples in both and compares block-downsampled output).
   `notes/773-readreals-all-offset-file.md`). The bulk read is `PsFile::read_into`, which keeps
   `consumed`/`line` exactly as `read_byte` does (for a filter too since #896; the `filters`
   fuzz target reads every chain both ways and asserts they agree).
+- **Binary object sequences (#733).** `setobjectformat`/`currentobjectformat`/`printobject`/
+  `writeobject` in `src/ops/binobj.rs`, the format itself in `src/binobj.rs` (module doc: header,
+  slot layout, what is representable, limits). The lexer frames a token whose first byte is
+  128..=131 as `Token::BinarySeq(bytes)` and does no decoding (immediately evaluated names need
+  the dictionary stack); the interpreter decodes it (`decode_sequence`) and a scanned sequence
+  *runs its top-level objects as tokens* (`Action::RunSequence`, a proc frame), while `token`
+  returns the executable array. Every offset is checked, a sequence decodes to at most one object per 8 bytes (so cycles and
+  shared layouts run out of budget: `syntaxerror`), nesting is capped at 500, and the fuzz
+  `lexer` target decodes what the lexer frames. Native formats 3/4 write as 1/2
+  (pscat is always little-endian IEEE, as Ghostscript treats it). Not done: binary tokens 132 to
+  159 (single numbers, strings, system name table indices), user and system name tables. Tests:
+  `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

@@ -295,6 +295,8 @@ struct SaveRecord {
     /// restore = grestoreall to the save point.
     gfx_depth: usize,
     gfx_state: Box<GraphicsState>,
+    /// `setobjectformat` is VM state: `restore` brings the old value back.
+    object_format: u8,
 }
 
 /// A PostScript interpreter with its own page, stacks and virtual memory.
@@ -417,6 +419,10 @@ pub struct Interp {
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
     pub(crate) packing: bool,
+    /// `setobjectformat` (#733): 0 off, 1 to 4 the binary object sequence
+    /// byte order. Starts at 2 (IEEE, low byte first) on every platform,
+    /// which is Ghostscript's default on a little-endian host.
+    pub(crate) object_format: u8,
     /// `usertime`'s zero point.
     pub(crate) clock: crate::clock::Clock,
     /// Non-Font resource categories (ops/level2.rs). Font shares
@@ -648,6 +654,7 @@ impl Interp {
             noise_from_override: false,
             seed_override_fired: false,
             packing: false,
+            object_format: 2,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
             keep_dicts_on_drop: false,
@@ -1815,6 +1822,10 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
+            /// A binary object sequence was scanned (raw bytes): decode it
+            /// and run its top-level objects in order, as if each had been
+            /// a token (#733).
+            RunSequence(Vec<u8>),
             /// A `run` file's scanner is exhausted (#1043): pop it and give
             /// the error location back to the source that ran it.
             PopRunScanner,
@@ -1840,13 +1851,14 @@ impl Interp {
                     dstack,
                     gfx,
                     ostack,
+                    object_format,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
                     return Ok(None);
                 };
                 match frame {
-                    Frame::Scanner(lexer) => match lexer.next_token()? {
+                    Frame::Scanner(lexer) => match lexer.next_token_in(*object_format != 0)? {
                         None => {
                             if lexer.pop_systemdict {
                                 Action::PopScannerAndDict
@@ -1865,6 +1877,7 @@ impl Interp {
                         Some(Token::ImmediateName(n)) => {
                             Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
                         }
+                        Some(Token::BinarySeq(bytes)) => Action::RunSequence(bytes),
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
                     // The step loop runs procedure elements itself
@@ -2076,6 +2089,28 @@ impl Interp {
                     if let Some(frame) = self.estack.pop() {
                         self.cleanup_unwound_frame(frame);
                     }
+                }
+                Action::RunSequence(bytes) => {
+                    // The scanner is still the top frame: errors from running
+                    // the sequence belong to its line, as for a plain token.
+                    self.sync_scan_line();
+                    let items = self.decode_sequence(&bytes)?;
+                    // A scanned executable string runs, as a token read from
+                    // a file would; a procedure body only pushes it. So each
+                    // one is followed by `exec` (the operator itself, not a
+                    // lookup a program could have redefined).
+                    let mut run = Vec::with_capacity(items.len());
+                    for o in items {
+                        let exec_string = o.executable && matches!(o.value, Value::String(_));
+                        run.push(o);
+                        if exec_string {
+                            run.push(Object::exec(Value::Operator(crate::object::Operator {
+                                name: "exec",
+                                func: crate::ops::control::exec,
+                            })));
+                        }
+                    }
+                    self.push_proc_frame(PsArray::from_vec(run))?;
                 }
                 Action::PopRunScanner => {
                     self.estack.pop();
@@ -2344,7 +2379,16 @@ impl Interp {
         self.scan_one(&mut lexer)
     }
 
+    /// The top-level objects of a scanned binary object sequence (#733).
+    /// A sequence decodes to at most one object per 8 bytes, so the memory
+    /// limit is asked about that much before anything is built.
+    fn decode_sequence(&self, bytes: &[u8]) -> Result<Vec<Object>, PsError> {
+        self.check_alloc(bytes.len() / 8 * std::mem::size_of::<Object>())?;
+        decode_sequence(bytes, &self.dstack)
+    }
+
     fn scan_one(&self, lexer: &mut Lexer) -> Result<Option<(Object, usize)>, PsError> {
+        lexer.binary_tokens = self.object_format != 0;
         let obj = match lexer.next_token()? {
             None => return Ok(None),
             Some(Token::RBrace) => {
@@ -2352,6 +2396,7 @@ impl Interp {
             }
             Some(Token::LBrace) => scan_procedure(lexer, 0, &self.dstack)?,
             Some(Token::ImmediateName(n)) => resolve_immediate(&n, &self.dstack)?,
+            Some(Token::BinarySeq(bytes)) => Object::procedure(self.decode_sequence(&bytes)?),
             Some(tok) => token_to_object(tok),
         };
         Ok(Some((obj, lexer.pos())))
@@ -2682,6 +2727,7 @@ impl Interp {
             seen: HashSet::new(),
             gfx_depth,
             gfx_state,
+            object_format: self.object_format,
         });
         Object::lit(Value::Save(handle))
     }
@@ -2717,6 +2763,7 @@ impl Interp {
                 JEntry::GState { gs, old } => *gs.borrow_mut() = *old,
             }
         }
+        self.object_format = rec.object_format;
         // grestoreall to the save point, then drop the saved state —
         // pinned against gs (`save gsave gsave 5 setlinewidth restore`).
         self.gfx
@@ -3159,7 +3206,7 @@ fn token_to_object(tok: Token) -> Object {
         Token::LiteralName(n) => Object::lit(Value::Name(crate::name::intern(&n))),
         // All callers consume brace and immediate-name tokens before
         // converting, so these cannot reach here.
-        Token::LBrace | Token::RBrace | Token::ImmediateName(_) => {
+        Token::LBrace | Token::RBrace | Token::ImmediateName(_) | Token::BinarySeq(_) => {
             unreachable!("structural tokens handled by the scanner")
         }
     }
@@ -3174,6 +3221,11 @@ fn resolve_immediate(name: &str, dicts: &[Rc<RefCell<Dict>>]) -> Result<Object, 
         }
     }
     Err(PsError::Undefined(name.to_string()))
+}
+
+/// The top-level objects of a scanned binary object sequence (#733).
+fn decode_sequence(bytes: &[u8], dicts: &[Rc<RefCell<Dict>>]) -> Result<Vec<Object>, PsError> {
+    crate::binobj::decode(bytes, &mut |n| resolve_immediate(n, dicts))
 }
 
 /// Collect tokens up to the matching `}` into a procedure object. Called
@@ -3197,6 +3249,9 @@ fn scan_procedure(
             Some(Token::RBrace) => break,
             Some(Token::LBrace) => items.push(scan_procedure(lexer, depth + 1, dicts)?),
             Some(Token::ImmediateName(n)) => items.push(resolve_immediate(&n, dicts)?),
+            Some(Token::BinarySeq(bytes)) => {
+                items.push(Object::procedure(decode_sequence(&bytes, dicts)?));
+            }
             Some(tok) => items.push(token_to_object(tok)),
         }
     }

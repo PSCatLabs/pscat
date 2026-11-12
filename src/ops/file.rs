@@ -33,7 +33,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "resetfile", resetfile);
 }
 
-fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
+pub(crate) fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
     match &it.pop()?.value {
         Value::File(f) => Ok(f.clone()),
         _ => Err(PsError::Typecheck),

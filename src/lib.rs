@@ -130,6 +130,7 @@ pub mod sheet;
 // and out of cargo-semver-checks' view of the API (issue #565).
 #[doc(hidden)]
 pub mod bbox;
+pub(crate) mod binobj;
 #[doc(hidden)]
 pub mod capabilities;
 #[doc(hidden)]
