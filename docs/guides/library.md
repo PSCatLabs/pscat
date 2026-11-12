@@ -149,19 +149,25 @@ and does not have to match pscat's version of one.
 
   ```rust
   use pscat::chalkboard::BoardConfig;
+  use pscat::Interp;
 
-  let driver = BoardConfig::default().driver("x + \\aleph\n+ ☃")?;
+  let board = BoardConfig::default();
+  let driver = board.driver("x + \\aleph\n+ ☃")?;
   let (w, h) = driver.page_size();
-  let mut interp = pscat::Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
+  let mut interp = Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
   interp.capture_stdout();
   let err = interp.run_str(driver.source()).expect_err("outside the subset");
   let e = driver.explain(interp.captured_stdout(), &err).expect("a TeX error");
-  for p in e.problems() {
-      println!("{}:{}  {}", p.line, p.column, p.message());
-  }
-  // 1:5  unsupported LaTeX command \aleph
-  // 2:3  unsupported character: ☃ (U+2603)
+
+  // two problems from one input, with their places
+  let found: Vec<_> = e.problems().iter().map(|p| (p.token.as_str(), p.line, p.column)).collect();
+  assert_eq!(found, [(r"\aleph", 1, 5), ("☃", 2, 3)]);
+  assert_eq!(e.problems()[0].code(), "unsupported_command");
+  assert_eq!(e.problems()[0].message(), r"unsupported LaTeX command \aleph");
+  # Ok::<(), pscat::chalkboard::ChalkError>(())
   ```
+
+  (The same example runs as the doctest on `ChalkError::problems`.)
 - **The catalog.** `pscat::catalog::capabilities()` is the JSON
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.
