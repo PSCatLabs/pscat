@@ -268,6 +268,8 @@ struct SaveRecord {
     handle: Rc<SaveHandle>,
     /// Journal length at save time; restore undoes back to here.
     journal_mark: usize,
+    /// `setpacking` is VM state: `restore` brings the old mode back.
+    packing: bool,
     /// Backing-store pointers already journaled at this level. The
     /// journal entry keeps the `Rc` alive, so pointer reuse can't alias.
     seen: HashSet<usize>,
@@ -1841,9 +1843,25 @@ impl Interp {
                     for o in operands {
                         self.push(o);
                     }
+                    let empty = target.executable
+                        && matches!(&target.value, Value::Array(a) if a.is_empty());
                     self.exec_object(target)?;
+                    // An empty procedure yields nothing, like an empty loop
+                    // body: count it toward the same run (#903).
+                    if empty {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                    }
                 }
-                Action::Nothing => {}
+                // A show frame that painted a glyph itself (#903).
+                Action::Nothing => {
+                    empty_run += 1;
+                    if empty_run == EMPTY_RUN {
+                        return Ok(Some(Item::Proc));
+                    }
+                }
                 Action::PopScannerAndDict => {
                     if let Some(frame) = self.estack.pop() {
                         self.cleanup_unwound_frame(frame);
@@ -2425,6 +2443,7 @@ impl Interp {
         self.save_stack.push(SaveRecord {
             handle: handle.clone(),
             journal_mark: self.journal.len(),
+            packing: self.packing,
             seen: HashSet::new(),
             gfx_depth,
             gfx_state,
@@ -2451,6 +2470,7 @@ impl Interp {
         }
         self.save_stack.truncate(idx + 1);
         let rec = self.save_stack.pop().expect("record at idx exists");
+        self.packing = rec.packing;
         while self.journal.len() > rec.journal_mark {
             match self.journal.pop().expect("length checked") {
                 // Replacing contents while holding the borrow is safe

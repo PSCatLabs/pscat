@@ -1361,3 +1361,82 @@ fn a_run_of_empty_iterations_is_one_step_per_1024() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Setup that runs to completion first (state persists across `run_str`),
+/// then the one operation under test, which has an empty procedure for its
+/// target and a huge input (#903). Before the fix its whole run happened
+/// inside a single step, so the first small slice finished the program.
+const EMPTY_TARGET_SETUP: &str = "/Courier findfont 10 scalefont setfont \
+     /s 60000 string def \
+     newpath 0 0 moveto 1 1 60000 { dup lineto } for";
+
+const EMPTY_TARGET_RUNS: &[&str] = &["{ } { } { } { } pathforall", "{ } s kshow", "s show"];
+
+#[test]
+fn a_slice_returns_on_every_kind_of_empty_target_over_a_huge_input() {
+    within_deadline(|| {
+        for timed in [false, true] {
+            for src in EMPTY_TARGET_RUNS {
+                let mut it = Interp::new();
+                it.run_str(EMPTY_TARGET_SETUP)
+                    .unwrap_or_else(|e| panic!("setup: {e}"));
+                if timed {
+                    // `--profile-ops` runs its own copy of the step loop.
+                    it.enable_profile();
+                    it.enable_profile_ops();
+                }
+                it.begin_source(src.as_bytes());
+                for _ in 0..3 {
+                    let more = it.step_n(10).unwrap_or_else(|e| panic!("{src}: {e}"));
+                    assert!(more, "{src}: ended early (timed: {timed})");
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn a_run_of_empty_targets_is_one_step_per_1024() {
+    // A path of n lineto segments plus a moveto is n + 1 procedure runs, and
+    // `n show` characters are n glyph steps. Up to 1024 in a row are free, as
+    // for an empty loop body (#900); a longer run pauses once per 1024.
+    let setup = |n: usize| {
+        format!(
+            "/Courier findfont 10 scalefont setfont /s {n} string def \
+             newpath 0 0 moveto 1 1 {n} {{ dup lineto }} for "
+        )
+    };
+    let steps = |n: usize, src: &str| {
+        let mut it = Interp::new();
+        it.run_str(&setup(n)).expect("setup");
+        it.begin_source(src.as_bytes());
+        let mut count = 0;
+        while it.step_n(1).unwrap_or_else(|e| panic!("{src}: {e}")) {
+            count += 1;
+            assert!(count < 1_000_000, "{src}: runaway");
+        }
+        count
+    };
+    let mut got = Vec::new();
+    for n in [100, 1023, 1024, 3000] {
+        for src in EMPTY_TARGET_RUNS {
+            got.push(format!("{n} {src}: {}", steps(n, src)));
+        }
+    }
+    // Measured on the tree before #903 for 100: 5, 3 and 2 steps, as now.
+    let want = [
+        "100 { } { } { } { } pathforall: 5",
+        "100 { } s kshow: 3",
+        "100 s show: 2",
+        "1023 { } { } { } { } pathforall: 6",
+        "1023 { } s kshow: 3",
+        "1023 s show: 2",
+        "1024 { } { } { } { } pathforall: 6",
+        "1024 { } s kshow: 4",
+        "1024 s show: 3",
+        "3000 { } { } { } { } pathforall: 7",
+        "3000 { } s kshow: 5",
+        "3000 s show: 4",
+    ];
+    assert_eq!(got.join("\n"), want.join("\n"));
+}
