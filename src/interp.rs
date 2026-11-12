@@ -486,6 +486,13 @@ const POLL_PERIOD: u32 = 1024;
 const EMPTY_RUN: u32 = 1024;
 const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
+/// Whether `scale` (device pixels per point, dpi / 72) can size a canvas:
+/// finite and above zero. A NaN or 0 would otherwise round to a 1x1 page
+/// and a negative one would mirror the page (#1133).
+fn usable_scale(scale: f32) -> bool {
+    scale.is_finite() && scale > 0.0
+}
+
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
     /// Nothing chose that size, so a program's `setpagedevice /PageSize`
@@ -511,11 +518,15 @@ impl Interp {
 
     /// A page of `width`x`height` *points* rendered at `scale` device
     /// pixels per point: `scale` is dpi / 72, so 2.0 renders at 144 dpi.
-    /// `None` if the page is more than 8000 pixels on a side at that scale.
+    /// `None` if `scale` is not a positive finite number, or if the page is
+    /// more than 8000 pixels on a side at that scale.
     /// Explicit, like [`with_page`](Self::with_page); a host that wants the
     /// program's `setpagedevice` to size the page sets another source with
     /// [`Gfx::set_page_size_source`](crate::gfx::Gfx::set_page_size_source).
     pub fn with_page_scaled(width: u32, height: u32, scale: f32) -> Option<Self> {
+        if !usable_scale(scale) {
+            return None;
+        }
         let px = |points: u32| ((points as f32 * scale).round() as u32).max(1);
         let (pw, ph) = (px(width), px(height));
         // Same ceiling as --page: keeps a huge dpi from attempting a
