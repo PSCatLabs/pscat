@@ -858,7 +858,7 @@ pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
   examples/hybrid/compare_alpine_trail.ps
 ```
 
-The route above the hut follows the zigzag trail as **the photographs** show it (`RouteHigh` in the program): the model kept the trail but moved its turns up to 6 px from the layout's, so the corners were read off the photograph (the same in both). The reference PNG is still the one that was sent, with its sky in 64 flat bands; today's program draws that sky as one smooth shading, within 3 levels of it per channel.
+The route above the hut follows the zigzag trail as **the photographs** show it (`RouteHigh` in the program): the model kept the trail but moved its turns up to 6 px from the layout's, so the corners were read off the photographs on a 4x grid (the same in both; no test pins this, the overlay is `docs/dev/review-log/pending/1029-hybrid-showcase-polish/alpine-route-trace-overlay.jpg`). The reference PNG is still the one that was sent, with its sky in 64 flat bands; today's program draws that sky as one smooth shading, within 3 levels of it per channel.
 
 `tests/hybrid_reverse.rs` checks the facts: the program still draws the reference that was sent; the layout drift of both photographs (ridge, shade edge, hut) and how quiet the type zones stayed, measured on the committed files; the QR code in both decoders from the PNG and the PDF, framed as a scanner frames it (the page's bottom-right quarter), for the summer and autumn hybrids and for pscat alone; the brief, string by string; and the decoders' verdict on the image model's own QR code.
 
