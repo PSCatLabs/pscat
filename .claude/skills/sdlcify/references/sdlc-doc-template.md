@@ -45,6 +45,12 @@ light_gate:                  # optional: the local gate for a PR whose every cha
   paths: ["docs/*", "notes/*"]   # globs; `*` also matches `/`. Only paths no test, lint or build reads
   exclude: [<globs of docs that tests execute>]  # optional: a match here needs the full gate
   command: <a fast check, e.g. a Markdown link check>
+independent_review:          # optional: who reviews which PR, and how many rounds
+  cross_family_paths: ["/src/", ...]  # one-line JSON list, CODEOWNERS syntax: these PRs get a cross-family (Codex) review
+  max_rounds: 2
+  wave_batch_max_prs: 5
+  wave_batch_max_changed_lines: 2000
+  stale_pr_days: 7
 dispatch_doc: <path>         # optional: how a dispatcher session runs many issues with agents
 release:                     # optional; absent means no release section
   process_doc: <path to the release procedure>
@@ -88,6 +94,14 @@ it to GitHub.
 8. **Independent review** — a reviewer with no context from
    implementation (a fresh session, or `/code-review`) checks the diff
    cold. Must come back clean to proceed.
+   <!-- When independent_review is set, replace this step's text with the
+   risk-tiered version: cross-family review for a diff touching
+   cross_family_paths (`scripts/review_tier.py` decides), a blank-context
+   agent review otherwise, at most max_rounds rounds after which only a real
+   correctness, security or data-loss defect blocks, a quoted `gs` run to
+   settle a PostScript-semantics finding, and the dispatcher's combined wave
+   review (dispatch_doc, "Review"). Keep the repo's current wording when it
+   already says this. -->
 9. **Merge**, per the policy above:
    - `human-only`: a human merges every PR, always.
    - `agent-full`: an agent may merge any PR once CI is green and

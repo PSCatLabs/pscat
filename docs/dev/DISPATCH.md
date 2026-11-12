@@ -42,6 +42,32 @@ The goals preamble at the top of the work-issue skill covers quality first, perf
 no Ghostscript timing and waiting for CI. The prompt adds only what the skill cannot know: the issue
 number, the lane (which files are this agent's), and whether the PR is expected to need the owner.
 
+## Review
+
+`SDLC.md` step 8 sets who reviews: Codex for PRs that touch `independent_review.cross_family_paths`
+(`scripts/review_tier.py`), a blank-context agent for the rest, with at most 2 rounds. In a wave
+the dispatcher batches the Codex reviews, so agents don't each wait on their own round trip:
+
+- **Agents in a wave stop before Codex** on cross-family PRs. The prompt says "combined wave
+  review": the agent runs the agent-tier review only when its PR is not cross-family, then waits
+  for green CI and stops without merging (`pitfalls.md` "Stop without merging").
+- **One combined Codex review per batch** of up to `wave_batch_max_prs` (5) PRs or
+  `wave_batch_max_changed_lines` (2000) changed lines, grouped by area so the reviewer has
+  context. A bigger wave is split into several batches.
+- **Integration tree first.** Before the review, merge every PR in the batch into one local
+  branch off `origin/main` and run the full quality gate on it, plus what per-PR CI runs only
+  piecemeal: `cargo test --no-default-features`, the npm tests (`./scripts/build_npm.sh` and
+  `npm test` in `npm/`) and the Ghostscript parity tests. This catches clashes between PRs that
+  pass alone. Then Codex reviews that branch against `origin/main`, and the dispatcher pushes
+  each fix to the PR it belongs to.
+- **Round cap.** Two rounds, as in `SDLC.md`. After round 2, only real correctness, security or
+  data-loss defects block. The rest become follow-ups (filed when they have user-visible impact,
+  "Follow-ups" below). A finding about PostScript semantics is settled by a `gs` run quoted in the
+  response, not by another round.
+- **No stale PRs.** At each wave start, every open PR with no activity for `stale_pr_days` (7)
+  days goes into this wave's review or gets closed with a comment saying why (the branch stays,
+  so it can be reopened). Bot PRs (Dependabot) follow `merge_policy.bot_merge_authors` instead.
+
 ## Merges
 
 Agents merge their own tier (a) and tier (b) PRs (`SDLC.md`, "Who merges"). The dispatcher:

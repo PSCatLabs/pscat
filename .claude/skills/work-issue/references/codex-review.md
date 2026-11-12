@@ -29,7 +29,28 @@ all the session had loaded). A human reading the comment then knows to
 re-check step 8's behavior against what actually merged, rather than
 trusting this run's self-report of "clean."
 
-**Review must come from a different model family than whichever one
+**Which reviewer: by risk, not size** (`SDLC.md` step 8,
+`independent_review`). `python3 scripts/review_tier.py --base origin/main`
+prints `cross-family` when the diff touches the engine, library, npm
+runtime, dependencies, user-machine launchers or release scripts, and
+`agent` otherwise. An `agent` PR (docs, skills, PostScript libraries,
+gallery, tests, CI) takes the **Agent path**: the blank-context `Agent`
+review described under "Fallback path" below, posted under the heading
+`## Agent review, round <R>` with the same verbatim-report and
+disposition table, as policy, not as a fallback. Its blind spots matter
+less there: those diffs are cheap to fix after the fact, and the
+perceptual review covers visible changes. In a dispatched wave the
+dispatcher runs the Codex review for cross-family PRs as one combined
+review (`docs/dev/DISPATCH.md`, "Review").
+
+**Round cap: `independent_review.max_rounds` (2).** Past it, only a real
+correctness, security or data-loss defect blocks; the rest get a "Our
+response" row saying so and go in the summary's follow-ups. When a
+finding turns on PostScript semantics, run Ghostscript and quote its
+output in the response: one `gs` run ends an argument that otherwise
+takes several rounds (eight on the #980 `arcto` review).
+
+**A cross-family PR's review must come from a different model family than whichever one
 implemented the change.** This skill only ever runs as Claude, so its
 review dispatches to Codex — never a same-family blank-context `Agent`
 review, which shares training and blind spots with the implementer no
@@ -221,8 +242,8 @@ continuing. Pushing before re-reviewing matters here specifically:
 `--scope branch` diffs local git state, so a fix that's only committed
 locally makes the *next local review* look clean while the actual PR
 on GitHub — what CI tests and what merge would actually ship — still
-points at the old, unfixed commit. Use your judgment on how many
-rounds are worth it on genuinely subjective feedback.
+points at the old, unfixed commit. Stop at the round cap above
+(2 rounds); within it, use your judgment on genuinely subjective feedback.
 
 Once the review is clean — nothing left unfixed without a stated
 reason — proceed to merge-eligibility below.

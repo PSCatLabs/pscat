@@ -28,6 +28,12 @@ light_gate:
   paths: ["docs/*", "notes/*"]
   exclude: ["docs/guides/*"]
   command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check && python3 scripts/check_licences.py all"
+independent_review:
+  cross_family_paths: ["/src/", "/build.rs", "/Cargo.toml", "/Cargo.lock", "/npm/*.js", "/npm/*.d.ts", "/plugin/scripts/", "/scripts/release.sh", "/scripts/package_release.sh", "/.github/workflows/release.yml", "/.github/workflows/npm.yml"]
+  max_rounds: 2
+  wave_batch_max_prs: 5
+  wave_batch_max_changed_lines: 2000
+  stale_pr_days: 7
 dispatch_doc: docs/dev/DISPATCH.md
 release:
   process_doc: docs/dev/RELEASING.md
@@ -72,8 +78,27 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    partial or related work, since GitHub closes an issue on any closing
    keyword, even in "does not fix #N"), with a summary and a test plan.
 8. **Independent review** — a reviewer with no context from
-   implementation (a fresh session, or `/code-review`) checks the diff
-   cold. Must come back clean to proceed.
+   implementation checks the diff cold. Must come back clean to proceed.
+   Which reviewer depends on risk, not size (`independent_review` in the
+   frontmatter; `python3 scripts/review_tier.py --base origin/main`
+   decides):
+   - **Cross-family (Codex)** when the diff touches a
+     `cross_family_paths` entry: the engine and library (`src/`), the npm
+     runtime, dependencies, the launchers that run on users' machines, and
+     the release scripts. The dispatcher may also ask for it on any PR.
+   - **Agent** (a same-family, blank-context reviewer) for everything else:
+     docs, skills, PostScript libraries, gallery, tests, CI. A visible
+     render change still gets the perceptual review (tier (b) below).
+
+   **At most `max_rounds` (2) review rounds.** After the last round, only a
+   finding that is a real correctness, security or data-loss defect
+   blocks the merge. Every other open finding is answered in the round's
+   table and listed as a proposed follow-up. When a finding turns on what
+   PostScript does, a Ghostscript run settles it: quote the `gs` output in
+   the response instead of arguing it over another round.
+   In a dispatched wave, the dispatcher runs one combined Codex review for
+   the wave's cross-family PRs, over a branch that merges them all
+   (`docs/dev/DISPATCH.md`, "Review").
 9. **Merge — agent-full policy**: an agent may merge any PR once CI is
    green and independent review is clean, regardless of diff size or
    which files it touches, **except** a PR that touches a path in
