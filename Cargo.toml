@@ -63,6 +63,11 @@ include = [
 # exit, and every headless mode works as before.
 default = ["window"]
 window = ["dep:winit", "dep:softbuffer"]
+# `gpu` adds `--gpu-preview` (issue #742): compiled kernels (`kernelimage`)
+# lowered to WGSL and run through wgpu, in f32, as a fast approximate
+# preview. Off by default: it is a large dependency tree, and final renders
+# stay on the exact CPU path. Not available on wasm32.
+gpu = ["dep:wgpu", "dep:pollster"]
 
 [package.metadata.docs.rs]
 # The documented API is the headless library; the window is a CLI concern
@@ -125,6 +130,8 @@ winit = { version = "0.30.13", optional = true }
 # Pure Rust, no C toolchain; ruzstd's frame checksum (the `hash`
 # feature) is off because every file is checked against its SHA-256.
 ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
+wgpu = { version = "30.0.1", optional = true, default-features = false, features = ["std", "wgsl", "metal", "vulkan", "dx12", "parking_lot"] }
+pollster = { version = "1.0.1", optional = true }
 sha2 = "0.11.1"
 
 # tests/qr.rs decodes PSCat's own rendered QR symbols with an independent

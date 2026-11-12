@@ -1,0 +1,55 @@
+%!PS
+% Kernel benchmark: a shaded-relief map, after gallery/basin_and_range.ps
+% (#742). Each pixel is a pure function of (i, j): the slope for the
+% lighting comes from two extra height samples, not from the row before.
+%   pscat --page 480x320 --png out.png benches/kernels/relief.ps
+/W 480 def /H 320 def
+7 noiseseed
+/Sea 0.48 def /NU 5.0 def /Sc NU W div def
+/height {                           % u v -> e
+  /v exch def /u exch def
+  u v 5 0.5 2.0 fbm2 0.34 mul 0.50 add
+  u 0.45 mul 31.7 add v 0.45 mul 12.3 add 3 0.5 2.0 fbm2
+  1.7 mul 0.15 add
+  dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+  dup mul
+  u 1.3 mul v 1.3 mul 6 0.52 2.05 ridged2
+  0.55 sub 0.66 mul
+  mul add
+  dup 0.8 gt { 0.8 sub 5 mul dup 1 add div 0.2 mul 0.8 add } if
+  dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+} bind def
+% colour stops [h r g b], looked up by a run-time index
+/Stops [
+  [0.00 0.04 0.11 0.25] [0.34 0.09 0.25 0.41] [0.46 0.25 0.52 0.62]
+  [0.48 0.81 0.77 0.59] [0.50 0.72 0.74 0.50] [0.56 0.50 0.62 0.36]
+  [0.63 0.45 0.52 0.30] [0.70 0.62 0.54 0.36] [0.78 0.53 0.45 0.38]
+  [0.88 0.72 0.68 0.64] [0.95 0.96 0.96 0.97] [1.00 1.00 1.00 1.00]
+] def
+/NS Stops length def
+/pixel {
+  /j exch def /i exch def
+  i Sc mul j Sc mul height /e exch def
+  i 1 sub Sc mul j Sc mul height /el exch def
+  i Sc mul j 1 sub Sc mul height /eu exch def
+  % find the stop segment
+  /s 0 def
+  0 1 NS 2 sub { /k exch def Stops k 1 add get 0 get e le { /s k 1 add def } if } for
+  s NS 1 sub ge { /s NS 2 sub def } if
+  Stops s get aload pop /b0 exch def /g0 exch def /r0 exch def /h0 exch def
+  Stops s 1 add get aload pop /b1 exch def /g1 exch def /r1 exch def /h1 exch def
+  /f e h0 sub h1 h0 sub div def
+  f 0 lt { /f 0 def } if f 1 gt { /f 1 def } if
+  e Sea gt {
+    1 e el sub e eu sub add 22 mul add
+    /n e 25 mul def /fr n n floor sub def
+    fr 1 fr sub 2 copy gt { exch } if pop
+    e el sub abs e eu sub abs add 25 mul 0.0001 add div
+    1.1 exch sub dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+    0.16 mul 1 exch sub mul
+  } { 1 } ifelse /lit exch def
+  r1 r0 sub f mul r0 add lit mul
+  g1 g0 sub f mul g0 add lit mul
+  b1 b0 sub f mul b0 add lit mul
+} bind def
+(benches/kernels/driver.ps) run

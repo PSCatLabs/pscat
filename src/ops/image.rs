@@ -16,7 +16,7 @@ pub fn install(dict: &mut Dict) {
     // setcolorspace/currentcolorspace/setcolor live in ops::color.
 }
 
-fn read_matrix6(obj: &Object) -> Result<[f64; 6], PsError> {
+pub(crate) fn read_matrix6(obj: &Object) -> Result<[f64; 6], PsError> {
     let Value::Array(a) = &obj.value else {
         return Err(PsError::Typecheck);
     };

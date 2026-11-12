@@ -1,0 +1,26 @@
+%!PS
+% Kernel benchmark: escape-time Mandelbrot with smooth colouring (#742).
+%   pscat --page 480x320 --png out.png benches/kernels/mandel.ps
+/W 480 def /H 320 def
+/MaxIt 200 def
+/Cx -0.7435 def /Cy 0.1314 def /Span 0.012 def     % a seahorse-valley window
+/pixel {
+  /j exch def /i exch def
+  /cr i W 2 div sub W div Span mul Cx add def
+  /ci H 2 div j sub W div Span mul Cy add def
+  /zr 0.0 def /zi 0.0 def /n 0 def /r2 0.0 def
+  { zr zr mul zi zi mul add /r2 exch def
+    r2 256 gt n MaxIt ge or { exit } if
+    zr zr mul zi zi mul sub cr add
+    zr zi mul 2 mul ci add /zi exch def /zr exch def
+    /n n 1 add def
+  } loop
+  n MaxIt ge { 0.02 0.02 0.05 } {
+    % smooth iteration count: n + 1 - log2(log|z|)
+    n 1 add r2 ln 0.5 mul ln 2 ln div sub 0.035 mul /t exch def
+    t 360 mul sin 0.5 mul 0.5 add
+    t 0.7 add 360 mul sin 0.5 mul 0.5 add
+    t 1.4 add 360 mul sin 0.5 mul 0.5 add
+  } ifelse
+} bind def
+(benches/kernels/driver.ps) run

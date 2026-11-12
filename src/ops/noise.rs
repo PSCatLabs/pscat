@@ -122,6 +122,10 @@ fn noiseseed(it: &mut Interp) -> Result<(), PsError> {
 
 /// Called by every operator that samples `noise_perm`: sampling the table
 /// a seed override built is the override taking effect (issue #753).
+pub(crate) fn note_sampled(it: &mut Interp) {
+    sampled(it);
+}
+
 fn sampled(it: &mut Interp) {
     if it.noise_from_override {
         it.seed_override_fired = true;
@@ -508,13 +512,29 @@ fn octaves<const N: usize>(
     if !(0..=MAX_OCTAVES).contains(&oct) {
         return Err(PsError::Rangecheck);
     }
+    let sum = octave_sum(&it.noise_perm, shape, sample, pt, oct, gain, lac)?;
+    it.push(Object::real(sum));
+    Ok(())
+}
+
+/// The octave sum itself, shared with the kernel executor
+/// (`crate::kernel`), so a compiled kernel gets the same bits.
+fn octave_sum<const N: usize>(
+    p: &[u8; 256],
+    shape: Shape,
+    sample: fn(&[u8; 256], [f64; N]) -> Result<f64, PsError>,
+    pt: [f64; N],
+    oct: i64,
+    gain: f64,
+    lac: f64,
+) -> Result<f64, PsError> {
     let (mut sum, mut amp, mut freq) = (0.0, 1.0, 1.0);
     for k in 0..oct {
         let mut q = [0.0; N];
         for (i, c) in q.iter_mut().enumerate() {
             *c = (pt[i] * freq) + (k as f64 * SHIFT[i]);
         }
-        let mut n = sample(&it.noise_perm, q)?;
+        let mut n = sample(p, q)?;
         if let Shape::Ridged = shape {
             n = 1.0 - n.abs();
             n *= n;
@@ -523,8 +543,90 @@ fn octaves<const N: usize>(
         amp *= gain;
         freq *= lac;
     }
-    it.push(Object::real(sum));
-    Ok(())
+    Ok(sum)
+}
+
+/// One native noise sample for a compiled kernel: the same functions the
+/// operators call. `a` holds the coordinates, then `oct gain lac` for an
+/// octave sum (`oct` already known to be an integer).
+pub(crate) fn kernel_noise(
+    p: &[u8; 256],
+    kind: crate::kernel::ir::NoiseKind,
+    a: &[f64; 6],
+) -> Result<[f64; 3], PsError> {
+    use crate::kernel::ir::NoiseKind as K;
+    let oct = |i: usize| -> Result<i64, PsError> {
+        let o = a[i];
+        if !(0.0..=MAX_OCTAVES as f64).contains(&o) {
+            return Err(PsError::Rangecheck);
+        }
+        Ok(o as i64)
+    };
+    let one = |v: f64| [v, 0.0, 0.0];
+    Ok(match kind {
+        K::G2 => one(g2(p, a[0], a[1])?),
+        K::G3 => one(g3(p, a[0], a[1], a[2])?),
+        K::V2 => one(v2(p, a[0], a[1])?),
+        K::V3 => one(v3(p, a[0], a[1], a[2])?),
+        K::G2D => {
+            let (n, dx, dy) = gnoise2_derivs(p, a[0], a[1])?;
+            [n, dx, dy]
+        }
+        K::Fbm2 => one(octave_sum(
+            p,
+            Shape::Plain,
+            |p, [x, y]| g2(p, x, y),
+            [a[0], a[1]],
+            oct(2)?,
+            a[3],
+            a[4],
+        )?),
+        K::VFbm2 => one(octave_sum(
+            p,
+            Shape::Plain,
+            |p, [x, y]| v2(p, x, y),
+            [a[0], a[1]],
+            oct(2)?,
+            a[3],
+            a[4],
+        )?),
+        K::Ridged2 => one(octave_sum(
+            p,
+            Shape::Ridged,
+            |p, [x, y]| g2(p, x, y),
+            [a[0], a[1]],
+            oct(2)?,
+            a[3],
+            a[4],
+        )?),
+        K::Fbm3 => one(octave_sum(
+            p,
+            Shape::Plain,
+            |p, [x, y, z]| g3(p, x, y, z),
+            [a[0], a[1], a[2]],
+            oct(3)?,
+            a[4],
+            a[5],
+        )?),
+        K::VFbm3 => one(octave_sum(
+            p,
+            Shape::Plain,
+            |p, [x, y, z]| v3(p, x, y, z),
+            [a[0], a[1], a[2]],
+            oct(3)?,
+            a[4],
+            a[5],
+        )?),
+        K::Ridged3 => one(octave_sum(
+            p,
+            Shape::Ridged,
+            |p, [x, y, z]| g3(p, x, y, z),
+            [a[0], a[1], a[2]],
+            oct(3)?,
+            a[4],
+            a[5],
+        )?),
+    })
 }
 
 fn fbm2(it: &mut Interp) -> Result<(), PsError> {

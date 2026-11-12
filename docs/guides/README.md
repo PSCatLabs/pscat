@@ -43,6 +43,10 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   halftone, woodcut and linocut.
 - [Dry media](dry-media.md): chalk, crayon, charcoal, single-stroke glyphs and
   TeX math as chalk.
+- [Compiled per-pixel kernels](kernels.md): `kernelimage` compiles a
+  per-pixel procedure (ray tracers, fractals, filters, a neural network) and
+  runs it on every core, byte for byte as the interpreter would; a GPU
+  preview too.
 - [Functional PostScript](functional.md): map, filter and fold over lists of
   records, composed procedures, and wrappers that count or trace calls.
 
