@@ -100,22 +100,30 @@ PscatOnly {
   % over everything. The same horizon line as the painting.
   /WL 152 def
   /SUNX 118 def
-  % a vertical colour ramp, painted as 1 pt strips (not shfill: pscat's
-  % PDF export flattens a shading to one colour, and strips survive every
-  % output). y0 y1 [ [t r g b] ... ] -
+  % a vertical colour ramp: one axial shading over the band, its colour
+  % function a stitching function (FunctionType 3) with a leg between each
+  % pair of stops, so the gradient is smooth at any resolution and the PDF
+  % holds a real /Shading, not hundreds of strips. y0 y1 [ [t r g b] ... ] -
+  % The shading pads its end colours past y0 and y1; the band is clipped to
+  % y0 .. y1+3, so the three points over y1 take the last stop's colour (the
+  % sea laps the horizon by that much and the sky's top edge is off the page).
   /vramp {
     /vr_k exch def /vr_y1 exch def /vr_y0 exch def
-    vr_y0 1 vr_y1 { /vr_y exch def
-      /vr_t vr_y vr_y0 sub vr_y1 vr_y0 sub div def
-      0 1 vr_k length 2 sub { /vr_i exch def
-        vr_k vr_i get aload pop /vr_b0 exch def /vr_g0 exch def /vr_r0 exch def /vr_t0 exch def
-        vr_k vr_i 1 add get aload pop /vr_b1 exch def /vr_g1 exch def /vr_r1 exch def /vr_t1 exch def
-        vr_t vr_t0 ge vr_t vr_t1 le and {
-          /vr_f vr_t vr_t0 sub vr_t1 vr_t0 sub div def
-          vr_r0 vr_r1 vr_r0 sub vr_f mul add
-          vr_g0 vr_g1 vr_g0 sub vr_f mul add
-          vr_b0 vr_b1 vr_b0 sub vr_f mul add setrgbcolor } if } for
-      0 vr_y PW 3 rectfill } for } def
+    /vr_n vr_k length 1 sub def
+    /vr_f vr_n array def /vr_b vr_n 1 sub array def /vr_e vr_n 2 mul array def
+    0 1 vr_n 1 sub { /vr_i exch def
+      vr_f vr_i
+        << /FunctionType 2 /Domain [0 1] /N 1
+           /C0 vr_k vr_i get 1 3 getinterval
+           /C1 vr_k vr_i 1 add get 1 3 getinterval >> put
+      vr_i 0 gt { vr_b vr_i 1 sub vr_k vr_i get 0 get put } if
+      vr_e vr_i 2 mul 0 put  vr_e vr_i 2 mul 1 add 1 put } for
+    gsave
+      0 vr_y0 PW vr_y1 vr_y0 sub 3 add rectclip
+      << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 vr_y0 0 vr_y1]
+         /Function << /FunctionType 3 /Domain [0 1]
+                      /Functions vr_f /Bounds vr_b /Encode vr_e >> >> shfill
+    grestore } def
   % the sky, horizon gold up to a deep evening blue
   WL PH
     [ [0 1.00 0.80 0.46] [0.10 0.99 0.62 0.42] [0.26 0.88 0.50 0.56]
@@ -216,7 +224,10 @@ PscatOnly {
 % A soft shade under the bottom band: the sea is dark already, and this
 % deepens it evenly behind the date, the venue and the QR caption so the
 % type never sits on a bright wave. Thin horizontal strips of rising
-% opacity, so it fades in with no visible edge.
+% opacity, so it fades in with no visible edge. These stay strips, unlike
+% the sky: a shading ramps colour, not opacity, and over the painting there
+% is no colour to ramp to, so an opacity ramp has no shfill form. The same
+% goes for the shade under the chart below, the sun's glow and the grain.
 gsave
   0.03 0.05 0.14 setrgbcolor
   0 2 196 { /sh_y exch def
@@ -324,5 +335,6 @@ M 81 moveto (Harbourside Library, Lecture Room 2) show
 QX QY moveto URL << /Level /H >> qrencode
 << /ModuleSize 2 /Dark [0.08 0.12 0.30] /Light [1 0.96 0.88] >> qrdraw
 cream /Label-L1 11 font
-RIGHT QY 100 add moveto (Scan: how this poster was made) 0.6 rtshow
+% the caption sits 12 pt clear of the code's quiet zone, not on it
+RIGHT QY 112 add moveto (Scan: how this poster was made) 0.6 rtshow
 showpage

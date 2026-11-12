@@ -22,7 +22,13 @@ usage: pscat fonts install [--version <fonts-YYYY.MM[.N]>|latest] [--from <file>
             their manifests), and fonts/catalog overrides
   remove    remove installed packs (all of them when none are named)
 
-Packs install into $PSCAT_HOME/fonts/packs, else the per-user data directory.";
+Packs install into $PSCAT_HOME/fonts/packs, else the per-user data directory.
+
+Your own fonts need no pack: put a .ttf, .otf or .ttc file in a subdirectory
+of fonts/catalog/ (fonts/catalog/mine/SomeFont.ttf) in the current directory,
+$PSCAT_HOME, the per-user data directory or beside the binary, and
+/SomeFont findfont finds it by its file name (case does not matter). These
+override installed packs; `pscat fonts list` shows them.";
 
 /// Run `pscat fonts <args>`.
 pub fn main(args: &[String]) -> ExitCode {

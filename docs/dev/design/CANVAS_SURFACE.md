@@ -119,7 +119,8 @@ the result is clipped to the catch.
 `pkX-touch-needs-a-canvas`, rather than silently painting the full mark.
 Guards are named after the preset, as everywhere in the file:
 `pktrowel-touch-must-be-0-to-1`, `pktrowel-touch-must-not-be-a-procedure`
-and `pktrowel-touch-area-exceeds-safety-limit` (section 3.3).
+and, for a stroke over the cell budget, a `limitcheck` whose message names the
+preset, the limit, the stroke's own reach and the fix (section 3.3, issue #1050).
 
 ### 2.3 Byte identity when unused
 
@@ -329,8 +330,9 @@ changes speed only and never output. A self-test pins that.
 **Bounds.**
 - Per call, the canvas-space box may hold at most 60000 cells (a 610pt
   square at the default weave). Past that, the preset raises
-  `pkX-touch-area-exceeds-safety-limit` before building anything, the
-  file's usual budget-then-reject shape.
+  `limitcheck` before building anything (budget-then-reject, as in the rest of
+  the file). The offending object is a message, not a name: it states the
+  limit, this stroke's reach in cells and points, and the fix (issue #1050).
 - A motion that hands a preset many subpaths in one call (`pkcrisscross`
   over a sky band) builds one catch for the whole call, so it is cheaper
   per stroke than separate calls. A 760 x 300pt sky is 36480 cells, under

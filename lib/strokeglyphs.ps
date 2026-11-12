@@ -79,9 +79,23 @@
 % /phi.loopy, reached by name (`[/phi.loopy]`) and by mathkit's \varphi.
 % U+03C6 keeps drawing /phi, as it always has.
 %
+% --- Accented Latin letters (issue #1051) ---------------------------------
+% Latin-1 (U+00C0-00FF) and Latin Extended-A (U+0100-017F), with ș ț
+% (U+0219, U+021B): café, jalapeño, crème brûlée, naïve, Łódź. Each is its
+% base letter's skeleton plus accent strokes (`sgaccents`), composed at
+% load by `sgaccented` from tables generated from Unicode's decompositions,
+% so the accented forms carry the base's hand and its jitter. Accents over
+% a capital or an ascender sit higher and flatter. A few letters are drawn
+% whole (ß Æ Þ þ ð ĸ Ŋ ŋ ſ) or run together from two (Œ œ æ Ĳ ĳ ŉ).
+%
 % --- Text ---------------------------------------------------------------
-% Text is a string or an array of glyph names. A string is decoded as
-% UTF-8: ASCII maps to handscript's lowercase, digits and punctuation
+% Text is a string or an array of glyph names. A string that is valid
+% UTF-8 is decoded as UTF-8; any other string (a byte from 80 up that is
+% not part of a well-formed sequence) is read as Latin-1, one byte one
+% code point, so (caf\351) and (café) draw the same word. The one
+% ambiguity: a Latin-1 string whose bytes happen to form valid UTF-8 (an
+% accented capital followed by a rare byte from 80 to BF, such as Ã©) is
+% read as UTF-8. ASCII maps to handscript's lowercase, digits and punctuation
 % and to the new capitals and operators; Greek and math symbols map by
 % code point (`sgcmap`). Math-hand variants have names only (`/x.curly`
 % `/z.crossed` `/y.math` `/t.math` `/n.math`) and are also reached by
@@ -459,6 +473,28 @@
   /Z.cal [520 [60 600 160 700 300 660 450 700 300 500 140 230 60 10 220 60
                360 0 480 40]]
 
+  % --- Latin letters that are not an accented base (issue #1051): their
+  % code points are in sgcmap. The ß is a long stem over the ascender into
+  % a 3-like double bump; the thorns are a stem with a bowl hung on it; the
+  % eth is a round d whose stem curls back over, crossed; the eng is an n
+  % whose right leg hooks down; the kra is a small K; the long s is the f
+  % without its bar.
+  /AE [720 [40 0 330 700] [330 700 330 0] [330 700 660 700]
+           [150 330 590 340] [330 0 670 0]]
+  /germandbls [500 [70 0 70 540 120 690 240 740 340 680 340 540 240 450
+                    190 430 190 430 290 400 420 300 430 140 330 20 190 10]]
+  /Thorn [500 [70 700 70 0] [70 560 300 560 430 480 430 320 300 230 70 230]]
+  /thorn [460 [60 750 60 -250] [60 400 220 510 380 400 380 150 230 20 60 90]]
+  /eth [460 [150 740 300 600 390 400 380 150 240 10 90 80 60 260 150 420
+             280 450 380 380]
+            [160 610 340 700]]
+  /kgreenlandic [400 [70 500 70 0] [330 500 70 210] [160 290 360 0]]
+  /eng [420 [60 500 60 20]
+            [60 350 190 510 330 430 340 0 330 -150 250 -240 150 -220]]
+  /Eng [580 [70 0 70 700]
+            [70 540 200 690 380 700 490 560 500 300 490 -60 410 -200 300 -190]]
+  /longs [300 [280 690 200 750 140 660 140 30]]
+
   % --- \mathbb: the Z has its diagonal doubled, so it is drawn whole; the
   % other capitals are derived in sginit (sgbbextra)
   /Z.bb [600 [60 700 560 700] [440 700 60 0] [550 700 170 0] [60 0 560 0]]
@@ -481,6 +517,173 @@
   /U [[190 700 190 210]] /V [[150 700 315 190]] /W [[145 700 245 230]]
   /X [[170 700 440 220]] /Y [[165 700 300 440]]
 >> def
+
+% Accented Latin letters (issue #1051). Each accent is [anchor stroke
+% ...], its strokes authored around (0 0) at a lowercase letter's size:
+%   /top     centred over the base glyph's box, its foot 90 units over
+%            the top (over a capital or an ascender: 70 units, and the
+%            accent squashed to 0.8 height, the way a hand writes a
+%            capital's accent flatter so the line above still clears it);
+%   /bot     centred under the box, (0 0) on the box's bottom;
+%   /ogonek  at the box's bottom right, 20 units in.
+% The circumflex and caron have their tip doubled: under the midpoint
+% rule a single tip is a control point, and the hat would round off into
+% a breve. The dots copy handscript's i-dot (a 20-unit dab).
+% @internal
+/sgaccents <<
+  /acute [/top [45 120 -30 0]]
+  /grave [/top [-45 120 30 0]]
+  /circumflex [/top [-70 0 0 100 0 100 70 0]]
+  /caron [/top [-70 100 0 0 0 0 70 100]]
+  /breve [/top [-70 100 -50 10 50 10 70 100]]
+  /tilde [/top [-85 15 -45 85 0 50 45 15 85 85]]
+  /macron [/top [-80 40 80 50]]
+  /dieresis [/top [-85 30 -65 45] [65 30 85 45]]
+  /dotaccent [/top [-10 30 10 45]]
+  /ring [/top [0 120 -50 100 -55 40 -10 5 40 15 55 75 25 115 -5 112]]
+  /hungarumlaut [/top [10 120 -55 0] [100 120 35 0]]
+  /commaturned [/top [30 150 -5 80 5 15]]
+  /cedilla [/bot [5 10 0 -45 0 -45 65 -75 55 -145 -35 -160]]
+  /commaaccent [/bot [10 -60 0 -110 -40 -190]]
+  /ogonek [/ogonek [-20 10 -65 -60 -45 -140 25 -150]]
+>> def
+
+% The composed letters, generated from Unicode's canonical decompositions
+% of U+00C0-017F and U+0218-021B (base letter + combining mark), in rows
+% of: code point, name, base glyph, accent, and a nudge dx dy in design
+% units for a base whose box centre is not its body's (the a's tail, the
+% J's and j's stem, the L's and l's stem, the r's shoulder). The cedilla
+% of G K L N R is drawn as a comma below, and the g's as a turned comma
+% above: the Latvian forms. The i and j take their accents on the dotless
+% forms, except the ogonek (į keeps its dot).
+% @internal
+/sgcomposed [
+  192 /Agrave /A /grave 0 0   193 /Aacute /A /acute 0 0
+  194 /Acircumflex /A /circumflex 0 0   195 /Atilde /A /tilde 0 0
+  196 /Adieresis /A /dieresis 0 0   197 /Aring /A /ring 0 0
+  199 /Ccedilla /C /cedilla -20 0   200 /Egrave /E /grave 0 0
+  201 /Eacute /E /acute 0 0   202 /Ecircumflex /E /circumflex 0 0
+  203 /Edieresis /E /dieresis 0 0   204 /Igrave /I /grave 0 0
+  205 /Iacute /I /acute 0 0   206 /Icircumflex /I /circumflex 0 0
+  207 /Idieresis /I /dieresis 0 0   209 /Ntilde /N /tilde 0 0
+  210 /Ograve /O /grave 0 0   211 /Oacute /O /acute 0 0
+  212 /Ocircumflex /O /circumflex 0 0   213 /Otilde /O /tilde 0 0
+  214 /Odieresis /O /dieresis 0 0   217 /Ugrave /U /grave 0 0
+  218 /Uacute /U /acute 0 0   219 /Ucircumflex /U /circumflex 0 0
+  220 /Udieresis /U /dieresis 0 0   221 /Yacute /Y /acute 0 0
+  224 /agrave /a /grave -40 0   225 /aacute /a /acute -40 0
+  226 /acircumflex /a /circumflex -40 0   227 /atilde /a /tilde -40 0
+  228 /adieresis /a /dieresis -40 0   229 /aring /a /ring -40 0
+  231 /ccedilla /c /cedilla 0 0   232 /egrave /e /grave 0 0
+  233 /eacute /e /acute 0 0   234 /ecircumflex /e /circumflex 0 0
+  235 /edieresis /e /dieresis 0 0   236 /igrave /dotlessi /grave 0 0
+  237 /iacute /dotlessi /acute 0 0
+  238 /icircumflex /dotlessi /circumflex 0 0
+  239 /idieresis /dotlessi /dieresis 0 0   241 /ntilde /n /tilde 0 0
+  242 /ograve /o /grave 0 0   243 /oacute /o /acute 0 0
+  244 /ocircumflex /o /circumflex 0 0   245 /otilde /o /tilde 0 0
+  246 /odieresis /o /dieresis 0 0   249 /ugrave /u /grave 0 0
+  250 /uacute /u /acute 0 0   251 /ucircumflex /u /circumflex 0 0
+  252 /udieresis /u /dieresis 0 0   253 /yacute /y /acute 0 0
+  255 /ydieresis /y /dieresis 0 0   256 /Amacron /A /macron 0 0
+  257 /amacron /a /macron -40 0   258 /Abreve /A /breve 0 0
+  259 /abreve /a /breve -40 0   260 /Aogonek /A /ogonek 0 0
+  261 /aogonek /a /ogonek 0 0   262 /Cacute /C /acute 0 0
+  263 /cacute /c /acute 0 0   264 /Ccircumflex /C /circumflex 0 0
+  265 /ccircumflex /c /circumflex 0 0   266 /Cdotaccent /C /dotaccent 0 0
+  267 /cdotaccent /c /dotaccent 0 0   268 /Ccaron /C /caron 0 0
+  269 /ccaron /c /caron 0 0   270 /Dcaron /D /caron 0 0
+  274 /Emacron /E /macron 0 0   275 /emacron /e /macron 0 0
+  276 /Ebreve /E /breve 0 0   277 /ebreve /e /breve 0 0
+  278 /Edotaccent /E /dotaccent 0 0   279 /edotaccent /e /dotaccent 0 0
+  280 /Eogonek /E /ogonek 0 0   281 /eogonek /e /ogonek -60 0
+  282 /Ecaron /E /caron 0 0   283 /ecaron /e /caron 0 0
+  284 /Gcircumflex /G /circumflex 0 0   285 /gcircumflex /g /circumflex 0 0
+  286 /Gbreve /G /breve 0 0   287 /gbreve /g /breve 0 0
+  288 /Gdotaccent /G /dotaccent 0 0   289 /gdotaccent /g /dotaccent 0 0
+  290 /Gcommaaccent /G /commaaccent 0 0
+  291 /gcommaturned /g /commaturned 0 0
+  292 /Hcircumflex /H /circumflex 0 0   293 /hcircumflex /h /circumflex 0 0
+  296 /Itilde /I /tilde 0 0   297 /itilde /dotlessi /tilde 0 0
+  298 /Imacron /I /macron 0 0   299 /imacron /dotlessi /macron 0 0
+  300 /Ibreve /I /breve 0 0   301 /ibreve /dotlessi /breve 0 0
+  302 /Iogonek /I /ogonek 0 0   303 /iogonek /i /ogonek 0 0
+  304 /Idotaccent /I /dotaccent 0 0   308 /Jcircumflex /J /circumflex 150 0
+  309 /jcircumflex /dotlessj /circumflex 90 0
+  310 /Kcommaaccent /K /commaaccent 0 0
+  311 /kcommaaccent /k /commaaccent 0 0   313 /Lacute /L /acute -110 0
+  314 /lacute /l /acute -45 0   315 /Lcommaaccent /L /commaaccent 0 0
+  316 /lcommaaccent /l /commaaccent 0 0   323 /Nacute /N /acute 0 0
+  324 /nacute /n /acute 0 0   325 /Ncommaaccent /N /commaaccent 0 0
+  326 /ncommaaccent /n /commaaccent 0 0   327 /Ncaron /N /caron 0 0
+  328 /ncaron /n /caron 0 0   332 /Omacron /O /macron 0 0
+  333 /omacron /o /macron 0 0   334 /Obreve /O /breve 0 0
+  335 /obreve /o /breve 0 0   336 /Ohungarumlaut /O /hungarumlaut 0 0
+  337 /ohungarumlaut /o /hungarumlaut 0 0   340 /Racute /R /acute 0 0
+  341 /racute /r /acute -20 0   342 /Rcommaaccent /R /commaaccent 0 0
+  343 /rcommaaccent /r /commaaccent -125 0   344 /Rcaron /R /caron 0 0
+  345 /rcaron /r /caron -20 0   346 /Sacute /S /acute 0 0
+  347 /sacute /s /acute 0 0   348 /Scircumflex /S /circumflex 0 0
+  349 /scircumflex /s /circumflex 0 0   350 /Scedilla /S /cedilla 0 0
+  351 /scedilla /s /cedilla 0 0   352 /Scaron /S /caron 0 0
+  353 /scaron /s /caron 0 0   354 /Tcedilla /T /cedilla 0 0
+  355 /tcedilla /t /cedilla 40 0   356 /Tcaron /T /caron 0 0
+  360 /Utilde /U /tilde 0 0   361 /utilde /u /tilde 0 0
+  362 /Umacron /U /macron 0 0   363 /umacron /u /macron 0 0
+  364 /Ubreve /U /breve 0 0   365 /ubreve /u /breve 0 0
+  366 /Uring /U /ring 0 0   367 /uring /u /ring 0 0
+  368 /Uhungarumlaut /U /hungarumlaut 0 0
+  369 /uhungarumlaut /u /hungarumlaut 0 0   370 /Uogonek /U /ogonek -40 0
+  371 /uogonek /u /ogonek 0 0   372 /Wcircumflex /W /circumflex 0 0
+  373 /wcircumflex /w /circumflex 0 0   374 /Ycircumflex /Y /circumflex 0 0
+  375 /ycircumflex /y /circumflex 0 0   376 /Ydieresis /Y /dieresis 0 0
+  377 /Zacute /Z /acute 0 0   378 /zacute /z /acute 0 0
+  379 /Zdotaccent /Z /dotaccent 0 0   380 /zdotaccent /z /dotaccent 0 0
+  381 /Zcaron /Z /caron 0 0   382 /zcaron /z /caron 0 0
+  536 /Scommaaccent /S /commaaccent 0 0
+  537 /scommaaccent /s /commaaccent 0 0
+  538 /Tcommaaccent /T /commaaccent 0 0
+  539 /tcommaaccent /t /commaaccent 40 0
+] def
+
+% The letters Unicode does not decompose, built from a base glyph plus
+% strokes at fixed places: [code-point name base extra-advance stroke ...].
+% The bar or slash through Ł Đ Ð Ħ Ŧ Ø, the caron that sits beside a tall
+% stem as an apostrophe (ď ľ ť Ľ, as Czech and Slovak write it) and the
+% Catalan middle dot (Ŀ ŀ).
+% @internal
+/sgbarred [
+  [321 /Lslash /L 0 [10 280 180 420]]
+  [322 /lslash /l 0 [70 330 230 470]]
+  [272 /Dcroat /D 0 [10 360 200 360]]
+  [208 /Eth /D 0 [10 360 200 360]]
+  [273 /dcroat /d 0 [320 640 470 640]]
+  [294 /Hstroke /H 0 [20 540 560 545]]
+  [295 /hstroke /h 0 [0 640 160 640]]
+  [358 /Tbar /T 0 [140 360 360 360]]
+  [359 /tbar /t 0 [100 300 270 300]]
+  [216 /Oslash /O 0 [570 760 50 -60]]
+  [248 /oslash /o 0 [400 560 50 -50]]
+  [271 /dcaron /d 60 [490 760 465 640]]
+  [318 /lcaron /l 30 [230 770 210 650]]
+  [357 /tcaron /t 0 [270 740 248 630]]
+  [317 /Lcaron /L 0 [170 720 150 610]]
+  [319 /Ldot /L 0 [230 345 245 360]]
+  [320 /ldot /l 80 [290 345 305 360]]
+] def
+
+% Two glyphs run together as one: [code-point name left right dx], the
+% right one moved dx units right of the left one's origin (the
+% ligatures, and ŉ).
+% @internal
+/sgpairs [
+  [306 /IJ /I /J 200]
+  [307 /ij /i /j 210]
+  [329 /napostrophe /quoteright /n 120]
+  [230 /ae /a /e 330]
+  [339 /oe /o /e 340]
+  [338 /OE /O /E 500]
+] def
 
 % Code point -> glyph name for UTF-8 text. ASCII letters, digits and
 % handscript's punctuation are added by `sginit` from handscript's own
@@ -527,6 +730,8 @@
   8476 /Rfractur  8465 /Ifractur
   8450 /C.bb  8461 /H.bb  8469 /N.bb  8473 /P.bb  8474 /Q.bb  8477 /R.bb
   8484 /Z.bb
+  198 /AE  222 /Thorn  223 /germandbls  240 /eth  254 /thorn
+  312 /kgreenlandic  330 /Eng  331 /eng  383 /longs
 >> def
 
 % Math class of each glyph, TeX's seven (`/ord` when absent): /op for
@@ -847,6 +1052,85 @@
   dup 0 sgsn putinterval dup sgsn length sgsx putinterval cvn
 } def
 
+% glyph -> [adv stroke ...]   the glyph's strokes without its box, for
+% building a new glyph on it
+% @internal
+/sgbare {
+  [ 1 index 0 get 3 -1 roll dup length 2 sub 2 exch getinterval aload pop ]
+} def
+
+% glyph name cp -> -   register a built glyph under its name and code point
+% @internal
+/sgreg {
+  /sgrc exch def /sgrn exch def
+  sgaddbox sgtab sgrn 3 -1 roll put
+  sgcmap sgrc sgrn put
+} def
+
+% - -> -   the accented Latin letters (issue #1051), from the base glyphs
+% already in sgtab: the dotless i and j, then sgcomposed, sgbarred and
+% sgpairs. Every one is its base's own skeleton plus the accent's
+% strokes, so a reshaped base reshapes its accented forms. Runs inside
+% sginit's private dict.
+% @internal
+/sgaccented {
+  % ı and ȷ: handscript's i and j without the dot, their last stroke
+  [ /i /dotlessi 305  /j /dotlessj 567 ] /sgdl exch def
+  0 3 sgdl length 3 sub {
+    /sgk exch def
+    sgtab sgdl sgk get get sgbare
+    dup length 1 sub 0 exch getinterval
+    sgdl sgk 1 add get sgdl sgk 2 add get sgreg
+  } for
+  % base + accent, placed by the accent's anchor
+  0 6 sgcomposed length 6 sub {
+    /sgk exch def
+    /sgbg sgtab sgcomposed sgk 2 add get get def
+    sgbg 1 get aload pop
+    /sgury exch def /sgurx exch def /sglly exch def /sgllx exch def
+    sgaccents sgcomposed sgk 3 add get get /sgac exch def
+    /sgys 1 def
+    sgac 0 get /top eq {
+      /sgax sgllx sgurx add 2 div def
+      sgury 600 gt { /sgys 0.8 def /sgay sgury 70 add def }
+        { /sgay sgury 90 add def } ifelse
+    } {
+      sgac 0 get /bot eq { /sgax sgllx sgurx add 2 div def }
+        { /sgax sgurx 20 sub def } ifelse
+      /sgay sglly def
+    } ifelse
+    /sgax sgax sgcomposed sgk 4 add get add def
+    /sgay sgay sgcomposed sgk 5 add get add def
+    [ sgbg sgbare aload pop
+      1 1 sgac length 1 sub {
+        sgac exch get /sgas exch def
+        [ 0 2 sgas length 2 sub {
+            /sgak exch def
+            sgas sgak get sgax add
+            sgas sgak 1 add get sgys mul sgay add
+          } for ]
+      } for ]
+    sgcomposed sgk 1 add get sgcomposed sgk get sgreg
+  } for
+  % base + strokes at fixed places, and an extra advance
+  sgbarred {
+    /sgbr exch def
+    [ sgtab sgbr 2 get get sgbare aload pop
+      sgbr 4 sgbr length 4 sub getinterval aload pop ]
+    dup 0 2 copy get sgbr 3 get add put
+    sgbr 1 get sgbr 0 get sgreg
+  } forall
+  % two glyphs run together
+  sgpairs {
+    /sgbr exch def
+    /sgbg sgtab sgbr 3 get get def
+    [ sgbr 4 get sgbg 0 get add
+      sgtab sgbr 2 get get sgbare dup length 1 sub 1 exch getinterval aload pop
+      2 1 sgbg length 1 sub { sgbg exch get sgbr 4 get sgshift } for ]
+    sgbr 1 get sgbr 0 get sgreg
+  } forall
+} def
+
 % \mathbf (issue #935): each stroke written twice, the second a little
 % right of and below the first, as a hand bears down and goes over a
 % letter again. Closer than the pen is wide on a board, so the two merge
@@ -903,6 +1187,8 @@
     sgcmap sgk 65 add sgch cvn put
   } for
   sgsrc { sgaddbox sgtab 3 1 roll put } forall
+  % accented Latin letters (issue #1051)
+  sgaccented
   % \mathbb capitals: the capital's own strokes, then the table's
   sgbbextra {
     /sgbx exch def /sgbl exch def
@@ -1010,10 +1296,96 @@
   sgstrict sgmiss null ne and { sgmiss sgmissfail } if
 } def
 
-% string-or-name-array -> array of glyph names (UTF-8 decode)
+% string -> bool   true when the string is well-formed UTF-8: every byte
+% from 0x80 up is part of a sequence with a lead byte C2-F4, the right
+% number of continuation bytes 80-BF, and after E0 ED F0 F4 the narrower
+% second-byte range that rules out overlong forms, surrogates and code
+% points past U+10FFFF (issue #1051)
+% @internal
+/sgutf8ok {
+  /sgus exch def
+  /sguk 0 def
+  true {
+    sguk sgus length ge { exit } if
+    /sgub sgus sguk get def
+    /sguk sguk 1 add def
+    sgub 128 ge {
+      sgub 194 lt sgub 244 gt or { pop false exit } if
+      sgub 224 lt { 1 } { sgub 240 lt { 2 } { 3 } ifelse } ifelse
+      dup sguk add sgus length gt { pop pop false exit } if
+      % the second byte's narrower range after E0 ED F0 F4: no overlong
+      % form, no surrogate, nothing above U+10FFFF (Unicode table 3-7)
+      sgus sguk get
+      sgub 224 eq { dup 160 lt } {
+        sgub 237 eq { dup 159 gt } {
+          sgub 240 eq { dup 144 lt } {
+            sgub 244 eq { dup 143 gt } { false } ifelse
+          } ifelse
+        } ifelse
+      } ifelse
+      exch pop { pop pop false exit } if
+      true exch {
+        sgus sguk get 192 and 128 ne { pop false } if
+        /sguk sguk 1 add def
+      } repeat
+      not { pop false exit } if
+    } if
+  } loop
+} def
+
+% byte -> string   a Latin-1 code point's UTF-8 bytes, for the error
+% label of a Latin-1 string, so the label reads as the character. A C1
+% control (80-9F: a byte of a broken UTF-8 sequence) has nothing to show,
+% so it is labelled by its number, U+0086.
+% @internal
+/sgcpstr {
+  /sguc exch def
+  sguc 128 lt { 1 string dup 0 sguc put } {
+    sguc 160 lt {
+      (U+00) length 2 add string dup 0 (U+00) putinterval
+      dup 4 sguc 16 2 string cvrs putinterval
+    } {
+      2 string dup 0 sguc -6 bitshift 192 or put
+      dup 1 sguc 63 and 128 or put
+    } ifelse
+  } ifelse
+} def
+
+% string-or-name-array -> array of glyph names. A string that is valid
+% UTF-8 is decoded as UTF-8; any other string is read as Latin-1, one
+% byte one code point, so (caf\351) and (café) are the same word (#1051).
 % @internal
 /sgnames {
   dup type /stringtype eq {
+    dup sgutf8ok not { sgnameslatin1 } { sgnamesutf8 } ifelse
+  } {
+    dup type /arraytype eq 1 index type /packedarraytype eq or {
+      /sgmiss null def
+      dup {
+        dup type /nametype ne { sg-text-array-must-hold-glyph-names } if
+        sgnotename
+      } forall
+    } {
+      sg-text-must-be-a-string-or-name-array
+    } ifelse
+  } ifelse
+} def
+
+% string -> array of glyph names, one byte one code point (Latin-1)
+% @internal
+/sgnameslatin1 {
+  /sgs exch def
+  /sgmiss null def
+  [ sgs {
+      dup sgcp2name
+      dup /.notdef eq sgmiss null eq and
+        { exch sgcpstr /sgmiss exch def } { exch pop } ifelse
+    } forall ]
+} def
+
+% string -> array of glyph names (UTF-8 decode)
+% @internal
+/sgnamesutf8 {
     /sgs exch def
     /sgk 0 def
     /sgmiss null def
@@ -1037,17 +1409,6 @@
         dup /.notdef eq sgmiss null eq and
           { sgs sgk0 sgk sgk0 sub getinterval /sgmiss exch def } if
       } loop ]
-  } {
-    dup type /arraytype eq 1 index type /packedarraytype eq or {
-      /sgmiss null def
-      dup {
-        dup type /nametype ne { sg-text-array-must-hold-glyph-names } if
-        sgnotename
-      } forall
-    } {
-      sg-text-must-be-a-string-or-name-array
-    } ifelse
-  } ifelse
 } def
 
 % opts /key default -> value   (numbers only)
@@ -1199,6 +1560,37 @@
 %   (a⊛) << /Strict false /Size 1000 >> sgwidth
 %   (a) << /Size 1000 >> sgwidth 300 add eq
 %   (a missing glyph advances 300 units under /Strict false) mustbe
+%   newpath
+%%EndSelfTest
+%
+%%SelfTest: sgpath-reads-utf8-and-latin1-accented-letters
+%   % issue #1051: a valid UTF-8 string is UTF-8, any other is Latin-1
+%   (café) << >> sgwidth (caf\351) << >> sgwidth eq
+%   (a Latin-1 byte string measures as its UTF-8 twin) mustbe
+%   (café) << >> sgwidth (cafe) << >> sgwidth eq
+%   (é keeps the e's advance) mustbe
+%   (Łódź) sgnames length 4 eq (Łódź is four glyphs) mustbe
+%   (caf\351) sgnames 3 get /eacute eq (byte E9 is é) mustbe
+%   (ℏħ) sgnames aload pop /hstroke eq exch /hbar eq and
+%   (ħ does not take over the name of the board-math ℏ) mustbe
+%   (é) << >> sgmetrics /Name get /eacute eq (sgmetrics names a UTF-8 é) mustbe
+%   (\351ab) << >> sgmetrics /Name get /.notdef eq
+%   (sgmetrics stays UTF-8 only, so mathkit's slices never swallow bytes) mustbe
+%   <E083A9> sgutf8ok not (an overlong é is not UTF-8) mustbe
+%   <EDA080> sgutf8ok not (a surrogate is not UTF-8) mustbe
+%   <F4908080> sgutf8ok not (a code point past U+10FFFF is not UTF-8) mustbe
+%   <F08F8080> sgutf8ok not (an overlong four-byte form is not UTF-8) mustbe
+%   <E0A080> sgutf8ok <ED9FBF> sgutf8ok <F0908080> sgutf8ok <F48FBFBF> sgutf8ok
+%   and and and (each boundary's first valid sequence is UTF-8) mustbe
+%   <E083A9> sgnames length 3 eq (a malformed string falls back to Latin-1) mustbe
+%   <E083A9> << >> sgmetrics /Name get /.notdef eq
+%   (sgmetrics refuses a malformed string) mustbe
+%   (\303) sgnames 0 get /Atilde eq
+%   (a truncated UTF-8 sequence is read as Latin-1) mustbe
+%   { (a\277) 0 0 << >> sgpath } /sg-missing-glyph:¿
+%   (a missing Latin-1 letter is labelled as the character) mustguard
+%   { (\351\342\206) 0 0 << >> sgpath } /sg-missing-glyph:U+0086
+%   (a C1 control byte is labelled by number) mustguard
 %   newpath
 %%EndSelfTest
 %
@@ -1440,7 +1832,7 @@
 %
 % (text) x y opts sgpath -
 % @kind: Procedure
-% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, superscript and subscript digits, Greek with its variant forms, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
+% @summary: Appends the jittered centerline skeleton of a string (UTF-8, or Latin-1 when the string is not valid UTF-8: Latin with the Latin-1 and Latin Extended-A accented letters, digits, superscript and subscript digits, Greek with its variant forms, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (∀ε>0 ∃δ>0) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
 % @param: /Size [points] The em size: cap height is 0.7 of it (default 36)
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
@@ -1518,7 +1910,7 @@
 
 % glyph opts sgmetrics -> dict
 % @kind: Procedure
-% @summary: Layout metrics for one glyph (a name, or the first glyph of a string) at the given size and slant: /Advance and /Italic correction in points, /BBox [llx lly urx ury] of the unjittered centerline in points relative to the origin, and /Class, TeX's math class (/ord /op /bin /rel /open /close /punct).
+% @summary: Layout metrics for one glyph (a name, or the first glyph of a UTF-8 string; a string that is not valid UTF-8 gives .notdef) at the given size and slant: /Advance and /Italic correction in points, /BBox [llx lly urx ury] of the unjittered centerline in points relative to the origin, and /Class, TeX's math class (/ord /op /bin /rel /open /close /punct).
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run /f << /Size 40 /Slant 12 >> sgmetrics /Italic get
 % @param: /Size [points] The em size (default 36)
 % @param: /Slant [degrees] The slant sgpath will draw with; it widens the box and sets the italic correction (default 0)
@@ -1526,6 +1918,10 @@
   sgcheckopts
   exch
   dup type /nametype eq { } {
+    % UTF-8 only, as before #1051: mathkit hands this one character's
+    % bytes, sliced by their lead byte, and a Latin-1 reading of a broken
+    % slice would name its first byte and lose the bytes after it
+    dup type /stringtype eq { dup sgutf8ok not { pop () } if } if
     sgnames dup length 0 eq { pop /.notdef } { 0 get } ifelse
   } ifelse
   /sgmn exch def

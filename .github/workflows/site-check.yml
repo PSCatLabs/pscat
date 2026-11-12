@@ -20,6 +20,7 @@ on:
       - "scripts/build_font_gallery.sh"
       - "scripts/site_pages.py"
       - "scripts/site_examples.py"
+      - "scripts/site_chalk.py"
       - "scripts/check_learn_examples.mjs"
       - "scripts/check_site_links.py"
       - "scripts/repo_url.py"

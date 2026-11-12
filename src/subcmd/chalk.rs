@@ -158,7 +158,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     let bytes = chalk::render_with_limits(&latex, &cfg, format, opts.limits).map_err(err)?;
     std::fs::write(&opts.out, bytes)
         .map_err(|e| Failure::Msg(format!("cannot write {}: {e}", opts.out)))?;
-    println!("pscat: wrote {}", opts.out);
+    eprintln!("pscat: wrote {}", opts.out);
     Ok(())
 }
 

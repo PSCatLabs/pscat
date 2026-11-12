@@ -352,9 +352,14 @@ cargo run -- --png sheets.png examples/font_catalog.ps   # the specimen sheets
 
 [`fonts/catalog/README.md`](../../fonts/catalog/README.md) is the manifest (families, genres,
 licenses — all OFL or Apache 2.0;
-per-family license files ride alongside the fonts). Drop your own
-`.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
-finds it. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
+per-family license files ride alongside the fonts). **Your own fonts:**
+drop a `.ttf`, `.otf` or `.ttc` file into a subdirectory of `fonts/catalog/`
+in the current directory, `$PSCAT_HOME`, the per-user data directory or beside
+the binary (`mkdir -p fonts/catalog/mine && cp SomeFont.ttf fonts/catalog/mine/`),
+and `/<FileStem> findfont` finds it (the file stem, case-insensitive; a
+`.ttc` gives its first face). `pscat --help` and `pscat fonts help` say so, and
+`pscat fonts list` shows the directories in use. The browser build's counterpart
+is `renderer.addFont(name, bytes)`. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
 on the project site shows every face — Type 3 library included, with a card
 for `/Typewriter` (one key struck twenty times) beside Courier Prime's — one
 card at a time.

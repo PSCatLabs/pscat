@@ -227,6 +227,16 @@ class Fixture(unittest.TestCase):
         self.mcp["mcpServers"]["s"]["args"][-1] = "--timeout"
         self.assertIn("keep them the same", " ".join(self.errors()))
 
+    def test_codex_stdio_server_takes_only_agent_plugins_keys(self):
+        # #800: `env_vars` is a config.toml key; in mcp.json Codex rejects it
+        # and loses the server.
+        self.mcp["mcpServers"]["s"]["env_vars"] = ["PSCAT_MCP_TIMEOUT"]
+        self.assertIn("env_vars", " ".join(self.errors()))
+        del self.mcp["mcpServers"]["s"]["env_vars"]
+        self.mcp["mcpServers"]["s"]["env"] = {"A": "b"}
+        self.mcp["mcpServers"]["s"]["cwd"] = "${PLUGIN_ROOT}"
+        self.assertEqual(self.errors(), [])
+
     def test_no_top_level_bin(self):
         self.write("plugin/bin/tool", "#!/bin/sh\n")
         self.assertIn("top-level bin/", " ".join(self.errors()))

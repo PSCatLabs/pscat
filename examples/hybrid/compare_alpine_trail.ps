@@ -19,7 +19,10 @@
 %
 % Every fact below is checked: by tests/hybrid_reverse.rs (the QR codes,
 % two decoders, PNG and PDF; the copy of (b) and (c) string by string; the
-% layout drift, measured on the committed images), and for (a)'s copy and
+% layout drift, measured on the committed images), except that the route
+% corners above the hut were read off both photographs on a 4x grid (the
+% overlay is docs/dev/review-log/pending/1029-hybrid-showcase-polish/
+% alpine-route-trace-overlay.jpg), and for (a)'s copy and
 % chart by reading and measuring the image at full size.
 % This file draws its own panels (it does not share compare_panel.ps).
 
@@ -38,6 +41,11 @@
   userdict /showpage {} put exec (examples/hybrid/alpine_trail.ps) run
   userdict /showpage undef } def
 
+% The text of a fact is set in a Latin-1 Helvetica, for the multiplication
+% sign in a pixel size (a times sign between the numbers, not a letter x).
+/Helvetica-L1 /Helvetica findfont dup length dict copy dup /Encoding ISOLatin1Encoding put
+definefont pop
+
 % A row of the strip: a mark (/ok, /no or /note), then the text.
 /fact { % /mark (text) -
   exch
@@ -45,7 +53,7 @@
   dup /no eq { 0.75 0.12 0.10 setrgbcolor /ZapfDingbats 15 selectfont (8) show } if
   /note eq { 0.35 setgray /ZapfDingbats 15 selectfont (l) show } if
   ( ) show
-  0.12 setgray /Helvetica 15 selectfont show } def
+  0.12 setgray /Helvetica-L1 15 selectfont show } def
 
 /panel { % (heading) [ [/mark (text)] ... ] {draw the poster} -
   /pn-draw exch def /pn-facts exch def /pn-head exch def
@@ -64,7 +72,7 @@ Panel 1 eq {
     [/ok (Text: all 26 strings of the brief spelled right)]
     [/note (Chart: points up to 0.1 km and 30 m off the data)]
     [/no (QR code: found, but does not decode)]
-    [/note (Raster only: 1024 x 1536 px, 128 px/in at 8 x 12 in)]
+    [/note (Raster only: 1024 \327 1536 px, 128 px/in at 8 \327 12 in)]
   ] { (examples/hybrid/alpine_trail_model.jpg) jpeg } panel
 } if
 Panel 2 eq {
@@ -78,14 +86,14 @@ Panel 2 eq {
 Panel 3 eq {
   ((c) Reversed hybrid: pscat layout, photo, pscat) [
     [/ok (Text and numbers exact, from the program)]
-    [/ok (Labels and route on the points pscat laid out)]
+    [/ok (Labels on pscat's points, route on the photo's trail)]
     [/ok (Photo's ridge within 1.2 px of the layout, mean)]
     [/ok (QR code: decodes to the URL, PNG and PDF)]
   ] { { } run-example } panel
 } if
 Panel 4 eq {
   ((1) pscat draws the layout) [
-    [/note (Flat colour block-in, 1024 x 1536 px)]
+    [/note (Flat colour block-in, 1024 \327 1536 px)]
     [/note (Every shape at known coordinates)]
     [/note (Sent to the image model as its input image)]
   ] { { /Stage /Reference def } run-example } panel
@@ -100,7 +108,7 @@ Panel 5 eq {
 Panel 6 eq {
   ((3) pscat lays the exact layer on) [
     [/ok (Labels end on the summits it drew)]
-    [/ok (Route follows its own trail and ridge)]
+    [/ok (Route follows the photo's trail and the ridge it drew)]
     [/ok (Chart, stats, times and QR in the empty shade)]
   ] { { } run-example } panel
 } if
@@ -108,7 +116,7 @@ Panel 7 eq {
   ((4) Same layer, a second photo) [
     [/note (Same reference; autumn morning in the prompt)]
     [/ok (Ridge: mean drift 1.1 px, none over 7 px)]
-    [/ok (The exact layer unchanged but for the season)]
+    [/ok (The exact layer unchanged but for the season: subtitle, hut)]
   ] { { /Season /Autumn def } run-example } panel
 } if
 showpage
