@@ -286,3 +286,5 @@ inline image. Jobs, limits, `bands` and registering the server:
   not in an install.
 - Big numeric arrays: use `writereals` / `readreals`, not printed text
   ([references/extensions.md](references/extensions.md)).
+- Rounded corners: `x1 y1 x2 y2 r arcto` (it leaves four numbers, so `4 { pop } repeat`)
+  or `arct` (leaves nothing), from 0.7.0; `lineto` the rest of the side after it.
