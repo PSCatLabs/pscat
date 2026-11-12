@@ -193,6 +193,59 @@ fn a_hostile_text_stays_text() {
 }
 
 #[test]
+fn the_text_reaches_the_program_byte_for_byte_in_both_passes() {
+    // The library is the only escaping a server does (pscat-mcp drops its
+    // own): whatever the text, both programs must hand the font exactly the
+    // lowercased, CR-normalised, trailing-newline-trimmed text, and nothing in
+    // it may run. Read it back from inside the interpreter after each pass.
+    let hostile = [
+        "x) pop (y",
+        "\\) showpage (",
+        ") quit (",
+        "a\\",
+        "(((",
+        ")))",
+        "% not a comment\r\n/Text (z) def stop\r",
+        "tab\there\\n not an escape",
+        "\\\\(\\)",
+        "End\n\n\r\n",
+    ];
+    for text in hostile {
+        let opts = HandOptions::new(text);
+        opts.validate().unwrap();
+        let want = text
+            .to_ascii_lowercase()
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .trim_end_matches('\n')
+            .to_string();
+        for (pass, src) in [
+            ("measure", measure_source(&opts)),
+            ("render", render_source(&opts, 400)),
+        ] {
+            let mut interp = Interp::with_page_scaled(612, 400, 1.0).unwrap();
+            interp.capture_stdout();
+            interp
+                .run_str(&src)
+                .unwrap_or_else(|e| panic!("{pass} pass of {text:?}: {e}"));
+            if pass == "measure" {
+                let printed = String::from_utf8_lossy(interp.captured_stdout()).into_owned();
+                assert!(
+                    parse_line_count(&printed).is_some(),
+                    "{text:?}: {printed:?}"
+                );
+            } else {
+                assert_eq!(interp.page_count(), 1, "{text:?}");
+            }
+            let before = interp.captured_stdout().len();
+            interp.run_str("HandOpts /Text get print").unwrap();
+            let got = String::from_utf8_lossy(&interp.captured_stdout()[before..]).into_owned();
+            assert_eq!(got, want, "{pass} pass of {text:?}");
+        }
+    }
+}
+
+#[test]
 fn validate_codes_and_fields() {
     let bad = |f: fn(&mut HandOptions)| {
         let mut o = HandOptions::new("hi");
