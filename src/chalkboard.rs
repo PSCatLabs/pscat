@@ -186,11 +186,16 @@ impl ChalkError {
         )
     }
 
-    /// The command, character or environment a LaTeX error named (`\aleph`,
-    /// `@`), if it named one.
+    /// The command, character, delimiter or environment a LaTeX error named
+    /// (`\aleph`, `@`, `\(`), if it named one. When one pass found several
+    /// problems (issue #1080), the first one's, as [`code`](Self::code) is.
     pub fn token(&self) -> Option<&str> {
         match &self.0 {
             chalk::ChalkError::Latex { token, .. } if !token.is_empty() => Some(token),
+            chalk::ChalkError::Problems(ps) => ps
+                .first()
+                .map(|p| p.token.as_str())
+                .filter(|t| !t.is_empty()),
             _ => None,
         }
     }
