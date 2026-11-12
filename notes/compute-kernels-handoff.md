@@ -52,9 +52,12 @@ session_016y8NtToNBqdyScG3LMGriu.
       `kernels/ci-43122833835/x/`;
     - the local build is `kernels/build4-6b7b5e5/pscat` (`18aecec9…b3fc`).
 
-    It was sent for fractal_clouds' timing rerun, which is **pending**. The
-    gallery now uses this test build, and next is the native-noise switch
-    (fc#16).
+    **fractal_clouds validated it** (fc#117 comment 6810569860, pscat#1102
+    comment 6810570206): build2's bytes and steps on all 8 scenes, and
+    build2's speed. Interleaved golden 2560: build2 54.4/57.5 s, a50dcd6
+    60.4/61.1 s, 97b481d 54.6/57.5 s. Its `fastrender` defaults to 97b481d,
+    and fractal_clouds is now switching the gallery to the native noise
+    operators (fc#16).
 - **Local gate.** Two tests fail on this machine since the afternoon of
   2026-11-11, on `8df943d` too, which had passed: `mcp
   concurrent_replies_never_interleave` (broken pipe) and `subcommands
@@ -88,7 +91,7 @@ session_016y8NtToNBqdyScG3LMGriu.
 
 ## Still to do before #1061 merges
 
-1. fractal_clouds' validation of the test release.
+1. ~~fractal_clouds' validation of the test release~~: done (97b481d).
 2. The GitHub edits above.
 3. The owner's merge of #1061. Then delete the remote
    `feature/compute-kernels-*` branches and confirm the issues closed.
