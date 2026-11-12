@@ -225,6 +225,28 @@ fn coincident_points_are_undefinedresult_and_leave_the_path_alone() {
 }
 
 #[test]
+fn a_short_first_leg_keeps_its_corner() {
+    // A 0.0001-long first leg into a right angle is a well-conditioned
+    // corner: the page translation (device y near 772) must not swamp it
+    // (Codex, combined review batch 1, round 4). gs 10.07.1 draws the
+    // radius-10 curve ending near (20.0001, 30).
+    let got = run_case("{ 20 20 moveto 20.0001 20 20.0001 120 10 arcto }");
+    assert!(got.contains(" c "), "{got}");
+    let stack: Vec<f64> = got
+        .split("stack: ")
+        .nth(1)
+        .and_then(|s| s.split(" path:").next())
+        .unwrap()
+        .split_whitespace()
+        .map(|w| w.parse().unwrap())
+        .collect();
+    assert!(
+        (stack[2] - 20.0001).abs() < 1e-3 && (stack[3] - 30.0).abs() < 1e-3,
+        "{got}"
+    );
+}
+
+#[test]
 fn a_coincident_corner_is_undefinedresult_under_a_rotation() {
     // The current point comes back through the inverse CTM, so p0 = p1
     // has to be decided in device space (Codex, combined review batch 1,

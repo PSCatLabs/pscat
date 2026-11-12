@@ -217,34 +217,58 @@ fn arcto_geometry(
     Ok(ArcTo::Arc { t1, c1, c2, t2 })
 }
 
-/// Whether p0, p1 and p2 count as collinear for `arcto`. p0 is the
-/// current point read back from single-precision device space, so it
-/// carries noise there: the test is the perpendicular distance of p0
-/// from the line p1-p2, in device space (an affine CTM keeps lines
-/// lines), against 1e-6 of the device size of p0 and p1 (at least one
-/// device unit). p2 only sets a direction, so its size never widens the
-/// tolerance, and a magnifying or shrinking CTM moves the tolerance
-/// with the noise. Without it a fold-back, whose tangent length is
-/// ~1/sin of the corner, would blow up on that noise.
-fn arcto_collinear(m: Transform, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64)) -> bool {
-    let dev = |p: (f64, f64)| {
-        let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
-        let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
-        (sx * p.0 + kx * p.1 + tx, ky * p.0 + sy * p.1 + ty)
-    };
-    let (q0, q1, q2) = (dev(p0), dev(p1), dev(p2));
-    let (d0x, d0y) = (q0.0 - q1.0, q0.1 - q1.1);
+/// `m` applied to a user point, in f64.
+fn arcto_dev(m: Transform, p: (f64, f64)) -> (f64, f64) {
+    let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
+    let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
+    (sx * p.0 + kx * p.1 + tx, ky * p.0 + sy * p.1 + ty)
+}
+
+/// The inverse of `m` applied to a device point, in f64, so the stored
+/// current point comes back without single-precision rounding on top.
+/// `UndefinedResult` for a singular CTM, as `currentpoint`.
+fn arcto_user(m: Transform, q: (f64, f64)) -> Result<(f64, f64), PsError> {
+    let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
+    let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
+    let det = sx * sy - kx * ky;
+    if det == 0.0 || !det.is_finite() {
+        return Err(PsError::UndefinedResult);
+    }
+    let (dx, dy) = (q.0 - tx, q.1 - ty);
+    Ok(((sy * dx - kx * dy) / det, (sx * dy - ky * dx) / det))
+}
+
+/// Whether the stored current point `q0` (device space; `p0` is the same
+/// point in user space) lies on the line p1-p2, up to the rounding that
+/// storing it in single precision can add. That rounding is a few f32
+/// ulps of the terms that make each device coordinate (`sx*x`, `kx*y`,
+/// `tx`, ...), so the bound is per axis, projected on the line's normal:
+/// a large page translation along one axis does not widen the test
+/// across the other, a far p2 only sets the direction, and the CTM's
+/// scale moves the bound with the noise. Without the bound a rotated
+/// fold-back (which a program means as collinear) would ask for a
+/// tangent length of ~1/sin of a noise-sized corner.
+fn arcto_collinear(
+    m: Transform,
+    q0: (f64, f64),
+    p0: (f64, f64),
+    p1: (f64, f64),
+    p2: (f64, f64),
+) -> bool {
+    let (q1, q2) = (arcto_dev(m, p1), arcto_dev(m, p2));
     let (d2x, d2y) = (q2.0 - q1.0, q2.1 - q1.1);
     let l2 = fmath::hypot(d2x, d2y);
     if l2 <= 0.0 || l2.is_nan() {
         return false; // p1 = p2: arcto_geometry reports it
     }
-    let dist = (d0x * d2y - d0y * d2x).abs() / l2;
-    let scale = [q0, q1]
-        .iter()
-        .flat_map(|q| [q.0.abs(), q.1.abs()])
-        .fold(1.0, f64::max);
-    dist <= 1e-6 * scale
+    let (nx, ny) = (-d2y / l2, d2x / l2);
+    let dist = ((q0.0 - q1.0) * nx + (q0.1 - q1.1) * ny).abs();
+    let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
+    let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
+    let bx = (sx * p0.0).abs() + (kx * p0.1).abs() + tx.abs();
+    let by = (ky * p0.0).abs() + (sy * p0.1).abs() + ty.abs();
+    let ulps = 4.0 * f64::from(f32::EPSILON);
+    dist <= ulps * (nx.abs() * bx + ny.abs() * by)
 }
 
 /// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and
@@ -255,13 +279,19 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
     let r = it.pop_f64()?;
     let (x2, y2) = pop_xy(it)?;
     let (x1, y1) = pop_xy(it)?;
-    let p0 = it.gfx.current_user_point()?;
-    // p0 = p1 is checked in device space: p0 came back through the
-    // inverse CTM, so under a rotation it may miss p1 by rounding alone.
-    if it.gfx.current_point_is(x1, y1) {
+    let q0 = it
+        .gfx
+        .current_device_point()
+        .ok_or(PsError::NoCurrentPoint)?;
+    // p0 = p1 is decided in device space, where the current point is
+    // stored: the same f32 transform `lineto x1 y1` would store.
+    if q0 == it.gfx.user_to_device(x1, y1) {
         return Err(PsError::UndefinedResult);
     }
-    let collinear = arcto_collinear(it.gfx.ctm(), p0, (x1, y1), (x2, y2));
+    let m = it.gfx.ctm();
+    let q0 = (f64::from(q0.x), f64::from(q0.y));
+    let p0 = arcto_user(m, q0)?;
+    let collinear = arcto_collinear(m, q0, p0, (x1, y1), (x2, y2));
     let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r, collinear)?;
     match arc {
         ArcTo::Line => {

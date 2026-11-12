@@ -24,12 +24,14 @@ operand stack and `pathforall`, and rasterises two rounded rectangles in each):
 
 **Deviations from gs.** (1) A failed call consumes its operands, the same as
 `lineto` and every other pscat operator (HANDOFF.md, "Deliberate deviations");
-gs leaves them. (2) "Collinear" is a perpendicular distance, measured in
-device space, of at most 1e-6 of the device size of p0 and p1 (at least one
-device unit), because the current point is read back through f32 device
-space; a rotated fold-back would otherwise ask for a tangent length of ~1e8.
-p2 only sets a direction, so its size never widens the tolerance, and the
-tolerance follows the CTM (both from the combined Codex review, batch 1). gs raises `limitcheck` for a near-fold-back (angle under about 1e-5 rad)
+gs leaves them. (2) "Collinear" allows for the current point's single-precision
+storage: arcto reads the stored device point exactly (inverse CTM in f64) and
+treats it as on the line p1-p2 when its device-space distance is within 4 f32
+ulps of the terms that made each coordinate, projected on the line's normal.
+So a rotated fold-back (meant as collinear) is a line, while a far p2, a
+magnifying or shrinking CTM, a large page translation or a 0.0001-long leg
+keep their corner, and p0 = p1 is compared in device space (all from the
+combined Codex review, batch 1). gs raises `limitcheck` for a near-fold-back (angle under about 1e-5 rad)
 where pscat either draws the large geometry or, inside the tolerance, a line.
 
 **Not done.** `--capabilities` lists no PLRM operators by design

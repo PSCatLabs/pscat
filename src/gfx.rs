@@ -1052,12 +1052,10 @@ impl Gfx {
         ))
     }
 
-    /// Whether the current point is exactly where `(x, y)` lands in
-    /// device space, i.e. what a `lineto x y` would store. Exact where a
-    /// comparison in user space is not: the current point read back
-    /// through the inverse CTM carries rounding (`arcto`'s p0 = p1).
-    pub(crate) fn current_point_is(&self, x: f64, y: f64) -> bool {
-        self.state.path.current() == Some(self.user_to_device(x, y))
+    /// The current point as stored, in device space (`arcto` works from
+    /// it exactly, where `current_user_point` adds inverse-CTM rounding).
+    pub(crate) fn current_device_point(&self) -> Option<DevPoint> {
+        self.state.path.current()
     }
 
     /// The user-space current point, or `nocurrentpoint`.
