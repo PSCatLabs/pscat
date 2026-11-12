@@ -268,6 +268,226 @@
   4 2 roll moveto 1 index 0 rlineto 0 exch rlineto neg 0 rlineto closepath
 } bind def
 
+% ---- Text: the show family, glyph by glyph ----
+% The decorated show operators other than show draw each glyph with
+% charpath, so they cut their string into glyphs as the interpreter does:
+% one byte per glyph, or one UTF-8 sequence per glyph in a Unicode-mode
+% font.
+
+% ( -- bool ): whether the current font reads strings as UTF-8. A Type 3
+% font says so with /UnicodeBuildChar; any other font is probed by
+% counting, on the null device, the glyphs the real kshow finds in a
+% two-byte UTF-8 sequence. Only fonts without a glyph procedure are
+% probed, so the probe runs no program code.
+% @internal
+/wp--unicode-font {
+  currentfont dup /BuildChar known 1 index /BuildGlyph known or
+    { dup /UnicodeBuildChar known { /UnicodeBuildChar get true eq } { pop false } ifelse }
+    { pop gsave nulldevice 0 0 moveto 0 { pop pop 1 add } (\303\251) kshow grestore 0 eq }
+  ifelse
+} bind def
+
+% ( string -- bool ): wp--unicode-font, asked only when the string has a
+% byte the two readings would cut differently.
+% @internal
+/wp--unicode-text {
+  false exch { 128 ge or } forall { //wp--unicode-font exec } { false } ifelse
+} bind def
+
+% ( string pos n lo hi -- len ): how many bytes from pos, at most n, form
+% one UTF-8 sequence whose second byte lies in lo..hi and whose later
+% bytes are continuation bytes. A sequence cut short is its longest valid
+% prefix, which shows as one U+FFFD (Unicode's "maximal subpart").
+% @internal
+/wp--utf8-run {
+  6 dict begin
+  /hi exch def /lo exch def /n exch def /pos exch def /s exch def /k 1 def
+  { k n ge { exit } if
+    pos k add s length ge { exit } if
+    s pos k add get dup lo ge exch hi le and not { exit } if
+    /k k 1 add def /lo 16#80 def /hi 16#BF def
+  } loop
+  k end
+} bind def
+
+% ( string pos unicode -- len ): the byte length of the glyph at pos. The
+% second-byte ranges are Unicode's table of well-formed UTF-8 (3-7).
+% @internal
+/wp--glyph-len {
+  { 2 copy get
+    dup 16#C2 lt 1 index 16#F4 gt or
+      { pop pop pop 1 }
+      { dup 16#E0 lt { pop 2 16#80 16#BF } {
+        dup 16#E0 eq { pop 3 16#A0 16#BF } {
+        dup 16#ED eq { pop 3 16#80 16#9F } {
+        dup 16#F0 lt { pop 3 16#80 16#BF } {
+        dup 16#F0 eq { pop 4 16#90 16#BF } {
+        16#F4 eq { 4 16#80 16#8F } { 4 16#80 16#BF } ifelse
+        } ifelse } ifelse } ifelse } ifelse } ifelse
+        //wp--utf8-run exec }
+    ifelse }
+  { pop pop 1 } ifelse
+} bind def
+
+% ( piece unicode -- code ): the character code the show operators give a
+% glyph's bytes: the byte, the decoded UTF-8 scalar, or U+FFFD for an
+% ill-formed sequence.
+% @internal
+/wp--code {
+  { dup 0 get dup 16#80 lt { exch pop } {
+      dup 16#C2 lt 1 index 16#F4 gt or { pop pop 16#FFFD } {
+        dup 16#E0 lt { 2 16#1F } { dup 16#F0 lt { 3 16#0F } { 4 16#07 } ifelse } ifelse
+        3 index length 3 -1 roll ne { pop pop pop 16#FFFD } {
+          and exch 1 1 index length 1 sub getinterval
+          { 16#3F and exch 64 mul add } forall
+        } ifelse
+      } ifelse } ifelse }
+  { 0 get } ifelse
+} bind def
+
+% ( string -- [pieces] unicode ): a string cut into one substring per glyph.
+% @internal
+/wp--pieces {
+  dup //wp--unicode-text exec
+  2 dict begin /u exch def /s exch def
+  [ 0 { dup s length ge { pop exit } if
+        s 1 index u //wp--glyph-len exec
+        s 2 index 2 index getinterval 3 1 roll add } loop ]
+  u end
+} bind def
+
+% ( piece prefix fillp -- ): one string's outlines filled through the
+% warp, as the show decorator draws them: the current path is kept and
+% only the current point advances. fillp is a procedure that fills.
+% @internal
+/wp--paint {
+  currentpoint gsave newpath moveto
+  3 -1 roll true charpath
+  currentpoint 4 2 roll exch exec exec
+  grestore moveto
+} bind def
+
+% ( any -- bool )
+% @internal
+/wp--number { type dup /integertype eq exch /realtype eq or } bind def
+
+% ( cx cy char ax ay string prefix fillp -- ): awidthshow through the
+% warp; ashow and widthshow pass the extras they lack as zeros. The
+% glyphs go into one path, each followed by its extra advance, and are
+% filled once. Operands are checked before anything is drawn, as the real
+% operators check them, and no dictionary of ours is open while charpath
+% or the warp runs.
+% @internal
+/wp--awidthshow {
+  currentpoint pop pop
+  2 index type /stringtype ne
+  4 index //wp--number exec not or 5 index //wp--number exec not or
+  6 index type /integertype ne or
+  7 index //wp--number exec not or 8 index //wp--number exec not or
+    { /awidthshow errordict /typecheck get exec } if
+  5 index dup 0 lt exch 255 gt or { /awidthshow errordict /rangecheck get exec } if
+  8 dict begin
+  /fillp exch def /prefix exch def /s exch def
+  /ay exch def /ax exch def /ch exch def /cy exch def /cx exch def
+  s //wp--pieces exec /u exch def
+  [ exch { dup u //wp--code exec ch eq { ax cx add ay cy add } { ax ay } ifelse
+           3 array astore } forall ]
+  /prefix load /fillp load
+  end
+  currentpoint gsave newpath moveto
+  3 -1 roll { aload pop 3 -1 roll true charpath rmoveto } forall
+  currentpoint 4 2 roll exch exec exec
+  grestore moveto
+} bind def
+
+% kshow keeps its state in a dictionary S: the procedure, the text, the
+% byte position, the warp prefix and fill, the code of the glyph just
+% shown, and whether the text is done. Nothing of ours is on the operand
+% or dictionary stack while the procedure runs, so it sees what the real
+% kshow shows it.
+
+% ( S -- piece prefix fillp ): cut the next glyph against the font live
+% now (a call of the procedure may have changed it).
+% @internal
+/wp--kshow-glyph {
+  dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { false } ifelse
+  exch begin
+    /u exch def
+    s pos u //wp--glyph-len exec
+    s pos 2 index getinterval
+    /pos pos 4 -1 roll add def
+    /code 1 index u //wp--code exec def
+    /prefix load /fillp load
+  end
+} bind def
+
+% ( S -- code1 code2 proc true | false ): if text remains, the codes of
+% the glyph just shown and of the next one, and the procedure to call.
+% @internal
+/wp--kshow-next {
+  dup /pos get 1 index /s get length ge
+    { /done true put false }
+    { dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { false } ifelse
+      exch begin
+        s pos 2 index //wp--glyph-len exec
+        s pos 3 -1 roll getinterval exch //wp--code exec
+        code exch /proc load true
+      end }
+  ifelse
+} bind def
+
+% ( S -- ): one glyph, then the procedure if another glyph follows.
+% @internal
+/wp--kshow-turn {
+  dup //wp--kshow-glyph exec //wp--paint exec
+  //wp--kshow-next exec { exec } { exit } ifelse
+} bind def
+
+% ( S -- ): an exit from the procedure left the text unfinished; the real
+% kshow refuses such an exit.
+% @internal
+/wp--kshow-done {
+  /done get not { /kshow errordict /invalidexit get exec } if
+} bind def
+
+% ( proc string prefix fillp -- ): kshow through the warp. The loop's body
+% holds S itself, so S is never on the operand stack between turns.
+% @internal
+/wp--kshow {
+  currentpoint pop pop
+  3 index dup type /arraytype ne exch xcheck not or 3 index type /stringtype ne or
+    { /kshow errordict /typecheck get exec } if
+  2 index length 0 eq { pop pop pop pop } {
+    8 dict begin
+    /fillp exch def /prefix exch def /s exch def /proc exch def
+    /pos 0 def /code 0 def /done false def
+    currentdict end
+    dup [ exch //wp--kshow-turn systemdict /exec get ] cvx
+    [ exch systemdict /loop get 4 -1 roll //wp--kshow-done systemdict /exec get ] cvx
+    exec
+  } ifelse
+} bind def
+
+% ( name prefix fillp -- ): glyphshow through the warp: charpath of code 0
+% in a copy of the font whose Encoding maps 0 to the name. The copy is set
+% inside the gsave, so the caller's font is current again afterwards. A
+% Unicode-mode font reads codes, not its Encoding, so there the real
+% glyphshow draws the glyph, unwarped.
+% @internal
+/wp--glyphshow {
+  currentpoint pop pop
+  2 index type /nametype ne { /glyphshow errordict /typecheck get exec } if
+  //wp--unicode-font exec
+    { pop pop systemdict /glyphshow get exec }
+    { currentpoint gsave newpath moveto
+      3 -1 roll currentfont dup length dict copy
+      dup /Encoding 256 array dup 0 7 -1 roll put put setfont
+      (\000) true charpath
+      currentpoint 4 2 roll exch exec exec
+      grestore moveto }
+  ifelse
+} bind def
+
 % ( transform step -- decorators ), transform: ( records -- records ).
 % Each decorator ( target -- wrapper ) turns an operator into one that
 % paints the transformed path. Strokes are outlined
@@ -276,12 +496,12 @@
 % unwarped; the array forms of rectfill, rectstroke and rectclip are not
 % supported.
 % @kind: Procedure
-% @summary: Build decorators that make fill, stroke, show and clip draw through a path transform.
+% @summary: Build decorators that make fill, stroke, clip and the show operators draw through a path transform.
 % @example: {} 4 wp-decorators
 /wp-decorators {
   matrix currentmatrix //wp--rebuild /exec load 5 array astore cvx
   % prefix: { warp step base rebuild } -- run it to warp the current path
-  8 dict begin /prefix exch def /realfill systemdict /fill get def
+  24 dict begin /prefix exch def /realfill systemdict /fill get def
   % operators that consume or clip the current path keep their own target
   [ /fill /eofill ] {
     [ /prefix load /exch load //fp-compose /exec load ] cvx def
@@ -312,7 +532,21 @@
       true /charpath load /currentpoint load
       /prefix load /exec load /realfill load
       /grestore load /moveto load ] cvx ] cvx def
-  currentdict /prefix undef currentdict /realfill undef
+  % the rest of the show family, glyph by glyph, with each operator's
+  % spacing: ashow and widthshow are awidthshow with zero extras
+  /fillp [ /realfill load ] cvx def
+  /ashow [ /pop load
+    [ 0 0 0 6 3 /roll load /prefix load /fillp load //wp--awidthshow /exec load ] cvx
+  ] cvx def
+  /widthshow [ /pop load
+    [ 0 0 3 -1 /roll load /prefix load /fillp load //wp--awidthshow /exec load ] cvx
+  ] cvx def
+  [ [ /awidthshow //wp--awidthshow ] [ /kshow //wp--kshow ]
+    [ /glyphshow //wp--glyphshow ] ] {
+    aload pop
+    [ /pop load [ /prefix load /fillp load 6 -1 roll /exec load ] cvx ] cvx def
+  } forall
+  currentdict /prefix undef currentdict /realfill undef currentdict /fillp undef
   currentdict end
 } bind def
 
