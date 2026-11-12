@@ -23,6 +23,9 @@ and both work against an **installed** pscat (no checkout needed):
 Which tool to pick for a picture (pscat, an image model, or an LLM's own
 SVG or matplotlib), and how pscat lets a model with no image output of its
 own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+An assistant that wants a map of the docs can read the site's
+[`llms.txt`](https://pscatlabs.github.io/pscat/llms.txt)
+(source: [`site/llms.txt`](../../site/llms.txt)), which links the guides, the skills and the install steps.
 
 In Claude Code the easiest route is the **plugin**, which installs the three
 skills and registers `pscat-mcp` in one step. No separate install is needed

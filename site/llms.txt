@@ -1,0 +1,73 @@
+# pscat
+
+> pscat is a PostScript interpreter written in Rust, for practical documents (charts, typed letters and memos, handwritten notes, certificates, multi-page PDFs) and for creative art (generative patterns, watercolor and oil paint, printmaking, chalkboards, display type). It renders PostScript and EPS to PNG, SVG and PDF from a command-line tool, as a Rust library, in the browser and Node as WebAssembly, and through an MCP server and agent plugin. Output is exact and repeatable: the same program and seed give the same picture, and a program is source you can diff, edit and re-render.
+
+Install the command-line tool with `cargo install pscat`, which installs both `pscat` and the `pscat-mcp` server. Or download a ready-built binary for macOS, Linux or Windows from the releases page (no Rust needed). Then `pscat --png out.png some_file.ps` renders a file (`--svg` and `--pdf` also work). `pscat fonts install` adds the full font catalog. For JavaScript, `npm install pscat` gives the WebAssembly renderer for browsers and Node. For a coding agent, the Claude Code plugin installs with `/plugin install pscat --marketplace PSCatLabs/pscat` and the Codex plugin with `codex plugin marketplace add PSCatLabs/pscat` then `codex plugin add pscat@pscat`. Any other MCP client can run `pscat mcp` over stdio. A hosted MCP server is planned (epic #689) and does not exist yet. To try pscat with nothing installed, open the playground.
+
+Most links below are Markdown sources on GitHub, which are the same text as the guides on the site.
+
+## Getting started
+
+- [Getting started](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/getting-started.md): build or install pscat, the command-line flags, the live window, and PNG, SVG and PDF output
+- [When to use pscat](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/when-to-use-pscat.md): pscat, an image model, or an LLM drawing on its own; what each does best, with a decision table
+- [Playground](https://pscatlabs.github.io/pscat/playground.html): run PostScript in the browser with nothing installed
+- [Learn PostScript](https://pscatlabs.github.io/pscat/learn.html): a short tour of the language with runnable examples, for readers new to PostScript
+- [Releases](https://github.com/PSCatLabs/pscat/releases): ready-built binaries for macOS, Linux and Windows
+
+## Guides
+
+Open the guide that matches the job.
+
+- [Charts and plots](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/charts.md): function plots, surfaces, and bar, line, area, pie and scatter charts for papers and documents, as PNG, SVG or PDF
+- [Handwriting](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/handwriting.md): a string in, a handwriting-style note, card or caption out (`pscat handwrite`), and the `/HandScript` font
+- [Style packs and page templates](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/style-packs-and-templates.md): five ready-made page templates (card, letter, certificate, invitation, poster) and four aesthetics, for documents that print as vector PDF
+- [Typewritten letters and memos](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/pscat/references/typewriter.md): typed pages with `pscat typewrite`, including an aged "released document" look
+- [Fonts](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/fonts.md): the display faces, the typewriter for typed letters and memos, and the font catalog
+- [Lettering, headlines and apparel](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/lettering.md): display type with textured fills, headline layout, shirts and jerseys
+- [QR codes](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/qr-codes.md): encode a URL or other text as a QR symbol drawn as vector geometry that scans from PNG, SVG and PDF
+- [artkit](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/artkit.md): the generative-art toolkit (randomness, palettes, turtle graphics, L-systems, path brushes, tilings, fractals, flow fields, scatter)
+- [Painting](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/painting.md): variable-width brushes, wash and watercolor
+- [Landscape cookbook](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/landscape-cookbook.md): how to paint each element of a landscape
+- [Printmaking and etching](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/printmaking.md): engraving, hatching, stipple, halftone, woodcut and linocut
+- [Dry media](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/dry-media.md): chalk, crayon, charcoal, single-stroke glyphs, and LaTeX math on a chalkboard (`pscat chalk`)
+- [Functional PostScript](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/functional.md): map, filter and fold over lists of records, composed procedures, and wrappers that count or trace calls
+- [pscat with an image model](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/pscat-with-image-models.md): the image model paints the background once, pscat sets the exact layer on top
+- [All guides](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/README.md): the index of the guides, grouped by topic
+
+## Agents and MCP
+
+- [pscat for AI agents](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/agents.md): the skills, the `pscat-mcp` server and its tools, how to register it, and which tool does which job
+- [Plugin README](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/README.md): installing the Claude Code and Codex plugin, requirements, example prompts and privacy
+- [pscat skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/pscat/SKILL.md): the tool reference for rendering, debugging, handwriting, typed pages and chalkboard math
+- [psart skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/psart/SKILL.md): the render-look-refine loop for generative art, painting, dry media and style packs
+- [psviz skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/psviz/SKILL.md): paper-ready function plots and bar, line, area, scatter and pie charts
+- [functional-postscript skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/functional-postscript/SKILL.md): data-in, marks-out PostScript, and wrappers that count or trace procedure calls
+- [Art capabilities catalog](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/dev/CAPABILITIES.md): the machine-readable inventory of fonts, palettes, templates and procedures behind `pscat --capabilities` and the `describe_art_capabilities` tool
+
+## JavaScript and Rust
+
+- [pscat on npm](https://raw.githubusercontent.com/PSCatLabs/pscat/main/npm/README.md): the WebAssembly renderer for browsers and Node, to render a page or watch a program draw
+- [pscat in the browser](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/browser.md): the WebAssembly build and a JavaScript quick start
+- [The JavaScript library](https://pscatlabs.github.io/pscat/javascript.html): the dependency-free ES module behind the playground
+- [pscat as a Rust library](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/library.md): the crate's API, its `window` feature, the supported builds and the stability policy
+
+## Gallery
+
+- [Gallery](https://pscatlabs.github.io/pscat/gallery.html): finished pieces, each drawn by a PostScript program with a "View source" window
+- [Font specimens](https://pscatlabs.github.io/pscat/fonts.html): a specimen of every font
+- [Gallery notes](https://raw.githubusercontent.com/PSCatLabs/pscat/main/gallery/README.md): how the gallery pieces are made and organised
+
+## Reference
+
+- [README](https://raw.githubusercontent.com/PSCatLabs/pscat/main/README.md): the project overview, install and quick start
+- [Stability policy](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/STABILITY.md): what stays stable between releases
+- [Changelog](https://raw.githubusercontent.com/PSCatLabs/pscat/main/CHANGELOG.md): what changed in each release
+- [Source code](https://github.com/PSCatLabs/pscat): the repository, issues and licences
+
+## Optional
+
+- [Architecture](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/dev/ARCHITECTURE.md): the object model, the execution model and the deliberate deferrals
+- [Contributing](https://raw.githubusercontent.com/PSCatLabs/pscat/main/CONTRIBUTING.md): how to contribute, and how contributions are licensed
+- [Agent conventions](https://raw.githubusercontent.com/PSCatLabs/pscat/main/AGENTS.md): how coding agents work in this repository
+- [Learn PostScript lessons](https://github.com/PSCatLabs/pscat/tree/main/site/learn): the runnable PostScript examples behind the Learn page
+- [Fonts internals](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/dev/FONTS.md): the font machinery, Type 3 programs, Type 1 parsing and the runtime catalog
