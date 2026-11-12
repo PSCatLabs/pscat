@@ -1147,7 +1147,7 @@ fn a_bad_env_var_is_a_startup_error_but_help_still_works() {
 #[test]
 fn a_bad_allow_read_is_a_startup_error() {
     let missing = common::scratch_dir("mcp-allow-read").join("nope");
-    let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+    let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
         .arg("--allow-read")
         .arg(&missing)
         .stdin(Stdio::null())
@@ -1753,7 +1753,7 @@ fn the_cap_flags_reject_values_out_of_range() {
         &["--max-latex-bytes", "0"],
         &["--max-latex-bytes"],
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
             .args(args)
             .current_dir(common::scratch_dir("mcp-badflag"))
             .stdin(Stdio::null())
@@ -1864,7 +1864,7 @@ fn version_flag_prints_the_build_version_and_exits_without_serving() {
     // exit with empty stdout, so the assertion fails instead of hanging.
     let want = format!("pscat-mcp {}\n", common::built_version());
     for flag in ["--version", "-V"] {
-        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
             .arg(flag)
             .current_dir(common::scratch_dir("mcp-version"))
             .stdin(Stdio::null())

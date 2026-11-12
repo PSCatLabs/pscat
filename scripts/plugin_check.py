@@ -252,6 +252,16 @@ def _check_servers(servers, rel, errors, need_type=False, plugin_dir=None, host=
         kind = cfg.get("type")
         if need_type and kind not in ("stdio", "streamable-http"):
             errors.append(f"{where}: type {kind!r} must be \"stdio\" or \"streamable-http\"")
+        if host == "codex" and need_type and kind == "stdio":
+            # Codex parses mcp.json against the Agent Plugins schema, whose stdio
+            # servers allow only these keys (deny_unknown_fields in
+            # codex-rs/codex-mcp/src/agent_plugin_config.rs). An extra key such as
+            # `env_vars` (#800) does not reach the server: Codex 0.167 drops the
+            # whole server from the plugin.
+            extra = sorted(set(cfg) - {"type", "command", "args", "env", "cwd"})
+            if extra:
+                errors.append(f"{where}: {', '.join(extra)}: not in the Agent Plugins stdio "
+                              "schema (type, command, args, env, cwd); Codex drops the server")
         cmd = cfg.get("command", "")
         if need_type and kind == "stdio" and not cmd:
             errors.append(f"{where}: a stdio server needs a command")
