@@ -193,22 +193,43 @@ def pinned_index(root=ROOT):
     return tag.group(1), sha.group(1)
 
 
+def tracked_files(root=ROOT):
+    """The set of git-tracked paths under `root` ("/"-separated, relative),
+    or None when `root` is not a git checkout (no `.git`: a copied tree, a
+    test fixture). In a checkout, a failing `git ls-files` is an error, never
+    a silent fall back to "everything on disk" (#959)."""
+    if not os.path.exists(os.path.join(root, ".git")):
+        return None
+    p = run(["git", "-C", root, "ls-files", "-z"], check=False)
+    if p.returncode != 0:
+        raise SystemExit(f"git ls-files failed in {root}: {p.stderr.strip()}")
+    return {f for f in p.stdout.split("\0") if f}
+
+
 def plugin_manifests(root=ROOT):
-    """Every plugin manifest in the repo (#569): Claude Code's
+    """Every tracked plugin manifest in the repo (#569): Claude Code's
     `.claude-plugin/{plugin,marketplace}.json` anywhere, and Codex's
     `.agents/plugins/marketplace.json` plus the `plugin.json` (portable, at
     the plugin root) or `.codex-plugin/plugin.json` of each local plugin it
-    lists."""
+    lists. In a git checkout only tracked files count, so an untracked
+    nested checkout or scratch directory is never read or rewritten (#959);
+    outside one (no `.git`) every file on disk counts."""
+    tracked = tracked_files(root)
+
+    def wanted(path):
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        return tracked is None or rel in tracked
+
     out = []
     for pattern in (".claude-plugin/*.json", "**/.claude-plugin/*.json"):
         for p in glob.glob(os.path.join(root, pattern), recursive=True):
             rel = os.path.relpath(p, root)
             if rel.split(os.sep)[0] in ("target", "node_modules", ".git"):
                 continue
-            if os.path.basename(p) in ("plugin.json", "marketplace.json") and p not in out:
+            if os.path.basename(p) in ("plugin.json", "marketplace.json") and p not in out and wanted(p):
                 out.append(p)
     codex_market = os.path.join(root, ".agents", "plugins", "marketplace.json")
-    if os.path.exists(codex_market):
+    if os.path.exists(codex_market) and wanted(codex_market):
         out.append(codex_market)
         with open(codex_market, encoding="utf-8") as f:
             entries = json.load(f).get("plugins") or []
@@ -220,7 +241,7 @@ def plugin_manifests(root=ROOT):
                 continue  # a git, url or npm source is not in this repo
             for name in ("plugin.json", os.path.join(".codex-plugin", "plugin.json")):
                 p = os.path.normpath(os.path.join(root, src, name))
-                if os.path.exists(p) and p not in out:
+                if os.path.exists(p) and p not in out and wanted(p):
                     out.append(p)
     return sorted(out)
 
