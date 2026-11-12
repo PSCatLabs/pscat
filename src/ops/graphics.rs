@@ -175,33 +175,41 @@ enum ArcTo {
     },
 }
 
-/// The geometry of `arcto`, PLRM 3rd ed. §8.2: the circle of radius `r`
-/// tangent to the lines p0-p1 and p1-p2, joined to p0 by a line and
-/// drawn as the one cubic Ghostscript draws, however far it sweeps. A
-/// negative `r` mirrors the circle through p1 (gs does the same). A
-/// zero `r` gives a zero-length cubic at p1; `collinear` points (decided
-/// by [`arcto_collinear`], in device space) give a plain line.
-/// `UndefinedResult` when p1 equals p0 or p2, as gs; `Limitcheck` when a
-/// result is not finite.
+/// The largest device coordinate Ghostscript's fixed-point path can hold
+/// (`max_fixed`, 24.8 bits, in 72-dpi device units). gs raises
+/// `limitcheck` for an arcto point beyond it; so does pscat, measured in
+/// the same units (device pixels over the device's pixels per point).
+const ARCTO_MAX_DEVICE: f64 = 2147483647.0 / 256.0;
+
+/// The geometry of `arcto`, PLRM 3rd ed. §8.2, following Ghostscript's
+/// `gs_arcto` decision for decision: `UndefinedResult` when p1 equals p0
+/// or p2 (a zero leg), a plain line to p1 only when the legs are exactly
+/// collinear (cross product 0), otherwise the circle of radius `r`
+/// tangent to both legs, drawn as the one cubic gs draws however far it
+/// sweeps (a negative `r` mirrors it through p1; a zero `r` gives a
+/// zero-length cubic at p1). There is no tolerance: a nearly collinear
+/// corner is real geometry, and when its tangent points leave the
+/// device's coordinate range (`fits`) it is `Limitcheck`, as in gs.
 fn arcto_geometry(
     p0: (f64, f64),
     p1: (f64, f64),
     p2: (f64, f64),
     r: f64,
-    collinear: bool,
+    fits: impl Fn((f64, f64)) -> bool,
 ) -> Result<ArcTo, PsError> {
     let (d0x, d0y) = (p0.0 - p1.0, p0.1 - p1.1);
     let (d2x, d2y) = (p2.0 - p1.0, p2.1 - p1.1);
-    let (l0, l2) = (fmath::hypot(d0x, d0y), fmath::hypot(d2x, d2y));
-    if !(l0 > 0.0 && l2 > 0.0) {
+    let (sq0, sq2) = (d0x * d0x + d0y * d0y, d2x * d2x + d2y * d2y);
+    if sq0 == 0.0 || sq2 == 0.0 {
         return Err(PsError::UndefinedResult);
     }
+    if d0x * d2y == d0y * d2x {
+        return Ok(ArcTo::Line);
+    }
+    let (l0, l2) = (fmath::sqrt(sq0), fmath::sqrt(sq2));
     let (u0, u2) = ((d0x / l0, d0y / l0), (d2x / l2, d2y / l2));
     let cross = u0.0 * u2.1 - u0.1 * u2.0;
     let dot = u0.0 * u2.0 + u0.1 * u2.1;
-    if collinear || cross == 0.0 {
-        return Ok(ArcTo::Line);
-    }
     // Corner angle at p1 in (0, pi); the arc turns through pi minus it.
     let corner = fmath::atan2(cross.abs(), dot);
     let t = r / fmath::tan(corner / 2.0);
@@ -211,7 +219,10 @@ fn arcto_geometry(
     let c1 = (t1.0 - r * k * u0.0, t1.1 - r * k * u0.1);
     let c2 = (t2.0 - r * k * u2.0, t2.1 - r * k * u2.1);
     let all = [t1, c1, c2, t2];
-    if all.iter().any(|p| !(p.0.is_finite() && p.1.is_finite())) {
+    if all
+        .iter()
+        .any(|p| !(p.0.is_finite() && p.1.is_finite() && fits(*p)))
+    {
         return Err(PsError::Limitcheck);
     }
     Ok(ArcTo::Arc { t1, c1, c2, t2 })
@@ -225,8 +236,8 @@ fn arcto_dev(m: Transform, p: (f64, f64)) -> (f64, f64) {
 }
 
 /// The inverse of `m` applied to a device point, in f64, so the stored
-/// current point comes back without single-precision rounding on top.
-/// `UndefinedResult` for a singular CTM, as `currentpoint`.
+/// current point comes back with no single-precision rounding on top of
+/// its storage. `UndefinedResult` for a singular CTM, as `currentpoint`.
 fn arcto_user(m: Transform, q: (f64, f64)) -> Result<(f64, f64), PsError> {
     let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
     let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
@@ -236,54 +247,6 @@ fn arcto_user(m: Transform, q: (f64, f64)) -> Result<(f64, f64), PsError> {
     }
     let (dx, dy) = (q.0 - tx, q.1 - ty);
     Ok(((sy * dx - kx * dy) / det, (sx * dy - ky * dx) / det))
-}
-
-/// Whether the stored current point `q0` (device space; `p0` is the same
-/// point in user space) lies on the line p1-p2, up to the rounding that
-/// storing it in single precision can add. That rounding is a few f32
-/// ulps of the terms that make each device coordinate (`sx*x`, `kx*y`,
-/// `tx`, ...), so the bound is per axis, projected on the line's normal:
-/// a large page translation along one axis does not widen the test
-/// across the other, a far p2 only sets the direction, and the CTM's
-/// scale moves the bound with the noise. The corner must also be nearly
-/// straight in user space, so a short leg into a real corner, or a corner
-/// a non-uniform CTM squashes in device space, is never swallowed.
-/// Without the bound a rotated
-/// fold-back (which a program means as collinear) would ask for a
-/// tangent length of ~1/sin of a noise-sized corner.
-fn arcto_collinear(
-    m: Transform,
-    q0: (f64, f64),
-    p0: (f64, f64),
-    p1: (f64, f64),
-    p2: (f64, f64),
-) -> bool {
-    let (q1, q2) = (arcto_dev(m, p1), arcto_dev(m, p2));
-    let (d2x, d2y) = (q2.0 - q1.0, q2.1 - q1.1);
-    let l2 = fmath::hypot(d2x, d2y);
-    if l2 <= 0.0 || l2.is_nan() {
-        return false; // p1 = p2: arcto_geometry reports it
-    }
-    let (nx, ny) = (-d2y / l2, d2x / l2);
-    let dist = ((q0.0 - q1.0) * nx + (q0.1 - q1.1) * ny).abs();
-    let (sx, kx, tx) = (f64::from(m.sx), f64::from(m.kx), f64::from(m.tx));
-    let (ky, sy, ty) = (f64::from(m.ky), f64::from(m.sy), f64::from(m.ty));
-    let bx = (sx * p0.0).abs() + (kx * p0.1).abs() + tx.abs();
-    let by = (ky * p0.0).abs() + (sy * p0.1).abs() + ty.abs();
-    let ulps = 4.0 * f64::from(f32::EPSILON);
-    // Both: within the rounding, and a nearly straight corner in user
-    // space (sine of the angle off the line under 1e-4), so the bound
-    // never swallows a short leg of a real corner, and a non-uniform CTM
-    // that squashes a corner flat in device space keeps it.
-    let (e0x, e0y) = (p0.0 - p1.0, p0.1 - p1.1);
-    let (e2x, e2y) = (p2.0 - p1.0, p2.1 - p1.1);
-    let (m0, m2) = (fmath::hypot(e0x, e0y), fmath::hypot(e2x, e2y));
-    let sine = if m0 > 0.0 && m2 > 0.0 {
-        ((e0x * e2y - e0y * e2x) / (m0 * m2)).abs()
-    } else {
-        0.0
-    };
-    dist <= ulps * (nx.abs() * bx + ny.abs() * by) && sine <= 1e-4
 }
 
 /// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and
@@ -298,16 +261,24 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
         .gfx
         .current_device_point()
         .ok_or(PsError::NoCurrentPoint)?;
-    // p0 = p1 is decided in device space, where the current point is
-    // stored: the same f32 transform `lineto x1 y1` would store.
+    // pscat keeps the current point in single-precision device space, so
+    // under a rotation it comes back a hair off the user point the
+    // program gave. p0 = p1 is therefore also checked where it is stored:
+    // the same f32 transform `lineto x1 y1` would store (gs keeps a
+    // double current point and needs only the user-space test below).
     if q0 == it.gfx.user_to_device(x1, y1) {
         return Err(PsError::UndefinedResult);
     }
     let m = it.gfx.ctm();
-    let q0 = (f64::from(q0.x), f64::from(q0.y));
-    let p0 = arcto_user(m, q0)?;
-    let collinear = arcto_collinear(m, q0, p0, (x1, y1), (x2, y2));
-    let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r, collinear)?;
+    let p0 = arcto_user(m, (f64::from(q0.x), f64::from(q0.y)))?;
+    let base = it.gfx.base_ctm();
+    let per_point = fmath::hypot(f64::from(base.sx), f64::from(base.ky));
+    let per_point = if per_point > 0.0 { per_point } else { 1.0 };
+    let fits = |p: (f64, f64)| {
+        let q = arcto_dev(m, p);
+        q.0.abs() / per_point <= ARCTO_MAX_DEVICE && q.1.abs() / per_point <= ARCTO_MAX_DEVICE
+    };
+    let arc = arcto_geometry(p0, (x1, y1), (x2, y2), r, fits)?;
     match arc {
         ArcTo::Line => {
             it.gfx.lineto(x1, y1)?;

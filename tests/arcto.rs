@@ -154,8 +154,8 @@ fn a_distant_direction_point_keeps_the_rounded_corner() {
 #[test]
 fn a_magnified_corner_is_still_a_corner() {
     // Tiny user coordinates under a huge CTM are the same 100-point
-    // corner as the unscaled one: the collinearity tolerance lives in
-    // device space (Codex, combined review batch 1, round 2). gs 10.07.1
+    // corner as the unscaled one (Codex, combined review batch 1, round
+    // 2): exact collinearity has no scale to get wrong. gs 10.07.1
     // also draws the curve (9e-08 0 1e-07 1e-08). Not in the shared gs
     // table: `case` does not save the graphics state, so the scale would
     // leak into the cases after it.
@@ -277,6 +277,23 @@ fn an_anisotropic_ctm_keeps_a_user_space_corner() {
     for (g, w) in stack.iter().zip([92.93, 92.93, 107.07, 92.93]) {
         assert!((g - w).abs() < 0.05, "{got}");
     }
+}
+
+#[test]
+fn a_hairpin_past_the_device_range_is_limitcheck_as_in_gs() {
+    // gs's fixed-point path holds 2^31/256 device units: its tangent point
+    // at -8.3868e6 fits, the next step out is limitcheck, and the path is
+    // left as it was. pscat uses the same limit.
+    let fits = run_case("{ 0 0 moveto 100 0 -50 0.0003577 10 arcto }");
+    assert!(fits.contains("ok stack: -838"), "{fits}");
+    assert_eq!(
+        run_case("{ 0 0 moveto 100 0 -50 0.0003576 10 arcto }"),
+        "c => limitcheck stack: path: m 0.0 0.0"
+    );
+    assert_eq!(
+        run_case("{ 0 0 moveto 100 0 -50 0.0001 10 arct }"),
+        "c => limitcheck stack: path: m 0.0 0.0"
+    );
 }
 
 #[test]
@@ -679,5 +696,292 @@ fn ghostscript_rasterises_our_pdf_like_our_canvas() {
             differing < 80,
             "{name}: {differing} pixels differ between gs(PDF) and the canvas"
         );
+    }
+}
+
+// ---- Sweep: the straight-or-curved decision, tangent points and errors
+// across transforms, against gs where the input is well-conditioned
+// (combined Codex review batch 1; the dispatcher's redesign). pscat keeps
+// the current point in f32 device space and gs on a 1/256-unit
+// fixed-point grid, so where a leg or a corner's angle is near either
+// precision (short legs or an exact fold-back under a rotation, a 1e-3
+// scale) the two differ in noise, and only sanity is asserted there.
+
+const SWEEP_PRELUDE: &str = "\
+/sw-r { { 64 string cvs print ( ) print } forall } def \
+/sw { gsave mark exch stopped \
+  { cleartomark $error /errorname get 64 string cvs print } \
+  { counttomark array astore exch pop sw-r } ifelse () = grestore } def \
+";
+
+fn rotations() -> Vec<String> {
+    (0..360)
+        .step_by(15)
+        .map(|a| format!("{a} rotate"))
+        .collect()
+}
+
+/// Transforms where both programs keep plenty of precision.
+fn well_conditioned_ctms() -> Vec<String> {
+    let mut v = rotations();
+    for s in [
+        "0.1 0.1 scale",
+        "10 10 scale",
+        "1000 1000 scale",
+        "1000 1000 scale 37 rotate",
+    ] {
+        v.push(s.to_string());
+    }
+    for s in [
+        "[1 0 0.5 1 0 0] concat",
+        "[1 0.3 0 1 0 0] concat 20 rotate",
+        "1 0.001 scale",
+        "1000 1 scale",
+    ] {
+        v.push(s.to_string());
+    }
+    v
+}
+
+/// Transforms that push a leg towards gs's fixed-point grid or pscat's f32.
+fn extreme_ctms() -> Vec<String> {
+    [
+        "0.001 0.001 scale",
+        "0.001 0.001 scale 37 rotate",
+        "1 0.000001 scale 30 rotate",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Corners well away from either precision limit, and the clear errors.
+const WELL_CONDITIONED: &[(&str, &str)] = &[
+    ("right", "13 17 moveto 113 17 113 117 10"),
+    ("obtuse", "13 17 moveto 113 17 163 67 10"),
+    ("acute", "13 17 moveto 113 17 23 27 10"),
+    ("negative radius", "13 17 moveto 113 17 113 117 -10"),
+    ("radius past the legs", "13 17 moveto 113 17 113 117 500"),
+    ("long legs", "0 0 moveto 100000 0 100000 100000 10"),
+    ("far p2", "0 0 moveto 100 0 100 1000000000 10"),
+    ("near-collinear ahead", "13 17 moveto 113 17 213 17.001 10"),
+    (
+        "collinear ahead from the origin",
+        "0 0 moveto 100 0 200 0 10",
+    ),
+    ("hairpin", "0 0 moveto 100 0 -50 0.0001 10"),
+    ("p1 = p2", "13 17 moveto 113 17 113 17 10"),
+];
+
+/// Inputs whose answer is decided by rounding, in gs and in pscat.
+const NOISE_DOMINATED: &[(&str, &str)] = &[
+    (
+        "short horizontal leg",
+        "20 20 moveto 20.0001 20 20.0001 120 10",
+    ),
+    (
+        "short vertical leg",
+        "20 20 moveto 20 20.0001 120 20.0001 10",
+    ),
+    ("near fold-back", "13 17 moveto 113 17 -37 17.01 10"),
+    ("fold-back", "13 17 moveto 113 17 -37 17 10"),
+    ("fold-back from the origin", "0 0 moveto 100 0 -50 0 10"),
+    ("collinear ahead", "13 17 moveto 113 17 213 17 10"),
+    ("p0 = p1", "13 17 moveto 13 17 113 117 10"),
+];
+
+fn sweep_program(ctms: &[String], geoms: &[(&str, &str)]) -> (String, Vec<String>) {
+    let mut body = String::from(SWEEP_PRELUDE);
+    let mut labels = Vec::new();
+    for c in ctms {
+        for (name, g) in geoms {
+            labels.push(format!("{c} | {name}"));
+            body.push_str(&format!("{{ {c} {g} arcto }} sw\n"));
+        }
+    }
+    (body, labels)
+}
+
+fn sweep_pscat(body: &str) -> Vec<String> {
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(body)
+        .unwrap_or_else(|e| panic!("sweep failed: {}", it.error_report(&e)));
+    String::from_utf8_lossy(it.captured_stdout())
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Numbers, or an error name, from one sweep line.
+fn sweep_words(line: &str) -> Result<Vec<f64>, String> {
+    let w: Vec<&str> = line.split_whitespace().collect();
+    match w.as_slice() {
+        [name] if name.parse::<f64>().is_err() => Err(name.to_string()),
+        _ => Ok(w.iter().map(|x| x.parse().expect("a number")).collect()),
+    }
+}
+
+fn close(a: &[f64], b: &[f64], rel: f64) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| (x - y).abs() <= rel * x.abs().max(y.abs()).max(1.0))
+}
+
+#[test]
+fn sweep_matches_ghostscript_where_well_conditioned() {
+    if !gs_available() {
+        eprintln!("skipping the gs sweep: gs is not installed");
+        return;
+    }
+    let (body, labels) = sweep_program(&well_conditioned_ctms(), WELL_CONDITIONED);
+    let ours = sweep_pscat(&body);
+    let theirs: Vec<String> = gs_output(&body).lines().map(str::to_string).collect();
+    assert_eq!(ours.len(), labels.len());
+    assert_eq!(theirs.len(), labels.len(), "gs printed {theirs:?}");
+    let mut bad = Vec::new();
+    for ((label, a), b) in labels.iter().zip(&ours).zip(&theirs) {
+        let same = match (sweep_words(a), sweep_words(b)) {
+            (Ok(x), Ok(y)) => close(&x, &y, 1e-3),
+            (Err(x), Err(y)) => x == y,
+            _ => false,
+        };
+        if !same {
+            bad.push(format!("{label}:\n  pscat {a}\n  gs    {b}"));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} of {} differ:\n{}",
+        bad.len(),
+        labels.len(),
+        bad.join("\n")
+    );
+}
+
+/// Transforms, geometries and the relative tolerance for one check.
+type SweepRun<'a> = (&'a [String], &'a [(&'a str, &'a str)], f64);
+
+/// How much a sweep transform magnifies user space (its largest scale).
+fn ctm_gain(ctm: &str) -> f64 {
+    if ctm.starts_with("1000") {
+        1000.0
+    } else if ctm.starts_with("10 ") {
+        10.0
+    } else {
+        1.0
+    }
+}
+
+/// Within `rel` of the larger magnitude in `want` (the corner's size).
+fn close_to(want: &[f64], got: &[f64], rel: f64) -> bool {
+    let size = want.iter().fold(1.0_f64, |m, x| m.max(x.abs()));
+    want.len() == got.len()
+        && want
+            .iter()
+            .zip(got)
+            .all(|(x, y)| (x - y).abs() <= rel * size)
+}
+
+#[test]
+fn sweep_tangent_points_do_not_depend_on_the_ctm() {
+    // User-space answers are CTM-independent, so each transform must give
+    // the identity's result. Strictly (1e-5 of the corner's size) where
+    // the current point keeps its precision; within 1% under a 0.1 or
+    // 1e-3 scale, where the f32 device current point carries ~3e-5 of the
+    // corner as noise; and the 6.7e-5 rad near fold-back (tangent length
+    // ~3000 legs) within 1% under the precise transforms only (under a
+    // small scale it is noise-dominated). The 1e-6 anisotropic transform
+    // is checked for sanity only, below. The hairpin is left out: whether it
+    // fits the device's coordinate range depends on the scale, as in gs.
+    let coarse_names = [
+        "0.1 0.1 scale",
+        "1 0.001 scale",
+        "0.001 0.001 scale",
+        "0.001 0.001 scale 37 rotate",
+    ];
+    let precise: Vec<String> = well_conditioned_ctms()
+        .into_iter()
+        .filter(|c| !coarse_names.contains(&c.as_str()))
+        .collect();
+    let coarse: Vec<String> = coarse_names.iter().map(|s| s.to_string()).collect();
+    let clear: Vec<(&str, &str)> = WELL_CONDITIONED
+        .iter()
+        .filter(|(n, _)| *n != "hairpin")
+        .copied()
+        .collect();
+    let near_fold = [("near fold-back", "13 17 moveto 113 17 -37 17.01 10")];
+    let runs: [SweepRun; 3] = [
+        (&precise, &clear, 1e-5),
+        (&coarse, &clear, 1e-2),
+        (&precise, &near_fold, 1e-2),
+    ];
+    let mut bad = Vec::new();
+    for (ctms, geoms, rel) in runs {
+        for (name, g) in geoms {
+            let (id_body, _) = sweep_program(&["".to_string()], &[(name, g)]);
+            let want = sweep_words(&sweep_pscat(&id_body)[0]);
+            let (body, labels) = sweep_program(ctms, &[(name, g)]);
+            for ((label, ctm), line) in labels.iter().zip(ctms.iter()).zip(sweep_pscat(&body)) {
+                // A corner the transform carries past the device's
+                // coordinate range is limitcheck, as in gs.
+                let leaves_range = want.as_ref().is_ok_and(|x| {
+                    x.iter().fold(0.0_f64, |m, v| m.max(v.abs())) * ctm_gain(ctm) > 8.0e6
+                });
+                let same = match (&want, sweep_words(&line)) {
+                    (Ok(_), Err(e)) if leaves_range => e == "limitcheck",
+                    (Ok(x), Ok(y)) => close_to(x, &y, rel),
+                    (Err(x), Err(y)) => *x == y,
+                    _ => false,
+                };
+                if !same {
+                    bad.push(format!("{label}: {line} (identity: {want:?})"));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+fn sweep_collinear_from_the_origin_is_a_line_under_every_ctm() {
+    // The origin maps to the CTM's translation exactly, so the current
+    // point comes back exact and an exactly collinear corner stays a line
+    // (gs's fixed-point grid turns some rotations of this into limitcheck).
+    let mut ctms = well_conditioned_ctms();
+    ctms.extend(extreme_ctms());
+    for g in ["0 0 moveto 100 0 -50 0 10", "0 0 moveto 100 0 200 0 10"] {
+        let (body, labels) = sweep_program(&ctms, &[("collinear", g)]);
+        for (label, line) in labels.iter().zip(sweep_pscat(&body)) {
+            assert_eq!(
+                sweep_words(&line),
+                Ok(vec![100.0, 0.0, 100.0, 0.0]),
+                "{label}"
+            );
+        }
+    }
+}
+
+#[test]
+fn sweep_noise_dominated_inputs_stay_sane() {
+    // Where rounding decides, pscat (like gs) may answer either way, but it
+    // must answer: finite tangent points, or undefinedresult/limitcheck.
+    let mut ctms = well_conditioned_ctms();
+    ctms.extend(extreme_ctms());
+    let (body, labels) = sweep_program(&ctms, NOISE_DOMINATED);
+    let lines = sweep_pscat(&body);
+    assert_eq!(lines.len(), labels.len());
+    for (label, line) in labels.iter().zip(lines) {
+        match sweep_words(&line) {
+            Ok(v) => assert!(
+                v.len() == 4 && v.iter().all(|x| x.is_finite()),
+                "{label}: {line}"
+            ),
+            Err(e) => assert!(
+                e == "undefinedresult" || e == "limitcheck",
+                "{label}: {line}"
+            ),
+        }
     }
 }

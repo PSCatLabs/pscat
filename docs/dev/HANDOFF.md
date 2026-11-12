@@ -511,11 +511,12 @@ renders eight examples in both and compares block-downsampled output).
   a zero-length cubic for `r = 0`, a negative `r` mirrored through the
   corner, `undefinedresult` for p0 = p1 or p1 = p2. They differ in two
   places: a failed call consumes its operands like every pscat operator
-  (gs leaves them), and "collinear" allows a few f32 ulps of the stored
-  device current point, per axis on the line's normal, because the current
-  point is kept in f32 device space (gs raises
-  `limitcheck` on an ill-conditioned fold-back that pscat draws or
-  flattens to a line). `tests/arcto.rs` compares both against `gs`.
+  (gs leaves them), and where rounding decides (short legs or exact
+  fold-backs under a rotation, tiny scales) the f32 device current point
+  and gs's fixed-point grid give different noise. The decision itself is
+  gs's: exact collinearity, no tolerance, `limitcheck` past gs's
+  fixed-point range. `tests/arcto.rs` compares against `gs`, including a
+  sweep over 32 transforms.
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,

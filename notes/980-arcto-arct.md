@@ -22,20 +22,31 @@ operand stack and `pathforall`, and rasterises two rounded rectangles in each):
   checked after the operands (a bad operand wins).
 - `arct` is `arcto` without the four results.
 
+**The decision follows gs's `gs_arcto`, with no tolerance.** The legs are
+exactly collinear (cross product 0) or they are a corner; a zero leg is
+`undefinedresult`; a corner whose tangent points leave the device's
+coordinate range is `limitcheck`, with gs's fixed-point limit (2^31/256
+device units at 72 dpi; pscat measures device pixels over pixels per
+point). So the hairpin `0 0 moveto 100 0 -50 0.0001 10 arcto` is
+`limitcheck` in both, and a 0.0001-long leg, a far p2, a magnifying,
+shrinking, sheared or non-uniform CTM all keep their corner. The combined
+Codex review (batch 1) found a straightened corner in six rounds under a
+tolerance; this replaced it. `tests/arcto.rs`'s sweep checks gs agreement
+over 32 transforms and 11 well-conditioned geometries, CTM invariance of
+the user-space answer, and sanity where rounding decides.
+
 **Deviations from gs.** (1) A failed call consumes its operands, the same as
 `lineto` and every other pscat operator (HANDOFF.md, "Deliberate deviations");
-gs leaves them. (2) "Collinear" allows for the current point's single-precision
-storage: arcto reads the stored device point exactly (inverse CTM in f64) and
-treats it as on the line p1-p2 when its device-space distance is within 4 f32
-ulps of the terms that made each coordinate, projected on the line's normal,
-and the corner is nearly straight in user space (sine under 1e-4), so a short
-leg into a real corner, or a corner a non-uniform CTM squashes in device
-space, is never swallowed.
-So a rotated fold-back (meant as collinear) is a line, while a far p2, a
-magnifying or shrinking CTM, a large page translation or a 0.0001-long leg
-keep their corner, and p0 = p1 is compared in device space (all from the
-combined Codex review, batch 1). gs raises `limitcheck` for a near-fold-back (angle under about 1e-5 rad)
-where pscat either draws the large geometry or, inside the tolerance, a line.
+gs leaves them. (2) Where rounding decides, the two differ in noise. pscat
+keeps the current point in f32 device space (read back with the inverse CTM
+in f64), gs on a 1/256-unit fixed-point grid. So a short leg under a
+rotation, an exact fold-back from a point other than the origin under a
+rotation (a line or `limitcheck`, by rounding, in both), a 1e-3 scale, or a
+near fold-back can give different tangent points or a different answer;
+neither is the exact geometry there, and pscat is usually the closer.
+p0 = p1 is also compared where pscat stores the current point (the same f32
+transform `lineto x1 y1` would store), so a rotation cannot hide it: gs,
+with its grid, returns a curve for some rotations of that case.
 
 **Not done.** `--capabilities` lists no PLRM operators by design
 (`src/capabilities.rs`), so neither operator is added there. No `%%SelfTest`
