@@ -831,6 +831,17 @@ renders eight examples in both and compares block-downsampled output).
    `enter_clip` and keep its own inner `q ... Q`. Page content streams
    are Flate-compressed (#244), so tests reading PDF operators use
    `tests/common/mod.rs::pdf_text`.
+   `pdfmark` (#1032, `src/ops/pdfmark.rs`) converts its operands into
+   `pdf::PdfValue` trees that the recorder keeps until `finish`. Named
+   objects are numbered after the shadings and before `/Info`, and the
+   Catalog gets `/Names /EmbeddedFiles` only when something was embedded,
+   so a document without pdfmark is byte-identical to before. PostScript
+   dict keys are written sorted, because a dict's own order follows
+   interned name ids, which the CLI and the wasm build may number
+   differently. `tests/pdf_pdfmark.rs` holds the CLI-vs-wasm byte check.
+   It skips without the wasm target or node. The `npm` workflow, the only
+   CI job that has both, runs only `--test wasm`, so CI does not run this
+   check yet; run it locally after touching `src/pdf.rs`.
 4. Dry media (epic #232): **read `docs/dev/design/DRYMEDIA.md` and
    `docs/dev/design/drymedia/REFERENCES.md` before starting #234–#242.** The design
    (#233) is approved, with every recommended answer to its Q1–Q9.
