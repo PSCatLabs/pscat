@@ -24,8 +24,8 @@ Which tool to pick for a picture (pscat, an image model, or an LLM's own
 SVG or matplotlib), and how pscat lets a model with no image output of its
 own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
 
-In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step. No separate install is needed
+In Claude Code the easiest route is the **plugin**, which installs the four
+skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
 on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
 uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
 downloads the pinned GitHub release once, checks it against the release's
