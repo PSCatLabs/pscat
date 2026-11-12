@@ -131,10 +131,43 @@ and does not have to match pscat's version of one.
   formula on the board. Run it on an `Interp` of `driver.page_size()` at
   `driver.dpi()`, after `driver.prepare(&mut interp)` (which makes the page
   transparent when there is no board, and sets the PDF title; call it after
-  `enable_pdf`). When the run fails, `chalkboard::explain(&err)` turns a TeX
-  error back into one (`unsupported_command`, `\aleph`). A `ChalkError` has a
-  stable `code()`, the `token()` a TeX error named, and `message()`, which
-  names a bad config key by its path (`layout.width must be ...`).
+  `enable_pdf`). When the run fails, turn the
+  error back into a TeX error with `driver.explain(interp.captured_stdout(),
+  &err)` (call `interp.capture_stdout()` before the run): it carries every
+  unsupported command or character in the formula, each with its place.
+  `chalkboard::explain(&err)` alone names only the first, with no place. A
+  `ChalkError` has a stable `code()`, the `token()` a TeX error named, and
+  `message()`, which names a bad config key by its path
+  (`layout.width must be ...`).
+
+  `error.problems()` is the list `pscat chalk` prints and pscat's MCP tool
+  returns as `problems`, in the same order and at the same places: a
+  `&[chalkboard::Problem]` with `code()`, `message()`, `token`, `line`,
+  `column` (both counted from 1) and `offset` (bytes into the LaTeX). It is
+  empty for an error that is not a list of TeX problems: a config error, no
+  formula, a render failure, or the position-less error from `explain` alone.
+
+  ```rust
+  use pscat::chalkboard::BoardConfig;
+  use pscat::Interp;
+
+  let board = BoardConfig::default();
+  let driver = board.driver("x + \\aleph\n+ ☃")?;
+  let (w, h) = driver.page_size();
+  let mut interp = Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
+  interp.capture_stdout();
+  let err = interp.run_str(driver.source()).expect_err("outside the subset");
+  let e = driver.explain(interp.captured_stdout(), &err).expect("a TeX error");
+
+  // two problems from one input, with their places
+  let found: Vec<_> = e.problems().iter().map(|p| (p.token.as_str(), p.line, p.column)).collect();
+  assert_eq!(found, [(r"\aleph", 1, 5), ("☃", 2, 3)]);
+  assert_eq!(e.problems()[0].code(), "unsupported_command");
+  assert_eq!(e.problems()[0].message(), r"unsupported LaTeX command \aleph");
+  # Ok::<(), pscat::chalkboard::ChalkError>(())
+  ```
+
+  (The same example runs as the doctest on `ChalkError::problems`.)
 - **Handwriting.** `pscat::handwriting` writes the programs behind
   `pscat handwrite`, as source for you to run in your own sandbox, so you can
   check the page between the two passes and run each under its own limits.

@@ -1058,6 +1058,9 @@ renders eight examples in both and compares block-downsampled output).
    and `chalkboard_math` returns as `problems`. `code` and `token` stay the
    first problem's, and the failing run still ends in the first problem's
    `mk-` error, so a caller that only reads `chalk::explain` is unchanged.
+   #1157: the supported facade has the same list: `chalkboard::Driver::explain(printed, err)`
+   and `ChalkError::problems() -> &[chalkboard::Problem]` (empty for config/render/position-less errors).
+   The hidden `ChalkError::Problems` stays for pscat-mcp until 0.7.0.
    #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem

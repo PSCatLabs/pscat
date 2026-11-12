@@ -23,7 +23,7 @@ gh issue view <N> --json state   # must print CLOSED
 gh issue edit <N> --remove-label in-review --remove-label in-progress
 gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
 gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'   # both counts >= 1
-gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback) review, round"))] | length'
+gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback|Agent) review, round"))] | length'
 # #1033: if target/ is a link into PSCAT_TARGET_ROOT, delete that build folder (only that exact path).
 T=$(readlink "$WORKTREE_DIR/target" 2>/dev/null) && [ -n "${PSCAT_TARGET_ROOT:-}" ] && [ "$T" = "$PSCAT_TARGET_ROOT/issue-<N>" ] && rm -rf "$T"
 git worktree remove "$WORKTREE_DIR" 2>&1 || true
