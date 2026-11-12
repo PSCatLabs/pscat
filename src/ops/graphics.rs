@@ -182,7 +182,7 @@ enum ArcTo {
 /// zero `r` gives a zero-length cubic at p1; collinear points give a
 /// plain line. `p0` is the current point read back through the CTM, so
 /// it carries single-precision noise: "collinear" is a perpendicular
-/// distance of 1e-6 relative to the coordinates' size, not exact zero
+/// distance of 1e-6 relative to the size of p0 and p1, not exact zero
 /// (a fold-back, whose tangent length is ~1/sin of the corner, would
 /// otherwise blow up on that noise). `UndefinedResult` when p1 equals
 /// p0 or p2, as gs; `Limitcheck` when a result is not finite.
@@ -201,7 +201,11 @@ fn arcto_geometry(
     let (u0, u2) = ((d0x / l0, d0y / l0), (d2x / l2, d2y / l2));
     let cross = u0.0 * u2.1 - u0.1 * u2.0;
     let dot = u0.0 * u2.0 + u0.1 * u2.1;
-    let scale = [p0, p1, p2]
+    // The noise is in p0 alone (the current point, back through device
+    // space), measured against p1; p2 only sets a direction, which the
+    // unit vector already carries exactly, so its size must not widen
+    // the tolerance (a far p2 on the same ray is the same corner).
+    let scale = [p0, p1]
         .iter()
         .flat_map(|p| [p.0.abs(), p.1.abs()])
         .fold(1.0, f64::max);

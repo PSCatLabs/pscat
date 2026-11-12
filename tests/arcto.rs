@@ -137,6 +137,21 @@ fn collinear_points_draw_a_line_to_the_corner() {
 }
 
 #[test]
+fn a_distant_direction_point_keeps_the_rounded_corner() {
+    // p2 only gives the second leg's direction: moving it far along the
+    // same ray must not turn the corner into a collinear line (Codex,
+    // combined review batch 1).
+    for p2 in ["100 100", "100 1000000", "100 1000000000"] {
+        assert_eq!(
+            run_case(&format!("{{ 0 0 moveto 100 0 {p2} 10 arcto }}")),
+            "c => ok stack: 90.0 0.0 100.0 10.0 path: m 0.0 0.0 l 90.0 0.0 \
+             c 95.52 0.0 100.0 4.48 100.0 10.0",
+            "{p2}"
+        );
+    }
+}
+
+#[test]
 fn zero_radius_is_a_line_and_a_zero_length_curve_as_in_gs() {
     let want = "c => ok stack: 100.0 0.0 100.0 0.0 path: m 0.0 0.0 l 100.0 0.0 \
                 c 100.0 0.0 100.0 0.0 100.0 0.0";
@@ -409,6 +424,10 @@ fn ghostscript_agrees_case_by_case() {
     let cases: &[(&str, &str)] = &[
         ("right angle", "0 0 moveto 100 0 100 100 10 arcto"),
         ("right angle arct", "0 0 moveto 100 0 100 100 10 arct"),
+        (
+            "distant direction point",
+            "0 0 moveto 100 0 100 1000000000 10 arcto",
+        ),
         ("clockwise turn", "0 0 moveto 100 0 100 -100 10 arcto"),
         ("obtuse", "0 0 moveto 100 0 150 50 10 arcto"),
         ("acute", "0 0 moveto 100 0 0 10 10 arcto"),
