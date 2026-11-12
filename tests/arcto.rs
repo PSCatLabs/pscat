@@ -230,20 +230,33 @@ fn a_short_first_leg_keeps_its_corner() {
     // corner: the page translation (device y near 772) must not swamp it
     // (Codex, combined review batch 1, round 4). gs 10.07.1 draws the
     // radius-10 curve ending near (20.0001, 30).
-    let got = run_case("{ 20 20 moveto 20.0001 20 20.0001 120 10 arcto }");
-    assert!(got.contains(" c "), "{got}");
-    let stack: Vec<f64> = got
-        .split("stack: ")
-        .nth(1)
-        .and_then(|s| s.split(" path:").next())
-        .unwrap()
-        .split_whitespace()
-        .map(|w| w.parse().unwrap())
-        .collect();
-    assert!(
-        (stack[2] - 20.0001).abs() < 1e-3 && (stack[3] - 30.0).abs() < 1e-3,
-        "{got}"
-    );
+    // The vertical counterpart (round 5) runs along the page's y
+    // translation itself; gs gives 20 10.0001 30 20.0001.
+    let cases = [
+        (
+            "20 20 moveto 20.0001 20 20.0001 120 10 arcto",
+            [10.0001, 20.0, 20.0001, 30.0],
+        ),
+        (
+            "20 20 moveto 20 20.0001 120 20.0001 10 arcto",
+            [20.0, 10.0001, 30.0, 20.0001],
+        ),
+    ];
+    for (src, want) in cases {
+        let got = run_case(&format!("{{ {src} }}"));
+        assert!(got.contains(" c "), "{src}: {got}");
+        let stack: Vec<f64> = got
+            .split("stack: ")
+            .nth(1)
+            .and_then(|s| s.split(" path:").next())
+            .unwrap()
+            .split_whitespace()
+            .map(|w| w.parse().unwrap())
+            .collect();
+        for (g, w) in stack.iter().zip(want) {
+            assert!((g - w).abs() < 1e-3, "{src}: {got}");
+        }
+    }
 }
 
 #[test]

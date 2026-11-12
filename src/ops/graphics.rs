@@ -245,7 +245,9 @@ fn arcto_user(m: Transform, q: (f64, f64)) -> Result<(f64, f64), PsError> {
 /// `tx`, ...), so the bound is per axis, projected on the line's normal:
 /// a large page translation along one axis does not widen the test
 /// across the other, a far p2 only sets the direction, and the CTM's
-/// scale moves the bound with the noise. Without the bound a rotated
+/// scale moves the bound with the noise. The corner must also be nearly
+/// straight, so a short leg into a real corner is never swallowed.
+/// Without the bound a rotated
 /// fold-back (which a program means as collinear) would ask for a
 /// tangent length of ~1/sin of a noise-sized corner.
 fn arcto_collinear(
@@ -268,7 +270,11 @@ fn arcto_collinear(
     let bx = (sx * p0.0).abs() + (kx * p0.1).abs() + tx.abs();
     let by = (ky * p0.0).abs() + (sy * p0.1).abs() + ty.abs();
     let ulps = 4.0 * f64::from(f32::EPSILON);
-    dist <= ulps * (nx.abs() * bx + ny.abs() * by)
+    // Both: within the rounding, and a nearly straight corner (the angle
+    // off the line under ~1e-4 rad), so the bound never swallows a whole
+    // short leg of a real corner (a right angle has dist equal to the leg).
+    let l0 = fmath::hypot(q0.0 - q1.0, q0.1 - q1.1);
+    dist <= ulps * (nx.abs() * bx + ny.abs() * by) && dist <= 1e-4 * l0
 }
 
 /// `x1 y1 x2 y2 r arcto` -> `xt1 yt1 xt2 yt2` (PLRM 3rd ed. §8.2), and
