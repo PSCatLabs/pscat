@@ -174,7 +174,11 @@ impl Default for Config {
 pub const MAX_SEED: i64 = 1_000_000_000;
 
 /// Why a board could not be made.
+///
+/// `#[non_exhaustive]`: PSCatLabs/pscat-mcp matches on this hidden enum, so a
+/// new variant (like `Problems`, #1080) must not break its build again.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ChalkError {
     /// A config key or value is wrong (the message names it).
     Config(String),

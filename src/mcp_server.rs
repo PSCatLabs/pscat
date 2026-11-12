@@ -2286,6 +2286,9 @@ fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
                 .with("problems", json!(problems))
         }
         ChalkError::Render(_) => ToolError::new("render_failed", e.to_string()),
+        // `ChalkError` is `#[non_exhaustive]`; a future variant reports as a
+        // LaTeX error with its message until it gets its own arm.
+        _ => ToolError::new("latex_error", e.to_string()),
     };
     err.with("code", json!(code))
 }
