@@ -293,8 +293,10 @@ fn draws_ink(text: &str) -> bool {
         .run_str(&render_source(&opts, height))
         .expect("the note renders");
     let page = interp.page(0).expect("one page");
-    page.rgba8()
-        .chunks_exact(4)
+    let rgba = page.rgba8();
+    let (pixels, _) = rgba.as_chunks::<4>();
+    pixels
+        .iter()
         .any(|p| p[3] != 0 && (p[0] != 255 || p[1] != 255 || p[2] != 255))
 }
 

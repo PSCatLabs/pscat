@@ -8,9 +8,15 @@
 
 use pscat::handwriting::{HandOptions, drawable, has_glyph, render_source};
 
+mod common;
+
+// A memory cap needs the tracking allocator; discovery uses one when it is there.
+#[global_allocator]
+static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
+
 #[test]
 fn an_override_library_is_followed_bounded_and_recoverable() {
-    let home = std::env::temp_dir().join(format!("pscat-hw-override-{}", std::process::id()));
+    let home = common::scratch_dir("hw-override");
     let lib = home.join("lib");
     std::fs::create_dir_all(&lib).expect("scratch lib dir");
     let file = lib.join("handscript.ps");
@@ -31,6 +37,13 @@ fn an_override_library_is_followed_bounded_and_recoverable() {
         started.elapsed() < std::time::Duration::from_secs(20),
         "discovery was not bounded"
     );
+
+    // An override that allocates without end stops at the memory cap, quickly.
+    std::fs::write(&file, "% memory bomb\n1000 { 1000000 array } repeat\n").unwrap();
+    assert!(uses_override("memory bomb"));
+    let started = std::time::Instant::now();
+    assert!(!has_glyph('a') && !drawable("abc"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
 
     // A good override afterwards works: the failure was not remembered.
     std::fs::write(&file, embedded).unwrap();
