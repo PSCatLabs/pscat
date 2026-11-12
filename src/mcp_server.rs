@@ -1134,6 +1134,7 @@ fn tool_list(cfg: &Config) -> Value {
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
             "bands": { "type": "integer", "minimum": 1, "maximum": cfg.max_bands, "description": bands_description(cfg) },
+            "gpu_preview": { "type": "boolean", "description": gpu_preview_description() },
             "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
         },
         "required": ["source"]
@@ -1151,6 +1152,13 @@ fn tool_list(cfg: &Config) -> Value {
         cfg.timeout.as_secs(),
         cfg.max_input
     );
+    let gpu = if GPU_BUILD {
+        "gpu_preview: true runs kernelimage kernels on the GPU in f32, an approximate \
+         preview that stays under the call's limits (see the argument)."
+    } else {
+        "gpu_preview needs a pscat built with the gpu feature; this one was not \
+         (gpu_unavailable)."
+    };
     json!([
         {
             "name": "render_postscript",
@@ -1165,7 +1173,7 @@ fn tool_list(cfg: &Config) -> Value {
                 {preview} \
                 Writes a file only when out_path is given (then it replaces an existing render \
                 file of that extension), which is why this tool is not marked read-only. \
-                {READS_BRIEF}",
+                {gpu} {READS_BRIEF}",
                 cfg.max_image),
             "inputSchema": render_schema.clone()
         },
@@ -1354,8 +1362,8 @@ fn tool_list(cfg: &Config) -> Value {
                 --job-timeout) under the same step, memory and pixel limits; {} run at once \
                 and more wait queued; a finished job is kept {}s. Bad arguments are refused \
                 here, before any job starts. A long render of a program that reads /BandBBox \
-                can also pass bands to use several threads. Writes a file only when out_path \
-                is given.",
+                can also pass bands to use several threads. {gpu} Writes a file only when \
+                out_path is given.",
                 cfg.job_timeout.as_secs(), cfg.max_jobs, cfg.job_ttl.as_secs()),
             "inputSchema": render_schema
         },
@@ -1405,6 +1413,32 @@ fn bands_description(cfg: &Config) -> String {
          Step and time limits apply to each band, the memory limit to all of them together, \
          and the call's (or job's) wall-clock limit to the whole render.",
         cfg.max_bands
+    )
+}
+
+/// The `gpu_preview` argument's description (issue #1065): what it gives,
+/// whether this build has it, and how the call's limits still bound it.
+fn gpu_preview_description() -> String {
+    let build = if GPU_BUILD {
+        "This server's pscat has it."
+    } else {
+        "This server's pscat was built without the gpu cargo feature, so true is a \
+         gpu_unavailable error."
+    };
+    format!(
+        "Run compiled kernelimage procedures on the GPU in 32-bit floats, as pscat \
+         --gpu-preview: a fast, approximate preview of a heavy kernel piece, not the CPU's \
+         exact pixels (no PostScript error checks inside the kernel). Default false; leave \
+         it off for a final render. {build} The call's limits still apply: the time and \
+         step limits are checked before each GPU dispatch of at most {} pixels and stop \
+         the render with limit_exceeded. GPU loop trips are not counted as steps but \
+         capped at {} per pixel, so a runaway loop returns a capped (often blank) image, \
+         not an error, unless the capped work runs past the limits. One dispatch cannot be interrupted, so a dispatch still \
+         running at the call's (or job's) wall-clock limit is killed (timeout). A kernel \
+         that does not compile, or a GPU failure, runs on the CPU; Warnings name the GPU \
+         that ran. Other drawing is unaffected.",
+        pscat::GPU_CHUNK_PIXELS,
+        pscat::GPU_LOOP_CAP
     )
 }
 
@@ -1512,6 +1546,8 @@ struct RenderPlan {
     halftone: bool,
     /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
     bands: u32,
+    /// `--gpu-preview` (issue #1065): compiled kernels in f32 on the GPU.
+    gpu_preview: bool,
     dest: Option<Dest>,
 }
 
@@ -1562,6 +1598,7 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         return Err(too_many_pixels(cfg, "the page", w_px, h_px));
     }
     let bands = render_bands(cfg, args, format, h_px)?;
+    let gpu_preview = render_gpu_preview(args)?;
     // Checked before rendering, so a refused path costs nothing.
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, format))
@@ -1580,8 +1617,35 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         dpi,
         halftone,
         bands,
+        gpu_preview,
         dest,
     })
+}
+
+/// Whether the child running the render was built with the `gpu` feature.
+/// It is the `pscat` beside this binary ([`pscat_bin`]), from the same
+/// cargo build, so this build's feature set is the child's.
+const GPU_BUILD: bool = cfg!(all(feature = "gpu", not(target_arch = "wasm32")));
+
+/// The `gpu_preview` argument (issue #1065). `false` is accepted by every
+/// build; `true` only by one with the `gpu` feature, and refused before
+/// any child or job starts otherwise.
+fn render_gpu_preview(args: &Value) -> Result<bool, ToolError> {
+    let on = optional_bool(args, "gpu_preview")?.unwrap_or(false);
+    if on && !GPU_BUILD {
+        return Err(gpu_unavailable());
+    }
+    Ok(on)
+}
+
+fn gpu_unavailable() -> ToolError {
+    ToolError::new(
+        "gpu_unavailable",
+        "gpu_preview needs a pscat built with the `gpu` cargo feature \
+         (cargo build --release --features gpu); this server's pscat was built without it. \
+         Leave gpu_preview out to render on the CPU",
+    )
+    .with("argument", json!("gpu_preview"))
 }
 
 /// The `bands` argument, checked against everything `pscat --bands` would
@@ -1634,6 +1698,7 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         dpi,
         halftone,
         bands,
+        gpu_preview,
         dest,
     } = plan;
     let (format, flag, dpi) = (*format, *flag, *dpi);
@@ -1664,6 +1729,9 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     if *halftone {
         cmd.arg("--halftone");
     }
+    if *gpu_preview {
+        cmd.arg("--gpu-preview");
+    }
     // A page the program's `setpagedevice` asks for is held to the same cap
     // as the first one, in the child (#909).
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
@@ -1678,6 +1746,11 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     let (lint_findings, other_stderr) = split_lint_findings(&run.stderr);
 
     let pages = collect_pages(&out);
+    // A `pscat` beside this server from another build (copied in by hand)
+    // refuses the flag before it renders anything.
+    if pages.is_empty() && *gpu_preview && run.stderr.contains("--gpu-preview needs a pscat") {
+        return Err(gpu_unavailable());
+    }
     if pages.is_empty() {
         return Err(failed_run(
             "no_output",

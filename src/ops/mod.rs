@@ -56,6 +56,7 @@ pub fn install_all(dict: &mut Dict) {
     level2::install(dict);
     shading::install(dict);
     noise::install(dict);
+    crate::kernel::install(dict);
     pagedevice::install(dict);
     pdfmark::install(dict);
 

@@ -45,6 +45,13 @@ light_gate:                  # optional: the local gate for a PR whose every cha
   paths: ["docs/*", "notes/*"]   # globs; `*` also matches `/`. Only paths no test, lint or build reads
   exclude: [<globs of docs that tests execute>]  # optional: a match here needs the full gate
   command: <a fast check, e.g. a Markdown link check>
+independent_review:          # optional: who reviews which PR, and how many rounds
+  # cross_family_paths: a one-line JSON list in CODEOWNERS syntax; these PRs get a cross-family review
+  cross_family_paths: ["/src/", "/Cargo.lock", "/scripts/review_tier.py", "/scripts/codeowners_check.py"]
+  max_rounds: 2
+  wave_batch_max_prs: 5
+  wave_batch_max_changed_lines: 2000
+  stale_pr_days: 7
 dispatch_doc: <path>         # optional: how a dispatcher session runs many issues with agents
 release:                     # optional; absent means no release section
   process_doc: <path to the release procedure>
@@ -88,6 +95,35 @@ it to GitHub.
 8. **Independent review** — a reviewer with no context from
    implementation (a fresh session, or `/code-review`) checks the diff
    cold. Must come back clean to proceed.
+   <!-- Include the rest of this step only when independent_review is set,
+   in place of the last sentence above. -->
+   Must come back clean to proceed: **clean** means no open blocking
+   finding, and every other finding has a written response.
+   Which reviewer depends on risk, not size (`independent_review` in the
+   frontmatter; `python3 scripts/review_tier.py --base origin/main`
+   decides, and an error from it means cross-family):
+   - **Cross-family** (a reviewer from another model family) when the diff
+     touches a `cross_family_paths` entry (`<summarise the list>`). The
+     dispatcher may also ask for it on any PR. A `bot_merge_authors` PR is
+     exempt: green CI is its review.
+   - **Agent** (a same-family, blank-context reviewer) for everything else.
+     A visible render change still gets the perceptual review when
+     `visible_change_review` is set.
+
+   **At most `max_rounds` (<max_rounds>) review rounds**, counting from 1.
+   After the last round, only a finding that is a real correctness,
+   security or data-loss defect blocks the merge. Every other open finding
+   is answered in the round's table and listed as a proposed follow-up. A
+   fix for a blocking finding made after the last round is pushed, and gets
+   one confirmation review limited to that fix; if that one still finds a
+   blocking defect, the PR stops without merging and goes to the owner.
+   When a finding turns on how a reference implementation behaves, run it
+   and quote the output in the response instead of arguing it over another
+   round.
+   <!-- Include this sentence only when dispatch_doc is also set. -->
+   In a dispatched wave, the dispatcher runs one combined cross-family
+   review per batch, over a branch that merges them all (`<dispatch_doc>`,
+   "Review").
 9. **Merge**, per the policy above:
    - `human-only`: a human merges every PR, always.
    - `agent-full`: an agent may merge any PR once CI is green and

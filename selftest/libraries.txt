@@ -28,3 +28,4 @@ lib/qr.ps
 lib/functional.ps
 lib/aspect.ps
 lib/warp.ps
+lib/kernel.ps

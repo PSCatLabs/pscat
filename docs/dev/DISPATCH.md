@@ -42,6 +42,40 @@ The goals preamble at the top of the work-issue skill covers quality first, perf
 no Ghostscript timing and waiting for CI. The prompt adds only what the skill cannot know: the issue
 number, the lane (which files are this agent's), and whether the PR is expected to need the owner.
 
+## Review
+
+`SDLC.md` step 8 sets who reviews: Codex for PRs that touch `independent_review.cross_family_paths`
+(`scripts/review_tier.py`), a blank-context agent for the rest, with at most 2 rounds. In a wave
+the dispatcher batches the Codex reviews, so agents don't each wait on their own round trip:
+
+- **Agent-tier PRs review and merge as usual**, each with its own agent review.
+- **Cross-family PRs in a wave stop before Codex.** The prompt says "combined wave review": the
+  agent waits for green CI and stops (`pitfalls.md` "Combined wave review").
+- **One combined Codex review per batch** of up to `wave_batch_max_prs` (5) PRs or
+  `wave_batch_max_changed_lines` (2000) changed lines, whichever limit is reached first, grouped
+  by area so the reviewer has context. A bigger wave is split into several batches.
+- **Record it per issue.** After each round, post a `## Codex review, round <R> (PR <URL>,
+  reviewed head <sha>)` comment on every issue in the batch, with that PR's head SHA and the
+  findings that apply to it (or "no findings for this PR"), so a resumed `/work-issue <N>` sees a
+  current review instead of starting its own. Then re-run `/work-issue <N>` for each PR: it lands
+  on the "review current" resume row and merges per its tier.
+- **Integration tree first.** Before the review, merge every PR in the batch into one local
+  branch off `origin/main` and run the full quality gate on it, plus what per-PR CI runs only
+  piecemeal: `cargo test --no-default-features`, the npm tests (`./scripts/build_npm.sh` and
+  `npm test` in `npm/`) and the Ghostscript parity tests. This catches clashes between PRs that
+  pass alone. Then Codex reviews that branch against `origin/main`, and the dispatcher pushes
+  each fix to the PR it belongs to.
+- **Round cap.** Two rounds, as in `SDLC.md`. After round 2, only real correctness, security or
+  data-loss defects block. The rest become follow-ups (filed when they have user-visible impact,
+  "Follow-ups" below). A finding about PostScript semantics is settled by a `gs` run quoted in the
+  response, not by another round.
+- **No stale PRs.** At each wave start, every open PR with no activity for `stale_pr_days` (7)
+  days goes into this wave's review or gets closed with a comment saying why (the branch stays,
+  so it can be reopened). Closing one moves its issue from `in-review` back to open with no
+  status label, so the picker can choose it again. Exempt: PRs waiting on the owner (tier (c),
+  a Decision block), which go back on the owner's list instead, and bot PRs (Dependabot), which
+  follow `merge_policy.bot_merge_authors`.
+
 ## Merges
 
 Agents merge their own tier (a) and tier (b) PRs (`SDLC.md`, "Who merges"). The dispatcher:

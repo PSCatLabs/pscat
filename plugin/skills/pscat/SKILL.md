@@ -266,8 +266,9 @@ Each line says when to open which reference file in `references/`.
   arrays, `pscat photo-etch` (photo to engraving), the live window (`pscat
   file.ps`, `-i`, `--spool`), the `--capabilities` inventory:
   [references/extensions.md](references/extensions.md).
-- **MCP details**: render jobs, time limits, `bands`, the `limit_exceeded`
-  error, registering the server:
+- **MCP details**: render jobs, time limits, `bands`, `gpu_preview` (a fast
+  f32 preview of a `kernelimage` piece), the `limit_exceeded` error,
+  registering the server:
   [references/mcp.md](references/mcp.md).
 - **Art** (palettes, turtle, L-systems, brushes, paint and dry media,
   chalkboards, TeX on a board): the `psart` skill.
@@ -288,7 +289,7 @@ takes from `out-root = DIR` in `~/.config/pscat/plugin.conf`), end in the output
 format's extension (`.png`, `.svg`, `.pdf`) and not sit in a dot-directory such
 as `.git/`, and large inline images are refused: lower `dpi` or pass `out_path`.
 A workspace outside the root: save there, then `cp` the file; never decode an
-inline image. Jobs, limits, `bands` and registering the server:
+inline image. Jobs, limits, `bands`, `gpu_preview` and registering the server:
 [references/mcp.md](references/mcp.md).
 
 ## Pitfalls

@@ -603,6 +603,129 @@ fn every_problem_is_reported_at_once_with_its_place() {
     assert_eq!(one.lines().count(), 1, "{one}");
 }
 
+/// The supported library list (`pscat::chalkboard`, issue #1157) is the list
+/// `pscat chalk` prints: same problems, same order, same places, same
+/// messages. It names only documented items.
+#[test]
+fn the_library_problem_list_is_the_cli_list() {
+    use pscat::chalkboard::BoardConfig;
+    let dir = scratch("problems-lib");
+    let tex = "\\text{G\\\"odel's First Incompleteness Theorem}\n\
+               \\text{G日del} \\\\\n\
+               x ``quoted'' + \\aleph \\; ☃";
+    std::fs::write(dir.join("in.tex"), tex).unwrap();
+    let out = pscat(&dir, &["chalk", "--file", "in.tex", "-o", "bad.png"], None);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    // "  L:C  message" lines under the "N problems" header
+    let cli: Vec<(usize, usize, String)> = err
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let (at, msg) = l.trim_start().split_once("  ")?;
+            let (line, col) = at.split_once(':')?;
+            Some((line.parse().ok()?, col.parse().ok()?, msg.to_string()))
+        })
+        .collect();
+    assert_eq!(cli.len(), 5, "{err}");
+
+    let board = BoardConfig::default();
+    let driver = board.driver(tex).expect("the delimiters are balanced");
+    let (w, h) = driver.page_size();
+    let mut interp = pscat::Interp::with_page_scaled(w, h, 1.0).expect("valid page");
+    interp.capture_stdout();
+    let run_err = interp
+        .run_str(driver.source())
+        .expect_err("outside the subset");
+    let e = driver
+        .explain(interp.captured_stdout(), &run_err)
+        .expect("a TeX error");
+    let lib: Vec<(usize, usize, String)> = e
+        .problems()
+        .iter()
+        .map(|p| (p.line, p.column, p.message().to_string()))
+        .collect();
+    assert_eq!(lib, cli);
+    assert_eq!(e.code(), "unsupported_command");
+    assert_eq!(e.problems()[0].code(), "unsupported_command");
+    assert_eq!(e.problems()[1].code(), "unsupported_character");
+    for p in e.problems() {
+        assert!(tex[p.offset..].starts_with(&p.token), "{p:?}");
+    }
+
+    // the hidden list is the same one (pscat-mcp matches on it until 0.7.0)
+    let hidden = chalk::render(tex, &small(), Format::Png).unwrap_err();
+    let chalk::ChalkError::Problems(hs) = &hidden else {
+        panic!("{hidden:?}");
+    };
+    assert_eq!(hs.len(), e.problems().len());
+    for (h, p) in hs.iter().zip(e.problems()) {
+        assert_eq!(
+            (&h.token, h.line, h.column, h.offset, h.code(), h.message()),
+            (
+                &p.token,
+                p.line,
+                p.column,
+                p.offset,
+                p.code().to_string(),
+                p.message().to_string()
+            )
+        );
+    }
+
+    // a delimiter problem is found before any run
+    let Err(e) = board.driver(r"x = \(y") else {
+        panic!("an unclosed \\( is an error")
+    };
+    assert_eq!(e.problems().len(), 1);
+    assert_eq!((e.problems()[0].line, e.problems()[0].column), (1, 5));
+
+    // not TeX problems: no list
+    let bad = BoardConfig::from_json(r#"{"layout": {"width": 1}}"#)
+        .and_then(|c| c.check().map(|()| c))
+        .unwrap_err();
+    assert!(bad.is_input_error() && bad.problems().is_empty(), "{bad}");
+    let e = board.driver("").unwrap_err();
+    assert!(e.problems().is_empty(), "{e}");
+    // `explain` alone never sees the input: the code and token, no list
+    let lone = pscat::chalkboard::explain(&pscat::PsError::Undefined(
+        "mk-unsupported-command:\\aleph".into(),
+    ))
+    .unwrap();
+    assert!(lone.problems().is_empty());
+    assert_eq!(lone.token(), Some("\\aleph"));
+    // nothing printed: the same, through the driver
+    let e = driver.explain(b"", &run_err).unwrap();
+    assert!(e.problems().is_empty());
+
+    // partial or garbled output (a limit that fired mid-print, the program's
+    // own lines first): whatever parses, never a panic, never None
+    let printed = interp.captured_stdout().to_vec();
+    assert!(
+        printed
+            .split(|&b| b == b'\n')
+            .filter(|l| !l.is_empty())
+            .all(|l| l.starts_with(pscat::chalkboard::PROBLEM_LINE_PREFIX.as_bytes())),
+        "every check-pass line carries the prefix"
+    );
+    let cut = printed.len() / 2;
+    let mut garbled = b"hello from the program\nCKPROBLEM\tx\ty\n\xff\xfe\n".to_vec();
+    garbled.extend_from_slice(&printed[..cut]);
+    garbled.extend_from_slice(b"CKPROBLEM\t99\t0\t1\tunsupported-command\t\\q\n");
+    let e = driver
+        .explain(&garbled, &run_err)
+        .expect("still a TeX error");
+    assert!(e.problems().len() <= cli.len(), "{e}");
+    assert_eq!(e.code(), "unsupported_command");
+    for junk in [
+        &b"CKPROBLEM\t"[..],
+        b"CKPROBLEM\t0\t99999\t1\tx\tq\n",
+        b"\xff",
+    ] {
+        assert!(driver.explain(junk, &run_err).is_some());
+    }
+}
+
 /// A structural error (a missing brace) is listed with the unsupported
 /// characters before it, and a run of them is capped.
 #[test]
