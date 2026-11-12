@@ -10,8 +10,17 @@ the same interpreter as the [`pscat` crate and command-line tool](https://github
 npm install pscat
 ```
 
-Node 22 or later, or any current browser. It is ESM only, ships
-TypeScript types, and has no dependencies and no install scripts.
+Node 22 or later, or any current browser. It is ESM (plus a classic-script
+build for `<script>` tags, below), ships TypeScript types, and has no
+dependencies and no install scripts.
+
+`import 'pscat'` picks the right entry for you: `node.js` in Node (it reads
+`pscat.wasm` from disk), `index.js` in browsers and bundlers (it fetches
+it). To choose the Node entry explicitly, for instance when you load the
+package by file path, import `pscat/node.js`. Importing `index.js` by path
+in Node fails with an error that says so, because Node's `fetch` cannot read
+`file:` URLs; pass `createRenderer({ wasm })` the module's bytes if you
+need that entry there.
 
 ## Render a page
 
@@ -33,6 +42,31 @@ page.output;  // what the program printed with = == print stack pstack
 In a browser, `r.paintTo(canvas)` draws the page into a `<canvas>`
 (resizing it), and `r.imageData()` returns an `ImageData`.
 
+## Without modules: a plain `<script>` tag
+
+`pscat.global.js` is the same API as one classic script, for a page with no
+bundler, an inline script in a single HTML file, or a classic worker. It
+defines one global, `pscat`, holding `createRenderer`, `PostScriptError` and
+`Renderer`:
+
+```html
+<script src="node_modules/pscat/pscat.global.js"></script>
+<script>
+  pscat.createRenderer().then((r) => {
+    r.render('0 0 1 setrgbcolor 20 20 100 60 rectfill', { width: 160, height: 100 });
+    r.paintTo(document.querySelector('canvas'));
+  });
+</script>
+```
+
+`pscat.wasm` is fetched from next to the script. Where the script cannot
+tell where it came from (inline, `blob:`, a worker, a `file://` page that
+cannot fetch), `createRenderer()` says so, and you pass the module:
+`createRenderer({ wasm: url })` or `{ wasm: bytes }`. From a CDN once the
+release is on npm, load the file by name
+(`https://unpkg.com/pscat@X.Y.Z/pscat.global.js`): a bare package URL has no
+`pscat.wasm` beside it.
+
 ## Watch it draw
 
 ```js
@@ -44,7 +78,8 @@ for (const _ of r.frames(source, { width: 612, height: 792, budget: 300 })) {
 
 `frames()` runs `budget` PostScript objects per iteration. To drive it
 yourself, call `r.begin(source, options)` and then `r.step(budget)` until
-it returns `false`.
+it returns `false`. `r.pageCount()` says how many pages there are so far,
+for a "page N" label on a long document.
 
 ## SVG and PDF
 
@@ -140,6 +175,7 @@ as Ghostscript does.
 | `pixels()` | A copy of the page as RGBA bytes. |
 | `warnings` | Notes about pack faces that were replaced since `begin` (an array of strings, empty when none). |
 | `image()` | `{ width, height, data, output, warnings }` for the page as it is now. |
+| `pageCount()` | How many pages the run holds now: those `showpage` or `copypage` emitted, plus the page being drawn if it has art on it (or is the only page). Works between `step()` calls and after the run, whatever is recorded, and equals `svgPages().length` with `svg: true`. 0 before `begin`. |
 | `svg(page = 0)`, `svgPages()` | SVG page `page` (from 0) as a string, or every page in order. Needs `svg: true`. |
 | `pdf()` | The whole document as PDF bytes (`Uint8Array`). Needs `pdf: true`. |
 | `imageData()` | The page as an `ImageData` (browsers and workers). |

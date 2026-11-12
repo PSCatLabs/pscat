@@ -6,6 +6,7 @@
 Builds a tiny site in a temp dir, checks it passes, then breaks it one way at
 a time and checks the right complaint appears.
 """
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,10 +25,30 @@ PAGE = """<!DOCTYPE html><html><head><!--@head--><title>t</title></head><body>
 <!--@header %s-->%s<!--@footer--></body></html>"""
 
 
-def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
+LLMS = """# t
+
+> A summary.
+
+Some text, and a snippet whose comment is not a heading:
+
+```sh
+# install it
+```
+
+## Docs
+
+- [Guides](%sguides.html): the guides
+- [A doc](%sdocs/a.md): from the repo
+- [Home](%s): the front page
+""" % (check_site_links.SITE_URL, check_site_links.RAW_URL + "main/", check_site_links.SITE_URL)
+
+
+def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm"), llms=LLMS):
     """Write pages ({name: (nav_key, body)}), apply the shell, return the site dir."""
     site = Path(tmp) / "_site"
     site.mkdir()
+    if llms is not None:
+        (site / "llms.txt").write_text(llms)
     for f in extra_files:
         (site / f).write_text("")
     (site / "assets/brand").mkdir(parents=True)  # the favicon every page links (#927)
@@ -83,6 +104,54 @@ class SiteScripts(unittest.TestCase):
         probs = run_check(site, self.repo)
         self.assertEqual(len(probs), 1)
         self.assertIn("moved.md", probs[0])
+
+    def llms_problems(self, llms, guides=()):
+        for g in guides:
+            (self.repo / "docs" / "guides").mkdir(parents=True, exist_ok=True)
+            (self.repo / "docs" / "guides" / g).write_text("x")
+        shutil.rmtree(Path(self.tmp.name) / "_site", ignore_errors=True)
+        site = build(self.tmp.name, full(), llms=llms)
+        return run_check(site, self.repo)
+
+    def test_llms_missing(self):
+        probs = self.llms_problems(None)
+        self.assertIn("llms.txt is missing from the site", probs)
+
+    def test_llms_structure(self):
+        sections = "## S\n- [a](%sguides.html): d\n" % check_site_links.SITE_URL
+        self.assertTrue(any("one H1" in p for p in self.llms_problems("> s\n" + sections)))
+        self.assertTrue(any("one H1" in p for p in self.llms_problems("# a\n# b\n> s\n" + sections)))
+        self.assertTrue(any("> summary" in p for p in self.llms_problems("# a\n\ntext\n" + sections)))
+        self.assertTrue(any("no ## sections" in p for p in self.llms_problems("# a\n> s\n")))
+        bad = "# a\n> s\n## S\n- [a](%sguides.html)\n- not a link\n" % check_site_links.SITE_URL
+        self.assertEqual(len(self.llms_problems(bad)), 1)  # a bare link is fine, a bare bullet is not
+
+    def test_llms_links_must_resolve(self):
+        head = "# a\n> s\n## S\n"
+        site, raw = check_site_links.SITE_URL, check_site_links.RAW_URL + "main/"
+        cases = {
+            "- [x](%snope.html): d" % site: "not on the site",
+            "- [x](%sguides.html#gone): d" % site: "no #gone",
+            "- [x](%sdocs/gone.md): d" % raw: "not in the repo",
+            "- [x](%sdocs/A.md): d" % raw: "not in the repo",  # case counts
+            "- [x](%sdocs/a.md#top): d" % raw: "no anchors",
+            "- [x](%sdocs/a.md): d" % (check_site_links.RAW_URL + "v1.0/"): "not under main",
+            "- [x](%s/blob/main/docs/gone.md): d" % check_site_links.REPO_URL: "not in the repo",
+            "- [x](docs/a.md): d": "not absolute",
+        }
+        for line, want in cases.items():
+            probs = self.llms_problems(head + line + "\n")
+            self.assertTrue(any(want in p for p in probs), (line, probs))
+        # an external link is not fetched; a github blob link into the repo is fine
+        ok = head + "- [x](https://example.com/): d\n- [y](%s/blob/main/docs/a.md): d\n" % check_site_links.REPO_URL
+        self.assertEqual(self.llms_problems(ok), [])
+
+    def test_llms_must_list_every_guide(self):
+        probs = self.llms_problems(LLMS, guides=["new.md"])
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("docs/guides/new.md is not listed", probs[0])
+        listed = LLMS + "- [New](%sdocs/guides/new.md): new\n" % (check_site_links.RAW_URL + "main/")
+        self.assertEqual(self.llms_problems(listed, guides=["new.md"]), [])
 
     def test_link_case_must_match_exactly(self):
         # passes on a case-insensitive file system unless the check is exact

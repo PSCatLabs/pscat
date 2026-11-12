@@ -442,20 +442,56 @@ fn latin1(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Every string the program paints with `show` or `ashow`, one per line,
+/// after `variant` (PostScript run before the example).
+fn painted(variant: &str) -> Vec<String> {
+    let prelude = format!(
+        "{variant}\n/show {{ dup print (\\n) print //show }} bind def\n\
+         /ashow {{ dup print (\\n) print //ashow }} bind def"
+    );
+    let (_, out) = pscat("copy", &prelude, &["--png", "{dir}/copy.png"]);
+    out.split(|&b| b == b'\n').map(latin1).collect()
+}
+
 #[test]
 fn the_poster_paints_the_brief_exactly() {
     for variant in ["", "/PscatOnly true def"] {
-        let prelude = format!(
-            "{variant}\n/show {{ dup print (\\n) print //show }} bind def\n\
-             /ashow {{ dup print (\\n) print //ashow }} bind def"
-        );
-        let (_, out) = pscat("copy", &prelude, &["--png", "{dir}/copy.png"]);
-        let shown: Vec<String> = out.split(|&b| b == b'\n').map(latin1).collect();
+        let shown = painted(variant);
         for want in COPY {
             assert!(
                 shown.iter().any(|s| s == want),
                 "{variant:?}: the brief's {want:?} is not painted; painted: {shown:?}"
             );
         }
+    }
+}
+
+/// The copy that depends on the season follows it (#1029): the autumn
+/// photograph is mid-October, so the poster must not say the hut is open
+/// from 20 June to 20 September, and its subtitle says autumn.
+#[test]
+fn the_autumn_poster_does_not_say_the_hut_is_open() {
+    let shown = painted("/Season /Autumn def");
+    for want in [
+        "VAL BRENNA · THE SUMMIT TRAIL · AUTUMN 2027",
+        "Hut",
+        "closed until 20 June",
+        "9.4 km",
+        "BUS 412",
+    ] {
+        assert!(
+            shown.iter().any(|s| s == want),
+            "autumn: {want:?} is not painted; painted: {shown:?}"
+        );
+    }
+    for not in [
+        "Hut open",
+        "20 June – 20 September",
+        "VAL BRENNA · THE SUMMIT TRAIL · SUMMER 2027",
+    ] {
+        assert!(
+            !shown.iter().any(|s| s == not),
+            "autumn: {not:?} is still painted"
+        );
     }
 }

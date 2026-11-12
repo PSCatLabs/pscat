@@ -25,6 +25,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "widthshow", widthshow);
     op(dict, "awidthshow", awidthshow);
     op(dict, "kshow", kshow);
+    op(dict, "glyphshow", glyphshow);
     op(dict, "stringwidth", stringwidth);
     op(dict, "charpath", charpath);
     op(dict, "setcachedevice", setcachedevice);
@@ -135,12 +136,14 @@ pub(crate) fn definefont(it: &mut Interp) -> Result<(), PsError> {
         // Procedural fonts have no outline registry entry: Type 3
         // glyphs are BuildChar/BuildGlyph procedures, Type 1 glyphs
         // are CharStrings — both rendered by the show machinery.
+        // A copy of a built-in dict (the re-encoding idiom, which drops
+        // `FID`) keeps its face through `font::FACE_KEY` (issue #1022).
         // Anything else gets the substitute face so it still renders.
         let has_charstrings = d.borrow().get("CharStrings").is_some();
         let fid = if font_type == Some(3) || has_charstrings {
             font::FID_NONE
         } else {
-            font::SUBSTITUTE
+            font::face_entry_fid(&d.borrow()).unwrap_or(font::SUBSTITUTE)
         };
         it.journal_dict(d);
         d.borrow_mut().put("FID".into(), Object::int(fid));
@@ -293,6 +296,23 @@ fn begin_show(
 fn show(it: &mut Interp) -> Result<(), PsError> {
     let s = pop_string(it)?;
     begin_show(it, s, ShowParams::default(), ShowMode::Paint, None)
+}
+
+/// name glyphshow (Level 2) — show one glyph selected by name, whatever
+/// the Encoding holds: how a program reaches `/eacute` in a
+/// StandardEncoding font. Only a name is accepted (a string is a
+/// typecheck, as in Ghostscript).
+fn glyphshow(it: &mut Interp) -> Result<(), PsError> {
+    let name = match &it.pop()?.value {
+        Value::Name(n) => n.clone(),
+        _ => return Err(PsError::Typecheck),
+    };
+    it.gfx.state().font.as_ref().ok_or(PsError::InvalidFont)?;
+    let pen = it
+        .gfx
+        .device_current_point()
+        .ok_or(PsError::NoCurrentPoint)?;
+    it.begin_show(font::ShowCtx::glyph(name, pen))
 }
 
 /// ax ay string ashow — per-glyph extra advance.

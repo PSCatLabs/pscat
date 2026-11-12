@@ -132,7 +132,7 @@ no separate stroke-path form worth distinguishing; documented.)
   [0.001 0 0 0.001 0 0]`, `Encoding` (a fresh 256-element
   StandardEncoding array per font dict — each font must own its
   Encoding so re-encoding one font can't poison another), `FontBBox`,
-  and `FID`.
+  `PSCatFace` (the registry index again, see the next bullet) and `FID`.
 - `scalefont`/`makefont` make a **shallow copy** of the dict (entries
   shared — including the `Encoding` array object, per the PLRM; only
   `FontMatrix` is replaced) and compose the matrix: glyph space → old
@@ -144,7 +144,13 @@ no separate stroke-path form worth distinguishing; documented.)
 - `definefont` adds `FID` (registry passthrough if the dict already
   came from a built-in — the re-encode-and-redefine idiom — or a
   substitute FID otherwise), installs into `FontDirectory`, returns
-  the dict. Type 3 dicts (`BuildChar` present, no outline source) are
+  the dict. The PLRM's idiom copies every entry *except* `FID`; a real
+  Type 42 copy keeps its face through `sfnts`, ours had nothing and came
+  out Helvetica (#1022). So built-in dicts also carry `/PSCatFace`, the
+  registry index, which the copy keeps: `definefont` takes a missing
+  `FID` from it when it names a loaded face (`font::face_entry_fid`), and
+  substitutes otherwise. `FontName` can't serve, since the idiom often
+  renames it. Type 3 dicts (`BuildChar` present, no outline source) are
   accepted and stored but glyphs error `invalidfont` at `show` time
   until task 5 lands.
 - Operator set for tasks 2–4: `findfont scalefont makefont setfont
@@ -152,6 +158,14 @@ no separate stroke-path form worth distinguishing; documented.)
   stringwidth charpath` plus the `StandardEncoding` /
   `ISOLatin1Encoding` systemdict arrays. (`selectfont` is Level 2 but
   ubiquitous in found files and one line here.)
+- `glyphshow` (Level 2, #1023) is a one-glyph `Frame::Show` whose name
+  replaces the Encoding lookup: outline faces resolve it like an encoded
+  name (`post` table, then AGL → `cmap`, Unicode-mode faces included),
+  Type 1 looks it up in `CharStrings` (`.notdef` fallback), Type 3 hands
+  it to `BuildGlyph`. A `BuildChar`-only Type 3 font gets the first
+  Encoding slot holding the name, else 0 (Ghostscript's behaviour; the
+  PLRM defines glyphshow through `BuildGlyph`). Name operand only, as in
+  gs: a string is a typecheck.
 
 ## Decision 6 — the show family is an execution-stack frame
 

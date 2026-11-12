@@ -42,6 +42,10 @@ cargo run -- --halftone file.ps           # classic 45° halftone dots, like a
                                           # mono laser printer (window/PNG)
 cargo run -- --lint --png out.png file.ps # self-check: blank page? unbalanced
                                           # gsave? stuff left on the stack?
+                                          # an operator name (/sub) redefined
+                                          # as a plain value? (silence it with
+                                          # a %lint: allow shadowed-operator
+                                          # comment line)
 cargo run -- --lint-strict file.ps        # ...and exit non-zero on any finding
                                           # (a run that errored is never "clean":
                                           # lint prints [run-error] and exits 1)
@@ -61,12 +65,47 @@ cargo test                                # language + pixel-level render tests
 
 More on the less obvious ones:
 
+- **Streams.** stdout is the program's own output (`print`, `=`, `==`) and
+  nothing else: `pscat: wrote FILE` and every other note go to stderr, so
+  `pscat --pdf out.pdf prog.ps | jq .` pipes cleanly. If the reader of stdout
+  goes away (`| head`) pscat ends quietly with status 141, after writing the
+  page and flushing any files the program left open. A file (or `-`) run with
+  no output flag opens a window; when neither stdin nor stdout is a terminal
+  (a script, an agent's shell) pscat says so on stderr first, as a hint to pass
+  `--headless`, `--png`/`--svg`/`--pdf` or `-e` for batch use.
 - **Multi-page output.** `showpage` ends a page. The window keeps showing the
   finished page, and `--png` numbers the pages (`out-001.png`, ...).
   `--svg` and `--pdf` export the same paint pipeline. A PDF is a real
   document: `%%Title:` and `%%For:` header comments become its title and
   author metadata, so a multi-page piece opens in any reader or e-reader with
   a proper title.
+- **`pdfmark`** (#1032). With `--pdf`, the Distiller/Ghostscript `pdfmark`
+  operator sets document info and attaches files:
+
+  ```postscript
+  [ /Title (Tune) /Subject (X:1 abc) /Keywords (folk) /DOCINFO pdfmark
+  [ /_objdef {f1} /type /stream /OBJ pdfmark
+  [ {f1} (X:1\nK:C\nCDE|) /PUT pdfmark
+  [ {f1} << /Subtype (text/vnd.abc) cvn >> /PUT pdfmark
+  [ /Name (tune.abc) /FS << /Type /Filespec /F (tune.abc) /EF << /F {f1} >> >> /EMBED pdfmark
+  ```
+
+  `/DOCINFO` takes any keys. A key it sets wins over `%%Title:`/`%%For:`,
+  as in Ghostscript, and `/Producer` stays `pscat`. Non-ASCII UTF-8 text is
+  written as UTF-16, so a reader shows it as typed. `/OBJ` makes a named
+  `/stream`, `/dict` or `/array`; `/PUT` adds a string, a file or dict entries
+  to it (an array takes `index value`), and `/APPEND` adds to an array. A
+  file is one the program opened with `file`, so `--read-root` applies, or
+  inline data from `currentfile /ASCIIHexDecode filter`. The browser build
+  writes the same bytes as the CLI for strings and `currentfile` data; it has
+  no files to open. `/EMBED` needs `/Name` and `/FS`. Write a MIME subtype as
+  `(text/plain) cvn`: a `#` in a PostScript name is a literal `#`. Other marks
+  (`/ANN`, `/OUT`, `/DEST`, and the `{Catalog}`/`{ThisPage}` objects) are
+  ignored for now. The data all marks of one document hold is capped at
+  64 MiB. On PNG, SVG and the window, `pdfmark` just clears the stack
+  to the mark, so the same program renders everywhere. Inline `currentfile`
+  data is then read as program text, so keep a portable program's
+  attachments in strings.
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
@@ -215,9 +254,13 @@ More on the less obvious ones:
   `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
-  refuses `--svg`, `--pdf`, sweeps, `--progress`, `--profile` and
-  `--allow-write`, since every band would write the same file (or, for
-  `--profile`, report N copies of the same calls: profile a plain run).
+  refuses `--svg`, `--pdf`, sweeps, `--progress` and `--profile` (which would
+  report N copies of the same calls: profile a plain run). `--allow-write`
+  works, with the same roots in every band and one `--max-write-bytes` budget
+  that all the bands spend together. But every band runs the whole program, so
+  an unaware one writes its file once per band, at the same time as the others
+  and in no fixed order: write from band 0 only (`BandIndex 0 eq`), or write a
+  temporary name and `renamefile` it, which is atomic.
   `--lint` and `--lint-strict` do work, and lint once, after the run, with a
   `pscat: lint: note:` line saying so: band 0 (the top band) is checked for
   the declared page count, unbalanced `gsave` and leftover operands, which are
@@ -419,8 +462,63 @@ come the installed font packs (`fonts/packs/`, written by `pscat fonts
 install`) in `$PSCAT_HOME`, the per-user data directory and the binary's
 directory. See [Fonts](fonts.md#font-packs-the-catalog-outside-a-checkout).
 
-`PSCAT_TRACE_RESOURCES=1 pscat ...` prints one line per file to stderr,
-naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).
+`PSCAT_TRACE_RESOURCES=1 pscat ...` (any non-empty value except `0`) prints
+one line per file to stderr, naming the step that served it
+(`pscat: resource lib/artkit.ps <- embedded`). `pscat --help` ends with the
+same variables.
+
+**Your own libraries.** A `lib/` directory in the per-user data directory
+(step 4) is a supported place for a library of your own: `(lib/mylib.ps) run`
+finds it from any directory. `$PSCAT_LIB` takes one directory, not a path
+list. The search follows the read roots: with `--read-root` (which `pscat-mcp`
+passes to every render) a `lib/` file is found only inside a read root, the
+per-user data directory and `$PSCAT_HOME` being among the MCP server's. A
+program cannot ask for the name of the file it is running, so a library that
+loads sibling files needs its directory passed in.
+
+## Error reports
+
+An uncaught error prints one line on stderr and exits nonzero:
+
+```
+%%[ Error: undefined; OffendingCommand: bogus; Line: 3 ]%%
+```
+
+`Line` is a line of the program you ran. When the error happens while a file
+loaded with `run` is being read, the line is that file's, followed by the file's
+name as the program gave it, and the chain of open `run` frames, innermost first
+(`line N` is the top-level program):
+
+```
+%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); Run chain: inner3.ps:5 <- lib/util.ps:12 <- line 2 ]%%
+```
+
+A procedure keeps no record of where it was written, so an error inside one
+reports the line of the token being read when it ran: a procedure from a
+library, called from your program, reports your program's line that called it.
+`;`, `]` and line breaks in a file name are shown percent-escaped (`%3B`,
+`%5D`, `%0A`, `%0D`). `--pstack-on-error`
+adds the operand stack to the report.
+
+## Which pscat is running
+
+`product` returns `(pscat)` and `version` the release, for example
+`(0.7.0)`. `revision` is the release as one integer, `major*10000 +
+minor*100 + patch` with any pre-release tag dropped (0.7.0 and 0.7.0-rc.4 are
+both 700), so a program can test for a release that has a feature it needs:
+
+```postscript
+/revision where { pop product (pscat) eq revision 700 ge and } { false } ifelse
+```
+
+`serialnumber` returns 0. Other interpreters answer these too (Ghostscript's
+`product` is `(GPL Ghostscript)`), so check `product` before reading `revision`
+as a pscat release. pscat's `version` is not a number (`(0.7.0-rc.4)`), unlike
+Ghostscript's `(3010)`: compare `revision`, never `version cvr`.
+
+A procedure that keeps one of these four names as a local variable (`dict
+begin /version exch def ... end`) and is `bind`-ed gets the operator instead,
+as in Ghostscript: rename the local.
 
 ## Where next
 

@@ -18,6 +18,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::PsError;
 use crate::font::{ShowCtx, ShowStep};
@@ -42,6 +44,22 @@ const PROC_NESTING_LIMIT: usize = 500;
 /// `execute_resolved`'s `via` for an object that was not reached through a
 /// name. No interned name has this id.
 const NO_NAME: u32 = u32::MAX;
+/// A `run` file's name as an error report shows it (issue #1043): capped
+/// like an offending command, with `;` and `]` percent-escaped so a name
+/// cannot forge the report's `; ` field separator or its ` ]%%` end
+/// (`pscat-mcp` splits on both, #745), and CR/LF escaped so the report
+/// stays one line (consumers read the first stderr line).
+fn report_name(name: &str) -> String {
+    cap_text(name, ERROR_NAME_LIMIT)
+        .replace(';', "%3B")
+        .replace(']', "%5D")
+        .replace('\n', "%0A")
+        .replace('\r', "%0D")
+}
+
+/// How many innermost `run` frames an error report's `Run chain` names
+/// before eliding to the outermost one (issue #1043).
+const ERROR_CHAIN_LIMIT: usize = 8;
 
 /// What a procedure literal (an executable array met in a body) runs as,
 /// so the step loop dispatches it like any operator (#864).
@@ -268,6 +286,8 @@ struct SaveRecord {
     handle: Rc<SaveHandle>,
     /// Journal length at save time; restore undoes back to here.
     journal_mark: usize,
+    /// `setpacking` is VM state: `restore` brings the old mode back.
+    packing: bool,
     /// Backing-store pointers already journaled at this level. The
     /// journal entry keeps the `Rc` alive, so pointer reuse can't alias.
     seen: HashSet<usize>,
@@ -342,15 +362,25 @@ pub struct Interp {
     /// (`(abc)`, `/foo`, `2`), not a name. Consumed by the next error,
     /// caught or not, so a REPL cannot carry it into an unrelated one.
     error_command: Option<Object>,
-    /// The line most recently scanned directly from the main program
-    /// source (issue #17) — `None` when no line is known, or the most
-    /// recent scanning happened in a `run`-loaded file, eexec stream, or
-    /// executable string (see `Lexer::line`). Sticky across procedure
-    /// calls: an error deep inside a previously-defined procedure is
-    /// attributed to the line that most recently touched real source
-    /// text, not the procedure's original definition site — this
-    /// interpreter doesn't tag objects with a source position.
+    /// The line most recently scanned from the main program source or a
+    /// `run` file (issues #17, #1043) — `None` when no line is known.
+    /// Scanning an eexec stream or executable string leaves it as it was
+    /// (see `Lexer::line`). Sticky across procedure calls: an error deep
+    /// inside a previously-defined procedure is attributed to the line
+    /// that most recently touched real source text, not the procedure's
+    /// original definition site — this interpreter doesn't tag objects
+    /// with a source position.
     last_line: Option<usize>,
+    /// The `run` file `last_line` belongs to (issue #1043); `None` when it
+    /// is a line of the main program.
+    last_file: Option<Rc<str>>,
+    /// The `run` frames open when the last uncaught error left the machine
+    /// (issue #1043), innermost first: `(file, line)`, `None` for the
+    /// main program. Taken in `step_n` before it unwinds the execution
+    /// stack (limit errors included); its innermost entry is the location
+    /// `error_report` gives. Cleared by `begin_source` and by a top-level
+    /// `stop`, so it never outlives the error it describes.
+    error_chain: Vec<(Option<Rc<str>>, usize)>,
     /// The font names `findfont` has already printed a stand-in note for
     /// (issue #728), so a `save`/`restore` loop warns once per name per
     /// interpreter, not once per call.
@@ -446,8 +476,16 @@ pub struct Interp {
     /// Set by a disk file dropped with bytes it could not write; shared
     /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
     lost_write: Rc<Cell<bool>>,
-    /// Bytes the program has handed to disk files so far (issue #762).
-    bytes_written: u64,
+    /// Bytes the program has handed to disk files so far (issue #762). An
+    /// `Arc` so the bands of a `--bands` render can count against one
+    /// budget ([`Interp::share_write_count`], #1045).
+    bytes_written: Arc<AtomicU64>,
+    /// Set when a write to the process's stdout failed because the reader
+    /// had gone (a closed pipe, `| head`), so the CLI can end quietly
+    /// instead of reporting the `ioerror` that follows (#1059). Cleared when
+    /// a `stopped` catches an error, so a later, unrelated `ioerror` is not
+    /// taken for it.
+    stdout_epipe_error: bool,
     /// The most bytes it may hand to disk files; `None` for no cap.
     max_write_bytes: Option<u64>,
     /// `--profile` (issue #737): `Some` while profiling. A program that
@@ -576,6 +614,8 @@ impl Interp {
             caught_error: None,
             error_command: None,
             last_line: None,
+            last_file: None,
+            error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
             rand_state: 1,
@@ -602,7 +642,8 @@ impl Interp {
             read_roots: None,
             open_outputs: Vec::new(),
             lost_write: Rc::new(Cell::new(false)),
-            bytes_written: 0,
+            bytes_written: Arc::new(AtomicU64::new(0)),
+            stdout_epipe_error: false,
             max_write_bytes: None,
             profile: None,
             op_name: "",
@@ -723,10 +764,26 @@ impl Interp {
     /// `writehexstring` and `writereals`, so overwriting a file after
     /// `setfileposition` counts again. A write that would pass the cap
     /// writes nothing and raises `limitcheck`. Calling this again also
-    /// starts the count again.
+    /// starts the count again (on a fresh count of its own, so it leaves
+    /// alone one shared with other interpreters).
     pub fn set_max_write_bytes(&mut self, max: Option<u64>) {
         self.max_write_bytes = max;
-        self.bytes_written = 0;
+        self.bytes_written = Arc::new(AtomicU64::new(0));
+    }
+
+    /// Count this interpreter's writes in `count`, which other
+    /// interpreters may hold too, so they all spend one
+    /// [`Interp::set_max_write_bytes`] budget (`--bands`, #1045). Call it
+    /// after `set_max_write_bytes`, which starts a count of its own.
+    pub fn share_write_count(&mut self, count: Arc<AtomicU64>) {
+        self.bytes_written = count;
+    }
+
+    /// Whether the last error raised failed a write to stdout because its
+    /// reader had gone (`EPIPE`), and nothing has caught it: an `ioerror`
+    /// that is that, not a fault in the program.
+    pub fn stdout_epipe_error(&self) -> bool {
+        self.stdout_epipe_error
     }
 
     /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
@@ -737,16 +794,38 @@ impl Interp {
     /// Whether `n` more bytes fit under the write cap.
     pub(crate) fn check_write_bytes(&self, n: u64) -> Result<(), PsError> {
         match self.max_write_bytes {
-            Some(max) if self.bytes_written.saturating_add(n) > max => Err(PsError::Limitcheck),
+            Some(max) if self.bytes_written.load(Ordering::Relaxed).saturating_add(n) > max => {
+                Err(PsError::Limitcheck)
+            }
             _ => Ok(()),
         }
     }
 
     /// Count `n` bytes against the write cap, or `limitcheck`.
     pub(crate) fn charge_write_bytes(&mut self, n: u64) -> Result<(), PsError> {
-        self.check_write_bytes(n)?;
-        self.bytes_written = self.bytes_written.saturating_add(n);
-        Ok(())
+        let Some(max) = self.max_write_bytes else {
+            self.bytes_written.fetch_add(n, Ordering::Relaxed);
+            return Ok(());
+        };
+        // One atomic check-and-add: bands sharing the count must not both
+        // pass a check that only one of them fits under. A compare-exchange
+        // loop, not `fetch_update`, which newer toolchains rename.
+        let mut used = self.bytes_written.load(Ordering::Relaxed);
+        loop {
+            let total = used.saturating_add(n);
+            if total > max {
+                return Err(PsError::Limitcheck);
+            }
+            match self.bytes_written.compare_exchange_weak(
+                used,
+                total,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(now) => used = now,
+            }
+        }
     }
 
     /// Forget output files that are closed or gone, and refuse (with
@@ -869,6 +948,8 @@ impl Interp {
         self.gfx.clear_memory_refused();
         self.last_name = None;
         self.last_line = None;
+        self.last_file = None;
+        self.error_chain.clear();
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
@@ -893,6 +974,7 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
+                    self.snapshot_error_chain();
                     self.unwind_all();
                     return Err(e);
                 }
@@ -911,6 +993,12 @@ impl Interp {
             result = self.after_slice(result, budget);
         }
         if result.is_err() || self.quit_requested {
+            // Every uncaught error, limits included, passes here with the
+            // execution stack still whole: the one place to record the
+            // open `run` frames before they are dropped (#1043).
+            if result.is_err() {
+                self.snapshot_error_chain();
+            }
             self.unwind_all();
         }
         result
@@ -1430,6 +1518,7 @@ impl Interp {
             return Err(e);
         }
         self.record_error(&e, command);
+        self.stdout_epipe_error = false;
         self.caught_error = Some(e);
         self.do_stop();
         self.push(Object::bool(true));
@@ -1490,6 +1579,9 @@ impl Interp {
             },
             None => (false, None, None),
         };
+        // The machine has unwound; whatever chain an earlier uncaught
+        // error left no longer describes this report.
+        self.error_chain.clear();
         if !newerror {
             return None;
         }
@@ -1562,14 +1654,92 @@ impl Interp {
             && let Some(line) = lexer.line()
         {
             self.last_line = Some(line);
+            // Per token: compare pointers so the common case (same file
+            // as the last token) touches no reference count.
+            let name = lexer.run_name();
+            let same = match (name, &self.last_file) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                self.last_file = name.cloned();
+            }
         }
+    }
+
+    /// Point `last_line`/`last_file` back at the innermost source still
+    /// on the execution stack (#1043). Without this, an error right after
+    /// `run` returns inside a procedure (`/f { (lib.ps) run 1 0 div } def`)
+    /// would name the finished file, since no token is scanned between.
+    fn restore_scan_location(&mut self) {
+        for frame in self.estack.iter().rev() {
+            if let Frame::Scanner(lexer) = frame
+                && let Some(line) = lexer.line()
+            {
+                self.last_line = Some(line);
+                self.last_file = lexer.run_name().cloned();
+                return;
+            }
+        }
+    }
+
+    /// Record the open `run` frames for `error_report` (issue #1043).
+    /// Called by `step_n` only for an error nothing caught, before it
+    /// unwinds, so a `stopped` loop used as control flow pays nothing.
+    fn snapshot_error_chain(&mut self) {
+        self.error_chain.clear();
+        for frame in self.estack.iter().rev() {
+            if let Frame::Scanner(lexer) = frame
+                && let Some(line) = lexer.line()
+            {
+                self.error_chain.push((lexer.run_name().cloned(), line));
+            }
+        }
+    }
+
+    /// `N`, `N (file)` or `N (file); Run chain: file:N <- outer:M <- line K`
+    /// (issue #1043). A main-program line stays a bare number, so the
+    /// report for a single-file program reads exactly as before.
+    fn error_location(&self, line: usize) -> String {
+        let file = match self.error_chain.first() {
+            Some((f, _)) => f,
+            None => &self.last_file,
+        };
+        let Some(file) = file else {
+            return line.to_string();
+        };
+        let mut out = format!("{line} ({})", report_name(file));
+        if self.error_chain.len() > 1 {
+            let link = |(f, l): &(Option<Rc<str>>, usize)| match f {
+                Some(f) => format!("{}:{l}", report_name(f)),
+                None => format!("line {l}"),
+            };
+            let chain = &self.error_chain;
+            let mut links: Vec<String>;
+            if chain.len() > ERROR_CHAIN_LIMIT + 1 {
+                // Deep `run` recursion: keep the innermost frames and the
+                // outermost one, elide the middle.
+                links = chain[..ERROR_CHAIN_LIMIT].iter().map(link).collect();
+                links.push("...".to_string());
+                links.extend(chain.last().map(link));
+            } else {
+                links = chain.iter().map(link).collect();
+            }
+            out.push_str("; Run chain: ");
+            out.push_str(&links.join(" <- "));
+        }
+        out
     }
 
     /// LaserWriter-style error report, e.g.
     /// `%%[ Error: undefined; OffendingCommand: frobnicate ]%%`. Appends
-    /// `; Line: N` (issue #17) when the most recent token scanned
-    /// directly from the submitted program source is known — see
-    /// `last_line`'s doc comment for what "known" excludes.
+    /// `; Line: N` (issue #17) when the line of the most recent token
+    /// scanned from the program or a `run` file is known — see
+    /// `last_line`'s doc comment for what "known" excludes. A `run` file's
+    /// line names the file, `Line: 5 (inner.ps)`, followed by the chain of
+    /// open `run` frames when there is one (issue #1043,
+    /// `error_location`).
     pub fn error_report(&self, err: &PsError) -> String {
         let kind = match err {
             PsError::Syntax(detail) => format!("syntaxerror ({detail})"),
@@ -1585,9 +1755,16 @@ impl Interp {
                 |n| cap_text(&n, ERROR_NAME_LIMIT),
             ),
         };
-        match self.last_line {
+        // The chain's innermost entry is the source still open when the
+        // error left the machine, which beats the sticky location: a
+        // `stop` that unwound a `run` file mid-procedure scans no token
+        // to correct it. The sticky one serves a top-level `stop`, whose
+        // stack is already drained (no chain).
+        let line = self.error_chain.first().map(|(_, l)| *l).or(self.last_line);
+        match line {
             Some(line) => {
-                format!("%%[ Error: {kind}; OffendingCommand: {command}; Line: {line} ]%%")
+                let at = self.error_location(line);
+                format!("%%[ Error: {kind}; OffendingCommand: {command}; Line: {at} ]%%")
             }
             None => format!("%%[ Error: {kind}; OffendingCommand: {command} ]%%"),
         }
@@ -1619,6 +1796,9 @@ impl Interp {
             /// and run its top-level objects in order, as if each had been
             /// a token (#733).
             RunSequence(Vec<u8>),
+            /// A `run` file's scanner is exhausted (#1043): pop it and give
+            /// the error location back to the source that ran it.
+            PopRunScanner,
             /// A profiled call returned (`--profile`).
             ProfExit,
         }
@@ -1652,6 +1832,8 @@ impl Interp {
                         None => {
                             if lexer.pop_systemdict {
                                 Action::PopScannerAndDict
+                            } else if lexer.run_name().is_some() {
+                                Action::PopRunScanner
                             } else {
                                 Action::Pop
                             }
@@ -1854,9 +2036,25 @@ impl Interp {
                     for o in operands {
                         self.push(o);
                     }
+                    let empty = target.executable
+                        && matches!(&target.value, Value::Array(a) if a.is_empty());
                     self.exec_object(target)?;
+                    // An empty procedure yields nothing, like an empty loop
+                    // body: count it toward the same run (#903).
+                    if empty {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                    }
                 }
-                Action::Nothing => {}
+                // A show frame that painted a glyph itself (#903).
+                Action::Nothing => {
+                    empty_run += 1;
+                    if empty_run == EMPTY_RUN {
+                        return Ok(Some(Item::Proc));
+                    }
+                }
                 Action::PopScannerAndDict => {
                     if let Some(frame) = self.estack.pop() {
                         self.cleanup_unwound_frame(frame);
@@ -1883,6 +2081,10 @@ impl Interp {
                         }
                     }
                     self.push_proc_frame(PsArray::from_vec(run))?;
+                }
+                Action::PopRunScanner => {
+                    self.estack.pop();
+                    self.restore_scan_location();
                 }
                 Action::ProfExit => {
                     self.estack.pop();
@@ -2117,6 +2319,16 @@ impl Interp {
         self.execute_resolved(obj, NO_NAME)
     }
 
+    /// Run `file` as program source loaded by `run` under `name`, so an
+    /// error in it reports its own file and line (issue #1043).
+    pub(crate) fn run_file(
+        &mut self,
+        file: crate::file::FileHandle,
+        name: Rc<str>,
+    ) -> Result<(), PsError> {
+        self.push_frame(Frame::Scanner(Lexer::run_file(file, name)))
+    }
+
     /// The `token` operator on a file: one token scanned in place — the
     /// file's shared position advances exactly past it.
     pub(crate) fn scan_token_from_file(
@@ -2245,9 +2457,20 @@ impl Interp {
     /// context existed; with none, the whole program is aborted, which is
     /// what the PLRM's outermost job-server `stopped` would do.
     pub(crate) fn do_stop(&mut self) -> bool {
+        let mut left_run_file = false;
         while let Some(frame) = self.estack.pop() {
             if matches!(frame, Frame::StopMark) {
+                // A `stopped` that abandoned a `run` file resumes in the
+                // source under it, which scans no token to say so (#1043).
+                if left_run_file {
+                    self.restore_scan_location();
+                }
                 return true;
+            }
+            if let Frame::Scanner(lexer) = &frame
+                && lexer.run_name().is_some()
+            {
+                left_run_file = true;
             }
             self.cleanup_unwound_frame(frame);
         }
@@ -2470,6 +2693,7 @@ impl Interp {
         self.save_stack.push(SaveRecord {
             handle: handle.clone(),
             journal_mark: self.journal.len(),
+            packing: self.packing,
             seen: HashSet::new(),
             gfx_depth,
             gfx_state,
@@ -2497,6 +2721,7 @@ impl Interp {
         }
         self.save_stack.truncate(idx + 1);
         let rec = self.save_stack.pop().expect("record at idx exists");
+        self.packing = rec.packing;
         while self.journal.len() > rec.journal_mark {
             match self.journal.pop().expect("length checked") {
                 // Replacing contents while holding the borrow is safe
@@ -2800,8 +3025,15 @@ impl Interp {
         use std::io::Write;
         let Some(buf) = self.stdout_capture.as_mut() else {
             let mut out = std::io::stdout();
-            out.write_all(bytes)?;
-            return if flush { out.flush() } else { Ok(()) };
+            let written = out
+                .write_all(bytes)
+                .and_then(|()| if flush { out.flush() } else { Ok(()) });
+            if let Err(e) = &written
+                && e.kind() == std::io::ErrorKind::BrokenPipe
+            {
+                self.stdout_epipe_error = true;
+            }
+            return written;
         };
         if self.stdout_truncated || bytes.is_empty() {
             return Ok(());

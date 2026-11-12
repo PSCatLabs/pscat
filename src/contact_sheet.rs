@@ -167,7 +167,7 @@ pub struct PackedRow {
 /// Where everything goes, from [`Layout::new`]. Columns are as wide as
 /// their widest cell or caption, and each cell is centred in its slot,
 /// so a 48 px render sits at true size beside a 512 px one.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Layout {
     pub width: u32,
     pub height: u32,

@@ -316,6 +316,7 @@ for (const inst of ['a', 'b']) {{
     if (ps.run(src, 612, 792, dpi / 72, {{ svg: true, pdf: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
     const n = ps.svgCount();
     if (n !== 2) {{ console.error('svgCount ' + n); process.exit(1); }}
+    if (ps.pageCount() !== n) {{ console.error('pageCount ' + ps.pageCount()); process.exit(1); }}
     for (let i = 0; i < n; i++) out(`abi-${{inst}}${{run}}-${{dpi}}-${{i + 1}}.svg`, ps.svg(i));
     out(`abi-${{inst}}${{run}}-${{dpi}}.pdf`, ps.pdf());
     if (ps.svg(n) !== null) {{ console.error('page past the end'); process.exit(1); }}
@@ -327,6 +328,8 @@ plain.run(src, 612, 792);
 if (plain.svgCount() !== 0 || plain.svg(0) !== null || plain.pdf() !== null) {{
   console.error('a plain run recorded vectors'); process.exit(1);
 }}
+// ...but the page count does not depend on recording (#1011).
+if (plain.pageCount() !== 2) {{ console.error('plain pageCount ' + plain.pageCount()); process.exit(1); }}
 // The npm API, over the same module.
 const r = await instantiate(await WebAssembly.compile(bytes));
 for (const dpi of [72, 144]) {{

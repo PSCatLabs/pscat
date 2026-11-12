@@ -16,8 +16,16 @@ currentalpha currentblendmode pop pop              % read them back
 Graphics state (`gsave`/`grestore` save them, `initgraphics` resets
 them). They reach fills, strokes, text, `shfill` and, since #766,
 `image`/`imagemask`/`colorimage` (an image at alpha 0.5 is half
-see-through; `Multiply` darkens what is under it; a soft-masked
-ImageType 3 multiplies its own mask by the alpha). Exported to SVG and
+see-through; `Multiply` darkens what is under it). An image has one
+alpha for the whole image: `ImageType 3` takes a 1-bit stencil (a
+`MaskDict` with `/BitsPerComponent 1`; 8 bits is `rangecheck`, and
+`InterleaveType` 1 and 2 are `limitcheck`), the stencil gates which pixels
+paint, and `setalpha` still applies to those. An `/SMask` entry in an
+ImageType 1 dictionary is ignored, so there is no per-pixel soft alpha for
+an image in PostScript (the PDF writer emits an `ImageType 3` stencil as a
+PDF `/SMask`, a detail of the file, not something a program can set). To
+fake one, slice the alpha into N levels and paint each through a 1-bit
+mask at that level's `setalpha`. Exported to SVG and
 PDF as well as PNG. **Not PLRM
 operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 `--pdf` or `--png`, not a `.ps`, and probe with `systemdict /setalpha
