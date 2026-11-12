@@ -122,7 +122,9 @@ Which tool to pick:
 - **`pkwash`** / **`pkpaper`** — watercolor and its ground. The only
   presets needing pscat's `setalpha`; under plain `gs` they fall back
   to flattening against white and overlaps stop mixing, so verify real
-  alpha output with `pscat --pdf`, not `gs file.ps`. `pkpaper` is a
+  alpha output with `pscat --pdf`, not `gs file.ps`. `pkwash` multiplies
+  each layer's `/Alpha` by the caller's `setalpha`, so
+  `gsave 0.6 setalpha ... pkwash grestore` fades a wash. `pkpaper` is a
   watercolor ground only; for paper, canvas or print surfaces in
   general use `lib/surfacekit.ps`.
 

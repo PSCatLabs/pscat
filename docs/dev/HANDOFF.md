@@ -1269,7 +1269,10 @@ renders eight examples in both and compares block-downsampled output).
   (`Gfx::set_page_origin`), and `Gfx::page_size_source` says which rule chose
   the size. Code that makes a CLI interpreter goes through
   `Options::new_interp` after `Options::resolve_page`. See
-  `notes/921-boundingbox-page-size.md`.
+  `notes/921-boundingbox-page-size.md`. A non-EPSF file whose box differs
+  from the page prints one `pscat: note: %%BoundingBox WxH ignored` line on
+  stderr (#1036, `notes/1036-ignored-boundingbox-note.md`); MCP renders
+  show it under `Warnings:`.
 - **The page can change size mid-job** (#909, `src/ops/pagedevice.rs`).
   `setpagedevice` installs a new `PageDevice` (`Gfx::install_device`: new
   canvas, erased, base CTM rebuilt), and the graphics state holds the device
