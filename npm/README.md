@@ -14,6 +14,14 @@ Node 22 or later, or any current browser. It is ESM (plus a classic-script
 build for `<script>` tags, below), ships TypeScript types, and has no
 dependencies and no install scripts.
 
+`import 'pscat'` picks the right entry for you: `node.js` in Node (it reads
+`pscat.wasm` from disk), `index.js` in browsers and bundlers (it fetches
+it). To choose the Node entry explicitly, for instance when you load the
+package by file path, import `pscat/node.js`. Importing `index.js` by path
+in Node fails with an error that says so, because Node's `fetch` cannot read
+`file:` URLs; pass `createRenderer({ wasm })` the module's bytes if you
+need that entry there.
+
 ## Render a page
 
 ```js
@@ -70,7 +78,8 @@ for (const _ of r.frames(source, { width: 612, height: 792, budget: 300 })) {
 
 `frames()` runs `budget` PostScript objects per iteration. To drive it
 yourself, call `r.begin(source, options)` and then `r.step(budget)` until
-it returns `false`.
+it returns `false`. `r.pageCount()` says how many pages there are so far,
+for a "page N" label on a long document.
 
 ## SVG and PDF
 
@@ -166,6 +175,7 @@ as Ghostscript does.
 | `pixels()` | A copy of the page as RGBA bytes. |
 | `warnings` | Notes about pack faces that were replaced since `begin` (an array of strings, empty when none). |
 | `image()` | `{ width, height, data, output, warnings }` for the page as it is now. |
+| `pageCount()` | How many pages the run holds now: those `showpage` or `copypage` emitted, plus the page being drawn if it has art on it (or is the only page). Works between `step()` calls and after the run, whatever is recorded, and equals `svgPages().length` with `svg: true`. 0 before `begin`. |
 | `svg(page = 0)`, `svgPages()` | SVG page `page` (from 0) as a string, or every page in order. Needs `svg: true`. |
 | `pdf()` | The whole document as PDF bytes (`Uint8Array`). Needs `pdf: true`. |
 | `imageData()` | The page as an `ImageData` (browsers and workers). |

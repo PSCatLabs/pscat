@@ -116,6 +116,11 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   offending `command`, the `line`, the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
+- `pageCount()` is the number of pages the run holds now: those `showpage`
+  or `copypage` emitted, plus the page being drawn when it has art on it (or
+  is the only page). It works between `step()` calls and after the run, with
+  or without `svg`/`pdf`, and equals `svgPages().length` when SVG is recorded
+  (#1011).
 - The `lib/` libraries are embedded: `(lib/artkit.ps) run` works with no
   fetches.
 - **Fonts:** all of the PostScript standard 35 are built in (Liberation,

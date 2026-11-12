@@ -37,6 +37,10 @@
     },
     "./pscat.global.js": "./pscat.global.js",
     "./pscat.wasm": "./pscat.wasm",
+    "./node.js": {
+      "types": "./index.d.ts",
+      "default": "./node.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./node.js",
