@@ -2,10 +2,9 @@
 
 One PR for four small tickets.
 
-- **#871** `site-check.yml`: `scripts/site_chalk.py` and `site/chalk/**` added to
-  the `paths:` filter. `site/**` already matches `site/chalk/**` in GitHub's glob
-  rules, so the second line is explicit rather than new coverage; the script line
-  is the real gap.
+- **#871** `site-check.yml`: `scripts/site_chalk.py` added to the `paths:` filter.
+  `site/chalk/**` was already covered by the existing `site/**` line (GitHub's
+  `**` crosses directories), so no line was added for it.
 - **#705** `dependabot.yml`: a second cargo entry for `/fuzz` (its own workspace
   and lockfile), lockfile-only like the root entry.
 - **#800** `env_vars` in `plugin/mcp.json` is **not** done, because it cannot
