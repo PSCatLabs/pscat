@@ -229,7 +229,15 @@ fn ghostscript_prints_the_pinned_lines() {
         let file = dir.join(format!("c{i}.ps"));
         std::fs::write(&file, format!("{PRELUDE}{src}\n")).expect("write");
         let out = std::process::Command::new("gs")
-            .args(["-q", "-dNOSAFER", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE"])
+            // The pins assume US Letter; Debian's gs defaults to A4 (libpaper), so say so.
+            .args([
+                "-q",
+                "-dNOSAFER",
+                "-dNODISPLAY",
+                "-dBATCH",
+                "-dNOPAUSE",
+                "-sPAPERSIZE=letter",
+            ])
             .arg(&file)
             .stdin(std::process::Stdio::null())
             .output()
