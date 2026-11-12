@@ -126,8 +126,10 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `jitter`, `align`, `color`, `board` or `false` for a transparent page,
   `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
-  outside mathkit's subset is a one-line `latex_error` naming it (`code`
-  `unsupported_command`, `token` `\aleph`). The input is LaTeX, never
+  outside mathkit's subset is a `latex_error` naming it (`code`
+  `unsupported_command`, `token` `\aleph`); every unsupported command or
+  character comes back in one call, listed in `problems` with its `line`,
+  `column` and byte `offset`. The input is LaTeX, never
   PostScript. By default `latex` is capped at 4096 bytes and the board at 40
   million pixels (`--max-latex-bytes`, `--max-pixels`; see the limits below); svg and pdf go to `out_path` only.
 - `review_sheet` — several programs in, one labelled PNG out: the

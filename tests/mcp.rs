@@ -2009,6 +2009,44 @@ fn chalkboard_math_without_a_board_is_transparent() {
     assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "some chalk");
 }
 
+/// Every unsupported character or command comes back in one call, each with
+/// its line and column (issue #1080); `code` and `token` stay the first one's.
+#[test]
+fn chalkboard_math_reports_every_problem_at_once() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let latex = "a \\aleph \\\\\n\\text{G\\\"odel} + \u{2603}";
+    let result = s.tool("chalkboard_math", small_board(latex));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["code"], "unsupported_command");
+    assert_eq!(err["token"], "\\aleph");
+    let problems = err["problems"].as_array().expect("the list");
+    let at: Vec<_> = problems
+        .iter()
+        .map(|p| {
+            (
+                p["token"].as_str().unwrap(),
+                p["line"].as_u64().unwrap(),
+                p["column"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        at,
+        [("\\aleph", 1, 3), ("\\\"", 2, 8), ("\u{2603}", 2, 18)],
+        "{result}"
+    );
+    assert_eq!(problems[0]["offset"], 2);
+    let text = &texts(&result)[0];
+    assert!(
+        text.starts_with("3 problems in the LaTeX (line:column):\n  1:3  "),
+        "{text}"
+    );
+    assert!(!text.contains("%%["), "{text}");
+    assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
+}
+
 #[test]
 fn chalkboard_math_errors_are_one_line_and_structured() {
     let mut s = Server::start();
@@ -2031,7 +2069,7 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
     let result = s.tool("chalkboard_math", small_board("x = \u{2603}"));
     assert_eq!(error_kind(&result), "latex_error", "{result}");
     assert_eq!(result["structuredContent"]["error"]["token"], "\u{2603}");
-    assert!(texts(&result)[0].ends_with("(U+2603)"), "{result}");
+    assert!(texts(&result)[0].contains("(U+2603) at 1:5"), "{result}");
 
     let result = s.tool("chalkboard_math", json!({ "latex": "% nothing" }));
     assert_eq!(error_kind(&result), "latex_error");

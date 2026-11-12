@@ -1206,8 +1206,9 @@ fn tool_list(cfg: &Config) -> Value {
                 backslashes: \\\\ breaks rows, & marks where align, aligned and split rows line up, \
                 gather, gather* and gathered centre each row instead, and an align*/equation \
                 wrapper or $...$ is fine. The subset is mathkit's (fractions, roots, sums, \
-                integrals, Greek, matrices, cases, accents...); a command outside it is a \
-                latex_error naming it. Same input and seed: the same image, byte for byte. \
+                integrals, Greek, matrices, cases, accents...); every command or character \
+                outside it comes back in one latex_error, each with its line and column \
+                (problems). Same input and seed: the same image, byte for byte. \
                 The input is LaTeX only, never PostScript. svg and pdf (megabytes: tens of \
                 thousands of grain marks) are written to out_path only. Writes a file only \
                 when out_path is given (then it replaces an existing file of that \
@@ -2279,7 +2280,32 @@ fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
         ChalkError::Latex { token, .. } => {
             ToolError::new("latex_error", e.to_string()).with("token", json!(token))
         }
+        // Every problem found in one pass (#1080): `token` and `code` are the
+        // first one's, so a caller that reads one error still works, and
+        // `problems` lists them all with their places.
+        ChalkError::Problems(ps) => {
+            let problems: Vec<Value> = ps
+                .iter()
+                .map(|p| {
+                    json!({
+                        "code": p.code(),
+                        "token": p.token,
+                        "line": p.line,
+                        "column": p.column,
+                        "offset": p.offset,
+                        "message": p.message(),
+                    })
+                })
+                .collect();
+            let first = ps.first().map(|p| p.token.clone()).unwrap_or_default();
+            ToolError::new("latex_error", e.to_string())
+                .with("token", json!(first))
+                .with("problems", json!(problems))
+        }
         ChalkError::Render(_) => ToolError::new("render_failed", e.to_string()),
+        // `ChalkError` is `#[non_exhaustive]`; a future variant reports as a
+        // LaTeX error with its message until it gets its own arm.
+        _ => ToolError::new("latex_error", e.to_string()),
     };
     err.with("code", json!(code))
 }
@@ -2352,7 +2378,10 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         if !fields.contains_key("limit")
             && fields.get("ps_error").and_then(Value::as_str) == Some("undefined")
             && let Some(cmd) = fields.get("offending_command").and_then(Value::as_str)
-            && let Some(e) = pscat::chalk::explain(&pscat::PsError::Undefined(cmd.into()))
+            && let Some(e) = driver.explain(
+                run.stdout.as_bytes(),
+                &pscat::PsError::Undefined(cmd.into()),
+            )
         {
             return Err(chalk_error(e));
         }

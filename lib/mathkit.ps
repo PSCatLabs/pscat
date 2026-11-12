@@ -367,6 +367,31 @@
   exch pop cvn cvx exec
 } bind def
 
+% (mk-kind:pre) (detail) start end -> -   An error mathkit can step over:
+% mkfail's name, plus the byte range [start end) of the source it is about.
+% While mkproblems is checking, it is recorded and parsing goes on; every
+% other entry point raises it, exactly as mkfail does.
+% @internal
+/mkrecover {
+  mkCollect {
+    /mkrcE exch mkset /mkrcS exch mkset /mkrcD exch mkset
+    3 1 index length 3 sub getinterval (:) search pop
+    /mkrcK exch mkset pop
+    mkrcD mkcat mkrcK exch mkrcS mkrcE mkaddprob
+  } { pop pop mkfail } ifelse
+} bind def
+
+% (kind) (token) start end -> -   Record a problem on line mkli (at most
+% 200 are kept; the rest are only dropped).
+% @internal
+/mkaddprob {
+  /mkapE exch mkset /mkapS exch mkset /mkapT exch mkset /mkapK exch mkset
+  mkpn mkprobs length lt {
+    mkprobs mkpn [ mkli mkapS mkapE mkapK mkapT ] put
+  } if
+  /mkpn mkpn 1 add mkset
+} bind def
+
 % (a) (b) -> (ab)
 % @internal
 /mkcat {
@@ -640,14 +665,23 @@
 
 % (label) -> list   A script's or command's argument: a {group}, or one
 % token. The label names the command in the error when it is missing.
+% While mkproblems is checking, a one-token argument that was stepped over
+% (x^\aleph, \sqrt@) stands in as an empty group, so the line goes on and
+% the problems after it are found; only an argument that is really missing
+% is reported as missing (#1080).
 % @internal
 /mkarg {
   mkskip
   mkpeek 123 eq { pop mkadv /group mkparse pop } {
+    mkCollect { mkpn } { -1 } ifelse exch
     dup 4 dict begin /mkarglabel exch def /mkmode /arg def
     [ mkparseone pop ]
     end
-    dup length 0 eq { pop (mk-missing-argument:) exch mkfail } { exch pop } ifelse
+    dup length 0 eq {
+      2 index 0 ge { mkpn 3 index gt } { false } ifelse
+      { pop pop pop [ << /T /group /L [ ] /C /ord /K mknewk >> ] }
+      { pop exch pop (mk-missing-argument:) exch mkfail } ifelse
+    } { exch pop exch pop } ifelse
   } ifelse
 } bind def
 
@@ -666,7 +700,7 @@
       dup mkisletter { mkletter } {
         mkascii 1 index known { mkadv mkascii exch get aload pop mksymatom } {
           mkadv 1 string dup 0 4 -1 roll put
-          (mk-unsupported-character:) exch mkfail
+          (mk-unsupported-character:) exch mkpos 1 sub mkpos mkrecover
         } ifelse
       } ifelse
     } ifelse
@@ -738,7 +772,8 @@
   % and the control-character check names those; bare, they are words
   % (x_{top}, E_{bot})
   mkbw (top) ne mkbw (bot) ne and and
-  { (mk-bare-word-needs-a-backslash:) mkbw mkfail } if
+  { mkCollect { (bare-word-needs-a-backslash) mkbw mkbw0 dup mkbw length add mkaddprob }
+      { (mk-bare-word-needs-a-backslash:) mkbw mkfail } ifelse } if
 } bind def
 
 % lead-byte -> (char)   the whole UTF-8 character that starts with it,
@@ -762,10 +797,13 @@
 /mkutf8 {
   mkutf8str
   dup mkutf8name
-  dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
-  exch pop
-  dup /summation eq 1 index /product eq or { /auto mkopatom } {
-    dup mkisintname { /no mkopatom } { dup mkgclass mksymatom } ifelse
+  dup /.notdef eq {
+    pop (mk-unsupported-character:) exch dup length mkpos exch sub mkpos mkrecover
+  } {
+    exch pop
+    dup /summation eq 1 index /product eq or { /auto mkopatom } {
+      dup mkisintname { /no mkopatom } { dup mkgclass mksymatom } ifelse
+    } ifelse
   } ifelse
 } bind def
 
@@ -773,8 +811,9 @@
 % @internal
 /mkbslash {
   pop mkadv
-  mkpeek dup 0 lt { pop (mk-unsupported-command:) (\\) mkfail } if
-  dup mkisletter { pop mkletters mkcommand } { mkadv mkctlsym } ifelse
+  mkpeek dup 0 lt { pop (mk-unsupported-command:) (\\) mkpos 1 sub mkpos mkrecover /none } {
+    dup mkisletter { pop mkletters mkcommand } { mkadv mkctlsym } ifelse
+  } ifelse
 } bind def
 
 % Control symbols that are spaces -> mu
@@ -791,7 +830,9 @@
       dup 123 eq { pop /braceleft /open mksymatom /none } {
         dup 125 eq { pop /braceright /close mksymatom /none } {
           dup 124 eq { pop /dblbar /ord mksymatom /none } {
-            1 string dup 0 4 -1 roll put (mk-unsupported-command:\\) exch mkfail
+            % the whole character, so a multi-byte one is one problem
+            dup 128 ge { /mkpos mkpos 1 sub mkset mkutf8str } { 1 string dup 0 4 -1 roll put } ifelse
+            (mk-unsupported-command:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover /none
           } ifelse
         } ifelse
       } ifelse
@@ -808,7 +849,9 @@
     dup (end) eq {
       pop mkmode /cell eq { /end } { mk-end-without-begin } ifelse
     } {
-      mkcmds 1 index cvn known not { (mk-unsupported-command:\\) exch mkfail } if
+      mkcmds 1 index cvn known not {
+        (mk-unsupported-command:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover /none
+      } {
       dup cvn mkcmds exch get
       dup 0 get
       dup /sym eq {
@@ -836,6 +879,7 @@
         } ifelse
       } ifelse
       /none
+      } ifelse
     } ifelse
   } ifelse
 } bind def
@@ -866,19 +910,23 @@
           mkletters
           mkdelimwords 1 index cvn known {
             mkdelimwords exch cvn get
-          } { (mk-unsupported-delimiter:\\) exch mkfail } ifelse
-        } {
-          mkpeek 0 lt { (mk-unsupported-delimiter:\\) () mkfail } if
-          mkpeek 128 ge { mkpeek mkutf8str } {
-            mkadv 1 string dup 0 mksrc mkpos 1 sub get put
+          } {
+            (mk-unsupported-delimiter:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover null
           } ifelse
-          (mk-unsupported-delimiter:\\) exch mkfail
+        } {
+          mkpeek 0 lt { (mk-unsupported-delimiter:\\) () mkpos mkpos mkrecover null } {
+            mkpeek 128 ge { mkpeek mkutf8str } {
+              mkadv 1 string dup 0 mksrc mkpos 1 sub get put
+            } ifelse
+            (mk-unsupported-delimiter:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover null
+          } ifelse
         } ifelse } ifelse
       } ifelse
     } ifelse
   } {
     dup 128 ge { mkdelimutf8 } {
-      mkadv 1 string dup 0 4 -1 roll put (mk-unsupported-delimiter:) exch mkfail
+      mkadv 1 string dup 0 4 -1 roll put
+      (mk-unsupported-delimiter:) exch mkpos 1 sub mkpos mkrecover null
     } ifelse
   } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse
 } bind def
@@ -890,7 +938,7 @@
 /mkdelimutf8 {
   mkutf8str dup mkutf8name
   mkdelimglyphs 1 index known { exch pop } {
-    pop (mk-unsupported-delimiter:) exch mkfail
+    pop (mk-unsupported-delimiter:) exch dup length mkpos exch sub mkpos mkrecover null
   } ifelse
 } bind def
 
@@ -1004,7 +1052,7 @@
 % @internal
 /mkrawarg {
   mkskip mkpeek 123 ne { mk-text-needs-braces } if
-  mkadv mkpos 1
+  mkadv mkpos dup /mkrawstart exch mkset 1
   {
     mkpeek dup 0 lt { pop mk-missing-closing-brace } if
     dup 123 eq { pop 1 add } { 125 eq { 1 sub } if } ifelse
@@ -1028,20 +1076,49 @@
       dup 32 lt 1 index 127 eq or {
         mk-control-character:write-each-TeX-backslash-as-\\
       } if
-      dup 92 eq { (mk-unsupported-command:\\) (inside-text) mkfail } if
-      dup 128 lt { pop 1 } {
-        dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
+      dup 92 eq { pop mktxcmd } {
+        dup 128 lt { pop 1 } {
+          dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
+        } ifelse
+        mkts length mkti sub min /mktn exch def
+        mkts mkti mktn getinterval
+        dup mkscratch begin << /Size 1000 >> sgmetrics end /Name get
+        dup /.notdef eq {
+          pop (mk-unsupported-character:) exch
+          mkrawstart mkti add dup mktn add mkrecover
+        } {
+          exch pop
+          dup /space eq mktc (text) ne and { pop } if
+        } ifelse
+        /mkti mkti mktn add def
       } ifelse
-      mkts length mkti sub min /mktn exch def
-      mkts mkti mktn getinterval
-      dup mkscratch begin << /Size 1000 >> sgmetrics end /Name get
-      dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
-      exch pop
-      dup /space eq mktc (text) ne and { pop } if
-      /mkti mkti mktn add def
     } loop
   ]
   mktc (operatorname) eq { /fn /op /no } { /text /ord /no } ifelse mkrunatom
+} bind def
+
+% - -> -   (in mkctext) a backslash command inside \text, which sets
+% characters and not commands: named as it was written (\" or \textbf, not
+% an internal name), then stepped over when mkproblems is checking
+% @internal
+/mktxcmd {
+  /mktxj mkti 1 add mkset
+  mktxj mkts length lt {
+    mkts mktxj get dup mkisletter {
+      pop {
+        mktxj mkts length lt { mkts mktxj get mkisletter } { false } ifelse
+        { /mktxj mktxj 1 add mkset } { exit } ifelse
+      } loop
+    } {
+      dup 128 lt { pop 1 } {
+        dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
+      } ifelse
+      mkts length mktxj sub min mktxj add /mktxj exch mkset
+    } ifelse
+  } if
+  (mk-unsupported-command:\\) mkts mkti 1 add mktxj mkti 1 add sub getinterval
+  mkrawstart mkti add mkrawstart mktxj add mkrecover
+  /mkti mktxj def
 } bind def
 
 % (cmd) -> -   \limits and \nolimits change the operator before them, or
@@ -2047,6 +2124,8 @@
   mko /MathHand true mkopt
   dup type /booleantype ne { mk-mathhand-must-be-a-boolean } if
   /mkHand exch def
+  % only mkproblems steps over an error (see mkrecover)
+  /mkCollect false mkset
 } bind def
 
 % x y -> int   a device-space position, quantized (sgpath's rule)
@@ -2601,6 +2680,37 @@
 %   (a digit in calligraphic) mustguard
 %   { (\\frac{\\mathbb{R x}}{2}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
 %   (a lowercase letter in blackboard bold, nested) mustguard
+%%EndSelfTest
+%
+%%SelfTest: mkproblems-reports-every-problem
+%   % issue #1080: every unsupported character or command at once, each with
+%   % its line and byte range, named as written; nothing is drawn
+%   /mkt-d0 countdictstack def
+%   /mkt-sentinel
+%   newpath
+%   [ (a \\aleph b @ \\text{G\\"odel \\textbf{x}}) (x_{max} + \\frac{1}{2) (fine) ]
+%   << >> mkproblems /mkt-p exch def
+%   /mkt-sentinel eq (mkproblems consumes only its operands) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   { currentpoint pop pop } stopped (and draws nothing) mustbe
+%   mkt-p length 6 eq (\\aleph, @, \\", \\textbf, the bare word and the missing brace) mustbe
+%   mkt-p 0 get dup 0 get 0 eq exch dup 1 get 2 eq exch 2 get 8 eq and and
+%   (the first is on line 0, bytes 2 to 8) mustbe
+%   mkt-p 0 get 3 get (unsupported-command) eq mkt-p 0 get 4 get (\\aleph) eq and
+%   (an unsupported command is named as written) mustbe
+%   mkt-p 1 get 4 get (@) eq (an unsupported character) mustbe
+%   mkt-p 2 get 4 get (\\") eq (a command inside \\text is named as written, not inside-text) mustbe
+%   mkt-p 3 get 4 get (\\textbf) eq (and so is a word command inside it) mustbe
+%   mkt-p 4 get 0 get 1 eq mkt-p 4 get 3 get (bare-word-needs-a-backslash) eq and
+%   (the bare word is on line 1) mustbe
+%   mkt-p 5 get 3 get (missing-closing-brace) eq (a missing brace ends its line's list) mustbe
+%   % the other entry points still stop at the first one
+%   { (a \\aleph @) 0 0 << >> mkpath } /mk-unsupported-command:\aleph (mkpath is fail-fast) mustguard
+%   { (a @ \\aleph) 0 0 << >> mkpath } /mk-unsupported-character:@ (and names the first) mustguard
+%   { [ (a) 5 ] << >> mkproblems } /mk-lines-must-be-an-array-of-strings (a number as a line) mustguard
+%   [ ] << >> mkproblems length 0 eq (no lines, no problems) mustbe
+%   [ (\\left\\( a \\right\\) \\beth) ] << >> mkproblems length 3 eq
+%   (an unsupported delimiter is stepped over, and what follows is found) mustbe
 %%EndSelfTest
 %
 %%SelfTest: errors-leave-the-stacks-as-they-were
@@ -3194,6 +3304,60 @@
 % @param: /Spacing [ratio] As for mkpath (default 1)
 % @param: /MathHand [boolean] As for mkpath (default true)
 /mkalign { 4 { mkalignbody } mkentry } bind def
+
+% (mk-kind:token) -> (kind) (token)   a mathkit error name, split
+% @internal
+/mksplitname {
+  3 1 index length 3 sub getinterval
+  (:) search { exch pop exch } { () } ifelse
+} bind def
+
+% - -> -   (in mkproblemsbody, after a line stopped) Unwind to where the
+% line began, then record the mathkit error that stopped it; any other error
+% (a limit, a bug) goes on up.
+% @internal
+/mkpfatal {
+  { count mkpc0 le { exit } if pop } loop
+  { countdictstack mkpd0 le { exit } if end } loop
+  $error /errorname get /undefined eq {
+    $error /command get 200 string cvs
+    dup length 3 ge { dup 0 3 getinterval (mk-) eq } { false } ifelse
+  } { () false } ifelse
+  { mksplitname
+    mkpos mklen min dup
+    % mkarg stands a stepped-over argument in, so a missing argument here is
+    % a real one, whatever else the line had (#1080)
+    mkaddprob
+  } { pop stop } ifelse
+} bind def
+
+% [(line) ...] opts -> [[line start end (kind) (token)] ...]
+% @internal
+/mkproblemsbody {
+  mkreadopts
+  dup type dup /arraytype ne exch /packedarraytype ne and
+    { mk-lines-must-be-an-array-of-strings } if
+  dup { type /stringtype ne { mk-lines-must-be-an-array-of-strings } if } forall
+  /mkplines exch mkset
+  /mkprobs 200 array mkset
+  /mkpn 0 mkset
+  /mkCollect true mkset
+  0 1 mkplines length 1 sub {
+    /mkli exch mkset
+    count /mkpc0 exch mkset countdictstack /mkpd0 exch mkset
+    { mkplines mkli get mkparsetop pop } stopped { mkpfatal } if
+  } for
+  /mkCollect false mkset
+  [ 0 1 mkpn mkprobs length min 1 sub { mkprobs exch get } for ]
+} bind def
+
+% [(line) ...] opts mkproblems -> [[line start end (kind) (token)] ...]
+% @kind: Procedure
+% @summary: Checks each TeX line the way mkpath would read it, and returns every unsupported character, unsupported command (named as written: \\", not an internal name), bare operator name and, per line, the first malformed construct (a missing brace, a stray \\right), as one record each: the line's index, the byte range [start end) of the offending source in that line, mathkit's error kind without its mk- prefix and what it named. Nothing is laid out or drawn; an unsupported character or command is stepped over so the ones after it are found too. Up to 200 records. Use it to report every problem in one pass; mkpath and the other entry points still stop at the first.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run [ (a + b) ] << >> mkproblems length 0 eq { newpath (a + b) 20 20 << /Size 30 >> mkpath 1.5 setlinewidth stroke } if
+% @param: /Size [points] As for mkpath (default 36)
+% @param: /Slant [degrees] As for mkpath (default 0)
+/mkproblems { 2 { mkproblemsbody } mkentry } bind def
 
 % llx lly urx ury opts mkframe -   or   record opts mkframe -
 % @kind: Procedure

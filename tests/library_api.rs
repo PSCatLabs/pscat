@@ -482,6 +482,24 @@ fn chalk_driver_matches_the_hidden_generator() {
     assert_eq!(e.token(), None);
 }
 
+/// A delimiter error from `driver()` and a several-problem error from a run
+/// keep their token through the supported facade (Codex batch 3, round 2):
+/// since #1080 both are `Problems` inside, and `token()` must not go `None`.
+#[test]
+fn chalk_errors_keep_their_token_through_the_facade() {
+    use pscat::chalkboard::BoardConfig;
+    let cfg = BoardConfig::from_json("{}").expect("default config");
+    let Err(e) = cfg.driver(r"\(x") else {
+        panic!("an unclosed \\( is an error")
+    };
+    assert_eq!(e.token(), Some(r"\("), "{e}");
+    assert!(!e.is_input_error());
+    let Err(e) = cfg.driver("x = 5$") else {
+        panic!("a stray $ is an error")
+    };
+    assert_eq!(e.token(), Some("$"), "{e}");
+}
+
 /// pscat-mcp's `chalkboard_math` takes some config keys as flat arguments
 /// and names them in errors by replacing the config path in the message.
 /// `ChalkError::message()` is the unprefixed text that works on, and gives

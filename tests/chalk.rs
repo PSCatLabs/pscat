@@ -488,7 +488,7 @@ fn unsupported_input_fails_with_the_named_error() {
             "unclosed_math_delimiter",
         ),
         (
-            r"a \left\( b \right\)",
+            r"a \left\( b \right.",
             "unsupported delimiter: \\(",
             "unsupported_delimiter",
         ),
@@ -499,8 +499,25 @@ fn unsupported_input_fails_with_the_named_error() {
         ),
         (
             r"\(x\) where \(y\)",
-            "text outside the math delimiters (w",
+            "text outside the math delimiters (where...)",
             "text_outside_math",
+        ),
+        // issue #718: a lone `$` is LaTeX's "Missing $ inserted", and the
+        // \big family fences a delimiter as \left and \right do
+        (
+            "a $ b",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            "x = 5$",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            r"\bigl\( b \bigr)",
+            "unsupported delimiter: \\(",
+            "unsupported_delimiter",
         ),
     ] {
         let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);
@@ -517,6 +534,135 @@ fn unsupported_input_fails_with_the_named_error() {
         let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
         assert_eq!(e.code(), code);
     }
+}
+
+/// Every unsupported character and command is reported in one pass, each
+/// with its line and column in the input, and the command is named as the
+/// user wrote it (issue #1080). The input is the issue's: three rounds of
+/// retries in one file.
+#[test]
+fn every_problem_is_reported_at_once_with_its_place() {
+    let dir = scratch("problems");
+    let tex = "\\text{G\\\"odel's First Incompleteness Theorem}\n\
+               \\text{G日del} \\\\\n\
+               x ``quoted'' + \\aleph \\; ☃";
+    std::fs::write(dir.join("in.tex"), tex).unwrap();
+    let out = pscat(&dir, &["chalk", "--file", "in.tex", "-o", "bad.png"], None);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    let want = [
+        r#"1:8  unsupported LaTeX command \" ("#,
+        "2:8  unsupported character: 日 (U+65E5)",
+        "3:3  unsupported character: `` (",
+        r"3:16  unsupported LaTeX command \aleph",
+        "3:26  unsupported character: ☃ (U+2603)",
+    ];
+    assert!(
+        err.starts_with("pscat chalk: 5 problems in the LaTeX (line:column):\n"),
+        "{err}"
+    );
+    for w in want {
+        assert!(err.contains(&format!("\n  {w}")), "{w:?} not in:\n{err}");
+    }
+    assert!(!err.contains("inside-text"), "{err}");
+    assert!(!err.contains("%%[ Error"), "{err}");
+    assert!(!dir.join("bad.png").exists(), "wrote a file");
+
+    // the library: the same list, as data
+    let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
+    let chalk::ChalkError::Problems(ps) = &e else {
+        panic!("{e:?}");
+    };
+    let at: Vec<_> = ps
+        .iter()
+        .map(|p| (p.token.as_str(), p.line, p.column))
+        .collect();
+    assert_eq!(
+        at,
+        [
+            ("\\\"", 1, 8),
+            ("日", 2, 8),
+            ("``", 3, 3),
+            ("\\aleph", 3, 16),
+            ("☃", 3, 26)
+        ]
+    );
+    // byte offsets, for a caller that slices the input
+    for p in ps {
+        assert!(tex[p.offset..].starts_with(&p.token), "{p:?}");
+    }
+    assert_eq!(e.code(), "unsupported_command");
+
+    // one problem stays one line, now with its place
+    let e = chalk::render(r#"a \text{\"o}"#, &small(), Format::Png).unwrap_err();
+    let one = e.to_string();
+    assert!(
+        one.starts_with(r#"unsupported LaTeX command \" at 1:9 (accents are not drawn"#),
+        "{one}"
+    );
+    assert_eq!(one.lines().count(), 1, "{one}");
+}
+
+/// A structural error (a missing brace) is listed with the unsupported
+/// characters before it, and a run of them is capped.
+#[test]
+fn structural_errors_join_the_list_and_a_long_list_is_cut() {
+    let e = chalk::render("a @ \\frac{b}{c", &small(), Format::Png).unwrap_err();
+    let chalk::ChalkError::Problems(ps) = &e else {
+        panic!("{e:?}");
+    };
+    let kinds: Vec<_> = ps.iter().map(|p| p.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["unsupported-character", "missing-closing-brace"],
+        "{e}"
+    );
+    assert_eq!(ps[0].column, 3);
+
+    let many = "@ ".repeat(300);
+    let e = chalk::render(&many, &small(), Format::Png).unwrap_err();
+    let shown = e.to_string();
+    assert!(shown.contains("problems in the LaTeX"), "{shown}");
+    assert!(shown.contains("... and "), "{shown}");
+    assert!(shown.lines().count() < 30, "{shown}");
+}
+
+/// A stepped-over one-token argument does not end the line, and a missing
+/// argument is still reported when something else on the line was stepped
+/// over (Codex batch 3, round 1).
+#[test]
+fn a_stepped_over_argument_neither_hides_nor_fakes_a_missing_one() {
+    let kinds_tokens = |tex: &str| -> Vec<(String, String)> {
+        let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
+        let chalk::ChalkError::Problems(ps) = &e else {
+            panic!("{tex}: {e:?}");
+        };
+        ps.iter()
+            .map(|p| (p.kind.clone(), p.token.clone()))
+            .collect()
+    };
+    let cmd = |t: &str| ("unsupported-command".to_string(), t.to_string());
+    let chr = |t: &str| ("unsupported-character".to_string(), t.to_string());
+    // later problems on the line are still found
+    assert_eq!(
+        kinds_tokens(r"x^\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\sqrt\aleph + \beth"),
+        [cmd(r"\aleph"), cmd(r"\beth")]
+    );
+    assert_eq!(
+        kinds_tokens(r"\vec@ + \frac@\beth + ☃"),
+        [chr("@"), chr("@"), cmd(r"\beth"), chr("☃")]
+    );
+    // a genuinely missing argument is not swallowed by an earlier step-over
+    let got = kinds_tokens(r"@ + \frac{1}");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0], chr("@"));
+    assert_eq!(got[1].0, "missing-argument", "{got:?}");
+    // and a stepped-over argument alone is one problem, not two
+    assert_eq!(kinds_tokens(r"x^\aleph"), [cmd(r"\aleph")]);
 }
 
 /// Separate inline pairs (the issue's `\(a\) + \(b\)`, in all four delimiter
@@ -575,6 +721,46 @@ fn help_lists_only_supported_commands() {
     assert!(
         missing.is_empty(),
         "--help lists unknown commands: {missing}"
+    );
+}
+
+/// `--help` says which characters `\text{}` sets (issue #1080); that list is
+/// what mathkit draws, so it never promises one that fails, or hides one that
+/// works.
+#[test]
+fn help_says_which_characters_text_takes() {
+    let dir = scratch("help-text");
+    let out = pscat(&dir, &["chalk", "--help"], None);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let after = &text[text
+        .find("digits and ")
+        .expect("the \\text{} line in --help")
+        + 11..];
+    let said: String = after[..after.find(" and spaces").expect("end of the list")]
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    // every printable ASCII character but the three that shape a group
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+         33 1 126 {
+           /c exch def
+           c 92 eq c 123 eq or c 125 eq or not {
+             newpath
+             { (\\\\text{x}) dup 6 c put 0 0 << >> mkpath } stopped
+               { clear } { (_) dup 0 c put print } ifelse
+           } if
+         } for",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let drawn = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    let (letters, punct): (String, String) = drawn.chars().partition(char::is_ascii_alphanumeric);
+    assert_eq!(letters.len(), 62, "letters and digits: {letters}");
+    assert_eq!(
+        punct, said,
+        "--help and mathkit disagree on \\text{{}}'s punctuation"
     );
 }
 

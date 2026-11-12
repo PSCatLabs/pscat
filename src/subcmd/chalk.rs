@@ -47,7 +47,8 @@ lists the LaTeX it knows."#;
 /// The LaTeX `pscat chalk` knows (mathkit's subset), printed by `--help`
 /// only, so a usage error stays short. An installed pscat has no
 /// lib/mathkit.ps to read (issue #934).
-const SUBSET: &str = r#"Supported LaTeX (anything else fails with one line naming it):
+const SUBSET: &str = r#"Supported LaTeX (every unsupported character or command is
+reported in one pass, with its line and column):
   scripts       x^2  x_i  x_i^2  f'
   fractions     \frac \dfrac \tfrac \binom \sqrt{x} \sqrt[n]{x}
   big operators \sum \prod \int \iint \iiint \oint \limits \nolimits
@@ -61,7 +62,11 @@ const SUBSET: &str = r#"Supported LaTeX (anything else fails with one line namin
   braces        \overbrace{}^{} \underbrace{}_{} \overset \underset \stackrel
                 \substack
   text, fonts   \text{} \mathrm{} \mathbf{} \mathbb{} \mathcal{} (the last
-                two: capital letters only)
+                two: capital letters only). \text{} sets ASCII letters and
+                digits and !'()*+,-./:;<=>?[]| and spaces; accent commands
+                (\"o), quotes, other symbols and backslash commands are not
+                drawn, and a letter the board hand lacks is reported (write
+                the plain letter, Goedel for Gödel)
   spacing       \, \: \; \! \  \quad \qquad ~
   styles        \displaystyle \textstyle \scriptstyle \scriptscriptstyle
   Greek         \alpha ... \omega  \Gamma ... \Omega  \varphi \vartheta
