@@ -42,6 +42,13 @@ page), `--dpi`, `--halftone`, `--transparent`, `--max-pixels N` (refuse a
 page over N device pixels or 8000 a side before drawing), `-o out.png`. Run with `--help` for
 the full list.
 
+Numbers have ranges, shown by `pscat handwrite` and the library's
+`MIN_`/`MAX_` consts: `--size` 0..2000, `--margin` 0..8000, `--leading`
+0..100, `--jitter` a whole number 0..10000, `--pen` 0..1000, each `--ink`
+component 0..1, `--seed` a 32-bit whole number. Rust programs can build the
+same note without running the subcommand: see `pscat::handwriting` and
+[pscat as a Rust library](library.md).
+
 The business logic lives in `lib/handscript.ps` — the font plus a
 dict-driven layout API (`hs-write` draws, `hs-linecount` measures;
 the script auto-sizes pages by running the count headlessly first).

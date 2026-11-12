@@ -79,7 +79,7 @@ misspelt operator or a type error, and it cannot know that a program reads its
 own text as data (`currentfile eexec`, inline `image` samples), so those bytes
 can be reported as errors.
 
-## Pages, halftone, review sheets and chalkboards
+## Pages, halftone, review sheets, chalkboards and handwriting
 
 These are the pieces behind `pscat --halftone`, `pscat sheet`, `pscat chalk`
 and `pscat --capabilities`, for a program (an MCP server, say) that runs each
@@ -168,6 +168,29 @@ and does not have to match pscat's version of one.
   ```
 
   (The same example runs as the doctest on `ChalkError::problems`.)
+- **Handwriting.** `pscat::handwriting` writes the programs behind
+  `pscat handwrite`, as source for you to run in your own sandbox, so you can
+  check the page between the two passes and run each under its own limits.
+  `HandOptions` is the text and the flags (`Default` is the subcommand's
+  defaults, `validate()` checks them against the `MIN_`/`MAX_` consts and
+  returns a `HandError` with a stable `code()` and the `field()`):
+
+  ```rust
+  use pscat::handwriting::{HandOptions, measure_source, parse_line_count, render_source};
+
+  let mut opts = HandOptions::new("meet me at nine");
+  opts.seed = 7;
+  opts.validate()?;
+  let stdout = my_run(&measure_source(&opts))?; // pass 1: prints the line count
+  let lines = parse_line_count(&stdout).expect("a count");
+  let height = opts.height_pt(lines) as u32; // check it against your own cap here
+  let page = my_render(&render_source(&opts, height), opts.width, height)?; // pass 2
+  ```
+
+  `page_height_pt(lines, size)` is `height_pt` at the default margin
+  (`DEFAULT_MARGIN`) and leading (`DEFAULT_LEADING`). A note made this way is
+  the same PNG `pscat handwrite` writes for the same options. The module's
+  own documentation has a complete example that runs as a doctest.
 - **The catalog.** `pscat::catalog::capabilities()` is the JSON
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.
@@ -188,8 +211,8 @@ version is the `rust-version` in `Cargo.toml` (1.88).
 ## Stability
 
 The supported API is what docs.rs shows: `Interp`, `Page`, `PsError`,
-`Limits`, `syntax::check_syntax`, and the `sheet`, `chalkboard` and `catalog`
-modules. The crate has other public modules that the binaries, the browser
+`Limits`, `syntax::check_syntax`, and the `sheet`, `chalkboard`, `handwriting`
+and `catalog` modules. The crate has other public modules that the binaries, the browser
 build and the
 test suite use; they are hidden from the documentation and can change in any
 release.
