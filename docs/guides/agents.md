@@ -102,7 +102,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
   `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
+  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
+  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page but no `Lint:` block: those findings describe where the
   run stopped, so they would only be consequences of the error (#942).

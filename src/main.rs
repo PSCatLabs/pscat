@@ -706,7 +706,7 @@ fn run_cli() -> ExitCode {
             run_headless(&mut interp, expr.as_bytes(), &options),
             &interp,
             &options,
-            pscat::lint::scan_declared_pages(expr.as_bytes()),
+            expr.as_bytes(),
         );
     }
     if options.interactive {
@@ -775,7 +775,7 @@ fn run_cli() -> ExitCode {
             run_headless(&mut interp, &source, &options),
             &interp,
             &options,
-            pscat::lint::scan_declared_pages(&source),
+            &source,
         );
     }
 
@@ -1110,15 +1110,10 @@ fn run_selftest(path: &std::path::Path) -> ExitCode {
     }
 }
 
-fn finish_headless(
-    ok: bool,
-    interp: &Interp,
-    options: &Options,
-    declared_pages: pscat::lint::DeclaredPages,
-) -> ExitCode {
+fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) -> ExitCode {
     let mut lint_failed = false;
     if options.lint {
-        let found = report_lint(interp, options, &declared_pages, ok);
+        let found = report_lint(interp, options, source, ok);
         lint_failed = options.lint_strict && found;
     }
     if let Some(path) = &options.png {
@@ -1220,12 +1215,7 @@ const RUN_ERROR_CHECK: &str = "run-error";
 /// "clean" (issue #369): the verdict line used to say so right under the
 /// `%%[ Error ... ]%%` report, and agents trust that line. The exit code
 /// is untouched (`finish_headless` already fails an errored run).
-fn report_lint(
-    interp: &Interp,
-    options: &Options,
-    declared_pages: &pscat::lint::DeclaredPages,
-    ok: bool,
-) -> bool {
+fn report_lint(interp: &Interp, options: &Options, source: &[u8], ok: bool) -> bool {
     // The blank-page/stack-leak checks assume the run was meant to
     // produce a page — true for any file or stdin run, whether or not
     // an output format flag was also given (`--lint file.ps` with no
@@ -1243,7 +1233,8 @@ fn report_lint(
         || options.png.is_some()
         || options.svg.is_some()
         || options.pdf.is_some();
-    let findings = interp.lint_with_pages(render_checks, declared_pages);
+    let findings = interp.lint_with_pages(render_checks, &pscat::lint::scan_declared_pages(source));
+    let findings = pscat::lint::scan_lint_allows(source).filter(findings);
     print_lint(&findings, ok, options.lint_strict, None)
 }
 
@@ -2338,8 +2329,10 @@ fn print_usage() {
     println!("      --confine-reads as --read-root, with no directories: only the embedded lib/");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
-    println!("                      left on the stack — printed to stderr, doesn't affect");
-    println!("                      the exit code");
+    println!("                      left on the stack, an operator name redefined as a");
+    println!("                      plain value (silence with a `%lint: allow");
+    println!("                      shadowed-operator` comment) — printed to stderr,");
+    println!("                      doesn't affect the exit code");
     println!("      --lint-strict   as --lint, but exit non-zero if anything is found");
     println!("      --selftest FILE run FILE's %%SelfTest blocks and exit (runs alone)");
     println!("      --selftest-list FILE   print FILE's %%SelfTest block names, then exit");

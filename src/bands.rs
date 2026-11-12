@@ -627,8 +627,10 @@ fn run_band(
         .collect();
     // Lint reads the band's interpreter, which can't leave this thread, so
     // band 0 (the top band, the only one whose stderr is kept) lints here.
-    let lint = (options.lint && index == 0)
-        .then(|| pscat::lint::check_band(&interp, &pscat::lint::scan_declared_pages(source)));
+    let lint = (options.lint && index == 0).then(|| {
+        let found = pscat::lint::check_band(&interp, &pscat::lint::scan_declared_pages(source));
+        pscat::lint::scan_lint_allows(source).filter(found)
+    });
     // The last band a worker runs leaves its dictionaries to the process
     // exit, as a plain render does (`main`); earlier ones free theirs, so
     // a long queue doesn't pile up dead interpreters.

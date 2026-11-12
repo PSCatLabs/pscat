@@ -186,6 +186,39 @@ fn lint_after_an_error_reports_no_consequence_findings() {
 }
 
 #[test]
+fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
+    // Issue #1052: `/sub` meant as "subtitle" replaces the operator.
+    let body = "/sub (hello) def\n/x 5 3 sub def\nshowpage\n";
+    let (_ok, _out, stderr) = run(&["--lint", "-"], body);
+    assert!(
+        stderr.contains("[shadowed-operator] /sub was redefined as a string"),
+        "{stderr}"
+    );
+    // The comment silences that finding and nothing else.
+    let allowed = format!("%lint: allow shadowed-operator\n{body}");
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &allowed);
+    assert!(!stderr.contains("[shadowed-operator]"), "{stderr}");
+    assert!(stderr.contains("[blank-page]"), "{stderr}");
+    // A procedure wrapper is not a shadow, and `--lint-strict` fails on the real thing.
+    let (ok, _out, stderr) = run(
+        &["--lint-strict", "-"],
+        "/showpage { showpage } bind def 0 0 moveto 9 9 lineto stroke showpage",
+    );
+    assert!(ok && stderr.contains("lint: clean"), "{stderr}");
+    let (ok, _out, _stderr) = run(&["--lint-strict", "-e", "/sub 1 def"], "");
+    assert!(!ok);
+    let (ok, _out, stderr) = run(
+        &[
+            "--lint-strict",
+            "-e",
+            "%lint: allow shadowed-operator\n/sub 1 def",
+        ],
+        "",
+    );
+    assert!(ok && stderr.contains("lint: clean"), "{stderr}");
+}
+
+#[test]
 fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
     let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");
     assert!(ok, "{stderr}");
