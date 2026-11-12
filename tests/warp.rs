@@ -322,3 +322,38 @@ fn a_decorated_program_can_take_operands_and_leave_results() {
     assert_eq!(stack.last().map(String::as_str), Some("/undefinedresult"));
     assert_eq!(&stack[stack.len() - 3..stack.len() - 1], ["true", "2"]);
 }
+
+#[test]
+fn a_decorator_that_fails_to_install_still_closes_the_scope() {
+    // Codex round 2 on #962: installing happened before `stopped`, so an
+    // error there left the scope dictionary (and the wrappers in it) open.
+    // (the operands the failed install was working on stay behind, as after
+    // any PostScript error; what matters is the dictionary depth)
+    let it = run("{ {} << /fill { pop 1 } >> wp-run-decorated } stopped countdictstack");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(&stack[stack.len() - 2..], ["true", "2"], "{stack:?}");
+    // and fill is the real one again afterwards
+    assert_eq!(
+        numbers("/fill load type /operatortype eq { 1 } { 0 } ifelse"),
+        [1.0]
+    );
+}
+
+#[test]
+fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
+    // Codex round 2 on #962: the runner loaded exec and stopped at run time,
+    // after the decorators were installed, so it picked up the wrappers.
+    assert_eq!(
+        numbers("{ 42 } << /exec { } >> wp-run-decorated countdictstack"),
+        [42.0, 2.0]
+    );
+    assert_eq!(
+        numbers("{ 42 } << /stopped { } >> wp-run-decorated countdictstack"),
+        [42.0, 2.0]
+    );
+    // an error inside still re-raises, with the scope closed
+    let it =
+        run("{ { 1 0 div } << /exec { } /stopped { } >> wp-run-decorated } stopped countdictstack");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["true", "2"], "{stack:?}");
+}

@@ -323,6 +323,20 @@
   countdictstack exch sub 0 max { end } repeat { stop } if
 } bind def
 
+% ( decorators -- ): open the scope dictionary and install the decorators
+% and the page-operator stubs in it. Bound, so a decorated def or forall
+% cannot change how it installs the rest.
+% @internal
+/wp--install {
+  64 dict begin
+  { //aop-wrap-def exec } forall
+  /showpage {} def /copypage {} def /erasepage {} def
+} bind def
+
+% ( program -- ): run a file name, or execute a procedure.
+% @internal
+/wp--runprog { dup type /stringtype eq { run } { exec } ifelse } bind def
+
 % Decorators are ( target -- wrapper ) quotations keyed by operator name,
 % installed with aop-wrap-def in a fresh scope dictionary before the
 % program is read, so even procedures the program binds see them.
@@ -333,15 +347,18 @@
 % @example: (gallery/golden_bloom.ps) << /fill {} >> wp-run-decorated
 /wp-run-decorated {
   dup type /dicttype ne { wp-decorators-must-be-dictionary } if
-  countdictstack 3 1 roll
-  64 dict begin
-  { //aop-wrap-def exec } forall
-  /showpage {} def /copypage {} def /erasepage {} def
-  % depth program: the depth goes into the procedure that runs the
-  % program, not under it on the operand stack, so the program can take
-  % operands from its caller and leave results.
-  { dup type /stringtype eq { run } { exec } ifelse } /exec load 3 array astore cvx
-  /stopped load 3 -1 roll //wp--unwind /exec load 5 array astore cvx exec
+  countdictstack 3 1 roll                           % depth program decorators
+  % One protected procedure installs the decorators and then runs the
+  % program, so a decorator that fails to install still has its scope
+  % closed. The depth goes into the procedure that unwinds, not under the
+  % program on the operand stack, so the program can take operands from
+  % its caller and leave results. exec and stopped come straight from
+  % systemdict: a decorated exec or stopped in the scope cannot stop the
+  % program from running or the scope from closing.
+  //wp--install systemdict /exec get 4 -1 roll      % depth decorators install exec program
+  //wp--runprog systemdict /exec get 6 array astore cvx
+  systemdict /stopped get 3 -1 roll
+  //wp--unwind systemdict /exec get 5 array astore cvx exec
 } bind def
 
 % @kind: Procedure
