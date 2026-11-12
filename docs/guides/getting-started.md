@@ -30,6 +30,8 @@ cargo run -- --page 500x500 file.ps       # canvas size; always wins (default: t
                                           # program's setpagedevice /PageSize, else
                                           # an EPSF file's %%BoundingBox, else 612x792)
 cargo run -- --bbox --png out.png file.ps # any file's %%BoundingBox is the page
+                                          # (without it, a non-EPSF file's box is ignored and a one-line
+                                          # `pscat: note:` on stderr says so)
 cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100)
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)

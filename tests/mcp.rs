@@ -3375,7 +3375,10 @@ fn a_plain_files_ignored_bounding_box_is_a_warning() {
     let eps = plain.replace("%!PS-Adobe-3.0\n", "%!PS-Adobe-3.0 EPSF-3.0\n");
     let result = s.tool("render_postscript", json!({ "source": eps }));
     assert!(!noted(&result), "{result}");
-    let result = s.tool("render_postscript", json!({ "source": plain, "bbox": true }));
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true }),
+    );
     assert!(!noted(&result), "{result}");
     let result = s.tool(
         "render_postscript",
