@@ -1,7 +1,17 @@
 %!PS-Adobe-3.0
-%% Review sheet for #980: rounded shapes built with arcto/arct only.
-%% Run:  pscat --page 480x320 --png roundrects.png roundrects.ps
-%%       gs -q -dNOPAUSE -dBATCH -dNOSAFER -sDEVICE=png16m -dGraphicsAlphaBits=4 -g480x320 -r72 -o gs.png roundrects.ps
+%%Title: arcto/arct rounded-corner driver and review sheet (issue #980)
+%%Pages: 1
+%%BoundingBox: 0 0 480 320
+%%SelfTestPage: 480x320
+%%EndComments
+
+% Rounded shapes built with arcto/arct only; the red dots are the tangent
+% points arcto returns. Strict lint (scripts/selftest.sh) checks it leaves
+% nothing on the stack and draws something. Compare with Ghostscript:
+%   pscat --page 480x320 --png pscat.png selftest/drivers/arcto.ps
+%   gs -q -dNOPAUSE -dBATCH -dNOSAFER -sDEVICE=png16m -dGraphicsAlphaBits=4 \
+%      -g480x320 -r72 -o gs.png selftest/drivers/arcto.ps
+% (notes/980-arcto-arct.md has the side-by-side.)
 /dot { gsave 1 0 0 setrgbcolor newpath 2 0 360 arc fill grestore } def   % x y dot: grestore also brings the path back
 % x y w h r rrect: arcto at the four corners, tangent points marked
 /rrect { /r exch def /h exch def /w exch def /y exch def /x exch def
@@ -12,7 +22,9 @@
   x y  x w add y  r arcto  dot dot
   closepath } def
 1 setgray 0 0 480 320 rectfill
-0.5 setlinewidth
+/Helvetica findfont 8 scalefont setfont
+1.5 setlinewidth
+/label { gsave 0 setgray moveto show grestore } def
 % 1: plain rounded rectangle, filled, radius 18
 gsave 0.78 0.87 0.97 setrgbcolor newpath 20 190 130 100 18 rrect fill grestore
 0 setgray newpath 20 190 130 100 18 rrect stroke
@@ -33,3 +45,11 @@ newpath 80 30 moveto 160 30 130 130 20 arct 130 130 60 110 20 arct 60 110 80 30 
   300 60 340 60 -12 arct 340 120 lineto stroke
 % 6: acute corner
 newpath 380 30 moveto 460 40 380 60 14 arcto 4 { pop } repeat 440 100 lineto stroke
+% panel labels
+(1: radius 18, tangent points in red) 20 172 label
+(2: radius 50, a pill) 170 172 label
+(3: scale 1.6 0.7, circles become ellipses) 320 172 label
+(4: arct polygon, radius 20) 60 14 label
+(5: collinear, r = 0, r = -12) 200 14 label
+(6: acute corner, r = 14) 380 14 label
+showpage

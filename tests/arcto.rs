@@ -332,7 +332,14 @@ fn rounded_rectangle_png_has_round_corners() {
 fn rounded_rectangle_svg_and_pdf_carry_the_curves() {
     let it = render(ROUNDRECT);
     let svg = it.gfx().svg_pages().expect("svg on").concat();
-    assert_eq!(svg.matches('C').count(), 4, "four corner curves: {svg}");
+    assert!(
+        svg.contains(
+            "<path d=\"M100 150L130 150C146.569 150 160 136.569 160 120L160 80\
+             C160 63.431 146.569 50 130 50L70 50C53.431 50 40 63.431 40 80L40 120\
+             C40 136.569 53.431 150 70 150Z\" fill=\"#1a4dcc\""
+        ),
+        "the rounded rectangle's path: {svg}"
+    );
     let pdf = pdf_text(&it.gfx().pdf_document().expect("pdf on"));
     // Four cubic segments; `h` closes the page fill and the shape.
     let ops = |op: &str| pdf.split_whitespace().filter(|w| *w == op).count();
@@ -371,10 +378,12 @@ fn gs_output(body: &str) -> String {
 /// operand stack of an error case is dropped before comparing.
 fn words(line: &str) -> Vec<Result<f64, String>> {
     let mut line = line.to_string();
-    if !line.contains("=> ok") {
-        if let (Some(a), Some(b)) = (line.find("stack:"), line.find("path:")) {
-            line.replace_range(a..b, "stack: ");
-        }
+    if let (false, Some(a), Some(b)) = (
+        line.contains("=> ok"),
+        line.find("stack:"),
+        line.find("path:"),
+    ) {
+        line.replace_range(a..b, "stack: ");
     }
     line.split_whitespace()
         .map(|w| w.parse::<f64>().map_err(|_| w.to_string()))
@@ -431,10 +440,9 @@ fn ghostscript_agrees_case_by_case() {
         ),
         ("scaled", "2 0.5 scale 0 0 moveto 50 0 50 100 10 arcto"),
         ("rotated", "30 rotate 0 0 moveto 100 0 100 100 10 arcto"),
-        (
-            "rotated fold-back",
-            "30 rotate 0 0 moveto 100 0 -50 0 10 arcto",
-        ),
+        // No rotated fold-back here: gs's answer to it depends on its own
+        // rounding noise (a line, or limitcheck, by CTM). The pscat side is
+        // pinned in `collinear_points_draw_a_line_to_the_corner`.
         (
             "rotated and scaled",
             "30 rotate 3 1.7 scale 0 0 moveto 50 20 80 -30 10 arcto",
@@ -512,5 +520,51 @@ fn ghostscript_draws_the_same_rounded_rectangles() {
             .count();
         // Edge pixels may differ in antialiasing; the shape may not.
         assert!(differing < 80, "{name}: {differing} pixels differ from gs");
+    }
+}
+
+#[test]
+fn ghostscript_rasterises_our_pdf_like_our_canvas() {
+    if !gs_available() {
+        eprintln!("skipping the gs PDF comparison: gs is not installed");
+        return;
+    }
+    for (name, prog) in [("plain", ROUNDRECT), ("scaled", SCALED_ROUNDRECT)] {
+        let it = render(prog);
+        let pdf = it.gfx().pdf_document().expect("pdf on");
+        let dir = common::scratch_dir("arcto_pdf_raster");
+        let (pdf_path, png) = (dir.join("rr.pdf"), dir.join("rr.png"));
+        std::fs::write(&pdf_path, pdf).expect("write pdf");
+        let out = Command::new("gs")
+            .args([
+                "-q",
+                "-dNOPAUSE",
+                "-dBATCH",
+                "-sDEVICE=png16m",
+                "-dGraphicsAlphaBits=4",
+                "-g200x200",
+                "-r72",
+            ])
+            .arg(format!("-o{}", png.display()))
+            .arg(&pdf_path)
+            .output_deadline()
+            .expect("run gs");
+        assert!(out.status.success(), "{name}: gs rejected our PDF");
+        let gs = tiny_skia::Pixmap::decode_png(&std::fs::read(&png).expect("png")).expect("decode");
+        let _ = std::fs::remove_dir_all(&dir);
+        let ours = &it.gfx().pixmap;
+        let differing = gs
+            .pixels()
+            .iter()
+            .zip(ours.pixels())
+            .filter(|(a, b)| {
+                let d = |x: u8, y: u8| x.abs_diff(y) as u32;
+                d(a.red(), b.red()) + d(a.green(), b.green()) + d(a.blue(), b.blue()) > 96
+            })
+            .count();
+        assert!(
+            differing < 80,
+            "{name}: {differing} pixels differ between gs(PDF) and the canvas"
+        );
     }
 }

@@ -34,8 +34,16 @@ where pscat either draws the large geometry or, inside the tolerance, a line.
 (`src/capabilities.rs`), so neither operator is added there. No `%%SelfTest`
 block: those belong to `lib/*.ps` files, and the cargo test covers this.
 
-**Review render.** `notes/980-arcto-arct/roundrects.ps` draws rounded
-rectangles with `arcto` (tangent points in red), a pill, a non-uniform-scale
-version, an `arct` polygon, and the collinear, zero-radius, negative-radius and
-acute cases. `pscat-left-gs-right.png` is pscat (left) beside Ghostscript
-(right); the shapes coincide, only stroke antialiasing differs.
+**Review render and selftest driver.** `selftest/drivers/arcto.ps` draws
+rounded rectangles with `arcto` (tangent points in red), a pill, a
+non-uniform-scale one, an `arct` polygon, and the collinear, zero-radius,
+negative-radius and acute cases; `scripts/selftest.sh` strict-lints it.
+`notes/980-arcto-arct/pscat-left-gs-right.png` is pscat (left) beside
+Ghostscript (right): the shapes coincide, only stroke antialiasing differs.
+
+**Verified.** Two-binary identity check (`--base-bin/--head-bin`) over all
+tracked `examples/*.ps` and `selftest/drivers/*.ps`: 159 pages identical, the
+control (the new driver) differs as it must. No tracked `.ps` in `lib/`,
+`gallery/` or `fuzz/` mentions `arcto` or `arct`, so no existing program can
+reach the new operators. SVG and PDF exports are pinned in `tests/arcto.rs`
+(the SVG path text, and gs rasterising our PDF against our canvas).
