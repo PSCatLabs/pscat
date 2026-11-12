@@ -16,11 +16,14 @@
 //! for byte.
 //!
 //! A formula outside the supported LaTeX subset fails when the program
-//! runs, as a PostScript `undefined` error that [`explain`] turns back into
-//! the TeX error it stands for.
+//! runs, as a PostScript `undefined` error. [`Driver::explain`] turns it
+//! back into the TeX error it stands for, with every unsupported command or
+//! character the program found and where each is
+//! ([`ChalkError::problems`]); [`explain`] alone names the first, without a
+//! place.
 //!
 //! ```
-//! use pscat::chalkboard::{BoardConfig, explain};
+//! use pscat::chalkboard::BoardConfig;
 //! use pscat::Interp;
 //!
 //! let mut config = BoardConfig::default();
@@ -30,9 +33,15 @@
 //!
 //! let mut interp = Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
 //! driver.prepare(&mut interp);
+//! interp.capture_stdout(); // the check pass reports its problems on stdout
 //! match interp.run_str(driver.source()) {
 //!     Ok(()) => assert_eq!(interp.pages().len(), 1),
-//!     Err(e) => panic!("{}", explain(&e).map_or(interp.error_report(&e), |c| c.to_string())),
+//!     Err(e) => panic!(
+//!         "{}",
+//!         driver
+//!             .explain(interp.captured_stdout(), &e)
+//!             .map_or(interp.error_report(&e), |c| c.to_string())
+//!     ),
 //! }
 //! # Ok::<(), pscat::chalkboard::ChalkError>(())
 //! ```
@@ -61,7 +70,7 @@ impl BoardConfig {
     pub fn from_json(text: &str) -> Result<BoardConfig, ChalkError> {
         chalk::Config::from_json(text)
             .map(BoardConfig)
-            .map_err(ChalkError)
+            .map_err(ChalkError::new)
     }
 
     /// Read a config from a JSON value in the `pscat chalk --json` schema,
@@ -69,7 +78,7 @@ impl BoardConfig {
     pub fn from_value(value: &Value) -> Result<BoardConfig, ChalkError> {
         chalk::Config::from_value(value)
             .map(BoardConfig)
-            .map_err(ChalkError)
+            .map_err(ChalkError::new)
     }
 
     /// Lay the keys in `value` (the same schema) over this config. A key
@@ -78,14 +87,14 @@ impl BoardConfig {
     /// `{"layout": {"width": 500}}`, then `{"seed": 7}`. Each value is
     /// checked on its own; [`check`](Self::check) checks the whole.
     pub fn apply(&mut self, value: &Value) -> Result<(), ChalkError> {
-        self.0.apply(value).map_err(ChalkError)
+        self.0.apply(value).map_err(ChalkError::new)
     }
 
     /// Check the config as a whole: every value in range, and room to write
     /// once the margins and the board's ledge are taken off the page.
     /// [`driver`](Self::driver) checks this too.
     pub fn check(&self) -> Result<(), ChalkError> {
-        self.0.check().map_err(ChalkError)
+        self.0.check().map_err(ChalkError::new)
     }
 
     /// The page size in points, width first.
@@ -111,7 +120,7 @@ impl BoardConfig {
     pub fn driver(&self, latex: &str) -> Result<Driver, ChalkError> {
         chalk::driver(latex, &self.0)
             .map(Driver)
-            .map_err(ChalkError)
+            .map_err(ChalkError::new)
     }
 }
 
@@ -161,19 +170,141 @@ impl Driver {
         }
         interp.set_pdf_info_from_dsc(self.0.source.as_bytes());
     }
+
+    /// A failed run of [`source`](Self::source) as the error to give the
+    /// user: every unsupported command or character (and delimiter problem)
+    /// the program's check pass found, each at its place in the LaTeX (see
+    /// [`ChalkError::problems`]); `None` when `err` is not a TeX error.
+    /// `printed` is what the run printed on standard output, so call
+    /// [`Interp::capture_stdout`] before running and pass
+    /// [`Interp::captured_stdout`] here. With nothing printed this is
+    /// [`explain`]`(err)`, which names the first problem without a place.
+    ///
+    /// `printed` may be partial or mixed with the program's own output (a
+    /// time or step limit that fired mid-print, say): lines it cannot read
+    /// are skipped, so a TeX error always comes back, with whatever problems
+    /// parsed, and this never panics. [`ChalkError::code`] is the first
+    /// problem's [`Problem::code`].
+    ///
+    /// The check pass's lines are internal, not API; their format may
+    /// change. Each starts with `CKPROBLEM` and a tab, so a caller that shows
+    /// the program's output to a user can drop the lines that start with
+    /// [`PROBLEM_LINE_PREFIX`].
+    pub fn explain(&self, printed: &[u8], err: &PsError) -> Option<ChalkError> {
+        self.0.explain(printed, err).map(ChalkError::new)
+    }
 }
+
+/// What every line the chalkboard program prints for a problem starts with
+/// ([`Driver::explain`]): strip such lines from program output shown to a
+/// user. The rest of the line's format is internal.
+pub const PROBLEM_LINE_PREFIX: &str = "CKPROBLEM\t";
 
 /// Why a board could not be made.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChalkError(chalk::ChalkError);
+pub struct ChalkError {
+    inner: chalk::ChalkError,
+    /// `inner`'s problems, converted once so [`problems`](Self::problems)
+    /// can lend them out.
+    problems: Vec<Problem>,
+}
+
+/// One unsupported command, unsupported character or delimiter problem in a
+/// formula, and where it is (issue #1080). The fields are those of the
+/// `problems` array `chalkboard_math` returns, so `pscat chalk`, pscat's MCP
+/// server and this library report the same list.
+///
+/// `#[non_exhaustive]`: later releases may add fields, so a caller reads the
+/// fields and cannot build or match one by listing them all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Problem {
+    /// What it named, as written in the input: `\aleph`, `\"`, `ö`.
+    pub token: String,
+    /// The line of the input it is on, counted from 1.
+    pub line: usize,
+    /// Its column on that line, in characters, counted from 1.
+    pub column: usize,
+    /// Its byte offset into the input, for a caller that slices it.
+    pub offset: usize,
+    code: String,
+    message: String,
+}
+
+impl Problem {
+    fn new(p: &chalk::Problem) -> Problem {
+        Problem {
+            token: p.token.clone(),
+            line: p.line,
+            column: p.column,
+            offset: p.offset,
+            code: p.code(),
+            message: p.message(),
+        }
+    }
+
+    /// A stable code for tools: `unsupported_command`,
+    /// `unsupported_character`, `unclosed_math_delimiter`, ...
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// The problem as one line, without where it is: `unsupported LaTeX
+    /// command \aleph`, with a hint where there is one. Add
+    /// [`line`](Self::line) and [`column`](Self::column) as the caller likes.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
 
 impl ChalkError {
+    fn new(inner: chalk::ChalkError) -> ChalkError {
+        let problems = match &inner {
+            chalk::ChalkError::Problems(ps) => ps.iter().map(Problem::new).collect(),
+            _ => Vec::new(),
+        };
+        ChalkError { inner, problems }
+    }
+
+    /// Every problem one pass found in the LaTeX, in the order and at the
+    /// places `pscat chalk` lists them, each with its line, column and byte
+    /// offset. Never empty for an error that has problems; empty for the
+    /// rest: a config error, no formula, a render failure, and a TeX error
+    /// from [`explain`] on its own (it never sees the input, so it names the
+    /// first problem without a place: use [`code`](Self::code) and
+    /// [`token`](Self::token), or [`Driver::explain`] to get the list).
+    ///
+    /// [`driver`](BoardConfig::driver) finds delimiter problems before any
+    /// run; the rest come from [`Driver::explain`] after a failed run.
+    ///
+    /// ```
+    /// use pscat::chalkboard::BoardConfig;
+    /// use pscat::Interp;
+    ///
+    /// let board = BoardConfig::default();
+    /// let driver = board.driver("x + \\aleph\n+ ☃")?;
+    /// let (w, h) = driver.page_size();
+    /// let mut interp = Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
+    /// interp.capture_stdout();
+    /// let err = interp.run_str(driver.source()).expect_err("outside the subset");
+    /// let e = driver.explain(interp.captured_stdout(), &err).expect("a TeX error");
+    ///
+    /// let found: Vec<_> = e.problems().iter().map(|p| (p.token.as_str(), p.line, p.column)).collect();
+    /// assert_eq!(found, [(r"\aleph", 1, 5), ("☃", 2, 3)]);
+    /// assert_eq!(e.problems()[0].code(), "unsupported_command");
+    /// assert_eq!(e.problems()[0].message(), r"unsupported LaTeX command \aleph");
+    /// # Ok::<(), pscat::chalkboard::ChalkError>(())
+    /// ```
+    pub fn problems(&self) -> &[Problem] {
+        &self.problems
+    }
+
     /// A stable code for tools: `config` (a config key or value is wrong),
     /// `empty` (no formula), `render` (the program failed for a reason that
     /// is not the TeX's), or the LaTeX error's kind (`unsupported_command`,
     /// `unsupported_character`, `missing_argument`, ...).
     pub fn code(&self) -> String {
-        self.0.code()
+        self.inner.code()
     }
 
     /// Whether the input is wrong in a way no run is needed to see: a config
@@ -181,7 +312,7 @@ impl ChalkError {
     /// render failure.
     pub fn is_input_error(&self) -> bool {
         matches!(
-            self.0,
+            self.inner,
             chalk::ChalkError::Config(_) | chalk::ChalkError::Empty
         )
     }
@@ -190,7 +321,7 @@ impl ChalkError {
     /// (`\aleph`, `@`, `\(`), if it named one. When one pass found several
     /// problems (issue #1080), the first one's, as [`code`](Self::code) is.
     pub fn token(&self) -> Option<&str> {
-        match &self.0 {
+        match &self.inner {
             chalk::ChalkError::Latex { token, .. } if !token.is_empty() => Some(token),
             chalk::ChalkError::Problems(ps) => ps
                 .first()
@@ -206,7 +337,7 @@ impl ChalkError {
     /// settings as flat arguments can substitute its own argument names.
     /// [`Display`](fmt::Display) adds `config: ` in front of a config error.
     pub fn message(&self) -> String {
-        match &self.0 {
+        match &self.inner {
             chalk::ChalkError::Config(m) => m.clone(),
             e => e.to_string(),
         }
@@ -215,7 +346,7 @@ impl ChalkError {
 
 impl fmt::Display for ChalkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        self.inner.fmt(f)
     }
 }
 
@@ -233,5 +364,5 @@ impl std::error::Error for ChalkError {}
 /// assert_eq!(tex.token(), Some("\\aleph"));
 /// ```
 pub fn explain(err: &PsError) -> Option<ChalkError> {
-    chalk::explain(err).map(ChalkError)
+    chalk::explain(err).map(ChalkError::new)
 }
