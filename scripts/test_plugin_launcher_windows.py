@@ -430,19 +430,31 @@ class WinLauncher(unittest.TestCase):
     def test_an_out_root_the_console_cannot_spell_goes_as_its_short_name(self):
         # A directory outside every environment-variable root, with a letter
         # outside the console code page: it can only travel as its 8.3 name,
-        # looked up with GetFolder (GetFile throws on a directory).
+        # looked up with GetFolder (GetFile throws on a directory). The
+        # runner's PowerShell can spell the letter, so this runs --exe
+        # directly with the output encoding forced to code page 437.
         root = self.path("outside \u0141\\out")
         os.makedirs(root)
         buf = ctypes.create_unicode_buffer(1024)
         ctypes.windll.kernel32.GetShortPathNameW(root, buf, 1024)
         if not buf.value or not buf.value.isascii():
             self.skipTest("8.3 short names are off on this volume")
-        env = self.env([self.fake_server()])
-        r = self.run_cmd(f"--plugin-out-root={root}", env=env)
-        args = self.served(r)
-        self.assertTrue(args.startswith('--out-root "') and args.endswith('"'), args)
+        script = self.path("plugin/scripts/pscat-mcp.ps1")
+        env = self.env([self.fake_server()], PSCAT_LAUNCH_ARGS=f'"--plugin-out-root={root}"')
+        command = ("try { [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437) } catch { };"
+                   "[Console]::Error.WriteLine('codepage=' + [Console]::OutputEncoding.CodePage);"
+                   f"& '{script}' --exe")
+        r = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                            "-ExecutionPolicy", "Bypass", "-Command", command],
+                           env=env, capture_output=True, stdin=subprocess.DEVNULL,
+                           encoding="cp437", errors="replace", timeout=180, cwd=self.path("empty"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("codepage=437", r.stderr)
         self.assertNotIn("passing over", r.stderr)
-        self.assertNotIn("\u0141", args)
+        lines = dict(line.split("|", 1) for line in r.stdout.splitlines() if "|" in line)
+        self.assertIn("R", lines, r.stdout)
+        self.assertTrue(lines["R"].startswith("-|") and lines["R"].isascii(), lines["R"])
+        self.assertSamePath(lines["R"][2:], root)
 
     def test_other_arguments_beside_the_plugin_options_are_refused(self):
         env = self.env([self.fake_server()])
