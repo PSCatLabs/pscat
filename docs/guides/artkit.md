@@ -32,6 +32,22 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   L-system engine that grows strings of drawing commands.
 - **Shapes, layout and text.** Shape primitives, layout helpers, and text
   helpers.
+- **Ellipses.** `cx cy rx ry ellipse` appends a closed elliptical subpath to
+  the current path (counterclockwise); `ellipsen` is the same with the
+  opposite winding, as `arcn` is to `arc`, so the pair builds a ring or a
+  cutout that fills and clips correctly (`newpath cx cy 100 70 ellipse cx cy
+  60 30 ellipsen fill` leaves the hole open under both the nonzero and the
+  even-odd rule). `cx cy rx ry a1 a2 ellipsearc` (and `ellipsearcn`) is the
+  open arc, with `arc`'s rules: it draws a line from the current point when
+  there is one. Each has a rotated form, `ellipserot`, `ellipsenrot`,
+  `ellipsearcrot` and `ellipsearcnrot`, taking `rot` in degrees,
+  counterclockwise about the centre, as the last operand (`cx cy rx ry rot
+  ellipserot`). Arc angles are parametric: 90 is always the top of the
+  ellipse, whatever the radii. A radius is taken as its magnitude and zero
+  raises `ellipse-radii-must-be-nonzero`. Nothing is painted, and the CTM is
+  restored on the way out, so the path survives: the hand-written idiom that
+  scales inside `gsave`/`grestore` loses it, because `grestore` discards the
+  current path.
 - **Path brushes.** These are built on `pathforall`.
   - `alongpath` stamps anything at even arc-length along any path, including
     `charpath` text.
