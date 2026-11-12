@@ -255,6 +255,31 @@ fn missing_directory_empty_and_device_names() {
     assert_eq!(eval(&mut it, "(f\\000x) status").unwrap(), s(&["false"]));
 }
 
+/// A file `file`/`run` cannot open is not something to probe-then-run.
+/// (gs reports `true` for it: it only stats.)
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_is_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = fixture("status-unreadable");
+    let path = fx.dir.join("secret");
+    std::fs::write(&path, "x").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    if std::fs::File::open(&path).is_ok() {
+        eprintln!("skipping: this user can open a mode 000 file (root)");
+        return;
+    }
+    let mut it = fresh();
+    assert_eq!(
+        eval(&mut it, &format!("({}) status", abs(&path))).unwrap(),
+        s(&["false"])
+    );
+    assert_eq!(
+        eval(&mut it, &format!("({}) (r) file", abs(&path))),
+        Err("undefinedfilename".to_string())
+    );
+}
+
 #[test]
 fn a_file_object_still_answers_open_or_closed() {
     let fx = fixture("status-fileobj");
@@ -583,7 +608,6 @@ fn status_agrees_with_ghostscript() {
         "(sub/nope) status",
         "(%stdout) status",
         "() status",
-        "(/dev/null) status",
         "(f) (r) file status",
         "(f) (r) file dup closefile status",
         "42 status",

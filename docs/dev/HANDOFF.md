@@ -542,8 +542,9 @@ renders eight examples in both and compares block-downsampled output).
   (512-byte disk blocks, filesystem-dependent, not the issue's 1024-byte
   rounding), `referenced` is the mtime and `created` the ctime
   (status-change) time; the embedded `lib/` copy reports 0 for both times.
-  Deliberately not gs: a directory is `false` (gs says `true`; `run` could
-  not read it), and a NUL in the name is `false` (gs cuts it there).
+  Deliberately not gs: a directory or a regular file the process cannot open
+  is `false` (gs only stats and says `true`; `run` could not read either), and
+  a NUL in the name is `false` (gs cuts it there).
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.

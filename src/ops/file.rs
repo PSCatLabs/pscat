@@ -502,8 +502,9 @@ fn status(it: &mut Interp) -> Result<(), PsError> {
 /// the modification time and `created` the status-change time (`st_ctime`,
 /// not a birth time), both in seconds since 1970. The embedded `lib/` copy
 /// has no times (0). Directories are `None`: `status` is the probe before
-/// `run`, which a directory would fail (gs says `true` for one). Anything
-/// else `file` could open counts, a FIFO or `/dev/null` included.
+/// `run`, which a directory would fail (gs says `true` for one), and a
+/// regular file the process cannot open is `None` too (gs says `true`).
+/// Anything else `file` could open counts, a FIFO or `/dev/null` included.
 ///
 /// The bytes are never read, only `stat`ted, so a FIFO or `/dev/zero` inside
 /// a root costs nothing and the execution limits have nothing to meter.
@@ -516,6 +517,12 @@ fn status_fields(it: &mut Interp, name: &str) -> Option<[i64; 4]> {
     #[cfg(not(target_arch = "wasm32"))]
     let read = |p: &std::path::Path| {
         let m = std::fs::metadata(p).ok().filter(|m| !m.is_dir())?;
+        // `file` skips a file it cannot open, so a probe that is followed by
+        // `run` must too. Only a regular file is opened here: opening a FIFO
+        // would block.
+        if m.is_file() && std::fs::File::open(p).is_err() {
+            return None;
+        }
         *stat.borrow_mut() = Some(metadata_fields(&m));
         Some(Vec::new())
     };

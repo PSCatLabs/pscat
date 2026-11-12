@@ -23,6 +23,7 @@ oracle for files outside the roots (`pscat-mcp`). Measured against gs:
 `pages` is `st_blocks` (the issue's "1024-byte blocks, rounded up" does not
 match gs: 8 for 213, 1024, 1025 and 1500 byte files, 0 for an empty one),
 `referenced` is mtime (not atime), `created` is ctime (not birth time).
-Where we differ: a directory is `false` (gs `true`); the embedded `lib/`
+Where we differ: a directory, or a regular file the process cannot open
+(mode 000), is `false` (gs `true` for both; `run` could not read them); the embedded `lib/`
 copy is found as `run` finds it (times 0); a NUL cuts the name in gs and is
 `false` here.
