@@ -162,15 +162,27 @@ fn an_override_beats_an_installed_pack_and_status_is_reported() {
         search.iter().position(|l| *l == want)
     };
     let home_catalog = at("override", "exists", &home.join("fonts/catalog")).expect(&out);
+    // The user data directory is absent on Windows (no APPDATA here), so
+    // it is checked only when listed. Every override line comes before
+    // every pack-dir line, and $PSCAT_HOME's catalog before its packs.
     let user = home.join("user").display().to_string();
-    let user_catalog = search
+    if let Some(user_catalog) = search
         .iter()
         .position(|l| l.starts_with("# font-search override missing ") && l.contains(&user))
-        .expect(&out);
+    {
+        assert!(home_catalog < user_catalog, "{out}");
+    }
     let home_packs = at("pack-dir", "exists", &home.join("fonts/packs")).expect(&out);
-    assert!(home_catalog < user_catalog, "{out}");
+    let last_override = search
+        .iter()
+        .rposition(|l| l.contains(" override "))
+        .expect(&out);
+    let first_pack = search
+        .iter()
+        .position(|l| l.contains(" pack-dir "))
+        .expect(&out);
     assert!(
-        user_catalog < home_packs,
+        last_override < first_pack && home_catalog < home_packs,
         "overrides come before pack directories:\n{out}"
     );
     assert!(
