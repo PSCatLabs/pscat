@@ -522,6 +522,28 @@ renders eight examples in both and compares block-downsampled output).
   hides the checkout's `lib/` and `fonts/catalog/`) and fails on a
   font-pack note, so a skill example cannot need a pack; a fragment is
   fenced `postscript partial`.
+- **Local and global VM are not separated** (#1146). pscat has one VM, so
+  `setglobal` only records a flag that `currentglobal` reads back (`false`
+  at start): nothing is allocated differently, which is enough for the
+  `currentglobal true setglobal ... setglobal` idiom prologs wrap their
+  resource definitions in. `restore` follows Ghostscript, which only ever
+  drops the mode to local (global afterwards only if it is global now and was
+  at every discarded `save`), not the PLRM's reset to the saved value
+  (`src/ops/vm.rs`, `VmMode`; `tests/status_setglobal.rs` pins the matrix
+  against gs). `gcheck` and `globaldict` do not exist, so a program that
+  asks which VM an object lives in stops at `undefined`.
+- **`string status`** (#952) is the file-existence probe: `pages bytes
+  referenced created true`, or `false`. It resolves the name through the
+  same search order and the same read roots as `file`/`run`
+  (`read_roots::open_confined`) but only `stat`s: a name outside the roots,
+  `..`, or a link leading out is `false`, never `invalidfileaccess`, so it
+  cannot tell a confined program what exists elsewhere (`pscat-mcp` relies
+  on this; `tests/mcp.rs`). Like Ghostscript, `pages` is `st_blocks`
+  (512-byte disk blocks, filesystem-dependent, not the issue's 1024-byte
+  rounding), `referenced` is the mtime and `created` the ctime
+  (status-change) time; the embedded `lib/` copy reports 0 for both times.
+  Deliberately not gs: a directory is `false` (gs says `true`; `run` could
+  not read it), and a NUL in the name is `false` (gs cuts it there).
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.

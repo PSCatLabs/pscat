@@ -470,15 +470,95 @@ fn resetfile(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// file status → bool | filename status → false (no filesystem stats).
+/// file status → bool | filename status → pages bytes referenced created
+/// true | false. A file object answers whether it is open. A filename
+/// answers `false` unless it names an existing file that `file`/`run`
+/// would find: the same search order and the same read roots
+/// ([`status_fields`]). Outside the roots is `false`, never
+/// `invalidfileaccess`, so `status` cannot tell a program what exists
+/// there (#952).
 fn status(it: &mut Interp) -> Result<(), PsError> {
     let top = it.pop()?;
     match &top.value {
         Value::File(f) => it.push(Object::bool(f.borrow().is_open())),
-        Value::String(_) => it.push(Object::bool(false)),
+        Value::String(s) => match status_fields(it, &s.text()) {
+            Some(fields) => {
+                for n in fields {
+                    it.push(Object::int(n));
+                }
+                it.push(Object::bool(true));
+            }
+            None => it.push(Object::bool(false)),
+        },
         _ => return Err(PsError::Typecheck),
     }
     Ok(())
+}
+
+/// `[pages, bytes, referenced, created]` for a name `file` would open, as
+/// Ghostscript reports them: `pages` is the disk blocks the file uses
+/// (`st_blocks`, 512-byte units, so 8 for a 1-byte file on APFS and 0 for an
+/// empty one; elsewhere `bytes` in 512-byte units, rounded up), `referenced`
+/// the modification time and `created` the status-change time (`st_ctime`,
+/// not a birth time), both in seconds since 1970. The embedded `lib/` copy
+/// has no times (0). Directories are `None`: `status` is the probe before
+/// `run`, which a directory would fail (gs says `true` for one). Anything
+/// else `file` could open counts, a FIFO or `/dev/null` included.
+///
+/// The bytes are never read, only `stat`ted, so a FIFO or `/dev/zero` inside
+/// a root costs nothing and the execution limits have nothing to meter.
+fn status_fields(it: &mut Interp, name: &str) -> Option<[i64; 4]> {
+    use std::cell::RefCell;
+    // What a program wrote is on disk before it asks.
+    let _ = it.flush_files();
+    let stat: RefCell<Option<[i64; 4]>> = RefCell::new(None);
+    // No disk on the wasm build: only the embedded `lib/` can answer.
+    #[cfg(not(target_arch = "wasm32"))]
+    let read = |p: &std::path::Path| {
+        let m = std::fs::metadata(p).ok().filter(|m| !m.is_dir())?;
+        *stat.borrow_mut() = Some(metadata_fields(&m));
+        Some(Vec::new())
+    };
+    #[cfg(target_arch = "wasm32")]
+    let read = |_: &std::path::Path| None;
+    // A refusal (`..`, outside the roots, a link leading out) is `false`
+    // like a missing file; `file` would say `invalidfileaccess`.
+    let found = crate::read_roots::open_confined(it.read_policy(), name, &read)
+        .ok()
+        .flatten()?;
+    let on_disk = stat.take();
+    on_disk.or_else(|| {
+        Some([
+            found.bytes.len().div_ceil(512) as i64,
+            found.bytes.len() as i64,
+            0,
+            0,
+        ])
+    })
+}
+
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+fn metadata_fields(m: &std::fs::Metadata) -> [i64; 4] {
+    use std::os::unix::fs::MetadataExt;
+    [m.blocks() as i64, m.size() as i64, m.mtime(), m.ctime()]
+}
+
+#[cfg(all(not(unix), not(target_arch = "wasm32")))]
+fn metadata_fields(m: &std::fs::Metadata) -> [i64; 4] {
+    // No `st_ctime`: the creation time, else the modification time.
+    let secs = |t: std::io::Result<std::time::SystemTime>| {
+        t.ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs() as i64)
+    };
+    let modified = secs(m.modified());
+    let created = secs(m.created());
+    [
+        m.len().div_ceil(512) as i64,
+        m.len() as i64,
+        modified,
+        if created != 0 { created } else { modified },
+    ]
 }
 
 /// source [dict] name filter → file. Decode filters only; a parameter

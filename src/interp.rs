@@ -304,6 +304,8 @@ pub struct Interp {
     /// journaling (the common, zero-overhead path).
     journal: Vec<JEntry>,
     save_stack: Vec<SaveRecord>,
+    /// `setglobal`'s allocation mode and the modes `save` recorded (#1146).
+    pub(crate) vm_mode: crate::ops::vm::VmMode,
     pub(crate) quit_requested: bool,
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
@@ -559,6 +561,7 @@ impl Interp {
             estack: Vec::new(),
             journal: Vec::new(),
             save_stack: Vec::new(),
+            vm_mode: Default::default(),
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
