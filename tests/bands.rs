@@ -53,10 +53,11 @@ fn assert_bands_match(tag: &str, file: &str, extra: &[&str], counts: &[u32]) {
         let (ok, stdout, stderr) = pscat(&args);
         assert!(ok, "{tag}: --bands {n} failed: {stderr}");
         assert_eq!(
-            stdout.matches("pscat: wrote").count(),
+            stderr.matches("pscat: wrote").count(),
             1,
-            "{tag}: one announcement: {stdout}"
+            "{tag}: one announcement: {stderr}"
         );
+        assert!(!stdout.contains("pscat: wrote"), "{tag}: stdout: {stdout}");
         let got = std::fs::read(&out).expect("banded png");
         assert!(
             got == want,
@@ -204,7 +205,7 @@ fn every_page_of_a_multi_page_program_is_banded() {
     let banded = dir.join("banded.png");
     let (ok, _, e) = pscat(&["--page", "100x80", "--png", plain.to_str().unwrap(), file]);
     assert!(ok, "{e}");
-    let (ok, out, e) = pscat(&[
+    let (ok, _, e) = pscat(&[
         "--page",
         "100x80",
         "--bands",
@@ -214,7 +215,7 @@ fn every_page_of_a_multi_page_program_is_banded() {
         file,
     ]);
     assert!(ok, "{e}");
-    assert_eq!(out.matches("pscat: wrote").count(), 2, "{out}");
+    assert_eq!(e.matches("pscat: wrote").count(), 2, "{e}");
     for page in ["001", "002"] {
         let p = std::fs::read(dir.join(format!("plain-{page}.png"))).expect("plain page");
         let b = std::fs::read(dir.join(format!("banded-{page}.png"))).expect("banded page");
@@ -354,19 +355,6 @@ fn refuses_what_it_cannot_honour() {
         (vec!["--bands", "2", "--svg", "x.svg", "-e", "0"], "--svg"),
         (vec!["--bands", "2", "--pdf", "x.pdf", "-e", "0"], "--pdf"),
         (vec!["--bands", "2", "--headless", "-e", "0"], "needs --png"),
-        (
-            vec![
-                "--bands",
-                "2",
-                "--png",
-                png,
-                "--allow-write",
-                ".",
-                "-e",
-                "0",
-            ],
-            "--allow-write",
-        ),
         (
             vec!["--bands", "2", "--png", png, "--grid", "2x2", "-e", "0"],
             "--grid",
@@ -751,6 +739,19 @@ fn lint_with_bands_reports_a_blank_page_once() {
     assert!(!err.contains("lint: clean"), "{err}");
 }
 
+/// A shadowed operator is reported once (band 0), and the allow comment
+/// silences it here as it does in a plain run (#1052).
+#[test]
+fn lint_with_bands_reports_a_shadowed_operator_once_and_honours_the_allow() {
+    let src = format!("/sub (hello) def {PAINTS}");
+    let (_ok, err) = bands_stderr("bands-lint-shadow", &["--lint"], &src);
+    assert_eq!(findings(&err, "shadowed-operator"), 1, "{err}");
+    let allowed = format!("%lint: allow shadowed-operator\n{src}");
+    let (_ok, err) = bands_stderr("bands-lint-shadow-allowed", &["--lint"], &allowed);
+    assert_eq!(findings(&err, "shadowed-operator"), 0, "{err}");
+    assert!(err.contains("lint: clean"), "{err}");
+}
+
 /// A band-aware program paints nothing in the top band, so band 0's own
 /// canvas is empty; the page is not blank, and lint must not say so.
 #[test]
@@ -858,4 +859,149 @@ d { exch pop 255 div setgray c 3 mul 0 3 100 rectfill /c c 1 add def } forall
             );
         }
     }
+}
+
+/// A program that knows about bands writes from band 0 only: the issue's own
+/// repro (#1045). `--allow-write` and `--bands` used to be refused together.
+#[test]
+fn allow_write_works_with_bands() {
+    let dir = common::scratch_dir("bands-write");
+    let out = dir.join("out");
+    std::fs::create_dir(&out).unwrap();
+    let file = write_source(
+        &dir,
+        "w.ps",
+        &format!(
+            "%%BoundingBox: 0 0 20 20\n\
+             /BandIndex where {{ pop BandIndex 0 eq {{ ({}/hello.txt) (w) file dup (hi) writestring closefile }} if }} if\n\
+             0 0 20 20 rectfill showpage\n",
+            common::ps_path(&out)
+        ),
+    );
+    let png = dir.join("w.png");
+    let (ok, _, e) = pscat(&[
+        "--bands",
+        "2",
+        "--allow-write",
+        out.to_str().unwrap(),
+        "--png",
+        png.to_str().unwrap(),
+        file.to_str().unwrap(),
+    ]);
+    assert!(ok, "{e}");
+    assert_eq!(std::fs::read(out.join("hello.txt")).unwrap(), b"hi");
+    assert!(png.exists());
+}
+
+/// The write roots bind every band, not just the first.
+#[cfg(unix)]
+#[test]
+fn bands_cannot_write_outside_the_roots() {
+    let dir = common::scratch_dir("bands-write-outside");
+    let out = dir.join("out");
+    std::fs::create_dir(&out).unwrap();
+    let file = write_source(
+        &dir,
+        "w.ps",
+        &format!(
+            "(/{}/stray.txt) (w) file closefile showpage\n",
+            dir.display().to_string().trim_start_matches('/')
+        ),
+    );
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "20x20",
+        "--bands",
+        "2",
+        "--allow-write",
+        out.to_str().unwrap(),
+        "--png",
+        dir.join("w.png").to_str().unwrap(),
+        file.to_str().unwrap(),
+    ]);
+    assert!(!ok, "a write outside the root is an error");
+    assert!(e.contains("invalidfileaccess"), "{e}");
+    assert!(!dir.join("stray.txt").exists());
+}
+
+/// One `--max-write-bytes` budget is spent by all the bands together (#1045).
+/// Four bands each write 100 bytes: 400 in all. A cap per band would pass
+/// 150 and refuse nothing; the shared one has to refuse it, and has to allow
+/// exactly 400.
+#[test]
+fn bands_share_one_write_budget() {
+    let dir = common::scratch_dir("bands-write-budget");
+    let out = dir.join("out");
+    std::fs::create_dir(&out).unwrap();
+    // Every band writes the same file: also the unordered case the docs
+    // describe, which must not fail a band.
+    let file = write_source(
+        &dir,
+        "w.ps",
+        &format!(
+            "({}/f.bin) (w) file dup 100 string writestring closefile 0 0 1 1 rectfill showpage\n",
+            common::ps_path(&out)
+        ),
+    );
+    let run = |cap: &str| {
+        pscat(&[
+            "--page",
+            "20x20",
+            "--band-rows",
+            "5",
+            "--bands",
+            "2",
+            "--allow-write",
+            out.to_str().unwrap(),
+            "--max-write-bytes",
+            cap,
+            "--png",
+            dir.join("w.png").to_str().unwrap(),
+            file.to_str().unwrap(),
+        ])
+    };
+    let (ok, _, e) = run("150");
+    assert!(!ok, "400 bytes written against a 150 byte budget");
+    assert!(e.contains("limitcheck"), "{e}");
+    let (ok, _, e) = run("399");
+    assert!(!ok, "one byte over: {e}");
+    let (ok, _, e) = run("400");
+    assert!(ok, "exactly the budget: {e}");
+    assert_eq!(std::fs::read(out.join("f.bin")).unwrap().len(), 100);
+}
+
+/// The roots are resolved once, before any band runs (Codex review, round 3):
+/// a root named through a symlink works for every band, and a missing one is
+/// refused up front with the flag's name.
+#[cfg(unix)]
+#[test]
+fn bands_resolve_their_roots_once() {
+    let dir = common::scratch_dir("bands-roots-frozen");
+    let real = dir.join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let file = write_source(
+        &dir,
+        "w.ps",
+        &format!(
+            "/BandIndex where {{ pop BandIndex 0 eq {{ ({}/hello.txt) (w) file dup (hi) writestring closefile }} if }} if showpage\n",
+            common::ps_path(&link)
+        ),
+    );
+    let png = dir.join("w.png");
+    let run = |roots: &[&str]| {
+        let mut args = vec!["--page", "20x20", "--bands", "2"];
+        for r in roots {
+            args.extend(["--allow-write", r]);
+        }
+        args.extend(["--png", png.to_str().unwrap(), file.to_str().unwrap()]);
+        pscat(&args)
+    };
+    let (ok, _, e) = run(&[link.to_str().unwrap()]);
+    assert!(ok, "{e}");
+    assert_eq!(std::fs::read(real.join("hello.txt")).unwrap(), b"hi");
+    let (ok, _, e) = run(&[dir.join("nope").to_str().unwrap()]);
+    assert!(!ok);
+    assert!(e.contains("--allow-write"), "{e}");
 }

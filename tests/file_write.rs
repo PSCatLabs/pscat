@@ -316,7 +316,7 @@ fn pscat_mcp_never_writes_files() {
     use std::process::Stdio;
 
     let cwd = common::scratch_dir("fw-mcp");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+    let mut child = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
         .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

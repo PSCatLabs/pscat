@@ -56,6 +56,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - An `Interp` is not `Send`. Make one per thread, or one per document; they
   are independent.
 
+## Pages, halftone, review sheets and chalkboards
+
+These are the pieces behind `pscat --halftone`, `pscat sheet`, `pscat chalk`
+and `pscat --capabilities`, for a program (an MCP server, say) that runs each
+PostScript program itself and wants the same output. They all take and return
+`Page`, pscat's own raster type, so your build never names a rasterizer type
+and does not have to match pscat's version of one.
+
+- **Pages one at a time.** `interp.page_count()` and `interp.page(i)` read the
+  pages that `pages()` returns, copying one at a time.
+  `interp.into_last_page()` takes the last page out of the interpreter without
+  a copy, the page `pscat sheet` uses for a cell. `Page::blank(w, h)` is a
+  white page.
+- **Output setup.** `interp.set_transparent_background()` before running
+  gives PNG pages an alpha channel and SVG pages no white backdrop
+  (`pscat --transparent`). After `enable_pdf()`,
+  `interp.set_pdf_info_from_dsc(source)` gives the PDF the title and author in
+  the program's `%%Title:` and `%%For:` comments (`pscat --pdf` does this).
+- **Halftone.** `page.halftone()` screens a page to pure black and white,
+  45 degree clustered dots, as `pscat --halftone` does:
+  `page.halftone().to_png()` is the same file `pscat --halftone --png` writes.
+- **Review sheets.** `pscat::sheet` lays out rows of cells from their sizes
+  alone (`SheetLayout::new`, before anything renders, so an oversized sheet
+  costs nothing), sets labels and captions with pscat's own fonts
+  (`text_strip`), enlarges a small cell pixel by pixel (`zoom`), and draws
+  the sheet (`Sheet`). Each cell is a `Page` you rendered:
+
+  ```rust
+  use pscat::sheet::{CellSize, RowSize, Sheet, SheetLayout, text_strip};
+
+  let label = text_strip("logo", 16, true)?.expect("non-empty");
+  let cell = my_render("logo.ps", 96.0)?; // your own sandboxed render: a Page
+  let row = RowSize::new(
+      (label.width(), label.height()),
+      vec![CellSize::new((cell.width(), cell.height()), (0, 0))],
+  );
+  let mut sheet = Sheet::new(&SheetLayout::new(&[row])?)?;
+  sheet.put_header(0, &label)?;
+  sheet.put_image(0, 0, &cell)?;
+  sheet.into_page().save_png("sheet.png")?;
+  ```
+
+  A sheet is at most `sheet::MAX_SIDE_PX` (8000) pixels on a side. An image
+  must be the size its slot was planned for; a label or caption may be
+  smaller than its slot.
+- **Chalkboards.** `pscat::chalkboard::BoardConfig` reads the
+  `pscat chalk --json` config (see
+  [From LaTeX to a board](dry-media.md#from-latex-to-a-board-pscat-chalk)),
+  and `config.driver(latex)` writes the PostScript program that puts the
+  formula on the board. Run it on an `Interp` of `driver.page_size()` at
+  `driver.dpi()`, after `driver.prepare(&mut interp)` (which makes the page
+  transparent when there is no board, and sets the PDF title; call it after
+  `enable_pdf`). When the run fails, `chalkboard::explain(&err)` turns a TeX
+  error back into one (`unsupported_command`, `\aleph`). A `ChalkError` has a
+  stable `code()`, the `token()` a TeX error named, and `message()`, which
+  names a bad config key by its path (`layout.width must be ...`).
+- **The catalog.** `pscat::catalog::capabilities()` is the JSON
+  `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
+  library procedures and native operators.
+
 ## Supported builds
 
 | Build | Command | What you get |
@@ -71,8 +131,9 @@ version is the `rust-version` in `Cargo.toml` (1.88).
 
 ## Stability
 
-The supported API is what docs.rs shows: `Interp`, `Page` and `PsError`. The
-crate has other public modules that the binaries, the browser build and the
+The supported API is what docs.rs shows: `Interp`, `Page`, `PsError`,
+`Limits`, and the `sheet`, `chalkboard` and `catalog` modules. The crate has
+other public modules that the binaries, the browser build and the
 test suite use; they are hidden from the documentation and can change in any
 release.
 

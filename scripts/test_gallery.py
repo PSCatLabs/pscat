@@ -212,6 +212,11 @@ class GalleryManifest(unittest.TestCase):
                 (site / f).write_text("")
             (site / "assets/brand").mkdir(parents=True, exist_ok=True)  # the favicon (#927)
             (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
+            # llms.txt (#1125) is required and has to list every guide
+            guides = sorted((SCRIPTS.parent / "docs" / "guides").glob("*.md"))
+            (site / "llms.txt").write_text("# t\n\n> s\n\n## Guides\n\n" + "".join(
+                "- [%s](%smain/docs/guides/%s): d\n" % (g.stem, check_site_links.RAW_URL, g.name)
+                for g in guides), encoding="utf-8")
             problems, _ = check_site_links.check(site, SCRIPTS.parent)
             self.assertEqual(problems, [])
 

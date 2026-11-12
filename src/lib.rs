@@ -49,6 +49,36 @@
 //! with `stopped`. See the [`limits`] module for what each limit can and cannot
 //! stop.
 //!
+//! # Pages, halftone, review sheets, chalkboards and the catalog
+//!
+//! A [`Page`] is pscat's own raster type (the crate does not expose its
+//! rasterizer's types), and the building blocks of `pscat`'s other outputs
+//! take and return it, so a server that runs each program in its own worker
+//! can put them together itself:
+//!
+//! - [`Interp::page`] and [`Interp::page_count`] read the pages one at a
+//!   time, and [`Interp::into_last_page`] takes the last one out without a
+//!   copy. [`Page::halftone`] screens a page as `pscat --halftone` does;
+//!   [`Page::to_png`] encodes it. [`Interp::set_transparent_background`] and
+//!   [`Interp::set_pdf_info_from_dsc`] set the output up as `pscat
+//!   --transparent` and `pscat --pdf` do.
+//! - [`sheet`] lays out and draws a labelled review sheet (`pscat sheet`)
+//!   around cells the caller renders.
+//! - [`chalkboard`] turns LaTeX and a board config into the PostScript
+//!   program `pscat chalk` runs, and explains its TeX errors.
+//! - [`catalog::capabilities`] is the art catalog `pscat --capabilities`
+//!   prints.
+//!
+//! ```
+//! let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+//! interp.run_str("0.4 setgray 10 10 80 80 rectfill showpage")?;
+//! for i in 0..interp.page_count() {
+//!     let png = interp.page(i).expect("in range").halftone().to_png().expect("PNG");
+//!     assert_eq!(&png[1..4], b"PNG");
+//! }
+//! # Ok::<(), pscat::PsError>(())
+//! ```
+//!
 //! # Threads
 //!
 //! An [`Interp`] is neither `Send` nor `Sync`: PostScript objects share
@@ -70,20 +100,28 @@
 //! # Supported API and stability
 //!
 //! The supported API is what this documentation shows: [`Interp`], [`Page`],
-//! [`PsError`] and [`Limits`]. The crate has other public modules that the `pscat` and
-//! `pscat-mcp` binaries, the browser build and the test suite use; they are
-//! hidden from the documentation and can change in any release. Before 1.0,
-//! a minor version (0.6 to 0.7) may break the supported API and a patch
+//! [`PsError`], [`Limits`], and the [`sheet`], [`chalkboard`] and
+//! [`catalog`] modules. The crate has other public modules that the `pscat`
+//! and `pscat-mcp` binaries, the browser build and the test suite use; they
+//! are hidden from the documentation and can change in any release. Before
+//! 1.0, a minor version (0.6 to 0.7) may break the supported API and a patch
 //! version does not.
 
 #![deny(missing_docs)]
 
 // The supported surface: documented, and checked by `missing_docs`.
+pub mod catalog;
+pub mod chalkboard;
 pub mod error;
 pub mod interp;
 pub mod limits;
 pub mod memtrack;
 pub mod page;
+// `sheet`, `chalkboard` and `catalog` are facades over the hidden
+// `contact_sheet`, `chalk` and `capabilities` modules (issue #1098): they
+// take and return `Page`, never a tiny-skia type, so tiny-skia stays a
+// private dependency.
+pub mod sheet;
 
 // Everything below is public only so the binaries, the wasm build and the
 // integration tests can reach it. `#[doc(hidden)]` keeps it out of the docs

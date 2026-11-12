@@ -620,5 +620,5 @@ fn run(it: &mut Interp) -> Result<(), PsError> {
     let name = pop_ps_string(it)?.text();
     let data = read_resource(it, &name)?;
     let f = PsFile::from_bytes(data);
-    it.exec_object(Object::exec(Value::File(f)))
+    it.run_file(f, name.as_str().into())
 }

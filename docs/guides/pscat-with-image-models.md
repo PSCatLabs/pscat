@@ -58,7 +58,7 @@ vector sky; a flat-ink botanical print), and (c) the hybrid. Under each panel ar
 | **Text** (poster: 20 strings; menu: 24) | All spelled right, on both | All exact, on both | All exact, on both |
 | **Numbers** | Chart labels right, bar heights within 2% of the data; all 9 prices right | Computed by the program, or typed in it | Same as (b) |
 | **QR code** | Found by both decoders, **decodes in neither**, on both | Decodes to the URL in both decoders, PNG and PDF | Same as (b) |
-| **Output** | One raster: 1055 x 1491 px (poster), 1103 x 1426 px (menu), about 127-130 px per inch at print size | Vector type, chart and QR code at any size | Vector exact layer over the painting, which is embedded at its own resolution |
+| **Output** | One raster: 1055 × 1491 px (poster), 1103 × 1426 px (menu), about 127-130 px per inch at print size | Vector type, chart and QR code at any size | Vector exact layer over the painting, which is embedded at its own resolution |
 | **The look** | The image model's, layout included | pscat's own vector art, with pscat's layout | The image model's painting, with pscat's layout |
 
 How each fact was checked:
@@ -375,7 +375,7 @@ cannot make a photograph. And the forward hybrid never knows where the
 picture's summits are.
 
 [`examples/hybrid/alpine_trail.ps`](../../examples/hybrid/alpine_trail.ps) is
-a 2:3 travel poster (8 x 12 in) for an invented summit trail, made this way:
+a 2:3 travel poster (8 × 12 in) for an invented summit trail, made this way:
 
 ![Four panels: pscat's flat layout reference, the photograph the image model made from it, the poster with pscat's exact layer, and the same layer on a second, autumn photograph made from the same reference](hybrid/alpine_trail_process.png)
 
@@ -383,7 +383,7 @@ a 2:3 travel poster (8 x 12 in) for an invented summit trail, made this way:
    block-in of the scene. It shows the ridge with two summits and a col, the
    lit and shaded faces, the slopes, the lake, the hut, the trail, and a
    foreground in shade where the facts will go. Every shape sits at
-   coordinates in the program. Rendered at 128 dpi it is 1024 x 1536 px, the
+   coordinates in the program. Rendered at 128 dpi it is 1024 × 1536 px, the
    size the image model works at.
 2. **The image model makes it a photograph.** The reference goes in as the
    input image (`codex exec --image=ref.png "<instruction>"`). The instruction
@@ -394,7 +394,10 @@ a 2:3 travel poster (8 x 12 in) for an invented summit trail, made this way:
    exactly 128 dpi, with no crop. Then the program uses the same coordinates
    as step 1:
    - leader lines that end on the summits and the col it drew;
-   - a dashed route along its own trail and ridge line;
+   - a dashed route: along the ridge line it drew, and, up the zigzag trail
+     above the hut, along the trail **as the photograph shows it** (the model
+     kept the zigzag but moved its turns up to 6 px, so those corners were
+     read off the photograph; see the next section);
    - the hut's label;
    - in the shade it left empty: an elevation profile, the stats computed
      from that profile (distance, ascent, the DIN 33466 walking time), the
@@ -403,12 +406,15 @@ a 2:3 travel poster (8 x 12 in) for an invented summit trail, made this way:
 Because the composition belongs to the program, the **same layer goes on a
 second photograph** made from the same reference. In the fourth panel only
 the season and light changed in the instruction (`/Season /Autumn`); the
-labels, route, chart and QR code did not move.
+labels, route, chart and QR code did not move. What the season changes in the
+exact layer is the copy that depends on it: the subtitle, and the hut row,
+because a hut that is open from 20 June to 20 September is shut in the
+October of the second photograph (it says "closed until 20 June").
 
 ### How closely the photograph follows the reference
 
 Measured on the committed images by `tests/hybrid_reverse.rs`, with one
-detector run on the reference and on the photograph. At 1024 x 1536 px, 1 px
+detector run on the reference and on the photograph. At 1024 × 1536 px, 1 px
 is 0.56 pt on the poster.
 
 | | Summer photograph | Autumn photograph |
@@ -426,7 +432,13 @@ outline of the big shapes held to about a pixel. Small objects moved more:
 the autumn hut drifted 14 px and grew. And the shade edge became a soft
 shadow rather than a line. So anchor the exact layer to big edges (the ridge
 and its summits), and keep small anchors loose: the hut's label points at
-the hut with a leader, so a few pixels do not show.
+the hut with a leader, so a few pixels do not show. A line drawn *along* a
+thin feature is the hardest case: the zigzag trail above the hut is only
+about 5 px wide, and the layout's turns were 1 to 6 px from where both
+photographs put them (and its first leg began 23 px from the trail, over the
+hut), so a dashed route on the layout's coordinates ran beside the path, over
+the grass, at the corners. Read the corners off the photograph instead (here
+on a 4x grid, to about 1 px) and the dashes sit on the path in both.
 
 **What format works best for the reference.** Two were tried, one run
 each, with the same instruction:

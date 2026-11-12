@@ -7,6 +7,11 @@
 
 /cmp-strip 190 def                    % the height of the facts strip
 
+% The text of a fact is set in a Latin-1 Helvetica, for the multiplication
+% sign in a pixel size (a times sign between the numbers, not a letter x).
+/Helvetica-L1 /Helvetica findfont dup length dict copy dup /Encoding ISOLatin1Encoding put
+definefont pop
+
 % A row of the strip: a mark (/ok, /no or /note), then the text.
 /cmp-fact { % /mark (text) -
   exch
@@ -14,7 +19,7 @@
   dup /no eq { 0.75 0.12 0.10 setrgbcolor /ZapfDingbats 15 selectfont (8) show } if
   /note eq { 0.35 setgray /ZapfDingbats 15 selectfont (l) show } if
   ( ) show
-  0.12 setgray /Helvetica 15 selectfont show
+  0.12 setgray /Helvetica-L1 15 selectfont show
 } def
 
 /cmp-panel { % (heading) [ [/mark (text)] ... ] { draw the poster } -

@@ -22,7 +22,11 @@ It fails (exit 1, one line per problem) when:
   * the files the pages load from script (pscat.js, pscat.wasm) are missing;
   * a page has no main navigation, or its navigation differs from the home
     page's, or it does not mark exactly one entry as the current page;
-  * a page cannot be reached by following links from index.html (an orphan).
+  * a page cannot be reached by following links from index.html (an orphan);
+  * llms.txt (#1125) is missing, is not in the llmstxt.org shape (an H1, then a
+    > summary, then H2 sections of "- [title](url): description" links), links a
+    site page, #fragment or repo path that does not exist, or leaves out a
+    docs/guides/*.md guide.
 
 Other external links (http://, https://, mailto:) are not fetched: a CI check
 that depends on third-party uptime goes red for reasons nobody can fix.
@@ -39,7 +43,11 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from repo_url import REPO_URL, match as repo_match
+from repo_url import REPO_SLUG, REPO_URL, match as repo_match
+
+# where the published site lives, and where raw Markdown comes from (#1125)
+SITE_URL = "https://pscatlabs.github.io/pscat/"
+RAW_URL = "https://raw.githubusercontent.com/" + REPO_SLUG + "/"
 
 # page-to-page links in these attributes
 LINK_ATTRS = {"a": "href", "link": "href", "img": "src", "script": "src",
@@ -120,6 +128,97 @@ def check_fragment(page, frag):
     return not frag or frag == "top" or frag in page.ids
 
 
+def raw_repo_path(url):
+    """The repo-relative path a raw.githubusercontent.com URL of this repo names, or None."""
+    if not url.startswith(RAW_URL):
+        return None
+    rest = re.split(r"[?#]", url[len(RAW_URL):])[0]
+    ref, _, tail = rest.partition("/")
+    if ref != "main":  # a pinned ref would be checked against today's checkout
+        return None
+    return unquote(tail).rstrip("/")
+
+
+LLMS_LINK = re.compile(r"^- \[([^\]]+)\]\(([^)\s]+)\)(?::\s+\S.*)?$")
+
+
+def check_llms(site, repo, pages):
+    """Problems with llms.txt (#1125): the llmstxt.org shape, live links, every guide listed."""
+    f = site / "llms.txt"
+    if not f.is_file():
+        return ["llms.txt is missing from the site"]
+    problems = []
+    lines = f.read_text(errors="replace").splitlines()
+    # headings outside fenced code blocks (an install snippet may hold "# comments")
+    fenced, headings = False, []
+    for n, line in enumerate(lines, 1):
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(r"#{1,6} ", line):
+            headings.append((n, len(line) - len(line.lstrip("#")), line))
+    h1 = [h for h in headings if h[1] == 1]
+    if len(h1) != 1 or not headings or headings[0][1] != 1:
+        problems.append("llms.txt: want exactly one H1, first, as the project name")
+    else:
+        after = [l for l in lines[h1[0][0]:] if l.strip()]
+        if not after or not after[0].startswith("> "):
+            problems.append("llms.txt: the H1 must be followed by a > summary blockquote")
+    sections = [h for h in headings if h[1] == 2]
+    if not sections:
+        problems.append("llms.txt: no ## sections of links")
+    linked = set()
+    section = None
+    fenced = False
+    for n, line in enumerate(lines, 1):
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if re.match(r"## ", line):
+            section = line
+            continue
+        if not line.startswith("- ") or section is None:
+            continue
+        m = LLMS_LINK.match(line)
+        if m is None:
+            problems.append("llms.txt:%d: not a '- [title](url): description' link: %s" % (n, line[:60]))
+            continue
+        url = m.group(2)
+        u = urlsplit(url)
+        if url.startswith(SITE_URL):
+            name = posixpath.normpath(unquote(url[len(SITE_URL):].split("#")[0].split("?")[0])) or "."
+            name = "index.html" if name == "." else name
+            if not exists_exact(site, name) or not (site / name).is_file():
+                problems.append("llms.txt:%d: not on the site: %s" % (n, url))
+            elif name in pages and not check_fragment(pages[name], unquote(u.fragment)):
+                problems.append("llms.txt:%d: %s has no #%s" % (n, name, u.fragment))
+        elif url.startswith(RAW_URL):
+            if u.fragment:
+                problems.append("llms.txt:%d: raw Markdown has no anchors: %s" % (n, url))
+            rp = raw_repo_path(url)
+            if not rp or not in_repo(repo, rp):
+                problems.append("llms.txt:%d: raw link not under main, or to a path not in the repo: %s" % (n, url))
+            else:
+                linked.add(rp)
+        elif u.scheme in ("http", "https"):
+            rp = repo_path_for(url)
+            if rp is not None:
+                if not in_repo(repo, rp):
+                    problems.append("llms.txt:%d: GitHub link to a path not in the repo: %s" % (n, url))
+                else:
+                    linked.add(rp)
+        else:
+            problems.append("llms.txt:%d: link is not absolute: %s" % (n, url))
+    # a guide added later has to be listed, or the file rots
+    guides = repo / "docs" / "guides"
+    if guides.is_dir():
+        for g in sorted(guides.glob("*.md")):
+            if "docs/guides/" + g.name not in linked:
+                problems.append("llms.txt: guide docs/guides/%s is not listed" % g.name)
+    return problems
+
+
 def check(site, repo):
     problems = []
     pages = {}
@@ -182,6 +281,8 @@ def check(site, repo):
         for url in page.view_sources:
             if url not in good:
                 problems.append("%s: View source link %r does not point into source/" % (src, url))
+
+    problems += check_llms(site, repo, pages)
 
     for need in ("style.css", "pscat.js", "pscat.wasm"):
         if not exists_exact(site, need):
