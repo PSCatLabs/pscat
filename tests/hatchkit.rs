@@ -1085,12 +1085,7 @@ fn ghostscript_accepts_a_mark_procedure_under_packing() {
     // Under `true setpacking` Ghostscript types a procedure literal
     // `packedarraytype`, which the /Mark guard must accept (Codex review,
     // PR #300). This interpreter never packs, so only real gs can show it.
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs packing check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-hatch-mark");
@@ -1134,12 +1129,7 @@ fn ghostscript_accepts_the_hatching_specimen_sheet() {
     // the file does `(lib/hatchkit.ps) run` from disk, which gs's
     // default sandbox blocks (same reasoning as every other sibling
     // library's own version of this test).
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

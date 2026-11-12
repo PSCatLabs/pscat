@@ -8,6 +8,8 @@
 //! vocabulary, the mandatory `gsave`/`grestore` isolation, and
 //! `weave`'s own grid/budget logic (not scatter-based at all).
 
+mod common;
+
 use pscat::{Interp, PsError};
 
 fn load(it: &mut Interp) {
@@ -679,12 +681,7 @@ fn every_example_tag_runs_clean() {
 
 #[test]
 fn ghostscript_accepts_the_surfacekit_specimen_sheet() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

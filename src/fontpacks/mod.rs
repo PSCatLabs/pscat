@@ -275,8 +275,57 @@ pub fn status_json() -> serde_json::Value {
     })
 }
 
-/// `--fonts`' trailer: one `#` line per override and installed pack,
-/// so a pasted `--fonts` says whether renders should reproduce.
+/// One directory font lookup looks in (or would, if it existed).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchDir {
+    pub path: PathBuf,
+    /// `true` for a plain `fonts/catalog/` override, `false` for a
+    /// `fonts/packs/` directory.
+    pub is_override: bool,
+    pub exists: bool,
+}
+
+/// Every directory font lookup searches, existing or not, in the order
+/// [`font_dirs`] reads them: the `fonts/catalog/` overrides first, then
+/// the `fonts/packs/` directories. Both lists come straight from the
+/// resolver (`paths::Roots`), so this cannot drift from the real order.
+/// A relative entry (the current directory's `fonts/catalog`) is shown
+/// absolute, which is only how it prints, not where it looks.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn search_dirs_in(
+    roots: &crate::paths::Roots,
+    is_dir: &dyn Fn(&Path) -> bool,
+) -> Vec<SearchDir> {
+    let cwd = std::env::current_dir().ok();
+    let shown = |p: PathBuf| match (&cwd, p.is_relative()) {
+        (Some(c), true) => c.join(p.strip_prefix(".").unwrap_or(&p)),
+        _ => p,
+    };
+    let overrides = roots
+        .catalog_dirs_with(&|_| true)
+        .into_iter()
+        .map(|p| (p, true));
+    let packs = roots.pack_dirs().into_iter().map(|p| (p, false));
+    overrides
+        .chain(packs)
+        .map(|(path, is_override)| SearchDir {
+            exists: is_dir(&path),
+            path: shown(path),
+            is_override,
+        })
+        .collect()
+}
+
+/// [`search_dirs_in`] for this process.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn search_dirs() -> Vec<SearchDir> {
+    search_dirs_in(crate::paths::process_roots(), &|p| p.is_dir())
+}
+
+/// `--fonts`' trailer: one `#` line per searched directory, override and
+/// installed pack, so a pasted `--fonts` says where pscat looked and
+/// whether renders should reproduce.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn status_lines() -> Vec<String> {
     let mut out = Vec::new();
@@ -288,6 +337,19 @@ pub fn status_lines() -> Vec<String> {
         None => {
             out.push("# font-pack index pinned: none (this build pins no fonts-* release)".into())
         }
+    }
+    // Path last: it can hold spaces ("Application Support").
+    for d in search_dirs() {
+        out.push(format!(
+            "# font-search {} {} {}",
+            if d.is_override {
+                "override"
+            } else {
+                "pack-dir"
+            },
+            if d.exists { "exists" } else { "missing" },
+            d.path.display()
+        ));
     }
     for d in crate::paths::catalog_dirs() {
         out.push(format!("# font-override {} user-selected", d.display()));
@@ -307,6 +369,42 @@ pub fn status_lines() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Unix-shaped fake roots: a drive-less "/h" counts as relative on Windows.
+    #[cfg(unix)]
+    #[test]
+    fn search_dirs_follow_the_resolver_order_and_mark_what_exists() {
+        let roots = crate::paths::Roots {
+            home: Some("/h".into()),
+            user_data: Some("/u dir".into()),
+            exe_dir: Some("/x".into()),
+            ..Default::default()
+        };
+        let exists = |p: &Path| p == Path::new("/u dir/fonts/catalog");
+        let got: Vec<(bool, bool, String)> = search_dirs_in(&roots, &exists)
+            .into_iter()
+            .map(|d| (d.is_override, d.exists, d.path.display().to_string()))
+            .collect();
+        let cwd_catalog = std::env::current_dir()
+            .unwrap()
+            .join("fonts/catalog")
+            .display()
+            .to_string();
+        let want = [
+            (true, false, "/h/fonts/catalog"),
+            (true, true, "/u dir/fonts/catalog"),
+            (true, false, "/x/fonts/catalog"),
+            (true, false, cwd_catalog.as_str()),
+            (false, false, "/h/fonts/packs"),
+            (false, false, "/u dir/fonts/packs"),
+            (false, false, "/x/fonts/packs"),
+        ];
+        let want: Vec<_> = want
+            .iter()
+            .map(|(a, b, c)| (*a, *b, c.to_string()))
+            .collect();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn table_matches_the_catalog_on_disk() {

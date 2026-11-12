@@ -332,7 +332,9 @@ fn a_touch_budget_error_leaves_the_state_alone() {
         &format!(
             "<< /Weave 0.01 >> pkcanvas {TRI_PAGE} \
              {{ << /Width 12 /Direction 30 /Touch 0.5 >> pktrowelplane }} stopped \
-             {{ $error /command get /pktrowel-touch-area-exceeds-safety-limit eq }} {{ false }} ifelse \
+             {{ $error /errorname get /limitcheck eq \
+                $error /command get (pktrowel: /Touch is limited to 60000) anchorsearch \
+                {{ pop pop true }} {{ false }} ifelse and }} {{ false }} ifelse \
              /tplseen exch def \
              newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill"
         ),
@@ -343,6 +345,48 @@ fn a_touch_budget_error_leaves_the_state_alone() {
     assert!(
         p.blue() > 200 && p.red() < 60,
         "the facet's clip or a rotation was left behind"
+    );
+}
+
+#[test]
+fn a_touch_budget_error_with_a_long_weave_is_still_a_limitcheck() {
+    // The message prints the weave. A valid /Weave whose decimal form is
+    // longer than an integer's (0.0123456789012345) must not turn the
+    // limitcheck into a rangecheck from too small a cvs buffer.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "<< /Weave 0.0123456789012345 >> pkcanvas {TRI_PAGE} \
+             {{ << /Width 12 /Direction 30 /Touch 0.5 >> pktrowelplane }} stopped \
+             {{ $error /errorname get /limitcheck eq }} {{ false }} ifelse \
+             {{ 1 }} {{ 0 }} ifelse"
+        ),
+    );
+    assert_eq!(
+        it.pop_int().ok(),
+        Some(1),
+        "a long /Weave value turned the /Touch limitcheck into another error"
+    );
+}
+
+#[test]
+fn a_touch_budget_error_with_a_huge_cell_count_is_still_a_limitcheck() {
+    // A fine weave on a modest stroke counts trillions of cells without any
+    // one cell index passing pjhuge's 1e9 line. pscat integers are 64-bit, so
+    // the count needs more than a 32-bit integer's 12 bytes to print.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        "<< /Weave 0.0001 >> pkcanvas newpath 10 10 moveto 110 110 lineto \
+         { << /Touch 0.5 >> pkbroad } stopped \
+         { $error /errorname get /limitcheck eq } { false } ifelse \
+         { 1 } { 0 } ifelse",
+    );
+    assert_eq!(
+        it.pop_int().ok(),
+        Some(1),
+        "a large cell count turned the /Touch limitcheck into another error"
     );
 }
 
@@ -580,12 +624,7 @@ fn a_whole_plane_is_cheap() {
 
 #[test]
 fn ghostscript_draws_the_same_area() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");

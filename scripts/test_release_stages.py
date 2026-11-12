@@ -541,6 +541,59 @@ class Channels(Base):
         st, r, _ = self.run_all()
         self.assertEqual((st, r["plugin"]), (rs.EXIT_OK, "skipped"))
 
+    def test_untracked_nested_checkouts_are_left_alone(self):
+        """In a git checkout only tracked manifests are found and bumped (#959):
+        a nested clone (like codex/) and a scratch directory are not touched."""
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
+        repo = os.path.join(self.tmp, "gitrepo")
+        files = {
+            ".claude-plugin/marketplace.json": {"name": "m", "plugins": [{"name": "p", "version": "0.0.1"}]},
+            "plugin/.claude-plugin/plugin.json": {"name": "p", "version": "0.0.1"},
+            "plugin/plugin.json": {"name": "p", "version": "0.0.1"},
+            ".agents/plugins/marketplace.json": {"name": "m", "plugins": [
+                {"name": "p", "source": {"source": "local", "path": "./plugin"}}]},
+        }
+        untracked = {
+            "nested/.claude-plugin/plugin.json": {"name": "n", "version": "0.0.1"},
+            "scratch/deep/.claude-plugin/plugin.json": {"name": "s", "version": "0.0.1"},
+            "scratch/plugin.json": {"name": "s", "version": "0.0.1"},
+        }
+        for group in (files, untracked):
+            for rel, data in group.items():
+                path = os.path.join(repo, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+        subprocess.run(["git", "init", "--quiet", repo], check=True)
+        subprocess.run(["git", "init", "--quiet", os.path.join(repo, "nested")], check=True)
+        subprocess.run(["git", "-C", repo, "add", *files], check=True)
+        before = {}
+        for rel in untracked:
+            with open(os.path.join(repo, *rel.split("/")), "rb") as f:
+                before[rel] = f.read()
+        found = sorted(os.path.relpath(p, repo).replace(os.sep, "/") for p in rs.plugin_manifests(repo))
+        self.assertEqual(found, sorted(files))
+        changed = sorted(c.replace(os.sep, "/") for c in rs.bump_manifests_json_only(repo, VERSION))
+        # The Codex marketplace carries no version, so only the others change.
+        self.assertEqual(changed, sorted(set(files) - {".agents/plugins/marketplace.json"}))
+        for rel, data in before.items():
+            with open(os.path.join(repo, *rel.split("/")), "rb") as f:
+                self.assertEqual(f.read(), data, f"{rel} was rewritten")
+        # Without a .git (a copied tree, the other fixtures) every file counts.
+        shutil.rmtree(os.path.join(repo, ".git"))
+        shutil.rmtree(os.path.join(repo, "nested", ".git"))
+        self.assertEqual(len(rs.plugin_manifests(repo)), len(files) + 2)
+
+    def test_a_failing_git_in_a_checkout_is_an_error_not_a_glob(self):
+        repo = os.path.join(self.tmp, "brokengit")
+        os.makedirs(os.path.join(repo, ".git"))  # a .git that is not a repository
+        os.makedirs(os.path.join(repo, "x", ".claude-plugin"))
+        with open(os.path.join(repo, "x", ".claude-plugin", "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": "0.0.1"}, f)
+        with self.assertRaises(SystemExit):
+            rs.plugin_manifests(repo)
+
     def test_the_repo_codex_manifest_is_bumped(self):
         files = [os.path.relpath(p, rs.ROOT) for p in rs.plugin_manifests()]
         self.assertIn(os.path.join("plugin", "plugin.json"), files)

@@ -521,13 +521,6 @@ fn a_hatched_region_renders_within_the_ci_budget() {
     );
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The libraries concatenated, so gs runs them under its default -dSAFER.
 fn libs_source() -> String {
     let mut src = String::new();
@@ -544,8 +537,7 @@ fn libs_source() -> String {
 /// can show it. Runs locally only: CI has no gs.
 #[test]
 fn ghostscript_accepts_a_packed_value_procedure() {
-    if !gs_available() {
-        eprintln!("skipping gs packing check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-drycharcoal-pack");
@@ -587,8 +579,7 @@ fn ghostscript_accepts_a_packed_value_procedure() {
 /// another seed is the negative control. Runs locally only.
 #[test]
 fn ghostscript_agrees_on_a_hatched_region() {
-    if !gs_available() {
-        eprintln!("skipping gs hatch check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: usize = 3;

@@ -1,12 +1,12 @@
 use std::env;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
 use pscat::gfx::{self, PageSizeSource};
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
-use pscat::{Interp, Limits};
+use pscat::{Interp, Limits, PsError};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). A
 // thread-local add per allocation or free, folded into one shared count
@@ -14,12 +14,87 @@ use pscat::{Interp, Limits};
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
+// `println!` and `print!` for this binary and the modules below it (macros
+// are in scope for every `mod` declared after them): the std ones panic when
+// stdout's reader has gone, so `pscat --capabilities | head -c 5` died with
+// a panic message (#1059). These end the process quietly instead, as the
+// Unix tools do (`stdout_text`).
+macro_rules! println {
+    () => { $crate::stdout_text(format_args!("\n")) };
+    ($($arg:tt)*) => {
+        $crate::stdout_text(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+macro_rules! print {
+    ($($arg:tt)*) => { $crate::stdout_text(format_args!($($arg)*)) };
+}
+
 // The MCP server, shared with the pscat-mcp binary (#569).
 #[path = "mcp_server.rs"]
 mod mcp_server;
 mod subcmd;
 // `--bands N` (#736).
 mod bands;
+
+/// The exit status of a process whose stdout reader went away: 128 + SIGPIPE,
+/// what a shell reports for a tool that `SIGPIPE` killed, so `set -o pipefail`
+/// sees the same as with any other Unix tool.
+const EXIT_STDOUT_CLOSED: u8 = 141;
+
+/// Set once a `println!`/`print!` of this binary found its reader gone.
+static STDOUT_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A run found the reader of stdout gone: `main` will exit with
+/// [`EXIT_STDOUT_CLOSED`].
+fn note_stdout_closed() {
+    STDOUT_CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a write of this binary has found the reader of stdout gone.
+fn stdout_is_closed() -> bool {
+    STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Flush stdout, noting a reader that has gone like [`stdout_text`].
+fn flush_stdout() {
+    if let Err(e) = io::stdout().flush()
+        && e.kind() == io::ErrorKind::BrokenPipe
+    {
+        note_stdout_closed();
+    }
+}
+
+/// End the process after `--help`, `--version`, `--fonts` or `--capabilities`
+/// printed: success, or [`EXIT_STDOUT_CLOSED`] if the reader went away.
+fn exit_after_printing() -> ! {
+    let closed = STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed);
+    std::process::exit(if closed {
+        i32::from(EXIT_STDOUT_CLOSED)
+    } else {
+        0
+    });
+}
+
+/// What `println!`/`print!` write (see the macros above). Rust ignores
+/// `SIGPIPE`, so a write to a closed pipe fails with `EPIPE` instead of
+/// killing us, and the std macros turn that into a panic. Here it is
+/// remembered and the text dropped, and `main` ends with
+/// [`EXIT_STDOUT_CLOSED`] once the run is over: not at the first failed
+/// write, because the paths that follow (flushing the files a program left
+/// open, writing the page) still have to happen. Any other write error is a
+/// real failure and panics as the std macros do.
+fn stdout_text(args: std::fmt::Arguments<'_>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if STDOUT_CLOSED.load(Relaxed) {
+        return;
+    }
+    if let Err(e) = io::stdout().lock().write_fmt(args) {
+        if e.kind() != io::ErrorKind::BrokenPipe {
+            panic!("failed printing to stdout: {e}");
+        }
+        note_stdout_closed();
+    }
+}
 
 /// Interpreter steps per rendered frame in the windowed modes. Named
 /// so `--selftest`'s runs-alone check can tell "the user asked for a
@@ -58,6 +133,8 @@ struct Options {
     halftone: bool,
     /// Transparent page background instead of opaque white (issue #146).
     transparent: bool,
+    /// `--svg-text`: standard-font text as SVG `<text>` (#1119).
+    svg_text: bool,
     /// The windowed REPL: type PostScript, watch it draw (Stage 8's
     /// last sliver).
     interactive: bool,
@@ -168,6 +245,7 @@ impl Options {
             spool: None,
             halftone: false,
             transparent: false,
+            svg_text: false,
             interactive: false,
             lint: false,
             lint_strict: false,
@@ -201,6 +279,21 @@ impl Options {
     fn resolve_page(&mut self, source: &[u8]) {
         if self.page_source == PageSizeSource::Explicit {
             return;
+        }
+        // A text-only run (`--headless` with no output file) draws no page.
+        let draws =
+            !self.headless || self.png.is_some() || self.svg.is_some() || self.pdf.is_some();
+        if draws
+            && !self.bbox
+            && let Some(ignored) = pscat::bbox::ignored_box(source)
+            && (ignored.width, ignored.height) != self.page
+        {
+            // The documented rule, said out loud: a half-blank page is
+            // easy to take for a bug in the art (#1036).
+            eprintln!(
+                "pscat: note: %%BoundingBox {}x{} ignored (not EPSF); pass --bbox or --page",
+                ignored.width, ignored.height
+            );
         }
         match pscat::bbox::page_box(source, self.bbox) {
             Ok(Some(found)) => {
@@ -268,6 +361,12 @@ impl Options {
                 .set_read_roots(dirs)
                 .map_err(|e| format!("--read-root: {e}"))?;
         }
+        self.apply_write_policy(interp)
+    }
+
+    /// `--allow-write` and `--max-write-bytes` on a fresh interpreter. Each
+    /// `--bands` band calls it too, then hands every band one shared count.
+    fn apply_write_policy(&self, interp: &mut Interp) -> Result<(), String> {
         interp
             .set_write_roots(&self.allow_write)
             .map_err(|e| format!("--allow-write: {e}"))?;
@@ -332,6 +431,17 @@ fn parse_byte_count(s: &str) -> Option<u64> {
 }
 
 fn main() -> ExitCode {
+    let code = run_cli();
+    // Short text without a newline is still buffered here, and Rust's own
+    // flush at exit would lose the failure; find it now.
+    flush_stdout();
+    if STDOUT_CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
+        return ExitCode::from(EXIT_STDOUT_CLOSED);
+    }
+    code
+}
+
+fn run_cli() -> ExitCode {
     // `pscat fonts ...` is its own small CLI (src/fontpacks/cli.rs).
     let argv: Vec<String> = env::args().skip(1).collect();
     if argv.first().is_some_and(|a| a == "fonts") {
@@ -388,6 +498,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         return run_selftest(std::path::Path::new(path));
+    }
+
+    if options.svg_text && options.svg.is_none() {
+        eprintln!("pscat: --svg-text needs --svg output");
+        return ExitCode::FAILURE;
     }
 
     if options.transparent {
@@ -604,6 +719,9 @@ fn main() -> ExitCode {
     }
 
     if options.svg.is_some() {
+        if options.svg_text {
+            interp.gfx_mut().set_svg_text(pscat::SvgText::Text);
+        }
         interp.gfx_mut().enable_svg();
     }
     if options.pdf.is_some() {
@@ -614,7 +732,7 @@ fn main() -> ExitCode {
             run_headless(&mut interp, expr.as_bytes(), &options),
             &interp,
             &options,
-            pscat::lint::scan_declared_pages(expr.as_bytes()),
+            expr.as_bytes(),
         );
     }
     if options.interactive {
@@ -683,10 +801,20 @@ fn main() -> ExitCode {
             run_headless(&mut interp, &source, &options),
             &interp,
             &options,
-            pscat::lint::scan_declared_pages(&source),
+            &source,
         );
     }
 
+    // The one path that opens a window for a plain run. An agent or a script
+    // with no terminal on either end has not asked for one, and would wait on
+    // a window nobody sees, with no output to say why (#1035). A notice, not
+    // a headless fallback: a desktop launcher has no terminal either and does
+    // want the window.
+    if window_without_terminal(io::stdin().is_terminal(), io::stdout().is_terminal()) {
+        eprintln!(
+            "pscat: opening a window; pass --headless, --png/--svg/--pdf or -e for batch use"
+        );
+    }
     interp.begin_source(&source);
     let window_options = WindowOptions {
         title: format!("pscat — {path}"),
@@ -700,6 +828,14 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Whether a run that is about to open its window has no terminal at either
+/// end (#1035): the case where a caller is probably waiting for output rather
+/// than looking at a window. `-` has stdin as its program, so only stdout
+/// tells a person at a shell (`cat f.ps | pscat -`) from a script.
+fn window_without_terminal(stdin_is_terminal: bool, stdout_is_terminal: bool) -> bool {
+    !stdin_is_terminal && !stdout_is_terminal
 }
 
 /// `path`'s program bytes: stdin for `-`, the file otherwise —
@@ -932,6 +1068,13 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     };
     let ok = match run {
         Ok(()) => true,
+        // A reader that went away (`| head`) is not the program's fault: its
+        // `ioerror` would be noise in the terminal the user is looking at
+        // (#1059). The output files below are still written.
+        Err(PsError::Io) if interp.stdout_epipe_error() => {
+            note_stdout_closed();
+            false
+        }
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
             if options.pstack_on_error {
@@ -993,15 +1136,10 @@ fn run_selftest(path: &std::path::Path) -> ExitCode {
     }
 }
 
-fn finish_headless(
-    ok: bool,
-    interp: &Interp,
-    options: &Options,
-    declared_pages: pscat::lint::DeclaredPages,
-) -> ExitCode {
+fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) -> ExitCode {
     let mut lint_failed = false;
     if options.lint {
-        let found = report_lint(interp, options, &declared_pages, ok);
+        let found = report_lint(interp, options, source, ok);
         lint_failed = options.lint_strict && found;
     }
     if let Some(path) = &options.png {
@@ -1022,7 +1160,7 @@ fn finish_headless(
                 eprintln!("pscat: cannot write {p}: {e}");
                 false
             } else {
-                println!("pscat: wrote {p}");
+                eprintln!("pscat: wrote {p}");
                 true
             }
         };
@@ -1045,7 +1183,7 @@ fn finish_headless(
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }
-        println!("pscat: wrote {path}");
+        eprintln!("pscat: wrote {path}");
     }
     if ok && !lint_failed {
         ExitCode::SUCCESS
@@ -1072,7 +1210,7 @@ fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool, scale: f
             eprintln!("pscat: cannot write {path}: {e}");
             false
         } else {
-            println!("pscat: wrote {path}");
+            eprintln!("pscat: wrote {path}");
             true
         }
     };
@@ -1103,12 +1241,7 @@ const RUN_ERROR_CHECK: &str = "run-error";
 /// "clean" (issue #369): the verdict line used to say so right under the
 /// `%%[ Error ... ]%%` report, and agents trust that line. The exit code
 /// is untouched (`finish_headless` already fails an errored run).
-fn report_lint(
-    interp: &Interp,
-    options: &Options,
-    declared_pages: &pscat::lint::DeclaredPages,
-    ok: bool,
-) -> bool {
+fn report_lint(interp: &Interp, options: &Options, source: &[u8], ok: bool) -> bool {
     // The blank-page/stack-leak checks assume the run was meant to
     // produce a page — true for any file or stdin run, whether or not
     // an output format flag was also given (`--lint file.ps` with no
@@ -1126,7 +1259,8 @@ fn report_lint(
         || options.png.is_some()
         || options.svg.is_some()
         || options.pdf.is_some();
-    let findings = interp.lint_with_pages(render_checks, declared_pages);
+    let findings = interp.lint_with_pages(render_checks, &pscat::lint::scan_declared_pages(source));
+    let findings = pscat::lint::scan_lint_allows(source).filter(findings);
     print_lint(&findings, ok, options.lint_strict, None)
 }
 
@@ -1504,7 +1638,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             eprintln!("pscat: cannot write {path}: {e}");
             return ExitCode::FAILURE;
         }
-        println!("pscat: wrote {path}");
+        eprintln!("pscat: wrote {path}");
     }
 
     if any_failed {
@@ -1876,11 +2010,11 @@ fn parse_args() -> Result<Options, String> {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_usage();
-                std::process::exit(0);
+                exit_after_printing();
             }
             "-V" | "--version" => {
                 println!("pscat {}", env!("PSCAT_VERSION"));
-                std::process::exit(0);
+                exit_after_printing();
             }
             "--fonts" => {
                 for name in pscat::font::available_fonts() {
@@ -1890,11 +2024,11 @@ fn parse_args() -> Result<Options, String> {
                 for line in pscat::fontpacks::status_lines() {
                     println!("{line}");
                 }
-                std::process::exit(0);
+                exit_after_printing();
             }
             "--capabilities" => {
                 println!("{}", pscat::capabilities::payload_json());
-                std::process::exit(0);
+                exit_after_printing();
             }
             "-e" | "--eval" => {
                 options.eval = Some(args.next().ok_or("missing expression after -e")?);
@@ -1996,6 +2130,7 @@ fn parse_args() -> Result<Options, String> {
             }
             "--halftone" => options.halftone = true,
             "--transparent" => options.transparent = true,
+            "--svg-text" => options.svg_text = true,
             "-i" | "--interactive" => options.interactive = true,
             "--lint" => options.lint = true,
             // Strict *is* lint, with findings promoted to fatal — set
@@ -2120,6 +2255,8 @@ fn print_usage() {
     println!();
     println!("Runs file.ps in a live window (watch it draw), or a REPL if no file.");
     println!("'-' reads the program from stdin (use with --png/--svg/--pdf/--headless).");
+    println!("With none of those or -e, a file opens a live window. A written file is");
+    println!("reported on stderr (`pscat: wrote FILE`); stdout is the program's own output.");
     println!();
     println!("  -h, --help          show this text and exit");
     println!("  -V, --version       print \"pscat X.Y.Z\" and exit");
@@ -2134,6 +2271,9 @@ fn print_usage() {
     println!("      --bbox          take the page from any file's %%BoundingBox, not only an EPSF");
     println!("                      file's (%!PS-Adobe-3.0 EPSF-3.0)");
     println!("      --svg PATH      write the page(s) as SVG (implies --headless)");
+    println!("      --svg-text      with --svg: write Helvetica, Times and Courier text as");
+    println!("                      selectable <text> rather than glyph outlines (smaller;");
+    println!("                      the viewer draws it in a metric-compatible face)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
     println!("      --spool DIR     watch DIR and render each .ps/.eps that lands there");
@@ -2186,7 +2326,8 @@ fn print_usage() {
     println!("      --max-write-bytes N  with --allow-write, stop a program that writes more");
     println!("                      than N bytes to files: N is bytes or takes a k, m or g");
     println!("                      suffix (1g = 1 GiB, the default); 0 = no limit. The");
-    println!("                      write raises `limitcheck`, which `stopped` can catch");
+    println!("                      write raises `limitcheck`, which `stopped` can catch.");
+    println!("                      With --bands, all the bands spend one budget");
     println!("      --bands N       render the PNG on N threads (1..64; PNG only). The page");
     println!("                      is cut into horizontal bands, by default 2 per thread and");
     println!("                      none under 8 rows, that the threads take from a queue,");
@@ -2196,8 +2337,11 @@ fn print_usage() {
     println!("                      one that doesn't pays for the whole program per band. The");
     println!("                      result is identical to a plain --png render unless the");
     println!("                      program reads the clock. Steps and time limits apply per");
-    println!("                      band, --max-memory to all bands together; the first band");
-    println!("                      to hit a limit stops the queue. The band names are in");
+    println!("                      band, --max-memory and --max-write-bytes to all bands");
+    println!("                      together; --allow-write works with --bands, but every band");
+    println!("                      runs the whole program, so its file writes happen once per");
+    println!("                      band, unordered (guard them with BandIndex 0 eq). The first");
+    println!("                      band to hit a limit stops the queue. The band names are in");
     println!("                      userdict and differ per band: leave them out of anything");
     println!("                      that hashes or serialises userdict (a cache key) or");
     println!("                      walks it with forall. --lint works with --bands: it checks");
@@ -2215,8 +2359,10 @@ fn print_usage() {
     println!("      --confine-reads as --read-root, with no directories: only the embedded lib/");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
-    println!("                      left on the stack — printed to stderr, doesn't affect");
-    println!("                      the exit code");
+    println!("                      left on the stack, an operator name redefined as a");
+    println!("                      plain value (silence with a `%lint: allow");
+    println!("                      shadowed-operator` comment) — printed to stderr,");
+    println!("                      doesn't affect the exit code");
     println!("      --lint-strict   as --lint, but exit non-zero if anything is found");
     println!("      --selftest FILE run FILE's %%SelfTest blocks and exit (runs alone)");
     println!("      --selftest-list FILE   print FILE's %%SelfTest block names, then exit");
@@ -2224,6 +2370,11 @@ fn print_usage() {
     println!(
         "                      (`#` lines after: pinned pack release, installed packs, overrides)"
     );
+    println!(
+        "                      your own fonts: put .ttf/.otf/.ttc files in fonts/catalog/<dir>/"
+    );
+    println!("                      (current directory, $PSCAT_HOME, the per-user data directory");
+    println!("                      or beside the binary); `/<FileStem> findfont` then finds them");
     println!(
         "      --capabilities  print the agent-usable art catalog (fonts, palettes, templates, procedures) as JSON, then exit"
     );
@@ -2247,6 +2398,23 @@ fn print_usage() {
         "  pscat sheet a.ps b.ps ...    labelled review sheet: files or sweeps at several sizes, one PNG"
     );
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
+    println!();
+    println!("Environment (where pscat finds lib/ and fonts; the full search order is in");
+    println!("docs/guides/getting-started.md, \"Where pscat finds its files\"):");
+    println!(
+        "  PSCAT_HOME             a pscat tree holding lib/ and fonts/catalog/ (old name PSCAT_ROOT)"
+    );
+    println!(
+        "  PSCAT_LIB              one directory that stands in for lib/, so $PSCAT_LIB/artkit.ps"
+    );
+    println!(
+        "                         serves (lib/artkit.ps) run; a single directory, not a path list"
+    );
+    println!(
+        "  PSCAT_TRACE_RESOURCES  1: print on stderr which copy served each file a program loads"
+    );
+    println!("  The lib/ search order is $PSCAT_LIB, $PSCAT_HOME, the current directory, the");
+    println!("  per-user data directory, the binary's directory, then the copy built into pscat.");
 }
 
 /// Write out the files the program left open (issue #762), and say so when
@@ -2291,7 +2459,12 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                 print!("PS<{depth}> ");
             }
         }
-        let _ = io::stdout().flush();
+        flush_stdout();
+        // Nobody is reading the prompts or results any more: stop, rather
+        // than wait on a stdin that may never end (#1059).
+        if stdout_is_closed() {
+            return repl_exit(interp);
+        }
 
         let mut line = String::new();
         match stdin.lock().read_line(&mut line) {
@@ -2304,6 +2477,10 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                     continue;
                 };
                 if let Err(e) = interp.run_str(&source) {
+                    if matches!(e, PsError::Io) && interp.stdout_epipe_error() {
+                        note_stdout_closed();
+                        return repl_exit(interp);
+                    }
                     eprintln!("{}", interp.error_report(&e));
                     if options.pstack_on_error {
                         print_pstack(interp);
@@ -2319,6 +2496,21 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod window_notice_tests {
+    use super::window_without_terminal;
+
+    #[test]
+    fn only_a_run_with_no_terminal_at_either_end_gets_the_notice() {
+        // An agent's shell: stdin /dev/null or a pipe, stdout captured.
+        assert!(window_without_terminal(false, false));
+        // A person at a shell: any terminal means someone may be looking.
+        assert!(!window_without_terminal(true, true));
+        assert!(!window_without_terminal(true, false), "pscat f.ps | cat");
+        assert!(!window_without_terminal(false, true), "cat f.ps | pscat -");
     }
 }
 

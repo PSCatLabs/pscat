@@ -332,12 +332,7 @@ fn leaves_stack_state_and_caller_random_stream_alone() {
 /// the library refuses that, see `missing_font_...` above).
 #[test]
 fn ghostscript_accepts_lettering_on_a_builtin_face() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let prog = "(lib/artkit.ps) run (lib/lettering.ps) run\n\
@@ -372,12 +367,7 @@ fn ghostscript_accepts_lettering_on_a_builtin_face() {
 
 #[test]
 fn ghostscript_refuses_a_catalog_face_instead_of_substituting_courier() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("lettering-gsf");

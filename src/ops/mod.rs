@@ -2,6 +2,7 @@
 //! groups them. Each module installs its operators into systemdict.
 
 pub mod arith;
+pub mod binobj;
 pub mod color;
 pub mod control;
 pub mod convert;
@@ -17,6 +18,7 @@ pub mod matrix;
 pub mod misc;
 pub mod noise;
 pub mod pagedevice;
+pub mod pdfmark;
 pub mod realsio;
 pub mod shading;
 pub mod stack;
@@ -45,6 +47,7 @@ pub fn install_all(dict: &mut Dict) {
     font::install(dict);
     file::install(dict);
     realsio::install(dict);
+    binobj::install(dict);
     image::install(dict);
     logic::install(dict);
     misc::install(dict);
@@ -54,6 +57,7 @@ pub fn install_all(dict: &mut Dict) {
     shading::install(dict);
     noise::install(dict);
     pagedevice::install(dict);
+    pdfmark::install(dict);
 
     // Constants: executing a name bound to a literal object pushes the
     // object, which is exactly the behavior `true`, `mark`, etc. need —

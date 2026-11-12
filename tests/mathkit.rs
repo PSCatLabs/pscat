@@ -116,13 +116,6 @@ fn ink_count(it: &Interp) -> usize {
         .count()
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The acceptance's "layout boxes are computed in a headless pass": every
 /// formula of the test set measures to a sane box with no page at all, and
 /// the path mkpath builds at /Irregular 0 lies inside that box (to the
@@ -364,7 +357,7 @@ fn every_example_tag_runs_clean() {
         .filter_map(|l| l.strip_prefix("% @example:"))
         .map(str::trim)
         .collect();
-    assert_eq!(examples.len(), 7, "one example per public procedure");
+    assert_eq!(examples.len(), 8, "one example per public procedure");
     for example in examples {
         let mut it = Interp::with_page(300, 200).expect("page");
         it.run_str(example)
@@ -507,8 +500,7 @@ fn assert_gs_same_numbers(tex: &str, body: &str) {
 /// seed.
 #[test]
 fn ghostscript_builds_the_same_layout_and_path() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_specimen.ps", "1000x1960");
@@ -520,8 +512,7 @@ fn ghostscript_builds_the_same_layout_and_path() {
 /// substack and \pmod lay out to the same box and path as in pscat.
 #[test]
 fn ghostscript_builds_the_same_structures() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_structures.ps", "1000x1320");
@@ -547,8 +538,7 @@ fn the_structures_specimen_renders_with_ink_and_a_clean_stack() {
 /// and path as in pscat.
 #[test]
 fn ghostscript_builds_the_same_mod_pod_and_side_labels() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_renders("examples/mathkit_columns_braces.ps", "1000x1180");
@@ -574,8 +564,7 @@ fn the_columns_and_braces_specimen_renders_with_ink_and_a_clean_stack() {
 /// points as in pscat.
 #[test]
 fn ghostscript_builds_the_same_mkbrace() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     assert_gs_same_numbers(

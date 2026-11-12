@@ -50,12 +50,20 @@ function pageOf(options = {}) {
     }
   }
   if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`pscat: dpi must be a positive number, got ${dpi}`);
-  for (const k of ['svg', 'pdf']) {
+  for (const k of ['svg', 'pdf', 'svgText']) {
     if (options[k] !== undefined && typeof options[k] !== 'boolean') {
       throw new TypeError(`pscat: ${k} must be true or false, got ${options[k]}`);
     }
   }
-  return { width, height, scale: dpi / 72, record: { svg: options.svg === true, pdf: options.pdf === true } };
+  if (options.svgText === true && options.svg !== true) {
+    throw new TypeError('pscat: svgText needs svg: true');
+  }
+  return {
+    width,
+    height,
+    scale: dpi / 72,
+    record: { svg: options.svg === true, pdf: options.pdf === true, svgText: options.svgText === true },
+  };
 }
 
 /** One interpreter in its own WebAssembly instance. Make one with createRenderer(). */
@@ -167,6 +175,17 @@ export class Renderer {
   }
 
   /**
+   * The number of pages the run holds now: those showpage or copypage
+   * emitted, plus the page being drawn when it holds art (or is the only
+   * page). Works between step() calls and after the run, whatever is
+   * recorded (pixels, SVG, PDF). It is svgPages().length with { svg: true },
+   * and the PDF's page count with { pdf: true }. 0 before begin().
+   */
+  pageCount() {
+    return this.#ps.pageCount();
+  }
+
+  /**
    * SVG page `page` (from 0) as a string: the bytes `pscat --svg` writes
    * for the same program, page size and dpi. Needs begin()/render() with
    * { svg: true }. Mid-run (between step() calls) it is the page so far.
@@ -236,12 +255,39 @@ async function compileResponse(res) {
   return WebAssembly.compile(await res.arrayBuffer());
 }
 
+// Node's fetch cannot read file: URLs ("not implemented... yet..."), which is
+// where a Node script that imports index.js by path (the browser entry,
+// skipping the exports map's `node` condition) lands (#1085). Say so, and
+// say what to do. Runtimes whose fetch does read file: URLs never get here.
+// Only Node's own refusal is reworded: its TypeError carries a cause saying
+// "not implemented". Any other failure (a browser's bare "Failed to fetch",
+// which the classic-script build explains for file: pages) passes through.
+async function fetchWasm(src) {
+  try {
+    return await fetch(src);
+  } catch (cause) {
+    if (
+      /^file:/i.test(String(src)) &&
+      globalThis.process?.versions?.node &&
+      /not implemented/i.test(String(cause?.cause?.message ?? ''))
+    ) {
+      throw new Error(
+        "pscat: this is the browser entry point, and Node's fetch cannot read a file: URL. " +
+          "In Node, import 'pscat' (it resolves to node.js) or 'pscat/node.js', " +
+          'or pass createRenderer({ wasm }) the module read from disk (its bytes).',
+        { cause },
+      );
+    }
+    throw cause;
+  }
+}
+
 export async function toModule(src) {
   if (src instanceof WebAssembly.Module) return src;
   if (src instanceof ArrayBuffer || ArrayBuffer.isView(src)) return WebAssembly.compile(src);
   if (typeof Response !== 'undefined' && src instanceof Response) return compileResponse(src);
   if (src && typeof src.then === 'function') return toModule(await src);
-  if (typeof src === 'string' || src instanceof URL) return compileResponse(await fetch(src));
+  if (typeof src === 'string' || src instanceof URL) return compileResponse(await fetchWasm(src));
   throw new TypeError('pscat: options.wasm must be a URL, a Response, bytes or a WebAssembly.Module');
 }
 

@@ -137,6 +137,20 @@ the flag in capitals with underscores (PSCAT_MCP_TIMEOUT, PSCAT_MCP_MAX_STEPS,
 PSCAT_MCP_MAX_PIXELS, ...); a flag overrides it, and a bad value stops the
 server. --allow-read and --out-root have no variable.";
 
+/// Said in the instructions and in every image tool's description (#1055):
+/// the image block reaches the model, not necessarily the user. `out_path`
+/// is how a file comes back (its `wrote <path>` line); when it is off, the
+/// command line is.
+fn preview_note(cfg: &Config) -> &'static str {
+    if cfg.out_root.is_ok() {
+        "The image preview is usually seen by you, not the user: to show them, \
+         pass out_path and send the file named in the `wrote <path>` line."
+    } else {
+        "The image preview is usually seen by you, not the user: to show them a \
+         file, render it with the pscat command line."
+    }
+}
+
 /// The limits and the output root, fixed for the server's lifetime by
 /// whoever registered it. No tool argument can change them. Each call and
 /// job runs on its own copy, which adds that run's cancel flag and, for a
@@ -907,6 +921,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
             ));
         }
     };
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "out_path writes only inside {} (relative paths start there), only to a name \
@@ -935,7 +950,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
              {bands}A page, board or sheet is limited to {} pixels. \
-             {out_path} {reads}",
+             {preview} {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
             cfg.max_pixels,
@@ -1097,6 +1112,7 @@ fn annotations_with(title: &str, read_only: bool, idempotent: bool) -> Value {
 }
 
 fn tool_list(cfg: &Config) -> Value {
+    let preview = preview_note(cfg);
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "Also write the file here: a path inside {} (relative paths start there; \
@@ -1146,6 +1162,7 @@ fn tool_list(cfg: &Config) -> Value {
                 a Lint: block when the page looks wrong (blank page, unbalanced gsave, \
                 leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
+                {preview} \
                 Writes a file only when out_path is given (then it replaces an existing render \
                 file of that extension), which is why this tool is not marked read-only. \
                 {READS_BRIEF}",
@@ -1162,7 +1179,7 @@ fn tool_list(cfg: &Config) -> Value {
                 specific person's handwriting or presenting writing as someone else's. \
                 Lowercase letters, digits and .,-'!? only; anything else is invisible. \
                 Writes a file only when out_path is given (then it replaces an existing .png), \
-                which is why this tool is not marked read-only. {limits} {canvas}"),
+                which is why this tool is not marked read-only. {preview} {limits} {canvas}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1189,12 +1206,13 @@ fn tool_list(cfg: &Config) -> Value {
                 backslashes: \\\\ breaks rows, & marks where align, aligned and split rows line up, \
                 gather, gather* and gathered centre each row instead, and an align*/equation \
                 wrapper or $...$ is fine. The subset is mathkit's (fractions, roots, sums, \
-                integrals, Greek, matrices, cases, accents...); a command outside it is a \
-                latex_error naming it. Same input and seed: the same image, byte for byte. \
+                integrals, Greek, matrices, cases, accents...); every command or character \
+                outside it comes back in one latex_error, each with its line and column \
+                (problems). Same input and seed: the same image, byte for byte. \
                 The input is LaTeX only, never PostScript. svg and pdf (megabytes: tens of \
                 thousands of grain marks) are written to out_path only. Writes a file only \
                 when out_path is given (then it replaces an existing file of that \
-                extension), which is why this tool is not marked read-only. Limits: \
+                extension), which is why this tool is not marked read-only. {preview} Limits: \
                 latex at most {max_latex} bytes; the board at most {max_pixels} \
                 pixels (width and height in points times dpi/72) and 8000 a side; \
                 {}s per call (the server's --timeout; its default is 60); the interpreter's step, time and memory limits \
@@ -1255,7 +1273,7 @@ fn tool_list(cfg: &Config) -> Value {
                 error text alongside. Labels in Latin (accents included), Korean, Japanese, \
                 Chinese and Thai are drawn in a face for the script (the last three need the \
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
-                an existing .png), which is why this tool is not marked read-only. Limits: \
+                an existing .png), which is why this tool is not marked read-only. {preview} Limits: \
                 {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
                 side, and the cells rendered at most {max_pixels} pixels in all; labels at \
                 most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
@@ -2262,7 +2280,32 @@ fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
         ChalkError::Latex { token, .. } => {
             ToolError::new("latex_error", e.to_string()).with("token", json!(token))
         }
+        // Every problem found in one pass (#1080): `token` and `code` are the
+        // first one's, so a caller that reads one error still works, and
+        // `problems` lists them all with their places.
+        ChalkError::Problems(ps) => {
+            let problems: Vec<Value> = ps
+                .iter()
+                .map(|p| {
+                    json!({
+                        "code": p.code(),
+                        "token": p.token,
+                        "line": p.line,
+                        "column": p.column,
+                        "offset": p.offset,
+                        "message": p.message(),
+                    })
+                })
+                .collect();
+            let first = ps.first().map(|p| p.token.clone()).unwrap_or_default();
+            ToolError::new("latex_error", e.to_string())
+                .with("token", json!(first))
+                .with("problems", json!(problems))
+        }
         ChalkError::Render(_) => ToolError::new("render_failed", e.to_string()),
+        // `ChalkError` is `#[non_exhaustive]`; a future variant reports as a
+        // LaTeX error with its message until it gets its own arm.
+        _ => ToolError::new("latex_error", e.to_string()),
     };
     err.with("code", json!(code))
 }
@@ -2335,7 +2378,10 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         if !fields.contains_key("limit")
             && fields.get("ps_error").and_then(Value::as_str) == Some("undefined")
             && let Some(cmd) = fields.get("offending_command").and_then(Value::as_str)
-            && let Some(e) = pscat::chalk::explain(&pscat::PsError::Undefined(cmd.into()))
+            && let Some(e) = driver.explain(
+                run.stdout.as_bytes(),
+                &pscat::PsError::Undefined(cmd.into()),
+            )
         {
             return Err(chalk_error(e));
         }
@@ -2927,10 +2973,22 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
             }
             "Error" => fields.insert("ps_error".into(), json!(value)),
             "OffendingCommand" => fields.insert("offending_command".into(), json!(value)),
-            "Line" => fields.insert(
-                "line".into(),
-                value.parse::<u64>().map_or(json!(value), |n| json!(n)),
-            ),
+            // `5`, or `5 (inner.ps)` for a line of a `run` file (#1043).
+            "Line" => {
+                let (num, file) = match value.split_once(" (") {
+                    Some((n, f)) if f.ends_with(')') => (n, Some(&f[..f.len() - 1])),
+                    _ => (value, None),
+                };
+                if let Some(file) = file {
+                    fields.insert("file".into(), json!(file));
+                }
+                fields.insert(
+                    "line".into(),
+                    num.parse::<u64>().map_or(json!(value), |n| json!(n)),
+                )
+            }
+            // `inner.ps:5 <- outer.ps:2 <- line 1`, innermost first.
+            "Run chain" => fields.insert("run_chain".into(), json!(value)),
             _ => None,
         };
     }
@@ -3800,6 +3858,23 @@ mod tests {
         assert_eq!(f["offending_command"], "bogus");
         assert_eq!(f["line"], 3);
         assert!(ps_error_fields("all fine").is_none());
+    }
+
+    #[test]
+    fn run_file_line_parses_into_line_file_and_chain() {
+        // #1043: an error in a `run` file names it, and the run chain.
+        let f = ps_error_fields(
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); \
+             Run chain: inner3.ps:5 <- lib/a b.ps:2 <- line 2 ]%%",
+        )
+        .unwrap();
+        assert_eq!(f["ps_error"], "undefinedresult");
+        assert_eq!(f["line"], 5);
+        assert_eq!(f["file"], "inner3.ps");
+        assert_eq!(f["run_chain"], "inner3.ps:5 <- lib/a b.ps:2 <- line 2");
+        // A main-program line has no file.
+        let f = ps_error_fields("%%[ Error: undefined; OffendingCommand: x; Line: 2 ]%%").unwrap();
+        assert!(!f.contains_key("file"));
     }
 
     #[test]

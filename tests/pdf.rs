@@ -13,13 +13,6 @@ use tiny_skia::Pixmap;
 const SIZE: u32 = 500;
 const BLOCK: u32 = 10;
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn pdf_and_canvas(src: &[u8]) -> (Vec<u8>, Pixmap) {
     let mut it = Interp::with_page(SIZE, SIZE).expect("page");
     it.gfx_mut().enable_pdf();
@@ -92,8 +85,7 @@ fn mean_block_diff(a: &Pixmap, b: &Pixmap) -> f64 {
 
 #[test]
 fn postcard_pdf_means_what_the_raster_meant() {
-    if !gs_available() {
-        eprintln!("skipping pdf test: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let src = std::fs::read("examples/postcard.ps").expect("example");
@@ -105,8 +97,7 @@ fn postcard_pdf_means_what_the_raster_meant() {
 
 #[test]
 fn specimen_text_survives_as_outlines() {
-    if !gs_available() {
-        eprintln!("skipping pdf test: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let src = std::fs::read("examples/specimen.ps").expect("example");
@@ -345,8 +336,7 @@ fn assert_real_shading(pdf: &[u8], shading_type: u8) {
 }
 
 fn assert_gs_matches(pdf: &[u8], canvas: &Pixmap, name: &str) {
-    if !gs_available() {
-        eprintln!("skipping gs round trip: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let theirs = gs_rasterize(pdf, name);
@@ -684,13 +674,11 @@ fn dsc_header_comments_become_pdf_info() {
     assert!(text.contains("/Author (Jerome)"));
     assert!(text.contains("/Info "), "trailer references /Info");
 
-    if gs_available() {
+    if common::gs_available() {
         // A broken object/xref layout (e.g. /Info shifting the page or
         // image object numbers) would make gs reject the file outright
         // -- this is a validity smoke test, not a pixel comparison.
         let _ = gs_rasterize(&pdf, "dsc_info");
-    } else {
-        eprintln!("skipping gs validity check: gs not installed");
     }
 }
 
@@ -715,8 +703,7 @@ fn no_dsc_comments_still_gets_producer_but_no_title() {
 /// implementation lands on the same pixels tiny-skia did.
 #[test]
 fn alpha_survives_the_round_trip_through_gs() {
-    if !gs_available() {
-        eprintln!("skipping pdf test: gs not installed");
+    if !common::gs_available() {
         return;
     }
     // Three overlapping translucent washes plus a translucent stroke,
@@ -739,8 +726,7 @@ fn alpha_survives_the_round_trip_through_gs() {
 
 #[test]
 fn multiply_blending_survives_the_round_trip_through_gs() {
-    if !gs_available() {
-        eprintln!("skipping pdf test: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let src = b"/Multiply setblendmode 0.7 setalpha
@@ -877,8 +863,7 @@ fn unclipped_pages_get_no_outer_group() {
 /// to the next.
 #[test]
 fn shared_clip_groups_round_trip_through_gs() {
-    if !gs_available() {
-        eprintln!("skipping pdf test: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let src = b"

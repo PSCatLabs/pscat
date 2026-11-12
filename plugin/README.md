@@ -13,7 +13,8 @@ interpreter. The plugin bundles:
   `functional-postscript` (map, filter and fold over lists of records, and
   wrapping procedures to count or trace calls).
 - **The `pscat-mcp` server**, which gives the agent ten tools:
-  `render_postscript` (pages come back as images the agent can look at),
+  `render_postscript` (pages come back as images the agent can look at; the
+  user usually cannot, so the agent saves a file with `out_path` to show one),
   `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
   PNG back), `review_sheet` (several programs at several sizes, labelled, on
   one PNG), `describe_art_capabilities`, and `start_render`,
@@ -267,7 +268,8 @@ below); a flag overrides its variable and an invalid value stops the server
 at startup. There is deliberately no variable for `--allow-read` or
 `--out-root`: these variables set only numeric limits, none adds a read root
 or moves where `out_path` writes. Codex starts a
-plugin's server with a short fixed environment, so under Codex (or to use
+plugin's server with a short fixed environment (a plugin's `mcp.json` cannot widen
+it: Codex rejects an `env_vars` key there, which only `config.toml` takes), so under Codex (or to use
 flags) register `pscat-mcp --timeout SECS` by
 hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in
 `/mcp`; Codex: an `[mcp_servers.<name>]` table in `config.toml` with `args` and

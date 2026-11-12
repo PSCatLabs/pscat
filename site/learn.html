@@ -401,7 +401,8 @@
   <p><code>curveto</code> adds a cubic Bézier curve: two control points that
   pull the curve towards them, then the end point. <code>arc</code> adds part
   of a circle, given its centre, its radius, and the start and end angles in
-  degrees. <code>setgray</code> picks a grey from 0 (black) to 1 (white).
+  degrees; <code>arcto</code> rounds a corner instead, given the two points
+  that make the corner and a radius. <code>setgray</code> picks a grey from 0 (black) to 1 (white).
   Rectangles are common enough to have shortcuts: <i>x y width height</i>
   <code>rectfill</code> fills one and <code>rectstroke</code> outlines one,
   without touching the current path. Later examples use them.</p>

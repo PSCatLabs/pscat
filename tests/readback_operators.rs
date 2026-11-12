@@ -255,19 +255,10 @@ fn a_colour_read_back_with_currentcolor_and_set_again_is_unchanged() {
     }
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The pinned lines are gs's own (local only; CI has no gs).
 #[test]
 fn ghostscript_prints_the_pinned_lines() {
-    if !gs_available() {
-        eprintln!("skipping gs readback check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-readbacks-gs");

@@ -561,13 +561,6 @@ fn the_catch_exports_the_same_svg_every_time() {
     }
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// Fraction of inked pixels inside the band, rendered by Ghostscript.
 fn gs_band_ink(prelude: &str, body: &str, px: (usize, usize), dpi: u32) -> f64 {
     let mut src = String::new();
@@ -613,8 +606,7 @@ fn gs_band_ink(prelude: &str, body: &str, px: (usize, usize), dpi: u32) -> f64 {
 /// the comparison can tell. Runs locally only: CI has no gs.
 #[test]
 fn ghostscript_keeps_the_tooth_open() {
-    if !gs_available() {
-        eprintln!("skipping gs fill-adjust check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let body = "<< /Seed 5 /Weave 0.6 >> pkcanvas \
@@ -1395,8 +1387,7 @@ fn a_hundred_strokes_render_within_the_ci_budget() {
 /// pattern at block scale, and a different seed is the negative control.
 #[test]
 fn ghostscript_agrees_on_a_stroke() {
-    if !gs_available() {
-        eprintln!("skipping gs stroke check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: usize = 4;
@@ -1481,8 +1472,7 @@ fn ghostscript_agrees_on_a_stroke() {
 /// of what it inks unclipped, in gs as in pscat. Runs locally only.
 #[test]
 fn ghostscript_keeps_a_dkclip_region_in_a_batch() {
-    if !gs_available() {
-        eprintln!("skipping gs dkclip check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const STROKE: &str = "newpath 0 20 moveto 120 20 lineto \
@@ -1639,8 +1629,7 @@ fn a_stroke_too_wide_for_any_catch_is_refused_before_anything_draws() {
 /// Runs locally only.
 #[test]
 fn ghostscript_keeps_a_plain_clip_in_a_batch() {
-    if !gs_available() {
-        eprintln!("skipping gs plain-clip check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const STROKE: &str = "newpath 0 20 moveto 120 20 lineto \
@@ -1809,8 +1798,7 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
 /// dpi; with the shadow line taken out they differ. Runs locally only.
 #[test]
 fn ghostscript_follows_a_cliprestore_in_a_batch() {
-    if !gs_available() {
-        eprintln!("skipping gs cliprestore check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-drykit-clipsave");

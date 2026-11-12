@@ -1086,6 +1086,68 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     assert!(!up.contains("away"), "{up}");
 }
 
+/// `string status` (#952) must not become a way to probe for files the read
+/// roots keep a program from opening: outside them it answers `false`, with
+/// no error, exactly as for a missing file.
+#[test]
+fn status_cannot_probe_for_files_outside_the_read_roots() {
+    let base = common::scratch_dir("mcp-status-roots");
+    let cwd = base.join("project");
+    let extra = base.join("extra");
+    let outside = base.join("outside");
+    for d in [&cwd, &extra, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(cwd.join("a.ps"), "(in cwd) =").unwrap();
+    std::fs::write(extra.join("b.ps"), "(in extra) =").unwrap();
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(outside.join("away.ps"), cwd.join("door.ps")).unwrap();
+        symlink(outside.join("missing.ps"), cwd.join("door-missing.ps")).unwrap();
+    }
+    let mut s = Server::start_in(&cwd, &["--allow-read", extra.to_str().unwrap()]);
+    initialized(&mut s);
+    let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
+    let status = |s: &mut Server, name: &str| {
+        let src = format!("mark ({name}) status ] ==");
+        let result = s.tool("eval_postscript", json!({ "source": src }));
+        assert_eq!(result["isError"], false, "{name}: {result}");
+        texts(&result)[0].trim().to_string()
+    };
+    // Inside: the working directory, an absolute path, an --allow-read root,
+    // and the bundled lib/.
+    for name in [
+        "a.ps".to_string(),
+        p(&cwd, "a.ps"),
+        p(&extra, "b.ps"),
+        "lib/artkit.ps".to_string(),
+    ] {
+        let got = status(&mut s, &name);
+        assert!(
+            got.starts_with('[') && got.ends_with(" true]"),
+            "{name}: {got}"
+        );
+    }
+    // Outside, missing, and out by `..` or a symlink: all the same answer.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut names = vec![
+        p(&outside, "away.ps"),
+        p(&outside, "missing.ps"),
+        "../outside/away.ps".to_string(),
+        "../outside/missing.ps".to_string(),
+        "/etc/hosts".to_string(),
+        "/dev/null".to_string(),
+        p(&cwd, "nope.ps"),
+    ];
+    #[cfg(unix)]
+    names.extend(["door.ps", "door-missing.ps"].map(|n| p(&cwd, n)));
+    for name in names {
+        assert_eq!(status(&mut s, &name), "[false]", "{name}");
+    }
+}
+
 /// `pscat-mcp` run to completion with these arguments and environment (and no
 /// other `PSCAT_MCP_*` variable).
 fn run_server(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
@@ -1147,7 +1209,7 @@ fn a_bad_env_var_is_a_startup_error_but_help_still_works() {
 #[test]
 fn a_bad_allow_read_is_a_startup_error() {
     let missing = common::scratch_dir("mcp-allow-read").join("nope");
-    let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+    let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
         .arg("--allow-read")
         .arg(&missing)
         .stdin(Stdio::null())
@@ -1753,7 +1815,7 @@ fn the_cap_flags_reject_values_out_of_range() {
         &["--max-latex-bytes", "0"],
         &["--max-latex-bytes"],
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
             .args(args)
             .current_dir(common::scratch_dir("mcp-badflag"))
             .stdin(Stdio::null())
@@ -1864,7 +1926,7 @@ fn version_flag_prints_the_build_version_and_exits_without_serving() {
     // exit with empty stdout, so the assertion fails instead of hanging.
     let want = format!("pscat-mcp {}\n", common::built_version());
     for flag in ["--version", "-V"] {
-        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        let out = common::without_mcp_env(&mut Command::new(env!("CARGO_BIN_EXE_pscat-mcp")))
             .arg(flag)
             .current_dir(common::scratch_dir("mcp-version"))
             .stdin(Stdio::null())
@@ -1947,6 +2009,44 @@ fn chalkboard_math_without_a_board_is_transparent() {
     assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "some chalk");
 }
 
+/// Every unsupported character or command comes back in one call, each with
+/// its line and column (issue #1080); `code` and `token` stay the first one's.
+#[test]
+fn chalkboard_math_reports_every_problem_at_once() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let latex = "a \\aleph \\\\\n\\text{G\\\"odel} + \u{2603}";
+    let result = s.tool("chalkboard_math", small_board(latex));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["code"], "unsupported_command");
+    assert_eq!(err["token"], "\\aleph");
+    let problems = err["problems"].as_array().expect("the list");
+    let at: Vec<_> = problems
+        .iter()
+        .map(|p| {
+            (
+                p["token"].as_str().unwrap(),
+                p["line"].as_u64().unwrap(),
+                p["column"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        at,
+        [("\\aleph", 1, 3), ("\\\"", 2, 8), ("\u{2603}", 2, 18)],
+        "{result}"
+    );
+    assert_eq!(problems[0]["offset"], 2);
+    let text = &texts(&result)[0];
+    assert!(
+        text.starts_with("3 problems in the LaTeX (line:column):\n  1:3  "),
+        "{text}"
+    );
+    assert!(!text.contains("%%["), "{text}");
+    assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
+}
+
 #[test]
 fn chalkboard_math_errors_are_one_line_and_structured() {
     let mut s = Server::start();
@@ -1969,7 +2069,7 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
     let result = s.tool("chalkboard_math", small_board("x = \u{2603}"));
     assert_eq!(error_kind(&result), "latex_error", "{result}");
     assert_eq!(result["structuredContent"]["error"]["token"], "\u{2603}");
-    assert!(texts(&result)[0].ends_with("(U+2603)"), "{result}");
+    assert!(texts(&result)[0].contains("(U+2603) at 1:5"), "{result}");
 
     let result = s.tool("chalkboard_math", json!({ "latex": "% nothing" }));
     assert_eq!(error_kind(&result), "latex_error");
@@ -3355,6 +3455,36 @@ fn render_tools_take_the_page_from_the_bounding_box() {
         images(&direct),
         "the same page as render_postscript"
     );
+}
+
+/// #1036: a render of a non-EPSF file whose `%%BoundingBox` differs from the
+/// page says so in `Warnings:` (the child's `pscat: note:` line), once; the
+/// `bbox` argument, an EPSF header and an explicit size leave it out.
+#[test]
+fn a_plain_files_ignored_bounding_box_is_a_warning() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-bbox-note"), &[]);
+    initialized(&mut s);
+    let plain = "%!PS-Adobe-3.0\n%%BoundingBox: 0 0 400 300\n0 0 1 setrgbcolor 0 0 400 300 rectfill showpage\n";
+    let noted = |result: &Value| {
+        texts(result)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("%%BoundingBox 400x300 ignored"))
+    };
+    let result = s.tool("render_postscript", json!({ "source": plain, "dpi": 36 }));
+    assert!(noted(&result), "{result}");
+    let eps = plain.replace("%!PS-Adobe-3.0\n", "%!PS-Adobe-3.0 EPSF-3.0\n");
+    let result = s.tool("render_postscript", json!({ "source": eps }));
+    assert!(!noted(&result), "{result}");
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true }),
+    );
+    assert!(!noted(&result), "{result}");
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "width": 400, "height": 300 }),
+    );
+    assert!(!noted(&result), "{result}");
 }
 
 /// #921: eval_postscript has no page arguments, so it keeps the letter page
