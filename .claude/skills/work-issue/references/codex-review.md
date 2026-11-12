@@ -29,7 +29,31 @@ all the session had loaded). A human reading the comment then knows to
 re-check step 8's behavior against what actually merged, rather than
 trusting this run's self-report of "clean."
 
-**Review must come from a different model family than whichever one
+**Which reviewer: by risk, not size** (`SDLC.md` step 8,
+`independent_review`). `python3 scripts/review_tier.py --base origin/main`
+prints `cross-family` when the diff touches the engine, library, npm
+runtime, dependencies, user-machine launchers or release scripts, and
+`agent` otherwise. An `agent` PR (docs, skills, PostScript libraries,
+gallery, tests, CI) takes the **Agent path**: the blank-context `Agent`
+review described under "Fallback path" below, posted under the heading
+`## Agent review, round <R>` with the same verbatim-report and
+disposition table, as policy, not as a fallback. Its blind spots matter
+less there: those diffs are cheap to fix after the fact, and the
+perceptual review covers visible changes. In a dispatched wave the
+dispatcher runs the Codex review for cross-family PRs as one combined
+review (`docs/dev/DISPATCH.md`, "Review").
+
+**Round cap: `independent_review.max_rounds` (2), counting from round 1.**
+Past it, only a real correctness, security or data-loss defect blocks; the
+rest get an "Our response" row saying so and go in the summary's
+follow-ups. A blocking fix made at the cap is pushed and gets one
+confirmation round limited to it (SKILL.md 8.9); a second blocking result
+there stops the run for the owner. When a
+finding turns on PostScript semantics, run Ghostscript and quote its
+output in the response: one `gs` run ends an argument that otherwise
+takes several rounds (eight on the #980 `arcto` review).
+
+**A cross-family PR's review must come from a different model family than whichever one
 implemented the change.** This skill only ever runs as Claude, so its
 review dispatches to Codex — never a same-family blank-context `Agent`
 review, which shares training and blind spots with the implementer no
@@ -204,8 +228,9 @@ returns, **before any fix commit**, and write that value, never `HEAD` at
 the time you post (fixes are committed first, and would be recorded as
 reviewed). It is what a resumed run compares the PR head against; without it a
 resume cannot tell a current review from a stale one (`pitfalls.md`
-"Resume paths", Codex round 4 on #208). The `## Fallback review, round <R>`
-heading carries it too.
+"Resume paths", Codex round 4 on #208). The `## Agent review, round <R>` and
+`## Fallback review, round <R>` headings carry it too, in the same form:
+`## Agent review, round <R> (PR <PR URL>, reviewed head <sha>)`.
 
 Every finding gets a row, including ones judged not real (say why) and
 including a clean pass ("no findings", one row or a sentence). "Our
@@ -221,8 +246,9 @@ continuing. Pushing before re-reviewing matters here specifically:
 `--scope branch` diffs local git state, so a fix that's only committed
 locally makes the *next local review* look clean while the actual PR
 on GitHub — what CI tests and what merge would actually ship — still
-points at the old, unfixed commit. Use your judgment on how many
-rounds are worth it on genuinely subjective feedback.
+points at the old, unfixed commit. Stop at the round cap above
+(SKILL.md 8.9 has the confirmation round for a blocking fix at the cap);
+within it, use your judgment on genuinely subjective feedback.
 
 Once the review is clean — nothing left unfixed without a stated
 reason — proceed to merge-eligibility below.

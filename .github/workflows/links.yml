@@ -29,3 +29,6 @@ jobs:
       # rule, and that every CODEOWNERS entry names a file that exists (#603).
       - name: CODEOWNERS checker tests and paths
         run: python3 scripts/test_codeowners_check.py
+      # The review-tier matcher (SDLC.md step 8): which PRs get a Codex review.
+      - name: Review-tier checker tests
+        run: python3 scripts/test_review_tier.py

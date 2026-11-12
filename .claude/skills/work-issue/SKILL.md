@@ -184,6 +184,13 @@ gh issue comment <N> --body "Opened <PR URL>."
 ## 8. Independent review, then merge
 
 1. **Read `.claude/skills/work-issue/references/codex-review.md` now** (full policy), and `merge_policy` from `git show origin/main:SDLC.md`.
+   **Pick the reviewer:** `cd "$WORKTREE_DIR" && test "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" && git fetch origin main &&
+   python3 scripts/review_tier.py --base origin/main`. Exit 2 or any other output: treat it as `cross-family` and say why.
+   `agent` (and the dispatcher did not ask for Codex): skip 3-6, run codex-review.md "Agent path", then 7-9.
+   `cross-family`: Codex, 3-9, unless the dispatcher said "combined wave review": then pitfalls.md "Combined wave review".
+   **Rounds:** R starts at 1; at most `independent_review.max_rounds` (`MAXR`, 2) from `git show origin/main:SDLC.md`.
+   After round `MAXR` only a real correctness, security or data-loss defect blocks; answer the rest in the table and
+   list them as proposed follow-ups. Settle a PostScript-semantics finding with a quoted `gs` run, not another round.
 2. If the diff touches `.claude/skills/work-issue/`, say so in every review comment. Codex reviews read-only
    and cannot run harnesses: for concurrency or shell changes the advisor plus real load runs are the review that counts.
 3. Find Codex: `CODEX_SCRIPT=$(find "$HOME/.claude/plugins" -path "*/codex/scripts/codex-companion.mjs" 2>/dev/null | head -1)`.
@@ -202,9 +209,12 @@ gh issue comment <N> --body "Opened <PR URL>."
 5. Check it succeeded; if not, do not post from the file (as in 3): `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json`
 6. Post it on the PR, even when clean: `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"`
 7. Read every finding. Decide for each: fix it, or state why not.
-8. Post the round on the issue (`## Codex review, round <R>` template in codex-review.md).
-9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5), go back to 4
-   with R+1. Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
+8. Post the round on the issue (`## Codex review, round <R>` or `## Agent review, round <R>`, each with `(PR <URL>, reviewed
+   head <sha>)`: template in codex-review.md).
+9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5). Then, if R < `MAXR`, go back to 4 (Agent
+   path: its reviewer) with R+1. At R = `MAXR`, push only fixes for blocking defects (the rest stay follow-ups), then one
+   confirmation round R+1 limited to those fixes (same reviewer; its heading says `confirmation`). It finds a blocking
+   defect again: stop without merging, Decision block, owner (pitfalls.md "Stop without merging"). Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
 10. **Merge tier. Read `.claude/skills/work-issue/references/perceptual-review.md` now.** Every policy field comes from
     `git show origin/main:SDLC.md` (the policy in force, not the PR's copy). Precedence (c) > (b) > (a):
     - (c) `python3 scripts/codeowners_check.py --base origin/main` exits 1, or `human-only`, or over the bar: the owner

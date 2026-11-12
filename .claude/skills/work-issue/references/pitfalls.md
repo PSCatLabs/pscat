@@ -531,9 +531,10 @@ file are gone). First match wins:
 |---|---|
 | PR `CLOSED` unmerged | Stop and report. |
 | PR `MERGED` | Step 9 only, then "Main CI after merge". |
-| The PR head equals the `reviewed head` in the last `## Codex review, round` / `## Fallback review, round` issue comment, every row of its table has a response, and a `## Summary of work (PR #<PR#>)` comment exists | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
+| The PR head equals the `reviewed head` in the last `## Codex review, round` / `## Agent review, round` / `## Fallback review, round` issue comment, every row of its table has a response, and a `## Summary of work (PR #<PR#>)` comment exists | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
 | Same, but no summary comment yet | 8.10, 8.11. |
-| Anything else or ambiguous: no review comment, no recorded `reviewed head`, a finding without a response, or non-merge commits since the reviewed head | 8.3 with R+1: re-review. |
+| The dispatcher said "combined wave review" and no review comment exists yet | "Combined wave review" below. |
+| Anything else or ambiguous: no review comment, no recorded `reviewed head`, a finding without a response, or non-merge commits since the reviewed head | 8.1 (re-run `review_tier.py`), then that tier's review with R+1, within the cap (SKILL.md 8.9: past it, only the confirmation round). |
 
 A head that only differs by clean merges of `origin/main` (no conflict
 resolutions: `git show --remerge-diff --format= --stat <merge>` empty, and
@@ -543,7 +544,18 @@ the reviewed head. When unsure, re-review.
 
 The final report on a resume fills `Plan review` with `done (earlier run)`
 and counts the review rounds from the issue's `## Codex review, round`
-and `## Fallback review, round` comments, not from this session.
+and `## Agent review, round` / `## Fallback review, round` comments, not from this session.
+
+### Combined wave review (DISPATCH.md "Review")
+
+A cross-family PR in a dispatched wave whose prompt says "combined wave review" skips 8.3-8.9:
+the dispatcher reviews it with the rest of its batch. Still do 8.10's tier check (an owner path
+still gets its Decision block), 8.11 (the summary says the review is pending, from the dispatcher)
+and 8.12 (green CI). Then stop as in "Stop without merging" items 1-2 and report
+`Merge: awaiting combined wave review (CI green)`. The dispatcher posts a
+`## Codex review, round <R> (PR <URL>, reviewed head <sha>)` comment on each issue in the batch,
+pushes fixes to the PR they belong to, and re-runs `/work-issue <N>`, which lands on a resume row
+above and merges per tier as usual.
 
 ### Stop without merging when the dispatcher says so (#208)
 

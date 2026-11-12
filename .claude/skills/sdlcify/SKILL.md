@@ -164,6 +164,13 @@ light-gate sentence: a PR whose every changed path matches `paths`, and none
 `command` locally instead of the quality gate, and CI still runs everything.
 (Added in #674.)
 
+**`independent_review`** (optional mapping: `cross_family_paths`, a one-line
+JSON list in CODEOWNERS syntax; `max_rounds`; `wave_batch_max_prs`;
+`wave_batch_max_changed_lines`; `stale_pr_days`) is read, not asked, and
+applies nothing on GitHub. When set, step 8 of `SDLC.md` gets the template's
+risk-tiered review text; the work-issue skill and `scripts/review_tier.py`
+read the fields. Keep it on every re-run. (Added 2026-11-12.)
+
 **`dispatch_doc`** (optional path; absent means no section) is read, not
 asked. When set, `SDLC.md` carries the template's short "Dispatching many
 issues" section pointing at it. sdlcify does not write that doc. (Added in
