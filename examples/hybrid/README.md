@@ -65,8 +65,8 @@ All four JPEGs were made on 2026-11-04 by **OpenAI's image model, through the
 Codex CLI 0.166 `image_generation` tool**, signed in with the project
 owner's ChatGPT account. OpenAI's terms assign the output to the user; the
 owner approved committing them. As files under `examples/`, they fall under
-that directory's existing CC0 1.0 mapping in `licenses/assets.json`
-([`LICENSE-CC0`](../../LICENSE-CC0)).
+the `ai-generated-hybrid-images` entry in `licenses/assets.json` (CC0 1.0,
+[`LICENSE-CC0`](../../LICENSE-CC0)).
 
 Each was made by one command, run in an empty scratch directory:
 
@@ -862,7 +862,7 @@ pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
 
 ### Where these images came from
 
-All were made on 2026-11-05 by **OpenAI's image model, through the Codex CLI 0.166 `image_generation` tool**, signed in with the project owner's ChatGPT account, under the same terms as the images above (the output is assigned to the user; CC0 1.0 under this directory's mapping in `licenses/assets.json`). Each was one command in an empty scratch directory holding the reference as `ref.png`:
+All were made on 2026-11-05 by **OpenAI's image model, through the Codex CLI 0.166 `image_generation` tool**, signed in with the project owner's ChatGPT account, under the same terms as the images above (the output is assigned to the user; CC0 1.0 under the `ai-generated-hybrid-images` entry in `licenses/assets.json`). Each was one command in an empty scratch directory holding the reference as `ref.png`:
 
 ```sh
 codex exec --skip-git-repo-check -s workspace-write --image=ref.png "<instruction>" < /dev/null

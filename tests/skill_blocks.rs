@@ -388,6 +388,40 @@ fn manifests_and_listings_state_the_real_skill_count() {
     }
 }
 
+/// Issue #1030: `.claude/skills/` is what a Claude Code session in this
+/// repo loads, and it holds a symlink to each plugin skill. `functional-postscript`
+/// had none, so sessions here never loaded it. Every skill in `plugin/skills/`
+/// must have its link, pointing back at that directory. (Unix only: Git for
+/// Windows checks a symlink out as a text file.)
+#[cfg(unix)]
+#[test]
+fn claude_skills_mirrors_the_plugin_skills() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<String> = std::fs::read_dir(skills_dir())
+        .expect("plugin/skills")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("SKILL.md").is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert!(names.len() >= 4, "plugin/skills/ lost skills: {names:?}");
+    for name in names {
+        let link = root.join(".claude/skills").join(&name);
+        let meta = std::fs::symlink_metadata(&link).unwrap_or_else(|_| {
+            panic!(".claude/skills/{name} is missing: symlink it to ../../plugin/skills/{name}")
+        });
+        assert!(
+            meta.file_type().is_symlink(),
+            ".claude/skills/{name} must be a symlink to ../../plugin/skills/{name}"
+        );
+        assert_eq!(
+            std::fs::canonicalize(&link).unwrap(),
+            std::fs::canonicalize(skills_dir().join(&name)).unwrap(),
+            ".claude/skills/{name} points somewhere other than plugin/skills/{name}"
+        );
+    }
+}
+
 #[test]
 fn the_skill_count_scanner_reads_words_digits_and_emphasis() {
     assert_eq!(stated_skill_counts("- **Three skills**: `pscat`"), [3]);
