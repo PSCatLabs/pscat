@@ -3357,6 +3357,33 @@ fn render_tools_take_the_page_from_the_bounding_box() {
     );
 }
 
+/// #1036: a render of a non-EPSF file whose `%%BoundingBox` differs from the
+/// page says so in `Warnings:` (the child's `pscat: note:` line), once; the
+/// `bbox` argument, an EPSF header and an explicit size leave it out.
+#[test]
+fn a_plain_files_ignored_bounding_box_is_a_warning() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-bbox-note"), &[]);
+    initialized(&mut s);
+    let plain = "%!PS-Adobe-3.0\n%%BoundingBox: 0 0 400 300\n0 0 1 setrgbcolor 0 0 400 300 rectfill showpage\n";
+    let noted = |result: &Value| {
+        texts(result)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("%%BoundingBox 400x300 ignored"))
+    };
+    let result = s.tool("render_postscript", json!({ "source": plain, "dpi": 36 }));
+    assert!(noted(&result), "{result}");
+    let eps = plain.replace("%!PS-Adobe-3.0\n", "%!PS-Adobe-3.0 EPSF-3.0\n");
+    let result = s.tool("render_postscript", json!({ "source": eps }));
+    assert!(!noted(&result), "{result}");
+    let result = s.tool("render_postscript", json!({ "source": plain, "bbox": true }));
+    assert!(!noted(&result), "{result}");
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "width": 400, "height": 300 }),
+    );
+    assert!(!noted(&result), "{result}");
+}
+
 /// #921: eval_postscript has no page arguments, so it keeps the letter page
 /// even for an EPSF source, whose box would size a canvas the pixel cap
 /// never checked.

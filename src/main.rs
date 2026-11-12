@@ -277,6 +277,17 @@ impl Options {
         if self.page_source == PageSizeSource::Explicit {
             return;
         }
+        if !self.bbox
+            && let Some(ignored) = pscat::bbox::ignored_box(source)
+            && (ignored.width, ignored.height) != self.page
+        {
+            // The documented rule, said out loud: a half-blank page is
+            // easy to take for a bug in the art (#1036).
+            eprintln!(
+                "pscat: note: %%BoundingBox {}x{} ignored (not EPSF); pass --bbox or --page",
+                ignored.width, ignored.height
+            );
+        }
         match pscat::bbox::page_box(source, self.bbox) {
             Ok(Some(found)) => {
                 self.page = (found.width, found.height);

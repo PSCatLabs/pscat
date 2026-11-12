@@ -83,6 +83,17 @@ pub fn page_box(source: &[u8], any_header: bool) -> Result<Option<PageBox>, Stri
     }
 }
 
+/// The page a non-EPSF `source`'s `%%BoundingBox` would give with `--bbox`,
+/// for the note that says it was ignored (#1036). `None` for an EPSF file
+/// (its box is used), and for a box that is missing or unusable (those are
+/// not worth a note on a file that never asked for the box).
+pub fn ignored_box(source: &[u8]) -> Option<PageBox> {
+    if is_epsf(source) {
+        return None;
+    }
+    page_box(source, true).ok().flatten()
+}
+
 /// The header comments' first `%%BoundingBox` and `%%HiResBoundingBox`
 /// values (the text after the colon), or a trailer's last ones.
 #[derive(Default)]
