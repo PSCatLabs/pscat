@@ -441,9 +441,14 @@ class WinLauncher(unittest.TestCase):
             self.skipTest("8.3 short names are off on this volume")
         script = self.path("plugin/scripts/pscat-mcp.ps1")
         env = self.env([self.fake_server()], PSCAT_LAUNCH_ARGS=f'"--plugin-out-root={root}"')
-        command = ("try { [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437) } catch { };"
+        # Setting the encoding moves the console the runner's tests share, so
+        # put it back afterwards or later tests see code page 437.
+        command = ("$old = [Console]::OutputEncoding;"
+                   "try { try { [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437) } catch { };"
                    "[Console]::Error.WriteLine('codepage=' + [Console]::OutputEncoding.CodePage);"
-                   f"& '{script}' --exe")
+                   f"& '{script}' --exe; $code = $LASTEXITCODE }}"
+                   " finally { try { [Console]::OutputEncoding = $old } catch { } };"
+                   "exit $code")
         r = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
                             "-ExecutionPolicy", "Bypass", "-Command", command],
                            env=env, capture_output=True, stdin=subprocess.DEVNULL,
