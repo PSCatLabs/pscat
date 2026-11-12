@@ -2206,7 +2206,8 @@ renders eight examples in both and compares block-downsampled output).
   that way gets the same stand-in as native (#728) and its note, worded for
   `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
   `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750);
-  `PostScriptError.warnings` and `web/index.html` show them too (#804).
+  `PostScriptError.warnings` and `web/index.html` show them too (#804);
+  `site/playground.html` does too, in an amber `#warn` line (#829).
   Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
   `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
   DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:
