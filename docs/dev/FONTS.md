@@ -253,7 +253,12 @@ the twelve builtins into a **runtime catalog** loaded from
   directory, the exe's directory, the checkout (debug-assertion builds
   only), then the cwd (`paths::catalog_dir`; the full order is in
   `docs/guides/getting-started.md`, "Where pscat finds its files").
-  `pscat --fonts` lists everything reachable.
+  `pscat --fonts` lists everything reachable, then `#` lines: one
+  `# font-search override|pack-dir exists|missing <path>` per directory
+  searched, in lookup order (`fontpacks::search_dirs`, built on
+  `Roots::catalog_dirs_with` and `pack_dirs`, so it cannot drift from the
+  real order), so a dropped-in font that is not picked up can be traced to
+  the directory pscat did not look in (#1113).
 - **Font packs (#599)**: outside a checkout the catalog arrives as
   downloadable packs (`src/fontpacks/`, `pscat fonts install`), unpacked
   to `<root>/fonts/packs/<pack>/` in the same `<Family>/<file>` layout.

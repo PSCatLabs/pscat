@@ -150,6 +150,28 @@ fn an_override_beats_an_installed_pack_and_status_is_reported() {
     let (ok, out, _) = pscat(&home, &["--fonts"]);
     assert!(ok);
     assert!(out.contains("# font-override "), "{out}");
+    // The searched directories are listed too (#1113), in resolver order:
+    // overrides before pack directories, $PSCAT_HOME first, with what
+    // exists marked. Existence is checked per line, not by counting.
+    let search: Vec<&str> = out
+        .lines()
+        .filter(|l| l.starts_with("# font-search "))
+        .collect();
+    let at = |kind: &str, mark: &str, path: &Path| {
+        let want = format!("# font-search {kind} {mark} {}", path.display());
+        search.iter().position(|l| *l == want)
+    };
+    let home_catalog = at("override", "exists", &home.join("fonts/catalog")).expect(&out);
+    let user_catalog = search
+        .iter()
+        .position(|l| l.starts_with("# font-search override missing ") && l.contains("/user/"))
+        .expect(&out);
+    let home_packs = at("pack-dir", "exists", &home.join("fonts/packs")).expect(&out);
+    assert!(home_catalog < user_catalog, "{out}");
+    assert!(
+        user_catalog < home_packs,
+        "overrides come before pack directories:\n{out}"
+    );
     assert!(
         out.lines()
             .any(|l| l.starts_with("# font-pack zztest fonts-2026.10 user-selected ")),
