@@ -765,6 +765,14 @@ renders eight examples in both and compares block-downsampled output).
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.
 
+- **`pscat::syntax::check_syntax` is the supported way to ask "does this
+  scan?"** (#1096, `src/syntax.rs`): token count or the first syntax error
+  with byte offset and line, braces balanced, nothing executed. pscat-mcp's
+  `validate_postscript` can move onto it from the `#[doc(hidden)]` `lexer`
+  module, which stays public for now. A scanner change that alters what
+  counts as a token or where an error starts shows up in `tests/syntax.rs`,
+  which pins the old pscat-mcp loop against it.
+
 - **`SECURITY.md` states what untrusted PostScript and `pscat-mcp` can do
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,

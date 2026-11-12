@@ -56,6 +56,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - An `Interp` is not `Send`. Make one per thread, or one per document; they
   are independent.
 
+## Check syntax without running a program
+
+`pscat::syntax::check_syntax` tokenizes a program with the interpreter's own
+scanner, balances `{` and `}`, and executes nothing, so an editor, a service or
+an agent can reject a program that cannot scan before it creates an `Interp`:
+
+```rust
+use pscat::syntax::check_syntax;
+
+match check_syntax(source.as_bytes()) {
+    Ok(summary) => println!("{} tokens", summary.tokens),
+    Err(e) => eprintln!("{e}"), // "syntaxerror: unterminated string (line 3, byte 41)"
+}
+```
+
+The error carries `kind` (`Lexical`, `UnmatchedCloseBrace`,
+`UnterminatedProcedure`), `message`, the byte `offset` and 1-based `line` where
+the offending token starts (for a missing `}`, the outermost `{` never closed),
+and the `tokens` read before it. It finds what a scanner can see, not a
+misspelt operator or a type error, and it cannot know that a program reads its
+own text as data (`currentfile eexec`, inline `image` samples), so those bytes
+can be reported as errors.
+
 ## Pages, halftone, review sheets and chalkboards
 
 These are the pieces behind `pscat --halftone`, `pscat sheet`, `pscat chalk`
@@ -132,8 +155,9 @@ version is the `rust-version` in `Cargo.toml` (1.88).
 ## Stability
 
 The supported API is what docs.rs shows: `Interp`, `Page`, `PsError`,
-`Limits`, and the `sheet`, `chalkboard` and `catalog` modules. The crate has
-other public modules that the binaries, the browser build and the
+`Limits`, `syntax::check_syntax`, and the `sheet`, `chalkboard` and `catalog`
+modules. The crate has other public modules that the binaries, the browser
+build and the
 test suite use; they are hidden from the documentation and can change in any
 release.
 

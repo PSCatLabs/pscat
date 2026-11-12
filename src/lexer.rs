@@ -52,6 +52,11 @@ pub struct Lexer {
     /// actively misleading; `run_name` below is how a run file's lines
     /// are reported instead).
     is_main: bool,
+    /// Byte offset the token most recently returned (or failed) by
+    /// `next_token` started at, for `syntax::check_syntax` (#1096): after
+    /// an unterminated string the file position is at EOF, which is no help
+    /// to the person who has to find the opening `(`.
+    token_start_pos: usize,
     /// The name a `run` file was loaded by (issue #1043), so an error in
     /// it can be reported as `Line: 5 (inner.ps)`. A run file has its
     /// own line numbers, which is why `is_main` alone leaves it out;
@@ -99,6 +104,7 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: false,
             is_main: false,
+            token_start_pos: 0,
             run_name: None,
             pop_systemdict: false,
             token_start_line: None,
@@ -112,6 +118,7 @@ impl Lexer {
             file: PsFile::from_bytes(src),
             is_file: true,
             is_main: true,
+            token_start_pos: 0,
             run_name: None,
             pop_systemdict: false,
             token_start_line: None,
@@ -126,6 +133,7 @@ impl Lexer {
             file,
             is_file: true,
             is_main: false,
+            token_start_pos: 0,
             run_name: None,
             pop_systemdict: false,
             token_start_line: None,
@@ -168,6 +176,12 @@ impl Lexer {
             .flatten()
     }
 
+    /// The byte offset the last-returned token (or the failed scan) started
+    /// at, past any leading whitespace and comments.
+    pub(crate) fn token_start(&self) -> usize {
+        self.token_start_pos
+    }
+
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
         self.file.borrow_mut().peek_byte()
     }
@@ -182,6 +196,7 @@ impl Lexer {
         // syntax error gets the line it actually happened on rather than
         // the previous good token's line.
         self.token_start_line = Some(self.file.borrow().line());
+        self.token_start_pos = self.file.borrow().pos();
         self.dispatch_token()
     }
 
