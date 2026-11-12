@@ -264,7 +264,7 @@ fn an_unreadable_file_is_missing() {
     let fx = fixture("status-unreadable");
     let path = fx.dir.join("secret");
     std::fs::write(&path, "x").unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
     if std::fs::File::open(&path).is_ok() {
         eprintln!("skipping: this user can open a mode 000 file (root)");
         return;
