@@ -94,3 +94,16 @@ fn a_banded_render_and_a_dpi_change_note_it_once() {
         assert_eq!(err.matches("ignored (not EPSF)").count(), 1, "{tag}: {err}");
     }
 }
+
+#[test]
+fn a_text_only_run_draws_no_page_and_says_nothing() {
+    // `--headless` with no output file prints text; the page size is moot.
+    let run = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--headless")
+        .arg("-")
+        .output_with_input(PLAIN.as_bytes())
+        .expect("run pscat");
+    assert!(run.status.success(), "{run:?}");
+    let err = stderr(&run);
+    assert!(!err.contains("BoundingBox"), "{err}");
+}

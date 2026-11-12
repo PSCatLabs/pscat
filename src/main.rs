@@ -277,7 +277,11 @@ impl Options {
         if self.page_source == PageSizeSource::Explicit {
             return;
         }
-        if !self.bbox
+        // A text-only run (`--headless` with no output file) draws no page.
+        let draws =
+            !self.headless || self.png.is_some() || self.svg.is_some() || self.pdf.is_some();
+        if draws
+            && !self.bbox
             && let Some(ignored) = pscat::bbox::ignored_box(source)
             && (ignored.width, ignored.height) != self.page
         {

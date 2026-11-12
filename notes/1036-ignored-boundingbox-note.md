@@ -12,7 +12,8 @@ prints, on stderr:
   box (the one `--bbox` would use, `bbox::ignored_box`, hidden) is usable and
   a different size from the page in use (letter by default, `--bbox`'s
   rounding of the box otherwise). A missing or malformed box in a plain file
-  says nothing: the file never asked for it. One line per run, also under
+  says nothing: the file never asked for it. A text-only run (`--headless` with no `--png`/`--svg`/`--pdf`, which
+  draws no page; the Learn examples' test runs that way) says nothing. One line per run, also under
   `--bands` and `--sweep-seed` (they resolve the page once).
 - **Stdout is untouched** (the `pscat: wrote` receipt is the only thing on it).
 - **Compared with the default page, not with a `setpagedevice` the program
