@@ -1,0 +1,28 @@
+%!PS-Adobe-3.0
+%%BoundingBox: 0 0 660 250
+%%Title: pkwash under the caller's setalpha (#1075)
+% The same wash (rainbow of three bands, same seeds) under a caller alpha of
+% 1, 0.6 and 0.2: `gsave A setalpha ... pkwash grestore` fades it.
+(lib/artkit.ps) run (lib/paintkit.ps) run
+0.97 0.95 0.9 setrgbcolor 0 0 660 250 rectfill
+/band { % r g b y0 y1
+    /by1 exch def /by0 exch def setrgbcolor
+    newpath 20 by0 moveto 190 by0 lineto 190 by1 lineto 20 by1 lineto closepath
+    << /Alpha 0.8 /Layers 3 /Wet 3 /Bloom 0.5 /Grain 0.3 /Seed 5 >> pkwash
+} def
+/panel { % alpha x label
+    /plab exch def /px exch def /pa exch def
+    gsave px 0 translate
+        gsave pa setalpha
+            0.85 0.2 0.2 150 200 band
+            0.95 0.7 0.1 100 150 band
+            0.2 0.4 0.8 50 100 band
+        grestore
+        0.2 0.2 0.2 setrgbcolor /Helvetica findfont 13 scalefont setfont
+        20 22 moveto plab show
+    grestore
+} def
+1 0 (caller alpha 1) panel
+0.6 220 (caller alpha 0.6) panel
+0.2 440 (caller alpha 0.2) panel
+showpage
