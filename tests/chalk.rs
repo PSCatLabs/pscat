@@ -499,8 +499,25 @@ fn unsupported_input_fails_with_the_named_error() {
         ),
         (
             r"\(x\) where \(y\)",
-            "text outside the math delimiters (w",
+            "text outside the math delimiters (where...)",
             "text_outside_math",
+        ),
+        // issue #718: a lone `$` is LaTeX's "Missing $ inserted", and the
+        // \big family fences a delimiter as \left and \right do
+        (
+            "a $ b",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            "x = 5$",
+            "math delimiter $ is never closed",
+            "unclosed_math_delimiter",
+        ),
+        (
+            r"\bigl\( b \bigr\)",
+            "unsupported delimiter: \\(",
+            "unsupported_delimiter",
         ),
     ] {
         let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);

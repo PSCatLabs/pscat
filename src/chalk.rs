@@ -236,14 +236,21 @@ impl fmt::Display for ChalkError {
                     f,
                     "math delimiter {token} is never closed: end it with {}",
                     closer(token)
-                ),
+                )
+                .and_then(|()| {
+                    if token == "$" {
+                        write!(f, " (LaTeX also stops with \"Missing $ inserted\")")
+                    } else {
+                        Ok(())
+                    }
+                }),
                 "unmatched-math-delimiter" => write!(
                     f,
                     "math delimiter {token} closes nothing: each \\( needs a \\) and each \\[ a \\], in order"
                 ),
                 "text-outside-math" => write!(
                     f,
-                    "text outside the math delimiters ({token}...): a board sets only the formula, so write one formula, or move the words out"
+                    "text outside the math delimiters ({token}...): a board sets only the formula, so put words inside one pair as \\text{{...}} (\\(x \\text{{ where }} y\\)), or move them out"
                 ),
                 _ => {
                     let what = kind.replace('-', " ");
@@ -768,10 +775,13 @@ fn delim_error(kind: &str, token: &str) -> ChalkError {
     }
 }
 
-/// `\left`, `\right` and the `\big` family name a fence, so a `\(` or `\]`
-/// right after one is a (mathkit-unsupported) delimiter, not a math pair.
+/// `\left`, `\right` and the `\big` family (`\big`, `\Big`, `\bigg`,
+/// `\Bigg`, each with an `l`, `r` or `m` form) name a fence, so a `\(` or
+/// `\]` right after one is a (mathkit-unsupported) delimiter, not a math
+/// pair (issue #718).
 fn is_fence(word: &str) -> bool {
-    matches!(word, "left" | "right")
+    let size = word.strip_suffix(['l', 'r', 'm']).unwrap_or(word);
+    matches!(word, "left" | "right") || matches!(size, "big" | "Big" | "bigg" | "Bigg")
 }
 
 /// The length of the control word (`\alpha`) or backslash-and-one-character
@@ -788,13 +798,18 @@ fn escape_len(rest: &str) -> usize {
     }
 }
 
-/// Whether `t` has an unescaped `\(`, `\)`, `\[` or `\]` that is not
-/// right after `\left` or `\right`: never valid mathkit input, so always a
-/// delimiter. (`\\(` is a row break and `(`.)
-fn has_backslash_delim(t: &str) -> bool {
+/// Whether `t` has an unescaped `$`, or a `\(`, `\)`, `\[` or `\]` that is
+/// not right after a fence (`\left`, `\bigl`, ...): a backslash one is never
+/// valid mathkit input, and LaTeX takes an unpaired `$` for an error
+/// ("Missing $ inserted"), so each is a delimiter. (`\\(` is a row break and
+/// `(`; `\$` is an escaped dollar.)
+fn has_delim(t: &str) -> bool {
     let mut rest = t;
     let mut after_fence = false;
     while let Some(c) = rest.chars().next() {
+        if c == '$' {
+            return true;
+        }
         if c != '\\' {
             after_fence &= c == ' ';
             rest = &rest[c.len_utf8()..];
@@ -818,14 +833,16 @@ fn has_backslash_delim(t: &str) -> bool {
 /// `\(..\)`, one or several pairs, nested or side by side) replaced by
 /// spaces; `None` when it has none to remove. Each backslash is paired with
 /// the character after it, so `\\(`, `\$` and `\right)` are not
-/// delimiters, nor is a `\(` right after `\left` (mathkit names that one).
-/// A `$` in the middle of plain input is left to mathkit, which
-/// ignores it: the scan starts only for input that begins with `$` or holds a
-/// backslash delimiter. Pieces between pairs are joined (`\(a\) + \(b\)` is
-/// `a + b`), but a letter outside any pair and any `{...}` group is an
-/// error: TeX sets it as text, which a board does not (`\text{and}` is fine).
+/// delimiters, nor is a `\(` right after a fence (`\left`, `\bigl`, ...:
+/// mathkit names that one). Any other unescaped `$` is a delimiter: LaTeX
+/// treats an unpaired one as an error ("Missing $ inserted"), so `a $ b` and
+/// `x = 5$` are an unclosed `$` (issue #718), not a dollar sign mathkit
+/// ignores. Pieces between pairs are joined (`\(a\) + \(b\)` is `a + b`),
+/// but a letter outside any pair and any `{...}` group is an error: TeX sets
+/// it as text, which a board does not (`\text{and}` is fine). The pairs are
+/// judged first, so a stray delimiter is named before the words around it.
 fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
-    if !t.starts_with('$') && !has_backslash_delim(t) {
+    if !has_delim(t) {
         return Ok(None);
     }
     let mut out = String::with_capacity(t.len());
@@ -833,6 +850,8 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
     let mut open: Vec<usize> = Vec::new();
     // the depth of `{` groups outside every pair
     let mut braces = 0usize;
+    // the first word outside every pair, reported once the pairs are known good
+    let mut stray: Option<ChalkError> = None;
     let mut after_fence = false;
     let mut rest = t;
     while let Some(c) = rest.chars().next() {
@@ -876,8 +895,9 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
             match c {
                 '{' => braces += 1,
                 '}' => braces = braces.saturating_sub(1),
-                _ if braces == 0 && c.is_ascii_alphabetic() => {
-                    return Err(delim_error("text-outside-math", &rest[..1]));
+                _ if braces == 0 && c.is_ascii_alphabetic() && stray.is_none() => {
+                    let word = rest.chars().take_while(char::is_ascii_alphabetic).count();
+                    stray = Some(delim_error("text-outside-math", &rest[..word]));
                 }
                 _ => {}
             }
@@ -888,7 +908,7 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
     if let Some(&i) = open.last() {
         return Err(delim_error("unclosed-math-delimiter", MATH_DELIMS[i].0));
     }
-    Ok(Some(out))
+    stray.map_or(Ok(Some(out)), Err)
 }
 
 /// The control word starting at byte `i` (just after a backslash), if any.
@@ -1752,9 +1772,9 @@ mod tests {
         assert_eq!(l(r"\( a \\ (b) \)"), ["a", "(b)"]);
         assert_eq!(l(r"\[ \left( a \right) \]"), [r"\left( a \right)"]);
         assert_eq!(l(r"\( a \$ \)"), [r"a \$"]);
-        // plain input with no delimiter at its start is left alone
-        assert_eq!(l("a $ b"), ["a $ b"]);
+        // plain input with no delimiter is left alone
         assert_eq!(l(r"a \\(b)"), ["a", "(b)"]);
+        assert_eq!(l(r"a \$ b"), [r"a \$ b"]);
         let e = |s: &str| lines(s).unwrap_err();
         let msg = |s: &str| e(s).to_string();
         assert_eq!(e(r"\(a\) + \(b").code(), "unclosed_math_delimiter");
@@ -1775,6 +1795,31 @@ mod tests {
         // control words outside a pair are math, not text
         assert_eq!(l(r"\(a\) \quad \(b\)"), [r"a  \quad  b"]);
         assert_eq!(msg("$$a$$ $b").lines().count(), 1);
+
+        // a bare `$` in plain input is an unclosed delimiter, as in LaTeX
+        // (issue #718): it used to be dropped without a word
+        for tex in ["a $ b", "x = 5$", "$ a", "a $$ b", "a + $b"] {
+            assert_eq!(e(tex).code(), "unclosed_math_delimiter", "{tex}");
+        }
+        assert_eq!(
+            msg("x = 5$"),
+            r#"math delimiter $ is never closed: end it with $ (LaTeX also stops with "Missing $ inserted")"#
+        );
+        // a pair in the middle leaves the words around it outside it
+        assert_eq!(e("a $x$ b").code(), "text_outside_math");
+        // the pairs are judged before the words: the stray `$` is named
+        assert_eq!(e(r"\(x\) where $").code(), "unclosed_math_delimiter");
+        // the message names the whole word and says how to write it
+        assert_eq!(
+            msg(r"\(x\) where \(y\)"),
+            r"text outside the math delimiters (where...): a board sets only the formula, so put words inside one pair as \text{...} (\(x \text{ where } y\)), or move them out"
+        );
+        // the \big family fences a delimiter like \left and \right
+        for fence in ["big", "bigl", "bigr", "bigm", "Big", "Bigl", "bigg", "biggr", "Bigg", "Biggm"] {
+            let tex = format!(r"\{fence}\( b \{fence}\)");
+            assert_eq!(l(&tex), [tex.clone()], "{tex}");
+        }
+        assert_eq!(l(r"\bigl\lbrace a"), [r"\bigl\lbrace a"]);
     }
 
     #[test]

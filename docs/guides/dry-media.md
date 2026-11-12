@@ -283,9 +283,12 @@ The input may carry `%` comments and newlines, and a display wrapper around
 the whole (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`, or an `align`, `align*`,
 `aligned`, `gather`, `equation` ... environment); `\label{}`, `\notag` and
 `\nonumber` are dropped. Several math pairs, as in `\(a\) + \(b\)`, are
-one formula with the delimiters removed. Words outside the pairs, or a
-delimiter that is never closed or closes nothing, fail with a one-line error
-naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
+one formula with the delimiters removed. Words outside the pairs (write
+them as `\text{...}` inside one pair), a `$` that has no partner (`a $ b`,
+`x = 5$`: LaTeX stops with "Missing $ inserted" too), or a delimiter that is
+never closed or closes nothing, fail with a one-line error naming it.
+`\bigl\(` and the rest of the `\big` family are fences like `\left`, so
+mathkit names the unsupported delimiter. Each top-level `\\` starts a row (those inside `pmatrix`,
 `cases` or `\substack{}` stay where they are). A bracket right after a
 row break, in a `pmatrix` or `cases` too, is TeX's row spacing (`\\[2pt]`,
 `\\[0.5\baselineskip]`, dropped) only when it holds a length; anything else
