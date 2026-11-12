@@ -131,10 +131,37 @@ and does not have to match pscat's version of one.
   formula on the board. Run it on an `Interp` of `driver.page_size()` at
   `driver.dpi()`, after `driver.prepare(&mut interp)` (which makes the page
   transparent when there is no board, and sets the PDF title; call it after
-  `enable_pdf`). When the run fails, `chalkboard::explain(&err)` turns a TeX
-  error back into one (`unsupported_command`, `\aleph`). A `ChalkError` has a
-  stable `code()`, the `token()` a TeX error named, and `message()`, which
-  names a bad config key by its path (`layout.width must be ...`).
+  `enable_pdf`). When the run fails, turn the
+  error back into a TeX error with `driver.explain(interp.captured_stdout(),
+  &err)` (call `interp.capture_stdout()` before the run): it carries every
+  unsupported command or character in the formula, each with its place.
+  `chalkboard::explain(&err)` alone names only the first, with no place. A
+  `ChalkError` has a stable `code()`, the `token()` a TeX error named, and
+  `message()`, which names a bad config key by its path
+  (`layout.width must be ...`).
+
+  `error.problems()` is the list `pscat chalk` prints and pscat's MCP tool
+  returns as `problems`, in the same order and at the same places: a
+  `&[chalkboard::Problem]` with `code()`, `message()`, `token`, `line`,
+  `column` (both counted from 1) and `offset` (bytes into the LaTeX). It is
+  empty for an error that is not a list of TeX problems: a config error, no
+  formula, a render failure, or the position-less error from `explain` alone.
+
+  ```rust
+  use pscat::chalkboard::BoardConfig;
+
+  let driver = BoardConfig::default().driver("x + \\aleph\n+ ☃")?;
+  let (w, h) = driver.page_size();
+  let mut interp = pscat::Interp::with_page_scaled(w, h, driver.dpi() / 72.0).expect("valid page");
+  interp.capture_stdout();
+  let err = interp.run_str(driver.source()).expect_err("outside the subset");
+  let e = driver.explain(interp.captured_stdout(), &err).expect("a TeX error");
+  for p in e.problems() {
+      println!("{}:{}  {}", p.line, p.column, p.message());
+  }
+  // 1:5  unsupported LaTeX command \aleph
+  // 2:3  unsupported character: ☃ (U+2603)
+  ```
 - **The catalog.** `pscat::catalog::capabilities()` is the JSON
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.
