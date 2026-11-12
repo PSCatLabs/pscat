@@ -2225,6 +2225,12 @@ renders eight examples in both and compares block-downsampled output).
   differ), and the release publishes the tarball `verify` packed
   (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as
   a size-budget failure in `build_npm.sh`.
+  `Renderer.pageCount()` (#1011, `ps_page_count`) uses the rule `svg_pages`
+  and `pdf_document` finish a document by (shown pages, plus the live one if
+  it holds art or is the first), so it equals `svgPages().length`; keep it so.
+  `index.js` (the browser entry) in Node fails on its `file:` fetch with an
+  error naming `node.js` (#1085); `pscat/node.js` is an export for choosing
+  the Node entry. `notes/1085-npm-node-entry-and-page-count.md`.
 - **The standard 35 are all compiled in (#757), but not all in
   `BUILTINS`.** The twelve Liberation faces are builtins (fixed FIDs,
   StandardEncoding, `FontName` = the PostScript name). The other 23

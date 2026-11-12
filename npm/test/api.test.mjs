@@ -258,3 +258,74 @@ test('createRenderer: each renderer is its own instance; wasm can be given', asy
   assert.equal(c.render(q, { width: 10, height: 10 }).output, '/Helvetica\n');
   await assert.rejects(createRenderer({ wasm: 12 }), TypeError);
 });
+
+test('pageCount: pages so far, mid-step and at the end, whatever is recorded (#1011)', async () => {
+  const r = await createRenderer();
+  const page = { width: 40, height: 40 };
+  const doc = '1 1 40 40 rectfill showpage 0 0 20 20 rectfill showpage 5 5 9 9 rectfill copypage showpage';
+  assert.equal(r.pageCount(), 0, 'before any begin()');
+  for (const record of [{}, { svg: true }, { pdf: true }, { svg: true, pdf: true }]) {
+    // Stepped one object at a time: the count never falls and ends at 4.
+    r.begin(doc, { ...page, ...record });
+    const seen = [];
+    do seen.push(r.pageCount()); while (r.step(1));
+    seen.push(r.pageCount());
+    assert.deepEqual(seen, [...seen].sort((a, b) => a - b), `non-decreasing ${JSON.stringify(record)}`);
+    assert.equal(seen[0], 1, 'a blank page before anything is drawn');
+    assert.ok(seen.includes(2) && seen.includes(3), `saw every count: ${seen}`);
+    assert.equal(seen.at(-1), 4, JSON.stringify(record));
+    if (record.svg) assert.equal(r.pageCount(), r.svgPages().length);
+    if (record.pdf) assert.equal((Buffer.from(r.pdf()).toString('latin1').match(/\/Type \/Page\b/g) ?? []).length, 4);
+  }
+});
+
+test('pageCount: the page being drawn counts, and agrees with svgPages()', async () => {
+  const r = await createRenderer();
+  const page = { width: 20, height: 20, svg: true };
+  for (const [src, n] of [
+    ['', 1], // an empty program is a one-page document, as svgPages() says
+    ['0 0 5 5 rectfill', 1], // drawn, never shown
+    ['showpage', 1],
+    ['0 0 5 5 rectfill showpage', 1],
+    ['0 0 5 5 rectfill showpage 0 0 5 5 rectfill', 2], // art after the last showpage
+    ['showpage showpage showpage', 3],
+  ]) {
+    r.render(src, page);
+    assert.equal(r.pageCount(), n, src);
+    assert.equal(r.pageCount(), r.svgPages().length, src);
+  }
+  // After an error the pages so far are still counted.
+  assert.throws(() => r.render('showpage showpage bogus', page), PostScriptError);
+  assert.equal(r.pageCount(), 2);
+  assert.equal(r.pageCount(), r.svgPages().length);
+});
+
+// Node's fetch refuses file: URLs today; a future Node that reads them would
+// make index.js work by path, and the error below could not happen.
+const nodeFetchesFiles = await fetch(new URL('../package.json', import.meta.url)).then(() => true, () => false);
+
+test('index.js imported by path in Node fails with a message that names the fix (#1085)', { skip: nodeFetchesFiles && "this Node's fetch reads file: URLs" }, async () => {
+  const browserEntry = fileURLToPath(new URL('../index.js', import.meta.url));
+  const { createRenderer: browserCreate } = await import(browserEntry);
+  await assert.rejects(browserCreate(), (e) => {
+    assert.match(e.message, /browser entry point/);
+    assert.match(e.message, /import 'pscat'/);
+    assert.match(e.message, /pscat\/node\.js/);
+    assert.match(e.message, /createRenderer\(\{ wasm \}\)/);
+    assert.ok(e.cause, 'the fetch error is kept as the cause');
+    return true;
+  });
+  // The fix the message names works: bytes go through either entry.
+  const bytes = await readFile(new URL('../pscat.wasm', import.meta.url));
+  assert.equal((await browserCreate({ wasm: bytes })).render('', { width: 3, height: 2 }).width, 3);
+  // A failed load is not cached: the next call fails the same helpful way.
+  await assert.rejects(browserCreate(), /browser entry point/);
+});
+
+test("'pscat/node.js' selects the Node entry explicitly, and 'pscat' resolves to it (#1085)", async () => {
+  const explicit = await import('pscat/node.js');
+  const bare = await import('pscat');
+  assert.equal(explicit.createRenderer, bare.createRenderer);
+  assert.equal(explicit.createRenderer, (await import('../node.js')).createRenderer);
+  assert.equal((await explicit.createRenderer()).render('', { width: 3, height: 2 }).width, 3);
+});
