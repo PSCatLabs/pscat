@@ -3345,7 +3345,7 @@
 % [(line) ...] opts mkproblems -> [[line start end (kind) (token)] ...]
 % @kind: Procedure
 % @summary: Checks each TeX line the way mkpath would read it, and returns every unsupported character, unsupported command (named as written: \\", not an internal name), bare operator name and, per line, the first malformed construct (a missing brace, a stray \\right), as one record each: the line's index, the byte range [start end) of the offending source in that line, mathkit's error kind without its mk- prefix and what it named. Nothing is laid out or drawn; an unsupported character or command is stepped over so the ones after it are found too. Up to 200 records. Use it to report every problem in one pass; mkpath and the other entry points still stop at the first.
-% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run [ (a \\aleph b) (c @ d) ] << >> mkproblems length
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run [ (a + b) ] << >> mkproblems length 0 eq { newpath (a + b) 20 20 << /Size 30 >> mkpath 1.5 setlinewidth stroke } if
 % @param: /Size [points] As for mkpath (default 36)
 % @param: /Slant [degrees] As for mkpath (default 0)
 /mkproblems { 2 { mkproblemsbody } mkentry } bind def

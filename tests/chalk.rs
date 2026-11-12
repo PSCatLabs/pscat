@@ -544,7 +544,7 @@ fn unsupported_input_fails_with_the_named_error() {
 fn every_problem_is_reported_at_once_with_its_place() {
     let dir = scratch("problems");
     let tex = "\\text{G\\\"odel's First Incompleteness Theorem}\n\
-               \\text{Gödel} \\\\\n\
+               \\text{G日del} \\\\\n\
                x ``quoted'' + \\aleph \\; ☃";
     std::fs::write(dir.join("in.tex"), tex).unwrap();
     let out = pscat(&dir, &["chalk", "--file", "in.tex", "-o", "bad.png"], None);
@@ -552,7 +552,7 @@ fn every_problem_is_reported_at_once_with_its_place() {
     let err = stderr(&out);
     let want = [
         r#"1:8  unsupported LaTeX command \" ("#,
-        "2:8  unsupported character: ö (U+00F6) (write oe for it)",
+        "2:8  unsupported character: 日 (U+65E5)",
         "3:3  unsupported character: `` (",
         r"3:16  unsupported LaTeX command \aleph",
         "3:26  unsupported character: ☃ (U+2603)",
@@ -581,7 +581,7 @@ fn every_problem_is_reported_at_once_with_its_place() {
         at,
         [
             ("\\\"", 1, 8),
-            ("ö", 2, 8),
+            ("日", 2, 8),
             ("``", 3, 3),
             ("\\aleph", 3, 16),
             ("☃", 3, 26)

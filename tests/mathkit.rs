@@ -364,7 +364,7 @@ fn every_example_tag_runs_clean() {
         .filter_map(|l| l.strip_prefix("% @example:"))
         .map(str::trim)
         .collect();
-    assert_eq!(examples.len(), 7, "one example per public procedure");
+    assert_eq!(examples.len(), 8, "one example per public procedure");
     for example in examples {
         let mut it = Interp::with_page(300, 200).expect("page");
         it.run_str(example)

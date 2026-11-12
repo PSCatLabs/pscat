@@ -2300,6 +2300,22 @@ mod tests {
     }
 
     #[test]
+    fn the_hints_say_what_to_write_instead() {
+        let say = |kind: &str, token: &str| Problem::at("", 0, kind, token).message();
+        assert_eq!(
+            say("unsupported-character", "ö"),
+            "unsupported character: ö (U+00F6) (write oe for it)"
+        );
+        assert!(say("unsupported-character", "é").ends_with("(write the plain letter)"));
+        assert_eq!(
+            say("unsupported-character", "日"),
+            "unsupported character: 日 (U+65E5)"
+        );
+        assert!(say("unsupported-command", "\\\"").contains("accents are not drawn"));
+        assert!(say("unsupported-character", "`").contains("opening quote"));
+    }
+
+    #[test]
     fn a_delimiter_problem_carries_its_place() {
         let at = |tex: &str| match lines(tex).unwrap_err() {
             ChalkError::Problems(p) => (p[0].kind.clone(), p[0].line, p[0].column),
