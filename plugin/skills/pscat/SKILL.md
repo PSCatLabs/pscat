@@ -51,9 +51,11 @@ A picture an MCP tool returns may be visible only to you: write the PNG with
 pscat also builds to WebAssembly: a live or step-by-step preview where there is
 no window (a cloud sandbox, a Chromebook, a chat artifact), and pages that render
 with no server. `npm install pscat`, then `createRenderer()`, `render()` (pixels;
-SVG and PDF from 0.7.0), `frames()` (watch it draw) and `paintTo(canvas)`; the `lib/` libraries
-are built in. It has no window, filesystem or clock, the standard 35 fonts are
-built in and other faces come from `addFont(name, bytes)`. Try it in the
+SVG and PDF from 0.7.0), `frames()` (watch it draw) and `paintTo(canvas)`. The
+`lib/` libraries are built in; there is no window, filesystem or clock. From
+0.7.0 the standard 35 fonts are built in; older npm packages have only the
+Liberation base faces and swap the rest for a stand-in, silently, and any other
+face comes from `addFont(name, bytes)`. Try it in the
 [playground](https://pscatlabs.github.io/pscat/playground.html); the API and the
 build are in the
 [browser guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/browser.md).
