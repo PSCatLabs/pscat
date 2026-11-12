@@ -1,19 +1,22 @@
 {
-  "source_revision": "3d54566311f993366e0e7dcd00305b68ef609f02",
+  "source_revision": "6bd63fe6bbc85a83a4138dfee6351621f5e5183b",
   "input_sha256": {
     "examples/functional/benchmark.ps": "0b245f2cc7617d9dad6cc4f51d91c0f447d8560f5fc6442ddeadea1652128f06",
-    "examples/functional/common.ps": "5ec6947245dabe8737bac443150afd8812b6b62249cc31094f990643783edf79",
-    "examples/functional/detail.ps": "383a880a3f2d335e92fcfb47939b11a35bfe2a89c689c51ba46ea3119e0d922f",
+    "examples/functional/common.ps": "af96ee9c3eefe7187e74dd1bebb556312d612102e435a4fd4569619c51722780",
+    "examples/functional/detail.ps": "35e8c173d15b95c7cfacd73f0cb19e2dff8523bbe4dbd9cddce32bf623988c7b",
     "examples/functional/imperative.ps": "ba696b765cc6acf0d6e75fa02f6206c196f4fde6e2ec0289d8834c967531afff",
-    "examples/functional/poster.ps": "75d67bee9b6663e90f78a06c9d75bfa7ffccd0abba0a9edb575ea82e9108f1e6",
-    "examples/functional/primitives.ps": "f3a50b27cad305c2460e8f57a73cfec9b413728f21d78943271f171fd05a6c61",
-    "lib/functional.ps": "abb72487c15fd22e05a24738afdf265cdd241eae2cbfbb5f823f684145043ecc",
-    "lib/aspect.ps": "c7dfdba0275cf6134d627f3e49a3618fed06340c9907856391f341e70302a8c5",
-    "lib/artkit.ps": "1fb38bc129283e0ee4f52ff875fbc38e28daf5aad1271f276b66201b9ba034aa",
-    "lib/paintkit.ps": "2c901df87aee699767a92863a6e4962e9ed82931d13fdaadc3829359845a7804"
+    "examples/functional/observable-press.ps": "23d53fb5f320e27fa598510da5ad0dbba2b6bfb3d073bfa703a2e9afb232d96f",
+    "examples/functional/poster.ps": "920d9ee9d3b5b85250117afb538246c3961e8e0e26a0a259a0602fa3622dfe99",
+    "examples/functional/primitives.ps": "c8ee9394e7600895d8b22f765da89d50f536f4d2f4474d319689e736a887c90d",
+    "examples/functional/type-common.ps": "b128c323dd200228dc0b857f01006f819825ee58aee5b4bfcab43e324dd196c7",
+    "examples/functional/type-terrain.ps": "f3eddca8202faa6e198482896062da785759043ede31a5a288b19195ba42d146",
+    "lib/functional.ps": "b0061f509580e85d26a155b41d12eff2eb1d8941f71c5c869f0f3d0d44f13202",
+    "lib/aspect.ps": "cea231e5a806ce24d98ba267a710d601fdd0187566543cc0de37035965b00847",
+    "lib/artkit.ps": "51c0e891923f3fc396f4454371ec6e79fd8d9b54cabfec1a49f5dd6a10ecb658",
+    "lib/paintkit.ps": "02432d1bccdb3265c512d86448825cf52161f8e1c0024a1d7e352a11c41e75ea"
   },
-  "platform": "macOS-15.7.7-arm64-arm-64bit-Mach-O",
-  "binary": "pscat 0.6.3+3d54566",
+  "platform": "macOS-15.7.7-arm64-arm-64bit",
+  "binary": "pscat 0.7.0-rc.4+6bd63fe",
   "samples": 5,
   "clock": "child user + system CPU seconds; includes loading/startup",
   "profile": "ci (optimized with debug assertions and overflow checks)",
@@ -21,54 +24,54 @@
     "map_fold": {
       "functional": {
         "cpu_seconds": [
-          0.14710199999999998,
-          0.15408,
-          0.15473999999999993,
-          0.159174,
-          0.1545229999999999
+          0.06849999999999999,
+          0.06706200000000001,
+          0.06668099999999998,
+          0.06803800000000004,
+          0.06918800000000003
         ],
-        "median": 0.1545229999999999,
-        "minimum": 0.14710199999999998
+        "median": 0.06803800000000004,
+        "minimum": 0.06668099999999998
       },
       "imperative": {
         "cpu_seconds": [
-          0.029038999999999995,
-          0.03428100000000002,
-          0.032068999999999966,
-          0.02958900000000007,
-          0.02968000000000004
+          0.023408999999999992,
+          0.023036999999999974,
+          0.02290999999999997,
+          0.023036000000000022,
+          0.023534999999999938
         ],
-        "median": 0.02968000000000004,
-        "minimum": 0.029038999999999995
+        "median": 0.023036999999999974,
+        "minimum": 0.02290999999999997
       }
     },
     "poster": {
       "functional": {
         "cpu_seconds": [
-          0.03214799999999997,
-          0.03787100000000007,
-          0.03654399999999999,
-          0.03810400000000003,
-          0.038901000000000074
+          0.030174000000000013,
+          0.028210999999999972,
+          0.027559000000000063,
+          0.027064000000000123,
+          0.027773
         ],
-        "median": 0.03787100000000007,
-        "minimum": 0.03214799999999997
+        "median": 0.027773,
+        "minimum": 0.027064000000000123
       },
       "imperative": {
         "cpu_seconds": [
-          0.037683000000000126,
-          0.03248100000000008,
-          0.03809499999999993,
-          0.03547800000000001,
-          0.037484999999999935
+          0.027134000000000012,
+          0.02751099999999994,
+          0.02784699999999997,
+          0.02723999999999986,
+          0.027680000000000038
         ],
-        "median": 0.037484999999999935,
-        "minimum": 0.03248100000000008
+        "median": 0.02751099999999994,
+        "minimum": 0.027134000000000012
       }
     }
   },
   "driver_noncomment_lines": {
-    "poster": 19,
+    "poster": 18,
     "imperative": 24
   }
 }

@@ -8,15 +8,15 @@
 (lib/aspect.ps) run
 (examples/functional/common.ps) run
 
-/indices [0 1 24 {} for] def
-/flowers indices {df-site} fp-map {df-visible} fp-filter def
+/flowers 25 fp-range {df-site} fp-map /Visible fp-field fp-filter def
 /checksum flowers 0 {df-weight} fp-fold def
 /visits << /Calls 0 >> def
 
-% A preserved record flows through stem, then flower. Colour is captured data.
+% Each record feeds the stem, is kept, then feeds the flower.
+% Colour is captured data.
 /stem df-palette {df-stem} fp-curry def
 /blossom df-palette {df-flower} fp-curry visits aop-count def
-/draw {dup} /stem load fp-compose /blossom load fp-compose def
+/draw {/stem load fp-keep blossom} def
 /score {
   df-ground
   Layer 2 ge {flowers /draw load fp-each} if
