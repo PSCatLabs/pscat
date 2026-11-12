@@ -320,3 +320,22 @@ fn ghostscript_accepts_the_same_bytes() {
         "gs agrees on 2 x 600/1000 x 20pt: {gs_width}"
     );
 }
+
+#[test]
+fn glyphshow_draws_a_charstring_by_name() {
+    // /slant sits at byte 98 ('b'): by name it must paint the same glyph
+    // and advance the same 12 pt; an unknown name falls back to .notdef.
+    let shown = run_with_font("/MiniSquare findfont 20 scalefont setfont 10 10 moveto (b) show");
+    let mut named = run_with_font(
+        "/MiniSquare findfont 20 scalefont setfont 10 10 moveto /slant glyphshow
+         currentpoint pop /nope glyphshow currentpoint pop",
+    );
+    let after_notdef = pop_f64(&mut named);
+    let x = pop_f64(&mut named);
+    assert!((x - 22.0).abs() < 1e-3, "advance {x}");
+    assert!(
+        (after_notdef - 34.0).abs() < 1e-3,
+        ".notdef advance {after_notdef}"
+    );
+    assert_eq!(shown.gfx().pixmap.data(), named.gfx().pixmap.data());
+}

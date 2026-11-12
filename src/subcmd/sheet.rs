@@ -336,7 +336,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     // resolution: 72 dpi, one pixel to the point.
     pscat::png::save(&out, 1.0, &opts.out)
         .map_err(|e| msg(format!("cannot write {}: {e}", opts.out)))?;
-    println!("pscat: wrote {}", opts.out);
+    eprintln!("pscat: wrote {}", opts.out);
     if any_failed {
         Err(Failure::Silent)
     } else {

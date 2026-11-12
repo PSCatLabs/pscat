@@ -99,3 +99,5 @@ and an image data procedure; and `ShowStep::Again` -> `Action::Nothing`,
 a show frame working through its string. Each is bounded by its path, string or image,
 so none hangs. Bounding them as well would mean the same counter in that
 arm. `Show` and `Image` belong to the image and filter lane (#896).
+
+Done in #903 (`notes/1124-903-restore-packing-and-empty-targets.md`).

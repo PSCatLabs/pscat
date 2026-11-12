@@ -23,9 +23,12 @@ and both work against an **installed** pscat (no checkout needed):
 Which tool to pick for a picture (pscat, an image model, or an LLM's own
 SVG or matplotlib), and how pscat lets a model with no image output of its
 own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+An assistant that wants a map of the docs can read the site's
+[`llms.txt`](https://pscatlabs.github.io/pscat/llms.txt)
+(source: [`site/llms.txt`](../../site/llms.txt)), which links the guides, the skills and the install steps.
 
-In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step. No separate install is needed
+In Claude Code the easiest route is the **plugin**, which installs the four
+skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
 on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
 uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
 downloads the pinned GitHub release once, checks it against the release's
@@ -102,7 +105,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
   `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
+  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
+  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page but no `Lint:` block: those findings describe where the
   run stopped, so they would only be consequences of the error (#942).
@@ -287,7 +291,9 @@ and `stack` truncate their own output well below that (1024 elements per array,
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
-PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
+PostScript errors `ps_error`, `offending_command`, `line`; for an error while a
+`run` file was being read, `line` is that file's line, `file` names it and
+`run_chain` lists the open `run` frames, innermost first; a program stopped by
 an interpreter limit has kind `limit_exceeded` and a `limit` field).
 
 **`out_path`** is resolved against the output root (relative paths start

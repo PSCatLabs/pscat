@@ -302,6 +302,34 @@ fn the_posters_paint_the_brief_exactly() {
     }
 }
 
+/// The pscat-alone sky and sea of the poster are real axial shadings with
+/// a stitching colour function, in the PDF as written (#1042), not hundreds
+/// of 1 pt strips: a shading is resolution-independent, and the file is
+/// smaller. The strips under the date and the chart (an opacity ramp, which
+/// a shading cannot be) stay: a shading ramps colour, not opacity.
+#[test]
+fn the_pscat_only_sky_is_a_real_shading_in_the_pdf() {
+    let ex = &EXAMPLES[0];
+    assert_eq!(ex.name, "sky_talk");
+    let (dir, _) = pscat(
+        ex,
+        "shading-pdf",
+        "/PscatOnly true def",
+        &["--pdf", "{dir}/sky.pdf"],
+    );
+    let pdf = String::from_utf8_lossy(&read(&dir.join("sky.pdf"))).into_owned();
+    assert_eq!(
+        pdf.matches("/ShadingType 2").count(),
+        2,
+        "the sky and the sea are one axial shading each"
+    );
+    assert_eq!(
+        pdf.matches("/FunctionType 3").count(),
+        2,
+        "each is coloured by a stitching function"
+    );
+}
+
 /// A committed JPEG as the decoders' greyscale.
 fn jpeg_grey(path: &str) -> Grey {
     let data = read(&root().join(path));
