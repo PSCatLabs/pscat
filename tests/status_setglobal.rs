@@ -372,6 +372,7 @@ fn tree(tag: &str) -> Tree {
 
 /// Names a confined program must see as missing, existing or not.
 fn outside_names(t: &Tree) -> Vec<String> {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut names = vec![
         abs(&t.outside.join("away.ps")),
         abs(&t.outside.join("missing.ps")),

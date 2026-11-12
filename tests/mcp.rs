@@ -1131,6 +1131,7 @@ fn status_cannot_probe_for_files_outside_the_read_roots() {
         );
     }
     // Outside, missing, and out by `..` or a symlink: all the same answer.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut names = vec![
         p(&outside, "away.ps"),
         p(&outside, "missing.ps"),
