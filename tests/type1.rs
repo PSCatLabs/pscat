@@ -288,12 +288,7 @@ fn ghostscript_accepts_the_same_bytes() {
     // The strongest possible check on the generator and on our
     // semantics at once: gs must parse the identical font program and
     // report the same stringwidth.
-    let gs_ok = Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs cross-check: ghostscript not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat_minisquare");

@@ -196,12 +196,7 @@ fn plotsurface_forwards_the_sampling_proc_without_invoking_it_early() {
 
 #[test]
 fn ghostscript_accepts_graph() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let lib = std::fs::read_to_string("lib/graph.ps").expect("graph.ps");

@@ -34,6 +34,14 @@ the original vision and staged milestones are history, kept in
   `target/ci/`). Plain `cargo test` still works, just slowly: the absolute
   CPU budgets and the default child deadline stretch in a dev-profile build
   (see "Timing assertions in `tests/`" below), so it passes too.
+- Ghostscript parity tests start with `if !common::gs_available() { return; }`
+  (`tests/common/mod.rs`): never probe `gs` ad hoc. Without gs a local run
+  skips with a `SKIPPED (gs not installed): <test>` line that libtest cannot
+  hide; with `PSCAT_REQUIRE_GS=1` (set on the macOS `test` job and the Linux
+  `cross-platform` job, which install gs) a missing gs panics instead.
+  `PSCAT_GS_LOG=<file>` records `ran`/`skipped` per test; CI counts it in the
+  job summary. Windows has no `gs` on PATH (it is `gswin64c`), so those tests
+  skip there.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.

@@ -4,6 +4,8 @@
 //! compatibility is asserted by running the file there when gs is
 //! present (it must not error — the font is plain Type 3 PostScript).
 
+mod common;
+
 use pscat::Interp;
 
 fn run_example() -> Interp {
@@ -86,12 +88,7 @@ fn deterministic_across_runs() {
 
 #[test]
 fn ghostscript_accepts_the_font() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")

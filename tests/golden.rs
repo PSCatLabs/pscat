@@ -16,13 +16,6 @@ mod common;
 const SIZE: u32 = 500;
 const BLOCK: u32 = 10;
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn render_pscat(path: &str) -> Pixmap {
     let source = std::fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     let mut it = Interp::with_page(SIZE, SIZE).expect("page");
@@ -114,8 +107,7 @@ fn assert_close(name: &str, text: bool) {
 
 #[test]
 fn examples_match_ghostscript() {
-    if !gs_available() {
-        eprintln!("skipping golden tests: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     for name in [
