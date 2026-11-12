@@ -5603,9 +5603,10 @@
 % with one backdrop per pass, 116.9 with 8 bands (41 runs of the mark), 81.2
 % with /PerFill (6 runs).
 %
-% pkwash is deliberately *not* wrappable: it resets alpha and blend mode
-% itself, by design, so it will not honor a surrounding context. pkwet
-% is for the stroke families.
+% pkwash is deliberately *not* wrappable: it resets blend mode itself,
+% by design, so it will not honor a surrounding context. (It does honor
+% the caller's alpha: each layer's alpha is multiplied by it, #1075.)
+% pkwet is for the stroke families.
 %
 % Determinism: the caller's own `N srand`, matching the presets it
 % wraps rather than pkwash's private generator — one call should not
@@ -6716,7 +6717,13 @@
 % fill plus seeded grain and fibers.
 %
 % Color, as with every other preset in this file, comes from whatever
-% the caller already set -- there is no color key.
+% the caller already set -- there is no color key. So does alpha, in the
+% one way that cannot clash with /Alpha: each layer's alpha is /Alpha
+% times the `setalpha` in effect at the call (#1075), so `gsave 0.6
+% setalpha ... pkwash grestore` fades a whole wash, or a whole procedure
+% built from washes, without reaching into its options. A caller at the
+% default alpha 1 gets exactly the wash it always did. (Blend mode is
+% still the wash's own, /Blend.)
 %
 % Wash order. Under the default /Blend /Normal, washes composite
 % source-over: a later wash reads as fresher paint over a drier one,
@@ -6920,12 +6927,13 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % amark -   (paint for one mark of alpha `amark` laid over whatever
-% this wash has already put down, tracked in pwcum)
+% this wash has already put down, tracked in pwcum; with real alpha the
+% mark is also faded by the caller's alpha, `pwca`, read at entry)
 % @internal
 /pwmark {
     /pwmk exch def
     pkalphaok
-        { pwmk setalpha }
+        { pwmk pwca mul setalpha }
         { 1 1 pwcum sub 1 pwmk sub mul sub pwsetflat }
     ifelse
 } bind def
@@ -6962,9 +6970,9 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: Fills the current path as a translucent watercolor wash: layered passes each with their own wobbled wet boundary, an optional darker rim where pigment pools at the drying edge, and optional granulation. Color comes from whatever the caller already set. Needs pscat's setalpha; falls back to flattening against white elsewhere.
+% @summary: Fills the current path as a translucent watercolor wash: layered passes each with their own wobbled wet boundary, an optional darker rim where pigment pools at the drying edge, and optional granulation. Color comes from whatever the caller already set, and the caller's setalpha multiplies every layer's own alpha, so gsave 0.6 setalpha ... grestore fades a whole wash. Needs pscat's setalpha; falls back to flattening against white elsewhere.
 % @example: newpath 200 200 90 0 360 arc closepath << /Alpha 0.3 /Wet 6 /Bloom 0.6 >> pkwash
-% @param: /Alpha [0..1] Per-layer wash strength, 0..1 (default 0.32)
+% @param: /Alpha [0..1] Per-layer wash strength, 0..1 (default 0.32); multiplied by the caller's setalpha in effect at the call
 % @param: /Layers [count] Translucent passes to build up, hard-capped 1..8 (default 2)
 % @param: /Wet [points] Peak boundary spread in points -- how far the wet edge wanders off the path (default 2.5)
 % @param: /Bloom [0..1] Edge-pooling strength, 0..1, the darker rim a drying wash leaves (default 0.45)
@@ -7140,6 +7148,13 @@ systemdict /setalpha known /pwhasalpha exch def
         pwn 120000 gt { pkwash-grain-count-exceeds-safety-limit } if
 
         currentrgbcolor /pwb exch def /pwg exch def /pwr exch def
+        % The caller's alpha, read before the gsave below resets it, so a
+        % `gsave 0.6 setalpha ... pkwash grestore` fades the whole wash
+        % (#1075): every mark's own alpha is multiplied by it. At 1 the
+        % product is exact, so a wash made under the default alpha is
+        % unchanged. Only real compositing reads it: the flattened
+        % fallback paints opaque colours and has no alpha to fade.
+        /pwca pwhasalpha pkalphaok and { currentalpha } { 1 } ifelse def
         gsave
         % Neutralize first, then opt in. Neutralizing keys off
         % `pwhasalpha` (do the operators exist?) rather than

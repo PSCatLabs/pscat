@@ -673,6 +673,13 @@ plain source-over does not. `pkpaper` lays the ground it sits on: tone
 plus seeded grain and fibers. Both are deterministic under `/Seed`, or
 under the caller's own `srand` without one.
 
+A wash honours the caller's alpha: each layer's alpha is `/Alpha` times the
+`setalpha` in effect when `pkwash` is called, so `gsave 0.6 setalpha ...
+pkwash grestore` fades a whole wash, and a procedure built from washes can
+be faded from outside without reaching into its options. At the default
+alpha 1 nothing changes. (`/Blend` is still the wash's own, and `pkpaper`
+sets its own alpha.)
+
 This is also a part of pscat that does **not** render the
 same way under plain `gs file.ps`: Ghostscript has no
 PostScript-callable alpha operator at all. Rather than error there,
