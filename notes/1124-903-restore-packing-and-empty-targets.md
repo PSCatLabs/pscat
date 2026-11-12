@@ -40,6 +40,10 @@ counted: a procedure yields on its own, and a bare operator target is not
 what this issue lists. An image data procedure that is empty leaves nothing
 for the next `supply`, which errors, so it is bounded already.
 
+`next_item` has two callers, `step_n_inner` and `step_n_timed`, and both
+already treat a `Proc` item with no procedure on top as a step that did
+nothing.
+
 Output is byte-identical: only the point where `next_item` hands control back
 changes.
 
@@ -48,7 +52,10 @@ one extra step per 1024 (`3000 show` 2 -> 4, a 3000-lineto `pathforall` with
 empty procs 5 -> 7, `kshow` 3 -> 5). Pinned in
 `a_run_of_empty_targets_is_one_step_per_1024`, with the values for 100 and
 1023 equal to the tree before the change. The step-cap accounting is
-unchanged (`tick` is not involved).
+as for #900's pauses: a pause is a step, so under `--max-steps` a long show
+or `pathforall` of empty procedures costs one extra step per 1024 glyphs or
+elements (`tick` is not involved, and the loop iterations' accounting is
+unchanged).
 
 **Tests (written first; the slice test failed with "ended early" on the old
 tree).** `a_slice_returns_on_every_kind_of_empty_target_over_a_huge_input`

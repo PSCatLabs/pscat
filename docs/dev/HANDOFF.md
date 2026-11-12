@@ -1790,7 +1790,10 @@ renders eight examples in both and compares block-downsampled output).
   nothing. Before this, `{ } loop` with no limits never left `next_item`,
   freezing the window and `--spool` (only `tick`'s limit poll could stop
   it). Any new path that loops inside `next_item` without yielding needs
-  the same bound; see `notes/900-empty-loop-slices.md`.
+  the same bound; see `notes/900-empty-loop-slices.md`. #903 added the two
+  other arms that did work in a row: `ExecWith` with an empty procedure
+  (`pathforall`, `kshow`, image data procs) and a show frame's glyph steps
+  (`Action::Nothing`); they share the loop arms' counter.
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
