@@ -707,6 +707,13 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Working conventions that matter (beyond AGENTS.md)
 
+- **The CLI's stdout is the program's alone** (#1058, #1059). Reports
+  (`pscat: wrote FILE`, notices, lint, errors) go to stderr, and `main.rs`
+  shadows `println!`/`print!` so a closed stdout reader sets a flag instead of
+  panicking; `main` then exits 141. A new CLI line that is not program output
+  is `eprintln!`. The flag, not an early exit, so the page and any open
+  `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
+
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.

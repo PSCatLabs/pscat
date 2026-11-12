@@ -61,6 +61,14 @@ cargo test                                # language + pixel-level render tests
 
 More on the less obvious ones:
 
+- **Streams.** stdout is the program's own output (`print`, `=`, `==`) and
+  nothing else: `pscat: wrote FILE` and every other note go to stderr, so
+  `pscat --pdf out.pdf prog.ps | jq .` pipes cleanly. If the reader of stdout
+  goes away (`| head`) pscat ends quietly with status 141, after writing the
+  page and flushing any files the program left open. A file (or `-`) run with
+  no output flag opens a window; when neither stdin nor stdout is a terminal
+  (a script, an agent's shell) pscat says so on stderr first, as a hint to pass
+  `--headless`, `--png`/`--svg`/`--pdf` or `-e` for batch use.
 - **Multi-page output.** `showpage` ends a page. The window keeps showing the
   finished page, and `--png` numbers the pages (`out-001.png`, ...).
   `--svg` and `--pdf` export the same paint pipeline. A PDF is a real
@@ -215,9 +223,13 @@ More on the less obvious ones:
   `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
-  refuses `--svg`, `--pdf`, sweeps, `--progress`, `--profile` and
-  `--allow-write`, since every band would write the same file (or, for
-  `--profile`, report N copies of the same calls: profile a plain run).
+  refuses `--svg`, `--pdf`, sweeps, `--progress` and `--profile` (which would
+  report N copies of the same calls: profile a plain run). `--allow-write`
+  works, with the same roots in every band and one `--max-write-bytes` budget
+  that all the bands spend together. But every band runs the whole program, so
+  an unaware one writes its file once per band, at the same time as the others
+  and in no fixed order: write from band 0 only (`BandIndex 0 eq`), or write a
+  temporary name and `renamefile` it, which is atomic.
   `--lint` and `--lint-strict` do work, and lint once, after the run, with a
   `pscat: lint: note:` line saying so: band 0 (the top band) is checked for
   the declared page count, unbalanced `gsave` and leftover operands, which are
