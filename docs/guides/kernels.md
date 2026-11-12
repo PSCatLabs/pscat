@@ -286,8 +286,6 @@ Tips:
 
 - Write the per-pixel procedure as a pure function of `i` and `j`, and keep
   setup (tables, weights, camera vectors) outside it.
-- A name defined only inside a loop and read after it does not compile.
-  Define it before the loop.
 - Avoid naming variables after operators (`fill`, `ln`, `sin`). `bind` turns
   such a name into the operator.
 
