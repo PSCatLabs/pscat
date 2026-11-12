@@ -9,7 +9,8 @@
 
 use pscat::Interp;
 use pscat::handwriting::{
-    HandError, HandOptions, MAX_PAGE_POINTS, Paper, measure_source, parse_line_count, render_source,
+    HandError, HandOptions, MAX_PAGE_POINTS, Paper, drawable, has_glyph, measure_source,
+    parse_line_count, render_source,
 };
 
 mod common;
@@ -275,4 +276,57 @@ fn validate_codes_and_fields() {
         "blue".parse::<Paper>(),
         Err(HandError::UnknownPaper(_))
     ));
+}
+
+/// Whether a one-character note puts any ink on the page, through the same
+/// two library functions a server uses.
+fn draws_ink(text: &str) -> bool {
+    let mut opts = HandOptions::new(text);
+    opts.width = 120;
+    opts.margin = 12.0;
+    opts.size = 48.0;
+    opts.paper = Paper::Plain;
+    opts.validate().expect("valid options");
+    let height = opts.height_pt(1) as u32;
+    let mut interp = Interp::with_page_scaled(opts.width, height, 1.0).expect("a valid page");
+    interp
+        .run_str(&render_source(&opts, height))
+        .expect("the note renders");
+    let page = interp.page(0).expect("one page");
+    page.rgba8()
+        .chunks_exact(4)
+        .any(|p| p[3] != 0 && (p[0] != 255 || p[1] != 255 || p[2] != 255))
+}
+
+#[test]
+fn has_glyph_agrees_with_what_the_renderer_draws() {
+    // The issue's acceptance check: every printable ASCII character, through
+    // the real lowercasing and escaping, then a few the font lacks.
+    let mut accepted = 0;
+    for b in 32u8..=126 {
+        let c = char::from(b);
+        assert_eq!(
+            has_glyph(c),
+            draws_ink(&c.to_string()),
+            "has_glyph({c:?}) disagrees with the renderer"
+        );
+        accepted += usize::from(has_glyph(c));
+    }
+    assert!(accepted > 0, "the font draws something");
+    for c in ['\u{e9}', '\u{20ac}', '\u{4f60}', '\u{7f}'] {
+        assert!(!has_glyph(c), "{c:?}");
+        assert!(!draws_ink(&c.to_string()), "{c:?} drew ink");
+    }
+}
+
+#[test]
+fn drawable_means_some_character_has_ink() {
+    assert!(drawable("Hi"));
+    assert!(drawable("\u{e9}!"));
+    assert!(!drawable(""));
+    assert!(!drawable("   \n\t"));
+    assert!(!drawable("\u{e9}\u{20ac}"));
+    for text in ["Hi", "\u{e9}!", "   ", "\u{e9}"] {
+        assert_eq!(drawable(text), draws_ink(text), "{text:?}");
+    }
 }

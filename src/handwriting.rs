@@ -25,7 +25,13 @@
 //! escaped, and stripped of trailing newlines, and every number and name is
 //! written by this module from a typed value. A character the font does not
 //! have advances as a blank rather than erroring, so it still takes up room
-//! in the wrap.
+//! in the wrap. [`has_glyph`] and [`drawable`] say which characters the font
+//! does have, so a caller can refuse text that would draw nothing before it
+//! spends a worker on it.
+//!
+//! The functions that build programs run nothing. [`has_glyph`] is the one
+//! exception: the first call runs the font's own table once, in this process
+//! and in a throwaway interpreter, and caches the answer.
 //!
 //! ```
 //! use pscat::handwriting::{HandOptions, Paper, MAX_PAGE_POINTS, measure_source,
@@ -58,6 +64,7 @@
 //! ```
 
 use std::fmt;
+use std::sync::OnceLock;
 
 /// The largest page dimension, in points, `pscat` draws: a note's width and
 /// height are each at most this (the `--page` limit).
@@ -315,6 +322,84 @@ fn library() -> String {
     }
 }
 
+/// The PostScript that prints the character codes the font draws ink for, one
+/// per line. It reads the same tables `BuildChar` and the wrap read: a code's
+/// name in `/Encoding`, that name in `/CharDefs` (a name with no entry is
+/// `.notdef`), and a glyph counts when it has at least one stroke beyond its
+/// advance width. `space` and `.notdef` are only an advance, so they do not.
+const GLYPH_TABLE_PROGRAM: &str = "\
+HandScriptDict begin\n\
+0 1 127 {\n\
+  /c exch def\n\
+  Encoding c get CharDefs 1 index known not { pop /.notdef } if\n\
+  CharDefs exch get length 1 gt { c = } if\n\
+} for\n\
+end\n";
+
+/// Which ASCII codes the font draws ink for, found by asking the font. The
+/// same `lib/handscript.ps` that [`render_source`] embeds is run once and the
+/// answer kept. If the table cannot be read, no character is drawable.
+fn glyph_table() -> &'static [bool; 128] {
+    static TABLE: OnceLock<[bool; 128]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [false; 128];
+        let mut interp = crate::Interp::new();
+        interp.capture_stdout();
+        let mut src = library();
+        src.push_str(GLYPH_TABLE_PROGRAM);
+        if interp.run_str(&src).is_ok() {
+            let out = String::from_utf8_lossy(interp.captured_stdout()).into_owned();
+            for code in out.lines().filter_map(|l| l.trim().parse::<usize>().ok()) {
+                if let Some(slot) = table.get_mut(code) {
+                    *slot = true;
+                }
+            }
+        }
+        table
+    })
+}
+
+/// Whether the handwriting font draws ink for `c`, under the same case rule
+/// the note uses: ASCII letters are lowercased first, so `'A'` and `'a'`
+/// agree.
+///
+/// A space is `false`: it advances the line but puts no ink down. So is any
+/// character the font lacks, including every non-ASCII one: those advance as a
+/// blank and draw nothing.
+///
+/// The answer comes from the font's own glyph table in `lib/handscript.ps`,
+/// the copy [`render_source`] embeds, so it follows the font when the font
+/// gains a glyph. The first call runs that table once in this process and
+/// caches it, so later calls are a lookup. If the table cannot be read
+/// (a broken `lib/handscript.ps` in `$PSCAT_HOME`), every character is
+/// `false`.
+///
+/// ```
+/// use pscat::handwriting::has_glyph;
+///
+/// assert!(has_glyph('a') && has_glyph('A') && has_glyph('7') && has_glyph('?'));
+/// assert!(!has_glyph(' ') && !has_glyph('@') && !has_glyph('\u{e9}'));
+/// ```
+pub fn has_glyph(c: char) -> bool {
+    let c = c.to_ascii_lowercase();
+    c.is_ascii() && glyph_table()[c as usize]
+}
+
+/// Whether `text` has at least one character the font draws ([`has_glyph`]).
+/// Text that is not `drawable` would render as a blank page, so a server can
+/// refuse it before measuring. Empty text is not drawable.
+///
+/// ```
+/// use pscat::handwriting::drawable;
+///
+/// assert!(drawable("Hi there"));
+/// assert!(!drawable("  \n\t "));
+/// assert!(!drawable("\u{4f60}\u{597d}"));
+/// ```
+pub fn drawable(text: &str) -> bool {
+    text.chars().any(has_glyph)
+}
+
 /// The program that prints the number of lines `opts` wraps to, then a
 /// newline. It contains `lib/handscript.ps` itself, read when you call this
 /// from `$PSCAT_HOME`, `$PSCAT_LIB` and the other roots of the calling
@@ -486,6 +571,16 @@ mod tests {
         ] {
             assert!(d.contains(want), "{want:?} in {d}");
         }
+    }
+
+    #[test]
+    fn the_glyph_table_is_the_fonts_own() {
+        // Pinned only by shape, not by a list: tests/handwriting_api.rs checks
+        // every printable ASCII character against what the renderer draws.
+        assert!(has_glyph('a') && has_glyph('A') && has_glyph('0') && has_glyph('!'));
+        assert!(!has_glyph(' ') && !has_glyph('@') && !has_glyph('\n'));
+        assert!(!has_glyph('\u{e9}') && !has_glyph('\u{0}') && !has_glyph('\u{7f}'));
+        assert!(drawable("  x") && !drawable("") && !drawable(" \t\n") && !drawable("\u{e9}"));
     }
 
     #[test]
