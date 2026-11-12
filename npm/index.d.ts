@@ -35,6 +35,12 @@ export interface PageOptions {
   svg?: boolean;
   /** Also record the run as PDF, read with pdf(). Default false. */
   pdf?: boolean;
+  /**
+   * With svg: write Helvetica, Times and Courier text as SVG <text>
+   * (selectable, much smaller) rather than glyph outlines, as
+   * `pscat --svg-text` does. Default false.
+   */
+  svgText?: boolean;
 }
 
 export interface FrameOptions extends PageOptions {
@@ -109,6 +115,14 @@ export class Renderer {
   pixels(): Uint8ClampedArray;
   /** The page as width, height, RGBA data, output and warnings. */
   image(): RenderResult;
+  /**
+   * Pages the run holds now: those showpage/copypage emitted, plus the page
+   * being drawn when it holds art (or is the only one). Works between step()
+   * calls and after the run, whatever is recorded (pixels, SVG, PDF); equals
+   * svgPages().length with { svg: true } and the PDF's page count with
+   * { pdf: true }. 0 before begin().
+   */
+  pageCount(): number;
   /**
    * SVG page `page` (from 0): the bytes `pscat --svg` writes for the same
    * program, page size and dpi. Needs a program begun with { svg: true };

@@ -33,7 +33,8 @@ up-to-date `main`. It refuses in these cases:
 
 It creates `release/vX.Y.Z` and sets the version in `Cargo.toml`, in pscat's
 `Cargo.lock` entry, and in every plugin, npm and MCP Registry manifest that
-exists. It also sets the plugin launcher's release pin, `plugin/pscat-release`,
+exists and is tracked by git (an untracked nested checkout inside the working
+tree is never rewritten, #959). It also sets the plugin launcher's release pin, `plugin/pscat-release`,
 to `vX.Y.Z` (an rc gets `vX.Y.Z-rc.N`), so no release PR needs a hand edit
 there (#867). The pin keeps its comment lines. It prepends the release's section to `CHANGELOG.md` with
 [git-cliff](https://git-cliff.org) (`cliff.toml`), commits `release: X.Y.Z`,

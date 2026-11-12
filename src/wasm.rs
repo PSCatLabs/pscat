@@ -37,8 +37,14 @@
 //!   (bit 1), with the same recorders as `pscat --svg`/`--pdf`, so the
 //!   bytes equal the CLI's for the same program, page and dpi (#1003).
 //!   With PDF on, the source's `%%Title:`/`%%For:` become the PDF's
-//!   `/Info`, as the CLI does for a file. -1 also for an unknown flag bit;
+//!   `/Info`, as the CLI does for a file. Bit 2, with bit 0, writes
+//!   standard-font text as SVG `<text>` (`pscat --svg-text`, #1119).
+//!   -1 also for an unknown flag bit, or bit 2 without bit 0;
 //! - `ps_svg_count()` — SVG pages so far (0 when not recording);
+//! - `ps_page_count()` — pages the document holds now, whatever is
+//!   recorded: those `showpage`/`copypage` emitted plus the live page when
+//!   it holds art or is the only one; what `ps_svg_count` returns with
+//!   SVG on, and the PDF's page count. 0 when no program has begun (#1011);
 //! - `ps_svg(page)` / `ps_pdf()` — finish SVG page `page` (from 0) / the
 //!   PDF document into the vector buffer: 0 = ok, -1 = not recorded (or
 //!   page out of range), -2 = no program begun. Callable mid-run: the
@@ -70,6 +76,7 @@ thread_local! {
 /// `ps_begin_vector` flag bits.
 const RECORD_SVG: u32 = 1;
 const RECORD_PDF: u32 = 2;
+const SVG_TEXT: u32 = 4;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_alloc(len: usize) -> *mut u8 {
@@ -133,7 +140,10 @@ pub unsafe extern "C" fn ps_begin_vector(
     scale: f32,
     flags: u32,
 ) -> i32 {
-    if flags & !(RECORD_SVG | RECORD_PDF) != 0 || !(scale.is_finite() && scale > 0.0) {
+    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT) != 0
+        || (flags & SVG_TEXT != 0 && flags & RECORD_SVG == 0)
+        || !(scale.is_finite() && scale > 0.0)
+    {
         return -1;
     }
     let source = unsafe { std::slice::from_raw_parts(src, len) }.to_vec();
@@ -143,6 +153,9 @@ pub unsafe extern "C" fn ps_begin_vector(
     // The CLI's order (src/main.rs): recorders on before the program runs,
     // then the DSC title/author for the PDF's /Info.
     if flags & RECORD_SVG != 0 {
+        if flags & SVG_TEXT != 0 {
+            it.set_svg_text(crate::SvgText::Text);
+        }
         it.enable_svg();
     }
     if flags & RECORD_PDF != 0 {
@@ -312,6 +325,19 @@ fn with_svg_pages<R>(f: impl FnOnce(Option<&[String]>) -> R) -> Option<R> {
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_svg_count() -> u32 {
     with_svg_pages(|pages| pages.map_or(0, |p| p.len() as u32)).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_page_count() -> u32 {
+    // The rule svg_pages and pdf_document use: a page the program is still
+    // drawing on counts when it holds art, and an empty document has one.
+    INTERP.with(|s| {
+        s.borrow().as_ref().map_or(0, |it| {
+            let gfx = it.gfx();
+            let shown = gfx.pages().len();
+            (shown + usize::from(shown == 0 || gfx.has_trailing_art())) as u32
+        })
+    })
 }
 
 #[unsafe(no_mangle)]

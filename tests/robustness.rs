@@ -107,6 +107,8 @@ fn random_token_soup_never_panics() {
         "curveto",
         "arc",
         "arcn",
+        "arcto",
+        "arct",
         "closepath",
         "newpath",
         "fill",

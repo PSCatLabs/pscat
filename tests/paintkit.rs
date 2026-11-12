@@ -695,12 +695,7 @@ fn empty_path_is_a_no_op() {
 
 #[test]
 fn ghostscript_accepts_paintkit() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -1141,12 +1136,7 @@ fn nib_empty_path_is_a_no_op() {
 
 #[test]
 fn ghostscript_accepts_paintkit_nib() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -1785,12 +1775,7 @@ fn dry_dryness_reads_similarly_across_different_pitch_values() {
 
 #[test]
 fn ghostscript_accepts_paintkit_dry() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -1831,12 +1816,7 @@ fn ghostscript_accepts_paintkit_dry() {
 
 #[test]
 fn ghostscript_accepts_the_actual_dry_demo_file() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -1870,12 +1850,7 @@ fn ghostscript_accepts_the_actual_nib_demo_file() {
     // `-dNOSAFER` is required because the demo does `(lib/artkit.ps)
     // run` from disk, which gs's default sandbox blocks -- fine here,
     // the file is repo-owned, not untrusted input.
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -2322,12 +2297,7 @@ fn spray_closed_subpath_renders_without_error() {
 
 #[test]
 fn ghostscript_accepts_paintkit_spray() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -2372,12 +2342,7 @@ fn ghostscript_accepts_the_actual_spray_demo_file() {
     // artkit's pal/star, charpath clipping, findfont/show, and its own
     // local helper procs -- run the real file directly. -dNOSAFER
     // because the demo loads lib files from disk.
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -3093,12 +3058,7 @@ fn the_no_alpha_fallback_cannot_show_what_is_underneath() {
 /// goes through `--pdf` (tests/pdf.rs), not through `gs file.ps`.
 #[test]
 fn ghostscript_accepts_paintkit_wash_via_the_fallback() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -3140,12 +3100,7 @@ fn ghostscript_accepts_paintkit_wash_via_the_fallback() {
 
 #[test]
 fn ghostscript_accepts_the_actual_wash_demo_file() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -4031,12 +3986,7 @@ fn trowel_deposit_budget_guard_rejects_lanes_times_samples_over_the_limit() {
 
 #[test]
 fn ghostscript_accepts_paintkit_trowel() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -4428,12 +4378,7 @@ fn fan_deposit_budget_guard_rejects_bristles_times_samples_over_the_limit() {
 
 #[test]
 fn ghostscript_accepts_paintkit_fan() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -5008,12 +4953,7 @@ fn broad_deposit_budget_guard_rejects_grain_times_samples_over_the_limit() {
 
 #[test]
 fn ghostscript_accepts_paintkit_broad() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -6013,12 +5953,7 @@ fn liner_advertises_exactly_the_parameters_it_implements() {
 /// portability criterion asks for.
 #[test]
 fn ghostscript_accepts_paintkit_liner() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -6445,12 +6380,7 @@ fn wet_validation_guards() {
 
 #[test]
 fn ghostscript_accepts_paintkit_wet() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -7522,12 +7452,7 @@ fn wet_directional_caught_error_unwinds_like_the_isotropic_one() {
 
 #[test]
 fn ghostscript_accepts_the_directional_wet_demo() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")
@@ -8285,12 +8210,7 @@ fn wet_bands_grade_loaded_colors_toward_the_cell() {
 /// `srand` are plain PostScript; its random scatter differs).
 #[test]
 fn ghostscript_accepts_paintkit_wet_bands_demo() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")
@@ -8320,12 +8240,7 @@ fn ghostscript_accepts_paintkit_wet_bands_demo() {
 /// every key are plain PostScript; its random scatter differs).
 #[test]
 fn ghostscript_accepts_paintkit_wet_under_demo() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")
@@ -9457,12 +9372,7 @@ fn dab_advertises_exactly_its_tested_parameters() {
 
 #[test]
 fn ghostscript_accepts_paintkit_dab() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -10492,12 +10402,7 @@ fn motions_advertise_exactly_their_tested_parameters() {
 
 #[test]
 fn ghostscript_accepts_the_motion_specimen() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -10524,12 +10429,7 @@ fn ghostscript_accepts_the_motion_specimen() {
 /// Ghostscript renders it too.
 #[test]
 fn ghostscript_accepts_the_massing_specimen() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -10837,12 +10737,7 @@ fn canvas_mean_block_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> (f64, usize) {
 ///   the same rule costs a quarter as much (measured 4.7).
 #[test]
 fn ghostscript_agrees_on_the_surface() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs surface check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: usize = 4;
@@ -10981,12 +10876,7 @@ fn the_weave_is_in_canvas_points_at_any_dpi() {
 /// that every touched mark and the `pkcanvas` call run there.
 #[test]
 fn ghostscript_accepts_the_canvas_demo() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")
@@ -12920,12 +12810,7 @@ fn ghostscript_accepts_paint_loading() {
         ink_count(&it)
     );
 
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
@@ -12961,12 +12846,7 @@ fn ghostscript_accepts_paint_loading() {
 
 #[test]
 fn ghostscript_accepts_the_loading_demo() {
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let out = std::process::Command::new("gs")

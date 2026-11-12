@@ -196,14 +196,7 @@ fn executable_strings_are_packed_as_bytes_without_executing_or_changing_them() {
 
 #[test]
 fn ghostscript_matches_every_reference_fixture_and_access_contract() {
-    // Existing repository gs tests permit an unavailable optional Ghostscript.
-    // Required rendered-QR decoding later has a separate, non-skipping gate.
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR data portability check not run");
+    if !common::gs_available() {
         return;
     }
     let data = vectors();
@@ -515,12 +508,7 @@ fn github_url_plans_pack_and_correct_to_independent_complete_streams() {
 
 #[test]
 fn ghostscript_matches_correction_vectors_and_access_guards() {
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR correction portability check not run");
+    if !common::gs_available() {
         return;
     }
     let data: serde_json::Value = serde_json::from_str(CORRECTION).expect("correction vectors");
@@ -631,12 +619,7 @@ fn planning_guards_and_executable_values_preserve_frames_and_ownership() {
 
 #[test]
 fn ghostscript_matches_capacity_tables_and_boundary_plan_versions() {
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR planning portability check not run");
+    if !common::gs_available() {
         return;
     }
     let data: serde_json::Value = serde_json::from_str(PLANNING).expect("planning vectors");
@@ -1071,12 +1054,7 @@ fn matrix_guards_preserve_frames_and_outputs_are_fresh() {
 
 #[test]
 fn ghostscript_builds_the_same_matrices_and_guards() {
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR matrix portability check not run");
+    if !common::gs_available() {
         return;
     }
     let data = matrix_vectors();
@@ -1447,12 +1425,7 @@ fn metadata_and_selection_guards_preserve_frames_and_inputs() {
 
 #[test]
 fn ghostscript_selects_the_same_masks_scores_and_grids() {
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR mask-selection portability check not run");
+    if !common::gs_available() {
         return;
     }
     let data = mask_vectors();
@@ -2282,14 +2255,7 @@ fn tagged_capabilities_run_from_the_embedded_distribution() {
 
 #[test]
 fn ghostscript_encodes_and_draws_the_same_symbol() {
-    // Optional portability check, like the other gs tests: the required
-    // decode checks above do not depend on Ghostscript.
-    if Command::new("gs")
-        .arg("--version")
-        .output_deadline()
-        .is_err()
-    {
-        eprintln!("gs unavailable; QR public-API portability check not run");
+    if !common::gs_available() {
         return;
     }
     let mut it = interpreter();

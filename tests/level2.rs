@@ -44,6 +44,31 @@ fn languagelevel_is_two() {
 }
 
 #[test]
+fn identity_operators_name_pscat_and_its_version() {
+    // Issue #1048: PLRM `product`, `version`, `revision`, `serialnumber`.
+    let mut it = run("product version revision serialnumber");
+    assert_eq!(top_repr(&mut it), "0");
+    let major: i64 = env!("CARGO_PKG_VERSION_MAJOR").parse().expect("major");
+    let minor: i64 = env!("CARGO_PKG_VERSION_MINOR").parse().expect("minor");
+    let patch: i64 = env!("CARGO_PKG_VERSION_PATCH").parse().expect("patch");
+    let revision = major * 10000 + minor * 100 + patch;
+    assert_eq!(top_repr(&mut it), revision.to_string());
+    assert_eq!(
+        top_repr(&mut it),
+        format!("({})", env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(top_repr(&mut it), "(pscat)");
+}
+
+#[test]
+fn revision_gates_a_feature_on_a_minimum_version() {
+    // The use the issue asks for: "is this pscat 0.7.0 or later?",
+    // safe on an interpreter without the operator too.
+    let mut it = run("/revision where { pop revision 700 ge } { false } ifelse");
+    assert_eq!(top_repr(&mut it), "true");
+}
+
+#[test]
 fn generic_resource_round_trip() {
     let mut it = run("/pal [1 2 3] /MyCategory defineresource pop
          /pal /MyCategory findresource

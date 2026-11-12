@@ -269,6 +269,8 @@ pub const ARTKIT_INTERNAL: &[&str] = &[
     "FractalGens",
     "nfade",
     "nlerp",
+    // The ellipse builders' shared transform wrapper (issue #1053).
+    "elrun",
     // The scatter section (issue #48): three helper families under
     // three deliberately distinct prefixes -- sc- (scatter's own
     // loop and option handling), sq- (region capture), si- (scin's
@@ -1320,6 +1322,78 @@ static ENTRIES: &[Entry] = &[
         &[],
         ARTKIT,
         "x y w h r rrect -",
+        LIB
+    ),
+    entry!(
+        "ellipse",
+        CapabilityKind::Procedure,
+        "Appends a closed counterclockwise ellipse (a new subpath) to the current path; the CTM is left as it was, so the path survives.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry ellipse -",
+        LIB
+    ),
+    entry!(
+        "ellipsen",
+        CapabilityKind::Procedure,
+        "Appends a closed clockwise ellipse, the reversed winding for cutouts and rings (as arcn is to arc).",
+        &[],
+        ARTKIT,
+        "cx cy rx ry ellipsen -",
+        LIB
+    ),
+    entry!(
+        "ellipsearc",
+        CapabilityKind::Procedure,
+        "Appends a counterclockwise elliptical arc from parametric angle a1 to a2 (degrees), as arc does.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry a1 a2 ellipsearc -",
+        LIB
+    ),
+    entry!(
+        "ellipsearcn",
+        CapabilityKind::Procedure,
+        "Appends a clockwise elliptical arc from parametric angle a1 to a2 (degrees), as arcn does.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry a1 a2 ellipsearcn -",
+        LIB
+    ),
+    entry!(
+        "ellipserot",
+        CapabilityKind::Procedure,
+        "ellipse tilted by rot degrees counterclockwise about its center.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry rot ellipserot -",
+        LIB
+    ),
+    entry!(
+        "ellipsenrot",
+        CapabilityKind::Procedure,
+        "ellipsen tilted by rot degrees counterclockwise about its center.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry rot ellipsenrot -",
+        LIB
+    ),
+    entry!(
+        "ellipsearcrot",
+        CapabilityKind::Procedure,
+        "ellipsearc tilted by rot degrees counterclockwise about its center.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry a1 a2 rot ellipsearcrot -",
+        LIB
+    ),
+    entry!(
+        "ellipsearcnrot",
+        CapabilityKind::Procedure,
+        "ellipsearcn tilted by rot degrees counterclockwise about its center.",
+        &[],
+        ARTKIT,
+        "cx cy rx ry a1 a2 rot ellipsearcnrot -",
         LIB
     ),
     // --- Procedures: text --------------------------------------------------

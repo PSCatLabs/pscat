@@ -28,13 +28,6 @@ fn near(a: [f64; 4], b: [f64; 4], tol: f64) -> bool {
     a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= tol)
 }
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn gs_bbox(src: &str) -> Option<[f64; 4]> {
     let path = common::scratch_dir("pscat_pathbbox").join("bbox.ps");
     std::fs::write(
@@ -183,8 +176,7 @@ const PATHS: &[(&str, &str, f64)] = &[
 
 #[test]
 fn pathbbox_matches_ghostscript_over_a_matrix() {
-    if !gs_available() {
-        eprintln!("skipping: ghostscript (gs) not installed");
+    if !common::gs_available() {
         return;
     }
     for (cname, ctm) in CTMS {

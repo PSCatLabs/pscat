@@ -384,9 +384,27 @@ again after any push, which restarts CI).
   only when SKILL.md 8.12's query prints `true` (the one copy; it also
   requires `mergeable == "MERGEABLE"` and `mergeStateStatus != "DIRTY"`).
   Its `length > 0` guard matters: jq's `all` is `true` on an empty
-  array, and the rollup is empty for a few seconds after a push. A
-  `CANCELLED`, `SKIPPED`, `NEUTRAL` or still-`IN_PROGRESS` check is not
-  `SUCCESS`. (Branch protection requires only `test`, but a red
+  array, and the rollup is empty for a few seconds after a push.
+  **What counts as passing (the owner's rule as relayed by the dispatcher, #709):**
+  - `SUCCESS` passes. `SKIPPED` passes too: a job that did not run
+    (the release jobs behind a `draft` or tag condition) is not a failure,
+    and counting it as one blocked every PR that carries such a job (PR #1137).
+  - `NEUTRAL` passes only for the check named `CodeQL`, and only when at
+    least one `Analyze (...)` check exists and every `Analyze (...)` check
+    is `SUCCESS`. Why: CodeQL's default setup rescans `main` on every push
+    and weekly, so the real analysis happens on GitHub's side after the merge
+    and is not our check; the `Analyze (...)` jobs are the part that ran here,
+    so they must be green. No `Analyze` check at all means no analysis ran:
+    a bare `CodeQL` NEUTRAL then blocks. Any other `NEUTRAL` blocks.
+  - `CANCELLED`, `FAILURE`, still-`IN_PROGRESS`/`QUEUED` (the conclusion
+    reads `""` or `null`) and everything else block.
+  - A `StatusContext` has `.context` and `.state` instead of `.name` and
+    `.conclusion`; the query reads both shapes, and only `SUCCESS` passes.
+
+  `.claude/skills/work-issue/scripts/test-merge-ready.sh` runs the query from SKILL.md against fixtures
+  for each case (`LIVE_PR=<PR#>` also runs it through `gh --jq`, which is
+  gojq). Re-run it after any edit to the query.
+  (Branch protection requires only `test`, but a red
   `perf-regression` is a signal to read, not to merge past.)
 - **"no checks reported"**: seconds after a push
   no check runs are registered yet, so `--watch` can exit non-zero with
@@ -429,8 +447,10 @@ The push-to-main `ci` run for your merge commit is the net. Since #273
 keyed by the commit SHA), so your merge commit gets its own run to
 completion, even when another agent merges seconds later. After step 9's
 cleanup, in a fresh Bash call, with `SHA` from `gh pr view <PR#> --json
-mergeCommit --jq .mergeCommit.oid`, wait for that run (background, ~3 min
-for `test`, cap about 20 min; `perf-regression` is `pull_request` only):
+mergeCommit --jq .mergeCommit.oid`, wait for that run. **Run it with
+`run_in_background: true`** (#709): the loop below can last up to 20 minutes, past the
+600 s cap on a foreground Bash call, which would kill it halfway (~3 min for
+`test`; `perf-regression` is `pull_request` only):
 
 ```sh
 SHA=<SHA>; for i in $(seq 1 60); do
@@ -475,7 +495,7 @@ task, or the user cut the run short), the PR is open but not merged. Do
    step 8.11's `## Summary of work` comment is already posted (do not post
    it twice); then `gh pr checks <PR#> --watch --fail-fast` (recipe
    above), SKILL.md 8.12's pass/fail query (not `DIRTY`, non-empty, every check
-   `SUCCESS`), `gh pr merge <PR#> --squash`, step 9, and "Main CI after merge".
+   passing by the rule in "CI wait"), `gh pr merge <PR#> --squash`, step 9, and "Main CI after merge".
 3. Resuming: the same session just continues from step 8.12 with no
    re-claim. A fresh `/work-issue <N>` after the lock is stale takes the
    "Resume paths" route below (issue is `in-review` with an open PR, so it
@@ -536,14 +556,18 @@ the wrap-up), then step 12 (the `merge-tree` check, the "no checks reported" ret
 watch) until 8.12's query prints `true` (#331). Hand over a PR whose CI is green: a maintainer
 who finds it red or still running has to babysit it. Stop **before** 8.13, the merge:
 
-0. Write the PR body for the maintainer from the start (step 7): what changed and why, what
+0. Write the PR body for the maintainer from the start (step 7), opening with the Decision block
+   (perceptual-review.md: source issue and parent linked, why the PR exists, click-by-click owner steps):
+   what changed and why, what
    you verified and how, what you did not or could not verify, what to look at first
    (renders, a risky function), and that merging is theirs to do (`/work-issue <N>` later
    finishes it). A body drafted for a self-merge ("CI is green, merging") misleads them.
    A specimen or render PR commits its render and embeds it in the body, pinned to the head SHA
    and rendered after the final rebase (demo-surfaces.md); a body with no picture sends the
    maintainer off to run it themselves (#286).
-1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
+1. Release the lock, last of all (#709): after the CI wait, the final heartbeat and the last
+   `gh` write for the issue, because `heartbeat.sh` fails once the lock is gone (then
+   "No such file or directory" sends a run back to the claim). `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9. If CI is red (a failed step, not infrastructure: "CI wait"), stop and report that
    instead; never hand over silently.
@@ -757,6 +781,13 @@ earlier run's files; resume decisions are made from GitHub state
   ... and the `fraction of`/`per`/`array of`/`U or V` forms). Check a new parameter's unit against it
   before the gate: `cargo test --profile ci --test capabilities` takes seconds, and the full gate
   fails on it minutes later (`notes/195-units-on-every-param.md`).
+- **Tests in a binary that uses `TrackingAllocator` must hold a shared mutex** (#773, from PR
+  #813/#820). `TrackingAllocator` is the process-wide memory limit (e.g. `tests/realsio_memory.rs`);
+  the tests of one binary run in parallel threads of one process, so one test's limit trips another's
+  allocation. Every test there takes the file's lock first (`serial()` in `realsio_memory.rs`,
+  tolerating a poisoned lock with `unwrap_or_else(|e| e.into_inner())`). The flake may show only
+  on the push-to-main CI run, so a new test in such a binary without the lock can pass the PR and
+  break `main`.
 - Already covered above, and still the most common slips: zsh does not word-split `$FILES`
   ("Added in #303"), and a foreground call past about 115 s is moved to the background ("Waiting and
   timeouts"): write poll loops to finish under that, or run them with `run_in_background: true`.

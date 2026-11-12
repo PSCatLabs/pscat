@@ -117,20 +117,12 @@ fn library_procedures_are_bound() {
     );
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The same walk under Ghostscript, where `bind` also resolves its own
 /// internal operators: a name the library defines later that gs already
 /// has as an operator would be bound to the wrong thing. Local only.
 #[test]
 fn library_procedures_are_bound_in_ghostscript() {
-    if !gs_available() {
-        eprintln!("skipping gs bind check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let mut src = String::new();

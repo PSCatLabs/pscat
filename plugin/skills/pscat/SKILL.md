@@ -24,7 +24,7 @@ a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
 
-**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window).
+**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window). For a live preview without a window, see "In the browser or Node" below.
 
 **When to reach for pscat.** Use it when the picture must be exact and
 checkable (text, QR codes, charts, math, a layout that prints at size, vector
@@ -33,6 +33,34 @@ output of your own and need a real picture you can look at and refine. For
 a photo-like image or a loose mood picture with nothing exact in it, suggest
 an image model instead, or combine the two. Decision table:
 [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/when-to-use-pscat.md).
+
+## No MCP, or a cloud sandbox
+
+The MCP tools are optional, and where they are connected they may run on the
+user's own computer (a device bridge), not in your sandbox. To render where you
+are, use the CLI: run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`
+once (it downloads the plugin's pinned release and puts `pscat` on `PATH`), then
+every render is a shell call, `pscat --lint --png out.png piece.ps`. `pscat
+--version` prints the release in use, so you can tell which build drew a page.
+A picture an MCP tool returns may be visible only to you: write the PNG with
+`--png` and send or link the file, as "Show the result to the user" below says
+(in a claude.ai cloud workspace, with the host's file-send tool).
+
+## In the browser or Node
+
+pscat also builds to WebAssembly: a live or step-by-step preview where there is
+no window (a cloud sandbox, a Chromebook, a chat artifact), and pages that render
+with no server. `npm install pscat`, then `createRenderer()`, `render()` (pixels;
+SVG and PDF from 0.7.0), `frames()` (watch it draw) and `paintTo(canvas)`. The
+`lib/` libraries are built in; there is no window, filesystem or clock. From
+0.7.0 the standard 35 fonts are built in; older npm packages have only the
+Liberation base faces and swap the rest for a stand-in, silently, and any other
+face comes from `addFont(name, bytes)`. Try it in the
+[playground](https://pscatlabs.github.io/pscat/playground.html); the API and the
+build are in the
+[browser guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/browser.md).
+npm can lag the plugin's CLI (a release candidate is on GitHub, not npm): compare
+`npm view pscat version` with `pscat --version`, since output can differ.
 
 ## Render a file (the common case)
 
@@ -50,6 +78,8 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
+**PDF metadata and attachments (`pdfmark`).** With `--pdf` (or `pdf: true` in the browser build), the Distiller `pdfmark` operator works. `[ /Title (T) /Subject (S) /Keywords (k) /DOCINFO pdfmark` sets document info; a key you set wins over `%%Title:`/`%%For:`, `/Producer` stays pscat, and UTF-8 text is fine. To attach a file: `[ /_objdef {f1} /type /stream /OBJ pdfmark  [ {f1} (data) /PUT pdfmark  [ {f1} << /Subtype (text/plain) cvn >> /PUT pdfmark  [ /Name (x.txt) /FS << /Type /Filespec /F (x.txt) /EF << /F {f1} >> >> /EMBED pdfmark`. Write MIME subtypes with `(a/b) cvn` (a `#` in a PS name is literal). Data can be a string, a file opened with `file` (read roots apply; not in the browser build), or inline `currentfile /ASCIIHexDecode filter` data. On PNG/SVG/window output pdfmark only clears to the mark. `/ANN` (links), `/OUT` (bookmarks) and `{Catalog}`/`{ThisPage}` marks are ignored for now. Mark data is capped at 64 MiB per document. (Needs the pscat release that includes PR #1073.)
+
 Page size: `--page` always wins. Without it, a `<< /PageSize [w h] >>
 setpagedevice` in the program sets the page (other page-device keys are
 ignored with a warning). Without that, an EPSF file (first line
@@ -63,16 +93,20 @@ over threads: [references/bands-profile.md](references/bands-profile.md).
 
 ## Show the result to the user
 
-A render that succeeded is not an image the user has seen. A picture returned
-inside a tool call (an MCP image block, a file you viewed yourself) usually shows
-only in the tool trace, which hosts collapse; the user reads your final message.
+A render that succeeded is not an image the user has seen. The MCP render
+preview is an image block for you, the model: the user usually cannot see it. A
+picture returned inside a tool call (that block, a file you viewed yourself)
+shows only in the tool trace, which hosts collapse; the user reads your final
+message.
 When they asked to see something, the final message must contain it. Check two
 things separately: the render worked (exit 0, clean `Lint:`), and the image is
 in the final answer.
 
 1. Save the PNG where the user can open it (the project or working folder), by
    `--png` or `out_path`, and keep the source `.ps` beside it when they may want
-   changes. `out_path`'s reply says `wrote <absolute path>`; use that path.
+   changes. Over MCP, pass `out_path` on the first render (a render without it
+   leaves no file to hand over, so you would render twice). `out_path`'s reply
+   says `wrote <absolute path>`; use that path.
 2. Put the image in the final message twice over, as an embed and as a plain
    link, so that a host that does not draw the embed still gives the user the
    file, then link the source: `![a colourful spiral](ABSOLUTE_PNG_PATH)`,
@@ -84,6 +118,9 @@ in the final answer.
      give the plain link; that part is documented (the Code tab opens a clicked
      path). Do not say the image is shown inline unless you can see that it is.
    - **Claude Code in a terminal:** it cannot draw images; say where the file is.
+   - **claude.ai cloud workspace (no device bridge):** markdown embeds of local
+     paths mean nothing there. Save the PNG and send it with the host's file-send
+     tool (`SendUserFile`).
 3. Never paste base64 or a `data:` URI into a reply. Do not write "rendered
    above" or "as you can see" unless the final message carries the image or path.
 4. If the user says they cannot see it, do not re-render or repeat the claim:
@@ -101,12 +138,13 @@ pscat --lint --png out.png file.ps     # self-check the render (see below)
 
 Exit code 0 = clean run; nonzero = a PostScript error, reported on
 stderr as `%%[ Error: undefined; OffendingCommand: bogus; Line: 3 ]%%`
-(the line is given for errors in the top-level program, not inside a
-`run`-loaded library). `--png` still writes the partial canvas after an
-error: useful to see how far a program got.
+(an error while a `run` file is being read gives that file's line and
+name, `Line: 5 (inner.ps); Run chain: inner.ps:5 <- line 2`). `--png`
+still writes the partial canvas after an error: useful to see how far a
+program got.
 
 **`--lint`** catches mistakes that don't *error*: a blank page, an
-unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack.
+unbalanced `gsave`/`grestore`, stuff left on the operand/dict stack, a built-in operator name such as `/sub` redefined as a plain value (`[shadowed-operator]`; silence a deliberate one with a `%lint: allow shadowed-operator` comment line).
 Findings print to stderr as `pscat: lint: [check] message` (or
 `pscat: lint: clean`); the exit code is unchanged (`--lint-strict` makes
 findings fail). A run that errored prints `pscat: lint: [run-error]`.
@@ -154,9 +192,38 @@ With the pack installed the real face is used and nothing changes. The Type
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
 /Circuitry, /Stitchwork, /Confetti).
 
+**Your own font files** (`.ttf`, `.otf`, `.ttc`) need no pack: put one in a
+subdirectory of `fonts/catalog/` in the current directory, `$PSCAT_HOME`, the
+per-user data directory or beside the binary
+(`mkdir -p fonts/catalog/mine && cp SomeFont.ttf fonts/catalog/mine/`), and
+`/SomeFont findfont` finds it by file name (case does not matter). It wins over
+an installed pack, and `pscat fonts list` shows the directory. This is the
+command-line counterpart of the browser build's `renderer.addFont(name, bytes)`.
+
 `pscat --capabilities` prints the machine-readable inventory of what this build
 has (fonts, palettes, templates, procedures, native operators) as JSON; prefer
 it over guessing a name from prose, this file included.
+
+## Where `(lib/...) run` finds a file
+
+A `lib/` name tries, in order: `$PSCAT_LIB` (one directory that stands in for
+`lib/`: `$PSCAT_LIB/artkit.ps` serves `lib/artkit.ps`; a single directory, not a
+path list), `$PSCAT_HOME/lib`, `lib/` in the current directory, `lib/` in the
+per-user data directory (`~/Library/Application Support/pscat` on macOS,
+`~/.local/share/pscat` on Linux, `%APPDATA%\pscat` on Windows), `lib/` beside
+the binary, then the copy compiled into pscat. The first that exists wins, so a
+file in the per-user `lib/` is a place for your own library. A file there
+named like a built-in one (`artkit.ps`) overrides the built-in everywhere, the
+command line and MCP, so a stale copy is a trap. `PSCAT_TRACE_RESOURCES=1`
+prints one line on stderr naming the copy that served each file `run` loaded
+(it does not cover fonts). Reads honour `--read-root`: a
+`$PSCAT_LIB` outside the read roots is not found. The `pscat-mcp` tools can read
+the per-user data directory, so a library installed there works over MCP too;
+another directory needs the server's `--allow-read` (see
+[references/mcp.md](references/mcp.md)). The full list:
+[Where pscat finds its files](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files).
+A program cannot ask for the name of the file it is running, so a library that
+loads sibling files needs its directory passed in.
 
 ## QR codes (lib/qr.ps)
 
@@ -258,3 +325,5 @@ inline image. Jobs, limits, `bands`, `gpu_preview` and registering the server:
   not in an install.
 - Big numeric arrays: use `writereals` / `readreals`, not printed text
   ([references/extensions.md](references/extensions.md)).
+- Rounded corners: `x1 y1 x2 y2 r arcto` (it leaves four numbers, so
+  `4 { pop } repeat`) or `arct` (leaves nothing), available from 0.7.0.

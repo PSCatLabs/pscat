@@ -212,12 +212,7 @@ fn imagetype3_datadict_interpolates_but_the_stencil_stays_hard() {
 /// clamp are the same; gs's filter is marginally softer).
 #[test]
 fn matches_ghostscript_on_the_issue_repro() {
-    if !Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("skipping gs comparison: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let src = "/W 8 def /H 4 def /row W 3 mul string def /j 0 def

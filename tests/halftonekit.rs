@@ -1053,12 +1053,7 @@ fn ghostscript_accepts_the_halftone_specimen_sheet() {
     // the file does `(lib/halftonekit.ps) run` from disk, which gs's
     // default sandbox blocks (same reasoning as every other sibling
     // library's own version of this test).
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let status = std::process::Command::new("gs")
@@ -1090,12 +1085,7 @@ fn ghostscript_accepts_packed_tone_callbacks() {
     // into the temp driver so gs needs no file access (no -dNOSAFER,
     // unlike the specimen test) — same harness shape as paintkit's
     // own packed-driver test.
-    let gs_ok = std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !gs_ok {
-        eprintln!("skipping gs compatibility check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let lib = std::fs::read_to_string("lib/halftonekit.ps").expect("library present");

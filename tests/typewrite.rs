@@ -630,19 +630,11 @@ fn the_script_turns_typographic_characters_into_ascii_and_rejects_bad_input() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The driver the script writes runs in Ghostscript and types ink in the
 /// same place as pscat (a correctness check only; CI has no gs).
 #[test]
 fn ghostscript_types_the_memo_the_script_writes() {
-    if !gs_available() {
-        eprintln!("skipping gs typewrite check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = scratch("gs");

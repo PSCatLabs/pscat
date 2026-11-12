@@ -935,13 +935,6 @@ fn a_strip_types_within_the_cpu_budget() {
     });
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// Renders `body` in Ghostscript at this file's page and scale; darkness
 /// per pixel.
 fn gs_ink(tag: &str, body: &str) -> Vec<u8> {
@@ -983,8 +976,7 @@ fn gs_ink(tag: &str, body: &str) -> Vec<u8> {
 /// control. Local only: CI has no gs.
 #[test]
 fn ghostscript_types_the_same_page_and_caches_no_glyph() {
-    if !gs_available() {
-        eprintln!("skipping gs typewriter check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let text = "e e e e e e e";

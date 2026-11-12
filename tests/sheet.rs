@@ -55,7 +55,7 @@ fn cells_keep_their_pixel_size_and_are_centred_in_the_column() {
     let d = dir();
     let a = write(&d, "a.ps", RED);
     let out = d.join("two-sizes.png");
-    let (ok, stdout, stderr) = sheet(&[
+    let (ok, _, stderr) = sheet(&[
         "-o",
         out.to_str().unwrap(),
         "--no-labels",
@@ -67,7 +67,7 @@ fn cells_keep_their_pixel_size_and_are_centred_in_the_column() {
         &a,
     ]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("wrote"), "{stdout}");
+    assert!(stderr.contains("wrote"), "{stderr}");
     let p = Pixmap::load_png(&out).unwrap();
     // 12 + (100+2) + 14 + (50+2) + 12 wide; 12 + 102 + 12 high.
     assert_eq!((p.width(), p.height()), (192, 126));
@@ -372,7 +372,7 @@ fn a_parameter_sweep_draws_one_labelled_cell_per_value() {
         "/W where { pop } { /W 1 def } ifelse 1 0 0 setrgbcolor 0 0 W 50 rectfill",
     );
     let out = d.join("param.png");
-    let (ok, stdout, stderr) = sheet(&[
+    let (ok, _, stderr) = sheet(&[
         "-o",
         out.to_str().unwrap(),
         "--no-labels",
@@ -384,7 +384,7 @@ fn a_parameter_sweep_draws_one_labelled_cell_per_value() {
         &prog,
     ]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("wrote"), "{stdout}");
+    assert!(stderr.contains("wrote"), "{stderr}");
     let p = Pixmap::load_png(&out).unwrap();
     assert_eq!(p.width(), 12 + 102 + 14 + 102 + 12);
     let red = [255, 0, 0, 255];

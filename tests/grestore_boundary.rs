@@ -203,19 +203,10 @@ fn a_colour_read_back_and_set_again_is_unchanged() {
     );
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// The pinned lines are gs's own (local only; CI has no gs).
 #[test]
 fn ghostscript_prints_the_pinned_lines() {
-    if !gs_available() {
-        eprintln!("skipping gs grestore check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat-grestore-gs");
@@ -223,7 +214,15 @@ fn ghostscript_prints_the_pinned_lines() {
         let file = dir.join(format!("c{i}.ps"));
         std::fs::write(&file, format!("{PRELUDE}{src}\n")).expect("write");
         let out = std::process::Command::new("gs")
-            .args(["-q", "-dNOSAFER", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE"])
+            // The pins assume US Letter; Debian's gs defaults to A4 (libpaper), so say so.
+            .args([
+                "-q",
+                "-dNOSAFER",
+                "-dNODISPLAY",
+                "-dBATCH",
+                "-dNOPAUSE",
+                "-sPAPERSIZE=letter",
+            ])
             .arg(&file)
             .stdin(std::process::Stdio::null())
             .output()

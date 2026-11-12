@@ -48,6 +48,26 @@ that the CPU would stop with `limit_exceeded` gives a capped, often blank image 
 if a preview comes back blank or flat, render once without `gpu_preview`. A `Warnings:`
 line names the GPU that ran, or says the kernel fell back to the CPU.
 
+## Showing the render to the user
+
+The PNG a render tool returns is for you, the model; the user usually cannot see
+it (the `pscat` skill's "Show the result to the user" has the per-host details).
+A render without `out_path` leaves no file anywhere, so the tool reply has no path
+to hand over. Pass `out_path` on the render you mean to show: the reply then ends
+with `wrote <absolute path>`, which is the PNG to send. `handwrite`,
+`chalkboard_math`, `review_sheet`, and `render_result` for a job started with an
+`out_path` do the same. The server's instructions and these tools' descriptions say so too.
+
+## Reading your own files and libraries
+
+Programs read files only in the server's working directory, the pscat data
+directories (`$PSCAT_HOME` and the per-user one, whose `lib/` is on the `lib/`
+search order) and each `--allow-read DIR`; the built-in `lib/` is always
+available. `--allow-read` is a flag of the server's command line with no
+environment variable, so another plugin's directory is not readable unless
+whoever registered the server adds it; copy the files into the project instead.
+`PSCAT_LIB` is read like any other path: outside these roots it is not found.
+
 ## Limits, `out_path` and registering
 
 The interpreter stops a runaway program itself, with a `limit_exceeded` error whose

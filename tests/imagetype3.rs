@@ -239,12 +239,7 @@ fn pdf_carries_a_soft_mask_and_gs_agrees_with_the_canvas() {
         text.contains("/XObject << /Im1 ") && !text.contains("/Im0 "),
         "only the colour image is a page resource: {text}"
     );
-    if !Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("skipping gs raster check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let dir = common::scratch_dir("pscat_it3");

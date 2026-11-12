@@ -492,13 +492,6 @@ fn reshaping_a_slot_does_not_reroll_the_others() {
     );
 }
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn gs_libs() -> String {
     let mut src = String::new();
     for path in LIBS {
@@ -514,8 +507,7 @@ fn gs_libs() -> String {
 /// scale; another seed is the negative control. Local only: CI has no gs.
 #[test]
 fn ghostscript_agrees_on_crayon() {
-    if !gs_available() {
-        eprintln!("skipping gs crayon check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     const SCALE: usize = 4;
@@ -585,8 +577,7 @@ fn ghostscript_agrees_on_crayon() {
 /// a number is rejected by its guard, and every motion runs. Local only.
 #[test]
 fn ghostscript_takes_packed_procedures_and_runs_every_motion() {
-    if !gs_available() {
-        eprintln!("skipping gs packed-procedure check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let driver = "<< >> dypaper 0 0 1 setrgbcolor \

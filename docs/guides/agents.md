@@ -23,9 +23,12 @@ and both work against an **installed** pscat (no checkout needed):
 Which tool to pick for a picture (pscat, an image model, or an LLM's own
 SVG or matplotlib), and how pscat lets a model with no image output of its
 own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+An assistant that wants a map of the docs can read the site's
+[`llms.txt`](https://pscatlabs.github.io/pscat/llms.txt)
+(source: [`site/llms.txt`](../../site/llms.txt)), which links the guides, the skills and the install steps.
 
-In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step. No separate install is needed
+In Claude Code the easiest route is the **plugin**, which installs the four
+skills (pscat, psart, psviz and functional-postscript) and registers `pscat-mcp` in one step. No separate install is needed
 on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
 uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
 downloads the pinned GitHub release once, checks it against the release's
@@ -103,7 +106,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `bands` and `gpu_preview` options (see "Banded renders" and "GPU preview"
   below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
+  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
+  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page but no `Lint:` block: those findings describe where the
   run stopped, so they would only be consequences of the error (#942).
@@ -123,8 +127,10 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `jitter`, `align`, `color`, `board` or `false` for a transparent page,
   `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
-  outside mathkit's subset is a one-line `latex_error` naming it (`code`
-  `unsupported_command`, `token` `\aleph`). The input is LaTeX, never
+  outside mathkit's subset is a `latex_error` naming it (`code`
+  `unsupported_command`, `token` `\aleph`); every unsupported command or
+  character comes back in one call, listed in `problems` with its `line`,
+  `column` and byte `offset`. The input is LaTeX, never
   PostScript. By default `latex` is capped at 4096 bytes and the board at 40
   million pixels (`--max-latex-bytes`, `--max-pixels`; see the limits below); svg and pdf go to `out_path` only.
 - `review_sheet` — several programs in, one labelled PNG out: the
@@ -186,7 +192,9 @@ a missing file named by an absolute path outside (the error never says whether
 it exists). `filenameforall`
 lists only inside the roots: an absolute template elsewhere, or one with `..`,
 yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
-Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
+Ghostscript's `-dSAFER` skips files it may not open the same way). `(path) status`,
+the probe before `run`, answers `false` for any of those names, existing or not,
+instead of raising (#952). The bundled
 `lib/` is not a disk read and always works. The server passes the roots to each
 render as the CLI's `--confine-reads` and `--read-root DIR`; the CLI itself reads
 openly unless given those. `read-only` here means the tool writes nothing.
@@ -288,7 +296,9 @@ and `stack` truncate their own output well below that (1024 elements per array,
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
-PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
+PostScript errors `ps_error`, `offending_command`, `line`; for an error while a
+`run` file was being read, `line` is that file's line, `file` names it and
+`run_chain` lists the open `run` frames, innermost first; a program stopped by
 an interpreter limit has kind `limit_exceeded` and a `limit` field).
 
 **`out_path`** is resolved against the output root (relative paths start

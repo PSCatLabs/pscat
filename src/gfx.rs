@@ -924,6 +924,9 @@ pub struct Gfx {
     suppress_paint: u32,
     /// SVG export recorder (`--svg`); mirrors every paint when on.
     svg: Option<Box<crate::svg::SvgRecorder>>,
+    /// How SVG output writes standard-font text (`--svg-text`, #1119).
+    /// The recorder never needs it: `paint_glyph` decides per glyph.
+    svg_text: crate::svg::SvgText,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
     /// Scratch coverage mask for [`Gfx::fill_coverage`], page-sized and
@@ -983,6 +986,7 @@ impl Gfx {
             background: tiny_skia::Color::WHITE,
             painted_since_page: false,
             svg: None,
+            svg_text: crate::svg::SvgText::Paths,
             pdf: None,
             suppress_paint: 0,
             coverage: None,
@@ -1050,6 +1054,12 @@ impl Gfx {
             f64::from(inv.sx * p.x + inv.kx * p.y + inv.tx),
             f64::from(inv.ky * p.x + inv.sy * p.y + inv.ty),
         ))
+    }
+
+    /// The current point as stored, in device space (`arcto` works from
+    /// it exactly, where `current_user_point` adds inverse-CTM rounding).
+    pub(crate) fn current_device_point(&self) -> Option<DevPoint> {
+        self.state.path.current()
     }
 
     /// The user-space current point, or `nocurrentpoint`.
@@ -2111,6 +2121,22 @@ impl Gfx {
         self.svg.is_some() && !self.painting_off()
     }
 
+    /// How SVG output writes text set in the standard fonts (#1119):
+    /// [`SvgText::Paths`](crate::svg::SvgText::Paths), the default, draws
+    /// every glyph as its outline; [`SvgText::Text`](crate::svg::SvgText::Text)
+    /// writes `<text>` elements instead (`pscat --svg-text`). Takes effect
+    /// for glyphs shown after the call, whether recording is already on or
+    /// is turned on later with [`enable_svg`](Self::enable_svg). PNG and
+    /// PDF output are unaffected.
+    pub fn set_svg_text(&mut self, mode: crate::svg::SvgText) {
+        self.svg_text = mode;
+    }
+
+    /// Whether a glyph shown now should reach the SVG recorder as text.
+    pub(crate) fn svg_text_wanted(&self) -> bool {
+        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted()
+    }
+
     /// Turn on PDF recording (`--pdf`).
     pub fn enable_pdf(&mut self) {
         self.pdf = Some(Box::new(crate::pdf::PdfRecorder::new(
@@ -2133,6 +2159,11 @@ impl Gfx {
         if let Some(pdf) = self.pdf.as_mut() {
             pdf.set_info(title, author);
         }
+    }
+
+    /// The PDF recorder, when `--pdf` is on (`pdfmark`, #1032).
+    pub(crate) fn pdf_mut(&mut self) -> Option<&mut crate::pdf::PdfRecorder> {
+        self.pdf.as_deref_mut()
     }
 
     pub(crate) fn pdf_wanted(&self) -> bool {
@@ -2433,6 +2464,42 @@ impl Gfx {
                 if let Some(pdf) = &mut self.pdf {
                     pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
                 }
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that the
+    /// SVG recorder takes as text (#1119): the raster and PDF still get the
+    /// outline, SVG gets the character. `path` may be empty (a space),
+    /// which paints nothing but still places a character in the SVG text.
+    pub(crate) fn paint_glyph(&mut self, path: &PsPath, text: Option<&crate::textrun::GlyphText>) {
+        let Some(g) = text.filter(|_| self.svg_text_wanted()) else {
+            if !path.is_empty() {
+                self.fill_path_direct(path);
+            }
+            return;
+        };
+        let skia = path.to_skia();
+        if skia.is_none() && self.pending_erase {
+            // A blank glyph opening a page would otherwise land on the old
+            // page's SVG body, which the erase is about to clear, or start
+            // a page that has no art. It draws nothing, so drop it.
+            return;
+        }
+        if let Some(p) = &skia {
+            self.prepare_paint();
+            self.fill_coverage(p, FillRule::Winding);
+        }
+        let comp = self.composite();
+        let rgb = self.state.rgb;
+        let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+        if let Some(svg) = &mut self.svg {
+            svg.glyph(g, rgb, comp, &chain);
+        }
+        if skia.is_some() {
+            if let Some(pdf) = &mut self.pdf {
+                pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
             }
             self.dirty = true;
         }

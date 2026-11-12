@@ -351,8 +351,7 @@ pub(crate) fn render(
         }
     }
     let ok = crate::run_headless(&mut interp, source, &options);
-    let declared = pscat::lint::scan_declared_pages(source);
-    match crate::finish_headless(ok, &interp, &options, declared) {
+    match crate::finish_headless(ok, &interp, &options, source) {
         code if code == ExitCode::SUCCESS => Ok(()),
         _ => Err(Failure::Silent),
     }

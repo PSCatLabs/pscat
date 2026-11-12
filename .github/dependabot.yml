@@ -31,3 +31,16 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: deps
+  # fuzz/ is its own workspace with its own lockfile (fuzz/Cargo.lock), which
+  # the entry above does not see, so libfuzzer-sys and friends need their own
+  # entry (issue #705). Same lockfile-only policy and grouping.
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    versioning-strategy: lockfile-only
+    groups:
+      cargo-fuzz:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
