@@ -1086,6 +1086,68 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     assert!(!up.contains("away"), "{up}");
 }
 
+/// `string status` (#952) must not become a way to probe for files the read
+/// roots keep a program from opening: outside them it answers `false`, with
+/// no error, exactly as for a missing file.
+#[test]
+fn status_cannot_probe_for_files_outside_the_read_roots() {
+    let base = common::scratch_dir("mcp-status-roots");
+    let cwd = base.join("project");
+    let extra = base.join("extra");
+    let outside = base.join("outside");
+    for d in [&cwd, &extra, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(cwd.join("a.ps"), "(in cwd) =").unwrap();
+    std::fs::write(extra.join("b.ps"), "(in extra) =").unwrap();
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(outside.join("away.ps"), cwd.join("door.ps")).unwrap();
+        symlink(outside.join("missing.ps"), cwd.join("door-missing.ps")).unwrap();
+    }
+    let mut s = Server::start_in(&cwd, &["--allow-read", extra.to_str().unwrap()]);
+    initialized(&mut s);
+    let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
+    let status = |s: &mut Server, name: &str| {
+        let src = format!("mark ({name}) status ] ==");
+        let result = s.tool("eval_postscript", json!({ "source": src }));
+        assert_eq!(result["isError"], false, "{name}: {result}");
+        texts(&result)[0].trim().to_string()
+    };
+    // Inside: the working directory, an absolute path, an --allow-read root,
+    // and the bundled lib/.
+    for name in [
+        "a.ps".to_string(),
+        p(&cwd, "a.ps"),
+        p(&extra, "b.ps"),
+        "lib/artkit.ps".to_string(),
+    ] {
+        let got = status(&mut s, &name);
+        assert!(
+            got.starts_with('[') && got.ends_with(" true]"),
+            "{name}: {got}"
+        );
+    }
+    // Outside, missing, and out by `..` or a symlink: all the same answer.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut names = vec![
+        p(&outside, "away.ps"),
+        p(&outside, "missing.ps"),
+        "../outside/away.ps".to_string(),
+        "../outside/missing.ps".to_string(),
+        "/etc/hosts".to_string(),
+        "/dev/null".to_string(),
+        p(&cwd, "nope.ps"),
+    ];
+    #[cfg(unix)]
+    names.extend(["door.ps", "door-missing.ps"].map(|n| p(&cwd, n)));
+    for name in names {
+        assert_eq!(status(&mut s, &name), "[false]", "{name}");
+    }
+}
+
 /// `pscat-mcp` run to completion with these arguments and environment (and no
 /// other `PSCAT_MCP_*` variable).
 fn run_server(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {

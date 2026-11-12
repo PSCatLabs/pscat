@@ -189,7 +189,9 @@ a missing file named by an absolute path outside (the error never says whether
 it exists). `filenameforall`
 lists only inside the roots: an absolute template elsewhere, or one with `..`,
 yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
-Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
+Ghostscript's `-dSAFER` skips files it may not open the same way). `(path) status`,
+the probe before `run`, answers `false` for any of those names, existing or not,
+instead of raising (#952). The bundled
 `lib/` is not a disk read and always works. The server passes the roots to each
 render as the CLI's `--confine-reads` and `--read-root DIR`; the CLI itself reads
 openly unless given those. `read-only` here means the tool writes nothing.
