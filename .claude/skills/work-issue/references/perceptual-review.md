@@ -141,7 +141,7 @@ portal's Validate" on PR #691 and asked for context, links and steps). So the bl
 - A PR that needs no action beyond the merge says so ("Nothing to do but merge").
 
 ```markdown
-## Decision (owner)
+## Decision
 
 **Source issue:** #<N> (<what it asks for, in a few words>), part of #<M> (<what the parent is>). Related: #<X> (<what>).
 

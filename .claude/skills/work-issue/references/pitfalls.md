@@ -385,7 +385,7 @@ again after any push, which restarts CI).
   requires `mergeable == "MERGEABLE"` and `mergeStateStatus != "DIRTY"`).
   Its `length > 0` guard matters: jq's `all` is `true` on an empty
   array, and the rollup is empty for a few seconds after a push.
-  **What counts as passing (the owner's rule, 2026-11-12, #709):**
+  **What counts as passing (the owner's rule as relayed by the dispatcher, #709):**
   - `SUCCESS` passes. `SKIPPED` passes too: a job that did not run
     (the release jobs behind a `draft` or tag condition) is not a failure,
     and counting it as one blocked every PR that carries such a job (PR #1137).
@@ -401,7 +401,7 @@ again after any push, which restarts CI).
   - A `StatusContext` has `.context` and `.state` instead of `.name` and
     `.conclusion`; the query reads both shapes, and only `SUCCESS` passes.
 
-  `scripts/test-merge-ready.sh` runs the query from SKILL.md against fixtures
+  `.claude/skills/work-issue/scripts/test-merge-ready.sh` runs the query from SKILL.md against fixtures
   for each case (`LIVE_PR=<PR#>` also runs it through `gh --jq`, which is
   gojq). Re-run it after any edit to the query.
   (Branch protection requires only `test`, but a red

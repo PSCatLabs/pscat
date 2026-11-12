@@ -359,11 +359,11 @@ and several earlier runs optimised a timing or a byte count at the expense of th
 
 - **SKIPPED passes; only `CodeQL` NEUTRAL passes.** The original `all(. == "SUCCESS")` blocked a PR
   whose release jobs were conditionally skipped (PR #1137) and CodeQL's NEUTRAL conclusion. The owner
-  decided (2026-11-12): skipped counts as passing; a NEUTRAL `CodeQL` is fine because CodeQL's default
+  decided (relayed by the dispatcher): skipped counts as passing; a NEUTRAL `CodeQL` is fine because CodeQL's default
   setup rescans `main` on every push and weekly, "that's a GitHub thing, not our check". The exemption is
   narrow on purpose: the check must be named `CodeQL`, and the `Analyze (...)` jobs that did run here must
   all be SUCCESS (and exist), so a broken analysis cannot hide behind the neutral umbrella check. Any other
-  NEUTRAL, CANCELLED or in-progress check still blocks. The query has a test (`scripts/test-merge-ready.sh`)
+  NEUTRAL, CANCELLED or in-progress check still blocks. The query has a test (`.claude/skills/work-issue/scripts/test-merge-ready.sh`)
   that reads it from SKILL.md, like `test-scan.sh`.
 - **The Decision block stands alone.** The owner reads it cold, days later; an unexplained "run the portal's
   Validate" on PR #691 cost a round trip. So it links the source issue and parent, says why the PR exists,
