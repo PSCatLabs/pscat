@@ -311,15 +311,15 @@ pscat chalk: unsupported LaTeX command \aleph at 1:3 (`pscat chalk --help` lists
 ```text
 pscat chalk: 4 problems in the LaTeX (line:column):
   1:8  unsupported LaTeX command \" (accents are not drawn: write the plain letter, oe for \"o)
-  2:8  unsupported character: ö (U+00F6) (write oe for it)
+  2:8  unsupported character: 日 (U+65E5)
   3:3  unsupported character: `` (TeX's `` opening quote is not drawn: leave it out)
   3:16  unsupported LaTeX command \aleph
 (`pscat chalk --help` lists the supported subset)
 ```
 
-`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; an
-accented letter or a quote inside it is not drawn (`pscat chalk --help` says
-so).
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; accent
+commands (`\"o`) and quotes inside it are not drawn, and a letter the board
+hand lacks is reported (`pscat chalk --help` says so).
 
 The block is measured first and shrunk, if it must be, to fit inside the
 margins and above the ledge, then centred (or set at the left margin). Same

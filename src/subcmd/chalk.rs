@@ -63,9 +63,10 @@ reported in one pass, with its line and column):
                 \substack
   text, fonts   \text{} \mathrm{} \mathbf{} \mathbb{} \mathcal{} (the last
                 two: capital letters only). \text{} sets ASCII letters and
-                digits and !'()*+,-./:;<=>?[]| and spaces; accents (\"o),
-                quotes, other symbols and backslash commands are not drawn
-                (write Goedel for Gödel)
+                digits and !'()*+,-./:;<=>?[]| and spaces; accent commands
+                (\"o), quotes, other symbols and backslash commands are not
+                drawn, and a letter the board hand lacks is reported (write
+                the plain letter, Goedel for Gödel)
   spacing       \, \: \; \! \  \quad \qquad ~
   styles        \displaystyle \textstyle \scriptstyle \scriptscriptstyle
   Greek         \alpha ... \omega  \Gamma ... \Omega  \varphi \vartheta

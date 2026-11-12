@@ -804,7 +804,11 @@ impl Src {
 impl Problem {
     /// A problem at byte `offset` of `origin`, as a line and a column.
     fn at(origin: &str, offset: usize, kind: &str, token: &str) -> Problem {
-        let offset = offset.min(origin.len());
+        let mut offset = offset.min(origin.len());
+        // one past a multi-byte last character is not a character boundary
+        while !origin.is_char_boundary(offset) {
+            offset += 1;
+        }
         let before = origin.get(..offset).unwrap_or("");
         let line = 1 + before.matches('\n').count();
         let column = 1 + before.rsplit('\n').next().map_or(0, |l| l.chars().count());
@@ -2297,6 +2301,17 @@ mod tests {
         // a problem past the end is at the end
         let (rows, _) = layout("ab").unwrap();
         assert_eq!(rows[0].origin(9), 2);
+        // also when the row ends in a multi-byte character
+        for (tex, line, column) in [("a \\\n x^{α", 2, 6), ("☃", 1, 2)] {
+            let (rows, _) = layout(tex).unwrap();
+            let end = rows.last().unwrap();
+            let p = Problem::at(tex, end.origin(end.s.len()), "x", "");
+            assert_eq!(
+                (p.line, p.column, p.offset),
+                (line, column, tex.len()),
+                "{tex:?}"
+            );
+        }
     }
 
     #[test]
