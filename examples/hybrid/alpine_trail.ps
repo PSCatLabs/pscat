@@ -20,7 +20,10 @@
 %      and col labels on leader lines that end at the summits it drew, the
 %      route along the ridge it drew, the hut it placed, and in the shaded
 %      foreground it left empty, an elevation profile, the stats computed
-%      from that profile, the bus times and a QR code.
+%      from that profile, the bus times and a QR code. One part of the
+%      layer follows the photograph, not the layout: the model kept the
+%      zigzag trail above the hut but moved it a few pixels, so the route
+%      there is traced from the photograph (RouteHigh below).
 %
 % /Stage /PscatOnly paints the scene with paintkit instead (the "pscat
 % alone" panel of the comparison); the exact layer is the same. So does
@@ -41,7 +44,8 @@
 /Stage where { pop } { /Stage /Hybrid def } ifelse
 % /Season /Autumn swaps in the second photograph, made from the same
 % reference with only the season and the light changed in the prompt;
-% the exact layer is the same but for the season in the subtitle.
+% the exact layer is the same but for what the season changes: the
+% subtitle, and the hut row (the hut is shut in October).
 /Season where { pop } { /Season /Summer def } ifelse
 
 /PW 576 def /PH 864 def
@@ -75,6 +79,17 @@
 /TrailLow [ 300 -4  284 90  246 170  196 238  150 290  118 322  HutDoorX HutY ] def
 /TrailHigh [ HutDoorX 4 add HutY HutH add 2 add  150 372  124 398  168 420
              142 444  182 462  ColX ColY ] def
+
+% The route above the hut as it lies in the photographs, not in the layout:
+% both photographs (summer and autumn) draw the same zigzag, within a few
+% pixels of each other, but 3 to 7 px from TrailHigh, which was only the
+% layout's guess. These corners were read off the photographs on a 4x grid
+% (hut, four turns, then the col); the route follows them so the dashes sit
+% on the path the picture shows, not beside it. The pscat-alone picture
+% paints TrailHigh itself, so it keeps that.
+/RouteHigh Stage /PscatOnly eq { TrailHigh } {
+  [ 123.2 362.8  151.9 373.5  124.3 398.5  169.3 420.8
+    145.1 444.4  182.8 462.1  ColX ColY ] } ifelse def
 
 % Zones the picture leaves empty for the type: the open sky above the
 % ridge, and the foreground in shade below ShadeTop.
@@ -143,12 +158,14 @@
   % A flat block-in: one colour per thing, with the light already in it
   % (sun low from the west: the west faces lit, the east faces in shadow),
   % so the image model has the values as well as the shapes.
-  0 1 63 { /si exch def                                % the sky, in 64 bands
-    si 63 div /t exch def
-    [ 0.93 t mul 0.16 1 t sub mul add  0.84 t mul 0.36 1 t sub mul add
-      0.72 t mul 0.68 1 t sub mul add ] rgb
-    0 PH si 1 add PH 380 sub 64 div mul sub PW PH 380 sub 64 div 1 add rectfill
-  } for
+  % the sky: one smooth axial shading, deep blue at the top to warm and
+  % pale at the ridge (the committed reference was sent with this sky in 64
+  % flat bands, which is what its banding was; the shapes are unchanged)
+  gsave 0 380 PW PH 380 sub rectclip
+    << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 PH 0 380]
+       /Function << /FunctionType 2 /Domain [0 1] /N 1
+                    /C0 [ 0.16 0.36 0.68 ] /C1 [ 0.93 0.84 0.72 ] >> >> shfill
+  grestore
   [ 0.31 0.31 0.36 ] rgb ridgepath fill                % rock in shadow
   gsave ridgepath clip
     [ 0.72 0.55 0.42 ] rgb litmora fill litcalderan fill
@@ -301,9 +318,11 @@ PW 2 div 748 moveto Season /Autumn eq { (VAL BRENNA \267 THE SUMMIT TRAIL \267 A
   gsave 0 setgray 0.5 setalpha sh_x 0.7 add sh_y 0.7 sub moveto sh_p grestore
   wht sh_x sh_y moveto sh_p } def
 /leader { % label-x label-y point-x point-y -> a white leader line
+  % over a dark halo wide and dense enough to hold against the pale sky by
+  % the ridge, where the leader to the col is crossing the brightest band
   newpath moveto lineto
-  gsave 0 setgray 0.4 setalpha 2.4 setlinewidth stroke grestore
-  wht 0.9 setlinewidth stroke } def
+  gsave 0.05 0.07 0.16 setrgbcolor 0.6 setalpha 3.4 setlinewidth stroke grestore
+  wht 1.2 setlinewidth stroke } def
 /dot { % x y r -> a white dot with a dark ring
   /dr exch def 2 copy newpath dr 0 360 arc 0.1 setgray fill
   newpath dr 0.62 mul 0 360 arc wht fill } def
@@ -313,14 +332,15 @@ PW 2 div 748 moveto Season /Autumn eq { (VAL BRENNA \267 THE SUMMIT TRAIL \267 A
   /Sans-P 11 font lx ly { lh la } shadowed } def
 
 % The route: up the trail to the hut, the zigzags to the col, then the
-% ridge itself to the summit, all on the coordinates the picture was
-% made from. It stops where the foreground's shade begins.
+% ridge itself to the summit. The trail below the hut and the ridge are on
+% the coordinates the picture was made from; the zigzags are RouteHigh.
+% It stops where the foreground's shade begins.
 /ridgeroute { % the ridge points from the col to the summit
   ColX ColY moveto
   0 2 Ridge length 2 sub { /ri exch def
     Ridge ri get dup ColX gt exch CalderanX le and {
       Ridge ri get Ridge ri 1 add get lineto } if } for } def
-/routepath { newpath TrailLow smooth TrailHigh pts ridgeroute } def
+/routepath { newpath TrailLow smooth RouteHigh pts ridgeroute } def
 gsave
   0 ShadeTop 8 add PW PH rectclip
   0 setlinecap 1 setlinejoin
@@ -400,7 +420,10 @@ SX 160 (THE TRAIL) head
 143 (Distance, one way) Distance fmt1 ( km) cat stat
 129 (Ascent) Ascent cvi meters stat
 115 (Walking time up) Minutes 60 idiv str ( h ) cat Minutes 60 mod 100 add str 1 2 getinterval cat ( min) cat stat
-101 (Hut open) (20 June \200 20 September) stat
+% the hut keeps summer hours: the autumn photograph is mid-October, after
+% it has shut for the winter
+Season /Autumn eq { 101 (Hut) (closed until 20 June) stat }
+                  { 101 (Hut open) (20 June \200 20 September) stat } ifelse
 
 SX 78 (BUS 412) head
 wht /Sans-P 10 font
