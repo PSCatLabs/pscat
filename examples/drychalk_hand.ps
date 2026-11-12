@@ -1,0 +1,92 @@
+%!PS-Adobe-3.0
+%%Title: drychalk hand and sign lettering -- /Hand, /Corners, dctext and dcleader (issues #1049, #1054)
+%%BoundingBox: 0 0 720 900
+%%EndComments
+
+% Specimen for drychalk's freehand line and its sign lettering. Top to
+% bottom:
+%
+%   ruled    the issue's repro: a box, a diagonal and a circle drawn with
+%            dcchalk exactly as the path says (/Hand 0, the default)
+%   hand     the same paths with /Hand 0.8 and /Corners /separate: the box
+%            is four strokes that overshoot at the corners, the lines drift,
+%            the circle closes a little past its start
+%   sign     a cafe menu: a title fitted to a width (dctext /Fit), centred
+%            and right-aligned lines (dctext /Align), and price rows with
+%            dotted leaders (dcleader) whose dots line up from row to row
+%
+%   pscat --dpi 144 --png chalk_hand_specimen.png examples/drychalk_hand.ps
+%
+% The wood frame, nails and chalk doodles a real sign has are the piece's
+% own drawing, not library calls (#1054's triage): the frame here is
+% plain dcchalk with /Hand.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+
+<< /PageSize [720 900] >> setpagedevice
+0.13 0.11 0.09 setrgbcolor 0 0 720 900 rectfill
+
+30 30 660 840 << /Surface /slate /Seed 7 /Swipes 4 /Ledge 14 >> dcboard
+
+% --- ruled and hand-drawn: the same three paths -------------------------
+
+% hand x0 -   (a box, a diagonal and a circle in the 300 x 220 panel at x0)
+/paths {
+    /px exch def /ho exch def
+    newpath px 600 moveto px 300 add 600 lineto px 300 add 820 lineto
+        px 820 lineto closepath
+    << /Width 2.4 /Hand ho /Corners ho 0 gt { /separate } { /joined } ifelse >> dcchalk
+    newpath px 25 add 625 moveto px 275 add 765 lineto
+    << /Width 2.4 /Hand ho >> dcchalk
+    newpath px 150 add 710 55 0 360 arc closepath
+    << /Width 2.4 /Hand ho >> dcchalk
+} def
+
+/white dcchalkcolor
+0 50 paths
+0.8 370 paths
+/yellow dcchalkcolor
+(ruled: /Hand 0) 200 575 << /Size 18 /Align /center /Seed 3 >> dctext
+(by hand: /Hand 0.8) 520 575 << /Size 18 /Align /center /Seed 4 >> dctext
+
+% --- a sign -------------------------------------------------------------
+
+/white dcchalkcolor
+% the frame: four hand-drawn strokes
+newpath 70 70 moveto 650 70 lineto 650 540 lineto 70 540 lineto closepath
+<< /Width 2 /Hand 0.7 /Corners /separate /Touch 0.6 >> dcchalk
+
+(Corner Cafe) 360 470 << /Align /center /Fit 380 /Hand 0.6 /Seed 11 >> dctext
+newpath 200 452 moveto 520 455 lineto << /Tilt 80 /Side 6 /Hand 0.8 >> dcchalk
+
+/pink dcchalkcolor
+(Coffee) 110 405 << /Size 26 /Seed 21 >> dctext
+/white dcchalkcolor
+/row 370 def
+% (name) (price) -   (one menu row, the rows stepping down)
+/item {
+    110 610 row << /Size 20 >> dcleader
+    /row row 32 sub def
+} def
+(Espresso) (2.80) item
+(Flat white) (3.60) item
+(Cappuccino) (3.80) item
+(Hot chocolate) (4.20) item
+
+/row row 18 sub def
+/blue dcchalkcolor
+(Pastries) 110 row << /Size 26 /Seed 22 >> dctext
+/row row 35 sub def
+/white dcchalkcolor
+(Croissant) (2.40) item
+(Cinnamon roll) (3.10) item
+
+/yellow dcchalkcolor
+(baked fresh every morning) 610 92 << /Size 16 /Align /right /Slant 10 /Seed 31 >> dctext
+
+showpage

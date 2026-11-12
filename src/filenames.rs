@@ -51,6 +51,10 @@ pub fn matching_names(
     if roots.is_some_and(|r| r.check_name(dir).is_err()) {
         return Ok(Vec::new());
     }
+    // Confined listings check a directory, read it and admit each entry in
+    // turn; a band's `renamefile` must not swap one in between (see
+    // `write_roots::lock_entries`).
+    let _entries = roots.map(|_| crate::write_roots::lock_entries());
     let mut found = std::collections::BTreeSet::new();
     // Every entry looked at goes through here, skipped ones as `None`, so
     // each one is polled.

@@ -280,3 +280,161 @@ fn ghostscript_builds_the_same_path_from_the_same_seed() {
         );
     }
 }
+
+/// Issue #1051's specimen: the accented Latin letters in test words, from
+/// Latin-1 byte strings, on a chalk slate, and every new letter once.
+#[test]
+fn the_accents_specimen_renders_with_ink_and_a_clean_stack() {
+    let src = std::fs::read("examples/strokeglyphs_accents.ps").expect("specimen present");
+    let mut it = Interp::with_page(900, 1180).expect("page");
+    it.run_source(&src)
+        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+    assert!(it.operand_stack().is_empty(), "specimen leaked operands");
+    assert!(ink_count(&it) > 20_000, "specimen drew too little ink");
+}
+
+/// The code points #1051 covers: every letter of Latin-1 (U+00C0-00FF
+/// but × and ÷, which were already there) and Latin Extended-A
+/// (U+0100-017F), and the Romanian comma-below letters U+0218-021B.
+fn latin_letters() -> Vec<u32> {
+    (0xC0..=0x17F)
+        .filter(|cp| *cp != 0xD7 && *cp != 0xF7)
+        .chain(0x218..=0x21B)
+        .collect()
+}
+
+/// #1051: every accented letter draws from a UTF-8 string, and every one
+/// up to U+00FF also from its single Latin-1 byte, where each used to
+/// raise `sg-missing-glyph:<char>`.
+#[test]
+fn every_latin_letter_draws_from_utf8_and_from_latin1() {
+    let mut it = Interp::with_page(300, 300).expect("page");
+    load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
+    for cp in latin_letters() {
+        let ch = char::from_u32(cp).expect("a char");
+        // currentpoint raises nocurrentpoint when the glyph added no path
+        run(
+            &mut it,
+            &format!("newpath ({ch}) 100 100 << /Size 80 /Jitter 0 >> sgpath currentpoint clear"),
+        );
+        if cp <= 0xFF {
+            run(
+                &mut it,
+                &format!(
+                    "newpath (a\\{cp:03o}) << /Size 80 >> sgwidth (a{ch}) << /Size 80 >> sgwidth \
+                     ne {{ latin1-width-differs }} if \
+                     (\\{cp:03o}) 100 100 << /Size 80 /Jitter 0 >> sgpath currentpoint clear"
+                ),
+            );
+        }
+        assert!(
+            it.operand_stack().is_empty(),
+            "U+{cp:04X} left operands on the stack"
+        );
+    }
+}
+
+/// #1051's convention: a Latin-1 byte string draws exactly the path its
+/// UTF-8 twin does under the same seed, coordinate for coordinate.
+#[test]
+fn a_latin1_string_draws_the_same_path_as_its_utf8_twin() {
+    let mut it = Interp::new();
+    load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
+    let flat = |text: &str| {
+        format!(
+            "newpath ({text}) 10 20 << /Seed 9 /Slant 6 >> sgpath \
+             [ {{ }} {{ }} {{ }} {{ }} pathforall ]"
+        )
+    };
+    run(
+        &mut it,
+        &format!(
+            "{} {} 2 copy length exch length eq \
+             {{ true 0 1 3 index length 1 sub {{ 3 index 1 index get 3 index 3 -1 roll get \
+                eq and }} for }} {{ false }} ifelse 3 1 roll pop pop",
+            flat("crème brûlée, naïve Zoë"),
+            flat("cr\\350me br\\373l\\351e, na\\357ve Zo\\353"),
+        ),
+    );
+    let stack = it.operand_stack();
+    assert_eq!(stack.len(), 1, "the comparison left one result");
+    assert_eq!(stack[0].repr(), "true", "the two paths differ");
+}
+
+/// Ghostscript builds the same accented path from the same seed, from a
+/// UTF-8 string and from a Latin-1 byte string alike.
+#[test]
+fn ghostscript_builds_the_same_accented_path() {
+    if !gs_available() {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let body = "newpath (Łódź Ångström ĳ ď) 10 20 << /Seed 9 /Slant 8 >> sgpath \
+                (caf\\351 \\337) 10 60 << /Seed 4 >> sgpath \
+                { } { } { } { } pathforall";
+    let probe = format!(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run {body} \
+         count {{ 1000 mul round cvi = }} repeat"
+    );
+    let gs = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNODISPLAY",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-q",
+            "-c",
+        ])
+        .arg(&probe)
+        .output()
+        .expect("run gs");
+    assert!(gs.status.success(), "gs probe failed");
+    let gs_nums: Vec<i64> = String::from_utf8_lossy(&gs.stdout)
+        .lines()
+        .map(|l| l.trim().parse().expect("an integer"))
+        .collect();
+
+    let mut it = Interp::new();
+    load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
+    run(
+        &mut it,
+        &format!("{body} count array astore {{ 1000 mul round cvi }} forall"),
+    );
+    let mut ours: Vec<i64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().parse().expect("an integer"))
+        .collect();
+    ours.reverse();
+    assert!(ours.len() > 100, "the probe path is suspiciously short");
+    assert_eq!(ours.len(), gs_nums.len(), "path lengths differ");
+    for (i, (a, b)) in ours.iter().zip(&gs_nums).enumerate() {
+        assert!(
+            (a - b).abs() <= 2,
+            "coordinate {i} differs: pscat {a} vs gs {b} (thousandths)"
+        );
+    }
+}
+
+/// #1051 left mathkit's input UTF-8 only. mathkit slices a character's
+/// bytes by its lead byte and asks `sgmetrics` for the name, so a Latin-1
+/// byte must still be refused there, not read as é while the two bytes
+/// after it vanish. A UTF-8 accented letter now lays out in `\text{}`.
+#[test]
+fn mathkit_refuses_latin1_bytes_and_draws_utf8_accents() {
+    let mut it = Interp::new();
+    load(
+        &mut it,
+        &["lib/handscript.ps", "lib/strokeglyphs.ps", "lib/mathkit.ps"],
+    );
+    run(
+        &mut it,
+        "newpath { (\\351ab) 0 0 << >> mkpath } stopped \
+         { $error /command get 40 string cvs (mk-unsupported-character:) anchorsearch \
+           { pop pop true } { pop false } ifelse } { false } ifelse \
+         newpath (\\\\text{caf\u{e9}}) 0 0 << /Seed 1 >> mkpath currentpoint pop pop",
+    );
+    let stack = it.operand_stack();
+    assert_eq!(stack.len(), 1, "the probe left one result");
+    assert_eq!(stack[0].repr(), "true", "mathkit accepted a Latin-1 byte");
+}

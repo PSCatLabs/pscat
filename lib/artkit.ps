@@ -32,6 +32,7 @@
 %             cx cy r ang (str) ctext | cx cy r (str) ctextctr
 %             pitch {x y ang t sp atend ...} walkpath (centerline sampler)
 %   shapes    cx cy r n ngon | cx cy r1 r2 n star | x y w h r rrect
+%             cx cy rx ry ellipse | ellipsen | a1 a2 ellipsearc | ...rot forms
 %   text      (s) cx y showctr | (s) w fitfont
 %   layout    x y w h cols rows {x y w h ...} grid
 %   scatter   x y w h screct | scpath -> region | x y region scin
@@ -53,7 +54,7 @@
 %             | x0 y0 r0 x1 y1 r1 [[rgb]...] radialsh | shdict gradfill
 %
 % Convention: helper names are lowercase and short; internal scratch
-% names carry two-letter prefixes (ad-, ap-, c2-, cp-, ct-, ef-, ep-,
+% names carry two-letter prefixes (ad-, ap-, c2-, cp-, ct-, ef-, el-, ep-,
 % g2-, gd-, gh-, gk-, ha-, hg-, ho-, hp-, hr-, ht-, hy-, ld-, ls-, n2-,
 % nf-, ni-, nl-, pt-, sc-, si-, sq-, tg-, tk-, wk-) — avoid redefining
 % those inside brush/draw procs.
@@ -597,6 +598,126 @@ end
     tkx tkr add tky tkr add tkr 180 270 arc
     closepath
 } bind def
+
+% --- ellipses (appended to the current path) -------------------------
+%
+% cx cy rx ry ellipse        closed ellipse, counterclockwise
+% cx cy rx ry ellipsen       closed ellipse, clockwise (cutouts)
+% cx cy rx ry a1 a2 ellipsearc   open elliptical arc, counterclockwise
+% cx cy rx ry a1 a2 ellipsearcn  the same, clockwise (as arcn is to arc)
+% Each also has a rotated form -- ellipserot, ellipsenrot, ellipsearcrot,
+% ellipsearcnrot -- that takes one more operand, rot (degrees, counter-
+% clockwise about the center), as the LAST operand: `cx cy rx ry rot
+% ellipserot`, `cx cy rx ry a1 a2 rot ellipsearcrot`. (A stack cannot
+% tell an optional operand from the next call's, hence separate names.)
+%
+% They only add to the current path: nothing is painted and the CTM is
+% left exactly as it was. The closed forms begin a new subpath at the
+% ellipse's start point (cx+rx, cy turned by rot), so a path already under
+% way gets no stray connecting line; the arc forms behave as arc and arcn
+% do, drawing a line from the current point to the arc's start when there
+% is one. The angles a1 and a2 are PARAMETRIC (the angle on the circle
+% that is stretched into the ellipse), so 90 is always the point
+% (cx, cy+ry), whatever the radii. That is the angle `arc` would take
+% after `scale`, and it is what keeps a1..a2 slices evenly spread. The
+% radii are magnitudes (a negative one is taken as its absolute value,
+% so it cannot flip the winding); a zero radius raises the guard
+% `ellipse-radii-must-be-nonzero`.
+%
+% The usual hand-written idiom wraps the arc in gsave/grestore, which
+% discards the very path it was building (grestore restores the path
+% too). These save and restore only the matrix, so the path survives.
+% The even-odd or nonzero fill of a ring is `ellipse` for the rim and
+% `ellipsen` for the hole: the opposite windings cancel under the nonzero
+% rule as well as the even-odd one.
+
+% Internal: cx cy rx ry rot {proc} -
+% Sets up the ellipse's transform (translate, rotate, scale in one
+% concat), runs proc in the unit-circle space, restores the matrix.
+% The operands are checked and the matrix is built BEFORE the CTM is
+% touched, so a bad operand raises with the caller's CTM intact; proc
+% (an arc with operands already checked) cannot raise.
+/elrun {
+    % each operand is checked as it sits on the stack, before it is bound
+    % to a name: a procedure bound to elcx would run when elcx is read
+    1 1 5 { index 0 add pop } for
+    /elproc exch def
+    /elrot exch def /elry exch abs def /elrx exch abs def
+    /elcy exch def /elcx exch def
+    elrx 0 eq elry 0 eq or { ellipse-radii-must-be-nonzero } if
+    [ elrx elrot cos mul  elrx elrot sin mul
+      elry elrot sin mul neg  elry elrot cos mul
+      elcx elcy ]
+    matrix currentmatrix exch concat
+    elproc
+    setmatrix
+} bind def
+
+/ellipserot {                                    % cx cy rx ry rot -
+    { 1 0 moveto 0 0 1 0 360 arc closepath } elrun
+} bind def
+/ellipsenrot {                                   % cx cy rx ry rot -
+    { 1 0 moveto 0 0 1 360 0 arcn closepath } elrun
+} bind def
+/ellipsearcrot {                                 % cx cy rx ry a1 a2 rot -
+    0 1 2 { index 0 add pop } for   % typecheck rot a2 a1 before binding them
+    /elrot exch def /ela2 exch def /ela1 exch def
+    elrot { 0 0 1 ela1 ela2 arc } elrun
+} bind def
+/ellipsearcnrot {                                % cx cy rx ry a1 a2 rot -
+    0 1 2 { index 0 add pop } for   % typecheck rot a2 a1 before binding them
+    /elrot exch def /ela2 exch def /ela1 exch def
+    elrot { 0 0 1 ela1 ela2 arcn } elrun
+} bind def
+/ellipse   { 0 ellipserot } bind def             % cx cy rx ry -
+/ellipsen  { 0 ellipsenrot } bind def            % cx cy rx ry -
+/ellipsearc  { 0 ellipsearcrot } bind def        % cx cy rx ry a1 a2 -
+/ellipsearcn { 0 ellipsearcnrot } bind def       % cx cy rx ry a1 a2 -
+
+% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/dev/SELFTEST.md).
+% The ellipse builders must leave the CTM exactly as they found it, on
+% the success path and when an operand is refused, because a scaled CTM
+% left behind would distort everything the caller draws next.
+%
+%%SelfTest: ellipse-builders-leave-the-ctm-as-they-found-it
+%   /tm1 matrix currentmatrix def
+%   { newpath 100 100 50 30 ellipse 100 100 20 10 ellipsen
+%     100 100 50 30 0 90 ellipsearc 100 100 50 30 90 0 ellipsearcn
+%     100 100 50 30 0 90 20 ellipsearcrot 100 100 50 30 0 90 20 ellipsearcnrot
+%     100 100 50 30 20 ellipserot 100 100 50 30 20 ellipsenrot
+%     /tm2 matrix currentmatrix def } (every builder runs) mustpass
+%   true 0 1 5 { dup tm1 exch get exch tm2 exch get eq and } for
+%   (the CTM is unchanged after every builder) mustbe
+%   { (a) 0 5 5 ellipse } /typecheck (a non-number operand is refused) mustfail
+%   /tran false def
+%   { { userdict /tran true put 0 } 0 20 10 ellipse } /typecheck (a procedure for cx is refused) mustfail
+%   { 0 0 20 10 { userdict /tran true put 0 } ellipserot } /typecheck (a procedure for rot is refused) mustfail
+%   { 0 0 20 10 { userdict /tran true put 0 } 90 ellipsearc } /typecheck (a procedure for an angle is refused) mustfail
+%   { 0 0 20 10 0 90 { userdict /tran true put 0 } ellipsearcnrot } /typecheck (a procedure for an arc's rot is refused) mustfail
+%   tran false eq (and none of the procedures ran) mustbe
+%   true 0 1 5 { dup tm1 exch get exch matrix currentmatrix exch get eq and } for
+%   (and the refused call left the CTM alone) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ellipse-bounds-and-guards
+%   { newpath 100 100 50 30 ellipse pathbbox
+%     /ey exch def /ex exch def /ly exch def /lx exch def
+%     lx 50 sub abs 0.01 lt ly 70 sub abs 0.01 lt and
+%     ex 150 sub abs 0.01 lt and ey 130 sub abs 0.01 lt and
+%     /tbb exch def } (bbox of a plain ellipse) mustpass
+%   tbb (an ellipse spans cx +- rx, cy +- ry) mustbe
+%   { newpath 0 0 50 10 90 ellipserot pathbbox
+%     /ey exch def /ex exch def /ly exch def /lx exch def
+%     lx 10 add abs 0.01 lt ly 50 add abs 0.01 lt and
+%     ex 10 sub abs 0.01 lt and ey 50 sub abs 0.01 lt and
+%     /tbb exch def } (bbox of a quarter-turned ellipse) mustpass
+%   tbb (rot 90 swaps the radii) mustbe
+%   { newpath 0 0 0 5 ellipse } /ellipse-radii-must-be-nonzero (a zero rx) mustguard
+%   { newpath 0 0 5 0 0 90 ellipsearc } /ellipse-radii-must-be-nonzero (a zero ry) mustguard
+%   { newpath 100 100 50 30 ellipse currentpoint /tcy exch def /tcx exch def } (current point) mustpass
+%   tcx 150 sub abs 0.01 lt tcy 100 sub abs 0.01 lt and
+%   (a closed ellipse leaves the current point at its start) mustbe
+%%EndSelfTest
 
 % --- text ------------------------------------------------------------
 

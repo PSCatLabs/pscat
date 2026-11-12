@@ -1135,8 +1135,18 @@
 %   % A coarse /Pitch keeps the deposit budget out of the way.
 %   { newpath 0 0 moveto 100000 0 lineto
 %     << /Touch 0.5 /Pitch 1000 /Bristles 2 >> pkdry }
-%   /pkdry-touch-area-exceeds-safety-limit
-%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%   /limitcheck
+%   (a 1e5pt stroke at /Touch 0.5) mustfail
+%
+%   % The error says which preset, what the limit is and how to get out, not
+%   % just that something is undefined (issue #1050).
+%   { { newpath 0 0 moveto 100000 0 lineto
+%       << /Touch 0.5 /Pitch 1000 /Bristles 2 >> pkdry } stopped pop
+%     $error /command get (pkdry: /Touch is limited to 60000 weave cells per stroke)
+%     anchorsearch { pop pop } { pkdry-touch-limit-message-missing } ifelse
+%     $error /command get (Drop /Touch) search { pop pop pop }
+%       { pkdry-touch-limit-fix-missing } ifelse }
+%   (the /Touch limit error names the preset, the limit and the fix) mustpass
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkdry grestore }
 %   (/Touch 0.5 with a canvas) mustpass
@@ -1172,7 +1182,7 @@
 % @param: /Jitter [points] Edge roughness, forwarded verbatim as each dash's own pkribbon Jitter; shares the Markov chain's random stream (default 0)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
 % @param: /ColorJitter [0..1] magnitude of small per-bristle color variation around the color active when pkdry is called (default 0.06)
-% @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
+% @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws. A stroke's /Touch catch may cover at most 60000 weave cells (about a 612pt square at the default /Weave 2.5, measured on the whole call's reach box, so a long diagonal counts its bounding box): past that it raises limitcheck with a message giving the limit, this stroke's reach and the fix (drop /Touch, split the stroke into separate strokes that each reach less, or set a coarser /Weave) (default unset)
 /pkdry {
     % Needs its options dict: with an empty stack the `exch def` below would
     % underflow and leave a name on the stack, naming no missing operand (#947).
@@ -1324,7 +1334,7 @@
             pbjitter abs add def
         [ pbraw { pop pbreach } pjstopbox ] /pbtouchbox exch def
         pbtouchbox aload pop pjcells pjbudget gt
-            { pkdry-touch-area-exceeds-safety-limit } if
+            { (pkdry) pbtouchbox pjtoucherr } if
     } if
 
     pbn 0 gt {
@@ -2480,8 +2490,18 @@
 %   % A coarse /Pitch and one lane keep the deposit budget out of the way.
 %   { newpath 0 0 moveto 100000 0 lineto
 %     << /Touch 0.5 /Pitch 1000 /Lanes 1 >> pktrowel }
-%   /pktrowel-touch-area-exceeds-safety-limit
-%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%   /limitcheck
+%   (a 1e5pt stroke at /Touch 0.5) mustfail
+%
+%   % The error says which preset, what the limit is and how to get out, not
+%   % just that something is undefined (issue #1050).
+%   { { newpath 0 0 moveto 100000 0 lineto
+%       << /Touch 0.5 /Pitch 1000 /Lanes 1 >> pktrowel } stopped pop
+%     $error /command get (pktrowel: /Touch is limited to 60000 weave cells per stroke)
+%     anchorsearch { pop pop } { pktrowel-touch-limit-message-missing } ifelse
+%     $error /command get (Drop /Touch) search { pop pop pop }
+%       { pktrowel-touch-limit-fix-missing } ifelse }
+%   (the /Touch limit error names the preset, the limit and the fix) mustpass
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pktrowel grestore }
 %   (/Touch 0.5 with a canvas) mustpass
@@ -2605,7 +2625,7 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the blade: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
-% @param: /Touch [0..1] How hard the blade presses into the shared canvas set by pkcanvas, which must be called first: below 1 the mark lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Takes no rand draws (default unset)
+% @param: /Touch [0..1] How hard the blade presses into the shared canvas set by pkcanvas, which must be called first: below 1 the mark lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Takes no rand draws. A stroke's /Touch catch may cover at most 60000 weave cells (about a 612pt square at the default /Weave 2.5, measured on the whole call's reach box, so a long diagonal counts its bounding box): past that it raises limitcheck with a message giving the limit, this stroke's reach and the fix (drop /Touch, split the stroke into separate strokes that each reach less, or set a coarser /Weave) (default unset)
 /pktrowel {
     % Needs its options dict: with an empty stack the `exch def` below would
     % underflow and leave a name on the stack, naming no missing operand (#947).
@@ -2705,7 +2725,7 @@
           { 6 get abs ptDrag 1 add mul ptPitch 0.5 mul add ptJitter abs add }
           pjstopbox ] /ptTouchBox exch def
         ptTouchBox aload pop pjcells pjbudget gt
-            { pktrowel-touch-area-exceeds-safety-limit } if
+            { (pktrowel) ptTouchBox pjtoucherr } if
     } if
     ptn 0 gt {
         gsave
@@ -3713,8 +3733,18 @@
 %   % A coarse /Pitch and two bristles keep the deposit budget out of the way.
 %   { newpath 0 0 moveto 100000 0 lineto
 %     << /Touch 0.5 /Pitch 1000 /Bristles 2 >> pkfan }
-%   /pkfan-touch-area-exceeds-safety-limit
-%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%   /limitcheck
+%   (a 1e5pt stroke at /Touch 0.5) mustfail
+%
+%   % The error says which preset, what the limit is and how to get out, not
+%   % just that something is undefined (issue #1050).
+%   { { newpath 0 0 moveto 100000 0 lineto
+%       << /Touch 0.5 /Pitch 1000 /Bristles 2 >> pkfan } stopped pop
+%     $error /command get (pkfan: /Touch is limited to 60000 weave cells per stroke)
+%     anchorsearch { pop pop } { pkfan-touch-limit-message-missing } ifelse
+%     $error /command get (Drop /Touch) search { pop pop pop }
+%       { pkfan-touch-limit-fix-missing } ifelse }
+%   (the /Touch limit error names the preset, the limit and the fix) mustpass
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkfan grestore }
 %   (/Touch 0.5 with a canvas) mustpass
@@ -3746,7 +3776,7 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
-% @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
+% @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws. A stroke's /Touch catch may cover at most 60000 weave cells (about a 612pt square at the default /Weave 2.5, measured on the whole call's reach box, so a long diagonal counts its bounding box): past that it raises limitcheck with a message giving the limit, this stroke's reach and the fix (drop /Touch, split the stroke into separate strokes that each reach less, or set a coarser /Weave) (default unset)
 /pkfan {
     % Needs its options dict: with an empty stack the `exch def` below would
     % underflow and leave a name on the stack, naming no missing operand (#947).
@@ -3852,7 +3882,7 @@
         def
         [ pfraw { pop pfreach } pjstopbox ] /pfTouchBox exch def
         pfTouchBox aload pop pjcells pjbudget gt
-            { pkfan-touch-area-exceeds-safety-limit } if
+            { (pkfan) pfTouchBox pjtoucherr } if
     } if
     pfn 0 gt {
         gsave
@@ -4361,8 +4391,18 @@
 %   % A coarse /Pitch and one striation keep the deposit budget out of the way.
 %   { newpath 0 0 moveto 100000 0 lineto
 %     << /Touch 0.5 /Pitch 1000 /Grain 1 >> pkbroad }
-%   /pkbroad-touch-area-exceeds-safety-limit
-%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%   /limitcheck
+%   (a 1e5pt stroke at /Touch 0.5) mustfail
+%
+%   % The error says which preset, what the limit is and how to get out, not
+%   % just that something is undefined (issue #1050).
+%   { { newpath 0 0 moveto 100000 0 lineto
+%       << /Touch 0.5 /Pitch 1000 /Grain 1 >> pkbroad } stopped pop
+%     $error /command get (pkbroad: /Touch is limited to 60000 weave cells per stroke)
+%     anchorsearch { pop pop } { pkbroad-touch-limit-message-missing } ifelse
+%     $error /command get (Drop /Touch) search { pop pop pop }
+%       { pkbroad-touch-limit-fix-missing } ifelse }
+%   (the /Touch limit error names the preset, the limit and the fix) mustpass
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkbroad grestore }
 %   (/Touch 0.5 with a canvas) mustpass
@@ -4389,7 +4429,7 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
-% @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
+% @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws. A stroke's /Touch catch may cover at most 60000 weave cells (about a 612pt square at the default /Weave 2.5, measured on the whole call's reach box, so a long diagonal counts its bounding box): past that it raises limitcheck with a message giving the limit, this stroke's reach and the fix (drop /Touch, split the stroke into separate strokes that each reach less, or set a coarser /Weave) (default unset)
 /pkbroad {
     % Needs its options dict: with an empty stack the `exch def` below would
     % underflow and leave a name on the stack, naming no missing operand (#947).
@@ -4460,7 +4500,7 @@
         /pmreach pmWidth 0.5 mul pmWidth 0.06 mul pmEdge mul add pmPitch add def
         [ pmraw { pop pmreach } pjstopbox ] /pmTouchBox exch def
         pmTouchBox aload pop pjcells pjbudget gt
-            { pkbroad-touch-area-exceeds-safety-limit } if
+            { (pkbroad) pmTouchBox pjtoucherr } if
     } if
     pmn 0 gt {
         gsave
@@ -4986,8 +5026,18 @@
 %   % A coarse /Pitch keeps the deposit budget out of the way.
 %   { newpath 0 0 moveto 100000 0 lineto
 %     << /Touch 0.5 /Pitch 1000 >> pkliner }
-%   /pkliner-touch-area-exceeds-safety-limit
-%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%   /limitcheck
+%   (a 1e5pt stroke at /Touch 0.5) mustfail
+%
+%   % The error says which preset, what the limit is and how to get out, not
+%   % just that something is undefined (issue #1050).
+%   { { newpath 0 0 moveto 100000 0 lineto
+%       << /Touch 0.5 /Pitch 1000 >> pkliner } stopped pop
+%     $error /command get (pkliner: /Touch is limited to 60000 weave cells per stroke)
+%     anchorsearch { pop pop } { pkliner-touch-limit-message-missing } ifelse
+%     $error /command get (Drop /Touch) search { pop pop pop }
+%       { pkliner-touch-limit-fix-missing } ifelse }
+%   (the /Touch limit error names the preset, the limit and the fix) mustpass
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkliner grestore }
 %   (/Touch 0.5 with a canvas) mustpass
@@ -5006,7 +5056,7 @@
 % @param: /Waver [multiple of /Width] Lateral wander of the loaded tip, in multiples of Width, 0..10; grows toward the tip; 0 is a mechanically straight line, and past about 2 the mark reads as near the caller's path rather than on it (default 0.8)
 % @param: /Pitch [points] walkpath sampling pitch for the centerline pass; must be > 0 (default Width*0.8, capped at 3 and floored at 0.5)
 % @param: /ColorJitter [0..1] one small tint shift per subpath -- one dip of the brush is one tint (default 0.05)
-% @param: /Touch [0..1] How hard the tip presses into the shared canvas set by pkcanvas, which must be called first: below 1 the line lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
+% @param: /Touch [0..1] How hard the tip presses into the shared canvas set by pkcanvas, which must be called first: below 1 the line lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws. A stroke's /Touch catch may cover at most 60000 weave cells (about a 612pt square at the default /Weave 2.5, measured on the whole call's reach box, so a long diagonal counts its bounding box): past that it raises limitcheck with a message giving the limit, this stroke's reach and the fix (drop /Touch, split the stroke into separate strokes that each reach less, or set a coarser /Weave) (default unset)
 /pkliner {
     % Needs its options dict: with an empty stack the `exch def` below would
     % underflow and leave a name on the stack, naming no missing operand (#947).
@@ -5091,7 +5141,7 @@
         [ pqraw { 5 get 3 and 3 eq { pqWidth 0.5 mul } { pqreach } ifelse }
           pjstopbox ] /pqTouchBox exch def
         pqTouchBox aload pop pjcells pjbudget gt
-            { pkliner-touch-area-exceeds-safety-limit } if
+            { (pkliner) pqTouchBox pjtoucherr } if
     } if
 
     pqn 0 gt {
@@ -11064,9 +11114,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % It clips to every knuckle the paint reaches at that touch. Before building
 % anything the preset checks `llx lly urx ury pjcells` against `pjbudget`
 % (60000 cells, about a 600pt square at the default weave once the
-% knuckle margin is added) and raises its own
-% `pkX-touch-area-exceeds-safety-limit`; `pjcatch` repeats the check as a
-% backstop under its own name. Both read one range computation (`pjrange`),
+% knuckle margin is added) and raises `limitcheck` through `pjtoucherr`,
+% with a message naming the preset, the limit, the stroke's own reach and
+% the fix (issue #1050); `pjcatch` repeats the check as a backstop under
+% its own name. Both read one range computation (`pjrange`),
 % so the pre-check and the catch it guards can never disagree.
 %
 % Determinism. The surface takes no `rand` and no `srand`: `pkcanvas` shuffles
@@ -11241,6 +11292,51 @@ systemdict /setalpha known /pwhasalpha exch def
     /pjwf pjwf dup mul 3 2 pjwf mul sub mul def
     pjwt pjwq pjws pjhash pjwt pjwq 1 add pjws pjhash pjwf pjlerp
     0.5 sub 0.7 mul
+} bind def
+
+% str-array -> str   (the strings of an array, joined)
+% @internal
+/pjjoin {
+    /pjja exch def
+    0 pjja { length add } forall string /pjjs exch def
+    /pjjn 0 def
+    pjja { dup length /pjjl exch def pjjs pjjn 3 -1 roll putinterval
+           /pjjn pjjn pjjl add def } forall
+    pjjs
+} bind def
+
+% (preset) box -   (never returns: raises `limitcheck`)
+% The error a preset raises when its /Touch catch box is over `pjbudget`
+% cells. A resource limit, not malformed input, so it is the PLRM's own
+% `limitcheck` with the message as the offending object (the one place in
+% the file that is not a self-documenting undefined name: a name cannot
+% carry this stroke's size). It states the limit, this stroke's reach in
+% cells and in points, and the ways out. The text has no `;` or `]`, which
+% pscat's own error report and the MCP server split on. A box so far off
+% the page that pjcells could not count it (`pjhuge`) says so instead of
+% giving a number. pscat integers are 64-bit, so each integer gets 24 bytes
+% (20 digits and a sign fit); the weave is any real and gets 40.
+% @internal
+/pjtoucherr {
+    /pjebox exch def /pjename exch def
+    pjebox aload pop pjcells /pjecells exch def
+    /pjew userdict /pjW get def
+    pjhuge {
+        [ pjename (: /Touch is limited to ) pjbudget 24 string cvs
+          ( weave cells per stroke, and this stroke reaches far beyond that \(past 1e9 cells\). )
+          (Drop /Touch from it, split it into separate strokes that each reach less, or set a coarser /Weave in pkcanvas) ]
+    } {
+        [ pjename (: /Touch is limited to ) pjbudget 24 string cvs
+          ( weave cells per stroke \(about ) pjbudget sqrt pjew mul cvi 24 string cvs
+          ( x ) pjbudget sqrt pjew mul cvi 24 string cvs
+          ( pt at /Weave ) pjew 40 string cvs
+          (\) and this stroke reaches ) pjecells cvi 24 string cvs
+          ( cells \(about ) pji1 pji0 sub 1 add pjew mul cvi 24 string cvs
+          ( x ) pjj1 pjj0 sub 1 add pjew mul cvi 24 string cvs
+          ( pt\). Drop /Touch from it, split it into separate strokes that each reach less, )
+          (or set a coarser /Weave in pkcanvas) ]
+    } ifelse
+    pjjoin errordict /limitcheck get exec
 } bind def
 
 % llx lly urx ury -   (sets pji0 pjj0 pji1 pjj1 and pjhuge)

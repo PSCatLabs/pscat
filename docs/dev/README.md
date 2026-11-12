@@ -27,6 +27,7 @@ on it with them. For conventions start with [`AGENTS.md`](../../AGENTS.md) and
 | [`GS_CHECK_INVENTORY.md`](GS_CHECK_INVENTORY.md) | Every Ghostscript cross-check test, and what each one asserts. |
 | [`DOCS_PLAN.md`](DOCS_PLAN.md) | How the documentation is organized, and why. |
 | [`TASTE.md`](TASTE.md) | The owner's taste in renders: what the perceptual reviewer checks a visible change against. |
+| [`site/llms.txt`](../../site/llms.txt) | The file AI assistants read to find pscat (llmstxt.org format), published at `/llms.txt`. Add each new `docs/guides/*.md` guide to it: `scripts/check_site_links.py` fails the site build when a guide is missing or a link is dead. |
 | [`DISPATCH.md`](DISPATCH.md) | Running many issues with agents: waves, the concurrency cap, file lanes, follow-ups. |
 | [`review-log/`](review-log/README.md) | Visible changes merged after a perceptual review, for the owner's read before each release. |
 | [`../STABILITY.md`](../STABILITY.md) | Which surfaces are stable, experimental or internal, pre-1.0 semver and the deprecation rule. |
