@@ -29,8 +29,10 @@ So vector math matters for ray-marched pieces, not for fractal_clouds.
   every lane the vector code did against `fmath`, over 4M random inputs per
   function plus each range boundary, and pass on arm64 and as x86_64 under
   Rosetta. So this is not the approximate mode the issue allowed, and no
-  error bound needs documenting. It is still opt-in, until it has had more
-  use and review.
+  error bound needs documenting. It was opt-in at first. On 2026-11-12 the
+  owner made it the default, with `PSCAT_KERNEL_MATH=exact` (or `/exact
+  .kernelmath`) to turn it off. The four kernel gallery stills stayed
+  byte-identical, and Mandelbulb went from 89.2G to 72.8G cycles.
 - **Cold lanes.** Lanes libm special-cases go to the scalar code, which also
   decides `0 0 atan`'s error:
   - NaN and infinities;

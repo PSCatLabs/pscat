@@ -457,7 +457,8 @@ pub struct Interp {
     /// How `kernelimage` runs its procedure (`.kernelmode`, #742).
     pub(crate) kernel_mode: crate::kernel::KernelMode,
     /// `.kernelmath /fast` (#1100): `sin`, `cos` and `atan` vectorised
-    /// in `kernelimage`'s compiled kernels.
+    /// in `kernelimage`'s compiled kernels. On unless `PSCAT_KERNEL_MATH`
+    /// is `exact` ([`crate::kernel::default_fast_math`]).
     pub(crate) kernel_fast_math: bool,
     /// `.kernelshare`: when the kernel compiler shares procedure bodies.
     pub(crate) kernel_share: crate::kernel::compile::ShareMode,
@@ -691,7 +692,7 @@ impl Interp {
             max_page_pixels: None,
             page_device_notes: std::collections::HashSet::new(),
             kernel_mode: crate::kernel::KernelMode::Auto,
-            kernel_fast_math: false,
+            kernel_fast_math: crate::kernel::default_fast_math(),
             kernel_share: crate::kernel::compile::ShareMode::Auto,
             kernel_caps: crate::kernel::compile::DEFAULT_CAPS,
             kernel_notes: std::collections::HashSet::new(),

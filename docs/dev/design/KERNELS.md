@@ -474,8 +474,9 @@ The CPU executor:
   kernel function, and the v3 copies use `ymm` registers throughout.
 - **AVX-512 is not a tier.** Its target features need Rust 1.89, above the
   1.88 `rust-version`.
-- **Vector math (`.kernelmath /fast`, `kernel/vmath.rs`).** `sin`, `cos`
-  and `atan` are libm's algorithms:
+- **Vector math (`.kernelmath /fast`, `kernel/vmath.rs`).** The default
+  since 2026-11-12; `PSCAT_KERNEL_MATH=exact` starts a run in `/exact`
+  (`default_fast_math`). `sin`, `cos` and `atan` are libm's algorithms:
   - `k_sin`, `k_cos`;
   - `rem_pio2`'s medium and small-multiple cases;
   - `atan`, `atan2`.

@@ -3132,6 +3132,56 @@ fn the_math_mode_is_per_call_and_kernelarray_is_always_exact() {
     );
 }
 
+/// The math mode a CLI render of `src` ran in, with `PSCAT_KERNEL_MATH`
+/// set to `env` (or unset): `PSCAT_KERNEL_TIMING`'s batches line.
+fn cli_math(src: &str, env: Option<&str>) -> String {
+    let dir = common::scratch_dir("kernels");
+    let ps = dir.join("math.ps");
+    std::fs::write(&ps, src).expect("write");
+    let mut cmd = std::process::Command::new(BIN);
+    cmd.args(["--page", "64x48", "--png"])
+        .arg(dir.join("math.png"))
+        .arg(&ps)
+        .env("PSCAT_KERNEL_TIMING", "1")
+        .env_remove("PSCAT_KERNEL_MATH");
+    if let Some(v) = env {
+        cmd.env("PSCAT_KERNEL_MATH", v);
+    }
+    let out = common::wait_output(
+        cmd.stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn"),
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    let line = err
+        .lines()
+        .find(|l| l.contains("kernel batches"))
+        .unwrap_or("no batches line");
+    ["fast math", "exact math"]
+        .into_iter()
+        .find(|m| line.contains(m))
+        .unwrap_or(line)
+        .to_string()
+}
+
+/// `/fast` is the default (#1100); `PSCAT_KERNEL_MATH=exact` starts in
+/// `/exact`, and a program's own `.kernelmath` wins over either.
+#[test]
+fn fast_math_is_the_default_and_the_environment_can_turn_it_off() {
+    let trig = "%!PS
+gsave 64 48 scale 64 48 [64 0 0 -48 0 48]
+{ /j exch def /i exch def i 0.37 mul j add sin j 7.1 mul i sub cos i 3 add j 2 add atan 360 div }
+bind 3 kernelimage grestore showpage
+";
+    assert_eq!(cli_math(trig, None), "fast math");
+    assert_eq!(cli_math(trig, Some("fast")), "fast math");
+    assert_eq!(cli_math(trig, Some("exact")), "exact math");
+    let own = format!("/fast .kernelmath\n{trig}");
+    assert_eq!(cli_math(&own, Some("exact")), "fast math");
+    let own = format!("/exact .kernelmath\n{trig}");
+    assert_eq!(cli_math(&own, None), "exact math");
+}
+
 #[test]
 fn kernelmath_checks_its_operand() {
     let mut it = Interp::new();
@@ -3202,6 +3252,7 @@ gsave 200 130 scale 200 130 [200 0 0 -130 0 130] { pixel pop } bind 3 kernelimag
         SCENE.to_string(),
         trig.to_string(),
         format!("/fast .kernelmath\n{trig}"),
+        format!("/exact .kernelmath\n{trig}"),
     ] {
         let base = cli_png_isa(&src, &[], Some("3"), Some("base"));
         for isa in ["v2", "v3"] {
