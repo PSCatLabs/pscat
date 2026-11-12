@@ -195,6 +195,17 @@ same convention as the other pscat libraries:
 
 `pscat --pstack-on-error` shows the stack at the failure.
 
+## Bending shapes
+
+`lib/warp.ps`, loaded after the two libraries above, reads a path back as
+data and moves every point, which bends shapes that PostScript's own affine
+transforms cannot (lens, swirl, ripple, polar, perspective). `wp-run` runs
+an unmodified program with its fills, strokes and text drawn through a warp:
+`(gallery/golden_bloom.ps) 350 350 300 0.4 wp-lens 3 wp-run`. The gallery's
+*Programs about programs* pieces use it, and
+[WARP.md](../functional-postscript/WARP.md) has the warps, the path
+transforms and the limits.
+
 ## Further reading
 
 The library was built as an experiment, and its design notes are kept in
