@@ -16,6 +16,7 @@ path. USERPROFILE, LOCALAPPDATA, PATH and the cache are temp dirs, so a real
 pscat on this machine is not seen. The Unix tests are
 test_plugin_launcher.py; these mirror them.
 """
+import ctypes
 import functools
 import hashlib
 import http.server
@@ -425,6 +426,23 @@ class WinLauncher(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("a drive root", r.stderr)
         self.assertEqual(self.served(r), "")  # the working directory, which is neither
+
+    def test_an_out_root_the_console_cannot_spell_goes_as_its_short_name(self):
+        # A directory outside every environment-variable root, with a letter
+        # outside the console code page: it can only travel as its 8.3 name,
+        # looked up with GetFolder (GetFile throws on a directory).
+        root = self.path("outside \u0141\\out")
+        os.makedirs(root)
+        buf = ctypes.create_unicode_buffer(1024)
+        ctypes.windll.kernel32.GetShortPathNameW(root, buf, 1024)
+        if not buf.value or not buf.value.isascii():
+            self.skipTest("8.3 short names are off on this volume")
+        env = self.env([self.fake_server()])
+        r = self.run_cmd(f"--plugin-out-root={root}", env=env)
+        args = self.served(r)
+        self.assertTrue(args.startswith('--out-root "') and args.endswith('"'), args)
+        self.assertNotIn("passing over", r.stderr)
+        self.assertNotIn("\u0141", args)
 
     def test_other_arguments_beside_the_plugin_options_are_refused(self):
         env = self.env([self.fake_server()])

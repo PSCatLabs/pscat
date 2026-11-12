@@ -368,8 +368,10 @@ function Ensure {
 # say). So the user-specific start of a path travels as the name of an
 # environment variable the caller already holds in Unicode, and only an
 # ASCII rest as text. Any other path goes as itself if the code page can
-# spell it, else as its 8.3 short name (ASCII). '' if neither works.
-function ExeHandoff([string]$Path) {
+# spell it, else as its 8.3 short name (ASCII). '' if neither works. IsDir
+# says $Path is a directory (an output root): FileSystemObject looks those up
+# with GetFolder, and GetFile throws on them.
+function ExeHandoff([string]$Path, [bool]$IsDir = $false) {
     foreach ($var in 'PSCAT_CACHE_DIR', 'LOCALAPPDATA', 'APPDATA', 'CARGO_HOME', 'USERPROFILE') {
         $base = [Environment]::GetEnvironmentVariable($var)
         if (-not $base) { continue }
@@ -385,7 +387,8 @@ function ExeHandoff([string]$Path) {
     $enc = [Console]::OutputEncoding
     if ($enc.GetString($enc.GetBytes($Path)) -eq $Path) { return "-|$Path" }
     try {
-        $short = (New-Object -ComObject Scripting.FileSystemObject).GetFile($Path).ShortPath
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $short = if ($IsDir) { $fso.GetFolder($Path).ShortPath } else { $fso.GetFile($Path).ShortPath }
         if ($short -and $enc.GetString($enc.GetBytes($short)) -eq $short) { return "-|$short" }
     } catch { }
     return ''
@@ -515,7 +518,7 @@ function ChooseOutRoot([bool]$Handoff) {
         $d = UsableRoot $c[0] $c[1]
         if (-not $d) { continue }
         if (-not $Handoff) { return $d }
-        $h = ExeHandoff $d
+        $h = ExeHandoff $d $true
         if ($h) { return $h }
         Say "passing over the output directory ${d}: cmd.exe cannot be given its path (letters outside the console code page, and no 8.3 short name)"
     }
@@ -523,7 +526,7 @@ function ChooseOutRoot([bool]$Handoff) {
     $d = DefaultRoot
     if ($d) {
         if (-not $Handoff) { return $d }
-        $h = ExeHandoff $d
+        $h = ExeHandoff $d $true
         if ($h) { return $h }
         Say "cmd.exe cannot be given the path $d; set APPDATA to a folder whose path has only ASCII letters, or out-root in $ConfFile"
     }
