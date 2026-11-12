@@ -6,7 +6,7 @@ session_016y8NtToNBqdyScG3LMGriu.
 
 ## Where things stand (end of 2026-11-11)
 
-- **The epic.** `feature/compute-kernels` is at `4953e28` and pushed. It is
+- **The epic.** `feature/compute-kernels` is at `6b7b5e5` and pushed. It is
   PR PSCatLabs/pscat#1061 (open, owner-merge, because it touches
   `Cargo.toml`). The ci, release and other workflows on `8df943d` were
   green, and the release dry run on `4953e28` is too.
@@ -36,16 +36,25 @@ session_016y8NtToNBqdyScG3LMGriu.
   - x86 NaN payloads. `kernelarray` now stores every NaN as the quiet NaN.
 
   A Codex review of the fix diff was clean.
-- **The test release for fractal_clouds** is CI run 43108195586 (artifacts
-  expire 2027-02-09), manifest commit `a50dcd6`.
-  - aarch64-apple-darwin tar.gz SHA-256: `e3a56280…7e2d`.
-  - Its binary's SHA-256 is `ddb75c5d…1382`, extracted to
-    `kernels/ci-43108195586/x/`.
-  - The local build of `4953e28` is `kernels/build3-4953e28/pscat`
-    (`c9a928c1…ca4a`).
-  - It was sent to fractal_clouds on 2026-11-11, and the **validation is
-    pending**. fc main stays at `3c64dcb` until then. After validation, the
-    owner wants the gallery switched to the native noise operators (fc#16).
+- **Test releases for fractal_clouds:**
+  - **The first** was CI run 43108195586 (4953e28, manifest `a50dcd6`).
+    fractal_clouds validated its correctness on every scene and size (fc#117
+    comment 6809200666, pscat#1102 comment 6809204375). Its #145 bakes
+    through `kernelarrays` are bit-identical to the loops, and the 512²
+    sample went from 4.3–8.6 s to 21–76 ms.
+  - **It found the release 5–10% slower per step.** The cause was #1100's
+    fast-math opcodes in the block loop's dispatch. They are now in the
+    side table (`5d383b4`), and cycles are back at build2's.
+  - **The current one** is CI run 43122833835 (6b7b5e5, manifest
+    `97b481d`):
+    - aarch64 tar.gz SHA-256 `5662db76…47df`;
+    - its binary's SHA-256 is `0aabf469…3f51`, in
+      `kernels/ci-43122833835/x/`;
+    - the local build is `kernels/build4-6b7b5e5/pscat` (`18aecec9…b3fc`).
+
+    It was sent for fractal_clouds' timing rerun, which is **pending**. The
+    gallery now uses this test build, and next is the native-noise switch
+    (fc#16).
 - **Local gate.** Two tests fail on this machine since the afternoon of
   2026-11-11, on `8df943d` too, which had passed: `mcp
   concurrent_replies_never_interleave` (broken pipe) and `subcommands
