@@ -435,7 +435,7 @@ over installed packs; among packs, `$PSCAT_HOME` wins over the per-user
 data directory. The compiled-in TeX Gyre and URW faces come after both,
 so a file with the same name on disk (`texgyrepagella-regular.otf`) is
 used instead; the twelve Liberation faces always win. `pscat --fonts` ends with `#` lines saying what is in
-use, and `pscat --capabilities` has the same in `font_packs`.
+use, starting with every directory it searched, in order (`# font-search override|pack-dir exists|missing <path>`), and `pscat --capabilities` has the same in `font_packs`.
 
 **The reproducibility contract.** The same pscat version, with the
 installed and verified pinned packs, and identical render settings,

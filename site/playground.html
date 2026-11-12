@@ -42,6 +42,7 @@ showpage</textarea>
       <span id="status"></span>
     </div>
     <div id="err"></div>
+    <div id="warn"></div>
     <pre id="out" aria-label="Program output" hidden></pre>
   </div>
   <div id="play-right"><canvas id="page" width="612" height="792"></canvas></div>
@@ -52,6 +53,7 @@ import { Pscat } from './pscat.js';
 
 const canvas = document.getElementById('page');
 const err = document.getElementById('err');
+const warn = document.getElementById('warn');
 const status = document.getElementById('status');
 const speed = document.getElementById('speed');
 const out = document.getElementById('out');
@@ -77,6 +79,7 @@ function showOutput() {
 function start() {
   cancelAnimationFrame(raf);
   err.textContent = '';
+  warn.textContent = '';
   out.textContent = '';
   out.hidden = true;
   const [w, h] = pageSize(srcBox.value);
@@ -92,6 +95,8 @@ function start() {
     steps += Number(speed.value);
     ps.paintTo(canvas);
     showOutput();
+    // Font stand-ins (a pack face the build lacks), also on a clean run (#804).
+    warn.textContent = ps.warnings.join('\n');
     if (more === 1) {
       status.textContent = `running… ${steps.toLocaleString()} steps`;
       raf = requestAnimationFrame(frame);
