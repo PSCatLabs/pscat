@@ -62,7 +62,7 @@ pub fn pdf_text(pdf: &[u8]) -> String {
 //     if !common::gs_available() { return; }
 //
 // and the rule lives here:
-//   - `gs` runs: true. If `PSCAT_GS_LOG` names a file, `ran <test>` is
+//   - `gs` runs: true. If `PSCAT_GS_LOG` names a file, `ran <suite>::<test>` is
 //     appended to it (CI counts the lines).
 //   - `gs` missing, `PSCAT_REQUIRE_GS` unset: false, after a `SKIPPED` line
 //     written straight to stderr (not through `eprintln!`, so libtest's
@@ -87,6 +87,23 @@ pub fn gs_decision(have_gs: bool, require_gs: bool) -> Result<bool, &'static str
     }
 }
 
+/// The log key for one gs probe: `<suite>::<test>`, where the suite is the
+/// test binary's name without cargo's `-<hash>` suffix (`clipsave-1a2b…`
+/// is `clipsave`). Pure, so tests/gs_helper.rs can cover it.
+pub fn gs_log_key(exe: Option<&std::path::Path>, test: &str) -> String {
+    let stem = exe
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("(unknown suite)");
+    let suite = match stem.rsplit_once('-') {
+        Some((name, hash)) if !hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit()) => {
+            name
+        }
+        _ => stem,
+    };
+    format!("{suite}::{test}")
+}
+
 /// True when `gs` is on PATH and runs; the one skip rule for Ghostscript
 /// tests (see the section comment above).
 pub fn gs_available() -> bool {
@@ -99,6 +116,10 @@ pub fn gs_available() -> bool {
     let require = std::env::var_os("PSCAT_REQUIRE_GS").is_some_and(|v| !v.is_empty() && v != "0");
     let thread = std::thread::current();
     let test = thread.name().unwrap_or("(unnamed test)");
+    // libtest's thread name omits the test binary, and every binary appends
+    // to the same log, so the key carries the suite too: four suites each
+    // have a `ghostscript_prints_the_pinned_lines`.
+    let key = gs_log_key(std::env::current_exe().ok().as_deref(), test);
     let log = |what: &str| {
         let file = std::env::var_os("PSCAT_GS_LOG").and_then(|path| {
             std::fs::OpenOptions::new()
@@ -109,7 +130,7 @@ pub fn gs_available() -> bool {
         });
         if let Some(mut f) = file {
             // One write call, so parallel test binaries cannot interleave a line.
-            let _ = f.write_all(format!("{what} {test}\n").as_bytes());
+            let _ = f.write_all(format!("{what} {key}\n").as_bytes());
         }
     };
     match gs_decision(have, require) {

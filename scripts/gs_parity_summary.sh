@@ -4,7 +4,8 @@
 # Usage: scripts/gs_parity_summary.sh <log> <label>
 #
 # <log> is the file tests/common's `gs_available()` appends to when
-# PSCAT_GS_LOG names it: one `ran <test>` or `skipped <test>` line per probe.
+# PSCAT_GS_LOG names it: one `ran <suite>::<test>` or `skipped <suite>::<test>`
+# line per probe (the suite keeps same-named tests in different binaries apart).
 # Prints a Markdown block (for $GITHUB_STEP_SUMMARY) with the number of
 # distinct tests that ran gs and the number that skipped. Never fails the
 # job: the enforcement is PSCAT_REQUIRE_GS (a skip panics), this is
