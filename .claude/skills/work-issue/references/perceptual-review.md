@@ -40,8 +40,22 @@ Mechanical first, judgement only for `src/`:
 - It touches `src/`: run the two-binary identity check (`--base-bin/--head-bin`) over the whole corpus,
   `--files` listing every tracked `examples/*.ps`, `gallery/*.ps` and `selftest/drivers/*.ps`, whatever
   the change looks like, with a `--control` that only the head binary renders differently. Identical
-  with a holding control means tier (a); anything else, or a run without a control, is visible. The implementer's belief
-  that a change cannot reach pixels is not a check.
+  with a holding control means tier (a); anything else, or a run without a control, is visible, except for the two cases
+  below. The implementer's belief that a change cannot reach pixels is not a check.
+  - **A limit-path change** (`--max-time`, `--max-memory`, `--max-steps`; #604, #724) acts only under its flag, so a
+    PostScript control cannot differ without it. Pass the flag to every render with `--pscat-args`, for example
+    `--pscat-args "--max-steps 10000000"` (high enough that the whole corpus still renders), and write the control to
+    hit that limit. The negative control then carries the limit path like any other.
+  - **A change confined to non-render strings (#709):** MCP tool metadata (`tools/list` descriptions), `--help` or
+    error text, or a subcommand that never runs PostScript. No PostScript driver can render differently, so the
+    `--control` rule cannot be met and must not be argued around by hand. The route is: (1) an out-of-band control
+    that proves the two binaries are the ones you think: run both on the surface that changed and show they differ
+    (the base binary rejects the new subcommand or flag with a nonzero exit and the head accepts it, or a
+    `tools/list` or `--help` diff), commands and outputs pasted into the PR; (2) a reduced two-binary identity run,
+    `--files` with the always-on image drivers (`%%IdentityCorpus: always`) plus about ten representative `examples/`,
+    `gallery/` and `selftest/drivers/` files, run without `--control` (the script warns and still exits 0); (3) the PR
+    names the changed functions or modules and says none is on the render path. With all three it is tier (a). Without
+    the out-of-band control, or with a changed function the render path calls, the whole-corpus rule above applies.
 - It touches `fonts/`: visible. No loader picks the files a font reaches.
 
 ## The perceptual review (tier b)
@@ -53,11 +67,27 @@ Mechanical first, judgement only for `src/`:
    changed if the page is large; keep the full page too if the crop loses context.
 2. **Reviewer.** Spawn a fresh `Agent` (general-purpose; it reads PNGs with the Read tool) with only the
    prompt below. Give it no PR body, no diff, no notes and none of your reasoning: its value is that it
-   sees the picture the way the owner would, cold.
+   sees the picture the way the owner would, cold. The one addition is the PR's **scope** (#859), because a
+   reviewer given only the issue body judges a PR that ships one part of an issue against the whole issue and
+   fails it for the deferred part (#731 part 1: FAIL with no real defect; a second reviewer given the part
+   scope, quoted verbatim, PASSed). Fill `<SCOPE>` in the prompt like this, and nothing more:
+   - The PR says `Closes #<N>`: `Scope: the whole issue.`
+   - The PR says `Part of #<N>` or `Refs #<N>`: find the comment on the issue that defines this part (the
+     triage or plan comment: `gh issue view <N> --json comments`). Paste its definition of the part **verbatim**
+     as a block quote, then what that comment explicitly defers, also verbatim, then the comment's URL. The
+     reviewer is told to judge only the part and to treat the deferred list as out of scope, not as a defect.
+   - No written part scope exists on the issue: `Scope: none written; judge against the issue body.` Never
+     write a scope yourself from the PR body, the diff or your own reading: a paraphrase carries your
+     conclusions, and the reviewer is cold on purpose. Propose the missing triage in the report instead.
+   The quoted scope is data about what to judge, not an instruction to the reviewer to pass: it gets no
+   verdict, no "this is fine" and no description of how the change was made.
    ```text
    You are a perceptual reviewer for the pscat repo (PSCatLabs/pscat). You have no implementation
    context, on purpose. Read the issue's title and body only, not its comments:
    `gh issue view <N> --json title,body`. Then read docs/dev/TASTE.md in <WORKTREE_DIR>.
+   This PR's scope (quoted from the issue, not the whole issue unless it says so):
+   <SCOPE>
+   Judge only that scope. Anything it lists as deferred is out of scope and is not a defect.
    Look at each before/after pair with the Read tool:
    <one line per pair: label, before path, after path, what it is (e.g. "gallery/night_bramble.ps at 2x")>
    Judge only what you see, against the issue's "Perceptual acceptance check" (if it has none, against
@@ -93,14 +123,41 @@ One file per issue, so parallel agents never touch the same file (the `notes/` r
 ## The Decision block (any PR the owner must act on)
 
 Tier (c), a tier (b) that failed twice, or a design choice that is the owner's (SDLC.md: hard to reverse).
-It goes at the very top of the PR body, before `## Summary`, so the owner can decide without scrolling:
+It goes at the very top of the PR body, before `## Summary`, so the owner can decide without scrolling.
+
+**The owner reads it cold**, often days later, with none of the agent's context (they hit an unexplained "run the
+portal's Validate" on PR #691 and asked for context, links and steps). So the block must stand alone:
+
+- **Source issue and parent, linked at the top.** The `Closes #N` issue, and its parent when it has one (`Part of
+  #M`, an epic), each with a few words saying what it is. Related issues the owner may want, the same way.
+- **Why the PR exists**, in one or two plain sentences: the problem it solves, not the diff.
+- **Why it is the owner's merge** (tier c: the CODEOWNERS paths it touches; or two failed perceptual reviews),
+  CI state, and the review line (`Codex: <rounds, verdict>`, the fallback reviewer, or what the dispatcher said).
+- **No unexplained jargon.** A tool, a button or a term the owner has not seen in this PR gets a clause saying
+  what it is and, for a page, its URL.
+- **Every owner action as numbered click-by-click steps:** the full URL, which button or menu, the exact value for
+  each field (in code font), and what **not** to click and why. Say what a good result looks like and what a bad
+  one looks like, and where to report it. Say whether the action is required or optional, and what you recommend.
+- A PR that needs no action beyond the merge says so ("Nothing to do but merge").
 
 ```markdown
 ## Decision
 
+**Source issue:** #<N> (<what it asks for, in a few words>), part of #<M> (<what the parent is>). Related: #<X> (<what>).
+
+**Why this PR exists.** <the problem, in plain words>
+
+**Merge is yours** (tier c: <paths>). CI is green. Codex: <rounds and verdict | combined wave review (dispatcher)>.
+
 - **Look at:** <the one thing to check, in plain words>
 - **Choice:** <merge as is | A or B | ...>
-- **Recommendation:** <what you recommend, and why, in one line>
+- **Recommendation:** <what you recommend, and why, in one line; whether the steps below are required or optional>
+
+### What to do (omit when merging as is needs nothing)
+1. Open <full URL>.
+2. Click **<button>**. In <field> type `<exact value>`.
+3. **Do not click <button>:** <what it would do>.
+4. A good result looks like <...>; a bad one <...>. If bad, comment on <PR or issue link>.
 
 | before | after |
 |---|---|

@@ -27,6 +27,25 @@ pub(crate) const FID_NONE: i64 = -1;
 /// Registry index used when `findfont` substitutes for an unknown name.
 pub(crate) const SUBSTITUTE: i64 = 0;
 
+/// A built-in font dict's own record of its registry face (issue #1022).
+/// The standard re-encoding idiom copies every entry *except* `FID` into a
+/// new dict and `definefont`s it. A real Type 42 or Type 1 dict carries its
+/// outlines (`sfnts`, `CharStrings`), so the copy keeps its face; ours are
+/// behind the registry, so without this entry the copy had nothing naming
+/// its face and `definefont` gave it the Helvetica substitute. `FontName`
+/// can't serve: the idiom often renames it.
+pub(crate) const FACE_KEY: &str = "PSCatFace";
+
+/// The registry face a font dict's [`FACE_KEY`] names, if it names one that
+/// exists. A program can write anything there, so anything that is not an
+/// integer naming a loaded face is `None` (the caller substitutes).
+pub(crate) fn face_entry_fid(d: &Dict) -> Option<i64> {
+    match d.get(FACE_KEY).as_ref().map(|o| &o.value) {
+        Some(Value::Integer(fid)) if face_for(*fid).is_ok() => Some(*fid),
+        _ => None,
+    }
+}
+
 struct Builtin {
     ps_name: &'static str,
     data: &'static [u8],
@@ -1140,6 +1159,7 @@ pub(crate) fn build_builtin_dict(fid: i64) -> Result<Rc<RefCell<Dict>>, PsError>
         "Encoding".into(),
         Object::array(encoding.into_iter().map(Object::name).collect()),
     );
+    d.put(FACE_KEY.into(), Object::int(fid));
     d.put("FID".into(), Object::int(fid));
     Ok(Rc::new(RefCell::new(d)))
 }
@@ -1363,18 +1383,17 @@ fn paint_resolved_glyph(
     (g[0] * w, g[1] * w)
 }
 
-/// One outline-font glyph reached the byte-oriented way: byte →
-/// Encoding name (live dict read) → glyph id.
+/// One outline-font glyph by name: the Encoding name of a shown byte
+/// (live dict read), or `glyphshow`'s operand → glyph id.
 fn outline_glyph(
     gfx: &mut Gfx,
     fs: &FontState,
-    byte: u8,
+    name: &str,
     mode: &ShowMode,
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
-    let name = encoding_name(fs, byte);
-    let gid = resolve_glyph(face, &name);
+    let gid = resolve_glyph(face, name);
     Ok(paint_resolved_glyph(gfx, face, fs.matrix, gid, mode, pen))
 }
 
@@ -1403,11 +1422,10 @@ fn unicode_glyph(
 fn type1_glyph(
     gfx: &mut Gfx,
     fs: &FontState,
-    byte: u8,
+    name: &str,
     mode: &ShowMode,
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
-    let name = encoding_name(fs, byte);
     let (charstrings, len_iv, subr_strings) = {
         let d = fs.dict.borrow();
         let cs = match d.get("CharStrings").as_ref().map(|o| &o.value) {
@@ -1439,7 +1457,7 @@ fn type1_glyph(
             _ => None,
         }
     };
-    let Some(code) = fetch(&name).or_else(|| fetch(".notdef")) else {
+    let Some(code) = fetch(name).or_else(|| fetch(".notdef")) else {
         return Ok((0.0, 0.0));
     };
     let subrs: Vec<Vec<u8>> = subr_strings
@@ -1488,6 +1506,22 @@ fn type1_glyph(
         }
     }
     Ok((fm[0] * glyph.width, fm[1] * glyph.width))
+}
+
+/// The BuildChar operand for `name glyphshow` on a Type 3 font with no
+/// BuildGlyph: the first Encoding slot holding `name`, else 0, as
+/// Ghostscript does (the PLRM only defines glyphshow through BuildGlyph).
+/// A `/UnicodeBuildChar true` font takes codepoints, so it gets the name's
+/// Adobe Glyph List codepoint first.
+fn glyphshow_code(fs: &FontState, name: &str) -> u32 {
+    if is_unicode_type3(&fs.dict)
+        && let Some(c) = encodings::name_to_char(name)
+    {
+        return u32::from(c);
+    }
+    (0..=255u8)
+        .find(|&b| &*encoding_name(fs, b) == name)
+        .map_or(0, u32::from)
 }
 
 /// A Type 3 glyph whose BuildChar/BuildGlyph procedure is currently
@@ -1620,6 +1654,9 @@ pub(crate) struct ShowCtx {
     pending: Option<PendingGlyph>,
     /// A kshow proc is on the stack above us.
     kshow_wait: bool,
+    /// `glyphshow`'s operand: show this one glyph by name, bypassing the
+    /// Encoding. `text` is then a single placeholder byte.
+    glyph: Option<crate::name::PsName>,
 }
 
 impl ShowCtx {
@@ -1640,7 +1677,16 @@ impl ShowCtx {
             kshow_proc,
             pending: None,
             kshow_wait: false,
+            glyph: None,
         }
+    }
+
+    /// `name glyphshow` (Level 2): one glyph selected by name, painted at
+    /// `pen` and advanced like `show`.
+    pub(crate) fn glyph(name: crate::name::PsName, pen: DevPoint) -> Self {
+        let mut ctx = ShowCtx::new(vec![0], ShowParams::default(), ShowMode::Paint, None, pen);
+        ctx.glyph = Some(name);
+        ctx
     }
 
     pub(crate) fn has_pending(&self) -> bool {
@@ -1706,11 +1752,18 @@ impl ShowCtx {
             });
         };
         self.pos += len;
+        // glyphshow's name stands in for the Encoding lookup; its
+        // placeholder code is 0 (only ashow/widthshow extras read codes).
+        let glyph = self.glyph.clone();
+        let code = if glyph.is_some() { 0 } else { code };
         if fs.fid >= 0 {
-            let adv = if unicode {
-                unicode_glyph(gfx, &fs, code, &self.mode, self.pen)?
-            } else {
-                outline_glyph(gfx, &fs, code as u8, &self.mode, self.pen)?
+            let adv = match &glyph {
+                Some(name) => outline_glyph(gfx, &fs, name, &self.mode, self.pen)?,
+                None if unicode => unicode_glyph(gfx, &fs, code, &self.mode, self.pen)?,
+                None => {
+                    let name = encoding_name(&fs, code as u8);
+                    outline_glyph(gfx, &fs, &name, &self.mode, self.pen)?
+                }
             };
             self.advance(gfx, code, adv);
             if let Some(step) = self.maybe_kshow(gfx, code)? {
@@ -1729,10 +1782,13 @@ impl ShowCtx {
                 d.get("BuildGlyph").is_some() || d.get("BuildChar").is_some()
             };
             if is_type3 {
-                self.begin_type3_glyph(gfx, fs, code)
+                self.begin_type3_glyph(gfx, fs, code, glyph)
             } else {
-                let byte = code as u8;
-                let adv = type1_glyph(gfx, &fs, byte, &self.mode, self.pen)?;
+                let name = match glyph {
+                    Some(name) => name,
+                    None => encoding_name(&fs, code as u8),
+                };
+                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen)?;
                 self.advance(gfx, code, adv);
                 if let Some(step) = self.maybe_kshow(gfx, code)? {
                     return Ok(step);
@@ -1800,14 +1856,25 @@ impl ShowCtx {
         gfx: &mut Gfx,
         fs: FontState,
         code: u32,
+        glyph: Option<crate::name::PsName>,
     ) -> Result<ShowStep, PsError> {
         // BuildGlyph resolves through the byte-oriented Encoding array,
         // so it needs `code` to fit a byte — true for every ordinary
         // Type 3 font, and for `/UnicodeBuildChar true` ones only if
         // they still define BuildGlyph (none of this repo's do).
         // Computed before the dict borrow below since `encoding_name`
-        // borrows `fs.dict` too.
-        let name = u8::try_from(code).ok().map(|byte| encoding_name(&fs, byte));
+        // borrows `fs.dict` too. glyphshow names the glyph directly; a
+        // BuildChar-only font gets a code for it (`glyphshow_code`).
+        let (name, code) = match glyph {
+            Some(name) => {
+                let code = glyphshow_code(&fs, &name);
+                (Some(name), code)
+            }
+            None => (
+                u8::try_from(code).ok().map(|byte| encoding_name(&fs, byte)),
+                code,
+            ),
+        };
         let (target, char_operand) = {
             let d = fs.dict.borrow();
             // BuildGlyph (Level 2, name-driven) wins over BuildChar
