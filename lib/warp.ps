@@ -229,17 +229,40 @@
     { [/z] } if ]
 } bind def
 
-% ( transform step base -- ): rebuild the current path under a path
-% transform, in the base coordinate space captured when the run began,
-% then restore the CTM. Every caller fills or clips the result, so open
-% subpaths are closed first.
+% ( transform step base -- records ): the current path warped, in the base
+% coordinate space captured when the run began. Every caller fills or clips
+% the result, so open subpaths are closed first. It only reads the path: the
+% caller rebuilds it with wp--apply once the warp has run without error.
 % @internal
-/wp--rebuild {
-  matrix currentmatrix 4 1 roll setmatrix
+/wp--compute {
+  setmatrix
   //wp-path exec //wp--close-subpaths exec
   exch //wp-subdivide exec exch exec
+} bind def
+
+% ( records base -- ): make records the current path, built in the base
+% coordinate space, then put the CTM back.
+% @internal
+/wp--apply {
+  matrix currentmatrix 3 1 roll setmatrix
   newpath //wp-emit exec
   setmatrix
+} bind def
+
+% ( saved region -- result ): run region, which takes the array saved on
+% the operand stack and leaves one result, inside a gsave. The user's warp
+% runs in there, so a warp that fails cannot leave its operands, its
+% graphics state or the decorator's own half-built path behind: the stack is
+% cleared back to what it was, the operands in saved are pushed again (the
+% operands the operator was called with, as a failing real operator leaves
+% them), the gsave is undone, and the error is re-raised with stop, which
+% keeps its name and offending command. On success the gsave is undone too,
+% so the result is all that is left, and the caller then rebuilds the path.
+% @internal
+/wp--try {
+  gsave exch dup mark exch 4 -1 roll stopped
+    { cleartomark grestore aload pop stop }
+    { exch pop exch pop grestore } ifelse
 } bind def
 
 % ( -- records ): the current path as it stands, curves kept, for
@@ -601,37 +624,55 @@
 % @summary: Build decorators that make fill, stroke, clip and the show operators draw through a path transform.
 % @example: {} 4 wp-decorators
 /wp-decorators {
-  matrix currentmatrix //wp--rebuild /exec load 5 array astore cvx
-  % prefix: { warp step base rebuild } -- run it to warp the current path
-  24 dict begin /prefix exch def /realfill systemdict /fill get def
+  matrix currentmatrix dup //wp--apply /exec load 3 array astore cvx
+  4 1 roll //wp--compute /exec load 5 array astore cvx
+  % apply: { records -- } rebuilds the path; warp: { -- records } warps it
+  24 dict begin /warp exch def /apply exch def /realfill systemdict /fill get def
+  % Each wrapper warps the path inside wp--try, which takes an array of
+  % the operands to give back if the warp fails and a region that consumes
+  % it and leaves the warped records; then it rebuilds the path from them.
+  /region [ /pop load /warp load /exec load ] cvx def
   % operators that consume or clip the current path keep their own target
+  /first [ [] /region load //wp--try /exec load /apply load /exec load ] cvx def
   [ /fill /eofill ] {
-    [ /prefix load /exch load //fp-compose /exec load ] cvx def
+    [ /first load /exch load //fp-compose /exec load ] cvx def
   } forall
   % clip and eoclip keep the current path: clip to the warped copy, then
   % put the original back so later painting warps it only once
+  /clipregion [ /pop load //wp--save-path /exec load /warp load /exec load
+                2 /array load /astore load ] cvx def
+  /clipfirst [ [] /clipregion load //wp--try /exec load /aload load /pop load
+               /apply load /exec load ] cvx def
   [ /clip /eoclip ] {
-    [ //wp--save-path /prefix load //fp-compose /exec load
-      /exch load //fp-compose /exec load
+    [ /clipfirst load /exch load //fp-compose /exec load
       //wp--restore-path //fp-compose /exec load ] cvx def
   } forall
+  /strokeregion [ /pop load /strokepath load /warp load /exec load ] cvx def
   /stroke [ /pop load
-    [ /strokepath load /prefix load /exec load /realfill load ] cvx ] cvx def
+    [ [] /strokeregion load //wp--try /exec load /apply load /exec load
+      /realfill load ] cvx ] cvx def
+  % the rect operators take x y w h, which they keep if the warp fails;
+  % the real rectfill and rectstroke leave the current path alone
+  /rectregion [ /aload load /pop load /newpath load //wp--rect /exec load
+                /warp load /exec load ] cvx def
   /rectfill [ /pop load
-    [ /gsave load /newpath load //wp--rect /exec load
-      /prefix load /exec load /realfill load /grestore load ] cvx ] cvx def
+    [ 4 /array load /astore load /rectregion load //wp--try /exec load
+      /gsave load /apply load /exec load /realfill load /grestore load ] cvx ] cvx def
+  /rectstrokeregion [ /aload load /pop load /newpath load //wp--rect /exec load
+                      /strokepath load /warp load /exec load ] cvx def
   /rectstroke [ /pop load
-    [ /gsave load /newpath load //wp--rect /exec load /strokepath load
-      /prefix load /exec load /realfill load /grestore load ] cvx ] cvx def
+    [ 4 /array load /astore load /rectstrokeregion load //wp--try /exec load
+      /gsave load /apply load /exec load /realfill load /grestore load ] cvx ] cvx def
   % rectclip: like clip, but it starts from a fresh path and leaves none
   /rectclip [ /pop load
-    [ /newpath load //wp--rect /exec load /prefix load /exec load
-      systemdict /clip get /newpath load ] cvx ] cvx def
+    [ 4 /array load /astore load /rectregion load //wp--try /exec load
+      /apply load /exec load systemdict /clip get /newpath load ] cvx ] cvx def
   % the show family: glyph outlines filled through the warp. As with the
   % real operators, the current path is kept and only the current point
   % advances. Each wrapper hands its operands, the prefix and a fill to
   % a helper, which falls back to the real operator for an error or a
   % Type 3 font.
+  /prefix [ /warp load /exec load /apply load /exec load ] cvx def
   /fillp [ /realfill load ] cvx def
   [ [ /show //wp--show ] [ /ashow //wp--ashow ] [ /widthshow //wp--widthshow ]
     [ /awidthshow //wp--awidthshow ] [ /kshow //wp--kshow ]
@@ -639,7 +680,8 @@
     aload pop
     [ /pop load [ /prefix load /fillp load 6 -1 roll /exec load ] cvx ] cvx def
   } forall
-  currentdict /prefix undef currentdict /realfill undef currentdict /fillp undef
+  [ /prefix /warp /apply /region /first /clipregion /clipfirst /strokeregion /rectregion
+    /rectstrokeregion /realfill /fillp ] { currentdict exch undef } forall
   currentdict end
 } bind def
 
