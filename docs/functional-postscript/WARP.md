@@ -114,6 +114,20 @@ name:
   The text is cut into glyphs as the interpreter cuts it: one byte each,
   or one UTF-8 sequence each in a Unicode-mode font (the CJK and Thai
   faces).
+- `xshow`, `yshow` and `xyshow` place each glyph where the program's numbers
+  put it (in user space, so the displacements are not warped, but the glyph
+  outlines drawn there are), then fill the outlines through the warp. The
+  numbers are an array or an encoded number string. Whether the real
+  operator would accept the operands is decided by running it, on the null
+  device, from a made-up current point: if it raises an error, the real
+  operator runs on the program's operands and raises it, in its order and
+  with the operand stack it leaves, so there is no second copy of its checks
+  here. An encoded number string is not decoded in PostScript: the same
+  operator, run on each prefix of the text on the null device, says how far
+  the pen moves after each glyph. `cshow` has no decorator: it paints
+  nothing and moves nothing, and the widths it reports are the font's, which
+  a warp does not change; the `show` calls in its procedure are the
+  decorated ones, so that text bends.
 - Text in a Type 3 font (the faces in `lib/fonts/`, `lib/hangul.ps`,
   `lib/handscript.ps`) is shown by the real operator, since `charpath`
   traces no Type 3 glyph. Its glyph procedures paint with the decorated
@@ -127,14 +141,27 @@ name:
   `rectfill`, `rectstroke` or `rectclip` redraws a path leaves the program
   where the call found it: the operand stack (a rect operator's `x y w h`
   are put back, as the real operators leave their operands on an error),
-  the current path, the CTM and the `gsave` depth. The warp's own error is
-  re-raised with its name and offending command (`undefinedresult`, `div`).
-  This holds for an ordinary warp. A warp that pushes a `mark` the guard
-  would stop at, or a closure warp (`wp-polar`, `wp-lens`, `wp-swirl`,
-  `wp-perspective`) that fails with its scratch dictionary open, is not yet
-  fully restored: see #1199. A rect operator without four numbers on top of
-  the stack (too few operands, a wrong type, the array form) goes to the real
-  operator, which raises its own error or draws unwarped.
+  the current path, the CTM, the dictionary stack and the `gsave` depth.
+  The warp's own error is re-raised with its name and offending command
+  (`undefinedresult`, `div`). The show family has the same guard, with one
+  difference: a failing show operator, like the real one, does not give back
+  its string. Both guards put the stacks back by depth, not to the nearest
+  mark: they note how deep the operand and dictionary stacks were when the
+  call began, and on an error pop and `end` back to those depths. So a
+  transform that fails with its own `mark` or `[` open, or a closure warp
+  (`wp-polar`, `wp-lens`, `wp-swirl`, `wp-perspective`, `wp-unroll`) that
+  fails with its scratch dictionary open, leaves nothing behind, and the
+  program's own names resolve as before. A warp that returns anything but
+  the one result it should (a path transform that leaves two items, none, or
+  something other than an array) is an error too, raised as the undefined
+  name `wp-warp-must-return-one-result`, after the same unwinding. What a
+  guard cannot undo is a `gsave` the warp itself opened and then failed
+  with: PostScript cannot query the gsave depth, so that one level stays. A
+  warp that pops items it was not given (below its own operands) has eaten
+  the caller's operands, which no guard can return. A rect operator without
+  four numbers on top of the stack (too few operands, a wrong type, the
+  array form) goes to the real operator, which raises its own error or draws
+  unwarped.
 
 The coordinate space a warp works in is the one in force when
 `wp-decorators` runs, so place the program with `translate`/`scale` before
@@ -162,8 +189,13 @@ forever.
 
 - Images, `shfill` and other smooth shadings pass through unwarped.
 - The array forms of `rectfill`, `rectstroke` and `rectclip` are not
-  decorated. pscat has no `xshow`, `yshow`, `xyshow` or `cshow`, so there
-  is nothing to decorate.
+  decorated.
+- A warp that opens a `gsave` of its own and then fails leaves that one
+  level, as above.
+- `xshow`, `yshow` and `xyshow` with an encoded number string run the real
+  operator once per glyph on the null device to find the displacements, so
+  they take time proportional to the square of the text length. Use an array
+  for long text.
 - Type 3 text bends only where its glyph procedures paint with names the
   warp decorates: a procedure that `bind`s `fill` before the warp is
   installed, or paints with `imagemask`, draws unwarped.

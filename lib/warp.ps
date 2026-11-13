@@ -17,6 +17,10 @@
 % { [] (2) wp-subdivide } /wp-step-must-be-positive (string step) mustguard
 % { [] wp-lift } /fp-quotation-required (lift needs a warp) mustguard
 % { (missing.ps) 5 wp-run-decorated } /wp-decorators-must-be-dictionary (decorator type) mustguard
+% { [] { pop 1 2 } wp--try } /wp-warp-must-return-one-result (path warp leaves two results) mustguard
+% { [] { pop } wp--try } /wp-warp-must-return-one-result (path warp leaves none) mustguard
+% { [] { pop 1 } wp--try } /wp-warp-must-return-one-result (path warp leaves a number) mustguard
+% { 1 2 3 3 { pop pop pop 1 } wp--guarded } /wp-warp-must-return-one-result (text warp leaves one point) mustguard
 %%EndSelfTest
 
 % ( dict body -- warp ): a warp that opens its own scratch dictionary, so
@@ -249,20 +253,75 @@
   setmatrix
 } bind def
 
+% ---- Guards: the user's warp runs inside one of these ----
+% A warp is the user's code, so it can fail, leave results behind, open a
+% dictionary (the closure warps do) or push a mark. A guard runs it inside a
+% gsave and, on an error, puts the program back where the call found it:
+% operands popped back to the depth at entry (counted, not found by a mark,
+% since the warp may push marks of its own), dictionaries closed back to
+% the depth at entry, the gsave undone, and the error re-raised with stop so
+% $error keeps its name and offending command. A warp that fails to leave
+% exactly the expected results is an error too. What a guard needs to do
+% that, A = [ saved n d k type ], lives in the executable array that runs
+% the warp, not on the operand stack, where the warp could reach it.
+%   saved  operands to push again after the unwind
+%   n      operand stack depth to unwind to
+%   d      dictionary stack depth to unwind to
+%   k      how many results the warp must leave
+%   type   the type name the single result must have, or null
+% A warp's own unbalanced gsave is not undone: PostScript cannot query the
+% gsave depth, so a warp that opens a gsave and then fails leaves one level.
+
+% ( ... A -- ... A ): pop the operand stack back to A's depth (leaving A on
+% top) and close the dictionaries above A's depth. Names used here are all
+% bound: a warp's open dictionary can shadow any name a warp may define.
+% @internal
+/wp--rewind {
+  countdictstack 1 index 2 get sub 0 max { end } repeat
+  count 1 sub 1 index 1 get sub 0 max { exch pop } repeat
+} bind def
+
+% ( results A -- results ): raise wp-warp-must-return-one-result unless
+% the warp left exactly k results, of the right type if A names one.
+% @internal
+/wp--shape {
+  count 1 sub 1 index 1 get sub 1 index 3 get ne
+    { true }
+    { dup 4 get dup null eq { pop false } { 2 index type ne } ifelse }
+  ifelse
+  { pop wp-warp-must-return-one-result } { pop } ifelse
+} bind def
+
+% ( ... failed A -- ... ): after the warp ran. On an error, unwind, push
+% the saved operands, undo the gsave and re-raise. Otherwise the results
+% are all that is left of the warp: undo the gsave.
+% @internal
+/wp--settle {
+  exch { //wp--rewind exec 0 get aload pop grestore stop } { pop grestore } ifelse
+} bind def
+
+% ( A body -- results ): run body inside a gsave, as described above.
+% @internal
+/wp--protect {
+  gsave
+  [ [ 2 index systemdict /exec get 5 index //wp--shape systemdict /exec get ] cvx
+    systemdict /stopped get 4 index //wp--settle systemdict /exec get ] cvx
+  3 1 roll pop pop exec
+} bind def
+
 % ( saved region -- result ): run region, which takes the array saved on
-% the operand stack and leaves one result, inside a gsave. The user's warp
+% the operand stack and leaves one array, inside the guard. The user's warp
 % runs in there, so a warp that fails cannot leave its operands, its
-% graphics state or the decorator's own half-built path behind: the stack is
-% cleared back to what it was, the operands in saved are pushed again (the
-% operands the operator was called with, as a failing real operator leaves
-% them), the gsave is undone, and the error is re-raised with stop, which
-% keeps its name and offending command. On success the gsave is undone too,
-% so the result is all that is left, and the caller then rebuilds the path.
+% graphics state or the decorator's own half-built path behind: the
+% operands in saved are pushed again (the operands the operator was called
+% with, as a failing real operator leaves them) and the error is re-raised.
+% On success the result is all that is left, and the caller rebuilds the
+% path from it.
 % @internal
 /wp--try {
-  gsave exch dup mark exch 4 -1 roll stopped
-    { cleartomark grestore aload pop stop }
-    { exch pop exch pop grestore } ifelse
+  [ 2 index 2 index systemdict /exec get ] cvx exch pop
+  exch count 2 sub countdictstack 1 /arraytype 5 array astore
+  exch //wp--protect exec
 } bind def
 
 % ( -- records ): the current path as it stands, curves kept, for
@@ -405,15 +464,19 @@
   exch { pop true } { 3 1 roll pop pop systemdict exch get exec false } ifelse
 } bind def
 
-% ( args n proc -- x y ): run proc on the n operands args inside a gsave.
+% ( args n proc -- x y ): run proc on the n operands args inside the guard.
 % proc builds glyph outlines, warps and fills them, and leaves the end
-% point. If it fails (a warp that errors), the graphics state, the path
-% and the operand stack are put back before the error is re-raised.
+% point. If it fails (a warp that errors, or leaves other than the end point),
+% the graphics state, the path, the operand stack down to what was below
+% args, and the dictionary stack are put back before the error is
+% re-raised. The operands in args are not given back: the show family
+% drops them.
 % @internal
 /wp--guarded {
-  gsave exch 2 add mark exch 1 roll stopped
-    { cleartomark grestore stop }
-    { 3 -1 roll pop grestore } ifelse
+  exch dup count 3 sub exch sub exch pop
+  [] exch countdictstack 2 null 5 array astore
+  exch [ exch systemdict /exec get ] cvx
+  //wp--protect exec
 } bind def
 
 % ( piece prefix fillp -- ): one string's outlines filled through the
@@ -612,6 +675,121 @@
   } if
 } bind def
 
+% ---- xshow, yshow and xyshow: glyphs placed by the program ----
+% These draw each glyph, then move the pen by the next displacement given
+% in user space (dx for xshow, dy for yshow, dx dy for xyshow) instead of by
+% the glyph's width. The decorators cut the text as the show family does,
+% charpath each glyph where the program puts it, and fill the outlines
+% through the warp. The displacements are user-space numbers, so the warp
+% bends where the glyphs land, as it bends everything else, and the
+% displacements themselves are not warped.
+%
+% The program's arguments are checked by the real operator, not here: a
+% dry run on the null device, from a made-up current point, says whether
+% the operator would accept the operands, the glyph count and every
+% displacement. Anything it refuses goes to the real operator, which then
+% raises the error it always raises, in its own order, with the operand
+% stack it leaves. Type 3 text is shown by the real operator too, as for the
+% rest of the show family. cshow paints nothing itself (its procedure's own
+% show calls go through the decorated operators), so it needs no decorator.
+
+% ( string nums prefix fillp ok name -- string nums prefix fillp ok ): when
+% ok, run the real operator name on the program's string and displacements
+% on the null device; ok stays true only if it raised no error.
+% @internal
+/wp--dry-run {
+  exch {
+    systemdict exch get 4 index 4 index 3 -1 roll
+    gsave nulldevice 0 0 moveto { exec } stopped grestore not
+  } { pop false } ifelse
+} bind def
+
+% ( pieces nums axes -- deltas ): [dx dy] for each glyph from a numarray:
+% axes 0 for xshow (dx), 1 for yshow (dy), 2 for xyshow (dx dy).
+% @internal
+/wp--array-deltas {
+  4 dict begin /axes exch def /nums exch def /k 0 def
+  [ exch { pop
+      axes 0 eq { nums k get 0 /k k 1 add def } {
+      axes 1 eq { 0 nums k get /k k 1 add def } {
+        nums k get nums k 1 add get /k k 2 add def } ifelse } ifelse
+      2 array astore
+  } forall ]
+  end
+} bind def
+
+% ( string nums op pieces -- deltas ): [dx dy] for each glyph from an
+% encoded number string. This code does not decode the packed numbers: it
+% has the real operator op place each prefix of the string on the null
+% device from the origin, and takes the displacement of each glyph as the
+% difference between the pen after it and after the glyph before. No
+% program code runs: only outline fonts get here.
+% @internal
+/wp--string-deltas {
+  12 dict begin
+  /pieces exch def /op exch def /nums exch def /s exch def
+  /x 0 def /y 0 def /off 0 def
+  gsave nulldevice
+  [ pieces {
+      length off add /off exch def
+      0 0 moveto s 0 off getinterval nums op currentpoint
+      /Y exch def /X exch def
+      X x sub Y y sub 2 array astore
+      /x X def /y Y def
+  } forall ]
+  grestore end
+} bind def
+
+% ( string nums prefix fillp axes name -- ): the glyphs of string, drawn
+% through the warp where the displacements in nums put them. Each glyph
+% starts where the last one's displacement left the pen; the path of all of
+% them is filled once, and the current point ends where the real operator
+% would leave it. The path in force is kept. No dictionary of ours is open
+% while charpath or the warp runs.
+% @internal
+/wp--positioned {
+  10 dict begin
+  /name exch def /axes exch def /fillp exch def /prefix exch def
+  /nums exch def /s exch def
+  s //wp--pieces exec pop /pieces exch def
+  nums type /stringtype eq
+    { s nums systemdict name get pieces //wp--string-deltas exec }
+    { pieces nums axes //wp--array-deltas exec } ifelse
+  /deltas exch def
+  [ 0 1 pieces length 1 sub {
+      dup pieces exch get exch deltas exch get aload pop 3 array astore
+  } for ]
+  /prefix load /fillp load
+  end
+  currentpoint 5 {
+    newpath moveto 3 -1 roll
+    { aload pop currentpoint 3 -1 roll add 3 1 roll add exch
+      3 -1 roll true charpath moveto } forall
+    currentpoint 4 2 roll exch exec exec
+  } //wp--guarded exec moveto
+} bind def
+
+% ( string nums prefix fillp -- ): xshow through the warp.
+% @internal
+/wp--xshow {
+  2 //wp--operands exec //wp--drawable exec /xshow //wp--dry-run exec
+  /xshow //wp--or-real exec { 0 /xshow //wp--positioned exec } if
+} bind def
+
+% ( string nums prefix fillp -- ): yshow through the warp.
+% @internal
+/wp--yshow {
+  2 //wp--operands exec //wp--drawable exec /yshow //wp--dry-run exec
+  /yshow //wp--or-real exec { 1 /yshow //wp--positioned exec } if
+} bind def
+
+% ( string nums prefix fillp -- ): xyshow through the warp.
+% @internal
+/wp--xyshow {
+  2 //wp--operands exec //wp--drawable exec /xyshow //wp--dry-run exec
+  /xyshow //wp--or-real exec { 2 /xyshow //wp--positioned exec } if
+} bind def
+
 % ( -- bool ): whether the stack ends in the four numbers x y w h. The
 % rect decorators warp only that call; anything else (too few operands, a
 % wrong type, the numarray form) goes to the real operator, which raises its
@@ -653,7 +831,10 @@
   } forall
   % clip and eoclip keep the current path: clip to the warped copy, then
   % put the original back so later painting warps it only once
-  /clipregion [ /pop load //wp--save-path /exec load /warp load /exec load
+  % the warp runs in a guard of its own, so its result is checked on its
+  % own, before the saved path joins it
+  /clipregion [ /pop load //wp--save-path /exec load
+                [] /region load //wp--try /exec load
                 2 /array load /astore load ] cvx def
   /clipfirst [ [] /clipregion load //wp--try /exec load /aload load /pop load
                /apply load /exec load ] cvx def
@@ -699,7 +880,8 @@
   /fillp [ /realfill load ] cvx def
   [ [ /show //wp--show ] [ /ashow //wp--ashow ] [ /widthshow //wp--widthshow ]
     [ /awidthshow //wp--awidthshow ] [ /kshow //wp--kshow ]
-    [ /glyphshow //wp--glyphshow ] ] {
+    [ /glyphshow //wp--glyphshow ] [ /xshow //wp--xshow ] [ /yshow //wp--yshow ]
+    [ /xyshow //wp--xyshow ] ] {
     aload pop
     [ /pop load [ /prefix load /fillp load 6 -1 roll /exec load ] cvx ] cvx def
   } forall
