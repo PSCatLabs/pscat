@@ -134,6 +134,12 @@ wgpu = { version = "30.0.1", optional = true, default-features = false, features
 pollster = { version = "1.0.1", optional = true }
 sha2 = "0.11.1"
 
+# `O_NONBLOCK`, for src/paths.rs: a resource candidate is opened without
+# blocking so a FIFO with no writer cannot hang the resolver (issue #1177).
+# Already in the tree through winit and the std runtime; no new crate.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # tests/qr.rs decodes PSCat's own rendered QR symbols with an independent
 # pure-Rust reader (issue #971). Compiled into the test binary, so the decode
 # check can never skip for want of a decoder. No `img` feature: the test feeds

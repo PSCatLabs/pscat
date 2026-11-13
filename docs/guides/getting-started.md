@@ -470,6 +470,15 @@ such as `(lib/artkit.ps) run`, pscat uses the first of these that exists:
    `handwrite`, `typewrite` and `photo-etch` need neither (they are `pscat`
    subcommands now, and use only the compiled-in `lib/`).
 
+Each of those places must hold a regular file. A FIFO, device, socket or
+directory at one of them (a workspace can put one at `lib/artkit.ps`) is
+skipped as if it were not there, without being opened for reading, and the
+search goes on to the next place and finally the compiled-in copy. A `lib/`
+file larger than 64 MiB (the biggest real one is 0.6 MB) is skipped too, with
+a note on stderr, and a resource the library API (`pscat::paths::open`) reads
+is refused above 512 MiB (font files are far below that; the largest in the
+catalog is 10 MB).
+
 An absolute name is read as written. A plain font catalog directory
 (`fonts/catalog/`, not compiled in) is looked for in steps 2, 4, 5 and
 7, then the current directory, and every one found is used. After those

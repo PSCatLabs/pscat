@@ -26,6 +26,20 @@
 //! that make no sense for a directory and checks the current directory
 //! last.
 //!
+//! ## What a disk candidate may be (issue #1177)
+//!
+//! A relative name's candidates in the search order must be regular
+//! files: a FIFO, device, socket or directory at one of those places is
+//! "not here", and the search goes on to the next place and finally the
+//! embedded copy. (A FIFO with no writer would otherwise block the open
+//! itself, before any interpreter limit applies.) The check is made on
+//! the opened handle, which [`open`] opens `O_NONBLOCK` on Unix, so a swap
+//! between the check and the read cannot slip a FIFO in. A `lib/` name
+//! larger than [`MAX_LIB_BYTES`] is skipped with a note on stderr, and
+//! [`open`] refuses a resource larger than [`size_cap`] says for its kind.
+//! An absolute name is still read as written, and a program's own reads
+//! under execution limits (issue #702) keep watching the limits instead.
+//!
 //! `PSCAT_TRACE_RESOURCES=1` prints one stderr line per resolved
 //! resource naming the backend that served it
 //! (`scripts/clean_install_test.sh` asserts on it).
@@ -175,6 +189,7 @@ impl Roots {
         }
         self.disk_candidates(name)
             .into_iter()
+            .filter(|(_, p)| plausible_candidate(name, p))
             .find_map(from_disk)
             .or_else(|| {
                 embedded(name).map(|b| Resource {
@@ -186,6 +201,7 @@ impl Roots {
             .or_else(|| {
                 self.checkout_candidates(name)
                     .into_iter()
+                    .filter(|(_, p)| plausible_candidate(name, p))
                     .find_map(from_disk)
             })
     }
@@ -310,13 +326,118 @@ fn roots() -> &'static Roots {
     ROOTS.get_or_init(Roots::from_process)
 }
 
+/// The largest `lib/` source file a candidate may be before it is skipped
+/// (issue #1177). The largest real one, `lib/paintkit.ps`, is 0.6 MB, so this
+/// is two orders of magnitude of headroom while still far below the memory a
+/// multi-GB file at a search-order place would take.
+pub const MAX_LIB_BYTES: u64 = 64 << 20;
+
+/// The largest file [`open`] reads for any other name: data a program
+/// loads, and font files (`.ttf`/`.otf`/`.ttc`; the largest in the
+/// catalog is 10 MB, a CJK collection can be several times that).
+pub const MAX_RESOURCE_BYTES: u64 = 512 << 20;
+
+/// The size cap that applies to a resource named `name`: [`MAX_LIB_BYTES`]
+/// for a `lib/` name, [`MAX_RESOURCE_BYTES`] otherwise.
+pub fn size_cap(name: &str) -> u64 {
+    if is_lib_name(name) {
+        MAX_LIB_BYTES
+    } else {
+        MAX_RESOURCE_BYTES
+    }
+}
+
+fn is_lib_name(name: &str) -> bool {
+    name.strip_prefix("./").unwrap_or(name).starts_with("lib/")
+}
+
+/// Open `path` for reading only if it is a regular file, deciding from the
+/// opened handle (issue #1177). On Unix the open is `O_NONBLOCK`, so a FIFO
+/// with no writer opens at once (and is then refused) instead of blocking in
+/// `open`; the flag does nothing to reads of a regular file.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_regular(path: &Path) -> Option<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = opts.open(path).ok()?;
+    file.metadata().ok()?.is_file().then_some(file)
+}
+
+/// Read the whole of the regular file at `path`, `None` when it is not one,
+/// cannot be read, or is larger than `cap` bytes (that last with a note on
+/// stderr: the file is real, so the refusal must not look like a missing
+/// one). The length is checked on the opened handle, and the read through
+/// the same handle stops one byte past `cap`, so a file that grows after
+/// the check cannot get past it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_regular(path: &Path, cap: u64) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = open_regular(path)?;
+    let len = file.metadata().ok()?.len();
+    if len > cap {
+        too_large(path, cap);
+        return None;
+    }
+    let mut data = Vec::new();
+    data.try_reserve_exact(usize::try_from(len).ok()?.checked_add(1)?)
+        .ok()?;
+    file.take(cap.saturating_add(1))
+        .read_to_end(&mut data)
+        .ok()?;
+    if data.len() as u64 > cap {
+        too_large(path, cap);
+        return None;
+    }
+    Some(data)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn too_large(path: &Path, cap: u64) {
+    eprintln!(
+        "pscat: {} is larger than the {} MiB a resource of its kind may be; skipped",
+        path.display(),
+        cap >> 20
+    );
+}
+
+/// Whether a search-order candidate for the relative `name` is worth
+/// handing to a reader: not a FIFO, device, socket or directory, and for a
+/// `lib/` name not larger than [`MAX_LIB_BYTES`]. A candidate that does not
+/// exist is passed on (the reader decides; tests use made-up paths). This
+/// looks at the path, so it is the cheap first screen; [`read_regular`]
+/// is the check that cannot be raced.
+#[cfg(not(target_arch = "wasm32"))]
+fn plausible_candidate(name: &str, path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return true;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    if is_lib_name(name) && meta.len() > MAX_LIB_BYTES {
+        too_large(path, MAX_LIB_BYTES);
+        return false;
+    }
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn plausible_candidate(_name: &str, _path: &Path) -> bool {
+    true
+}
+
 /// Resolve and read a program's `run`/`file` name through the search
 /// order (module doc).
 pub fn open(name: &str) -> Option<Resource> {
     #[cfg(target_arch = "wasm32")]
     let read = |_: &Path| None;
     #[cfg(not(target_arch = "wasm32"))]
-    let read = |p: &Path| std::fs::read(p).ok();
+    let read = |p: &Path| read_regular(p, size_cap(name));
     open_with_reader(name, &read)
 }
 
@@ -587,5 +708,37 @@ mod tests {
         let exe = Some(Path::new("/c/target/release/pscat"));
         assert!(checkout_roots_unless(exe, true).is_empty());
         assert!(!checkout_roots_unless(exe, false).is_empty());
+    }
+
+    /// The handle-level reader itself (issue #1177), with a small cap so a
+    /// regression cannot allocate much: tests/resource_candidates.rs covers
+    /// the search order around it.
+    #[cfg(unix)]
+    #[test]
+    fn read_regular_refuses_fifos_and_oversize_files_without_blocking() {
+        let dir = std::env::temp_dir().join(format!("pscat-paths-regular-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("ok.ps");
+        std::fs::write(&ok, b"12345").unwrap();
+        assert_eq!(read_regular(&ok, 5).as_deref(), Some(&b"12345"[..]));
+        assert_eq!(read_regular(&ok, 4), None);
+        assert_eq!(read_regular(&dir, 1 << 20), None, "a directory");
+        assert_eq!(read_regular(&dir.join("missing"), 1 << 20), None);
+        let fifo = dir.join("stuck.ps");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        // O_NONBLOCK: this open returns at once instead of waiting for a writer.
+        assert_eq!(read_regular(&fifo, 1 << 20), None);
+        // A link to a FIFO is a FIFO.
+        let link = dir.join("link.ps");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        assert_eq!(read_regular(&link, 1 << 20), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

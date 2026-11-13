@@ -504,7 +504,9 @@ fn status(it: &mut Interp) -> Result<(), PsError> {
 /// has no times (0). Directories are `None`: `status` is the probe before
 /// `run`, which a directory would fail (gs says `true` for one), and a
 /// regular file the process cannot open is `None` too (gs says `true`).
-/// Anything else `file` could open counts, a FIFO or `/dev/null` included.
+/// Anything else `file` could open counts, a FIFO or `/dev/null` named by an
+/// absolute path included; a relative name's search-order candidates must be
+/// regular files, as for `run` (issue #1177).
 ///
 /// The bytes are never read, only `stat`ted, so a FIFO or `/dev/zero` inside
 /// a root costs nothing and the execution limits have nothing to meter.
