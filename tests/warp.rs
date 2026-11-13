@@ -357,3 +357,219 @@ fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     assert_eq!(stack, ["true", "2"], "{stack:?}");
 }
+
+/// The show-family programs the decorators must draw through the warp
+/// (#1172): a line, the text, then the line stroked, so a decorator that
+/// lost the caller's path would show as a missing line.
+const SHOW_FAMILY: [(&str, &str); 5] = [
+    ("ashow", "2 1 (AVA) ashow"),
+    ("widthshow", "6 0 32 (A V) widthshow"),
+    ("awidthshow", "6 2 32 1 0 (A V) awidthshow"),
+    ("kshow", "{ pop pop -3 0 rmoveto } (AVA) kshow"),
+    ("glyphshow", "/eacute glyphshow /Aring glyphshow"),
+];
+
+fn show_program(text: &str) -> String {
+    format!(
+        "/Helvetica findfont 24 scalefont setfont \
+         newpath 10 10 moveto 90 10 lineto 15 50 moveto {text} \
+         4 setlinewidth stroke"
+    )
+}
+
+#[test]
+fn the_rest_of_the_show_family_draws_through_the_warp() {
+    for (op, text) in SHOW_FAMILY {
+        let program = show_program(text);
+        let native = render(&program);
+        // an identity warp redraws it (block means: the warp flattens and
+        // subdivides the outlines, so the edges are not byte-identical)
+        let warped = render(&format!("{{ {program} }} {{}} 2 wp-run"));
+        let worst = worst_block_diff(&warped, &native, 8);
+        assert!(worst < 4.0, "{op}: identity warp changed the text: {worst}");
+        assert!(grey_at(&warped, 50.0, 10.0) < 60, "{op}: the line was lost");
+        // a shift moves the text with everything else, so it went through
+        // the warp rather than being drawn flat
+        let shifted = render(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+        let moved = render(&format!("20 5 translate {program}"));
+        let worst = worst_block_diff(&shifted, &moved, 8);
+        assert!(
+            worst < 4.0,
+            "{op}: the text did not follow the warp: {worst}"
+        );
+    }
+}
+
+/// What a program left on the operand stack, as text.
+fn stack_text(src: &str) -> Vec<String> {
+    run(src).operand_stack().iter().map(|o| o.repr()).collect()
+}
+
+/// `body` run plain and then through an identity warp leave the same stack.
+fn assert_same_as_native(body: &str) {
+    let native = stack_text(body);
+    let warped = stack_text(&format!("{{ {body} }} {{}} 2 wp-run"));
+    assert_eq!(warped, native, "{body}");
+}
+
+#[test]
+fn the_show_family_leaves_the_current_point_and_stacks_as_the_real_operators_do() {
+    // (run checks that no dictionary is left open after the scope)
+    for (_, text) in SHOW_FAMILY {
+        assert_same_as_native(&format!(
+            "/Helvetica findfont 24 scalefont setfont 7 newpath 15 50 moveto {text} \
+             currentpoint"
+        ));
+    }
+    // kshow's procedure sees the codes, the current point after each glyph,
+    // the caller's operands below them and the caller's dictionaries
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont /d0 countdictstack def \
+         99 newpath 15 50 moveto \
+         { 2 array astore countdictstack d0 sub currentpoint 3 0 rmoveto } (ABC) kshow \
+         currentpoint",
+    );
+    // a font set by the procedure is the font of the glyphs after it, and
+    // stays set; here it switches from byte codes to UTF-8 mid-string
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         { 2 array astore /NotoSansKR-Regular findfont 20 scalefont setfont } \
+         (A\u{c548}\u{c548}) kshow currentpoint currentfont /FontName get",
+    );
+    // an exit from the procedure is refused, as the real kshow refuses it
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         { { pop pop exit } (ABC) kshow } stopped $error /errorname get currentpoint",
+    );
+    // glyphshow leaves the caller's font, Encoding and all
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont newpath 15 50 moveto /eacute glyphshow \
+         currentfont /Encoding get 233 get currentfont /FontName get",
+    );
+}
+
+#[test]
+fn the_show_family_cuts_text_into_glyphs_as_the_interpreter_does() {
+    // kshow reports every glyph's code, so it shows the cut: one byte per
+    // glyph in a byte font, one UTF-8 sequence in a Unicode-mode font, and
+    // an ill-formed sequence as U+FFFD glyphs of its longest valid prefix
+    let texts = [
+        "\u{c548} \u{b155}A",
+        // a surrogate, a truncated three-byte sequence, two lone lead bytes
+        "\\355\\240\\200A\\341\\200B\\303\\303",
+        // a four-byte scalar, one past U+10FFFF, an overlong slash
+        "\\360\\237\\230\\200\\364\\220\\200\\200\\300\\257",
+    ];
+    for font in ["NotoSansKR-Regular", "Helvetica"] {
+        for text in texts {
+            let setup = format!("/{font} findfont 20 scalefont setfont newpath 10 10 moveto");
+            assert_same_as_native(&format!(
+                "{setup} [ {{ 2 array astore currentpoint 3 array astore }} ({text}) kshow \
+                 currentpoint ]"
+            ));
+            assert_same_as_native(&format!("{setup} 2 1 ({text}) ashow currentpoint"));
+            assert_same_as_native(&format!("{setup} 5 0 32 ({text}) widthshow currentpoint"));
+        }
+    }
+    // a Type 3 font's glyph procedure runs once per glyph, as without the
+    // warp: the Unicode-mode check reads /UnicodeBuildChar instead of
+    // showing a probe string
+    assert_same_as_native(
+        "/n 0 def /T3 << /FontType 3 /FontMatrix [0.001 0 0 0.001 0 0] \
+         /FontBBox [0 0 1000 1000] /Encoding 256 array \
+         /BuildChar { /n n 1 add def pop pop 600 0 setcharwidth } >> definefont \
+         20 scalefont setfont newpath 10 10 moveto 1 0 (\\303\\251) ashow n currentpoint",
+    );
+}
+
+const MARQUEE: &str = include_str!("../lib/fonts/marquee.ps");
+
+/// `render`, with the bundled Type 3 face Marquee loaded and seeded.
+fn render_marquee(src: &str) -> Interp {
+    let mut it = interpreter(400, 400);
+    it.run_str(MARQUEE).expect("Marquee");
+    it.run_str(&format!(
+        "4 4 scale 2 srand /Marquee findfont 24 scalefont setfont {src}"
+    ))
+    .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    it
+}
+
+/// Pixels that are not white.
+fn ink(it: &Interp) -> usize {
+    it.gfx()
+        .pixmap
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[0].min(p[1]).min(p[2]) < 200)
+        .count()
+}
+
+#[test]
+fn type3_text_bends_under_every_show_operator() {
+    // charpath traces no Type 3 glyph, so these go to the real operator,
+    // whose BuildChar paints with the decorated fill and stroke
+    let texts = [
+        ("show", "(AB) show"),
+        ("ashow", "2 1 (AB) ashow"),
+        ("widthshow", "6 0 32 (A B) widthshow"),
+        ("awidthshow", "6 2 32 1 0 (A B) awidthshow"),
+        ("kshow", "{ pop pop -3 0 rmoveto } (AB) kshow"),
+        ("glyphshow", "/A glyphshow /B glyphshow"),
+    ];
+    for (op, text) in texts {
+        let program = format!("newpath 10 40 moveto {text}");
+        let native = render_marquee(&program);
+        assert!(
+            ink(&native) > 2000,
+            "{op}: Marquee drew {} pixels",
+            ink(&native)
+        );
+        let warped = render_marquee(&format!("{{ {program} }} {{}} 2 wp-run"));
+        assert!(ink(&warped) > 2000, "{op}: the warped text vanished");
+        let worst = worst_block_diff(&warped, &native, 8);
+        assert!(
+            worst < 4.0,
+            "{op}: identity warp changed Type 3 text: {worst}"
+        );
+        let shifted = render_marquee(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+        let moved = render_marquee(&format!("20 5 translate {program}"));
+        let worst = worst_block_diff(&shifted, &moved, 8);
+        assert!(
+            worst < 4.0,
+            "{op}: Type 3 text did not follow the warp: {worst}"
+        );
+    }
+}
+
+#[test]
+fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
+    // bad operands and a missing current point go to the real operator,
+    // so the error and the operands left behind are its own
+    for body in [
+        "newpath 10 10 moveto { 1 (x) (AB) ashow } stopped",
+        "newpath { 1 1 (AB) ashow } stopped",
+        "newpath { 1 (AB) ashow } stopped",
+        "newpath 10 10 moveto { 1 1 300 (AB) widthshow } stopped",
+        "newpath 10 10 moveto { 1 1 32.0 (AB) widthshow } stopped",
+        "newpath { 1 1 (x) 1 1 (AB) awidthshow } stopped",
+        "newpath 10 10 moveto { 5 (AB) kshow } stopped",
+        "newpath 10 10 moveto { { pop pop newpath } (AB) kshow } stopped",
+        "newpath 10 10 moveto { 65 glyphshow } stopped",
+        "newpath 10 10 moveto { 7 show } stopped",
+    ] {
+        assert_same_as_native(&format!(
+            "/Helvetica findfont 24 scalefont setfont 9 {body} $error /errorname get"
+        ));
+    }
+    // a warp that fails mid-glyph leaves no gsave and no glyph path behind
+    let it = run("/Helvetica findfont 24 scalefont setfont 5 setlinewidth \
+                  { newpath 0 0 moveto 50 50 lineto 10 10 moveto \
+                    { 1 1 (AB) ashow } stopped pop } { pop pop 1 0 div } 2 wp-run \
+                  currentlinewidth [ { } { } { } { } pathforall ] length");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["5.0", "6"], "{stack:?}");
+}

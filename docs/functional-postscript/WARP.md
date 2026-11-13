@@ -103,6 +103,26 @@ name:
 - `show` draws the string's glyph outlines (`charpath`) through the warp.
   Like the real `show`, it keeps the current path and only moves the
   current point to where `show` would leave it.
+- `ashow`, `widthshow`, `awidthshow`, `kshow` and `glyphshow` do the same,
+  glyph by glyph, with each operator's spacing: `ashow`'s extra advance
+  after every glyph, `widthshow`'s after the given character code, both
+  for `awidthshow`. `kshow` calls its procedure between each pair of
+  glyphs with their two codes on the operand stack, the current point
+  after the first glyph, and the caller's operand and dictionary stacks
+  below them, so a procedure that moves the current point or sets a font
+  works as it does without the warp. `glyphshow` draws the named glyph.
+  The text is cut into glyphs as the interpreter cuts it: one byte each,
+  or one UTF-8 sequence each in a Unicode-mode font (the CJK and Thai
+  faces).
+- Text in a Type 3 font (the faces in `lib/fonts/`, `lib/hangul.ps`,
+  `lib/handscript.ps`) is shown by the real operator, since `charpath`
+  traces no Type 3 glyph. Its glyph procedures paint with the decorated
+  `fill` and `stroke`, so it bends too. `kshow` makes that choice glyph by
+  glyph, as its procedure may change the font.
+- A show operator given bad operands, or run with no current point, hands
+  them to the real operator, which raises its usual error and leaves the
+  operand stack as it would without the warp. A warp that fails while a
+  glyph is drawn leaves no `gsave` or glyph path behind.
 
 The coordinate space a warp works in is the one in force when
 `wp-decorators` runs, so place the program with `translate`/`scale` before
@@ -130,8 +150,14 @@ forever.
 
 - Images, `shfill` and other smooth shadings pass through unwarped.
 - The array forms of `rectfill`, `rectstroke` and `rectclip` are not
-  decorated, and neither are `ashow`, `widthshow`, `kshow`, `xshow` or
-  `glyphshow`.
+  decorated. pscat has no `xshow`, `yshow`, `xyshow` or `cshow`, so there
+  is nothing to decorate.
+- Type 3 text bends only where its glyph procedures paint with names the
+  warp decorates: a procedure that `bind`s `fill` before the warp is
+  installed, or paints with `imagemask`, draws unwarped.
+- `glyphshow` in a Unicode-mode font draws its glyph unwarped: those fonts
+  look glyphs up by code, not through the `Encoding` the decorator uses to
+  reach a glyph by name.
 - A program that fetches operators straight from `systemdict`, or that
   `initmatrix`/`setmatrix`es away the placement, escapes the warp.
 - Flattening makes curves into short lines. `setflat` controls how fine

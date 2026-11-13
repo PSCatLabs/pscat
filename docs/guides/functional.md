@@ -200,7 +200,8 @@ same convention as the other pscat libraries:
 `lib/warp.ps`, loaded after the two libraries above, reads a path back as
 data and moves every point, which bends shapes that PostScript's own affine
 transforms cannot (lens, swirl, ripple, polar, perspective). `wp-run` runs
-an unmodified program with its fills, strokes and text drawn through a warp:
+an unmodified program with its fills, strokes and text (every show operator
+pscat has) drawn through a warp:
 `(gallery/golden_bloom.ps) 350 350 300 0.4 wp-lens 3 wp-run`. The gallery's
 *Programs about programs* pieces use it, and
 [WARP.md](../functional-postscript/WARP.md) has the warps, the path
