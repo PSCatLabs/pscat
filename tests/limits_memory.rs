@@ -93,6 +93,21 @@ fn memory_growth_is_capped() {
             .unwrap();
     }
 
+    // Each kind is charged what its recorder really builds (Codex, PR
+    // #1186): a PDF imagemask keeps its packed bits, 1.1 MB for 3000 x
+    // 3000, where a colour image of that size decodes to 27 MB of RGB. Under
+    // a 20 MiB cap the mask runs and the colour image is refused.
+    let mut it = limited(20);
+    it.enable_pdf();
+    it.run_str("100 100 scale 3000 3000 true [3000 0 0 3000 0 0] {()} imagemask")
+        .unwrap();
+    let mut it = limited(20);
+    it.enable_pdf();
+    assert_eq!(
+        it.run_str("100 100 scale 3000 3000 8 [3000 0 0 3000 0 0] {()} image"),
+        Err(PsError::MemoryExceeded)
+    );
+
     // A whole-file read counts as it grows (issue #702): `/dev/zero` never
     // ends, so the cap is what stops it, well short of a gigabyte.
     #[cfg(unix)]

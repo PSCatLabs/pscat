@@ -417,20 +417,41 @@ mod one_operator {
         op: &'static str,
         budget: Duration,
     ) {
+        stops_inside_with(
+            what,
+            setup,
+            src,
+            op,
+            budget,
+            untrusted(Duration::from_millis(100)),
+            PsError::TimeExceeded,
+        );
+    }
+
+    /// [`stops_inside`] under other `limits`, expecting the error `want`.
+    fn stops_inside_with(
+        what: &'static str,
+        setup: String,
+        src: &'static str,
+        op: &'static str,
+        budget: Duration,
+        limits: Limits,
+        want: PsError,
+    ) {
         let (err, report) = on_a_deadline(what, move || {
             common::within_cpu_budget(what, budget, 3, || {
                 let mut it = Interp::new();
                 it.run_str(&setup).expect("the setup runs");
-                it.set_limits(untrusted(Duration::from_millis(100)))
+                it.set_limits(limits)
                     .expect("limits without memory always apply");
                 let err = it
                     .run_str(&format!("{src} 1 pop"))
-                    .expect_err("the time limit stops it");
+                    .expect_err("a limit stops it");
                 let report = it.error_report(&err);
                 (err, report)
             })
         });
-        assert_eq!(err, PsError::TimeExceeded, "{what}: {report}");
+        assert_eq!(err, want, "{what}: {report}");
         assert!(
             report.contains(&format!("OffendingCommand: {op};")),
             "{what}: stopped after `{op}` returned, not inside it: {report}"
@@ -485,6 +506,153 @@ mod one_operator {
             "bind",
             Duration::from_secs(2),
         );
+    }
+
+    #[test]
+    fn bind_with_a_deep_dictionary_stack_stops_inside_bind() {
+        // Each unresolved name is looked up through every dictionary on the
+        // stack: 60,000 names under 2,000 dictionaries is 1.2e8 probes in
+        // one `bind` (Codex, PR #1186: 1.3 s past a 0.1 s limit, blamed on
+        // the next operator). The walk counts lookups as work.
+        stops_inside(
+            "bind under a deep dictionary stack",
+            "2000 { 1 dict begin } repeat /p [ 60000 { /zz_not_defined cvx } repeat ] cvx def"
+                .into(),
+            "/p load bind pop",
+            "bind",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn a_huge_arc_sweep_stops_at_the_step_limit() {
+        // Segments are steps (one per 1024), charged as the loop runs, so a
+        // step cap stops a sweep that has no end (Codex, PR #1186: it needed
+        // an outside kill under `--max-steps 10`).
+        stops_inside_with(
+            "arc sweep, steps",
+            String::new(),
+            "newpath 0 0 10 -1e15 0 arc",
+            "arc",
+            Duration::from_secs(2),
+            steps(10),
+            PsError::StepsExceeded,
+        );
+    }
+
+    #[test]
+    fn arc_turns_like_gs_over_whole_and_near_whole_turns() {
+        // `ang1 ang2 arc` and `arcn` path element counts (moveto included)
+        // from gs 10, over whole turns in both directions and a hundredth of
+        // a degree either side of them. Codex found `2160 -2520 arc` drawing
+        // a full circle with the first #1176 normalisation (gs and main: 2).
+        // pscat's turning is main's loop exactly (`turn_past`, unit-tested
+        // bit for bit against it); these pin the picture to gs.
+        const GS: &[(f64, f64, u32, u32)] = &[
+            (-2520.0, -2520.0, 2, 2),
+            (-2520.0, -2160.0, 5, 2),
+            (-2520.0, -360.0, 25, 2),
+            (-2520.0, 0.0, 29, 2),
+            (-2520.0, 360.0, 33, 2),
+            (-2520.0, 2160.0, 53, 2),
+            (-2520.0, 4680.0, 81, 2),
+            (-2160.0, -2520.0, 2, 5),
+            (-2160.0, -2160.0, 2, 2),
+            (-2160.0, -360.0, 21, 2),
+            (-2160.0, 0.0, 25, 2),
+            (-2160.0, 360.0, 29, 2),
+            (-2160.0, 2160.0, 49, 2),
+            (-2160.0, 4680.0, 77, 2),
+            (-360.0, -2520.0, 2, 25),
+            (-360.0, -2160.0, 2, 21),
+            (-360.0, -360.0, 2, 2),
+            (-360.0, 0.0, 5, 2),
+            (-360.0, 360.0, 9, 2),
+            (-360.0, 2160.0, 29, 2),
+            (-360.0, 4680.0, 57, 2),
+            (0.0, -2520.0, 2, 29),
+            (0.0, -2160.0, 2, 25),
+            (0.0, -360.0, 2, 5),
+            (0.0, 0.0, 2, 2),
+            (0.0, 360.0, 5, 2),
+            (0.0, 2160.0, 25, 2),
+            (0.0, 4680.0, 53, 2),
+            (360.0, -2520.0, 2, 33),
+            (360.0, -2160.0, 2, 29),
+            (360.0, -360.0, 2, 9),
+            (360.0, 0.0, 2, 5),
+            (360.0, 360.0, 2, 2),
+            (360.0, 2160.0, 21, 2),
+            (360.0, 4680.0, 49, 2),
+            (2160.0, -2520.0, 2, 53),
+            (2160.0, -2160.0, 2, 49),
+            (2160.0, -360.0, 2, 29),
+            (2160.0, 0.0, 2, 25),
+            (2160.0, 360.0, 2, 21),
+            (2160.0, 2160.0, 2, 2),
+            (2160.0, 4680.0, 29, 2),
+            (4680.0, -2520.0, 2, 81),
+            (4680.0, -2160.0, 2, 77),
+            (4680.0, -360.0, 2, 57),
+            (4680.0, 0.0, 2, 53),
+            (4680.0, 360.0, 2, 49),
+            (4680.0, 2160.0, 2, 29),
+            (4680.0, 4680.0, 2, 2),
+            (-359.99, -2520.0, 5, 26),
+            (-360.0, -2519.99, 2, 25),
+            (-360.01, -2520.0, 2, 25),
+            (-360.0, -2520.01, 5, 26),
+            (-359.99, 0.0, 5, 2),
+            (-360.0, 0.01, 6, 5),
+            (-360.01, 0.0, 6, 5),
+            (-360.0, -0.01, 5, 2),
+            (-359.99, 2520.0, 33, 2),
+            (-360.0, 2520.01, 34, 5),
+            (-360.01, 2520.0, 34, 5),
+            (-360.0, 2519.99, 33, 2),
+            (2160.01, -2520.0, 5, 54),
+            (2160.0, -2519.99, 2, 53),
+            (2159.99, -2520.0, 2, 53),
+            (2160.0, -2520.01, 5, 54),
+            (2160.01, 0.0, 5, 26),
+            (2160.0, 0.01, 2, 25),
+            (2159.99, 0.0, 2, 25),
+            (2160.0, -0.01, 5, 26),
+            (2160.01, 2520.0, 5, 2),
+            (2160.0, 2520.01, 6, 5),
+            (2159.99, 2520.0, 6, 5),
+            (2160.0, 2519.99, 5, 2),
+        ];
+        // Where a sweep is a whole number of quarter turns, pscat (main and
+        // this branch alike) makes one more segment than gs: its sweep in
+        // double precision is a hair over the multiple that gs's single
+        // precision lands on. Not a turning difference.
+        const ONE_MORE: &[(f64, f64, bool)] = &[
+            (-2520.0, 2160.0, true),
+            (-360.0, 4680.0, true),
+            (0.0, 4680.0, true),
+            (2160.0, -2520.0, false),
+            (2160.0, 4680.0, true),
+            (4680.0, -360.0, false),
+            (4680.0, 0.0, false),
+            (4680.0, 2160.0, false),
+        ];
+        let mut src = String::from(
+            "/cnt { /n 0 def {pop pop /n n 1 add def} {pop pop /n n 1 add def} \
+             {6 {pop} repeat /n n 1 add def} {/n n 1 add def} pathforall n } def\n",
+        );
+        let mut want = String::new();
+        for &(a1, a2, arc, arcn) in GS {
+            for (op, gs, ccw) in [("arc", arc, true), ("arcn", arcn, false)] {
+                src.push_str(&format!("newpath 100 100 10 {a1} {a2} {op} cnt =\n"));
+                let extra = u32::from(ONE_MORE.contains(&(a1, a2, ccw)));
+                want.push_str(&format!("{}\n", gs + extra));
+            }
+        }
+        let mut it = limited(untrusted(Duration::from_secs(30)));
+        it.capture_stdout();
+        it.run_str(&src).unwrap();
+        assert_eq!(String::from_utf8_lossy(it.captured_stdout()), want);
     }
 
     #[test]

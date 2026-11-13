@@ -184,7 +184,8 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     }
 }
 
-/// Elements `bind` walks between looks at the limits (#1176).
+/// Units of work (`BindWalk::walked`) `bind` does between looks at the
+/// limits (#1176).
 const BIND_POLL: usize = 1 << 16;
 
 /// One `bind` call's walk (#1176). `seen` is each procedure view already
@@ -197,7 +198,8 @@ const BIND_POLL: usize = 1 << 16;
 #[derive(Default)]
 struct BindWalk {
     seen: std::collections::HashMap<(usize, usize, usize), usize>,
-    /// Elements walked since the last look at the limits.
+    /// Work (elements, and dictionaries searched for names) since the last
+    /// look at the limits.
     walked: usize,
 }
 
@@ -224,32 +226,48 @@ fn bind_proc(
             e.insert(depth);
         }
     }
-    // Distinct views can still overlap (every suffix of one array), so the
-    // walk is not linear in the VM in every case: it looks at the limits as
-    // it goes, a step per 1024 elements, as a file read does.
-    walk.walked += body.len();
-    if walk.walked >= BIND_POLL {
-        it.poll_limits((walk.walked / 1024) as u64)?;
-        walk.walked %= 1024;
-    }
     // bind mutates VM contents like any put — journaled so restore
     // un-binds, matching Adobe's VM semantics.
     it.journal_array(body);
     let mut nested: Vec<PsArray> = Vec::new();
+    // Distinct views can still overlap (every suffix of one array), and each
+    // name is looked up through the whole dictionary stack, so the walk is
+    // not linear in the VM in every case. It looks at the limits as it goes:
+    // an element is one unit of work and a lookup one more per dictionary on
+    // the stack, a step per 1024 units, as a file read is charged per KiB. A
+    // limit stops the walk where it is (the elements after it are skipped).
+    let lookup = 1 + it.dict_stack_len();
+    let mut stopped: Option<PsError> = None;
     // for_each_mut declines (harmlessly) if the storage is already
     // borrowed — the self-referential case.
-    body.for_each_mut(|el| match (&el.value, el.executable) {
-        (Value::Name(n), true) => {
-            if let Some(resolved) = it.load(n)
-                && resolved.executable
-                && matches!(resolved.value, Value::Operator(_))
-            {
-                *el = resolved;
-            }
+    body.for_each_mut(|el| {
+        if stopped.is_some() {
+            return;
         }
-        (Value::Array(inner), true) => nested.push(inner.clone()),
-        _ => {}
+        walk.walked += 1;
+        match (&el.value, el.executable) {
+            (Value::Name(n), true) => {
+                walk.walked += lookup;
+                if let Some(resolved) = it.load(n)
+                    && resolved.executable
+                    && matches!(resolved.value, Value::Operator(_))
+                {
+                    *el = resolved;
+                }
+            }
+            (Value::Array(inner), true) => nested.push(inner.clone()),
+            _ => {}
+        }
+        if walk.walked >= BIND_POLL {
+            if let Err(e) = it.poll_limits((walk.walked / 1024) as u64) {
+                stopped = Some(e);
+            }
+            walk.walked %= 1024;
+        }
     });
+    if let Some(e) = stopped {
+        return Err(e);
+    }
     for inner in nested {
         bind_proc(it, &inner, depth + 1, walk)?;
     }

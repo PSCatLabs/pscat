@@ -158,14 +158,16 @@ pub const UNTRUSTED_MAX_TIME: Duration = Duration::from_secs(55);
 /// Heap growth in [`Limits::untrusted`]: 1 GiB.
 pub const UNTRUSTED_MAX_MEMORY: usize = 1 << 30;
 
-/// The time and memory limits as a value a loop deep inside one operator
-/// can look at without the interpreter (#1176): code in `Gfx` that cannot
-/// borrow the [`Interp`](crate::Interp) it belongs to. Made by
-/// `Interp::limit_probe`; [`LimitProbe::NONE`] where no limit applies.
-/// Steps are not charged through it: an operator that wants its work
-/// counted charges it with `Interp::poll_limits` when it returns.
+/// The limits as a value a loop deep inside one operator can look at
+/// without the interpreter (#1176): code in `Gfx` that cannot borrow the
+/// [`Interp`](crate::Interp) it belongs to. Made by `Interp::limit_probe`;
+/// [`LimitProbe::NONE`] where no limit applies. The loop says how many steps
+/// its work so far comes to; the operator charges them with
+/// `Interp::poll_limits` when it returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LimitProbe {
+    /// Steps the program has left when the operator started.
+    pub(crate) steps_left: Option<u64>,
     /// The time limit as a `Clock::mono_ns` instant.
     pub(crate) deadline_ns: Option<u64>,
     /// Heap bytes at `set_limits`, and the growth allowed from there.
@@ -175,13 +177,21 @@ pub(crate) struct LimitProbe {
 impl LimitProbe {
     /// Nothing to look at: `check` always passes.
     pub(crate) const NONE: LimitProbe = LimitProbe {
+        steps_left: None,
         deadline_ns: None,
         memory: None,
     };
 
-    /// `TimeExceeded` past the deadline, `MemoryExceeded` past the heap cap:
-    /// the errors the interpreter's own check between slices raises.
-    pub(crate) fn check(&self) -> Result<(), crate::PsError> {
+    /// `StepsExceeded` once `steps` (the work done so far, in steps) passes
+    /// what was left, `TimeExceeded` past the deadline, `MemoryExceeded`
+    /// past the heap cap: the errors the interpreter's own check between
+    /// slices raises.
+    pub(crate) fn check(&self, steps: u64) -> Result<(), crate::PsError> {
+        if let Some(left) = self.steps_left
+            && steps > left
+        {
+            return Err(crate::PsError::StepsExceeded);
+        }
         if let Some(d) = self.deadline_ns
             && crate::clock::Clock::mono_ns() >= d
         {

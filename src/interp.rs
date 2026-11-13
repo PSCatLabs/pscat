@@ -1007,14 +1007,16 @@ impl Interp {
         (steps, deadline)
     }
 
-    /// The time and memory limits for a loop that cannot borrow the
-    /// interpreter (#1176, [`LimitProbe`](crate::limits::LimitProbe)).
+    /// The limits for a loop that cannot borrow the interpreter (#1176,
+    /// [`LimitProbe`](crate::limits::LimitProbe)).
     pub(crate) fn limit_probe(&self) -> crate::limits::LimitProbe {
         if self.limits.is_none() {
             return crate::limits::LimitProbe::NONE;
         }
+        let (steps_left, deadline_ns) = self.remaining_budget();
         crate::limits::LimitProbe {
-            deadline_ns: self.remaining_budget().1,
+            steps_left,
+            deadline_ns,
             memory: self.limits.max_memory.map(|max| (self.mem_base, max)),
         }
     }
@@ -2554,10 +2556,9 @@ impl Interp {
         // (`30000 30000 8 [...] {()} image` is 3.6 GB and 9e8 pixels in one
         // step, #1176), so that buffer is refused against a memory cap
         // before the image starts, as `array` and `string` are.
-        let per_px =
-            4 * usize::from(self.gfx.svg_wanted()) + 3 * usize::from(self.gfx.pdf_wanted());
-        if per_px > 0 {
-            self.check_alloc(ctx.width.saturating_mul(ctx.height).saturating_mul(per_px))?;
+        let bytes = ctx.recorder_bytes(self.gfx.svg_wanted(), self.gfx.pdf_wanted());
+        if bytes > 0 {
+            self.check_alloc(bytes)?;
         }
         self.push_frame(Frame::Image(Box::new(ctx)))
     }
