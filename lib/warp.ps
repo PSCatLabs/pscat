@@ -672,7 +672,10 @@
   % advances. Each wrapper hands its operands, the prefix and a fill to
   % a helper, which falls back to the real operator for an error or a
   % Type 3 font.
-  /prefix [ /warp load /exec load /apply load /exec load ] cvx def
+  % prefix: the show family's warp-and-rebuild, which then puts the
+  % caller's CTM back, as the fill that follows it saw it before
+  /prefix [ /matrix load /currentmatrix load /warp load /exec load
+            /apply load /exec load /setmatrix load ] cvx def
   /fillp [ /realfill load ] cvx def
   [ [ /show //wp--show ] [ /ashow //wp--ashow ] [ /widthshow //wp--widthshow ]
     [ /awidthshow //wp--awidthshow ] [ /kshow //wp--kshow ]

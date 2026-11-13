@@ -593,7 +593,9 @@ fn a_failing_warp_leaves_the_stack_and_graphics_state_as_the_call_had_them() {
     // leaves: the operands it was called with (the real rectfill keeps
     // them on a typecheck: gs prints 77 1 2 (a) 4 for `77 1 2 (a) 4
     // rectfill` under stopped), the path and CTM it was called with, the
-    // gsave depth and the dictionary stack. The CTM is moved first, so a
+    // gsave depth (a warp that opens no dictionary of its own, so the
+    // dictionary stack is checked for the decorator's part only). The CTM
+    // is moved first, so a
     // CTM left at the warp's base would show.
     for (op, call) in PAINTERS {
         let operands = call.strip_suffix(op).unwrap().trim();
