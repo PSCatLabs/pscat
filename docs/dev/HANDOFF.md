@@ -555,6 +555,9 @@ renders eight examples in both and compares block-downsampled output).
   `xshow`/`yshow`/`xyshow` (number arrays and PLRM 3.14.5 encoded number
   strings, `src/numstring.rs`) and `cshow` are too (#1180); their checks,
   and cshow's taking its operands in either order, follow Ghostscript.
+  `rectfill`/`rectstroke`/`rectclip` take the same operand (`pop_rects`), and the
+  scanner reads binary token 149 (homogeneous number array) into a literal array
+  (`Token::NumberArray`, #1192; `notes/1192-encoded-number-strings-rects-token-149.md`).
 - **Local and global VM are not separated** (#1146). pscat has one VM, so
   `setglobal` only records a flag that `currentglobal` reads back (`false`
   at start): nothing is allocated differently, which is enough for the
@@ -1624,8 +1627,9 @@ renders eight examples in both and compares block-downsampled output).
   returns the executable array. Every offset is checked, a sequence decodes to at most one object per 8 bytes (so cycles and
   shared layouts run out of budget: `syntaxerror`), nesting is capped at 500, and the fuzz
   `lexer` target decodes what the lexer frames. Native formats 3/4 write as 1/2
-  (pscat is always little-endian IEEE, as Ghostscript treats it). Not done: binary tokens 132 to
-  159 (single numbers, strings, system name table indices), user and system name tables. Tests:
+  (pscat is always little-endian IEEE, as Ghostscript treats it). Token 149, the homogeneous number
+  array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
+  strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
   `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
