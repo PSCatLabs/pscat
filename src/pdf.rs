@@ -34,7 +34,13 @@
 //!   #244). Anything that greps the raw PDF for operators must inflate
 //!   first (`tests/common/mod.rs::pdf_text`).
 //! - Text arrives as glyph outlines (same as SVG); no fonts are
-//!   embedded.
+//!   embedded. With [`PdfText::Text`] (`pscat --pdf-text`, #1193) a glyph
+//!   of an embeddable TrueType/OpenType face is written as text instead:
+//!   one `BT … TJ ET` per run of glyphs on a baseline, in a Type 0 font
+//!   with an embedded CFF subset and a `/ToUnicode` map
+//!   (`src/pdf_font.rs`). A run is held open while glyphs join it and is
+//!   written before the next mark of any kind (every writer goes through
+//!   `enter_clip`), so paint order holds.
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
 //!   1-bit `/ImageMask` stencils painted in the current fill color,
 //!   which is precisely PostScript's own semantics.
@@ -57,7 +63,44 @@ use std::rc::Rc;
 use tiny_skia::FillRule;
 
 use crate::gfx::{ClipNode, Composite};
+use crate::pdf_font::{OBJECTS_PER_FONT, UsedGlyphs};
 use crate::svg::Chain;
+use crate::textrun::{GlyphText, Placement, TextRun};
+
+/// How PDF output writes text (#1193).
+///
+/// Set with `Gfx::set_pdf_text` (`interp.set_pdf_text(..)`) or
+/// `pscat --pdf-text`. Only PDF output reads it: PNG and SVG are unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PdfText {
+    /// Every glyph is its outline, a filled path: no fonts in the file. The
+    /// default, and the only form before #1193.
+    #[default]
+    Paths,
+    /// Glyphs of TrueType and OpenType faces whose licence bits allow
+    /// embedding (the bundled Liberation, TeX Gyre, URW and Noto faces, the
+    /// catalog, font packs) become PDF text in an embedded subset of the
+    /// face, with a `/ToUnicode` map: selectable, searchable and
+    /// extractable, drawn from the same outlines. Type 1 and Type 3 fonts,
+    /// `charpath`, and glyphs with no Unicode name keep their outlines.
+    Text,
+}
+
+/// The open text run: glyphs on one baseline in one face, size, frame,
+/// paint and clip, written as one text object.
+struct PdfRun {
+    text: TextRun,
+    /// The run's em → device matrix (linear part), which is its `Tm`.
+    em: [f64; 4],
+    /// The first glyph's device origin.
+    origin: (f64, f64),
+    /// Document font index (`/F<n>`).
+    font: usize,
+    /// The `ExtGState` selection, empty for the default.
+    gs: String,
+    /// Each glyph's advance in 1/1000 em, as `/W` gives it.
+    widths: Vec<f64>,
+}
 
 pub struct PdfRecorder {
     width: u32,
@@ -127,6 +170,17 @@ pub struct PdfRecorder {
     /// Bytes pdfmark has stored so far (stream data, strings, names),
     /// against [`MAX_MARK_BYTES`].
     mark_bytes: usize,
+    /// The text run being collected (`--pdf-text`), written before the
+    /// next mark. Always `None` without text output.
+    run: Option<PdfRun>,
+    /// Embedded fonts (#1193): FID and the glyphs used, document-global,
+    /// numbered after the named objects. Empty without text output, so
+    /// such documents keep every object number they had.
+    fonts: Vec<(i64, UsedGlyphs)>,
+    font_ids: HashMap<i64, usize>,
+    /// Which fonts each finished page references.
+    page_fonts: Vec<Vec<usize>>,
+    current_fonts: Vec<usize>,
 }
 
 /// A PDF object built by `pdfmark` (#1032): the interpreter converts the
@@ -224,6 +278,11 @@ impl PdfRecorder {
             named_ids: HashMap::new(),
             embeds: Vec::new(),
             mark_bytes: 0,
+            run: None,
+            fonts: Vec::new(),
+            font_ids: HashMap::new(),
+            page_fonts: Vec::new(),
+            current_fonts: Vec::new(),
         }
     }
 
@@ -420,7 +479,7 @@ impl PdfRecorder {
         format!("/GS{idx} gs ")
     }
 
-    fn clip_prelude(&mut self, chain: &Chain) -> String {
+    fn clip_prelude(&self, chain: &Chain) -> String {
         let mut out = String::new();
         let mut node: Option<Rc<ClipNode>> = chain.clone();
         while let Some(n) = node {
@@ -444,6 +503,10 @@ impl PdfRecorder {
     /// clipped chain, a new `q <clip>` group opens. Unclipped elements
     /// are written with no outer group, as before.
     fn enter_clip(&mut self, chain: &Chain) {
+        // Every writer comes through here first, so an open text run is
+        // written before the mark that follows it. (`flush_text` calls back
+        // in here with the run already taken, which returns at once.)
+        self.flush_text();
         let same = match (&self.open_clip, chain) {
             (Some(open), Some(want)) => Rc::ptr_eq(open, want),
             (None, None) => true,
@@ -466,15 +529,153 @@ impl PdfRecorder {
         }
     }
 
-    /// The current page's content with any open clip group closed, for
-    /// a finished-page snapshot. The live `content` is left untouched
-    /// (`copypage` keeps painting into it).
+    /// The current page's content with any open text run written and any
+    /// open clip group closed, for a finished-page snapshot. The live
+    /// `content` is left untouched (`copypage` keeps painting into it), and
+    /// the run stays open, so a mid-run read (`pdf_document`) shows the
+    /// text so far and later glyphs on the line still join it.
     fn snapshot(&self) -> String {
         let mut s = self.content.clone();
-        if self.open_clip.is_some() {
+        let mut open = self.open_clip.is_some();
+        if let Some(run) = &self.run {
+            let same = match (&self.open_clip, &run.text.chain) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                if open {
+                    s.push_str("Q\n");
+                }
+                open = run.text.chain.is_some();
+                if open {
+                    let _ = writeln!(s, "q {}", self.clip_prelude(&run.text.chain));
+                }
+            }
+            // Inside the run's clip group, before the group's `Q`.
+            Self::write_run(&mut s, run);
+        }
+        if open {
             s.push_str("Q\n");
         }
         s
+    }
+
+    /// One glyph as text (#1193): continue the open run, or write it and
+    /// open a new one. A glyph with no placement (a collapsed font matrix)
+    /// paints nothing in the raster either, so it is dropped.
+    pub(crate) fn glyph(
+        &mut self,
+        g: &GlyphText,
+        rgb: (f32, f32, f32),
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        let Some(p) = Placement::of(g) else {
+            return;
+        };
+        let font = match self.font_ids.get(&g.fid) {
+            Some(&i) => i,
+            None => {
+                let i = self.fonts.len();
+                self.fonts.push((g.fid, UsedGlyphs::default()));
+                self.font_ids.insert(g.fid, i);
+                i
+            }
+        };
+        self.fonts[font]
+            .1
+            .glyphs
+            .entry(g.gid)
+            .or_insert((g.ch, g.advance));
+        if let Some(run) = &mut self.run
+            && run.text.accepts(g, &p, rgb, comp, chain)
+        {
+            run.text.push(g, &p);
+            run.widths.push(g.advance);
+            return;
+        }
+        self.flush_text();
+        let gs = self.gs_ref(comp);
+        // Registered when the run opens, so a page snapshotted with the
+        // run still open lists the font in its resources.
+        if !self.current_fonts.contains(&font) {
+            self.current_fonts.push(font);
+        }
+        self.run = Some(PdfRun {
+            text: TextRun::new(g, p, rgb, comp, chain.clone()),
+            em: [g.em[0], g.em[1], g.em[2], g.em[3]],
+            origin: (g.em[4], g.em[5]),
+            font,
+            gs,
+            widths: vec![g.advance],
+        });
+    }
+
+    /// Write the open text run into the content.
+    fn flush_text(&mut self) {
+        let Some(run) = self.run.take() else {
+            return;
+        };
+        self.enter_clip(&run.text.chain);
+        Self::write_run(&mut self.content, &run);
+    }
+
+    /// One text object: `Tf` at size 1 and the em → device matrix as `Tm`
+    /// (the page's flip `cm` is in force), so text space is one em. Each
+    /// glyph after the first is placed at pscat's own x by a `TJ`
+    /// adjustment against the advance `/W` gives it, so ashow, widthshow,
+    /// kshow and the xshow family keep their spacing. The adjustment is
+    /// taken from where the previous one actually left the pen, so
+    /// rounding never accumulates along a line.
+    fn write_run(out: &mut String, run: &PdfRun) {
+        let [a, b, c, d] = run.em;
+        let size = run.text.size;
+        let x0 = run.text.glyphs.first().map_or(0.0, |g| g.x);
+        let mut tj = String::new();
+        let mut hex_open = false;
+        let mut pen = 0.0f64;
+        for (i, (g, &w)) in run.text.glyphs.iter().zip(&run.widths).enumerate() {
+            if i > 0 {
+                let target = (g.x - x0) / size;
+                // Hundredths of a thousandth of an em: what is printed.
+                let n = ((pen - target) * 100_000.0).round() / 100.0;
+                if n != 0.0 && n.is_finite() {
+                    if hex_open {
+                        tj.push('>');
+                        hex_open = false;
+                    }
+                    let _ = write!(tj, " {} ", crate::pdf_font::num(n, 2));
+                    pen -= n / 1000.0;
+                }
+            }
+            if !hex_open {
+                tj.push('<');
+                hex_open = true;
+            }
+            let _ = write!(tj, "{:04X}", g.gid);
+            pen += w / 1000.0;
+        }
+        if hex_open {
+            tj.push('>');
+        }
+        let fm = |v: f64| crate::pdf_font::num(v, 5);
+        let _ = writeln!(
+            out,
+            "q {}{} {} {} rg BT /F{} 1 Tf {} {} {} {} {} {} Tm [{}] TJ ET Q",
+            run.gs,
+            f(run.text.rgb.0),
+            f(run.text.rgb.1),
+            f(run.text.rgb.2),
+            run.font,
+            fm(a),
+            fm(b),
+            fm(c),
+            fm(d),
+            crate::pdf_font::num(run.origin.0, 3),
+            crate::pdf_font::num(run.origin.1, 3),
+            tj.trim(),
+        );
     }
 
     pub(crate) fn fill(
@@ -773,6 +974,8 @@ Q",
     }
 
     pub(crate) fn erase(&mut self) {
+        self.run = None;
+        self.current_fonts.clear();
         self.content.clear();
         self.open_clip = None;
         self.current_images.clear();
@@ -784,16 +987,19 @@ Q",
     /// The page size from now on (`setpagedevice`, #909); finished pages
     /// keep theirs.
     pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.flush_text();
         self.width = width;
         self.height = height;
     }
 
     pub(crate) fn end_page(&mut self) {
+        self.flush_text();
         self.pages.push(self.snapshot());
         self.page_sizes.push((self.width, self.height));
         self.page_images.push(self.current_images.clone());
         self.page_gstates.push(self.current_gstates.clone());
         self.page_shadings.push(self.current_shadings.clone());
+        self.page_fonts.push(self.current_fonts.clone());
     }
 
     /// Serialize the whole document.
@@ -803,12 +1009,14 @@ Q",
         let mut page_gstates = self.page_gstates.clone();
         let mut page_sizes = self.page_sizes.clone();
         let mut page_shadings = self.page_shadings.clone();
+        let mut page_fonts = self.page_fonts.clone();
         if pages.is_empty() || trailing_art {
             pages.push(self.snapshot());
             page_sizes.push((self.width, self.height));
             page_images.push(self.current_images.clone());
             page_gstates.push(self.current_gstates.clone());
             page_shadings.push(self.current_shadings.clone());
+            page_fonts.push(self.current_fonts.clone());
         }
         let npages = pages.len();
 
@@ -825,6 +1033,9 @@ Q",
         // reason.
         let named_base = shading_base + self.shadings.len();
         let refs = |i: usize| named_base + i;
+        // Embedded fonts (#1193) follow the named objects, so a document
+        // without text output keeps every object number it had.
+        let font_base = named_base + self.named.len();
         if self.embeds.is_empty() {
             objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
         } else {
@@ -850,12 +1061,13 @@ Q",
             )
             .into_bytes(),
         );
-        for (i, ((((content, imgs), gss), shs), &(width, height))) in pages
+        for (i, (((((content, imgs), gss), shs), &(width, height)), fonts)) in pages
             .iter()
             .zip(&page_images)
             .zip(&page_gstates)
             .zip(&page_shadings)
             .zip(&page_sizes)
+            .zip(&page_fonts)
             .enumerate()
         {
             let xobjects: Vec<String> = imgs
@@ -884,6 +1096,13 @@ Q",
                     .map(|&idx| format!("/Sh{idx} {} 0 R", shading_base + idx))
                     .collect();
                 let _ = write!(parts, " /Shading << {} >>", list.join(" "));
+            }
+            if !fonts.is_empty() {
+                let list: Vec<String> = fonts
+                    .iter()
+                    .map(|&idx| format!("/F{idx} {} 0 R", font_base + idx * OBJECTS_PER_FONT))
+                    .collect();
+                let _ = write!(parts, " /Font << {} >>", list.join(" "));
             }
             let resources = if parts.is_empty() {
                 String::new()
@@ -944,6 +1163,18 @@ Q",
         }
         for obj in &self.named {
             objects.push(obj.to_pdf(&refs));
+        }
+        for (i, (fid, used)) in self.fonts.iter().enumerate() {
+            let face = crate::font::embed_face(*fid);
+            let first = font_base + i * OBJECTS_PER_FONT;
+            debug_assert_eq!(first, objects.len() + 1);
+            objects.extend(crate::pdf_font::font_objects(
+                face.as_ref().map(|(f, _)| *f),
+                face.as_ref().map_or("Font", |(_, n)| n.as_str()),
+                i,
+                used,
+                first,
+            ));
         }
 
         // /Info is appended last, after every page/image object, so it
@@ -1020,7 +1251,7 @@ pub(crate) enum ImageData {
 }
 
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
-fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
+pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     use flate2::{Compression, write::ZlibEncoder};
     use std::io::Write as _;
     let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());

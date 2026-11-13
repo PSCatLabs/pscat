@@ -135,6 +135,8 @@ struct Options {
     transparent: bool,
     /// `--svg-text`: standard-font text as SVG `<text>` (#1119).
     svg_text: bool,
+    /// `--pdf-text`: text as PDF text objects in embedded fonts (#1193).
+    pdf_text: bool,
     /// The windowed REPL: type PostScript, watch it draw (Stage 8's
     /// last sliver).
     interactive: bool,
@@ -246,6 +248,7 @@ impl Options {
             halftone: false,
             transparent: false,
             svg_text: false,
+            pdf_text: false,
             interactive: false,
             lint: false,
             lint_strict: false,
@@ -504,6 +507,10 @@ fn run_cli() -> ExitCode {
         eprintln!("pscat: --svg-text needs --svg output");
         return ExitCode::FAILURE;
     }
+    if options.pdf_text && options.pdf.is_none() {
+        eprintln!("pscat: --pdf-text needs --pdf output");
+        return ExitCode::FAILURE;
+    }
 
     if options.transparent {
         // The window shows an opaque canvas, and --halftone screens the
@@ -725,6 +732,9 @@ fn run_cli() -> ExitCode {
         interp.gfx_mut().enable_svg();
     }
     if options.pdf.is_some() {
+        if options.pdf_text {
+            interp.gfx_mut().set_pdf_text(pscat::PdfText::Text);
+        }
         interp.gfx_mut().enable_pdf();
     }
     if let Some(expr) = &options.eval {
@@ -2134,6 +2144,7 @@ fn parse_args() -> Result<Options, String> {
             "--halftone" => options.halftone = true,
             "--transparent" => options.transparent = true,
             "--svg-text" => options.svg_text = true,
+            "--pdf-text" => options.pdf_text = true,
             "-i" | "--interactive" => options.interactive = true,
             "--lint" => options.lint = true,
             // Strict *is* lint, with findings promoted to fatal — set
@@ -2278,6 +2289,8 @@ fn print_usage() {
     println!("                      selectable <text> rather than glyph outlines (smaller;");
     println!("                      the viewer draws it in a metric-compatible face)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
+    println!("      --pdf-text      with --pdf: write text as selectable, searchable text in");
+    println!("                      embedded subset fonts rather than glyph outlines");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
     println!("      --spool DIR     watch DIR and render each .ps/.eps that lands there");
     println!(

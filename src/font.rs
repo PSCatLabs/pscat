@@ -1449,14 +1449,16 @@ fn paint_resolved_glyph(
         };
         face.outline_glyph(gid, &mut sink);
         let as_text = match (mode, text) {
-            (ShowMode::Paint, Some((fid, ch))) if gfx.svg_text_wanted() => {
-                glyph_text(fid, ch, gid, &m, face.units_per_em())
+            (ShowMode::Paint, Some((fid, ch))) => {
+                let pdf = gfx.pdf_text_wanted();
+                (pdf || gfx.svg_text_wanted()).then(|| glyph_text(fid, ch, gid, &m, face, pdf))
             }
             _ => None,
         };
         if let Some(g) = as_text {
             // Spaces included: an empty outline still places a character,
             // which is what keeps the words apart when the text is copied.
+            // `paint_glyph` decides per recorder whether it takes the text.
             gfx.paint_glyph(&sink.path, Some(&g));
         } else if !sink.path.is_empty() {
             match mode {
@@ -1478,27 +1480,57 @@ fn paint_resolved_glyph(
     (g[0] * w, g[1] * w)
 }
 
-/// The text form of a glyph (#1119), when its face is a standard one and
-/// its character can stand in for it; `None` keeps the outline.
+/// The text form of a glyph (#1119, #1193). Whether a recorder takes it
+/// is its own call (`textrun::svg_eligible`, `textrun::pdf_eligible`);
+/// the face's embedding bits and the advance are only read when PDF text
+/// output is on (`pdf`).
 fn glyph_text(
     fid: i64,
     ch: char,
     gid: GlyphId,
     m: &GlyphTransform,
-    units_per_em: u16,
-) -> Option<crate::textrun::GlyphText> {
-    if !crate::textrun::text_safe(ch) {
-        return None;
-    }
-    crate::textrun::standard_face(fid)?;
+    face: &Face,
+    pdf: bool,
+) -> crate::textrun::GlyphText {
     // `m` maps font units to device; an em is `units_per_em` of them.
-    let u = f64::from(units_per_em);
-    Some(crate::textrun::GlyphText {
+    let u = f64::from(face.units_per_em());
+    let embeddable = pdf && crate::pdf_font::embedding_allowed(face);
+    crate::textrun::GlyphText {
         ch,
         gid: gid.0,
         fid,
         em: [m.a * u, m.b * u, m.c * u, m.d * u, m.tx, m.ty],
-    })
+        advance: if embeddable {
+            crate::pdf_font::advance_1000(face, gid.0)
+        } else {
+            0.0
+        },
+        embeddable,
+    }
+}
+
+/// The face behind `fid` and the name its embedded subset goes by (#1193):
+/// the face's own PostScript name for the built-in faces
+/// (`LiberationSans`, not the `Helvetica` it stands in for), the catalog's
+/// `FontName` for the rest (for the pinned variable faces that is the
+/// file stem, since their name table names the Thin master).
+pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
+    let face = face_for(fid).ok()?;
+    let idx = usize::try_from(fid).ok()?;
+    let name = match BUILTINS.get(idx) {
+        // The first entry may be a Mac-platform one `to_string` cannot read.
+        Some(b) => face
+            .names()
+            .into_iter()
+            .filter(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
+            .find_map(|n| n.to_string())
+            .unwrap_or_else(|| b.ps_name.to_string()),
+        None => {
+            let cat = CATALOG.read().ok()?;
+            cat.get(idx - BUILTINS.len())?.ps_name.clone()
+        }
+    };
+    Some((face, name))
 }
 
 /// One outline-font glyph by name: the Encoding name of a shown byte
@@ -1531,10 +1563,18 @@ fn unicode_glyph(
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
-    let gid = char::from_u32(code).and_then(|c| glyph_for_char(face, c));
-    // Unicode-mode faces are never standard faces: outlines only.
+    let ch = char::from_u32(code);
+    let gid = ch.and_then(|c| glyph_for_char(face, c));
+    // Never a standard face, so SVG keeps the outlines; PDF text takes the
+    // character for its `/ToUnicode` map (Hangul, kana, kanji, Thai).
     Ok(paint_resolved_glyph(
-        gfx, face, fs.matrix, gid, mode, pen, None,
+        gfx,
+        face,
+        fs.matrix,
+        gid,
+        mode,
+        pen,
+        ch.map(|c| (fs.fid, c)),
     ))
 }
 
