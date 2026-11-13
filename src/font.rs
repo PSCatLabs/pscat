@@ -2307,4 +2307,57 @@ mod tests {
         assert!(register_font_bytes("PscatRegisterJunk", b"not a font".to_vec()).is_err());
         assert!(register_font_bytes("", BUILTINS[0].data.to_vec()).is_err());
     }
+
+    /// #1193: the licence bits of every compiled-in face allow a PDF to
+    /// embed a subset, so `--pdf-text` covers all of the standard 35. Several
+    /// TeX Gyre faces set Preview & Print and Editable together, which reads
+    /// as Editable.
+    #[test]
+    fn every_compiled_in_face_may_be_embedded_in_a_pdf() {
+        for b in &BUILTINS {
+            let face = Face::parse(b.data, 0).expect("parses");
+            assert!(crate::pdf_font::embedding_allowed(&face), "{}", b.ps_name);
+        }
+        for (key, data) in &EMBEDDED {
+            let face = Face::parse(data, 0).expect("parses");
+            assert!(crate::pdf_font::embedding_allowed(&face), "{key}");
+        }
+    }
+
+    /// #1193: a face whose OS/2 fsType forbids embedding keeps its outlines
+    /// under PDF text output, beside a face that becomes text.
+    #[test]
+    fn a_restricted_licence_face_keeps_its_outlines_in_pdf_text() {
+        let mut bytes = BUILTINS[0].data.to_vec();
+        let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+        let os2 = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &bytes[r..r + 4] == b"OS/2")
+            .expect("OS/2 table");
+        let at = u32::from_be_bytes([
+            bytes[os2 + 8],
+            bytes[os2 + 9],
+            bytes[os2 + 10],
+            bytes[os2 + 11],
+        ]);
+        let at = at as usize + 8;
+        bytes[at..at + 2].copy_from_slice(&0x0002u16.to_be_bytes());
+        assert!(!crate::pdf_font::embedding_allowed(
+            &Face::parse(&bytes, 0).expect("parses")
+        ));
+        register_font_bytes("PscatRestrictedTest-Regular", bytes).expect("registers");
+
+        let mut it = crate::Interp::with_page(200, 100).expect("page");
+        it.set_pdf_text(crate::PdfText::Text);
+        it.enable_pdf();
+        it.run_str(
+            "/PscatRestrictedTest-Regular findfont 20 scalefont setfont 10 50 moveto (Hi) show \
+             /Helvetica findfont 20 scalefont setfont (Hi) show",
+        )
+        .expect("runs");
+        let pdf = String::from_utf8_lossy(&it.pdf_document().expect("pdf")).into_owned();
+        // Font dicts are not compressed: one font, the Helvetica one.
+        assert_eq!(pdf.matches("/Subtype /Type0 ").count(), 1, "{pdf}");
+        assert!(pdf.contains("+LiberationSans /Encoding"), "{pdf}");
+    }
 }
