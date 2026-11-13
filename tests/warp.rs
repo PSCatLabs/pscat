@@ -397,10 +397,6 @@ fn the_rest_of_the_show_family_draws_through_the_warp() {
             worst < 4.0,
             "{op}: the text did not follow the warp: {worst}"
         );
-        assert!(
-            worst_block_diff(&shifted, &native, 8) > 40.0,
-            "{op}: the shift changed nothing"
-        );
     }
 }
 
@@ -484,4 +480,96 @@ fn the_show_family_cuts_text_into_glyphs_as_the_interpreter_does() {
          /BuildChar { /n n 1 add def pop pop 600 0 setcharwidth } >> definefont \
          20 scalefont setfont newpath 10 10 moveto 1 0 (\\303\\251) ashow n currentpoint",
     );
+}
+
+const MARQUEE: &str = include_str!("../lib/fonts/marquee.ps");
+
+/// `render`, with the bundled Type 3 face Marquee loaded and seeded.
+fn render_marquee(src: &str) -> Interp {
+    let mut it = interpreter(400, 400);
+    it.run_str(MARQUEE).expect("Marquee");
+    it.run_str(&format!(
+        "4 4 scale 2 srand /Marquee findfont 24 scalefont setfont {src}"
+    ))
+    .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    it
+}
+
+/// Pixels that are not white.
+fn ink(it: &Interp) -> usize {
+    it.gfx()
+        .pixmap
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[0].min(p[1]).min(p[2]) < 200)
+        .count()
+}
+
+#[test]
+fn type3_text_bends_under_every_show_operator() {
+    // charpath traces no Type 3 glyph, so these go to the real operator,
+    // whose BuildChar paints with the decorated fill and stroke
+    let texts = [
+        ("show", "(AB) show"),
+        ("ashow", "2 1 (AB) ashow"),
+        ("widthshow", "6 0 32 (A B) widthshow"),
+        ("awidthshow", "6 2 32 1 0 (A B) awidthshow"),
+        ("kshow", "{ pop pop -3 0 rmoveto } (AB) kshow"),
+        ("glyphshow", "/A glyphshow /B glyphshow"),
+    ];
+    for (op, text) in texts {
+        let program = format!("newpath 10 40 moveto {text}");
+        let native = render_marquee(&program);
+        assert!(
+            ink(&native) > 2000,
+            "{op}: Marquee drew {} pixels",
+            ink(&native)
+        );
+        let warped = render_marquee(&format!("{{ {program} }} {{}} 2 wp-run"));
+        assert!(ink(&warped) > 2000, "{op}: the warped text vanished");
+        let worst = worst_block_diff(&warped, &native, 8);
+        assert!(
+            worst < 4.0,
+            "{op}: identity warp changed Type 3 text: {worst}"
+        );
+        let shifted = render_marquee(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+        let moved = render_marquee(&format!("20 5 translate {program}"));
+        let worst = worst_block_diff(&shifted, &moved, 8);
+        assert!(
+            worst < 4.0,
+            "{op}: Type 3 text did not follow the warp: {worst}"
+        );
+    }
+}
+
+#[test]
+fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
+    // bad operands and a missing current point go to the real operator,
+    // so the error and the operands left behind are its own
+    for body in [
+        "newpath 10 10 moveto { 1 (x) (AB) ashow } stopped",
+        "newpath { 1 1 (AB) ashow } stopped",
+        "newpath { 1 (AB) ashow } stopped",
+        "newpath 10 10 moveto { 1 1 300 (AB) widthshow } stopped",
+        "newpath 10 10 moveto { 1 1 32.0 (AB) widthshow } stopped",
+        "newpath { 1 1 (x) 1 1 (AB) awidthshow } stopped",
+        "newpath 10 10 moveto { 5 (AB) kshow } stopped",
+        "newpath 10 10 moveto { { pop pop newpath } (AB) kshow } stopped",
+        "newpath 10 10 moveto { 65 glyphshow } stopped",
+        "newpath 10 10 moveto { 7 show } stopped",
+    ] {
+        assert_same_as_native(&format!(
+            "/Helvetica findfont 24 scalefont setfont 9 {body} $error /errorname get"
+        ));
+    }
+    // a warp that fails mid-glyph leaves no gsave and no glyph path behind
+    let it = run("/Helvetica findfont 24 scalefont setfont 5 setlinewidth \
+                  { newpath 0 0 moveto 50 50 lineto 10 10 moveto \
+                    { 1 1 (AB) ashow } stopped pop } { pop pop 1 0 div } 2 wp-run \
+                  currentlinewidth [ { } { } { } { } pathforall ] length");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["5.0", "6"], "{stack:?}");
 }

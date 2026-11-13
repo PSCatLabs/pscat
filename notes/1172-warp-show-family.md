@@ -39,6 +39,22 @@ and operand stack match the plain operator; kshow's codes, current points,
 dictionary depth, a font switch and `exit`; the glyph cut for Hangul and
 ill-formed UTF-8 in a Unicode-mode and a byte font.
 
-Deferred: Type 3 text is still not warped under any show operator (charpath
-gives no outlines for Type 3 glyphs), and an error inside `charpath` would
-leave the decorator's gsave open, as it already would for `show`.
+Review round 1 (agent review on PR #1179):
+
+- **Type 3 text.** `charpath` traces no Type 3 glyph, so the first version
+  made Type 3 text vanish under the new decorators, where on `main` the
+  real operators ran BuildChar, whose `fill` and `stroke` reach the
+  decorated ones and bend. Every show decorator, `show` included (whose
+  Type 3 text already vanished on `main`), now hands a Type 3 font's text
+  to the real operator; `kshow` decides glyph by glyph, showing a Type 3
+  glyph with the real `show`. Tested with Marquee under each operator.
+- **Errors.** Bad operands, too few of them, or no current point now go to
+  the real operator after the decorator drops its own operands, so the
+  error, its order (typecheck before nocurrentpoint) and the operand stack
+  left behind are the real operator's. A glyph the `kshow` procedure left
+  with no current point raises `nocurrentpoint` with nothing of ours on
+  the stack (the loop body holds the state dictionary).
+- **gsave guard.** The charpath-and-fill section runs inside
+  `gsave ... stopped ... grestore` (`wp--guarded`), so a warp that errors
+  leaves neither the gsave nor the glyph path behind; the error is then
+  re-raised.

@@ -114,6 +114,15 @@ name:
   The text is cut into glyphs as the interpreter cuts it: one byte each,
   or one UTF-8 sequence each in a Unicode-mode font (the CJK and Thai
   faces).
+- Text in a Type 3 font (the faces in `lib/fonts/`, `lib/hangul.ps`,
+  `lib/handscript.ps`) is shown by the real operator, since `charpath`
+  traces no Type 3 glyph. Its glyph procedures paint with the decorated
+  `fill` and `stroke`, so it bends too. `kshow` makes that choice glyph by
+  glyph, as its procedure may change the font.
+- A show operator given bad operands, or run with no current point, hands
+  them to the real operator, which raises its usual error and leaves the
+  operand stack as it would without the warp. A warp that fails while a
+  glyph is drawn leaves no `gsave` or glyph path behind.
 
 The coordinate space a warp works in is the one in force when
 `wp-decorators` runs, so place the program with `translate`/`scale` before
@@ -143,9 +152,9 @@ forever.
 - The array forms of `rectfill`, `rectstroke` and `rectclip` are not
   decorated. pscat has no `xshow`, `yshow`, `xyshow` or `cshow`, so there
   is nothing to decorate.
-- Text in a Type 3 font is not drawn through the warp: `charpath` gives
-  no outlines for its glyphs, so they advance the current point and paint
-  nothing.
+- Type 3 text bends only where its glyph procedures paint with names the
+  warp decorates: a procedure that `bind`s `fill` before the warp is
+  installed, or paints with `imagemask`, draws unwarped.
 - `glyphshow` in a Unicode-mode font draws its glyph unwarped: those fonts
   look glyphs up by code, not through the `Encoding` the decorator uses to
   reach a glyph by name.
