@@ -58,12 +58,20 @@ Both now go through `wp--protect`, which is given `A = [saved n d k type]`:
   `wp--numbers` turns the string into the array it holds (the real operator
   has already accepted it in the dry run). The scanner reads it only while
   the object format is not 0, so for a program that set `0 setobjectformat`
-  the format is raised to 1 for the scan and put back. The first version
+  the format is raised to 1 for the scan and put back (gs gates it the same
+  way: see the runs below). The first version
   asked the real operator for the pen position after each prefix of the text
   and took differences (no decoder needed, but quadratic and with float
   noise); `token` is simpler, linear and exact. Routing encoded strings to
   the real operator, unwarped, would have left those texts flat in a bent
   page.
+- **The dry run keeps no state on the operand stack.** `wp--dry-run` records
+  the depth (`count`) before it runs the operator and `wp--dry-settle` pops
+  back to it afterwards, so it does not depend on pscat dropping the operands
+  of a failing operator (#1198 would change that, and gs leaves them). The
+  operator and its copies sit in the array that runs it. The error-parity
+  tests compare the decorator with pscat's own operator, whose behaviour on
+  an error is "operands dropped"; gs leaves `(AB) [1]` (below).
 - **cshow** paints nothing and moves nothing; the widths it reports are the
   font's, which a warp does not change; what its procedure shows goes
   through the decorated `show`. Tested (a decorator for it would only have
@@ -81,3 +89,33 @@ xshow family joins `SHOW_FAMILY` (identity warp, shift, current point and
 stack against the plain operator, one entry with an encoded string), the Type 3
 test, and the failing-operator test (errors against the real operator).
 Also a Hangul case, a ripple, `cshow`.
+
+### Ghostscript 10.07.1 runs behind the decisions
+
+```
+$ gs -q -dNODISPLAY -dNOPAUSE -dBATCH -dNOSAFER t.ps
+{ 0 0 atan } stopped { $error /errorname get == $error /command get == } if
+/undefinedresult
+--atan--                        (pscat: /undefinedresult, atan)
+9 { (AB) [1] xshow } stopped { $error /errorname get == } if pstack
+/rangecheck                     (gs leaves  (AB) [1] 9 ; pscat drops (AB) [1], #1198)
+[1]
+(AB)
+9
+currentobjectformat ==   2
+(\225\060\000\002\100\000\000\000\100\200\000\000) token pstack      % object format 2
+true
+[2.0 4.0]
+()
+0 setobjectformat   (same string) token pstack                              % object format 0
+true
+<the string read as text: a name token>
+```
+
+So `0 0 atan` is `undefinedresult` in gs too (the closure-warp failure the
+tests rely on), `token` reads a 149 string as the number array `[2.0 4.0]`
+and, with the object format at 0, does not (pscat's lexer gate is the same,
+which is why `wp--numbers` raises the format around the scan). The decorated
+operators match pscat's own operator, not gs's, on the operands left after an
+error: the tests' contract is the native pscat operator, and #1198 is the
+open question about making pscat leave them as gs does.

@@ -795,6 +795,18 @@ fn xshow_family_places_unicode_glyphs_and_ignores_extra_numbers() {
 }
 
 #[test]
+fn the_dry_run_pops_back_to_its_depth_whatever_the_operator_leaves() {
+    // pscat's operators drop their operands on an error (#1198) and gs's
+    // leave them: the dry run must not depend on which
+    let it = run("1 2 3 (j) (k) true 3 wp--dry-settle");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["1", "2", "3", "true"], "{stack:?}");
+    let it = run("1 2 3 false 3 wp--dry-settle");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["1", "2", "3", "false"], "{stack:?}");
+}
+
+#[test]
 fn an_encoded_number_string_works_with_the_object_format_at_zero() {
     // the scanner reads token 149 only while the object format is not 0, so
     // the decorator raises it for the scan and puts it back

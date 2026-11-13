@@ -693,14 +693,29 @@
 % rest of the show family. cshow paints nothing itself (its procedure's own
 % show calls go through the decorated operators), so it needs no decorator.
 
+% ( ... bool depth -- bool ): after a dry run: pop whatever the real
+% operator left beneath its result, back to depth items. pscat's operators
+% drop their operands on an error (#1198); gs's leave them, and a pscat that
+% did the same would leave the two copies here.
+% @internal
+/wp--dry-settle {
+  count 2 sub exch sub 0 max { exch pop } repeat
+} bind def
+
 % ( string nums prefix fillp ok name -- string nums prefix fillp ok ): when
 % ok, run the real operator name on the program's string and displacements
-% on the null device; ok stays true only if it raised no error.
+% on the null device; ok stays true only if it raised no error. The copies
+% are held by the executable array that runs the operator, and the stack is
+% put back to its depth by count, whatever the operator leaves.
 % @internal
 /wp--dry-run {
   exch {
-    systemdict exch get 4 index 4 index 3 -1 roll
-    gsave nulldevice 0 0 moveto { exec } stopped grestore not
+    systemdict exch get count 1 sub
+    [ 6 index 6 index 4 index ] cvx
+    [ exch systemdict /stopped get 4 -1 roll
+      //wp--dry-settle systemdict /exec get ] cvx
+    exch pop
+    gsave nulldevice 0 0 moveto exec grestore not
   } { pop false } ifelse
 } bind def
 

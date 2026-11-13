@@ -144,9 +144,10 @@ name:
   The warp's own error is re-raised with its name and offending command
   (`undefinedresult`, `div`). The show family has the same guard, with one
   difference: a failing show operator does not give back its string (pscat's
-  own operators drop their operands on an error, #1198). Both guards put the stacks back by depth, not to the nearest
-  mark: they note how deep the operand and dictionary stacks were when the
-  call began, and on an error pop and `end` back to those depths. So a
+  own operators drop their operands on an error, #1198). Both guards put
+  the stacks back by depth, not to the nearest mark: they note how deep the
+  operand and dictionary stacks were when the call began, and on an error
+  pop and `end` back to those depths. So a
   transform that fails with its own `mark` or `[` open, or a closure warp
   (`wp-polar`, `wp-lens`, `wp-swirl`, `wp-perspective`, `wp-unroll`) that
   fails with its scratch dictionary open, leaves nothing behind, and the
