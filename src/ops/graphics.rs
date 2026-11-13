@@ -793,10 +793,7 @@ fn pop_rects(it: &mut Interp) -> Result<Vec<[f64; 4]>, PsError> {
                 return Err(PsError::Typecheck);
             }
             let nums = list.into_numbers()?;
-            Ok(nums
-                .chunks_exact(4)
-                .map(|q| [q[0], q[1], q[2], q[3]])
-                .collect())
+            Ok(nums.as_chunks::<4>().0.to_vec())
         }
     }
 }
