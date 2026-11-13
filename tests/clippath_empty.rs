@@ -413,12 +413,60 @@ const CASES: &[Case] = &[
             "z",
         ],
     ),
+    (
+        "a new page size is the page again",
+        "<< /PageSize [200 300] >> setpagedevice T",
+        &[
+            "0.0 0.0 200.0 300.0",
+            "m 0.0 300.0",
+            "l 0.0 0.0",
+            "l 200.0 0.0",
+            "l 200.0 300.0",
+            "z",
+        ],
+    ),
+    (
+        "a page-size change drops an empty clip",
+        "newpath 0 0 10 10 rectclip 50 50 10 10 rectclip << /PageSize [200 300] >> setpagedevice T initclip T",
+        &[
+            "0.0 0.0 200.0 300.0",
+            "m 0.0 300.0",
+            "l 0.0 0.0",
+            "l 200.0 0.0",
+            "l 200.0 300.0",
+            "z",
+            "0.0 0.0 200.0 300.0",
+            "m 0.0 300.0",
+            "l 0.0 0.0",
+            "l 200.0 0.0",
+            "l 200.0 300.0",
+            "z",
+        ],
+    ),
+    (
+        "initclip after an empty clip on a new page size",
+        "<< /PageSize [200 300] >> setpagedevice newpath 0 0 10 10 rectclip 50 50 10 10 rectclip initclip T",
+        &[
+            "0.0 0.0 200.0 300.0",
+            "m 0.0 300.0",
+            "l 0.0 0.0",
+            "l 200.0 0.0",
+            "l 200.0 300.0",
+            "z",
+        ],
+    ),
+    (
+        "an empty clip survives a page-size change through cliprestore",
+        "newpath 0 0 10 10 rectclip 50 50 10 10 rectclip gsave << /PageSize [200 300] >> setpagedevice cliprestore T grestore",
+        &["0.0 300.0 0.0 300.0", "m 0.0 300.0"],
+    ),
 ];
 
-/// The program on a fresh letter-size page (gs's default), printing into a
-/// buffer.
+/// The program on a fresh letter-size page (gs's default; `Interp::new`,
+/// not `with_page`, so `setpagedevice /PageSize` may resize it), printing
+/// into a buffer.
 fn pscat_lines(src: &str) -> Vec<String> {
-    let mut it = Interp::with_page(612, 792).expect("page");
+    let mut it = Interp::new();
     it.capture_stdout();
     it.run_str(&format!("{PRELUDE}{src}"))
         .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
@@ -504,4 +552,37 @@ fn ghostscript_prints_the_pinned_lines() {
         assert_eq!(got, *want, "gs, {what}: {src}");
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Codex round 1 on PR #1204: a zero-area path that retraces a line over a
+/// span under 1e-3 is not a rectangle. `fit_clip` (page-size change, then
+/// `cliprestore`) must keep the path itself, not turn it into a thin strip.
+#[test]
+fn a_thin_retraced_path_is_not_refit_into_a_rectangle() {
+    const SRC: &str = "<< /PageSize [100 100] >> setpagedevice \
+        newpath 10.0044 20 moveto 10.0052 80 lineto 10.0052 80 lineto 10.0044 20 lineto closepath clip \
+        gsave << /PageSize [200 200] >> setpagedevice cliprestore \
+        newpath 0 0 200 200 rectfill ";
+    let mut it = Interp::new();
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    it.run_str(SRC)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert!(
+        it.gfx()
+            .pixmap
+            .data()
+            .chunks(4)
+            .all(|p| p == [255, 255, 255, 255]),
+        "a zero-area clip painted something"
+    );
+    it.run_str("showpage").expect("showpage");
+    let svg = it.gfx().svg_pages().expect("svg").concat();
+    // The retraced path itself, not a four-corner strip.
+    assert!(
+        svg.contains("M10.004 80L10.005 20L10.005 20L10.004 80Z"),
+        "{svg}"
+    );
+    let pdf = common::pdf_text(&it.gfx().pdf_document().expect("pdf"));
+    assert!(pdf.contains("10 80 m 10.01 20 l 10 80 l h W n"), "{pdf}");
 }

@@ -478,7 +478,9 @@ impl PsPath {
         // A zero-area box (a point, or a line along one axis, as `rectclip`
         // makes from a zero width or height, #1197) has edges that change
         // no coordinate at all; it is still a rectangle for `clippath`.
-        if x1 - x0 < EPS || y1 - y0 < EPS {
+        // Exactly zero only: a span that is merely tiny is a real (thin)
+        // rectangle or a retraced line, and the edge check below decides.
+        if x1 == x0 || y1 == y0 {
             return Some((x0, y0, x1, y1));
         }
         // All four corners present isn't enough: a "bowtie"
