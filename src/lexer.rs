@@ -14,6 +14,7 @@ use std::rc::Rc;
 use crate::file::{FileHandle, PsFile};
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Token {
     Integer(i64),
     Real(f64),
