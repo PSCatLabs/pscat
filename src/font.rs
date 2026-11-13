@@ -1449,14 +1449,16 @@ fn paint_resolved_glyph(
         };
         face.outline_glyph(gid, &mut sink);
         let as_text = match (mode, text) {
-            (ShowMode::Paint, Some((fid, ch))) if gfx.svg_text_wanted() => {
-                glyph_text(fid, ch, gid, &m, face.units_per_em())
+            (ShowMode::Paint, Some((fid, ch))) => {
+                let pdf = gfx.pdf_text_wanted();
+                (pdf || gfx.svg_text_wanted()).then(|| glyph_text(fid, ch, gid, &m, face, pdf))
             }
             _ => None,
         };
         if let Some(g) = as_text {
             // Spaces included: an empty outline still places a character,
             // which is what keeps the words apart when the text is copied.
+            // `paint_glyph` decides per recorder whether it takes the text.
             gfx.paint_glyph(&sink.path, Some(&g));
         } else if !sink.path.is_empty() {
             match mode {
@@ -1478,27 +1480,64 @@ fn paint_resolved_glyph(
     (g[0] * w, g[1] * w)
 }
 
-/// The text form of a glyph (#1119), when its face is a standard one and
-/// its character can stand in for it; `None` keeps the outline.
+/// The text form of a glyph (#1119, #1193). Whether a recorder takes it
+/// is its own call (`textrun::svg_eligible`, `textrun::pdf_eligible`);
+/// the face's embedding bits and the advance are only read when PDF text
+/// output is on (`pdf`).
 fn glyph_text(
     fid: i64,
     ch: char,
     gid: GlyphId,
     m: &GlyphTransform,
-    units_per_em: u16,
-) -> Option<crate::textrun::GlyphText> {
-    if !crate::textrun::text_safe(ch) {
-        return None;
-    }
-    crate::textrun::standard_face(fid)?;
+    face: &Face,
+    pdf: bool,
+) -> crate::textrun::GlyphText {
     // `m` maps font units to device; an em is `units_per_em` of them.
-    let u = f64::from(units_per_em);
-    Some(crate::textrun::GlyphText {
+    let u = f64::from(face.units_per_em());
+    let embeddable = pdf && crate::pdf_font::embedding_allowed(face);
+    crate::textrun::GlyphText {
         ch,
         gid: gid.0,
         fid,
         em: [m.a * u, m.b * u, m.c * u, m.d * u, m.tx, m.ty],
-    })
+        advance: if embeddable {
+            crate::pdf_font::advance_1000(face, gid.0)
+        } else {
+            0.0
+        },
+        embeddable,
+    }
+}
+
+/// The face behind `fid`, for the PDF font writer (#1193).
+pub(crate) fn pdf_face(fid: i64) -> Option<&'static Face<'static>> {
+    face_for(fid).ok()
+}
+
+/// The face behind `fid` and the name its embedded subset goes by (#1193):
+/// the face's own PostScript name for the built-in faces
+/// (`LiberationSans`, not the `Helvetica` it stands in for), the catalog's
+/// `FontName` for the rest (for the pinned variable faces that is the
+/// file stem, since their name table names the Thin master).
+pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
+    let face = face_for(fid).ok()?;
+    let idx = usize::try_from(fid).ok()?;
+    let name = match BUILTINS.get(idx) {
+        // The first entry may be a Mac-platform one `to_string` cannot read.
+        Some(b) => crate::guard::catch(|| {
+            face.names()
+                .into_iter()
+                .filter(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
+                .find_map(|n| n.to_string())
+        })
+        .flatten()
+        .unwrap_or_else(|| b.ps_name.to_string()),
+        None => {
+            let cat = CATALOG.read().ok()?;
+            cat.get(idx - BUILTINS.len())?.ps_name.clone()
+        }
+    };
+    Some((face, name))
 }
 
 /// One outline-font glyph by name: the Encoding name of a shown byte
@@ -1531,10 +1570,18 @@ fn unicode_glyph(
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
-    let gid = char::from_u32(code).and_then(|c| glyph_for_char(face, c));
-    // Unicode-mode faces are never standard faces: outlines only.
+    let ch = char::from_u32(code);
+    let gid = ch.and_then(|c| glyph_for_char(face, c));
+    // Never a standard face, so SVG keeps the outlines; PDF text takes the
+    // character for its `/ToUnicode` map (Hangul, kana, kanji, Thai).
     Ok(paint_resolved_glyph(
-        gfx, face, fs.matrix, gid, mode, pen, None,
+        gfx,
+        face,
+        fs.matrix,
+        gid,
+        mode,
+        pen,
+        ch.map(|c| (fs.fid, c)),
     ))
 }
 
@@ -2266,5 +2313,114 @@ mod tests {
         );
         assert!(register_font_bytes("PscatRegisterJunk", b"not a font".to_vec()).is_err());
         assert!(register_font_bytes("", BUILTINS[0].data.to_vec()).is_err());
+    }
+
+    /// #1193: the licence bits of every compiled-in face allow a PDF to
+    /// embed a subset, so `--pdf-text` covers all of the standard 35. Several
+    /// TeX Gyre faces set Preview & Print and Editable together, which reads
+    /// as Editable.
+    #[test]
+    fn every_compiled_in_face_may_be_embedded_in_a_pdf() {
+        for b in &BUILTINS {
+            let face = Face::parse(b.data, 0).expect("parses");
+            assert!(crate::pdf_font::embedding_allowed(&face), "{}", b.ps_name);
+        }
+        for (key, data) in &EMBEDDED {
+            let face = Face::parse(data, 0).expect("parses");
+            assert!(crate::pdf_font::embedding_allowed(&face), "{key}");
+        }
+    }
+
+    /// Where table `tag` starts in an sfnt.
+    fn table_offset(bytes: &[u8], tag: &[u8; 4]) -> usize {
+        let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+        let rec = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &bytes[r..r + 4] == tag)
+            .expect("table");
+        let at = [
+            bytes[rec + 8],
+            bytes[rec + 9],
+            bytes[rec + 10],
+            bytes[rec + 11],
+        ];
+        u32::from_be_bytes(at) as usize
+    }
+
+    /// Run `src` with PDF text output on; the document as lossy text (font
+    /// dicts are not compressed).
+    fn pdf_text_document(src: &str) -> String {
+        let mut it = crate::Interp::with_page(200, 100).expect("page");
+        it.set_pdf_text(crate::PdfText::Text);
+        it.enable_pdf();
+        it.run_str(src).expect("runs");
+        String::from_utf8_lossy(&it.pdf_document().expect("pdf")).into_owned()
+    }
+
+    /// #1193, Codex review: every committed `truetype` fuzz input (the
+    /// seeds and the crash regressions that `tests/fuzz_corpus.rs` replays)
+    /// that loads as a face is shown with PDF text output on, every byte,
+    /// and the document finished. `hvar_region_index_overflow` panicked in
+    /// the advance lookup before it was guarded.
+    #[test]
+    fn the_truetype_fuzz_corpus_survives_pdf_text() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+        let mut files: Vec<_> = ["seeds/truetype", "regressions/truetype"]
+            .iter()
+            .flat_map(|d| std::fs::read_dir(root.join(d)).expect("corpus dir"))
+            .map(|e| e.expect("entry").path())
+            .collect();
+        files.sort();
+        assert!(files.len() >= 8, "{files:?}");
+        let mut loaded = 0;
+        for (i, path) in files.iter().enumerate() {
+            let bytes = std::fs::read(path).expect("read seed");
+            let name = format!("PscatPdfTextFuzz{i}");
+            if register_font_bytes(&name, bytes).is_err() {
+                continue;
+            }
+            loaded += 1;
+            pdf_text_document(&format!(
+                "/{name} findfont 20 scalefont setfont 10 50 moveto (ABC abc 0123) show \
+                 0 1 255 {{ 1 string dup 0 4 -1 roll put show }} for"
+            ));
+        }
+        assert!(loaded >= 4, "only {loaded} corpus faces loaded");
+    }
+
+    /// #1193, Codex review: a valid 16-unit em puts Liberation's outlines
+    /// 62.5 times past 1000 units, beyond a Type 2 operand. Those glyphs
+    /// keep their outlines (clamped, they drew at the wrong size), and no
+    /// empty font is written for the face.
+    #[test]
+    fn outlines_past_the_type2_range_stay_paths() {
+        let mut bytes = BUILTINS[0].data.to_vec();
+        let head = table_offset(&bytes, b"head");
+        bytes[head + 18..head + 20].copy_from_slice(&16u16.to_be_bytes());
+        register_font_bytes("PscatTinyEmTest-Regular", bytes).expect("registers");
+        let pdf = pdf_text_document(
+            "/PscatTinyEmTest-Regular findfont 0.5 scalefont setfont 10 50 moveto (Hi) show",
+        );
+        assert!(!pdf.contains("/Subtype /Type0 "), "{pdf}");
+    }
+
+    /// #1193: a face whose OS/2 fsType forbids embedding keeps its outlines
+    /// under PDF text output, beside a face that becomes text.
+    #[test]
+    fn a_restricted_licence_face_keeps_its_outlines_in_pdf_text() {
+        let mut bytes = BUILTINS[0].data.to_vec();
+        let at = table_offset(&bytes, b"OS/2") + 8;
+        bytes[at..at + 2].copy_from_slice(&0x0002u16.to_be_bytes());
+        assert!(!crate::pdf_font::embedding_allowed(
+            &Face::parse(&bytes, 0).expect("parses")
+        ));
+        register_font_bytes("PscatRestrictedTest-Regular", bytes).expect("registers");
+        let pdf = pdf_text_document(
+            "/PscatRestrictedTest-Regular findfont 20 scalefont setfont 10 50 moveto (Hi) show \
+             /Helvetica findfont 20 scalefont setfont (Hi) show",
+        );
+        // Font dicts are not compressed: one font, the Helvetica one.
+        assert_eq!(pdf.matches("/Subtype /Type0 ").count(), 1, "{pdf}");
+        assert!(pdf.contains("+LiberationSans /Encoding"), "{pdf}");
     }
 }

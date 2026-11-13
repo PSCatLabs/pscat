@@ -934,6 +934,9 @@ pub struct Gfx {
     svg_text: crate::svg::SvgText,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
+    /// How PDF output writes text (`--pdf-text`, #1193); read per glyph
+    /// by `paint_glyph`, like `svg_text`.
+    pdf_text: crate::pdf::PdfText,
     /// Scratch coverage mask for [`Gfx::fill_coverage`], page-sized and
     /// reused across fills; only the filled path's pixel bounds are
     /// written (and read) each time.
@@ -1085,6 +1088,7 @@ impl Gfx {
             svg: None,
             svg_text: crate::svg::SvgText::Paths,
             pdf: None,
+            pdf_text: crate::pdf::PdfText::Paths,
             suppress_paint: 0,
             coverage: None,
             band: None,
@@ -2294,6 +2298,21 @@ impl Gfx {
         self.pdf.as_deref_mut()
     }
 
+    /// How PDF output writes text (#1193):
+    /// [`PdfText::Paths`](crate::pdf::PdfText::Paths), the default, draws
+    /// every glyph as its outline; [`PdfText::Text`](crate::pdf::PdfText::Text)
+    /// writes text objects in embedded subset fonts (`pscat --pdf-text`).
+    /// Takes effect for glyphs shown after the call. PNG and SVG output are
+    /// unaffected.
+    pub fn set_pdf_text(&mut self, mode: crate::pdf::PdfText) {
+        self.pdf_text = mode;
+    }
+
+    /// Whether a glyph shown now may reach the PDF recorder as text.
+    pub(crate) fn pdf_text_wanted(&self) -> bool {
+        self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted()
+    }
+
     pub(crate) fn pdf_wanted(&self) -> bool {
         self.pdf.is_some() && !self.painting_off()
     }
@@ -2597,17 +2616,21 @@ impl Gfx {
         }
     }
 
-    /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that the
-    /// SVG recorder takes as text (#1119): the raster and PDF still get the
-    /// outline, SVG gets the character. `path` may be empty (a space),
-    /// which paints nothing but still places a character in the SVG text.
+    /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that a
+    /// vector recorder may take as text: SVG (#1119) and PDF (#1193) each
+    /// decide on their own (`textrun::svg_eligible`, `pdf_eligible`) and
+    /// get the character or the outline; the raster always gets the
+    /// outline. `path` may be empty (a space), which paints nothing but
+    /// still places a character in the text.
     pub(crate) fn paint_glyph(&mut self, path: &PsPath, text: Option<&crate::textrun::GlyphText>) {
-        let Some(g) = text.filter(|_| self.svg_text_wanted()) else {
+        let svg_text = text.filter(|g| self.svg_text_wanted() && crate::textrun::svg_eligible(g));
+        let pdf_text = text.filter(|g| self.pdf_text_wanted() && crate::textrun::pdf_eligible(g));
+        if svg_text.is_none() && pdf_text.is_none() {
             if !path.is_empty() {
                 self.fill_path_direct(path);
             }
             return;
-        };
+        }
         let skia = path.to_skia();
         if skia.is_none() && self.pending_erase {
             // A blank glyph opening a page would otherwise land on the old
@@ -2623,12 +2646,27 @@ impl Gfx {
         let rgb = self.state.rgb;
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(svg) = &mut self.svg {
-            svg.glyph(g, rgb, comp, &chain);
+            match svg_text {
+                Some(g) => svg.glyph(g, rgb, comp, &chain),
+                None if skia.is_some() => {
+                    svg.fill(&path.to_svg_data(), FillRule::Winding, rgb, comp, &chain)
+                }
+                None => {}
+            }
+        }
+        if let Some(pdf) = &mut self.pdf {
+            match pdf_text {
+                // A glyph the font writer refuses keeps its outline.
+                Some(g) => {
+                    if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
+                        pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                    }
+                }
+                None if skia.is_some() => pdf.fill(path, FillRule::Winding, rgb, comp, &chain),
+                None => {}
+            }
         }
         if skia.is_some() {
-            if let Some(pdf) = &mut self.pdf {
-                pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
-            }
             self.dirty = true;
         }
     }

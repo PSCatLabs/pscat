@@ -904,9 +904,17 @@ renders eight examples in both and compares block-downsampled output).
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two. Glyphs have a second seam since #1119:
    `Gfx::paint_glyph` takes the glyph as text (`src/textrun.rs`,
-   renderer-neutral) when `--svg-text` is on, so SVG writes `<text>`
-   runs; PDF still gets the outline. Real PDF text (#1026) should
-   start from that capture (`notes/1119-svg-text.md`).
+   renderer-neutral) when `--svg-text` or `--pdf-text` is on, and each
+   recorder decides on its own whether it takes the glyph as text
+   (`textrun::svg_eligible`, `pdf_eligible`). SVG writes `<text>` runs
+   for the standard faces (`notes/1119-svg-text.md`); PDF writes `TJ`
+   runs in Type 0 fonts whose CID-keyed CFF subset `src/pdf_font.rs`
+   rebuilds from the outlines pscat paints (variable faces at their
+   pinned instance), for any face whose `fsType` allows it
+   (`notes/1193-pdf-text.md`). The PDF's open text run is written at the
+   top of `enter_clip`, so a new PDF hook that goes through `enter_clip`
+   keeps paint order for free; one that writes `content` directly must
+   call `flush_text` first. Fonts are numbered after the named objects.
    An exporter table keyed by clip-node identity must hold the `Rc`
    (SVG's `clip_ids` stores it, PDF's `open_clip` is one), never a bare
    `Rc::as_ptr` address: a freed node's address is recycled and aliases a

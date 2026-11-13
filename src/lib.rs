@@ -41,7 +41,9 @@
 //! [`Interp::enable_pdf`] before running the program, then read
 //! [`Interp::svg_pages`] or [`Interp::pdf_document`].
 //! [`Interp::set_svg_text`] with [`SvgText::Text`] makes SVG output write
-//! text set in the standard fonts as `<text>` rather than glyph outlines.
+//! text set in the standard fonts as `<text>` rather than glyph outlines;
+//! [`Interp::set_pdf_text`] with [`PdfText::Text`] makes PDF output write
+//! text objects in embedded subset fonts.
 //!
 //! # Running a program you do not trust
 //!
@@ -195,6 +197,7 @@ pub mod ops;
 pub mod paths;
 #[doc(hidden)]
 pub mod pdf;
+pub(crate) mod pdf_font;
 #[doc(hidden)]
 pub mod png;
 #[doc(hidden)]
@@ -238,4 +241,5 @@ pub use memtrack::TrackingAllocator;
 #[doc(hidden)]
 pub use object::{Object, Value};
 pub use page::Page;
+pub use pdf::PdfText;
 pub use svg::SvgText;

@@ -121,6 +121,18 @@ More on the less obvious ones:
   font packs, Type 3 and Type 1 fonts from a program) and `charpath` text
   stay outlines. PNG and PDF output are not affected
   (`notes/1119-svg-text.md`).
+- **PDF text (`--pdf-text`).** By default a PDF draws every glyph as its
+  outline too, so its text cannot be selected, searched or extracted
+  (`pdftotext` finds nothing). With `--pdf-text`, `show` text becomes real
+  PDF text in an embedded subset of the font pscat drew it with: the
+  standard 35, the font catalog and font packs, Korean, Japanese and Thai
+  included. It looks the same as the outlines (the glyphs are the same
+  shapes at the same positions, `ashow`/`kshow`/`xyshow` spacing
+  included), copies and searches as text, and a text page is far smaller
+  (a page of Times went from 741 KB to 8 KB). Type 1 and Type 3 fonts
+  from a program, `charpath` text, Symbol and Dingbats glyphs, and fonts
+  whose licence bits forbid embedding stay outlines. PNG and SVG output
+  are not affected (`notes/1193-pdf-text.md`).
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded

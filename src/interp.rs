@@ -3230,6 +3230,15 @@ impl Interp {
         self.gfx.set_svg_text(mode);
     }
 
+    /// How PDF output writes text: [`PdfText::Text`](crate::PdfText::Text)
+    /// writes selectable, searchable text objects in embedded subset fonts
+    /// instead of glyph outlines (`pscat --pdf-text`, #1193). The default
+    /// is [`PdfText::Paths`](crate::PdfText::Paths). Call before running
+    /// the program; PNG and SVG output are unaffected.
+    pub fn set_pdf_text(&mut self, mode: crate::PdfText) {
+        self.gfx.set_pdf_text(mode);
+    }
+
     /// One SVG document per page (as [`pages`](Self::pages) counts them),
     /// or `None` if [`enable_svg`](Self::enable_svg) was not called.
     pub fn svg_pages(&self) -> Option<Vec<String>> {

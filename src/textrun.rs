@@ -2,17 +2,18 @@
 //! named standard face, rather than as outlines, for an exporter that
 //! can write real text.
 //!
-//! The SVG recorder is the one user today (`--svg-text`, which writes
-//! `<text>` instead of glyph paths). The types here know nothing about
-//! SVG on purpose: the PDF side of #1026 (text objects with an embedded
-//! subset font) needs the same three facts per glyph (which face, which
-//! glyph id and character, and where in device space) and the same
-//! grouping into runs, so it can build on this module instead of
-//! re-deriving them from the show engine (`notes/1119-svg-text.md`).
+//! Two recorders use it: SVG (`--svg-text`, #1119, which writes `<text>`
+//! instead of glyph paths) and PDF (`--pdf-text`, #1193, text objects in an
+//! embedded subset font). The types here know nothing about either format:
+//! both need the same three facts per glyph (which face, which glyph id
+//! and character, and where in device space) and the same grouping into
+//! runs (`notes/1119-svg-text.md`, `notes/1193-pdf-text.md`). Which glyphs
+//! qualify differs, because SVG names a face for the viewer to substitute
+//! and PDF carries the face itself.
 //!
-//! Only the twelve built-in faces qualify (Helvetica, Times and Courier
-//! in four styles each, drawn with the Liberation faces). A browser can
-//! match them metrically: Arial, Times New Roman and Courier New (and
+//! For SVG only the twelve built-in faces qualify (Helvetica, Times and
+//! Courier in four styles each, drawn with the Liberation faces). A browser
+//! can match them metrically: Arial, Times New Roman and Courier New (and
 //! Liberation itself) have the same advance widths, so a substituted face
 //! sits on the same per-glyph origins without gaps or collisions. The
 //! other standard-35 families (Palatino, Bookman, ...) have no common
@@ -23,8 +24,8 @@ use std::rc::Rc;
 use crate::gfx::{ClipNode, Composite};
 
 /// One glyph a `show` painted, as text: the character it stands for, the
-/// face's glyph id (for a future embedded-font writer), the font's FID,
-/// and the em-square → device transform at the glyph's origin.
+/// face's glyph id, the font's FID, and the em-square → device transform
+/// at the glyph's origin.
 ///
 /// `em` maps glyph space in ems (1.0 = one em, y up, origin on the
 /// baseline at the pen) to device space: `[a b c d tx ty]`, PostScript
@@ -35,6 +36,27 @@ pub(crate) struct GlyphText {
     pub(crate) gid: u16,
     pub(crate) fid: i64,
     pub(crate) em: [f64; 6],
+    /// The glyph's advance in 1/1000 em, as an embedded font's `/W` gives
+    /// it (`pdf_font::advance_1000`).
+    pub(crate) advance: f64,
+    /// Whether the PDF recorder may write it as text: its face may be
+    /// embedded and the glyph is a real one (`pdf_eligible`).
+    pub(crate) embeddable: bool,
+}
+
+/// Whether the SVG recorder takes `g` as text: a standard face and a
+/// character a viewer draws on its own at the glyph's x.
+pub(crate) fn svg_eligible(g: &GlyphText) -> bool {
+    text_safe(g.ch) && standard_face(g.fid).is_some()
+}
+
+/// Whether the PDF recorder takes `g` as text. The PDF carries the glyph
+/// itself, so any script and any mark qualifies: the character only feeds
+/// the `/ToUnicode` map that extraction reads. A control character maps to
+/// nothing a reader wants, and glyph 0 is `.notdef`, which is CID 0 in the
+/// embedded font, so both keep their outlines.
+pub(crate) fn pdf_eligible(g: &GlyphText) -> bool {
+    g.embeddable && g.gid != 0 && !g.ch.is_control()
 }
 
 /// How a standard face is named to a viewer that substitutes fonts.
@@ -159,9 +181,9 @@ fn is_identity(f: [f64; 4]) -> bool {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RunGlyph {
     pub(crate) ch: char,
-    /// SVG names the character; an embedded-font writer (the PDF half of
-    /// #1026) needs the glyph itself, which a re-encoded font can pick
-    /// apart from its character.
+    /// The glyph the character was drawn with. Neither writer reads it
+    /// back from the run: SVG names the character, and PDF keeps the CID
+    /// it allocated for this (glyph, character) pair beside the run.
     #[allow(dead_code)]
     pub(crate) gid: u16,
     pub(crate) x: f64,
@@ -272,6 +294,8 @@ mod tests {
             gid: 1,
             fid: 0,
             em,
+            advance: 500.0,
+            embeddable: true,
         }
     }
 
