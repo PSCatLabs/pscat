@@ -261,16 +261,16 @@ fn bind_proc(
                     *el = resolved;
                 }
             }
-            (Value::Array(inner), true) => {
-                // A nested procedure is made read-only through this slot,
-                // and bound, unless the slot already was read-only: `bind`
-                // does not enter those (#1189). One this walk has bound
-                // already is entered again (the `seen` check decides if it
-                // needs a second look), since the walk itself set the flag.
-                if !el.readonly || walk.seen.contains_key(&inner.identity()) {
-                    nested.push(inner.clone());
-                    el.readonly = true;
-                }
+            // A nested procedure is made read-only through this slot, and
+            // bound, unless the slot already was read-only: `bind` does not
+            // enter those (#1189). One this walk has bound already is entered
+            // again (the `seen` check decides if it needs a second look),
+            // since the walk itself set the flag.
+            (Value::Array(inner), true)
+                if !el.readonly || walk.seen.contains_key(&inner.identity()) =>
+            {
+                nested.push(inner.clone());
+                el.readonly = true;
             }
             _ => {}
         }

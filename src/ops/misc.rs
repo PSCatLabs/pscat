@@ -101,7 +101,6 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
     Err(PsError::from_name(name, text).unwrap_or(PsError::Undefined(name.to_string())))
 }
 
-
 /// `readonly`, `executeonly`, `noaccess`: the reference loses write
 /// access if it is an array and is unchanged otherwise.
 fn access_restrict(it: &mut Interp) -> Result<(), PsError> {

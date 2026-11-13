@@ -1,0 +1,69 @@
+## `bind` makes nested procedures read-only (issue #1189, 2026-11-12)
+
+The issue said gs makes the procedures `bind` binds read-only and pscat left
+them writable: `/p { 1 add } bind def /p load wcheck` was supposed to be
+`false` in gs. It is not. Ghostscript 10.07.1:
+
+```
+$ gs -q -dNODISPLAY -dNOSAFER -dBATCH -c '/p { 1 add } bind def /p load wcheck ='
+true
+$ ... '/p { { 1 add } } bind def /p load wcheck = /p load 0 get wcheck ='
+true false
+$ ... '/p { { 1 add } } bind def /p load 0 get 0 1 put'
+Error: /invalidaccess in --put--
+$ ... '/p { 1 add } bind def /p load 0 1 put (ok) ='
+ok
+```
+
+The procedure given to `bind` keeps the access it had. Access belongs to the
+reference, not the storage; `bind` walks the slots of that procedure and makes
+each slot that holds an executable array read-only, then walks into it. (There is no
+local copy of the PLRM; the behaviour here is pinned to gs 10.07.1, which
+also ignores a procedure that already is read-only.)
+
+### The model
+
+pscat did not model access at all: `readonly`/`noaccess`/`executeonly` were
+identities and `wcheck` was always `true`. Now `Object` carries a `readonly`
+flag, set only on arrays, beside `executable` (it lives in padding:
+`size_of::<Object>()` is unchanged, and a test pins that).
+
+- Set by `readonly`, `executeonly`, `noaccess`, `packedarray`, and by `bind`
+  on every nested executable array slot it enters.
+- Seen by `wcheck`; enforced by `put`, `putinterval` (destination), `astore`
+  and `copy` (destination array): `invalidaccess` (new `PsError::InvalidAccess`
+  and an `errordict` handler).
+- Carried by `dup`, `getinterval`, `cvx`, `cvlit` and `load`. A fresh array
+  (`array`, `copy`'s result view) is writable. `eq` ignores it.
+- `bind` on a read-only procedure is a no-op: names stay names, nested
+  procedures stay writable (gs: `{ add } readonly bind 0 get type =` is
+  `nametype`).
+- A nested slot that is already read-only is not entered unless this same
+  walk bound that view already. The `seen` map (#1176) keeps bind linear; a
+  re-walk of a view at a shallower depth must still go into slots the first
+  walk flagged, or the depth-100 cut-off would leave their contents unbound.
+- `restore` brings the flag back with the array contents (`bind` journals the
+  array before it writes).
+
+### Checks
+
+- `tests/access.rs`: 26 cases pinned from gs 10.07.1 and run through gs too
+  (top level writable, nested read-only, two deep, inside `if`, a slot shared
+  twice, the dictionary's own reference still writable, `getinterval`/`cvlit`/
+  `aload`, already-read-only procedures, `packedarray`, the four writers,
+  `stopped` + `$error`), plus restore and the size.
+- `selftest.sh` clean; `scripts/identity_check.sh` with a base and a head binary
+  over every tracked gallery, example and selftest-driver file: 207 page renders
+  identical across 168 files (4 files fail identically in both trees; the control
+  differs as it must). Nothing in `lib/` writes into a bound procedure.
+
+### Not done (deviations, kept in HANDOFF)
+
+- Reads are never refused: `rcheck` is always true, `get` on a `noaccess` or
+  `executeonly` array works.
+- Strings, dictionaries and files have no access attribute.
+- `wcheck` on a name or operator answers `true` (gs: `typecheck`).
+- Matrix writers (`currentmatrix`, `defaultmatrix`, `invertmatrix`, ...) write
+  into a read-only array (gs: `invalidaccess`).
+- Procedures scanned under `true setpacking` are writable (gs: read-only
+  packed arrays). `packedarray` itself is read-only.

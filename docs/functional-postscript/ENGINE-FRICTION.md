@@ -229,8 +229,9 @@ no issues have been filed automatically.
 - **Classification/status:** confirmed existing missing PSCat functionality,
   documented in core handoff; not a newly introduced bug.
 - **Reproduction:** `true setpacking {} type` remains arraytype in PSCat but
-  becomes packedarraytype in gs. `readonly`/`executeonly` currently do not enforce
-  permissions in PSCat.
+  becomes packedarraytype in gs. `readonly`/`executeonly` did not enforce
+  permissions in PSCat; since #1189 they make an array unwritable, but a
+  procedure scanned under `setpacking` is still a plain array.
 - **Expected/actual:** standard PS distinguishes these representations/access
   rules. This library accepts both real quotation types and does not rely on
   read-only wrappers for safety.

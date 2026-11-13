@@ -19,8 +19,16 @@ use pscat::Interp;
 /// word) and an error it raises prints its name in place of the rest.
 const CASES: &[(&str, &str, &str)] = &[
     // --- wcheck after bind
-    ("top level stays writable", "/p { 1 add } bind def /p load wcheck b", "true"),
-    ("bare bind stays writable", "{ 1 add } bind wcheck b", "true"),
+    (
+        "top level stays writable",
+        "/p { 1 add } bind def /p load wcheck b",
+        "true",
+    ),
+    (
+        "bare bind stays writable",
+        "{ 1 add } bind wcheck b",
+        "true",
+    ),
     (
         "nested is read-only, top is not",
         "/p { { 1 add } } bind def /p load wcheck b /p load 0 get wcheck b",
@@ -73,7 +81,11 @@ const CASES: &[(&str, &str, &str)] = &[
         "true",
     ),
     // --- packed arrays, readonly, copies
-    ("packedarray is read-only", "1 2 2 packedarray wcheck b", "false"),
+    (
+        "packedarray is read-only",
+        "1 2 2 packedarray wcheck b",
+        "false",
+    ),
     (
         "bind of a packed procedure",
         "{ 1 add } aload pop 2 packedarray cvx bind wcheck b",
@@ -89,8 +101,16 @@ const CASES: &[(&str, &str, &str)] = &[
         "[ 1 2 ] readonly dup length array copy wcheck b",
         "true",
     ),
-    ("readonly is not identity", "[ 1 2 ] readonly [ 1 2 ] eq b", "false"),
-    ("eq ignores the attribute", "[ 1 2 ] readonly dup eq b", "true"),
+    (
+        "readonly is not identity",
+        "[ 1 2 ] readonly [ 1 2 ] eq b",
+        "false",
+    ),
+    (
+        "eq ignores the attribute",
+        "[ 1 2 ] readonly dup eq b",
+        "true",
+    ),
     // --- the writes
     (
         "put into a nested bound procedure",
@@ -102,9 +122,21 @@ const CASES: &[(&str, &str, &str)] = &[
         "/p { 1 add } bind def /p load 0 1 put (done) b",
         "done",
     ),
-    ("put into a read-only array", "5 array readonly 0 1 put (done) b", "invalidaccess"),
-    ("astore into one", "5 array readonly astore (done) b", "invalidaccess"),
-    ("copy into one", "[ 1 2 ] 3 array readonly copy pop (done) b", "invalidaccess"),
+    (
+        "put into a read-only array",
+        "5 array readonly 0 1 put (done) b",
+        "invalidaccess",
+    ),
+    (
+        "astore into one",
+        "5 array readonly astore (done) b",
+        "invalidaccess",
+    ),
+    (
+        "copy into one",
+        "[ 1 2 ] 3 array readonly copy pop (done) b",
+        "invalidaccess",
+    ),
     (
         "putinterval from a read-only source",
         "[ 1 2 3 ] 0 [ 7 ] readonly putinterval (done) b",
