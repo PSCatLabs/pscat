@@ -119,3 +119,22 @@ which is why `wp--numbers` raises the format around the scan). The decorated
 operators match pscat's own operator, not gs's, on the operands left after an
 error: the tests' contract is the native pscat operator, and #1198 is the
 open question about making pscat leave them as gs does.
+
+### Review round 1 (PR #1202)
+
+- Executable operands are data. The decorators stored the text and the
+  numbers with `def` and called them by name, so `(ab) {1 2} xshow` ran the
+  array and `(ab) cvx [1 2] xshow` ran the string (the latter also broke
+  widthshow, awidthshow and kshow on base). `cvlit` now on every stored
+  operand (the glyph cut, `wp--awidth-path`, `wp--kshow`, `wp--positioned`,
+  `wp--array-deltas`) and on the copies the dry run executes; the program's
+  own operands are untouched when handed to `wp--or-real`.
+- Errors routed to the real operator named `systemdict`, then `[`, as the
+  offending command: pscat reports the last name it executed. The decorator
+  code now uses `//systemdict`, `//true` and `//false`, and the dry run builds
+  its arrays with `array astore`, not `[ ]`. The error tests compare the
+  command as well as the error name. One difference stays: a kshow procedure
+  that leaves no current point raises `nocurrentpoint` with command `kshow`
+  from the decorator, where pscat's real kshow reports the last name it ran
+  (`newpath`); gs names kshow.
+- `wp--numbers` restores the object format when `token` raises.
