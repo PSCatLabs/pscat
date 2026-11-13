@@ -146,7 +146,7 @@ compiled-in face passes it (`font::tests::every_compiled_in_face_may_be_embedded
   face as `CID Type 0C`, embedded, subset, with ToUnicode. gs, poppler
   and macOS CoreGraphics (`sips`) all render the sample page the same, with
   Hangul at Regular weight.
-- Default output: the merge-base binary (`c27a021`) and this branch's,
+- Default output: the merge-base binary (`c27a021`, again at `70920f7` after the review fixes) and this branch's,
   both release builds, on every `examples/*.ps` and `selftest/drivers/*.ps`
   plus `gallery/pscat_card.ps`, `ring_of_type.ps` and `keepin_it_real.ps`
   (109 files): `--pdf` is byte-identical for all 109, and `--svg
