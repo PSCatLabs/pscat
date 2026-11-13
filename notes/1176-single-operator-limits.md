@@ -22,16 +22,31 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
   views and sixty levels of `[p p]` walked 2^60. Binding does not depend on the
   order or the count of visits while the walk runs (the dictionary stack does
   not change), so the result is the same. Distinct views that overlap (each
-  suffix of one array) are still n²/2 elements, so `bind` also calls
-  `Interp::poll_limits` every 64K elements, charging a step per 1024.
+  suffix of one array) are still n²/2 elements, and every name is looked up
+  through the whole dictionary stack (60,000 unresolved names under 2,000
+  dictionaries is 1.2e8 probes). So `bind` calls `Interp::poll_limits` inside
+  its element walk: an element is a unit of work and a name lookup one more
+  per dictionary on the stack, polled every 64K units, a step per 1024 units.
 - **`arc` / `arcn`**. ang2 was turned past ang1 a full turn at a time
   (`while a2 < a1 { a2 += TAU }`): `1e15 0 arc` took 1.6e14 trips, and past
   about 1.6e18 degrees adding a turn no longer changes the value, so
-  `1e20 0 arc` never ended, with or without limits. A gap of more than four
-  turns now jumps most of the way in one step. An arc whose angles are within
-  four turns of each other never jumps and is bit-identical. A larger gap
-  (`3000 0 arc`) can move in the last bits of its coordinates, but it keeps
-  gs's element count. The identity check (below) found no rendered difference.
+  `1e20 0 arc` never ended, with or without limits. `gfx::turn_past` now gives
+  that loop's result bit for bit, in a few steps per binade. Inside one binade
+  (sign and exponent) every trip adds the same rounded amount. The exception
+  is a tie, which makes the value even, after which every step is even and
+  equal. So after three plain trips in one binade it skips to just short of
+  the binade's edge or ang1, and crosses edges trip by trip. A unit test
+  checks it bit for bit against the loop on whole and near-whole turns in both
+  directions and on gaps of up to a million turns.
+
+  Codex round 1 found that the first version, which jumped `floor(gap/TAU) - 2`
+  turns, drew a full circle for `2160 -2520 arc` (gs and main: 2 elements).
+  The jump landed a hair below ang1, and the loop then added one more turn.
+  That case is now in `tests/limits.rs` with 146 gs-pinned element counts.
+  On 8 of those, pscat makes one more segment than gs, the same on main: the
+  sweep is a whole number of quarter turns, and pscat's double-precision
+  value lands a hair over it where gs's single precision lands on it.
+
   Angles are refused as gs refuses them:
   - gs 10 gives `limitcheck` for a positive angle past about 2^31 degrees
     (`0 0 10 2.15e9 0 arc`, `0 0 10 0 1e10 arc` and `arcn`), and draws
@@ -61,18 +76,35 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
   FlateDecode + RunLengthDecode bomb built in a scratch file) must stop with
   `limitexceeded (time)` blamed on the operator itself, not on the `1 pop`
   after it. With the polls in `bind` and `flushfile` commented out, both of
-  those tests fail (`bind` at the deadline). `limits_memory.rs` covers the
-  SVG/PDF image check.
+  those tests fail (`bind` at the deadline).
+  Added in Codex round 1:
+  - `bind` under 2,000 dictionaries must stop inside `bind`;
+  - a huge arc sweep under `steps(10)` must stop with `StepsExceeded` inside
+    `arc`;
+  - the gs element-count table;
+  - `gfx::turn_past` against the plain loop.
+
+  `limits_memory.rs` covers the SVG/PDF image check: a huge image is refused,
+  and a 3000 × 3000 PDF imagemask passes under a 20 MiB cap that refuses a
+  colour image of the same size.
 - **`image` / `imagemask` / `colorimage` with SVG or PDF output**:
   `begin_image` checks the recorder's decode buffer (w × h × 4 for SVG, × 3 for
   PDF) against a memory cap before the image starts. The probe
   `30000 30000 8 [30000 0 0 30000 0 0] {()} image --svg` was 3.6 GB and 9e8
-  pixel iterations in one step, and ran 10 s past `--max-time 1`.
+  pixel iterations in one step, and ran 10 s past `--max-time 1`. Each kind
+  is charged its real buffer (`ImageCtx::recorder_bytes`):
+  - SVG: RGBA for every kind;
+  - PDF: a mask's packed bits, RGB for a colour image, and RGBA plus RGB and
+    alpha for a stenciled image.
+
+  Codex round 1 found the first version charging a PDF mask 3 bytes a pixel.
 - New plumbing in `src/interp.rs` / `src/limits.rs`:
   - `Interp::poll_limits(steps)`: the slice loop's checks (step cap, time,
     memory), raising the same uncatchable `limitexceeded`. It is an inlined
     no-op when no limit is set.
-  - `Interp::limit_probe()` → `LimitProbe` (deadline and heap cap as a value),
+  - `Interp::limit_probe()` → `LimitProbe` (steps left, deadline and heap cap
+    as a value; the loop passes the steps its work comes to so far, so a step
+    cap stops a huge arc sweep inside the loop),
     for loops in `Gfx` that cannot borrow the interpreter. `Gfx::arc` keeps its
     signature and `Gfx::arc_limited` takes the probe.
 
@@ -83,6 +115,12 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
 smallest gallery pieces that use `arc`, `arcn` or `shfill`, plus the default
 paintkit pick, at `--gallery-dpi 72`. Result: 56 of 56 page renders were
 byte-identical across 41 files. `bind` runs in every library those files load.
+After Codex round 1 it was run again against main at 6b34d79 (merged in), with
+the same result. Two arc stress files were also compared, base against head:
+- a grid of 474 arc/arcn pairs (whole and near-whole turns, random angles up
+  to 1e6 degrees) rendered at 144 dpi: byte-identical PNGs;
+- the device coordinates of 948 arcs, from `pathforall`: identical.
+Path element counts for 1212 arc/arcn cases matched main exactly.
 
 ### The audit
 

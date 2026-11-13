@@ -442,13 +442,15 @@ without the limits above:
   - `search` is linear (`memchr::memmem`). Before, a 16 MiB string searched for
     an 8 MiB pattern took about 20 minutes in one call.
   - `bind` binds each procedure once per call, where a procedure that holds
-    itself twice was 2^100 visits. It also looks at the limits every 64K
-    elements it walks, and charges a step per 1024.
+    itself twice was 2^100 visits. It also looks at the limits inside its
+    walk, counting each name lookup as one unit of work per dictionary on the
+    stack, and charges a step per 1024 units.
   - `arc`/`arcn` turn a huge angle gap in one step, where `1e20 0 arc` never
     ended. As gs does, they refuse a positive angle of about 2^31 degrees or
     more with `limitcheck` (gs refuses a little below it too). They also
     refuse an angle of -2^53 degrees or below, which gs draws. They look at
-    the limits every 4096 segments of a huge sweep.
+    the limits every 4096 segments of a huge sweep, the step cap included (a
+    step per 1024 segments).
   - `flushfile` on a decode filter looks at the limits every 64 KiB it
     discards, a step per KiB.
   - `shfill` refuses a shading whose function dicts, counting every reference
@@ -456,8 +458,8 @@ without the limits above:
     stitching function that names the level below twice took 2^30 parses.
     Painting is not bounded by this: the cost is pixels × stops, below.
   - With an SVG or PDF output, `image`, `imagemask` and `colorimage` check
-    their decode buffer (width × height × 3 or 4 bytes) against a memory limit
-    before they start.
+    the buffer the recorder builds against a memory limit before they start:
+    RGBA for SVG; for PDF, a mask's packed bits, or RGB for a colour image.
 
   These are still known to run long inside one call:
   - an image's drain of its filter chain to EOD, and a decode filter that

@@ -1021,7 +1021,7 @@ pub(crate) fn turn_past(mut a2: f64, a1: f64, up: bool) -> f64 {
         // in floating point and then checked exactly: x3 + j*d is exact for
         // any j that keeps it in the binade (a multiple of the ulp there).
         let est = ((stop - x3) / d).floor() - 1.0;
-        if !(est >= 1.0) {
+        if est.is_nan() || est < 1.0 {
             continue;
         }
         let mut j = est.min(9.0e15);
