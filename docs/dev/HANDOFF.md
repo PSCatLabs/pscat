@@ -486,8 +486,9 @@ renders eight examples in both and compares block-downsampled output).
    `stringwidth` can push its result at frame-pop, why Type 3
    BuildChar and kshow procs nest arbitrarily, and why the live window
    renders glyph-by-glyph. If a new feature needs to run a PostScript
-   procedure mid-operator (patterns, `cshow`, resource callbacks),
-   copy the ShowCtx pattern; do NOT call the machine recursively.
+   procedure mid-operator (patterns, resource callbacks), copy the
+   ShowCtx pattern, as `cshow` does (#1180); do NOT call the machine
+   recursively.
 
 2. **Files share one read cursor** (`src/file.rs`). The scanner pulls
    bytes through a `FileHandle`; `currentfile` returns the same
@@ -555,6 +556,9 @@ renders eight examples in both and compares block-downsampled output).
   keeps the face: `definefont` takes a missing `FID` from it (#1022,
   `notes/1022-definefont-copy-keeps-face.md`). Before, such a copy drew as
   Helvetica. `glyphshow` (name only) is implemented for every font kind (#1023).
+  `xshow`/`yshow`/`xyshow` (number arrays and PLRM 3.14.5 encoded number
+  strings, `src/numstring.rs`) and `cshow` are too (#1180); their checks,
+  and cshow's taking its operands in either order, follow Ghostscript.
 - **Local and global VM are not separated** (#1146). pscat has one VM, so
   `setglobal` only records a flag that `currentglobal` reads back (`false`
   at start): nothing is allocated differently, which is enough for the
@@ -776,6 +780,17 @@ renders eight examples in both and compares block-downsampled output).
   panicking; `main` then exits 141. A new CLI line that is not program output
   is `eprintln!`. The flag, not an early exit, so the page and any open
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
+
+- **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
+  relative name's search-order candidate is opened once by `Probe::open`
+  (`O_NONBLOCK`, the handle checked with `is_file()` and, for `lib/` names,
+  against 64 MiB) and the reader reads that handle; a FIFO, device, socket or
+  directory is "not here". `paths::open` also caps (`size_cap`: 64 MiB for
+  `lib/`, 512 MiB otherwise). Absolute names are read as written, and the
+  read-root admission comes before `Probe::open`. `font.rs` reads font files
+  itself, not through `paths::open`. `tests/resource_candidates.rs` is a
+  single-test binary because `PSCAT_HOME` is read once per process
+  (`notes/1177-resource-candidates.md`).
 
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;
@@ -1891,7 +1906,12 @@ renders eight examples in both and compares block-downsampled output).
   Since #1098 the supported surface also has `pscat::sheet`,
   `pscat::chalkboard`, `pscat::handwriting` (#1135: written in the open, not a
   facade; `has_glyph`/`drawable`, #1170, ask the font's own tables in
-  `lib/handscript.ps` instead of keeping a character list) and `pscat::catalog` (facades over the hidden
+  `lib/handscript.ps` instead of keeping a character list; #1182:
+  `Library::Embedded` on `HandOptions::library` pins the compiled-in font for
+  `render_source`, `measure_source`, `has_glyph_in` and `drawable_in`, and its
+  glyph check reads the const `EMBEDDED_GLYPHS`, which a unit test recomputes by
+  discovery, so a change to `lib/handscript.ps`'s character set makes that test
+  fail until the const is updated) and `pscat::catalog` (facades over the hidden
   `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
   `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
   `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so

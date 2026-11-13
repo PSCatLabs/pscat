@@ -5,6 +5,9 @@ use crate::error::PsError;
 use crate::file::{Decoder, DiskSink, FileHandle, PsFile, Sink};
 use crate::interp::Interp;
 use crate::object::{Dict, Object, PsString, Value};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::paths::Opened;
+use crate::paths::Probe;
 
 pub fn install(dict: &mut Dict) {
     use super::op;
@@ -67,9 +70,15 @@ pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsEr
     }
     // The wasm build has no disk to read.
     #[cfg(target_arch = "wasm32")]
-    let read = |_: &std::path::Path| None;
+    let read = |_: &std::path::Path, _: Probe<'_>| None;
+    // A search-order candidate is opened once, non-blocking, and that handle
+    // is what is read, to the `lib/` cap at most (issue #1177); an absolute
+    // name is read as written.
     #[cfg(not(target_arch = "wasm32"))]
-    let read = |p: &std::path::Path| std::fs::read(p).ok();
+    let read = |p: &std::path::Path, probe: Probe<'_>| match probe.open(p)? {
+        Opened::Handle(f) => crate::paths::read_handle(f, p, probe.read_cap()),
+        Opened::AsWritten => std::fs::read(p).ok(),
+    };
     // Under read roots (issue #763) only files inside them are read.
     crate::read_roots::open_confined(it.read_policy(), name, &read)?
         .map(|r| r.bytes.into_owned())
@@ -82,12 +91,20 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
     let policy = it.read_policy().cloned();
     let it = RefCell::new(it);
     let stopped: RefCell<Option<PsError>> = RefCell::new(None);
-    let read = |path: &std::path::Path| {
+    let read = |path: &std::path::Path, probe: Probe<'_>| {
         if stopped.borrow().is_some() {
             return None;
         }
         let mut poll = |kib: usize, will_alloc: usize| it.borrow_mut().poll_read(kib, will_alloc);
-        match crate::file::read_path_limited(path, &mut poll) {
+        // The handle of a search-order candidate goes to the limit-aware
+        // reader as it is, never reopened by path (issue #1177).
+        let read = match probe.open(path)? {
+            Opened::Handle(f) => {
+                crate::file::read_file_limited(f, path, probe.read_cap(), &mut poll)
+            }
+            Opened::AsWritten => crate::file::read_path_limited(path, &mut poll),
+        };
+        match read {
             Ok(data) => data,
             Err(e) => {
                 *stopped.borrow_mut() = Some(e);
@@ -516,7 +533,9 @@ fn status(it: &mut Interp) -> Result<(), PsError> {
 /// has no times (0). Directories are `None`: `status` is the probe before
 /// `run`, which a directory would fail (gs says `true` for one), and a
 /// regular file the process cannot open is `None` too (gs says `true`).
-/// Anything else `file` could open counts, a FIFO or `/dev/null` included.
+/// Anything else `file` could open counts, a FIFO or `/dev/null` named by an
+/// absolute path included; a relative name's search-order candidates must be
+/// regular files, as for `run` (issue #1177).
 ///
 /// The bytes are never read, only `stat`ted, so a FIFO or `/dev/zero` inside
 /// a root costs nothing and the execution limits have nothing to meter.
@@ -527,19 +546,27 @@ fn status_fields(it: &mut Interp, name: &str) -> Option<[i64; 4]> {
     let stat: RefCell<Option<[i64; 4]>> = RefCell::new(None);
     // No disk on the wasm build: only the embedded `lib/` can answer.
     #[cfg(not(target_arch = "wasm32"))]
-    let read = |p: &std::path::Path| {
-        let m = std::fs::metadata(p).ok().filter(|m| !m.is_dir())?;
-        // `file` skips a file it cannot open, so a probe that is followed by
-        // `run` must too. Only a regular file is opened here: opening a FIFO
-        // would block.
-        if m.is_file() && std::fs::File::open(p).is_err() {
-            return None;
-        }
+    let read = |p: &std::path::Path, probe: Probe<'_>| {
+        // A search-order candidate is opened once (a regular file, or not
+        // here), the way `run` will open it.
+        let m = match probe.open(p)? {
+            Opened::Handle(f) => f.metadata().ok()?,
+            Opened::AsWritten => {
+                let m = std::fs::metadata(p).ok().filter(|m| !m.is_dir())?;
+                // `file` skips a file it cannot open, so a probe that is
+                // followed by `run` must too. Only a regular file is opened
+                // here: opening a FIFO would block.
+                if m.is_file() && std::fs::File::open(p).is_err() {
+                    return None;
+                }
+                m
+            }
+        };
         *stat.borrow_mut() = Some(metadata_fields(&m));
         Some(Vec::new())
     };
     #[cfg(target_arch = "wasm32")]
-    let read = |_: &std::path::Path| None;
+    let read = |_: &std::path::Path, _: Probe<'_>| None;
     // A refusal (`..`, outside the roots, a link leading out) is `false`
     // like a missing file; `file` would say `invalidfileaccess`.
     let found = crate::read_roots::open_confined(it.read_policy(), name, &read)

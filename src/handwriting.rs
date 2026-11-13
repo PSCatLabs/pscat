@@ -29,12 +29,52 @@
 //! does have, so a caller can refuse text that would draw nothing before it
 //! spends a worker on it.
 //!
-//! The functions that build programs run nothing. [`has_glyph`] and
-//! [`drawable`] are the exception: they run the font's own definitions in a
-//! throwaway interpreter, bounded in steps, time and (with
-//! [`TrackingAllocator`](crate::TrackingAllocator) installed) memory, and with no file reads,
-//! and cache the answer by the library text. They read the library the way
-//! [`render_source`] does, so they always agree with it.
+//! # Which `lib/handscript.ps`
+//!
+//! The programs carry the font, `lib/handscript.ps`, as text, so the
+//! interpreter that runs them needs no file access. This module reads that
+//! file in the **calling** process, outside any interpreter, so an
+//! interpreter's read roots (`Interp::set_read_roots`) and its limits do not
+//! apply to it. By default ([`Library::Resolved`]) it is found the way
+//! `run` finds a library, first match wins:
+//!
+//! 1. `$PSCAT_LIB`,
+//! 2. `$PSCAT_HOME` (or `$PSCAT_ROOT`),
+//! 3. the process's **current working directory**,
+//! 4. the per-user data directory,
+//! 5. the directory of the running executable,
+//! 6. the copy compiled into the crate.
+//!
+//! A server whose working directory, home or install directory it does not
+//! control can therefore end up with someone else's font. To use the
+//! compiled-in font and nothing else, set [`HandOptions::library`] to
+//! [`Library::Embedded`]: [`measure_source`] and [`render_source`] then embed
+//! the compiled-in copy, and [`has_glyph_in`] and [`drawable_in`] answer for
+//! it. One value covers all four; the environment, the working directory
+//! and the disk are not consulted.
+//!
+//! # Checking characters without running PostScript
+//!
+//! For the compiled-in font, [`has_glyph_in`] and [`drawable_in`] with
+//! [`Library::Embedded`] read a table checked in to this module, so they run no
+//! PostScript and build no interpreter (a test recomputes the table from the
+//! font and fails if they differ). [`has_glyph`] and [`drawable`], which
+//! follow the resolver, give the same answer without PostScript when it lands
+//! on the compiled-in copy. For any other text (an override) they run the
+//! font's own definitions in a throwaway interpreter, bounded in steps, time
+//! and (with [`TrackingAllocator`](crate::TrackingAllocator) installed)
+//! memory, and with no file reads, and cache the answer by the library text.
+//! They read the library the way [`render_source`] does, so they always agree
+//! with it.
+//!
+//! ```
+//! use pscat::handwriting::{HandOptions, Library, drawable_in};
+//!
+//! // One setting: the compiled-in font for the program and for the check.
+//! let mut opts = HandOptions::new("hello");
+//! opts.library = Library::Embedded;
+//! assert!(drawable_in(opts.library, &opts.text)); // no PostScript ran
+//! ```
 //!
 //! ```
 //! use pscat::handwriting::{HandOptions, Paper, MAX_PAGE_POINTS, measure_source,
@@ -128,6 +168,27 @@ pub const MAX_INK: f64 = 1.0;
 /// Default random seed: the same seed and options give the same page.
 pub const DEFAULT_SEED: i32 = 1985;
 
+/// Which copy of the handwriting font, `lib/handscript.ps`, the functions in
+/// this module use. Set it once, on [`HandOptions::library`], and pass the same
+/// value to [`has_glyph_in`] and [`drawable_in`], so the program and the
+/// character check can not disagree. See the module documentation for the
+/// search order.
+///
+/// `#[non_exhaustive]`: keep a `_` arm.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Library {
+    /// Search for the file the way `run` does: `$PSCAT_LIB`,
+    /// `$PSCAT_HOME`, the working directory, the per-user data directory, the
+    /// executable's directory, then the compiled-in copy. What the module
+    /// always did, and the default.
+    #[default]
+    Resolved,
+    /// The copy compiled into the crate, and nothing from the environment,
+    /// the working directory or the disk.
+    Embedded,
+}
+
 /// The paper a note is written on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -194,6 +255,11 @@ pub struct HandOptions {
     pub paper: Paper,
     /// Random seed. The same seed and options write the same page.
     pub seed: i32,
+    /// Which `lib/handscript.ps` [`measure_source`] and [`render_source`] carry.
+    /// [`Library::Resolved`] by default; [`Library::Embedded`] pins the
+    /// compiled-in copy. Pass the same value to [`has_glyph_in`] and
+    /// [`drawable_in`]. It is not part of the program's options dictionary.
+    pub library: Library,
 }
 
 impl Default for HandOptions {
@@ -209,6 +275,7 @@ impl Default for HandOptions {
             ink: DEFAULT_INK,
             paper: Paper::Plain,
             seed: DEFAULT_SEED,
+            library: Library::Resolved,
         }
     }
 }
@@ -313,16 +380,57 @@ impl HandOptions {
     }
 }
 
-/// The handwriting library, `lib/handscript.ps`, as the resolver finds it
-/// (`$PSCAT_HOME` and the other roots first, then the copy compiled in), so a
-/// program is self-contained and the interpreter that runs it needs no file
-/// access. Only a build with no embedded copy at all falls back to a `run`.
-fn library() -> String {
-    const NAME: &str = "lib/handscript.ps";
-    match crate::paths::open(NAME) {
-        Some(r) => String::from_utf8_lossy(&r.bytes).into_owned(),
-        None => format!("({NAME}) run\n"),
+/// The name of the handwriting library.
+const LIBRARY_NAME: &str = "lib/handscript.ps";
+
+/// The handwriting library, `lib/handscript.ps`, as text, so a program is
+/// self-contained and the interpreter that runs it needs no file access.
+/// `Resolved` is what the resolver finds (`$PSCAT_HOME` and the other roots
+/// first, then the copy compiled in); only a build with no embedded copy at
+/// all falls back to a `run`. `Embedded` is the compiled-in copy, never a
+/// `run` (which would let the interpreter go looking on disk).
+///
+/// # Panics
+///
+/// `Embedded` panics if the crate was built without `lib/handscript.ps`,
+/// which `build.rs` and the package's file list rule out.
+fn library_text(which: Library) -> String {
+    match which {
+        Library::Embedded => String::from_utf8_lossy(embedded_library()).into_owned(),
+        Library::Resolved => match crate::paths::open(LIBRARY_NAME) {
+            Some(r) => String::from_utf8_lossy(&r.bytes).into_owned(),
+            None => format!("({LIBRARY_NAME}) run\n"),
+        },
     }
+}
+
+/// The bytes of the compiled-in `lib/handscript.ps`. `build.rs` embeds every
+/// `lib/**/*.ps` that is in the source tree, and the package ships `lib/`
+/// (`Cargo.toml` `include`), so a build always has it; a test checks. Only
+/// [`Library::Embedded`] programs need it (`Resolved` falls back to a `run`).
+fn embedded_library() -> &'static [u8] {
+    crate::paths::embedded(LIBRARY_NAME).expect("lib/handscript.ps is compiled in")
+}
+
+/// The ASCII characters the compiled-in font draws ink for, in code order:
+/// what [`discover_glyphs`] finds over `lib/handscript.ps`. Checked in so the
+/// compiled-in font needs no PostScript to answer; the test
+/// `the_checked_in_table_is_what_discovery_finds` fails, and prints the line to
+/// paste here, when the font changes.
+const EMBEDDED_GLYPHS: &str = "!',-.0123456789?abcdefghijklmnopqrstuvwxyz";
+
+/// Whether the compiled-in font draws ink for `c`, which is already lowercase.
+fn embedded_has(c: char) -> bool {
+    EMBEDDED_GLYPHS.contains(c)
+}
+
+/// [`EMBEDDED_GLYPHS`] as a table by character code.
+fn embedded_table() -> [bool; 128] {
+    let mut table = [false; 128];
+    for b in EMBEDDED_GLYPHS.bytes() {
+        table[usize::from(b)] = true;
+    }
+    table
 }
 
 /// The PostScript that prints the character codes the font draws ink for, one
@@ -348,6 +456,14 @@ const DISCOVERY_STEPS: u64 = 5_000_000;
 const DISCOVERY_TIME: std::time::Duration = std::time::Duration::from_secs(2);
 const DISCOVERY_MEMORY: usize = 64 << 20;
 
+// How many interpreters discovery has built on this thread. This module builds
+// an interpreter nowhere else, so a test that sees it stand still has shown a
+// call ran no PostScript.
+#[cfg(test)]
+thread_local! {
+    static INTERPS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// What discovery found, and whether it is safe to remember. A memory-limit
 /// stop is not remembered: the count is process-wide, so other threads'
 /// allocation could have caused it, and the next call should try again.
@@ -361,6 +477,8 @@ struct Discovery {
 /// files, so a library that loops, allocates without end or tries to `run`
 /// something yields no glyphs rather than hanging the caller.
 fn discover_glyphs(library_src: &str) -> Discovery {
+    #[cfg(test)]
+    INTERPS_BUILT.with(|n| n.set(n.get() + 1));
     let mut found = Discovery {
         table: [false; 128],
         cacheable: true,
@@ -396,7 +514,8 @@ fn discover_glyphs(library_src: &str) -> Discovery {
 }
 
 /// The glyph table for the library text `render_source` would embed right
-/// now. Tables are cached by the library text itself (hashed, then compared
+/// now. The compiled-in text is answered from [`EMBEDDED_GLYPHS`] without
+/// running anything. Tables are cached by the library text itself (hashed, then compared
 /// on a hit, so a hash collision cannot return another font's table), so the
 /// same bytes are never run twice and a changed library gets a fresh answer.
 /// The lock is not held while discovery runs, and a poisoned lock is
@@ -406,6 +525,9 @@ fn glyph_table_for(library_src: &str) -> [bool; 128] {
     use std::collections::HashMap;
     use std::hash::{Hash, Hasher};
     use std::sync::{Mutex, PoisonError};
+    if crate::paths::embedded(LIBRARY_NAME).is_some_and(|b| b == library_src.as_bytes()) {
+        return embedded_table();
+    }
     /// Distinct library texts kept. A process sees one or two in practice.
     const KEPT: usize = 8;
     type Cache = Mutex<HashMap<u64, (String, [bool; 128])>>;
@@ -443,15 +565,20 @@ fn glyph_table_for(library_src: &str) -> [bool; 128] {
 ///
 /// The answer comes from the font's own glyph table in `lib/handscript.ps`,
 /// the copy [`render_source`] would embed on this very call, so it follows the
-/// font when the font gains a glyph and follows an override that changes. The
-/// table is found by running the font's definitions in a throwaway
-/// interpreter, bounded in steps, time and (where the process installs
-/// [`TrackingAllocator`](crate::TrackingAllocator)) memory, allowed to read no files, and
-/// cached by a hash of the library text; a call reads the library the way
-/// [`render_source`] does, so use [`drawable`] for a whole string rather than
-/// calling this per character in a hot loop. If the table cannot be found (a
-/// broken or runaway `lib/handscript.ps` in `$PSCAT_HOME`), every character
-/// is `false`.
+/// font when the font gains a glyph and follows an override that changes. When
+/// that copy is the compiled-in one the answer is a checked-in table and no
+/// PostScript runs. Otherwise the table is found by running the font's
+/// definitions in a throwaway interpreter, bounded in steps, time and (where
+/// the process installs [`TrackingAllocator`](crate::TrackingAllocator))
+/// memory, allowed to read no files, and cached by a hash of the library text;
+/// a call reads the library the way [`render_source`] does, so use
+/// [`drawable`] for a whole string rather than calling this per character in a
+/// hot loop. If the table cannot be found (a broken or runaway
+/// `lib/handscript.ps` in `$PSCAT_HOME`), every character is `false`.
+///
+/// This is [`has_glyph_in`] with [`Library::Resolved`]. To check the
+/// compiled-in font whatever the environment holds, use
+/// `has_glyph_in(Library::Embedded, c)`.
 ///
 /// ```
 /// use pscat::handwriting::has_glyph;
@@ -460,13 +587,35 @@ fn glyph_table_for(library_src: &str) -> [bool; 128] {
 /// assert!(!has_glyph(' ') && !has_glyph('@') && !has_glyph('\u{e9}'));
 /// ```
 pub fn has_glyph(c: char) -> bool {
+    has_glyph_in(Library::Resolved, c)
+}
+
+/// [`has_glyph`] for the font `library` names: the one `opts.library` sets for
+/// [`measure_source`] and [`render_source`]. With [`Library::Embedded`] it reads
+/// a table checked in to this crate: it runs no PostScript, builds no
+/// interpreter, and looks at no environment variable, directory or file.
+///
+/// ```
+/// use pscat::handwriting::{Library, has_glyph_in};
+///
+/// assert!(has_glyph_in(Library::Embedded, 'Q') && !has_glyph_in(Library::Embedded, '@'));
+/// ```
+pub fn has_glyph_in(library: Library, c: char) -> bool {
     let c = c.to_ascii_lowercase();
-    c.is_ascii() && glyph_table_for(&library())[c as usize]
+    if !c.is_ascii() {
+        return false;
+    }
+    match library {
+        Library::Embedded => embedded_has(c),
+        Library::Resolved => glyph_table_for(&library_text(Library::Resolved))[c as usize],
+    }
 }
 
 /// Whether `text` has at least one character the font draws ([`has_glyph`]).
 /// Text that is not `drawable` would render as a blank page, so a server can
 /// refuse it before measuring. Empty text is not drawable.
+///
+/// This is [`drawable_in`] with [`Library::Resolved`].
 ///
 /// ```
 /// use pscat::handwriting::drawable;
@@ -476,22 +625,34 @@ pub fn has_glyph(c: char) -> bool {
 /// assert!(!drawable("\u{4f60}\u{597d}"));
 /// ```
 pub fn drawable(text: &str) -> bool {
-    let table = glyph_table_for(&library());
-    text.chars().any(|c| {
-        let c = c.to_ascii_lowercase();
-        c.is_ascii() && table[c as usize]
-    })
+    drawable_in(Library::Resolved, text)
+}
+
+/// [`drawable`] for the font `library` names, with [`has_glyph_in`]'s
+/// guarantee: [`Library::Embedded`] runs no PostScript.
+pub fn drawable_in(library: Library, text: &str) -> bool {
+    match library {
+        Library::Embedded => text.chars().any(|c| embedded_has(c.to_ascii_lowercase())),
+        Library::Resolved => {
+            let table = glyph_table_for(&library_text(Library::Resolved));
+            text.chars().any(|c| {
+                let c = c.to_ascii_lowercase();
+                c.is_ascii() && table[c as usize]
+            })
+        }
+    }
 }
 
 /// The program that prints the number of lines `opts` wraps to, then a
-/// newline. It contains `lib/handscript.ps` itself, read when you call this
-/// from `$PSCAT_HOME`, `$PSCAT_LIB` and the other roots of the calling
-/// process, then the copy compiled in, so the interpreter that runs it needs
-/// no file access. Run it on a default page with the interpreter's stdout captured
+/// newline. It contains `lib/handscript.ps` itself, so the interpreter that
+/// runs it needs no file access: the copy [`HandOptions::library`] names,
+/// which by default is read when you call this from `$PSCAT_LIB`,
+/// `$PSCAT_HOME` and the other roots of the calling process, then the copy
+/// compiled in (the module documentation has the order). Run it on a default page with the interpreter's stdout captured
 /// and give the output to [`parse_line_count`]. The page height does not
 /// affect the wrap, so none is needed.
 pub fn measure_source(opts: &HandOptions) -> String {
-    let mut src = library();
+    let mut src = library_text(opts.library);
     src.push_str(&opts.dictionary(792));
     src.push_str("HandOpts hs-linecount =\n");
     src
@@ -516,7 +677,7 @@ pub fn page_height_pt(lines: u64, size: f64) -> f64 {
 /// `Interp::with_page_scaled(opts.width, height_pt, dpi / 72.0)`, and keep
 /// `height_pt` within [`MIN_PAGE_POINTS`]..=[`MAX_PAGE_POINTS`].
 pub fn render_source(opts: &HandOptions, height_pt: u32) -> String {
-    let mut src = library();
+    let mut src = library_text(opts.library);
     src.push_str(&opts.dictionary(height_pt));
     src.push_str("HandOpts hs-write showpage\n");
     src
@@ -668,7 +829,7 @@ mod tests {
 
     #[test]
     fn discovery_is_bounded_and_follows_the_library_text() {
-        let good = library();
+        let good = library_text(Library::Resolved);
         let table = glyph_table_for(&good);
         assert!(table[usize::from(b'a')] && table[usize::from(b'.')] && !table[32]);
 
@@ -717,6 +878,86 @@ mod tests {
         let t2 = glyph_table_for(&changed);
         assert!(!t2[usize::from(b'.')] && t2[usize::from(b'a')]);
         assert_eq!(glyph_table_for(&good), table);
+    }
+
+    fn built() -> usize {
+        INTERPS_BUILT.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn the_checked_in_table_is_what_discovery_finds() {
+        // Discovery is called directly: going through `glyph_table_for` would
+        // hit the fast path and compare the table with itself.
+        let text = String::from_utf8_lossy(embedded_library()).into_owned();
+        let found = discover_glyphs(&text);
+        assert!(
+            found.cacheable,
+            "discovery over the compiled-in font stopped"
+        );
+        let want: String = (0u8..128)
+            .filter(|&b| found.table[usize::from(b)])
+            .map(char::from)
+            .collect();
+        assert_eq!(
+            EMBEDDED_GLYPHS, want,
+            "lib/handscript.ps draws different characters than the checked-in table; \
+             set EMBEDDED_GLYPHS in src/handwriting.rs to {want:?}"
+        );
+        assert_eq!(embedded_table(), found.table);
+        assert!(EMBEDDED_GLYPHS.is_ascii() && !EMBEDDED_GLYPHS.contains(' '));
+    }
+
+    #[test]
+    fn the_embedded_checks_run_no_postscript() {
+        // The control: a library text no other test uses misses the cache, so
+        // it must build an interpreter, once. If the counter could not move,
+        // the zero below would prove nothing.
+        let unique = format!(
+            "{}\n% only the no-postscript test uses this line\n",
+            String::from_utf8_lossy(embedded_library())
+        );
+        let before = built();
+        assert!(glyph_table_for(&unique)[usize::from(b'a')]);
+        assert_eq!(
+            built(),
+            before + 1,
+            "the control did not build an interpreter"
+        );
+
+        let before = built();
+        for c in ['a', 'Q', '.', ' ', '@', '\u{e9}'] {
+            assert_eq!(
+                has_glyph_in(Library::Embedded, c),
+                c.is_ascii_alphabetic() || c == '.'
+            );
+        }
+        assert!(drawable_in(Library::Embedded, "  hi") && !drawable_in(Library::Embedded, " \n"));
+        assert!(!drawable_in(Library::Embedded, ""));
+        assert_eq!(built(), before, "an embedded check built an interpreter");
+
+        // The resolver landing on the compiled-in copy is answered the same way.
+        if library_text(Library::Resolved).as_bytes() == embedded_library() {
+            assert!(has_glyph('a') && drawable("x") && !drawable(" "));
+            assert_eq!(
+                built(),
+                before,
+                "a resolved check on the compiled-in font ran PostScript"
+            );
+        }
+    }
+
+    #[test]
+    fn the_pinned_library_is_the_compiled_in_text() {
+        assert!(crate::paths::embedded(LIBRARY_NAME).is_some());
+        assert_eq!(Library::default(), Library::Resolved);
+        assert_eq!(HandOptions::default().library, Library::Resolved);
+        let mut o = HandOptions::new("hi");
+        o.library = Library::Embedded;
+        let text = String::from_utf8_lossy(embedded_library()).into_owned();
+        assert_eq!(library_text(Library::Embedded), text);
+        assert!(measure_source(&o).starts_with(&text));
+        assert!(render_source(&o, 100).starts_with(&text));
+        assert!(!render_source(&o, 100).contains(") run"), "no run fallback");
     }
 
     #[test]

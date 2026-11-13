@@ -138,7 +138,7 @@ impl ReadRoots {
 pub(crate) fn open_confined(
     roots: Option<&ReadRoots>,
     name: &str,
-    read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+    read: &crate::paths::Reader<'_>,
 ) -> Result<Option<crate::paths::Resource>, PsError> {
     let Some(roots) = roots else {
         return Ok(crate::paths::open_with_reader(name, read));
@@ -146,12 +146,12 @@ pub(crate) fn open_confined(
     roots.check_name(name)?;
     let absolute = Path::new(name).is_absolute();
     let refused = std::cell::Cell::new(false);
-    let gated = |p: &Path| {
+    let gated = |p: &Path, probe: crate::paths::Probe<'_>| {
         // Admission and the open under one lock, so a band's `renamefile`
         // cannot swap the entry between them (see `write_roots::ENTRY_LOCK`).
         let _entries = crate::write_roots::lock_entries();
         match roots.admit(p) {
-            Admit::Open(canon) => read(&canon),
+            Admit::Open(canon) => read(&canon, probe),
             Admit::Refused => {
                 // A search-order place outside the roots altogether (the
                 // executable's directory, or the working directory when that

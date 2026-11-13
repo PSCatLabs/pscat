@@ -19,8 +19,8 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   and the `N RD <binary>` idiom. Ghostscript accepts the Type 1 file the test
   suite generates, byte for byte.
 
-This guide covers accented text in the standard fonts, the Type 3 display
-library, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
+This guide covers accented text in the standard fonts, placing each glyph
+yourself, the Type 3 display library, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
 
@@ -58,6 +58,46 @@ lacks advances by `.notdef`'s width. On a Type 3 font it calls `BuildGlyph`
 with the name. A Type 3 font with only `BuildChar` gets the first Encoding
 slot holding the name, or 0, as in Ghostscript. Latin faces do not read UTF-8:
 a byte is an Encoding slot.
+
+## Placing each glyph: xshow, yshow, xyshow and cshow
+
+`show` moves the current point by each glyph's own width. The Level 2
+`xshow`, `yshow` and `xyshow` paint the same glyphs but move it by numbers
+you give, one per glyph (`xyshow`: an x and a y per glyph), in user space.
+Typesetters and PDF-to-PostScript converters use them to place every
+glyph exactly:
+
+```postscript
+/Helvetica 18 selectfont
+72 700 moveto (SPACED) [20 20 20 20 20 20] xshow
+72 600 moveto (DOWN) [-22 -22 -22 -22] yshow
+72 500 moveto (wave) [14 6 14 -6 14 6 14 -6] xyshow
+```
+
+The numbers can also be an encoded number string (PLRM 3.14.5): byte 149,
+a representation byte, a 16-bit count and the packed numbers, so
+`<95 20 0003 0014 0014 0014>` is three 16-bit integers of 20. Too few
+numbers for the glyphs is a `rangecheck` and a non-number a `typecheck`,
+both before anything is painted; extra numbers are ignored.
+
+`cshow` paints nothing. For each character it pushes the character code and
+its width (`wx wy`, user space) and calls your procedure, which does the
+drawing. Here every character is centred in a 20-point cell:
+
+```postscript
+/Helvetica 18 selectfont
+72 400 moveto
+(cells) {
+  pop 20 exch sub 2 div            % code gap: the cell's spare width
+  dup 0 rmoveto exch
+  1 string dup 0 4 -1 roll put show
+  0 rmoveto
+} cshow
+```
+
+During the procedure the current font is the one `cshow` started with, and
+it is set back after each call, so a `setfont` inside lasts only for that
+character. pscat accepts the operands in either order, as Ghostscript does.
 
 ## The display font library
 

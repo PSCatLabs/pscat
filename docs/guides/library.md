@@ -199,6 +199,31 @@ and does not have to match pscat's version of one.
   (the library text `render_source` embeds, so an override is followed), in a
   bounded run that reads no files and gives no glyphs if the library misbehaves,
   rather than a copy that could drift.
+
+  **Pinning the font.** `lib/handscript.ps` is read in your process, outside
+  any interpreter, so the interpreter's read roots do not apply. By default
+  (`Library::Resolved`) it is the first match of `$PSCAT_LIB`, `$PSCAT_HOME` (or
+  `$PSCAT_ROOT`), the **current directory**, the per-user data directory, the
+  executable's directory, then the copy compiled in. A server that does not
+  control those should pin the compiled-in font once, and pass the same value to
+  the glyph checks:
+
+  ```rust
+  use pscat::handwriting::{HandOptions, Library, drawable_in, has_glyph_in};
+
+  let mut opts = HandOptions::new("meet me at nine");
+  opts.library = Library::Embedded; // measure_source and render_source carry the compiled-in font
+  if !drawable_in(opts.library, &opts.text) {
+      // refuse: nothing would be drawn
+  }
+  assert!(has_glyph_in(opts.library, 'n'));
+  ```
+
+  With `Library::Embedded` the glyph checks read a table checked in to the crate
+  (a test recomputes it from the font): they run no PostScript and build no
+  interpreter, so a process that never runs PostScript can use them. The
+  default `has_glyph` and `drawable` answer the same way, without PostScript,
+  whenever the resolver lands on the compiled-in copy.
 - **The catalog.** `pscat::catalog::capabilities()` is the JSON
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.

@@ -166,6 +166,9 @@ no separate stroke-path form worth distinguishing; documented.)
   Encoding slot holding the name, else 0 (Ghostscript's behaviour; the
   PLRM defines glyphshow through `BuildGlyph`). Name operand only, as in
   gs: a string is a typecheck.
+- `xshow`, `yshow`, `xyshow` and `cshow` (Level 2, #1180) are more
+  `Frame::Show`s; see Decision 6. The numbers of the first three are an
+  array or an encoded number string (PLRM 3.14.5, `src/numstring.rs`).
 
 ## Decision 6 — the show family is an execution-stack frame
 
@@ -191,6 +194,25 @@ machine then processes **one glyph per step**:
 - **`kshow`** yields to its proc between character pairs with both
   codes pushed; the pen is re-read from the current point afterwards,
   so the proc can kern (that's the point) — or even change the font.
+- **`xshow`/`yshow`/`xyshow`** (#1180) are `show` with a
+  `Displacements` list: after each glyph the pen moves by the next dx,
+  dy or dx dy in user space, and the glyph's own width is ignored. Every
+  check runs before anything paints, in Ghostscript's order: both
+  operand types, an encoded string's header and count, too few numbers
+  for the glyph count (`rangecheck`; the count is `font::glyph_count`,
+  so a Unicode-mode font counts UTF-8 scalars), the current point, then
+  the values: every array element a number (`typecheck`, unused ones
+  too) and every encoded real finite (`undefinedresult`). The count can
+  be taken up front because nothing can change the font mid-show: there
+  is no kshow proc, and a BuildChar's `setfont` is rolled back.
+- **`cshow`** (#1180) runs in `ShowMode::Width`: each character is
+  measured (a Type 3 BuildChar runs with painting suppressed, as for
+  `stringwidth`), then the proc is called with `code wx wy`. Nothing
+  paints, no current point is needed and it never moves. The proc sees
+  the base font, which without composite fonts is the current font; it
+  is set again after every call, at the end, and by `ShowCtx::cleanup`
+  when a `stop` or an error leaves the proc, all as in Ghostscript. Like
+  gs, the operands may come in either order (`string proc cshow` too).
 
 Why frames make everything easy: the frame runs to completion *before
 the token after the operator*, so `stringwidth` pushing its results at
@@ -226,8 +248,6 @@ paints as paths is not attempted; documented deviation).
   choice above is the thing it would obsolete. For Type 3, a cache
   keyed on (font, size, glyph) is what would make `setcachedevice`'s
   bbox meaningful.
-- **`cshow`** — trivial atop the ShowFrame now; take it with Type 0
-  work if ever.
 - **`charpath` capturing Type 3 outlines** — see Decision 6.
 - **FontID as a distinct object type** — see Decision 2.
 - **Symbol** — substituted, not mapped; revisit with Type 1.
