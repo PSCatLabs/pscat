@@ -60,6 +60,9 @@ pub(crate) struct UsedGlyphs {
     pairs: HashMap<(u16, char), u16>,
     /// Glyphs whose outline cannot be embedded: they stay paths.
     refused: HashSet<u16>,
+    /// The face's glyph count: real glyph ids are below it, extra CIDs
+    /// start at it.
+    glyph_count: u32,
     next_extra: u32,
 }
 
@@ -68,11 +71,14 @@ const MAX_CIDS: usize = 65_534;
 
 impl UsedGlyphs {
     pub(crate) fn new(face: &Face) -> Self {
+        // A face whose glyph count cannot be read embeds nothing.
+        let glyph_count = u32::from(catch(|| face.number_of_glyphs()).unwrap_or(0));
         UsedGlyphs {
             cids: BTreeMap::new(),
             pairs: HashMap::new(),
             refused: HashSet::new(),
-            next_extra: u32::from(catch(|| face.number_of_glyphs()).unwrap_or(u16::MAX)),
+            glyph_count,
+            next_extra: glyph_count,
         }
     }
 
@@ -83,7 +89,14 @@ impl UsedGlyphs {
         if let Some(&cid) = self.pairs.get(&(gid, ch)) {
             return Some(cid);
         }
-        if gid == 0 || self.refused.contains(&gid) || self.cids.len() >= MAX_CIDS {
+        // A hostile cmap can name a glyph id past the face's glyph count;
+        // it would collide with the extra CIDs, so it keeps its outline
+        // (Codex review, round 2).
+        if gid == 0
+            || u32::from(gid) >= self.glyph_count
+            || self.refused.contains(&gid)
+            || self.cids.len() >= MAX_CIDS
+        {
             return None;
         }
         let (cid, charstring) = match self.cids.get(&gid) {
@@ -194,9 +207,17 @@ struct Charstring {
     /// The last point exactly, in 1000-unit em, for the quadratic →
     /// cubic conversion.
     last: (f64, f64),
-    /// False once an operand did not fit a Type 2 number.
+    /// False once the glyph is refused: an operand did not fit a Type 2
+    /// number, or the charstring would pass [`MAX_CHARSTRING`]. From then
+    /// on the outline callbacks append nothing, so a hostile outline
+    /// (composites or subroutines expanding without end) cannot grow the
+    /// buffer past its one up-front allocation.
     exact: bool,
 }
+
+/// The most one outline callback appends: a curve's six 5-byte operands
+/// and its operator.
+const MAX_STEP: usize = 31;
 
 const FIXED_ONE: i64 = 65536;
 
@@ -243,6 +264,17 @@ fn push_operand(out: &mut Vec<u8>, d: i64) -> bool {
 }
 
 impl Charstring {
+    /// Whether one more callback may append. Room is kept for it and the
+    /// closing `endchar`; past that the glyph is refused and its buffer
+    /// freed.
+    fn room(&mut self) -> bool {
+        if self.exact && self.out.len() + MAX_STEP + 1 > MAX_CHARSTRING {
+            self.exact = false;
+            self.out = Vec::new();
+        }
+        self.exact
+    }
+
     fn point(&mut self, x: f64, y: f64) {
         let p = (fixed(x), fixed(y));
         self.exact &= push_operand(&mut self.out, p.0 - self.cur.0);
@@ -254,18 +286,27 @@ impl Charstring {
 
 impl OutlineBuilder for Charstring {
     fn move_to(&mut self, x: f32, y: f32) {
+        if !self.room() {
+            return;
+        }
         let s = self.scale;
         self.point(f64::from(x) * s, f64::from(y) * s);
         self.out.push(21); // rmoveto
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
+        if !self.room() {
+            return;
+        }
         let s = self.scale;
         self.point(f64::from(x) * s, f64::from(y) * s);
         self.out.push(5); // rlineto
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        if !self.room() {
+            return;
+        }
         let s = self.scale;
         let (x0, y0) = self.last;
         let (qx, qy) = (f64::from(x1) * s, f64::from(y1) * s);
@@ -277,6 +318,9 @@ impl OutlineBuilder for Charstring {
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        if !self.room() {
+            return;
+        }
         let s = self.scale;
         self.point(f64::from(x1) * s, f64::from(y1) * s);
         self.point(f64::from(x2) * s, f64::from(y2) * s);
@@ -294,7 +338,9 @@ const MAX_CHARSTRING: usize = 65_535;
 impl Charstring {
     fn new(units_per_em: u16) -> Self {
         Charstring {
-            out: Vec::new(),
+            // The whole budget at once: appends never reallocate, so the
+            // buffer's peak is this, whatever the outline does.
+            out: Vec::with_capacity(MAX_CHARSTRING),
             scale: 1000.0 / f64::from(units_per_em.max(1)),
             cur: (0, 0),
             last: (0.0, 0.0),
@@ -305,8 +351,12 @@ impl Charstring {
     /// The finished charstring, or `None` if it cannot be written exactly
     /// within the Type 2 limits.
     fn finish(mut self) -> Option<Vec<u8>> {
+        if !self.exact {
+            return None;
+        }
         self.out.push(14); // endchar
-        (self.exact && self.out.len() <= MAX_CHARSTRING).then_some(self.out)
+        self.out.shrink_to_fit();
+        Some(self.out)
     }
 }
 
@@ -741,6 +791,20 @@ mod tests {
             cs.line_to(if i % 2 == 0 { 1.0 } else { 0.0 }, 0.0);
         }
         assert!(cs.finish().is_none());
+        // Far past the limit (an outline expanding without end): appends
+        // stop at the limit, the buffer never grows past its one
+        // allocation, and the refused glyph holds nothing.
+        let mut cs = Charstring::new(1000);
+        cs.move_to(0.0, 0.0);
+        let mut peak = 0;
+        for i in 0..1_000_000 {
+            let v = f32::from(u8::try_from(i % 200).expect("small")) + 0.5;
+            cs.curve_to(v, v, -v, v, v, -v);
+            peak = peak.max(cs.out.capacity());
+        }
+        assert!(peak <= MAX_CHARSTRING, "peak capacity {peak}");
+        assert!(cs.out.is_empty() && !cs.exact);
+        assert!(cs.finish().is_none());
         let mut cs = Charstring::new(1000);
         cs.move_to(0.0, 0.0);
         for i in 0..20_000 {
@@ -748,6 +812,28 @@ mod tests {
         }
         let out = cs.finish().expect("fits");
         assert!(out.len() <= MAX_CHARSTRING && out.len() > 60_000);
+    }
+
+    /// Codex review, round 2: a cmap may name a glyph id at or past the
+    /// face's glyph count. It keeps its outline, so it can never collide
+    /// with the extra CIDs (which start at that count) a shared glyph's
+    /// second character gets.
+    #[test]
+    fn a_glyph_id_past_the_glyph_count_is_refused() {
+        let face = Face::parse(include_bytes!("../fonts/LiberationSans-Regular.ttf"), 0)
+            .expect("bundled face");
+        let n = face.number_of_glyphs();
+        let mut used = UsedGlyphs::new(&face);
+        assert_eq!(used.cid(&face, 36, 'A', 667.0), Some(36));
+        assert_eq!(used.cid(&face, n, 'x', 500.0), None);
+        assert_eq!(used.cid(&face, u16::MAX, 'y', 500.0), None);
+        // The second character of glyph 36 takes CID n, untouched by the
+        // refused ids, and glyph 36's first character keeps CID 36.
+        assert_eq!(used.cid(&face, 36, 'B', 667.0), Some(n));
+        assert_eq!(used.cid(&face, n, 'z', 500.0), None);
+        assert_eq!(used.cids[&n].ch, 'B');
+        assert_eq!(used.cids[&36].ch, 'A');
+        assert_eq!(used.cids.len(), 2);
     }
 
     #[test]
