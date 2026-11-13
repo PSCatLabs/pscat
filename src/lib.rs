@@ -186,6 +186,7 @@ pub mod lexer;
 pub mod lint;
 #[doc(hidden)]
 pub mod name;
+pub(crate) mod numstring;
 #[doc(hidden)]
 pub mod object;
 #[doc(hidden)]

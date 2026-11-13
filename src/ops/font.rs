@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::encodings;
 use crate::error::PsError;
-use crate::font::{self, FontState, ShowMode, ShowParams};
+use crate::font::{self, Axes, FontState, ShowMode, ShowParams};
 use crate::interp::Interp;
 use crate::object::{Dict, Object, PsString, Value};
 
@@ -25,6 +25,10 @@ pub fn install(dict: &mut Dict) {
     op(dict, "widthshow", widthshow);
     op(dict, "awidthshow", awidthshow);
     op(dict, "kshow", kshow);
+    op(dict, "xshow", xshow);
+    op(dict, "yshow", yshow);
+    op(dict, "xyshow", xyshow);
+    op(dict, "cshow", cshow);
     op(dict, "glyphshow", glyphshow);
     op(dict, "stringwidth", stringwidth);
     op(dict, "charpath", charpath);
@@ -379,6 +383,74 @@ fn kshow(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     }
     begin_show(it, s, ShowParams::default(), ShowMode::Paint, Some(proc))
+}
+
+/// string numarray|numstring xshow, yshow, xyshow (Level 2, #1180):
+/// paint each glyph like `show`, then move the current point by the next
+/// number (`xshow`: dx, `yshow`: dy) or pair (`xyshow`: dx dy) in user
+/// space instead of by the glyph's width. This is how typesetters and
+/// PDF converters place every glyph exactly.
+///
+/// The checks run in Ghostscript's order (`tests/xshow.rs` compares
+/// them): the operand types and an encoded string's header, then too few
+/// numbers for the glyphs (`rangecheck`; extra numbers are ignored), then
+/// the current point, then every array element being a number
+/// (`typecheck`, the unused ones included). Nothing paints before they
+/// all pass.
+fn positioned_show(it: &mut Interp, axes: Axes) -> Result<(), PsError> {
+    let nums = crate::numstring::NumOperand::of(&it.pop()?)?;
+    let s = pop_string(it)?;
+    let text = s.to_vec();
+    let glyphs = font::glyph_count(&it.gfx, &text)?;
+    if nums.len() < glyphs.saturating_mul(axes.per_glyph()) {
+        return Err(PsError::Rangecheck);
+    }
+    let pen = it
+        .gfx
+        .device_current_point()
+        .ok_or(PsError::NoCurrentPoint)?;
+    let displace = font::Displacements::new(nums.into_numbers()?, axes);
+    it.begin_show(font::ShowCtx::positioned(text, displace, pen))
+}
+
+fn xshow(it: &mut Interp) -> Result<(), PsError> {
+    positioned_show(it, Axes::X)
+}
+
+fn yshow(it: &mut Interp) -> Result<(), PsError> {
+    positioned_show(it, Axes::Y)
+}
+
+fn xyshow(it: &mut Interp) -> Result<(), PsError> {
+    positioned_show(it, Axes::XY)
+}
+
+/// proc string cshow (Level 2, #1180): for each character, push its code
+/// and its width `wx wy` in user space and call proc, with the current
+/// font as the base font (pscat has no composite fonts, so that is the
+/// current font itself; it is set again after each call, as in gs).
+/// cshow paints nothing and needs no current point: the proc decides
+/// what to do with each character, usually a `show` of its own.
+///
+/// `string proc cshow` works too: Ghostscript takes the operands in either
+/// order, because some Adobe interpreters did.
+fn cshow(it: &mut Interp) -> Result<(), PsError> {
+    let is_proc = |o: &Object| o.executable && matches!(o.value, Value::Array(_));
+    let top = it.pop()?;
+    let under = it.pop()?;
+    let (proc, s) = if is_proc(&top) {
+        (top, under)
+    } else {
+        (under, top)
+    };
+    let Value::String(s) = s.value else {
+        return Err(PsError::Typecheck);
+    };
+    if !is_proc(&proc) {
+        return Err(PsError::Typecheck);
+    }
+    let base = it.gfx.state().font.clone().ok_or(PsError::InvalidFont)?;
+    it.begin_show(font::ShowCtx::cshow(s.to_vec(), proc, base))
 }
 
 /// The results are pushed when the frame completes — which the machine
