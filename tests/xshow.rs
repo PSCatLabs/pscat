@@ -67,6 +67,8 @@ const CASES: &str = r#"
 (too few yshow) { 0 0 moveto (abc) [1 2] yshow } case
 (too few xyshow) { 0 0 moveto (abc) [1 2 3 4 5] xyshow } case
 (non-number) { 0 0 moveto (abc) [1 /x 3] xshow } case
+(non-number yshow) { 0 0 moveto (abc) [1 /x 3] yshow } case
+(non-number xyshow) { 0 0 moveto (abc) [1 2 /x 4 5 6] xyshow } case
 (unused non-number) { 0 0 moveto (ab) [1 2 /x] xshow } case
 (numarray not array) { 0 0 moveto (ab) 5 xshow } case
 (text not string) { 0 0 moveto 5 [1 2] xshow } case
@@ -127,6 +129,8 @@ too few xshow => rangecheck
 too few yshow => rangecheck
 too few xyshow => rangecheck
 non-number => typecheck
+non-number yshow => typecheck
+non-number xyshow => typecheck
 unused non-number => typecheck
 numarray not array => typecheck
 text not string => typecheck

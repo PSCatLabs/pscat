@@ -76,9 +76,9 @@ glyph exactly:
 
 The numbers can also be an encoded number string (PLRM 3.14.5): byte 149,
 a representation byte, a 16-bit count and the packed numbers, so
-`<95 20 0003 0014 0014 0014>` is three 16-bit integers of 20. Fewer numbers
-than glyphs is a `rangecheck` and a non-number a `typecheck`, both before
-anything is painted; extra numbers are ignored.
+`<95 20 0003 0014 0014 0014>` is three 16-bit integers of 20. Too few
+numbers for the glyphs is a `rangecheck` and a non-number a `typecheck`,
+both before anything is painted; extra numbers are ignored.
 
 `cshow` paints nothing. For each character it pushes the character code and
 its width (`wx wy`, user space) and calls your procedure, which does the
