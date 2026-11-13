@@ -433,7 +433,7 @@ fn xyshow(it: &mut Interp) -> Result<(), PsError> {
 /// what to do with each character, usually a `show` of its own.
 ///
 /// `string proc cshow` works too: Ghostscript takes the operands in either
-/// order, because some Adobe interpreters did.
+/// order, so a program written against it may rely on that.
 fn cshow(it: &mut Interp) -> Result<(), PsError> {
     let is_proc = |o: &Object| o.executable && matches!(o.value, Value::Array(_));
     let top = it.pop()?;

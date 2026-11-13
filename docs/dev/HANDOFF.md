@@ -486,8 +486,9 @@ renders eight examples in both and compares block-downsampled output).
    `stringwidth` can push its result at frame-pop, why Type 3
    BuildChar and kshow procs nest arbitrarily, and why the live window
    renders glyph-by-glyph. If a new feature needs to run a PostScript
-   procedure mid-operator (patterns, `cshow`, resource callbacks),
-   copy the ShowCtx pattern; do NOT call the machine recursively.
+   procedure mid-operator (patterns, resource callbacks), copy the
+   ShowCtx pattern, as `cshow` does (#1180); do NOT call the machine
+   recursively.
 
 2. **Files share one read cursor** (`src/file.rs`). The scanner pulls
    bytes through a `FileHandle`; `currentfile` returns the same
@@ -551,6 +552,9 @@ renders eight examples in both and compares block-downsampled output).
   keeps the face: `definefont` takes a missing `FID` from it (#1022,
   `notes/1022-definefont-copy-keeps-face.md`). Before, such a copy drew as
   Helvetica. `glyphshow` (name only) is implemented for every font kind (#1023).
+  `xshow`/`yshow`/`xyshow` (number arrays and PLRM 3.14.5 encoded number
+  strings, `src/numstring.rs`) and `cshow` are too (#1180); their checks,
+  and cshow's taking its operands in either order, follow Ghostscript.
 - **Local and global VM are not separated** (#1146). pscat has one VM, so
   `setglobal` only records a flag that `currentglobal` reads back (`false`
   at start): nothing is allocated differently, which is enough for the
