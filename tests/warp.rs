@@ -361,7 +361,7 @@ fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
 /// The show-family programs the decorators must draw through the warp
 /// (#1172): a line, the text, then the line stroked, so a decorator that
 /// lost the caller's path would show as a missing line.
-const SHOW_FAMILY: [(&str, &str); 9] = [
+const SHOW_FAMILY: [(&str, &str); 19] = [
     ("ashow", "2 1 (AVA) ashow"),
     ("widthshow", "6 0 32 (A V) widthshow"),
     ("awidthshow", "6 2 32 1 0 (A V) awidthshow"),
@@ -371,6 +371,30 @@ const SHOW_FAMILY: [(&str, &str); 9] = [
     ("xshow", "(ABC) [20 22 24] xshow"),
     ("yshow", "(ABC) [8 -6 10] yshow"),
     ("xyshow", "(ABC) [20 4 22 -3 24 6] xyshow"),
+    // executable operands are data, not code (an executable array is
+    // pushed, an executable string would run if it were called by name)
+    ("xshow (executable array)", "(ABC) {20 22 24} xshow"),
+    ("yshow (executable array)", "(ABC) {8 -6 10} yshow"),
+    (
+        "xyshow (executable array)",
+        "(ABC) {20 4 22 -3 24 6} xyshow",
+    ),
+    ("xshow (executable text)", "(ABC) cvx [20 22 24] xshow"),
+    ("yshow (executable text)", "(ABC) cvx [8 -6 10] yshow"),
+    (
+        "xyshow (executable text)",
+        "(ABC) cvx [20 4 22 -3 24 6] xyshow",
+    ),
+    ("ashow (executable text)", "2 1 (AVA) cvx ashow"),
+    ("widthshow (executable text)", "6 0 32 (A V) cvx widthshow"),
+    (
+        "awidthshow (executable text)",
+        "6 2 32 1 0 (A V) cvx awidthshow",
+    ),
+    (
+        "kshow (executable text)",
+        "{ pop pop -3 0 rmoveto } (AVA) cvx kshow",
+    ),
     // a number string: IEEE binary32, big-endian, 6 numbers: 20 4 22 -3 24 6
     (
         "xyshow (encoded)",
@@ -569,7 +593,6 @@ fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
         "newpath 10 10 moveto { 1 1 32.0 (AB) widthshow } stopped",
         "newpath { 1 1 (x) 1 1 (AB) awidthshow } stopped",
         "newpath 10 10 moveto { 5 (AB) kshow } stopped",
-        "newpath 10 10 moveto { { pop pop newpath } (AB) kshow } stopped",
         "newpath 10 10 moveto { 65 glyphshow } stopped",
         "newpath 10 10 moveto { 7 show } stopped",
         // xshow, yshow, xyshow (#1191): the real operator checks, in its order
@@ -589,9 +612,18 @@ fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
         "newpath { (AB) (\\225\\060\\000\\002\\100\\000\\000\\000\\100\\000\\000\\000) xshow } stopped",
     ] {
         assert_same_as_native(&format!(
-            "/Helvetica findfont 24 scalefont setfont 9 {body} $error /errorname get"
+            "/Helvetica findfont 24 scalefont setfont 9 {body} \
+             $error /errorname get $error /command get"
         ));
     }
+    // a kshow procedure that leaves no current point: the error and the
+    // operands match. (The offending command does not: pscat reports the last
+    // name it executed, `newpath`, for the real kshow; the decorator names
+    // `kshow`, as gs does.)
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont 9 newpath 10 10 moveto \
+         { { pop pop newpath } (AB) kshow } stopped $error /errorname get",
+    );
     // a warp that fails mid-glyph leaves no gsave and no glyph path behind
     let it = run("/Helvetica findfont 24 scalefont setfont 5 setlinewidth \
                   { newpath 0 0 moveto 50 50 lineto 10 10 moveto \
