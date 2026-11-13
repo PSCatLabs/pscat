@@ -33,7 +33,7 @@
 //! "not here", and the search goes on to the next place and finally the
 //! embedded copy. (A FIFO with no writer would otherwise block the open
 //! itself, before any interpreter limit applies.) The check is made on
-//! the opened handle ([`Probe::open`]: opened once, `O_NONBLOCK` on Unix so
+//! the opened handle (`Probe::open`: opened once, `O_NONBLOCK` on Unix so
 //! the open itself cannot block), and the read goes through that same
 //! handle, so a swap between the check and the read cannot slip a FIFO in.
 //! This holds for `run`, `file` and `status` too, with or without execution
