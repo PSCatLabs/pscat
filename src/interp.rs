@@ -3319,6 +3319,7 @@ fn token_to_object(tok: Token) -> Object {
         Token::String(bytes) => Object::string(bytes),
         Token::Name(n) => Object::exec(Value::Name(crate::name::intern(&n))),
         Token::LiteralName(n) => Object::lit(Value::Name(crate::name::intern(&n))),
+        Token::NumberArray(nums) => Object::array(nums.into_iter().map(token_to_object).collect()),
         // All callers consume brace and immediate-name tokens before
         // converting, so these cannot reach here.
         Token::LBrace | Token::RBrace | Token::ImmediateName(_) | Token::BinarySeq(_) => {
