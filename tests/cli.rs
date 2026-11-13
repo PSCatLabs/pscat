@@ -1319,16 +1319,23 @@ fn a_closed_stdout_ends_quietly() {
 
 /// #1059: a REPL whose stdout reader has gone stops at once, flushing as it
 /// leaves, instead of waiting on a stdin that stays open.
+///
+/// The reader is gone before the child starts. Dropping it after `spawn`
+/// raced the child (seen on Linux CI, on main too): a child that wrote its
+/// banner and first prompt into the pipe's buffer before the test closed the
+/// read end got no `EPIPE`, and then waited on the open stdin until the
+/// deadline killed it.
 #[cfg(unix)]
 #[test]
 fn a_repl_stops_when_its_stdout_reader_goes() {
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
     let mut child = Command::new(BIN)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(writer)
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn pscat");
-    drop(child.stdout.take());
     // Held open until the child has exited: it must not need the EOF.
     let stdin = child.stdin.take();
     let out = common::wait_output(child);
