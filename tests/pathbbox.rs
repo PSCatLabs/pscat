@@ -180,22 +180,26 @@ fn pathbbox_matches_ghostscript_over_a_matrix() {
         return;
     }
     for (cname, ctm) in CTMS {
-        // Stroke width is the scalar sqrt|det| (a round pen), so gs's
-        // elliptical pen differs under anisotropic CTMs; those compare
-        // paths only. Known deviation, see docs/dev/HANDOFF.md.
+        // Anisotropic CTMs included: strokepath draws gs's elliptical pen
+        // since #1196. A stroked curve's outline is curves in pscat (lines
+        // in gs), and the anisotropic map stretches the gap between their
+        // control-point hulls past the curve tolerance, so those compare
+        // the flattened outline, which agrees to 0.4.
         let aniso = matches!(
             *cname,
             "scale" | "scale then rotate" | "rotate then scale" | "skew" | "general matrix"
         );
-        for (pname, path, tol) in PATHS {
-            if aniso && pname.starts_with("strokepath") {
-                continue;
-            }
+        for &(pname, path, tol) in PATHS {
+            let (path, tol) = if aniso && pname == "strokepath of a curve" {
+                (format!("{path} flattenpath"), 0.5)
+            } else {
+                (path.to_string(), tol)
+            };
             let src = format!("{ctm} {path}");
             match (bbox(&src), gs_bbox(&src)) {
                 (Some(a), Some(b)) => {
                     assert!(
-                        near(a, b, *tol),
+                        near(a, b, tol),
                         "{cname} / {pname}: pscat {a:?} vs gs {b:?}"
                     )
                 }
