@@ -67,6 +67,32 @@ fn memory_growth_is_capped() {
         .unwrap();
     assert_eq!(it.captured_stdout(), b"done");
 
+    // The SVG and PDF recorders decode a whole image into a buffer of their
+    // own, width x height whatever the data supplies (#1176): a 30000 x
+    // 30000 image with no data was 3.6 GB and 9e8 pixels in one step. Its
+    // buffer is refused before the image starts; a modest one still runs.
+    for svg in [true, false] {
+        let mut it = limited(100);
+        if svg {
+            it.enable_svg();
+        } else {
+            it.enable_pdf();
+        }
+        assert_eq!(
+            it.run_str("30000 30000 8 [30000 0 0 30000 0 0] {()} image"),
+            Err(PsError::MemoryExceeded),
+            "svg {svg}"
+        );
+        let mut it = limited(100);
+        if svg {
+            it.enable_svg();
+        } else {
+            it.enable_pdf();
+        }
+        it.run_str("100 100 scale 64 64 8 [64 0 0 64 0 0] {(abcdefgh)} image")
+            .unwrap();
+    }
+
     // A whole-file read counts as it grows (issue #702): `/dev/zero` never
     // ends, so the cap is what stops it, well short of a gigabyte.
     #[cfg(unix)]

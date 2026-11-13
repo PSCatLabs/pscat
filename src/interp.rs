@@ -1007,6 +1007,18 @@ impl Interp {
         (steps, deadline)
     }
 
+    /// The time and memory limits for a loop that cannot borrow the
+    /// interpreter (#1176, [`LimitProbe`](crate::limits::LimitProbe)).
+    pub(crate) fn limit_probe(&self) -> crate::limits::LimitProbe {
+        if self.limits.is_none() {
+            return crate::limits::LimitProbe::NONE;
+        }
+        crate::limits::LimitProbe {
+            deadline_ns: self.remaining_budget().1,
+            memory: self.limits.max_memory.map(|max| (self.mem_base, max)),
+        }
+    }
+
     /// Count `n` steps done off the machine.
     pub(crate) fn charge_steps(&mut self, n: u64) {
         self.steps_used = self.steps_used.saturating_add(n);
@@ -1217,6 +1229,32 @@ impl Interp {
         }
         if will_alloc > 0 {
             self.check_alloc(will_alloc)?;
+        }
+        self.check_time_and_memory()
+    }
+
+    /// The limits' look from inside one long operator (#1176): the same
+    /// checks a slice ends with, raising the same uncatchable
+    /// `limitexceeded`. `steps` is the work done since the last look, in
+    /// the operator's own unit (a KiB read, 1024 path segments); 0 charges
+    /// nothing and only reads the clock and the heap. Free when no limit is
+    /// set, so an operator can call it every few thousand items of its loop.
+    #[inline]
+    pub(crate) fn poll_limits(&mut self, steps: u64) -> Result<(), PsError> {
+        if self.limits.is_none() {
+            return Ok(());
+        }
+        self.poll_limits_slow(steps)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn poll_limits_slow(&mut self, steps: u64) -> Result<(), PsError> {
+        self.steps_used = self.steps_used.saturating_add(steps);
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
         }
         self.check_time_and_memory()
     }
@@ -2511,6 +2549,16 @@ impl Interp {
 
     /// Queue an image (image/imagemask/colorimage) frame.
     pub(crate) fn begin_image(&mut self, ctx: ImageCtx) -> Result<(), PsError> {
+        // The SVG and PDF recorders decode the whole image into a buffer of
+        // their own, width x height pixels whatever data the source gives
+        // (`30000 30000 8 [...] {()} image` is 3.6 GB and 9e8 pixels in one
+        // step, #1176), so that buffer is refused against a memory cap
+        // before the image starts, as `array` and `string` are.
+        let per_px =
+            4 * usize::from(self.gfx.svg_wanted()) + 3 * usize::from(self.gfx.pdf_wanted());
+        if per_px > 0 {
+            self.check_alloc(ctx.width.saturating_mul(ctx.height).saturating_mul(per_px))?;
+        }
         self.push_frame(Frame::Image(Box::new(ctx)))
     }
 

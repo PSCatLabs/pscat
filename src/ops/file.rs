@@ -432,12 +432,24 @@ fn bytesavailable(it: &mut Interp) -> Result<(), PsError> {
 
 /// For an input file, flushfile reads and discards to EOF, per the PLRM;
 /// an output file's pending bytes go out.
+///
+/// A decode filter can expand its source a thousandfold, and filters stack,
+/// so the drain looks at the limits every 64 KiB it discards, a step per KiB
+/// as for a whole-file read (#1176).
 fn flushfile(it: &mut Interp) -> Result<(), PsError> {
+    const CHUNK: usize = 64 * 1024;
     let f = pop_file(it)?;
     if f.borrow().is_output() {
         return flush_output(it, &f);
     }
-    while f.borrow_mut().read_byte()?.is_some() {}
+    let mut n = 0usize;
+    while f.borrow_mut().read_byte()?.is_some() {
+        n += 1;
+        if n == CHUNK {
+            n = 0;
+            it.poll_limits((CHUNK / 1024) as u64)?;
+        }
+    }
     Ok(())
 }
 

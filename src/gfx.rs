@@ -942,6 +942,9 @@ pub struct Gfx {
     band: Option<(u32, u32)>,
 }
 
+/// Segments `arc`/`arcn` add between looks at the limits (#1176).
+const ARC_POLL: usize = 4096;
+
 impl Gfx {
     pub fn new(width: u32, height: u32) -> Option<Self> {
         Self::with_scale(width, height, 1.0)
@@ -1364,14 +1367,59 @@ impl Gfx {
         ang2: f64,
         ccw: bool,
     ) -> Result<(), PsError> {
+        self.arc_limited(cx, cy, r, ang1, ang2, ccw, &crate::limits::LimitProbe::NONE)
+            .map(|_| ())
+    }
+
+    /// [`Gfx::arc`] under the limits: `probe` is looked at every
+    /// [`ARC_POLL`] segments (#1176), since a sweep of a billion degrees is
+    /// ten million segments in this one call. Returns the number of
+    /// segments added.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn arc_limited(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        r: f64,
+        ang1: f64,
+        ang2: f64,
+        ccw: bool,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<usize, PsError> {
+        // gs refuses a huge positive angle (`0 0 10 2.15e9 0 arc` and
+        // `0 0 10 0 1e10 arc` are limitcheck in gs 10; `2.14e9 0` draws) and
+        // accepts a huge negative one. Past 2^53 degrees an angle has no
+        // unit precision left, and turning one end to meet the other could
+        // not finish (adding a full turn no longer changes it), so that is a
+        // limitcheck here too, as is an angle that is not a number.
+        const MAX_POSITIVE: f64 = 2_147_483_648.0; // 2^31 degrees
+        const MAX_NEGATIVE: f64 = 9_007_199_254_740_992.0; // 2^53 degrees
+        for a in [ang1, ang2] {
+            if !a.is_finite() || a >= MAX_POSITIVE || a <= -MAX_NEGATIVE {
+                return Err(PsError::Limitcheck);
+            }
+        }
         let (a1, mut a2) = (ang1.to_radians(), ang2.to_radians());
+        let tau = std::f64::consts::TAU;
+        // Turn ang2 past ang1 a full turn at a time, as before; a gap of more
+        // than a few turns first jumps most of the way in one step (#1176:
+        // `1e15 0 arc` took 1.6e14 trips). An ordinary arc never jumps, so its
+        // segments are bit-for-bit what they were.
         if ccw {
+            let gap = a1 - a2;
+            if gap > 4.0 * tau {
+                a2 += ((gap / tau).floor() - 2.0) * tau;
+            }
             while a2 < a1 {
-                a2 += std::f64::consts::TAU;
+                a2 += tau;
             }
         } else {
+            let gap = a2 - a1;
+            if gap > 4.0 * tau {
+                a2 -= ((gap / tau).floor() - 2.0) * tau;
+            }
             while a2 > a1 {
-                a2 -= std::f64::consts::TAU;
+                a2 -= tau;
             }
         }
 
@@ -1388,7 +1436,10 @@ impl Gfx {
         let n = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil().max(1.0) as usize;
         let step = sweep / n as f64;
         let mut a = a1;
-        for _ in 0..n {
+        for done in 0..n {
+            if done % ARC_POLL == ARC_POLL - 1 {
+                probe.check()?;
+            }
             let b = a + step;
             // Standard cubic approximation of a circular arc segment.
             let k = 4.0 / 3.0 * fmath::tan(step / 4.0);
@@ -1402,7 +1453,7 @@ impl Gfx {
             self.state.path.curve_to(c1, c2, p);
             a = b;
         }
-        Ok(())
+        Ok(n)
     }
 
     // --- painting --------------------------------------------------------

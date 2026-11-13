@@ -176,7 +176,7 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     match (&obj.value, obj.executable) {
         (Value::Array(body), true) => {
-            bind_proc(it, body, 0);
+            bind_proc(it, body, 0, &mut BindWalk::default())?;
             it.push(obj);
             Ok(())
         }
@@ -184,12 +184,53 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     }
 }
 
+/// Elements `bind` walks between looks at the limits (#1176).
+const BIND_POLL: usize = 1 << 16;
+
+/// One `bind` call's walk (#1176). `seen` is each procedure view already
+/// bound, with the shallowest depth it was reached at: a procedure two
+/// others share, or one that contains itself, is bound once instead of
+/// once per path to it, which made `bind` exponential (a cycle of two
+/// references walked 2^100 views). Binding is idempotent while the walk
+/// runs (the dictionary stack does not change), so skipping a view seen at
+/// the same or a shallower depth binds exactly what walking it again would.
+#[derive(Default)]
+struct BindWalk {
+    seen: std::collections::HashMap<(usize, usize, usize), usize>,
+    /// Elements walked since the last look at the limits.
+    walked: usize,
+}
+
 /// Replace executable names that currently resolve to operators with the
 /// operators themselves, recursing into nested procedures — the classic
 /// "immune to later redefinition, and faster" transform.
-fn bind_proc(it: &mut Interp, body: &PsArray, depth: usize) {
+fn bind_proc(
+    it: &mut Interp,
+    body: &PsArray,
+    depth: usize,
+    walk: &mut BindWalk,
+) -> Result<(), PsError> {
     if depth > 100 {
-        return;
+        return Ok(());
+    }
+    match walk.seen.entry(body.identity()) {
+        std::collections::hash_map::Entry::Occupied(mut e) => {
+            if *e.get() <= depth {
+                return Ok(());
+            }
+            e.insert(depth);
+        }
+        std::collections::hash_map::Entry::Vacant(e) => {
+            e.insert(depth);
+        }
+    }
+    // Distinct views can still overlap (every suffix of one array), so the
+    // walk is not linear in the VM in every case: it looks at the limits as
+    // it goes, a step per 1024 elements, as a file read does.
+    walk.walked += body.len();
+    if walk.walked >= BIND_POLL {
+        it.poll_limits((walk.walked / 1024) as u64)?;
+        walk.walked %= 1024;
     }
     // bind mutates VM contents like any put — journaled so restore
     // un-binds, matching Adobe's VM semantics.
@@ -210,6 +251,7 @@ fn bind_proc(it: &mut Interp, body: &PsArray, depth: usize) {
         _ => {}
     });
     for inner in nested {
-        bind_proc(it, &inner, depth + 1);
+        bind_proc(it, &inner, depth + 1, walk)?;
     }
+    Ok(())
 }

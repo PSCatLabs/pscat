@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use pscat::{Interp, Limits, PsError};
 
-#[cfg(unix)]
 mod common;
 
 fn limited(limits: Limits) -> Interp {
@@ -338,5 +337,260 @@ mod file_reads {
                 .with_max_time(Duration::from_secs(60)),
         );
         it.run_str("(lib/artkit.ps) run").unwrap();
+    }
+}
+
+/// One operator whose single call can do far more work than its operands
+/// suggest (#1176). The limits are looked at between interpreter steps, so
+/// such an operator is either made linear or looks at them itself. Each
+/// worst case runs on a thread under a deadline, so a regression fails the
+/// test instead of hanging the suite, and must stop (or finish) within a
+/// CPU budget a few hundred times below what it took before the fix.
+mod one_operator {
+    use super::*;
+    use crate::common;
+
+    /// The MCP server's preset with a short clock. Its memory cap needs the
+    /// tracking allocator, which this binary does not install (the memory
+    /// side is in `limits_memory.rs`), so that one is left off.
+    fn untrusted(time: Duration) -> Limits {
+        let mut l = Limits::untrusted().with_max_time(time);
+        l.max_memory = None;
+        l
+    }
+
+    /// `f` on its own thread, failed if it has not returned within the
+    /// suite's child deadline (60 s).
+    fn on_a_deadline<T: Send + 'static>(
+        what: &'static str,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        use std::sync::mpsc::RecvTimeoutError;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name(what.into())
+            .spawn(move || {
+                let _ = tx.send(f());
+            })
+            .expect("spawn the test thread");
+        match rx.recv_timeout(common::default_deadline()) {
+            Ok(v) => v,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("{what}: still running at the deadline; the operator does not stop")
+            }
+            Err(RecvTimeoutError::Disconnected) => panic!("{what}: the test thread panicked"),
+        }
+    }
+
+    /// Run `src` under `limits` within `budget` of CPU (best of 3), on a
+    /// deadline; the program's result and its captured stdout.
+    fn run(
+        what: &'static str,
+        limits: Limits,
+        budget: Duration,
+        src: &'static str,
+    ) -> (Result<(), PsError>, String) {
+        on_a_deadline(what, move || {
+            common::within_cpu_budget(what, budget, 3, || {
+                let mut it = limited(limits);
+                it.capture_stdout();
+                let r = it.run_str(src);
+                (
+                    r,
+                    String::from_utf8_lossy(it.captured_stdout()).into_owned(),
+                )
+            })
+        })
+    }
+
+    #[test]
+    fn search_is_linear() {
+        // A 16 MiB string searched for an 8 MiB pattern that is not there
+        // until its last byte: O(n*m) took about 20 minutes in this one call.
+        let (r, out) = run(
+            "search",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(2),
+            "/s 16777216 string def /p 8388608 string def p 8388607 1 put \
+             s p search { (found) = } { (notfound) = } ifelse \
+             s 16777215 1 put s p search { length = length = length = } { (notfound) = } ifelse",
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "notfound\n8388608\n8388608\n0\n");
+    }
+
+    #[test]
+    fn bind_walks_a_shared_procedure_once() {
+        // Two references to itself: 2^100 views walked before #1176. And
+        // sixty levels each holding the one below twice: 2^60.
+        let (r, out) = run(
+            "bind",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(1),
+            "/a [null null /add cvx] cvx def /a load 0 /a load put /a load 1 /a load put \
+             /a load bind pop /a load 2 get type = /a load 0 get /a load eq = \
+             /p { 1 2 add } def 60 { /p [ /p load dup ] cvx def } repeat /p load bind pop \
+             /q /p load def 60 { /q /q load 0 get def } repeat /q load 2 get type =",
+        );
+        assert_eq!(r, Ok(()));
+        // Still bound all the way down, and the cycle still a cycle.
+        assert_eq!(out, "operatortype\ntrue\noperatortype\n");
+    }
+
+    #[test]
+    fn bind_over_overlapping_views_stops_at_the_time_limit() {
+        // Every suffix of one array, each a distinct view: n^2/2 elements
+        // walked, which the visited set cannot shorten. bind looks at the
+        // limits as it goes.
+        let (r, _) = run(
+            "bind over views",
+            untrusted(Duration::from_millis(100)),
+            Duration::from_secs(2),
+            "/n 300000 def /S n array def /A n array def \
+             0 1 n 1 sub { /i exch def A i S i n i sub getinterval cvx put } for \
+             /A load cvx bind pop",
+        );
+        assert_eq!(r, Err(PsError::TimeExceeded));
+    }
+
+    #[test]
+    fn arc_turns_a_huge_angle_in_one_step() {
+        // gs 10 refuses a positive angle past 2^31 degrees:
+        //   $ gs -q -dNODISPLAY -dBATCH -c '0 0 10 2.15e9 0 arc'
+        //   Error: /limitcheck in --arc--
+        // (`2.14e9 0 arc` and `0 -1e10 arc` draw.) Before #1176 the first
+        // two here turned ang2 a full turn at a time: forever for 1e20.
+        for src in [
+            "newpath 0 0 10 1e20 0 arc",
+            "newpath 0 0 10 1e15 0 arc",
+            "newpath 0 0 10 0 1e10 arc",
+            "newpath 0 0 10 0 1e10 arcn",
+            "newpath 0 0 10 0 -1e17 arc",
+        ] {
+            let (r, _) = run(
+                "arc",
+                untrusted(Duration::from_secs(30)),
+                Duration::from_secs(1),
+                src,
+            );
+            assert_eq!(r, Err(PsError::Limitcheck), "{src}");
+        }
+        // The element counts gs gives (`pathforall`, moveto included).
+        for (args, gs) in [
+            ("720 0", 2),
+            ("0 720", 9),
+            ("3000 0", 4),
+            ("1e9 0", 2),
+            ("2.14e9 0", 4),
+            ("0 -1e10", 2),
+            ("0 7200", 81),
+        ] {
+            let mut it = limited(untrusted(Duration::from_secs(30)));
+            it.capture_stdout();
+            let src = format!(
+                "/n 0 def newpath 0 0 10 {args} arc \
+                 {{pop pop /n n 1 add def}} {{pop pop /n n 1 add def}} \
+                 {{6 {{pop}} repeat /n n 1 add def}} {{/n n 1 add def}} pathforall n ="
+            );
+            it.run_str(&src).unwrap();
+            assert_eq!(
+                it.captured_stdout(),
+                format!("{gs}\n").as_bytes(),
+                "{args} arc"
+            );
+        }
+    }
+
+    #[test]
+    fn a_huge_arc_sweep_stops_at_the_time_limit() {
+        // A sweep of 1e15 degrees is 1.1e13 segments in one `arc` (gs runs
+        // it until it is killed too); the segment loop looks at the limits.
+        let (r, _) = run(
+            "arc sweep",
+            untrusted(Duration::from_millis(100)),
+            Duration::from_secs(2),
+            "newpath 0 0 10 -1e15 0 arc",
+        );
+        assert_eq!(r, Err(PsError::TimeExceeded));
+    }
+
+    #[test]
+    fn a_shared_stitching_function_is_a_limitcheck_not_2_to_the_30_parses() {
+        let (r, _) = run(
+            "shfill",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(1),
+            "/f <</FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1>> def \
+             30 { /f <</FunctionType 3 /Domain [0 1] /Functions [f f] /Bounds [.5] \
+             /Encode [0 1 0 1]>> def } repeat \
+             <</ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 1 0] /Function f>> shfill",
+        );
+        assert_eq!(r, Err(PsError::Limitcheck));
+        // A real stitching function, legs shared or not, still parses.
+        let (r, _) = run(
+            "shfill",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(1),
+            "/f <</FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1>> def \
+             /g <</FunctionType 3 /Domain [0 1] /Functions [f f f f] /Bounds [.25 .5 .75] \
+             /Encode [0 1 1 0 0 1 1 0]>> def \
+             <</ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 100 0] /Function g>> shfill",
+        );
+        assert_eq!(r, Ok(()));
+    }
+
+    /// A RunLengthDecode stream (each pair 0x81 c is 128 copies of c, with
+    /// c changing every 100 pairs) under FlateDecode: about 3000 bytes out
+    /// per byte in. Flate never makes more than 512 bytes of one input byte
+    /// here, which pscat's decoder truncates past (a separate bug).
+    fn bomb(pairs: usize) -> (Vec<u8>, usize) {
+        use std::io::Write;
+        let mut rle = Vec::with_capacity(pairs * 2 + 1);
+        let mut x: u32 = 1;
+        for i in 0..pairs {
+            if i % 100 == 0 {
+                x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            }
+            rle.extend_from_slice(&[0x81, (x >> 16) as u8]);
+        }
+        rle.push(0x80);
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&rle).expect("compress in memory");
+        (z.finish().expect("compress in memory"), pairs * 128)
+    }
+
+    #[test]
+    fn flushfile_on_a_decode_filter_stops_at_the_time_limit() {
+        let dir = common::scratch_dir("limits-flushfile");
+        // The same stream, small: it decodes in full (the count proves the
+        // big one is a long drain, not an early decode error).
+        let (small, small_len) = bomb(10_000);
+        let small_path = dir.join("small.z");
+        std::fs::write(&small_path, small).expect("write scratch file");
+        let mut it = Interp::new();
+        it.capture_stdout();
+        it.run_str(&format!(
+            "/f ({}) (r) file /FlateDecode filter /RunLengthDecode filter def \
+             /n 0 def /buf 65536 string def \
+             {{ f buf readstring exch length n add /n exch def not {{ exit }} if }} loop n =",
+            common::ps_path(&small_path)
+        ))
+        .unwrap();
+        assert_eq!(it.captured_stdout(), format!("{small_len}\n").as_bytes());
+
+        // 4 GiB out of a 150 KB file, in one `flushfile`.
+        let (big, _) = bomb(32 << 20);
+        let big_path = dir.join("big.z");
+        std::fs::write(&big_path, big).expect("write scratch file");
+        let src = format!(
+            "({}) (r) file /FlateDecode filter /RunLengthDecode filter flushfile",
+            common::ps_path(&big_path)
+        );
+        let r = on_a_deadline("flushfile", move || {
+            common::within_cpu_budget("flushfile", Duration::from_secs(2), 3, || {
+                limited(untrusted(Duration::from_millis(100))).run_str(&src)
+            })
+        });
+        assert_eq!(r, Err(PsError::TimeExceeded));
     }
 }

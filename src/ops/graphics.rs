@@ -150,7 +150,15 @@ fn arc_common(it: &mut Interp, ccw: bool) -> Result<(), PsError> {
     let ang1 = it.pop_f64()?;
     let r = it.pop_f64()?;
     let (x, y) = pop_xy(it)?;
-    it.gfx.arc(x, y, r, ang1, ang2, ccw)
+    let probe = it.limit_probe();
+    let segments = it.gfx.arc_limited(x, y, r, ang1, ang2, ccw, &probe)?;
+    // A step per 1024 segments, as a file read is charged per KiB (#1176),
+    // so a step cap bounds a run of huge arcs too. An ordinary arc (four
+    // segments a turn) is not charged and costs no clock read.
+    if segments >= 1024 {
+        it.poll_limits((segments / 1024) as u64)?;
+    }
+    Ok(())
 }
 
 fn arc(it: &mut Interp) -> Result<(), PsError> {
