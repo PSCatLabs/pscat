@@ -372,7 +372,9 @@ More on the less obvious ones:
   `currentobjectformat`, `printobject` and `writeobject` write one object (a
   number, boolean, name, string, `null`, `mark` or an array of those, nested)
   in the PLRM's compact binary form, and the scanner reads it back: `run`,
-  `token` and `cvx exec` all accept a token that starts with byte 128 to 131.
+  `token` and `cvx exec` all accept a token that starts with byte 128 to 131, or 149 (a homogeneous number
+  array: `149`, a representation byte, a count, then the numbers, which
+  scans to a literal array).
   `obj tag printobject` writes to stdout and `file obj tag writeobject` to an
   output file from `(path) (w) file`, so it needs `--allow-write` like any
   write. Reals are stored as binary32 (`0.1` comes back as

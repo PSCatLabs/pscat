@@ -771,31 +771,14 @@ fn currentlinewidth(it: &mut Interp) -> Result<(), PsError> {
 }
 
 /// The rect operand forms shared by rectfill/rectstroke/rectclip:
-/// `x y width height`, or a flat array of 4n numbers (each quad one
-/// rectangle; empty allowed, other lengths typecheck — gs-pinned).
-/// The PLRM's encoded-number-string form is not supported; a string
-/// typechecks, the same answer gs gives a plain string.
+/// `x y width height`, or a list of 4n numbers (each quad one rectangle;
+/// empty allowed, other counts typecheck — gs-pinned), given as an array
+/// or as an encoded number string (PLRM 3.14.5, #1192; `crate::numstring`).
+/// gs's order: the type, then a string's header (`typecheck`/`rangecheck`),
+/// then the count, then the values (a non-number or a non-finite real).
 fn pop_rects(it: &mut Interp) -> Result<Vec<[f64; 4]>, PsError> {
     let top = it.pop()?;
     match &top.value {
-        Value::Array(a) => {
-            if a.len() % 4 != 0 {
-                return Err(PsError::Typecheck);
-            }
-            let mut rects = Vec::with_capacity(a.len() / 4);
-            for q in 0..a.len() / 4 {
-                let mut r = [0.0; 4];
-                for (k, slot) in r.iter_mut().enumerate() {
-                    *slot = match a.get(q * 4 + k).as_ref().map(|o| &o.value) {
-                        Some(Value::Integer(n)) => *n as f64,
-                        Some(Value::Real(x)) => *x,
-                        _ => return Err(PsError::Typecheck),
-                    };
-                }
-                rects.push(r);
-            }
-            Ok(rects)
-        }
         Value::Integer(n) => {
             let h = *n as f64;
             pop_rect_under_height(it, h)
@@ -804,7 +787,14 @@ fn pop_rects(it: &mut Interp) -> Result<Vec<[f64; 4]>, PsError> {
             let h = *h;
             pop_rect_under_height(it, h)
         }
-        _ => Err(PsError::Typecheck),
+        _ => {
+            let list = crate::numstring::NumOperand::of(&top)?;
+            if list.len() % 4 != 0 {
+                return Err(PsError::Typecheck);
+            }
+            let nums = list.into_numbers()?;
+            Ok(nums.as_chunks::<4>().0.to_vec())
+        }
     }
 }
 
