@@ -119,9 +119,24 @@ compiled-in face passes it (`font::tests::every_compiled_in_face_may_be_embedded
   face as `CID Type 0C`, embedded, subset, with ToUnicode. gs, poppler
   and macOS CoreGraphics (`sips`) all render the sample page the same, with
   Hangul at Regular weight.
-- Default output: `--pdf` from the merge-base binary and from this
-  branch's, on every `examples/*.ps` and `selftest/drivers/*.ps`, is
-  byte-identical, and so is `--svg --svg-text` (see the PR for the counts).
+- Default output: the merge-base binary (`c27a021`) and this branch's,
+  both release builds, on every `examples/*.ps` and `selftest/drivers/*.ps`
+  plus `gallery/pscat_card.ps`, `ring_of_type.ps` and `keepin_it_real.ps`
+  (109 files): `--pdf` is byte-identical for all 109, and `--svg
+  --svg-text` for all 95 single-page SVGs and all 57 pages of the 14
+  multi-page ones. The larger gallery pieces were left out (the machine
+  was short on memory).
+- Corpus sweep, `--pdf` vs `--pdf --pdf-text` of `font_catalog.ps` (every
+  bundled and catalog face, two pages), `specimen.ps`, `pdf_document.ps`,
+  `template_letter.ps`, `postcard.ps`, `ring_of_type.ps` (rotated runs),
+  `keepin_it_real.ps` and `pscat_card.ps`, each rasterized by gs
+  (`-dPDFSTOPONERROR`) and by `pdftoppm`: no warning or error from either,
+  the same page count, and a largest per-page mean block difference
+  between the two PDFs of 2.98 (gs) and 1.81 (poppler), on
+  `ring_of_type`. Most of that is gs's own outline rendering:
+  against pscat's canvas the gs raster of the outline PDF differs by 3.08
+  there and the text PDF by 0.92 (`font_catalog` page 2: 2.94 against
+  0.56). Same glyph shapes and positions, side by side at 2x.
 
 **Sizes** (`--pdf` vs `--pdf --pdf-text`, this branch):
 

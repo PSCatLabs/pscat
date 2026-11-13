@@ -224,15 +224,38 @@ fn pdftotext_extracts_latin_and_hangul() {
     }
     let dir = common::scratch_dir("pscat-pdf-text-extract");
     let path = dir.join("sample.pdf");
-    std::fs::write(&path, text_pdf(SAMPLE)).expect("write pdf");
-    let out = Command::new("pdftotext")
-        .args(["-layout"])
-        .arg(&path)
-        .arg("-")
-        .output_deadline()
-        .expect("run pdftotext");
-    assert!(out.status.success());
-    let text = String::from_utf8_lossy(&out.stdout);
+    let extract = |pdf: &[u8]| {
+        std::fs::write(&path, pdf).expect("write pdf");
+        let out = Command::new("pdftotext")
+            .args(["-layout"])
+            .arg(&path)
+            .arg("-")
+            .output_deadline()
+            .expect("run pdftotext");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // The re-encoding idiom (a copy of Helvetica with ISOLatin1Encoding,
+    // #1022's FACE_KEY path), Japanese and Thai.
+    let more = extract(&text_pdf(
+        "/Helvetica findfont dup length dict begin
+           { 1 index /FID ne { def } { pop pop } ifelse } forall
+           /Encoding ISOLatin1Encoding def currentdict end
+         /Helvetica-Latin1 exch definefont 20 scalefont setfont
+         20 150 moveto (caf\\351 na\\357ve) show
+         /NotoSansJP-Regular findfont 20 scalefont setfont
+         20 100 moveto (\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30c6}\u{30ad}\u{30b9}\u{30c8}) show
+         /NotoSansThai-Regular findfont 20 scalefont setfont
+         20 50 moveto (\u{e20}\u{e32}\u{e29}\u{e32}\u{e44}\u{e17}\u{e22}) show",
+    ));
+    for want in [
+        "caf\u{e9} na\u{ef}ve",
+        "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30c6}\u{30ad}\u{30b9}\u{30c8}",
+        "\u{e20}\u{e32}\u{e29}\u{e32}\u{e44}\u{e17}\u{e22}",
+    ] {
+        assert!(more.contains(want), "{want:?} not in {more}");
+    }
+    let text = extract(&text_pdf(SAMPLE));
     for want in [
         "Hello, PDF text!",
         "word spacing here",
@@ -248,13 +271,11 @@ fn pdftotext_extracts_latin_and_hangul() {
     assert!(squeezed.contains("Spacedout"), "{text}");
     assert!(squeezed.contains("kernedbykshow"), "{text}");
     // The outline PDF has no text at all.
-    std::fs::write(&path, render(None, SAMPLE.as_bytes()).0).expect("write pdf");
-    let out = Command::new("pdftotext")
-        .arg(&path)
-        .arg("-")
-        .output_deadline()
-        .expect("run pdftotext");
-    assert!(String::from_utf8_lossy(&out.stdout).trim().is_empty());
+    assert!(
+        extract(&render(None, SAMPLE.as_bytes()).0)
+            .trim()
+            .is_empty()
+    );
 }
 
 fn mean_block_diff(a: &Pixmap, b: &Pixmap) -> f64 {
@@ -301,6 +322,7 @@ fn rasterize(tool: &str, pdf: &[u8], name: &str) -> Pixmap {
                     "-sDEVICE=png16m",
                     "-dGraphicsAlphaBits=4",
                     "-dTextAlphaBits=4",
+                    "-dPDFSTOPONERROR",
                     &format!("-g{SIZE}x{SIZE}"),
                     "-r72",
                 ])
@@ -308,7 +330,14 @@ fn rasterize(tool: &str, pdf: &[u8], name: &str) -> Pixmap {
                 .arg(&pdf_path)
                 .output_deadline()
                 .expect("run gs");
-            assert!(out.status.success(), "gs rejected the PDF");
+            // gs repairs a broken font quietly and exits 0; with -q it says
+            // nothing at all about a sound one.
+            assert!(
+                out.status.success() && out.stdout.is_empty() && out.stderr.is_empty(),
+                "gs: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
             png
         }
         _ => {
