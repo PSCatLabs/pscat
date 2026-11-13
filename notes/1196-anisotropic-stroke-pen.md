@@ -74,7 +74,11 @@ under a skew. It is now the slightly elliptical one gs draws. The pages are
 `gallery/field_notes.ps`, `hundred_lines.ps`, `released_memo.ps` and
 `time_traveler_memo.ps`, and `examples/handwriting.ps`,
 `hangul_handscript.ps`, `drychalk_specimen.ps`, `released_specimen.ps` and
-`released_pages.ps` (page 2). At most 0.97% of a page's pixels change, and
+`released_pages.ps` (page 2). A separate pass over `selftest/drivers/*.ps`
+(12 files, 51 pages) changed one more page: `selftest/drivers/arcto.ps`,
+where panel 3 strokes a rounded rectangle under `1.6 0.7 scale`. Its sides
+are now 1.6 and 0.7 of the line width, as gs draws them. On the handwriting
+pages, at most 0.97% of a page's pixels change, and
 0.024% by more than 32 of 255. The change is edge anti-aliasing on slanted
 strokes, which nobody can see at viewing size; the crops are in
 `docs/dev/review-log/pending/1196-anisotropic-stroke-pen/`. The committed
