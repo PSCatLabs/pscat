@@ -1200,6 +1200,74 @@ pub(crate) struct ShowParams {
     pub char_extra: Option<(u32, (f64, f64))>,
 }
 
+/// Which way each glyph of `xshow`, `yshow` or `xyshow` moves (#1180).
+#[derive(Clone, Copy)]
+pub(crate) enum Axes {
+    /// `xshow`: one number per glyph, the x displacement.
+    X,
+    /// `yshow`: one number per glyph, the y displacement.
+    Y,
+    /// `xyshow`: two numbers per glyph, x then y.
+    XY,
+}
+
+impl Axes {
+    pub(crate) fn per_glyph(self) -> usize {
+        match self {
+            Axes::XY => 2,
+            Axes::X | Axes::Y => 1,
+        }
+    }
+}
+
+/// The user-space displacements of an `xshow`-family show: each glyph
+/// moves the pen by its own entry, never by the glyph's width.
+pub(crate) struct Displacements {
+    nums: Vec<f64>,
+    axes: Axes,
+    next: usize,
+}
+
+impl Displacements {
+    pub(crate) fn new(nums: Vec<f64>, axes: Axes) -> Self {
+        Displacements {
+            nums,
+            axes,
+            next: 0,
+        }
+    }
+
+    /// The next glyph's displacement. The operator checked that there are
+    /// numbers for every glyph of the string under the font it shows with,
+    /// and that font cannot change mid-show (no kshow proc, and a
+    /// BuildChar's `setfont` is rolled back), so the fallback of zero is
+    /// never reached; it is there so a miscount can never panic.
+    fn take(&mut self) -> (f64, f64) {
+        let at = |i: usize| self.nums.get(i).copied().unwrap_or(0.0);
+        let d = match self.axes {
+            Axes::X => (at(self.next), 0.0),
+            Axes::Y => (0.0, at(self.next)),
+            Axes::XY => (at(self.next), at(self.next + 1)),
+        };
+        self.next += self.axes.per_glyph();
+        d
+    }
+}
+
+/// `proc string cshow` (#1180): measure each character, then call `proc`
+/// with its code and width. Runs in [`ShowMode::Width`], so nothing is
+/// painted and the current point stays where it is.
+struct Cshow {
+    proc: Object,
+    /// The font the show started with. pscat has no composite fonts, so
+    /// it is the base font the PLRM sets for the proc. Ghostscript sets it
+    /// back after every call, and after a `stop` out of the proc, so a
+    /// proc's `setfont` lasts only until the next character.
+    base: FontState,
+    /// The proc is on the stack above the show.
+    in_proc: bool,
+}
+
 pub(crate) enum ShowMode {
     /// Paint glyphs; current point advances (`show` family).
     Paint,
@@ -1633,6 +1701,23 @@ fn current_unicode_mode(gfx: &Gfx) -> Result<bool, PsError> {
     })
 }
 
+/// How many glyphs a show of `text` paints with the current font: one per
+/// byte, or one per decoded UTF-8 scalar on a Unicode-mode font, cut the
+/// way the show itself cuts them (`decode_one`). `xshow` and friends
+/// check their number count against it (#1180); `invalidfont` with no
+/// font set.
+pub(crate) fn glyph_count(gfx: &Gfx, text: &[u8]) -> Result<usize, PsError> {
+    if !current_unicode_mode(gfx)? {
+        return Ok(text.len());
+    }
+    let (mut pos, mut n) = (0, 0);
+    while let Some((_, len)) = decode_one(text, pos, true) {
+        pos += len;
+        n += 1;
+    }
+    Ok(n)
+}
+
 /// Decode one glyph code from `text` starting at byte offset `pos`,
 /// against `unicode` (the live font's mode at this position — see
 /// `current_unicode_mode`): a single raw byte in byte mode, or one
@@ -1713,6 +1798,10 @@ pub(crate) struct ShowCtx {
     /// `glyphshow`'s operand: show this one glyph by name, bypassing the
     /// Encoding. `text` is then a single placeholder byte.
     glyph: Option<crate::name::PsName>,
+    /// `xshow`/`yshow`/`xyshow`: per-glyph moves that replace the widths.
+    displace: Option<Displacements>,
+    /// `cshow`: the proc each measured character is handed to.
+    cshow: Option<Cshow>,
 }
 
 impl ShowCtx {
@@ -1734,7 +1823,31 @@ impl ShowCtx {
             pending: None,
             kshow_wait: false,
             glyph: None,
+            displace: None,
+            cshow: None,
         }
+    }
+
+    /// `string numarray xshow` (and `yshow`, `xyshow`): paint like `show`,
+    /// but move the pen by `displace` after each glyph.
+    pub(crate) fn positioned(text: Vec<u8>, displace: Displacements, pen: DevPoint) -> Self {
+        let mut ctx = ShowCtx::new(text, ShowParams::default(), ShowMode::Paint, None, pen);
+        ctx.displace = Some(displace);
+        ctx
+    }
+
+    /// `proc string cshow`: measure each character with `base` (the
+    /// current font) and call `proc` with `code wx wy`. No pen: like
+    /// `stringwidth`, it needs no current point and never moves it.
+    pub(crate) fn cshow(text: Vec<u8>, proc: Object, base: FontState) -> Self {
+        let pen = DevPoint { x: 0.0, y: 0.0 };
+        let mut ctx = ShowCtx::new(text, ShowParams::default(), ShowMode::Width, None, pen);
+        ctx.cshow = Some(Cshow {
+            proc,
+            base,
+            in_proc: false,
+        });
+        ctx
     }
 
     /// `name glyphshow` (Level 2): one glyph selected by name, painted at
@@ -1765,6 +1878,20 @@ impl ShowCtx {
             }
             gfx.restore_glyph_snapshot(p.depth, p.saved);
         }
+        // A `stop` or an error out of a cshow proc still gets the base font
+        // back, as in Ghostscript.
+        self.end_cshow_proc(gfx);
+    }
+
+    /// The cshow proc returned (or is being unwound): put the base font
+    /// back over whatever the proc set.
+    fn end_cshow_proc(&mut self, gfx: &mut Gfx) {
+        if let Some(c) = &mut self.cshow
+            && c.in_proc
+        {
+            c.in_proc = false;
+            gfx.set_font(c.base.clone());
+        }
     }
 
     pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ShowStep, PsError> {
@@ -1776,11 +1903,8 @@ impl ShowCtx {
             gfx.restore_glyph_snapshot(p.depth, p.saved);
             let (wx, wy) = p.width.unwrap_or((0.0, 0.0));
             let m = p.matrix;
-            self.advance(gfx, p.code, (m[0] * wx + m[2] * wy, m[1] * wx + m[3] * wy));
-            if let Some(step) = self.maybe_kshow(gfx, p.code)? {
-                return Ok(step);
-            }
-            return Ok(ShowStep::Again);
+            let adv = (m[0] * wx + m[2] * wy, m[1] * wx + m[3] * wy);
+            return self.finish_glyph(gfx, p.code, adv);
         }
         // A kshow proc just finished: it may have moved the current
         // point; the next glyph starts wherever it left the pen.
@@ -1790,6 +1914,9 @@ impl ShowCtx {
                 self.pen = gfx.device_current_point().ok_or(PsError::NoCurrentPoint)?;
             }
         }
+        // A cshow proc just finished: the next character is measured, and
+        // the proc called, with the base font again.
+        self.end_cshow_proc(gfx);
         // The font is read per glyph — and now so is the segmentation of
         // the remaining text: a kshow proc may have changed the font,
         // and `decode_one` re-reads the *raw bytes* against whichever
@@ -1803,7 +1930,10 @@ impl ShowCtx {
         };
         let Some((code, len)) = decode_one(&self.text, self.pos, unicode) else {
             return Ok(match self.mode {
-                ShowMode::Width => ShowStep::PopPushWidth(self.total.0, self.total.1),
+                // cshow measures in this mode too, but returns nothing.
+                ShowMode::Width if self.cshow.is_none() => {
+                    ShowStep::PopPushWidth(self.total.0, self.total.1)
+                }
                 _ => ShowStep::Pop,
             });
         };
@@ -1821,11 +1951,7 @@ impl ShowCtx {
                     outline_glyph(gfx, &fs, &name, &self.mode, self.pen)?
                 }
             };
-            self.advance(gfx, code, adv);
-            if let Some(step) = self.maybe_kshow(gfx, code)? {
-                return Ok(step);
-            }
-            Ok(ShowStep::Again)
+            self.finish_glyph(gfx, code, adv)
         } else {
             // No registry entry: a procedural font. Type 3 glyph
             // procedures win; otherwise Type 1 CharStrings render
@@ -1845,18 +1971,42 @@ impl ShowCtx {
                     None => encoding_name(&fs, code as u8),
                 };
                 let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen)?;
-                self.advance(gfx, code, adv);
-                if let Some(step) = self.maybe_kshow(gfx, code)? {
-                    return Ok(step);
-                }
-                Ok(ShowStep::Again)
+                self.finish_glyph(gfx, code, adv)
             }
         }
     }
 
-    /// Apply one glyph's advance (plus ashow/widthshow extras) to the
-    /// running total and, when painting, to the pen and current point.
-    fn advance(&mut self, gfx: &mut Gfx, code: u32, mut adv: (f64, f64)) {
+    /// A glyph is done (painted or measured, `adv` its user-space
+    /// width): advance, then hand over to a kshow or cshow proc, if any.
+    fn finish_glyph(
+        &mut self,
+        gfx: &mut Gfx,
+        code: u32,
+        adv: (f64, f64),
+    ) -> Result<ShowStep, PsError> {
+        let adv = self.advance(gfx, code, adv);
+        if let Some(c) = &mut self.cshow {
+            c.in_proc = true;
+            return Ok(ShowStep::Exec {
+                operands: vec![
+                    Object::int(i64::from(code)),
+                    Object::real(adv.0),
+                    Object::real(adv.1),
+                ],
+                target: c.proc.clone(),
+            });
+        }
+        Ok(self.maybe_kshow(gfx, code)?.unwrap_or(ShowStep::Again))
+    }
+
+    /// Apply one glyph's advance (plus ashow/widthshow extras, or in
+    /// place of all of it an xshow displacement) to the running total
+    /// and, when painting, to the pen and current point. Returns the
+    /// advance applied.
+    fn advance(&mut self, gfx: &mut Gfx, code: u32, mut adv: (f64, f64)) -> (f64, f64) {
+        if let Some(d) = &mut self.displace {
+            adv = d.take();
+        }
         adv.0 += self.params.extra.0;
         adv.1 += self.params.extra.1;
         if let Some((ch, (cx, cy))) = self.params.char_extra
@@ -1875,6 +2025,7 @@ impl ShowCtx {
             // end: BuildChar and kshow procs are allowed to observe it.
             gfx.move_to_device(self.pen);
         }
+        adv
     }
 
     /// Between two characters (never before the first or after the

@@ -112,7 +112,7 @@ impl ByteOrder {
         });
     }
 
-    fn u16(self, b: &[u8]) -> u16 {
+    pub(crate) fn u16(self, b: &[u8]) -> u16 {
         let a = [b[0], b[1]];
         match self {
             ByteOrder::High => u16::from_be_bytes(a),
@@ -120,7 +120,7 @@ impl ByteOrder {
         }
     }
 
-    fn u32(self, b: &[u8]) -> u32 {
+    pub(crate) fn u32(self, b: &[u8]) -> u32 {
         let a = [b[0], b[1], b[2], b[3]];
         match self {
             ByteOrder::High => u32::from_be_bytes(a),
