@@ -423,15 +423,50 @@ Checked with: `tests/limits.rs` (`file_reads`), `tests/limits_memory.rs`,
 These are the gaps. A hostile program can still use all of them, with or
 without the limits above:
 
-- **One long operator runs to completion.** The limits are read between
-  interpreter steps (and every 1024 loop iterations inside one), never inside
-  an operator. `array`, `string` and `aload`, the operators that can ask for
-  hundreds of megabytes in a step, check a memory limit before allocating, and
-  a whole-file read looks at the limits as it goes ("Whole-file reads and the
-  limits", above). Everything else is looked at only afterwards. For a hosted
-  service the answer to anything that gets through is the outer kill: the MCP
-  server kills its child at `--timeout`, and anything else should run the
-  process under `ulimit`, a container's limits or `timeout`.
+- **One long operator runs to completion, unless it is one of the few that
+  look for themselves.** The limits are read between interpreter steps (and
+  every 1024 loop iterations inside one). `array`, `string` and `aload`, the
+  operators that can ask for hundreds of megabytes in a step, check a memory
+  limit before allocating, and a whole-file read looks at the limits as it goes
+  ("Whole-file reads and the limits", above). Issue #1176 audited the
+  operators whose one call can do far more work than its operands or its
+  allocation suggest (the list and the verdicts are in
+  `notes/1176-single-operator-limits.md`). These are now linear or look at the
+  limits as they go:
+  - `search` is linear (`memchr::memmem`). Before, a 16 MiB string searched for
+    an 8 MiB pattern took about 20 minutes in one call.
+  - `bind` binds each procedure once per call, where a procedure that holds
+    itself twice was 2^100 visits. It also looks at the limits every 64K
+    elements it walks, and charges a step per 1024.
+  - `arc`/`arcn` turn a huge angle gap in one step, where `1e20 0 arc` never
+    ended. As gs does, they refuse a positive angle of 2^31 degrees or more,
+    and an angle of -2^53 or below, with `limitcheck`. They look at the
+    limits every 4096 segments of a huge sweep.
+  - `flushfile` on a decode filter looks at the limits every 64 KiB it
+    discards, a step per KiB.
+  - `shfill` refuses a shading whose function dicts, counting every reference
+    to a shared one, pass 4096 (`limitcheck`). Before, thirty levels of a
+    stitching function that names the level below twice took 2^30 parses.
+  - With an SVG or PDF output, `image`, `imagemask` and `colorimage` check
+    their decode buffer (width × height × 3 or 4 bytes) against a memory limit
+    before they start.
+
+  These are still known to run long inside one call:
+  - an image's drain of its filter chain to EOD, and a decode filter that
+    skips input to find output (ASCIIHex whitespace, `readhexstring`), or the
+    scanner reading a filter;
+  - `fill` of a path with very many curves (the rasteriser walks every line
+    once per band: 100,000 curves took 2.5 s in one `fill`);
+  - `flattenpath` (up to 65,536 segments per curve, and no memory check);
+  - a Type 1 glyph whose `callsubr` copies a huge subroutine;
+  - the SVG and PDF recorders' per-pixel loop under a time limit alone;
+  - a `kernelimage` whose pixels nearly all retire to the interpreter (its
+    list of retired pixels is built and sorted unpolled: 5 s past
+    `--max-time 1` for an 8000 × 8000 image).
+
+  For a hosted service the answer to anything that gets through is the outer
+  kill: the MCP server kills its child at `--timeout`, and anything else
+  should run the process under `ulimit`, a container's limits or `timeout`.
 - **A GPU dispatch runs to completion** (`--gpu-preview`, MCP `gpu_preview`,
   a build with the `gpu` feature, #1065). The time and step limits are read
   before each dispatch of 65536 pixels. A dispatch is charged only the

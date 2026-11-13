@@ -517,6 +517,10 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Deliberate deviations (all documented in place)
 
+- `arc`/`arcn` with an angle of -2^53 degrees or below (#1176, `Gfx::arc_limited`)
+  are `limitcheck`; gs draws something for `0 -1e17 arc`, but at that size an
+  angle has no unit precision left and turning it a full turn at a time cannot
+  finish. Positive angles of 2^31 or more are `limitcheck` in both.
 - `arcto`/`arct` (#980, `ops/graphics.rs`, `notes/980-arcto-arct.md`) match
   Ghostscript 10.07.1 on the tangent points and the path: one cubic per
   corner whatever its sweep, a line only for collinear points, a line plus
@@ -1427,6 +1431,13 @@ renders eight examples in both and compares block-downsampled output).
     memory. A new operator that reads an unbounded source must do the same;
     with no limits the plain `std::fs::read` path is untouched. See
     `notes/702-whole-file-reads-and-limits.md`.
+  - Any other operator whose one call can do far more work than its operands
+    or allocation suggest must be linear or look at the limits itself (#1176):
+    `Interp::poll_limits(steps)` where it holds `it` (`bind`, `flushfile`; free
+    with no limits set), `Interp::limit_probe()` passed down to a loop in
+    `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`). Both raise
+    the slice loop's own uncatchable errors. The audit list and what is still
+    open are in `notes/1176-single-operator-limits.md`.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.
