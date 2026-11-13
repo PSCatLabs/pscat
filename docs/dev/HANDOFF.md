@@ -1880,7 +1880,12 @@ renders eight examples in both and compares block-downsampled output).
   Since #1098 the supported surface also has `pscat::sheet`,
   `pscat::chalkboard`, `pscat::handwriting` (#1135: written in the open, not a
   facade; `has_glyph`/`drawable`, #1170, ask the font's own tables in
-  `lib/handscript.ps` instead of keeping a character list) and `pscat::catalog` (facades over the hidden
+  `lib/handscript.ps` instead of keeping a character list; #1182:
+  `Library::Embedded` on `HandOptions::library` pins the compiled-in font for
+  `render_source`, `measure_source`, `has_glyph_in` and `drawable_in`, and its
+  glyph check reads the const `EMBEDDED_GLYPHS`, which a unit test recomputes by
+  discovery, so a change to `lib/handscript.ps`'s character set makes that test
+  fail until the const is updated) and `pscat::catalog` (facades over the hidden
   `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
   `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
   `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so
