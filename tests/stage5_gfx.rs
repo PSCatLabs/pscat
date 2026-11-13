@@ -210,12 +210,14 @@ fn clippath_does_not_mistake_a_bowtie_for_a_rectangle() {
 
 #[test]
 fn clippath_of_disjoint_rect_clips_is_empty() {
+    // gs 10.07.1 (100x100 page): an empty clip is one moveto at the device
+    // origin, so pathbbox works and gives `0 100 0 100` (#1197).
     assert_eq!(
-        eval_err(
+        eval(
             "newpath 100 100 200 200 rectclip newpath 150 150 100 100 rectclip \
              0 0 1 1 rectclip clippath pathbbox"
         ),
-        PsError::NoCurrentPoint
+        ["0.0", "100.0", "0.0", "100.0"]
     );
 }
 

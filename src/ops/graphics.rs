@@ -868,7 +868,17 @@ fn rectstroke(it: &mut Interp) -> Result<(), PsError> {
 /// leave the current path empty (gs-pinned; an empty rect list clips
 /// everything away, also pinned).
 fn rectclip(it: &mut Interp) -> Result<(), PsError> {
-    let rects = pop_rects(it)?;
+    let mut rects = pop_rects(it)?;
+    // gs lists a zero-area clip (a point or a line) from the rectangle with
+    // a non-negative width: `10 20 -5 0 rectclip` starts at `5 20`. A
+    // negative height is kept as given, and so is any rectangle with area
+    // (#1197, gs 10.07.1).
+    for r in &mut rects {
+        if (r[2] == 0.0 || r[3] == 0.0) && r[2] < 0.0 {
+            r[0] += r[2];
+            r[2] = -r[2];
+        }
+    }
     it.gfx.newpath();
     append_rects(it, &rects)?;
     it.gfx.clip(FillRule::Winding)?;

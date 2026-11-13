@@ -109,6 +109,12 @@ impl PsPath {
         self.segs.is_empty()
     }
 
+    /// True when the path has a line, curve or `closepath`, not just
+    /// `moveto`s: a lone `moveto` bounds no region.
+    pub(crate) fn has_drawing_segment(&self) -> bool {
+        self.segs.iter().any(|s| !matches!(s, Seg::Move(_)))
+    }
+
     pub fn current(&self) -> Option<DevPoint> {
         self.current
     }
@@ -420,7 +426,8 @@ impl PsPath {
     /// falling back to pixel tracing — the dominant real-world nested-
     /// clip shape. A rotated rect, a multi-rect `rectclip` numarray
     /// (more than one subpath), or any curve disqualifies it, safely
-    /// falling back to the pixel trace instead of misreporting.
+    /// falling back to the pixel trace instead of misreporting. A
+    /// zero-width or zero-height box counts (its bounds have no area).
     ///
     /// Deliberately rule-agnostic (the caller never looks at
     /// `ClipNode::rule` here): for one non-self-intersecting closed
@@ -467,6 +474,12 @@ impl PsPath {
                 }
             }
             return None;
+        }
+        // A zero-area box (a point, or a line along one axis, as `rectclip`
+        // makes from a zero width or height, #1197) has edges that change
+        // no coordinate at all; it is still a rectangle for `clippath`.
+        if x1 - x0 < EPS || y1 - y0 < EPS {
+            return Some((x0, y0, x1, y1));
         }
         // All four corners present isn't enough: a "bowtie"
         // (20,20 → 80,80 → 80,20 → 20,80) visits them too. Every edge
@@ -2876,6 +2889,10 @@ impl Gfx {
     /// nested chain (a curved or rotated clip nested with anything else)
     /// — a documented residual approximation, not the unbounded
     /// "newest clip only" error this replaces.
+    ///
+    /// An empty clip region (#1197) is never an empty path: it is the
+    /// lone device-origin `moveto` Ghostscript gives, or, for a zero-area
+    /// rectangle that sits inside the region it was clipped to, that box.
     pub fn set_path_to_clip(&mut self) {
         if self.state.null_device {
             // The null device has no area: gs reports a degenerate clip at
@@ -2884,18 +2901,118 @@ impl Gfx {
             self.state.path = Self::rect_path(0.0, 0.0, 0.0, 0.0);
             return;
         }
-        match &self.state.clip {
-            Some(c) if c.node.parent.is_none() => self.state.path = c.node.path.clone(),
-            Some(c) => {
-                let page = (self.pixmap.width() as f32, self.pixmap.height() as f32);
-                self.state.path = match Self::chain_rect_intersection(&c.node, page) {
-                    Some((x0, y0, x1, y1)) if x1 <= x0 || y1 <= y0 => PsPath::default(),
-                    Some((x0, y0, x1, y1)) => Self::rect_path(x0, y0, x1, y1),
-                    None => Self::mask_boundary_path(&c.mask),
-                };
+        let page = (self.pixmap.width() as f32, self.pixmap.height() as f32);
+        let path = match &self.state.clip {
+            Some(c) if c.node.parent.is_none() => Self::single_clip_boundary(&c.node.path, page),
+            Some(c) => match Self::chain_rect_intersection(&c.node, page) {
+                Some((x0, y0, x1, y1)) if x1 > x0 && y1 > y0 => Self::rect_path(x0, y0, x1, y1),
+                Some(_) => self.degenerate_chain_boundary(&c.node, page),
+                None => Self::mask_boundary_path(&c.mask),
+            },
+            None => self.page_rect_path(),
+        };
+        // An empty clip region is a path of its own, never an empty path
+        // (#1197): `pathbbox` and `currentpoint` must still work on it.
+        self.state.path = if path.has_drawing_segment() {
+            path
+        } else {
+            Self::empty_clip_path()
+        };
+    }
+
+    /// What Ghostscript's `clippath` gives for a clip with no area: one
+    /// `moveto` at the device origin (`0 792` in default user space).
+    fn empty_clip_path() -> PsPath {
+        let mut p = PsPath::default();
+        p.move_to(DevPoint { x: 0.0, y: 0.0 });
+        p
+    }
+
+    /// `clippath` for a clip that is the only link in the chain: the path
+    /// the program clipped with, exactly. A zero-area rectangle (a point or
+    /// a line, as `rectclip` makes from a zero width or height) is the one
+    /// exception, matching Ghostscript: it is an empty clip when it is not
+    /// wholly on the page.
+    fn single_clip_boundary(path: &PsPath, page: (f32, f32)) -> PsPath {
+        match path.as_axis_aligned_rect() {
+            Some((x0, y0, x1, y1))
+                if (x0 >= x1 || y0 >= y1)
+                    && !(x0 >= 0.0 && y0 >= 0.0 && x1 <= page.0 && y1 <= page.1) =>
+            {
+                PsPath::default()
             }
-            None => self.state.path = self.page_rect_path(),
+            _ => path.clone(),
         }
+    }
+
+    /// `clippath` for a chain of rectangles whose intersection has no area.
+    /// Ghostscript keeps a zero-area *newest* clip as a box when it lies
+    /// inside a parent region that has area; any other empty intersection
+    /// (disjoint, merely touching, or a zero-area clip already in force)
+    /// is an empty clip. Decided from the rectangles, never the mask.
+    fn degenerate_chain_boundary(&self, node: &ClipNode, page: (f32, f32)) -> PsPath {
+        let newest = node.path.as_axis_aligned_rect();
+        let parent = node
+            .parent
+            .as_deref()
+            .and_then(|p| Self::chain_rect_intersection(p, page));
+        match (newest, parent) {
+            (Some((x0, y0, x1, y1)), Some((px0, py0, px1, py1)))
+                if (x0 >= x1 || y0 >= y1)
+                    && px1 > px0
+                    && py1 > py0
+                    && x0 >= px0
+                    && y0 >= py0
+                    && x1 <= px1
+                    && y1 <= py1 =>
+            {
+                self.degenerate_box_path(x0, y0, x1, y1)
+            }
+            _ => PsPath::default(),
+        }
+    }
+
+    /// A zero-area device box as Ghostscript lists it: lower-left,
+    /// lower-right, upper-right, upper-left *in user space* (so `10 20 -5 0
+    /// rectclip` starts at `5 20`, as under any axis-aligned CTM). When the
+    /// CTM is not axis-aligned (or singular) the corners are in device
+    /// order instead.
+    fn degenerate_box_path(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> PsPath {
+        let device = Self::rect_path(x0, y0, x1, y1);
+        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+        let mut user = Vec::with_capacity(4);
+        for (x, y) in corners {
+            match self.device_to_user(DevPoint { x, y }) {
+                Ok(u) => user.push(u),
+                Err(_) => return device,
+            }
+        }
+        let (umin, umax) = user
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+        let (vmin, vmax) = user
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+        let mut out = PsPath::default();
+        for (i, (u, v)) in [(umin, vmin), (umax, vmin), (umax, vmax), (umin, vmax)]
+            .into_iter()
+            .enumerate()
+        {
+            let d = self.user_to_device(u, v);
+            // Off the box: a rotated CTM, where user corners are not these.
+            let on_box = (d.x - x0).abs() < 1e-3 || (d.x - x1).abs() < 1e-3;
+            let on_box = on_box && ((d.y - y0).abs() < 1e-3 || (d.y - y1).abs() < 1e-3);
+            if !on_box {
+                return device;
+            }
+            if i == 0 {
+                out.move_to(d);
+            } else {
+                out.line_to(d);
+            }
+        }
+        out.close();
+        out
     }
 
     /// The exact intersection of every clip in the chain, and the page
@@ -2927,13 +3044,15 @@ impl Gfx {
     /// A device-space rectangle path — `chain_rect_intersection`'s
     /// exact-fast-path answer, and (via `page_rect_path`) the
     /// unclipped-`clippath` fallback and `shfill`'s paint region (which
-    /// the current clip mask then bounds, same as `fill`).
+    /// the current clip mask then bounds, same as `fill`). Corners run
+    /// (x0,y0), (x0,y1), (x1,y1), (x1,y0): the order Ghostscript lists a
+    /// clip box's path in (#1197), so `clippath` traces match it.
     fn rect_path(x0: f32, y0: f32, x1: f32, y1: f32) -> PsPath {
         let mut p = PsPath::default();
         p.move_to(DevPoint { x: x0, y: y0 });
-        p.line_to(DevPoint { x: x1, y: y0 });
-        p.line_to(DevPoint { x: x1, y: y1 });
         p.line_to(DevPoint { x: x0, y: y1 });
+        p.line_to(DevPoint { x: x1, y: y1 });
+        p.line_to(DevPoint { x: x1, y: y0 });
         p.close();
         p
     }

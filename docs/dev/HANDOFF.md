@@ -632,6 +632,13 @@ renders eight examples in both and compares block-downsampled output).
   the exact original path, bit-for-bit. It also drops the `eoclip` rule.
   For an exact capture and replay of the clip in force, use a Level 2
   `gstate` object (#394): `setgstate` restores the same mask and chain.
+  An *empty* clip (#1197) is never an empty path, as in gs: `clippath` gives
+  one `moveto` at the device origin (`pathbbox` is `0 792 0 792` on a
+  Letter page), or, for a zero-area `rectclip` wholly inside the clip it
+  was made under, that box. Touching rectangles, a point or line that
+  leaves its parent, and anything clipped after a zero-area clip are empty.
+  Known gap: gs answers a zero-height line that only partly overlaps its
+  parent with a 1-pixel strip (device pixels); pscat says empty.
 - `gstate` objects (#394): `gstate`, `currentgstate`, `setgstate`, and
   `copy` between two gstates; `currentgstate`/`copy` are journaled, so
   `restore` undoes them, as in gs. No local/global VM distinction, no
