@@ -321,6 +321,7 @@ impl SvgRecorder {
     pub(crate) fn stroke(
         &mut self,
         d: &str,
+        pen: Option<tiny_skia::Transform>,
         rgb: (f32, f32, f32),
         width: f32,
         cap: tiny_skia::LineCap,
@@ -342,6 +343,20 @@ impl SvgRecorder {
             tiny_skia::LineJoin::Bevel => "bevel",
             _ => "miter",
         };
+        // `d` is in pen space when the CTM is anisotropic (#1196,
+        // `Gfx::stroke_space`): SVG strokes in the element's own user
+        // space, so a `transform` on the path itself gives the elliptical
+        // pen. The clip groups around it stay in device space.
+        let transform = match pen {
+            Some(l) => format!(
+                " transform=\"matrix({} {} {} {} 0 0)\"",
+                fmt_frame(f64::from(l.sx)),
+                fmt_frame(f64::from(l.ky)),
+                fmt_frame(f64::from(l.kx)),
+                fmt_frame(f64::from(l.sy)),
+            ),
+            None => String::new(),
+        };
         let mut extra = String::new();
         if let Some((pattern, phase)) = dash {
             let list: Vec<String> = pattern.iter().map(|d| fmt_f32(*d)).collect();
@@ -354,7 +369,7 @@ impl SvgRecorder {
         }
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" \
+            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" \
              stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{close}",
             Self::color(rgb),
             fmt_f32(width),

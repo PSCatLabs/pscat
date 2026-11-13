@@ -506,6 +506,7 @@ Q",
     pub(crate) fn stroke(
         &mut self,
         path: &crate::gfx::PsPath,
+        pen: Option<tiny_skia::Transform>,
         rgb: (f32, f32, f32),
         width: f32,
         cap: tiny_skia::LineCap,
@@ -534,9 +535,19 @@ Q",
             }
             None => String::new(),
         };
+        // `path` is in pen space when the CTM is anisotropic (#1196,
+        // `Gfx::stroke_space`): PDF strokes in user space, so a `cm` of
+        // the pen-to-device map gives the elliptical pen. Written at full
+        // f32 precision, like the shading `cm`: these entries are near 1,
+        // where three decimals would move a far point by a fraction of a
+        // point.
+        let pen = match pen {
+            Some(l) => format!("{} {} {} {} 0 0 cm ", p(l.sx), p(l.ky), p(l.kx), p(l.sy)),
+            None => String::new(),
+        };
         let _ = writeln!(
             self.content,
-            "q {gs}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
+            "q {gs}{pen}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
 Q",
             f(rgb.0),
             f(rgb.1),
