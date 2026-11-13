@@ -1868,6 +1868,7 @@ dependencies = [
  "hayro",
  "libc",
  "libm",
+ "memchr",
  "pollster",
  "resvg",
  "rqrr",

@@ -442,15 +442,26 @@ fn get_domain(d: &Dict) -> Result<(f64, f64), PsError> {
 /// example here nests one level deep at most).
 const MAX_FUNCTION_DEPTH: usize = 32;
 
+/// Caps the function dicts one shading parses, counting each time a
+/// shared one is reached again (#1176). Depth alone does not bound the
+/// work: thirty levels of a stitching function whose `/Functions` names the
+/// level below twice is 2^30 dicts from thirty in VM, all parsed in one
+/// `shfill`, and `build_stops` then evaluates the result at every leg's
+/// bounds. Real stitching functions have tens of legs.
+const MAX_FUNCTION_NODES: usize = 4096;
+
 fn parse_function(obj: &crate::object::Object) -> Result<PsFunction, PsError> {
-    parse_function_at_depth(obj, 0)
+    let mut nodes = 0;
+    parse_function_at_depth(obj, 0, &mut nodes)
 }
 
 fn parse_function_at_depth(
     obj: &crate::object::Object,
     depth: usize,
+    nodes: &mut usize,
 ) -> Result<PsFunction, PsError> {
-    if depth > MAX_FUNCTION_DEPTH {
+    *nodes += 1;
+    if depth > MAX_FUNCTION_DEPTH || *nodes > MAX_FUNCTION_NODES {
         return Err(PsError::Limitcheck);
     }
     let Value::Dict(dr) = &obj.value else {
@@ -514,7 +525,9 @@ fn parse_function_at_depth(
                 return Err(PsError::Rangecheck);
             }
             let functions: Vec<PsFunction> = (0..fa.len())
-                .map(|i| parse_function_at_depth(&fa.get(i).expect("len checked"), depth + 1))
+                .map(|i| {
+                    parse_function_at_depth(&fa.get(i).expect("len checked"), depth + 1, nodes)
+                })
                 .collect::<Result<_, _>>()?;
             let ncomp = functions[0].ncomp();
             if functions.iter().any(|f| f.ncomp() != ncomp) {

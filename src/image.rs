@@ -215,6 +215,34 @@ impl ImageCtx {
         self.row_bytes() * self.height
     }
 
+    /// The bytes the SVG and PDF recorders build for this image, beyond its
+    /// own samples (#1176: refused against a memory cap up front). SVG
+    /// paints every kind into a w x h RGBA pixmap. PDF passes a mask's
+    /// packed bits through (one copy of the samples), decodes a colour image
+    /// to RGB, and flattens a stenciled one to RGBA then splits it into RGB
+    /// and alpha (counted at the image's own resolution, the least its
+    /// composite can be).
+    pub(crate) fn recorder_bytes(&self, svg: bool, pdf: bool) -> usize {
+        let px = self.width.saturating_mul(self.height);
+        let mut bytes = 0usize;
+        if svg {
+            bytes = bytes.saturating_add(px.saturating_mul(4));
+        }
+        if pdf {
+            let pdf_bytes = if self.stencil.is_some() {
+                px.saturating_mul(8)
+            } else if self.mask.is_some() {
+                // One bit a sample: `row_bytes` for a mask, without its
+                // product that could overflow for a hostile width.
+                self.width.div_ceil(8).saturating_mul(self.height)
+            } else {
+                px.saturating_mul(3)
+            };
+            bytes = bytes.saturating_add(pdf_bytes);
+        }
+        bytes
+    }
+
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
             || self.stencil.as_ref().is_some_and(|s| s.waiting())

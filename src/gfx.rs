@@ -947,6 +947,98 @@ pub struct Gfx {
     band: Option<(u32, u32)>,
 }
 
+/// Segments `arc`/`arcn` add between looks at the limits (#1176).
+const ARC_POLL: usize = 4096;
+
+/// `while a2 < a1 { a2 += TAU }` (`up`), or `while a2 > a1 { a2 -= TAU }`,
+/// the bits of the result exactly as that loop leaves them, without its trip
+/// per turn (#1176). Inside one binade (one sign and exponent) every value is
+/// a multiple of the binade's ulp, and adding TAU to such a value, with a
+/// result in the same binade, adds TAU rounded to that grid: the same amount
+/// every trip. The one exception is a tie (TAU an odd number of half-ulps),
+/// where round-half-to-even depends on the value's last bit; after one tie
+/// the value is even, and so is every step after it. So once three plain
+/// trips have stayed in one binade, the steps from the third on are all
+/// equal, and the walk can skip to just before it leaves the binade or
+/// reaches `a1`, then go on trip by trip. Crossing a binade boundary is
+/// always a plain trip. Callers keep both angles well inside the range
+/// where TAU still moves a value (`Gfx::arc_limited` refuses angles past
+/// 2^53 degrees).
+pub(crate) fn turn_past(mut a2: f64, a1: f64, up: bool) -> f64 {
+    let step = if up {
+        std::f64::consts::TAU
+    } else {
+        -std::f64::consts::TAU
+    };
+    let done = |x: f64| if up { x >= a1 } else { x <= a1 };
+    // Strictly before `stop` in the walk's direction.
+    let before = |x: f64, stop: f64| if up { x < stop } else { x > stop };
+    // (sign, biased exponent) of a normal number; `None` for zero,
+    // subnormals and anything not finite, which are walked trip by trip.
+    let binade = |x: f64| {
+        let e = (x.to_bits() >> 52) & 0x7ff;
+        (e != 0 && e != 0x7ff).then_some((x.is_sign_negative(), e))
+    };
+    loop {
+        // Three plain trips, each a possible end.
+        if done(a2) || a2.is_nan() {
+            return a2;
+        }
+        let x1 = a2 + step;
+        if done(x1) || x1 == a2 {
+            // (`x1 == a2`: TAU no longer moves the value, where the plain
+            // loop would never end; the caller's angle cap keeps this away.)
+            return x1;
+        }
+        let x2 = x1 + step;
+        if done(x2) {
+            return x2;
+        }
+        let x3 = x2 + step;
+        if done(x3) {
+            return x3;
+        }
+        a2 = x3;
+        let b = binade(x1);
+        let Some((neg, e)) = b else { continue };
+        if binade(x2) != b || binade(x3) != b {
+            continue;
+        }
+        let d = x3 - x2; // exact: two values on one grid
+        // The binade's edge the walk runs towards. Its magnitudes are
+        // [2^(e-1023), 2^(e-1022)), both powers of two, so exact; a value
+        // strictly on the walk's near side of the edge is still inside.
+        let low = f64::from_bits(e << 52);
+        let high = f64::from_bits((e + 1) << 52);
+        let edge = match (up, neg) {
+            (true, false) => high,
+            (true, true) => -low,
+            (false, false) => low,
+            (false, true) => -high,
+        };
+        let stop = if up { a1.min(edge) } else { a1.max(edge) };
+        // Trips that stay strictly before both `a1` and the edge, estimated
+        // in floating point and then checked exactly: x3 + j*d is exact for
+        // any j that keeps it in the binade (a multiple of the ulp there).
+        let est = ((stop - x3) / d).floor() - 1.0;
+        if est.is_nan() || est < 1.0 {
+            continue;
+        }
+        let mut j = est.min(9.0e15);
+        loop {
+            let y = x3 + j * d;
+            if before(y, stop) && binade(y) == b {
+                a2 = y;
+                break;
+            }
+            j = (j / 2.0).floor();
+            if j < 1.0 {
+                break;
+            }
+        }
+    }
+}
+
 impl Gfx {
     pub fn new(width: u32, height: u32) -> Option<Self> {
         Self::with_scale(width, height, 1.0)
@@ -1369,16 +1461,43 @@ impl Gfx {
         ang2: f64,
         ccw: bool,
     ) -> Result<(), PsError> {
-        let (a1, mut a2) = (ang1.to_radians(), ang2.to_radians());
-        if ccw {
-            while a2 < a1 {
-                a2 += std::f64::consts::TAU;
-            }
-        } else {
-            while a2 > a1 {
-                a2 -= std::f64::consts::TAU;
+        self.arc_limited(cx, cy, r, ang1, ang2, ccw, &crate::limits::LimitProbe::NONE)
+            .map(|_| ())
+    }
+
+    /// [`Gfx::arc`] under the limits: `probe` is looked at every
+    /// [`ARC_POLL`] segments (#1176), since a sweep of a billion degrees is
+    /// ten million segments in this one call. Returns the number of
+    /// segments added.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn arc_limited(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        r: f64,
+        ang1: f64,
+        ang2: f64,
+        ccw: bool,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<usize, PsError> {
+        // gs refuses a huge positive angle (`0 0 10 2.15e9 0 arc` and
+        // `0 0 10 0 1e10 arc` are limitcheck in gs 10; `2.14e9 0` draws) and
+        // accepts a huge negative one. Past 2^53 degrees an angle has no
+        // unit precision left, and turning one end to meet the other could
+        // not finish (adding a full turn no longer changes it), so that is a
+        // limitcheck here too, as is an angle that is not a number.
+        const MAX_POSITIVE: f64 = 2_147_483_648.0; // 2^31 degrees
+        const MAX_NEGATIVE: f64 = 9_007_199_254_740_992.0; // 2^53 degrees
+        for a in [ang1, ang2] {
+            if !a.is_finite() || a >= MAX_POSITIVE || a <= -MAX_NEGATIVE {
+                return Err(PsError::Limitcheck);
             }
         }
+        let (a1, mut a2) = (ang1.to_radians(), ang2.to_radians());
+        // Turn ang2 past ang1 a full turn at a time, exactly as the plain
+        // loop does, but in a few steps per binade (#1176: `1e15 0 arc` took
+        // 1.6e14 trips).
+        a2 = turn_past(a2, a1, ccw);
 
         let point_at = |a: f64| (cx + r * fmath::cos(a), cy + r * fmath::sin(a));
         let start = point_at(a1);
@@ -1393,7 +1512,11 @@ impl Gfx {
         let n = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil().max(1.0) as usize;
         let step = sweep / n as f64;
         let mut a = a1;
-        for _ in 0..n {
+        for done in 0..n {
+            if done % ARC_POLL == ARC_POLL - 1 {
+                // A step per 1024 segments, as `arc_common` charges them.
+                probe.check((done / 1024) as u64)?;
+            }
             let b = a + step;
             // Standard cubic approximation of a circular arc segment.
             let k = 4.0 / 3.0 * fmath::tan(step / 4.0);
@@ -1407,7 +1530,7 @@ impl Gfx {
             self.state.path.curve_to(c1, c2, p);
             a = b;
         }
-        Ok(())
+        Ok(n)
     }
 
     // --- painting --------------------------------------------------------
@@ -3174,6 +3297,74 @@ fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The loop `turn_past` replaces (#1176), the reference it must match
+    /// bit for bit.
+    fn plain_turn(mut a2: f64, a1: f64) -> f64 {
+        while a2 < a1 {
+            a2 += std::f64::consts::TAU;
+        }
+        a2
+    }
+
+    #[test]
+    fn turn_past_matches_the_plain_loop_bit_for_bit() {
+        let mut cases: Vec<(f64, f64)> = Vec::new();
+        // Whole turns and near-whole turns in degrees, both directions (the
+        // `2160 -2520 arc` case Codex found drew a full circle).
+        for a in -40i32..=40 {
+            for b in -40i32..=40 {
+                for (da, db) in [
+                    (0.0, 0.0),
+                    (1e-9, 0.0),
+                    (0.0, 1e-9),
+                    (-1e-9, 0.0),
+                    (0.0, -1e-9),
+                    (0.5, 0.0),
+                ] {
+                    let (x, y) = (f64::from(a) * 360.0 + da, f64::from(b) * 360.0 + db);
+                    cases.push((x.to_radians(), y.to_radians()));
+                    cases.push((y.to_radians(), x.to_radians()));
+                }
+            }
+        }
+        cases.push((2160f64.to_radians(), -2520f64.to_radians()));
+        // Big gaps, many binades: up to a million turns from either sign.
+        let mut seed: u64 = 0x1176;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..400 {
+            let a1 = (next() - 0.5) * 2.0e4;
+            let a2 = a1 - next() * 6.3e6;
+            cases.push((a1, a2));
+            let a1 = (next() - 0.5) * 1.0e3;
+            let a2 = a1 - next().powi(4) * 6.3e6;
+            cases.push((a1, a2));
+        }
+        for (a1, a2) in cases {
+            for (from, to) in [(a1, a2), (a2, a1)] {
+                let up = plain_turn(from, to);
+                assert_eq!(
+                    turn_past(from, to, true).to_bits(),
+                    up.to_bits(),
+                    "ccw {from:e} past {to:e}"
+                );
+                let mut down = from;
+                while down > to {
+                    down -= std::f64::consts::TAU;
+                }
+                assert_eq!(
+                    turn_past(from, to, false).to_bits(),
+                    down.to_bits(),
+                    "cw {from:e} past {to:e}"
+                );
+            }
+        }
+    }
 
     /// Issue #46's watercolor architecture spike, Approach B: the
     /// same three-circle Venn scene as
