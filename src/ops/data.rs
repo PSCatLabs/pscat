@@ -38,23 +38,26 @@ fn pop_string(it: &mut Interp) -> Result<crate::object::PsString, PsError> {
     }
 }
 
+/// The first index at which `needle` occurs in `hay`; 0 for an empty
+/// needle. Linear in `hay.len() + needle.len()` (#1176): the naive
+/// `windows().position()` it replaced was O(n*m), so one `search` of a
+/// 16 MiB string for an 8 MiB pattern ran for minutes inside one operator,
+/// where the execution limits cannot see it.
+fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    memchr::memmem::find(hay, needle)
+}
+
 /// str seek search -> post match pre true | str false. The three results
 /// are views into str, per the PLRM.
 fn search(it: &mut Interp) -> Result<(), PsError> {
     let seek = pop_string(it)?;
     let s = pop_string(it)?;
-    let hay = s.to_vec();
-    let needle = seek.to_vec();
-    let found = if needle.is_empty() {
-        Some(0)
-    } else if needle.len() > hay.len() {
-        None
-    } else {
-        hay.windows(needle.len()).position(|w| w == needle)
-    };
+    // Borrowed, not copied: the two may be views of one string, which two
+    // shared borrows allow. Both end before the result views are made.
+    let found = find_bytes(&s.borrow_bytes(), &seek.borrow_bytes());
     match found {
         Some(i) => {
-            let n = needle.len();
+            let n = seek.len();
             it.push(Object::lit(Value::String(
                 s.interval(i + n, s.len() - i - n)?,
             )));
@@ -378,4 +381,64 @@ fn astore(it: &mut Interp) -> Result<(), PsError> {
     }
     it.push(obj.clone());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_bytes;
+
+    /// What `search` used before #1176: the reference the linear search
+    /// must agree with.
+    fn naive(hay: &[u8], needle: &[u8]) -> Option<usize> {
+        if needle.is_empty() {
+            Some(0)
+        } else if needle.len() > hay.len() {
+            None
+        } else {
+            hay.windows(needle.len()).position(|w| w == needle)
+        }
+    }
+
+    #[test]
+    fn the_linear_search_finds_what_the_naive_one_found() {
+        let cases: &[(&[u8], &[u8])] = &[
+            (b"", b""),
+            (b"", b"a"),
+            (b"abc", b""),
+            (b"abc", b"abc"),
+            (b"abc", b"abcd"),
+            (b"aaab", b"aab"),
+            (b"abababac", b"ababac"),
+            (b"abcdef", b"ef"),
+            (b"abcdef", b"a"),
+            (b"abcdef", b"xy"),
+            (b"\0\0\0\x01", b"\0\x01"),
+            (b"\xff\xfe\xff\xfe\xfd", b"\xfe\xfd"),
+        ];
+        for &(hay, needle) in cases {
+            assert_eq!(
+                find_bytes(hay, needle),
+                naive(hay, needle),
+                "{hay:?} {needle:?}"
+            );
+        }
+        // Every needle cut from a small two-letter alphabet, in every
+        // haystack up to eight long: overlapping prefixes and periodic
+        // patterns are where a fast search goes wrong.
+        let words: Vec<Vec<u8>> = (0..=8u32)
+            .flat_map(|n| {
+                (0..1u32 << n)
+                    .map(move |bits| (0..n).map(|i| b'a' + (bits >> i & 1) as u8).collect())
+            })
+            .collect();
+        for hay in &words {
+            for needle in words.iter().filter(|w| w.len() <= 4) {
+                assert_eq!(
+                    find_bytes(hay, needle),
+                    naive(hay, needle),
+                    "{hay:?} {needle:?}"
+                );
+            }
+        }
+    }
 }

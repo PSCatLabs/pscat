@@ -112,6 +112,10 @@ overflow-checks = true
 serde_json = "1"
 thiserror = "2"
 flate2 = "1"
+# `search` (issue #1176): a linear substring search (two-way with SIMD
+# prefilters) instead of an O(n*m) scan. Already in every build through
+# serde_json, so this adds no crate.
+memchr = "2"
 tiny-skia = "0.12.0"
 ttf-parser = "0.25"
 zune-jpeg = "0.5.15"

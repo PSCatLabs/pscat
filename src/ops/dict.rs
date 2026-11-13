@@ -176,7 +176,7 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     match (&obj.value, obj.executable) {
         (Value::Array(body), true) => {
-            bind_proc(it, body, 0);
+            bind_proc(it, body, 0, &mut BindWalk::default())?;
             it.push(obj);
             Ok(())
         }
@@ -184,32 +184,92 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     }
 }
 
+/// Units of work (`BindWalk::walked`) `bind` does between looks at the
+/// limits (#1176).
+const BIND_POLL: usize = 1 << 16;
+
+/// One `bind` call's walk (#1176). `seen` is each procedure view already
+/// bound, with the shallowest depth it was reached at: a procedure two
+/// others share, or one that contains itself, is bound once instead of
+/// once per path to it, which made `bind` exponential (a cycle of two
+/// references walked 2^100 views). Binding is idempotent while the walk
+/// runs (the dictionary stack does not change), so skipping a view seen at
+/// the same or a shallower depth binds exactly what walking it again would.
+#[derive(Default)]
+struct BindWalk {
+    seen: std::collections::HashMap<(usize, usize, usize), usize>,
+    /// Work (elements, and dictionaries searched for names) since the last
+    /// look at the limits.
+    walked: usize,
+}
+
 /// Replace executable names that currently resolve to operators with the
 /// operators themselves, recursing into nested procedures — the classic
 /// "immune to later redefinition, and faster" transform.
-fn bind_proc(it: &mut Interp, body: &PsArray, depth: usize) {
+fn bind_proc(
+    it: &mut Interp,
+    body: &PsArray,
+    depth: usize,
+    walk: &mut BindWalk,
+) -> Result<(), PsError> {
     if depth > 100 {
-        return;
+        return Ok(());
+    }
+    match walk.seen.entry(body.identity()) {
+        std::collections::hash_map::Entry::Occupied(mut e) => {
+            if *e.get() <= depth {
+                return Ok(());
+            }
+            e.insert(depth);
+        }
+        std::collections::hash_map::Entry::Vacant(e) => {
+            e.insert(depth);
+        }
     }
     // bind mutates VM contents like any put — journaled so restore
     // un-binds, matching Adobe's VM semantics.
     it.journal_array(body);
     let mut nested: Vec<PsArray> = Vec::new();
+    // Distinct views can still overlap (every suffix of one array), and each
+    // name is looked up through the whole dictionary stack, so the walk is
+    // not linear in the VM in every case. It looks at the limits as it goes:
+    // an element is one unit of work and a lookup one more per dictionary on
+    // the stack, a step per 1024 units, as a file read is charged per KiB. A
+    // limit stops the walk where it is (the elements after it are skipped).
+    let lookup = 1 + it.dict_stack_len();
+    let mut stopped: Option<PsError> = None;
     // for_each_mut declines (harmlessly) if the storage is already
     // borrowed — the self-referential case.
-    body.for_each_mut(|el| match (&el.value, el.executable) {
-        (Value::Name(n), true) => {
-            if let Some(resolved) = it.load(n)
-                && resolved.executable
-                && matches!(resolved.value, Value::Operator(_))
-            {
-                *el = resolved;
-            }
+    body.for_each_mut(|el| {
+        if stopped.is_some() {
+            return;
         }
-        (Value::Array(inner), true) => nested.push(inner.clone()),
-        _ => {}
+        walk.walked += 1;
+        match (&el.value, el.executable) {
+            (Value::Name(n), true) => {
+                walk.walked += lookup;
+                if let Some(resolved) = it.load(n)
+                    && resolved.executable
+                    && matches!(resolved.value, Value::Operator(_))
+                {
+                    *el = resolved;
+                }
+            }
+            (Value::Array(inner), true) => nested.push(inner.clone()),
+            _ => {}
+        }
+        if walk.walked >= BIND_POLL {
+            if let Err(e) = it.poll_limits((walk.walked / 1024) as u64) {
+                stopped = Some(e);
+            }
+            walk.walked %= 1024;
+        }
     });
-    for inner in nested {
-        bind_proc(it, &inner, depth + 1);
+    if let Some(e) = stopped {
+        return Err(e);
     }
+    for inner in nested {
+        bind_proc(it, &inner, depth + 1, walk)?;
+    }
+    Ok(())
 }

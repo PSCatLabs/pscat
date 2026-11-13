@@ -27,9 +27,12 @@
 //!
 //! What a limit can and cannot stop is spelled out in `SECURITY.md`: steps
 //! are counted between objects, so a single long-running operator (one
-//! enormous fill) finishes before the time or step limit is looked at. A
-//! whole-file read (`file`, `run`) is the exception: it looks at the limits
-//! after each 64 KiB it reads, and charges one step per KiB.
+//! enormous fill) finishes before the time or step limit is looked at. The
+//! operators whose one call can do far more work than its operands or its
+//! allocation suggest look at the limits themselves as they go: a
+//! whole-file read (`file`, `run`) after each 64 KiB it reads, charging one
+//! step per KiB, and `bind`, `arc`/`arcn` and `flushfile` on a filter
+//! likewise (#1176).
 //!
 //! Thread note for a library embedder: a whole-file read of something that is
 //! not a regular file (a FIFO, a device) runs on a helper thread, so the
@@ -154,6 +157,54 @@ pub const UNTRUSTED_MAX_STEPS: u64 = 25_000_000_000;
 pub const UNTRUSTED_MAX_TIME: Duration = Duration::from_secs(55);
 /// Heap growth in [`Limits::untrusted`]: 1 GiB.
 pub const UNTRUSTED_MAX_MEMORY: usize = 1 << 30;
+
+/// The limits as a value a loop deep inside one operator can look at
+/// without the interpreter (#1176): code in `Gfx` that cannot borrow the
+/// [`Interp`](crate::Interp) it belongs to. Made by `Interp::limit_probe`;
+/// [`LimitProbe::NONE`] where no limit applies. The loop says how many steps
+/// its work so far comes to; the operator charges them with
+/// `Interp::poll_limits` when it returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LimitProbe {
+    /// Steps the program has left when the operator started.
+    pub(crate) steps_left: Option<u64>,
+    /// The time limit as a `Clock::mono_ns` instant.
+    pub(crate) deadline_ns: Option<u64>,
+    /// Heap bytes at `set_limits`, and the growth allowed from there.
+    pub(crate) memory: Option<(usize, usize)>,
+}
+
+impl LimitProbe {
+    /// Nothing to look at: `check` always passes.
+    pub(crate) const NONE: LimitProbe = LimitProbe {
+        steps_left: None,
+        deadline_ns: None,
+        memory: None,
+    };
+
+    /// `StepsExceeded` once `steps` (the work done so far, in steps) passes
+    /// what was left, `TimeExceeded` past the deadline, `MemoryExceeded`
+    /// past the heap cap: the errors the interpreter's own check between
+    /// slices raises.
+    pub(crate) fn check(&self, steps: u64) -> Result<(), crate::PsError> {
+        if let Some(left) = self.steps_left
+            && steps > left
+        {
+            return Err(crate::PsError::StepsExceeded);
+        }
+        if let Some(d) = self.deadline_ns
+            && crate::clock::Clock::mono_ns() >= d
+        {
+            return Err(crate::PsError::TimeExceeded);
+        }
+        if let Some((base, max)) = self.memory
+            && crate::memtrack::live_bytes().saturating_sub(base) > max
+        {
+            return Err(crate::PsError::MemoryExceeded);
+        }
+        Ok(())
+    }
+}
 
 /// Why [`Interp::set_limits`](crate::Interp::set_limits) refused a set of
 /// limits.
