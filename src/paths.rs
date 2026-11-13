@@ -471,7 +471,7 @@ pub(crate) fn read_handle(file: std::fs::File, path: &Path, cap: u64) -> Option<
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn too_large(path: &Path, cap: u64) {
+pub(crate) fn too_large(path: &Path, cap: u64) {
     eprintln!(
         "pscat: {} is larger than the {} MiB a resource of its kind may be; skipped",
         path.display(),

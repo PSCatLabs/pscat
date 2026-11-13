@@ -99,7 +99,9 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
         // The handle of a search-order candidate goes to the limit-aware
         // reader as it is, never reopened by path (issue #1177).
         let read = match probe.open(path)? {
-            Opened::Handle(f) => crate::file::read_file_limited(f, &mut poll),
+            Opened::Handle(f) => {
+                crate::file::read_file_limited(f, path, probe.read_cap(), &mut poll)
+            }
             Opened::AsWritten => crate::file::read_path_limited(path, &mut poll),
         };
         match read {
