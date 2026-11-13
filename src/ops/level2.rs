@@ -54,7 +54,8 @@ fn packedarray(it: &mut Interp) -> Result<(), PsError> {
         items.push(it.pop()?);
     }
     items.reverse();
-    it.push(Object::array(items));
+    // A packed array is read-only, as in Ghostscript (#1189).
+    it.push(Object::array(items).into_readonly());
     Ok(())
 }
 

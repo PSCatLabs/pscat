@@ -176,7 +176,13 @@ fn bind(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     match (&obj.value, obj.executable) {
         (Value::Array(body), true) => {
-            bind_proc(it, body, 0, &mut BindWalk::default())?;
+            // A read-only procedure is left alone, names and all (PLRM
+            // `bind`; Ghostscript agrees). The procedure itself stays as
+            // writable as it was: only the nested procedures `bind`
+            // walks into are made read-only (#1189).
+            if !obj.is_readonly() {
+                bind_proc(it, body, 0, &mut BindWalk::default())?;
+            }
             it.push(obj);
             Ok(())
         }
@@ -255,7 +261,17 @@ fn bind_proc(
                     *el = resolved;
                 }
             }
-            (Value::Array(inner), true) => nested.push(inner.clone()),
+            (Value::Array(inner), true) => {
+                // A nested procedure is made read-only through this slot,
+                // and bound, unless the slot already was read-only: `bind`
+                // does not enter those (#1189). One this walk has bound
+                // already is entered again (the `seen` check decides if it
+                // needs a second look), since the walk itself set the flag.
+                if !el.readonly || walk.seen.contains_key(&inner.identity()) {
+                    nested.push(inner.clone());
+                    el.readonly = true;
+                }
+            }
             _ => {}
         }
         if walk.walked >= BIND_POLL {

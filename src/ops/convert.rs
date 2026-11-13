@@ -74,6 +74,7 @@ fn cvn(it: &mut Interp) -> Result<(), PsError> {
     it.push(Object {
         value: Value::Name(crate::name::intern(&s.text())),
         executable: obj.executable,
+        readonly: false,
     });
     Ok(())
 }

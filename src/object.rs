@@ -282,6 +282,12 @@ pub enum Value {
 pub struct Object {
     pub value: Value,
     pub executable: bool,
+    /// The write-protect attribute of an array (#1189). Like `executable`
+    /// it belongs to the reference, not the storage: `bind` makes the slot
+    /// that holds a nested procedure read-only and the dictionary's own
+    /// reference to the same array stays writable, as in Ghostscript. Only
+    /// arrays ever carry it; see [`Object::is_readonly`].
+    pub(crate) readonly: bool,
 }
 
 impl Object {
@@ -289,6 +295,7 @@ impl Object {
         Object {
             value,
             executable: false,
+            readonly: false,
         }
     }
 
@@ -296,7 +303,34 @@ impl Object {
         Object {
             value,
             executable: true,
+            readonly: false,
         }
+    }
+
+    /// True for an array whose reference was made read-only (`readonly`,
+    /// `executeonly`, `noaccess`, `packedarray`, or by `bind` as a nested
+    /// procedure). Access is modelled for arrays only (#1189).
+    pub fn is_readonly(&self) -> bool {
+        self.readonly && matches!(self.value, Value::Array(_))
+    }
+
+    /// `invalidaccess` if this is a read-only array: the check `put`,
+    /// `putinterval`, `astore` and `copy` make before writing one.
+    pub(crate) fn check_writable(&self) -> Result<(), PsError> {
+        if self.is_readonly() {
+            Err(PsError::InvalidAccess)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// This reference with its write attribute set: a no-op unless it is
+    /// an array.
+    pub(crate) fn into_readonly(mut self) -> Self {
+        if matches!(self.value, Value::Array(_)) {
+            self.readonly = true;
+        }
+        self
     }
 
     pub fn int(i: i64) -> Self {
@@ -341,6 +375,7 @@ impl Object {
         Object {
             value,
             executable: self.executable,
+            readonly: self.readonly,
         }
     }
 

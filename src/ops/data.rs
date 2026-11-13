@@ -173,6 +173,7 @@ fn put(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     match &obj.value {
         Value::Array(a) => {
+            obj.check_writable()?;
             it.journal_array(a);
             a.put(index_of(&key)?, value)
         }
@@ -209,6 +210,7 @@ fn getinterval(it: &mut Interp) -> Result<(), PsError> {
     it.push(Object {
         value,
         executable: obj.executable,
+        readonly: obj.readonly,
     });
     Ok(())
 }
@@ -223,6 +225,7 @@ fn putinterval(it: &mut Interp) -> Result<(), PsError> {
     let dst = it.pop()?;
     match (&dst.value, &src.value) {
         (Value::Array(d), Value::Array(s)) => {
+            dst.check_writable()?;
             it.journal_array(d);
             // Snapshot first so overlapping views over the same storage
             // copy correctly.
@@ -255,6 +258,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             let Value::Array(src) = &src_obj.value else {
                 return Err(PsError::Typecheck);
             };
+            top.check_writable()?;
             it.journal_array(dst);
             let items = src.snapshot();
             if items.len() > dst.len() {
@@ -266,6 +270,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             it.push(Object {
                 value: Value::Array(dst.interval(0, items.len())?),
                 executable: top.executable,
+                readonly: false,
             });
             Ok(())
         }
@@ -279,6 +284,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             it.push(Object {
                 value: Value::String(dst.interval(0, bytes.len())?),
                 executable: top.executable,
+                readonly: false,
             });
             Ok(())
         }
@@ -372,6 +378,7 @@ fn astore(it: &mut Interp) -> Result<(), PsError> {
     let Value::Array(a) = &obj.value else {
         return Err(PsError::Typecheck);
     };
+    obj.check_writable()?;
     it.journal_array(a);
     // Elements come off the stack top-down, filling the array back-to-
     // front, so a0..an-1 land in order.

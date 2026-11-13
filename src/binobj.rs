@@ -285,6 +285,7 @@ impl Reader<'_> {
         Ok(Object {
             value,
             executable: exec,
+            readonly: false,
         })
     }
 }
