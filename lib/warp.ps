@@ -17,6 +17,10 @@
 % { [] (2) wp-subdivide } /wp-step-must-be-positive (string step) mustguard
 % { [] wp-lift } /fp-quotation-required (lift needs a warp) mustguard
 % { (missing.ps) 5 wp-run-decorated } /wp-decorators-must-be-dictionary (decorator type) mustguard
+% { [] { pop 1 2 } wp--try } /wp-warp-must-return-one-result (path warp leaves two results) mustguard
+% { [] { pop } wp--try } /wp-warp-must-return-one-result (path warp leaves none) mustguard
+% { [] { pop 1 } wp--try } /wp-warp-must-return-one-result (path warp leaves a number) mustguard
+% { 1 2 3 3 { pop pop pop 1 } wp--guarded } /wp-warp-must-return-one-result (text warp leaves one point) mustguard
 %%EndSelfTest
 
 % ( dict body -- warp ): a warp that opens its own scratch dictionary, so
@@ -221,10 +225,10 @@
 % implicitly, so the closing edge is subdivided and bends with the rest.
 % @internal
 /wp--close-subpaths {
-  [ exch false exch
+  [ exch //false exch
     { dup 0 get
-      dup /m eq { pop exch { [/z] exch } if true }
-        { /z eq { exch pop false } { exch pop true } ifelse } ifelse
+      dup /m eq { pop exch { [/z] exch } if //true }
+        { /z eq { exch pop //false } { exch pop //true } ifelse } ifelse
     } forall
     { [/z] } if ]
 } bind def
@@ -249,20 +253,75 @@
   setmatrix
 } bind def
 
+% ---- Guards: the user's warp runs inside one of these ----
+% A warp is the user's code, so it can fail, leave results behind, open a
+% dictionary (the closure warps do) or push a mark. A guard runs it inside a
+% gsave and, on an error, puts the program back where the call found it:
+% operands popped back to the depth at entry (counted, not found by a mark,
+% since the warp may push marks of its own), dictionaries closed back to
+% the depth at entry, the gsave undone, and the error re-raised with stop so
+% $error keeps its name and offending command. A warp that fails to leave
+% exactly the expected results is an error too. What a guard needs to do
+% that, A = [ saved n d k type ], lives in the executable array that runs
+% the warp, not on the operand stack, where the warp could reach it.
+%   saved  operands to push again after the unwind
+%   n      operand stack depth to unwind to
+%   d      dictionary stack depth to unwind to
+%   k      how many results the warp must leave
+%   type   the type name the single result must have, or null
+% A warp's own unbalanced gsave is not undone: PostScript cannot query the
+% gsave depth, so a warp that opens a gsave and then fails leaves one level.
+
+% ( ... A -- ... A ): pop the operand stack back to A's depth (leaving A on
+% top) and close the dictionaries above A's depth. Names used here are all
+% bound: a warp's open dictionary can shadow any name a warp may define.
+% @internal
+/wp--rewind {
+  countdictstack 1 index 2 get sub 0 max { end } repeat
+  count 1 sub 1 index 1 get sub 0 max { exch pop } repeat
+} bind def
+
+% ( results A -- results ): raise wp-warp-must-return-one-result unless
+% the warp left exactly k results, of the right type if A names one.
+% @internal
+/wp--shape {
+  count 1 sub 1 index 1 get sub 1 index 3 get ne
+    { //true }
+    { dup 4 get dup null eq { pop //false } { 2 index type ne } ifelse }
+  ifelse
+  { pop wp-warp-must-return-one-result } { pop } ifelse
+} bind def
+
+% ( ... failed A -- ... ): after the warp ran. On an error, unwind, push
+% the saved operands, undo the gsave and re-raise. Otherwise the results
+% are all that is left of the warp: undo the gsave.
+% @internal
+/wp--settle {
+  exch { //wp--rewind exec 0 get aload pop grestore stop } { pop grestore } ifelse
+} bind def
+
+% ( A body -- results ): run body inside a gsave, as described above.
+% @internal
+/wp--protect {
+  gsave
+  [ [ 2 index //systemdict /exec get 5 index //wp--shape //systemdict /exec get ] cvx
+    //systemdict /stopped get 4 index //wp--settle //systemdict /exec get ] cvx
+  3 1 roll pop pop exec
+} bind def
+
 % ( saved region -- result ): run region, which takes the array saved on
-% the operand stack and leaves one result, inside a gsave. The user's warp
+% the operand stack and leaves one array, inside the guard. The user's warp
 % runs in there, so a warp that fails cannot leave its operands, its
-% graphics state or the decorator's own half-built path behind: the stack is
-% cleared back to what it was, the operands in saved are pushed again (the
-% operands the operator was called with, as a failing real operator leaves
-% them), the gsave is undone, and the error is re-raised with stop, which
-% keeps its name and offending command. On success the gsave is undone too,
-% so the result is all that is left, and the caller then rebuilds the path.
+% graphics state or the decorator's own half-built path behind: the
+% operands in saved are pushed again (the operands the operator was called
+% with, as a failing real operator leaves them) and the error is re-raised.
+% On success the result is all that is left, and the caller rebuilds the
+% path from it.
 % @internal
 /wp--try {
-  gsave exch dup mark exch 4 -1 roll stopped
-    { cleartomark grestore aload pop stop }
-    { exch pop exch pop grestore } ifelse
+  [ 2 index 2 index //systemdict /exec get ] cvx exch pop
+  exch count 2 sub countdictstack 1 /arraytype 5 array astore
+  exch //wp--protect exec
 } bind def
 
 % ( -- records ): the current path as it stands, curves kept, for
@@ -308,7 +367,7 @@
 % @internal
 /wp--unicode-font {
   currentfont dup /BuildChar known 1 index /BuildGlyph known or
-    { dup /UnicodeBuildChar known { /UnicodeBuildChar get true eq } { pop false } ifelse }
+    { dup /UnicodeBuildChar known { /UnicodeBuildChar get //true eq } { pop //false } ifelse }
     { pop gsave nulldevice 0 0 moveto 0 { pop pop 1 add } (\303\251) kshow grestore 0 eq }
   ifelse
 } bind def
@@ -317,7 +376,7 @@
 % byte the two readings would cut differently.
 % @internal
 /wp--unicode-text {
-  false exch { 128 ge or } forall { //wp--unicode-font exec } { false } ifelse
+  //false exch { 128 ge or } forall { //wp--unicode-font exec } { //false } ifelse
 } bind def
 
 % ( string pos n lo hi -- len ): how many bytes from pos, at most n, form
@@ -327,7 +386,7 @@
 % @internal
 /wp--utf8-run {
   6 dict begin
-  /hi exch def /lo exch def /n exch def /pos exch def /s exch def /k 1 def
+  /hi exch def /lo exch def /n exch def /pos exch def /s exch cvlit def /k 1 def
   { k n ge { exit } if
     pos k add s length ge { exit } if
     s pos k add get dup lo ge exch hi le and not { exit } if
@@ -375,7 +434,7 @@
 % @internal
 /wp--pieces {
   dup //wp--unicode-text exec
-  2 dict begin /u exch def /s exch def
+  2 dict begin /u exch def /s exch cvlit def
   [ 0 { dup s length ge { pop exit } if
         s 1 index u //wp--glyph-len exec
         s 2 index 2 index getinterval 3 1 roll add } loop ]
@@ -384,13 +443,13 @@
 
 % ( -- bool ): whether the current point exists, without raising an error.
 % @internal
-/wp--has-point { { currentpoint } stopped { false } { pop pop true } ifelse } bind def
+/wp--has-point { { currentpoint } stopped { //false } { pop pop //true } ifelse } bind def
 
 % ( -- bool ): whether there is a current font with outlines that charpath
 % can read: not a Type 3 font, whose glyphs charpath does not trace.
 % @internal
 /wp--outline-font {
-  { currentfont } stopped { false }
+  { currentfont } stopped { //false }
     { dup /BuildChar known exch /BuildGlyph known or not } ifelse
 } bind def
 
@@ -402,18 +461,22 @@
 % through the decorated operators.
 % @internal
 /wp--or-real {
-  exch { pop true } { 3 1 roll pop pop systemdict exch get exec false } ifelse
+  exch { pop //true } { 3 1 roll pop pop //systemdict exch get exec //false } ifelse
 } bind def
 
-% ( args n proc -- x y ): run proc on the n operands args inside a gsave.
+% ( args n proc -- x y ): run proc on the n operands args inside the guard.
 % proc builds glyph outlines, warps and fills them, and leaves the end
-% point. If it fails (a warp that errors), the graphics state, the path
-% and the operand stack are put back before the error is re-raised.
+% point. If it fails (a warp that errors, or leaves other than the end point),
+% the graphics state, the path, the operand stack down to what was below
+% args, and the dictionary stack are put back before the error is
+% re-raised. The operands in args are not given back: the show family
+% drops them.
 % @internal
 /wp--guarded {
-  gsave exch 2 add mark exch 1 roll stopped
-    { cleartomark grestore stop }
-    { 3 -1 roll pop grestore } ifelse
+  exch dup count 3 sub exch sub exch pop
+  [] exch countdictstack 2 null 5 array astore
+  exch [ exch //systemdict /exec get ] cvx
+  //wp--protect exec
 } bind def
 
 % ( piece prefix fillp -- ): one string's outlines filled through the
@@ -422,7 +485,7 @@
 % @internal
 /wp--paint {
   currentpoint 5 {
-    newpath moveto 3 -1 roll true charpath
+    newpath moveto 3 -1 roll //true charpath
     currentpoint 4 2 roll exch exec exec
   } //wp--guarded exec moveto
 } bind def
@@ -445,7 +508,7 @@
 % ( string prefix fillp -- ): show through the warp.
 % @internal
 /wp--show {
-  1 //wp--operands exec { 2 index type /stringtype eq } { false } ifelse
+  1 //wp--operands exec { 2 index type /stringtype eq } { //false } ifelse
   //wp--drawable exec
   /show //wp--or-real exec { //wp--paint exec } if
 } bind def
@@ -457,7 +520,7 @@
 % @internal
 /wp--awidth-path {
   8 dict begin
-  /fillp exch def /prefix exch def /s exch def
+  /fillp exch def /prefix exch def /s exch cvlit def
   /ay exch def /ax exch def /ch exch def /cy exch def /cx exch def
   s //wp--pieces exec /u exch def
   [ exch { dup u //wp--code exec ch eq { ax cx add ay cy add } { ax ay } ifelse
@@ -466,7 +529,7 @@
   end
   currentpoint 5 {
     newpath moveto 3 -1 roll
-    { aload pop 3 -1 roll true charpath rmoveto } forall
+    { aload pop 3 -1 roll //true charpath rmoveto } forall
     currentpoint 4 2 roll exch exec exec
   } //wp--guarded exec moveto
 } bind def
@@ -477,7 +540,7 @@
   3 //wp--operands exec {
     2 index type /stringtype eq
     4 index //wp--number exec and 5 index //wp--number exec and
-  } { false } ifelse
+  } { //false } ifelse
   //wp--drawable exec
   /ashow //wp--or-real exec { 0 0 0 8 3 roll //wp--awidth-path exec } if
 } bind def
@@ -488,9 +551,9 @@
   4 //wp--operands exec {
     2 index type /stringtype eq
     4 index type /integertype eq and
-    { 3 index dup 0 ge exch 255 le and } { false } ifelse
+    { 3 index dup 0 ge exch 255 le and } { //false } ifelse
     5 index //wp--number exec and 6 index //wp--number exec and
-  } { false } ifelse
+  } { //false } ifelse
   //wp--drawable exec
   /widthshow //wp--or-real exec { 0 0 5 2 roll //wp--awidth-path exec } if
 } bind def
@@ -502,9 +565,9 @@
     2 index type /stringtype eq
     4 index //wp--number exec and 5 index //wp--number exec and
     6 index type /integertype eq and
-    { 5 index dup 0 ge exch 255 le and } { false } ifelse
+    { 5 index dup 0 ge exch 255 le and } { //false } ifelse
     7 index //wp--number exec and 8 index //wp--number exec and
-  } { false } ifelse
+  } { //false } ifelse
   //wp--drawable exec
   /awidthshow //wp--or-real exec { //wp--awidth-path exec } if
 } bind def
@@ -520,7 +583,7 @@
 % now (a call of the procedure may have changed it).
 % @internal
 /wp--kshow-glyph {
-  dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { false } ifelse
+  dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { //false } ifelse
   exch begin
     /u exch def
     s pos u //wp--glyph-len exec
@@ -538,7 +601,7 @@
 % @internal
 /wp--kshow-paint {
   //wp--has-point exec not { pop pop pop /kshow errordict /nocurrentpoint get exec } if
-  //wp--outline-font exec { //wp--paint exec } { pop pop systemdict /show get exec } ifelse
+  //wp--outline-font exec { //wp--paint exec } { pop pop //systemdict /show get exec } ifelse
 } bind def
 
 % ( S -- code1 code2 proc true | false ): if text remains, the codes of
@@ -546,12 +609,12 @@
 % @internal
 /wp--kshow-next {
   dup /pos get 1 index /s get length ge
-    { /done true put false }
-    { dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { false } ifelse
+    { /done //true put //false }
+    { dup /s get 1 index /pos get get 128 ge { //wp--unicode-font exec } { //false } ifelse
       exch begin
         s pos 2 index //wp--glyph-len exec
         s pos 3 -1 roll getinterval exch //wp--code exec
-        code exch /proc load true
+        code exch /proc load //true
       end }
   ifelse
 } bind def
@@ -574,19 +637,19 @@
 /wp--kshow {
   2 //wp--operands exec {
     3 index dup type /arraytype eq exch xcheck and 3 index type /stringtype eq and
-  } { false } ifelse
+  } { //false } ifelse
   //wp--has-point exec and
   /kshow //wp--or-real exec {
     2 index length 0 eq { pop pop pop pop } {
       8 dict begin
-      /fillp exch def /prefix exch def /s exch def /proc exch def
-      /pos 0 def /code 0 def /done false def
+      /fillp exch def /prefix exch def /s exch cvlit def /proc exch def
+      /pos 0 def /code 0 def /done //false def
       currentdict end
       dup dup
-      [ exch //wp--kshow-glyph systemdict /exec get //wp--kshow-paint systemdict /exec get
-        7 -1 roll //wp--kshow-next systemdict /exec get
-        //wp--kshow-call systemdict /exec get ] cvx
-      [ exch systemdict /loop get 4 -1 roll //wp--kshow-done systemdict /exec get ] cvx
+      [ exch //wp--kshow-glyph //systemdict /exec get //wp--kshow-paint //systemdict /exec get
+        7 -1 roll //wp--kshow-next //systemdict /exec get
+        //wp--kshow-call //systemdict /exec get ] cvx
+      [ exch //systemdict /loop get 4 -1 roll //wp--kshow-done //systemdict /exec get ] cvx
       exec
     } ifelse
   } if
@@ -599,17 +662,138 @@
 % Type 3 font, the real glyphshow draws the glyph.
 % @internal
 /wp--glyphshow {
-  1 //wp--operands exec { 2 index type /nametype eq } { false } ifelse
+  1 //wp--operands exec { 2 index type /nametype eq } { //false } ifelse
   //wp--drawable exec
   dup { //wp--unicode-font exec not and } if
   /glyphshow //wp--or-real exec {
     currentpoint 5 {
       newpath moveto 3 -1 roll currentfont dup length dict copy
       dup /Encoding 256 array dup 0 7 -1 roll put put setfont
-      (\000) true charpath
+      (\000) //true charpath
       currentpoint 4 2 roll exch exec exec
     } //wp--guarded exec moveto
   } if
+} bind def
+
+% ---- xshow, yshow and xyshow: glyphs placed by the program ----
+% These draw each glyph, then move the pen by the next displacement given
+% in user space (dx for xshow, dy for yshow, dx dy for xyshow) instead of by
+% the glyph's width. The decorators cut the text as the show family does,
+% charpath each glyph where the program puts it, and fill the outlines
+% through the warp. The displacements are user-space numbers, so the warp
+% bends where the glyphs land, as it bends everything else, and the
+% displacements themselves are not warped.
+%
+% The program's arguments are checked by the real operator, not here: a
+% dry run on the null device, from a made-up current point, says whether
+% the operator would accept the operands, the glyph count and every
+% displacement. Anything it refuses goes to the real operator, which then
+% raises the error it always raises, in its own order, with the operand
+% stack it leaves. Type 3 text is shown by the real operator too, as for the
+% rest of the show family. cshow paints nothing itself (its procedure's own
+% show calls go through the decorated operators), so it needs no decorator.
+
+% ( ... bool depth -- bool ): after a dry run: pop whatever the real
+% operator left beneath its result, back to depth items. pscat's operators
+% drop their operands on an error (#1198); gs's leave them, and a pscat that
+% did the same would leave the two copies here.
+% @internal
+/wp--dry-settle {
+  count 2 sub exch sub 0 max { exch pop } repeat
+} bind def
+
+% ( string nums prefix fillp ok name -- string nums prefix fillp ok ): when
+% ok, run the real operator name on the program's string and displacements
+% on the null device; ok stays true only if it raised no error. The copies
+% are held by the executable array that runs the operator, and the stack is
+% put back to its depth by count, whatever the operator leaves. No `[`
+% is executed here: pscat names the last name it ran as the offending
+% command of a routed error, which must stay the operator the program called.
+% @internal
+/wp--dry-run {
+  exch {
+    //systemdict exch get count 1 sub
+    5 index cvlit 5 index cvlit 3 index 3 array astore cvx
+    exch //systemdict /stopped get exch
+    //wp--dry-settle //systemdict /exec get 5 array astore cvx
+    exch pop
+    gsave nulldevice 0 0 moveto exec grestore not
+  } { pop //false } ifelse
+} bind def
+
+% ( pieces nums axes -- deltas ): [dx dy] for each glyph from a numarray:
+% axes 0 for xshow (dx), 1 for yshow (dy), 2 for xyshow (dx dy).
+% @internal
+/wp--array-deltas {
+  4 dict begin /axes exch def /nums exch cvlit def /k 0 def
+  [ exch { pop
+      axes 0 eq { nums k get 0 /k k 1 add def } {
+      axes 1 eq { 0 nums k get /k k 1 add def } {
+        nums k get nums k 1 add get /k k 2 add def } ifelse } ifelse
+      2 array astore
+  } forall ]
+  end
+} bind def
+
+% ( numstring -- numarray ): an encoded number string as the array of
+% numbers it holds, by scanning it as the binary token it is (token type
+% 149, PLRM 3.14.2). The real operator has accepted the string already; with
+% the object format at 0 the scanner would read it as text, so that is set
+% to 1 for the scan and put back, whether or not the scan raises an error.
+% @internal
+/wp--numbers {
+  currentobjectformat 0 eq
+    { 1 setobjectformat { token } stopped 0 setobjectformat { stop } if
+      pop exch pop }
+    { token pop exch pop } ifelse
+} bind def
+
+% ( string nums prefix fillp axes -- ): the glyphs of string, drawn
+% through the warp where the displacements in nums put them. Each glyph
+% starts where the last one's displacement left the pen; the path of all of
+% them is filled once, and the current point ends where the real operator
+% would leave it. The path in force is kept. No dictionary of ours is open
+% while charpath or the warp runs.
+% @internal
+/wp--positioned {
+  8 dict begin
+  /axes exch def /fillp exch def /prefix exch def
+  /nums exch cvlit def /s exch cvlit def
+  s //wp--pieces exec pop /pieces exch def
+  nums type /stringtype eq { nums //wp--numbers exec /nums exch def } if
+  pieces nums axes //wp--array-deltas exec /deltas exch def
+  [ 0 1 pieces length 1 sub {
+      dup pieces exch get exch deltas exch get aload pop 3 array astore
+  } for ]
+  /prefix load /fillp load
+  end
+  currentpoint 5 {
+    newpath moveto 3 -1 roll
+    { aload pop currentpoint 3 -1 roll add 3 1 roll add exch
+      3 -1 roll //true charpath moveto } forall
+    currentpoint 4 2 roll exch exec exec
+  } //wp--guarded exec moveto
+} bind def
+
+% ( string nums prefix fillp -- ): xshow through the warp.
+% @internal
+/wp--xshow {
+  2 //wp--operands exec //wp--drawable exec /xshow //wp--dry-run exec
+  /xshow //wp--or-real exec { 0 //wp--positioned exec } if
+} bind def
+
+% ( string nums prefix fillp -- ): yshow through the warp.
+% @internal
+/wp--yshow {
+  2 //wp--operands exec //wp--drawable exec /yshow //wp--dry-run exec
+  /yshow //wp--or-real exec { 1 //wp--positioned exec } if
+} bind def
+
+% ( string nums prefix fillp -- ): xyshow through the warp.
+% @internal
+/wp--xyshow {
+  2 //wp--operands exec //wp--drawable exec /xyshow //wp--dry-run exec
+  /xyshow //wp--or-real exec { 2 //wp--positioned exec } if
 } bind def
 
 % ( -- bool ): whether the stack ends in the four numbers x y w h. The
@@ -641,7 +825,7 @@
   matrix currentmatrix dup //wp--apply /exec load 3 array astore cvx
   4 1 roll //wp--compute /exec load 5 array astore cvx
   % apply: { records -- } rebuilds the path; warp: { -- records } warps it
-  24 dict begin /warp exch def /apply exch def /realfill systemdict /fill get def
+  24 dict begin /warp exch def /apply exch def /realfill //systemdict /fill get def
   % Each wrapper warps the path inside wp--try, which takes an array of
   % the operands to give back if the warp fails and a region that consumes
   % it and leaves the warped records; then it rebuilds the path from them.
@@ -653,7 +837,10 @@
   } forall
   % clip and eoclip keep the current path: clip to the warped copy, then
   % put the original back so later painting warps it only once
-  /clipregion [ /pop load //wp--save-path /exec load /warp load /exec load
+  % the warp runs in a guard of its own, so its result is checked on its
+  % own, before the saved path joins it
+  /clipregion [ /pop load //wp--save-path /exec load
+                [] /region load //wp--try /exec load
                 2 /array load /astore load ] cvx def
   /clipfirst [ [] /clipregion load //wp--try /exec load /aload load /pop load
                /apply load /exec load ] cvx def
@@ -673,20 +860,20 @@
     [ //wp--rect-ok /exec load
       [ 4 /array load /astore load /rectregion load //wp--try /exec load
         /gsave load /apply load /exec load /realfill load /grestore load ] cvx
-      [ systemdict /rectfill get ] cvx /ifelse load ] cvx ] cvx def
+      [ //systemdict /rectfill get ] cvx /ifelse load ] cvx ] cvx def
   /rectstrokeregion [ /aload load /pop load /newpath load //wp--rect /exec load
                       /strokepath load /warp load /exec load ] cvx def
   /rectstroke [ /pop load
     [ //wp--rect-ok /exec load
       [ 4 /array load /astore load /rectstrokeregion load //wp--try /exec load
         /gsave load /apply load /exec load /realfill load /grestore load ] cvx
-      [ systemdict /rectstroke get ] cvx /ifelse load ] cvx ] cvx def
+      [ //systemdict /rectstroke get ] cvx /ifelse load ] cvx ] cvx def
   % rectclip: like clip, but it starts from a fresh path and leaves none
   /rectclip [ /pop load
     [ //wp--rect-ok /exec load
       [ 4 /array load /astore load /rectregion load //wp--try /exec load
-        /apply load /exec load systemdict /clip get /newpath load ] cvx
-      [ systemdict /rectclip get ] cvx /ifelse load ] cvx ] cvx def
+        /apply load /exec load //systemdict /clip get /newpath load ] cvx
+      [ //systemdict /rectclip get ] cvx /ifelse load ] cvx ] cvx def
   % the show family: glyph outlines filled through the warp. As with the
   % real operators, the current path is kept and only the current point
   % advances. Each wrapper hands its operands, the prefix and a fill to
@@ -699,7 +886,8 @@
   /fillp [ /realfill load ] cvx def
   [ [ /show //wp--show ] [ /ashow //wp--ashow ] [ /widthshow //wp--widthshow ]
     [ /awidthshow //wp--awidthshow ] [ /kshow //wp--kshow ]
-    [ /glyphshow //wp--glyphshow ] ] {
+    [ /glyphshow //wp--glyphshow ] [ /xshow //wp--xshow ] [ /yshow //wp--yshow ]
+    [ /xyshow //wp--xyshow ] ] {
     aload pop
     [ /pop load [ /prefix load /fillp load 6 -1 roll /exec load ] cvx ] cvx def
   } forall
@@ -747,10 +935,10 @@
   % its caller and leave results. exec and stopped come straight from
   % systemdict: a decorated exec or stopped in the scope cannot stop the
   % program from running or the scope from closing.
-  //wp--install systemdict /exec get 4 -1 roll      % depth decorators install exec program
-  //wp--runprog systemdict /exec get 6 array astore cvx
-  systemdict /stopped get 3 -1 roll
-  //wp--unwind systemdict /exec get 5 array astore cvx exec
+  //wp--install //systemdict /exec get 4 -1 roll      % depth decorators install exec program
+  //wp--runprog //systemdict /exec get 6 array astore cvx
+  //systemdict /stopped get 3 -1 roll
+  //wp--unwind //systemdict /exec get 5 array astore cvx exec
 } bind def
 
 % @kind: Procedure

@@ -361,12 +361,45 @@ fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
 /// The show-family programs the decorators must draw through the warp
 /// (#1172): a line, the text, then the line stroked, so a decorator that
 /// lost the caller's path would show as a missing line.
-const SHOW_FAMILY: [(&str, &str); 5] = [
+const SHOW_FAMILY: [(&str, &str); 19] = [
     ("ashow", "2 1 (AVA) ashow"),
     ("widthshow", "6 0 32 (A V) widthshow"),
     ("awidthshow", "6 2 32 1 0 (A V) awidthshow"),
     ("kshow", "{ pop pop -3 0 rmoveto } (AVA) kshow"),
     ("glyphshow", "/eacute glyphshow /Aring glyphshow"),
+    // #1191: the glyphs go where the numbers put them
+    ("xshow", "(ABC) [20 22 24] xshow"),
+    ("yshow", "(ABC) [8 -6 10] yshow"),
+    ("xyshow", "(ABC) [20 4 22 -3 24 6] xyshow"),
+    // executable operands are data, not code (an executable array is
+    // pushed, an executable string would run if it were called by name)
+    ("xshow (executable array)", "(ABC) {20 22 24} xshow"),
+    ("yshow (executable array)", "(ABC) {8 -6 10} yshow"),
+    (
+        "xyshow (executable array)",
+        "(ABC) {20 4 22 -3 24 6} xyshow",
+    ),
+    ("xshow (executable text)", "(ABC) cvx [20 22 24] xshow"),
+    ("yshow (executable text)", "(ABC) cvx [8 -6 10] yshow"),
+    (
+        "xyshow (executable text)",
+        "(ABC) cvx [20 4 22 -3 24 6] xyshow",
+    ),
+    ("ashow (executable text)", "2 1 (AVA) cvx ashow"),
+    ("widthshow (executable text)", "6 0 32 (A V) cvx widthshow"),
+    (
+        "awidthshow (executable text)",
+        "6 2 32 1 0 (A V) cvx awidthshow",
+    ),
+    (
+        "kshow (executable text)",
+        "{ pop pop -3 0 rmoveto } (AVA) cvx kshow",
+    ),
+    // a number string: IEEE binary32, big-endian, 6 numbers: 20 4 22 -3 24 6
+    (
+        "xyshow (encoded)",
+        "(ABC) (\\225\\060\\000\\006\\101\\240\\000\\000\\100\\200\\000\\000\\101\\260\\000\\000\\300\\100\\000\\000\\101\\300\\000\\000\\100\\300\\000\\000) xyshow",
+    ),
 ];
 
 fn show_program(text: &str) -> String {
@@ -519,6 +552,9 @@ fn type3_text_bends_under_every_show_operator() {
         ("awidthshow", "6 2 32 1 0 (A B) awidthshow"),
         ("kshow", "{ pop pop -3 0 rmoveto } (AB) kshow"),
         ("glyphshow", "/A glyphshow /B glyphshow"),
+        ("xshow", "(AB) [22 24] xshow"),
+        ("yshow", "(AB) [4 -6] yshow"),
+        ("xyshow", "(AB) [22 4 24 -6] xyshow"),
     ];
     for (op, text) in texts {
         let program = format!("newpath 10 40 moveto {text}");
@@ -557,14 +593,37 @@ fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
         "newpath 10 10 moveto { 1 1 32.0 (AB) widthshow } stopped",
         "newpath { 1 1 (x) 1 1 (AB) awidthshow } stopped",
         "newpath 10 10 moveto { 5 (AB) kshow } stopped",
-        "newpath 10 10 moveto { { pop pop newpath } (AB) kshow } stopped",
         "newpath 10 10 moveto { 65 glyphshow } stopped",
         "newpath 10 10 moveto { 7 show } stopped",
+        // xshow, yshow, xyshow (#1191): the real operator checks, in its order
+        "newpath 10 10 moveto { (AB) [1] xshow } stopped",
+        "newpath 10 10 moveto { (AB) [1 2 3] xyshow } stopped",
+        "newpath { (AB) [1 2] xshow } stopped",
+        "newpath { (AB) [1] xshow } stopped",
+        "newpath 10 10 moveto { (AB) [1 (x)] xshow } stopped",
+        "newpath { (AB) [1 (x)] yshow } stopped",
+        "newpath 10 10 moveto { (AB) [1 2 (x) 4] xyshow } stopped",
+        "newpath 10 10 moveto { 7 [1 2] xshow } stopped",
+        "newpath 10 10 moveto { (AB) 5 yshow } stopped",
+        "newpath 10 10 moveto { [1 2] (AB) xyshow } stopped",
+        "newpath 10 10 moveto { [1 2] xshow } stopped",
+        "newpath 10 10 moveto { (AB) (nope) xshow } stopped",
+        "newpath 10 10 moveto { (AB) (\\225\\060\\000\\003\\100\\000\\000\\000) xshow } stopped",
+        "newpath { (AB) (\\225\\060\\000\\002\\100\\000\\000\\000\\100\\000\\000\\000) xshow } stopped",
     ] {
         assert_same_as_native(&format!(
-            "/Helvetica findfont 24 scalefont setfont 9 {body} $error /errorname get"
+            "/Helvetica findfont 24 scalefont setfont 9 {body} \
+             $error /errorname get $error /command get"
         ));
     }
+    // a kshow procedure that leaves no current point: the error and the
+    // operands match. (The offending command does not: pscat reports the last
+    // name it executed, `newpath`, for the real kshow; the decorator names
+    // `kshow`, as gs does.)
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont 9 newpath 10 10 moveto \
+         { { pop pop newpath } (AB) kshow } stopped $error /errorname get",
+    );
     // a warp that fails mid-glyph leaves no gsave and no glyph path behind
     let it = run("/Helvetica findfont 24 scalefont setfont 5 setlinewidth \
                   { newpath 0 0 moveto 50 50 lineto 10 10 moveto \
@@ -586,64 +645,294 @@ const PAINTERS: [(&str, &str); 8] = [
     ("rectclip", "1 2 30 40 rectclip"),
 ];
 
+/// Run each path painting operator under a warp that fails and check what
+/// the program finds when it catches the error: `run_with` is the end of
+/// the `wp-run` / `wp-run-path` call that follows the program. Returns the
+/// error name and offending command. The operator is called with the
+/// operands it is called with; the CTM is moved first, so a CTM left at the
+/// warp's base would show; `/y` is the program's own, which must still
+/// resolve to it, so a warp's scratch dictionary left open would show.
+fn painter_after_failure(op: &str, call: &str, run_with: &str) -> (String, String) {
+    let operands = call.strip_suffix(op).unwrap().trim();
+    let program = format!(
+        "/y 7 def {{ /snap {{ [ {{2 array astore}} {{2 array astore}} {{6 array astore}} {{[/z]}} \
+                      pathforall ] }} bind def \
+           1 setlinewidth 10 20 translate gsave 9 setlinewidth \
+           newpath 0 0 moveto 10 0 20 30 40 50 curveto 40 0 lineto closepath \
+           /args [ 77 66 {operands} ] def \
+           /pre snap def /ctm0 matrix currentmatrix def /d0 countdictstack def \
+           args aload pop {{ {op} }} stopped \
+           /caught exch def \
+           count array astore /after exch def \
+           $error /errorname get $error /command get countdictstack d0 sub \
+           snap pre matrix currentmatrix ctm0 \
+           grestore currentlinewidth after args caught y \
+         }} {run_with}"
+    );
+    let it = run(&program);
+    let s: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    let [
+        name,
+        command,
+        dicts,
+        path,
+        pre,
+        ctm,
+        ctm0,
+        width,
+        after,
+        args,
+        caught,
+        y,
+    ] = &s[..]
+    else {
+        panic!("{op}: {s:?}");
+    };
+    assert_eq!(caught, "true", "{op}: no error reached the program");
+    assert_eq!(after, args, "{op}: operand stack");
+    assert_eq!(dicts, "0", "{op}: dictionary stack");
+    assert_eq!(y, "7", "{op}: the program's y was shadowed");
+    assert_eq!(path, pre, "{op}: current path");
+    assert!(
+        path.contains("10.0 0.0 20.0 30.0 40.0 50.0"),
+        "{op}: curve kept"
+    );
+    assert_eq!(ctm, ctm0, "{op}: CTM");
+    assert_eq!(width, "1.0", "{op}: a gsave was left behind");
+    (name.clone(), command.clone())
+}
+
 #[test]
 fn a_failing_warp_leaves_the_stack_and_graphics_state_as_the_call_had_them() {
     // Under a warp that raises undefinedresult (#1184), each decorated
     // painting operator, caught with stopped, leaves what the real one
     // leaves: the operands it was called with (the real rectfill keeps
     // them on a typecheck: gs prints 77 1 2 (a) 4 for `77 1 2 (a) 4
-    // rectfill` under stopped), the path and CTM it was called with, the
-    // gsave depth (a warp that opens no dictionary of its own, so the
-    // dictionary stack is checked for the decorator's part only). The CTM
-    // is moved first, so a
-    // CTM left at the warp's base would show.
+    // rectfill` under stopped), the path and CTM it was called with and
+    // the gsave depth.
     for (op, call) in PAINTERS {
-        let operands = call.strip_suffix(op).unwrap().trim();
-        let program = format!(
-            "{{ /snap {{ [ {{2 array astore}} {{2 array astore}} {{6 array astore}} {{[/z]}} \
-                          pathforall ] }} bind def \
-               1 setlinewidth 10 20 translate gsave 9 setlinewidth \
-               newpath 0 0 moveto 10 0 20 30 40 50 curveto 40 0 lineto closepath \
-               /args [ 77 66 {operands} ] def \
-               /pre snap def /ctm0 matrix currentmatrix def /d0 countdictstack def \
-               args aload pop {{ {op} }} stopped \
-               /caught exch def \
-               count array astore /after exch def \
-               $error /errorname get $error /command get countdictstack d0 sub \
-               snap pre matrix currentmatrix ctm0 \
-               grestore currentlinewidth after args caught \
-             }} {{ pop pop 1 0 div }} 2 wp-run"
-        );
-        let it = run(&program);
-        let s: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-        let [
-            name,
-            command,
-            dicts,
-            path,
-            pre,
-            ctm,
-            ctm0,
-            width,
-            after,
-            args,
-            caught,
-        ] = &s[..]
-        else {
-            panic!("{op}: {s:?}");
-        };
-        assert_eq!(caught, "true", "{op}: no error reached the program");
+        let (name, command) = painter_after_failure(op, call, "{ pop pop 1 0 div } 2 wp-run");
         assert_eq!(name, "/undefinedresult", "{op}");
         assert_eq!(command, "div", "{op}");
-        assert_eq!(after, args, "{op}: operand stack");
-        assert_eq!(dicts, "0", "{op}: dictionary stack");
-        assert_eq!(path, pre, "{op}: current path");
-        assert!(
-            path.contains("10.0 0.0 20.0 30.0 40.0 50.0"),
-            "{op}: curve kept"
+    }
+}
+
+#[test]
+fn a_path_transform_that_fails_with_its_own_mark_open_is_unwound_by_depth() {
+    // #1199: the guard used to clear back to the nearest mark, which was the
+    // transform's own: `{ mark 1 0 div }` left the decorator's records, a
+    // mark and the rect operands behind, and the operands were not put back
+    // (gs: `77 1 2 3 4 rectfill` leaves them on an error, run above).
+    for (op, call) in PAINTERS {
+        let (name, command) = painter_after_failure(op, call, "{ mark 1 0 div } 2 wp-run-path");
+        assert_eq!(name, "/undefinedresult", "{op}");
+        assert_eq!(command, "div", "{op}");
+        // a mark and more of the transform's own debris
+        let (name, _) = painter_after_failure(
+            op,
+            call,
+            "{ [ exch { 1 } forall mark 5 6 7 1 0 div } 2 wp-run-path",
         );
-        assert_eq!(ctm, ctm0, "{op}: CTM");
-        assert_eq!(width, "1.0", "{op}: a gsave was left behind");
+        assert_eq!(name, "/undefinedresult", "{op}");
+    }
+}
+
+#[test]
+fn a_closure_warp_that_fails_does_not_leave_its_scratch_dictionary_open() {
+    // #1199: wp-unroll with a point exactly at its centre fails in `atan`
+    // (0 0 atan is undefinedresult in gs too) with the warp's dictionary
+    // open: countdictstack stayed one higher and the program's y resolved to
+    // the warp's. The path starts at 10 20, the centre. The operators whose
+    // path has no point exactly there use a closure warp that always fails,
+    // with a y of its own.
+    for (op, call) in PAINTERS {
+        let (name, _) = painter_after_failure(
+            op,
+            call,
+            "<< /y 99 >> { pop pop y 0 div } wp--closure 2 wp-run",
+        );
+        assert_eq!(name, "/undefinedresult", "{op}");
+        if matches!(op, "fill" | "eofill" | "clip" | "eoclip") {
+            let (name, _) = painter_after_failure(op, call, "10 20 1 wp-unroll 2 wp-run-path");
+            assert_eq!(name, "/undefinedresult", "{op}: wp-unroll at its centre");
+        }
+    }
+}
+
+#[test]
+fn a_transform_that_leaves_other_than_one_array_is_refused_and_unwound() {
+    // #1199: `{ 99 exch }` leaves two results and used to be accepted, and a
+    // transform that leaves nothing made the guard eat the caller's operands.
+    for (op, call) in PAINTERS {
+        for transform in ["{ 99 exch }", "{ pop }", "{ pop 5 }"] {
+            let (name, command) =
+                painter_after_failure(op, call, &format!("{transform} 2 wp-run-path"));
+            assert_eq!(name, "/undefined", "{op} {transform}");
+            assert_eq!(
+                command, "wp-warp-must-return-one-result",
+                "{op} {transform}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cshow_needs_no_decorator_because_what_its_procedure_shows_goes_through_the_warp() {
+    // #1191: cshow paints nothing. The procedure gets code wx wy, and the
+    // real widths are right under any warp (a warp does not change a
+    // font's metrics), while the glyphs the procedure shows with `show`
+    // are drawn by the decorated operator.
+    let text = "{ pop pop 1 string dup 0 4 -1 roll put show } (AVA) cshow";
+    let program = show_program(text);
+    let native = render(&program);
+    assert!(ink(&native) > 2000, "cshow drew {} pixels", ink(&native));
+    let warped = render(&format!("{{ {program} }} {{}} 2 wp-run"));
+    let worst = worst_block_diff(&warped, &native, 8);
+    assert!(worst < 4.0, "identity warp changed cshow text: {worst}");
+    let shifted = render(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+    let moved = render(&format!("20 5 translate {program}"));
+    let worst = worst_block_diff(&shifted, &moved, 8);
+    assert!(worst < 4.0, "cshow's text did not follow the warp: {worst}");
+    // the widths it reports, the current point it leaves and the stack
+    assert_same_as_native(
+        "/Helvetica findfont 24 scalefont setfont 9 newpath 15 50 moveto \
+         [ { 3 array astore aload pop } (AV) cshow ] \
+         currentpoint { pop pop 7 } (AV) cshow",
+    );
+    // no decorator is built for it: the operator stays the real one
+    let it = run("{} 4 wp-decorators dup /cshow known exch /xyshow known");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["false", "true"], "{stack:?}");
+}
+
+#[test]
+fn xshow_family_places_unicode_glyphs_and_ignores_extra_numbers() {
+    // one number per glyph, and a Hangul syllable is one glyph (three bytes
+    // of UTF-8), so the pen moves by three numbers for six syllables' worth
+    // of bytes; extra numbers are allowed
+    let font = "/NotoSansKR-Regular findfont 22 scalefont setfont";
+    for text in [
+        "(\u{c548}\u{c548}\u{c548}) [20 24 28 99 99] xshow",
+        "(\u{c548}\u{c548}) [24 -4 22 3 1 1] xyshow",
+    ] {
+        let program = format!("{font} newpath 10 40 moveto {text}");
+        let native = render(&program);
+        assert!(ink(&native) > 500, "{text}: {} pixels", ink(&native));
+        let warped = render(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+        let moved = render(&format!("20 5 translate {program}"));
+        let worst = worst_block_diff(&warped, &moved, 8);
+        assert!(worst < 4.0, "{text}: did not follow the warp: {worst}");
+        assert_same_as_native(&format!("{font} newpath 10 40 moveto {text} currentpoint"));
+    }
+}
+
+#[test]
+fn the_dry_run_pops_back_to_its_depth_whatever_the_operator_leaves() {
+    // pscat's operators drop their operands on an error (#1198) and gs's
+    // leave them: the dry run must not depend on which
+    let it = run("1 2 3 (j) (k) true 3 wp--dry-settle");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["1", "2", "3", "true"], "{stack:?}");
+    let it = run("1 2 3 false 3 wp--dry-settle");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["1", "2", "3", "false"], "{stack:?}");
+}
+
+#[test]
+fn an_encoded_number_string_works_with_the_object_format_at_zero() {
+    // the scanner reads token 149 only while the object format is not 0, so
+    // the decorator raises it for the scan and puts it back
+    assert_same_as_native(
+        "0 setobjectformat /Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         (AB) (\\225\\060\\000\\004\\101\\240\\000\\000\\100\\200\\000\\000\\101\\260\\000\\000\\300\\100\\000\\000) xyshow \
+         currentpoint currentobjectformat",
+    );
+    let program = "0 setobjectformat /Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         (AB) (\\225\\060\\000\\004\\101\\240\\000\\000\\100\\200\\000\\000\\101\\260\\000\\000\\300\\100\\000\\000) xyshow";
+    let shifted = render(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+    let moved = render(&format!("20 5 translate {program}"));
+    assert!(ink(&moved) > 500);
+    assert!(worst_block_diff(&shifted, &moved, 8) < 4.0);
+}
+
+#[test]
+fn xshow_family_bends_with_a_real_warp_and_places_glyphs_in_user_space() {
+    // the displacements are user space numbers: under a scale their pen
+    // path is scaled, and a warp then bends where the glyphs land
+    let text = "(HHH) [20 20 20] xshow";
+    let program = format!("/Helvetica findfont 20 scalefont setfont newpath 10 50 moveto {text}");
+    let flat = render(&format!("{{ {program} }} {{}} 2 wp-run"));
+    let bent = render(&format!("{{ {program} }} 10 120 wp-ripple 2 wp-run"));
+    assert!(ink(&bent) > 500);
+    assert!(
+        worst_block_diff(&flat, &bent, 8) > 20.0,
+        "the ripple did not bend the text"
+    );
+    // positions: yshow moves only up the page
+    let it = run(
+        "/Helvetica findfont 20 scalefont setfont newpath 10 10 moveto \
+                  { (HH) [5 7] yshow currentpoint } {} 2 wp-run",
+    );
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack, ["10.0", "22.0"], "{stack:?}");
+}
+
+/// A show-family `text` (at the current point 20 20, with the program's
+/// own `9` under it) run under a warp that fails: what the program finds
+/// after it catches the error. `run_with` ends the `wp-run` call.
+fn show_after_failure(text: &str, run_with: &str) -> String {
+    let program = format!(
+        "/y 7 def {{ /Helvetica findfont 24 scalefont setfont \
+           /snap {{ [ {{2 array astore}} {{2 array astore}} {{6 array astore}} {{[/z]}} \
+                      pathforall ] }} bind def \
+           1 setlinewidth gsave 9 setlinewidth \
+           newpath 5 5 moveto 80 5 lineto 20 20 moveto \
+           /pre snap def /d0 countdictstack def \
+           9 {{ {text} }} stopped /caught exch def \
+           count array astore /after exch def \
+           $error /errorname get countdictstack d0 sub snap pre \
+           grestore currentlinewidth after caught y \
+         }} {run_with}"
+    );
+    let it = run(&program);
+    let s: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    let [name, dicts, path, pre, width, after, caught, y] = &s[..] else {
+        panic!("{text}: {s:?}");
+    };
+    assert_eq!(caught, "true", "{text}: no error reached the program");
+    assert_eq!(after, "[9]", "{text}: {run_with}: operand stack");
+    assert_eq!(dicts, "0", "{text}: {run_with}: dictionary stack");
+    assert_eq!(y, "7", "{text}: the program's y was shadowed");
+    assert_eq!(path, pre, "{text}: {run_with}: current path");
+    assert_eq!(width, "1.0", "{text}: a gsave was left behind");
+    name.clone()
+}
+
+#[test]
+fn the_show_family_guard_unwinds_by_depth_too() {
+    // #1199: the same two gaps as the path painters, in the guard of the
+    // show family (wp--guarded): a transform's own mark, and a closure warp's
+    // open dictionary (wp-unroll with a glyph point exactly at its centre,
+    // here the first point of the A that starts every text but glyphshow's).
+    let centre = "/Helvetica findfont 24 scalefont setfont \
+                  newpath 20 20 moveto (A) true charpath flattenpath \
+                  [ {2 array astore} {pop pop} {pop pop pop pop pop pop} {} pathforall ] \
+                  0 get aload pop 1 wp-unroll newpath 2 wp-run-path";
+    let mut texts = vec![("show", "(AB) show")];
+    texts.extend(SHOW_FAMILY);
+    for (op, text) in texts {
+        let mark = show_after_failure(text, "{ mark 1 0 div } 2 wp-run-path");
+        assert_eq!(mark, "/undefinedresult", "{op}");
+        let closure =
+            show_after_failure(text, "<< /y 99 >> { pop pop y 0 div } wp--closure 2 wp-run");
+        assert_eq!(closure, "/undefinedresult", "{op}");
+        // extra results: refused, and unwound all the same
+        show_after_failure(text, "{ 99 exch } 2 wp-run-path");
+        show_after_failure(text, "{ pop } 2 wp-run-path");
+        if op != "glyphshow" {
+            let centred = show_after_failure(text, centre);
+            assert_eq!(centred, "/undefinedresult", "{op}: wp-unroll at its centre");
+        }
     }
 }
 
