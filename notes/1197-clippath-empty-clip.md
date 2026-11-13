@@ -33,7 +33,9 @@ lines and re-runs gs where it is installed).
 - `Gfx::set_path_to_clip` ends by swapping a path with no line, curve or
   close for the device-origin `moveto`. A rectangle chain whose
   intersection has no area goes through `degenerate_chain_boundary`.
-- `PsPath::as_axis_aligned_rect` accepts a zero-area box, so a degenerate
+- `PsPath::as_axis_aligned_rect` accepts a box that is *exactly* zero-area
+  in width or height (a span that is merely under 1e-3 still goes through
+  the edge check, so a retraced thin line is not refit into a strip), so a degenerate
   clip stays on the exact rectangle path instead of the mask trace.
 - `rectclip` normalises the width of a zero-area rect before building its
   path (the corner order above).
