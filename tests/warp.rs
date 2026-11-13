@@ -661,3 +661,35 @@ fn the_path_painters_still_paint_and_leave_the_real_paths_behind() {
         ));
     }
 }
+
+#[test]
+fn rect_operators_with_bad_operands_or_the_array_form_go_to_the_real_operator() {
+    // Not four numbers on the stack: the real operator raises its own error
+    // (name, command and the operands it leaves), and the numarray form is
+    // drawn unwarped. The warp fails if it is reached, so none of these
+    // may reach it.
+    for op in ["rectfill", "rectstroke", "rectclip"] {
+        for operands in [
+            "[0 0 10 10]",
+            "1 2",
+            "1 2 (a) 4",
+            "1 2 3 (a)",
+            "",
+            "[0 0 10 10] [0 0 5 5]",
+        ] {
+            let body = format!(
+                "newpath 0 0 moveto 9 9 lineto 77 {{ {operands} {op} }} stopped \
+                 {{ $error /errorname get $error /command get }} {{ null null }} ifelse"
+            );
+            let native = stack_text(&body);
+            let warped = stack_text(&format!("{{ {body} }} {{ pop pop 1 0 div }} 2 wp-run"));
+            assert_eq!(warped, native, "{op}: {operands}");
+        }
+    }
+    // the cases above do raise the plain operator's error, not the warp's
+    let it = run("77 { 1 2 (a) 4 rectfill } stopped $error /command get");
+    assert_eq!(
+        it.operand_stack().last().map(|o| o.repr()).as_deref(),
+        Some("rectfill")
+    );
+}

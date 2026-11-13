@@ -27,3 +27,10 @@ operators, a leaked `gsave` and the rect path.
   was #1179's call and is unchanged.
 - A warp that leaves its own `gsave` open and then fails still leaves that
   one level; only the decorator's gsave is balanced.
+- **Rect operands are checked first.** `wp--rect-ok` tests for four numbers
+  on top of the stack before `4 array astore` (pscat's `astore` empties the
+  stack on a stackunderflow). Otherwise the real operator runs and raises its
+  own error, or draws the array form unwarped. `wp--rect-ok` uses `//false`
+  because pscat reports the last executed *name* as the offending command.
+- Known gaps: guards unwind to the nearest mark and closure warps leave their
+  scratch dictionary open (#1199); pscat drops operands on errors (#1198).

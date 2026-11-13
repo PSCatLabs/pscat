@@ -612,6 +612,20 @@
   } if
 } bind def
 
+% ( -- bool ): whether the stack ends in the four numbers x y w h. The
+% rect decorators warp only that call; anything else (too few operands, a
+% wrong type, the numarray form) goes to the real operator, which raises its
+% own error with the stack it leaves, or draws the array form unwarped. No
+% name is executed on the way (//false, not false): pscat reports the last
+% name executed as the offending command, which must stay the rect operator.
+% @internal
+/wp--rect-ok {
+  count 4 ge {
+    3 index //wp--number exec 3 index //wp--number exec and
+    2 index //wp--number exec and 1 index //wp--number exec and
+  } { //false } ifelse
+} bind def
+
 % ( transform step -- decorators ), transform: ( records -- records ).
 % Each decorator ( target -- wrapper ) turns an operator into one that
 % paints the transformed path. Strokes are outlined
@@ -656,17 +670,23 @@
   /rectregion [ /aload load /pop load /newpath load //wp--rect /exec load
                 /warp load /exec load ] cvx def
   /rectfill [ /pop load
-    [ 4 /array load /astore load /rectregion load //wp--try /exec load
-      /gsave load /apply load /exec load /realfill load /grestore load ] cvx ] cvx def
+    [ //wp--rect-ok /exec load
+      [ 4 /array load /astore load /rectregion load //wp--try /exec load
+        /gsave load /apply load /exec load /realfill load /grestore load ] cvx
+      [ systemdict /rectfill get ] cvx /ifelse load ] cvx ] cvx def
   /rectstrokeregion [ /aload load /pop load /newpath load //wp--rect /exec load
                       /strokepath load /warp load /exec load ] cvx def
   /rectstroke [ /pop load
-    [ 4 /array load /astore load /rectstrokeregion load //wp--try /exec load
-      /gsave load /apply load /exec load /realfill load /grestore load ] cvx ] cvx def
+    [ //wp--rect-ok /exec load
+      [ 4 /array load /astore load /rectstrokeregion load //wp--try /exec load
+        /gsave load /apply load /exec load /realfill load /grestore load ] cvx
+      [ systemdict /rectstroke get ] cvx /ifelse load ] cvx ] cvx def
   % rectclip: like clip, but it starts from a fresh path and leaves none
   /rectclip [ /pop load
-    [ 4 /array load /astore load /rectregion load //wp--try /exec load
-      /apply load /exec load systemdict /clip get /newpath load ] cvx ] cvx def
+    [ //wp--rect-ok /exec load
+      [ 4 /array load /astore load /rectregion load //wp--try /exec load
+        /apply load /exec load systemdict /clip get /newpath load ] cvx
+      [ systemdict /rectclip get ] cvx /ifelse load ] cvx ] cvx def
   % the show family: glyph outlines filled through the warp. As with the
   % real operators, the current path is kept and only the current point
   % advances. Each wrapper hands its operands, the prefix and a fill to
