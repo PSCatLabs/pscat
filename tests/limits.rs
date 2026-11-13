@@ -743,8 +743,8 @@ mod one_operator {
 
     /// A RunLengthDecode stream (each pair 0x81 c is 128 copies of c, with
     /// c changing every 100 pairs) under FlateDecode: about 3000 bytes out
-    /// per byte in. Flate never makes more than 512 bytes of one input byte
-    /// here, which pscat's decoder truncates past (a separate bug).
+    /// per byte in. Written when Flate lost a byte after any byte that made
+    /// more than 512 (#1187), so it never does that.
     fn bomb(pairs: usize) -> (Vec<u8>, usize) {
         use std::io::Write;
         let mut rle = Vec::with_capacity(pairs * 2 + 1);
@@ -794,6 +794,85 @@ mod one_operator {
             "f flushfile",
             "flushfile",
             Duration::from_secs(2),
+        );
+    }
+
+    /// 4 GiB of spaces from about 150 KB: RunLengthDecode pairs (0x81 0x20
+    /// is 128 spaces) under FlateDecode, built once for every test here.
+    fn space_bomb() -> &'static [u8] {
+        use std::io::Write;
+        static BOMB: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+        BOMB.get_or_init(|| {
+            let pairs = 32usize << 20;
+            let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            let chunk = [0x81u8, 0x20].repeat(1 << 16);
+            for _ in 0..pairs / (1 << 16) {
+                z.write_all(&chunk).expect("compress in memory");
+            }
+            z.write_all(&[0x80]).expect("compress in memory");
+            z.finish().expect("compress in memory")
+        })
+    }
+
+    /// The setup that opens [`space_bomb`] as `/f`, with `layers` more
+    /// filters over it. It runs before the limits are set, so these tests
+    /// also show a filter made earlier obeys them.
+    fn bomb_setup(tag: &str, layers: &str) -> String {
+        let dir = common::scratch_dir(tag);
+        let path = dir.join("spaces.z");
+        std::fs::write(&path, space_bomb()).expect("write scratch file");
+        format!(
+            "/f ({}) (r) file /FlateDecode filter /RunLengthDecode filter {layers} def",
+            common::ps_path(&path)
+        )
+    }
+
+    /// A Flate stream with large flat areas decoded in full after #1187, so
+    /// a few KB can expand without bound. Every path that drains a filter
+    /// in one call must stop inside it: the image's drain to EOD, the skip
+    /// loops of `readhexstring` and of an ASCIIHex filter, the scanner, and
+    /// `token`.
+    #[test]
+    fn draining_a_decompression_bomb_stops_inside_the_operator() {
+        let cases: [(&str, &str, &str, &str); 6] = [
+            // 10 x 10 samples, then the drain to the end of the data.
+            ("image", "", "10 10 8 [10 0 0 10 0 0] f image", "image"),
+            (
+                "readhexstring",
+                "",
+                "f 10 string readhexstring",
+                "readhexstring",
+            ),
+            // The hex filter skips the spaces inside one pull.
+            ("hexskip", "/ASCIIHexDecode filter", "f read", "read"),
+            ("scanner", "", "f cvx exec", "exec"),
+            ("token", "", "f token", "token"),
+            // `stopped` cannot catch it.
+            ("stopped", "", "{ f flushfile } stopped", "flushfile"),
+        ];
+        for (tag, layers, src, op) in cases {
+            stops_inside(
+                op,
+                bomb_setup(&format!("limits-bomb-{tag}"), layers),
+                src,
+                op,
+                Duration::from_secs(2),
+            );
+        }
+    }
+
+    /// The decoded bytes count as steps, a step per KiB: 4 GiB is four
+    /// million, so a step cap stops the drain too, inside it.
+    #[test]
+    fn a_decode_drain_counts_toward_the_step_cap() {
+        stops_inside_with(
+            "flushfile",
+            bomb_setup("limits-bomb-steps", ""),
+            "f flushfile",
+            "flushfile",
+            Duration::from_secs(2),
+            steps(200_000),
+            PsError::StepsExceeded,
         );
     }
 }
