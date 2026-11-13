@@ -28,13 +28,16 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
   (`while a2 < a1 { a2 += TAU }`): `1e15 0 arc` took 1.6e14 trips, and past
   about 1.6e18 degrees adding a turn no longer changes the value, so
   `1e20 0 arc` never ended, with or without limits. A gap of more than four
-  turns now jumps most of the way in one step. Ordinary arcs never jump, so
-  they are bit-identical (identity check below). Angles are refused as gs
-  refuses them:
-  - gs 10 gives `limitcheck` for a positive angle past 2^31 degrees
+  turns now jumps most of the way in one step. An arc whose angles are within
+  four turns of each other never jumps and is bit-identical. A larger gap
+  (`3000 0 arc`) can move in the last bits of its coordinates, but it keeps
+  gs's element count. The identity check (below) found no rendered difference.
+  Angles are refused as gs refuses them:
+  - gs 10 gives `limitcheck` for a positive angle past about 2^31 degrees
     (`0 0 10 2.15e9 0 arc`, `0 0 10 0 1e10 arc` and `arcn`), and draws
     `2.14e9 0` (4 path elements) and `0 -1e10` (2). pscat now matches all of
-    these.
+    these. gs also refuses the integer `2147483520`, just below 2^31, which
+    pscat draws.
   - An angle that is not finite, or -2^53 degrees or below, is `limitcheck`
     too. gs draws something for `0 -1e17 arc`, but such an angle has no unit
     precision left (recorded in HANDOFF's deviations).
@@ -48,7 +51,18 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
   each time it is reached, and refuses past 4096 (`limitcheck`). Thirty levels
   of a stitching function naming the level below twice was 2^30 parses (and
   that many nodes in memory) in one call. This also bounds `build_stops`'
-  O(K²) evaluation.
+  O(K²) evaluation. It does not bound painting: tiny-skia's gradient costs
+  pixels × stops. At 300 dpi letter, 64 legs took 0.15 s, 256 took 0.35 s,
+  1024 took 1.2 s and 4095 took 4.4 s, the same on base and head. That
+  remains open.
+- **Tests** (`tests/limits.rs`, `one_operator`). Each worst case runs on a
+  thread under the suite's 60 s deadline and inside a CPU budget. The polled
+  ones (`bind` over overlapping views, a huge `arc` sweep, `flushfile` on a
+  FlateDecode + RunLengthDecode bomb built in a scratch file) must stop with
+  `limitexceeded (time)` blamed on the operator itself, not on the `1 pop`
+  after it. With the polls in `bind` and `flushfile` commented out, both of
+  those tests fail (`bind` at the deadline). `limits_memory.rs` covers the
+  SVG/PDF image check.
 - **`image` / `imagemask` / `colorimage` with SVG or PDF output**:
   `begin_image` checks the recorder's decode buffer (w × h × 4 for SVG, × 3 for
   PDF) against a memory cap before the image starts. The probe
@@ -61,6 +75,14 @@ searched for an 8 MiB pattern took about 20 minutes in one call.
   - `Interp::limit_probe()` → `LimitProbe` (deadline and heap cap as a value),
     for loops in `Gfx` that cannot borrow the interpreter. `Gfx::arc` keeps its
     signature and `Gfx::arc_limited` takes the probe.
+
+### Identity
+
+`scripts/identity_check.sh` was run with `--base-bin` (main at 3be5e46) and
+`--head-bin` (this branch before its rebase), over every example and the 12
+smallest gallery pieces that use `arc`, `arcn` or `shfill`, plus the default
+paintkit pick, at `--gallery-dpi 72`. Result: 56 of 56 page renders were
+byte-identical across 41 files. `bind` runs in every library those files load.
 
 ### The audit
 
@@ -93,6 +115,7 @@ read from the code (marked).
 | `fill` / `eofill` / `clip` (pscat's coverage rasteriser) | Open: lines × bands. 100,000 curves: 2.5 s in one `fill`, 1M: well past 8 s. Measured. |
 | `pathforall` `pathbbox` `rectfill` `rectstroke` | Linear; `pathforall` is frame-driven. Read. `reversepath`, `ufill` and the other user-path operators are not implemented. |
 | `shfill` (function parse) | **Fixed** (4096-dict cap). Measured. |
+| `shfill` (painting a many-leg stitch) | Open: pixels × stops, 4.4 s for 4095 legs at 300 dpi. Measured. |
 | `image` `imagemask` `colorimage` (raster) | Bounded by the device box. A file source is one bulk read of `needed()` bytes. Read. |
 | SVG / PDF image recorders | **Memory checked up front**; the w × h loop is still unpolled under a time limit alone. Measured. |
 | Type 1 charstrings | Op budget of 100,000 and call depth of 30 per glyph. Open: `callsubr` clones the subroutine, and every glyph decrypts all Subrs again. Read. |
@@ -121,3 +144,5 @@ read from the code (marked).
 - Kernel retirements: cap the retired-pixel list (fall back to the whole
   interpreter past it), or poll and memory-check while it grows.
 - SVG / PDF image recorders: a `LimitProbe` per row.
+- Many-stop gradients: resample a stitching function with more than a few
+  hundred stops into a fixed table before tiny-skia sees it, or lower the cap.

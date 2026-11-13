@@ -403,6 +403,40 @@ mod one_operator {
         })
     }
 
+    /// Run `setup` with no limits (its time does not count), then `src`
+    /// under a 100 ms clock, within `budget` of CPU (best of 3), on a
+    /// deadline. It must stop with `limitexceeded (time)` blamed on `op`.
+    /// The blame is what shows the operator looked at the limits itself:
+    /// without that, the check at the end of the slice stops the program
+    /// after the operator has returned and blames what ran next (the
+    /// `1 pop` appended here), as `search` blamed the `=` after it.
+    fn stops_inside(
+        what: &'static str,
+        setup: String,
+        src: &'static str,
+        op: &'static str,
+        budget: Duration,
+    ) {
+        let (err, report) = on_a_deadline(what, move || {
+            common::within_cpu_budget(what, budget, 3, || {
+                let mut it = Interp::new();
+                it.run_str(&setup).expect("the setup runs");
+                it.set_limits(untrusted(Duration::from_millis(100)))
+                    .expect("limits without memory always apply");
+                let err = it
+                    .run_str(&format!("{src} 1 pop"))
+                    .expect_err("the time limit stops it");
+                let report = it.error_report(&err);
+                (err, report)
+            })
+        });
+        assert_eq!(err, PsError::TimeExceeded, "{what}: {report}");
+        assert!(
+            report.contains(&format!("OffendingCommand: {op};")),
+            "{what}: stopped after `{op}` returned, not inside it: {report}"
+        );
+    }
+
     #[test]
     fn search_is_linear() {
         // A 16 MiB string searched for an 8 MiB pattern that is not there
@@ -442,15 +476,15 @@ mod one_operator {
         // Every suffix of one array, each a distinct view: n^2/2 elements
         // walked, which the visited set cannot shorten. bind looks at the
         // limits as it goes.
-        let (r, _) = run(
+        stops_inside(
             "bind over views",
-            untrusted(Duration::from_millis(100)),
-            Duration::from_secs(2),
             "/n 300000 def /S n array def /A n array def \
-             0 1 n 1 sub { /i exch def A i S i n i sub getinterval cvx put } for \
-             /A load cvx bind pop",
+             0 1 n 1 sub { /i exch def A i S i n i sub getinterval cvx put } for"
+                .into(),
+            "/A load cvx bind pop",
+            "bind",
+            Duration::from_secs(2),
         );
-        assert_eq!(r, Err(PsError::TimeExceeded));
     }
 
     #[test]
@@ -505,13 +539,13 @@ mod one_operator {
     fn a_huge_arc_sweep_stops_at_the_time_limit() {
         // A sweep of 1e15 degrees is 1.1e13 segments in one `arc` (gs runs
         // it until it is killed too); the segment loop looks at the limits.
-        let (r, _) = run(
+        stops_inside(
             "arc sweep",
-            untrusted(Duration::from_millis(100)),
-            Duration::from_secs(2),
+            String::new(),
             "newpath 0 0 10 -1e15 0 arc",
+            "arc",
+            Duration::from_secs(2),
         );
-        assert_eq!(r, Err(PsError::TimeExceeded));
     }
 
     #[test]
@@ -582,15 +616,16 @@ mod one_operator {
         let (big, _) = bomb(32 << 20);
         let big_path = dir.join("big.z");
         std::fs::write(&big_path, big).expect("write scratch file");
-        let src = format!(
-            "({}) (r) file /FlateDecode filter /RunLengthDecode filter flushfile",
+        let setup = format!(
+            "/f ({}) (r) file /FlateDecode filter /RunLengthDecode filter def",
             common::ps_path(&big_path)
         );
-        let r = on_a_deadline("flushfile", move || {
-            common::within_cpu_budget("flushfile", Duration::from_secs(2), 3, || {
-                limited(untrusted(Duration::from_millis(100))).run_str(&src)
-            })
-        });
-        assert_eq!(r, Err(PsError::TimeExceeded));
+        stops_inside(
+            "flushfile",
+            setup,
+            "f flushfile",
+            "flushfile",
+            Duration::from_secs(2),
+        );
     }
 }

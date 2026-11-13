@@ -439,14 +439,16 @@ without the limits above:
     itself twice was 2^100 visits. It also looks at the limits every 64K
     elements it walks, and charges a step per 1024.
   - `arc`/`arcn` turn a huge angle gap in one step, where `1e20 0 arc` never
-    ended. As gs does, they refuse a positive angle of 2^31 degrees or more,
-    and an angle of -2^53 or below, with `limitcheck`. They look at the
-    limits every 4096 segments of a huge sweep.
+    ended. As gs does, they refuse a positive angle of about 2^31 degrees or
+    more with `limitcheck` (gs refuses a little below it too). They also
+    refuse an angle of -2^53 degrees or below, which gs draws. They look at
+    the limits every 4096 segments of a huge sweep.
   - `flushfile` on a decode filter looks at the limits every 64 KiB it
     discards, a step per KiB.
   - `shfill` refuses a shading whose function dicts, counting every reference
     to a shared one, pass 4096 (`limitcheck`). Before, thirty levels of a
     stitching function that names the level below twice took 2^30 parses.
+    Painting is not bounded by this: the cost is pixels × stops, below.
   - With an SVG or PDF output, `image`, `imagemask` and `colorimage` check
     their decode buffer (width × height × 3 or 4 bytes) against a memory limit
     before they start.
@@ -460,9 +462,13 @@ without the limits above:
   - `flattenpath` (up to 65,536 segments per curve, and no memory check);
   - a Type 1 glyph whose `callsubr` copies a huge subroutine;
   - the SVG and PDF recorders' per-pixel loop under a time limit alone;
+  - `shfill` of a stitching function with many legs: the gradient costs
+    pixels × stops. 4095 legs at 300 dpi letter took 4.4 s in one `shfill`,
+    and 1024 legs 1.2 s, the same before and after #1176;
   - a `kernelimage` whose pixels nearly all retire to the interpreter (its
-    list of retired pixels is built and sorted unpolled: 5 s past
-    `--max-time 1` for an 8000 × 8000 image).
+    list of retired pixels is built and sorted unpolled: the compiled phase
+    of an 8000 × 8000 image took 5.2 s under `--max-time 1`, about 4 s past
+    it).
 
   For a hosted service the answer to anything that gets through is the outer
   kill: the MCP server kills its child at `--timeout`, and anything else
