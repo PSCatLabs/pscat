@@ -1029,6 +1029,68 @@ fn make_room(data: &mut Vec<u8>, chunk: usize, poll: ReadPoll<'_>) -> Result<(),
     Ok(())
 }
 
+/// [`read_path_limited`] for a regular file that is already open (issue
+/// #1177): the resolver opens a search-order candidate once, non-blocking,
+/// checks the handle, and passes that handle here, so the path is never
+/// opened a second time. The file is read on the calling thread, in
+/// `READ_CHUNK` pieces, into a buffer sized from its length when the limits
+/// allow it. `Ok(None)` when it cannot be read, or is (or grows to be) larger
+/// than `cap` bytes, which `path` is named for on stderr as at
+/// `paths::read_handle`; the cap is checked on every chunk, besides the
+/// limits, so a file that grows after the resolver validated it cannot be
+/// read whole.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_file_limited(
+    mut f: std::fs::File,
+    path: &std::path::Path,
+    cap: u64,
+    poll: ReadPoll<'_>,
+) -> Result<Option<Vec<u8>>, PsError> {
+    use std::io::Read;
+    let Ok(meta) = f.metadata() else {
+        return Ok(None);
+    };
+    let mut carry = 0usize;
+    let mut kib = |n: usize| {
+        carry += n;
+        let k = carry / 1024;
+        carry %= 1024;
+        k
+    };
+    let mut data: Vec<u8> = Vec::new();
+    if meta.len() > cap {
+        crate::paths::too_large(path, cap);
+        return Ok(None);
+    }
+    let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
+    poll(0, size)?;
+    // The whole file's room in one go: no doubling to be refused halfway
+    // for a file that passed the check above. A size that cannot be had
+    // reads as unreadable, as `std::fs::read` fails on it.
+    if data.try_reserve_exact(size.saturating_add(1)).is_err() {
+        return Ok(None);
+    }
+    loop {
+        // Fill the room the size gave (no growth for a file that is what
+        // `metadata` said); make more only once it is full.
+        if data.len() == data.capacity() {
+            make_room(&mut data, READ_CHUNK, poll)?;
+        }
+        let room = (data.capacity() - data.len()).min(READ_CHUNK);
+        match f.by_ref().take(room as u64).read_to_end(&mut data) {
+            Ok(0) => return Ok(Some(data)),
+            Ok(n) => {
+                poll(kib(n), 0)?;
+                if data.len() as u64 > cap {
+                    crate::paths::too_large(path, cap);
+                    return Ok(None);
+                }
+            }
+            Err(_) => return Ok(None),
+        }
+    }
+}
+
 /// Read the whole of `path` the way `std::fs::read` does (`Ok(None)` when it
 /// cannot be opened or read), but look at the execution limits as the bytes
 /// arrive instead of after the last one (issue #702). An `Err` from `poll`
@@ -1064,33 +1126,13 @@ pub(crate) fn read_path_limited(
         carry %= 1024;
         k
     };
-    let mut data: Vec<u8> = Vec::new();
     if meta.is_file() {
-        let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
-        poll(0, size)?;
-        // The whole file's room in one go: no doubling to be refused halfway
-        // for a file that passed the check above. A size that cannot be had
-        // reads as unreadable, as `std::fs::read` fails on it.
-        if data.try_reserve_exact(size.saturating_add(1)).is_err() {
-            return Ok(None);
-        }
-        let Ok(mut f) = std::fs::File::open(path) else {
+        let Ok(f) = std::fs::File::open(path) else {
             return Ok(None);
         };
-        loop {
-            // Fill the room the size gave (no growth for a file that is what
-            // `metadata` said); make more only once it is full.
-            if data.len() == data.capacity() {
-                make_room(&mut data, READ_CHUNK, poll)?;
-            }
-            let room = (data.capacity() - data.len()).min(READ_CHUNK);
-            match f.by_ref().take(room as u64).read_to_end(&mut data) {
-                Ok(0) => return Ok(Some(data)),
-                Ok(n) => poll(kib(n), 0)?,
-                Err(_) => return Ok(None),
-            }
-        }
+        return read_file_limited(f, path, u64::MAX, poll);
     }
+    let mut data: Vec<u8> = Vec::new();
     let (tx, rx) = sync_channel::<std::io::Result<Vec<u8>>>(2);
     let owned = path.to_path_buf();
     let spawned = std::thread::Builder::new()
@@ -1147,6 +1189,46 @@ mod tests {
             out.push(b);
         }
         out
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_limited_handle_read_enforces_its_own_cap() {
+        // Issue #1177: the cap is the limited reader's own, not a trust in
+        // what the resolver saw when it opened the file. No limit is hit:
+        // `poll` always allows, as a time-only limit does.
+        let dir = std::env::temp_dir().join(format!("pscat-limited-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("lib.ps");
+        std::fs::write(&path, vec![b'x'; 5000]).unwrap();
+        let mut allow = |_: usize, _: usize| Ok(());
+        let open = || std::fs::File::open(&path).unwrap();
+        let got = read_file_limited(open(), &path, 5000, &mut allow).unwrap();
+        assert_eq!(got.map(|d| d.len()), Some(5000));
+        assert_eq!(read_file_limited(open(), &path, 4999, &mut allow), Ok(None));
+        assert_eq!(read_file_limited(open(), &path, 100, &mut allow), Ok(None));
+        // A file that grows after it was opened and sized: 100 KiB when
+        // opened (the cap), 10 KiB more appended after the first chunk.
+        let grow = dir.join("grow.ps");
+        std::fs::write(&grow, vec![b'y'; 100 * 1024]).unwrap();
+        let mut appended = false;
+        let mut poll_and_grow = |_: usize, _: usize| {
+            if !appended {
+                appended = true;
+                use std::io::Write;
+                let mut a = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&grow)
+                    .unwrap();
+                a.write_all(&vec![b'z'; 10 * 1024]).unwrap();
+            }
+            Ok(())
+        };
+        let f = std::fs::File::open(&grow).unwrap();
+        let got = read_file_limited(f, &grow, 100 * 1024, &mut poll_and_grow);
+        assert_eq!(got, Ok(None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

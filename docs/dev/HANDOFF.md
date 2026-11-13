@@ -773,6 +773,17 @@ renders eight examples in both and compares block-downsampled output).
   is `eprintln!`. The flag, not an early exit, so the page and any open
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
 
+- **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
+  relative name's search-order candidate is opened once by `Probe::open`
+  (`O_NONBLOCK`, the handle checked with `is_file()` and, for `lib/` names,
+  against 64 MiB) and the reader reads that handle; a FIFO, device, socket or
+  directory is "not here". `paths::open` also caps (`size_cap`: 64 MiB for
+  `lib/`, 512 MiB otherwise). Absolute names are read as written, and the
+  read-root admission comes before `Probe::open`. `font.rs` reads font files
+  itself, not through `paths::open`. `tests/resource_candidates.rs` is a
+  single-test binary because `PSCAT_HOME` is read once per process
+  (`notes/1177-resource-candidates.md`).
+
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.

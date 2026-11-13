@@ -128,6 +128,11 @@ tables in `src/ops/`, and each line below run through `pscat --headless -` (a
   grows memory without end (`(/dev/zero) (r) file` reached about 1 GB in 3
   seconds). With a limit set, the read looks at the limits as the bytes arrive
   and stops with `limitexceeded` (see "Whole-file reads and the limits").
+  A relative name is the exception for the places the search order tries
+  (`$PSCAT_HOME`, the current directory and the rest): one that is a FIFO,
+  device, socket or directory there is skipped without being read, and so is a
+  `lib/` file over 64 MiB, so a hostile workspace cannot stall `(lib/artkit.ps)
+  run` by putting a FIFO at that name (issue #1177).
 
 **Confining reads: read roots.** `--read-root DIR` (repeatable) on the command
 line, `--confine-reads` (the same with no directory: only the copy of `lib/`
@@ -150,7 +155,8 @@ them (`src/read_roots.rs`, used by `file`, `run`, `readreals` and
 - `filenameforall` lists only directories inside the roots and yields only
   names that would open, so outside them it yields nothing and raises no error.
 - The roots decide *where*, not *what*. Inside a root a FIFO or a hard link
-  somebody else made is read as it would be without roots (under the
+  somebody else made is read as it would be without roots (except that a
+  relative name's search-order candidate that is not a regular file is skipped) (under the
   execution limits, "Whole-file reads and the limits"). `/dev/zero` is outside
   every root unless one names `/dev`, and a symlink to it inside a root
   resolves outside and is refused.
