@@ -64,5 +64,18 @@ compared flattened, because pscat's curve outline and gs's line outline have
 control-point hulls that the anisotropic map pulls apart. The flattened
 bboxes agree to 0.4.
 
-**Identity.** Every tracked `gallery/*.ps` and `examples/*.ps` was
-compared, base binary against head binary (see the PR for the result).
+**Identity.** Every tracked `gallery/*.ps` and `examples/*.ps` (161 files,
+175 pages) was compared, base binary against head binary. 166 pages were
+identical and 4 were skipped (the `hybrid/compare_*` files fail the same way
+in both trees). Nine pages changed, all of them handwriting:
+`lib/handscript.ps` and `lib/hangul.ps` give each glyph a small random slant,
+`[1 0 k 1 0 j] concat` with |k| up to 0.08, so their pen was a round pen
+under a skew. It is now the slightly elliptical one gs draws. The pages are
+`gallery/field_notes.ps`, `hundred_lines.ps`, `released_memo.ps` and
+`time_traveler_memo.ps`, and `examples/handwriting.ps`,
+`hangul_handscript.ps`, `drychalk_specimen.ps`, `released_specimen.ps` and
+`released_pages.ps` (page 2). At most 0.97% of a page's pixels change, and
+0.024% by more than 32 of 255. The change is edge anti-aliasing on slanted
+strokes, which nobody can see at viewing size; the crops are in
+`docs/dev/review-log/pending/1196-anisotropic-stroke-pen/`. The committed
+`gallery/renders/` stills were not re-rendered.
