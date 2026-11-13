@@ -472,7 +472,8 @@ such as `(lib/artkit.ps) run`, pscat uses the first of these that exists:
 
 Each of those places must hold a regular file. A FIFO, device, socket or
 directory at one of them (a workspace can put one at `lib/artkit.ps`) is
-skipped as if it were not there, without being opened for reading, and the
+skipped as if it were not there (pscat opens each place once, without
+blocking, and checks what it opened), and the
 search goes on to the next place and finally the compiled-in copy. A `lib/`
 file larger than 64 MiB (the biggest real one is 0.6 MB) is skipped too. The
 library API (`pscat::paths::open`) also refuses, with a note on stderr, any

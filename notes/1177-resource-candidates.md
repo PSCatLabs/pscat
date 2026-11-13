@@ -7,19 +7,23 @@ multi-GB file was read whole.
 
 ## What changed
 
-- `Roots::open_with` screens each disk candidate of a relative name
-  (`plausible_candidate`): `metadata` succeeds and is not a regular file, skip;
-  a `lib/` name over `MAX_LIB_BYTES` (64 MiB), skip (silently: this runs before the read roots
-  are consulted, and a note could name a path outside them). A
-  candidate that does not exist is passed to the reader, as before. This covers
-  `run`, `file` and `status`, limited and unlimited. An absolute name is read as
-  written, and `read_path_limited` (#702) is untouched.
-- `paths::open` reads through `read_regular`: open `O_NONBLOCK` (Unix), check
-  the opened handle's `is_file()`, check its length against `size_cap(name)`,
-  and read through the same handle with `take(cap + 1)`. So a swap between the
-  screen and the read cannot slip a FIFO in, and a file that grows cannot pass
-  the cap. `libc` moved from a dev-dependency to a Unix dependency for
-  `O_NONBLOCK` (already in the tree through winit; no new crate).
+- Readers now get a `Probe { name, search }` with each candidate
+  (`Roots::open_probed`, `paths::Reader`). For a search-order candidate the
+  reader calls `Probe::open`, which opens the path once (`O_NONBLOCK` on Unix),
+  checks the opened handle is a regular file, and for a `lib/` name that it is
+  within `MAX_LIB_BYTES`; anything else is "not here" (silently: a note could
+  name a path outside the read roots). The reader then reads that same handle:
+  `paths::open` and the unlimited `run`/`file` readers through
+  `paths::read_handle` (a `take(cap + 1)` read), the limited ones through
+  `file::read_file_limited` (the #702 reader, taking the handle). No path is
+  opened twice, so a swap between check and read cannot slip a FIFO in.
+- Read-root admission (`open_confined`) happens before `Probe::open`, so a
+  link out of the roots is `invalidfileaccess` whatever its target's type or size.
+- An absolute name is `Opened::AsWritten`: read by path exactly as before
+  (`/dev/stdin`, `/dev/null`, FIFOs with a writer), including at
+  `paths::open`.
+- `libc` moved from a dev-dependency to a Unix dependency for `O_NONBLOCK`
+  (already in the tree through winit; no new crate).
 
 ## The cap, from real data
 

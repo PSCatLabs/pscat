@@ -22,8 +22,11 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use pscat::paths::{self, MAX_LIB_BYTES, MAX_RESOURCE_BYTES};
-use pscat::{Interp, PsError};
+use pscat::{Interp, Limits, PsError, paths};
+
+// The caps documented in docs/guides/getting-started.md.
+const MAX_LIB_BYTES: u64 = 64 << 20;
+const MAX_RESOURCE_BYTES: u64 = 512 << 20;
 
 fn mkfifo(path: &Path) {
     assert!(
@@ -117,6 +120,53 @@ fn a_fifo_or_huge_file_in_the_search_order_is_skipped() {
     assert_eq!(got.bytes.len(), 48 << 20);
     sparse(&home.join("data.bin"), MAX_RESOURCE_BYTES + 1);
     assert!(within(|| paths::open("data.bin")).is_none());
+
+    // The same skip holds under execution limits (issue #702's reader takes
+    // the opened handle, not the path), and a relative FIFO is not a limit.
+    let limited = within(|| {
+        let mut it = Interp::new();
+        it.set_limits(Limits::none().with_max_time(std::time::Duration::from_secs(10)))
+            .unwrap();
+        (
+            it.run_str("(lib/handscript.ps) (r) file pop"),
+            it.run_str("(lib/only_a_fifo.ps) run"),
+        )
+    });
+    assert_eq!(limited, (Ok(()), Err(PsError::UndefinedFilename)));
+
+    // Read roots: a link inside a root that leads outside gets the same
+    // answer whatever its target is (admission comes before any look at the
+    // target's type or size).
+    let outside = common::scratch_dir("resource-candidates-outside");
+    mkfifo(&outside.join("fifo.ps"));
+    sparse(&outside.join("huge.ps"), MAX_LIB_BYTES + 1);
+    std::fs::write(outside.join("small.ps"), "1").unwrap();
+    std::fs::create_dir(outside.join("dir.ps")).unwrap();
+    for target in ["fifo.ps", "huge.ps", "small.ps", "dir.ps"] {
+        let link = home.join("lib/probe.ps");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(outside.join(target), &link).unwrap();
+        let got = within(|| {
+            let mut it = Interp::new();
+            it.set_read_roots(&[std::env::var("PSCAT_HOME").unwrap()])
+                .unwrap();
+            it.run_str("(lib/probe.ps) run")
+        });
+        assert_eq!(got, Err(PsError::InvalidFileAccess), "{target}");
+    }
+    let _ = std::fs::remove_dir_all(&outside);
+
+    // An absolute name is read as written, as on main: `paths::open` reads
+    // a device node and a FIFO that has a writer.
+    assert_eq!(within(|| paths::open("/dev/null")).unwrap().bytes.len(), 0);
+    let named = home.join("named.fifo");
+    mkfifo(&named);
+    let name = common::ps_path(&named);
+    let w = named.clone();
+    let writer = std::thread::spawn(move || std::fs::write(w, b"as written").unwrap());
+    let got = within(move || paths::open(&name)).expect("an absolute FIFO is read");
+    assert_eq!(&got.bytes[..], b"as written");
+    writer.join().unwrap();
 
     let _ = std::fs::remove_dir_all(&home);
 }

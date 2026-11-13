@@ -774,14 +774,15 @@ renders eight examples in both and compares block-downsampled output).
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
 
 - **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
-  relative name's search-order candidates that are a FIFO, device, socket or
-  directory are skipped (`Roots::open_with`), and `paths::open` reads through an
-  `O_NONBLOCK` open whose handle is checked with `is_file()` and capped
-  (`size_cap`: 64 MiB for `lib/` names, 512 MiB otherwise). The `run`/`file`
-  readers keep their behaviour for absolute names and under execution limits
-  (#702). `font.rs` reads font files itself, not through `paths::open`.
-  `tests/resource_candidates.rs` is a single-test binary because `PSCAT_HOME`
-  is read once per process (`notes/1177-resource-candidates.md`).
+  relative name's search-order candidate is opened once by `Probe::open`
+  (`O_NONBLOCK`, the handle checked with `is_file()` and, for `lib/` names,
+  against 64 MiB) and the reader reads that handle; a FIFO, device, socket or
+  directory is "not here". `paths::open` also caps (`size_cap`: 64 MiB for
+  `lib/`, 512 MiB otherwise). Absolute names are read as written, and the
+  read-root admission comes before `Probe::open`. `font.rs` reads font files
+  itself, not through `paths::open`. `tests/resource_candidates.rs` is a
+  single-test binary because `PSCAT_HOME` is read once per process
+  (`notes/1177-resource-candidates.md`).
 
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;

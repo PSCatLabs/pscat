@@ -33,13 +33,15 @@
 //! "not here", and the search goes on to the next place and finally the
 //! embedded copy. (A FIFO with no writer would otherwise block the open
 //! itself, before any interpreter limit applies.) The check is made on
-//! the opened handle, which [`open`] opens `O_NONBLOCK` on Unix, so a swap
-//! between the check and the read cannot slip a FIFO in. A `lib/` name
-//! larger than [`MAX_LIB_BYTES`] is skipped, and
-//! [`open`] refuses (with a note on stderr) a resource larger than [`size_cap`]
-//! says for its kind.
-//! An absolute name is still read as written, and a program's own reads
-//! under execution limits (issue #702) keep watching the limits instead.
+//! the opened handle ([`Probe::open`]: opened once, `O_NONBLOCK` on Unix so
+//! the open itself cannot block), and the read goes through that same
+//! handle, so a swap between the check and the read cannot slip a FIFO in.
+//! This holds for `run`, `file` and `status` too, with or without execution
+//! limits (their readers take the handle, issue #702's limit-aware one
+//! included). A `lib/` file larger than `MAX_LIB_BYTES` is skipped as well,
+//! silently, and [`open`] refuses (with a note on stderr) any other resource
+//! larger than `MAX_RESOURCE_BYTES`. An absolute name is read as written,
+//! exactly as before, FIFOs and devices included.
 //!
 //! `PSCAT_TRACE_RESOURCES=1` prints one stderr line per resolved
 //! resource naming the backend that served it
@@ -172,26 +174,36 @@ impl Roots {
     }
 
     /// Resolve `name` against these roots, reading through `read`
-    /// (a parameter so tests need no real files).
+    /// (a parameter so tests need no real files). `read` is handed every
+    /// candidate path as it is, with no screening of what it is: the
+    /// screening of issue #1177 is [`Roots::open_probed`]'s.
     pub fn open_with(
         &self,
         name: &str,
         read: &dyn Fn(&Path) -> Option<Vec<u8>>,
     ) -> Option<Resource> {
-        let from_disk = |(backend, path): (Backend, PathBuf)| {
-            read(&path).map(|bytes| Resource {
-                bytes: Cow::Owned(bytes),
-                backend,
-                path: Some(path),
-            })
+        self.open_probed(name, &|p: &Path, _: Probe<'_>| read(p))
+    }
+
+    /// [`Roots::open_with`] telling `read` what kind of candidate it has
+    /// (a [`Probe`]), so that it can open a search-order candidate once, with
+    /// [`Probe::open`], and read the handle it gets (issue #1177).
+    pub(crate) fn open_probed(&self, name: &str, read: &Reader<'_>) -> Option<Resource> {
+        let from_disk = |search: bool| {
+            move |(backend, path): (Backend, PathBuf)| {
+                read(&path, Probe { name, search }).map(|bytes| Resource {
+                    bytes: Cow::Owned(bytes),
+                    backend,
+                    path: Some(path),
+                })
+            }
         };
         if Path::new(name).is_absolute() {
-            return from_disk((Backend::Direct, PathBuf::from(name)));
+            return from_disk(false)((Backend::Direct, PathBuf::from(name)));
         }
         self.disk_candidates(name)
             .into_iter()
-            .filter(|(_, p)| plausible_candidate(name, p))
-            .find_map(from_disk)
+            .find_map(from_disk(true))
             .or_else(|| {
                 embedded(name).map(|b| Resource {
                     bytes: Cow::Borrowed(b),
@@ -202,8 +214,7 @@ impl Roots {
             .or_else(|| {
                 self.checkout_candidates(name)
                     .into_iter()
-                    .filter(|(_, p)| plausible_candidate(name, p))
-                    .find_map(from_disk)
+                    .find_map(from_disk(true))
             })
     }
 
@@ -331,16 +342,19 @@ fn roots() -> &'static Roots {
 /// (issue #1177). The largest real one, `lib/paintkit.ps`, is 0.6 MB, so this
 /// is two orders of magnitude of headroom while still far below the memory a
 /// multi-GB file at a search-order place would take.
-pub const MAX_LIB_BYTES: u64 = 64 << 20;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const MAX_LIB_BYTES: u64 = 64 << 20;
 
-/// The largest file [`open`] reads for any other name: data a program
-/// loads, and font files (`.ttf`/`.otf`/`.ttc`; the largest in the
+/// The largest file [`open`] reads for any other relative name: data a
+/// program loads, and font files (`.ttf`/`.otf`/`.ttc`; the largest in the
 /// catalog is 10 MB, a CJK collection can be several times that).
-pub const MAX_RESOURCE_BYTES: u64 = 512 << 20;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const MAX_RESOURCE_BYTES: u64 = 512 << 20;
 
-/// The size cap that applies to a resource named `name`: [`MAX_LIB_BYTES`]
-/// for a `lib/` name, [`MAX_RESOURCE_BYTES`] otherwise.
-pub fn size_cap(name: &str) -> u64 {
+/// The size cap [`open`] applies to a resource named `name`:
+/// [`MAX_LIB_BYTES`] for a `lib/` name, [`MAX_RESOURCE_BYTES`] otherwise.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn size_cap(name: &str) -> u64 {
     if is_lib_name(name) {
         MAX_LIB_BYTES
     } else {
@@ -348,8 +362,69 @@ pub fn size_cap(name: &str) -> u64 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_lib_name(name: &str) -> bool {
     name.strip_prefix("./").unwrap_or(name).starts_with("lib/")
+}
+
+/// What a reader is told about the candidate it is handed (issue #1177).
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) struct Probe<'a> {
+    /// The name the program (or library) asked for.
+    pub name: &'a str,
+    /// Whether the candidate is a place the search order tries for a relative
+    /// name, rather than an absolute name read as written.
+    pub search: bool,
+}
+
+/// A disk reader for [`Roots::open_probed`]: the candidate path and what it
+/// is, `None` for "not here, try the next place".
+pub(crate) type Reader<'a> = dyn Fn(&Path, Probe<'_>) -> Option<Vec<u8>> + 'a;
+
+/// What [`Probe::open`] made of a candidate.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) enum Opened {
+    /// A search-order candidate, opened once and found to be a regular file
+    /// of acceptable size: read this handle, never the path again.
+    Handle(std::fs::File),
+    /// An absolute name: nothing was opened; read it by path as before.
+    AsWritten,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Probe<'_> {
+    /// Open a search-order candidate for reading, once. `None` means "not
+    /// here": the path is missing or unreadable, or is not a regular file
+    /// (a FIFO, device, socket or directory), or is a `lib/` file over
+    /// [`MAX_LIB_BYTES`]. The decision is made on the opened handle, which
+    /// is `O_NONBLOCK` on Unix so that a FIFO with no writer opens at once
+    /// instead of blocking in `open`, so there is no window between the
+    /// check and the read for a swap. The skip is silent: a reader under
+    /// read roots calls this only after admitting the path, but a note
+    /// naming it would still be a message about the disk. An absolute name
+    /// is [`Opened::AsWritten`].
+    pub(crate) fn open(&self, path: &Path) -> Option<Opened> {
+        if !self.search {
+            return Some(Opened::AsWritten);
+        }
+        let file = open_regular(path)?;
+        if is_lib_name(self.name) && file.metadata().ok()?.len() > MAX_LIB_BYTES {
+            return None;
+        }
+        Some(Opened::Handle(file))
+    }
+
+    /// The most bytes a read of this candidate may take: [`MAX_LIB_BYTES`]
+    /// for a `lib/` name, no limit otherwise (a program's own data files
+    /// were never capped; [`open`] has its own cap).
+    pub(crate) fn read_cap(&self) -> u64 {
+        if is_lib_name(self.name) {
+            MAX_LIB_BYTES
+        } else {
+            u64::MAX
+        }
+    }
 }
 
 /// Open `path` for reading only if it is a regular file, deciding from the
@@ -369,16 +444,14 @@ fn open_regular(path: &Path) -> Option<std::fs::File> {
     file.metadata().ok()?.is_file().then_some(file)
 }
 
-/// Read the whole of the regular file at `path`, `None` when it is not one,
-/// cannot be read, or is larger than `cap` bytes (that last with a note on
-/// stderr: the file is real, so the refusal must not look like a missing
-/// one). The length is checked on the opened handle, and the read through
-/// the same handle stops one byte past `cap`, so a file that grows after
-/// the check cannot get past it.
+/// Read the rest of `file`, an opened regular file, `None` when it cannot be
+/// read or is larger than `cap` bytes (that last with a note on stderr
+/// naming `path`: the file is real, so the refusal must not look like a
+/// missing one). The length is checked on the handle, and the read stops one
+/// byte past `cap`, so a file that grows after the check cannot get past it.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn read_regular(path: &Path, cap: u64) -> Option<Vec<u8>> {
+pub(crate) fn read_handle(file: std::fs::File, path: &Path, cap: u64) -> Option<Vec<u8>> {
     use std::io::Read;
-    let file = open_regular(path)?;
     let len = file.metadata().ok()?.len();
     if len > cap {
         too_large(path, cap);
@@ -406,37 +479,18 @@ fn too_large(path: &Path, cap: u64) {
     );
 }
 
-/// Whether a search-order candidate for the relative `name` is worth
-/// handing to a reader: not a FIFO, device, socket or directory, and for a
-/// `lib/` name not larger than [`MAX_LIB_BYTES`]. A candidate that does not
-/// exist is passed on (the reader decides; tests use made-up paths). This
-/// looks at the path, so it is the cheap first screen; [`read_regular`]
-/// is the check that cannot be raced.
-#[cfg(not(target_arch = "wasm32"))]
-fn plausible_candidate(name: &str, path: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(path) else {
-        return true;
-    };
-    if !meta.is_file() {
-        return false;
-    }
-    // Silent: this runs before the read roots are consulted, and a note
-    // naming a path outside them would tell the program what is there.
-    !(is_lib_name(name) && meta.len() > MAX_LIB_BYTES)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn plausible_candidate(_name: &str, _path: &Path) -> bool {
-    true
-}
-
 /// Resolve and read a program's `run`/`file` name through the search
 /// order (module doc).
 pub fn open(name: &str) -> Option<Resource> {
     #[cfg(target_arch = "wasm32")]
-    let read = |_: &Path| None;
+    let read = |_: &Path, _: Probe<'_>| None;
+    // A search-order candidate is opened once and read through that handle
+    // (`Probe::open`); an absolute name is read as written, as it always was.
     #[cfg(not(target_arch = "wasm32"))]
-    let read = |p: &Path| read_regular(p, size_cap(name));
+    let read = |p: &Path, probe: Probe<'_>| match probe.open(p)? {
+        Opened::Handle(f) => read_handle(f, p, size_cap(name)),
+        Opened::AsWritten => std::fs::read(p).ok(),
+    };
     open_with_reader(name, &read)
 }
 
@@ -445,11 +499,8 @@ pub fn open(name: &str) -> Option<Resource> {
 /// interpreter's execution limits when it has any). `read` returning `None`
 /// means "not here, try the next place", so a reader that stops for a limit
 /// must remember why and make the caller discard whatever this returns.
-pub(crate) fn open_with_reader(
-    name: &str,
-    read: &dyn Fn(&Path) -> Option<Vec<u8>>,
-) -> Option<Resource> {
-    let found = roots().open_with(name, read);
+pub(crate) fn open_with_reader(name: &str, read: &Reader<'_>) -> Option<Resource> {
+    let found = roots().open_probed(name, read);
     if trace_enabled() {
         match &found {
             Some(r) => match &r.path {
@@ -709,21 +760,74 @@ mod tests {
         assert!(!checkout_roots_unless(exe, false).is_empty());
     }
 
-    /// The handle-level reader itself (issue #1177), with a small cap so a
-    /// regression cannot allocate much: tests/resource_candidates.rs covers
-    /// the search order around it.
+    /// Open `path` as a search-order candidate for `name` and read it, the
+    /// way `paths::open` does (issue #1177).
+    #[cfg(unix)]
+    fn regular(name: &str, path: &Path, cap: u64) -> Option<Vec<u8>> {
+        let probe = Probe { name, search: true };
+        match probe.open(path)? {
+            Opened::Handle(f) => read_handle(f, path, cap),
+            Opened::AsWritten => unreachable!("a search candidate"),
+        }
+    }
+
+    /// Run `f` on a thread and give up after a deadline: a regression in the
+    /// non-blocking open is a hang, which must fail the test, not stall it.
+    #[cfg(unix)]
+    fn within<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(20))
+            .expect("opening a FIFO blocked")
+    }
+
+    #[test]
+    fn the_cap_is_per_kind() {
+        assert_eq!(size_cap("lib/artkit.ps"), MAX_LIB_BYTES);
+        assert_eq!(size_cap("./lib/artkit.ps"), MAX_LIB_BYTES);
+        assert_eq!(size_cap("fonts/catalog/X/X.ttf"), MAX_RESOURCE_BYTES);
+        assert_eq!(size_cap("data.bin"), MAX_RESOURCE_BYTES);
+        // Real data the numbers are chosen from: the largest lib file and
+        // the largest catalog font.
+        const { assert!(MAX_LIB_BYTES > 100 * 598_400) };
+        const { assert!(MAX_RESOURCE_BYTES > 40 * 10_414_588) };
+        let search = |name| Probe { name, search: true };
+        assert_eq!(search("lib/x.ps").read_cap(), MAX_LIB_BYTES);
+        assert_eq!(search("data.bin").read_cap(), u64::MAX);
+    }
+
     #[cfg(unix)]
     #[test]
-    fn read_regular_refuses_fifos_and_oversize_files_without_blocking() {
+    fn an_absolute_name_is_read_as_written() {
+        let probe = Probe {
+            name: "/dev/null",
+            search: false,
+        };
+        assert!(matches!(
+            probe.open(Path::new("/dev/null")),
+            Some(Opened::AsWritten)
+        ));
+        // And `open` returns what `std::fs::read` does for a device node.
+        assert_eq!(open("/dev/null").unwrap().bytes.len(), 0);
+    }
+
+    /// The handle-level reader itself, with a small cap so a regression
+    /// cannot allocate much: tests/resource_candidates.rs covers the search
+    /// order around it. Every open of a FIFO is behind a deadline.
+    #[cfg(unix)]
+    #[test]
+    fn a_search_candidate_that_is_not_a_small_regular_file_is_refused_without_blocking() {
         let dir = std::env::temp_dir().join(format!("pscat-paths-regular-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let ok = dir.join("ok.ps");
         std::fs::write(&ok, b"12345").unwrap();
-        assert_eq!(read_regular(&ok, 5).as_deref(), Some(&b"12345"[..]));
-        assert_eq!(read_regular(&ok, 4), None);
-        assert_eq!(read_regular(&dir, 1 << 20), None, "a directory");
-        assert_eq!(read_regular(&dir.join("missing"), 1 << 20), None);
+        assert_eq!(regular("x.ps", &ok, 5).as_deref(), Some(&b"12345"[..]));
+        assert_eq!(regular("x.ps", &ok, 4), None);
+        assert_eq!(regular("x.ps", &dir, 1 << 20), None, "a directory");
+        assert_eq!(regular("x.ps", &dir.join("missing"), 1 << 20), None);
         let fifo = dir.join("stuck.ps");
         assert!(
             std::process::Command::new("mkfifo")
@@ -732,12 +836,20 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        // O_NONBLOCK: this open returns at once instead of waiting for a writer.
-        assert_eq!(read_regular(&fifo, 1 << 20), None);
+        // O_NONBLOCK: these return at once instead of waiting for a writer.
+        let f = fifo.clone();
+        assert_eq!(within(move || regular("x.ps", &f, 1 << 20)), None);
         // A link to a FIFO is a FIFO.
         let link = dir.join("link.ps");
         std::os::unix::fs::symlink(&fifo, &link).unwrap();
-        assert_eq!(read_regular(&link, 1 << 20), None);
+        assert_eq!(within(move || regular("x.ps", &link, 1 << 20)), None);
+        // A `lib/` file over the cap is skipped before it is read.
+        let big = dir.join("big.ps");
+        std::fs::File::create(&big)
+            .unwrap()
+            .set_len(MAX_LIB_BYTES + 1)
+            .unwrap();
+        assert_eq!(regular("lib/big.ps", &big, MAX_LIB_BYTES), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
