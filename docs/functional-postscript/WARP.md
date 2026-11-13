@@ -123,6 +123,18 @@ name:
   them to the real operator, which raises its usual error and leaves the
   operand stack as it would without the warp. A warp that fails while a
   glyph is drawn leaves no `gsave` or glyph path behind.
+- A warp that fails while `fill`, `eofill`, `stroke`, `clip`, `eoclip`,
+  `rectfill`, `rectstroke` or `rectclip` redraws a path leaves the program
+  where the call found it: the operand stack (a rect operator's `x y w h`
+  are put back, as the real operators leave their operands on an error),
+  the current path, the CTM and the `gsave` depth. The warp's own error is
+  re-raised with its name and offending command (`undefinedresult`, `div`).
+  This holds for an ordinary warp. A warp that pushes a `mark` the guard
+  would stop at, or a closure warp (`wp-polar`, `wp-lens`, `wp-swirl`,
+  `wp-perspective`) that fails with its scratch dictionary open, is not yet
+  fully restored: see #1199. A rect operator without four numbers on top of
+  the stack (too few operands, a wrong type, the array form) goes to the real
+  operator, which raises its own error or draws unwarped.
 
 The coordinate space a warp works in is the one in force when
 `wp-decorators` runs, so place the program with `translate`/`scale` before

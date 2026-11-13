@@ -573,3 +573,123 @@ fn a_failing_show_operator_leaves_what_the_real_one_leaves() {
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     assert_eq!(stack, ["5.0", "6"], "{stack:?}");
 }
+
+/// The path painting operators, each with the operands it is called with.
+const PAINTERS: [(&str, &str); 8] = [
+    ("fill", "fill"),
+    ("eofill", "eofill"),
+    ("stroke", "stroke"),
+    ("clip", "clip"),
+    ("eoclip", "eoclip"),
+    ("rectfill", "1 2 30 40 rectfill"),
+    ("rectstroke", "1 2 30 40 rectstroke"),
+    ("rectclip", "1 2 30 40 rectclip"),
+];
+
+#[test]
+fn a_failing_warp_leaves_the_stack_and_graphics_state_as_the_call_had_them() {
+    // Under a warp that raises undefinedresult (#1184), each decorated
+    // painting operator, caught with stopped, leaves what the real one
+    // leaves: the operands it was called with (the real rectfill keeps
+    // them on a typecheck: gs prints 77 1 2 (a) 4 for `77 1 2 (a) 4
+    // rectfill` under stopped), the path and CTM it was called with, the
+    // gsave depth (a warp that opens no dictionary of its own, so the
+    // dictionary stack is checked for the decorator's part only). The CTM
+    // is moved first, so a
+    // CTM left at the warp's base would show.
+    for (op, call) in PAINTERS {
+        let operands = call.strip_suffix(op).unwrap().trim();
+        let program = format!(
+            "{{ /snap {{ [ {{2 array astore}} {{2 array astore}} {{6 array astore}} {{[/z]}} \
+                          pathforall ] }} bind def \
+               1 setlinewidth 10 20 translate gsave 9 setlinewidth \
+               newpath 0 0 moveto 10 0 20 30 40 50 curveto 40 0 lineto closepath \
+               /args [ 77 66 {operands} ] def \
+               /pre snap def /ctm0 matrix currentmatrix def /d0 countdictstack def \
+               args aload pop {{ {op} }} stopped \
+               /caught exch def \
+               count array astore /after exch def \
+               $error /errorname get $error /command get countdictstack d0 sub \
+               snap pre matrix currentmatrix ctm0 \
+               grestore currentlinewidth after args caught \
+             }} {{ pop pop 1 0 div }} 2 wp-run"
+        );
+        let it = run(&program);
+        let s: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+        let [
+            name,
+            command,
+            dicts,
+            path,
+            pre,
+            ctm,
+            ctm0,
+            width,
+            after,
+            args,
+            caught,
+        ] = &s[..]
+        else {
+            panic!("{op}: {s:?}");
+        };
+        assert_eq!(caught, "true", "{op}: no error reached the program");
+        assert_eq!(name, "/undefinedresult", "{op}");
+        assert_eq!(command, "div", "{op}");
+        assert_eq!(after, args, "{op}: operand stack");
+        assert_eq!(dicts, "0", "{op}: dictionary stack");
+        assert_eq!(path, pre, "{op}: current path");
+        assert!(
+            path.contains("10.0 0.0 20.0 30.0 40.0 50.0"),
+            "{op}: curve kept"
+        );
+        assert_eq!(ctm, ctm0, "{op}: CTM");
+        assert_eq!(width, "1.0", "{op}: a gsave was left behind");
+    }
+}
+
+#[test]
+fn the_path_painters_still_paint_and_leave_the_real_paths_behind() {
+    // an identity warp leaves what the real operators leave: fill and
+    // stroke consume the path, clip keeps it, the rect operators leave it
+    // alone (rectclip clears it) and every clip shrinks the clip
+    for (_, call) in PAINTERS {
+        assert_same_as_native(&format!(
+            "10 20 translate newpath 0 0 moveto 10 0 20 30 40 50 curveto 40 0 lineto closepath \
+             {call} \
+             [ {{2 array astore}} {{2 array astore}} {{6 array astore}} {{[/z]}} pathforall ] \
+             {{ currentpoint 2 array astore }} stopped pop clippath pathbbox 4 array astore"
+        ));
+    }
+}
+
+#[test]
+fn rect_operators_with_bad_operands_or_the_array_form_go_to_the_real_operator() {
+    // Not four numbers on the stack: the real operator raises its own error
+    // (name, command and the operands it leaves), and the numarray form is
+    // drawn unwarped. The warp fails if it is reached, so none of these
+    // may reach it.
+    for op in ["rectfill", "rectstroke", "rectclip"] {
+        for operands in [
+            "[0 0 10 10]",
+            "1 2",
+            "1 2 (a) 4",
+            "1 2 3 (a)",
+            "",
+            "[0 0 10 10] [0 0 5 5]",
+        ] {
+            let body = format!(
+                "newpath 0 0 moveto 9 9 lineto 77 {{ {operands} {op} }} stopped \
+                 {{ $error /errorname get $error /command get }} {{ null null }} ifelse"
+            );
+            let native = stack_text(&body);
+            let warped = stack_text(&format!("{{ {body} }} {{ pop pop 1 0 div }} 2 wp-run"));
+            assert_eq!(warped, native, "{op}: {operands}");
+        }
+    }
+    // the cases above do raise the plain operator's error, not the warp's
+    let it = run("77 { 1 2 (a) 4 rectfill } stopped $error /command get");
+    assert_eq!(
+        it.operand_stack().last().map(|o| o.repr()).as_deref(),
+        Some("rectfill")
+    );
+}
