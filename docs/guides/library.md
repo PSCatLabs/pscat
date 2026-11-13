@@ -191,6 +191,14 @@ and does not have to match pscat's version of one.
   (`DEFAULT_MARGIN`) and leading (`DEFAULT_LEADING`). A note made this way is
   the same PNG `pscat handwrite` writes for the same options. The module's
   own documentation has a complete example that runs as a doctest.
+
+  `has_glyph(c)` and `drawable(text)` say which characters the font draws
+  (letters in either case, digits and `. , - ' ! ?` today; a space and
+  anything non-ASCII draw nothing), so a server can refuse blank text before
+  it spends a worker. They read the font's own table in `lib/handscript.ps`
+  (the library text `render_source` embeds, so an override is followed), in a
+  bounded run that reads no files and gives no glyphs if the library misbehaves,
+  rather than a copy that could drift.
 - **The catalog.** `pscat::catalog::capabilities()` is the JSON
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.

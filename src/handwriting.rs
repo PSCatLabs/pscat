@@ -25,7 +25,16 @@
 //! escaped, and stripped of trailing newlines, and every number and name is
 //! written by this module from a typed value. A character the font does not
 //! have advances as a blank rather than erroring, so it still takes up room
-//! in the wrap.
+//! in the wrap. [`has_glyph`] and [`drawable`] say which characters the font
+//! does have, so a caller can refuse text that would draw nothing before it
+//! spends a worker on it.
+//!
+//! The functions that build programs run nothing. [`has_glyph`] and
+//! [`drawable`] are the exception: they run the font's own definitions in a
+//! throwaway interpreter, bounded in steps, time and (with
+//! [`TrackingAllocator`](crate::TrackingAllocator) installed) memory, and with no file reads,
+//! and cache the answer by the library text. They read the library the way
+//! [`render_source`] does, so they always agree with it.
 //!
 //! ```
 //! use pscat::handwriting::{HandOptions, Paper, MAX_PAGE_POINTS, measure_source,
@@ -58,6 +67,7 @@
 //! ```
 
 use std::fmt;
+use std::sync::OnceLock;
 
 /// The largest page dimension, in points, `pscat` draws: a note's width and
 /// height are each at most this (the `--page` limit).
@@ -315,6 +325,164 @@ fn library() -> String {
     }
 }
 
+/// The PostScript that prints the character codes the font draws ink for, one
+/// per line. It reads the same tables `BuildChar` and the wrap read: a code's
+/// name in `/Encoding`, that name in `/CharDefs` (a name with no entry is
+/// `.notdef`), and a glyph counts when it has at least one stroke beyond its
+/// advance width. `space` and `.notdef` are only an advance, so they do not.
+const GLYPH_TABLE_PROGRAM: &str = "\
+HandScriptDict begin\n\
+0 1 127 {\n\
+  /c exch def\n\
+  Encoding c get CharDefs 1 index known not { pop /.notdef } if\n\
+  CharDefs exch get length 1 gt { c = } if\n\
+} for\n\
+end\n";
+
+/// Steps, wall-clock time and (when the process has `TrackingAllocator`
+/// installed) heap growth the glyph discovery may use. Loading the library and
+/// reading 128 codes takes a few tens of thousands of steps, a few
+/// milliseconds and well under a megabyte; the caps only stop a library that
+/// never finishes or that allocates without end.
+const DISCOVERY_STEPS: u64 = 5_000_000;
+const DISCOVERY_TIME: std::time::Duration = std::time::Duration::from_secs(2);
+const DISCOVERY_MEMORY: usize = 64 << 20;
+
+/// What discovery found, and whether it is safe to remember. A memory-limit
+/// stop is not remembered: the count is process-wide, so other threads'
+/// allocation could have caused it, and the next call should try again.
+struct Discovery {
+    table: [bool; 128],
+    cacheable: bool,
+}
+
+/// Which ASCII codes the font in `library_src` draws ink for, found by running
+/// its own tables. The run is bounded (steps, time and memory) and reads no
+/// files, so a library that loops, allocates without end or tries to `run`
+/// something yields no glyphs rather than hanging the caller.
+fn discover_glyphs(library_src: &str) -> Discovery {
+    let mut found = Discovery {
+        table: [false; 128],
+        cacheable: true,
+    };
+    let mut interp = crate::Interp::new();
+    let no_extra_roots: [&str; 0] = [];
+    let mut limits = crate::Limits::none()
+        .with_max_steps(DISCOVERY_STEPS)
+        .with_max_time(DISCOVERY_TIME);
+    if crate::memtrack::installed() {
+        limits = limits.with_max_memory(DISCOVERY_MEMORY);
+    }
+    if interp.set_limits(limits).is_err() || interp.set_read_roots(&no_extra_roots).is_err() {
+        found.cacheable = false;
+        return found;
+    }
+    interp.capture_stdout();
+    let mut src = String::with_capacity(library_src.len() + GLYPH_TABLE_PROGRAM.len());
+    src.push_str(library_src);
+    src.push_str(GLYPH_TABLE_PROGRAM);
+    match interp.run_str(&src) {
+        Ok(()) => {
+            let out = String::from_utf8_lossy(interp.captured_stdout()).into_owned();
+            for code in out.lines().filter_map(|l| l.trim().parse::<usize>().ok()) {
+                if let Some(slot) = found.table.get_mut(code) {
+                    *slot = true;
+                }
+            }
+        }
+        Err(e) => found.cacheable = e.limit() != Some(crate::limits::Limit::Memory),
+    }
+    found
+}
+
+/// The glyph table for the library text `render_source` would embed right
+/// now. Tables are cached by the library text itself (hashed, then compared
+/// on a hit, so a hash collision cannot return another font's table), so the
+/// same bytes are never run twice and a changed library gets a fresh answer.
+/// The lock is not held while discovery runs, and a poisoned lock is
+/// recovered, so one failed or slow discovery never blocks or breaks later
+/// calls.
+fn glyph_table_for(library_src: &str) -> [bool; 128] {
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    use std::sync::{Mutex, PoisonError};
+    /// Distinct library texts kept. A process sees one or two in practice.
+    const KEPT: usize = 8;
+    type Cache = Mutex<HashMap<u64, (String, [bool; 128])>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    library_src.hash(&mut hasher);
+    let key = hasher.finish();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((text, table)) = cache
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+        && text == library_src
+    {
+        return *table;
+    }
+    let found = discover_glyphs(library_src);
+    if found.cacheable {
+        let mut map = cache.lock().unwrap_or_else(PoisonError::into_inner);
+        if map.len() >= KEPT {
+            map.clear();
+        }
+        map.insert(key, (library_src.to_string(), found.table));
+    }
+    found.table
+}
+
+/// Whether the handwriting font draws ink for `c`, under the same case rule
+/// the note uses: ASCII letters are lowercased first, so `'A'` and `'a'`
+/// agree.
+///
+/// A space is `false`: it advances the line but puts no ink down. So is any
+/// character the font lacks, including every non-ASCII one: those advance as a
+/// blank and draw nothing.
+///
+/// The answer comes from the font's own glyph table in `lib/handscript.ps`,
+/// the copy [`render_source`] would embed on this very call, so it follows the
+/// font when the font gains a glyph and follows an override that changes. The
+/// table is found by running the font's definitions in a throwaway
+/// interpreter, bounded in steps, time and (where the process installs
+/// [`TrackingAllocator`](crate::TrackingAllocator)) memory, allowed to read no files, and
+/// cached by a hash of the library text; a call reads the library the way
+/// [`render_source`] does, so use [`drawable`] for a whole string rather than
+/// calling this per character in a hot loop. If the table cannot be found (a
+/// broken or runaway `lib/handscript.ps` in `$PSCAT_HOME`), every character
+/// is `false`.
+///
+/// ```
+/// use pscat::handwriting::has_glyph;
+///
+/// assert!(has_glyph('a') && has_glyph('A') && has_glyph('7') && has_glyph('?'));
+/// assert!(!has_glyph(' ') && !has_glyph('@') && !has_glyph('\u{e9}'));
+/// ```
+pub fn has_glyph(c: char) -> bool {
+    let c = c.to_ascii_lowercase();
+    c.is_ascii() && glyph_table_for(&library())[c as usize]
+}
+
+/// Whether `text` has at least one character the font draws ([`has_glyph`]).
+/// Text that is not `drawable` would render as a blank page, so a server can
+/// refuse it before measuring. Empty text is not drawable.
+///
+/// ```
+/// use pscat::handwriting::drawable;
+///
+/// assert!(drawable("Hi there"));
+/// assert!(!drawable("  \n\t "));
+/// assert!(!drawable("\u{4f60}\u{597d}"));
+/// ```
+pub fn drawable(text: &str) -> bool {
+    let table = glyph_table_for(&library());
+    text.chars().any(|c| {
+        let c = c.to_ascii_lowercase();
+        c.is_ascii() && table[c as usize]
+    })
+}
+
 /// The program that prints the number of lines `opts` wraps to, then a
 /// newline. It contains `lib/handscript.ps` itself, read when you call this
 /// from `$PSCAT_HOME`, `$PSCAT_LIB` and the other roots of the calling
@@ -486,6 +654,69 @@ mod tests {
         ] {
             assert!(d.contains(want), "{want:?} in {d}");
         }
+    }
+
+    #[test]
+    fn the_glyph_table_is_the_fonts_own() {
+        // Pinned only by shape, not by a list: tests/handwriting_api.rs checks
+        // every printable ASCII character against what the renderer draws.
+        assert!(has_glyph('a') && has_glyph('A') && has_glyph('0') && has_glyph('!'));
+        assert!(!has_glyph(' ') && !has_glyph('@') && !has_glyph('\n'));
+        assert!(!has_glyph('\u{e9}') && !has_glyph('\u{0}') && !has_glyph('\u{7f}'));
+        assert!(drawable("  x") && !drawable("") && !drawable(" \t\n") && !drawable("\u{e9}"));
+    }
+
+    #[test]
+    fn discovery_is_bounded_and_follows_the_library_text() {
+        let good = library();
+        let table = glyph_table_for(&good);
+        assert!(table[usize::from(b'a')] && table[usize::from(b'.')] && !table[32]);
+
+        // A library that never finishes, or reads a file, gives no glyphs and
+        // does not hold up (or break) the calls after it.
+        let started = std::time::Instant::now();
+        for bad in ["{ } loop", "%!\n1 0 div"] {
+            assert_eq!(glyph_table_for(bad), [false; 128], "{bad}");
+        }
+        // A valid font whose only glyph appears if a file read succeeds: the
+        // read is refused (no read roots), so it has none; run unconfined, the
+        // same text does get its glyph, so the confinement is what stopped it.
+        let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")
+            .replace('\\', "\\\\")
+            .replace('(', "\\(")
+            .replace(')', "\\)");
+        let reads = format!(
+            "/HandScriptDict 4 dict def HandScriptDict begin\n\
+             /Encoding 256 array def 0 1 255 {{ Encoding exch /.notdef put }} for\n\
+             /CharDefs 4 dict def CharDefs begin /.notdef [300] def /a [500 [0 0 1 1]] def end\n\
+             ({manifest}) (r) file closefile Encoding 97 /a put end\n"
+        );
+        let mut open = crate::Interp::new();
+        open.capture_stdout();
+        open.run_str(&format!("{reads}{GLYPH_TABLE_PROGRAM}"))
+            .unwrap();
+        assert_eq!(open.captured_stdout(), b"97\n", "the probe font works");
+        assert_eq!(
+            glyph_table_for(&reads),
+            [false; 128],
+            "the read was refused"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        assert_eq!(glyph_table_for(&good), table);
+
+        // A different font text is a different answer, and the old one still
+        // answers for its own text.
+        let changed = good.replace(
+            "/period     [200 [60 25 75 15 65 5]] def",
+            "/period [200] def",
+        );
+        assert_ne!(
+            changed, good,
+            "the period glyph def is where the test expects"
+        );
+        let t2 = glyph_table_for(&changed);
+        assert!(!t2[usize::from(b'.')] && t2[usize::from(b'a')]);
+        assert_eq!(glyph_table_for(&good), table);
     }
 
     #[test]

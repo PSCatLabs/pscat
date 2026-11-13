@@ -1879,7 +1879,8 @@ renders eight examples in both and compares block-downsampled output).
   of a hidden item either, so supported items must live in a visible module.
   Since #1098 the supported surface also has `pscat::sheet`,
   `pscat::chalkboard`, `pscat::handwriting` (#1135: written in the open, not a
-  facade) and `pscat::catalog` (facades over the hidden
+  facade; `has_glyph`/`drawable`, #1170, ask the font's own tables in
+  `lib/handscript.ps` instead of keeping a character list) and `pscat::catalog` (facades over the hidden
   `contact_sheet`, `chalk` and `capabilities`), `Page::halftone`/`blank`, and
   `Interp::page_count`/`page`/`into_last_page`/`set_transparent_background`/
   `set_pdf_info_from_dsc` (in `src/page.rs`, not `interp.rs`). They take and return `Page`, never a tiny-skia type, so
