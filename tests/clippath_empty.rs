@@ -341,6 +341,78 @@ const CASES: &[Case] = &[
             "z",
         ],
     ),
+    (
+        "a zero-size clip keeps the corner order it was made with, under a later mirror",
+        "newpath 0 0 100 100 rectclip 10 20 5 0 rectclip 200 0 translate -1 1 scale T",
+        &[
+            "185.0 20.0 190.0 20.0",
+            "m 190.0 20.0",
+            "l 185.0 20.0",
+            "l 185.0 20.0",
+            "l 190.0 20.0",
+            "z",
+        ],
+    ),
+    (
+        "a nested zero width with a negative height keeps its order",
+        "newpath 0 0 100 100 rectclip 10 50 0 -30 rectclip T",
+        &[
+            "10.0 20.0 10.0 50.0",
+            "m 10.0 50.0",
+            "l 10.0 50.0",
+            "l 10.0 20.0",
+            "l 10.0 20.0",
+            "z",
+        ],
+    ),
+    (
+        "a nested zero height with a negative width starts at the left end",
+        "newpath 0 0 100 100 rectclip 10 20 -5 0 rectclip T",
+        &[
+            "5.0 20.0 10.0 20.0",
+            "m 5.0 20.0",
+            "l 10.0 20.0",
+            "l 10.0 20.0",
+            "l 5.0 20.0",
+            "z",
+        ],
+    ),
+    (
+        "a nested clip path keeps its order",
+        "newpath 0 0 100 100 rectclip newpath 10 20 -5 0 R clip T",
+        &[
+            "5.0 20.0 10.0 20.0",
+            "m 10.0 20.0",
+            "l 5.0 20.0",
+            "l 5.0 20.0",
+            "l 10.0 20.0",
+            "z",
+        ],
+    ),
+    (
+        "a clip path keeps its order",
+        "newpath 10 20 -5 0 R clip T",
+        &[
+            "5.0 20.0 10.0 20.0",
+            "m 10.0 20.0",
+            "l 5.0 20.0",
+            "l 5.0 20.0",
+            "l 10.0 20.0",
+            "z",
+        ],
+    ),
+    (
+        "a nested zero-size clip, then a mirror and a reset",
+        "newpath 0 0 300 300 rectclip 200 0 translate -1 1 scale 10 20 5 0 rectclip initmatrix T",
+        &[
+            "185.0 20.0 190.0 20.0",
+            "m 190.0 20.0",
+            "l 185.0 20.0",
+            "l 185.0 20.0",
+            "l 190.0 20.0",
+            "z",
+        ],
+    ),
 ];
 
 /// The program on a fresh letter-size page (gs's default), printing into a

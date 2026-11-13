@@ -17,11 +17,12 @@ lines and re-runs gs where it is installed).
   `0 792 0 792`.
 - **A zero-area rectangle** (`rectclip` with a zero width or height) that
   lies wholly inside the clip it was made under (page included, edges
-  allowed) stays a box: `m x y / l / l / l / z`, four points, with the
-  user-space corner order xmin,ymin  xmax,ymin  xmax,ymax  xmin,ymax. A
-  negative width on a zero-height rect is normalised (`10 20 -5 0` starts
-  at `5 20`); a negative height is not (`10 50 0 -30` keeps its order).
-  Off the page, or leaving its parent, it is empty.
+  allowed) stays a box: its own four-point path, in the device order it was
+  made with (a later CTM change only re-expresses it). `rectclip`
+  normalises a negative width on a zero-area rect (`10 20 -5 0` starts at
+  `5 20`); a negative height is kept (`10 50 0 -30` keeps its order); a
+  path built by hand and `clip`ped is kept as given. Off the page, or
+  leaving its parent, it is empty.
 - `eoclip` with a path that cancels itself leaves gs's `clippath` as the
   original (two-subpath) path, so emptiness is decided from the
   rectangles, never from the raster mask.
@@ -36,8 +37,9 @@ lines and re-runs gs where it is installed).
   clip stays on the exact rectangle path instead of the mask trace.
 - `rectclip` normalises the width of a zero-area rect before building its
   path (the corner order above).
-- `rect_path` lists its corners in gs's order (x0,y0 x0,y1 x1,y1 x1,y0),
-  so `initclip clippath` traces match gs. Fills and clips are unaffected.
+- With no clip, `clippath` lists the page corners in gs's order (device
+  (0,0), (0,h), (w,h), (w,0)) through its own `page_clip_path`; `rect_path`
+  (used by `shfill` and clip refits too) is unchanged.
 
 ## Not done
 
