@@ -122,9 +122,8 @@ name:
   device, from a made-up current point: if it raises an error, the real
   operator runs on the program's operands and raises it, in its order and
   with the operand stack it leaves, so there is no second copy of its checks
-  here. An encoded number string is not decoded in PostScript: the same
-  operator, run on each prefix of the text on the null device, says how far
-  the pen moves after each glyph. `cshow` has no decorator: it paints
+  here. An encoded number string is read with `token`, which scans it as the
+  homogeneous number array it is. `cshow` has no decorator: it paints
   nothing and moves nothing, and the widths it reports are the font's, which
   a warp does not change; the `show` calls in its procedure are the
   decorated ones, so that text bends.
@@ -144,8 +143,8 @@ name:
   the current path, the CTM, the dictionary stack and the `gsave` depth.
   The warp's own error is re-raised with its name and offending command
   (`undefinedresult`, `div`). The show family has the same guard, with one
-  difference: a failing show operator, like the real one, does not give back
-  its string. Both guards put the stacks back by depth, not to the nearest
+  difference: a failing show operator does not give back its string (pscat's
+  own operators drop their operands on an error, #1198). Both guards put the stacks back by depth, not to the nearest
   mark: they note how deep the operand and dictionary stacks were when the
   call began, and on an error pop and `end` back to those depths. So a
   transform that fails with its own `mark` or `[` open, or a closure warp
@@ -188,14 +187,10 @@ forever.
 ## Limits
 
 - Images, `shfill` and other smooth shadings pass through unwarped.
-- The array forms of `rectfill`, `rectstroke` and `rectclip` are not
-  decorated.
+- The array and encoded-number-string forms of `rectfill`, `rectstroke` and
+  `rectclip` are not decorated.
 - A warp that opens a `gsave` of its own and then fails leaves that one
   level, as above.
-- `xshow`, `yshow` and `xyshow` with an encoded number string run the real
-  operator once per glyph on the null device to find the displacements, so
-  they take time proportional to the square of the text length. Use an array
-  for long text.
 - Type 3 text bends only where its glyph procedures paint with names the
   warp decorates: a procedure that `bind`s `fill` before the warp is
   installed, or paints with `imagemask`, draws unwarped.

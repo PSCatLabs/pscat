@@ -718,29 +718,19 @@
   end
 } bind def
 
-% ( string nums op pieces -- deltas ): [dx dy] for each glyph from an
-% encoded number string. This code does not decode the packed numbers: it
-% has the real operator op place each prefix of the string on the null
-% device from the origin, and takes the displacement of each glyph as the
-% difference between the pen after it and after the glyph before. No
-% program code runs: only outline fonts get here.
+% ( numstring -- numarray ): an encoded number string as the array of
+% numbers it holds, by scanning it as the binary token it is (token type
+% 149, PLRM 3.14.2). The real operator has accepted the string already; with
+% the object format at 0 the scanner would read it as text, so that is set
+% to 1 for the scan and put back.
 % @internal
-/wp--string-deltas {
-  12 dict begin
-  /pieces exch def /op exch def /nums exch def /s exch def
-  /x 0 def /y 0 def /off 0 def
-  gsave nulldevice
-  [ pieces {
-      length off add /off exch def
-      0 0 moveto s 0 off getinterval nums op currentpoint
-      /Y exch def /X exch def
-      X x sub Y y sub 2 array astore
-      /x X def /y Y def
-  } forall ]
-  grestore end
+/wp--numbers {
+  currentobjectformat 0 eq
+    { 1 setobjectformat token pop exch pop 0 setobjectformat }
+    { token pop exch pop } ifelse
 } bind def
 
-% ( string nums prefix fillp axes name -- ): the glyphs of string, drawn
+% ( string nums prefix fillp axes -- ): the glyphs of string, drawn
 % through the warp where the displacements in nums put them. Each glyph
 % starts where the last one's displacement left the pen; the path of all of
 % them is filled once, and the current point ends where the real operator
@@ -748,14 +738,12 @@
 % while charpath or the warp runs.
 % @internal
 /wp--positioned {
-  10 dict begin
-  /name exch def /axes exch def /fillp exch def /prefix exch def
+  8 dict begin
+  /axes exch def /fillp exch def /prefix exch def
   /nums exch def /s exch def
   s //wp--pieces exec pop /pieces exch def
-  nums type /stringtype eq
-    { s nums systemdict name get pieces //wp--string-deltas exec }
-    { pieces nums axes //wp--array-deltas exec } ifelse
-  /deltas exch def
+  nums type /stringtype eq { nums //wp--numbers exec /nums exch def } if
+  pieces nums axes //wp--array-deltas exec /deltas exch def
   [ 0 1 pieces length 1 sub {
       dup pieces exch get exch deltas exch get aload pop 3 array astore
   } for ]
@@ -773,21 +761,21 @@
 % @internal
 /wp--xshow {
   2 //wp--operands exec //wp--drawable exec /xshow //wp--dry-run exec
-  /xshow //wp--or-real exec { 0 /xshow //wp--positioned exec } if
+  /xshow //wp--or-real exec { 0 //wp--positioned exec } if
 } bind def
 
 % ( string nums prefix fillp -- ): yshow through the warp.
 % @internal
 /wp--yshow {
   2 //wp--operands exec //wp--drawable exec /yshow //wp--dry-run exec
-  /yshow //wp--or-real exec { 1 /yshow //wp--positioned exec } if
+  /yshow //wp--or-real exec { 1 //wp--positioned exec } if
 } bind def
 
 % ( string nums prefix fillp -- ): xyshow through the warp.
 % @internal
 /wp--xyshow {
   2 //wp--operands exec //wp--drawable exec /xyshow //wp--dry-run exec
-  /xyshow //wp--or-real exec { 2 /xyshow //wp--positioned exec } if
+  /xyshow //wp--or-real exec { 2 //wp--positioned exec } if
 } bind def
 
 % ( -- bool ): whether the stack ends in the four numbers x y w h. The

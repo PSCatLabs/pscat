@@ -692,8 +692,7 @@ fn a_path_transform_that_fails_with_its_own_mark_open_is_unwound_by_depth() {
     // mark and the rect operands behind, and the operands were not put back
     // (gs: `77 1 2 3 4 rectfill` leaves them on an error, run above).
     for (op, call) in PAINTERS {
-        let (name, command) =
-            painter_after_failure(op, call, "{ mark 1 0 div } 2 wp-run-path");
+        let (name, command) = painter_after_failure(op, call, "{ mark 1 0 div } 2 wp-run-path");
         assert_eq!(name, "/undefinedresult", "{op}");
         assert_eq!(command, "div", "{op}");
         // a mark and more of the transform's own debris
@@ -737,7 +736,10 @@ fn a_transform_that_leaves_other_than_one_array_is_refused_and_unwound() {
             let (name, command) =
                 painter_after_failure(op, call, &format!("{transform} 2 wp-run-path"));
             assert_eq!(name, "/undefined", "{op} {transform}");
-            assert_eq!(command, "wp-warp-must-return-one-result", "{op} {transform}");
+            assert_eq!(
+                command, "wp-warp-must-return-one-result",
+                "{op} {transform}"
+            );
         }
     }
 }
@@ -793,6 +795,23 @@ fn xshow_family_places_unicode_glyphs_and_ignores_extra_numbers() {
 }
 
 #[test]
+fn an_encoded_number_string_works_with_the_object_format_at_zero() {
+    // the scanner reads token 149 only while the object format is not 0, so
+    // the decorator raises it for the scan and puts it back
+    assert_same_as_native(
+        "0 setobjectformat /Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         (AB) (\\225\\060\\000\\004\\101\\240\\000\\000\\100\\200\\000\\000\\101\\260\\000\\000\\300\\100\\000\\000) xyshow \
+         currentpoint currentobjectformat",
+    );
+    let program = "0 setobjectformat /Helvetica findfont 24 scalefont setfont newpath 15 50 moveto \
+         (AB) (\\225\\060\\000\\004\\101\\240\\000\\000\\100\\200\\000\\000\\101\\260\\000\\000\\300\\100\\000\\000) xyshow";
+    let shifted = render(&format!("{{ {program} }} 20 5 wp-shift 2 wp-run"));
+    let moved = render(&format!("20 5 translate {program}"));
+    assert!(ink(&moved) > 500);
+    assert!(worst_block_diff(&shifted, &moved, 8) < 4.0);
+}
+
+#[test]
 fn xshow_family_bends_with_a_real_warp_and_places_glyphs_in_user_space() {
     // the displacements are user space numbers: under a scale their pen
     // path is scaled, and a warp then bends where the glyphs land
@@ -801,10 +820,15 @@ fn xshow_family_bends_with_a_real_warp_and_places_glyphs_in_user_space() {
     let flat = render(&format!("{{ {program} }} {{}} 2 wp-run"));
     let bent = render(&format!("{{ {program} }} 10 120 wp-ripple 2 wp-run"));
     assert!(ink(&bent) > 500);
-    assert!(worst_block_diff(&flat, &bent, 8) > 20.0, "the ripple did not bend the text");
+    assert!(
+        worst_block_diff(&flat, &bent, 8) > 20.0,
+        "the ripple did not bend the text"
+    );
     // positions: yshow moves only up the page
-    let it = run("/Helvetica findfont 20 scalefont setfont newpath 10 10 moveto \
-                  { (HH) [5 7] yshow currentpoint } {} 2 wp-run");
+    let it = run(
+        "/Helvetica findfont 20 scalefont setfont newpath 10 10 moveto \
+                  { (HH) [5 7] yshow currentpoint } {} 2 wp-run",
+    );
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     assert_eq!(stack, ["10.0", "22.0"], "{stack:?}");
 }
@@ -855,10 +879,8 @@ fn the_show_family_guard_unwinds_by_depth_too() {
     for (op, text) in texts {
         let mark = show_after_failure(text, "{ mark 1 0 div } 2 wp-run-path");
         assert_eq!(mark, "/undefinedresult", "{op}");
-        let closure = show_after_failure(
-            text,
-            "<< /y 99 >> { pop pop y 0 div } wp--closure 2 wp-run",
-        );
+        let closure =
+            show_after_failure(text, "<< /y 99 >> { pop pop y 0 div } wp--closure 2 wp-run");
         assert_eq!(closure, "/undefinedresult", "{op}");
         // extra results: refused, and unwound all the same
         show_after_failure(text, "{ 99 exch } 2 wp-run-path");

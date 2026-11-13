@@ -53,17 +53,17 @@ Both now go through `wp--protect`, which is given `A = [saved n d k type]`:
   raises its error in gs's order and leaves the stack it leaves. A missing
   current point is checked separately, the same way. Type 3 text goes to the
   real operator too, as for the rest of the family.
-- **Encoded number strings** are not decoded in PostScript. Decoding is 16
-  representations (fixed point with any number of fraction bits, both byte
-  orders, IEEE and native reals) plus the count rules; instead
-  `wp--string-deltas` asks the real operator for the pen position after each
-  prefix of the text on the null device, and takes the difference between
-  neighbours as the glyph's displacement. That is quadratic in the text
-  length (documented in WARP.md: use an array for long text), and the
-  displacements carry the float noise of a user to device to user round
-  trip (about 1e-13), which the tests do not see.
-  Routing encoded strings to the real operator, unwarped, was the simpler
-  option; it would have left those texts flat in an otherwise bent page.
+- **Encoded number strings** are read with `token`: since #1192 (PR #1195,
+  merged while this was in flight) pscat scans token type 149, so
+  `wp--numbers` turns the string into the array it holds (the real operator
+  has already accepted it in the dry run). The scanner reads it only while
+  the object format is not 0, so for a program that set `0 setobjectformat`
+  the format is raised to 1 for the scan and put back. The first version
+  asked the real operator for the pen position after each prefix of the text
+  and took differences (no decoder needed, but quadratic and with float
+  noise); `token` is simpler, linear and exact. Routing encoded strings to
+  the real operator, unwarped, would have left those texts flat in a bent
+  page.
 - **cshow** paints nothing and moves nothing; the widths it reports are the
   font's, which a warp does not change; what its procedure shows goes
   through the decorated `show`. Tested (a decorator for it would only have
