@@ -84,6 +84,18 @@ const CASES: &str = r#"
 (ns short header) { 0 0 moveto (abc) <95 20 00> xshow } case
 (ns empty) { 0 0 moveto () () xshow } case
 (ns infinity) { 0 0 moveto (a) <95 30 0001 7f800000> xshow } case
+(text type before ns header xshow) { 0 0 moveto 5 <95 32 0001 0001> xshow } case
+(text type before ns header yshow) { 0 0 moveto 5 <95 32 0001 0001> yshow } case
+(text type before ns header xyshow) { 0 0 moveto 5 <95 32 0001 0001> xyshow } case
+(nocurrentpoint before ns value xshow) { (a) <95 30 0001 7f800000> xshow } case
+(nocurrentpoint before ns value yshow) { (a) <95 30 0001 7f800000> yshow } case
+(nocurrentpoint before ns value xyshow) { (a) <95 30 0002 7f800000 00000000> xyshow } case
+(count before ns value xshow) { 0 0 moveto (ab) <95 30 0001 7f800000> xshow } case
+(count before ns value yshow) { 0 0 moveto (ab) <95 30 0001 7f800000> yshow } case
+(count before ns value xyshow) { 0 0 moveto (ab) <95 30 0003 7f800000 00000000 00000000> xyshow } case
+(ns value after a good one) { 0 0 moveto (ab) <95 30 0002 3f800000 7f800000> xshow } case
+(ns infinity yshow) { 0 0 moveto (a) <95 30 0001 7f800000> yshow } case
+(ns nan xyshow) { 0 0 moveto (a) <95 30 0002 00000000 7fc00000> xyshow } case
 (cshow) { 20 30 moveto (abc) { cs } cshow } case
 (cshow string first) { 20 30 moveto { cs } (ab) cshow } case
 (cshow no current point) { (ab) { cs } cshow } case
@@ -146,6 +158,18 @@ ns bad header => typecheck
 ns short header => typecheck
 ns empty => typecheck
 ns infinity => undefinedresult
+text type before ns header xshow => typecheck
+text type before ns header yshow => typecheck
+text type before ns header xyshow => typecheck
+nocurrentpoint before ns value xshow => nocurrentpoint
+nocurrentpoint before ns value yshow => nocurrentpoint
+nocurrentpoint before ns value xyshow => nocurrentpoint
+count before ns value xshow => rangecheck
+count before ns value yshow => rangecheck
+count before ns value xyshow => rangecheck
+ns value after a good one => undefinedresult
+ns infinity yshow => undefinedresult
+ns nan xyshow => undefinedresult
 cshow => cs 0.0 24.0 97 cs 0.0 28.0 98 cs 0.0 20.0 99 ok cp 20.0 30.0 
 cshow string first => cs 0.0 24.0 97 cs 0.0 28.0 98 ok cp 20.0 30.0 
 cshow no current point => cs 0.0 24.0 97 cs 0.0 28.0 98 ok nocp
@@ -355,6 +379,7 @@ fn cshow_and_a_failed_xshow_paint_nothing() {
         "20 20 moveto { (abc) [1 2] xshow } stopped pop",
         "20 20 moveto { (abc) [1 2 /x] xshow } stopped pop",
         "20 20 moveto { (abc) <95 20 0003 0001 0002 0003 0004> xyshow } stopped pop",
+        "20 20 moveto { (ab) <95 30 0002 3f800000 7f800000> xshow } stopped pop",
     ] {
         let it = render(&format!("{PRELUDE} box {src}"));
         assert_eq!(ink(&it.gfx().pixmap), 0, "{src} painted");

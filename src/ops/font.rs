@@ -392,14 +392,20 @@ fn kshow(it: &mut Interp) -> Result<(), PsError> {
 /// PDF converters place every glyph exactly.
 ///
 /// The checks run in Ghostscript's order (`tests/xshow.rs` compares
-/// them): the operand types and an encoded string's header, then too few
-/// numbers for the glyphs (`rangecheck`; extra numbers are ignored), then
-/// the current point, then every array element being a number
-/// (`typecheck`, the unused ones included). Nothing paints before they
-/// all pass.
+/// them): both operand types, then an encoded string's header and count,
+/// then too few numbers for the glyphs (`rangecheck`; extra numbers are
+/// ignored), then the current point, then the values: every array element
+/// a number (`typecheck`, the unused ones included) and every encoded real
+/// finite (`undefinedresult`). Nothing paints before they all pass.
 fn positioned_show(it: &mut Interp, axes: Axes) -> Result<(), PsError> {
-    let nums = crate::numstring::NumOperand::of(&it.pop()?)?;
-    let s = pop_string(it)?;
+    let nums = it.pop()?;
+    let Value::String(s) = it.pop()?.value else {
+        return Err(PsError::Typecheck);
+    };
+    if !matches!(nums.value, Value::Array(_) | Value::String(_)) {
+        return Err(PsError::Typecheck);
+    }
+    let nums = crate::numstring::NumOperand::of(&nums)?;
     let text = s.to_vec();
     let glyphs = font::glyph_count(&it.gfx, &text)?;
     if nums.len() < glyphs.saturating_mul(axes.per_glyph()) {

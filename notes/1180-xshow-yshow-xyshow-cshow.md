@@ -26,11 +26,14 @@ converters (dvips, pdftops, Ghostscript's ps2write emit `xshow` and
 **Decisions, all settled against Ghostscript 10.07.1** (the pinned
 report in `tests/xshow.rs`):
 
-- Validation happens before anything paints, in gs's order: operand
-  types and the string header, then too few numbers (`rangecheck`, also
-  before `nocurrentpoint`), then the current point, then every array
-  element a number (`typecheck`, after `nocurrentpoint`, and for unused
-  extra elements too). Extra numbers are fine.
+- Validation happens before anything paints, in gs's order: both
+  operand types, then an encoded string's header and count, then too few
+  numbers (`rangecheck`, also before `nocurrentpoint`), then the current
+  point, then the values: every array element a number (`typecheck`,
+  after `nocurrentpoint`, and for unused extra elements too) and every
+  encoded real finite (`undefinedresult`, also after `nocurrentpoint`
+  and the count check). Extra numbers are fine. Codex's review of PR
+  #1190 caught the first version decoding the values with the header.
 - The glyph count is `font::glyph_count`, cut by `decode_one` like the
   show itself, so a Unicode-mode font counts UTF-8 scalars.
 - One stray byte after the last whole value of an encoded string is

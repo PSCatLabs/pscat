@@ -25,8 +25,10 @@
 //! not starting with 149 is a `typecheck`; any other representation, or a
 //! count that is not the number of whole values after the header, is a
 //! `rangecheck` (one stray trailing byte is allowed, a whole extra value is
-//! not). A non-finite real is an `undefinedresult`, which is where gs ends
-//! up when it moves the current point by one.
+//! not). A non-finite real is an `undefinedresult`. Those header checks come
+//! when the operand is read ([`NumOperand::of`]); the values are read, and
+//! a non-finite one found, only in [`NumOperand::into_numbers`], because gs
+//! checks the count against the text and the current point first.
 //!
 //! `xshow`, `yshow` and `xyshow` take this operand today. The Level 2
 //! `rectfill`, `rectstroke` and `rectclip` accept it too in Ghostscript;
@@ -39,25 +41,26 @@ use crate::object::{Object, PsArray, Value};
 /// The binary token type that heads an encoded number string.
 const HOMOGENEOUS_ARRAY: u8 = 149;
 
-/// A `numarray | numstring` operand, read but not yet type-checked
-/// element by element: Ghostscript checks the count against the text
-/// before it checks the current point, and the element types after it,
-/// so the two steps are separate.
+/// A `numarray | numstring` operand, its structure checked but not its
+/// values: Ghostscript checks the count against the text before it checks
+/// the current point, and the values (array element types, non-finite
+/// reals) after it, so the two steps are separate.
 pub(crate) enum NumOperand {
     /// An array (literal, executable or packed): its elements are checked
     /// by [`NumOperand::into_numbers`].
     Array(PsArray),
-    /// An encoded number string, already decoded.
-    Decoded(Vec<f64>),
+    /// An encoded number string whose header has been checked.
+    Encoded(Encoded),
 }
 
 impl NumOperand {
     /// Read `obj` as a number list: `typecheck` for anything but an array
-    /// or a string, and the header checks of [`decode`] for a string.
+    /// or a string, and the header checks of [`Encoded::parse`] for a
+    /// string.
     pub(crate) fn of(obj: &Object) -> Result<NumOperand, PsError> {
         match &obj.value {
             Value::Array(a) => Ok(NumOperand::Array(a.clone())),
-            Value::String(s) => Ok(NumOperand::Decoded(decode(&s.to_vec())?)),
+            Value::String(s) => Ok(NumOperand::Encoded(Encoded::parse(s.to_vec())?)),
             _ => Err(PsError::Typecheck),
         }
     }
@@ -66,15 +69,16 @@ impl NumOperand {
     pub(crate) fn len(&self) -> usize {
         match self {
             NumOperand::Array(a) => a.len(),
-            NumOperand::Decoded(v) => v.len(),
+            NumOperand::Encoded(e) => e.count,
         }
     }
 
     /// The numbers, snapshotted: a `typecheck` if any array element (the
-    /// ones past those a show needs included, as in gs) is not a number.
+    /// ones past those a show needs included, as in gs) is not a number,
+    /// an `undefinedresult` for a non-finite encoded real.
     pub(crate) fn into_numbers(self) -> Result<Vec<f64>, PsError> {
         match self {
-            NumOperand::Decoded(v) => Ok(v),
+            NumOperand::Encoded(e) => e.values(),
             NumOperand::Array(a) => (0..a.len())
                 .map(|i| match a.get(i).map(|o| o.value) {
                     Some(Value::Integer(n)) => Ok(n as f64),
@@ -130,36 +134,65 @@ fn representation(r: u8) -> Option<(ByteOrder, Repr)> {
     Some((order, repr))
 }
 
-/// Decode an encoded number string (see the module comment for the format
-/// and the errors).
-pub(crate) fn decode(bytes: &[u8]) -> Result<Vec<f64>, PsError> {
-    if bytes.len() < 4 || bytes[0] != HOMOGENEOUS_ARRAY {
-        return Err(PsError::Typecheck);
-    }
-    let (order, repr) = representation(bytes[1]).ok_or(PsError::Rangecheck)?;
-    let count = usize::from(order.u16(&bytes[2..4]));
-    let body = &bytes[4..];
-    let width = repr.width();
-    if body.len() / width != count {
-        return Err(PsError::Rangecheck);
-    }
-    body.chunks_exact(width)
-        .map(|b| {
-            let v = match repr {
-                Repr::Fixed { bytes: 2, frac } => {
-                    f64::from(order.u16(b) as i16) / f64::from(1u32 << frac)
-                }
-                Repr::Fixed { frac, .. } => f64::from(order.u32(b) as i32) / (1u64 << frac) as f64,
-                Repr::Real => f64::from(f32::from_bits(order.u32(b))),
-                Repr::NativeReal => f64::from(f32::from_ne_bytes([b[0], b[1], b[2], b[3]])),
-            };
-            if v.is_finite() {
-                Ok(v)
-            } else {
-                Err(PsError::UndefinedResult)
-            }
+/// An encoded number string with a valid header: its layout and how many
+/// numbers it holds, the values still unread.
+pub(crate) struct Encoded {
+    bytes: Vec<u8>,
+    order: ByteOrder,
+    repr: Repr,
+    count: usize,
+}
+
+impl Encoded {
+    /// Check the header and the count (see the module comment for the
+    /// errors). The values are not looked at.
+    fn parse(bytes: Vec<u8>) -> Result<Encoded, PsError> {
+        if bytes.len() < 4 || bytes[0] != HOMOGENEOUS_ARRAY {
+            return Err(PsError::Typecheck);
+        }
+        let (order, repr) = representation(bytes[1]).ok_or(PsError::Rangecheck)?;
+        let count = usize::from(order.u16(&bytes[2..4]));
+        if (bytes.len() - 4) / repr.width() != count {
+            return Err(PsError::Rangecheck);
+        }
+        Ok(Encoded {
+            bytes,
+            order,
+            repr,
+            count,
         })
-        .collect()
+    }
+
+    /// The numbers: `undefinedresult` if one is not finite.
+    fn values(&self) -> Result<Vec<f64>, PsError> {
+        let (order, repr) = (self.order, self.repr);
+        self.bytes[4..]
+            .chunks_exact(repr.width())
+            .map(|b| {
+                let v = match repr {
+                    Repr::Fixed { bytes: 2, frac } => {
+                        f64::from(order.u16(b) as i16) / f64::from(1u32 << frac)
+                    }
+                    Repr::Fixed { frac, .. } => {
+                        f64::from(order.u32(b) as i32) / (1u64 << frac) as f64
+                    }
+                    Repr::Real => f64::from(f32::from_bits(order.u32(b))),
+                    Repr::NativeReal => f64::from(f32::from_ne_bytes([b[0], b[1], b[2], b[3]])),
+                };
+                if v.is_finite() {
+                    Ok(v)
+                } else {
+                    Err(PsError::UndefinedResult)
+                }
+            })
+            .collect()
+    }
+}
+
+/// Decode an encoded number string: the header checks, then the values.
+#[cfg(test)]
+fn decode(bytes: &[u8]) -> Result<Vec<f64>, PsError> {
+    Encoded::parse(bytes.to_vec())?.values()
 }
 
 #[cfg(test)]
@@ -207,6 +240,19 @@ mod tests {
             b.extend_from_slice(&native);
             assert_eq!(decode(&b), reals, "r = {r}");
         }
+    }
+
+    /// The header is checked when the operand is read, the values only
+    /// when they are taken, so a show can report its count and current
+    /// point errors first, as gs does.
+    #[test]
+    fn values_are_checked_after_the_header() {
+        let inf = Object::lit(Value::String(crate::object::PsString::from_bytes(hex(
+            "95 30 0002 3f800000 7f800000",
+        ))));
+        let op = NumOperand::of(&inf).expect("the header is fine");
+        assert_eq!(op.len(), 2);
+        assert_eq!(op.into_numbers(), Err(PsError::UndefinedResult));
     }
 
     #[test]

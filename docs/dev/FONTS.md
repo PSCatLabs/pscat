@@ -197,11 +197,12 @@ machine then processes **one glyph per step**:
 - **`xshow`/`yshow`/`xyshow`** (#1180) are `show` with a
   `Displacements` list: after each glyph the pen moves by the next dx,
   dy or dx dy in user space, and the glyph's own width is ignored. Every
-  check runs before anything paints, in Ghostscript's order: operand
-  types and an encoded string's header, too few numbers for the glyph
-  count (`rangecheck`; the count is `font::glyph_count`, so a
-  Unicode-mode font counts UTF-8 scalars), the current point, then every
-  array element a number (`typecheck`, unused ones too). The count can
+  check runs before anything paints, in Ghostscript's order: both
+  operand types, an encoded string's header and count, too few numbers
+  for the glyph count (`rangecheck`; the count is `font::glyph_count`,
+  so a Unicode-mode font counts UTF-8 scalars), the current point, then
+  the values: every array element a number (`typecheck`, unused ones
+  too) and every encoded real finite (`undefinedresult`). The count can
   be taken up front because nothing can change the font mid-show: there
   is no kshow proc, and a BuildChar's `setfont` is rolled back.
 - **`cshow`** (#1180) runs in `ShowMode::Width`: each character is
