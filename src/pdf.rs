@@ -506,7 +506,7 @@ Q",
     pub(crate) fn stroke(
         &mut self,
         path: &crate::gfx::PsPath,
-        pen: Option<tiny_skia::Transform>,
+        pen: Option<(tiny_skia::Transform, usize)>,
         rgb: (f32, f32, f32),
         width: f32,
         cap: tiny_skia::LineCap,
@@ -537,13 +537,17 @@ Q",
         };
         // `path` is in pen space when the CTM is anisotropic (#1196,
         // `Gfx::stroke_space`): PDF strokes in user space, so a `cm` of
-        // the pen-to-device map gives the elliptical pen. Written at full
-        // f32 precision, like the shading `cm`: these entries are near 1,
-        // where three decimals would move a far point by a fraction of a
-        // point.
-        let pen = match pen {
-            Some(l) => format!("{} {} {} {} 0 0 cm ", p(l.sx), p(l.ky), p(l.kx), p(l.sy)),
-            None => String::new(),
+        // the pen-to-device map gives the elliptical pen. The `cm` is at
+        // full f32 precision, like the shading `cm` (its entries can be
+        // near 1, where three decimals would move a far point), and the
+        // path at the extra decimals the caller asks for, since the `cm`
+        // stretches its rounding too.
+        let (pen, path_text) = match pen {
+            Some((l, decimals)) => (
+                format!("{} {} {} {} 0 0 cm ", p(l.sx), p(l.ky), p(l.kx), p(l.sy)),
+                path.to_pdf_ops_with(false, decimals),
+            ),
+            None => (String::new(), path_ops(path, false)),
         };
         let _ = writeln!(
             self.content,
@@ -554,7 +558,7 @@ Q",
             f(rgb.2),
             f(width),
             f(miter_limit),
-            path_ops(path, false),
+            path_text,
         );
     }
 
@@ -1203,9 +1207,13 @@ fn f(v: f32) -> String {
 /// (#320). Device units are points, so the error is at most 0.005 pt, and
 /// the same coordinate always rounds to the same text, so shapes that
 /// shared an edge still share it. Roughly -20% on a speck-heavy page.
+#[cfg(test)]
 pub(crate) fn path_coord(v: f32) -> String {
-    fmt_num(v, 2)
+    fmt_num(v, PATH_DECIMALS)
 }
+
+/// The decimals `path_coord` writes.
+pub(crate) const PATH_DECIMALS: usize = 2;
 
 /// Shading geometry and its `cm` (#1028): the shortest text that reads
 /// back as the same `f32` (Rust's `Display` never uses an exponent, which
