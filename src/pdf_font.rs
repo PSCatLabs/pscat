@@ -18,6 +18,17 @@
 //! - the subset holds only the glyphs used, with no subsetting library
 //!   (none is in the dependency tree).
 //!
+//! A glyph shared by two characters (NotoSansJP draws U+2012 and U+2013
+//! with one glyph) gets a second CID beyond the face's glyph range, with a
+//! copy of the charstring, so `/ToUnicode` can give each its own character.
+//!
+//! Every call into ttf-parser here runs under `guard::catch`, as the show
+//! engine's own lookups do: a hostile font can trip an overflow assertion
+//! inside the parser in a debug build (the `truetype` fuzz regressions).
+//! A glyph whose outline cannot be written exactly (an operand past the
+//! 16.16 range, a charstring past 65,535 bytes, a parser panic) is refused,
+//! and the recorder keeps its outline in the content stream.
+//!
 //! TrueType quadratics become cubics exactly (control points at 2/3).
 //! Outlines are scaled to the CFF's default 1000-unit em (FontMatrix
 //! 0.001, written nowhere, so no Top DICT/FDArray matrix composition can
@@ -26,25 +37,90 @@
 //! previous *rounded* point, so rounding never drifts along a contour.
 //! Hints are not carried; pscat's own raster is unhinted too.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
-/// What one embedded font needs from the recorder: the glyphs it used,
-/// each with the character it stands for (first one seen) and its advance
-/// in 1/1000 em.
-#[derive(Default)]
+use crate::guard::catch;
+
+/// One CID of an embedded font: the character it stands for, its advance
+/// in 1/1000 em and the Type 2 charstring of the glyph it draws.
+pub(crate) struct CidGlyph {
+    pub(crate) ch: char,
+    pub(crate) advance: f64,
+    pub(crate) charstring: Vec<u8>,
+}
+
+/// The glyphs one embedded font holds, by CID. A glyph's first character
+/// takes CID = glyph id; another character drawn with the same glyph gets
+/// a CID from `number_of_glyphs` up.
 pub(crate) struct UsedGlyphs {
-    pub(crate) glyphs: BTreeMap<u16, (char, f64)>,
+    pub(crate) cids: BTreeMap<u16, CidGlyph>,
+    pairs: HashMap<(u16, char), u16>,
+    /// Glyphs whose outline cannot be embedded: they stay paths.
+    refused: HashSet<u16>,
+    next_extra: u32,
+}
+
+/// CIDs per font: a CFF INDEX counts to 65,535, `.notdef` included.
+const MAX_CIDS: usize = 65_534;
+
+impl UsedGlyphs {
+    pub(crate) fn new(face: &Face) -> Self {
+        UsedGlyphs {
+            cids: BTreeMap::new(),
+            pairs: HashMap::new(),
+            refused: HashSet::new(),
+            next_extra: u32::from(catch(|| face.number_of_glyphs()).unwrap_or(u16::MAX)),
+        }
+    }
+
+    /// The CID that draws `gid` and stands for `ch`, building its
+    /// charstring the first time the glyph is seen. `None` keeps the
+    /// glyph's outline: it cannot be embedded, or the font is out of CIDs.
+    pub(crate) fn cid(&mut self, face: &Face, gid: u16, ch: char, advance: f64) -> Option<u16> {
+        if let Some(&cid) = self.pairs.get(&(gid, ch)) {
+            return Some(cid);
+        }
+        if gid == 0 || self.refused.contains(&gid) || self.cids.len() >= MAX_CIDS {
+            return None;
+        }
+        let (cid, charstring) = match self.cids.get(&gid) {
+            // Glyph ids are below `number_of_glyphs` and extra CIDs at or
+            // above it, so CID `gid` is this glyph's first character.
+            Some(first) => {
+                let cid = u16::try_from(self.next_extra).ok()?;
+                self.next_extra += 1;
+                (cid, first.charstring.clone())
+            }
+            None => match charstring(face, gid) {
+                Some(cs) => (gid, cs),
+                None => {
+                    self.refused.insert(gid);
+                    return None;
+                }
+            },
+        };
+        self.cids.insert(
+            cid,
+            CidGlyph {
+                ch,
+                advance,
+                charstring,
+            },
+        );
+        self.pairs.insert((gid, ch), cid);
+        Some(cid)
+    }
 }
 
 /// A glyph's advance in 1/1000 em, rounded to what the PDF writes, so the
 /// `/W` entry and the `TJ` adjustments computed against it agree exactly.
 pub(crate) fn advance_1000(face: &Face, gid: u16) -> f64 {
     let upem = f64::from(face.units_per_em().max(1));
-    let adv = face
-        .glyph_hor_advance(GlyphId(gid))
+    let adv = catch(|| face.glyph_hor_advance(GlyphId(gid)))
+        .flatten()
         .map(f64::from)
         .unwrap_or(0.0);
     round_to(adv * 1000.0 / upem, 3)
@@ -86,7 +162,10 @@ pub(crate) fn num(v: f64, decimals: usize) -> String {
 /// (bits 2 and 3 both set, as several TeX Gyre faces have it, is
 /// Editable). A face with no OS/2 table carries no restriction.
 pub(crate) fn embedding_allowed(face: &Face) -> bool {
-    let Some(os2) = face.raw_face().table(ttf_parser::Tag::from_bytes(b"OS/2")) else {
+    let Some(os2) = catch(|| face.raw_face().table(ttf_parser::Tag::from_bytes(b"OS/2"))) else {
+        return false;
+    };
+    let Some(os2) = os2 else {
         return true;
     };
     let Some(bits) = os2.get(8..10) else {
@@ -115,6 +194,8 @@ struct Charstring {
     /// The last point exactly, in 1000-unit em, for the quadratic →
     /// cubic conversion.
     last: (f64, f64),
+    /// False once an operand did not fit a Type 2 number.
+    exact: bool,
 }
 
 const FIXED_ONE: i64 = 65536;
@@ -127,40 +208,45 @@ fn fixed(v: f64) -> i64 {
 }
 
 /// A charstring operand: a short integer form when the value is whole and
-/// small, else a 16.16 fixed number (operator 255).
-fn push_operand(out: &mut Vec<u8>, d: i64) {
+/// small, else a 16.16 fixed number (operator 255). `false` when `d` is
+/// beyond what Type 2 can say (±32768 units): the caller refuses the glyph
+/// rather than draw it distorted.
+fn push_operand(out: &mut Vec<u8>, d: i64) -> bool {
     if d % FIXED_ONE == 0 {
         let v = d / FIXED_ONE;
         if (-107..=107).contains(&v) {
             out.push((v + 139) as u8);
-            return;
+            return true;
         }
         if (108..=1131).contains(&v) {
             let w = v - 108;
             out.extend_from_slice(&[((w >> 8) + 247) as u8, (w & 0xFF) as u8]);
-            return;
+            return true;
         }
         if (-1131..=-108).contains(&v) {
             let w = -v - 108;
             out.extend_from_slice(&[((w >> 8) + 251) as u8, (w & 0xFF) as u8]);
-            return;
+            return true;
         }
         if (-32768..=32767).contains(&v) {
             out.push(28);
             out.extend_from_slice(&(v as i16).to_be_bytes());
-            return;
+            return true;
         }
     }
-    let f = d.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    let Ok(f) = i32::try_from(d) else {
+        return false;
+    };
     out.push(255);
     out.extend_from_slice(&f.to_be_bytes());
+    true
 }
 
 impl Charstring {
     fn point(&mut self, x: f64, y: f64) {
         let p = (fixed(x), fixed(y));
-        push_operand(&mut self.out, p.0 - self.cur.0);
-        push_operand(&mut self.out, p.1 - self.cur.1);
+        self.exact &= push_operand(&mut self.out, p.0 - self.cur.0);
+        self.exact &= push_operand(&mut self.out, p.1 - self.cur.1);
         self.cur = p;
         self.last = (x, y);
     }
@@ -202,22 +288,41 @@ impl OutlineBuilder for Charstring {
     fn close(&mut self) {}
 }
 
-/// The charstring for `gid`. No width operand: PDF takes advances from the
-/// CIDFont's `/W`, which overrides the font program's.
-fn charstring(face: &Face, gid: u16) -> Vec<u8> {
-    let mut cs = Charstring {
-        out: Vec::new(),
-        scale: 1000.0 / f64::from(face.units_per_em().max(1)),
-        cur: (0, 0),
-        last: (0.0, 0.0),
-    };
-    // An outline the parser rejects halfway (a hostile font) is dropped
-    // whole rather than left half-drawn.
-    if face.outline_glyph(GlyphId(gid), &mut cs).is_none() {
-        cs.out.clear();
+/// The Type 2 limit on one charstring.
+const MAX_CHARSTRING: usize = 65_535;
+
+impl Charstring {
+    fn new(units_per_em: u16) -> Self {
+        Charstring {
+            out: Vec::new(),
+            scale: 1000.0 / f64::from(units_per_em.max(1)),
+            cur: (0, 0),
+            last: (0.0, 0.0),
+            exact: true,
+        }
     }
-    cs.out.push(14); // endchar
-    cs.out
+
+    /// The finished charstring, or `None` if it cannot be written exactly
+    /// within the Type 2 limits.
+    fn finish(mut self) -> Option<Vec<u8>> {
+        self.out.push(14); // endchar
+        (self.exact && self.out.len() <= MAX_CHARSTRING).then_some(self.out)
+    }
+}
+
+/// The charstring for `gid`, `None` when it cannot be embedded exactly.
+/// No width operand: PDF takes advances from the CIDFont's `/W`, which
+/// overrides the font program's. An empty glyph (a space) is a bare
+/// `endchar`.
+fn charstring(face: &Face, gid: u16) -> Option<Vec<u8>> {
+    let mut cs = Charstring::new(face.units_per_em());
+    // `outline_glyph` is `None` for an empty glyph and for one the parser
+    // gives up on halfway; either way nothing usable was drawn.
+    let drawn = catch(|| face.outline_glyph(GlyphId(gid), &mut cs).is_some())?;
+    if !drawn {
+        cs = Charstring::new(face.units_per_em());
+    }
+    cs.finish()
 }
 
 // ---------------------------------------------------------------------
@@ -291,7 +396,9 @@ fn dict_int5(out: &mut Vec<u8>, v: usize) {
 /// The face's bounding box in 1000-unit em, rounded outward.
 pub(crate) fn bbox_1000(face: &Face) -> [i32; 4] {
     let k = 1000.0 / f64::from(face.units_per_em().max(1));
-    let r = face.global_bounding_box();
+    let Some(r) = catch(|| face.global_bounding_box()) else {
+        return [0; 4];
+    };
     let c = |v: f64| v.clamp(-1e6, 1e6) as i32;
     [
         c((f64::from(r.x_min) * k).floor()),
@@ -301,35 +408,40 @@ pub(crate) fn bbox_1000(face: &Face) -> [i32; 4] {
     ]
 }
 
-/// A bare CID-keyed CFF holding `.notdef` and `gids` (ascending, no 0),
-/// registry-ordering-supplement Adobe-Identity-0 to match the CIDFont's
-/// `/CIDSystemInfo`, CID = source glyph id.
-pub(crate) fn cid_cff(face: &Face, name: &str, gids: &[u16]) -> Vec<u8> {
+/// A bare CID-keyed CFF holding `notdef` and `glyphs` (by ascending CID,
+/// none 0), registry-ordering-supplement Adobe-Identity-0 to match the
+/// CIDFont's `/CIDSystemInfo`.
+pub(crate) fn cid_cff(
+    name: &str,
+    bbox: [i32; 4],
+    notdef: Vec<u8>,
+    glyphs: &[(u16, &[u8])],
+) -> Vec<u8> {
     let header = [1u8, 0, 4, 4];
     let name_index = index(&[name.as_bytes().to_vec()]);
     // Custom strings start at SID 391.
     let strings = index(&[b"Adobe".to_vec(), b"Identity".to_vec()]);
     let gsubrs = index(&[]);
 
-    let mut charstrings = Vec::with_capacity(gids.len() + 1);
-    charstrings.push(charstring(face, 0));
-    for &g in gids {
-        charstrings.push(charstring(face, g));
+    let glyphs = &glyphs[..glyphs.len().min(MAX_CIDS)];
+    let mut charstrings = Vec::with_capacity(glyphs.len() + 1);
+    charstrings.push(notdef);
+    for (_, cs) in glyphs {
+        charstrings.push(cs.to_vec());
     }
     let charstrings = index(&charstrings);
-    let nglyphs = u16::try_from(gids.len() + 1).unwrap_or(u16::MAX);
+    let nglyphs = u16::try_from(glyphs.len() + 1).unwrap_or(u16::MAX);
 
     // charset format 0: the CID of every glyph after .notdef.
     let mut charset = vec![0u8];
-    for &g in gids {
-        charset.extend_from_slice(&g.to_be_bytes());
+    for (cid, _) in glyphs {
+        charset.extend_from_slice(&cid.to_be_bytes());
     }
     // FDSelect format 3: one range, every glyph in FD 0.
     let mut fdselect = vec![3u8, 0, 1, 0, 0, 0];
     fdselect.extend_from_slice(&nglyphs.to_be_bytes());
     let private = vec![139u8, 20, 139, 21]; // defaultWidthX 0, nominalWidthX 0
-    let cid_count = i32::from(gids.last().copied().unwrap_or(0)) + 1;
-    let bbox = bbox_1000(face);
+    let cid_count = i32::from(glyphs.last().map_or(0, |g| g.0)) + 1;
 
     let top = |offs: [usize; 4]| {
         let mut d = Vec::new();
@@ -425,26 +537,27 @@ fn subset_tag(font_index: usize, gids: &[u16]) -> String {
         .collect()
 }
 
-/// The `/ToUnicode` CMap: each CID to its character, UTF-16BE.
-fn to_unicode(glyphs: &BTreeMap<u16, (char, f64)>) -> String {
+/// The `/ToUnicode` CMap: each CID to its character, UTF-16BE (a
+/// surrogate pair past the BMP).
+fn to_unicode(cids: &BTreeMap<u16, CidGlyph>) -> String {
     let mut s = String::from(
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n\
          /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n\
          /CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n\
          1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n",
     );
-    let entries: Vec<(&u16, &(char, f64))> = glyphs.iter().collect();
+    let entries: Vec<(&u16, &CidGlyph)> = cids.iter().collect();
     // At most 100 entries per bfchar block (the CMap format's limit).
     for chunk in entries.chunks(100) {
         let _ = writeln!(s, "{} beginbfchar", chunk.len());
-        for (gid, (ch, _)) in chunk {
+        for (cid, g) in chunk {
             let mut units = [0u16; 2];
-            let dst: String = ch
-                .encode_utf16(&mut units)
-                .iter()
-                .map(|u| format!("{u:04X}"))
-                .collect();
-            let _ = writeln!(s, "<{gid:04X}> <{dst}>");
+            let dst: String =
+                g.ch.encode_utf16(&mut units)
+                    .iter()
+                    .map(|u| format!("{u:04X}"))
+                    .collect();
+            let _ = writeln!(s, "<{cid:04X}> <{dst}>");
         }
         s.push_str("endbfchar\n");
     }
@@ -453,20 +566,20 @@ fn to_unicode(glyphs: &BTreeMap<u16, (char, f64)>) -> String {
 }
 
 /// The `/W` array: runs of consecutive CIDs share one bracket.
-fn widths(glyphs: &BTreeMap<u16, (char, f64)>) -> String {
+fn widths(cids: &BTreeMap<u16, CidGlyph>) -> String {
     let mut s = String::from("[");
     let mut prev: Option<u16> = None;
-    for (&gid, &(_, w)) in glyphs {
-        if prev.is_some_and(|p| u32::from(p) + 1 == u32::from(gid)) {
+    for (&cid, g) in cids {
+        if prev.is_some_and(|p| u32::from(p) + 1 == u32::from(cid)) {
             s.push(' ');
         } else {
             if prev.is_some() {
                 s.push(']');
             }
-            let _ = write!(s, " {gid} [");
+            let _ = write!(s, " {cid} [");
         }
-        s.push_str(&num(w, 3));
-        prev = Some(gid);
+        s.push_str(&num(g.advance, 3));
+        prev = Some(cid);
     }
     if prev.is_some() {
         s.push(']');
@@ -491,9 +604,34 @@ fn stream(dict: &str, data: &[u8]) -> Vec<u8> {
 /// font program, ToUnicode CMap.
 pub(crate) const OBJECTS_PER_FONT: usize = 5;
 
+/// The descriptor's metrics, in 1000-unit em: bbox, ascent, descent, cap
+/// height, italic angle, flags.
+type Metrics = ([i32; 4], f64, f64, f64, f64, u32);
+
+fn metrics(face: &Face) -> Option<Metrics> {
+    catch(|| {
+        let k = 1000.0 / f64::from(face.units_per_em().max(1));
+        let ascent = f64::from(face.ascender()) * k;
+        let descent = f64::from(face.descender()) * k;
+        let cap = face.capital_height().map_or(ascent, |c| f64::from(c) * k);
+        let italic = f64::from(face.italic_angle());
+        // Symbolic (bit 3): the glyphs are named by CID, not a standard
+        // Latin set. FixedPitch and Italic as the face says.
+        let mut flags = 4;
+        if face.is_monospaced() {
+            flags |= 1;
+        }
+        if face.is_italic() || italic != 0.0 {
+            flags |= 64;
+        }
+        (bbox_1000(face), ascent, descent, cap, italic, flags)
+    })
+}
+
 /// The five objects of document font `font_index`, numbered from `first`.
-/// `face` is `None` only if the face vanished, which the registry never
-/// does; the font then has empty glyphs rather than a broken file.
+/// The glyphs come from `used` (their charstrings were built as they were
+/// shown); `face` only gives the descriptor's metrics and `.notdef`, and
+/// is `None` only if the face vanished, which the registry never does.
 pub(crate) fn font_objects(
     face: Option<&Face>,
     ps_name: &str,
@@ -501,8 +639,8 @@ pub(crate) fn font_objects(
     used: &UsedGlyphs,
     first: usize,
 ) -> [Vec<u8>; OBJECTS_PER_FONT] {
-    let gids: Vec<u16> = used.glyphs.keys().copied().filter(|&g| g != 0).collect();
-    let base = format!("{}+{}", subset_tag(font_index, &gids), name_token(ps_name));
+    let cids: Vec<u16> = used.cids.keys().copied().collect();
+    let base = format!("{}+{}", subset_tag(font_index, &cids), name_token(ps_name));
     let (cidfont, descriptor, program, cmap) = (first + 1, first + 2, first + 3, first + 4);
     let type0_obj = format!(
         "<< /Type /Font /Subtype /Type0 /BaseFont /{base} /Encoding /Identity-H \
@@ -513,37 +651,23 @@ pub(crate) fn font_objects(
         "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /{base} \
          /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> \
          /FontDescriptor {descriptor} 0 R /DW 0 /W {} >>",
-        widths(&used.glyphs)
+        widths(&used.cids)
     )
     .into_bytes();
-    let (bbox, ascent, descent, cap, italic, flags, cff) = match face {
-        Some(face) => {
-            let k = 1000.0 / f64::from(face.units_per_em().max(1));
-            let ascent = f64::from(face.ascender()) * k;
-            let descent = f64::from(face.descender()) * k;
-            let cap = face.capital_height().map_or(ascent, |c| f64::from(c) * k);
-            let italic = f64::from(face.italic_angle());
-            // Symbolic (bit 3): the glyphs are named by CID, not a standard
-            // Latin set. FixedPitch and Italic as the face says.
-            let mut flags = 4;
-            if face.is_monospaced() {
-                flags |= 1;
-            }
-            if face.is_italic() || italic != 0.0 {
-                flags |= 64;
-            }
-            (
-                bbox_1000(face),
-                ascent,
-                descent,
-                cap,
-                italic,
-                flags,
-                cid_cff(face, &base, &gids),
-            )
-        }
-        None => ([0; 4], 0.0, 0.0, 0.0, 0.0, 4, Vec::new()),
-    };
+    let (bbox, ascent, descent, cap, italic, flags) = face
+        .and_then(metrics)
+        .unwrap_or(([0; 4], 0.0, 0.0, 0.0, 0.0, 4));
+    // `.notdef` is never shown (glyph 0 keeps its outline), so an empty
+    // one is as good as the face's when the face cannot give it.
+    let notdef = face
+        .and_then(|f| charstring(f, 0))
+        .unwrap_or_else(|| vec![14]);
+    let glyphs: Vec<(u16, &[u8])> = used
+        .cids
+        .iter()
+        .map(|(&cid, g)| (cid, g.charstring.as_slice()))
+        .collect();
+    let cff = cid_cff(&base, bbox, notdef, &glyphs);
     let descriptor_obj = format!(
         "<< /Type /FontDescriptor /FontName /{base} /Flags {flags} /FontBBox [{} {} {} {}] \
          /ItalicAngle {} /Ascent {} /Descent {} /CapHeight {} /StemV 80 /FontFile3 {program} 0 R >>",
@@ -558,7 +682,7 @@ pub(crate) fn font_objects(
     )
     .into_bytes();
     let program_obj = stream("/Subtype /CIDFontType0C ", &cff);
-    let cmap_obj = stream("", to_unicode(&used.glyphs).as_bytes());
+    let cmap_obj = stream("", to_unicode(&used.cids).as_bytes());
     [type0_obj, cid_obj, descriptor_obj, program_obj, cmap_obj]
 }
 
@@ -566,11 +690,19 @@ pub(crate) fn font_objects(
 mod tests {
     use super::*;
 
+    fn glyph(ch: char, advance: f64) -> CidGlyph {
+        CidGlyph {
+            ch,
+            advance,
+            charstring: vec![14],
+        }
+    }
+
     #[test]
     fn operands_take_the_short_forms_and_fixed_for_fractions() {
         let enc = |v: i64| {
             let mut o = Vec::new();
-            push_operand(&mut o, v);
+            assert!(push_operand(&mut o, v));
             o
         };
         assert_eq!(enc(0), vec![139]);
@@ -579,6 +711,43 @@ mod tests {
         assert_eq!(enc(-1131 * FIXED_ONE), vec![254, 255]);
         assert_eq!(enc(2000 * FIXED_ONE), vec![28, 0x07, 0xD0]);
         assert_eq!(enc(FIXED_ONE / 2), vec![255, 0, 0, 0x80, 0]);
+        assert_eq!(enc(-32768 * FIXED_ONE), vec![28, 0x80, 0]);
+        // Past what a Type 2 number can say: refused, never clamped.
+        assert!(!push_operand(&mut Vec::new(), 32768 * FIXED_ONE));
+        assert!(!push_operand(&mut Vec::new(), -32769 * FIXED_ONE));
+    }
+
+    /// Codex review, #1193: a 16-unit em with a 1024-unit rectangle needs
+    /// 64000-unit deltas at 1000/em. Clamped, it drew at half size; now the
+    /// glyph is refused and keeps its outline.
+    #[test]
+    fn a_delta_past_the_type2_range_refuses_the_glyph() {
+        let mut cs = Charstring::new(16);
+        cs.move_to(0.0, 0.0);
+        cs.line_to(1024.0, 0.0);
+        cs.line_to(1024.0, 1024.0);
+        assert!(cs.finish().is_none());
+        let mut cs = Charstring::new(16);
+        cs.move_to(0.0, 0.0);
+        cs.line_to(500.0, 0.0);
+        assert!(cs.finish().is_some());
+    }
+
+    #[test]
+    fn a_charstring_past_65535_bytes_refuses_the_glyph() {
+        let mut cs = Charstring::new(1000);
+        cs.move_to(0.0, 0.0);
+        for i in 0..22_000 {
+            cs.line_to(if i % 2 == 0 { 1.0 } else { 0.0 }, 0.0);
+        }
+        assert!(cs.finish().is_none());
+        let mut cs = Charstring::new(1000);
+        cs.move_to(0.0, 0.0);
+        for i in 0..20_000 {
+            cs.line_to(if i % 2 == 0 { 1.0 } else { 0.0 }, 0.0);
+        }
+        let out = cs.finish().expect("fits");
+        assert!(out.len() <= MAX_CHARSTRING && out.len() > 60_000);
     }
 
     #[test]
@@ -588,20 +757,58 @@ mod tests {
         assert_eq!(index(&[]), vec![0, 0]);
     }
 
+    /// The offset size follows the last offset (data length + 1) across
+    /// each byte boundary.
+    #[test]
+    fn index_offset_size_switches_at_the_byte_boundaries() {
+        for (len, size) in [
+            (0xFE, 1),
+            (0xFF, 2),
+            (0xFFFE, 2),
+            (0xFFFF, 3),
+            (0xFF_FFFE, 3),
+            (0xFF_FFFF, 4),
+        ] {
+            let i = index(&[vec![7u8; len]]);
+            let size: usize = size;
+            assert_eq!(usize::from(i[2]), size, "data length {len:#x}");
+            let last = i[3 + size..3 + 2 * size]
+                .iter()
+                .fold(0usize, |a, &b| a << 8 | usize::from(b));
+            assert_eq!(last, len + 1);
+            assert_eq!(i.len(), 3 + 2 * size + len);
+        }
+    }
+
     #[test]
     fn widths_group_consecutive_cids() {
         let mut g = BTreeMap::new();
-        g.insert(3, ('a', 500.0));
-        g.insert(4, ('b', 250.5));
-        g.insert(9, ('c', 1000.0));
+        g.insert(3, glyph('a', 500.0));
+        g.insert(4, glyph('b', 250.5));
+        g.insert(9, glyph('c', 1000.0));
         assert_eq!(widths(&g), "[ 3 [500 250.5] 9 [1000] ]");
     }
 
     #[test]
     fn to_unicode_writes_surrogate_pairs_beyond_the_bmp() {
         let mut g = BTreeMap::new();
-        g.insert(0x41, ('\u{1F600}', 0.0));
-        assert!(to_unicode(&g).contains("<0041> <D83DDE00>"));
+        g.insert(0x41, glyph('\u{1F600}', 0.0));
+        g.insert(0x42, glyph('\u{10FFFF}', 0.0));
+        let cmap = to_unicode(&g);
+        assert!(cmap.contains("<0041> <D83DDE00>"), "{cmap}");
+        assert!(cmap.contains("<0042> <DBFFDFFF>"), "{cmap}");
+    }
+
+    #[test]
+    fn to_unicode_blocks_hold_at_most_100_entries() {
+        let mut g = BTreeMap::new();
+        for cid in 1..=250u16 {
+            g.insert(cid, glyph('x', 0.0));
+        }
+        let cmap = to_unicode(&g);
+        assert_eq!(cmap.matches("100 beginbfchar").count(), 2, "{cmap}");
+        assert_eq!(cmap.matches("50 beginbfchar").count(), 1);
+        assert_eq!(cmap.matches("endbfchar").count(), 3);
     }
 
     #[test]
@@ -622,5 +829,121 @@ mod tests {
         assert!(!ok(0x0002));
         assert!(!ok(0x0100));
         assert!(!ok(0x0208));
+    }
+
+    /// A CFF INDEX at `at`: its items and the offset just past it.
+    fn read_index(b: &[u8], at: usize) -> (Vec<&[u8]>, usize) {
+        let count = usize::from(u16::from_be_bytes([b[at], b[at + 1]]));
+        if count == 0 {
+            return (Vec::new(), at + 2);
+        }
+        let os = usize::from(b[at + 2]);
+        let off = |i: usize| {
+            let p = at + 3 + i * os;
+            b[p..p + os]
+                .iter()
+                .fold(0usize, |a, &x| a << 8 | usize::from(x))
+        };
+        let data = at + 3 + (count + 1) * os - 1;
+        let items = (0..count)
+            .map(|i| &b[data + off(i)..data + off(i + 1)])
+            .collect();
+        (items, data + off(count))
+    }
+
+    /// A DICT as (operands, operator) pairs; a two-byte operator is
+    /// 1200 + its second byte.
+    fn read_dict(d: &[u8]) -> Vec<(Vec<i64>, u16)> {
+        let (mut out, mut ops, mut i) = (Vec::new(), Vec::new(), 0);
+        while i < d.len() {
+            let b0 = d[i];
+            match b0 {
+                0..=21 => {
+                    let op = if b0 == 12 {
+                        i += 1;
+                        1200 + u16::from(d[i])
+                    } else {
+                        u16::from(b0)
+                    };
+                    out.push((std::mem::take(&mut ops), op));
+                    i += 1;
+                }
+                28 => {
+                    ops.push(i64::from(i16::from_be_bytes([d[i + 1], d[i + 2]])));
+                    i += 3;
+                }
+                29 => {
+                    ops.push(i64::from(i32::from_be_bytes([
+                        d[i + 1],
+                        d[i + 2],
+                        d[i + 3],
+                        d[i + 4],
+                    ])));
+                    i += 5;
+                }
+                32..=246 => {
+                    ops.push(i64::from(b0) - 139);
+                    i += 1;
+                }
+                247..=250 => {
+                    ops.push((i64::from(b0) - 247) * 256 + i64::from(d[i + 1]) + 108);
+                    i += 2;
+                }
+                251..=254 => {
+                    ops.push(-(i64::from(b0) - 251) * 256 - i64::from(d[i + 1]) - 108);
+                    i += 2;
+                }
+                _ => panic!("unexpected DICT byte {b0}"),
+            }
+        }
+        out
+    }
+
+    /// The CFF's structure, read back: ROS first, CIDCount, no FontMatrix
+    /// anywhere (the 0.001 default), charset mapping GIDs to CIDs, FDSelect
+    /// format 3 putting every glyph in FD 0, one FD whose Private DICT is
+    /// where it says.
+    #[test]
+    fn the_cid_keyed_cff_reads_back() {
+        let cs_a: &[u8] = &[139, 139, 21, 14];
+        let cs_b: &[u8] = &[14];
+        let cff = cid_cff(
+            "ABCDEF+Test",
+            [-10, -20, 900, 800],
+            vec![14],
+            &[(5, cs_a), (300, cs_b)],
+        );
+        assert_eq!(&cff[..4], &[1, 0, 4, 4]);
+        let (names, at) = read_index(&cff, 4);
+        assert_eq!(names, vec![b"ABCDEF+Test".as_slice()]);
+        let (tops, at) = read_index(&cff, at);
+        let top = read_dict(tops[0]);
+        assert_eq!(top[0], (vec![391, 392, 0], 1230), "ROS first");
+        let get = |op: u16| top.iter().find(|e| e.1 == op).map(|e| e.0.clone());
+        assert_eq!(get(1234), Some(vec![301]), "CIDCount");
+        assert_eq!(get(5), Some(vec![-10, -20, 900, 800]), "FontBBox");
+        assert_eq!(get(1207), None, "no Top DICT FontMatrix");
+        let (strings, at) = read_index(&cff, at);
+        assert_eq!(strings, vec![b"Adobe".as_slice(), b"Identity".as_slice()]);
+        let (gsubrs, _) = read_index(&cff, at);
+        assert!(gsubrs.is_empty());
+
+        let off = |op: u16| usize::try_from(get(op).expect("offset")[0]).expect("offset");
+        assert_eq!(&cff[off(15)..off(15) + 5], &[0, 0, 5, 1, 44], "charset");
+        assert_eq!(
+            &cff[off(1237)..off(1237) + 8],
+            &[3, 0, 1, 0, 0, 0, 0, 3],
+            "FDSelect format 3, one range, sentinel 3"
+        );
+        let (charstrings, _) = read_index(&cff, off(17));
+        assert_eq!(charstrings, vec![[14u8].as_slice(), cs_a, cs_b]);
+        let (fds, _) = read_index(&cff, off(1236));
+        assert_eq!(fds.len(), 1);
+        let fd = read_dict(fds[0]);
+        assert!(fd.iter().all(|e| e.1 != 1207), "no FD FontMatrix");
+        let private = fd.iter().find(|e| e.1 == 18).expect("Private").0.clone();
+        let (size, at) = (private[0] as usize, private[1] as usize);
+        assert_eq!(&cff[at..at + size], &[139, 20, 139, 21]);
+        assert_eq!(at + size, cff.len());
     }
 }

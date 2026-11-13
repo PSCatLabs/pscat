@@ -67,6 +67,32 @@ than by copying tables out of the font file:
   coordinates at 1000 units, five bytes each. It is still far smaller
   than outlines in the content stream (table below).
 
+**Hardening (Codex review, round 1).**
+- Every ttf-parser call in the font writer runs under `guard::catch`, as
+  the show engine's lookups do (`font::advance_of`). The `truetype` fuzz
+  regression `hvar_region_index_overflow` overflowed a `u16` inside the
+  parser's advance lookup with `--pdf-text` on, a panic in debug and CI
+  builds. `font::tests::the_truetype_fuzz_corpus_survives_pdf_text` shows
+  every byte of every committed `truetype` seed and regression with PDF
+  text on (it panics with the guard removed).
+- A glyph is built into its charstring the first time it is shown, not at
+  `finish`. One that cannot be written exactly is refused and keeps its
+  outline in the content stream: a delta past a Type 2 operand's ±32768
+  units (a valid 16-unit em at 1000/em; clamped, it drew at half size), a
+  charstring past 65,535 bytes, or a parser panic. A face none of whose
+  glyphs can be embedded writes no font.
+- One glyph drawing two characters (NotoSansJP's U+2012 and U+2013 share
+  glyph 465) gets a second CID from the face's glyph count up, with a copy
+  of the charstring and the same `/W` advance, so `/ToUnicode` gives each
+  its own character. Before, the first character shown won for both.
+- Unit tests now read the CFF back (ROS first, CIDCount, no FontMatrix in
+  the Top DICT or the FD, charset, FDSelect format 3, the Private DICT
+  where the FD says), and pin the INDEX offset size at the 255 / 65,535 /
+  16M boundaries, 100-entry `bfchar` blocks, surrogate pairs at U+1F600
+  and U+10FFFF, and a blend-mode glyph as its own text object in its
+  `ExtGState`. The gs/poppler sample now has a Multiply-blended word over
+  other text.
+
 **Which glyphs stay outlines.**
 - Faces whose OS/2 `fsType` forbids it: restricted-licence embedding (bit 1
   alone), no subsetting (bit 8: this writer only subsets), bitmap only
@@ -82,7 +108,8 @@ than by copying tables out of the font file:
   Type 3 metrics runs).
 - Per glyph: a name with no Unicode value (Symbol's `alpha`, Dingbats'
   `a1` ...: `encodings::name_to_char` is `None`), `.notdef` (glyph 0, which
-  is CID 0 in the subset), and control characters. Unlike SVG, any script
+  is CID 0 in the subset), control characters, and a glyph the font writer
+  refuses (above). Unlike SVG, any script
   qualifies, combining marks and right-to-left letters included: the PDF
   carries the glyph at pscat's position, and the character only feeds
   `/ToUnicode`.
@@ -101,7 +128,7 @@ faces a program or a user font pack brings. A unit test pins that every
 compiled-in face passes it (`font::tests::every_compiled_in_face_may_be_embedded_in_a_pdf`).
 
 **Evidence.**
-- `tests/pdf_text.rs` (9 tests): default equals explicit `Paths` and has no
+- `tests/pdf_text.rs` (11 tests): default equals explicit `Paths` and has no
   fonts; text objects, fonts, ToUnicode, the ashow `TJ` value, clip group and
   alpha `ExtGState`; fallbacks (charpath, Type 3, stringwidth); per-page font
   resources; mid-run reads; the CLI flag. `pdftotext` extracts Latin and

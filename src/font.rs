@@ -1509,6 +1509,11 @@ fn glyph_text(
     }
 }
 
+/// The face behind `fid`, for the PDF font writer (#1193).
+pub(crate) fn pdf_face(fid: i64) -> Option<&'static Face<'static>> {
+    face_for(fid).ok()
+}
+
 /// The face behind `fid` and the name its embedded subset goes by (#1193):
 /// the face's own PostScript name for the built-in faces
 /// (`LiberationSans`, not the `Helvetica` it stands in for), the catalog's
@@ -1519,12 +1524,14 @@ pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
     let idx = usize::try_from(fid).ok()?;
     let name = match BUILTINS.get(idx) {
         // The first entry may be a Mac-platform one `to_string` cannot read.
-        Some(b) => face
-            .names()
-            .into_iter()
-            .filter(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
-            .find_map(|n| n.to_string())
-            .unwrap_or_else(|| b.ps_name.to_string()),
+        Some(b) => crate::guard::catch(|| {
+            face.names()
+                .into_iter()
+                .filter(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
+                .find_map(|n| n.to_string())
+        })
+        .flatten()
+        .unwrap_or_else(|| b.ps_name.to_string()),
         None => {
             let cat = CATALOG.read().ok()?;
             cat.get(idx - BUILTINS.len())?.ps_name.clone()
@@ -2324,38 +2331,94 @@ mod tests {
         }
     }
 
+    /// Where table `tag` starts in an sfnt.
+    fn table_offset(bytes: &[u8], tag: &[u8; 4]) -> usize {
+        let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+        let rec = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &bytes[r..r + 4] == tag)
+            .expect("table");
+        let at = [
+            bytes[rec + 8],
+            bytes[rec + 9],
+            bytes[rec + 10],
+            bytes[rec + 11],
+        ];
+        u32::from_be_bytes(at) as usize
+    }
+
+    /// Run `src` with PDF text output on; the document as lossy text (font
+    /// dicts are not compressed).
+    fn pdf_text_document(src: &str) -> String {
+        let mut it = crate::Interp::with_page(200, 100).expect("page");
+        it.set_pdf_text(crate::PdfText::Text);
+        it.enable_pdf();
+        it.run_str(src).expect("runs");
+        String::from_utf8_lossy(&it.pdf_document().expect("pdf")).into_owned()
+    }
+
+    /// #1193, Codex review: every committed `truetype` fuzz input (the
+    /// seeds and the crash regressions that `tests/fuzz_corpus.rs` replays)
+    /// that loads as a face is shown with PDF text output on, every byte,
+    /// and the document finished. `hvar_region_index_overflow` panicked in
+    /// the advance lookup before it was guarded.
+    #[test]
+    fn the_truetype_fuzz_corpus_survives_pdf_text() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+        let mut files: Vec<_> = ["seeds/truetype", "regressions/truetype"]
+            .iter()
+            .flat_map(|d| std::fs::read_dir(root.join(d)).expect("corpus dir"))
+            .map(|e| e.expect("entry").path())
+            .collect();
+        files.sort();
+        assert!(files.len() >= 8, "{files:?}");
+        let mut loaded = 0;
+        for (i, path) in files.iter().enumerate() {
+            let bytes = std::fs::read(path).expect("read seed");
+            let name = format!("PscatPdfTextFuzz{i}");
+            if register_font_bytes(&name, bytes).is_err() {
+                continue;
+            }
+            loaded += 1;
+            pdf_text_document(&format!(
+                "/{name} findfont 20 scalefont setfont 10 50 moveto (ABC abc 0123) show \
+                 0 1 255 {{ 1 string dup 0 4 -1 roll put show }} for"
+            ));
+        }
+        assert!(loaded >= 4, "only {loaded} corpus faces loaded");
+    }
+
+    /// #1193, Codex review: a valid 16-unit em puts Liberation's outlines
+    /// 62.5 times past 1000 units, beyond a Type 2 operand. Those glyphs
+    /// keep their outlines (clamped, they drew at the wrong size), and no
+    /// empty font is written for the face.
+    #[test]
+    fn outlines_past_the_type2_range_stay_paths() {
+        let mut bytes = BUILTINS[0].data.to_vec();
+        let head = table_offset(&bytes, b"head");
+        bytes[head + 18..head + 20].copy_from_slice(&16u16.to_be_bytes());
+        register_font_bytes("PscatTinyEmTest-Regular", bytes).expect("registers");
+        let pdf = pdf_text_document(
+            "/PscatTinyEmTest-Regular findfont 0.5 scalefont setfont 10 50 moveto (Hi) show",
+        );
+        assert!(!pdf.contains("/Subtype /Type0 "), "{pdf}");
+    }
+
     /// #1193: a face whose OS/2 fsType forbids embedding keeps its outlines
     /// under PDF text output, beside a face that becomes text.
     #[test]
     fn a_restricted_licence_face_keeps_its_outlines_in_pdf_text() {
         let mut bytes = BUILTINS[0].data.to_vec();
-        let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
-        let os2 = (0..tables)
-            .map(|i| 12 + 16 * i)
-            .find(|&r| &bytes[r..r + 4] == b"OS/2")
-            .expect("OS/2 table");
-        let at = u32::from_be_bytes([
-            bytes[os2 + 8],
-            bytes[os2 + 9],
-            bytes[os2 + 10],
-            bytes[os2 + 11],
-        ]);
-        let at = at as usize + 8;
+        let at = table_offset(&bytes, b"OS/2") + 8;
         bytes[at..at + 2].copy_from_slice(&0x0002u16.to_be_bytes());
         assert!(!crate::pdf_font::embedding_allowed(
             &Face::parse(&bytes, 0).expect("parses")
         ));
         register_font_bytes("PscatRestrictedTest-Regular", bytes).expect("registers");
-
-        let mut it = crate::Interp::with_page(200, 100).expect("page");
-        it.set_pdf_text(crate::PdfText::Text);
-        it.enable_pdf();
-        it.run_str(
+        let pdf = pdf_text_document(
             "/PscatRestrictedTest-Regular findfont 20 scalefont setfont 10 50 moveto (Hi) show \
              /Helvetica findfont 20 scalefont setfont (Hi) show",
-        )
-        .expect("runs");
-        let pdf = String::from_utf8_lossy(&it.pdf_document().expect("pdf")).into_owned();
+        );
         // Font dicts are not compressed: one font, the Helvetica one.
         assert_eq!(pdf.matches("/Subtype /Type0 ").count(), 1, "{pdf}");
         assert!(pdf.contains("+LiberationSans /Encoding"), "{pdf}");

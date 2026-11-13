@@ -48,7 +48,8 @@ fn text_objects(pdf: &[u8]) -> usize {
 
 /// A page of show-family text: Latin in three standard faces, Hangul
 /// (Unicode-mode NotoSansKR), a TeX Gyre face, rotation, a clip, colour,
-/// alpha, and every per-glyph spacing operator.
+/// alpha, a blend mode over other text, and every per-glyph spacing
+/// operator.
 const SAMPLE: &str = "
 /Helvetica findfont 24 scalefont setfont
 30 450 moveto (Hello, PDF text!) show
@@ -70,6 +71,8 @@ gsave 30 180 moveto 0 0 1 setrgbcolor
 grestore
 gsave 0.5 setalpha 0 0.5 0 setrgbcolor /Helvetica findfont 40 scalefont setfont
   30 120 moveto (Half) show grestore
+gsave /Multiply setblendmode 1 0.6 0 setrgbcolor /Helvetica findfont 40 scalefont setfont
+  60 110 moveto (Blend) show grestore
 ";
 
 #[test]
@@ -114,6 +117,58 @@ fn text_mode_writes_text_objects_in_embedded_subset_fonts() {
     // its ExtGState.
     assert!(doc.contains(" W n \nq 0 0 1 rg BT "), "{doc}");
     assert!(doc.contains("q /GS0 gs 0 0.5 0 rg BT "), "{doc}");
+}
+
+/// The CID a `/ToUnicode` map gives `ch` (as its UTF-16BE hex).
+fn cid_of(doc: &str, utf16: &str) -> String {
+    let at = doc
+        .find(&format!("> <{utf16}>"))
+        .unwrap_or_else(|| panic!("no ToUnicode entry for {utf16}: {doc}"));
+    doc[at - 4..at].to_string()
+}
+
+/// Codex review, #1193: NotoSansJP draws U+2012 and U+2013 with one glyph.
+/// Each character gets its own code (the glyph id, then one past the
+/// face's glyph range, with the same outline), so extraction says which.
+#[test]
+fn a_glyph_shared_by_two_characters_extracts_as_each() {
+    let pdf = text_pdf(
+        "/NotoSansJP-Regular findfont 20 scalefont setfont 10 50 moveto \
+         (\u{2012}\u{2013}\u{2012}) show",
+    );
+    let doc = content(&pdf);
+    let (figure, en) = (cid_of(&doc, "2012"), cid_of(&doc, "2013"));
+    assert_ne!(figure, en, "{doc}");
+    assert!(
+        doc.contains(&format!("[<{figure}{en}{figure}>] TJ")),
+        "{doc}"
+    );
+    // Both codes are in /W, with the same advance.
+    let w = doc
+        .split("/W [")
+        .nth(1)
+        .expect("/W")
+        .split(" >>")
+        .next()
+        .expect("/W");
+    let n = |cid: &str| u16::from_str_radix(cid, 16).expect("hex").to_string();
+    assert!(w.contains(&format!(" {} [", n(&figure))), "{w}");
+    assert!(w.contains(&format!(" {} [", n(&en))), "{w}");
+}
+
+/// A glyph under a blend mode is its own text object inside its
+/// `ExtGState`, as under alpha (the raster blends each glyph on its own).
+#[test]
+fn blended_glyphs_are_one_text_object_each_in_their_extgstate() {
+    let pdf = text_pdf(
+        "/Helvetica findfont 30 scalefont setfont 0 0 1 setrgbcolor
+         10 50 moveto (Ink) show
+         /Multiply setblendmode 1 0 0 setrgbcolor 10 50 moveto (Ink) show",
+    );
+    let doc = content(&pdf);
+    assert!(doc.contains("/BM /Multiply"), "{doc}");
+    assert_eq!(doc.matches("q /GS0 gs 1 0 0 rg BT ").count(), 3, "{doc}");
+    assert_eq!(doc.matches("q 0 0 1 rg BT ").count(), 1, "{doc}");
 }
 
 #[test]
@@ -246,12 +301,15 @@ fn pdftotext_extracts_latin_and_hangul() {
          /NotoSansJP-Regular findfont 20 scalefont setfont
          20 100 moveto (\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30c6}\u{30ad}\u{30b9}\u{30c8}) show
          /NotoSansThai-Regular findfont 20 scalefont setfont
-         20 50 moveto (\u{e20}\u{e32}\u{e29}\u{e32}\u{e44}\u{e17}\u{e22}) show",
+         20 50 moveto (\u{e20}\u{e32}\u{e29}\u{e32}\u{e44}\u{e17}\u{e22}) show
+         /NotoSansJP-Regular findfont 20 scalefont setfont
+         20 20 moveto (A\u{2012}B\u{2013}C) show",
     ));
     for want in [
         "caf\u{e9} na\u{ef}ve",
         "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30c6}\u{30ad}\u{30b9}\u{30c8}",
         "\u{e20}\u{e32}\u{e29}\u{e32}\u{e44}\u{e17}\u{e22}",
+        "A\u{2012}B\u{2013}C",
     ] {
         assert!(more.contains(want), "{want:?} not in {more}");
     }

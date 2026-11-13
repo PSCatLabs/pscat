@@ -181,8 +181,10 @@ fn is_identity(f: [f64; 4]) -> bool {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RunGlyph {
     pub(crate) ch: char,
-    /// SVG names the character; PDF names the glyph (its CID), which a
-    /// re-encoded font can pick apart from its character.
+    /// The glyph the character was drawn with. Neither writer reads it
+    /// back from the run: SVG names the character, and PDF keeps the CID
+    /// it allocated for this (glyph, character) pair beside the run.
+    #[allow(dead_code)]
     pub(crate) gid: u16,
     pub(crate) x: f64,
 }

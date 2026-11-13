@@ -2533,7 +2533,12 @@ impl Gfx {
         }
         if let Some(pdf) = &mut self.pdf {
             match pdf_text {
-                Some(g) => pdf.glyph(g, rgb, comp, &chain),
+                // A glyph the font writer refuses keeps its outline.
+                Some(g) => {
+                    if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
+                        pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                    }
+                }
                 None if skia.is_some() => pdf.fill(path, FillRule::Winding, rgb, comp, &chain),
                 None => {}
             }

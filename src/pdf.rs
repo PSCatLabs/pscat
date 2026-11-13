@@ -100,6 +100,8 @@ struct PdfRun {
     gs: String,
     /// Each glyph's advance in 1/1000 em, as `/W` gives it.
     widths: Vec<f64>,
+    /// Each glyph's character code (its CID in the embedded font).
+    cids: Vec<u16>,
 }
 
 pub struct PdfRecorder {
@@ -562,38 +564,49 @@ impl PdfRecorder {
     }
 
     /// One glyph as text (#1193): continue the open run, or write it and
-    /// open a new one. A glyph with no placement (a collapsed font matrix)
-    /// paints nothing in the raster either, so it is dropped.
+    /// open a new one. `false` when the glyph cannot be embedded (its
+    /// outline does not fit a Type 2 charstring, or the parser panics on
+    /// it): the caller then records its outline instead. A glyph with no
+    /// placement (a collapsed font matrix) paints nothing in the raster
+    /// either, so it is dropped and counts as taken.
     pub(crate) fn glyph(
         &mut self,
         g: &GlyphText,
         rgb: (f32, f32, f32),
         comp: Composite,
         chain: &Chain,
-    ) {
+    ) -> bool {
         let Some(p) = Placement::of(g) else {
-            return;
+            return true;
         };
-        let font = match self.font_ids.get(&g.fid) {
-            Some(&i) => i,
+        let Some(face) = crate::font::pdf_face(g.fid) else {
+            return false;
+        };
+        // A font joins the document with its first embeddable glyph, so a
+        // face whose every glyph is refused writes no font objects.
+        let (font, cid) = match self.font_ids.get(&g.fid) {
+            Some(&i) => match self.fonts[i].1.cid(face, g.gid, g.ch, g.advance) {
+                Some(cid) => (i, cid),
+                None => return false,
+            },
             None => {
+                let mut used = UsedGlyphs::new(face);
+                let Some(cid) = used.cid(face, g.gid, g.ch, g.advance) else {
+                    return false;
+                };
                 let i = self.fonts.len();
-                self.fonts.push((g.fid, UsedGlyphs::default()));
+                self.fonts.push((g.fid, used));
                 self.font_ids.insert(g.fid, i);
-                i
+                (i, cid)
             }
         };
-        self.fonts[font]
-            .1
-            .glyphs
-            .entry(g.gid)
-            .or_insert((g.ch, g.advance));
         if let Some(run) = &mut self.run
             && run.text.accepts(g, &p, rgb, comp, chain)
         {
             run.text.push(g, &p);
             run.widths.push(g.advance);
-            return;
+            run.cids.push(cid);
+            return true;
         }
         self.flush_text();
         let gs = self.gs_ref(comp);
@@ -609,7 +622,9 @@ impl PdfRecorder {
             font,
             gs,
             widths: vec![g.advance],
+            cids: vec![cid],
         });
+        true
     }
 
     /// Write the open text run into the content.
@@ -635,7 +650,8 @@ impl PdfRecorder {
         let mut tj = String::new();
         let mut hex_open = false;
         let mut pen = 0.0f64;
-        for (i, (g, &w)) in run.text.glyphs.iter().zip(&run.widths).enumerate() {
+        let glyphs = run.text.glyphs.iter().zip(&run.widths).zip(&run.cids);
+        for (i, ((g, &w), &cid)) in glyphs.enumerate() {
             if i > 0 {
                 let target = (g.x - x0) / size;
                 // Hundredths of a thousandth of an em: what is printed.
@@ -653,7 +669,7 @@ impl PdfRecorder {
                 tj.push('<');
                 hex_open = true;
             }
-            let _ = write!(tj, "{:04X}", g.gid);
+            let _ = write!(tj, "{cid:04X}");
             pen += w / 1000.0;
         }
         if hex_open {
@@ -1166,6 +1182,8 @@ Q",
         }
         for (i, (fid, used)) in self.fonts.iter().enumerate() {
             let face = crate::font::embed_face(*fid);
+            // `face` gives the descriptor's metrics and the name; the
+            // glyphs were built as they were shown.
             let first = font_base + i * OBJECTS_PER_FONT;
             debug_assert_eq!(first, objects.len() + 1);
             objects.extend(crate::pdf_font::font_objects(
