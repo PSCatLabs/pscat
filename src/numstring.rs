@@ -30,16 +30,22 @@
 //! a non-finite one found, only in [`NumOperand::into_numbers`], because gs
 //! checks the count against the text and the current point first.
 //!
-//! `xshow`, `yshow` and `xyshow` take this operand today. The Level 2
-//! `rectfill`, `rectstroke` and `rectclip` accept it too in Ghostscript;
-//! pscat's take arrays only.
+//! `xshow`, `yshow`, `xyshow` and the Level 2 `rectfill`, `rectstroke` and
+//! `rectclip` take this operand. The same bytes are also a binary token, the
+//! homogeneous number array (token 149, PLRM 3.14.2, issue #1192): the
+//! scanner ([`token_len`], [`token_numbers`]) reads one and yields a literal
+//! array. There the checks differ, as gs's do: a short or truncated token or
+//! an undefined representation is a `syntaxerror`, bytes after the last
+//! value are not part of the token, and a fixed-point number with no
+//! fraction bits scans as an integer, any other as a real.
 
 use crate::binobj::ByteOrder;
 use crate::error::PsError;
+use crate::lexer::Token;
 use crate::object::{Object, PsArray, Value};
 
 /// The binary token type that heads an encoded number string.
-const HOMOGENEOUS_ARRAY: u8 = 149;
+pub(crate) const HOMOGENEOUS_ARRAY: u8 = 149;
 
 /// A `numarray | numstring` operand, its structure checked but not its
 /// values: Ghostscript checks the count against the text before it checks
@@ -163,6 +169,23 @@ impl Encoded {
         })
     }
 
+    /// The numbers as scanner tokens: integers for a fixed-point
+    /// representation with no fraction bits, reals for all others.
+    fn tokens(&self) -> Result<Vec<Token>, PsError> {
+        let whole = matches!(self.repr, Repr::Fixed { frac: 0, .. });
+        Ok(self
+            .values()?
+            .into_iter()
+            .map(|v| {
+                if whole {
+                    Token::Integer(v as i64)
+                } else {
+                    Token::Real(v)
+                }
+            })
+            .collect())
+    }
+
     /// The numbers: `undefinedresult` if one is not finite.
     fn values(&self) -> Result<Vec<f64>, PsError> {
         let (order, repr) = (self.order, self.repr);
@@ -187,6 +210,27 @@ impl Encoded {
             })
             .collect()
     }
+}
+
+/// How many bytes a homogeneous number array token occupies, from its
+/// first four bytes (`149`, the representation, the count): the header
+/// and the numbers. `syntaxerror` for an undefined representation.
+pub(crate) fn token_len(head: &[u8]) -> Result<usize, PsError> {
+    let syntax = |m: &str| PsError::Syntax(format!("homogeneous number array: {m}"));
+    if head.len() < 4 || head[0] != HOMOGENEOUS_ARRAY {
+        return Err(syntax("bad header"));
+    }
+    let (order, repr) =
+        representation(head[1]).ok_or_else(|| syntax("undefined representation"))?;
+    Ok(4 + usize::from(order.u16(&head[2..4])) * repr.width())
+}
+
+/// The numbers of a whole homogeneous number array token (`bytes` is
+/// exactly [`token_len`] long) as integer and real tokens:
+/// `undefinedresult` for a non-finite real.
+pub(crate) fn token_numbers(bytes: Vec<u8>) -> Result<Vec<Token>, PsError> {
+    let enc = Encoded::parse(bytes)?;
+    enc.tokens()
 }
 
 /// Decode an encoded number string: the header checks, then the values.

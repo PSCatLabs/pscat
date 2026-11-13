@@ -34,6 +34,9 @@ pub enum Token {
     /// decodes them (`binobj::decode`) because immediately evaluated names
     /// need the dictionary stack.
     BinarySeq(Vec<u8>),
+    /// A homogeneous number array (token type 149, PLRM 3.14.2): the
+    /// numbers, as `Integer` and `Real` tokens. It scans to a literal array.
+    NumberArray(Vec<Token>),
 }
 
 /// The scanner reads through a shared [`FileHandle`], so a program can
@@ -234,6 +237,11 @@ impl Lexer {
         if self.binary_tokens && (128..=131).contains(&b) {
             return Ok(Some(Token::BinarySeq(self.read_binary_sequence()?)));
         }
+        // So is a token of type 149, a homogeneous number array (#1192),
+        // under the same switch.
+        if self.binary_tokens && b == crate::numstring::HOMOGENEOUS_ARRAY {
+            return Ok(Some(Token::NumberArray(self.read_number_array()?)));
+        }
         if is_regular(b) {
             // Number-or-name words dispatch on their whole run; the
             // first byte must not be consumed before reading it.
@@ -307,6 +315,23 @@ impl Lexer {
             bytes.push(self.bump()?.ok_or_else(truncated)?);
         }
         Ok(bytes)
+    }
+
+    /// Read one homogeneous number array token (#1192): the 4-byte header
+    /// and exactly the numbers it counts, nothing after (a stray byte or a
+    /// delimiter stays in the input). Truncation is a `syntaxerror`, and
+    /// nothing is allocated from the count before the bytes are there.
+    fn read_number_array(&mut self) -> Result<Vec<Token>, PsError> {
+        let truncated = || syntax("homogeneous number array is truncated");
+        let mut bytes: Vec<u8> = Vec::with_capacity(4);
+        for _ in 0..4 {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+        }
+        let total = crate::numstring::token_len(&bytes)?;
+        while bytes.len() < total {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+        }
+        crate::numstring::token_numbers(bytes)
     }
 
     /// A token terminated *by* whitespace consumes that one whitespace
