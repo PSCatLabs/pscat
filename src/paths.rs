@@ -35,8 +35,9 @@
 //! itself, before any interpreter limit applies.) The check is made on
 //! the opened handle, which [`open`] opens `O_NONBLOCK` on Unix, so a swap
 //! between the check and the read cannot slip a FIFO in. A `lib/` name
-//! larger than [`MAX_LIB_BYTES`] is skipped with a note on stderr, and
-//! [`open`] refuses a resource larger than [`size_cap`] says for its kind.
+//! larger than [`MAX_LIB_BYTES`] is skipped, and
+//! [`open`] refuses (with a note on stderr) a resource larger than [`size_cap`]
+//! says for its kind.
 //! An absolute name is still read as written, and a program's own reads
 //! under execution limits (issue #702) keep watching the limits instead.
 //!
@@ -419,11 +420,9 @@ fn plausible_candidate(name: &str, path: &Path) -> bool {
     if !meta.is_file() {
         return false;
     }
-    if is_lib_name(name) && meta.len() > MAX_LIB_BYTES {
-        too_large(path, MAX_LIB_BYTES);
-        return false;
-    }
-    true
+    // Silent: this runs before the read roots are consulted, and a note
+    // naming a path outside them would tell the program what is there.
+    !(is_lib_name(name) && meta.len() > MAX_LIB_BYTES)
 }
 
 #[cfg(target_arch = "wasm32")]

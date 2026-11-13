@@ -56,7 +56,11 @@ fn a_fifo_or_huge_file_in_the_search_order_is_skipped() {
     std::fs::create_dir_all(home.join("lib")).unwrap();
     std::fs::create_dir_all(home.join("fonts/catalog/Big")).unwrap();
     // SAFETY: the only test in this binary, and no resolver call has run.
-    unsafe { std::env::set_var("PSCAT_HOME", &home) };
+    // `PSCAT_LIB` would come before `PSCAT_HOME` and hide the FIFO.
+    unsafe {
+        std::env::remove_var("PSCAT_LIB");
+        std::env::set_var("PSCAT_HOME", &home);
+    }
 
     let real = std::fs::read("lib/handscript.ps").expect("run from the crate root");
 

@@ -474,9 +474,9 @@ Each of those places must hold a regular file. A FIFO, device, socket or
 directory at one of them (a workspace can put one at `lib/artkit.ps`) is
 skipped as if it were not there, without being opened for reading, and the
 search goes on to the next place and finally the compiled-in copy. A `lib/`
-file larger than 64 MiB (the biggest real one is 0.6 MB) is skipped too, with
-a note on stderr, and a resource the library API (`pscat::paths::open`) reads
-is refused above 512 MiB (font files are far below that; the largest in the
+file larger than 64 MiB (the biggest real one is 0.6 MB) is skipped too. The
+library API (`pscat::paths::open`) also refuses, with a note on stderr, any
+resource above 512 MiB (font files are far below that; the largest in the
 catalog is 10 MB).
 
 An absolute name is read as written. A plain font catalog directory
