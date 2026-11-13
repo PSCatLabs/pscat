@@ -284,9 +284,14 @@ impl PsPath {
     }
 
     pub(crate) fn close(&mut self) {
-        // closepath on an empty path is a legal no-op in PostScript.
+        // closepath on an empty path is a legal no-op in PostScript, and so is
+        // closepath on a subpath that is already closed (PLRM 3rd ed.): a second
+        // record would show up in pathforall (#1178). A lineto after a close
+        // pushes a segment, so "last record is Close" means "already closed".
         if let Some(start) = self.subpath_start {
-            self.segs.push(Seg::Close);
+            if !matches!(self.segs.last(), Some(Seg::Close)) {
+                self.segs.push(Seg::Close);
+            }
             self.current = Some(start);
         }
     }
