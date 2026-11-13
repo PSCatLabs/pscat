@@ -9,7 +9,8 @@ multi-GB file was read whole.
 
 - `Roots::open_with` screens each disk candidate of a relative name
   (`plausible_candidate`): `metadata` succeeds and is not a regular file, skip;
-  a `lib/` name over `MAX_LIB_BYTES` (64 MiB), skip with a stderr note. A
+  a `lib/` name over `MAX_LIB_BYTES` (64 MiB), skip (silently: this runs before the read roots
+  are consulted, and a note could name a path outside them). A
   candidate that does not exist is passed to the reader, as before. This covers
   `run`, `file` and `status`, limited and unlimited. An absolute name is read as
   written, and `read_path_limited` (#702) is untouched.
