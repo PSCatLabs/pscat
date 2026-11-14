@@ -110,20 +110,57 @@ fn memory_growth_is_capped() {
 
     // A decompression bomb read into something that grows (#1187): 4 GiB
     // from a 150 KB FlateDecode + RunLengthDecode string, read as a 225 MB
-    // image's samples, and as one string token. The filters look at the
-    // heap as they decode and a read asks before its buffer grows, so the
-    // cap stops both inside the one step, well short of their size: a
-    // thread samples the heap while it runs. (Stopped only after the
-    // operator, the image would have grown to 225 MB first and the token
-    // to gigabytes.) The time limit is a backstop: a regression is a time
-    // error, not a hang.
-    for (lead, src) in [
-        (&b""[..], "15000 15000 8 [15000 0 0 15000 0 0] f image"),
-        (&[0x00, b'('][..], "f cvx exec"),
-    ] {
+    // image's samples, and as one token (a string, a hex string, a name).
+    // The filters look at the heap as they decode and a read asks before
+    // its buffer grows, so the cap stops them inside the one step, well
+    // short of their size: a thread samples the heap while it runs.
+    // (Stopped only after the operator, the image would have grown to
+    // 225 MB first and the token to gigabytes.) The time limit is a
+    // backstop: a regression is a time error, not a hang.
+    //
+    // A token's buffer doubles, and the decoder looks at the heap only
+    // every 64 KiB it decodes (#1209), so a token that checked only there
+    // would double past the cap: from 32 MiB to 64 MiB under a 40 MiB cap,
+    // 60 percent over. The scanner asks before each doubling, so the
+    // buffer stops at 32 MiB, and the peak stays within a margin of the
+    // cap, not just under some multiple of it. The cap is not a power of
+    // two on purpose: at 32 MiB the unchecked buffer stops at the cap.
+    struct Bomb {
+        lead: &'static [u8],
+        cap_mib: usize,
+        /// Peak growth must stay within the cap plus this, in MiB.
+        margin_mib: Option<usize>,
+        programs: &'static [&'static str],
+    }
+    let bombs = [
+        Bomb {
+            lead: b"",
+            cap_mib: 32,
+            margin_mib: None,
+            programs: &["15000 15000 8 [15000 0 0 15000 0 0] f image"],
+        },
+        Bomb {
+            lead: &[0x00, b'('],
+            cap_mib: 40,
+            margin_mib: Some(2),
+            programs: &["f cvx exec", "f token", "{ f token } stopped"],
+        },
+        Bomb {
+            lead: &[0x00, b'<'],
+            cap_mib: 40,
+            margin_mib: Some(2),
+            programs: &["f cvx exec", "f token"],
+        },
+        Bomb {
+            lead: &[0x00, b'/'],
+            cap_mib: 40,
+            margin_mib: Some(2),
+            programs: &["f cvx exec", "f token"],
+        },
+    ];
+    for bomb in &bombs {
         use std::io::Write;
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        let mut rle = lead.to_vec();
+        let mut rle = bomb.lead.to_vec();
         rle.extend([0x81, b'a'].repeat(32 << 20));
         rle.push(0x80);
         let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
@@ -135,40 +172,56 @@ fn memory_growth_is_capped() {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let src = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def {src}");
-        let mut it = Interp::new();
-        it.set_limits(
-            Limits::none()
-                .with_max_memory(32 * MIB)
-                .with_max_time(std::time::Duration::from_secs(20)),
-        )
-        .expect("the allocator is installed");
-        let before = pscat::memtrack::live_bytes();
-        let peak = std::sync::Arc::new(AtomicUsize::new(before));
-        let done = std::sync::Arc::new(AtomicBool::new(false));
-        let sampler = {
-            let (peak, done) = (peak.clone(), done.clone());
-            std::thread::spawn(move || {
-                while !done.load(Ordering::Relaxed) {
-                    peak.fetch_max(pscat::memtrack::live_bytes(), Ordering::Relaxed);
-                    std::thread::sleep(std::time::Duration::from_micros(200));
-                }
-            })
-        };
-        let result = it.run_str(&src);
-        done.store(true, Ordering::Relaxed);
-        sampler.join().unwrap();
-        let what = &src[src.len() - 40..];
-        assert_eq!(result, Err(PsError::MemoryExceeded), "{what}");
-        let grew = peak.load(Ordering::Relaxed).saturating_sub(before);
-        // The cap, plus a buffer's doubling while the old copy is live.
-        assert!(grew < 4 * 32 * MIB, "{what}: peak growth {grew}");
-        drop(it);
-        let after = pscat::memtrack::live_bytes();
-        assert!(
-            after < before + 16 * MIB,
-            "{what}: the buffers are freed again"
-        );
+        for program in bomb.programs {
+            let src =
+                format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def {program}");
+            let cap = bomb.cap_mib * MIB;
+            let what = format!("{:?} {program}", bomb.lead);
+            let (result, grew) = {
+                use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+                let mut it = Interp::new();
+                it.set_limits(
+                    Limits::none()
+                        .with_max_memory(cap)
+                        .with_max_time(std::time::Duration::from_secs(20)),
+                )
+                .expect("the allocator is installed");
+                let before = pscat::memtrack::live_bytes();
+                let peak = std::sync::Arc::new(AtomicUsize::new(before));
+                let done = std::sync::Arc::new(AtomicBool::new(false));
+                // No sleeping: a doubled buffer lives for well under a
+                // millisecond before the decoder's own check takes it.
+                let sampler = {
+                    let (peak, done) = (peak.clone(), done.clone());
+                    std::thread::spawn(move || {
+                        while !done.load(Ordering::Relaxed) {
+                            peak.fetch_max(pscat::memtrack::live_bytes(), Ordering::Relaxed);
+                            std::thread::yield_now();
+                        }
+                    })
+                };
+                let result = it.run_str(&src);
+                done.store(true, Ordering::Relaxed);
+                sampler.join().unwrap();
+                let grew = peak.load(Ordering::Relaxed).saturating_sub(before);
+                drop(it);
+                let after = pscat::memtrack::live_bytes();
+                assert!(
+                    after < before + 16 * MIB,
+                    "{what}: the buffers are freed again"
+                );
+                (result, grew)
+            };
+            assert_eq!(result, Err(PsError::MemoryExceeded), "{what}");
+            match bomb.margin_mib {
+                // The cap, plus a buffer's doubling while the old copy is live.
+                None => assert!(grew < 4 * cap, "{what}: peak growth {grew}"),
+                Some(margin) => assert!(
+                    grew <= cap + margin * MIB,
+                    "{what}: peak growth {grew} is over the {cap} cap by more than {margin} MiB"
+                ),
+            }
+        }
     }
 
     // A whole-file read counts as it grows (issue #702): `/dev/zero` never

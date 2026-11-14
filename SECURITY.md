@@ -543,7 +543,10 @@ without the limits above:
   the decoded bytes count a step per KiB, checked against the step cap as
   they are counted, and every 64 KiB of output it checks the time and the
   heap. A read refuses to grow its buffer past the
-  memory cap, and DCTDecode checks the image size from the JPEG header
+  memory cap, and so does the scanner for the token it is reading (#1209: a
+  string, hex string, name or binary sequence is checked before each
+  doubling of its buffer, so a token read from a bomb stops at the cap, not at
+  up to three times it), and DCTDecode checks the image size from the JPEG header
   against it before decoding. The run stops inside the operator with
   `limitexceeded`. With no limits set, a decompression bomb now runs to its
   end, as it does in Ghostscript.

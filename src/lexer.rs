@@ -313,7 +313,8 @@ impl Lexer {
         let (_, total, _) = crate::binobj::parse_header(&bytes)?;
         bytes.reserve(total.saturating_sub(bytes.len()).min(1 << 20));
         while bytes.len() < total {
-            bytes.push(self.bump()?.ok_or_else(truncated)?);
+            let b = self.bump()?.ok_or_else(truncated)?;
+            self.put(&mut bytes, b)?;
         }
         Ok(bytes)
     }
@@ -362,13 +363,50 @@ impl Lexer {
         Ok(())
     }
 
+    /// Push onto a token's buffer, asking the memory cap first when the
+    /// push would grow it (#1209). A filter's decoder looks at the heap only
+    /// every 64 KiB it decodes, and a buffer that doubles can take far more
+    /// than that at once, so a token read from a decompression bomb would
+    /// pass the cap by up to the buffer's size. One compare per byte.
+    #[inline(always)]
+    fn put(&self, out: &mut Vec<u8>, b: u8) -> Result<(), PsError> {
+        if out.len() == out.capacity() {
+            self.check_growth(out, 1)?;
+        }
+        out.push(b);
+        Ok(())
+    }
+
+    /// [`Self::put`] for `extra` bytes at once.
+    #[inline(always)]
+    fn room(&self, out: &Vec<u8>, extra: usize) -> Result<(), PsError> {
+        if out.capacity() - out.len() < extra {
+            self.check_growth(out, extra)?;
+        }
+        Ok(())
+    }
+
+    /// The growth `Vec` makes to take `extra` more bytes, put to the cap as
+    /// `PsFile::read_into` does. Only a source that decodes (a filter made
+    /// by an interpreter) has limits to ask; a byte buffer is already in
+    /// memory and bounds its own tokens.
+    #[cold]
+    fn check_growth(&self, out: &Vec<u8>, extra: usize) -> Result<(), PsError> {
+        let cap = out.capacity();
+        let grown = cap
+            .saturating_mul(2)
+            .max(out.len().saturating_add(extra))
+            .max(8);
+        self.file.borrow().check_alloc(grown - cap)
+    }
+
     fn read_regular_run(&mut self) -> Result<Vec<u8>, PsError> {
         let mut out = Vec::new();
         while let Some(b) = self.peek()? {
             if !is_regular(b) {
                 break;
             }
-            out.push(b);
+            self.put(&mut out, b)?;
             self.bump()?;
         }
         Ok(out)
@@ -387,11 +425,11 @@ impl Lexer {
                         return Err(syntax("unterminated string"));
                     };
                     match e {
-                        b'n' => out.push(b'\n'),
-                        b'r' => out.push(b'\r'),
-                        b't' => out.push(b'\t'),
-                        b'b' => out.push(0x08),
-                        b'f' => out.push(0x0c),
+                        b'n' => self.put(&mut out, b'\n')?,
+                        b'r' => self.put(&mut out, b'\r')?,
+                        b't' => self.put(&mut out, b'\t')?,
+                        b'b' => self.put(&mut out, 0x08)?,
+                        b'f' => self.put(&mut out, 0x0c)?,
                         b'0'..=b'7' => {
                             let mut v = u32::from(e - b'0');
                             for _ in 0..2 {
@@ -404,7 +442,7 @@ impl Lexer {
                                 }
                             }
                             // Per PLRM, high-order overflow in \ddd is ignored.
-                            out.push((v & 0xff) as u8);
+                            self.put(&mut out, (v & 0xff) as u8)?;
                         }
                         // \<newline> is a line continuation: no character.
                         b'\n' => {}
@@ -414,28 +452,28 @@ impl Lexer {
                             }
                         }
                         // Includes \\, \(, \): the escaped character itself.
-                        other => out.push(other),
+                        other => self.put(&mut out, other)?,
                     }
                 }
                 b'(' => {
                     depth += 1;
-                    out.push(b);
+                    self.put(&mut out, b)?;
                 }
                 b')' => {
                     depth -= 1;
                     if depth == 0 {
                         return Ok(out);
                     }
-                    out.push(b);
+                    self.put(&mut out, b)?;
                 }
                 // The PLRM normalizes CR and CRLF inside strings to LF.
                 b'\r' => {
                     if self.peek()? == Some(b'\n') {
                         self.bump()?;
                     }
-                    out.push(b'\n');
+                    self.put(&mut out, b'\n')?;
                 }
-                _ => out.push(b),
+                _ => self.put(&mut out, b)?,
             }
         }
     }
@@ -459,7 +497,10 @@ impl Lexer {
                     break;
                 }
                 _ if is_whitespace(b) => {}
-                b'z' if n == 0 => out.extend_from_slice(&[0, 0, 0, 0]),
+                b'z' if n == 0 => {
+                    self.room(&out, 4)?;
+                    out.extend_from_slice(&[0, 0, 0, 0]);
+                }
                 b'!'..=b'u' => {
                     group[n] = b - b'!';
                     n += 1;
@@ -467,6 +508,7 @@ impl Lexer {
                         let v = group.iter().fold(0u32, |acc, d| {
                             acc.wrapping_mul(85).wrapping_add(u32::from(*d))
                         });
+                        self.room(&out, 4)?;
                         out.extend_from_slice(&v.to_be_bytes());
                         n = 0;
                     }
@@ -490,8 +532,11 @@ impl Lexer {
         Ok(out)
     }
 
+    /// `<...>` hex. Pairs go straight into the result, never through a
+    /// buffer of nibbles (a byte each, twice the result's size, #1209).
     fn read_hex_string(&mut self) -> Result<Vec<u8>, PsError> {
-        let mut nibbles = Vec::new();
+        let mut out = Vec::new();
+        let mut high: Option<u8> = None;
         loop {
             let Some(b) = self.bump()? else {
                 return Err(syntax("unterminated hex string"));
@@ -500,16 +545,17 @@ impl Lexer {
                 b'>' => break,
                 _ if is_whitespace(b) => {}
                 _ => match (b as char).to_digit(16) {
-                    Some(v) => nibbles.push(v as u8),
+                    Some(v) => match high.take() {
+                        Some(h) => self.put(&mut out, (h << 4) | v as u8)?,
+                        None => high = Some(v as u8),
+                    },
                     None => return Err(syntax("invalid character in hex string")),
                 },
             }
         }
-        let mut out = Vec::with_capacity(nibbles.len().div_ceil(2));
-        for pair in nibbles.chunks(2) {
-            // An odd final nibble is padded with zero, per the PLRM.
-            let lo = pair.get(1).copied().unwrap_or(0);
-            out.push((pair[0] << 4) | lo);
+        // An odd final nibble is padded with zero, per the PLRM.
+        if let Some(h) = high {
+            self.put(&mut out, h << 4)?;
         }
         Ok(out)
     }
@@ -723,6 +769,15 @@ mod tests {
         assert_eq!(lex("<48656c6c6f>"), vec![Token::String(b"Hello".to_vec())]);
         assert_eq!(lex("<48 65>"), vec![Token::String(b"He".to_vec())]);
         assert_eq!(lex("<7>"), vec![Token::String(vec![0x70])]);
+        // A pair may span whitespace, and an odd final nibble is padded.
+        assert_eq!(lex("<4 8\n6>"), vec![Token::String(vec![0x48, 0x60])]);
+        assert_eq!(lex("<>"), vec![Token::String(Vec::new())]);
+        // Past the buffer's first capacities (8, 16, ...).
+        let long = "ab".repeat(100);
+        assert_eq!(
+            lex(&format!("<{long}>")),
+            vec![Token::String(vec![0xab; 100])]
+        );
     }
 
     #[test]

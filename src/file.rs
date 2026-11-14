@@ -302,6 +302,19 @@ impl PsFile {
         Ok(b)
     }
 
+    /// `MemoryExceeded` if taking `bytes` more heap would pass the cap, when
+    /// this is a filter an interpreter made (it holds the limits); anything
+    /// else has none to ask (#1209).
+    pub(crate) fn check_alloc(&self, bytes: usize) -> Result<(), PsError> {
+        match &self.kind {
+            Kind::Filter {
+                budget: Some(budget),
+                ..
+            } => budget.check_alloc(bytes),
+            _ => Ok(()),
+        }
+    }
+
     /// Append up to `max` bytes to `buf` and return how many were added
     /// (fewer only at end of data). `ioerror` for a closed file or an output
     /// file. The position, byte count and line count move exactly as that
