@@ -241,8 +241,10 @@ impl PsPath {
     /// [`flattened`](Self::flattened) under the limits (#1188): a curve can
     /// come to 65,536 chords (depth 16), so a path of a few thousand huge
     /// curves was gigabytes in one `flattenpath`. The probe is looked at
-    /// every [`FLATTEN_POLL`] chords, its heap cap included, a step per
-    /// 1024 chords. Also gives the chord count, for the operator to charge.
+    /// every [`FLATTEN_POLL`] segments it writes, its heap cap included
+    /// (both paths are alive then), a step per 1024 segments, and the whole
+    /// count once more at the end. Also gives that count, for the operator
+    /// to charge.
     pub(crate) fn flattened_limited(
         &self,
         probe: &crate::limits::LimitProbe,
@@ -268,8 +270,19 @@ impl PsPath {
         // chord, then emit the chord.
         struct Flat<'a> {
             out: PsPath,
-            chords: usize,
+            /// Segments written: chords and the copied moves, lines and
+            /// closes alike (a million straight lines are copied too).
+            count: usize,
             probe: &'a crate::limits::LimitProbe,
+        }
+        impl Flat<'_> {
+            fn wrote(&mut self) -> Result<(), PsError> {
+                self.count += 1;
+                if self.count.is_multiple_of(FLATTEN_POLL) {
+                    self.probe.check((self.count / 1024) as u64)?;
+                }
+                Ok(())
+            }
         }
         fn subdivide(
             f: &mut Flat,
@@ -281,11 +294,7 @@ impl PsPath {
         ) -> Result<(), PsError> {
             if depth >= 16 || (chord_dist(c1, p0, p3) <= TOL && chord_dist(c2, p0, p3) <= TOL) {
                 f.out.line_to(p3);
-                f.chords += 1;
-                if f.chords.is_multiple_of(FLATTEN_POLL) {
-                    f.probe.check((f.chords / 1024) as u64)?;
-                }
-                return Ok(());
+                return f.wrote();
             }
             let (ab, bc, cd) = (mid(p0, c1), mid(c1, c2), mid(c2, p3));
             let (abc, bcd) = (mid(ab, bc), mid(bc, cd));
@@ -295,7 +304,7 @@ impl PsPath {
         }
         let mut f = Flat {
             out: PsPath::default(),
-            chords: 0,
+            count: 0,
             probe,
         };
         for seg in &self.segs {
@@ -305,11 +314,16 @@ impl PsPath {
                 Seg::Curve(c1, c2, p) => {
                     let start = f.out.current().unwrap_or(p);
                     subdivide(&mut f, start, c1, c2, p, 0)?;
+                    continue;
                 }
                 Seg::Close => f.out.close(),
             }
+            f.wrote()?;
         }
-        Ok((f.out, f.chords))
+        // The whole count against the step limit before the caller takes
+        // the path, so a limit leaves the current path as it was.
+        probe.check((f.count / 1024) as u64)?;
+        Ok((f.out, f.count))
     }
 
     /// Build a path from a tiny-skia one (the stroker's output). Goes
@@ -1179,7 +1193,7 @@ pub struct Gfx {
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
 const ARC_POLL: usize = 4096;
 
-/// Chords `flattenpath` makes between looks at the limits (#1188).
+/// Segments `flattenpath` writes between looks at the limits (#1188).
 const FLATTEN_POLL: usize = 4096;
 
 /// `while a2 < a1 { a2 += TAU }` (`up`), or `while a2 > a1 { a2 -= TAU }`,
@@ -1362,7 +1376,7 @@ impl Gfx {
 
     /// `flattenpath`: curves in the current path become chords. The path
     /// is replaced only once the whole of it is flat: a limit that stops
-    /// it leaves the current path as it was. Gives the chord count.
+    /// it leaves the current path as it was. Gives the segment count.
     pub(crate) fn flatten_path(
         &mut self,
         probe: &crate::limits::LimitProbe,

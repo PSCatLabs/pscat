@@ -1502,7 +1502,11 @@ renders eight examples in both and compares block-downsampled output).
   - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep
     each band's edges in the original order: the coverage sums are f32 and
     their order is what makes a fill byte-identical to the edges x bands
-    loop it replaced.
+    loop. It runs only in `rasterize_body::<true>` (limits set); with no
+    limits the body is compiled without it or any counting, which cost 4%
+    of a fill-heavy render otherwise. Code added to `next_item`'s frame arms
+    moved a plain arithmetic loop by 3% in instructions: measure with
+    `/usr/bin/time -l` (instructions retired) when touching interp.rs.
   - Decode filters charge the limits themselves (#1187): the interpreter
     holds one `limits::DecodeBudget` and every `filter` and `eexec` it makes
     gets a handle (`PsFile::filtered_limited`), so a drain of any length

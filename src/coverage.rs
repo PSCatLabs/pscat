@@ -117,8 +117,31 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
 /// step per 1024. A path of 100,000 huge curves comes to 10^8 edges (up to
 /// [`MAX_CHORDS`] a curve, 16 bytes each), so the probe, its heap cap
 /// included, is looked at every [`POLL_WORK`] units while the path is
-/// flattened and while its edges are laid into bands.
+/// flattened and while its edges are laid into bands. The whole work count
+/// is checked against the step limit before the first band, and nothing is
+/// painted here (the caller composites the runs after this returns), so a
+/// fill a limit stops paints nothing.
+///
+/// With no limit (every glyph of an ordinary render) the body is compiled
+/// without any of that, as before #1188: the counting and the band walk,
+/// even skipped at run time, cost 4% of a fill-heavy render's instructions.
 pub(crate) fn rasterize_limited(
+    path: &Path,
+    rule: Rule,
+    mask: &mut Mask,
+    clip: Option<&Mask>,
+    probe: &LimitProbe,
+) -> Result<(Vec<Run>, u64), PsError> {
+    if *probe == LimitProbe::NONE {
+        rasterize_body::<false>(path, rule, mask, clip, probe)
+    } else {
+        rasterize_body::<true>(path, rule, mask, clip, probe)
+    }
+}
+
+/// [`rasterize_limited`]'s body; `LIMITED` false compiles out every look at
+/// the limits and the band walk (every edge then visits every band).
+fn rasterize_body<const LIMITED: bool>(
     path: &Path,
     rule: Rule,
     mask: &mut Mask,
@@ -144,20 +167,36 @@ pub(crate) fn rasterize_limited(
     // right of it, so it collapses onto x = 0; one right of it affects
     // nothing visible and collapses onto x = w.
     let mut lines = Vec::new();
-    let mut work = Work {
-        done: 0,
-        next_poll: POLL_WORK,
-        probe,
-    };
-    let mut stopped = Ok(());
-    flatten(path, x0, y0, |l| {
-        push_clipped(&mut lines, l, w as f32);
-        stopped = work.add(1);
-        stopped.is_ok()
-    });
-    stopped?;
+    // The edge count is the work so far: looked at every `POLL_WORK` of
+    // them.
+    let mut poll_at = POLL_WORK as usize;
+    let mut stopped = None;
+    let stop = std::cell::Cell::new(false);
+    if !LIMITED {
+        flatten(path, x0, y0, &stop, |l| {
+            push_clipped(&mut lines, l, w as f32)
+        });
+    } else {
+        flatten(path, x0, y0, &stop, |l| {
+            if stop.get() {
+                return;
+            }
+            push_clipped(&mut lines, l, w as f32);
+            if lines.len() < poll_at {
+                return;
+            }
+            poll_at = lines.len() + POLL_WORK as usize;
+            if let Err(e) = probe.check(lines.len() as u64 / 1024) {
+                stopped = Some(e);
+                stop.set(true);
+            }
+        });
+    }
+    if let Some(e) = stopped {
+        return Err(e);
+    }
     if lines.is_empty() {
-        return Ok((out, work.done));
+        return Ok((out, 0));
     }
 
     let small = w * h <= SMALL_AREA;
@@ -177,10 +216,24 @@ pub(crate) fn rasterize_limited(
     let mut merger = Merger::default();
     let mut spans: Vec<(u32, u32, bool)> = Vec::new();
     let mstride = mw as usize;
-    let mut bands = BandWalk::new(&lines, band, h);
-    if bands.is_some() {
-        work.add(lines.len() as u64)?;
+    let mut bands = if LIMITED {
+        BandWalk::new(&lines, band, h)
+    } else {
+        None
+    };
+    // The whole work is known before any band is laid: the edges, and each
+    // edge once per band it reaches. A step limit it would pass stops the
+    // fill here, before anything is painted (#1188).
+    let visits = bands.as_ref().map_or(lines.len() as u64, |b| b.visits);
+    let total = lines.len() as u64 + visits;
+    if LIMITED {
+        probe.check(total / 1024)?;
     }
+    let mut work = Work {
+        done: lines.len() as u64,
+        next_poll: lines.len() as u64 + POLL_WORK,
+        probe,
+    };
     let mut by = 0;
     while by < h {
         let bh = band.min(h - by);
@@ -188,6 +241,11 @@ pub(crate) fn rasterize_limited(
             Some(walk) => {
                 let mine = walk.band(by / band).iter().map(|&i| &lines[i as usize]);
                 lay(&mut acc, stride, by, bh, mine, &mut work)?;
+            }
+            None if !LIMITED => {
+                for l in &lines {
+                    accumulate(&mut acc, stride, by, bh, l);
+                }
             }
             None => lay(&mut acc, stride, by, bh, lines.iter(), &mut work)?,
         }
@@ -274,7 +332,7 @@ pub(crate) fn rasterize_limited(
             solid: false,
         });
     }
-    Ok((out, work.done))
+    Ok((out, total))
 }
 
 /// Work units between looks at the limits in [`rasterize_limited`].
@@ -320,7 +378,10 @@ fn lay<'a>(
             n = 0;
         }
     }
-    work.add(n)
+    if n > 0 {
+        work.add(n)?;
+    }
+    Ok(())
 }
 
 /// Which edges each band needs (#1188). Laying every edge into every band
@@ -345,6 +406,8 @@ struct BandWalk {
     /// The edges reaching the current band, and scratch for the next.
     active: Vec<u32>,
     next: Vec<u32>,
+    /// Edge visits the whole walk makes: each edge once per band it reaches.
+    visits: u64,
 }
 
 impl BandWalk {
@@ -370,10 +433,12 @@ impl BandWalk {
         };
         let mut start = vec![0usize; nb + 1];
         let mut last = vec![0u32; lines.len()];
+        let mut visits = 0u64;
         for (l, end) in lines.iter().zip(&mut last) {
             if let Some((k0, k1)) = range(l) {
                 start[k0 + 1] += 1;
                 *end = k1 as u32;
+                visits += (k1 - k0 + 1) as u64;
             }
         }
         for k in 0..nb {
@@ -393,6 +458,7 @@ impl BandWalk {
             last,
             active: Vec::new(),
             next: Vec::new(),
+            visits,
         })
     }
 
@@ -520,23 +586,26 @@ fn mul255(a: u8, b: u8) -> u8 {
 /// Walk `path` as straight edges relative to `(ox, oy)`, closing every
 /// subpath (a fill closes open subpaths implicitly).
 ///
-/// `emit` returns false to stop: the walk ends at the next segment.
-fn flatten(path: &Path, ox: f32, oy: f32, mut emit: impl FnMut(Line) -> bool) {
+/// The walk ends at the next segment once `stop` is set (by `emit`).
+fn flatten(
+    path: &Path,
+    ox: f32,
+    oy: f32,
+    stop: &std::cell::Cell<bool>,
+    mut emit: impl FnMut(Line),
+) {
     let mut start = (0.0f32, 0.0f32);
     let mut cur = start;
-    let go = std::cell::Cell::new(true);
     let mut edge = |from: (f32, f32), to: (f32, f32)| {
-        if go.get() {
-            go.set(emit(Line {
-                x0: from.0 - ox,
-                y0: from.1 - oy,
-                x1: to.0 - ox,
-                y1: to.1 - oy,
-            }));
-        }
+        emit(Line {
+            x0: from.0 - ox,
+            y0: from.1 - oy,
+            x1: to.0 - ox,
+            y1: to.1 - oy,
+        })
     };
     for seg in path.segments() {
-        if !go.get() {
+        if stop.get() {
             return;
         }
         match seg {
@@ -655,6 +724,7 @@ fn push_clipped(out: &mut Vec<Line>, l: Line, w: f32) {
 /// `[0, stride - 2]`. After a running sum along a row, each cell holds
 /// the winding-weighted area of its pixel the path covers. The per-row
 /// arithmetic is font-rs's (Raph Levien, Apache-2.0/MIT).
+#[inline(always)]
 fn accumulate(acc: &mut Acc, stride: usize, by: usize, bh: usize, l: &Line) {
     let (dir, a, b) = if l.y0 < l.y1 {
         (1.0f32, (l.x0, l.y0), (l.x1, l.y1))
@@ -971,5 +1041,83 @@ mod tests {
             );
         }
         assert!(BandWalk::new(&lines, h, h).is_none(), "one band: no walk");
+    }
+
+    /// #1188: the limited body (band walk, polls) and the unlimited one
+    /// (every edge visits every band) give the same runs and the same mask
+    /// bytes, on a canvas of many bands: edges that start, end and turn on
+    /// band boundaries, edges far off the canvas, tall and short curves,
+    /// both fill rules, with and without a clip. (Coordinates that are not
+    /// finite never get here: tiny-skia refuses to build such a path.)
+    #[test]
+    fn the_band_walk_paints_exactly_what_every_band_visiting_every_edge_does() {
+        let (w, h) = (1200u32, 900u32);
+        let band = BAND_FLOATS / (w as usize + 2);
+        assert!((h as usize).div_ceil(band) > 4, "several bands");
+        let b = band as f32;
+        let mut pb = PathBuilder::new();
+        // Zigzags whose corners sit on, just above and just below band edges.
+        for (k, dy) in [0.0f32, -0.001, 0.001, 0.5].into_iter().enumerate() {
+            let x = 50.0 + 250.0 * k as f32;
+            pb.move_to(x, 0.0);
+            for i in 1..=(h as usize / band) {
+                let xi = x + if i % 2 == 0 { 0.0 } else { 120.0 };
+                pb.line_to(xi, i as f32 * b + dy);
+            }
+            pb.line_to(x, h as f32);
+            pb.close();
+        }
+        // Huge edges far off the canvas, and curves of every height.
+        pb.move_to(-1e30, -1e30);
+        pb.line_to(1e30, 450.0);
+        pb.line_to(600.0, 1e30);
+        pb.close();
+        for i in 0..40 {
+            let f = i as f32;
+            pb.move_to(30.0 + f * 28.0, 10.0 + f * 21.0);
+            pb.cubic_to(
+                900.0 - f * 5.0,
+                f * 3.0,
+                -200.0 + f * 9.0,
+                880.0 - f,
+                600.0,
+                5.0 + f * 7.0,
+            );
+            pb.close();
+        }
+        // Thin slivers straddling band edges.
+        for i in 1..5 {
+            let y = i as f32 * b;
+            pb.push_rect(Rect::from_xywh(5.0, y - 0.3, 1100.0, 0.6).unwrap());
+        }
+        let path = pb.finish().unwrap();
+        let mut clip = Mask::new(w, h).unwrap();
+        for (i, v) in clip.data_mut().iter_mut().enumerate() {
+            *v = (i * 37 % 256) as u8;
+        }
+        let probe = LimitProbe {
+            steps_left: Some(u64::MAX),
+            deadline_ns: None,
+            memory: None,
+        };
+        for rule in [Rule::NonZero, Rule::EvenOdd] {
+            for c in [None, Some(&clip)] {
+                let mut a = Mask::new(w, h).unwrap();
+                let mut z = Mask::new(w, h).unwrap();
+                let (ra, wa) = rasterize_body::<true>(&path, rule, &mut a, c, &probe).unwrap();
+                let (rz, _) = rasterize_body::<false>(&path, rule, &mut z, c, &probe).unwrap();
+                assert_eq!(ra, rz, "{rule:?} clip {}", c.is_some());
+                for r in &ra {
+                    for y in r.rect.y0..r.rect.y1 {
+                        let row = (y * w) as usize;
+                        let span = row + r.rect.x0 as usize..row + r.rect.x1 as usize;
+                        if !r.solid {
+                            assert_eq!(a.data()[span.clone()], z.data()[span], "row {y}");
+                        }
+                    }
+                }
+                assert!(wa > 0);
+            }
+        }
     }
 }

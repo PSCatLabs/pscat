@@ -8,8 +8,8 @@ work. Output does not change: the identity check below.
 
 | Item | Before | After |
 |---|---|---|
-| `fill` of 100,000 page-sized curves | 1.8 s under `--max-time 0.2` at 72 dpi, 5.8 s at 300 dpi; the fill alone 1.0 s / 4.2 s with no limit | stops inside `fill` at 0.21 s / 0.25 s; the fill alone 0.77 s / 2.9 s |
-| `rectfill` of 100,000 page-tall rectangles, 300 dpi | 2.3–3.2 s, no look at the limits | 1.9–2.1 s, under the limits like `fill` |
+| `fill` of 100,000 page-sized curves | 1.8 s under `--max-time 0.2` at 72 dpi, 5.8 s at 300 dpi; the fill alone 1.0 s / 4.2 s with no limit | stops inside `fill` at 0.21 s / 0.25 s; under a limit it does not reach, the fill alone 0.77 s / 2.9 s (the band walk); with no limits, main's loop |
+| `rectfill` of 100,000 page-tall rectangles, 300 dpi | 2.3–3.2 s, no look at the limits | 1.9–2.1 s with limits on, under the limits like `fill` |
 | `flattenpath` of 2000 curves at 1e20 | 1.7 s under `--max-time 0.1`, 0.95 GB RSS under `--max-memory 50` | stops inside `flattenpath` at 0.10 s; 37 MB |
 | `shfill`, 4095-leg stitch, 300 dpi | 5.2 s under `--max-time 0.5` | 0.6 s with or without a limit |
 | Type 1, 1000 Subrs of 64 KiB, 200 glyphs | 25 s under `--max-time 1` | 0.7 s (mostly scanning the 131 MB file) |
@@ -102,6 +102,59 @@ work. Output does not change: the identity check below.
 - **`bind`** looks names up with `load_id(n.id())`, which is what name
   execution does and gives the same result as `load(&str)`.
 
+### Codex round 1 (PR #1217)
+
+- **The fill and flattenpath charges came after the commit.** Under
+  `--max-steps 12`, flattenpath replaced the path and fill painted, and only
+  then was `StepsExceeded` raised. Now both hold the complete work count
+  against the step limit before they commit:
+  - fill does this before the first band is laid (`rasterize_limited`),
+    and composites only after the rasteriser returns, so a stopped fill
+    paints nothing;
+  - flattenpath does it before the caller takes the path.
+
+  The operators then only count the steps (`Interp::charge_probed_steps`,
+  which counts nothing with no limits set).
+- **flattenpath counted only chords.** A path of a million straight lines
+  was copied unpolled, reaching 71 MB under a 40 MiB cap. Every segment it
+  writes now counts toward the polls, and the heap is looked at while both
+  paths are alive.
+- **A Type 1 subr could pass the memory cap** (16 MB, about 72 MB RSS under
+  `--max-memory 20`). Each time a glyph has decrypted another 64 KiB, the
+  decryption about to be made is held against the cap (twice its size: the
+  bytes and their shared copy). The heap is looked at again once it is
+  made. Decryption now reads the string in place instead of copying it.
+- **Blame.** A limit the recorders find while an image's data procedure
+  runs between steps blamed the procedure's last operator (`pop`). The
+  image remembers the operator that began it, and `recover` puts that back
+  when the error comes from the image frame on top. That code sits outside
+  the interpreter's hot loop, for the cost reason below.
+- **Cost.** Codex measured 540k Helvetica glyphs at about 7% over main
+  with no limits. Instruction counts (`/usr/bin/time -l`) are steady to
+  about 0.1% across runs, so they found the causes where wall time could
+  not:
+  - **Probes built in `next_item`'s Show and Image arms.** Even after the
+    probe moved out, any code added to those arms cost 3% of instructions
+    on a plain `1 2 add pop` loop, a layout effect. The show and image
+    contexts now take a probe snapshot when they begin. The deadline and
+    the heap cap do not move during them, and they check with 0 steps.
+  - **The fill body.** Its counting and the band walk cost 4% of a
+    fill-heavy render even when skipped at run time. `rasterize_body` is
+    now generic over `LIMITED`. With no limit it compiles without any of
+    it, so it is main's loop again, with every edge visiting every band.
+    The band walk runs only under limits, where it gives the same bytes:
+    a unit test compares both bodies run for run and byte for byte on a
+    many-band canvas, and so does the identity check.
+
+  Instructions after the fix, main (38ee4ed) vs this branch:
+
+  | Workload | Change |
+  |---|---|
+  | `1 2 add pop` loop | 0% |
+  | 540k small fills | +1.2% |
+  | 540k glyphs | +0.7% |
+  | 540k glyphs with limits on | +0.8% |
+
 ### Tests
 
 - `tests/limits.rs` (`one_operator`). `fill`, `flattenpath`, `show` of
@@ -130,7 +183,7 @@ work. Output does not change: the identity check below.
 `scripts/identity_check.sh` was run with `--base-bin`/`--head-bin` over
 every tracked gallery piece, example and selftest driver: 168 files, gallery
 at 144 dpi. It ran under `--pscat-args "--max-time 900 --max-memory 8192"`,
-so the probes are live, and against main at 6f1e05f after the last rebase.
+so the probes are live, and against main at 6f1e05f after the last rebase. After Codex round 1 it was run again against 38ee4ed, both with those limits (the band-walk body) and with none (the unlimited body): 207 of 207 identical each time, control differing.
 207 of 207 page renders were identical. Four files were skipped as failing
 identically in both trees: the `examples/hybrid/compare_*` sheets, which
 need `pscat sheet --sweep`. The control is the 4095-leg ramp, which the

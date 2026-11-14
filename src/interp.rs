@@ -564,40 +564,6 @@ fn usable_scale(scale: f32) -> bool {
     scale.is_finite() && scale > 0.0
 }
 
-/// [`Interp::remaining_budget`] from the fields it reads, for a caller that
-/// holds the interpreter split into its parts.
-fn remaining_budget(
-    limits: &Limits,
-    steps_used: u64,
-    run_clock: &crate::clock::Clock,
-) -> (Option<u64>, Option<u64>) {
-    let steps = limits.max_steps.map(|m| m.saturating_sub(steps_used));
-    let deadline = limits.max_time.map(|t| {
-        let left = (t.as_millis() as i64 - run_clock.elapsed_ms()).max(0) as u64;
-        crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
-    });
-    (steps, deadline)
-}
-
-/// [`Interp::limit_probe`] from the fields it reads: the image frame makes
-/// one while the interpreter is split into its parts (#1188).
-fn limit_probe(
-    limits: &Limits,
-    steps_used: u64,
-    run_clock: &crate::clock::Clock,
-    mem_base: usize,
-) -> crate::limits::LimitProbe {
-    if limits.is_none() {
-        return crate::limits::LimitProbe::NONE;
-    }
-    let (steps_left, deadline_ns) = remaining_budget(limits, steps_used, run_clock);
-    crate::limits::LimitProbe {
-        steps_left,
-        deadline_ns,
-        memory: limits.max_memory.map(|max| (mem_base, max)),
-    }
-}
-
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
     /// Nothing chose that size, so a program's `setpagedevice /PageSize`
@@ -1052,18 +1018,29 @@ impl Interp {
     /// machine (a compiled kernel, #742): steps still allowed, and the
     /// deadline as a `Clock::mono_ns` instant.
     pub(crate) fn remaining_budget(&self) -> (Option<u64>, Option<u64>) {
-        remaining_budget(&self.limits, self.steps_used, &self.run_clock)
+        let steps = self
+            .limits
+            .max_steps
+            .map(|m| m.saturating_sub(self.steps_used));
+        let deadline = self.limits.max_time.map(|t| {
+            let left = (t.as_millis() as i64 - self.run_clock.elapsed_ms()).max(0) as u64;
+            crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
+        });
+        (steps, deadline)
     }
 
     /// The limits for a loop that cannot borrow the interpreter (#1176,
     /// [`LimitProbe`](crate::limits::LimitProbe)).
     pub(crate) fn limit_probe(&self) -> crate::limits::LimitProbe {
-        limit_probe(
-            &self.limits,
-            self.steps_used,
-            &self.run_clock,
-            self.mem_base,
-        )
+        if self.limits.is_none() {
+            return crate::limits::LimitProbe::NONE;
+        }
+        let (steps_left, deadline_ns) = self.remaining_budget();
+        crate::limits::LimitProbe {
+            steps_left,
+            deadline_ns,
+            memory: self.limits.max_memory.map(|max| (self.mem_base, max)),
+        }
     }
 
     /// Count `n` steps done off the machine.
@@ -1328,14 +1305,6 @@ impl Interp {
             return Err(PsError::StepsExceeded);
         }
         self.check_time_and_memory()
-    }
-
-    /// Heap growth the memory limit still allows, or `None` with no memory
-    /// limit: for work that sizes itself to the limit (#1188).
-    pub(crate) fn memory_left(&self) -> Option<usize> {
-        self.limits
-            .max_memory
-            .map(|max| max.saturating_sub(self.heap_growth()))
     }
 
     /// Refuse an allocation of `bytes` that would pass the memory cap,
@@ -1728,6 +1697,7 @@ impl Interp {
     #[inline(always)]
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
         let command = self.error_command.take();
+        self.blame_image();
         // A limit error is never catchable: `stopped` would otherwise let a
         // runaway program swallow it and carry on (issue #604).
         if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
@@ -2038,10 +2008,6 @@ impl Interp {
                     gfx,
                     ostack,
                     object_format,
-                    limits,
-                    steps_used,
-                    run_clock,
-                    mem_base,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
@@ -2148,11 +2114,7 @@ impl Interp {
                     Frame::ProfReturn => Action::ProfExit,
                     Frame::Show(ctx) => {
                         stepped_show = true;
-                        // A Type 1 glyph looks at the limits as it decrypts
-                        // its subroutines (#1188): the slice's own check
-                        // comes only every 512 glyphs.
-                        let probe = limit_probe(limits, *steps_used, run_clock, *mem_base);
-                        let step = ctx.step(gfx, &probe)?;
+                        let step = ctx.step(gfx)?;
                         match step {
                             ShowStep::Pop => Action::Pop,
                             ShowStep::PopPushWidth(wx, wy) => {
@@ -2192,10 +2154,7 @@ impl Interp {
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
                         }
-                        // The SVG and PDF recorders look at the limits per
-                        // row of a big image (#1188).
-                        let probe = limit_probe(limits, *steps_used, run_clock, *mem_base);
-                        match ctx.step(gfx, &probe)? {
+                        match ctx.step(gfx)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
                             ImageStep::Done => Action::Pop,
                         }
@@ -2636,12 +2595,18 @@ impl Interp {
     }
 
     /// Queue a show (any of the family) as an execution-stack frame.
-    pub(crate) fn begin_show(&mut self, ctx: ShowCtx) -> Result<(), PsError> {
+    pub(crate) fn begin_show(&mut self, mut ctx: ShowCtx) -> Result<(), PsError> {
+        // For a Type 1 glyph's decryption (#1188), checked with no steps:
+        // the deadline and the heap cap do not move while the show runs.
+        ctx.set_limit_probe(self.limit_probe());
         self.push_frame(Frame::Show(Box::new(ctx)))
     }
 
     /// Queue an image (image/imagemask/colorimage) frame.
-    pub(crate) fn begin_image(&mut self, ctx: ImageCtx) -> Result<(), PsError> {
+    pub(crate) fn begin_image(&mut self, mut ctx: ImageCtx) -> Result<(), PsError> {
+        ctx.op_name = self.last_name;
+        // For the SVG and PDF recorders (#1188), checked with no steps.
+        ctx.probe = self.limit_probe();
         // The SVG and PDF recorders decode the whole image into a buffer of
         // their own, width x height pixels whatever data the source gives
         // (`30000 30000 8 [...] {()} image` is 3.6 GB and 9e8 pixels in one
@@ -3476,6 +3441,42 @@ fn scan_procedure(
         }
     }
     Ok(Object::procedure(items))
+}
+
+// #1188's helpers, kept after everything else: the interpreter's hot loop
+// above is sensitive to what shares its code unit (an image-arm change in
+// `next_item` cost 3% of instructions on a plain arithmetic loop).
+impl Interp {
+    /// Count `n` steps an operator's own loop did and has already held
+    /// against the step limit through its [`LimitProbe`](crate::limits::LimitProbe)
+    /// (#1188: `fill`, `flattenpath`), so nothing is checked here. Counted
+    /// only while limits are set, as every step is.
+    pub(crate) fn charge_probed_steps(&mut self, n: u64) {
+        if !self.limits.is_none() {
+            self.charge_steps(n);
+        }
+    }
+
+    /// Heap growth the memory limit still allows, or `None` with no memory
+    /// limit: for work that sizes itself to the limit (#1188).
+    pub(crate) fn memory_left(&self) -> Option<usize> {
+        self.limits
+            .max_memory
+            .map(|max| max.saturating_sub(self.heap_growth()))
+    }
+
+    /// An error raised while an image frame is on top came from the image's
+    /// own step (its recorders' limits, a decode filter), not from its data
+    /// procedure, whose frames would be above it: blame the operator that
+    /// began the image, not the procedure's last one (#1188).
+    #[cold]
+    fn blame_image(&mut self) {
+        if let Some(Frame::Image(ctx)) = self.estack.last()
+            && ctx.op_name.is_some()
+        {
+            self.last_name = ctx.op_name;
+        }
+    }
 }
 
 #[cfg(test)]

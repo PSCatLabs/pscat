@@ -137,6 +137,14 @@ pub(crate) struct ImageCtx {
     lut: Option<Vec<f32>>,
     waiting: bool,
     eod: bool,
+    /// The name of the operator that began the image (`image`,
+    /// `imagemask`, `colorimage`), put back as the offending command each
+    /// time the frame steps (#1188): a data procedure runs in between, and
+    /// a limit the recorders find must blame the image, not the
+    /// procedure's last operator.
+    pub(crate) op_name: Option<u32>,
+    /// The limits when the image began, for the recorders (#1188).
+    pub(crate) probe: crate::limits::LimitProbe,
 }
 
 impl ImageCtx {
@@ -170,6 +178,8 @@ impl ImageCtx {
             lut: None,
             waiting: false,
             eod: false,
+            op_name: None,
+            probe: crate::limits::LimitProbe::NONE,
         }
     }
 
@@ -291,13 +301,7 @@ impl ImageCtx {
         }
     }
 
-    /// `probe` is for the SVG and PDF recorders' per-pixel loops, which
-    /// look at the limits once a row (#1188).
-    pub(crate) fn step(
-        &mut self,
-        gfx: &mut Gfx,
-        probe: &crate::limits::LimitProbe,
-    ) -> Result<ImageStep, PsError> {
+    pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ImageStep, PsError> {
         // gs reads the mask's source first, then the image's (probed with
         // two data procedures, #739), so a shared file or one procedure
         // counter sees the same order.
@@ -331,7 +335,9 @@ impl ImageCtx {
         }
         // Premature EOD renders what arrived; missing samples read as 0.
         self.build_decode_lut();
-        self.rasterize(gfx, probe)?;
+        // The SVG and PDF recorders look at the limits once a row (#1188).
+        let probe = self.probe;
+        self.rasterize(gfx, &probe)?;
         Ok(ImageStep::Done)
     }
 

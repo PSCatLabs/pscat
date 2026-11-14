@@ -4,7 +4,6 @@
 
 use pscat::{Interp, Limits, PsError};
 
-#[cfg(unix)]
 mod common;
 
 #[global_allocator]
@@ -163,6 +162,38 @@ fn memory_growth_is_capped() {
     );
     let kept = pscat::memtrack::live_bytes().saturating_sub(before);
     assert!(kept < 100 * MIB, "the flattened path is not kept: {kept}");
+    drop(it);
+
+    // Copying a path of a million straight lines is a second path that size
+    // (Codex, PR #1217: under a 40 MiB cap flattenpath ran to 71 MB). The
+    // copy counts toward the polls; the path stays as it was.
+    let mut it = Interp::new();
+    it.run_str("newpath 0 0 moveto 1000000 { 1 1 lineto } repeat")
+        .unwrap();
+    it.set_limits(Limits::none().with_max_memory(20 * MIB))
+        .expect("the allocator is installed");
+    assert_eq!(it.run_str("flattenpath"), Err(PsError::MemoryExceeded));
+    it.set_limits(Limits::none()).unwrap();
+    it.capture_stdout();
+    it.run_str(
+        "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } pathforall =",
+    )
+    .unwrap();
+    assert_eq!(it.captured_stdout(), b"1000001\n");
+    drop(it);
+
+    // A Type 1 glyph that calls a 16 MB subroutine (Codex, PR #1217): its
+    // decrypted copy was made, used and freed inside one step, past a 20 MiB
+    // cap. The decryption is held against the cap before it is made.
+    let mut it = Interp::new();
+    it.run_str(&common::type1_probe(16_000_000, 0, 0, 1, ""))
+        .unwrap();
+    it.set_limits(Limits::none().with_max_memory(20 * MIB))
+        .expect("the allocator is installed");
+    assert_eq!(
+        it.run_str("(A) show (survived) ="),
+        Err(PsError::MemoryExceeded)
+    );
     drop(it);
 
     // A kernelimage whose every pixel retires to the interpreter (#1188):

@@ -464,9 +464,10 @@ without the limits above:
   Issue #1188 closed more of them:
   - `fill`/`eofill`/`rectfill` look at the limits, the memory cap included, as the
     rasteriser flattens the path and lays its edges into bands, a step per
-    1024 units of work; each edge is laid only into the bands it reaches
-    (100,000 curves took 5 s at 300 dpi in one `fill`, then 2.9 s, and stop
-    at the limit).
+    1024 units of work. With limits on, each edge is laid only into the
+    bands it reaches (100,000 curves took 5 s at 300 dpi in one `fill`; now
+    2.9 s, and they stop at the limit). Before any of it is painted, the
+    whole work is checked against the step limit.
   - `flattenpath` looks at them every 4096 chords, a step per 1024 chords,
     and keeps the current path when a limit stops it.
   - A Type 1 glyph decrypts only the subroutines it calls, once each, and

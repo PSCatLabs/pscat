@@ -786,6 +786,59 @@ mod one_operator {
         );
     }
 
+    /// The program's current path as `pathforall` sees it: elements.
+    fn path_elements(it: &mut Interp) -> String {
+        it.set_limits(Limits::none()).expect("no limits");
+        it.capture_stdout();
+        it.run_str(
+            "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall =",
+        )
+        .expect("pathforall");
+        String::from_utf8_lossy(it.captured_stdout())
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn a_step_limit_stops_flattenpath_and_fill_before_they_commit() {
+        // Codex, PR #1217: the step charge came after the path was replaced
+        // and after the fill painted. The whole count is now held against
+        // the limit first: the path stays as it was, and nothing is painted.
+        let mut it = Interp::new();
+        it.run_str("newpath 0 0 moveto 10000000 10000000 -10000000 10000000 0 0 curveto")
+            .unwrap();
+        it.set_limits(steps(12)).unwrap();
+        assert_eq!(it.run_str("flattenpath"), Err(PsError::StepsExceeded));
+        assert_eq!(
+            path_elements(&mut it),
+            "2",
+            "moveto and curveto, not chords"
+        );
+
+        let mut it = Interp::new();
+        it.run_str("0 setgray newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        // About 120,000 edges, over a hundred steps of work.
+        it.set_limits(steps(20)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        let painted = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .filter(|p| p.red() != 255)
+            .count();
+        assert_eq!(painted, 0, "the fill painted nothing");
+        // The same fill under a step cap it fits paints.
+        let mut it = Interp::new();
+        it.run_str("0 setgray newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        it.set_limits(steps(1_000_000)).unwrap();
+        it.run_str("fill").unwrap();
+        assert!(it.gfx().pixmap.pixels().iter().any(|p| p.red() != 255));
+    }
+
     #[test]
     fn flattenpath_of_huge_curves_stops_inside_flattenpath() {
         // Each curve is 65,536 chords (#1188: 2000 of them were 1.3 s and
@@ -829,6 +882,19 @@ mod one_operator {
         stops_inside_on(
             "pdf stencil",
             Interp::enable_pdf,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+        // A data procedure runs between the image's steps (Codex, PR #1217):
+        // the limit the recorder finds still blames `image`, not the
+        // procedure's last operator (`pop`).
+        let clock = Duration::from_millis(100);
+        let src = "100 100 scale 8000 8000 8 [8000 0 0 8000 0 0] { () dup pop } image";
+        stops_inside_on(
+            "svg image, proc",
+            Interp::enable_svg,
             src,
             "image",
             clock,
@@ -878,60 +944,12 @@ mod one_operator {
         assert_eq!(r, Ok(()));
     }
 
-    /// Type 1 charstring encryption (key 4330), with the usual four
-    /// leading bytes, as hex.
-    fn t1_hex(plain: &[u8]) -> String {
-        let mut r: u16 = 4330;
-        let mut out = String::new();
-        for &p in [0u8; 4].iter().chain(plain) {
-            let c = p ^ (r >> 8) as u8;
-            r = (u16::from(c).wrapping_add(r))
-                .wrapping_mul(52845)
-                .wrapping_add(22719);
-            out.push_str(&format!("{c:02x}"));
-        }
-        out
-    }
-
-    /// A Type 1 font `/T1Probe` whose Subrs are `subr0` (encrypted, then
-    /// `pad` bytes of anything) and `others` more `other_len`-byte strings,
-    /// and whose glyph `A` calls subr 0 `calls` times, set as the font; then
-    /// the program `show`.
-    fn type1_probe(
-        pad: usize,
-        others: usize,
-        other_len: usize,
-        calls: usize,
-        show: &str,
-    ) -> String {
-        let subr0 = t1_hex(&[11]);
-        let mut glyph = vec![139, 248, 136, 13]; // 0 500 hsbw
-        for _ in 0..calls {
-            glyph.extend([139, 10]); // 0 callsubr
-        }
-        glyph.push(14); // endchar
-        format!(
-            "/s0 {len} string def s0 0 <{subr0}> putinterval \
-             /T1Probe 10 dict dup begin /FontType 1 def /PaintType 0 def \
-             /FontMatrix [0.001 0 0 0.001 0 0] def /FontBBox [0 0 1000 1000] def \
-             /Encoding 256 array 0 1 255 {{ 1 index exch /.notdef put }} for dup 65 /A put def \
-             /Private 3 dict dup begin /lenIV 4 def \
-               /Subrs [ s0 {others} {{ {other_len} string }} repeat ] def end def \
-             /CharStrings 2 dict dup begin /.notdef <{notdef}> def /A <{glyph}> def end def \
-             end definefont pop /T1Probe findfont 12 scalefont setfont 10 10 moveto \
-             {show}",
-            len = 5 + pad,
-            notdef = t1_hex(&[139, 248, 136, 13, 14]),
-            glyph = t1_hex(&glyph),
-        )
-    }
-
     #[test]
     fn a_type1_glyph_decrypts_only_the_subroutines_it_calls() {
         // Every glyph decrypted every Subrs entry: 1000 of 64 KiB, 200
         // glyphs, took 25 s past a 1 s limit (#1188). Now only subr 0.
         let src: &'static str = Box::leak(
-            type1_probe(
+            common::type1_probe(
                 0,
                 1000,
                 65536,
@@ -951,7 +969,8 @@ mod one_operator {
         // And one subroutine of 8 MB called 30,000 times was copied each
         // time (240 GB); now it is shared.
         let src: &'static str = Box::leak(
-            type1_probe(8 << 20, 0, 0, 30_000, "(A) show currentpoint pop =").into_boxed_str(),
+            common::type1_probe(8 << 20, 0, 0, 30_000, "(A) show currentpoint pop =")
+                .into_boxed_str(),
         );
         let (r, out) = run(
             "type1 callsubr",
@@ -970,7 +989,7 @@ mod one_operator {
         // at the limits before each subroutine it decrypts.
         stops_inside(
             "type1 show",
-            type1_probe(16_000_000, 0, 0, 1, ""),
+            common::type1_probe(16_000_000, 0, 0, 1, ""),
             "500 { (A) show } repeat",
             "show",
             Duration::from_secs(2),
