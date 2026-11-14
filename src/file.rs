@@ -343,6 +343,7 @@ impl PsFile {
                     // `Vec` grows it (#1187).
                     if let Some(budget) = budget
                         && buf.len() + take > buf.capacity()
+                        && budget.active()
                     {
                         let grown = (2 * buf.capacity()).max(buf.len() + take);
                         if let Err(e) = budget.check_alloc(grown - buf.capacity()) {
@@ -459,10 +460,18 @@ impl PsFile {
         eod: &mut bool,
         budget: Option<&DecodeBudget>,
     ) -> Result<(), PsError> {
-        while out.is_empty() && !*eod {
-            dec.pull(source, out, eod, budget)?;
-            if let Some(budget) = budget {
-                budget.charge(out.len())?;
+        match budget.filter(|b| b.active()) {
+            // No limits: the loop as it was, nothing more per pull.
+            None => {
+                while out.is_empty() && !*eod {
+                    dec.pull(source, out, eod, budget)?;
+                }
+            }
+            Some(b) => {
+                while out.is_empty() && !*eod {
+                    dec.pull(source, out, eod, budget)?;
+                    b.charge(out.len())?;
+                }
             }
         }
         Ok(())

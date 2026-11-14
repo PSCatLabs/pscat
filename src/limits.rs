@@ -238,6 +238,8 @@ const DECODE_CHECK_EVERY: u64 = 64 * 1024;
 /// limits and refreshes the probe then.
 #[derive(Debug)]
 pub(crate) struct DecodeBudget {
+    /// Some limit is set: the one thing a pull reads when none is.
+    active: Cell<bool>,
     probe: Cell<LimitProbe>,
     /// Decoded bytes the interpreter has not taken as steps yet.
     bytes: Cell<u64>,
@@ -246,6 +248,7 @@ pub(crate) struct DecodeBudget {
 impl Default for DecodeBudget {
     fn default() -> Self {
         DecodeBudget {
+            active: Cell::new(false),
             probe: Cell::new(LimitProbe::NONE),
             bytes: Cell::new(0),
         }
@@ -255,28 +258,34 @@ impl Default for DecodeBudget {
 impl DecodeBudget {
     /// Point the filters at `probe` ([`LimitProbe::NONE`]: no limits).
     pub(crate) fn set_probe(&self, probe: LimitProbe) {
+        self.active.set(probe != LimitProbe::NONE);
         self.probe.set(probe);
     }
 
     /// Forget the bytes not yet taken: a new program, or new limits.
     pub(crate) fn reset(&self, probe: LimitProbe) {
-        self.probe.set(probe);
+        self.set_probe(probe);
         self.bytes.set(0);
+    }
+
+    /// Whether any limit is set; with none, a filter skips the budget.
+    #[inline]
+    pub(crate) fn active(&self) -> bool {
+        self.active.get()
     }
 
     /// Count `n` bytes a filter just decoded, and look at the limits each
     /// time the count passes a multiple of 64 KiB. Free with no limits.
     #[inline]
     pub(crate) fn charge(&self, n: usize) -> Result<(), crate::PsError> {
-        let probe = self.probe.get();
-        if probe == LimitProbe::NONE {
+        if !self.active.get() {
             return Ok(());
         }
         let before = self.bytes.get();
         let after = before.saturating_add(n as u64);
         self.bytes.set(after);
         if before / DECODE_CHECK_EVERY != after / DECODE_CHECK_EVERY {
-            probe.check(after / 1024)?;
+            self.probe.get().check(after / 1024)?;
         }
         Ok(())
     }

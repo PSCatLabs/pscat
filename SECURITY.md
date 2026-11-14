@@ -535,7 +535,17 @@ without the limits above:
 - **No cap on total decoded bytes from filters** (`FlateDecode`,
   `LZWDecode`, `RunLengthDecode`, ...) as such. They decode as the program
   reads, so what a program keeps counts against the memory limit and what it
-  pulls and discards costs steps and time.
+  pulls and discards costs steps and time. A few KB of FlateDecode can expand
+  to gigabytes (before #1187 a decoder bug cut such streams short, which
+  capped them by accident), and one operator can drain it: `image` reading to
+  the end of its data, `readhexstring` or the scanner skipping whitespace,
+  `flushfile`. So every filter looks at the limits as it decodes (#1187):
+  every 64 KiB of output it checks the time and the heap, and the decoded
+  bytes count a step per KiB. A read refuses to grow its buffer past the
+  memory cap, and DCTDecode checks the image size from the JPEG header
+  against it before decoding. The run stops inside the operator with
+  `limitexceeded`. With no limits set, a decompression bomb now runs to its
+  end, as it does in Ghostscript.
 - **No time limit in the browser build**, which has no clock: the `wasm32`
   module reads time as 0. A step limit applies (`Interp::set_limits`), but
   the playground does not set one; it runs in slices (`begin` and `step` in
