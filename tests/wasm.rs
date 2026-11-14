@@ -514,8 +514,8 @@ const ps = await Pscat.instantiate(readFileSync('{wasm}'));
 const fail = (m) => {{ console.error(m); process.exit(1); }};
 // Zeros, MIB mebibytes of them, deflated `layers` times, streamed so the
 // expanded size never sits in memory. Returns the compressed bytes.
-async function bombBytes(MIB, layers) {{
-  let s = (async function* () {{ const z = Buffer.alloc(1 << 20); for (let i = 0; i < MIB; i++) yield z; }})();
+async function bombBytes(MIB, layers, fill = 0) {{
+  let s = (async function* () {{ const z = Buffer.alloc(1 << 20, fill); for (let i = 0; i < MIB; i++) yield z; }})();
   const {{ Readable }} = await import('node:stream');
   let r = Readable.from(s);
   for (let i = 0; i < layers; i++) r = r.pipe(zlib.createDeflate({{ level: i === 0 ? 1 : 9 }}));
@@ -525,9 +525,9 @@ async function bombBytes(MIB, layers) {{
 }}
 // currentfile's rest is the bomb: `layers` filters, then one operator
 // (flushfile) drains them all.
-function bombProgram(data, layers, before = '') {{
+function bombProgram(data, layers, before = '', op = 'flushfile') {{
   return Buffer.concat([
-    Buffer.from(before + 'currentfile ' + '/FlateDecode filter '.repeat(layers) + 'flushfile\n'),
+    Buffer.from(before + 'currentfile ' + '/FlateDecode filter '.repeat(layers) + op + '\n'),
     data, Buffer.from('\n')]);
 }}
 {body}
@@ -582,14 +582,13 @@ if (st !== 0) fail('uncapped drain failed: ' + st + ' ' + ps.error);
 if (ps.stepsUsed !== 0) fail('steps counted with no cap: ' + ps.stepsUsed);
 
 // A cap of 1000, set before begin, stops it after about 1 MiB of the 32,
-// inside the one operator. (The count lags the cap by the KiB the stopping
-// call had charged but not yet handed over.)
+// inside the one operator.
 ps.maxSteps = 1000;
 const t = Date.now();
 st = drain();
 const ms = Date.now() - t;
 if (st !== -1 || !ps.error.includes('limitexceeded (steps)')) fail('not stopped: ' + st + ' ' + ps.error);
-if (ps.stepsUsed < 500 || ps.stepsUsed > 1400) fail('stopped far from the cap: ' + ps.stepsUsed);
+if (ps.stepsUsed < 1000 || ps.stepsUsed > 1400) fail('stopped far from the cap: ' + ps.stepsUsed);
 if (ms > 5000) fail('stopped but slowly: ' + ms + ' ms');
 // The page and the session survive: the next program runs clean.
 if (ps.run('0 0 10 10 rectfill', 100, 100) !== 0) fail('not reusable after the limit: ' + ps.error);
@@ -622,6 +621,27 @@ calls = 0;
 do { ps.maxSteps = 5000; more = ps.step(1000); calls++; } while (more === 1);
 if (more !== -1 || !ps.error.includes('limitexceeded (steps)') || !ps.error.includes('flushfile')) fail('frame cap missed the bomb: ' + more + ' ' + ps.error);
 if (calls < 50) fail('stopped before the loop was over: ' + calls);
+
+// Other operators drain a filter too, and a drain stopped for passing the
+// cap still shows in stepsUsed (it was lost when the failing operator never
+// reached the place the interpreter takes decoded KiB as steps): a stream
+// of blanks read by token, the same read as hex digits, and an image whose
+// samples are the zeros.
+const blanks = await bombBytes(MIB, 2, 0x20);
+const drains = [
+  ['token', bombProgram(blanks, 2, '', 'token')],
+  ['readhexstring', bombProgram(blanks, 2, '/s 10 string def ', 's readhexstring')],
+  ['image', Buffer.concat([
+    Buffer.from('4096 4096 8 [4096 0 0 -4096 0 4096] currentfile /FlateDecode filter /FlateDecode filter image\n'),
+    data, Buffer.from('\n')])],
+];
+for (const [name, program] of drains) {
+  ps.maxSteps = 1000;
+  ps.begin(program, 100, 100);
+  st = ps.step(1 << 16);
+  if (st !== -1 || !ps.error.includes('Error: limitexceeded (steps); OffendingCommand: ' + name)) fail(name + ' not stopped by the cap: ' + st + ' ' + ps.error);
+  if (ps.stepsUsed < 1000 || ps.stepsUsed > 1400) fail(name + ' drain not counted: ' + ps.stepsUsed);
+}
 
 // 0 lifts the cap again; a bad value is refused.
 ps.maxSteps = 0;

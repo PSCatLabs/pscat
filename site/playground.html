@@ -76,9 +76,13 @@ const DEFAULT_FRAME_MAX_STEPS = 500_000;
 const asked = new URLSearchParams(location.search).get('maxsteps');
 const FRAME_MAX_STEPS = /^\d{1,15}$/.test(asked ?? '') ? Number(asked) : DEFAULT_FRAME_MAX_STEPS;
 
+// Whether the report's error is the step cap, by its Error: field: a program
+// can print or name `limitexceeded (steps)` in an error of its own.
+const hitStepCap = (report) => /%%\[ Error: limitexceeded \(steps\);/.test(report);
+
 // A frame stopped by the cap: say so in words, with the raw report under it.
 function describeError(report) {
-  if (!/limitexceeded \(steps\)/.test(report)) return report;
+  if (!hitStepCap(report)) return report;
   return `Stopped: limitexceeded (steps). One frame of the program did more than ` +
     `${FRAME_MAX_STEPS.toLocaleString()} steps of work, the playground's limit ` +
     '(one step per operator, loop pass, or KiB of decoded filter data), so it was cut off. ' +
@@ -130,7 +134,7 @@ function start() {
     } else if (more === -1) {
       const report = ps.error;
       err.textContent = describeError(report);
-      status.textContent = report.includes('limitexceeded') ? 'stopped: step limit' : 'stopped on error';
+      status.textContent = hitStepCap(report) ? 'stopped: step limit' : 'stopped on error';
     } else {
       status.textContent = 'done';
     }

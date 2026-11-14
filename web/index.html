@@ -106,7 +106,7 @@ function start() {
       raf = requestAnimationFrame(frame);
     } else if (more === -1) {
       err.textContent = ps.error;
-      status.textContent = ps.error.includes('limitexceeded') ? 'stopped: step limit' : 'stopped on error';
+      status.textContent = /%%\[ Error: limitexceeded \(steps\);/.test(ps.error) ? 'stopped: step limit' : 'stopped on error';
     } else {
       status.textContent = 'done';
     }

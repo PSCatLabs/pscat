@@ -256,7 +256,17 @@ fn arm(it: &mut Interp, max: u64) {
 /// Steps the current program has run (0 unless a cap is set).
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_steps_used() -> f64 {
-    INTERP.with(|s| s.borrow().as_ref().map_or(0, Interp::steps_used)) as f64
+    INTERP.with(|s| {
+        s.borrow_mut().as_mut().map_or(0, |it| {
+            // The KiB the decode filters produced are handed to the step
+            // count only when the interpreter next looks at its limits,
+            // which a failing operator never reaches: take them now, so a
+            // drain that was stopped for passing the cap still shows.
+            let decoded = it.decode_budget().take_steps();
+            it.charge_steps(decoded);
+            it.steps_used()
+        })
+    }) as f64
 }
 
 #[unsafe(no_mangle)]
