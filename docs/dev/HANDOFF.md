@@ -791,6 +791,13 @@ renders eight examples in both and compares block-downsampled output).
   `src/ops/level2.rs`). As PLRM operators they are not in the
   capabilities catalog, which lists only pscat extensions.
 
+- `resourcestatus` of a Font (#1214) uses `font::locate`, the lookup
+  `findfont` is built on (`font::resolve` = `locate` plus the missing-pack
+  stand-in), so the two cannot disagree: not defined but loadable is
+  `2 -1 true`, in `FontDirectory` is `0 -1 true`, a name nothing provides,
+  or a pack face whose pack is missing, is `false`. Size is -1 in every
+  category now, as gs. `resourceforall` is not implemented.
+
 ## Working conventions that matter (beyond AGENTS.md)
 
 - **The CLI's stdout is the program's alone** (#1058, #1059). Reports

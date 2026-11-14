@@ -361,6 +361,67 @@ fn a_missing_pack_face_stands_in_and_says_which_pack() {
     );
 }
 
+/// Issue #1214: `resourcestatus` answers `true` for exactly the faces
+/// `findfont` loads and `false` for a pack face whose pack is not
+/// installed (where `findfont` hands back a stand-in), so a program can
+/// stop instead of printing blank Hangul. Ghostscript 10.07.1 reports a
+/// face it has not loaded as `2 -1 true` and an unknown name as `false`.
+#[test]
+fn resourcestatus_reports_installed_pack_faces_and_not_missing_ones() {
+    let home = common::scratch_dir("fontpack-resourcestatus");
+    let status = |face: &str| {
+        let (ok, out, err) = pscat_bare(
+            &home,
+            &[
+                "-e",
+                &format!(
+                    "/{face} /Font resourcestatus {{ exch 20 string cvs print ( ) print 20 string cvs print }} {{ (false) print }} ifelse"
+                ),
+            ],
+        );
+        assert!(ok, "{face}: {err}");
+        out
+    };
+    // Bare install: the standard 35 are compiled in; pack faces are not.
+    assert_eq!(status("NewCenturySchlbk-Roman"), "2 -1");
+    assert_eq!(status("Helvetica"), "2 -1");
+    assert_eq!(status("NotoSansKR-Regular"), "false");
+    assert_eq!(status("Bangers"), "false");
+    assert_eq!(status("NoSuchFont-Bold"), "false");
+
+    // Install a pack carrying Zztest-Regular: that face, and only it,
+    // becomes available, and findfont loads the real face for it.
+    let serif = std::fs::read(root().join("fonts/LiberationSerif-Regular.ttf")).unwrap();
+    let file = home.join("zz.tar.zst");
+    std::fs::write(
+        &file,
+        pack(
+            "zztest",
+            "fonts-2026.10",
+            "Zztest/Zztest-Regular.ttf",
+            &serif,
+        ),
+    )
+    .unwrap();
+    assert_eq!(status("Zztest-Regular"), "false", "before the install");
+    let (ok, _, err) = pscat_bare(
+        &home,
+        &["fonts", "install", "--from", file.to_str().unwrap()],
+    );
+    assert!(ok, "{err}");
+    assert_eq!(status("Zztest-Regular"), "2 -1");
+    assert_eq!(status("Zztest"), "2 -1", "the family name, as findfont");
+    assert_eq!(status("Zztest-Bold"), "false");
+    assert_eq!(
+        status("NotoSansKR-Regular"),
+        "false",
+        "other packs unaffected"
+    );
+    let (ok, out, err) = pscat_bare(&home, &["-e", "/Zztest-Regular findfont /FontName get =="]);
+    assert!(ok && err.is_empty(), "{err}");
+    assert_eq!(out.trim(), "/Zztest-Regular");
+}
+
 /// With the face on disk (a checkout's catalog stands in for an installed
 /// pack) nothing changes: the real face, and silence.
 #[test]

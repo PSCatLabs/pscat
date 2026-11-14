@@ -321,6 +321,35 @@ impl Resolved {
     }
 }
 
+/// The FID of the face `requested` names when one exists: a builtin, a
+/// disk-catalog (or wasm-registered) face, or an embedded standard-35
+/// face. `None` for a name nothing provides, including a face of a font
+/// pack that is not installed, where [`resolve`] falls back to a
+/// stand-in. [`resolve`] and `resourcestatus` share it, so the two
+/// cannot disagree about which names are available.
+pub(crate) fn locate(requested: &str) -> Option<i64> {
+    if let Some(fid) = builtin_index(requested) {
+        return Some(fid);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(fid) = catalog_fid(requested) {
+        return Some(fid);
+    }
+    // wasm has no disk catalog; its catalog is only the faces the caller
+    // registered with `register_font_bytes` (the npm package's
+    // `addFont`, #566). Same stems as the disk lookup, so an alias like
+    // `/Garamond` finds an `EBGaramond-Regular` registered under that name.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let (stem, fallback) = wanted_stems(requested);
+        if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
+        {
+            return Some(fid);
+        }
+    }
+    embedded_fid(requested)
+}
+
 /// findfont's name resolution: builtins, then the disk catalog (via
 /// aliases and file stems), then the embedded rest of the standard 35
 /// ([`EMBEDDED`]), then a stand-in face. The disk catalog is
@@ -334,26 +363,7 @@ impl Resolved {
 /// nothing changes. Names no pack has substitute Helvetica without a
 /// note, Ghostscript-style.
 pub(crate) fn resolve(requested: &str) -> Resolved {
-    if let Some(fid) = builtin_index(requested) {
-        return Resolved::found(fid);
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(fid) = catalog_fid(requested) {
-        return Resolved::found(fid);
-    }
-    // wasm has no disk catalog; its catalog is only the faces the caller
-    // registered with `register_font_bytes` (the npm package's
-    // `addFont`, #566). Same stems as the disk lookup, so an alias like
-    // `/Garamond` finds an `EBGaramond-Regular` registered under that name.
-    #[cfg(target_arch = "wasm32")]
-    {
-        let (stem, fallback) = wanted_stems(requested);
-        if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
-        {
-            return Resolved::found(fid);
-        }
-    }
-    if let Some(fid) = embedded_fid(requested) {
+    if let Some(fid) = locate(requested) {
         return Resolved::found(fid);
     }
     if let Some((pack, stem)) = missing_face(requested) {
