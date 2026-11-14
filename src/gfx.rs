@@ -1873,7 +1873,10 @@ impl Gfx {
             Some(m) if m.width() == w && m.height() == h => m,
             _ => match tiny_skia::Mask::new(w, h) {
                 Some(m) => m,
-                None => return Ok(0),
+                None => {
+                    self.prepare_paint();
+                    return Ok(0);
+                }
             },
         };
         let clip = self
@@ -1888,6 +1891,10 @@ impl Gfx {
                 return Err(e);
             }
         };
+        // Only now, so a fill a limit refuses leaves the page as it was: a
+        // showpage's pending erase not done, nothing marked painted (Codex,
+        // PR #1217: a refused fill after showpage made a blank last page).
+        self.prepare_paint();
         if !runs.is_empty() {
             let mut paint = self.paint();
             paint.anti_alias = false;
@@ -1925,7 +1932,6 @@ impl Gfx {
         if !self.painting_off()
             && let Some(path) = self.state.path.to_skia()
         {
-            self.prepare_paint();
             work = self.fill_coverage_limited(&path, rule, probe)?;
             let comp = self.composite();
             if self.svg.is_some() {

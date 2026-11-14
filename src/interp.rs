@@ -783,6 +783,7 @@ impl Interp {
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
         self.decode_budget.reset(self.limit_probe());
+        self.refresh_frame_probes();
         Ok(())
     }
 
@@ -806,6 +807,7 @@ impl Interp {
         self.gfx
             .set_memory_budget(self.limits.max_memory.map(|max| (base, max)));
         self.decode_budget.set_probe(self.limit_probe());
+        self.refresh_frame_probes();
     }
 
     /// The limits in force ([`Limits::none`] by default).
@@ -1097,6 +1099,7 @@ impl Interp {
             self.poll_in = POLL_PERIOD;
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
+            self.refresh_frame_probes();
         }
         self.estack
             .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
@@ -3463,6 +3466,21 @@ impl Interp {
         self.limits
             .max_memory
             .map(|max| max.saturating_sub(self.heap_growth()))
+    }
+
+    /// Hand every show and image frame on the stack the limits now in force
+    /// (#1188): they keep a snapshot taken when they began, and an embedder
+    /// can pause one, change the limits (`set_limits`, `set_memory_base`, a
+    /// new program's clock) and resume it.
+    fn refresh_frame_probes(&mut self) {
+        let probe = self.limit_probe();
+        for frame in &mut self.estack {
+            match frame {
+                Frame::Show(ctx) => ctx.set_limit_probe(probe),
+                Frame::Image(ctx) => ctx.probe = probe,
+                _ => {}
+            }
+        }
     }
 
     /// An error raised while an image frame is on top came from the image's

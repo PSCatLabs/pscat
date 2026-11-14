@@ -840,6 +840,79 @@ mod one_operator {
     }
 
     #[test]
+    fn a_fill_of_flat_curves_counts_the_chords_it_drops() {
+        // Codex, PR #1217: every chord of a curve along y = 792 is horizontal
+        // and dropped, so counting the edges kept saw no work at all; 100,000
+        // such curves are 10^8 chords, 100,000 steps of work.
+        let mut it = Interp::new();
+        it.run_str(
+            "newpath 0 792 moveto 100000 { 1e10 792 -1e10 792 0 792 curveto } repeat \
+             0 791 lineto closepath",
+        )
+        .unwrap();
+        it.set_limits(steps(100)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        // And under a clock it stops inside the fill.
+        stops_inside(
+            "fill of flat curves",
+            "newpath 0 792 moveto 100000 { 1e10 792 -1e10 792 0 792 curveto } repeat \
+             0 791 lineto closepath"
+                .into(),
+            "fill",
+            "fill",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn limits_set_while_an_image_is_paused_reach_its_recorder() {
+        // Codex, PR #1217: the image keeps the limits it began under; a host
+        // that pauses it, sets limits and resumes must not run on the old
+        // (here: none). The SVG recorder then stops inside `image`.
+        let mut it = Interp::new();
+        it.enable_svg();
+        it.begin_source(
+            b"/row 64000 string def 100 100 scale \
+              8000 8000 8 [8000 0 0 8000 0 0] { row } image 1 pop",
+        );
+        // Into the image's data procedure calls, then pause.
+        for _ in 0..20 {
+            assert!(it.step_n(10).expect("runs"), "still in the image");
+        }
+        it.set_limits(untrusted(Duration::from_millis(100)))
+            .unwrap();
+        let err = loop {
+            match it.step_n(1000) {
+                Ok(true) => {}
+                Ok(false) => panic!("the image ran to the end past its limit"),
+                Err(e) => break e,
+            }
+        };
+        let report = it.error_report(&err);
+        assert_eq!(err, PsError::TimeExceeded, "{report}");
+        assert!(report.contains("OffendingCommand: image;"), "{report}");
+    }
+
+    #[test]
+    fn a_refused_fill_after_showpage_leaves_the_page_alone() {
+        // Codex, PR #1217: the page was prepared (the pending erase done, the
+        // recorders cleared, a new page marked painted) before the fill was
+        // refused, so the export gained a blank last page.
+        let mut it = Interp::new();
+        it.enable_svg();
+        it.run_str("0 setgray 10 10 50 50 rectfill showpage")
+            .unwrap();
+        it.run_str("newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        it.set_limits(steps(20)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        // The first page is still on the canvas, its erase still pending.
+        let p = it.gfx().pixmap.pixel(30, 792 - 30).expect("in bounds");
+        assert_eq!((p.red(), p.green(), p.blue()), (0, 0, 0));
+        assert_eq!(it.svg_pages().expect("svg on").len(), 1, "no blank page");
+    }
+
+    #[test]
     fn flattenpath_of_huge_curves_stops_inside_flattenpath() {
         // Each curve is 65,536 chords (#1188: 2000 of them were 1.3 s and
         // about 1 GB in one `flattenpath`).

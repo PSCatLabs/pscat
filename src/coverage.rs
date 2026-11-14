@@ -113,7 +113,7 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
 }
 
 /// [`rasterize`] under the limits (#1188), and the work it did, in units of
-/// one edge made or one edge laid into one band: the operator charges a
+/// one chord made (kept or not) or one edge laid into one band: the operator charges a
 /// step per 1024. A path of 100,000 huge curves comes to 10^8 edges (up to
 /// [`MAX_CHORDS`] a curve, 16 bytes each), so the probe, its heap cap
 /// included, is looked at every [`POLL_WORK`] units while the path is
@@ -170,6 +170,7 @@ fn rasterize_body<const LIMITED: bool>(
     // The edge count is the work so far: looked at every `POLL_WORK` of
     // them.
     let mut poll_at = POLL_WORK as usize;
+    let mut chords = 0usize;
     let mut stopped = None;
     let stop = std::cell::Cell::new(false);
     if !LIMITED {
@@ -181,12 +182,16 @@ fn rasterize_body<const LIMITED: bool>(
             if stop.get() {
                 return;
             }
+            // Every chord made counts, kept or not: a horizontal one is
+            // dropped below, and a path of flat curves is all of those
+            // (Codex, PR #1217: 512M chords, none kept, ran unpolled).
+            chords += 1;
             push_clipped(&mut lines, l, w as f32);
-            if lines.len() < poll_at {
+            if chords < poll_at {
                 return;
             }
-            poll_at = lines.len() + POLL_WORK as usize;
-            if let Err(e) = probe.check(lines.len() as u64 / 1024) {
+            poll_at = chords + POLL_WORK as usize;
+            if let Err(e) = probe.check(chords as u64 / 1024) {
                 stopped = Some(e);
                 stop.set(true);
             }
@@ -196,7 +201,10 @@ fn rasterize_body<const LIMITED: bool>(
         return Err(e);
     }
     if lines.is_empty() {
-        return Ok((out, 0));
+        if LIMITED {
+            probe.check(chords as u64 / 1024)?;
+        }
+        return Ok((out, chords as u64));
     }
 
     let small = w * h <= SMALL_AREA;
@@ -225,13 +233,13 @@ fn rasterize_body<const LIMITED: bool>(
     // edge once per band it reaches. A step limit it would pass stops the
     // fill here, before anything is painted (#1188).
     let visits = bands.as_ref().map_or(lines.len() as u64, |b| b.visits);
-    let total = lines.len() as u64 + visits;
+    let total = chords as u64 + visits;
     if LIMITED {
         probe.check(total / 1024)?;
     }
     let mut work = Work {
-        done: lines.len() as u64,
-        next_poll: lines.len() as u64 + POLL_WORK,
+        done: chords as u64,
+        next_poll: chords as u64 + POLL_WORK,
         probe,
     };
     let mut by = 0;

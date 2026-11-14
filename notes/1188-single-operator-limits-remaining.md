@@ -155,6 +155,34 @@ work. Output does not change: the identity check below.
   | 540k glyphs | +0.7% |
   | 540k glyphs with limits on | +0.8% |
 
+### Codex round 2 (PR #1217)
+
+- **The fill's polls counted the edges it kept**, not the chords it made.
+  A curve along a horizontal line is all horizontal chords, which are
+  dropped. 500,000 such curves (512M chords) ran 2.5 s past a 0.2 s clock
+  and passed a 4.1M-step cap. Now every chord counts toward the polls and
+  the step preflight, kept or not. A fill whose edges are all dropped is
+  still held against the step limit before it returns.
+- **Stale snapshots.** The show and image probe snapshots did not follow
+  `set_limits`. An embedder could pause a show or image, change the limits
+  and resume it on the old ones. `set_limits`, `set_memory_base` and a new
+  program's clock (`begin_source`) now refresh the snapshot of every show
+  and image frame on the stack (`refresh_frame_probes`). `next_item` is
+  untouched.
+- **A refused fill after `showpage` changed the page.** `prepare_paint` ran
+  before the fallible rasteriser: the pending erase, the cleared recorders
+  and the page marked painted, so the export gained a blank last page. It
+  now runs only once the rasteriser has succeeded.
+- The in-slice steps missing from the preflight are #1213's (the slice
+  snapshot), not fixed here.
+- **Tests:** the flat-curve fill under `steps(100)` and under a clock; an
+  image paused with `step_n`, limits set, then resumed (it stops inside
+  `image`); a refused fill after `showpage` (the canvas keeps page one and
+  the SVG has one page). Each of the three fails with its fix reverted.
+- Identity (PNG) was run again against 38ee4ed, with limits and without:
+  207 of 207 identical both times. Instruction counts are unchanged from
+  round 1.
+
 ### Tests
 
 - `tests/limits.rs` (`one_operator`). `fill`, `flattenpath`, `show` of
