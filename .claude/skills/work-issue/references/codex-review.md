@@ -46,7 +46,9 @@ review (`docs/dev/DISPATCH.md`, "Review").
 **Round cap: `independent_review.max_rounds` (2), counting from round 1.**
 Past it, only a real correctness, security or data-loss defect blocks; the
 rest get an "Our response" row saying so and go in the summary's
-follow-ups. A blocking fix made at the cap is pushed and gets one
+follow-ups. From round 2 on a nitpick (SDLC.md step 8) never blocks: its
+row says "nitpick" and why, and it goes in the follow-ups marked
+`codex-nitpick`. A blocking fix made at the cap is pushed and gets one
 confirmation round limited to it (SKILL.md 8.9); a second blocking result
 there stops the run for the owner. When a
 finding turns on PostScript semantics, run Ghostscript and quote its

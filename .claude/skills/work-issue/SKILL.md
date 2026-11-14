@@ -190,7 +190,8 @@ gh issue comment <N> --body "Opened <PR URL>."
    `cross-family`: Codex, 3-9, unless the dispatcher said "combined wave review": then pitfalls.md "Combined wave review".
    **Rounds:** R starts at 1; at most `independent_review.max_rounds` (`MAXR`, 2) from `git show origin/main:SDLC.md`.
    After round `MAXR` only a real correctness, security or data-loss defect blocks; answer the rest in the table and
-   list them as proposed follow-ups. Settle a PostScript-semantics finding with a quoted `gs` run, not another round.
+   list them as proposed follow-ups. From round 2 on, a nitpick never blocks (SDLC.md step 8 defines it; it wins over
+   "correctness"). Settle a PostScript-semantics finding with a quoted `gs` run, not another round.
 2. If the diff touches `.claude/skills/work-issue/`, say so in every review comment. Codex reviews read-only
    and cannot run harnesses: for concurrency or shell changes the advisor plus real load runs are the review that counts.
 3. Find Codex: `CODEX_SCRIPT=$(find "$HOME/.claude/plugins" -path "*/codex/scripts/codex-companion.mjs" 2>/dev/null | head -1)`.
@@ -209,12 +210,13 @@ gh issue comment <N> --body "Opened <PR URL>."
 5. Check it succeeded; if not, do not post from the file (as in 3): `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json`
 6. Post it on the PR, even when clean: `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"`
 7. Read every finding. Decide for each: fix it, or state why not. From round 2 on, a nitpick (SDLC.md step 8: a
-   crafted-input edge case with bounded effect) is not fixed here: propose it as a follow-up marked `codex-nitpick`
-   (the dispatcher files it in the `Backlog` milestone), and say so in the round's table.
+   crafted-input edge case with bounded effect) is not fixed here: say so in the round's table and propose it as a
+   `codex-nitpick` follow-up (step 10; the dispatcher files it). A one-line fix pinned against gs may go in instead.
 8. Post the round on the issue (`## Codex review, round <R>` or `## Agent review, round <R>`, each with `(PR <URL>, reviewed
    head <sha>)`: template in codex-review.md).
 9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5). Then, if R < `MAXR`, go back to 4 (Agent
-   path: its reviewer) with R+1. At R = `MAXR`, push only fixes for blocking defects (the rest stay follow-ups), then one
+   path: its reviewer) with R+1. At R = `MAXR`, push only fixes for blocking defects (the rest stay follow-ups; a one-line gs-pinned nitpick fix may
+   ride along), then one
    confirmation round R+1 limited to those fixes (same reviewer; its heading says `confirmation`). It finds a blocking
    defect again: stop without merging, Decision block, owner (pitfalls.md "Stop without merging"). Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
 10. **Merge tier. Read `.claude/skills/work-issue/references/perceptual-review.md` now.** Every policy field comes from
