@@ -462,7 +462,7 @@ without the limits above:
     RGBA for SVG; for PDF, a mask's packed bits, or RGB for a colour image.
 
   Issue #1188 closed more of them:
-  - `fill`/`eofill` look at the limits, the memory cap included, as the
+  - `fill`/`eofill`/`rectfill` look at the limits, the memory cap included, as the
     rasteriser flattens the path and lays its edges into bands, a step per
     1024 units of work; each edge is laid only into the bands it reaches
     (100,000 curves took 5 s at 300 dpi in one `fill`, then 2.9 s, and stop
@@ -471,7 +471,8 @@ without the limits above:
     and keeps the current path when a limit stops it.
   - A Type 1 glyph decrypts only the subroutines it calls, once each, and
     `callsubr` no longer copies one (a font with 64 MB of Subrs took 25 s
-    for 200 glyphs).
+    for 200 glyphs). It looks at the time and memory limits before each
+    subroutine it decrypts, since one slice is 512 glyphs.
   - The SVG and PDF image recorders, and a stenciled image's composite,
     look at the time and memory limits once a row. The composite is
     counted at its expanded size against a memory cap before it starts.
@@ -495,8 +496,10 @@ without the limits above:
   - a single `shfill` costs up to pixels × 1024 stops (0.6 s for the
     resampled 4095-leg ramp at 300 dpi letter) and does not look at the
     clock;
+  - `clip` of a path with very many curves (tiny-skia's own rasteriser:
+    100,000 curves took 5.6 s at 300 dpi in one `clip`);
   - a Type 1 glyph still decrypts each subroutine it calls in full, once,
-    so one glyph's cost is the size of the subroutines it calls.
+    so the overshoot is one subroutine's decryption.
 
   For a hosted service the answer to anything that gets through is the outer
   kill: the MCP server kills its child at `--timeout`, and anything else

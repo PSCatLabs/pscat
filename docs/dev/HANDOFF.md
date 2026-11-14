@@ -1493,13 +1493,14 @@ renders eight examples in both and compares block-downsampled output).
     `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`,
     `Gfx::fill_limited` into `coverage::rasterize_limited`,
     `Gfx::flatten_path`). Both raise the slice loop's own uncatchable errors.
-    The image frame builds its probe from the split interpreter fields
-    (`interp::limit_probe`) for the SVG/PDF recorders. The audit list is in
+    The image and show frames build theirs from the split interpreter fields
+    (`interp::limit_probe`) for the SVG/PDF recorders and Type 1 glyphs. The audit list is in
     `notes/1176-single-operator-limits.md`; #1188 closed most of what it left
     open (`notes/1188-single-operator-limits-remaining.md`).
-  - The fill rasteriser's band index (#1188) must keep each band's edges in
-    the original order: the coverage sums are f32 and their order is what
-    makes a fill byte-identical to the edges x bands walk it replaced.
+  - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep
+    each band's edges in the original order: the coverage sums are f32 and
+    their order is what makes a fill byte-identical to the edges x bands
+    loop it replaced.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.
