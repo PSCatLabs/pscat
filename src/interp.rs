@@ -1298,6 +1298,14 @@ impl Interp {
         self.check_time_and_memory()
     }
 
+    /// Heap growth the memory limit still allows, or `None` with no memory
+    /// limit: for work that sizes itself to the limit (#1188).
+    pub(crate) fn memory_left(&self) -> Option<usize> {
+        self.limits
+            .max_memory
+            .map(|max| max.saturating_sub(self.heap_growth()))
+    }
+
     /// Refuse an allocation of `bytes` that would pass the memory cap,
     /// before making it. For the operators that can ask for megabytes in
     /// one step (`array`, `string`); everything else is caught by the
