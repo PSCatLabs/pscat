@@ -71,6 +71,30 @@ the raster's dashes).
   each dash boundary must also be within 1/16 px:
   `(σ - 1)·(path length) ≤ 1/16`.
 
+**Codex round 2** found four more, also fixed and tested with their cases:
+
+- *Hairline caps.* The sub-pixel path drew each segment as its own
+  hairline, so round or square caps landed on every segment:
+  8000 collinear tiny linetos read 310 px of ink against gs's 31.5.
+  - Runs of one device width now stay one connected polyline.
+  - Collinear short steps are merged, within 1/32 px (`simplify_polyline`).
+    tiny-skia's hairline under-covers a run of 0.02 px steps under any CTM,
+    so this also fixes the conformal-looking ink deficit.
+  - Every run is drawn butt-capped. Caps go only at the true ends of open
+    subpaths, by extending the end points as far as tiny-skia's hairline
+    cap would (π/8 or 1/2 px).
+  - Closed subpaths get no caps.
+- *Zero widths in PDF/SVG.* Pen-space widths and dash arrays now get the
+  path's extra decimals, and a nonzero one is never written as `0`.
+- *`moveto closepath` dot.* A zero-length subpath is a dot under round or
+  square caps, in the raster, SVG and PDF alike, as in gs. Under butt caps
+  it draws nothing.
+- *Miter tips.* The round-pen error bound now scales by how far the outline
+  reaches from the path: the miter limit under miter joins, √2 under square
+  caps. Under `[1.01 0 0 .9900990099]`, a 13.45:1 miter tip now sits at the
+  user-space point the PLRM gives (x = 167.03, the same as untransformed).
+  gs puts it at 167.27 even untransformed.
+
 The device-space path is also kept for a hairline (`0 setlinewidth` stays
 one device pixel), for a singular CTM, for a pen more than 10⁶:1 flat
 (`‖L‖² > 10⁶`), and for a path whose pen-space image leaves f32 range. Those
@@ -78,7 +102,7 @@ fall back rather than risk a stroke tiny-skia would drop.
 
 Timing, user CPU for 20k dashed strokes on one page, base / head:
 - 1.5-wide pen under `[2 0 0 0.5]`: 0.15 / 0.15 s
-- 0.3-wide pen, which takes the sub-pixel path: 0.07 / 0.09 s
+- 0.3-wide pen, which takes the sub-pixel path: 0.06 / 0.11 s (after round 2)
 - the same strokes under a uniform scale: 0.13 / 0.12 s
 
 **Tests.** `tests/stroke_anisotropic.rs` covers:
