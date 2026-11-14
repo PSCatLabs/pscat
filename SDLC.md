@@ -110,7 +110,8 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    API sequence nothing uses. What still blocks: wrong output on realistic
    input, a crash or panic, a security or data-loss defect (an exploitable
    one, not a bounded overshoot), an unbounded limit bypass, or a
-   regression of behaviour that worked on main. The agent proposes each
+   regression of behaviour that worked on main for
+   realistic input. The agent proposes each
    nitpick as a follow-up marked `codex-nitpick` with the reviewer's repro,
    and the dispatcher files it as its own issue (label `codex-nitpick`,
    milestone `Backlog`). The call and its reason go in the round's table.
