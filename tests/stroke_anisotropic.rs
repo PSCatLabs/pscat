@@ -1127,6 +1127,19 @@ fn points_gs_rounds_to_one_device_point_are_a_zero_length_subpath_under_square_c
             assert!(ink < 1e-9, "{program}: {ink:.3} of ink");
         }
     }
+    // Half-grid ties: gs rounds them toward +inf, not away from zero
+    // (Codex round 2, PR #1220), so on each axis one of each pair is a
+    // real line and the other a point.
+    for seg in [
+        "-0.001953125 25 moveto -0.002 25 lineto",
+        "-0.001953125 25 moveto 0 25 lineto",
+        "0.001953125 25 moveto 0.002 25 lineto",
+        "25 -0.001953125 moveto 25 -0.002 lineto",
+        "25 -0.001953125 moveto 25 0 lineto",
+        "25 25 moveto 25 24.998046875 lineto",
+    ] {
+        assert_outline_as_gs(&format!("2 setlinecap 4 setlinewidth {seg}"));
+    }
     // A step gs does see keeps its square caps in both.
     assert_outline_as_gs("2 setlinecap 1 setlinewidth 25 25 moveto 25.01 25 lineto");
     assert!(

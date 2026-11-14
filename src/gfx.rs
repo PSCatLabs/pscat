@@ -406,7 +406,8 @@ impl PsPath {
     /// rounds every point to) count as one; without, only identical ones
     /// (for a path in pen space, whose grid is not that).
     fn without_point_subpaths(&self, device_units: bool) -> Option<PsPath> {
-        let key = |v: f32| (f64::from(v) * 256.0).round();
+        // gs rounds half-grid ties toward +inf (not away from zero).
+        let key = |v: f32| (f64::from(v) * 256.0 + 0.5).floor();
         let same = move |a: DevPoint, b: DevPoint| {
             if device_units {
                 key(a.x) == key(b.x) && key(a.y) == key(b.y)
