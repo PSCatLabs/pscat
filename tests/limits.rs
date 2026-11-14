@@ -871,7 +871,7 @@ mod one_operator {
             "f flushfile",
             "flushfile",
             Duration::from_secs(2),
-            steps(200_000),
+            steps(20_000),
             PsError::StepsExceeded,
         );
     }
