@@ -130,7 +130,7 @@ work. Output does not change: the identity check below.
 `scripts/identity_check.sh` was run with `--base-bin`/`--head-bin` over
 every tracked gallery piece, example and selftest driver: 168 files, gallery
 at 144 dpi. It ran under `--pscat-args "--max-time 900 --max-memory 8192"`,
-so the probes are live, and against main at d01f9e7 after the last rebase.
+so the probes are live, and against main at 6f1e05f after the last rebase.
 207 of 207 page renders were identical. Four files were skipped as failing
 identically in both trees: the `examples/hybrid/compare_*` sheets, which
 need `pscat sheet --sweep`. The control is the 4095-leg ramp, which the
