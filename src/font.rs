@@ -615,6 +615,15 @@ fn catalog_fid(requested: &str) -> Option<i64> {
 #[cfg(not(target_arch = "wasm32"))]
 fn load_catalog_face(path: &std::path::Path) -> Option<i64> {
     let key = path.file_stem()?.to_str()?.to_string();
+    // A family name (`/NotoSansKR`) finds the file `NotoSansKR-Regular`,
+    // so the cache probe in `catalog_fid`, made under the requested stem,
+    // misses on every later call and the face would be read, parsed and
+    // leaked again (issue #1214: ~10 MB per `resourcestatus` of a CJK
+    // family name). Dedupe on the file's own stem, the key it registers
+    // under. Which file wins is still decided by the scan, unchanged.
+    if let Some(fid) = loaded_fid(&key, "") {
+        return Some(fid);
+    }
     let data: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
     register_face(key, data)
 }

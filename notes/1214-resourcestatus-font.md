@@ -18,6 +18,17 @@ itself is unchanged, so pscat-mcp's pack behaviour is untouched. `locate`
 loads the face (as `findfont` does), so a corrupt catalog file reports
 false, like the substitution it would cause.
 
+**Face cache (Codex round 1).** `locate` loads the face, and a family name
+(`/NotoSansKR` for the file `NotoSansKR-Regular`) missed the cache in
+`catalog_fid` (probed under the requested stem, registered under the file's
+stem), so every query re-read and leaked the ~10 MB face; `findfont` hid it
+behind its `FontDirectory` entry, `resourcestatus` and `has_glyph` did not.
+`load_catalog_face` now returns the already-registered face with the file's
+own stem before registering a new one. The scan still decides which file
+wins, so resolution results are unchanged; only duplicate registrations
+(and their FIDs) go away. `tests/font_packs.rs` pins it by FID: 25 status
+queries before `findfont` leave the same FID as none (it was 62 against 12).
+
 **Status and size follow gs 10.07.1.** Not loaded, available: `2 -1 true`.
 Defined by `definefont`/`defineresource`: `0 -1 true`. Size was a fiction
 of 0 for every category; it is -1 ("unknown") now, as gs prints it. An
