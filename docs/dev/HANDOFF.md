@@ -588,7 +588,16 @@ renders eight examples in both and compares block-downsampled output).
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
-- Access control (`executeonly` etc.) is not modeled — identities.
+- Access control is modelled for arrays, and only the write half (#1189):
+  `readonly`, `executeonly`, `noaccess`, `packedarray` and `bind` (on the
+  procedures nested in the one it is given) set a flag on the array
+  reference, `wcheck` reports it, and `put`, `putinterval`, `astore` and
+  `copy` into it raise `invalidaccess`. Not modelled: reading is never refused
+  (`rcheck` is always true, `get` on a `noaccess` array works), strings,
+  dictionaries and files have no attribute (those operators are identities on
+  them), `wcheck` on a name or operator answers true where gs raises
+  `typecheck`, and procedures scanned under `true setpacking` stay
+  writable arrays. See `notes/1189-bind-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,

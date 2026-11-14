@@ -83,6 +83,20 @@ fn proc_body(o: &Object) -> Option<PsArray> {
     }
 }
 
+/// The procedure literal `o` as the object pushed for it: executable, with
+/// the access attributes of the slot it sits in.
+#[inline(always)]
+fn proc_literal_object(o: &Object) -> Option<Object> {
+    match &o.value {
+        Value::Array(_) => {
+            let mut lit = o.clone();
+            lit.executable = true;
+            Some(lit)
+        }
+        _ => None,
+    }
+}
+
 /// Whether procedure element `o` runs the operator named `op` (#864): `Some(
 /// NO_NAME)` if it is that operator, `Some(id)` if it is the executable name
 /// `name_id` and that name resolves to the operator in `dstack` right now,
@@ -1552,8 +1566,11 @@ impl Interp {
         };
         let i = *pc;
         // The body's handle copied in place, not through `Value::clone`.
-        if let Some(Some(lit)) = body.peek(i, proc_body) {
-            self.ostack.push(Object::exec(Value::Array(lit)));
+        // The whole object goes on, access flags and all: a nested procedure
+        // `bind` made read-only is still read-only once it is on the stack
+        // (#1189).
+        if let Some(Some(lit)) = body.peek(i, proc_literal_object) {
+            self.ostack.push(lit);
         }
         *pc = i + 1;
         if *pc >= body.len() {

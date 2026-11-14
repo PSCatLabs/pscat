@@ -911,21 +911,24 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
         "1 true false",
         "1 true false",
     ),
+    // In the bound column the procedure the body defines is nested in a
+    // bound one, so `bind` made it read-only: changing it while it runs is
+    // `invalidaccess`, as in gs (#1189).
     // A body changed while it runs: every iteration reads it as it is now.
     (
         "/b { 1 /b load 0 2 index 1 add put } def 3 /b load repeat",
         "1 2 3 false",
-        "1 2 3 false",
+        "1 /invalidaccess stopped true",
     ),
     (
         "/b { /b load 5 8 put 0 } def 2 /b load repeat",
         "8 8 false",
-        "8 8 false",
+        "/invalidaccess stopped true",
     ),
     (
         "/a { /a load 4 7 put 1 } def 2 /a load 0 5 getinterval cvx repeat",
         "{/a load 4 7 7 1} 4 7 7 false",
-        "{/a --load-- 4 7 7 1} 4 7 7 false",
+        "/invalidaccess stopped true",
     ),
     (
         "/a [ 1 2 3 4 ] cvx def 2 /a load 1 2 getinterval repeat",
@@ -935,13 +938,13 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
     (
         "/b { 1 /b load 1 [ 9 /pop load ] putinterval 2 3 } def 2 /b load repeat",
         "1 2 3 /typecheck putinterval true",
-        "1 2 3 /typecheck [ true",
+        "1 /invalidaccess [ true",
     ),
     // `restore` puts back an element of the running body.
     (
         "/b { 1 pop /b load 0 get exch restore save } def save /b load 0 2 put 2 /b load repeat pop",
         "2 1 false",
-        "2 1 false",
+        "-save- /invalidaccess stopped true",
     ),
     (
         "/b { 1 } def 3 { /b load } repeat",

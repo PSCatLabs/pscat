@@ -17,14 +17,17 @@ pub fn install(dict: &mut Dict) {
     op(dict, "print", print_string);
     op(dict, "quit", quit);
     op(dict, "handleerror", handleerror);
-    // Access-control attributes are not modeled (nothing enforces
-    // them), but the operators must exist as identities: every real
-    // Type 1 font says `executeonly`/`noaccess` on its way in.
-    op(dict, "executeonly", access_noop);
-    op(dict, "readonly", access_noop);
-    op(dict, "noaccess", access_noop);
+    // Access is modelled for arrays only, and only the write half (#1189):
+    // `readonly`, `executeonly` and `noaccess` make an array reference
+    // unwritable (`put`, `putinterval`, `astore` and `copy` then raise
+    // `invalidaccess`, and `bind` leaves it alone). Reading is never
+    // refused, and every other type passes through unchanged, as every
+    // real Type 1 font needs: it says `executeonly`/`noaccess` on its way in.
+    op(dict, "executeonly", access_restrict);
+    op(dict, "readonly", access_restrict);
+    op(dict, "noaccess", access_restrict);
     op(dict, "rcheck", access_check);
-    op(dict, "wcheck", access_check);
+    op(dict, "wcheck", wcheck);
 }
 
 /// Fill `errordict` (issue #372). Ghostscript's has a handler per error
@@ -34,7 +37,7 @@ pub fn install(dict: &mut Dict) {
 /// where Ghostscript keeps the name.
 ///
 /// Only names the interpreter can raise get an entry: Ghostscript has
-/// 14 more (`stackoverflow`, `VMerror`, `invalidaccess`, ...), but a
+/// 13 more (`stackoverflow`, `VMerror`, ...), but a
 /// program can only meet them by catching one, and pscat never raises
 /// them.
 pub(crate) fn install_errordict(dict: &mut Dict) {
@@ -59,6 +62,7 @@ pub(crate) fn install_errordict(dict: &mut Dict) {
         h_invalidexit => "invalidexit",
         h_dictstackunderflow => "dictstackunderflow",
         h_invalidfont => "invalidfont",
+        h_invalidaccess => "invalidaccess",
         h_invalidfileaccess => "invalidfileaccess",
         h_undefinedfilename => "undefinedfilename",
         h_syntaxerror => "syntaxerror",
@@ -97,17 +101,26 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
     Err(PsError::from_name(name, text).unwrap_or(PsError::Undefined(name.to_string())))
 }
 
-fn access_noop(it: &mut Interp) -> Result<(), PsError> {
-    // operand ... operand: identity, but stackunderflow still applies.
+/// `readonly`, `executeonly`, `noaccess`: the reference loses write
+/// access if it is an array and is unchanged otherwise.
+fn access_restrict(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    it.push(obj);
+    it.push(obj.into_readonly());
     Ok(())
 }
 
-/// Everything reads/writes as permitted here; report true.
+/// `rcheck` is always true (reads are never refused). `wcheck` is false for
+/// a read-only array and true for everything else; Ghostscript raises
+/// `typecheck` on a name or an operator, pscat answers true.
 fn access_check(it: &mut Interp) -> Result<(), PsError> {
     it.pop()?;
     it.push(Object::bool(true));
+    Ok(())
+}
+
+fn wcheck(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    it.push(Object::bool(!obj.is_readonly()));
     Ok(())
 }
 

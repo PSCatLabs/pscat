@@ -1358,6 +1358,8 @@ fn substitute(obj: &Object, ks: &Object, sys: &Dict) -> Object {
             Object {
                 value: Value::Array(PsArray::from_vec(items)),
                 executable: obj.executable,
+                readonly: obj.readonly,
+                packed: obj.packed,
             }
         }
         _ => obj.clone(),

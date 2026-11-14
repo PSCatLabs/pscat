@@ -49,6 +49,9 @@ pub enum PsError {
     /// A font dictionary was malformed or a font operation was invalid (`invalidfont`).
     #[error("invalidfont")]
     InvalidFont,
+    /// A write to a read-only array (`invalidaccess`, #1189).
+    #[error("invalidaccess")]
+    InvalidAccess,
     /// A file was opened with a mode that is not allowed (`invalidfileaccess`).
     #[error("invalidfileaccess")]
     InvalidFileAccess,
@@ -132,6 +135,7 @@ impl PsError {
             PsError::InvalidExit => "invalidexit",
             PsError::DictStackUnderflow => "dictstackunderflow",
             PsError::InvalidFont => "invalidfont",
+            PsError::InvalidAccess => "invalidaccess",
             PsError::InvalidFileAccess => "invalidfileaccess",
             PsError::UndefinedFilename => "undefinedfilename",
             PsError::Syntax(_) => "syntaxerror",
@@ -170,6 +174,7 @@ impl PsError {
             "invalidexit" => PsError::InvalidExit,
             "dictstackunderflow" => PsError::DictStackUnderflow,
             "invalidfont" => PsError::InvalidFont,
+            "invalidaccess" => PsError::InvalidAccess,
             "invalidfileaccess" => PsError::InvalidFileAccess,
             "undefinedfilename" => PsError::UndefinedFilename,
             "syntaxerror" => PsError::Syntax(String::new()),
@@ -208,6 +213,7 @@ mod tests {
             PsError::InvalidExit => PsError::InvalidExit,
             PsError::DictStackUnderflow => PsError::DictStackUnderflow,
             PsError::InvalidFont => PsError::InvalidFont,
+            PsError::InvalidAccess => PsError::InvalidAccess,
             PsError::InvalidFileAccess => PsError::InvalidFileAccess,
             PsError::UndefinedFilename => PsError::UndefinedFilename,
             PsError::Syntax(d) => PsError::Syntax(d.clone()),
@@ -238,6 +244,7 @@ mod tests {
             PsError::InvalidExit,
             PsError::DictStackUnderflow,
             PsError::InvalidFont,
+            PsError::InvalidAccess,
             PsError::InvalidFileAccess,
             PsError::UndefinedFilename,
             PsError::Syntax(String::new()),
@@ -301,6 +308,7 @@ mod tests {
             PsError::InvalidExit,
             PsError::DictStackUnderflow,
             PsError::InvalidFont,
+            PsError::InvalidAccess,
             PsError::InvalidFileAccess,
             PsError::UndefinedFilename,
             PsError::Syntax(String::new()),
