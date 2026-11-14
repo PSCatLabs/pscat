@@ -95,6 +95,17 @@ the raster's dashes).
   user-space point the PLRM gives (x = 167.03, the same as untransformed).
   gs puts it at 167.27 even untransformed.
 
+**Codex confirmation round** found two problems that round 2 introduced:
+- *Zigzag widths.* A sub-pixel subpath is now merged (1/32 px) *before* each
+  segment's device width is measured. A fine zigzag straightened into a
+  line used to keep its diagonals' width (92.2 px of ink); it now gets the
+  line's own (62.8, against an exact band of about 69).
+- *Square-cap dots.* `stroke_space` drops zero-length subpaths under square
+  caps, so `moveto closepath` and `moveto lineto` to the same point paint
+  nothing in the raster, SVG or PDF, as in gs. A round cap still makes a
+  dot. The device-space path (similarity CTMs) still draws tiny-skia's
+  square there, which gs does not: a pre-existing difference left alone.
+
 The device-space path is also kept for a hairline (`0 setlinewidth` stays
 one device pixel), for a singular CTM, for a pen more than 10⁶:1 flat
 (`‖L‖² > 10⁶`), and for a path whose pen-space image leaves f32 range. Those
