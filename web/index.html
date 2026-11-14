@@ -77,6 +77,10 @@ const warn = document.getElementById('warn');
 const status = document.getElementById('status');
 const speed = document.getElementById('speed');
 const ps = await Pscat.load();
+// No clock in wasm: a per-frame step cap stops one operator that runs away
+// inside a frame, such as a decompression bomb (#1210; the site's playground
+// does the same, see site/playground.html).
+const FRAME_MAX_STEPS = 500_000;
 let raf = 0;
 
 function start() {
@@ -91,6 +95,7 @@ function start() {
     return;
   }
   const frame = () => {
+    ps.maxSteps = FRAME_MAX_STEPS;
     const more = ps.step(Number(speed.value));
     steps += Number(speed.value);
     ps.paintTo(canvas);
@@ -101,7 +106,7 @@ function start() {
       raf = requestAnimationFrame(frame);
     } else if (more === -1) {
       err.textContent = ps.error;
-      status.textContent = 'stopped on error';
+      status.textContent = /%%\[ Error: limitexceeded \(steps\);/.test(ps.error) ? 'stopped: step limit' : 'stopped on error';
     } else {
       status.textContent = 'done';
     }

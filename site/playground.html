@@ -61,6 +61,36 @@ const srcBox = document.getElementById('src');
 const ps = await Pscat.load();
 let raf = 0;
 
+// The browser build has no clock, so a step cap is the only thing that can
+// stop one operator that runs away inside a frame (a decompression bomb:
+// decoded filter output counts a step per KiB, and one flushfile or image
+// drains it all before the page gets control back). The cap is per frame,
+// set again before every step() call, because the page only runs `speed`
+// steps a frame: a cap on the whole program would sit at billions of steps,
+// hours of frames away, and a bomb drains about 90,000 KiB (steps) a second.
+// 500,000 is about a hundred times the most a frame of any gallery piece or
+// example charges (5,306 at the slider's top speed), and stops a bomb after
+// about 500 MiB, some six seconds (#1210, notes/1210-playground-step-limit.md).
+// ?maxsteps=N changes it for one visit; 0 lifts it.
+const DEFAULT_FRAME_MAX_STEPS = 500_000;
+const asked = new URLSearchParams(location.search).get('maxsteps');
+const FRAME_MAX_STEPS = /^\d{1,15}$/.test(asked ?? '') ? Number(asked) : DEFAULT_FRAME_MAX_STEPS;
+
+// Whether the report's error is the step cap, by its Error: field: a program
+// can print or name `limitexceeded (steps)` in an error of its own.
+const hitStepCap = (report) => /%%\[ Error: limitexceeded \(steps\);/.test(report);
+
+// A frame stopped by the cap: say so in words, with the raw report under it.
+function describeError(report) {
+  if (!hitStepCap(report)) return report;
+  return `Stopped: limitexceeded (steps). One frame of the program did more than ` +
+    `${FRAME_MAX_STEPS.toLocaleString()} steps of work, the playground's limit ` +
+    '(one step per operator, loop pass, or KiB of decoded filter data), so it was cut off. ' +
+    'The usual cause is one operator expanding a huge compressed stream. ' +
+    'The page shows what it had drawn. Add ?maxsteps=N to the address to change the limit ' +
+    '(0 for none).\n\n' + report;
+}
+
 // Examples carry their page size in the DSC BoundingBox when they
 // have one; default to US Letter otherwise.
 function pageSize(source) {
@@ -91,6 +121,7 @@ function start() {
     return;
   }
   const frame = () => {
+    ps.maxSteps = FRAME_MAX_STEPS;
     const more = ps.step(Number(speed.value));
     steps += Number(speed.value);
     ps.paintTo(canvas);
@@ -101,8 +132,9 @@ function start() {
       status.textContent = `running… ${steps.toLocaleString()} steps`;
       raf = requestAnimationFrame(frame);
     } else if (more === -1) {
-      err.textContent = ps.error;
-      status.textContent = 'stopped on error';
+      const report = ps.error;
+      err.textContent = describeError(report);
+      status.textContent = hitStepCap(report) ? 'stopped: step limit' : 'stopped on error';
     } else {
       status.textContent = 'done';
     }

@@ -499,3 +499,212 @@ console.log('TEXT_OK');
         );
     }
 }
+
+/// Run a node driver (an ES module body that has `ps`, `fail` and the
+/// bomb helpers in scope) against the real wasm module; the driver prints
+/// `OK` when every check passed.
+fn run_cap_driver(name: &str, body: &str) {
+    let root = root();
+    let driver = format!(
+        r#"
+import {{ readFileSync }} from 'node:fs';
+import zlib from 'node:zlib';
+import {{ Pscat }} from 'file://{lib}';
+const ps = await Pscat.instantiate(readFileSync('{wasm}'));
+const fail = (m) => {{ console.error(m); process.exit(1); }};
+// Zeros, MIB mebibytes of them, deflated `layers` times, streamed so the
+// expanded size never sits in memory. Returns the compressed bytes.
+async function bombBytes(MIB, layers, fill = 0) {{
+  let s = (async function* () {{ const z = Buffer.alloc(1 << 20, fill); for (let i = 0; i < MIB; i++) yield z; }})();
+  const {{ Readable }} = await import('node:stream');
+  let r = Readable.from(s);
+  for (let i = 0; i < layers; i++) r = r.pipe(zlib.createDeflate({{ level: i === 0 ? 1 : 9 }}));
+  const parts = [];
+  for await (const c of r) parts.push(c);
+  return Buffer.concat(parts);
+}}
+// currentfile's rest is the bomb: `layers` filters, then one operator
+// (flushfile) drains them all.
+function bombProgram(data, layers, before = '', op = 'flushfile') {{
+  return Buffer.concat([
+    Buffer.from(before + 'currentfile ' + '/FlateDecode filter '.repeat(layers) + op + '\n'),
+    data, Buffer.from('\n')]);
+}}
+{body}
+console.log('OK');
+"#,
+        lib = root.join("web/pscat.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+    );
+    let dir = common::scratch_dir(name);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let script = dir.join("cap.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output_deadline()
+        .expect("run node");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.trim_end().ends_with("OK"),
+        "node step-cap driver failed\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The browser build has no clock, so `maxSteps` (`ps_set_max_steps`) is
+/// what stops a program there, and since #1208 it also stops one operator
+/// draining a decompression bomb, because decoded filter output counts a
+/// step per KiB. A 600-byte, two-layer FlateDecode bomb that expands to
+/// 32 MiB in a single `flushfile` must give `limitexceeded (steps)` within
+/// a few KiB of the cap and not run to the end. The cap is off until set,
+/// applies from the moment it is set (to the program in progress too) and
+/// to the programs begun after it, and set before each `step()` it bounds
+/// that call, which is how the playground uses it (#1210).
+#[test]
+fn wasm_step_cap_stops_a_single_operator_decompression_bomb() {
+    if !wasm_ready() {
+        return;
+    }
+    run_cap_driver(
+        "pscat-wasm-step-cap",
+        r#"
+const MIB = 32;
+const data = await bombBytes(MIB, 2);
+if (data.length > 2000) fail('bomb not small: ' + data.length);
+const src = bombProgram(data, 2);
+const drain = () => { ps.begin(src, 100, 100); return ps.step(1 << 16); };
+
+// No cap set: the whole bomb is drained, and nothing is counted.
+if (ps.stepsUsed !== 0) fail('steps counted before any program');
+let st = drain();
+if (st !== 0) fail('uncapped drain failed: ' + st + ' ' + ps.error);
+if (ps.stepsUsed !== 0) fail('steps counted with no cap: ' + ps.stepsUsed);
+
+// A cap of 1000, set before begin, stops it after about 1 MiB of the 32,
+// inside the one operator.
+ps.maxSteps = 1000;
+const t = Date.now();
+st = drain();
+const ms = Date.now() - t;
+if (st !== -1 || !ps.error.includes('limitexceeded (steps)')) fail('not stopped: ' + st + ' ' + ps.error);
+if (ps.stepsUsed < 1000 || ps.stepsUsed > 1400) fail('stopped far from the cap: ' + ps.stepsUsed);
+if (ms > 5000) fail('stopped but slowly: ' + ms + ' ms');
+// The page and the session survive: the next program runs clean.
+if (ps.run('0 0 10 10 rectfill', 100, 100) !== 0) fail('not reusable after the limit: ' + ps.error);
+
+// A cap with room for the whole 32 MiB (32768 KiB) lets it finish, and counts it.
+ps.maxSteps = 100000;
+st = drain();
+if (st !== 0) fail('roomy cap stopped it: ' + ps.error);
+if (ps.stepsUsed < 32768 || ps.stepsUsed > 33500) fail('miscounted: ' + ps.stepsUsed);
+
+// An endless loop, which has no operator to drain, stops the same way.
+ps.maxSteps = 100000;
+ps.begin('{ } loop', 100, 100);
+let more;
+do { more = ps.step(5000); } while (more === 1);
+if (more !== -1 || !ps.error.includes('limitexceeded (steps)')) fail('loop not stopped: ' + more + ' ' + ps.error);
+
+// Set again before each step, the cap is per call: a program of 600,000
+// steps runs to the end under a 5,000-step cap, because no one call comes
+// near it ...
+ps.maxSteps = 0;
+ps.begin('0 1 200000 { pop } for 0 0 10 10 rectfill', 100, 100);
+let calls = 0;
+do { ps.maxSteps = 5000; more = ps.step(1000); calls++; } while (more === 1);
+if (more !== 0 || calls < 100) fail('per-call cap stopped a small-step program: ' + more + ' ' + ps.error + ' after ' + calls);
+// ... and the bomb, after a long run of those calls, is stopped in its frame.
+ps.maxSteps = 0;
+ps.begin(bombProgram(data, 2, '0 1 100000 { pop } for\n'), 100, 100);
+calls = 0;
+do { ps.maxSteps = 5000; more = ps.step(1000); calls++; } while (more === 1);
+if (more !== -1 || !ps.error.includes('limitexceeded (steps)') || !ps.error.includes('flushfile')) fail('frame cap missed the bomb: ' + more + ' ' + ps.error);
+if (calls < 50) fail('stopped before the loop was over: ' + calls);
+
+// Other operators drain a filter too, and a drain stopped for passing the
+// cap still shows in stepsUsed (it was lost when the failing operator never
+// reached the place the interpreter takes decoded KiB as steps): a stream
+// of blanks read by token, the same read as hex digits, and an image whose
+// samples are the zeros.
+const blanks = await bombBytes(MIB, 2, 0x20);
+const drains = [
+  ['token', bombProgram(blanks, 2, '', 'token')],
+  ['readhexstring', bombProgram(blanks, 2, '/s 10 string def ', 's readhexstring')],
+  ['image', Buffer.concat([
+    Buffer.from('4096 4096 8 [4096 0 0 -4096 0 4096] currentfile /FlateDecode filter /FlateDecode filter image\n'),
+    data, Buffer.from('\n')])],
+];
+for (const [name, program] of drains) {
+  ps.maxSteps = 1000;
+  ps.begin(program, 100, 100);
+  st = ps.step(1 << 16);
+  if (st !== -1 || !ps.error.includes('Error: limitexceeded (steps); OffendingCommand: ' + name)) fail(name + ' not stopped by the cap: ' + st + ' ' + ps.error);
+  if (ps.stepsUsed < 1000 || ps.stepsUsed > 1400) fail(name + ' drain not counted: ' + ps.stepsUsed);
+}
+
+// 0 lifts the cap again; a bad value is refused.
+ps.maxSteps = 0;
+st = drain();
+if (st !== 0 || ps.stepsUsed !== 0) fail('cap not lifted: ' + st + ' ' + ps.stepsUsed);
+for (const bad of [-1, 1.5, NaN, Infinity]) {
+  let threw = false;
+  try { ps.maxSteps = bad; } catch (e) { threw = e instanceof RangeError; }
+  if (!threw) fail('maxSteps accepted ' + bad);
+}
+"#,
+    );
+}
+
+/// The number the playground ships, from `site/playground.html`: it must
+/// stop a decompression bomb in its frame, and let a frame of ordinary
+/// work through. A three-layer, 560 MiB bomb of a few hundred bytes is
+/// drained by one `flushfile`; at a step per KiB it passes 500,000 steps
+/// after about 500 MiB (#1210).
+#[test]
+fn wasm_playground_frame_cap_stops_a_bomb_and_passes_a_frame() {
+    if !wasm_ready() {
+        return;
+    }
+    let html = std::fs::read_to_string(root().join("site/playground.html")).expect("playground");
+    let cap: u64 = html
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("const DEFAULT_FRAME_MAX_STEPS = "))
+        .map(|v| v.trim_end_matches(';').replace('_', ""))
+        .expect("DEFAULT_FRAME_MAX_STEPS in site/playground.html")
+        .parse()
+        .expect("a whole number");
+    assert!(
+        html.contains("ps.maxSteps = FRAME_MAX_STEPS;"),
+        "the playground must set the cap before each step"
+    );
+    run_cap_driver(
+        "pscat-wasm-playground-cap",
+        &format!(
+            r#"
+const CAP = {cap};
+const MIB = Math.ceil(CAP / 1024 * 1.15); // a bomb bigger than the cap allows, but cheap to make
+const data = await bombBytes(MIB, 3);
+if (data.length > 5000) fail('bomb not small: ' + data.length);
+ps.maxSteps = 0;
+ps.begin(bombProgram(data, 3, '0 0 50 50 rectfill\n'), 100, 100);
+const t = Date.now();
+let more, calls = 0;
+do {{ ps.maxSteps = CAP; more = ps.step(220); calls++; }} while (more === 1);
+const ms = Date.now() - t;
+if (more !== -1 || !ps.error.includes('limitexceeded (steps)')) fail('the default cap missed the bomb: ' + more + ' ' + ps.error);
+if (ms > 30000) fail('stopped, but after ' + ms + ' ms');
+// The page it had drawn stays.
+const px = ps.pixels();
+if (px[(99 * 100 + 10) * 4] > 100) fail('the page it had drawn is gone');
+// A frame at the slider's top speed is nowhere near the cap.
+ps.maxSteps = CAP;
+ps.begin('0 1 100000 {{ pop }} for', 100, 100);
+ps.maxSteps = CAP;
+ps.step(4000);
+if (ps.stepsUsed > CAP / 50) fail('a frame charged ' + ps.stepsUsed);
+console.log('stopped after ' + ms + ' ms, ' + calls + ' calls');
+"#
+        ),
+    );
+}

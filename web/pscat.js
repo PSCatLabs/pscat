@@ -68,6 +68,37 @@ export class Pscat {
   }
 
   /**
+   * Cap the steps (objects executed, loop passes, and a step per KiB a
+   * decode filter produces) a program may run, from now on, as
+   * `pscat --max-steps` does; 0 or null lifts the cap, the default. It
+   * applies to the program in progress, counting from this assignment,
+   * and to every program begun after it. A wasm module has no clock, so
+   * this is the only thing that stops a program inside one step() call,
+   * such as one operator draining a decompression bomb. Over the cap the
+   * program stops with `limitexceeded (steps)` in .error (status -1; the
+   * page and stacks survive).
+   *
+   * Set once before begin(), it caps the whole program. Set again before
+   * each step(), it caps that call's work, which is what bounds a frame
+   * in a step-driven page (the site's playground does this). Throws
+   * RangeError on a negative or fractional number.
+   */
+  set maxSteps(n) {
+    if (this.ex.ps_set_max_steps(n ?? 0) !== 0) {
+      throw new RangeError(`pscat: maxSteps must be a whole number >= 0, got ${n}`);
+    }
+  }
+
+  /**
+   * Steps run since maxSteps was last set or the program began: counted
+   * only while a cap is set, 0 otherwise, and trailing the true figure
+   * by up to a slice of a few thousand.
+   */
+  get stepsUsed() {
+    return this.ex.ps_steps_used();
+  }
+
+  /**
    * Register a TrueType/OpenType font file's bytes for findfont, under
    * `name`: a font pack's file stem such as 'EBGaramond-Regular' (which
    * /Garamond then finds too, as with the installed pack). The face's
