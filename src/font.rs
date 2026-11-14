@@ -414,12 +414,21 @@ pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
 }
 
 /// The FID of an already-registered catalog face whose key is `want`
-/// (case-insensitively) or whose PostScript name is `requested`.
+/// (case-insensitively) or whose PostScript name is `requested`. An
+/// empty `requested` matches by key only (`load_catalog_face` passes ""
+/// for a key-only lookup), so a face with an empty name record can't
+/// stand in for an unrelated file (Codex, PR #1216).
 fn loaded_fid(want: &str, requested: &str) -> Option<i64> {
     let cat = CATALOG.read().unwrap();
     cat.iter()
-        .position(|c| c.key.eq_ignore_ascii_case(want) || c.ps_name == requested)
+        .position(|c| catalog_entry_matches(&c.key, &c.ps_name, want, requested))
         .map(|i| (BUILTINS.len() + i) as i64)
+}
+
+/// The match rule behind [`loaded_fid`]: the key case-insensitively, or
+/// a non-empty PostScript name exactly.
+fn catalog_entry_matches(key: &str, ps_name: &str, want: &str, requested: &str) -> bool {
+    key.eq_ignore_ascii_case(want) || (!requested.is_empty() && ps_name == requested)
 }
 
 /// The file stems a requested name is looked up by: the alias target
@@ -744,6 +753,7 @@ fn prepare_face_unguarded<'a>(
             .into_iter()
             .find(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
             .and_then(|n| n.to_string())
+            .filter(|n| !n.is_empty())
             .unwrap_or_else(|| key.to_string())
     };
     Some((face, encoding, ps_name))
@@ -2203,6 +2213,37 @@ impl ShowCtx {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    /// A key-only lookup (empty `requested`) never matches on the
+    /// PostScript name, so a face whose name record is empty can't
+    /// answer for another file's stem (Codex round 2, PR #1216).
+    #[test]
+    fn an_empty_requested_name_matches_by_key_only() {
+        assert!(!catalog_entry_matches(
+            "EmptyName-Regular",
+            "",
+            "Other-Regular",
+            ""
+        ));
+        assert!(catalog_entry_matches(
+            "Other-Regular",
+            "",
+            "other-regular",
+            ""
+        ));
+        assert!(catalog_entry_matches(
+            "NotoSansKR-Regular",
+            "NotoSansKR-Regular",
+            "NotoSansKR",
+            "NotoSansKR-Regular"
+        ));
+        assert!(!catalog_entry_matches(
+            "A-Regular",
+            "APS",
+            "B-Regular",
+            "BPS"
+        ));
+    }
 
     /// The stand-in table (issue #728): weight and slant survive, and
     /// each pack names itself in the note.
