@@ -8,7 +8,8 @@
 //! packing flag is tracked but changes nothing about how procedures
 //! are built, and the resource machinery covers the Font category
 //! (delegating to findfont/definefont, sharing FontDirectory) plus a
-//! generic per-category registry for everything else.
+//! generic per-category registry for everything else. Resource status
+//! and size follow Ghostscript (`resourcestatus`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -184,31 +185,45 @@ fn findresource(it: &mut Interp) -> Result<(), PsError> {
     }
 }
 
-/// key category resourcestatus → status size true | false. Status and
-/// size are fictions (0 0), like vmstatus's byte counts.
+/// key category resourcestatus → status size true | false.
+///
+/// `status` follows Ghostscript, whose answers the tests pin: 0 for an
+/// instance in VM, 2 for a Font that is not in VM but that `findfont` can
+/// load (a built-in, standard-35 or catalog/pack face), and `size` -1,
+/// "unknown" per the PLRM. A face asked for by name that nothing
+/// provides, or whose font pack is not installed (`findfont` would hand
+/// back a stand-in), is `false`, so a program can test for a face before
+/// it sets text (issue #1214). Deviation: Ghostscript reports a face
+/// `findfont` has already loaded as status 1 with its file size; here it
+/// is in `FontDirectory`, so status 0, size -1.
 fn resourcestatus(it: &mut Interp) -> Result<(), PsError> {
     let category = pop_category(it)?;
     let key = it.pop()?;
-    let known = if &*category == "Font" {
+    let status = if &*category == "Font" {
         let dir = super::font::font_directory(it)?;
-        let in_dir = dir.borrow().known(&key)?;
-        // Builtin faces materialize on demand — report them present.
-        in_dir
-            || match &key.value {
-                Value::Name(n) => crate::font::builtin_index(n).is_some(),
-                Value::String(s) => crate::font::builtin_index(&s.text()).is_some(),
-                _ => false,
-            }
+        if dir.borrow().known(&key)? {
+            Some(0)
+        } else {
+            // Not defined yet: available when findfont would load it. The
+            // same lookup findfont uses (`font::locate`), so the two agree.
+            let name = match &key.value {
+                Value::Name(n) => Some(n.to_string()),
+                Value::String(s) => Some(s.text()),
+                _ => None,
+            };
+            name.and_then(|n| crate::font::locate(&n)).map(|_| 2)
+        }
     } else {
         let d = it.resource_category(&category);
-        d.borrow().known(&key)?
+        d.borrow().known(&key)?.then_some(0)
     };
-    if known {
-        it.push(Object::int(0));
-        it.push(Object::int(0));
-        it.push(Object::bool(true));
-    } else {
-        it.push(Object::bool(false));
+    match status {
+        Some(status) => {
+            it.push(Object::int(status));
+            it.push(Object::int(-1));
+            it.push(Object::bool(true));
+        }
+        None => it.push(Object::bool(false)),
     }
     Ok(())
 }

@@ -468,6 +468,17 @@ another type. Names no pack has (`/Arial`) get the Helvetica substitute
 with no note, as in Ghostscript. The wasm build has no packs and no
 stderr, so there a pack face becomes its stand-in silently.
 
+**Test for a face before using it (issue #1214).** `findfont` never fails,
+so ask `resourcestatus`: `/NotoSansKR-Regular /Font resourcestatus { pop pop
+} { (install the cjk-thai pack) = quit } ifelse`. It answers `status size
+true` for every face `findfont` would load (the standard 35, catalog and
+pack faces, anything you `definefont`ed) and `false` for a name nothing
+provides, including a pack face whose pack is not installed. Status is 2
+("not loaded, available") before the first `findfont` and 0 once the face
+is in `FontDirectory`; size is -1 (unknown). Ghostscript reports the same
+2 and -1, and 1 with the file size for a face it has loaded; pscat says 0
+there. Looking does not change what `findfont` does.
+
 **Which fonts win.** A plain `fonts/catalog/` directory (in
 `$PSCAT_HOME`, the per-user data directory, beside the binary, in a
 checkout, or in the current directory) is an explicit override and wins

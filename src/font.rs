@@ -321,6 +321,35 @@ impl Resolved {
     }
 }
 
+/// The FID of the face `requested` names when one exists: a builtin, a
+/// disk-catalog (or wasm-registered) face, or an embedded standard-35
+/// face. `None` for a name nothing provides, including a face of a font
+/// pack that is not installed, where [`resolve`] falls back to a
+/// stand-in. [`resolve`] and `resourcestatus` share it, so the two
+/// cannot disagree about which names are available.
+pub(crate) fn locate(requested: &str) -> Option<i64> {
+    if let Some(fid) = builtin_index(requested) {
+        return Some(fid);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(fid) = catalog_fid(requested) {
+        return Some(fid);
+    }
+    // wasm has no disk catalog; its catalog is only the faces the caller
+    // registered with `register_font_bytes` (the npm package's
+    // `addFont`, #566). Same stems as the disk lookup, so an alias like
+    // `/Garamond` finds an `EBGaramond-Regular` registered under that name.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let (stem, fallback) = wanted_stems(requested);
+        if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
+        {
+            return Some(fid);
+        }
+    }
+    embedded_fid(requested)
+}
+
 /// findfont's name resolution: builtins, then the disk catalog (via
 /// aliases and file stems), then the embedded rest of the standard 35
 /// ([`EMBEDDED`]), then a stand-in face. The disk catalog is
@@ -334,26 +363,7 @@ impl Resolved {
 /// nothing changes. Names no pack has substitute Helvetica without a
 /// note, Ghostscript-style.
 pub(crate) fn resolve(requested: &str) -> Resolved {
-    if let Some(fid) = builtin_index(requested) {
-        return Resolved::found(fid);
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(fid) = catalog_fid(requested) {
-        return Resolved::found(fid);
-    }
-    // wasm has no disk catalog; its catalog is only the faces the caller
-    // registered with `register_font_bytes` (the npm package's
-    // `addFont`, #566). Same stems as the disk lookup, so an alias like
-    // `/Garamond` finds an `EBGaramond-Regular` registered under that name.
-    #[cfg(target_arch = "wasm32")]
-    {
-        let (stem, fallback) = wanted_stems(requested);
-        if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
-        {
-            return Resolved::found(fid);
-        }
-    }
-    if let Some(fid) = embedded_fid(requested) {
+    if let Some(fid) = locate(requested) {
         return Resolved::found(fid);
     }
     if let Some((pack, stem)) = missing_face(requested) {
@@ -404,12 +414,21 @@ pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
 }
 
 /// The FID of an already-registered catalog face whose key is `want`
-/// (case-insensitively) or whose PostScript name is `requested`.
+/// (case-insensitively) or whose PostScript name is `requested`. An
+/// empty `requested` matches by key only (`load_catalog_face` passes ""
+/// for a key-only lookup), so a face with an empty name record can't
+/// stand in for an unrelated file (Codex, PR #1216).
 fn loaded_fid(want: &str, requested: &str) -> Option<i64> {
     let cat = CATALOG.read().unwrap();
     cat.iter()
-        .position(|c| c.key.eq_ignore_ascii_case(want) || c.ps_name == requested)
+        .position(|c| catalog_entry_matches(&c.key, &c.ps_name, want, requested))
         .map(|i| (BUILTINS.len() + i) as i64)
+}
+
+/// The match rule behind [`loaded_fid`]: the key case-insensitively, or
+/// a non-empty PostScript name exactly.
+fn catalog_entry_matches(key: &str, ps_name: &str, want: &str, requested: &str) -> bool {
+    key.eq_ignore_ascii_case(want) || (!requested.is_empty() && ps_name == requested)
 }
 
 /// The file stems a requested name is looked up by: the alias target
@@ -605,6 +624,15 @@ fn catalog_fid(requested: &str) -> Option<i64> {
 #[cfg(not(target_arch = "wasm32"))]
 fn load_catalog_face(path: &std::path::Path) -> Option<i64> {
     let key = path.file_stem()?.to_str()?.to_string();
+    // A family name (`/NotoSansKR`) finds the file `NotoSansKR-Regular`,
+    // so the cache probe in `catalog_fid`, made under the requested stem,
+    // misses on every later call and the face would be read, parsed and
+    // leaked again (issue #1214: ~10 MB per `resourcestatus` of a CJK
+    // family name). Dedupe on the file's own stem, the key it registers
+    // under. Which file wins is still decided by the scan, unchanged.
+    if let Some(fid) = loaded_fid(&key, "") {
+        return Some(fid);
+    }
     let data: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
     register_face(key, data)
 }
@@ -725,6 +753,7 @@ fn prepare_face_unguarded<'a>(
             .into_iter()
             .find(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
             .and_then(|n| n.to_string())
+            .filter(|n| !n.is_empty())
             .unwrap_or_else(|| key.to_string())
     };
     Some((face, encoding, ps_name))
@@ -2184,6 +2213,37 @@ impl ShowCtx {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    /// A key-only lookup (empty `requested`) never matches on the
+    /// PostScript name, so a face whose name record is empty can't
+    /// answer for another file's stem (Codex round 2, PR #1216).
+    #[test]
+    fn an_empty_requested_name_matches_by_key_only() {
+        assert!(!catalog_entry_matches(
+            "EmptyName-Regular",
+            "",
+            "Other-Regular",
+            ""
+        ));
+        assert!(catalog_entry_matches(
+            "Other-Regular",
+            "",
+            "other-regular",
+            ""
+        ));
+        assert!(catalog_entry_matches(
+            "NotoSansKR-Regular",
+            "NotoSansKR-Regular",
+            "NotoSansKR",
+            "NotoSansKR-Regular"
+        ));
+        assert!(!catalog_entry_matches(
+            "A-Regular",
+            "APS",
+            "B-Regular",
+            "BPS"
+        ));
+    }
 
     /// The stand-in table (issue #728): weight and slant survive, and
     /// each pack names itself in the note.
