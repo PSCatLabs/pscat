@@ -392,17 +392,32 @@ fn pathforall(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn flattenpath(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.flatten_path();
+    let probe = it.limit_probe();
+    let chords = it.gfx.flatten_path(&probe)?;
+    // A step per 1024 chords, as `arc` charges its segments (#1188).
+    if chords >= 1024 {
+        it.poll_limits((chords / 1024) as u64)?;
+    }
     Ok(())
 }
 
 fn fill(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.fill(FillRule::Winding);
-    Ok(())
+    fill_common(it, FillRule::Winding)
 }
 
 fn eofill(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.fill(FillRule::EvenOdd);
+    fill_common(it, FillRule::EvenOdd)
+}
+
+/// `fill`/`eofill` under the limits (#1188): the rasteriser looks at them
+/// as it goes, and its work is charged a step per 1024 units, as `arc`
+/// charges its segments. An ordinary fill is not charged.
+fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
+    let probe = it.limit_probe();
+    let work = it.gfx.fill_limited(rule, &probe)?;
+    if work >= 1024 {
+        it.poll_limits(work / 1024)?;
+    }
     Ok(())
 }
 

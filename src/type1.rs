@@ -27,10 +27,15 @@ pub(crate) struct Glyph {
     pub width: f64,
 }
 
-/// Everything a charstring needs from its font: decrypted subroutines
-/// and (for seac) a way to fetch sibling charstrings by name.
+/// Everything a charstring needs from its font: its subroutines, by number,
+/// decrypted, and (for seac) a way to fetch sibling charstrings by name.
+///
+/// `subr` is asked for a subroutine when a glyph calls it (#1188), so a
+/// font decrypts only the ones its glyphs use: decrypting every Subrs entry
+/// for every glyph made a font with 64 MB of Subrs take 25 s for 200
+/// glyphs. The subroutine comes back shared, not copied per call.
 pub(crate) struct FontData<'a> {
-    pub subrs: &'a [Vec<u8>],
+    pub subr: &'a dyn Fn(usize) -> Option<std::rc::Rc<[u8]>>,
     pub charstring_by_name: &'a dyn Fn(&str) -> Option<Vec<u8>>,
 }
 
@@ -221,11 +226,7 @@ impl Exec {
                 // --- control -------------------------------------------
                 10 => {
                     let [n] = self.take()?;
-                    let sub = font
-                        .subrs
-                        .get(n as usize)
-                        .ok_or(PsError::InvalidFont)?
-                        .clone();
+                    let sub = (font.subr)(n as usize).ok_or(PsError::InvalidFont)?;
                     self.run(&sub, font, depth + 1)?;
                 }
                 11 => return Ok(()),
@@ -393,10 +394,11 @@ mod tests {
 
     fn run_code(code: &[u8], subrs: &[Vec<u8>]) -> Result<Glyph, PsError> {
         let by_name = |_: &str| -> Option<Vec<u8>> { None };
+        let subr = |n: usize| subrs.get(n).map(|s| std::rc::Rc::from(s.as_slice()));
         run(
             code,
             &FontData {
-                subrs,
+                subr: &subr,
                 charstring_by_name: &by_name,
             },
         )

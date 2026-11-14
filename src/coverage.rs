@@ -30,6 +30,8 @@
 //! composites it with `fill_rect`, so colour, alpha and blend modes keep
 //! going through tiny-skia's pipeline exactly as before.
 
+use crate::error::PsError;
+use crate::limits::LimitProbe;
 use tiny_skia::{Mask, Path, PathSegment};
 
 /// Flattening tolerance for curves, in device pixels.
@@ -102,7 +104,27 @@ const SMALL_AREA: usize = 4096;
 /// pixels, not its area: between two cells an edge touched, a row's
 /// coverage is constant, so a big interior becomes one solid span (and,
 /// merged with the identical spans of the rows below, one rectangle).
+#[cfg(test)]
 pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&Mask>) -> Vec<Run> {
+    match rasterize_limited(path, rule, mask, clip, &LimitProbe::NONE) {
+        Ok((runs, _)) => runs,
+        Err(_) => unreachable!("no limit to exceed"),
+    }
+}
+
+/// [`rasterize`] under the limits (#1188), and the work it did, in units of
+/// one edge made or one edge laid into one band: the operator charges a
+/// step per 1024. A path of 100,000 huge curves comes to 10^8 edges (up to
+/// [`MAX_CHORDS`] a curve, 16 bytes each), so the probe, its heap cap
+/// included, is looked at every [`POLL_WORK`] units while the path is
+/// flattened and while its edges are laid into bands.
+pub(crate) fn rasterize_limited(
+    path: &Path,
+    rule: Rule,
+    mask: &mut Mask,
+    clip: Option<&Mask>,
+    probe: &LimitProbe,
+) -> Result<(Vec<Run>, u64), PsError> {
     let mut out = Vec::new();
     let (mw, mh) = (mask.width(), mask.height());
     let b = path.bounds();
@@ -111,7 +133,7 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
     let x1 = b.right().ceil().min(mw as f32);
     let y1 = b.bottom().ceil().min(mh as f32);
     if !(x0 < x1 && y0 < y1) {
-        return out;
+        return Ok((out, 0));
     }
     let (ox, oy) = (x0 as u32, y0 as u32);
     let w = (x1 - x0) as usize;
@@ -122,9 +144,20 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
     // right of it, so it collapses onto x = 0; one right of it affects
     // nothing visible and collapses onto x = w.
     let mut lines = Vec::new();
-    flatten(path, x0, y0, |l| push_clipped(&mut lines, l, w as f32));
+    let mut work = Work {
+        done: 0,
+        next_poll: POLL_WORK,
+        probe,
+    };
+    let mut stopped = Ok(());
+    flatten(path, x0, y0, |l| {
+        push_clipped(&mut lines, l, w as f32);
+        stopped = work.add(1);
+        stopped.is_ok()
+    });
+    stopped?;
     if lines.is_empty() {
-        return out;
+        return Ok((out, work.done));
     }
 
     let small = w * h <= SMALL_AREA;
@@ -144,11 +177,19 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
     let mut merger = Merger::default();
     let mut spans: Vec<(u32, u32, bool)> = Vec::new();
     let mstride = mw as usize;
+    let bands = BandIndex::new(&lines, band, h);
+    if let Some(ix) = &bands {
+        work.add(ix.list.len() as u64)?;
+    }
     let mut by = 0;
     while by < h {
         let bh = band.min(h - by);
-        for l in &lines {
-            accumulate(&mut acc, stride, by, bh, l);
+        match &bands {
+            Some(ix) => {
+                let mine = ix.lines(by / band).iter().map(|&i| &lines[i as usize]);
+                lay(&mut acc, stride, by, bh, mine, &mut work)?;
+            }
+            None => lay(&mut acc, stride, by, bh, lines.iter(), &mut work)?,
         }
         acc.list.sort_unstable();
         let mut cells = std::mem::take(&mut acc.list);
@@ -233,7 +274,117 @@ pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&
             solid: false,
         });
     }
-    out
+    Ok((out, work.done))
+}
+
+/// Work units between looks at the limits in [`rasterize_limited`].
+const POLL_WORK: u64 = 1 << 16;
+
+/// The work count of one [`rasterize_limited`] call and its probe.
+struct Work<'a> {
+    done: u64,
+    next_poll: u64,
+    probe: &'a LimitProbe,
+}
+
+impl Work<'_> {
+    /// Count `n` units, looking at the limits each time the count passes
+    /// another [`POLL_WORK`].
+    #[inline]
+    fn add(&mut self, n: u64) -> Result<(), PsError> {
+        self.done += n;
+        if self.done >= self.next_poll {
+            self.next_poll = self.done + POLL_WORK;
+            self.probe.check(self.done / 1024)?;
+        }
+        Ok(())
+    }
+}
+
+/// Lay `lines` into the band at rows `[by, by + bh)`, counting each as a
+/// unit of work.
+fn lay<'a>(
+    acc: &mut Acc,
+    stride: usize,
+    by: usize,
+    bh: usize,
+    lines: impl Iterator<Item = &'a Line>,
+    work: &mut Work,
+) -> Result<(), PsError> {
+    let mut n = 0u64;
+    for l in lines {
+        accumulate(acc, stride, by, bh, l);
+        n += 1;
+        if n == 4096 {
+            work.add(n)?;
+            n = 0;
+        }
+    }
+    work.add(n)
+}
+
+/// Which edges each band needs (#1188). Laying every edge into every band
+/// made a fill cost edges x bands: 100,000 curves took 5 s at 300 dpi, a
+/// page of 33 bands. An edge is listed for the bands its y range reaches,
+/// in the edges' own order, so each band adds the same areas in the same
+/// order as before and the coverage is bit for bit the same; the range is
+/// a superset of the bands `accumulate` keeps it for, and it drops the
+/// rest. A path that fits one band (every glyph) is not indexed: `None`.
+struct BandIndex {
+    /// Band `k`'s edges are `list[start[k]..start[k + 1]]`.
+    start: Vec<usize>,
+    list: Vec<u32>,
+}
+
+impl BandIndex {
+    fn new(lines: &[Line], band: usize, h: usize) -> Option<BandIndex> {
+        let nb = h.div_ceil(band);
+        if nb <= 1 || u32::try_from(lines.len()).is_err() {
+            return None;
+        }
+        let last = nb - 1;
+        // Bands `[floor(ymin / band), floor(ymax / band)]`: below the first,
+        // a band ends at or above ymin; past the last, one starts above
+        // ymax; `accumulate` keeps an edge for neither. Not a number: every
+        // band, as before.
+        let range = |l: &Line| -> Option<(usize, usize)> {
+            // `f32::min` drops a NaN operand, so look at the ends first.
+            if l.y0.is_nan() || l.y1.is_nan() {
+                return Some((0, last));
+            }
+            let (lo, hi) = (l.y0.min(l.y1), l.y0.max(l.y1));
+            let q = |y: f32| (f64::from(y) / band as f64).floor();
+            let (k0, k1) = (q(lo).max(0.0), q(hi).min(last as f64));
+            (k0 <= k1).then_some((k0 as usize, k1 as usize))
+        };
+        let mut start = vec![0usize; nb + 1];
+        for l in lines {
+            if let Some((k0, k1)) = range(l) {
+                for c in &mut start[k0 + 1..=k1 + 1] {
+                    *c += 1;
+                }
+            }
+        }
+        for k in 0..nb {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut list = vec![0u32; start[nb]];
+        for (i, l) in lines.iter().enumerate() {
+            if let Some((k0, k1)) = range(l) {
+                for slot in &mut fill[k0..=k1] {
+                    list[*slot] = i as u32;
+                    *slot += 1;
+                }
+            }
+        }
+        Some(BandIndex { start, list })
+    }
+
+    /// Band `k`'s edges, by index into the edge list, in order.
+    fn lines(&self, k: usize) -> &[u32] {
+        &self.list[self.start[k]..self.start[k + 1]]
+    }
 }
 
 /// The accumulation buffer for one band, with the cells touched so far:
@@ -324,18 +475,26 @@ fn mul255(a: u8, b: u8) -> u8 {
 
 /// Walk `path` as straight edges relative to `(ox, oy)`, closing every
 /// subpath (a fill closes open subpaths implicitly).
-fn flatten(path: &Path, ox: f32, oy: f32, mut emit: impl FnMut(Line)) {
+///
+/// `emit` returns false to stop: the walk ends at the next segment.
+fn flatten(path: &Path, ox: f32, oy: f32, mut emit: impl FnMut(Line) -> bool) {
     let mut start = (0.0f32, 0.0f32);
     let mut cur = start;
+    let go = std::cell::Cell::new(true);
     let mut edge = |from: (f32, f32), to: (f32, f32)| {
-        emit(Line {
-            x0: from.0 - ox,
-            y0: from.1 - oy,
-            x1: to.0 - ox,
-            y1: to.1 - oy,
-        })
+        if go.get() {
+            go.set(emit(Line {
+                x0: from.0 - ox,
+                y0: from.1 - oy,
+                x1: to.0 - ox,
+                y1: to.1 - oy,
+            }));
+        }
     };
     for seg in path.segments() {
+        if !go.get() {
+            return;
+        }
         match seg {
             PathSegment::MoveTo(p) => {
                 edge(cur, start);
@@ -696,5 +855,77 @@ mod tests {
             Some(&clip),
         );
         assert_eq!(m.data(), clip.data());
+    }
+
+    /// The band index (#1188) lists an edge for every band `accumulate`
+    /// adds anything to it in: a superset, so each band sums the same areas
+    /// in the same order as when every edge visited every band. Edges with
+    /// ends on, just off and between band boundaries, reversed, outside the
+    /// rows, and not finite in y.
+    #[test]
+    fn the_band_index_covers_every_band_an_edge_reaches() {
+        let (band, h, w) = (7usize, 50usize, 16usize);
+        let stride = w + 2;
+        let ys = [
+            -3.0f32,
+            -0.0,
+            0.0,
+            0.25,
+            6.999,
+            7.0,
+            7.0001,
+            13.5,
+            14.0,
+            20.9999,
+            21.0,
+            48.0,
+            49.5,
+            50.0,
+            51.0,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let mut lines = Vec::new();
+        for &a in &ys {
+            for &b in &ys {
+                if a != b {
+                    lines.push(Line {
+                        x0: 1.5,
+                        y0: a,
+                        x1: 9.25,
+                        y1: b,
+                    });
+                }
+            }
+        }
+        let ix = BandIndex::new(&lines, band, h).expect("several bands");
+        let nb = h.div_ceil(band);
+        for k in 0..nb {
+            let by = k * band;
+            let bh = band.min(h - by);
+            let listed = ix.lines(k);
+            for (i, l) in lines.iter().enumerate() {
+                let mut acc = Acc {
+                    vals: vec![0.0; stride * band],
+                    hit: vec![false; stride * band],
+                    list: Vec::new(),
+                };
+                accumulate(&mut acc, stride, by, bh, l);
+                if !acc.list.is_empty() {
+                    assert!(
+                        listed.contains(&(i as u32)),
+                        "band {k} misses edge y {} .. {}",
+                        l.y0,
+                        l.y1
+                    );
+                }
+            }
+            assert!(
+                listed.windows(2).all(|p| p[0] < p[1]),
+                "band {k} keeps edge order"
+            );
+        }
+        assert!(BandIndex::new(&lines, h, h).is_none(), "one band: no index");
     }
 }

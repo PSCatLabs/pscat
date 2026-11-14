@@ -18,7 +18,7 @@ use ttf_parser::{Face, GlyphId};
 use crate::encodings;
 use crate::error::PsError;
 use crate::gfx::{DevPoint, Gfx, PsPath};
-use crate::object::{Dict, Object, PsString, Value};
+use crate::object::{Dict, Object, Value};
 
 /// `FID` value for fonts with no outline source we can drive yet
 /// (Type 3 dicts accepted by `definefont`); `show` reports invalidfont.
@@ -1597,30 +1597,24 @@ fn type1_glyph(
     mode: &ShowMode,
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
-    let (charstrings, len_iv, subr_strings) = {
+    let (charstrings, len_iv, subr_array) = {
         let d = fs.dict.borrow();
         let cs = match d.get("CharStrings").as_ref().map(|o| &o.value) {
             Some(Value::Dict(cs)) => cs.clone(),
             _ => return Err(PsError::InvalidFont),
         };
         let mut len_iv = 4usize;
-        let mut subr_strings: Vec<crate::object::PsString> = Vec::new();
+        let mut subr_array = None;
         if let Some(Value::Dict(private)) = d.get("Private").as_ref().map(|o| &o.value) {
             let p = private.borrow();
             if let Some(Value::Integer(n)) = p.get("lenIV").as_ref().map(|o| &o.value) {
                 len_iv = usize::try_from(*n).unwrap_or(4);
             }
             if let Some(Value::Array(a)) = p.get("Subrs").as_ref().map(|o| &o.value) {
-                for i in 0..a.len() {
-                    if let Some(Value::String(s)) = a.get(i).as_ref().map(|o| &o.value) {
-                        subr_strings.push(s.clone());
-                    } else {
-                        subr_strings.push(PsString::from_bytes(Vec::new()));
-                    }
-                }
+                subr_array = Some(a.clone());
             }
         }
-        (cs, len_iv, subr_strings)
+        (cs, len_iv, subr_array)
     };
     let fetch = |n: &str| -> Option<Vec<u8>> {
         match charstrings.borrow().get(n).as_ref().map(|o| &o.value) {
@@ -1631,14 +1625,25 @@ fn type1_glyph(
     let Some(code) = fetch(name).or_else(|| fetch(".notdef")) else {
         return Ok((0.0, 0.0));
     };
-    let subrs: Vec<Vec<u8>> = subr_strings
-        .iter()
-        .map(|s| crate::file::decrypt_charstring(&s.to_vec(), len_iv))
-        .collect();
+    // Each subroutine is decrypted the first time this glyph calls it, and
+    // once (#1188); an entry that is not a string is an empty subroutine.
+    let decrypted: RefCell<std::collections::HashMap<usize, Rc<[u8]>>> = RefCell::default();
+    let subr = |n: usize| -> Option<Rc<[u8]>> {
+        if let Some(code) = decrypted.borrow().get(&n) {
+            return Some(code.clone());
+        }
+        let a = subr_array.as_ref().filter(|a| n < a.len())?;
+        let code: Rc<[u8]> = match a.get(n).as_ref().map(|o| &o.value) {
+            Some(Value::String(s)) => crate::file::decrypt_charstring(&s.to_vec(), len_iv).into(),
+            _ => Rc::from(&[][..]),
+        };
+        decrypted.borrow_mut().insert(n, code.clone());
+        Some(code)
+    };
     let glyph = crate::type1::run(
         &code,
         &crate::type1::FontData {
-            subrs: &subrs,
+            subr: &subr,
             charstring_by_name: &fetch,
         },
     )?;

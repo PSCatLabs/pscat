@@ -264,7 +264,11 @@ fn bind_proc(
         match (&el.value, el.executable) {
             (Value::Name(n), true) => {
                 walk.walked += lookup;
-                if let Some(resolved) = it.load(n)
+                // By interned id, as name execution looks it up: through
+                // `&str` every dictionary on the stack re-hashed the text,
+                // so one 8 MB name under 2,000 dictionaries took seconds
+                // between two looks at the limits (#1188).
+                if let Some(resolved) = it.load_id(n.id())
                     && resolved.executable
                     && matches!(resolved.value, Value::Operator(_))
                 {

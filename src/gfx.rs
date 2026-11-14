@@ -231,7 +231,16 @@ impl PsPath {
     /// don't model `setflat`, and found files that call flattenpath
     /// want the shape, not a particular chord count (documented
     /// deviation; gs honors flatness).
-    pub(crate) fn flattened(&self) -> PsPath {
+    ///
+    /// Under the limits (#1188): a curve can come to 65,536 chords (depth
+    /// 16), so a path of a few thousand huge curves was gigabytes in one
+    /// `flattenpath`. The probe is looked at every [`FLATTEN_POLL`] chords,
+    /// its heap cap included, a step per 1024 chords. Also gives the chord
+    /// count, for the operator to charge.
+    pub(crate) fn flattened_limited(
+        &self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(PsPath, usize), PsError> {
         const TOL: f32 = 0.25;
         fn mid(a: DevPoint, b: DevPoint) -> DevPoint {
             DevPoint {
@@ -251,37 +260,50 @@ impl PsPath {
         }
         // De Casteljau: split at t=1/2 until the control points hug the
         // chord, then emit the chord.
+        struct Flat<'a> {
+            out: PsPath,
+            chords: usize,
+            probe: &'a crate::limits::LimitProbe,
+        }
         fn subdivide(
-            out: &mut PsPath,
+            f: &mut Flat,
             p0: DevPoint,
             c1: DevPoint,
             c2: DevPoint,
             p3: DevPoint,
             depth: u8,
-        ) {
+        ) -> Result<(), PsError> {
             if depth >= 16 || (chord_dist(c1, p0, p3) <= TOL && chord_dist(c2, p0, p3) <= TOL) {
-                out.line_to(p3);
-                return;
+                f.out.line_to(p3);
+                f.chords += 1;
+                if f.chords % FLATTEN_POLL == 0 {
+                    f.probe.check((f.chords / 1024) as u64)?;
+                }
+                return Ok(());
             }
             let (ab, bc, cd) = (mid(p0, c1), mid(c1, c2), mid(c2, p3));
             let (abc, bcd) = (mid(ab, bc), mid(bc, cd));
             let m = mid(abc, bcd);
-            subdivide(out, p0, ab, abc, m, depth + 1);
-            subdivide(out, m, bcd, cd, p3, depth + 1);
+            subdivide(f, p0, ab, abc, m, depth + 1)?;
+            subdivide(f, m, bcd, cd, p3, depth + 1)
         }
-        let mut out = PsPath::default();
+        let mut f = Flat {
+            out: PsPath::default(),
+            chords: 0,
+            probe,
+        };
         for seg in &self.segs {
             match *seg {
-                Seg::Move(p) => out.move_to(p),
-                Seg::Line(p) => out.line_to(p),
+                Seg::Move(p) => f.out.move_to(p),
+                Seg::Line(p) => f.out.line_to(p),
                 Seg::Curve(c1, c2, p) => {
-                    let start = out.current().unwrap_or(p);
-                    subdivide(&mut out, start, c1, c2, p, 0);
+                    let start = f.out.current().unwrap_or(p);
+                    subdivide(&mut f, start, c1, c2, p, 0)?;
                 }
-                Seg::Close => out.close(),
+                Seg::Close => f.out.close(),
             }
         }
-        out
+        Ok((f.out, f.chords))
     }
 
     /// Build a path from a tiny-skia one (the stroker's output). Goes
@@ -1151,6 +1173,9 @@ pub struct Gfx {
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
 const ARC_POLL: usize = 4096;
 
+/// Chords `flattenpath` makes between looks at the limits (#1188).
+const FLATTEN_POLL: usize = 4096;
+
 /// `while a2 < a1 { a2 += TAU }` (`up`), or `while a2 > a1 { a2 -= TAU }`,
 /// the bits of the result exactly as that loop leaves them, without its trip
 /// per turn (#1176). Inside one binade (one sign and exponent) every value is
@@ -1329,9 +1354,16 @@ impl Gfx {
         &self.state.colorspace
     }
 
-    /// `flattenpath`: curves in the current path become chords.
-    pub(crate) fn flatten_path(&mut self) {
-        self.state.path = self.state.path.flattened();
+    /// `flattenpath`: curves in the current path become chords. The path
+    /// is replaced only once the whole of it is flat: a limit that stops
+    /// it leaves the current path as it was. Gives the chord count.
+    pub(crate) fn flatten_path(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<usize, PsError> {
+        let (flat, chords) = self.state.path.flattened_limited(probe)?;
+        self.state.path = flat;
+        Ok(chords)
     }
 
     // --- coordinate plumbing -------------------------------------------
@@ -1803,18 +1835,39 @@ impl Gfx {
     /// holds the edge coverage, and colour, alpha and blend still go
     /// through tiny-skia's pipeline as before.
     fn fill_coverage(&mut self, path: &tiny_skia::Path, rule: FillRule) {
+        // No limit to exceed, so it cannot fail.
+        let _ = self.fill_coverage_limited(path, rule, &crate::limits::LimitProbe::NONE);
+    }
+
+    /// [`fill_coverage`](Self::fill_coverage) under the limits (#1188), and
+    /// the rasteriser's work (`coverage::rasterize_limited`). A limit stops
+    /// it before anything is painted.
+    fn fill_coverage_limited(
+        &mut self,
+        path: &tiny_skia::Path,
+        rule: FillRule,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         let (w, h) = (self.pixmap.width(), self.pixmap.height());
         let mut cov = match self.coverage.take() {
             Some(m) if m.width() == w && m.height() == h => m,
             _ => match tiny_skia::Mask::new(w, h) {
                 Some(m) => m,
-                None => return,
+                None => return Ok(0),
             },
         };
         let clip = self
             .clip_mask()
             .filter(|c| c.width() == w && c.height() == h);
-        let runs = crate::coverage::rasterize(path, rule.into(), &mut cov, clip.as_deref());
+        let rasterized =
+            crate::coverage::rasterize_limited(path, rule.into(), &mut cov, clip.as_deref(), probe);
+        let (runs, work) = match rasterized {
+            Ok(r) => r,
+            Err(e) => {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        };
         if !runs.is_empty() {
             let mut paint = self.paint();
             paint.anti_alias = false;
@@ -1832,14 +1885,28 @@ impl Gfx {
             }
         }
         self.coverage = Some(cov);
+        Ok(work)
     }
 
     pub fn fill(&mut self, rule: FillRule) {
+        // No limit to exceed, so it cannot fail.
+        let _ = self.fill_limited(rule, &crate::limits::LimitProbe::NONE);
+    }
+
+    /// [`fill`](Self::fill) under the limits (#1188), and the rasteriser's
+    /// work, for the operator to charge (a step per 1024). A limit stops it
+    /// before anything is painted or recorded; the path is left as it was.
+    pub(crate) fn fill_limited(
+        &mut self,
+        rule: FillRule,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        let mut work = 0;
         if !self.painting_off()
             && let Some(path) = self.state.path.to_skia()
         {
             self.prepare_paint();
-            self.fill_coverage(&path, rule);
+            work = self.fill_coverage_limited(&path, rule, probe)?;
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = self.state.path.to_svg_data();
@@ -1861,6 +1928,7 @@ impl Gfx {
         }
         // Painting consumes the path (implicit newpath), filled or not.
         self.newpath();
+        Ok(work)
     }
 
     /// `shfill` (issue #20): paint a shading's gradient within the

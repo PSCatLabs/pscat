@@ -559,6 +559,40 @@ fn usable_scale(scale: f32) -> bool {
     scale.is_finite() && scale > 0.0
 }
 
+/// [`Interp::remaining_budget`] from the fields it reads, for a caller that
+/// holds the interpreter split into its parts.
+fn remaining_budget(
+    limits: &Limits,
+    steps_used: u64,
+    run_clock: &crate::clock::Clock,
+) -> (Option<u64>, Option<u64>) {
+    let steps = limits.max_steps.map(|m| m.saturating_sub(steps_used));
+    let deadline = limits.max_time.map(|t| {
+        let left = (t.as_millis() as i64 - run_clock.elapsed_ms()).max(0) as u64;
+        crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
+    });
+    (steps, deadline)
+}
+
+/// [`Interp::limit_probe`] from the fields it reads: the image frame makes
+/// one while the interpreter is split into its parts (#1188).
+fn limit_probe(
+    limits: &Limits,
+    steps_used: u64,
+    run_clock: &crate::clock::Clock,
+    mem_base: usize,
+) -> crate::limits::LimitProbe {
+    if limits.is_none() {
+        return crate::limits::LimitProbe::NONE;
+    }
+    let (steps_left, deadline_ns) = remaining_budget(limits, steps_used, run_clock);
+    crate::limits::LimitProbe {
+        steps_left,
+        deadline_ns,
+        memory: limits.max_memory.map(|max| (mem_base, max)),
+    }
+}
+
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
     /// Nothing chose that size, so a program's `setpagedevice /PageSize`
@@ -1010,29 +1044,18 @@ impl Interp {
     /// machine (a compiled kernel, #742): steps still allowed, and the
     /// deadline as a `Clock::mono_ns` instant.
     pub(crate) fn remaining_budget(&self) -> (Option<u64>, Option<u64>) {
-        let steps = self
-            .limits
-            .max_steps
-            .map(|m| m.saturating_sub(self.steps_used));
-        let deadline = self.limits.max_time.map(|t| {
-            let left = (t.as_millis() as i64 - self.run_clock.elapsed_ms()).max(0) as u64;
-            crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
-        });
-        (steps, deadline)
+        remaining_budget(&self.limits, self.steps_used, &self.run_clock)
     }
 
     /// The limits for a loop that cannot borrow the interpreter (#1176,
     /// [`LimitProbe`](crate::limits::LimitProbe)).
     pub(crate) fn limit_probe(&self) -> crate::limits::LimitProbe {
-        if self.limits.is_none() {
-            return crate::limits::LimitProbe::NONE;
-        }
-        let (steps_left, deadline_ns) = self.remaining_budget();
-        crate::limits::LimitProbe {
-            steps_left,
-            deadline_ns,
-            memory: self.limits.max_memory.map(|max| (self.mem_base, max)),
-        }
+        limit_probe(
+            &self.limits,
+            self.steps_used,
+            &self.run_clock,
+            self.mem_base,
+        )
     }
 
     /// Count `n` steps done off the machine.
@@ -1975,6 +1998,10 @@ impl Interp {
                     gfx,
                     ostack,
                     object_format,
+                    limits,
+                    steps_used,
+                    run_clock,
+                    mem_base,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
@@ -2121,7 +2148,10 @@ impl Interp {
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
                         }
-                        match ctx.step(gfx)? {
+                        // The SVG and PDF recorders look at the limits per
+                        // row of a big image (#1188).
+                        let probe = limit_probe(limits, *steps_used, run_clock, *mem_base);
+                        match ctx.step(gfx, &probe)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
                             ImageStep::Done => Action::Pop,
                         }
