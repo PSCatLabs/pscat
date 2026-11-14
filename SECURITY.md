@@ -485,10 +485,8 @@ without the limits above:
     under a memory cap, once the list would not fit, the interpreter does
     the whole image instead.
 
-  These are still known to run long inside one call:
-  - an image's drain of its filter chain to EOD, and a decode filter that
-    skips input to find output (ASCIIHex whitespace, `readhexstring`), or the
-    scanner reading a filter;
+  These are still known to run long inside one call (decode filters look
+  at the limits themselves since #1187, below):
   - a `kernelimage` whose pixels nearly all retire, without a memory limit:
     its retired-pixel list (16 bytes a pixel, then two objects a pixel for
     the interpreter) is not bounded except by the time limit, which it
