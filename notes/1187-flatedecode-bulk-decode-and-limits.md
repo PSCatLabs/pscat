@@ -42,9 +42,9 @@ FlateDecode image with large flat areas was cut short or failed.
   `readhexstring`.
   - The interpreter now holds one `Rc<DecodeBudget>`, and every filter it
     makes (`filter`, `eexec`: `PsFile::filtered_limited`) holds a handle.
-    `ensure_output` charges each pull's output. Every 64 KiB of decoded output,
-    in any layer, the filter checks the `LimitProbe`: time, heap, and steps
-    left at a step per KiB.
+    `ensure_output` charges each pull's output, in any layer, at a step per
+    KiB. The step cap is checked as each KiB is counted. Time and heap are
+    checked every 64 KiB (`LimitProbe::check`).
   - `read_into` asks `check_alloc` before it grows the caller's buffer (an
     image's samples).
   - The interpreter takes the decoded KiB as steps and refreshes the probe
@@ -55,8 +55,10 @@ FlateDecode image with large flat areas was cut short or failed.
   - Because the handle is shared, a filter made before `set_limits` obeys the
     limits set after it.
   - With no limits, a pull reads one bool.
-  - `flushfile`'s own poll from #1176 is gone, since the filter now charges
-    the same bytes and they would count twice.
+  - `flushfile` still polls every 64 KiB and once at the end. It charges a
+    raw file's bytes as steps itself, since a raw file has no budget; a
+    filter's bytes are only looked at there, because the filter already
+    charged them.
   - `PsFile::filtered` (no budget) keeps its signature for code outside an
     interpreter (the fuzz harness).
 - **Errors** are blamed on the operator that was draining: `flushfile`,
@@ -91,6 +93,28 @@ FlateDecode image with large flat areas was cut short or failed.
   image's samples and as one string token, under a 32 MiB cap. Both must stop
   with `MemoryExceeded`, with a sampling thread's peak heap growth under
   128 MiB. With the checks disabled the image test fails.
+
+### Codex round 1 (PR #1208)
+
+Two P2s, both fixed, each with a regression test in `tests/limits.rs`:
+
+1. **Raw `flushfile` had no limits.** The first version dropped
+   `flushfile`'s #1176 poll, and a raw file has no budget, so
+   `currentfile flushfile` over 1 MiB of spaces passed a 20-step cap. The
+   poll is back, as described above.
+2. **A short drain overran and blamed the next operator.** The step cap was
+   checked only every 64 KiB, so under a 20-step cap a drain of 32,000
+   decoded spaces (31 steps) let `(survived) =` run and take the blame, and a
+   following `1 0 div` hid the overrun behind `undefinedresult`. The step cap
+   is now checked at every KiB inside the draining operator, whether that is
+   `flushfile`, `readstring`, `readhexstring` or `image`.
+
+   The steps left are the figure at the start of the slice, as for
+   `poll_limits`. A drain that crosses the cap only together with the steps
+   run earlier in the same slice (at most a slice, 512 steps under a time
+   limit) is still caught when the slice ends.
+
+With the round's `src` changes reverted, both new tests fail.
 
 ### Identity
 

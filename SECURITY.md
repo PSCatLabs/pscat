@@ -540,8 +540,9 @@ without the limits above:
   capped them by accident), and one operator can drain it: `image` reading to
   the end of its data, `readhexstring` or the scanner skipping whitespace,
   `flushfile`. So every filter looks at the limits as it decodes (#1187):
-  every 64 KiB of output it checks the time and the heap, and the decoded
-  bytes count a step per KiB. A read refuses to grow its buffer past the
+  the decoded bytes count a step per KiB, checked against the step cap as
+  they are counted, and every 64 KiB of output it checks the time and the
+  heap. A read refuses to grow its buffer past the
   memory cap, and DCTDecode checks the image size from the JPEG header
   against it before decoding. The run stops inside the operator with
   `limitexceeded`. With no limits set, a decompression bomb now runs to its

@@ -875,4 +875,61 @@ mod one_operator {
             PsError::StepsExceeded,
         );
     }
+
+    /// A raw file has no decode budget, so `flushfile` charges its bytes
+    /// itself, a step per KiB (Codex, PR #1208): `currentfile flushfile`
+    /// over 1 MiB of spaces under a 20-step cap must stop inside it.
+    #[test]
+    fn flushfile_on_a_raw_file_counts_its_bytes_as_steps() {
+        let mut it = limited(steps(20));
+        let err = it
+            .run_str(&format!("currentfile flushfile{}", " ".repeat(1 << 20)))
+            .expect_err("the step cap stops it");
+        let report = it.error_report(&err);
+        assert_eq!(err, PsError::StepsExceeded, "{report}");
+        assert!(report.contains("OffendingCommand: flushfile;"), "{report}");
+    }
+
+    /// A drain far shorter than the 64 KiB between clock checks still
+    /// counts against the step cap as it decodes, so the operator that
+    /// drained is the one stopped (Codex, PR #1208). 32,000 decoded spaces
+    /// are 31 steps; under a 20-step cap `(survived) =` used to run and
+    /// take the blame, and `1 0 div` hid the overrun behind
+    /// `undefinedresult`.
+    #[test]
+    fn a_short_decode_drain_past_the_step_cap_stops_inside_the_operator() {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&[b' '; 32_000]).expect("compress in memory");
+        let hex: String = z
+            .finish()
+            .expect("compress in memory")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let cases: [(&str, &str); 5] = [
+            ("f flushfile (survived) =", "flushfile"),
+            ("f flushfile 1 0 div", "flushfile"),
+            (
+                "f 40000 string readstring pop pop (survived) =",
+                "readstring",
+            ),
+            (
+                "f 40000 string readhexstring pop pop (survived) =",
+                "readhexstring",
+            ),
+            ("100 320 8 [100 0 0 320 0 0] f image (survived) =", "image"),
+        ];
+        for (src, op) in cases {
+            stops_inside_with(
+                src,
+                format!("/f <{hex}> /FlateDecode filter def"),
+                src,
+                op,
+                Duration::from_secs(2),
+                steps(20),
+                PsError::StepsExceeded,
+            );
+        }
+    }
 }

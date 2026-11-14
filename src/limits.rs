@@ -274,8 +274,12 @@ impl DecodeBudget {
         self.active.get()
     }
 
-    /// Count `n` bytes a filter just decoded, and look at the limits each
-    /// time the count passes a multiple of 64 KiB. Free with no limits.
+    /// Count `n` bytes a filter just decoded. Each whole KiB is a step, and
+    /// the step cap is checked as each one is counted, so a drain that runs
+    /// past the steps left stops inside the operator doing it, however short
+    /// (Codex, PR #1208: a 31 KiB drain under a 20-step cap used to let the
+    /// next operator run and take the blame). The clock and the heap cost a
+    /// read each, so they are looked at every 64 KiB. Free with no limits.
     #[inline]
     pub(crate) fn charge(&self, n: usize) -> Result<(), crate::PsError> {
         if !self.active.get() {
@@ -284,8 +288,16 @@ impl DecodeBudget {
         let before = self.bytes.get();
         let after = before.saturating_add(n as u64);
         self.bytes.set(after);
-        if before / DECODE_CHECK_EVERY != after / DECODE_CHECK_EVERY {
-            self.probe.get().check(after / 1024)?;
+        if before / 1024 != after / 1024 {
+            let probe = self.probe.get();
+            if let Some(left) = probe.steps_left
+                && after / 1024 > left
+            {
+                return Err(crate::PsError::StepsExceeded);
+            }
+            if before / DECODE_CHECK_EVERY != after / DECODE_CHECK_EVERY {
+                probe.check(after / 1024)?;
+            }
         }
         Ok(())
     }
