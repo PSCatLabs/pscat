@@ -2520,6 +2520,19 @@ renders eight examples in both and compares block-downsampled output).
   `index.js` (the browser entry) in Node fails on its `file:` fetch with an
   error naming `node.js` (#1085); `pscat/node.js` is an export for choosing
   the Node entry. `notes/1085-npm-node-entry-and-page-count.md`.
+- **The browser build has a step cap, off until a page sets it** (#1210,
+  `notes/1210-playground-step-limit.md`). `ps_set_max_steps`
+  (`Pscat.maxSteps`) caps steps from now on, for the program in progress and
+  the ones begun after; `ps_steps_used` (`stepsUsed`) reads the count. A
+  wasm module has no clock, so this is the only thing that stops one
+  operator draining a decompression bomb (decoded filter output is a step
+  per KiB, #1187), and only a *per-call* cap does: `site/playground.html`
+  re-arms 500,000 steps before every `step()`, since a whole-program cap
+  that lets the heaviest piece finish (84 million steps) is hours of drain
+  at 90,000 KiB a second. `tests/wasm.rs` reads that number from the page
+  and drains a bomb under it, so changing the constant keeps the test
+  honest. The CLI, npm and `Pscat` defaults are unchanged (no cap). A
+  `maxSteps` option on the npm `Renderer` is not done.
 - **The standard 35 are all compiled in (#757), but not all in
   `BUILTINS`.** The twelve Liberation faces are builtins (fixed FIDs,
   StandardEncoding, `FontName` = the PostScript name). The other 23

@@ -25,6 +25,21 @@
 //!   file's bytes under `name` (a font pack's file stem) for `findfont`;
 //!   0 = ok, -1 = name not UTF-8, -2 = not a font (report via
 //!   `ps_error_*`). Fonts are per module instance and outlive `ps_begin`;
+//! - `ps_set_max_steps(steps)` — cap the steps (objects run, loop passes,
+//!   and a step per KiB a decode filter produces) the program may run
+//!   from now on, as `pscat --max-steps` does; 0 = no cap, the default.
+//!   It applies to the program in progress, counting from this call, and
+//!   to every program begun after it; 0 = ok, -1 = not a whole number
+//!   >= 0. A wasm module has no clock, so a step cap is the only thing
+//!   that stops a program inside one `ps_step`, such as one operator
+//!   draining a decompression bomb (#1208, #1210). Set once before
+//!   `ps_begin`, it caps the whole program; set again before each
+//!   `ps_step`, it caps that call's work, which is what bounds a frame in
+//!   a browser. Over the cap the error is `limitexceeded (steps)`. `steps`
+//!   is an f64 so JS passes a Number;
+//! - `ps_steps_used()` — steps run since the cap was last set or the
+//!   program began, counted only while a cap is set (0 otherwise). It
+//!   trails the true figure by up to one slice. An f64;
 //! - `ps_output_ptr`/`ps_output_len` — what the program has printed so
 //!   far (`=`, `==`, `stack`, `pstack`, `print`), UTF-8 as written; a
 //!   wasm32 module has no stdout, so `ps_begin` captures it (#252);
@@ -58,7 +73,7 @@
 //! opt-in, so a pixels-only page pays nothing, and pages come back one at
 //! a time as raw bytes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::Interp;
 
@@ -71,6 +86,9 @@ thread_local! {
     /// per document, so reading N pages one by one would otherwise finish
     /// all of them N times. Cleared whenever the program can draw again.
     static SVG_PAGES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    /// The step cap `ps_set_max_steps` set, for every program begun after
+    /// it (the module instance outlives each `ps_begin`). 0 = none.
+    static MAX_STEPS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// `ps_begin_vector` flag bits.
@@ -169,6 +187,11 @@ pub unsafe extern "C" fn ps_begin_vector(
 
 fn install(mut it: Interp, source: &[u8]) {
     it.capture_stdout();
+    // Before begin_source, which restarts the step count under a cap.
+    let max_steps = MAX_STEPS.with(Cell::get);
+    if max_steps > 0 {
+        arm(&mut it, max_steps);
+    }
     it.begin_source(source);
     INTERP.with(|s| *s.borrow_mut() = Some(it));
     ERROR.with(|e| e.borrow_mut().clear());
@@ -198,6 +221,42 @@ pub unsafe extern "C" fn ps_add_font(
             -2
         }
     }
+}
+
+/// Cap the steps from now on, for the program in progress and every one
+/// begun after; 0 lifts the cap. Counting restarts here, so calling it
+/// before each `ps_step` caps that call's work.
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_set_max_steps(steps: f64) -> i32 {
+    if !(steps.is_finite() && steps >= 0.0 && steps.fract() == 0.0) {
+        return -1;
+    }
+    // `as` saturates, so a cap past 2^64 is simply a very large one.
+    let max = steps as u64;
+    MAX_STEPS.with(|m| m.set(max));
+    INTERP.with(|s| {
+        if let Some(it) = s.borrow_mut().as_mut() {
+            arm(it, max);
+        }
+    });
+    0
+}
+
+/// Give `it` a step cap of `max` (0 = none), counting from now.
+fn arm(it: &mut Interp, max: u64) {
+    let limits = if max > 0 {
+        crate::Limits::none().with_max_steps(max)
+    } else {
+        crate::Limits::none()
+    };
+    it.set_limits(limits)
+        .expect("a step cap needs no allocator");
+}
+
+/// Steps the current program has run (0 unless a cap is set).
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_steps_used() -> f64 {
+    INTERP.with(|s| s.borrow().as_ref().map_or(0, Interp::steps_used)) as f64
 }
 
 #[unsafe(no_mangle)]

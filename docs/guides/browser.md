@@ -28,8 +28,25 @@ requestAnimationFrame(frame);
 live canvas). Errors come back REPL-style via `ps.error` with the
 standard PostScript error names. The wasm build has no window, no
 filesystem, and no clock (`usertime`/`realtime` read 0 — the one
-documented deviation). Works under node too — `tests/wasm.rs` drives
+documented deviation), so no time limit either; see
+[Stopping a runaway program](#stopping-a-runaway-program). Works under node too — `tests/wasm.rs` drives
 the real module through the same JS library.
+
+### Stopping a runaway program
+
+A wasm module cannot read a clock, so `--max-time` has no browser
+equivalent. A step cap does work: `ps.maxSteps = N` caps the steps
+(operators run, loop passes, and one per KiB a decode filter produces) from
+that moment, for the program in progress and the ones begun after, and a
+program over it stops with `limitexceeded (steps)` in `ps.error`, status
+`-1`, the page and stacks intact. `ps.stepsUsed` is the count since. The cap
+is off until you set it. Set once before `begin()` it caps the whole program
+(`run()` in node). In a step-driven page, set it again before every
+`step()` so it caps that call's work: that is the cap that stops one
+operator draining a decompression bomb, which no slicing can interrupt. The
+site's playground does this with 500,000 steps a frame, and
+`playground.html?maxsteps=N` changes it for a visit (0 for none). The npm
+`Renderer` has no such option yet.
 
 ### SVG and PDF
 

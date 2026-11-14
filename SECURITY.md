@@ -548,11 +548,20 @@ without the limits above:
   `limitexceeded`. With no limits set, a decompression bomb now runs to its
   end, as it does in Ghostscript.
 - **No time limit in the browser build**, which has no clock: the `wasm32`
-  module reads time as 0. A step limit applies (`Interp::set_limits`), but
-  the playground does not set one; it runs in slices (`begin` and `step` in
-  `web/pscat.js`) so a runaway does not freeze the tab. One operator draining
-  a decompression bomb is a single step, though, so in the browser only a
-  step limit stops it: decoded data counts a step per KiB (#1187).
+  module reads time as 0. A step cap is the only limit it can enforce, and
+  it is off until the page sets it (`ps_set_max_steps`, `Pscat.maxSteps`,
+  #1210). Every page runs in slices (`begin` and `step` in `web/pscat.js`)
+  so a runaway loop does not freeze the tab, but one operator draining a
+  decompression bomb is a single step, and only a step cap stops it:
+  decoded data counts a step per KiB (#1187). A cap on the whole program
+  does not do it, since the program steps a few thousand a frame and a
+  drain runs only about 90,000 KiB (steps) a second, so a cap that lets the
+  heaviest gallery piece finish (84 million steps) is hours of drain. The
+  site's playground therefore re-arms a per-frame cap of 500,000 steps
+  before each `step()`: about 500 MiB of decoded data, some six seconds,
+  where the heaviest frame of any piece or example charges 5,306
+  (`site/playground.html`, `notes/1210-playground-step-limit.md`). The CLI,
+  the npm package and `Pscat` itself keep no cap by default.
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
   `--bands` band (steps and time; the bands share `--max-memory` and
