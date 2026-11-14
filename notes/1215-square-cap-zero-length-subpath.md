@@ -50,3 +50,22 @@ wide); a mixed path loses only the dots (SVG `d`, PDF content, and the PDF
 read back by gs); `strokepath` leaves nothing for a square-capped point and a
 butt-capped one, and an outline for a round one; zero-length dashes of a real
 line still draw as in gs, and a dashed point stays empty.
+
+**Codex round 1 (PR #1220), two fixes.**
+
+- *Points that collapse.* gs rounds every device point to 1/256 px, so a
+  `25 25 moveto 25.000001 25 lineto` (or a step of .001) is a zero-length line
+  there and paints nothing under square caps, under any CTM (a step of .003 or
+  more is a line, caps and all). pscat's f32 points stay distinct, so the drop
+  now compares device points on that grid. After mapping into pen space the
+  path is filtered again for identical points, the old `stroke_space` filter,
+  for points the mapping itself collapses.
+- *A `lineto` after `closepath`.* It begins a new subpath at the closed point
+  (as `pathforall` reports it), but `subpaths()` split only at a `moveto`, so
+  `25 25 moveto 65 25 lineto closepath 25 25 lineto` kept a square cap at the
+  closed point (bbox 23..65 against gs's 25..65). `subpaths()` now also ends a
+  subpath at a segment that follows a close, and a kept subpath whose
+  predecessor was dropped gets its start point back.
+- Not changed: a degenerate *leading segment* of a longer subpath
+  (`25 25 moveto 25 25 lineto 60 40 lineto`, square caps) makes tiny-skia add
+  a cap at the start that gs does not draw. That predates this issue.

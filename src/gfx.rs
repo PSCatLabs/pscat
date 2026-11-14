@@ -353,44 +353,84 @@ impl PsPath {
         })
     }
 
-    /// Each subpath's segments, and whether it never leaves its first
+    /// Each subpath's segments, its first point (`None` for a stray run
+    /// with no point to start from), and whether it never leaves that
     /// point (`moveto closepath`, or a `lineto` back to the start).
-    fn subpaths(&self) -> impl Iterator<Item = (&[Seg], bool)> {
+    ///
+    /// A subpath ends at the next `moveto`, and also at a `closepath`
+    /// that a drawing segment follows: that segment begins a new subpath
+    /// at the point the close returned to, as `pathforall` reports it.
+    /// `same` says whether two points are one.
+    fn subpaths<'a>(
+        &'a self,
+        same: impl Fn(DevPoint, DevPoint) -> bool + 'a,
+    ) -> impl Iterator<Item = (&'a [Seg], Option<DevPoint>, bool)> + 'a {
         let mut i = 0;
+        let mut current: Option<DevPoint> = None;
         std::iter::from_fn(move || {
             if i >= self.segs.len() {
                 return None;
             }
-            let end = self.segs[i + 1..]
-                .iter()
-                .position(|s| matches!(s, Seg::Move(_)))
-                .map_or(self.segs.len(), |n| i + 1 + n);
+            let mut end = i + 1;
+            let mut closed = false;
+            while let Some(seg) = self.segs.get(end) {
+                match seg {
+                    Seg::Move(_) => break,
+                    Seg::Close => closed = true,
+                    _ if closed => break,
+                    _ => {}
+                }
+                end += 1;
+            }
             let sub = &self.segs[i..end];
             i = end;
             let start = match sub[0] {
                 Seg::Move(p) => Some(p),
-                _ => None,
+                _ => current,
             };
+            current = start;
             let moves = sub.iter().any(|s| match *s {
                 Seg::Move(_) | Seg::Close => false,
-                Seg::Line(p) => Some(p) != start,
-                Seg::Curve(a, b, p) => [a, b, p].iter().any(|q| Some(*q) != start),
+                Seg::Line(p) => !start.is_some_and(|st| same(st, p)),
+                Seg::Curve(a, b, p) => [a, b, p]
+                    .iter()
+                    .any(|q| !start.is_some_and(|st| same(st, *q))),
             });
-            Some((sub, start.is_some() && !moves))
+            Some((sub, start, start.is_some() && !moves))
         })
     }
 
     /// This path without its subpaths that never leave their first point,
-    /// or `None` when it has none (so a caller clones nothing then).
-    fn without_point_subpaths(&self) -> Option<PsPath> {
-        if !self.subpaths().any(|(_, point)| point) {
+    /// or `None` when it has none (so a caller clones nothing then). With
+    /// `device_units`, points within gs's device grid (1/256 px, which it
+    /// rounds every point to) count as one; without, only identical ones
+    /// (for a path in pen space, whose grid is not that).
+    fn without_point_subpaths(&self, device_units: bool) -> Option<PsPath> {
+        let key = |v: f32| (f64::from(v) * 256.0).round();
+        let same = move |a: DevPoint, b: DevPoint| {
+            if device_units {
+                key(a.x) == key(b.x) && key(a.y) == key(b.y)
+            } else {
+                a == b
+            }
+        };
+        if !self.subpaths(same).any(|(_, _, point)| point) {
             return None;
         }
         let mut out = PsPath::default();
-        for (sub, point) in self.subpaths() {
-            if !point {
-                out.segs.extend_from_slice(sub);
+        let mut dropped = false;
+        for (sub, start, point) in self.subpaths(same) {
+            if point {
+                dropped = true;
+                continue;
             }
+            // A subpath begun by a `lineto` after a `closepath` needs its
+            // start back once the subpath before it is gone.
+            if dropped && !matches!(sub[0], Seg::Move(_)) {
+                out.segs.extend(start.map(Seg::Move));
+            }
+            dropped = false;
+            out.segs.extend_from_slice(sub);
         }
         out.current = self.current;
         out.subpath_start = self.subpath_start;
@@ -2567,7 +2607,7 @@ impl Gfx {
     /// subpaths and stay.
     fn stroke_dropped(&self) -> Option<PsPath> {
         if self.state.line_cap == LineCap::Square {
-            self.state.path.without_point_subpaths()
+            self.state.path.without_point_subpaths(true)
         } else {
             None
         }
@@ -2639,7 +2679,15 @@ impl Gfx {
         }
         let det = l[0] * l[3] - l[1] * l[2];
         let inverse = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
-        let path = path.linear_mapped(inverse)?;
+        let mut path = path.linear_mapped(inverse)?;
+        if self.state.line_cap == LineCap::Square {
+            // Distinct device points can land on one pen-space point once
+            // mapped (f32 rounding); gs, which drops by the mapped point,
+            // draws nothing for those either.
+            if let Some(kept) = path.without_point_subpaths(false) {
+                path = kept;
+            }
+        }
         let to_device =
             Transform::from_row(l[0] as f32, l[1] as f32, l[2] as f32, l[3] as f32, 0.0, 0.0);
         Some(PenSpace {

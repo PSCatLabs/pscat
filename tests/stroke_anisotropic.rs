@@ -1048,3 +1048,121 @@ fn zero_length_dashes_of_a_real_subpath_still_draw_under_square_caps() {
         assert!(total_ink(&render_gs(point, "square-dashed-point")) < 1e-9);
     }
 }
+
+// Codex review, round 1 on PR #1220: one test per finding, with its cases.
+
+/// The device-space bbox of what `src` strokes (`strokepath`), or `None`
+/// when the path comes out empty (`nocurrentpoint`).
+fn outline_bbox(program: &str, gs: bool) -> Option<Vec<f64>> {
+    let probe = format!(
+        "{program} strokepath initmatrix {{pathbbox 4 array astore ==}} stopped {{(none) ==}} if"
+    );
+    let text = if gs {
+        let ps = scratch("outline-bbox.ps");
+        std::fs::write(&ps, format!("false setstrokeadjust {probe}\n")).unwrap();
+        let out = Command::new("gs")
+            .args(["-q", "-dNOPAUSE", "-dBATCH", "-dNODISPLAY"])
+            .arg(&ps)
+            .output_deadline()
+            .expect("run gs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    } else {
+        let it = interp(
+            &format!(
+                "{program} strokepath initmatrix {{pathbbox 4 array astore}} stopped {{(none)}} \
+                 if"
+            ),
+            |_| {},
+        );
+        it.operand_stack()
+            .last()
+            .map(|o| o.repr())
+            .unwrap_or_default()
+    };
+    if text.contains("none") {
+        return None;
+    }
+    let nums: Vec<f64> = text
+        .trim()
+        .trim_matches(['[', ']'])
+        .split_whitespace()
+        .map(|n| n.parse().unwrap_or_else(|_| panic!("{program}: {text:?}")))
+        .collect();
+    assert_eq!(nums.len(), 4, "{program}: {text:?}");
+    Some(nums)
+}
+
+fn assert_outline_as_gs(program: &str) {
+    let ours = outline_bbox(program, false);
+    if !common::gs_available() {
+        return;
+    }
+    let theirs = outline_bbox(program, true);
+    match (&ours, &theirs) {
+        (None, None) => {}
+        (Some(a), Some(b)) => {
+            for (x, y) in a.iter().zip(b) {
+                assert!(
+                    (x - y).abs() < 0.1,
+                    "{program}: pscat {ours:?}, gs {theirs:?}"
+                );
+            }
+        }
+        _ => panic!("{program}: pscat {ours:?}, gs {theirs:?}"),
+    }
+}
+
+#[test]
+fn points_gs_rounds_to_one_device_point_are_a_zero_length_subpath_under_square_caps() {
+    // gs rounds every device point to 1/256 px, so these 1e-6 and 1e-3
+    // steps are zero-length lines in gs; pscat's f32 points stay distinct
+    // but must be treated alike, in pen space (the shear below) and out.
+    for ctm in ["", "[1 0 10 1 0 0] concat", "[2 0 0 .5 0 0] concat"] {
+        for step in ["25.000001", "25.001"] {
+            let program =
+                format!("2 setlinecap 1 setlinewidth 25 25 moveto {step} 25 lineto {ctm}");
+            assert_eq!(outline_bbox(&program, false), None, "{program}");
+            assert_outline_as_gs(&program);
+            let ink = total_ink(&render_pscat(&format!("{program} stroke")));
+            assert!(ink < 1e-9, "{program}: {ink:.3} of ink");
+        }
+    }
+    // A step gs does see keeps its square caps in both.
+    assert_outline_as_gs("2 setlinecap 1 setlinewidth 25 25 moveto 25.01 25 lineto");
+    assert!(
+        outline_bbox(
+            "2 setlinecap 1 setlinewidth 25 25 moveto 25.01 25 lineto",
+            false
+        )
+        .is_some()
+    );
+}
+
+#[test]
+fn a_lineto_after_closepath_starts_a_subpath_the_square_cap_rule_sees() {
+    for program in [
+        // The closed line, then a point subpath at the closed point.
+        "4 setlinewidth 2 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 2 setlinecap 25 25 moveto 65 25 lineto closepath 0 0 rlineto",
+        // Only that point: `moveto closepath lineto` back to the start.
+        "4 setlinewidth 2 setlinecap 25 25 moveto closepath 25 25 lineto",
+        // A real segment after the close keeps its caps, and the dropped
+        // point before it must not leave it without a start.
+        "4 setlinewidth 2 setlinecap 25 25 moveto closepath 60 40 lineto",
+        // Under the other caps, and dashed.
+        "4 setlinewidth 0 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 1 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 2 setlinecap [6 4] 0 setdash 25 25 moveto 65 25 lineto closepath \
+         25 25 lineto",
+    ] {
+        assert_outline_as_gs(program);
+        if common::gs_available() {
+            let ours = total_ink(&render_pscat(&format!("{program} stroke")));
+            let theirs = total_ink(&render_gs(&format!("{program} stroke"), "close-lineto"));
+            assert!(
+                (ours - theirs).abs() <= 0.1 * theirs.max(1.0),
+                "{program}: pscat {ours:.3}, gs {theirs:.3}"
+            );
+        }
+    }
+}
