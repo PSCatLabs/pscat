@@ -108,6 +108,83 @@ fn memory_growth_is_capped() {
         Err(PsError::MemoryExceeded)
     );
 
+    // A stenciled image is flattened to a composite expanded to the mask's
+    // resolution (#1188): a 64 x 64 image under a 4096 x 4096 mask is 16
+    // Mpixel, 200 MB for SVG and 140 MB for PDF with every buffer alive at
+    // once, which passed a 1 MiB cap when counted at the image's own size.
+    let stencil = |w: usize| {
+        format!(
+            "/DeviceRGB setcolorspace 100 100 scale \
+             << /ImageType 3 /InterleaveType 3 \
+             /DataDict << /ImageType 1 /Width 64 /Height 64 /BitsPerComponent 8 \
+               /Decode [0 1 0 1 0 1] /ImageMatrix [64 0 0 -64 0 64] /DataSource {{()}} >> \
+             /MaskDict << /ImageType 1 /Width {w} /Height {w} /BitsPerComponent 1 \
+               /ImageMatrix [{w} 0 0 -{w} 0 {w}] /DataSource {{()}} >> >> image"
+        )
+    };
+    for svg in [true, false] {
+        let mut it = limited(50);
+        if svg {
+            it.enable_svg();
+        } else {
+            it.enable_pdf();
+        }
+        assert_eq!(
+            it.run_str(&stencil(4096)),
+            Err(PsError::MemoryExceeded),
+            "svg {svg}"
+        );
+        // The same image under a mask of its own size fits.
+        let mut it = limited(50);
+        if svg {
+            it.enable_svg();
+        } else {
+            it.enable_pdf();
+        }
+        it.run_str(&stencil(64)).unwrap();
+    }
+
+    // `fill` and `flattenpath` look at the cap as their edge lists grow
+    // (#1188). The fill's 10^8 edges were freed again before the next look
+    // at the limits, so a 100 MiB cap never saw them; the flattened path
+    // replaced the current one and stayed, about 1 GB.
+    let mut it = limited(100);
+    assert_eq!(
+        it.run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat fill"),
+        Err(PsError::MemoryExceeded)
+    );
+    let before = pscat::memtrack::live_bytes();
+    let mut it = limited(100);
+    assert_eq!(
+        it.run_str(
+            "newpath 0 0 moveto 2000 { 1e20 1e20 -1e20 1e20 0 0 curveto } repeat flattenpath"
+        ),
+        Err(PsError::MemoryExceeded)
+    );
+    let kept = pscat::memtrack::live_bytes().saturating_sub(before);
+    assert!(kept < 100 * MIB, "the flattened path is not kept: {kept}");
+    drop(it);
+
+    // A kernelimage whose every pixel retires to the interpreter (#1188):
+    // its list of 4 million retired pixels was 64 MB, made with no look at
+    // the cap, before the interpreter's copy of it (256 MB) was refused.
+    // Once the list would not fit, the interpreter does the whole image
+    // instead, under the cap, until the clock stops it.
+    let mut it = Interp::new();
+    it.set_limits(
+        Limits::none()
+            .with_max_memory(50 * MIB)
+            .with_max_time(std::time::Duration::from_millis(300)),
+    )
+    .expect("the allocator is installed");
+    assert_eq!(
+        it.run_str(
+            "gsave 600 600 scale 2000 2000 [2000 0 0 -2000 0 2000] \
+             { /j exch def /i exch def i 3037000500 mul dup mul pop i 2000 div } 1 kernelimage grestore"
+        ),
+        Err(PsError::TimeExceeded)
+    );
+
     // A whole-file read counts as it grows (issue #702): `/dev/zero` never
     // ends, so the cap is what stops it, well short of a gigabyte.
     #[cfg(unix)]

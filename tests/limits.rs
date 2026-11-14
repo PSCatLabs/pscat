@@ -741,6 +741,216 @@ mod one_operator {
         assert_eq!(r, Ok(()));
     }
 
+    /// [`stops_inside_with`] on an interpreter `prep` has set up (an SVG
+    /// or PDF recorder), under a `clock` time limit.
+    fn stops_inside_on(
+        what: &'static str,
+        prep: fn(&mut Interp),
+        src: &'static str,
+        op: &'static str,
+        clock: Duration,
+        budget: Duration,
+    ) {
+        let (err, report) = on_a_deadline(what, move || {
+            common::within_cpu_budget(what, budget, 3, || {
+                let mut it = Interp::new();
+                prep(&mut it);
+                it.set_limits(untrusted(clock))
+                    .expect("limits without memory always apply");
+                let err = it
+                    .run_str(&format!("{src} 1 pop"))
+                    .expect_err("a limit stops it");
+                let report = it.error_report(&err);
+                (err, report)
+            })
+        });
+        assert_eq!(err, PsError::TimeExceeded, "{what}: {report}");
+        assert!(
+            report.contains(&format!("OffendingCommand: {op};")),
+            "{what}: stopped after `{op}` returned, not inside it: {report}"
+        );
+    }
+
+    #[test]
+    fn a_fill_of_very_many_curves_stops_inside_fill() {
+        // 100,000 page-sized curves are 10^8 edges for the rasteriser
+        // (#1188: 1.2 s at 72 dpi and 5 s at 300 dpi in one `fill`, then
+        // blamed on the next operator). It looks at the limits as it
+        // flattens and as it lays edges into bands.
+        stops_inside(
+            "fill",
+            "newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat".into(),
+            "fill",
+            "fill",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn flattenpath_of_huge_curves_stops_inside_flattenpath() {
+        // Each curve is 65,536 chords (#1188: 2000 of them were 1.3 s and
+        // about 1 GB in one `flattenpath`).
+        stops_inside(
+            "flattenpath",
+            "newpath 0 0 moveto 2000 { 1e20 1e20 -1e20 1e20 0 0 curveto } repeat".into(),
+            "flattenpath",
+            "flattenpath",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn the_svg_and_pdf_image_recorders_stop_inside_image() {
+        // A 64-megapixel image with no data under a time limit alone: the
+        // recorder decodes every pixel in one step (#1188: about 0.5 s past
+        // a 0.2 s limit, blamed on the next operator). They look once a row.
+        let (clock, budget) = (Duration::from_millis(100), Duration::from_secs(2));
+        let src = "100 100 scale 8000 8000 8 [8000 0 0 8000 0 0] {()} image";
+        stops_inside_on("svg image", Interp::enable_svg, src, "image", clock, budget);
+        stops_inside_on("pdf image", Interp::enable_pdf, src, "image", clock, budget);
+        // A stenciled one: a 64 x 64 image under a 4096 x 4096 mask is a
+        // 16-megapixel composite, about 0.25 s; a shorter clock, so a fast
+        // machine still meets the limit inside the image.
+        let clock = Duration::from_millis(20);
+        let src = "/DeviceRGB setcolorspace 100 100 scale \
+            << /ImageType 3 /InterleaveType 3 \
+            /DataDict << /ImageType 1 /Width 64 /Height 64 /BitsPerComponent 8 \
+              /Decode [0 1 0 1 0 1] /ImageMatrix [64 0 0 -64 0 64] /DataSource {()} >> \
+            /MaskDict << /ImageType 1 /Width 4096 /Height 4096 /BitsPerComponent 1 \
+              /ImageMatrix [4096 0 0 -4096 0 4096] /DataSource {()} >> >> image";
+        stops_inside_on(
+            "svg stencil",
+            Interp::enable_svg,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+        stops_inside_on(
+            "pdf stencil",
+            Interp::enable_pdf,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+    }
+
+    #[test]
+    fn bind_looks_a_long_name_up_by_its_id() {
+        // One 8,000,000-byte name under 2,000 dictionaries: its text was
+        // hashed again in every one (#1188: 4 s, under a 0.1 s limit,
+        // between two looks at the limits).
+        let (r, out) = run(
+            "bind long name",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(1),
+            "/n 8000000 string cvn def 2000 { 1 dict begin } repeat \
+             [ n cvx /add cvx ] cvx bind 1 get type =",
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "operatortype\n");
+    }
+
+    #[test]
+    fn a_ramp_of_thousands_of_legs_paints_in_bounded_time() {
+        // 4095 legs are 8190 stops, and tiny-skia's gradient walks every
+        // stop at every pixel (#1188: 5 s in one `shfill` at 300 dpi). The
+        // raster gets the ramp resampled to 1024 stops.
+        let src = "/n 4095 def \
+            /fns [ 0 1 n 1 sub { 2 mod 0 eq \
+              { << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> } \
+              { << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> } ifelse } for ] def \
+            /bounds [ 1 1 n 1 sub { n div } for ] def \
+            /encode [ 0 1 n 1 sub { pop 0 1 } for ] def \
+            << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 612 0] \
+               /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+               /Bounds bounds /Encode encode >> >> shfill";
+        let r = on_a_deadline("shfill legs", move || {
+            common::within_cpu_budget("shfill legs", Duration::from_secs(2), 3, || {
+                // Letter at 300 dpi.
+                let mut it = Interp::with_page_scaled(612, 792, 300.0 / 72.0).expect("page");
+                it.set_limits(untrusted(Duration::from_secs(30)))
+                    .expect("limits without memory always apply");
+                it.run_str(src)
+            })
+        });
+        assert_eq!(r, Ok(()));
+    }
+
+    /// Type 1 charstring encryption (key 4330), with the usual four
+    /// leading bytes, as hex.
+    fn t1_hex(plain: &[u8]) -> String {
+        let mut r: u16 = 4330;
+        let mut out = String::new();
+        for &p in [0u8; 4].iter().chain(plain) {
+            let c = p ^ (r >> 8) as u8;
+            r = (u16::from(c).wrapping_add(r))
+                .wrapping_mul(52845)
+                .wrapping_add(22719);
+            out.push_str(&format!("{c:02x}"));
+        }
+        out
+    }
+
+    /// A Type 1 font `/T1Probe` whose Subrs are `subr0` (encrypted, then
+    /// `pad` bytes of anything) and `others` more `other_len`-byte strings,
+    /// and whose glyph `A` calls subr 0 `calls` times; then `show`.
+    fn type1_probe(
+        pad: usize,
+        others: usize,
+        other_len: usize,
+        calls: usize,
+        show: usize,
+    ) -> String {
+        let subr0 = t1_hex(&[11]);
+        let mut glyph = vec![139, 248, 136, 13]; // 0 500 hsbw
+        for _ in 0..calls {
+            glyph.extend([139, 10]); // 0 callsubr
+        }
+        glyph.push(14); // endchar
+        format!(
+            "/s0 {len} string def s0 0 <{subr0}> putinterval \
+             /T1Probe 10 dict dup begin /FontType 1 def /PaintType 0 def \
+             /FontMatrix [0.001 0 0 0.001 0 0] def /FontBBox [0 0 1000 1000] def \
+             /Encoding 256 array 0 1 255 {{ 1 index exch /.notdef put }} for dup 65 /A put def \
+             /Private 3 dict dup begin /lenIV 4 def \
+               /Subrs [ s0 {others} {{ {other_len} string }} repeat ] def end def \
+             /CharStrings 2 dict dup begin /.notdef <{notdef}> def /A <{glyph}> def end def \
+             end definefont pop /T1Probe findfont 12 scalefont setfont 10 10 moveto \
+             {show} {{ (A) show }} repeat currentpoint pop =",
+            len = 5 + pad,
+            notdef = t1_hex(&[139, 248, 136, 13, 14]),
+            glyph = t1_hex(&glyph),
+        )
+    }
+
+    #[test]
+    fn a_type1_glyph_decrypts_only_the_subroutines_it_calls() {
+        // Every glyph decrypted every Subrs entry: 1000 of 64 KiB, 200
+        // glyphs, took 25 s past a 1 s limit (#1188). Now only subr 0.
+        let src: &'static str = Box::leak(type1_probe(0, 1000, 65536, 1, 200).into_boxed_str());
+        let (r, out) = run(
+            "type1 subrs",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(2),
+            src,
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "1210.0\n", "200 advances of 6");
+        // And one subroutine of 8 MB called 30,000 times was copied each
+        // time (240 GB); now it is shared.
+        let src: &'static str = Box::leak(type1_probe(8 << 20, 0, 0, 30_000, 1).into_boxed_str());
+        let (r, out) = run(
+            "type1 callsubr",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(2),
+            src,
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "16.0\n");
+    }
+
     /// A RunLengthDecode stream (each pair 0x81 c is 128 copies of c, with
     /// c changing every 100 pairs) under FlateDecode: about 3000 bytes out
     /// per byte in. Flate never makes more than 512 bytes of one input byte
