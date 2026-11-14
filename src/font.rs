@@ -1590,13 +1590,19 @@ fn unicode_glyph(
 /// through the same FontMatrix∘CTM pipeline as every other glyph
 /// source. Charspace units go through FontMatrix directly (no em
 /// normalization — the font's own 0.001 matrix is the convention).
+///
+/// `probe` is looked at (time and heap) before the glyph and before each
+/// subroutine it decrypts (#1188): 500 glyphs each calling a 16 MB
+/// subroutine were 12 s in one slice of the interpreter.
 fn type1_glyph(
     gfx: &mut Gfx,
     fs: &FontState,
     name: &str,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
 ) -> Result<(f64, f64), PsError> {
+    probe.check(0)?;
     let (charstrings, len_iv, subr_array) = {
         let d = fs.dict.borrow();
         let cs = match d.get("CharStrings").as_ref().map(|o| &o.value) {
@@ -1627,10 +1633,17 @@ fn type1_glyph(
     };
     // Each subroutine is decrypted the first time this glyph calls it, and
     // once (#1188); an entry that is not a string is an empty subroutine.
+    // A limit found there stops the charstring (as a missing subroutine
+    // would) and is raised in its place.
     let decrypted: RefCell<std::collections::HashMap<usize, Rc<[u8]>>> = RefCell::default();
+    let limit: std::cell::Cell<Option<PsError>> = std::cell::Cell::new(None);
     let subr = |n: usize| -> Option<Rc<[u8]>> {
         if let Some(code) = decrypted.borrow().get(&n) {
             return Some(code.clone());
+        }
+        if let Err(e) = probe.check(0) {
+            limit.set(Some(e));
+            return None;
         }
         let a = subr_array.as_ref().filter(|a| n < a.len())?;
         let code: Rc<[u8]> = match a.get(n).as_ref().map(|o| &o.value) {
@@ -1646,7 +1659,11 @@ fn type1_glyph(
             subr: &subr,
             charstring_by_name: &fetch,
         },
-    )?;
+    );
+    if let Some(e) = limit.take() {
+        return Err(e);
+    }
+    let glyph = glyph?;
 
     let fm = fs.matrix;
     if !matches!(mode, ShowMode::Width) {
@@ -1946,7 +1963,12 @@ impl ShowCtx {
         }
     }
 
-    pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ShowStep, PsError> {
+    /// `probe` is for a Type 1 glyph's subroutines (`type1_glyph`).
+    pub(crate) fn step(
+        &mut self,
+        gfx: &mut Gfx,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<ShowStep, PsError> {
         // A BuildChar just finished: seal the glyph context and advance.
         if let Some(p) = self.pending.take() {
             if p.suppressed {
@@ -2022,7 +2044,7 @@ impl ShowCtx {
                     Some(name) => name,
                     None => encoding_name(&fs, code as u8),
                 };
-                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen)?;
+                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen, probe)?;
                 self.finish_glyph(gfx, code, adv)
             }
         }

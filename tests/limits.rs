@@ -895,13 +895,14 @@ mod one_operator {
 
     /// A Type 1 font `/T1Probe` whose Subrs are `subr0` (encrypted, then
     /// `pad` bytes of anything) and `others` more `other_len`-byte strings,
-    /// and whose glyph `A` calls subr 0 `calls` times; then `show`.
+    /// and whose glyph `A` calls subr 0 `calls` times, set as the font; then
+    /// the program `show`.
     fn type1_probe(
         pad: usize,
         others: usize,
         other_len: usize,
         calls: usize,
-        show: usize,
+        show: &str,
     ) -> String {
         let subr0 = t1_hex(&[11]);
         let mut glyph = vec![139, 248, 136, 13]; // 0 500 hsbw
@@ -918,7 +919,7 @@ mod one_operator {
                /Subrs [ s0 {others} {{ {other_len} string }} repeat ] def end def \
              /CharStrings 2 dict dup begin /.notdef <{notdef}> def /A <{glyph}> def end def \
              end definefont pop /T1Probe findfont 12 scalefont setfont 10 10 moveto \
-             {show} {{ (A) show }} repeat currentpoint pop =",
+             {show}",
             len = 5 + pad,
             notdef = t1_hex(&[139, 248, 136, 13, 14]),
             glyph = t1_hex(&glyph),
@@ -929,7 +930,16 @@ mod one_operator {
     fn a_type1_glyph_decrypts_only_the_subroutines_it_calls() {
         // Every glyph decrypted every Subrs entry: 1000 of 64 KiB, 200
         // glyphs, took 25 s past a 1 s limit (#1188). Now only subr 0.
-        let src: &'static str = Box::leak(type1_probe(0, 1000, 65536, 1, 200).into_boxed_str());
+        let src: &'static str = Box::leak(
+            type1_probe(
+                0,
+                1000,
+                65536,
+                1,
+                "200 { (A) show } repeat currentpoint pop =",
+            )
+            .into_boxed_str(),
+        );
         let (r, out) = run(
             "type1 subrs",
             untrusted(Duration::from_secs(30)),
@@ -940,7 +950,9 @@ mod one_operator {
         assert_eq!(out, "1210.0\n", "200 advances of 6");
         // And one subroutine of 8 MB called 30,000 times was copied each
         // time (240 GB); now it is shared.
-        let src: &'static str = Box::leak(type1_probe(8 << 20, 0, 0, 30_000, 1).into_boxed_str());
+        let src: &'static str = Box::leak(
+            type1_probe(8 << 20, 0, 0, 30_000, "(A) show currentpoint pop =").into_boxed_str(),
+        );
         let (r, out) = run(
             "type1 callsubr",
             untrusted(Duration::from_secs(30)),
@@ -949,6 +961,20 @@ mod one_operator {
         );
         assert_eq!(r, Ok(()));
         assert_eq!(out, "16.0\n");
+    }
+
+    #[test]
+    fn type1_glyphs_that_each_decrypt_a_huge_subroutine_stop_inside_show() {
+        // Each glyph decrypts the 16 MB subroutine it calls, once: 500 of
+        // them were 12 s in one slice of 512 steps (#1188). The glyph looks
+        // at the limits before each subroutine it decrypts.
+        stops_inside(
+            "type1 show",
+            type1_probe(16_000_000, 0, 0, 1, ""),
+            "500 { (A) show } repeat",
+            "show",
+            Duration::from_secs(2),
+        );
     }
 
     /// A RunLengthDecode stream (each pair 0x81 c is 128 copies of c, with

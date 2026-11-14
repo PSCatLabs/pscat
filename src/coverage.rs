@@ -177,16 +177,16 @@ pub(crate) fn rasterize_limited(
     let mut merger = Merger::default();
     let mut spans: Vec<(u32, u32, bool)> = Vec::new();
     let mstride = mw as usize;
-    let bands = BandIndex::new(&lines, band, h);
-    if let Some(ix) = &bands {
-        work.add(ix.list.len() as u64)?;
+    let mut bands = BandWalk::new(&lines, band, h);
+    if bands.is_some() {
+        work.add(lines.len() as u64)?;
     }
     let mut by = 0;
     while by < h {
         let bh = band.min(h - by);
-        match &bands {
-            Some(ix) => {
-                let mine = ix.lines(by / band).iter().map(|&i| &lines[i as usize]);
+        match &mut bands {
+            Some(walk) => {
+                let mine = walk.band(by / band).iter().map(|&i| &lines[i as usize]);
                 lay(&mut acc, stride, by, bh, mine, &mut work)?;
             }
             None => lay(&mut acc, stride, by, bh, lines.iter(), &mut work)?,
@@ -325,24 +325,35 @@ fn lay<'a>(
 
 /// Which edges each band needs (#1188). Laying every edge into every band
 /// made a fill cost edges x bands: 100,000 curves took 5 s at 300 dpi, a
-/// page of 33 bands. An edge is listed for the bands its y range reaches,
-/// in the edges' own order, so each band adds the same areas in the same
-/// order as before and the coverage is bit for bit the same; the range is
-/// a superset of the bands `accumulate` keeps it for, and it drops the
-/// rest. A path that fits one band (every glyph) is not indexed: `None`.
-struct BandIndex {
-    /// Band `k`'s edges are `list[start[k]..start[k + 1]]`.
+/// page of 33 bands. Each band gets the edges whose y range reaches it, in
+/// the edges' own order, so it adds the same areas in the same order as
+/// before and the coverage is bit for bit the same; the range is a superset
+/// of the bands `accumulate` keeps an edge for, and it drops the rest.
+///
+/// The bands are walked top to bottom with an active list: the edges that
+/// start in a band are merged into the ones still reaching it, both in edge
+/// order, so a band costs the edges it gets and the walk holds a few words
+/// an edge, not one per edge per band (an index of every edge for every
+/// band it crosses was 130 bytes an edge for page-tall ones at 300 dpi). A
+/// path that fits one band (every glyph) is not walked this way: `None`.
+struct BandWalk {
+    /// The edges that start in band `k` are `order[start[k]..start[k + 1]]`.
     start: Vec<usize>,
-    list: Vec<u32>,
+    order: Vec<u32>,
+    /// The last band each edge reaches.
+    last: Vec<u32>,
+    /// The edges reaching the current band, and scratch for the next.
+    active: Vec<u32>,
+    next: Vec<u32>,
 }
 
-impl BandIndex {
-    fn new(lines: &[Line], band: usize, h: usize) -> Option<BandIndex> {
+impl BandWalk {
+    fn new(lines: &[Line], band: usize, h: usize) -> Option<BandWalk> {
         let nb = h.div_ceil(band);
-        if nb <= 1 || u32::try_from(lines.len()).is_err() {
+        if nb <= 1 || u32::try_from(lines.len()).is_err() || u32::try_from(nb).is_err() {
             return None;
         }
-        let last = nb - 1;
+        let top = nb - 1;
         // Bands `[floor(ymin / band), floor(ymax / band)]`: below the first,
         // a band ends at or above ymin; past the last, one starts above
         // ymax; `accumulate` keeps an edge for neither. Not a number: every
@@ -350,40 +361,73 @@ impl BandIndex {
         let range = |l: &Line| -> Option<(usize, usize)> {
             // `f32::min` drops a NaN operand, so look at the ends first.
             if l.y0.is_nan() || l.y1.is_nan() {
-                return Some((0, last));
+                return Some((0, top));
             }
             let (lo, hi) = (l.y0.min(l.y1), l.y0.max(l.y1));
             let q = |y: f32| (f64::from(y) / band as f64).floor();
-            let (k0, k1) = (q(lo).max(0.0), q(hi).min(last as f64));
+            let (k0, k1) = (q(lo).max(0.0), q(hi).min(top as f64));
             (k0 <= k1).then_some((k0 as usize, k1 as usize))
         };
         let mut start = vec![0usize; nb + 1];
-        for l in lines {
+        let mut last = vec![0u32; lines.len()];
+        for (l, end) in lines.iter().zip(&mut last) {
             if let Some((k0, k1)) = range(l) {
-                for c in &mut start[k0 + 1..=k1 + 1] {
-                    *c += 1;
-                }
+                start[k0 + 1] += 1;
+                *end = k1 as u32;
             }
         }
         for k in 0..nb {
             start[k + 1] += start[k];
         }
         let mut fill = start.clone();
-        let mut list = vec![0u32; start[nb]];
+        let mut order = vec![0u32; start[nb]];
         for (i, l) in lines.iter().enumerate() {
-            if let Some((k0, k1)) = range(l) {
-                for slot in &mut fill[k0..=k1] {
-                    list[*slot] = i as u32;
-                    *slot += 1;
-                }
+            if let Some((k0, _)) = range(l) {
+                order[fill[k0]] = i as u32;
+                fill[k0] += 1;
             }
         }
-        Some(BandIndex { start, list })
+        Some(BandWalk {
+            start,
+            order,
+            last,
+            active: Vec::new(),
+            next: Vec::new(),
+        })
     }
 
-    /// Band `k`'s edges, by index into the edge list, in order.
-    fn lines(&self, k: usize) -> &[u32] {
-        &self.list[self.start[k]..self.start[k + 1]]
+    /// Band `k`'s edges, by index into the edge list, in order. Called for
+    /// `k = 0, 1, 2, ...` in turn.
+    fn band(&mut self, k: usize) -> &[u32] {
+        let starting = &self.order[self.start[k]..self.start[k + 1]];
+        let last = &self.last;
+        self.next.clear();
+        let mut kept = self
+            .active
+            .iter()
+            .copied()
+            .filter(|&i| last[i as usize] as usize >= k);
+        let mut new = starting.iter().copied();
+        let (mut a, mut b) = (kept.next(), new.next());
+        loop {
+            match (a, b) {
+                (Some(x), Some(y)) if x < y => {
+                    self.next.push(x);
+                    a = kept.next();
+                }
+                (Some(x), None) => {
+                    self.next.push(x);
+                    a = kept.next();
+                }
+                (_, Some(y)) => {
+                    self.next.push(y);
+                    b = new.next();
+                }
+                (None, None) => break,
+            }
+        }
+        std::mem::swap(&mut self.active, &mut self.next);
+        &self.active
     }
 }
 
@@ -857,13 +901,13 @@ mod tests {
         assert_eq!(m.data(), clip.data());
     }
 
-    /// The band index (#1188) lists an edge for every band `accumulate`
+    /// The band walk (#1188) gives an edge to every band `accumulate`
     /// adds anything to it in: a superset, so each band sums the same areas
     /// in the same order as when every edge visited every band. Edges with
     /// ends on, just off and between band boundaries, reversed, outside the
     /// rows, and not finite in y.
     #[test]
-    fn the_band_index_covers_every_band_an_edge_reaches() {
+    fn the_band_walk_covers_every_band_an_edge_reaches() {
         let (band, h, w) = (7usize, 50usize, 16usize);
         let stride = w + 2;
         let ys = [
@@ -899,12 +943,12 @@ mod tests {
                 }
             }
         }
-        let ix = BandIndex::new(&lines, band, h).expect("several bands");
+        let mut walk = BandWalk::new(&lines, band, h).expect("several bands");
         let nb = h.div_ceil(band);
         for k in 0..nb {
             let by = k * band;
             let bh = band.min(h - by);
-            let listed = ix.lines(k);
+            let listed = walk.band(k).to_vec();
             for (i, l) in lines.iter().enumerate() {
                 let mut acc = Acc {
                     vals: vec![0.0; stride * band],
@@ -926,6 +970,6 @@ mod tests {
                 "band {k} keeps edge order"
             );
         }
-        assert!(BandIndex::new(&lines, h, h).is_none(), "one band: no index");
+        assert!(BandWalk::new(&lines, h, h).is_none(), "one band: no walk");
     }
 }

@@ -2116,7 +2116,11 @@ impl Interp {
                     Frame::ProfReturn => Action::ProfExit,
                     Frame::Show(ctx) => {
                         stepped_show = true;
-                        let step = ctx.step(gfx)?;
+                        // A Type 1 glyph looks at the limits as it decrypts
+                        // its subroutines (#1188): the slice's own check
+                        // comes only every 512 glyphs.
+                        let probe = limit_probe(limits, *steps_used, run_clock, *mem_base);
+                        let step = ctx.step(gfx, &probe)?;
                         match step {
                             ShowStep::Pop => Action::Pop,
                             ShowStep::PopPushWidth(wx, wy) => {

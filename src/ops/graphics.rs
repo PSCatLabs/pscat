@@ -845,11 +845,20 @@ fn rectfill(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.gsave();
     it.gfx.newpath();
     let built = append_rects(it, &rects);
+    let mut work = Ok(0);
     if built.is_ok() {
-        it.gfx.fill(FillRule::Winding);
+        // Under the limits like `fill` (#1188): a numarray can hold
+        // millions of rectangles.
+        let probe = it.limit_probe();
+        work = it.gfx.fill_limited(FillRule::Winding, &probe);
     }
     it.gfx.grestore();
-    built
+    built?;
+    let work = work?;
+    if work >= 1024 {
+        it.poll_limits(work / 1024)?;
+    }
+    Ok(())
 }
 
 /// `x y w h rectstroke` / `numarray rectstroke`, optionally with a
