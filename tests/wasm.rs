@@ -638,7 +638,7 @@ for (const bad of [-1, 1.5, NaN, Infinity]) {
 
 /// The number the playground ships, from `site/playground.html`: it must
 /// stop a decompression bomb in its frame, and let a frame of ordinary
-/// work through. A three-layer, 700 MiB bomb of a few hundred bytes is
+/// work through. A three-layer, 560 MiB bomb of a few hundred bytes is
 /// drained by one `flushfile`; at a step per KiB it passes 500,000 steps
 /// after about 500 MiB (#1210).
 #[test]
@@ -663,7 +663,7 @@ fn wasm_playground_frame_cap_stops_a_bomb_and_passes_a_frame() {
         &format!(
             r#"
 const CAP = {cap};
-const MIB = Math.ceil(CAP / 1024 * 1.4); // a bomb a good deal bigger than the cap allows
+const MIB = Math.ceil(CAP / 1024 * 1.15); // a bomb bigger than the cap allows, but cheap to make
 const data = await bombBytes(MIB, 3);
 if (data.length > 5000) fail('bomb not small: ' + data.length);
 ps.maxSteps = 0;

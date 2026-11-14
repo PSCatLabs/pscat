@@ -335,7 +335,7 @@ output is cut off at 64 KiB.
 | Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200; a `setpagedevice` page too (#909), and `--max-pixels N` caps it lower | `src/main.rs`, `src/interp.rs`, `src/ops/pagedevice.rs` |
 | Canvas, sheet or board size under the MCP server | at most 40,000,000 device pixels by default (`--max-pixels`, at most 64,000,000) | `src/mcp_server.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
-| Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
+| Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000; the site's playground 500,000 per frame, set before each `step()` (`Pscat.maxSteps`, #1210) | `src/interp.rs`, `src/wasm.rs` |
 | Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s); a render job `--job-timeout` less the same margin (3600 s default) | `src/interp.rs` |
 | Heap growth per run (opt in: `--max-memory MIB`, `Limits::max_memory`) | none by default; MCP 1024 MiB | `src/interp.rs`, `src/memtrack.rs` |
 
