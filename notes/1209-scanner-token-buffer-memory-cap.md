@@ -76,6 +76,18 @@ still catches the result. That one case (the ASCII85 partial group) is in the
 sampled loop, and read 67,219,714 bytes against a 41,943,040 cap with the
 guard removed, on three runs.
 
+### Codex round 2 (PR #1221)
+
+1. **A number was charged as a name.** The interning check ran before
+   `parse_number`, so 4 MiB of ASCII `0` (the integer 0) was refused under a
+   6 MiB cap. `classify_word` parses first and charges (`charge_name`) only a
+   word that becomes a name.
+2. **Invalid UTF-8 names** were charged at the raw length, not the repaired
+   one (8 MiB of 0xff is 24 MiB of text, interned as a second copy). The
+   charge is now on the text that results, after repair.
+
+Both have deterministic tests; each fails with its fix reverted.
+
 ### Performance (release, no limits, user time, best of 5, main 38ee4ed -> head)
 
 See the PR. Large tokens (100 MB string, hex, name; and the same through a

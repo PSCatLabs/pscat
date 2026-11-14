@@ -331,6 +331,18 @@ fn memory_growth_is_capped() {
         let hex = flate_rle_hex(b"/", b'a', 32 * MIB, b"");
         let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
         refused(40 * MIB, &format!("{f} f token"), "token");
+        // A name that is invalid UTF-8 is repaired into a copy, up to three
+        // times its size, and that is what is interned: 8 MiB of 0xff are
+        // 24 MiB of text, held twice with its copy, over 40.
+        let hex = flate_rle_hex(b"/", 0xff, 8 * MIB, b"");
+        let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
+        refused(40 * MIB, &format!("{f} f token"), "token");
+        // A number is not interned, whatever its length: 4 MiB of `0` is the
+        // integer 0 under a cap too small for a name that long, with its copy.
+        let hex = flate_rle_hex(b"", b'0', 4 * MIB, b"");
+        let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
+        let (r, report) = run(6 * MIB, &format!("{f} f token pop 0 ne {{ 1 0 div }} if"));
+        assert_eq!(r, Ok(()), "{report}");
         // And one that fits, with its copy, is not refused.
         let hex = flate_rle_hex(b"/", b'a', 10 * MIB, b"");
         let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");

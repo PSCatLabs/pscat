@@ -424,29 +424,49 @@ impl Lexer {
     }
 
     /// A name's text, made from its buffer without a copy when it is UTF-8
-    /// (a name is whatever a program wrote, so not always). Anything over
-    /// 64 KiB is first put to the cap for what comes next: the interpreter
-    /// interns every name, which copies it, and the buffer lives until
-    /// then (#1209). Invalid UTF-8 is repaired into a copy at most three
-    /// times its size.
+    /// (a name is whatever a program wrote, so not always). Invalid UTF-8
+    /// is repaired into a copy at most three times its size. Either way the
+    /// text that results is then put to the cap for the copy the
+    /// interpreter makes by interning it (#1209), by [`Self::charge_name`].
     fn name_text(&self, word: Vec<u8>) -> Result<String, PsError> {
-        if word.len() >= 64 << 10 {
-            self.ask(word.len())?;
-        }
-        match String::from_utf8(word) {
-            Ok(s) => Ok(s),
-            Err(e) => {
-                let bytes = e.into_bytes();
-                self.ask(bytes.len().saturating_mul(3))?;
-                Ok(String::from_utf8_lossy(&bytes).into_owned())
-            }
-        }
+        let s = match String::from_utf8(word) {
+            Ok(s) => s,
+            Err(e) => self.repaired(e.into_bytes())?,
+        };
+        self.charge_name(s.len())?;
+        Ok(s)
     }
 
-    /// A word that is a number, or else a name.
+    /// `bytes` with each invalid sequence replaced, which can take up to
+    /// three times the room, asked for first.
+    fn repaired(&self, bytes: Vec<u8>) -> Result<String, PsError> {
+        self.ask(bytes.len().saturating_mul(3))?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The interpreter interns a name, which copies it while this text is
+    /// still live. A name of 64 KiB or more is asked of the cap first; a
+    /// short one is not worth the look.
+    #[inline]
+    fn charge_name(&self, len: usize) -> Result<(), PsError> {
+        if len >= 64 << 10 {
+            self.ask(len)?;
+        }
+        Ok(())
+    }
+
+    /// A word that is a number, or else a name. Only a name is interned,
+    /// so only a name is charged for it: a long run of digits is a number.
     fn classify_word(&self, word: Vec<u8>) -> Result<Token, PsError> {
-        let s = self.name_text(word)?;
-        Ok(parse_number(&s).unwrap_or(Token::Name(s)))
+        let s = match String::from_utf8(word) {
+            Ok(s) => match parse_number(&s) {
+                Some(number) => return Ok(number),
+                None => s,
+            },
+            Err(e) => self.repaired(e.into_bytes())?,
+        };
+        self.charge_name(s.len())?;
+        Ok(Token::Name(s))
     }
 
     fn read_regular_run(&mut self) -> Result<Vec<u8>, PsError> {
