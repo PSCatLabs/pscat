@@ -1463,7 +1463,9 @@ renders eight examples in both and compares block-downsampled output).
     with no limits set), `Interp::limit_probe()` passed down to a loop in
     `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`). Both raise
     the slice loop's own uncatchable errors. The audit list and what is still
-    open are in `notes/1176-single-operator-limits.md`.
+    open are in `notes/1176-single-operator-limits.md` (#1187 closed its
+    filter-drain rows: the image drain, the skip loops, the scanner, and
+    FlateDecode's accidental cap).
   - Decode filters charge the limits themselves (#1187): the interpreter
     holds one `limits::DecodeBudget` and every `filter` and `eexec` it makes
     gets a handle (`PsFile::filtered_limited`), so a drain of any length

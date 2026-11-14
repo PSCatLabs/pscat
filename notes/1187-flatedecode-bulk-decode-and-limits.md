@@ -92,6 +92,19 @@ FlateDecode image with large flat areas was cut short or failed.
   with `MemoryExceeded`, with a sampling thread's peak heap growth under
   128 MiB. With the checks disabled the image test fails.
 
+### Identity
+
+`scripts/identity_check.sh` was run with `--base-bin` (main at 0698b20) and
+`--head-bin` (this branch rebased on it). It covered every tracked example,
+`hybrid/` included (they hold the FlateDecode, DCTDecode and ASCII85 users:
+postcard, etching_demo, the hybrid pieces), plus `gallery/mochi_in_oils.ps`
+(DCT) and the 12 smallest gallery pieces, at `--gallery-dpi 72`. Every text
+example also loads Type 1 fonts through `eexec`. Result: 143 of 143 page
+renders were byte-identical across 130 files. The four `hybrid/compare_*.ps`
+were skipped: they fail the same way in both trees (they need an input file
+that isn't tracked). The negative control, a 200 × 200 flat FlateDecode
+`colorimage`, differs between the trees: main gives `ioerror`.
+
 ### Performance (release, user time, best of 3, base eb44371 → head)
 
 | Workload | Base | Head |
@@ -102,10 +115,16 @@ FlateDecode image with large flat areas was cut short or failed.
 | 9 MB through ASCIIHexDecode, `readstring` (one pull per byte) | 0.13 s | 0.145 s |
 | 9 MB through ASCIIHexDecode, `colorimage` | 0.12 s | 0.14 s |
 
+The real image pieces, rebased (base 0698b20 → head, best of 3):
+`gallery/mochi_in_oils.ps` (DCTDecode) 11.64 → 11.46 s,
+`examples/etching_demo.ps` 0.11 → 0.11 s, `examples/postcard.ps` (FlateDecode)
+0.00 → 0.00 s. No gallery piece reads image data through ASCIIHexDecode or
+`readhexstring`.
+
 The two ASCIIHex rows are slower by a nanosecond or two a byte. Moving the
 budget check out of the pull loop, dropping the budget argument from `pull`,
-and making filters with no budget at all did not bring it back, so it is code
-layout, not the budget. Later runs on a loaded machine read 0.17-0.18 s for
+and making filters with no budget at all did not bring it back. So it is not
+the budget; the cause was not isolated. Later runs on a loaded machine read 0.17-0.18 s for
 base. Recorded as a guard, not tuned further.
 
 ### Not done (proposed follow-ups)
@@ -113,6 +132,10 @@ base. Recorded as a guard, not tuned further.
 - The other open items in `notes/1176-single-operator-limits.md` (`fill`'s
   bands, `flattenpath`, Type 1 subrs, kernel retirements, the SVG/PDF image
   rows, many-stop gradients) are unchanged.
+- The browser build has no clock, and the playground sets no step cap, so a
+  bomb drained by one operator there runs to its end in a single step. The
+  decoded KiB now count as steps, so setting a step cap in `web/pscat.js`
+  would stop it.
 - The lexer's own token buffer grows without asking `check_alloc`. The
   decoder's 64 KiB heap check bounds it, at up to about three times the cap
   while a doubling copies.

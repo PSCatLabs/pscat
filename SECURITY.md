@@ -549,7 +549,9 @@ without the limits above:
 - **No time limit in the browser build**, which has no clock: the `wasm32`
   module reads time as 0. A step limit applies (`Interp::set_limits`), but
   the playground does not set one; it runs in slices (`begin` and `step` in
-  `web/pscat.js`) so a runaway does not freeze the tab.
+  `web/pscat.js`) so a runaway does not freeze the tab. One operator draining
+  a decompression bomb is a single step, though, so in the browser only a
+  step limit stops it: decoded data counts a step per KiB (#1187).
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
   `--bands` band (steps and time; the bands share `--max-memory` and
