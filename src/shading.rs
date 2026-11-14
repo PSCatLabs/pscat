@@ -375,6 +375,56 @@ pub(crate) struct Shading {
     pub(crate) bbox: Option<(f64, f64, f64, f64)>,
 }
 
+/// The most stops the raster's gradient is given (#1188). tiny-skia's
+/// gradient finds each pixel's stop by a walk over all of them, so painting
+/// costs pixels x stops: a stitching function of 4095 legs (8190 stops)
+/// took 5 s in one `shfill` at 300 dpi. Past this many the ramp is sampled
+/// at this many evenly spaced positions instead, which bounds a `shfill` at
+/// what an ordinary 512-leg ramp costs. Real ramps have a handful of stops
+/// (at most 10 in the gallery and examples; a smooth function is sampled at
+/// about 64 plus two a leg), so only a hostile or extreme one is resampled.
+const MAX_RASTER_STOPS: usize = 1024;
+
+impl Shading {
+    /// The stops the raster paints with: [`Shading::stops`], or past
+    /// [`MAX_RASTER_STOPS`] the same piecewise-linear ramp sampled at that
+    /// many even positions. A leg narrower than the spacing (1/1023 of the
+    /// axis, a few device pixels across a page) is blended into its
+    /// neighbours there. The SVG and PDF exports keep every stop.
+    pub(crate) fn raster_stops(&self) -> std::borrow::Cow<'_, [(f32, f32, f32, f32)]> {
+        if self.stops.len() <= MAX_RASTER_STOPS {
+            return std::borrow::Cow::Borrowed(&self.stops);
+        }
+        std::borrow::Cow::Owned(resample_stops(&self.stops, MAX_RASTER_STOPS))
+    }
+}
+
+/// `stops` (ascending positions) sampled at `n` (2 or more) even positions
+/// from 0 to 1, read as tiny-skia reads them: below the first stop its
+/// colour, past the last the last's, and at a position several stops share
+/// the last of them.
+fn resample_stops(stops: &[(f32, f32, f32, f32)], n: usize) -> Vec<(f32, f32, f32, f32)> {
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    for k in 0..n {
+        let t = k as f32 / (n - 1) as f32;
+        while i + 1 < stops.len() && stops[i + 1].0 <= t {
+            i += 1;
+        }
+        let a = stops[i];
+        let c = match stops.get(i + 1) {
+            Some(&b) if t > a.0 && b.0 > a.0 => {
+                let f = (t - a.0) / (b.0 - a.0);
+                let mix = |x: f32, y: f32| x + (y - x) * f;
+                (t, mix(a.1, b.1), mix(a.2, b.2), mix(a.3, b.3))
+            }
+            _ => (t, a.1, a.2, a.3),
+        };
+        out.push(c);
+    }
+    out
+}
+
 fn get(d: &Dict, key: &str) -> Result<crate::object::Object, PsError> {
     d.get(key).ok_or(PsError::Rangecheck)
 }
@@ -1086,5 +1136,59 @@ mod tests {
             std::cell::RefCell::new(dict),
         ))));
         assert!(matches!(result, Err(PsError::Rangecheck)));
+    }
+
+    /// #1188: a ramp of more than `MAX_RASTER_STOPS` stops reaches the
+    /// raster resampled to that many even positions, read as tiny-skia reads
+    /// stops; one of at most that many is handed over as it is.
+    #[test]
+    fn a_ramp_of_very_many_stops_is_resampled_for_the_raster() {
+        let ramp = |n: usize| Shading {
+            kind: ShadingKind::Axial {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 1.0,
+                y1: 0.0,
+            },
+            stops: (0..n)
+                .map(|i| {
+                    let t = i as f32 / (n - 1) as f32;
+                    (t, t, 1.0 - t, 0.5)
+                })
+                .collect(),
+            bbox: None,
+        };
+        let small = ramp(MAX_RASTER_STOPS);
+        assert!(matches!(
+            small.raster_stops(),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let big = ramp(8190);
+        let r = big.raster_stops();
+        assert_eq!(r.len(), MAX_RASTER_STOPS);
+        for (k, &(t, red, green, blue)) in r.iter().enumerate() {
+            assert_eq!(t, k as f32 / (MAX_RASTER_STOPS - 1) as f32);
+            // A straight ramp stays the same ramp.
+            assert!(
+                (red - t).abs() < 1e-5 && (green - (1.0 - t)).abs() < 1e-5,
+                "{k}"
+            );
+            assert_eq!(blue, 0.5);
+        }
+        // A hard edge at 0.5 (two stops there): the later colour from it on.
+        let edge = [
+            (0.0, 0.0, 0.0, 0.0),
+            (0.5, 0.0, 0.0, 0.0),
+            (0.5, 1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ];
+        let r = resample_stops(&edge, 5);
+        let reds: Vec<f32> = r.iter().map(|s| s.1).collect();
+        assert_eq!(reds, [0.0, 0.0, 1.0, 1.0, 1.0]);
+        // Before the first stop and past the last: their colours.
+        let inner = [(0.25, 0.2, 0.2, 0.2), (0.75, 0.8, 0.8, 0.8)];
+        let r = resample_stops(&inner, 5);
+        let reds: Vec<f32> = r.iter().map(|s| s.1).collect();
+        assert_eq!(reds, [0.2, 0.2, 0.5, 0.8, 0.8]);
     }
 }

@@ -1958,7 +1958,7 @@ impl Gfx {
             return Ok(());
         }
         let stops: Vec<GradientStop> = shading
-            .stops
+            .raster_stops()
             .iter()
             .map(|&(pos, r, g, b)| {
                 GradientStop::new(pos, Color::from_rgba(r, g, b, 1.0).unwrap_or(Color::BLACK))
