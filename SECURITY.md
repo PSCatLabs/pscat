@@ -544,7 +544,7 @@ without the limits above:
   they are counted, and every 64 KiB of output it checks the time and the
   heap. A read refuses to grow its buffer past the
   memory cap, and so does the scanner for the token it is reading (#1209: a
-  string, hex string, name or binary sequence is checked before each
+  string, hex string, ASCII85 string, name or binary sequence is checked before each
   doubling of its buffer, so a token read from a bomb stops at the cap, not at
   up to three times it), and DCTDecode checks the image size from the JPEG header
   against it before decoding. The run stops inside the operator with

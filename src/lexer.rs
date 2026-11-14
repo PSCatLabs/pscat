@@ -12,6 +12,7 @@ use crate::error::PsError;
 use std::rc::Rc;
 
 use crate::file::{FileHandle, PsFile};
+use crate::limits::DecodeBudget;
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -80,6 +81,11 @@ pub struct Lexer {
     /// (`0 setobjectformat`), when those bytes are ordinary name characters
     /// (#733).
     pub(crate) binary_tokens: bool,
+    /// The interpreter's limits, which a token's buffer asks before it grows
+    /// (#1209). A filter holds them itself; a byte source (the main program,
+    /// an executable string, a file read whole) does not, so the interpreter
+    /// hands it this handle. `None` outside an interpreter.
+    limits: Option<Rc<DecodeBudget>>,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -113,6 +119,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -127,6 +134,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -142,6 +150,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -152,6 +161,12 @@ impl Lexer {
             run_name: Some(name),
             ..Lexer::from_file(file)
         }
+    }
+
+    /// Have this scanner's token buffers ask `limits` before they grow.
+    pub(crate) fn with_limits(mut self, limits: Rc<DecodeBudget>) -> Self {
+        self.limits = Some(limits);
+        self
     }
 
     /// The name of the `run` file this scanner reads, or `None` for the
@@ -248,7 +263,7 @@ impl Lexer {
             // first byte must not be consumed before reading it.
             let word = self.read_regular_run()?;
             self.eat_token_delimiter()?;
-            return Ok(Some(classify_word(&word)));
+            return Ok(Some(self.classify_word(word)?));
         }
         self.bump()?;
         match b {
@@ -280,15 +295,11 @@ impl Lexer {
                     self.bump()?;
                     let word = self.read_regular_run()?;
                     self.eat_token_delimiter()?;
-                    Ok(Some(Token::ImmediateName(
-                        String::from_utf8_lossy(&word).into_owned(),
-                    )))
+                    Ok(Some(Token::ImmediateName(self.name_text(word)?)))
                 } else {
                     let word = self.read_regular_run()?;
                     self.eat_token_delimiter()?;
-                    Ok(Some(Token::LiteralName(
-                        String::from_utf8_lossy(&word).into_owned(),
-                    )))
+                    Ok(Some(Token::LiteralName(self.name_text(word)?)))
                 }
             }
             // is_regular handled above; whitespace/comments skipped above.
@@ -311,7 +322,11 @@ impl Lexer {
             }
         }
         let (_, total, _) = crate::binobj::parse_header(&bytes)?;
-        bytes.reserve(total.saturating_sub(bytes.len()).min(1 << 20));
+        // The header can claim 4 GB; the up-front reserve is capped at
+        // 1 MiB, and is put to the memory cap before it is taken.
+        let want = total.saturating_sub(bytes.len()).min(1 << 20);
+        self.room(&bytes, want)?;
+        bytes.reserve(want);
         while bytes.len() < total {
             let b = self.bump()?.ok_or_else(truncated)?;
             self.put(&mut bytes, b)?;
@@ -397,7 +412,41 @@ impl Lexer {
             .saturating_mul(2)
             .max(out.len().saturating_add(extra))
             .max(8);
-        self.file.borrow().check_alloc(grown - cap)
+        self.ask(grown - cap)
+    }
+
+    /// `MemoryExceeded` if `bytes` more heap would pass the cap.
+    fn ask(&self, bytes: usize) -> Result<(), PsError> {
+        match &self.limits {
+            Some(limits) => limits.check_alloc(bytes),
+            None => self.file.borrow().check_alloc(bytes),
+        }
+    }
+
+    /// A name's text, made from its buffer without a copy when it is UTF-8
+    /// (a name is whatever a program wrote, so not always). Anything over
+    /// 64 KiB is first put to the cap for what comes next: the interpreter
+    /// interns every name, which copies it, and the buffer lives until
+    /// then (#1209). Invalid UTF-8 is repaired into a copy at most three
+    /// times its size.
+    fn name_text(&self, word: Vec<u8>) -> Result<String, PsError> {
+        if word.len() >= 64 << 10 {
+            self.ask(word.len())?;
+        }
+        match String::from_utf8(word) {
+            Ok(s) => Ok(s),
+            Err(e) => {
+                let bytes = e.into_bytes();
+                self.ask(bytes.len().saturating_mul(3))?;
+                Ok(String::from_utf8_lossy(&bytes).into_owned())
+            }
+        }
+    }
+
+    /// A word that is a number, or else a name.
+    fn classify_word(&self, word: Vec<u8>) -> Result<Token, PsError> {
+        let s = self.name_text(word)?;
+        Ok(parse_number(&s).unwrap_or(Token::Name(s)))
     }
 
     fn read_regular_run(&mut self) -> Result<Vec<u8>, PsError> {
@@ -527,6 +576,7 @@ impl Lexer {
             let v = group.iter().fold(0u32, |acc, d| {
                 acc.wrapping_mul(85).wrapping_add(u32::from(*d))
             });
+            self.room(&out, n - 1)?;
             out.extend_from_slice(&v.to_be_bytes()[..n - 1]);
         }
         Ok(out)
@@ -559,13 +609,6 @@ impl Lexer {
         }
         Ok(out)
     }
-}
-
-fn classify_word(word: &[u8]) -> Token {
-    let Ok(s) = std::str::from_utf8(word) else {
-        return Token::Name(String::from_utf8_lossy(word).into_owned());
-    };
-    parse_number(s).unwrap_or_else(|| Token::Name(s.to_string()))
 }
 
 /// Also used by `cvi`/`cvr`, which accept full scanner number syntax.
@@ -778,6 +821,34 @@ mod tests {
             lex(&format!("<{long}>")),
             vec![Token::String(vec![0xab; 100])]
         );
+    }
+
+    #[test]
+    fn names_keep_their_text_and_numbers_stay_numbers() {
+        assert_eq!(
+            lex("abc /abc 12 1e3 16#ff 12abc"),
+            vec![
+                Token::Name("abc".into()),
+                Token::LiteralName("abc".into()),
+                Token::Integer(12),
+                Token::Real(1000.0),
+                Token::Integer(255),
+                Token::Name("12abc".into()),
+            ]
+        );
+        // Invalid UTF-8 in a name becomes the replacement character, in a
+        // plain, a literal and an immediate name alike.
+        let mut lexer = Lexer::new(b"a\xffb /a\xffb //a\xffb".to_vec());
+        for want in [
+            Token::Name("a\u{fffd}b".into()),
+            Token::LiteralName("a\u{fffd}b".into()),
+            Token::ImmediateName("a\u{fffd}b".into()),
+        ] {
+            assert_eq!(lexer.next_token().unwrap(), Some(want));
+        }
+        // A name past the size that is put to the cap (64 KiB) is the same.
+        let long = "n".repeat(100_000);
+        assert_eq!(lex(&long), vec![Token::Name(long.clone())]);
     }
 
     #[test]

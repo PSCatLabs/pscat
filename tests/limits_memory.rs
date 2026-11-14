@@ -19,6 +19,30 @@ fn limited(mib: usize) -> Interp {
     it
 }
 
+// `lead`, then `count` of `byte` as RunLengthDecode runs, then
+// `tail`, deflated, as hex for a string literal.
+fn flate_rle_hex(lead: &[u8], byte: u8, count: usize, tail: &[u8]) -> String {
+    use std::io::Write;
+    let literal = |rle: &mut Vec<u8>, bytes: &[u8]| {
+        if !bytes.is_empty() {
+            rle.push(bytes.len() as u8 - 1);
+            rle.extend(bytes);
+        }
+    };
+    let mut rle = Vec::new();
+    literal(&mut rle, lead);
+    rle.extend([0x81, byte].repeat(count / 128));
+    literal(&mut rle, tail);
+    rle.push(0x80);
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(&rle).unwrap();
+    z.finish()
+        .unwrap()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+}
+
 #[test]
 fn memory_growth_is_capped() {
     // The allocator is counting. Other threads' counts can lag by up to
@@ -126,7 +150,12 @@ fn memory_growth_is_capped() {
     // cap, not just under some multiple of it. The cap is not a power of
     // two on purpose: at 32 MiB the unchecked buffer stops at the cap.
     struct Bomb {
+        /// What the stream starts with, and `count` bytes of `byte` after it,
+        /// then `tail`.
         lead: &'static [u8],
+        byte: u8,
+        count: usize,
+        tail: &'static [u8],
         cap_mib: usize,
         /// Peak growth must stay within the cap plus this, in MiB.
         margin_mib: Option<usize>,
@@ -135,43 +164,54 @@ fn memory_growth_is_capped() {
     let bombs = [
         Bomb {
             lead: b"",
+            byte: b'a',
+            count: 4 << 30,
+            tail: b"",
             cap_mib: 32,
             margin_mib: None,
             programs: &["15000 15000 8 [15000 0 0 15000 0 0] f image"],
         },
         Bomb {
-            lead: &[0x00, b'('],
+            lead: b"(",
+            byte: b'a',
+            count: 4 << 30,
+            tail: b"",
             cap_mib: 40,
             margin_mib: Some(2),
             programs: &["f cvx exec", "f token", "{ f token } stopped"],
         },
         Bomb {
-            lead: &[0x00, b'<'],
+            lead: b"<",
+            byte: b'a',
+            count: 4 << 30,
+            tail: b"",
             cap_mib: 40,
             margin_mib: Some(2),
             programs: &["f cvx exec", "f token"],
         },
         Bomb {
-            lead: &[0x00, b'/'],
+            lead: b"/",
+            byte: b'a',
+            count: 4 << 30,
+            tail: b"",
             cap_mib: 40,
             margin_mib: Some(2),
             programs: &["f cvx exec", "f token"],
         },
+        // An ASCII85 string whose last, partial group is the growth that
+        // takes the buffer from 32 MiB to 64: 8,388,608 `z` fill it.
+        Bomb {
+            lead: b"<~",
+            byte: b'z',
+            count: 8 << 20,
+            tail: b"!!~>",
+            cap_mib: 40,
+            margin_mib: Some(2),
+            programs: &["f token"],
+        },
     ];
     for bomb in &bombs {
-        use std::io::Write;
-        let mut rle = bomb.lead.to_vec();
-        rle.extend([0x81, b'a'].repeat(32 << 20));
-        rle.push(0x80);
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        z.write_all(&rle).unwrap();
-        drop(rle);
-        let hex: String = z
-            .finish()
-            .unwrap()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let hex = flate_rle_hex(bomb.lead, bomb.byte, bomb.count, bomb.tail);
         for program in bomb.programs {
             let src =
                 format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def {program}");
@@ -222,6 +262,80 @@ fn memory_growth_is_capped() {
                 ),
             }
         }
+    }
+
+    // The scanner's other allocations, each refused deterministically (Codex,
+    // PR #1221): no sampling, the program either stops inside the operator
+    // that was scanning or it does not. Every one of these ran to its end
+    // before the check was added.
+    {
+        use std::io::Write;
+        let run = |cap: usize, src: &str| {
+            let mut it = Interp::new();
+            it.set_limits(
+                Limits::none()
+                    .with_max_memory(cap)
+                    .with_max_time(std::time::Duration::from_secs(20)),
+            )
+            .expect("the allocator is installed");
+            let r = it.run_str(src);
+            let report = r.as_ref().err().map(|e| it.error_report(e));
+            (r, report.unwrap_or_default())
+        };
+        let refused = |cap: usize, src: &str, op: &str| {
+            let (r, report) = run(cap, src);
+            assert_eq!(r, Err(PsError::MemoryExceeded), "{src:.200}");
+            assert!(
+                report.contains(&format!("OffendingCommand: {op};")),
+                "{src:.200}: {report}"
+            );
+        };
+
+        // The last, partial ASCII85 group is a growth of its own: 8,388,608
+        // `z` are 32 MiB, exactly the buffer, and the `!!` after them take
+        // it to 64.
+        let hex = flate_rle_hex(b"<~", b'z', 8 << 20, b"!!~>");
+        let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
+        refused(40 * MIB, &format!("{f} f token pop pop"), "token");
+        refused(40 * MIB, &format!("{f} f cvx exec"), "exec");
+
+        // A binary object sequence's header can claim 4 GB, and the
+        // scanner reserves up to 1 MiB for it before the bytes are there.
+        // The header alone, with 750,000 bytes already held under a 1 MiB
+        // cap, was an allocation past the cap and then a catchable
+        // `syntaxerror`.
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&[0x80, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00])
+            .unwrap();
+        let hex: String = z
+            .finish()
+            .unwrap()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        refused(
+            MIB,
+            &format!("/s 750000 string def /f <{hex}> /FlateDecode filter def f token"),
+            "token",
+        );
+
+        // A token in a byte source (a string run as code) has no filter to
+        // ask for it: a 16 MB string, the copy the scanner reads, and the
+        // token's own buffer are 46 MB under a 40 MiB cap.
+        let held = "/s 16000000 string def s 0 40 put s 15999999 41 put";
+        refused(40 * MIB, &format!("{held} s cvx exec pop"), "exec");
+        refused(40 * MIB, &format!("{held} s token pop pop pop"), "token");
+
+        // A name is interned, which copies it, and the buffer it was read
+        // into is still live until then: 32 MiB twice, over 40.
+        let hex = flate_rle_hex(b"/", b'a', 32 * MIB, b"");
+        let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
+        refused(40 * MIB, &format!("{f} f token"), "token");
+        // And one that fits, with its copy, is not refused.
+        let hex = flate_rle_hex(b"/", b'a', 10 * MIB, b"");
+        let f = format!("/f <{hex}> /FlateDecode filter /RunLengthDecode filter def");
+        let (r, report) = run(40 * MIB, &format!("{f} f token pop"));
+        assert_eq!(r, Ok(()), "{report}");
     }
 
     // A whole-file read counts as it grows (issue #702): `/dev/zero` never
