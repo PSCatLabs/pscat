@@ -787,3 +787,54 @@ fn a_miter_tip_keeps_its_user_space_place_under_a_slight_stretch() {
         0.02,
     );
 }
+
+// Codex confirmation round on PR #1203.
+
+#[test]
+fn a_straightened_zigzag_takes_its_own_width() {
+    // 10,240 steps of 1/64 in x with y alternating 100 ± 1/128: a 320 px
+    // device line about 0.216 px thick (the 0.2 px pen plus the zigzag's
+    // 1/256 px swing each way), so about 69 px of ink. Merging the zigzag
+    // but keeping its diagonals' 0.583 px width gave 92.2.
+    let src = "[2 0 0 .5 0 0] concat .4 setlinewidth 1 setlinejoin 0 setlinecap 20 100 moveto \
+               1 1 10240 { /i exch def i 64 div 20 add \
+               i 2 mod 0 eq { 100 1 128 div sub } { 100 1 128 div add } ifelse lineto } for stroke";
+    let mut it = Interp::with_page(400, SIZE).expect("page");
+    it.run_str(src)
+        .unwrap_or_else(|e| panic!("{src:?}: {}", it.error_report(&e)));
+    let px = it.gfx().pixmap.clone();
+    let mut sum = 0.0;
+    for y in 0..SIZE {
+        for x in 0..400 {
+            let p = px.pixel(x, y).expect("in page");
+            sum += 1.0
+                - f64::from(u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue()))
+                    / 765.0;
+        }
+    }
+    assert!((60.0..=72.0).contains(&sum), "zigzag ink {sum:.2}");
+}
+
+#[test]
+fn a_zero_length_subpath_under_square_caps_paints_nothing_as_in_gs() {
+    for sub in ["moveto closepath", "moveto 50 200 lineto"] {
+        let src = format!("[2 0 0 .5 0 0] concat .4 setlinewidth 2 setlinecap 50 200 {sub} stroke");
+        let ours = total_ink(&render_pscat(&src));
+        assert!(ours < 1e-9, "{sub}: {ours:.3} of ink");
+        if common::gs_available() {
+            let theirs = total_ink(&render_gs(&src, "square-dot"));
+            assert!(theirs < 1e-9, "{sub}: gs painted {theirs:.3}");
+        }
+        let it = interp(&src, |it| it.gfx_mut().enable_svg());
+        let svg = &it.gfx().svg_pages().expect("recording on")[0];
+        assert!(!svg.contains("<path"), "{sub}: {svg}");
+        let it = interp(&src, |it| it.gfx_mut().enable_pdf());
+        let text = common::pdf_text(&it.gfx().pdf_document().expect("recording on"));
+        assert!(!text.lines().any(|l| l.ends_with(" S")), "{sub}: {text}");
+    }
+    // A round cap still makes the dot.
+    let dot = total_ink(&render_pscat(
+        "[2 0 0 .5 0 0] concat .4 setlinewidth 1 setlinecap 50 200 moveto closepath stroke",
+    ));
+    assert!(dot > 0.05, "round dot {dot:.3}");
+}

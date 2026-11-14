@@ -347,6 +347,35 @@ impl PsPath {
         })
     }
 
+    /// This path without its subpaths that never leave their first point.
+    fn without_point_subpaths(&self) -> PsPath {
+        let mut out = PsPath::default();
+        let mut i = 0;
+        while i < self.segs.len() {
+            let end = self.segs[i + 1..]
+                .iter()
+                .position(|s| matches!(s, Seg::Move(_)))
+                .map_or(self.segs.len(), |n| i + 1 + n);
+            let sub = &self.segs[i..end];
+            let start = match sub[0] {
+                Seg::Move(p) => Some(p),
+                _ => None,
+            };
+            let moves = sub.iter().any(|s| match *s {
+                Seg::Move(_) | Seg::Close => false,
+                Seg::Line(p) => Some(p) != start,
+                Seg::Curve(a, b, p) => [a, b, p].iter().any(|q| Some(*q) != start),
+            });
+            if moves || start.is_none() {
+                out.segs.extend_from_slice(sub);
+            }
+            i = end;
+        }
+        out.current = self.current;
+        out.subpath_start = self.subpath_start;
+        out
+    }
+
     /// The length of the path's control polygon in device space, an upper
     /// bound on its arc length (subpath closes included).
     fn device_length(&self) -> f32 {
@@ -2363,8 +2392,17 @@ impl Gfx {
             if closed && pts.len() > 1 && pts.first() != pts.last() {
                 pts.push(pts[0]);
             }
+            // Merge before measuring: each merged segment's width comes
+            // from its own direction, so a fine zigzag straightened into
+            // one line gets that line's width, not its diagonals'.
+            if pts.len() > 2 {
+                *pts = simplify_polyline(pts, 1.0 / 32.0);
+            }
             if pts.len() < 2 {
-                if let (Some(&p), false) = (pts.first(), cap_outset == 0.0) {
+                // A dot under round caps only: gs paints nothing for a
+                // zero-length subpath under square caps (`stroke_space`
+                // drops those before they get here).
+                if let (Some(&p), LineCap::Round) = (pts.first(), stroke.line_cap) {
                     // A dot: the pen's mean device width (det L = ±1).
                     let pb = groups.entry((key_of(stroke.width), true)).or_default();
                     pb.move_to(p.x, p.y);
@@ -2396,7 +2434,6 @@ impl Gfx {
             }
             for (key, run) in chains {
                 let pb = groups.entry((key, false)).or_default();
-                let run = simplify_polyline(&run, 1.0 / 32.0);
                 pb.move_to(run[0].x, run[0].y);
                 for p in &run[1..] {
                     pb.line_to(p.x, p.y);
@@ -2548,7 +2585,14 @@ impl Gfx {
         }
         let det = l[0] * l[3] - l[1] * l[2];
         let inverse = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
-        let path = self.state.path.linear_mapped(inverse)?;
+        let mut path = self.state.path.linear_mapped(inverse)?;
+        if self.state.line_cap == LineCap::Square {
+            // gs paints nothing for a zero-length subpath under square
+            // caps (`moveto closepath`, or a lineto back to the point), and
+            // reads none back from a PDF either; leave it out of the
+            // raster, SVG and PDF alike.
+            path = path.without_point_subpaths();
+        }
         let to_device =
             Transform::from_row(l[0] as f32, l[1] as f32, l[2] as f32, l[3] as f32, 0.0, 0.0);
         Some(PenSpace {
