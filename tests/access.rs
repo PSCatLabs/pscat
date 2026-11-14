@@ -128,6 +128,76 @@ const CASES: &[(&str, &str, &str)] = &[
     ),
     // --- the writes
     (
+        "identmatrix into a read-only matrix",
+        "[ 1 0 0 1 0 0 ] readonly identmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "currentmatrix into a read-only matrix",
+        "[ 1 0 0 1 0 0 ] readonly currentmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "defaultmatrix into a read-only matrix",
+        "[ 1 0 0 1 0 0 ] readonly defaultmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "concatmatrix into a read-only matrix",
+        "[ 1 0 0 1 0 0 ] readonly dup [ 1 0 0 1 0 0 ] [ 1 0 0 1 0 0 ] 4 -1 roll concatmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "invertmatrix into a read-only matrix",
+        "[ 1 0 0 1 0 0 ] [ 1 0 0 1 0 0 ] readonly invertmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "translate into a read-only matrix",
+        "1 2 [ 1 0 0 1 0 0 ] readonly translate (done) b",
+        "invalidaccess",
+    ),
+    (
+        "scale into a read-only matrix",
+        "1 2 [ 1 0 0 1 0 0 ] readonly scale (done) b",
+        "invalidaccess",
+    ),
+    (
+        "rotate into a read-only matrix",
+        "30 [ 1 0 0 1 0 0 ] readonly rotate (done) b",
+        "invalidaccess",
+    ),
+    (
+        "identmatrix into a bound nested procedure",
+        "/p { { 0 0 0 0 0 0 } } bind def /p load 0 get identmatrix (done) b",
+        "invalidaccess",
+    ),
+    (
+        "identmatrix into a writable matrix",
+        "[ 0 0 0 0 0 0 ] identmatrix (done) b",
+        "done",
+    ),
+    (
+        "a nested procedure keeps its access when it runs",
+        "/p { { 1 add } } bind def p wcheck b",
+        "false",
+    ),
+    (
+        "so a put into it is refused",
+        "/p { { 1 add } } bind def p 0 99 put (done) b",
+        "invalidaccess",
+    ),
+    (
+        "and so is one through forall",
+        "/p { { 1 add } } bind def /p load { wcheck b } forall",
+        "false",
+    ),
+    (
+        "a slot restricted at the depth limit is still entered from a shallower visit",
+        "/leaf { add } def /p [ /leaf load ] cvx def /deep /p load def 99 { /deep [ /deep load ] cvx def } repeat [ /deep load /p load ] cvx bind pop /add { sub } def 5 2 /leaf load exec userdict /add undef b",
+        "7",
+    ),
+    (
         "put into a nested bound procedure",
         "/p { { 1 add } } bind def /p load 0 get 0 1 put (done) b",
         "invalidaccess",
@@ -171,6 +241,7 @@ const CASES: &[(&str, &str, &str)] = &[
 
 /// Plain PostScript, valid in pscat and in gs.
 const PRELUDE: &str = "/b { dup type /booleantype eq { 8 string cvs } if \
+dup type /integertype eq { 8 string cvs } if \
 dup type /nametype eq { 32 string cvs } if print ( ) print } def\n";
 
 fn program() -> String {

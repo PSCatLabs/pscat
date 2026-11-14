@@ -35,8 +35,10 @@ flag, set only on arrays, beside `executable` (it lives in padding:
 
 - Set by `readonly`, `executeonly`, `noaccess`, `packedarray`, and by `bind`
   on every nested executable array slot it enters.
-- Seen by `wcheck`; enforced by `put`, `putinterval` (destination), `astore`
-  and `copy` (destination array): `invalidaccess` (new `PsError::InvalidAccess`
+- Seen by `wcheck`; enforced by `put`, `putinterval` (destination), `astore`,
+  `copy` (destination array) and the matrix writers (`identmatrix`,
+  `currentmatrix`, `defaultmatrix`, `concatmatrix`, `invertmatrix`, and
+  `translate`/`scale`/`rotate` given a matrix): `invalidaccess` (new `PsError::InvalidAccess`
   and an `errordict` handler).
 - Carried by `dup`, `getinterval`, `cvx`, `cvlit` and `load`. A fresh array
   (`array`, `copy`'s result view) is writable. `eq` ignores it.
@@ -47,15 +49,21 @@ flag, set only on arrays, beside `executable` (it lives in padding:
   procedures stay writable (gs: `{ add } readonly bind 0 get type =` is
   `nametype`).
 - A nested slot that is already read-only is not entered unless this same
-  walk bound that view already. The `seen` map (#1176) keeps bind linear; a
-  re-walk of a view at a shallower depth must still go into slots the first
-  walk flagged, or the depth-100 cut-off would leave their contents unbound.
+  walk restricted that slot (`BindWalk::restricted`, by storage address and
+  index). The `seen` map (#1176) keeps bind linear; a re-walk of a view at a
+  shallower depth must still go into slots the first walk flagged, or the
+  depth-100 cut-off would leave their contents unbound (found by Codex: a
+  leaf reached at depth 101 first and at depth 2 second stayed unbound; gs
+  prints 7 for the case in `tests/access.rs`).
+- A procedure literal in a running procedure is pushed with the slot's
+  attributes (`proc_literal`), so `p wcheck` after `/p { { } } bind def` is
+  `false`, as in gs.
 - `restore` brings the flag back with the array contents (`bind` journals the
   array before it writes).
 
 ### Checks
 
-- `tests/access.rs`: 29 cases pinned from gs 10.07.1 and run through gs too
+- `tests/access.rs`: 43 cases pinned from gs 10.07.1 and run through gs too
   (top level writable, nested read-only, two deep, inside `if`, a slot shared
   twice, the dictionary's own reference still writable, `getinterval`/`cvlit`/
   `aload`, already-read-only procedures, `packedarray`, the four writers,
@@ -71,7 +79,5 @@ flag, set only on arrays, beside `executable` (it lives in padding:
   `executeonly` array works.
 - Strings, dictionaries and files have no access attribute.
 - `wcheck` on a name or operator answers `true` (gs: `typecheck`).
-- Matrix writers (`currentmatrix`, `defaultmatrix`, `invertmatrix`, ...) write
-  into a read-only array (gs: `invalidaccess`).
 - Procedures scanned under `true setpacking` are writable (gs: read-only
   packed arrays). `packedarray` itself is read-only.

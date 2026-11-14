@@ -596,9 +596,7 @@ renders eight examples in both and compares block-downsampled output).
   (`rcheck` is always true, `get` on a `noaccess` array works), strings,
   dictionaries and files have no attribute (those operators are identities on
   them), `wcheck` on a name or operator answers true where gs raises
-  `typecheck`, the matrix writers (`currentmatrix`, `defaultmatrix`,
-  `invertmatrix`, ...) write into a read-only array where gs raises
-  `invalidaccess`, and procedures scanned under `true setpacking` stay
+  `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:

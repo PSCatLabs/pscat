@@ -204,6 +204,12 @@ const BIND_POLL: usize = 1 << 16;
 #[derive(Default)]
 struct BindWalk {
     seen: std::collections::HashMap<(usize, usize, usize), usize>,
+    /// The slots (storage address, index) this walk made read-only. A slot
+    /// that is read-only is not entered, unless it is one of these: the walk
+    /// set the flag itself, and may meet the slot again from a shallower
+    /// depth after a visit that stopped at the depth limit without
+    /// recording the procedure in `seen` (#1189).
+    restricted: std::collections::HashSet<(usize, usize)>,
     /// Work (elements, and dictionaries searched for names) since the last
     /// look at the limits.
     walked: usize,
@@ -244,9 +250,13 @@ fn bind_proc(
     // limit stops the walk where it is (the elements after it are skipped).
     let lookup = 1 + it.dict_stack_len();
     let mut stopped: Option<PsError> = None;
+    let (storage, first, _) = body.identity();
+    let mut slot = first;
     // for_each_mut declines (harmlessly) if the storage is already
     // borrowed — the self-referential case.
     body.for_each_mut(|el| {
+        let here = (storage, slot);
+        slot += 1;
         if stopped.is_some() {
             return;
         }
@@ -264,13 +274,16 @@ fn bind_proc(
             // A nested procedure is made read-only through this slot, and
             // bound, unless the slot already was read-only: `bind` does not
             // enter those (#1189), except a packed array, which gs binds
-            // although it is read-only. One this walk has bound already is entered
-            // again (the `seen` check decides if it needs a second look),
-            // since the walk itself set the flag.
+            // although it is read-only. A slot this walk restricted itself is
+            // entered again (the `seen` check decides if it needs a second
+            // look).
             (Value::Array(inner), true)
-                if !el.readonly || el.packed || walk.seen.contains_key(&inner.identity()) =>
+                if !el.readonly || el.packed || walk.restricted.contains(&here) =>
             {
                 nested.push(inner.clone());
+                if !el.readonly {
+                    walk.restricted.insert(here);
+                }
                 el.readonly = true;
             }
             _ => {}

@@ -59,6 +59,7 @@ fn write_matrix(it: &mut Interp, obj: &Object, t: Transform) -> Result<(), PsErr
     if a.len() != 6 {
         return Err(PsError::Rangecheck);
     }
+    obj.check_writable()?;
     it.journal_array(a);
     for (i, v) in [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].into_iter().enumerate() {
         a.put(i, Object::real(f64::from(v)))?;
