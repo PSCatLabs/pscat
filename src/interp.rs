@@ -494,6 +494,11 @@ pub struct Interp {
     mem_base: usize,
     /// Loop iterations until the next `poll_slow` (see `tick`).
     poll_in: u32,
+    /// The limits as the decode filters this interpreter makes see them,
+    /// and the bytes they decoded since the last look (#1187). Every
+    /// `filter` and `eexec` gets a handle; `sync_decode_budget` takes the
+    /// bytes as steps and refreshes the probe wherever the limits are read.
+    decode_budget: Rc<crate::limits::DecodeBudget>,
     /// Directories the program may write files in (issue #740); empty
     /// unless `set_write_roots` was called.
     write_roots: crate::write_roots::WriteRoots,
@@ -715,6 +720,7 @@ impl Interp {
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,
             poll_in: POLL_PERIOD,
+            decode_budget: Rc::default(),
             write_roots: Default::default(),
             read_roots: None,
             open_outputs: Vec::new(),
@@ -776,6 +782,7 @@ impl Interp {
         self.steps_used = 0;
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
+        self.decode_budget.reset(self.limit_probe());
         Ok(())
     }
 
@@ -798,6 +805,7 @@ impl Interp {
         self.mem_base = base;
         self.gfx
             .set_memory_budget(self.limits.max_memory.map(|max| (base, max)));
+        self.decode_budget.set_probe(self.limit_probe());
     }
 
     /// The limits in force ([`Limits::none`] by default).
@@ -1040,6 +1048,24 @@ impl Interp {
         self.steps_used = self.steps_used.saturating_add(n);
     }
 
+    /// The handle every decode filter this interpreter makes holds (#1187).
+    pub(crate) fn decode_budget(&self) -> Rc<crate::limits::DecodeBudget> {
+        self.decode_budget.clone()
+    }
+
+    /// Take what the decode filters decoded since the last look as steps
+    /// (a step per KiB, as for a whole-file read), then give them the
+    /// limits as they stand now. Called wherever the limits are read; only
+    /// under limits, so the clock reads it makes cost nothing otherwise.
+    fn sync_decode_budget(&mut self) {
+        if self.limits.is_none() {
+            return;
+        }
+        let steps = self.decode_budget.take_steps();
+        self.steps_used = self.steps_used.saturating_add(steps);
+        self.decode_budget.set_probe(self.limit_probe());
+    }
+
     /// The permanent systemdict.
     pub(crate) fn systemdict(&self) -> Rc<RefCell<Dict>> {
         self.dstack[0].clone()
@@ -1070,6 +1096,7 @@ impl Interp {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
             self.run_clock = crate::clock::Clock::start();
+            self.decode_budget.reset(self.limit_probe());
         }
         self.estack
             .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
@@ -1127,6 +1154,7 @@ impl Interp {
     #[cold]
     #[inline(never)]
     fn limit_budget(&mut self, budget: usize) -> Result<usize, PsError> {
+        self.sync_decode_budget();
         self.check_time_and_memory()?;
         let mut n = budget;
         if let Some(max) = self.limits.max_steps {
@@ -1153,6 +1181,7 @@ impl Interp {
         let pending = u64::from(POLL_PERIOD - self.poll_in);
         self.poll_in = POLL_PERIOD;
         self.steps_used = self.steps_used.saturating_add(pending);
+        self.sync_decode_budget();
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
@@ -1209,6 +1238,7 @@ impl Interp {
         // A loop iteration counts as a step, on top of the objects its body
         // executes.
         self.steps_used = self.steps_used.saturating_add(u64::from(POLL_PERIOD));
+        self.sync_decode_budget();
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
@@ -1238,6 +1268,7 @@ impl Interp {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poll_read(&mut self, kib: usize, will_alloc: usize) -> Result<(), PsError> {
         self.steps_used = self.steps_used.saturating_add(kib as u64);
+        self.sync_decode_budget();
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
@@ -1267,6 +1298,7 @@ impl Interp {
     #[inline(never)]
     fn poll_limits_slow(&mut self, steps: u64) -> Result<(), PsError> {
         self.steps_used = self.steps_used.saturating_add(steps);
+        self.sync_decode_budget();
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
@@ -2593,7 +2625,11 @@ impl Interp {
     /// `eexec`: run a decrypting view of `file` as program source, with
     /// systemdict pushed for its duration (Type 1 fonts assume it).
     pub(crate) fn begin_eexec(&mut self, file: crate::file::FileHandle) -> Result<(), PsError> {
-        let eexec_file = crate::file::PsFile::filtered(file, crate::file::Decoder::eexec());
+        let eexec_file = crate::file::PsFile::filtered_limited(
+            file,
+            crate::file::Decoder::eexec(),
+            self.decode_budget(),
+        );
         let mut lexer = Lexer::from_file(eexec_file);
         lexer.pop_systemdict = true;
         self.push_dict(self.dstack[0].clone());

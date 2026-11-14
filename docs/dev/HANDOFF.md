@@ -1488,7 +1488,23 @@ renders eight examples in both and compares block-downsampled output).
     with no limits set), `Interp::limit_probe()` passed down to a loop in
     `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`). Both raise
     the slice loop's own uncatchable errors. The audit list and what is still
-    open are in `notes/1176-single-operator-limits.md`.
+    open are in `notes/1176-single-operator-limits.md` (#1187 closed its
+    filter-drain rows: the image drain, the skip loops, the scanner, and
+    FlateDecode's accidental cap).
+  - Decode filters charge the limits themselves (#1187): the interpreter
+    holds one `limits::DecodeBudget` and every `filter` and `eexec` it makes
+    gets a handle (`PsFile::filtered_limited`), so a drain of any length
+    (`image` to EOD, the scanner, `readhexstring`, skip loops inside an
+    ASCIIHex filter) stops inside the operator. `sync_decode_budget` takes
+    the decoded KiB as steps and refreshes the probe wherever the interpreter
+    reads its limits; a new place that reads them should call it. A new
+    decoder needs nothing extra (`ensure_output` charges every pull), but
+    one that buffers a whole input before decoding it (DCT) should ask
+    `check_alloc` for its output size first. `PsFile::filtered` (no budget)
+    stays for code outside an interpreter. FlateDecode reads its source in
+    bulk through `PsFile::with_input` and consumes only what the inflater
+    took, so the source still stops at the byte after the stream; see
+    `notes/1187-flatedecode-bulk-decode-and-limits.md`.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.

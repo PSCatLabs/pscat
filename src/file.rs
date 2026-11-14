@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::error::PsError;
+use crate::limits::DecodeBudget;
 
 pub type FileHandle = Rc<RefCell<PsFile>>;
 
@@ -47,6 +48,9 @@ enum Kind {
         dec: Decoder,
         out: VecDeque<u8>,
         eod: bool,
+        /// The interpreter's limits, which every pull charges (#1187);
+        /// `None` for a filter made outside an interpreter.
+        budget: Option<Rc<DecodeBudget>>,
     },
     /// A file opened for writing (issue #740). Reading one is an
     /// `ioerror`. `None` once closed (a disk file's handle is dropped).
@@ -220,12 +224,31 @@ impl PsFile {
     }
 
     pub fn filtered(source: FileHandle, dec: Decoder) -> FileHandle {
+        Self::make_filter(source, dec, None)
+    }
+
+    /// A filter that charges what it decodes to an interpreter's limits
+    /// (#1187): what the `filter` and `eexec` operators make.
+    pub(crate) fn filtered_limited(
+        source: FileHandle,
+        dec: Decoder,
+        budget: Rc<DecodeBudget>,
+    ) -> FileHandle {
+        Self::make_filter(source, dec, Some(budget))
+    }
+
+    fn make_filter(
+        source: FileHandle,
+        dec: Decoder,
+        budget: Option<Rc<DecodeBudget>>,
+    ) -> FileHandle {
         Rc::new(RefCell::new(PsFile {
             kind: Kind::Filter {
                 source,
                 dec,
                 out: VecDeque::new(),
                 eod: false,
+                budget,
             },
             closed: false,
             consumed: 0,
@@ -251,8 +274,9 @@ impl PsFile {
                 dec,
                 out,
                 eod,
+                budget,
             } => {
-                Self::ensure_output(source, dec, out, eod)?;
+                Self::ensure_output(source, dec, out, eod, budget.as_deref())?;
                 out.pop_front()
             }
             Kind::Output(_) => return Err(PsError::Io),
@@ -302,9 +326,10 @@ impl PsFile {
                 dec,
                 out,
                 eod,
+                budget,
             } => {
                 while buf.len() - start < max {
-                    if let Err(e) = Self::ensure_output(source, dec, out, eod) {
+                    if let Err(e) = Self::ensure_output(source, dec, out, eod, budget.as_deref()) {
                         result = Err(e);
                         break;
                     }
@@ -312,6 +337,20 @@ impl PsFile {
                         break;
                     }
                     let take = out.len().min(max - (buf.len() - start));
+                    // A filter can fill a buffer far bigger than its
+                    // source (an image's samples from a few KB of Flate):
+                    // ask the memory cap before the buffer grows, as
+                    // `Vec` grows it (#1187).
+                    if let Some(budget) = budget
+                        && buf.len() + take > buf.capacity()
+                        && budget.active()
+                    {
+                        let grown = (2 * buf.capacity()).max(buf.len() + take);
+                        if let Err(e) = budget.check_alloc(grown - buf.capacity()) {
+                            result = Err(e);
+                            break;
+                        }
+                    }
                     if let (1, Some(b)) = (take, out.front()) {
                         // ASCIIHex decodes one byte per pull: skip the
                         // slice copy for a lone byte.
@@ -338,15 +377,55 @@ impl PsFile {
     /// branches, since it runs over every sample of an image (#896).
     fn count_read(&mut self, bytes: &[u8]) {
         self.consumed += bytes.len();
-        let mut prev_cr = self.last_was_cr;
-        let mut lines = 0;
-        for &b in bytes {
-            let cr = b == b'\r';
-            lines += usize::from(cr | (b == b'\n' && !prev_cr));
-            prev_cr = cr;
-        }
+        let (lines, last_cr) = count_lines(bytes, self.last_was_cr);
         self.line += lines;
-        self.last_was_cr = prev_cr;
+        self.last_was_cr = last_cr;
+    }
+
+    /// Lend `f` the bytes this file can hand out now without decoding
+    /// more (a raw file's rest, or a filter's decoded run; empty at end of
+    /// data or once closed), and consume the count `f` returns, with the
+    /// bookkeeping [`Self::read_byte`] does. A decoder that takes its input
+    /// in bulk (FlateDecode, #1187) reads its source this way and still
+    /// leaves every byte after its own end unread. `ioerror` for an output
+    /// file.
+    pub(crate) fn with_input<R>(
+        &mut self,
+        f: impl FnOnce(&[u8]) -> (usize, R),
+    ) -> Result<R, PsError> {
+        if self.closed {
+            return Ok(f(&[]).1);
+        }
+        let (n, r, lines, last_cr) = match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let rest = &data[*pos..];
+                let (n, r) = f(rest);
+                let n = n.min(rest.len());
+                let (lines, last_cr) = count_lines(&rest[..n], self.last_was_cr);
+                *pos += n;
+                (n, r, lines, last_cr)
+            }
+            Kind::Filter {
+                source,
+                dec,
+                out,
+                eod,
+                budget,
+            } => {
+                Self::ensure_output(source, dec, out, eod, budget.as_deref())?;
+                let front = out.as_slices().0;
+                let (n, r) = f(front);
+                let n = n.min(front.len());
+                let (lines, last_cr) = count_lines(&front[..n], self.last_was_cr);
+                out.drain(..n);
+                (n, r, lines, last_cr)
+            }
+            Kind::Output(_) => return Err(PsError::Io),
+        };
+        self.consumed += n;
+        self.line += lines;
+        self.last_was_cr = last_cr;
+        Ok(r)
     }
 
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
@@ -360,22 +439,40 @@ impl PsFile {
                 dec,
                 out,
                 eod,
+                budget,
             } => {
-                Self::ensure_output(source, dec, out, eod)?;
+                Self::ensure_output(source, dec, out, eod, budget.as_deref())?;
                 out.front().copied()
             }
             Kind::Output(_) => return Err(PsError::Io),
         })
     }
 
+    /// Pull until there is decoded output or the filter is at its end.
+    /// Every pull's output is charged to the interpreter's limits, so a
+    /// drain of any length looks at them, and so does a decoder that skips
+    /// input (an ASCIIHex filter over gigabytes of decoded spaces): the
+    /// layer below it charges what it decodes (#1187).
     fn ensure_output(
         source: &FileHandle,
         dec: &mut Decoder,
         out: &mut VecDeque<u8>,
         eod: &mut bool,
+        budget: Option<&DecodeBudget>,
     ) -> Result<(), PsError> {
-        while out.is_empty() && !*eod {
-            dec.pull(source, out, eod)?;
+        match budget.filter(|b| b.active()) {
+            // No limits: the loop as it was, nothing more per pull.
+            None => {
+                while out.is_empty() && !*eod {
+                    dec.pull(source, out, eod, budget)?;
+                }
+            }
+            Some(b) => {
+                while out.is_empty() && !*eod {
+                    dec.pull(source, out, eod, budget)?;
+                    b.charge(out.len())?;
+                }
+            }
         }
         Ok(())
     }
@@ -508,6 +605,21 @@ impl PsFile {
     }
 }
 
+/// The lines `bytes` ends (CR, LF, and CR LF one each, a pair straddling
+/// the previous read included: `prev_cr` says the byte before was a CR),
+/// and whether its last byte is a CR. One pass without branches, since it
+/// runs over every sample of an image (#896).
+fn count_lines(bytes: &[u8], prev_cr: bool) -> (usize, bool) {
+    let mut prev_cr = prev_cr;
+    let mut lines = 0;
+    for &b in bytes {
+        let cr = b == b'\r';
+        lines += usize::from(cr | (b == b'\n' && !prev_cr));
+        prev_cr = cr;
+    }
+    (lines, prev_cr)
+}
+
 /// Streaming decoders. Each `pull` produces at least one output byte or
 /// sets `eod` (end of data — the filter's own marker, or source
 /// exhaustion, which the PLRM treats as premature-but-terminal).
@@ -528,10 +640,8 @@ pub enum Decoder {
         skip: usize,
         mode: EexecMode,
     },
-    /// zlib (RFC 1950) — PostScript FlateDecode. Fed one byte at a
-    /// time so the source stops exactly at the end of the compressed
-    /// stream (deflate marks its own final block).
-    Flate(Box<flate2::Decompress>),
+    /// zlib (RFC 1950) — PostScript FlateDecode.
+    Flate(Box<FlateState>),
     /// PostScript LZWDecode: variable 9–12 bit codes, MSB-first,
     /// EarlyChange=1.
     Lzw(Box<LzwState>),
@@ -567,6 +677,83 @@ impl Default for LzwState {
     }
 }
 
+/// A FlateDecode filter's inflater, and the run of output it decodes into.
+pub struct FlateState {
+    z: flate2::Decompress,
+    /// Reused for every pull, so a pull that decodes a few bytes does not
+    /// clear a fresh buffer.
+    chunk: Vec<u8>,
+    /// The stream is corrupt: the output before the damage has been handed
+    /// out, and the next pull is the `ioerror`.
+    failed: bool,
+}
+
+/// The most a FlateDecode pull decodes. A bomb is drained a chunk at a
+/// time, each one charged to the limits.
+const FLATE_CHUNK: usize = 32 * 1024;
+
+impl FlateState {
+    /// Decode up to `FLATE_CHUNK` bytes into `out`, or set `eod`.
+    ///
+    /// The inflater gets the source's whole decoded run at once and says
+    /// how much of it it took; only that much is consumed, so the source
+    /// still stops at the byte after the zlib stream (#1187). It used to
+    /// get one byte at a time and a 512-byte buffer, and drop the byte
+    /// when the inflater did not take it: an inflater with output still to
+    /// hand over takes no input in that call, so any byte that expanded
+    /// past 512 bytes lost the byte after it, and the stream came out cut
+    /// short or corrupt.
+    fn pull(
+        &mut self,
+        source: &FileHandle,
+        out: &mut VecDeque<u8>,
+        eod: &mut bool,
+    ) -> Result<(), PsError> {
+        if self.failed {
+            return Err(PsError::Io);
+        }
+        loop {
+            self.chunk.clear();
+            self.chunk.reserve(FLATE_CHUNK);
+            let (z, chunk) = (&mut self.z, &mut self.chunk);
+            // A limit error from a filter below comes out of `with_input`
+            // as itself; only the inflater's own failure is an `ioerror`.
+            let (status, took, at_end) = source.borrow_mut().with_input(|input| {
+                let before = z.total_in();
+                let status = z.decompress_vec(input, chunk, flate2::FlushDecompress::None);
+                let took = (z.total_in() - before) as usize;
+                (took, (status, took, input.is_empty()))
+            })?;
+            let made = self.chunk.len();
+            out.extend(&self.chunk);
+            match status {
+                // A corrupt stream: what came before the damage first,
+                // then the error.
+                Err(_) if made > 0 => {
+                    self.failed = true;
+                    return Ok(());
+                }
+                Err(_) => return Err(PsError::Io),
+                Ok(flate2::Status::StreamEnd) => {
+                    *eod = true;
+                    return Ok(());
+                }
+                Ok(_) if made > 0 => return Ok(()),
+                // The source ended before the stream did, and nothing is
+                // left to hand over: premature end of data, as before.
+                Ok(_) if at_end => {
+                    *eod = true;
+                    return Ok(());
+                }
+                Ok(_) if took > 0 => {}
+                // Input offered, room to write, and nothing taken or made:
+                // the inflater cannot go on. Never spin on it.
+                Ok(_) => return Err(PsError::Io),
+            }
+        }
+    }
+}
+
 pub enum EexecMode {
     Unknown,
     Binary,
@@ -595,7 +782,11 @@ impl Decoder {
     }
 
     pub fn flate() -> Self {
-        Decoder::Flate(Box::new(flate2::Decompress::new(true)))
+        Decoder::Flate(Box::new(FlateState {
+            z: flate2::Decompress::new(true),
+            chunk: Vec::new(),
+            failed: false,
+        }))
     }
 
     pub fn lzw() -> Self {
@@ -611,6 +802,7 @@ impl Decoder {
         source: &FileHandle,
         out: &mut VecDeque<u8>,
         eod: &mut bool,
+        budget: Option<&DecodeBudget>,
     ) -> Result<(), PsError> {
         let next = || source.borrow_mut().read_byte();
         match self {
@@ -704,28 +896,7 @@ impl Decoder {
                 }
                 Ok(())
             }
-            Decoder::Flate(z) => {
-                let mut outbuf = [0u8; 512];
-                loop {
-                    let Some(b) = next()? else {
-                        *eod = true;
-                        return Ok(());
-                    };
-                    let before = z.total_out();
-                    let status = z
-                        .decompress(&[b], &mut outbuf, flate2::FlushDecompress::None)
-                        .map_err(|_| PsError::Io)?;
-                    let produced = (z.total_out() - before) as usize;
-                    out.extend(&outbuf[..produced]);
-                    if matches!(status, flate2::Status::StreamEnd) {
-                        *eod = true;
-                        return Ok(());
-                    }
-                    if produced > 0 {
-                        return Ok(());
-                    }
-                }
-            }
+            Decoder::Flate(st) => st.pull(source, out, eod),
             Decoder::Lzw(st) => loop {
                 // Refill the bit reservoir to one code's worth.
                 while st.nbits < st.code_width {
@@ -797,7 +968,8 @@ impl Decoder {
                 // upsampler (aarch64; found by the `filters` fuzz target,
                 // issue #704). A panic there must be an `ioerror` like any
                 // other undecodable image, not the end of the process.
-                let decoded = crate::guard::catch(|| decode_jpeg(data)).ok_or(PsError::Io)??;
+                let decoded =
+                    crate::guard::catch(|| decode_jpeg(data, budget)).ok_or(PsError::Io)??;
                 out.extend(decoded);
                 *eod = true;
                 Ok(())
@@ -849,7 +1021,11 @@ impl Decoder {
 /// Decode one buffered JPEG to one byte per PostScript sample: grayscale
 /// yields 1 component, CMYK/YCCK 4, and everything else (the usual YCbCr)
 /// RGB triples.
-fn decode_jpeg(data: Vec<u8>) -> Result<Vec<u8>, PsError> {
+///
+/// The whole image is decoded in one go, so its size (from the header: a
+/// few hundred bytes can claim 65535 x 65535) is put to the memory cap
+/// first (#1187).
+fn decode_jpeg(data: Vec<u8>, budget: Option<&DecodeBudget>) -> Result<Vec<u8>, PsError> {
     use zune_jpeg::zune_core::{colorspace::ColorSpace, options::DecoderOptions};
     let mut dec = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(data));
     dec.decode_headers().map_err(|_| PsError::Io)?;
@@ -858,6 +1034,9 @@ fn decode_jpeg(data: Vec<u8>) -> Result<Vec<u8>, PsError> {
         Some(ColorSpace::CMYK | ColorSpace::YCCK) => ColorSpace::CMYK,
         _ => ColorSpace::RGB,
     };
+    if let (Some(budget), Some((w, h))) = (budget, dec.dimensions()) {
+        budget.check_alloc(w.saturating_mul(h).saturating_mul(want.num_components()))?;
+    }
     dec.set_options(DecoderOptions::default().jpeg_set_out_colorspace(want));
     dec.decode().map_err(|_| PsError::Io)
 }
@@ -1189,6 +1368,96 @@ mod tests {
             out.push(b);
         }
         out
+    }
+
+    fn zlib(data: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(data).expect("compress in memory");
+        z.finish().expect("compress in memory")
+    }
+
+    /// Flat runs, text and noise, the mix a page image has.
+    fn mixed(len: usize) -> Vec<u8> {
+        let mut x: u32 = 9;
+        let mut out = Vec::with_capacity(len);
+        while out.len() < len {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            match (x >> 28) % 4 {
+                0 => out.extend(std::iter::repeat_n((x >> 8) as u8, 20_000)),
+                1 => out.extend_from_slice(b"the quick brown fox jumps over the lazy dog\n"),
+                _ => out.extend((0..500).map(|i| (x >> (i % 24)) as u8)),
+            }
+        }
+        out.truncate(len);
+        out
+    }
+
+    #[test]
+    fn flate_decodes_every_byte_and_stops_at_the_end_of_its_stream() {
+        // #1187: one compressed byte that expanded past 512 bytes lost
+        // the byte after it. The source must still stop exactly after
+        // the zlib stream, whether it is raw bytes or another filter
+        // (here ASCIIHex, which hands over one byte per pull).
+        for data in [
+            vec![b' '; 1 << 20],
+            mixed(3 << 20),
+            Vec::new(),
+            b"x".to_vec(),
+        ] {
+            let z = zlib(&data);
+            let mut raw = z.clone();
+            raw.extend_from_slice(b"TAIL");
+            let src = PsFile::from_bytes(raw);
+            let f = PsFile::filtered(src.clone(), Decoder::flate());
+            assert!(drain(&f) == data, "{} bytes from raw", data.len());
+            assert_eq!(drain(&src), b"TAIL");
+
+            let mut hex: Vec<u8> = z
+                .iter()
+                .flat_map(|b| format!("{b:02x}").into_bytes())
+                .collect();
+            hex.extend_from_slice(b">TAIL");
+            let src = PsFile::from_bytes(hex);
+            let unhex = PsFile::filtered(src.clone(), Decoder::ascii_hex());
+            let f = PsFile::filtered(unhex.clone(), Decoder::flate());
+            let mut got = Vec::new();
+            f.borrow_mut()
+                .read_into(&mut got, usize::MAX)
+                .expect("read");
+            assert!(got == data, "{} bytes through ASCIIHex", data.len());
+            assert_eq!(drain(&unhex), b"", "the hex filter is at its EOD");
+            assert_eq!(drain(&src), b"TAIL");
+        }
+    }
+
+    #[test]
+    fn a_corrupt_flate_stream_hands_over_what_came_before_the_damage() {
+        let data = mixed(200_000);
+        let mut z = zlib(&data);
+        let at = z.len() / 2;
+        for b in &mut z[at..at + 8] {
+            *b ^= 0xA5;
+        }
+        let f = PsFile::filtered(PsFile::from_bytes(z), Decoder::flate());
+        let mut got = Vec::new();
+        let r = f.borrow_mut().read_into(&mut got, usize::MAX);
+        assert_eq!(r, Err(PsError::Io));
+        assert!(!got.is_empty() && data.starts_with(&got[..got.len().min(1000)]));
+        assert_eq!(
+            f.borrow_mut().read_byte(),
+            Err(PsError::Io),
+            "and stays broken"
+        );
+
+        // A stream cut short is a premature end of data, not an error.
+        let z = zlib(&data);
+        let f = PsFile::filtered(
+            PsFile::from_bytes(z[..z.len() / 2].to_vec()),
+            Decoder::flate(),
+        );
+        let got = drain(&f);
+        assert!(!got.is_empty() && data.starts_with(&got));
     }
 
     #[cfg(unix)]

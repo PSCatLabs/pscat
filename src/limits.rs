@@ -43,6 +43,7 @@
 //!
 //! [`Interp::begin_source`]: crate::Interp::begin_source
 
+use std::cell::Cell;
 use std::time::Duration;
 
 use thiserror::Error;
@@ -203,6 +204,115 @@ impl LimitProbe {
             return Err(crate::PsError::MemoryExceeded);
         }
         Ok(())
+    }
+
+    /// `MemoryExceeded` if taking `bytes` more heap would pass the cap,
+    /// before they are taken (`Interp::check_alloc` for a probe).
+    pub(crate) fn check_alloc(&self, bytes: usize) -> Result<(), crate::PsError> {
+        if let Some((base, max)) = self.memory
+            && crate::memtrack::live_bytes()
+                .saturating_sub(base)
+                .saturating_add(bytes)
+                > max
+        {
+            return Err(crate::PsError::MemoryExceeded);
+        }
+        Ok(())
+    }
+}
+
+/// Decoded bytes between two looks at the limits from inside a decode filter.
+const DECODE_CHECK_EVERY: u64 = 64 * 1024;
+
+/// The limits as every decode filter an interpreter makes sees them (#1187).
+///
+/// A filter can turn a few KB into gigabytes (FlateDecode, and filters
+/// stack), and one operator call can drain it: `image` reading to EOD,
+/// `readhexstring` or the scanner skipping whitespace, `flushfile`. The
+/// interpreter holds one budget and gives every filter it makes a handle
+/// to it, so every read of every layer counts, whoever reads it, and a
+/// filter made before `set_limits` obeys the limits set after it. Each
+/// pull adds the bytes it decoded; every 64 KiB the filter looks at the
+/// probe (time, memory, and the steps left counting a step per KiB). The
+/// interpreter takes the whole KiB as steps when it next looks at its
+/// limits and refreshes the probe then.
+#[derive(Debug)]
+pub(crate) struct DecodeBudget {
+    /// Some limit is set: the one thing a pull reads when none is.
+    active: Cell<bool>,
+    probe: Cell<LimitProbe>,
+    /// Decoded bytes the interpreter has not taken as steps yet.
+    bytes: Cell<u64>,
+}
+
+impl Default for DecodeBudget {
+    fn default() -> Self {
+        DecodeBudget {
+            active: Cell::new(false),
+            probe: Cell::new(LimitProbe::NONE),
+            bytes: Cell::new(0),
+        }
+    }
+}
+
+impl DecodeBudget {
+    /// Point the filters at `probe` ([`LimitProbe::NONE`]: no limits).
+    pub(crate) fn set_probe(&self, probe: LimitProbe) {
+        self.active.set(probe != LimitProbe::NONE);
+        self.probe.set(probe);
+    }
+
+    /// Forget the bytes not yet taken: a new program, or new limits.
+    pub(crate) fn reset(&self, probe: LimitProbe) {
+        self.set_probe(probe);
+        self.bytes.set(0);
+    }
+
+    /// Whether any limit is set; with none, a filter skips the budget.
+    #[inline]
+    pub(crate) fn active(&self) -> bool {
+        self.active.get()
+    }
+
+    /// Count `n` bytes a filter just decoded. Each whole KiB is a step, and
+    /// the step cap is checked as each one is counted, so a drain that runs
+    /// past the steps left stops inside the operator doing it, however short
+    /// (Codex, PR #1208: a 31 KiB drain under a 20-step cap used to let the
+    /// next operator run and take the blame). The clock and the heap cost a
+    /// read each, so they are looked at every 64 KiB. Free with no limits.
+    #[inline]
+    pub(crate) fn charge(&self, n: usize) -> Result<(), crate::PsError> {
+        if !self.active.get() {
+            return Ok(());
+        }
+        let before = self.bytes.get();
+        let after = before.saturating_add(n as u64);
+        self.bytes.set(after);
+        if before / 1024 != after / 1024 {
+            let probe = self.probe.get();
+            if let Some(left) = probe.steps_left
+                && after / 1024 > left
+            {
+                return Err(crate::PsError::StepsExceeded);
+            }
+            if before / DECODE_CHECK_EVERY != after / DECODE_CHECK_EVERY {
+                probe.check(after / 1024)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `MemoryExceeded` if `bytes` more heap would pass the cap: asked
+    /// before a read grows its buffer.
+    pub(crate) fn check_alloc(&self, bytes: usize) -> Result<(), crate::PsError> {
+        self.probe.get().check_alloc(bytes)
+    }
+
+    /// The whole KiB decoded since the last call, as steps; the rest stays.
+    pub(crate) fn take_steps(&self) -> u64 {
+        let b = self.bytes.get();
+        self.bytes.set(b % 1024);
+        b / 1024
     }
 }
 
