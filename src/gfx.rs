@@ -82,7 +82,28 @@ struct PenSpace {
     stretch: f64,
 }
 
+/// What `Gfx::stroke` paints: a device path for tiny-skia's stroker, a
+/// pen-space outline to fill mapped by L, or a sub-pixel pen's segments
+/// grouped by device width.
+enum StrokeDraw {
+    Device(tiny_skia::Path),
+    PenOutline(tiny_skia::Path, Transform),
+    Hairlines(Vec<(f32, tiny_skia::Path)>),
+}
+
 impl PenSpace {
+    /// Whether tiny-skia would draw a pen of diameter `width` under L as
+    /// a hairline: both mapped axis vectors at most a pixel by its own
+    /// `fast_len` (the longer component plus half the shorter).
+    fn is_sub_pixel(&self, width: f32) -> bool {
+        let fast_len = |x: f32, y: f32| {
+            let (a, b) = (x.abs(), y.abs());
+            a.max(b) + a.min(b) / 2.0
+        };
+        let l = &self.to_device;
+        fast_len(l.sx * width, l.ky * width) <= 1.0 && fast_len(l.kx * width, l.sy * width) <= 1.0
+    }
+
     /// Fractional digits for writing the pen-space path, given what device
     /// space uses: L stretches a rounding error by up to `stretch`, so add
     /// its decimal magnitude back.
@@ -2091,32 +2112,56 @@ impl Gfx {
         let pen = self.stroke_space();
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
         // In pen space (#1196) the outline is made here and filled, mapped
-        // by L: tiny-skia's `stroke_path` would turn a stroke under a pixel
-        // wide into a device hairline of averaged coverage, which loses the
-        // pen's anisotropy. For a wider stroke it does exactly this anyway.
+        // by L, which is what tiny-skia's `stroke_path` does for any pen it
+        // does not treat as a hairline. A pen under a pixel every way it
+        // would draw as one device hairline of averaged coverage, losing
+        // the anisotropy: `pen_hairlines` draws each segment at its own
+        // device width instead.
         let drawable = match &pen {
-            Some(pen) => self.pen_outline(pen, &stroke),
-            None => self.state.path.to_skia_for_stroke(stroke.width),
+            Some(pen) if pen.is_sub_pixel(stroke.width) => {
+                self.pen_hairlines(pen, &stroke).map(StrokeDraw::Hairlines)
+            }
+            Some(pen) => self
+                .pen_outline(pen, &stroke)
+                .map(|o| StrokeDraw::PenOutline(o, pen.to_device)),
+            None => self
+                .state
+                .path
+                .to_skia_for_stroke(stroke.width)
+                .map(StrokeDraw::Device),
         };
-        if let Some(path) = drawable {
+        if let Some(draw) = drawable {
             self.prepare_paint();
             let paint = self.paint();
             let mask = self.clip_mask();
-            match &pen {
-                Some(pen) => self.pixmap.fill_path(
-                    &path,
-                    &paint,
-                    FillRule::Winding,
-                    pen.to_device,
-                    mask.as_deref(),
-                ),
-                None => self.pixmap.stroke_path(
-                    &path,
+            match &draw {
+                StrokeDraw::Device(path) => self.pixmap.stroke_path(
+                    path,
                     &paint,
                     &stroke,
                     Transform::identity(),
                     mask.as_deref(),
                 ),
+                StrokeDraw::PenOutline(outline, l) => {
+                    self.pixmap
+                        .fill_path(outline, &paint, FillRule::Winding, *l, mask.as_deref())
+                }
+                StrokeDraw::Hairlines(buckets) => {
+                    for (width, path) in buckets {
+                        let thin = Stroke {
+                            width: *width,
+                            dash: None,
+                            ..stroke.clone()
+                        };
+                        self.pixmap.stroke_path(
+                            path,
+                            &paint,
+                            &thin,
+                            Transform::identity(),
+                            mask.as_deref(),
+                        );
+                    }
+                }
             }
             let (w, cap, join, ml) = (
                 stroke.width,
@@ -2238,6 +2283,77 @@ impl Gfx {
             None => path,
         };
         dashed.stroke(stroke, res_scale)
+    }
+
+    /// A sub-pixel pen's stroke as device-space segments grouped by their
+    /// own device width (#1196): `p·|Lᵀn|` across a segment with unit
+    /// normal `n`, floored at the 0.1 px every thin stroke gets, in steps
+    /// of 1/256 px. Each group then draws as tiny-skia's modulated
+    /// hairline, exactly as a thin line under a similarity CTM does, so a
+    /// side's ink is its own width wherever it falls on the pixel grid.
+    /// Dashes are cut in pen space first, so their lengths stay right.
+    /// Under a pixel there are no joins to keep.
+    fn pen_hairlines(
+        &self,
+        pen: &PenSpace,
+        stroke: &Stroke,
+    ) -> Option<Vec<(f32, tiny_skia::Path)>> {
+        let path = pen.path.to_skia_for_stroke(stroke.width)?;
+        let res_scale = tiny_skia::PathStroker::compute_resolution_scale(&pen.to_device);
+        let dashed = match &stroke.dash {
+            Some(d) => path.dash(d, res_scale)?,
+            None => path,
+        };
+        let device = PsPath::from_skia(&dashed.transform(pen.to_device)?).flattened();
+        let l = pen.to_device;
+        let across = |a: DevPoint, b: DevPoint| {
+            let (ux, uy) = (b.x - a.x, b.y - a.y);
+            let len = fmath::hypotf(ux, uy);
+            if len == 0.0 {
+                // A dot (a zero-length dash or subpath with round or
+                // square caps): the pen's mean width.
+                return stroke.width;
+            }
+            let (nx, ny) = (-uy / len, ux / len);
+            stroke.width * fmath::hypotf(l.sx * nx + l.ky * ny, l.kx * nx + l.sy * ny)
+        };
+        let mut buckets: std::collections::BTreeMap<u32, PathBuilder> =
+            std::collections::BTreeMap::new();
+        let mut add = |a: DevPoint, b: DevPoint| {
+            let width = across(a, b).max(0.1);
+            let key = (width * 256.0).round() as u32;
+            let pb = buckets.entry(key).or_default();
+            pb.move_to(a.x, a.y);
+            pb.line_to(b.x, b.y);
+        };
+        let (mut cur, mut start) = (None::<DevPoint>, None::<DevPoint>);
+        for seg in &device.segs {
+            match *seg {
+                Seg::Move(p) => {
+                    cur = Some(p);
+                    start = Some(p);
+                }
+                Seg::Line(p) | Seg::Curve(_, _, p) => {
+                    if let Some(c) = cur {
+                        add(c, p);
+                    }
+                    cur = Some(p);
+                }
+                Seg::Close => {
+                    if let (Some(c), Some(s0)) = (cur, start) {
+                        if c != s0 {
+                            add(c, s0);
+                        }
+                    }
+                    cur = start;
+                }
+            }
+        }
+        let out: Vec<(f32, tiny_skia::Path)> = buckets
+            .into_iter()
+            .filter_map(|(key, pb)| Some((key as f32 / 256.0, pb.finish()?)))
+            .collect();
+        (!out.is_empty()).then_some(out)
     }
 
     /// `strokepath`: replace the current path with the outline `stroke`

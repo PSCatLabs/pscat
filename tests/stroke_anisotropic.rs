@@ -461,3 +461,188 @@ fn strokepath_bbox_matches_ghostscript_under_an_anisotropic_ctm() {
         }
     }
 }
+
+// Codex review, round 1 on PR #1203: one test per finding, with its cases.
+
+/// The numbers `pathbbox` leaves on the stack.
+fn bbox_of(src: &str) -> Vec<f64> {
+    interp(&format!("{src} pathbbox"), |_| {})
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().parse().expect("number"))
+        .collect()
+}
+
+fn assert_bbox(src: &str, got: &[f64], want: [f64; 4], tol: f64) {
+    assert_eq!(got.len(), 4, "{src}: {got:?}");
+    for (g, w) in got.iter().zip(want) {
+        assert!(
+            (g - w).abs() <= tol,
+            "{src}: pathbbox {got:?}, expected {want:?}"
+        );
+    }
+}
+
+#[test]
+fn the_thin_stroke_floor_is_a_device_width_not_a_pen_space_one() {
+    // `[100 0 0 0.01]`, width 0.01: the pen is 1 px across a vertical line
+    // and 0.0001 px across a horizontal one. The 0.1 floor used to apply in
+    // pen space, where L's x stretch of 100 made it 10 px.
+    let src = "[100 0 0 0.01 0 0] concat newpath 0 0 moveto 0 100 lineto 0.01 setlinewidth \
+               strokepath";
+    assert_bbox(src, &bbox_of(src), [-0.005, 0.0, 0.005, 100.0], 1e-4);
+    let px = render_pscat(
+        "[100 0 0 0.01 0 0] concat 0.01 setlinewidth 0.4 2000 moveto 0.4 8000 lineto stroke",
+    );
+    // Device x = 40, y 20..80: PNG row 150 is device y 49..50.
+    assert_widths("vertical line", &widths(&px, Probe::Row(150)), &[1.0], 0.05);
+}
+
+#[test]
+fn a_sub_pixel_pen_keeps_its_anisotropy() {
+    // A 0.4 pen under [2 0 0 0.5] is 0.8 px across vertical lines and 0.2 px
+    // across horizontal ones. tiny-skia's thin-stroke shortcut used to draw
+    // both as one averaged hairline (about 0.5 px of ink each way). On and
+    // off the pixel grid, the ink is the width.
+    for (x, y) in [(10.0, 40.0), (10.17, 40.3)] {
+        let src = format!(
+            "[2 0 0 0.5 0 0] concat 0.4 setlinewidth {x} {y} moveto {} {y} lineto \
+             {} {} lineto {x} {} lineto closepath stroke",
+            x + 60.0,
+            x + 60.0,
+            y + 240.0,
+            y + 240.0
+        );
+        let px = render_pscat(&src);
+        assert_widths(
+            &format!("{src}, row"),
+            &widths(&px, MID_ROW),
+            &[0.8, 0.8],
+            0.05,
+        );
+        assert_widths(
+            &format!("{src}, column"),
+            &widths(&px, MID_COL),
+            &[0.2, 0.2],
+            0.05,
+        );
+    }
+}
+
+/// A 4.5 px wide vertical line at device x = 103.4 under a CTM that
+/// stretches pen space 900 times horizontally: pen x is 0.114889, which two
+/// decimals used to write as 0.11, landing at x = 99.
+const PRECISE_PEN: &str = "[900 0 0 0.0011111111 0 0] concat 0.005 setlinewidth \
+     0.1148889 9000 moveto 0.1148889 171000 lineto stroke";
+
+/// The first `x y m` (PDF) or `Mx y` (SVG) x coordinate in `text`.
+fn first_x(text: &str, pdf: bool) -> f64 {
+    let n = if pdf {
+        let end = text.find(" m ").expect("a moveto");
+        let line = &text[..end];
+        line.rsplit(' ').nth(1).expect("x y m").to_string()
+    } else {
+        let start = text.find(" d=\"M").expect("path data") + 5;
+        text[start..].split(' ').next().expect("x").to_string()
+    };
+    n.parse().unwrap_or_else(|_| panic!("not a number: {n:?}"))
+}
+
+#[test]
+fn pdf_and_svg_write_pen_space_coordinates_precisely_enough_for_the_pen_map() {
+    let it = interp(PRECISE_PEN, |it| it.gfx_mut().enable_pdf());
+    let pdf = it.gfx().pdf_document().expect("recording on");
+    let text = common::pdf_text(&pdf);
+    let stroke = text
+        .lines()
+        .find(|l| l.ends_with(" S"))
+        .unwrap_or_else(|| panic!("no stroke: {text}"));
+    assert!(stroke.contains("900 0 0 -0.0011"), "{stroke}");
+    let x = first_x(stroke, true) * 900.0;
+    assert!((x - 103.4).abs() < 0.05, "PDF x lands at {x}: {stroke}");
+
+    let it = interp(PRECISE_PEN, |it| it.gfx_mut().enable_svg());
+    let svg = &it.gfx().svg_pages().expect("recording on")[0];
+    let at = svg.find("<path transform").expect("pen-space path");
+    let x = first_x(&svg[at..], false) * 900.0;
+    assert!((x - 103.4).abs() < 0.05, "SVG x lands at {x}");
+
+    if !common::gs_available() {
+        return;
+    }
+    // gs reads the PDF back with the line where the raster has it.
+    let path = scratch("precise.pdf");
+    std::fs::write(&path, &pdf).unwrap();
+    let theirs = gs_png(&path, "precise-pdf");
+    let ours = render_pscat(PRECISE_PEN);
+    let centre = |px: &Pixmap| {
+        let (mut sum, mut total) = (0.0, 0.0);
+        for x in 0..SIZE {
+            let v = ink(px, x, SIZE / 2);
+            sum += v * (f64::from(x) + 0.5);
+            total += v;
+        }
+        sum / total
+    };
+    let (a, b) = (centre(&ours), centre(&theirs));
+    assert!((a - 103.4).abs() < 0.1, "pscat's line is centred at {a}");
+    assert!((b - 103.4).abs() < 0.3, "gs draws the PDF's line at {b}");
+}
+
+#[test]
+fn the_round_pen_shortcut_is_bounded_by_the_stroke_size() {
+    // 0.15% out of round: a 4000-unit pen is 3 px off per edge if drawn
+    // round (±1997.0 in user space), so it takes pen space: ±2000, as gs.
+    let src = "[1.0015 0 0 0.9985022466 0 0] concat newpath 0 -10 moveto 0 10 lineto \
+               4000 setlinewidth strokepath";
+    let got = bbox_of(src);
+    assert_eq!(got.len(), 4, "{src}: {got:?}");
+    assert!(
+        (got[0] + 2000.0).abs() < 0.01 && (got[2] - 2000.0).abs() < 0.01,
+        "{src}: pathbbox {got:?}, expected x ±2000"
+    );
+    // The same CTM with an ordinary pen stays on the round-pen path: under
+    // 1/16 px from the true one, and byte-identical to before.
+    let thin = render_pscat(
+        "[1.0015 0 0 0.9985022466 0 0] concat 4 setlinewidth 40 40 120 120 rectstroke",
+    );
+    let round = render_pscat("4 setlinewidth 40.06 39.94 120.18 119.82 rectstroke");
+    assert_eq!(
+        widths(&thin, MID_ROW),
+        widths(&round, MID_ROW),
+        "a 4-unit pen 0.15% out of round should keep the round shortcut"
+    );
+}
+
+#[test]
+fn pdf_dashes_are_pen_space_lengths_under_the_cm() {
+    if !common::gs_available() {
+        return;
+    }
+    // GS_CASES' dashes, with the lines kept apart (gs adjusts strokes it
+    // reads from a PDF, which merges runs where they cross): 20 on, 10 off
+    // along the stretched horizontal line, 5 on, 2.5 off along the
+    // squashed vertical one, once gs reads the dash array under the `cm`.
+    let src = "[2 0 0 0.5 0 0] concat 4 setlinewidth [10 5] 0 setdash \
+               10 100 moveto 60 100 lineto 75 40 moveto 75 360 lineto stroke";
+    let it = interp(src, |it| it.gfx_mut().enable_pdf());
+    let pdf = it.gfx().pdf_document().expect("recording on");
+    let path = scratch("dash.pdf");
+    std::fs::write(&path, &pdf).unwrap();
+    let theirs = gs_png(&path, "dash-pdf");
+    let ours = it.gfx().pixmap.clone();
+    for probe in [Probe::Row(149), Probe::Col(150)] {
+        let (a, b) = (runs(&ours, probe), runs(&theirs, probe));
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{probe:?}: pscat {a:.2?}, gs on the PDF {b:.2?}"
+        );
+        for ((sa, wa), (sb, wb)) in a.iter().zip(&b) {
+            assert!(
+                sa.abs_diff(*sb) <= 1 && (wa - wb).abs() <= 0.6,
+                "{probe:?}: pscat {a:.2?}, gs on the PDF {b:.2?}"
+            );
+        }
+    }
+}
