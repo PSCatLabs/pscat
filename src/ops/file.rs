@@ -450,24 +450,29 @@ fn bytesavailable(it: &mut Interp) -> Result<(), PsError> {
 /// For an input file, flushfile reads and discards to EOF, per the PLRM;
 /// an output file's pending bytes go out.
 ///
-/// A decode filter can expand its source a thousandfold, and filters stack,
-/// so the drain looks at the limits every 64 KiB it discards, a step per KiB
-/// as for a whole-file read (#1176).
+/// The drain looks at the limits every 64 KiB it discards and once at the
+/// end, so it stops inside this call when one is passed (#1176). A raw
+/// file's bytes are a step per KiB here, as for a whole-file read. A
+/// filter's are charged as it decodes them (#1187: a filter can expand its
+/// source a thousandfold, and filters stack), so here they only take the
+/// look, and are not counted twice.
 fn flushfile(it: &mut Interp) -> Result<(), PsError> {
     const CHUNK: usize = 64 * 1024;
     let f = pop_file(it)?;
     if f.borrow().is_output() {
         return flush_output(it, &f);
     }
+    let raw = !f.borrow().is_filter();
+    let steps = |n: usize| if raw { (n / 1024) as u64 } else { 0 };
     let mut n = 0usize;
     while f.borrow_mut().read_byte()?.is_some() {
         n += 1;
         if n == CHUNK {
             n = 0;
-            it.poll_limits((CHUNK / 1024) as u64)?;
+            it.poll_limits(steps(CHUNK))?;
         }
     }
-    Ok(())
+    it.poll_limits(steps(n))
 }
 
 /// file fileposition → position. The byte offset of the next read or
@@ -637,7 +642,8 @@ fn filter(it: &mut Interp) -> Result<(), PsError> {
         Value::String(s) => PsFile::from_bytes(s.to_vec()),
         _ => return Err(PsError::Typecheck),
     };
-    it.push(Object::lit(Value::File(PsFile::filtered(source, dec))));
+    let filtered = PsFile::filtered_limited(source, dec, it.decode_budget());
+    it.push(Object::lit(Value::File(filtered)));
     Ok(())
 }
 
