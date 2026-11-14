@@ -741,6 +741,334 @@ mod one_operator {
         assert_eq!(r, Ok(()));
     }
 
+    /// [`stops_inside_with`] on an interpreter `prep` has set up (an SVG
+    /// or PDF recorder), under a `clock` time limit.
+    fn stops_inside_on(
+        what: &'static str,
+        prep: fn(&mut Interp),
+        src: &'static str,
+        op: &'static str,
+        clock: Duration,
+        budget: Duration,
+    ) {
+        let (err, report) = on_a_deadline(what, move || {
+            common::within_cpu_budget(what, budget, 3, || {
+                let mut it = Interp::new();
+                prep(&mut it);
+                it.set_limits(untrusted(clock))
+                    .expect("limits without memory always apply");
+                let err = it
+                    .run_str(&format!("{src} 1 pop"))
+                    .expect_err("a limit stops it");
+                let report = it.error_report(&err);
+                (err, report)
+            })
+        });
+        assert_eq!(err, PsError::TimeExceeded, "{what}: {report}");
+        assert!(
+            report.contains(&format!("OffendingCommand: {op};")),
+            "{what}: stopped after `{op}` returned, not inside it: {report}"
+        );
+    }
+
+    #[test]
+    fn a_fill_of_very_many_curves_stops_inside_fill() {
+        // 100,000 page-sized curves are 10^8 edges for the rasteriser
+        // (#1188: 1.2 s at 72 dpi and 5 s at 300 dpi in one `fill`, then
+        // blamed on the next operator). It looks at the limits as it
+        // flattens and as it lays edges into bands.
+        stops_inside(
+            "fill",
+            "newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat".into(),
+            "fill",
+            "fill",
+            Duration::from_secs(2),
+        );
+    }
+
+    /// The program's current path as `pathforall` sees it: elements.
+    fn path_elements(it: &mut Interp) -> String {
+        it.set_limits(Limits::none()).expect("no limits");
+        it.capture_stdout();
+        it.run_str(
+            "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall =",
+        )
+        .expect("pathforall");
+        String::from_utf8_lossy(it.captured_stdout())
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn a_step_limit_stops_flattenpath_and_fill_before_they_commit() {
+        // Codex, PR #1217: the step charge came after the path was replaced
+        // and after the fill painted. The whole count is now held against
+        // the limit first: the path stays as it was, and nothing is painted.
+        let mut it = Interp::new();
+        it.run_str("newpath 0 0 moveto 10000000 10000000 -10000000 10000000 0 0 curveto")
+            .unwrap();
+        it.set_limits(steps(12)).unwrap();
+        assert_eq!(it.run_str("flattenpath"), Err(PsError::StepsExceeded));
+        assert_eq!(
+            path_elements(&mut it),
+            "2",
+            "moveto and curveto, not chords"
+        );
+
+        let mut it = Interp::new();
+        it.run_str("0 setgray newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        // About 120,000 edges, over a hundred steps of work.
+        it.set_limits(steps(20)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        let painted = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .filter(|p| p.red() != 255)
+            .count();
+        assert_eq!(painted, 0, "the fill painted nothing");
+        // The same fill under a step cap it fits paints.
+        let mut it = Interp::new();
+        it.run_str("0 setgray newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        it.set_limits(steps(1_000_000)).unwrap();
+        it.run_str("fill").unwrap();
+        assert!(it.gfx().pixmap.pixels().iter().any(|p| p.red() != 255));
+    }
+
+    #[test]
+    fn a_fill_of_flat_curves_counts_the_chords_it_drops() {
+        // Codex, PR #1217: every chord of a curve along y = 792 is horizontal
+        // and dropped, so counting the edges kept saw no work at all; 100,000
+        // such curves are 10^8 chords, 100,000 steps of work.
+        let mut it = Interp::new();
+        it.run_str(
+            "newpath 0 792 moveto 100000 { 1e10 792 -1e10 792 0 792 curveto } repeat \
+             0 791 lineto closepath",
+        )
+        .unwrap();
+        it.set_limits(steps(100)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        // And under a clock it stops inside the fill.
+        stops_inside(
+            "fill of flat curves",
+            "newpath 0 792 moveto 100000 { 1e10 792 -1e10 792 0 792 curveto } repeat \
+             0 791 lineto closepath"
+                .into(),
+            "fill",
+            "fill",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn limits_set_while_an_image_is_paused_reach_its_recorder() {
+        // Codex, PR #1217: the image keeps the limits it began under; a host
+        // that pauses it, sets limits and resumes must not run on the old
+        // (here: none). The SVG recorder then stops inside `image`.
+        let mut it = Interp::new();
+        it.enable_svg();
+        it.begin_source(
+            b"/row 64000 string def 100 100 scale \
+              8000 8000 8 [8000 0 0 8000 0 0] { row } image 1 pop",
+        );
+        // Into the image's data procedure calls, then pause.
+        for _ in 0..20 {
+            assert!(it.step_n(10).expect("runs"), "still in the image");
+        }
+        it.set_limits(untrusted(Duration::from_millis(100)))
+            .unwrap();
+        let err = loop {
+            match it.step_n(1000) {
+                Ok(true) => {}
+                Ok(false) => panic!("the image ran to the end past its limit"),
+                Err(e) => break e,
+            }
+        };
+        let report = it.error_report(&err);
+        assert_eq!(err, PsError::TimeExceeded, "{report}");
+        assert!(report.contains("OffendingCommand: image;"), "{report}");
+    }
+
+    #[test]
+    fn a_refused_fill_after_showpage_leaves_the_page_alone() {
+        // Codex, PR #1217: the page was prepared (the pending erase done, the
+        // recorders cleared, a new page marked painted) before the fill was
+        // refused, so the export gained a blank last page.
+        let mut it = Interp::new();
+        it.enable_svg();
+        it.run_str("0 setgray 10 10 50 50 rectfill showpage")
+            .unwrap();
+        it.run_str("newpath 0 0 moveto 1000 { 600 800 -200 900 300 0 curveto } repeat")
+            .unwrap();
+        it.set_limits(steps(20)).unwrap();
+        assert_eq!(it.run_str("fill"), Err(PsError::StepsExceeded));
+        // The first page is still on the canvas, its erase still pending.
+        let p = it.gfx().pixmap.pixel(30, 792 - 30).expect("in bounds");
+        assert_eq!((p.red(), p.green(), p.blue()), (0, 0, 0));
+        assert_eq!(it.svg_pages().expect("svg on").len(), 1, "no blank page");
+    }
+
+    #[test]
+    fn flattenpath_of_huge_curves_stops_inside_flattenpath() {
+        // Each curve is 65,536 chords (#1188: 2000 of them were 1.3 s and
+        // about 1 GB in one `flattenpath`).
+        stops_inside(
+            "flattenpath",
+            "newpath 0 0 moveto 2000 { 1e20 1e20 -1e20 1e20 0 0 curveto } repeat".into(),
+            "flattenpath",
+            "flattenpath",
+            Duration::from_secs(2),
+        );
+    }
+
+    #[test]
+    fn the_svg_and_pdf_image_recorders_stop_inside_image() {
+        // A 64-megapixel image with no data under a time limit alone: the
+        // recorder decodes every pixel in one step (#1188: about 0.5 s past
+        // a 0.2 s limit, blamed on the next operator). They look once a row.
+        let (clock, budget) = (Duration::from_millis(100), Duration::from_secs(2));
+        let src = "100 100 scale 8000 8000 8 [8000 0 0 8000 0 0] {()} image";
+        stops_inside_on("svg image", Interp::enable_svg, src, "image", clock, budget);
+        stops_inside_on("pdf image", Interp::enable_pdf, src, "image", clock, budget);
+        // A stenciled one: a 64 x 64 image under a 4096 x 4096 mask is a
+        // 16-megapixel composite, about 0.25 s; a shorter clock, so a fast
+        // machine still meets the limit inside the image.
+        let clock = Duration::from_millis(20);
+        let src = "/DeviceRGB setcolorspace 100 100 scale \
+            << /ImageType 3 /InterleaveType 3 \
+            /DataDict << /ImageType 1 /Width 64 /Height 64 /BitsPerComponent 8 \
+              /Decode [0 1 0 1 0 1] /ImageMatrix [64 0 0 -64 0 64] /DataSource {()} >> \
+            /MaskDict << /ImageType 1 /Width 4096 /Height 4096 /BitsPerComponent 1 \
+              /ImageMatrix [4096 0 0 -4096 0 4096] /DataSource {()} >> >> image";
+        stops_inside_on(
+            "svg stencil",
+            Interp::enable_svg,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+        stops_inside_on(
+            "pdf stencil",
+            Interp::enable_pdf,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+        // A data procedure runs between the image's steps (Codex, PR #1217):
+        // the limit the recorder finds still blames `image`, not the
+        // procedure's last operator (`pop`).
+        let clock = Duration::from_millis(100);
+        let src = "100 100 scale 8000 8000 8 [8000 0 0 8000 0 0] { () dup pop } image";
+        stops_inside_on(
+            "svg image, proc",
+            Interp::enable_svg,
+            src,
+            "image",
+            clock,
+            budget,
+        );
+    }
+
+    #[test]
+    fn bind_looks_a_long_name_up_by_its_id() {
+        // One 8,000,000-byte name under 2,000 dictionaries: its text was
+        // hashed again in every one (#1188: 4 s, under a 0.1 s limit,
+        // between two looks at the limits).
+        let (r, out) = run(
+            "bind long name",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(1),
+            "/n 8000000 string cvn def 2000 { 1 dict begin } repeat \
+             [ n cvx /add cvx ] cvx bind 1 get type =",
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "operatortype\n");
+    }
+
+    #[test]
+    fn a_ramp_of_thousands_of_legs_paints_in_bounded_time() {
+        // 4095 legs are 8190 stops, and tiny-skia's gradient walks every
+        // stop at every pixel (#1188: 5 s in one `shfill` at 300 dpi). The
+        // raster gets the ramp resampled to 1024 stops.
+        let src = "/n 4095 def \
+            /fns [ 0 1 n 1 sub { 2 mod 0 eq \
+              { << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> } \
+              { << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> } ifelse } for ] def \
+            /bounds [ 1 1 n 1 sub { n div } for ] def \
+            /encode [ 0 1 n 1 sub { pop 0 1 } for ] def \
+            << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 612 0] \
+               /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+               /Bounds bounds /Encode encode >> >> shfill";
+        let r = on_a_deadline("shfill legs", move || {
+            common::within_cpu_budget("shfill legs", Duration::from_secs(2), 3, || {
+                // Letter at 300 dpi.
+                let mut it = Interp::with_page_scaled(612, 792, 300.0 / 72.0).expect("page");
+                it.set_limits(untrusted(Duration::from_secs(30)))
+                    .expect("limits without memory always apply");
+                it.run_str(src)
+            })
+        });
+        assert_eq!(r, Ok(()));
+    }
+
+    #[test]
+    fn a_type1_glyph_decrypts_only_the_subroutines_it_calls() {
+        // Every glyph decrypted every Subrs entry: 1000 of 64 KiB, 200
+        // glyphs, took 25 s past a 1 s limit (#1188). Now only subr 0.
+        let src: &'static str = Box::leak(
+            common::type1_probe(
+                0,
+                1000,
+                65536,
+                1,
+                "200 { (A) show } repeat currentpoint pop =",
+            )
+            .into_boxed_str(),
+        );
+        let (r, out) = run(
+            "type1 subrs",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(2),
+            src,
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "1210.0\n", "200 advances of 6");
+        // And one subroutine of 8 MB called 30,000 times was copied each
+        // time (240 GB); now it is shared.
+        let src: &'static str = Box::leak(
+            common::type1_probe(8 << 20, 0, 0, 30_000, "(A) show currentpoint pop =")
+                .into_boxed_str(),
+        );
+        let (r, out) = run(
+            "type1 callsubr",
+            untrusted(Duration::from_secs(30)),
+            Duration::from_secs(2),
+            src,
+        );
+        assert_eq!(r, Ok(()));
+        assert_eq!(out, "16.0\n");
+    }
+
+    #[test]
+    fn type1_glyphs_that_each_decrypt_a_huge_subroutine_stop_inside_show() {
+        // Each glyph decrypts the 16 MB subroutine it calls, once: 500 of
+        // them were 12 s in one slice of 512 steps (#1188). The glyph looks
+        // at the limits before each subroutine it decrypts.
+        stops_inside(
+            "type1 show",
+            common::type1_probe(16_000_000, 0, 0, 1, ""),
+            "500 { (A) show } repeat",
+            "show",
+            Duration::from_secs(2),
+        );
+    }
+
     /// A RunLengthDecode stream (each pair 0x81 c is 128 copies of c, with
     /// c changing every 100 pairs) under FlateDecode: about 3000 bytes out
     /// per byte in. Written when Flate lost a byte after any byte that made

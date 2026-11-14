@@ -704,6 +704,10 @@ renders eight examples in both and compares block-downsampled output).
   ramp's average colour), its Function built from the same RGB stops the
   raster and SVG paint, with `/Extend [true true]` to match the raster
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`).
+  A ramp of more than 1024 stops reaches the raster resampled at 1024 even
+  positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
+  pixels x stops), so a leg narrower than 1/1023 of the axis blends into
+  its neighbours there; SVG and PDF keep every stop.
   ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
   `/Pattern` colour spaces) are not implemented at all, in any output.
   SVG's two-circle radial
@@ -1493,11 +1497,23 @@ renders eight examples in both and compares block-downsampled output).
     or allocation suggest must be linear or look at the limits itself (#1176):
     `Interp::poll_limits(steps)` where it holds `it` (`bind`, `flushfile`; free
     with no limits set), `Interp::limit_probe()` passed down to a loop in
-    `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`). Both raise
-    the slice loop's own uncatchable errors. The audit list and what is still
-    open are in `notes/1176-single-operator-limits.md` (#1187 closed its
-    filter-drain rows: the image drain, the skip loops, the scanner, and
-    FlateDecode's accidental cap).
+    `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`,
+    `Gfx::fill_limited` into `coverage::rasterize_limited`,
+    `Gfx::flatten_path`). Both raise the slice loop's own uncatchable errors.
+    The image and show frames build theirs from the split interpreter fields
+    (`interp::limit_probe`) for the SVG/PDF recorders and Type 1 glyphs. The
+    audit list is in `notes/1176-single-operator-limits.md`; #1187 closed its
+    filter-drain rows (the image drain, the skip loops, the scanner, and
+    FlateDecode's accidental cap) and #1188 most of the rest
+    (`notes/1188-single-operator-limits-remaining.md`).
+  - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep
+    each band's edges in the original order: the coverage sums are f32 and
+    their order is what makes a fill byte-identical to the edges x bands
+    loop. It runs only in `rasterize_body::<true>` (limits set); with no
+    limits the body is compiled without it or any counting, which cost 4%
+    of a fill-heavy render otherwise. Code added to `next_item`'s frame arms
+    moved a plain arithmetic loop by 3% in instructions: measure with
+    `/usr/bin/time -l` (instructions retired) when touching interp.rs.
   - Decode filters charge the limits themselves (#1187): the interpreter
     holds one `limits::DecodeBudget` and every `filter` and `eexec` it makes
     gets a handle (`PsFile::filtered_limited`), so a drain of any length

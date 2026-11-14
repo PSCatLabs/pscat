@@ -141,10 +141,11 @@ pub fn type1_charstring(data: &[u8]) {
             .fold(0usize, |h, b| h.wrapping_mul(31) ^ usize::from(b));
         Some(named[h % named.len()].clone())
     };
+    let subr = |n: usize| subrs.get(n).map(|s| std::rc::Rc::from(s.as_slice()));
     let _ = crate::type1::run(
         code,
         &crate::type1::FontData {
-            subrs: &subrs,
+            subr: &subr,
             charstring_by_name: &by_name,
         },
     );

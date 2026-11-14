@@ -137,6 +137,14 @@ pub(crate) struct ImageCtx {
     lut: Option<Vec<f32>>,
     waiting: bool,
     eod: bool,
+    /// The name of the operator that began the image (`image`,
+    /// `imagemask`, `colorimage`), put back as the offending command each
+    /// time the frame steps (#1188): a data procedure runs in between, and
+    /// a limit the recorders find must blame the image, not the
+    /// procedure's last operator.
+    pub(crate) op_name: Option<u32>,
+    /// The limits when the image began, for the recorders (#1188).
+    pub(crate) probe: crate::limits::LimitProbe,
 }
 
 impl ImageCtx {
@@ -170,6 +178,8 @@ impl ImageCtx {
             lut: None,
             waiting: false,
             eod: false,
+            op_name: None,
+            probe: crate::limits::LimitProbe::NONE,
         }
     }
 
@@ -218,19 +228,36 @@ impl ImageCtx {
     /// The bytes the SVG and PDF recorders build for this image, beyond its
     /// own samples (#1176: refused against a memory cap up front). SVG
     /// paints every kind into a w x h RGBA pixmap. PDF passes a mask's
-    /// packed bits through (one copy of the samples), decodes a colour image
-    /// to RGB, and flattens a stenciled one to RGBA then splits it into RGB
-    /// and alpha (counted at the image's own resolution, the least its
-    /// composite can be).
+    /// packed bits through (one copy of the samples) and decodes a colour
+    /// image to RGB.
+    ///
+    /// A stenciled image is flattened to an RGBA composite first, at the
+    /// expanded size [`composite`](Self::composite) builds (up to 64x per
+    /// axis, #1188: counting it at the image's own size let a 64 x 64 image
+    /// under a 4096 x 4096 mask build 200 MB under a 1 MiB cap), and it is
+    /// counted with every buffer alive with it: for SVG the pixmap it is
+    /// copied into and the copy `encode_png` demultiplies, 12 bytes a
+    /// pixel; for PDF its split into RGB and alpha, 8.
     pub(crate) fn recorder_bytes(&self, svg: bool, pdf: bool) -> usize {
         let px = self.width.saturating_mul(self.height);
+        let composite_px = match &self.stencil {
+            Some(st) => self
+                .composite_size(st)
+                .map_or(0, |(w, h, _)| w.saturating_mul(h)),
+            None => 0,
+        };
         let mut bytes = 0usize;
         if svg {
-            bytes = bytes.saturating_add(px.saturating_mul(4));
+            let svg_bytes = if self.stencil.is_some() {
+                composite_px.saturating_mul(12)
+            } else {
+                px.saturating_mul(4)
+            };
+            bytes = bytes.saturating_add(svg_bytes);
         }
         if pdf {
             let pdf_bytes = if self.stencil.is_some() {
-                px.saturating_mul(8)
+                composite_px.saturating_mul(8)
             } else if self.mask.is_some() {
                 // One bit a sample: `row_bytes` for a mask, without its
                 // product that could overflow for a hostile width.
@@ -308,7 +335,9 @@ impl ImageCtx {
         }
         // Premature EOD renders what arrived; missing samples read as 0.
         self.build_decode_lut();
-        self.rasterize(gfx);
+        // The SVG and PDF recorders look at the limits once a row (#1188).
+        let probe = self.probe;
+        self.rasterize(gfx, &probe)?;
         Ok(ImageStep::Done)
     }
 
@@ -605,13 +634,13 @@ impl ImageCtx {
         }
     }
 
-    /// The masked image as one straight-alpha RGBA raster (#739), the
-    /// form the SVG and PDF backends take (a PNG alpha channel, a PDF
-    /// /SMask). The image's samples are expanded by an integer factor
-    /// large enough for the stencil's own resolution, and every cell is
-    /// gated by the stencil exactly as the rasterizer gates a pixel, so
-    /// mask and image may differ in size and ImageMatrix.
-    fn composite(&self, st: &ImageCtx) -> Option<Composite> {
+    /// The composite's raster, `(w, h, k)`: the image expanded `k` times
+    /// per axis, enough for the stencil's own resolution and, off its grid,
+    /// quarter-cell accuracy. `None` when the ImageMatrix is singular or the
+    /// raster empty. One helper, so the memory estimate
+    /// ([`recorder_bytes`](Self::recorder_bytes)) and the composite cannot
+    /// drift apart.
+    fn composite_size(&self, st: &ImageCtx) -> Option<(usize, usize, usize)> {
         let inv = invert6(self.matrix)?;
         // Samples per user unit along each axis, image vs stencil.
         let axes = |m: &[f64; 6]| {
@@ -647,8 +676,32 @@ impl ImageCtx {
         if w == 0 || h == 0 {
             return None;
         }
+        Some((w, h, k))
+    }
+
+    /// The masked image as one straight-alpha RGBA raster (#739), the
+    /// form the SVG and PDF backends take (a PNG alpha channel, a PDF
+    /// /SMask). The image's samples are expanded by an integer factor
+    /// large enough for the stencil's own resolution, and every cell is
+    /// gated by the stencil exactly as the rasterizer gates a pixel, so
+    /// mask and image may differ in size and ImageMatrix.
+    ///
+    /// The limits are looked at once a row (#1188): the raster can be 16
+    /// Mpixel for a tiny image.
+    fn composite(
+        &self,
+        st: &ImageCtx,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<Option<Composite>, PsError> {
+        let Some(inv) = invert6(self.matrix) else {
+            return Ok(None);
+        };
+        let Some((w, h, k)) = self.composite_size(st) else {
+            return Ok(None);
+        };
         let mut rgba = Vec::with_capacity(w * h * 4);
         for cy in 0..h {
+            probe.check(0)?;
             for cx in 0..w {
                 // Centre of this raster cell in image space, then user space.
                 let (px, py) = ((cx as f64 + 0.5) / k as f64, (cy as f64 + 0.5) / k as f64);
@@ -671,13 +724,21 @@ impl ImageCtx {
                 ]);
             }
         }
-        Some(Composite { w, h, k, rgba })
+        Ok(Some(Composite { w, h, k, rgba }))
     }
 
-    fn record_svg_stenciled(&self, gfx: &mut Gfx, st: &ImageCtx, t: tiny_skia::Transform) {
-        let Some(c) = self.composite(st) else { return };
+    fn record_svg_stenciled(
+        &self,
+        gfx: &mut Gfx,
+        st: &ImageCtx,
+        t: tiny_skia::Transform,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(), PsError> {
+        let Some(c) = self.composite(st, probe)? else {
+            return Ok(());
+        };
         let Some(mut pm) = tiny_skia::Pixmap::new(c.w as u32, c.h as u32) else {
-            return;
+            return Ok(());
         };
         for (dst, px) in pm
             .pixels_mut()
@@ -701,13 +762,19 @@ impl ImageCtx {
         if let Ok(png) = encoded {
             gfx.svg_image(&png, c.w, c.h, c.transform(t), self.interpolate);
         }
+        Ok(())
     }
 
     /// Mirror this image into the SVG recorder: the source samples as
     /// an embedded PNG plus the exact device transform the rasterizer
     /// applies (CTM ∘ ImageMatrix⁻¹, mapping sample coordinates to
     /// device space).
-    fn record_svg(&self, gfx: &mut Gfx, ctm: tiny_skia::Transform) {
+    fn record_svg(
+        &self,
+        gfx: &mut Gfx,
+        ctm: tiny_skia::Transform,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(), PsError> {
         let m = self.matrix;
         let img = tiny_skia::Transform::from_row(
             m[0] as f32,
@@ -717,19 +784,21 @@ impl ImageCtx {
             m[4] as f32,
             m[5] as f32,
         );
-        let Some(inv) = img.invert() else { return };
+        let Some(inv) = img.invert() else {
+            return Ok(());
+        };
         let t = inv.post_concat(ctm);
         if let Some(st) = &self.stencil {
-            self.record_svg_stenciled(gfx, st, t);
-            return;
+            return self.record_svg_stenciled(gfx, st, t, probe);
         }
         let Some(mut pm) =
             tiny_skia::Pixmap::new(self.width.max(1) as u32, self.height.max(1) as u32)
         else {
-            return;
+            return Ok(());
         };
         let paint_rgb = gfx.rgb();
         for iy in 0..self.height {
+            probe.check(0)?;
             for ix in 0..self.width {
                 let (r, g, b, a) = match self.mask {
                     Some(paint_ones) => {
@@ -772,12 +841,18 @@ impl ImageCtx {
                 self.interpolate && self.mask.is_none(),
             );
         }
+        Ok(())
     }
 
     /// Mirror into the PDF recorder: masks pass their packed 1-bit
     /// rows straight through (that's already our wire format); color
     /// images decode to interleaved RGB.
-    fn record_pdf(&self, gfx: &mut Gfx, ctm: tiny_skia::Transform) {
+    fn record_pdf(
+        &self,
+        gfx: &mut Gfx,
+        ctm: tiny_skia::Transform,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(), PsError> {
         let m = self.matrix;
         let img = tiny_skia::Transform::from_row(
             m[0] as f32,
@@ -787,10 +862,12 @@ impl ImageCtx {
             m[4] as f32,
             m[5] as f32,
         );
-        let Some(inv) = img.invert() else { return };
+        let Some(inv) = img.invert() else {
+            return Ok(());
+        };
         let t = inv.post_concat(ctm);
         if let Some(st) = &self.stencil {
-            if let Some(c) = self.composite(st) {
+            if let Some(c) = self.composite(st, probe)? {
                 let mut rgb = Vec::with_capacity(c.w * c.h * 3);
                 let mut alpha = Vec::with_capacity(c.w * c.h);
                 for px in c.rgba.as_chunks::<4>().0.iter() {
@@ -805,7 +882,7 @@ impl ImageCtx {
                     self.interpolate,
                 );
             }
-            return;
+            return Ok(());
         }
         let data = match self.mask {
             Some(paint_ones) => crate::pdf::ImageData::Mask {
@@ -815,6 +892,7 @@ impl ImageCtx {
             None => {
                 let mut rgb = Vec::with_capacity(self.width * self.height * 3);
                 for iy in 0..self.height {
+                    probe.check(0)?;
                     for ix in 0..self.width {
                         let (r, g, b) = self.rgb_at(ix, iy);
                         rgb.push((r * 255.0).round() as u8);
@@ -832,6 +910,7 @@ impl ImageCtx {
             [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty],
             self.interpolate && self.mask.is_none(),
         );
+        Ok(())
     }
 
     /// True when the ImageMatrix maps the user-space unit square's
@@ -854,20 +933,20 @@ impl ImageCtx {
     // Kept out of `step` (#835): inlined there, the per-pixel loop came out
     // a few percent slower on depths without a decode table (16-bit, Indexed).
     #[inline(never)]
-    fn rasterize(&self, gfx: &mut Gfx) {
+    fn rasterize(&self, gfx: &mut Gfx, probe: &crate::limits::LimitProbe) -> Result<(), PsError> {
         if self.width == 0 || self.height == 0 || self.bits == 0 || gfx.is_null_device() {
-            return; // nothing to paint, or `nulldevice` discards it (#739)
+            return Ok(()); // nothing to paint, or `nulldevice` discards it (#739)
         }
         let ctm = gfx.ctm();
         let Some(inv) = ctm.invert() else {
-            return; // singular CTM: the image has no area
+            return Ok(()); // singular CTM: the image has no area
         };
         gfx.prepare_paint();
         if gfx.svg_wanted() {
-            self.record_svg(gfx, ctm);
+            self.record_svg(gfx, ctm, probe)?;
         }
         if gfx.pdf_wanted() {
-            self.record_pdf(gfx, ctm);
+            self.record_pdf(gfx, ctm, probe)?;
         }
         // The image's footprint in user space is ImageMatrix⁻¹ of the
         // source rectangle [0,w]×[0,h] (PLRM 4.10.3): the unit square
@@ -881,7 +960,7 @@ impl ImageCtx {
             [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
         } else {
             let Some(mi) = invert6(m) else {
-                return; // singular: refused at the operator, never here
+                return Ok(()); // singular: refused at the operator, never here
             };
             let (w, h) = (self.width as f64, self.height as f64);
             [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)].map(|(ix, iy)| {
@@ -1014,6 +1093,7 @@ impl ImageCtx {
         if painted {
             gfx.dirty = true;
         }
+        Ok(())
     }
 }
 

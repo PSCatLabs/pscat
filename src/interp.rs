@@ -783,6 +783,7 @@ impl Interp {
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
         self.decode_budget.reset(self.limit_probe());
+        self.refresh_frame_probes();
         Ok(())
     }
 
@@ -806,6 +807,7 @@ impl Interp {
         self.gfx
             .set_memory_budget(self.limits.max_memory.map(|max| (base, max)));
         self.decode_budget.set_probe(self.limit_probe());
+        self.refresh_frame_probes();
     }
 
     /// The limits in force ([`Limits::none`] by default).
@@ -1097,6 +1099,7 @@ impl Interp {
             self.poll_in = POLL_PERIOD;
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
+            self.refresh_frame_probes();
         }
         self.estack.push(Frame::Scanner(
             Lexer::main_program(src.to_vec()).with_limits(self.decode_budget.clone()),
@@ -1698,6 +1701,7 @@ impl Interp {
     #[inline(always)]
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
         let command = self.error_command.take();
+        self.blame_image();
         // A limit error is never catchable: `stopped` would otherwise let a
         // runaway program swallow it and carry on (issue #604).
         if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
@@ -2601,12 +2605,18 @@ impl Interp {
     }
 
     /// Queue a show (any of the family) as an execution-stack frame.
-    pub(crate) fn begin_show(&mut self, ctx: ShowCtx) -> Result<(), PsError> {
+    pub(crate) fn begin_show(&mut self, mut ctx: ShowCtx) -> Result<(), PsError> {
+        // For a Type 1 glyph's decryption (#1188), checked with no steps:
+        // the deadline and the heap cap do not move while the show runs.
+        ctx.set_limit_probe(self.limit_probe());
         self.push_frame(Frame::Show(Box::new(ctx)))
     }
 
     /// Queue an image (image/imagemask/colorimage) frame.
-    pub(crate) fn begin_image(&mut self, ctx: ImageCtx) -> Result<(), PsError> {
+    pub(crate) fn begin_image(&mut self, mut ctx: ImageCtx) -> Result<(), PsError> {
+        ctx.op_name = self.last_name;
+        // For the SVG and PDF recorders (#1188), checked with no steps.
+        ctx.probe = self.limit_probe();
         // The SVG and PDF recorders decode the whole image into a buffer of
         // their own, width x height pixels whatever data the source gives
         // (`30000 30000 8 [...] {()} image` is 3.6 GB and 9e8 pixels in one
@@ -3441,6 +3451,57 @@ fn scan_procedure(
         }
     }
     Ok(Object::procedure(items))
+}
+
+// #1188's helpers, kept after everything else: the interpreter's hot loop
+// above is sensitive to what shares its code unit (an image-arm change in
+// `next_item` cost 3% of instructions on a plain arithmetic loop).
+impl Interp {
+    /// Count `n` steps an operator's own loop did and has already held
+    /// against the step limit through its [`LimitProbe`](crate::limits::LimitProbe)
+    /// (#1188: `fill`, `flattenpath`), so nothing is checked here. Counted
+    /// only while limits are set, as every step is.
+    pub(crate) fn charge_probed_steps(&mut self, n: u64) {
+        if !self.limits.is_none() {
+            self.charge_steps(n);
+        }
+    }
+
+    /// Heap growth the memory limit still allows, or `None` with no memory
+    /// limit: for work that sizes itself to the limit (#1188).
+    pub(crate) fn memory_left(&self) -> Option<usize> {
+        self.limits
+            .max_memory
+            .map(|max| max.saturating_sub(self.heap_growth()))
+    }
+
+    /// Hand every show and image frame on the stack the limits now in force
+    /// (#1188): they keep a snapshot taken when they began, and an embedder
+    /// can pause one, change the limits (`set_limits`, `set_memory_base`, a
+    /// new program's clock) and resume it.
+    fn refresh_frame_probes(&mut self) {
+        let probe = self.limit_probe();
+        for frame in &mut self.estack {
+            match frame {
+                Frame::Show(ctx) => ctx.set_limit_probe(probe),
+                Frame::Image(ctx) => ctx.probe = probe,
+                _ => {}
+            }
+        }
+    }
+
+    /// An error raised while an image frame is on top came from the image's
+    /// own step (its recorders' limits, a decode filter), not from its data
+    /// procedure, whose frames would be above it: blame the operator that
+    /// began the image, not the procedure's last one (#1188).
+    #[cold]
+    fn blame_image(&mut self) {
+        if let Some(Frame::Image(ctx)) = self.estack.last()
+            && ctx.op_name.is_some()
+        {
+            self.last_name = ctx.op_name;
+        }
+    }
 }
 
 #[cfg(test)]

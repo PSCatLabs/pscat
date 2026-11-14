@@ -287,8 +287,10 @@ most `--max-input-bytes`. The cells share the one `--timeout`. Also in
 The three interpreter limits (steps, time, memory) are on by default for
 `render_postscript`, `eval_postscript` and `chalkboard_math`; a program cannot catch them with
 `stopped`. They are read between interpreter steps, so one operator that runs
-for a long time (an enormous fill, a read of a device file) is outside them;
-`SECURITY.md` lists what each limit can and cannot stop. `handwrite` runs
+for a long time is outside them unless it looks at them itself, as file reads,
+`fill`, `flattenpath`, `bind` and the SVG/PDF image export do (an image
+draining a decode filter to its end does not); `SECURITY.md` lists what each
+limit can and cannot stop. `handwrite` runs
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
