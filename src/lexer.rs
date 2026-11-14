@@ -12,6 +12,7 @@ use crate::error::PsError;
 use std::rc::Rc;
 
 use crate::file::{FileHandle, PsFile};
+use crate::limits::DecodeBudget;
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -80,6 +81,11 @@ pub struct Lexer {
     /// (`0 setobjectformat`), when those bytes are ordinary name characters
     /// (#733).
     pub(crate) binary_tokens: bool,
+    /// The interpreter's limits, which a token's buffer asks before it grows
+    /// (#1209). A filter holds them itself; a byte source (the main program,
+    /// an executable string, a file read whole) does not, so the interpreter
+    /// hands it this handle. `None` outside an interpreter.
+    limits: Option<Rc<DecodeBudget>>,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -113,6 +119,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -127,6 +134,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -142,6 +150,7 @@ impl Lexer {
             pop_systemdict: false,
             token_start_line: None,
             binary_tokens: true,
+            limits: None,
         }
     }
 
@@ -152,6 +161,12 @@ impl Lexer {
             run_name: Some(name),
             ..Lexer::from_file(file)
         }
+    }
+
+    /// Have this scanner's token buffers ask `limits` before they grow.
+    pub(crate) fn with_limits(mut self, limits: Rc<DecodeBudget>) -> Self {
+        self.limits = Some(limits);
+        self
     }
 
     /// The name of the `run` file this scanner reads, or `None` for the
@@ -248,7 +263,7 @@ impl Lexer {
             // first byte must not be consumed before reading it.
             let word = self.read_regular_run()?;
             self.eat_token_delimiter()?;
-            return Ok(Some(classify_word(&word)));
+            return Ok(Some(self.classify_word(word)?));
         }
         self.bump()?;
         match b {
@@ -280,15 +295,11 @@ impl Lexer {
                     self.bump()?;
                     let word = self.read_regular_run()?;
                     self.eat_token_delimiter()?;
-                    Ok(Some(Token::ImmediateName(
-                        String::from_utf8_lossy(&word).into_owned(),
-                    )))
+                    Ok(Some(Token::ImmediateName(self.name_text(word)?)))
                 } else {
                     let word = self.read_regular_run()?;
                     self.eat_token_delimiter()?;
-                    Ok(Some(Token::LiteralName(
-                        String::from_utf8_lossy(&word).into_owned(),
-                    )))
+                    Ok(Some(Token::LiteralName(self.name_text(word)?)))
                 }
             }
             // is_regular handled above; whitespace/comments skipped above.
@@ -311,9 +322,14 @@ impl Lexer {
             }
         }
         let (_, total, _) = crate::binobj::parse_header(&bytes)?;
-        bytes.reserve(total.saturating_sub(bytes.len()).min(1 << 20));
+        // The header can claim 4 GB; the up-front reserve is capped at
+        // 1 MiB, and is put to the memory cap before it is taken.
+        let want = total.saturating_sub(bytes.len()).min(1 << 20);
+        self.room(&bytes, want)?;
+        bytes.reserve(want);
         while bytes.len() < total {
-            bytes.push(self.bump()?.ok_or_else(truncated)?);
+            let b = self.bump()?.ok_or_else(truncated)?;
+            self.put(&mut bytes, b)?;
         }
         Ok(bytes)
     }
@@ -362,13 +378,104 @@ impl Lexer {
         Ok(())
     }
 
+    /// Push onto a token's buffer, asking the memory cap first when the
+    /// push would grow it (#1209). A filter's decoder looks at the heap only
+    /// every 64 KiB it decodes, and a buffer that doubles can take far more
+    /// than that at once, so a token read from a decompression bomb would
+    /// pass the cap by up to the buffer's size. One compare per byte.
+    #[inline(always)]
+    fn put(&self, out: &mut Vec<u8>, b: u8) -> Result<(), PsError> {
+        if out.len() == out.capacity() {
+            self.check_growth(out, 1)?;
+        }
+        out.push(b);
+        Ok(())
+    }
+
+    /// [`Self::put`] for `extra` bytes at once.
+    #[inline(always)]
+    fn room(&self, out: &Vec<u8>, extra: usize) -> Result<(), PsError> {
+        if out.capacity() - out.len() < extra {
+            self.check_growth(out, extra)?;
+        }
+        Ok(())
+    }
+
+    /// The growth `Vec` makes to take `extra` more bytes, put to the cap as
+    /// `PsFile::read_into` does. Only a source that decodes (a filter made
+    /// by an interpreter) has limits to ask; a byte buffer is already in
+    /// memory and bounds its own tokens.
+    #[cold]
+    fn check_growth(&self, out: &Vec<u8>, extra: usize) -> Result<(), PsError> {
+        let cap = out.capacity();
+        let grown = cap
+            .saturating_mul(2)
+            .max(out.len().saturating_add(extra))
+            .max(8);
+        self.ask(grown - cap)
+    }
+
+    /// `MemoryExceeded` if `bytes` more heap would pass the cap.
+    fn ask(&self, bytes: usize) -> Result<(), PsError> {
+        match &self.limits {
+            Some(limits) => limits.check_alloc(bytes),
+            None => self.file.borrow().check_alloc(bytes),
+        }
+    }
+
+    /// A name's text, made from its buffer without a copy when it is UTF-8
+    /// (a name is whatever a program wrote, so not always). Invalid UTF-8
+    /// is repaired into a copy at most three times its size. Either way the
+    /// text that results is then put to the cap for the copy the
+    /// interpreter makes by interning it (#1209), by [`Self::charge_name`].
+    fn name_text(&self, word: Vec<u8>) -> Result<String, PsError> {
+        let s = match String::from_utf8(word) {
+            Ok(s) => s,
+            Err(e) => self.repaired(e.into_bytes())?,
+        };
+        self.charge_name(s.len())?;
+        Ok(s)
+    }
+
+    /// `bytes` with each invalid sequence replaced, which can take up to
+    /// three times the room, asked for first.
+    fn repaired(&self, bytes: Vec<u8>) -> Result<String, PsError> {
+        self.ask(bytes.len().saturating_mul(3))?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The interpreter interns a name, which copies it while this text is
+    /// still live. A name of 64 KiB or more is asked of the cap first; a
+    /// short one is not worth the look.
+    #[inline]
+    fn charge_name(&self, len: usize) -> Result<(), PsError> {
+        if len >= 64 << 10 {
+            self.ask(len)?;
+        }
+        Ok(())
+    }
+
+    /// A word that is a number, or else a name. Only a name is interned,
+    /// so only a name is charged for it: a long run of digits is a number.
+    fn classify_word(&self, word: Vec<u8>) -> Result<Token, PsError> {
+        let s = match String::from_utf8(word) {
+            Ok(s) => match parse_number(&s) {
+                Some(number) => return Ok(number),
+                None => s,
+            },
+            Err(e) => self.repaired(e.into_bytes())?,
+        };
+        self.charge_name(s.len())?;
+        Ok(Token::Name(s))
+    }
+
     fn read_regular_run(&mut self) -> Result<Vec<u8>, PsError> {
         let mut out = Vec::new();
         while let Some(b) = self.peek()? {
             if !is_regular(b) {
                 break;
             }
-            out.push(b);
+            self.put(&mut out, b)?;
             self.bump()?;
         }
         Ok(out)
@@ -387,11 +494,11 @@ impl Lexer {
                         return Err(syntax("unterminated string"));
                     };
                     match e {
-                        b'n' => out.push(b'\n'),
-                        b'r' => out.push(b'\r'),
-                        b't' => out.push(b'\t'),
-                        b'b' => out.push(0x08),
-                        b'f' => out.push(0x0c),
+                        b'n' => self.put(&mut out, b'\n')?,
+                        b'r' => self.put(&mut out, b'\r')?,
+                        b't' => self.put(&mut out, b'\t')?,
+                        b'b' => self.put(&mut out, 0x08)?,
+                        b'f' => self.put(&mut out, 0x0c)?,
                         b'0'..=b'7' => {
                             let mut v = u32::from(e - b'0');
                             for _ in 0..2 {
@@ -404,7 +511,7 @@ impl Lexer {
                                 }
                             }
                             // Per PLRM, high-order overflow in \ddd is ignored.
-                            out.push((v & 0xff) as u8);
+                            self.put(&mut out, (v & 0xff) as u8)?;
                         }
                         // \<newline> is a line continuation: no character.
                         b'\n' => {}
@@ -414,28 +521,28 @@ impl Lexer {
                             }
                         }
                         // Includes \\, \(, \): the escaped character itself.
-                        other => out.push(other),
+                        other => self.put(&mut out, other)?,
                     }
                 }
                 b'(' => {
                     depth += 1;
-                    out.push(b);
+                    self.put(&mut out, b)?;
                 }
                 b')' => {
                     depth -= 1;
                     if depth == 0 {
                         return Ok(out);
                     }
-                    out.push(b);
+                    self.put(&mut out, b)?;
                 }
                 // The PLRM normalizes CR and CRLF inside strings to LF.
                 b'\r' => {
                     if self.peek()? == Some(b'\n') {
                         self.bump()?;
                     }
-                    out.push(b'\n');
+                    self.put(&mut out, b'\n')?;
                 }
-                _ => out.push(b),
+                _ => self.put(&mut out, b)?,
             }
         }
     }
@@ -459,7 +566,10 @@ impl Lexer {
                     break;
                 }
                 _ if is_whitespace(b) => {}
-                b'z' if n == 0 => out.extend_from_slice(&[0, 0, 0, 0]),
+                b'z' if n == 0 => {
+                    self.room(&out, 4)?;
+                    out.extend_from_slice(&[0, 0, 0, 0]);
+                }
                 b'!'..=b'u' => {
                     group[n] = b - b'!';
                     n += 1;
@@ -467,6 +577,7 @@ impl Lexer {
                         let v = group.iter().fold(0u32, |acc, d| {
                             acc.wrapping_mul(85).wrapping_add(u32::from(*d))
                         });
+                        self.room(&out, 4)?;
                         out.extend_from_slice(&v.to_be_bytes());
                         n = 0;
                     }
@@ -485,13 +596,17 @@ impl Lexer {
             let v = group.iter().fold(0u32, |acc, d| {
                 acc.wrapping_mul(85).wrapping_add(u32::from(*d))
             });
+            self.room(&out, n - 1)?;
             out.extend_from_slice(&v.to_be_bytes()[..n - 1]);
         }
         Ok(out)
     }
 
+    /// `<...>` hex. Pairs go straight into the result, never through a
+    /// buffer of nibbles (a byte each, twice the result's size, #1209).
     fn read_hex_string(&mut self) -> Result<Vec<u8>, PsError> {
-        let mut nibbles = Vec::new();
+        let mut out = Vec::new();
+        let mut high: Option<u8> = None;
         loop {
             let Some(b) = self.bump()? else {
                 return Err(syntax("unterminated hex string"));
@@ -500,26 +615,20 @@ impl Lexer {
                 b'>' => break,
                 _ if is_whitespace(b) => {}
                 _ => match (b as char).to_digit(16) {
-                    Some(v) => nibbles.push(v as u8),
+                    Some(v) => match high.take() {
+                        Some(h) => self.put(&mut out, (h << 4) | v as u8)?,
+                        None => high = Some(v as u8),
+                    },
                     None => return Err(syntax("invalid character in hex string")),
                 },
             }
         }
-        let mut out = Vec::with_capacity(nibbles.len().div_ceil(2));
-        for pair in nibbles.chunks(2) {
-            // An odd final nibble is padded with zero, per the PLRM.
-            let lo = pair.get(1).copied().unwrap_or(0);
-            out.push((pair[0] << 4) | lo);
+        // An odd final nibble is padded with zero, per the PLRM.
+        if let Some(h) = high {
+            self.put(&mut out, h << 4)?;
         }
         Ok(out)
     }
-}
-
-fn classify_word(word: &[u8]) -> Token {
-    let Ok(s) = std::str::from_utf8(word) else {
-        return Token::Name(String::from_utf8_lossy(word).into_owned());
-    };
-    parse_number(s).unwrap_or_else(|| Token::Name(s.to_string()))
 }
 
 /// Also used by `cvi`/`cvr`, which accept full scanner number syntax.
@@ -723,6 +832,43 @@ mod tests {
         assert_eq!(lex("<48656c6c6f>"), vec![Token::String(b"Hello".to_vec())]);
         assert_eq!(lex("<48 65>"), vec![Token::String(b"He".to_vec())]);
         assert_eq!(lex("<7>"), vec![Token::String(vec![0x70])]);
+        // A pair may span whitespace, and an odd final nibble is padded.
+        assert_eq!(lex("<4 8\n6>"), vec![Token::String(vec![0x48, 0x60])]);
+        assert_eq!(lex("<>"), vec![Token::String(Vec::new())]);
+        // Past the buffer's first capacities (8, 16, ...).
+        let long = "ab".repeat(100);
+        assert_eq!(
+            lex(&format!("<{long}>")),
+            vec![Token::String(vec![0xab; 100])]
+        );
+    }
+
+    #[test]
+    fn names_keep_their_text_and_numbers_stay_numbers() {
+        assert_eq!(
+            lex("abc /abc 12 1e3 16#ff 12abc"),
+            vec![
+                Token::Name("abc".into()),
+                Token::LiteralName("abc".into()),
+                Token::Integer(12),
+                Token::Real(1000.0),
+                Token::Integer(255),
+                Token::Name("12abc".into()),
+            ]
+        );
+        // Invalid UTF-8 in a name becomes the replacement character, in a
+        // plain, a literal and an immediate name alike.
+        let mut lexer = Lexer::new(b"a\xffb /a\xffb //a\xffb".to_vec());
+        for want in [
+            Token::Name("a\u{fffd}b".into()),
+            Token::LiteralName("a\u{fffd}b".into()),
+            Token::ImmediateName("a\u{fffd}b".into()),
+        ] {
+            assert_eq!(lexer.next_token().unwrap(), Some(want));
+        }
+        // A name past the size that is put to the cap (64 KiB) is the same.
+        let long = "n".repeat(100_000);
+        assert_eq!(lex(&long), vec![Token::Name(long.clone())]);
     }
 
     #[test]

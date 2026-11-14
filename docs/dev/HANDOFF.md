@@ -1512,6 +1512,14 @@ renders eight examples in both and compares block-downsampled output).
     bulk through `PsFile::with_input` and consumes only what the inflater
     took, so the source still stops at the byte after the stream; see
     `notes/1187-flatedecode-bulk-decode-and-limits.md`.
+  - The scanner asks the cap before a token's buffer grows (#1209):
+    `Lexer::put` / `room` compare length to capacity and, only then, call
+    the interpreter's `DecodeBudget` (`Lexer::with_limits`: every scanner the
+    interpreter makes holds it; a filter's own handle is the fallback). A new
+    token reader in `lexer.rs` pushes through `put`, reserves through `room`,
+    and builds a name with `name_text` (no copy). Hex strings pack pairs as
+    they go (no nibble buffer); see
+    `notes/1209-scanner-token-buffer-memory-cap.md`.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.

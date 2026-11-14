@@ -1098,8 +1098,9 @@ impl Interp {
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
         }
-        self.estack
-            .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
+        self.estack.push(Frame::Scanner(
+            Lexer::main_program(src.to_vec()).with_limits(self.decode_budget.clone()),
+        ));
     }
 
     /// Execute up to `budget` objects. A step that executes no object, such
@@ -2429,12 +2430,17 @@ impl Interp {
                 // An executable string runs as source — the `(...) cvx
                 // exec` idiom found code uses constantly.
                 Value::String(s) => {
-                    return self.push_frame(Frame::Scanner(Lexer::new(s.to_vec())));
+                    // The scanner works on a copy of the string, so the
+                    // copy is asked of the memory cap first (#1209).
+                    self.check_alloc(s.len())?;
+                    let lexer = Lexer::new(s.to_vec()).with_limits(self.decode_budget.clone());
+                    return self.push_frame(Frame::Scanner(lexer));
                 }
                 // An executable file runs in place, sharing its position
                 // with everything else holding the handle.
                 Value::File(f) => {
-                    return self.push_frame(Frame::Scanner(Lexer::from_file(f.clone())));
+                    let lexer = Lexer::from_file(f.clone()).with_limits(self.decode_budget.clone());
+                    return self.push_frame(Frame::Scanner(lexer));
                 }
                 Value::Name(n) => {
                     hops += 1;
@@ -2511,7 +2517,8 @@ impl Interp {
         file: crate::file::FileHandle,
         name: Rc<str>,
     ) -> Result<(), PsError> {
-        self.push_frame(Frame::Scanner(Lexer::run_file(file, name)))
+        let lexer = Lexer::run_file(file, name).with_limits(self.decode_budget.clone());
+        self.push_frame(Frame::Scanner(lexer))
     }
 
     /// The `token` operator on a file: one token scanned in place — the
@@ -2520,7 +2527,7 @@ impl Interp {
         &self,
         file: crate::file::FileHandle,
     ) -> Result<Option<Object>, PsError> {
-        let mut lexer = Lexer::from_file(file);
+        let mut lexer = Lexer::from_file(file).with_limits(self.decode_budget.clone());
         Ok(self.scan_one(&mut lexer)?.map(|(obj, _)| obj))
     }
 
@@ -2530,7 +2537,7 @@ impl Interp {
         &self,
         bytes: Vec<u8>,
     ) -> Result<Option<(Object, usize)>, PsError> {
-        let mut lexer = Lexer::new(bytes);
+        let mut lexer = Lexer::new(bytes).with_limits(self.decode_budget.clone());
         self.scan_one(&mut lexer)
     }
 
