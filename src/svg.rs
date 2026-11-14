@@ -321,6 +321,7 @@ impl SvgRecorder {
     pub(crate) fn stroke(
         &mut self,
         d: &str,
+        pen: Option<(tiny_skia::Transform, usize)>,
         rgb: (f32, f32, f32),
         width: f32,
         cap: tiny_skia::LineCap,
@@ -342,22 +343,42 @@ impl SvgRecorder {
             tiny_skia::LineJoin::Bevel => "bevel",
             _ => "miter",
         };
+        // `d` is in pen space when the CTM is anisotropic (#1196,
+        // `Gfx::stroke_space`): SVG strokes in the element's own user
+        // space, so a `transform` on the path itself gives the elliptical
+        // pen. The clip groups around it stay in device space.
+        // Its width and dashes are pen units too, written with the same
+        // extra decimals as `d` (`PenSpace::extra_decimals`).
+        let num = |v: f32| match pen {
+            Some((_, extra)) => fmt_nonzero(v, 3 + extra),
+            None => fmt_f32(v),
+        };
+        let transform = match pen {
+            Some((l, _)) => format!(
+                " transform=\"matrix({} {} {} {} 0 0)\"",
+                fmt_frame(f64::from(l.sx)),
+                fmt_frame(f64::from(l.ky)),
+                fmt_frame(f64::from(l.kx)),
+                fmt_frame(f64::from(l.sy)),
+            ),
+            None => String::new(),
+        };
         let mut extra = String::new();
         if let Some((pattern, phase)) = dash {
-            let list: Vec<String> = pattern.iter().map(|d| fmt_f32(*d)).collect();
+            let list: Vec<String> = pattern.iter().map(|d| num(*d)).collect();
             let _ = write!(
                 extra,
                 " stroke-dasharray=\"{}\" stroke-dashoffset=\"{}\"",
                 list.join(" "),
-                fmt_f32(phase)
+                num(phase)
             );
         }
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" \
+            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" \
              stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{close}",
             Self::color(rgb),
-            fmt_f32(width),
+            num(width),
             fmt_f32(miter_limit),
             Self::opacity_attr(comp, true),
         );
@@ -628,6 +649,19 @@ fn fmt_f32(v: f32) -> String {
     // Enough precision for device coordinates, no trailing noise.
     let s = format!("{v:.3}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `v` with `decimals` fractional digits, trailing zeros trimmed; a nonzero
+/// value that would round to 0 is written at full precision instead, so a
+/// thin pen-space stroke width never reads as 0 (#1196).
+fn fmt_nonzero(v: f32, decimals: usize) -> String {
+    let s = format!("{v:.decimals$}");
+    let t = s.trim_end_matches('0').trim_end_matches('.');
+    match t {
+        "0" | "-0" if v != 0.0 => fmt_precise(v),
+        "-0" => "0".to_string(),
+        _ => t.to_string(),
+    }
 }
 
 /// A text frame's matrix entries, unit-scale: six decimals keep a

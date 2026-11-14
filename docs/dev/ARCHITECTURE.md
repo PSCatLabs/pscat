@@ -160,10 +160,15 @@ Graphics semantics worth knowing (`src/gfx.rs`):
 - **Arcs** are flattened to ≤90° cubic Béziers in *user* space and the
   control points transformed, so arcs under rotation/scaling become the
   correct ellipses.
-- **Stroke width approximation**: PostScript strokes with a user-space
-  pen; we stroke in device space with width scaled by √|det CTM|. Exact
-  for uniform scale/rotation; anisotropic `scale` won't produce
-  elliptical pens. Deliberate, documented, revisit on demand.
+- **Stroking**: PostScript strokes with a user-space pen. Under a
+  similarity CTM (uniform scale, rotation, reflection) the pen is round in
+  device space too, so we stroke the device path with the width scaled by
+  √|det CTM|; that round pen is also kept while it is within 1/16 px of the
+  true one. Otherwise the device path is mapped into a "pen
+  space" (the CTM's linear part is s·L with det L = ±1; pen space is L⁻¹
+  of the device), stroked there with the same scaled width and dashes,
+  and mapped back by L, which draws the elliptical pen (#1196,
+  `Gfx::stroke_space`; SVG and PDF carry L as a `transform`/`cm`).
 - **`showpage` deviation**: marks the page complete and leaves the image
   visible instead of erasing for the next page — erasing would defeat
   watching. Multi-page documents are a future problem.

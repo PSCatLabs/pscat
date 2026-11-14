@@ -626,8 +626,7 @@ renders eight examples in both and compares block-downsampled output).
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
   There is no `setdevice`/`currentdevice`, so nothing else can install a
   device.
-- Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
-  inherits it, since it shares `stroke`'s parameters); `showpage`
+- `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
   quarter-pixel tolerance (`setflat` not modeled — chord counts
   differ from gs, shapes agree).
@@ -1335,6 +1334,16 @@ renders eight examples in both and compares block-downsampled output).
   `gs` ad hoc: the helper prints an uncapturable `SKIPPED` line when gs is
   missing and panics under `PSCAT_REQUIRE_GS=1`, which the macOS `test` and
   Linux `cross-platform` CI jobs set after installing gs.
+
+- **An anisotropic CTM strokes in pen space** (#1196, `Gfx::stroke_space`,
+  `notes/1196-anisotropic-stroke-pen.md`). `stroke`, `strokepath` and
+  `rectstroke`'s matrix draw gs's elliptical pen: the device path is mapped
+  by L⁻¹ (CTM linear part = s·L, det L = ±1), stroked with the s-scaled
+  width and dashes, mapped back by L. A pen within 1/16 px of round (and of
+  its dash boundaries) or a hairline keeps the plain device-space stroke,
+  byte for byte. A pen under a pixel every way draws per-segment hairlines
+  (`pen_hairlines`). A new stroke consumer goes through `stroke_space` too,
+  never `w·√|det|` alone.
 
 - **The page size has a precedence** (#921, #909): `--page` (MCP
   `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
