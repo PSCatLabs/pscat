@@ -461,22 +461,42 @@ without the limits above:
     the buffer the recorder builds against a memory limit before they start:
     RGBA for SVG; for PDF, a mask's packed bits, or RGB for a colour image.
 
+  Issue #1188 closed more of them:
+  - `fill`/`eofill` look at the limits, the memory cap included, as the
+    rasteriser flattens the path and lays its edges into bands, a step per
+    1024 units of work; each edge is laid only into the bands it reaches
+    (100,000 curves took 5 s at 300 dpi in one `fill`, then 2.9 s, and stop
+    at the limit).
+  - `flattenpath` looks at them every 4096 chords, a step per 1024 chords,
+    and keeps the current path when a limit stops it.
+  - A Type 1 glyph decrypts only the subroutines it calls, once each, and
+    `callsubr` no longer copies one (a font with 64 MB of Subrs took 25 s
+    for 200 glyphs).
+  - The SVG and PDF image recorders, and a stenciled image's composite,
+    look at the time and memory limits once a row. The composite is
+    counted at its expanded size against a memory cap before it starts.
+  - `bind` looks names up by interned id (an 8 MB name under 2,000
+    dictionaries took 4 s).
+  - `shfill` hands the raster a ramp of more than 1024 stops resampled to
+    1024 (4095 legs at 300 dpi took 5 s, now 0.6 s).
+  - `kernelimage`/`kernelarray` order their retired pixels in linear time
+    and look at the limits while building the list for the interpreter;
+    under a memory cap, once the list would not fit, the interpreter does
+    the whole image instead.
+
   These are still known to run long inside one call:
   - an image's drain of its filter chain to EOD, and a decode filter that
     skips input to find output (ASCIIHex whitespace, `readhexstring`), or the
     scanner reading a filter;
-  - `fill` of a path with very many curves (the rasteriser walks every line
-    once per band: 100,000 curves took 2.5 s in one `fill`);
-  - `flattenpath` (up to 65,536 segments per curve, and no memory check);
-  - a Type 1 glyph whose `callsubr` copies a huge subroutine;
-  - the SVG and PDF recorders' per-pixel loop under a time limit alone;
-  - `shfill` of a stitching function with many legs: the gradient costs
-    pixels × stops. 4095 legs at 300 dpi letter took 4.4 s in one `shfill`,
-    and 1024 legs 1.2 s, the same before and after #1176;
-  - a `kernelimage` whose pixels nearly all retire to the interpreter (its
-    list of retired pixels is built and sorted unpolled: the compiled phase
-    of an 8000 × 8000 image took 5.2 s under `--max-time 1`, about 4 s past
-    it).
+  - a `kernelimage` whose pixels nearly all retire, without a memory limit:
+    its retired-pixel list (16 bytes a pixel, then two objects a pixel for
+    the interpreter) is not bounded except by the time limit, which it
+    does look at;
+  - a single `shfill` costs up to pixels × 1024 stops (0.6 s for the
+    resampled 4095-leg ramp at 300 dpi letter) and does not look at the
+    clock;
+  - a Type 1 glyph still decrypts each subroutine it calls in full, once,
+    so one glyph's cost is the size of the subroutines it calls.
 
   For a hosted service the answer to anything that gets through is the outer
   kill: the MCP server kills its child at `--timeout`, and anything else

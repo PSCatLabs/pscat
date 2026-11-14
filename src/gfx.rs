@@ -276,7 +276,7 @@ impl PsPath {
             if depth >= 16 || (chord_dist(c1, p0, p3) <= TOL && chord_dist(c2, p0, p3) <= TOL) {
                 f.out.line_to(p3);
                 f.chords += 1;
-                if f.chords % FLATTEN_POLL == 0 {
+                if f.chords.is_multiple_of(FLATTEN_POLL) {
                     f.probe.check((f.chords / 1024) as u64)?;
                 }
                 return Ok(());

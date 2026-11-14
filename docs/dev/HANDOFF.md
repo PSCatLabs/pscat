@@ -704,6 +704,10 @@ renders eight examples in both and compares block-downsampled output).
   ramp's average colour), its Function built from the same RGB stops the
   raster and SVG paint, with `/Extend [true true]` to match the raster
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`).
+  A ramp of more than 1024 stops reaches the raster resampled at 1024 even
+  positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
+  pixels x stops), so a leg narrower than 1/1023 of the axis blends into
+  its neighbours there; SVG and PDF keep every stop.
   ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
   `/Pattern` colour spaces) are not implemented at all, in any output.
   SVG's two-circle radial
@@ -1486,9 +1490,16 @@ renders eight examples in both and compares block-downsampled output).
     or allocation suggest must be linear or look at the limits itself (#1176):
     `Interp::poll_limits(steps)` where it holds `it` (`bind`, `flushfile`; free
     with no limits set), `Interp::limit_probe()` passed down to a loop in
-    `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`). Both raise
-    the slice loop's own uncatchable errors. The audit list and what is still
-    open are in `notes/1176-single-operator-limits.md`.
+    `Gfx` that cannot borrow the interpreter (`Gfx::arc_limited`,
+    `Gfx::fill_limited` into `coverage::rasterize_limited`,
+    `Gfx::flatten_path`). Both raise the slice loop's own uncatchable errors.
+    The image frame builds its probe from the split interpreter fields
+    (`interp::limit_probe`) for the SVG/PDF recorders. The audit list is in
+    `notes/1176-single-operator-limits.md`; #1188 closed most of what it left
+    open (`notes/1188-single-operator-limits-remaining.md`).
+  - The fill rasteriser's band index (#1188) must keep each band's edges in
+    the original order: the coverage sums are f32 and their order is what
+    makes a fill byte-identical to the edges x bands walk it replaced.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.
