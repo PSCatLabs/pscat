@@ -231,12 +231,18 @@ impl PsPath {
     /// don't model `setflat`, and found files that call flattenpath
     /// want the shape, not a particular chord count (documented
     /// deviation; gs honors flatness).
-    ///
-    /// Under the limits (#1188): a curve can come to 65,536 chords (depth
-    /// 16), so a path of a few thousand huge curves was gigabytes in one
-    /// `flattenpath`. The probe is looked at every [`FLATTEN_POLL`] chords,
-    /// its heap cap included, a step per 1024 chords. Also gives the chord
-    /// count, for the operator to charge.
+    pub(crate) fn flattened(&self) -> PsPath {
+        // With no limit to exceed it cannot fail.
+        self.flattened_limited(&crate::limits::LimitProbe::NONE)
+            .map(|(p, _)| p)
+            .unwrap_or_default()
+    }
+
+    /// [`flattened`](Self::flattened) under the limits (#1188): a curve can
+    /// come to 65,536 chords (depth 16), so a path of a few thousand huge
+    /// curves was gigabytes in one `flattenpath`. The probe is looked at
+    /// every [`FLATTEN_POLL`] chords, its heap cap included, a step per
+    /// 1024 chords. Also gives the chord count, for the operator to charge.
     pub(crate) fn flattened_limited(
         &self,
         probe: &crate::limits::LimitProbe,
