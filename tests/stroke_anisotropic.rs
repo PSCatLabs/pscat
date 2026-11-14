@@ -838,3 +838,331 @@ fn a_zero_length_subpath_under_square_caps_paints_nothing_as_in_gs() {
     ));
     assert!(dot > 0.05, "round dot {dot:.3}");
 }
+
+// #1215: the same zero-length rule under an ordinary (similarity) CTM, where
+// the stroke is tiny-skia's own on the device path rather than pen space.
+
+/// The CTMs of a similarity: none, a uniform scale, a rotation.
+const ORDINARY_CTMS: [&str; 3] = ["", "2 2 scale", "30 rotate"];
+
+/// The four spellings of a zero-length subpath, at (25, 25).
+const POINT_SUBPATHS: [&str; 4] = [
+    "moveto closepath",
+    "moveto 25 25 lineto",
+    "moveto 25 25 lineto closepath",
+    "moveto 0 0 rlineto",
+];
+
+fn svg_of(src: &str) -> String {
+    let it = interp(src, |it| it.gfx_mut().enable_svg());
+    it.gfx().svg_pages().expect("recording on")[0].clone()
+}
+
+fn pdf_of(src: &str) -> String {
+    let it = interp(src, |it| it.gfx_mut().enable_pdf());
+    common::pdf_text(&it.gfx().pdf_document().expect("recording on"))
+}
+
+/// Stroke operators in a PDF page's text.
+fn pdf_strokes(text: &str) -> Vec<&str> {
+    text.lines().filter(|l| l.ends_with(" S")).collect()
+}
+
+#[test]
+fn a_zero_length_subpath_under_square_caps_paints_nothing_under_an_ordinary_ctm() {
+    for ctm in ORDINARY_CTMS {
+        for width in ["0", ".4", "4"] {
+            for sub in POINT_SUBPATHS {
+                let src = format!("{ctm} {width} setlinewidth 2 setlinecap 25 25 {sub} stroke");
+                let ours = total_ink(&render_pscat(&src));
+                assert!(ours < 1e-9, "{src}: {ours:.3} of ink");
+                if common::gs_available() {
+                    let theirs = total_ink(&render_gs(&src, "square-dot-ordinary"));
+                    assert!(theirs < 1e-9, "{src}: gs painted {theirs:.3}");
+                }
+                let svg = svg_of(&src);
+                assert!(!svg.contains("<path"), "{src}: {svg}");
+                let pdf = pdf_of(&src);
+                assert!(pdf_strokes(&pdf).is_empty(), "{src}: {pdf}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_zero_length_subpath_under_butt_caps_paints_nothing_under_an_ordinary_ctm() {
+    for ctm in ORDINARY_CTMS {
+        for sub in POINT_SUBPATHS {
+            let src = format!("{ctm} 4 setlinewidth 0 setlinecap 25 25 {sub} stroke");
+            let ours = total_ink(&render_pscat(&src));
+            assert!(ours < 1e-9, "{src}: {ours:.3} of ink");
+            if common::gs_available() {
+                let theirs = total_ink(&render_gs(&src, "butt-dot-ordinary"));
+                assert!(theirs < 1e-9, "{src}: gs painted {theirs:.3}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_round_cap_dot_stays_under_an_ordinary_ctm() {
+    for ctm in ORDINARY_CTMS {
+        for sub in POINT_SUBPATHS {
+            // 4 wide: a disc, about pi * 2^2 of ink (scaled by the CTM).
+            // 0 wide: a one-pixel hairline dot. gs's is fainter than
+            // pscat's (0.27 against 0.79 of ink), a separate difference, so
+            // only its presence is pinned.
+            for width in ["0", "4"] {
+                let src = format!("{ctm} {width} setlinewidth 1 setlinecap 25 25 {sub} stroke");
+                let ours = total_ink(&render_pscat(&src));
+                assert!(ours > 0.05, "{src}: no dot ({ours:.3})");
+                if common::gs_available() {
+                    let theirs = total_ink(&render_gs(&src, "round-dot-ordinary"));
+                    assert!(theirs > 0.05, "{src}: gs has no dot ({theirs:.3})");
+                    if width != "0" {
+                        assert!(
+                            (ours - theirs).abs() <= 0.25 * theirs,
+                            "{src}: pscat {ours:.3}, gs {theirs:.3}"
+                        );
+                    }
+                }
+                let svg = svg_of(&src);
+                assert!(svg.contains("<path"), "{src}: {svg}");
+                let pdf = pdf_of(&src);
+                assert_eq!(pdf_strokes(&pdf).len(), 1, "{src}: {pdf}");
+            }
+        }
+    }
+}
+
+#[test]
+fn only_the_zero_length_subpaths_of_a_mixed_path_are_left_out() {
+    // Two dots and a real line in one stroke: the line keeps its square
+    // caps, the dots go from the raster, the SVG `d` data and the PDF path.
+    let src = "4 setlinewidth 2 setlinecap 25 25 moveto closepath 75 75 moveto 75 75 lineto \
+               30 60 moveto 60 60 lineto stroke";
+    let ours = total_ink(&render_pscat(src));
+    // The line is 30 long, plus 2 of cap each end: 34 x 4, sampled to 4x4.
+    assert!((ours - 136.0).abs() < 2.0, "pscat {ours:.3}");
+    let pdf = pdf_of(src);
+    if common::gs_available() {
+        let theirs = total_ink(&render_gs(src, "square-mixed"));
+        assert!(
+            (ours - theirs).abs() < 1.0,
+            "pscat {ours:.3}, gs {theirs:.3}"
+        );
+        // The PDF read back by gs paints what the line alone does (the
+        // PDF interpreter has its own stroke adjustment, so not what the
+        // PostScript run above does).
+        let alone = "4 setlinewidth 2 setlinecap 30 60 moveto 60 60 lineto stroke";
+        let mut inks = [0.0; 2];
+        for (i, program) in [src, alone].into_iter().enumerate() {
+            let file = scratch("square-mixed.pdf");
+            let it = interp(program, |it| it.gfx_mut().enable_pdf());
+            std::fs::write(&file, it.gfx().pdf_document().expect("recording on")).unwrap();
+            inks[i] = total_ink(&gs_png(&file, "square-mixed-pdf"));
+        }
+        assert!(
+            (inks[0] - inks[1]).abs() < 0.5,
+            "gs on the PDF: {:.3} with the dots, {:.3} without",
+            inks[0],
+            inks[1]
+        );
+    }
+    let svg = svg_of(src);
+    assert_eq!(svg.matches("<path").count(), 1, "{svg}");
+    // 25 25 and 75 75 are the dots; y is flipped, so 25 is 175 on the page.
+    assert!(
+        !svg.contains("M25 175") && !svg.contains("M75 125"),
+        "dot in the SVG: {svg}"
+    );
+    assert!(svg.contains("M30 140"), "line missing from the SVG: {svg}");
+    let strokes = pdf_strokes(&pdf);
+    assert_eq!(strokes.len(), 1, "{pdf}");
+    assert_eq!(strokes[0].matches(" m ").count(), 1, "{pdf}");
+    assert!(strokes[0].contains("30 140 m"), "{pdf}");
+}
+
+/// What `strokepath` leaves of `src`: the segments `pathforall` counts.
+fn outline_elements(src: &str) -> i64 {
+    let probe =
+        "0 {pop pop 1 add} {pop pop 1 add} {pop pop pop pop pop pop 1 add} {1 add} pathforall";
+    let it = interp(&format!("{src} strokepath {probe}"), |_| {});
+    it.operand_stack()
+        .last()
+        .and_then(|o| o.repr().parse().ok())
+        .expect("count")
+}
+
+#[test]
+fn strokepath_of_a_zero_length_subpath_follows_the_cap_as_in_gs() {
+    for (cap, want_ink) in [(0, false), (1, true), (2, false)] {
+        for sub in POINT_SUBPATHS {
+            let src = format!("4 setlinewidth {cap} setlinecap newpath 25 25 {sub}");
+            let ours = outline_elements(&src);
+            assert_eq!(ours > 0, want_ink, "{src}: pscat counts {ours}");
+            if common::gs_available() {
+                let ps = scratch("strokepath-dot.ps");
+                std::fs::write(
+                    &ps,
+                    format!(
+                        "{src} strokepath 0 {{pop pop 1 add}} {{pop pop 1 add}} \
+                         {{pop pop pop pop pop pop 1 add}} {{1 add}} pathforall ==\n"
+                    ),
+                )
+                .unwrap();
+                let out = Command::new("gs")
+                    .args(["-q", "-dNOPAUSE", "-dBATCH", "-dNODISPLAY"])
+                    .arg(&ps)
+                    .output_deadline()
+                    .expect("run gs");
+                let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                let theirs: i64 = text
+                    .trim()
+                    .parse()
+                    .unwrap_or_else(|_| panic!("gs: {text:?}"));
+                assert_eq!(theirs > 0, want_ink, "{src}: gs counts {theirs}");
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_length_dashes_of_a_real_subpath_still_draw_under_square_caps() {
+    // The rule is about zero-length *subpaths*. A `[0 3]` dash pattern on a
+    // line cuts zero-length dashes, which both rasterisers cap (gs: 7 squares
+    // on 20 units), and a dashed point subpath stays empty.
+    let line = "4 setlinewidth 2 setlinecap [0 6] 0 setdash 25 25 moveto 65 25 lineto stroke";
+    let ours = total_ink(&render_pscat(line));
+    assert!(ours > 10.0, "zero-length dashes vanished: {ours:.3}");
+    if common::gs_available() {
+        let theirs = total_ink(&render_gs(line, "square-dashes"));
+        assert!(
+            (ours - theirs).abs() <= 0.1 * theirs,
+            "pscat {ours:.3}, gs {theirs:.3}"
+        );
+    }
+    let point = "4 setlinewidth 2 setlinecap [0 6] 0 setdash 25 25 moveto closepath stroke";
+    assert!(total_ink(&render_pscat(point)) < 1e-9);
+    if common::gs_available() {
+        assert!(total_ink(&render_gs(point, "square-dashed-point")) < 1e-9);
+    }
+}
+
+// Codex review, round 1 on PR #1220: one test per finding, with its cases.
+
+/// The device-space bbox of what `src` strokes (`strokepath`), or `None`
+/// when the path comes out empty (`nocurrentpoint`).
+fn outline_bbox(program: &str, gs: bool) -> Option<Vec<f64>> {
+    let probe = format!(
+        "{program} strokepath initmatrix {{pathbbox 4 array astore ==}} stopped {{(none) ==}} if"
+    );
+    let text = if gs {
+        let ps = scratch("outline-bbox.ps");
+        std::fs::write(&ps, format!("false setstrokeadjust {probe}\n")).unwrap();
+        let out = Command::new("gs")
+            .args(["-q", "-dNOPAUSE", "-dBATCH", "-dNODISPLAY"])
+            .arg(&ps)
+            .output_deadline()
+            .expect("run gs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    } else {
+        let it = interp(
+            &format!(
+                "{program} strokepath initmatrix {{pathbbox 4 array astore}} stopped {{(none)}} \
+                 if"
+            ),
+            |_| {},
+        );
+        it.operand_stack()
+            .last()
+            .map(|o| o.repr())
+            .unwrap_or_default()
+    };
+    if text.contains("none") {
+        return None;
+    }
+    let nums: Vec<f64> = text
+        .trim()
+        .trim_matches(['[', ']'])
+        .split_whitespace()
+        .map(|n| n.parse().unwrap_or_else(|_| panic!("{program}: {text:?}")))
+        .collect();
+    assert_eq!(nums.len(), 4, "{program}: {text:?}");
+    Some(nums)
+}
+
+fn assert_outline_as_gs(program: &str) {
+    let ours = outline_bbox(program, false);
+    if !common::gs_available() {
+        return;
+    }
+    let theirs = outline_bbox(program, true);
+    match (&ours, &theirs) {
+        (None, None) => {}
+        (Some(a), Some(b)) => {
+            for (x, y) in a.iter().zip(b) {
+                assert!(
+                    (x - y).abs() < 0.1,
+                    "{program}: pscat {ours:?}, gs {theirs:?}"
+                );
+            }
+        }
+        _ => panic!("{program}: pscat {ours:?}, gs {theirs:?}"),
+    }
+}
+
+#[test]
+fn points_gs_rounds_to_one_device_point_are_a_zero_length_subpath_under_square_caps() {
+    // gs rounds every device point to 1/256 px, so these 1e-6 and 1e-3
+    // steps are zero-length lines in gs; pscat's f32 points stay distinct
+    // but must be treated alike, in pen space (the shear below) and out.
+    for ctm in ["", "[1 0 10 1 0 0] concat", "[2 0 0 .5 0 0] concat"] {
+        for step in ["25.000001", "25.001"] {
+            let program =
+                format!("2 setlinecap 1 setlinewidth 25 25 moveto {step} 25 lineto {ctm}");
+            assert_eq!(outline_bbox(&program, false), None, "{program}");
+            assert_outline_as_gs(&program);
+            let ink = total_ink(&render_pscat(&format!("{program} stroke")));
+            assert!(ink < 1e-9, "{program}: {ink:.3} of ink");
+        }
+    }
+    // A step gs does see keeps its square caps in both.
+    assert_outline_as_gs("2 setlinecap 1 setlinewidth 25 25 moveto 25.01 25 lineto");
+    assert!(
+        outline_bbox(
+            "2 setlinecap 1 setlinewidth 25 25 moveto 25.01 25 lineto",
+            false
+        )
+        .is_some()
+    );
+}
+
+#[test]
+fn a_lineto_after_closepath_starts_a_subpath_the_square_cap_rule_sees() {
+    for program in [
+        // The closed line, then a point subpath at the closed point.
+        "4 setlinewidth 2 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 2 setlinecap 25 25 moveto 65 25 lineto closepath 0 0 rlineto",
+        // Only that point: `moveto closepath lineto` back to the start.
+        "4 setlinewidth 2 setlinecap 25 25 moveto closepath 25 25 lineto",
+        // A real segment after the close keeps its caps, and the dropped
+        // point before it must not leave it without a start.
+        "4 setlinewidth 2 setlinecap 25 25 moveto closepath 60 40 lineto",
+        // Under the other caps, and dashed.
+        "4 setlinewidth 0 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 1 setlinecap 25 25 moveto 65 25 lineto closepath 25 25 lineto",
+        "4 setlinewidth 2 setlinecap [6 4] 0 setdash 25 25 moveto 65 25 lineto closepath \
+         25 25 lineto",
+    ] {
+        assert_outline_as_gs(program);
+        if common::gs_available() {
+            let ours = total_ink(&render_pscat(&format!("{program} stroke")));
+            let theirs = total_ink(&render_gs(&format!("{program} stroke"), "close-lineto"));
+            assert!(
+                (ours - theirs).abs() <= 0.1 * theirs.max(1.0),
+                "{program}: pscat {ours:.3}, gs {theirs:.3}"
+            );
+        }
+    }
+}

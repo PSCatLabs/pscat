@@ -1351,6 +1351,9 @@ renders eight examples in both and compares block-downsampled output).
   byte for byte. A pen under a pixel every way draws per-segment hairlines
   (`pen_hairlines`). A new stroke consumer goes through `stroke_space` too,
   never `w·√|det|` alone.
+  A zero-length subpath under square caps is dropped before either path
+  (`Gfx::stroke_dropped`, #1215, `notes/1215-square-cap-zero-length-subpath.md`):
+  gs draws nothing for it, tiny-skia and SVG would draw a square.
 
 - **The page size has a precedence** (#921, #909): `--page` (MCP
   `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
