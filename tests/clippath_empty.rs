@@ -520,7 +520,7 @@ fn an_empty_clip_still_paints_nothing_in_png_svg_and_pdf() {
     );
 }
 
-/// Rotates each closed `m`/`l`/`z` subpath to start at its smallest vertex.
+/// Rotates each closed `m`/`l`/`z` subpath to its smallest whole rotation.
 /// Ghostscript releases disagree on the corner a restored rectangle's
 /// `clippath` starts at (10.06.0 on Ubuntu CI: `m 0 100`; 10.07.1:
 /// `m 0 0`), so the gs cross-check compares shapes, not the start corner.
@@ -530,13 +530,23 @@ fn canonical_subpaths(lines: &[String]) -> Vec<String> {
     let mut pts: Vec<String> = Vec::new();
     let flush = |pts: &mut Vec<String>, out: &mut Vec<String>, closed: bool| {
         if pts.is_empty() {
+            if closed {
+                out.push("z".to_string()); // a stray `z` stays visible
+            }
             return;
         }
         if closed {
-            let start = (0..pts.len())
-                .min_by(|&a, &b| pts[a].cmp(&pts[b]))
-                .unwrap_or(0);
-            pts.rotate_left(start);
+            // The smallest whole rotation, so repeated vertices still give
+            // one canonical form.
+            let best = (0..pts.len())
+                .map(|s| {
+                    let mut r = pts.clone();
+                    r.rotate_left(s);
+                    r
+                })
+                .min()
+                .unwrap_or_default();
+            *pts = best;
         }
         for (i, p) in pts.drain(..).enumerate() {
             out.push(format!("{} {p}", if i == 0 { "m" } else { "l" }));
