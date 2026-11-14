@@ -139,8 +139,10 @@ fn resourcestatus_reports_every_font_findfont_can_load() {
     // Issue #1214. Ghostscript 10.07.1 (`/Name /Font resourcestatus`):
     // status 2, size -1 for a face not yet loaded, false for an unknown
     // name. The standard 35 are all compiled in, so they are available on
-    // any install; the first four are not among the twelve faces built in
-    // under their own names (the case that returned false).
+    // any install. Before #1214 only the twelve Liberation-backed faces
+    // (Helvetica, Courier-BoldOblique) read true; the rest (NewCentury,
+    // Palatino, Bookman, AvantGarde, ZapfChancery, Helvetica-Narrow,
+    // Symbol, ZapfDingbats) read false.
     for face in [
         "/Helvetica",
         "/Courier-BoldOblique",
