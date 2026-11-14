@@ -392,17 +392,32 @@ fn pathforall(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn flattenpath(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.flatten_path();
+    let probe = it.limit_probe();
+    let segments = it.gfx.flatten_path(&probe)?;
+    // A step per 1024 segments (#1188). The probe has already held the
+    // whole count against the step limit, before the path was replaced, so
+    // this only counts them.
+    it.charge_probed_steps((segments / 1024) as u64);
     Ok(())
 }
 
 fn fill(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.fill(FillRule::Winding);
-    Ok(())
+    fill_common(it, FillRule::Winding)
 }
 
 fn eofill(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.fill(FillRule::EvenOdd);
+    fill_common(it, FillRule::EvenOdd)
+}
+
+/// `fill`/`eofill` under the limits (#1188): the rasteriser looks at them
+/// as it goes, and its work is charged a step per 1024 units, as `arc`
+/// charges its segments. An ordinary fill is not charged. The rasteriser
+/// holds the whole work against the step limit before anything is painted,
+/// so this only counts it.
+fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
+    let probe = it.limit_probe();
+    let work = it.gfx.fill_limited(rule, &probe)?;
+    it.charge_probed_steps(work / 1024);
     Ok(())
 }
 
@@ -830,11 +845,17 @@ fn rectfill(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.gsave();
     it.gfx.newpath();
     let built = append_rects(it, &rects);
+    let mut work = Ok(0);
     if built.is_ok() {
-        it.gfx.fill(FillRule::Winding);
+        // Under the limits like `fill` (#1188): a numarray can hold
+        // millions of rectangles.
+        let probe = it.limit_probe();
+        work = it.gfx.fill_limited(FillRule::Winding, &probe);
     }
     it.gfx.grestore();
-    built
+    built?;
+    it.charge_probed_steps(work? / 1024);
+    Ok(())
 }
 
 /// `x y w h rectstroke` / `numarray rectstroke`, optionally with a

@@ -18,7 +18,7 @@ use ttf_parser::{Face, GlyphId};
 use crate::encodings;
 use crate::error::PsError;
 use crate::gfx::{DevPoint, Gfx, PsPath};
-use crate::object::{Dict, Object, PsString, Value};
+use crate::object::{Dict, Object, Value};
 
 /// `FID` value for fonts with no outline source we can drive yet
 /// (Type 3 dicts accepted by `definefont`); `show` reports invalidfont.
@@ -1619,58 +1619,113 @@ fn unicode_glyph(
 /// through the same FontMatrix∘CTM pipeline as every other glyph
 /// source. Charspace units go through FontMatrix directly (no em
 /// normalization — the font's own 0.001 matrix is the convention).
+///
+/// Bytes a Type 1 glyph decrypts between looks at the limits (#1188).
+const DECRYPT_POLL: usize = 64 << 10;
+
+/// Under the limits (#1188): `show` paints a glyph a step and a slice is
+/// 512 steps, so 500 glyphs each calling a 16 MB subroutine were 12 s in
+/// one slice. Each time the glyph has decrypted another [`DECRYPT_POLL`]
+/// bytes (charstrings and subroutines together), `probe` (the limits when
+/// the show began) is looked at, the decryption about to be made is held
+/// against the heap cap first, and the heap is looked at again once it is
+/// made. An ordinary glyph decrypts a few hundred bytes and reads no clock.
 fn type1_glyph(
     gfx: &mut Gfx,
     fs: &FontState,
     name: &str,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
 ) -> Result<(f64, f64), PsError> {
-    let (charstrings, len_iv, subr_strings) = {
+    let (charstrings, len_iv, subr_array) = {
         let d = fs.dict.borrow();
         let cs = match d.get("CharStrings").as_ref().map(|o| &o.value) {
             Some(Value::Dict(cs)) => cs.clone(),
             _ => return Err(PsError::InvalidFont),
         };
         let mut len_iv = 4usize;
-        let mut subr_strings: Vec<crate::object::PsString> = Vec::new();
+        let mut subr_array = None;
         if let Some(Value::Dict(private)) = d.get("Private").as_ref().map(|o| &o.value) {
             let p = private.borrow();
             if let Some(Value::Integer(n)) = p.get("lenIV").as_ref().map(|o| &o.value) {
                 len_iv = usize::try_from(*n).unwrap_or(4);
             }
             if let Some(Value::Array(a)) = p.get("Subrs").as_ref().map(|o| &o.value) {
-                for i in 0..a.len() {
-                    if let Some(Value::String(s)) = a.get(i).as_ref().map(|o| &o.value) {
-                        subr_strings.push(s.clone());
-                    } else {
-                        subr_strings.push(PsString::from_bytes(Vec::new()));
-                    }
-                }
+                subr_array = Some(a.clone());
             }
         }
-        (cs, len_iv, subr_strings)
+        (cs, len_iv, subr_array)
+    };
+    // A limit found while decrypting stops the charstring (as a missing
+    // subroutine would) and is raised in its place.
+    let limit: std::cell::Cell<Option<PsError>> = std::cell::Cell::new(None);
+    let bytes = std::cell::Cell::new(0usize);
+    let next_look = std::cell::Cell::new(DECRYPT_POLL);
+    // Decrypt `s`, looking at the limits as above; `None` on a limit.
+    let decrypt = |s: &crate::object::PsString| -> Option<Vec<u8>> {
+        let len = s.len();
+        let total = bytes.get().saturating_add(len);
+        bytes.set(total);
+        let look = total >= next_look.get();
+        let fail = |e: PsError| {
+            limit.set(Some(e));
+            None
+        };
+        if look {
+            next_look.set(total.saturating_add(DECRYPT_POLL));
+            // The decrypted bytes, and their shared copy.
+            if let Err(e) = probe
+                .check(0)
+                .and_then(|()| probe.check_alloc(len.saturating_mul(2)))
+            {
+                return fail(e);
+            }
+        }
+        let code = crate::file::decrypt_charstring(&s.borrow_bytes(), len_iv);
+        if look && let Err(e) = probe.check(0) {
+            return fail(e);
+        }
+        Some(code)
     };
     let fetch = |n: &str| -> Option<Vec<u8>> {
         match charstrings.borrow().get(n).as_ref().map(|o| &o.value) {
-            Some(Value::String(s)) => Some(crate::file::decrypt_charstring(&s.to_vec(), len_iv)),
+            Some(Value::String(s)) => decrypt(s),
             _ => None,
         }
     };
     let Some(code) = fetch(name).or_else(|| fetch(".notdef")) else {
-        return Ok((0.0, 0.0));
+        return match limit.take() {
+            Some(e) => Err(e),
+            None => Ok((0.0, 0.0)),
+        };
     };
-    let subrs: Vec<Vec<u8>> = subr_strings
-        .iter()
-        .map(|s| crate::file::decrypt_charstring(&s.to_vec(), len_iv))
-        .collect();
+    // Each subroutine is decrypted the first time this glyph calls it, and
+    // once (#1188); an entry that is not a string is an empty subroutine.
+    let decrypted: RefCell<std::collections::HashMap<usize, Rc<[u8]>>> = RefCell::default();
+    let subr = |n: usize| -> Option<Rc<[u8]>> {
+        if let Some(code) = decrypted.borrow().get(&n) {
+            return Some(code.clone());
+        }
+        let a = subr_array.as_ref().filter(|a| n < a.len())?;
+        let code: Rc<[u8]> = match a.get(n).as_ref().map(|o| &o.value) {
+            Some(Value::String(s)) => decrypt(s)?.into(),
+            _ => Rc::from(&[][..]),
+        };
+        decrypted.borrow_mut().insert(n, code.clone());
+        Some(code)
+    };
     let glyph = crate::type1::run(
         &code,
         &crate::type1::FontData {
-            subrs: &subrs,
+            subr: &subr,
             charstring_by_name: &fetch,
         },
-    )?;
+    );
+    if let Some(e) = limit.take() {
+        return Err(e);
+    }
+    let glyph = glyph?;
 
     let fm = fs.matrix;
     if !matches!(mode, ShowMode::Width) {
@@ -1878,6 +1933,9 @@ pub(crate) struct ShowCtx {
     displace: Option<Displacements>,
     /// `cshow`: the proc each measured character is handed to.
     cshow: Option<Cshow>,
+    /// The limits when the show began, for a Type 1 glyph's decryption
+    /// (#1188); looked at with no steps.
+    probe: crate::limits::LimitProbe,
 }
 
 impl ShowCtx {
@@ -1901,7 +1959,12 @@ impl ShowCtx {
             glyph: None,
             displace: None,
             cshow: None,
+            probe: crate::limits::LimitProbe::NONE,
         }
+    }
+
+    pub(crate) fn set_limit_probe(&mut self, probe: crate::limits::LimitProbe) {
+        self.probe = probe;
     }
 
     /// `string numarray xshow` (and `yshow`, `xyshow`): paint like `show`,
@@ -2046,7 +2109,7 @@ impl ShowCtx {
                     Some(name) => name,
                     None => encoding_name(&fs, code as u8),
                 };
-                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen)?;
+                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen, &self.probe)?;
                 self.finish_glyph(gfx, code, adv)
             }
         }

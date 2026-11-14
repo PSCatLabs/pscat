@@ -750,3 +750,51 @@ pub fn built_version() -> &'static str {
     assert!(ok, "unexpected build metadata in version {version:?}");
     version
 }
+
+/// Type 1 charstring encryption (key 4330), with the usual four
+/// leading bytes, as hex.
+pub fn t1_hex(plain: &[u8]) -> String {
+    let mut r: u16 = 4330;
+    let mut out = String::new();
+    for &p in [0u8; 4].iter().chain(plain) {
+        let c = p ^ (r >> 8) as u8;
+        r = (u16::from(c).wrapping_add(r))
+            .wrapping_mul(52845)
+            .wrapping_add(22719);
+        out.push_str(&format!("{c:02x}"));
+    }
+    out
+}
+
+/// A Type 1 font `/T1Probe` whose Subrs are `subr0` (encrypted, then
+/// `pad` bytes of anything) and `others` more `other_len`-byte strings,
+/// and whose glyph `A` calls subr 0 `calls` times, set as the font; then
+/// the program `show`.
+pub fn type1_probe(
+    pad: usize,
+    others: usize,
+    other_len: usize,
+    calls: usize,
+    show: &str,
+) -> String {
+    let subr0 = t1_hex(&[11]);
+    let mut glyph = vec![139, 248, 136, 13]; // 0 500 hsbw
+    for _ in 0..calls {
+        glyph.extend([139, 10]); // 0 callsubr
+    }
+    glyph.push(14); // endchar
+    format!(
+        "/s0 {len} string def s0 0 <{subr0}> putinterval \
+         /T1Probe 10 dict dup begin /FontType 1 def /PaintType 0 def \
+         /FontMatrix [0.001 0 0 0.001 0 0] def /FontBBox [0 0 1000 1000] def \
+         /Encoding 256 array 0 1 255 {{ 1 index exch /.notdef put }} for dup 65 /A put def \
+         /Private 3 dict dup begin /lenIV 4 def \
+           /Subrs [ s0 {others} {{ {other_len} string }} repeat ] def end def \
+         /CharStrings 2 dict dup begin /.notdef <{notdef}> def /A <{glyph}> def end def \
+         end definefont pop /T1Probe findfont 12 scalefont setfont 10 10 moveto \
+         {show}",
+        len = 5 + pad,
+        notdef = t1_hex(&[139, 248, 136, 13, 14]),
+        glyph = t1_hex(&glyph),
+    )
+}

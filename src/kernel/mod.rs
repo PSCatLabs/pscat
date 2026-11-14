@@ -794,11 +794,23 @@ where
     let code = code::Code::new(k, fast);
     let first_err: Mutex<Option<Stop>> = Mutex::new(None);
     let retired: Mutex<Retired> = Mutex::new((Vec::new(), Vec::new()));
+    // Each retired pixel costs its (row, column) here and two Objects in the
+    // interpreter's list of them (`fallback_pixels`, `cells_fallback`), which
+    // is refused against a memory limit. Past what that limit allows, the
+    // interpreter does the whole image instead, from the same procedure, so
+    // the result is the same (#1188: 64 million retired pixels were 1 GB
+    // here and 4 GB there, made with no look at the limits).
+    let retire_cap = it.memory_left().map(|left| {
+        left / (std::mem::size_of::<(usize, usize)>() + 2 * std::mem::size_of::<Object>())
+    });
+    let retired_count = std::sync::atomic::AtomicUsize::new(0);
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
     let dispatched = std::sync::atomic::AtomicU64::new(0);
     let work = |ctl: &RunCtl| {
         let mut m = Machine::new(k, &code, ctl);
-        let mut mine: Vec<(usize, usize)> = Vec::new();
+        // This worker's retired pixels, one list per band of rows, each in
+        // raster order.
+        let mut mine: Vec<(usize, Vec<(usize, usize)>)> = Vec::new();
         let mut my_seeds: Vec<(usize, i64)> = Vec::new();
         let mut at = [(0i64, 0i64); LANES];
         loop {
@@ -808,6 +820,7 @@ where
             };
             let Some((jb, rows)) = next else { break };
             let nrows = rows.len() / row_bytes;
+            let mut band_retired: Vec<(usize, usize)> = Vec::new();
             let mut i0 = 0;
             let mut r = Ok(());
             // The state each row's last seeding pixel left (`Kernel::rand`).
@@ -823,10 +836,21 @@ where
                 }
                 match m.run_lanes(&at[..n]) {
                     Ok(killed) => {
+                        if killed != 0
+                            && let Some(cap) = retire_cap
+                        {
+                            let n = killed.count_ones() as usize;
+                            let before =
+                                retired_count.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+                            if before + n > cap {
+                                r = Err(Stop::Cancelled);
+                                break;
+                            }
+                        }
                         for (l, &(i, j)) in at[..n].iter().enumerate() {
                             let (i, j) = (i as usize, j as usize);
                             if killed >> l & 1 != 0 {
-                                mine.push((j, i));
+                                band_retired.push((j, i));
                             } else {
                                 let o = (j - jb) * row_bytes + i * ncomp;
                                 emit(&m, l, &mut rows[o..o + ncomp]);
@@ -858,6 +882,13 @@ where
                 if let Some(s) = s {
                     my_seeds.push((jb + y, *s));
                 }
+            }
+            if !band_retired.is_empty() {
+                // Tiles go left to right and each row of a tile left to
+                // right, so a stable sort by row alone is raster order; the
+                // band's rows are its own, so no other worker's interleave.
+                band_retired.sort_by_key(|&(j, _)| j);
+                mine.push((jb, band_retired));
             }
             if let Err(e) = r {
                 ctl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -911,7 +942,7 @@ where
     {
         return Err(e);
     }
-    let (mut pixels, counts) = retired.into_inner().unwrap_or_default();
+    let (mut bands, counts) = retired.into_inner().unwrap_or_default();
     // Most first; ties in reason order, so the report is deterministic.
     let mut why: Vec<(u64, usize)> = counts
         .into_iter()
@@ -921,8 +952,14 @@ where
         .collect();
     why.sort_by_key(|&(n, c)| (std::cmp::Reverse(n), c));
     // Raster order, so the interpreter meets an error at the pixel it
-    // would have met it at.
-    pixels.sort_unstable();
+    // would have met it at: bands in order, each already in raster order.
+    // Linear, where sorting every pixel took seconds for 64 million.
+    bands.sort_unstable_by_key(|&(jb, _)| jb);
+    let mut pixels = Vec::with_capacity(bands.iter().map(|(_, b)| b.len()).sum());
+    for (_, b) in bands {
+        pixels.extend_from_slice(&b);
+        it.poll_limits(0).map_err(Stop::Limit)?;
+    }
     let mut seeds = seeds.into_inner().unwrap_or_default();
     seeds.sort_unstable();
     Ok(Ran {
@@ -995,9 +1032,10 @@ fn final_rand_state(
     r
 }
 
-/// Pixels (row, column) retired to the interpreter, and how many retired
-/// for each reason code (`exec::Why`).
-type Retired = (Vec<(usize, usize)>, Vec<u64>);
+/// Pixels (row, column) retired to the interpreter, as (first row, its
+/// pixels in raster order) per band of rows, and how many retired for each
+/// reason code (`exec::Why`).
+type Retired = (Vec<(usize, Vec<(usize, usize)>)>, Vec<u64>);
 
 /// A compiled run's result: the image, and the pixels (row, column) that
 /// left the compiled path, for the interpreter to finish.
@@ -1309,10 +1347,7 @@ fn fallback_pixels(
             .len()
             .saturating_mul(2 * std::mem::size_of::<Object>()),
     )?;
-    let flat: Vec<Object> = pixels
-        .iter()
-        .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)])
-        .collect();
+    let flat = pixel_list(it, &pixels)?;
     ks.put(
         "Pix".into(),
         Object::lit(Value::Array(PsArray::from_vec(flat))),
@@ -1331,6 +1366,21 @@ fn fallback_pixels(
         return Err(PsError::Undefined("kernelimage driver".into()));
     };
     it.exec_object(Object::exec(Value::Array(body.clone())))
+}
+
+/// The retired pixels as the drivers' `Pix` list, `i j` per pixel, looking
+/// at the limits as it grows (#1188: 64 million pixels took seconds).
+fn pixel_list(it: &mut Interp, pixels: &[(usize, usize)]) -> Result<Vec<Object>, PsError> {
+    let mut flat = Vec::with_capacity(pixels.len().saturating_mul(2));
+    for chunk in pixels.chunks(1 << 16) {
+        flat.extend(
+            chunk
+                .iter()
+                .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)]),
+        );
+        it.poll_limits(0)?;
+    }
+    Ok(flat)
 }
 
 /// Replace `KS` with the state dict and every other executable name with
@@ -1634,10 +1684,7 @@ fn cells_fallback(it: &mut Interp, a: Cells, part: Option<Partial>) -> Result<()
                     .len()
                     .saturating_mul(2 * std::mem::size_of::<Object>()),
             )?;
-            let flat: Vec<Object> = pixels
-                .iter()
-                .flat_map(|&(j, i)| [Object::int(i as i64), Object::int(j as i64)])
-                .collect();
+            let flat = pixel_list(it, &pixels)?;
             ks.put(
                 "Pix".into(),
                 Object::lit(Value::Array(PsArray::from_vec(flat))),
