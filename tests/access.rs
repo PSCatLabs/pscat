@@ -92,6 +92,21 @@ const CASES: &[(&str, &str, &str)] = &[
         "false",
     ),
     (
+        "bind enters a packed procedure",
+        "{ add } aload pop 1 packedarray cvx bind 0 get type b",
+        "operatortype",
+    ),
+    (
+        "and one nested in a procedure",
+        "/q { add } aload pop 1 packedarray cvx def /p [ /q load ] cvx def /p load bind pop /p load 0 get 0 get type b",
+        "operatortype",
+    ),
+    (
+        "but not a read-only one nested in a procedure",
+        "/q [ { add } aload pop ] cvx readonly def /p [ /q load ] cvx def /p load bind pop /p load 0 get 0 get type b",
+        "nametype",
+    ),
+    (
         "cvx and getinterval keep it",
         "[ 1 2 ] readonly dup 0 1 getinterval wcheck b dup cvx wcheck b cvx cvlit wcheck b",
         "false false false",

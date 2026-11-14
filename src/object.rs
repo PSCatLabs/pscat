@@ -288,6 +288,9 @@ pub struct Object {
     /// reference to the same array stays writable, as in Ghostscript. Only
     /// arrays ever carry it; see [`Object::is_readonly`].
     pub(crate) readonly: bool,
+    /// A packed array (`packedarray`). Read-only like any other, but `bind`
+    /// still enters it and the procedures nested in it, as Ghostscript does.
+    pub(crate) packed: bool,
 }
 
 impl Object {
@@ -296,6 +299,7 @@ impl Object {
             value,
             executable: false,
             readonly: false,
+            packed: false,
         }
     }
 
@@ -304,6 +308,7 @@ impl Object {
             value,
             executable: true,
             readonly: false,
+            packed: false,
         }
     }
 
@@ -376,6 +381,7 @@ impl Object {
             value,
             executable: self.executable,
             readonly: self.readonly,
+            packed: self.packed,
         }
     }
 

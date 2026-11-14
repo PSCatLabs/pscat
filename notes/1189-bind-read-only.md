@@ -17,9 +17,14 @@ ok
 
 The procedure given to `bind` keeps the access it had. Access belongs to the
 reference, not the storage; `bind` walks the slots of that procedure and makes
-each slot that holds an executable array read-only, then walks into it. (There is no
-local copy of the PLRM; the behaviour here is pinned to gs 10.07.1, which
-also ignores a procedure that already is read-only.)
+each slot that holds an executable array read-only, then walks into it. The `bind` entry (a mirror of the Level 2 reference,
+<https://hepunx.rl.ac.uk/~adye/psdocs/ref/PSL2b.html>, found by search; no copy
+is checked in, so the wording is as that page gives it) says "For each
+procedure object in proc, bind applies itself recursively to that procedure,
+makes the procedure read-only, and stores it back into proc", and that bind
+ignores a read-only array, "that is, it will neither bind elements of the
+array nor examine nested procedures", while packed arrays are processed
+whatever their access. gs 10.07.1 agrees on all three.
 
 ### The model
 
@@ -35,7 +40,10 @@ flag, set only on arrays, beside `executable` (it lives in padding:
   and an `errordict` handler).
 - Carried by `dup`, `getinterval`, `cvx`, `cvlit` and `load`. A fresh array
   (`array`, `copy`'s result view) is writable. `eq` ignores it.
-- `bind` on a read-only procedure is a no-op: names stay names, nested
+- A second flag, `packed`, rides beside `readonly` (`packedarray` sets both):
+  `bind` still enters a packed procedure and the packed procedures nested in
+  it, as gs and the reference do, though they are read-only.
+- `bind` on a read-only (not packed) procedure is a no-op: names stay names, nested
   procedures stay writable (gs: `{ add } readonly bind 0 get type =` is
   `nametype`).
 - A nested slot that is already read-only is not entered unless this same
@@ -47,7 +55,7 @@ flag, set only on arrays, beside `executable` (it lives in padding:
 
 ### Checks
 
-- `tests/access.rs`: 26 cases pinned from gs 10.07.1 and run through gs too
+- `tests/access.rs`: 29 cases pinned from gs 10.07.1 and run through gs too
   (top level writable, nested read-only, two deep, inside `if`, a slot shared
   twice, the dictionary's own reference still writable, `getinterval`/`cvlit`/
   `aload`, already-read-only procedures, `packedarray`, the four writers,

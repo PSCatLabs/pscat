@@ -286,6 +286,7 @@ impl Reader<'_> {
             value,
             executable: exec,
             readonly: false,
+            packed: false,
         })
     }
 }

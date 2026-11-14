@@ -211,6 +211,7 @@ fn getinterval(it: &mut Interp) -> Result<(), PsError> {
         value,
         executable: obj.executable,
         readonly: obj.readonly,
+        packed: obj.packed,
     });
     Ok(())
 }
@@ -271,6 +272,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
                 value: Value::Array(dst.interval(0, items.len())?),
                 executable: top.executable,
                 readonly: false,
+                packed: false,
             });
             Ok(())
         }
@@ -285,6 +287,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
                 value: Value::String(dst.interval(0, bytes.len())?),
                 executable: top.executable,
                 readonly: false,
+                packed: false,
             });
             Ok(())
         }
