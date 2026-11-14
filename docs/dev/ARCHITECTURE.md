@@ -163,7 +163,8 @@ Graphics semantics worth knowing (`src/gfx.rs`):
 - **Stroking**: PostScript strokes with a user-space pen. Under a
   similarity CTM (uniform scale, rotation, reflection) the pen is round in
   device space too, so we stroke the device path with the width scaled by
-  √|det CTM|. Under any other CTM the device path is mapped into a "pen
+  √|det CTM|; that round pen is also kept while it is within 1/16 px of the
+  true one. Otherwise the device path is mapped into a "pen
   space" (the CTM's linear part is s·L with det L = ±1; pen space is L⁻¹
   of the device), stroked there with the same scaled width and dashes,
   and mapped back by L, which draws the elliptical pen (#1196,

@@ -29,21 +29,57 @@ and `det L = ±1`. A user path `U` reaches the device as `M·U + t`, so
 mapping the device path by `L⁻¹` gives `s·U` plus a constant: "pen space".
 Stroking there with a round pen of `s·w`, dashes of `s·d` and the miter
 limit unchanged (it is a ratio), then mapping the outline by `L`, is exactly
-`M` applied to the user-space stroke. The raster hands `L` to tiny-skia's
-`stroke_path` as its transform, so tiny-skia dashes and strokes in pen space
-and keeps its thin-line coverage. `strokepath` dashes and strokes at
-`L`'s resolution scale and maps the outline by `L`. SVG writes
+`M` applied to the user-space stroke. The raster dashes and strokes in pen
+space at `L`'s resolution scale and fills the outline mapped by `L`, which is
+what tiny-skia's `stroke_path` does for any pen it does not treat as a
+hairline. `strokepath` makes the same outline. SVG writes
 `<path transform="matrix(L)">` inside the clip groups, which stay in device
-space. PDF writes `L` as a `cm` inside the stroke's `q … Q`, at full f32
-precision, since its entries are near 1.
+space; its `stroke-width` and dash array are pen units, which the transform
+scales (checked by rendering the SVG with Quick Look: 8 and 2 px sides, as in
+the raster). PDF writes `L` as a `cm` inside the stroke's `q … Q`, at full
+f32 precision, and its dash array is in pen units too (gs reads it back to
+the raster's dashes).
 
-The old device-space path is kept, unchanged, wherever it is already exact.
-That is a similarity CTM: `‖L‖²_F − 2 ≤ 1e-5`, a pen at most 0.3% out of
-round, well above the f32 noise of a stack of rotations. It is also kept for
-a hairline (`0 setlinewidth` stays one device pixel) and a singular CTM. It
-is the fallback for a pen more than 10⁶:1 flat, and for a path whose
-pen-space image leaves f32 range, rather than risk a stroke tiny-skia would
-drop.
+**Codex round 1** found four gaps, each now fixed and tested with its case:
+
+- *The 0.1 px width floor* applied in pen space, where `L` magnified it
+  (`[100 0 0 0.01] concat 0.01 setlinewidth` drew a 10 px line). In pen
+  space it is now `0.1/σ`, where `σ` is `L`'s larger singular value, so the
+  pen's widest device extent is at least 0.1 px. `strokepath pathbbox`
+  gives ±0.005, as gs does.
+- *A pen under a pixel every way.* tiny-skia draws a pen like that as one
+  device hairline of averaged coverage, losing the anisotropy: a 0.4 pen
+  under `[2 0 0 0.5]` read 0.5 px both ways. Filling the outline instead
+  is no good either, because 4×4 supersampling can miss a 0.2 px stripe
+  entirely. `Gfx::pen_hairlines` cuts the dashes in pen space, maps the
+  path to device space and flattens it. It then groups the segments by
+  their own device width, `p·|Lᵀn|` across unit normal `n` (floored at
+  0.1, in 1/256 px steps), and draws each group as tiny-skia's modulated
+  hairline, the same thing a thin line under a similarity CTM gets. Ink is
+  then 0.8 and 0.2 px wherever the line falls on the grid.
+  - This only applies when tiny-skia's own hairline test would fire.
+  - A pen over a pixel one way and under it the other is filled. Its thin
+    direction follows fill sampling, as `strokepath fill` does.
+- *Pen-space coordinates in PDF and SVG* were rounded before the map
+  stretched them (2 and 3 decimals). Under `[900 0 0 0.0011111111]`, a line
+  at x = 103.4 landed at 99. They now get `⌈log10 σ⌉` extra decimals
+  (`PenSpace::decimals`, at most 6 more).
+- *The round-pen shortcut* used a fixed 0.3% slack, so a 4000-unit pen
+  under a 0.15% stretch was 3 px off per edge. The shortcut is now bounded
+  by error instead. The round device pen is kept while each pen edge is
+  within 1/16 px of the true one: `(σ - 1)·s·w/2 ≤ 1/16`. With a dash set,
+  each dash boundary must also be within 1/16 px:
+  `(σ - 1)·(path length) ≤ 1/16`.
+
+The device-space path is also kept for a hairline (`0 setlinewidth` stays
+one device pixel), for a singular CTM, for a pen more than 10⁶:1 flat
+(`‖L‖² > 10⁶`), and for a path whose pen-space image leaves f32 range. Those
+fall back rather than risk a stroke tiny-skia would drop.
+
+Timing, user CPU for 20k dashed strokes on one page, base / head:
+- 1.5-wide pen under `[2 0 0 0.5]`: 0.15 / 0.15 s
+- 0.3-wide pen, which takes the sub-pixel path: 0.07 / 0.09 s
+- the same strokes under a uniform scale: 0.13 / 0.12 s
 
 **Tests.** `tests/stroke_anisotropic.rs` covers:
 - analytic side widths, with no gs needed, for rectstroke's matrix and
@@ -64,22 +100,17 @@ compared flattened, because pscat's curve outline and gs's line outline have
 control-point hulls that the anisotropic map pulls apart. The flattened
 bboxes agree to 0.4.
 
-**Identity.** Every tracked `gallery/*.ps` and `examples/*.ps` (161 files,
-175 pages) was compared, base binary against head binary. 166 pages were
-identical and 4 were skipped (the `hybrid/compare_*` files fail the same way
-in both trees). Nine pages changed, all of them handwriting:
-`lib/handscript.ps` and `lib/hangul.ps` give each glyph a small random slant,
-`[1 0 k 1 0 j] concat` with |k| up to 0.08, so their pen was a round pen
-under a skew. It is now the slightly elliptical one gs draws. The pages are
-`gallery/field_notes.ps`, `hundred_lines.ps`, `released_memo.ps` and
-`time_traveler_memo.ps`, and `examples/handwriting.ps`,
-`hangul_handscript.ps`, `drychalk_specimen.ps`, `released_specimen.ps` and
-`released_pages.ps` (page 2). A separate pass over `selftest/drivers/*.ps`
-(12 files, 51 pages) changed one more page: `selftest/drivers/arcto.ps`,
-where panel 3 strokes a rounded rectangle under `1.6 0.7 scale`. Its sides
-are now 1.6 and 0.7 of the line width, as gs draws them. On the handwriting
-pages, at most 0.97% of a page's pixels change, and
-0.024% by more than 32 of 255. The change is edge anti-aliasing on slanted
-strokes, which nobody can see at viewing size; the crops are in
-`docs/dev/review-log/pending/1196-anisotropic-stroke-pen/`. The committed
-`gallery/renders/` stills were not re-rendered.
+**Identity.** Two-binary check over every tracked `gallery/*.ps`,
+`examples/*.ps` and `selftest/drivers/*.ps` (168 files, 207 pages): 205
+identical, 4 skipped (the `hybrid/compare_*` files fail the same way in both
+trees), 2 changed. One is `selftest/drivers/arcto.ps`, whose panel 3
+strokes a rounded rectangle under `1.6 0.7 scale`; its sides are now 1.6
+and 0.7 of the line width, as gs draws them. The other is
+`gallery/released_memo.ps`: one handwritten glyph (the "w" of the
+initials) changes at its edges, at most 19/255 on 0.01% of the page.
+`lib/handscript.ps` and `lib/hangul.ps` give each glyph a small shear,
+`[1 0 k 1 0 j] concat` with |k| up to 0.08. Before round 1 that changed nine
+handwriting pages (up to 0.97% of a page's pixels). With the 1/16 px bound,
+only that glyph's pen is far enough out of round to take pen space. The
+crops are in `docs/dev/review-log/pending/1196-anisotropic-stroke-pen/`.
+The committed `gallery/renders/` stills were not re-rendered.

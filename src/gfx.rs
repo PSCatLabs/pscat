@@ -12,7 +12,8 @@
 //! width, transformed by the CTM, so an anisotropic CTM draws an
 //! elliptical pen. Under a similarity CTM (uniform scale, rotation,
 //! reflection) that pen is still round, and we stroke the device path
-//! directly with the width scaled by √|det CTM|. Otherwise (#1196) the
+//! directly with the width scaled by √|det CTM|; so we do while that round
+//! pen is within 1/16 px of the true one. Otherwise (#1196) the
 //! CTM's linear part is split as `s·L` with `det L = ±1`; the device path
 //! is mapped by `L⁻¹` into "pen space", stroked there with the same
 //! `s`-scaled width and dashes, and mapped back by `L` (`Gfx::stroke_space`).
@@ -2340,10 +2341,10 @@ impl Gfx {
                     cur = Some(p);
                 }
                 Seg::Close => {
-                    if let (Some(c), Some(s0)) = (cur, start) {
-                        if c != s0 {
-                            add(c, s0);
-                        }
+                    if let (Some(c), Some(s0)) = (cur, start)
+                        && c != s0
+                    {
+                        add(c, s0);
                     }
                     cur = start;
                 }
@@ -2433,11 +2434,10 @@ impl Gfx {
         let stretch = fmath::sqrt((norm_sq + fmath::sqrt(norm_sq * norm_sq - 4.0)) / 2.0);
         let excess = stretch - 1.0;
         let pen_error = excess * self.state.line_width * s / 2.0;
-        if !(pen_error > MAX_ERROR_PX) {
-            let dash_error = || excess * f64::from(self.state.path.device_length());
-            if self.state.dash.is_none() || !(dash_error() > MAX_ERROR_PX) {
-                return None;
-            }
+        let dash_error = || excess * f64::from(self.state.path.device_length());
+        if pen_error <= MAX_ERROR_PX && (self.state.dash.is_none() || dash_error() <= MAX_ERROR_PX)
+        {
+            return None;
         }
         let det = l[0] * l[3] - l[1] * l[2];
         let inverse = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
