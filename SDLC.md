@@ -98,7 +98,25 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    **At most `max_rounds` (2) review rounds**, counting from 1. After the
    last round, only a finding that is a real correctness, security or
    data-loss defect blocks the merge. Every other open finding is answered
-   in the round's table and listed as a proposed follow-up. A fix for a
+   in the round's table and listed as a proposed follow-up.
+   **Nitpicks don't block (owner, 2026-11-14).** From round 2 on, a finding
+   the agent doing the work judges a nitpick does not block, even if it is
+   technically a correctness defect the PR introduced: this definition
+   wins over "correctness" above. A nitpick is an edge case that only
+   crafted input reaches, and does no harm beyond a small, bounded
+   difference: a sub-pixel geometry difference from gs (under one device
+   pixel), a coordinate exactly on a rounding boundary, a limit overshoot
+   under 2x the memory cap or under a second past the clock, or an embedder
+   API sequence nothing uses. What still blocks: wrong output on realistic
+   input, a crash or panic, a security or data-loss defect (an exploitable
+   one, not a bounded overshoot), an unbounded limit bypass, or a
+   regression of behaviour that worked on main for
+   realistic input. The agent proposes each
+   nitpick as a follow-up marked `codex-nitpick` with the reviewer's repro,
+   and the dispatcher files it as its own issue (label `codex-nitpick`,
+   milestone `Backlog`). The call and its reason go in the round's table.
+   A nitpick whose fix is one line and pinned against gs may be fixed
+   instead, at any round; it then needs no confirmation round of its own. A fix for a
    blocking finding made after the last round is pushed, and gets one
    confirmation review limited to that fix; if that one still finds a
    blocking defect, the PR stops without merging and goes to the owner. When a finding turns on what

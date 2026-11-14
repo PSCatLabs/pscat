@@ -67,7 +67,10 @@ the dispatcher batches the Codex reviews, so agents don't each wait on their own
   each fix to the PR it belongs to.
 - **Round cap.** Two rounds, as in `SDLC.md`. After round 2, only real correctness, security or
   data-loss defects block. The rest become follow-ups (filed when they have user-visible impact,
-  "Follow-ups" below). A finding about PostScript semantics is settled by a `gs` run quoted in the
+  "Follow-ups" below). From round 2 on, a nitpick (a crafted-input edge case with bounded effect;
+  `SDLC.md` step 8 defines it and says it wins over "correctness") does not block: the working
+  agent makes the call, records it in the round's table and proposes it as a `codex-nitpick`
+  follow-up, which the dispatcher files ("Follow-ups" below). A finding about PostScript semantics is settled by a `gs` run quoted in the
   response, not by another round.
 - **No stale PRs.** At each wave start, every open PR with no activity for `stale_pr_days` (7)
   days goes into this wave's review or gets closed with a comment saying why (the branch stays,
@@ -100,6 +103,9 @@ user-visible impact of each. The dispatcher:
   missing capability someone asked for);
 - **adds polish ideas to the parent epic**, which is parked by default (the `deferred` label), not
   as new tickets;
+- **files each `codex-nitpick` follow-up as its own issue**, labelled `codex-nitpick`, in the
+  `Backlog` milestone, with the reviewer's repro, even with no user-visible impact (`SDLC.md`
+  step 8);
 - **never files anything that assigns physical work to the owner** (photographing references,
   buying hardware, printing samples).
 

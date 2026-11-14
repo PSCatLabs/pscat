@@ -86,7 +86,8 @@ step 10's report with `PR: none`, `Merge: closed without a PR (<why>)`, `Plan re
 **Proposed follow-ups (#674).** Agents never run `gh issue create`. List each follow-up with its
 user-visible impact (what a user sees go wrong or cannot do); the dispatcher files only those
 (docs/dev/DISPATCH.md). Polish with no such impact is marked `polish` and goes to the parent epic,
-parked by default. Never propose work that needs the owner's hands (photographing references,
+parked by default. A review nitpick (SDLC.md step 8) is marked `codex-nitpick` with the reviewer's
+repro; the dispatcher files it in the `Backlog` milestone. Never propose work that needs the owner's hands (photographing references,
 buying or printing things).
 
 End the run by printing exactly this, filled in (write `none` where empty):
@@ -99,7 +100,7 @@ End the run by printing exactly this, filled in (write `none` where empty):
 - Wall time: <start time from step 1> -> <now> (<minutes> min)
 - Review rounds: <count>, reviewer <Codex | fallback (why)>, findings fixed <n> / declined <n>
 - Steps skipped or failed: <step: reason>
-- Proposed follow-ups: <one per line: title: user-visible impact | polish (parent epic #E)>
+- Proposed follow-ups: <one per line: title: user-visible impact | polish (parent epic #E) | codex-nitpick (repro)>
 - Cleanup: worktree <removed/kept at path>, branch <deleted/kept>, lock <released>, labels <cleared>
 - Friction: <anything in this skill that was unclear, wrong or slow>
 ```
