@@ -646,3 +646,144 @@ fn pdf_dashes_are_pen_space_lengths_under_the_cm() {
         }
     }
 }
+
+// Codex review, round 2 on PR #1203: one test per finding, with its cases.
+
+/// Total ink on the page.
+fn total_ink(px: &Pixmap) -> f64 {
+    let mut sum = 0.0;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            sum += ink(px, x, y);
+        }
+    }
+    sum
+}
+
+#[test]
+fn sub_pixel_hairlines_cap_only_the_true_ends() {
+    // 8000 collinear 0.01-unit linetos, round caps: one 160 px line 0.2 px
+    // thick (32 px of ink; gs 31.5). Capping every segment gave 310, and a
+    // run of very short segments under-covers in tiny-skia's hairline.
+    let many = "[2 0 0 .5 0 0] concat .4 setlinewidth 1 setlinecap \
+                10 200 moveto 10.01 .01 90 {200 lineto} for stroke";
+    let one = "[2 0 0 .5 0 0] concat .4 setlinewidth 1 setlinecap \
+               10 200 moveto 90 200 lineto stroke";
+    let (a, b) = (
+        total_ink(&render_pscat(many)),
+        total_ink(&render_pscat(one)),
+    );
+    assert!(
+        (a - b).abs() < 0.5,
+        "8000 segments: {a:.2} of ink, one segment: {b:.2}"
+    );
+    assert!((b - 32.0).abs() < 1.0, "one segment: {b:.2}");
+    let px = render_pscat(many);
+    for y in [99, 100] {
+        let v = ink(&px, 100, y);
+        assert!(
+            (0.05..=0.15).contains(&v),
+            "interior pixel (100, {y}) has ink {v:.3}"
+        );
+    }
+    if common::gs_available() {
+        let g = total_ink(&render_gs(many, "many-segments"));
+        // gs fattens thin lines; it is the order of magnitude that matters.
+        assert!(a < 2.0 * g, "pscat {a:.2}, gs {g:.2}");
+    }
+    // A closed subpath has no caps: round and butt caps paint the same.
+    let circle = |cap: u8| {
+        render_pscat(&format!(
+            "[2 0 0 .5 0 0] concat .4 setlinewidth {cap} setlinecap 50 200 30 0 360 arc closepath stroke"
+        ))
+    };
+    assert_eq!(
+        circle(0).data(),
+        circle(1).data(),
+        "a closed curve got caps"
+    );
+    // An open curve gets exactly two: a little more ink than butt caps.
+    let arc = |cap: u8| {
+        total_ink(&render_pscat(&format!(
+            "[2 0 0 .5 0 0] concat .4 setlinewidth {cap} setlinecap 50 200 30 0 270 arc stroke"
+        )))
+    };
+    let (butt, round) = (arc(0), arc(1));
+    assert!(
+        round > butt && round - butt < 0.5,
+        "butt {butt:.2}, round {round:.2}"
+    );
+}
+
+#[test]
+fn thin_pen_space_widths_and_dashes_are_never_written_as_zero() {
+    // Codex's line, plus a dashed horizontal one: its dashes are
+    // 0.0003 and 0.0002 pen units, 0.27 and 0.18 px once stretched.
+    let src = "[900 0 0 .0011111111 0 0] concat .0004 setlinewidth \
+               .1 18000 moveto .1 162000 lineto stroke \
+               [.0003 .0002] 0 setdash .1 90000 moveto .2 90000 lineto stroke";
+    let it = interp(src, |it| it.gfx_mut().enable_svg());
+    let svg = &it.gfx().svg_pages().expect("recording on")[0];
+    assert!(svg.contains("stroke-width=\"0.0004\""), "{svg}");
+    assert!(svg.contains("stroke-dasharray=\"0.0003 0.0002\""), "{svg}");
+    let it = interp(src, |it| it.gfx_mut().enable_pdf());
+    let text = common::pdf_text(&it.gfx().pdf_document().expect("recording on"));
+    let strokes: Vec<&str> = text.lines().filter(|l| l.ends_with(" S")).collect();
+    assert_eq!(strokes.len(), 2, "{text}");
+    assert!(
+        strokes.iter().all(|l| l.contains(" 0.0004 w ")),
+        "{strokes:?}"
+    );
+    assert!(strokes[1].contains("[0.0003 0.0002] 0 d "), "{strokes:?}");
+}
+
+#[test]
+fn moveto_closepath_with_round_caps_is_a_dot_in_every_format() {
+    let src = "[2 0 0 .5 0 0] concat .4 setlinewidth 1 setlinecap 50 200 moveto closepath stroke";
+    let ours = total_ink(&render_pscat(src));
+    // A 0.4 pen's dot under det 1: about π·0.2² of area, drawn as a
+    // modulated hairline dot like any thin round-capped dot.
+    assert!(ours > 0.05, "no dot: {ours:.3}");
+    if common::gs_available() {
+        let theirs = total_ink(&render_gs(src, "closepath-dot"));
+        assert!(
+            (ours - theirs).abs() < 0.2,
+            "pscat {ours:.3}, gs {theirs:.3}"
+        );
+    }
+    let it = interp(src, |it| it.gfx_mut().enable_svg());
+    let svg = &it.gfx().svg_pages().expect("recording on")[0];
+    assert!(
+        svg.contains("<path transform") && svg.contains("Z\" fill=\"none\""),
+        "{svg}"
+    );
+    let it = interp(src, |it| it.gfx_mut().enable_pdf());
+    let text = common::pdf_text(&it.gfx().pdf_document().expect("recording on"));
+    assert!(
+        text.lines()
+            .any(|l| l.contains(" 1 J ") && l.ends_with(" h S")),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_miter_tip_keeps_its_user_space_place_under_a_slight_stretch() {
+    // 1% out of round is 0.05 px at a 10-wide pen's edge, but a 13.45:1
+    // miter tip is 0.66 px off with the round pen. The tip of this join is
+    // at user x = 167.03 (5/sin(4.27°) along the bisector), whatever the
+    // CTM. (gs puts it at 167.27 even untransformed, and 167.35 here.)
+    let path = "10 setlinewidth 20 setmiterlimit newpath 0 0 moveto 100 0 lineto 0 15 lineto \
+                strokepath";
+    let plain = bbox_of(path);
+    let stretched = bbox_of(&format!("[1.01 0 0 .9900990099 0 0] concat {path}"));
+    assert!(
+        (plain[2] - 167.03).abs() < 0.02,
+        "untransformed tip {plain:?}"
+    );
+    assert_bbox(
+        "stretched",
+        &stretched,
+        [plain[0], plain[1], plain[2], plain[3]],
+        0.02,
+    );
+}

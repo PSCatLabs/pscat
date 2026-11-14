@@ -89,7 +89,7 @@ struct PenSpace {
 enum StrokeDraw {
     Device(tiny_skia::Path),
     PenOutline(tiny_skia::Path, Transform),
-    Hairlines(Vec<(f32, tiny_skia::Path)>),
+    Hairlines(Vec<(Stroke, tiny_skia::Path)>),
 }
 
 impl PenSpace {
@@ -105,12 +105,13 @@ impl PenSpace {
         fast_len(l.sx * width, l.ky * width) <= 1.0 && fast_len(l.kx * width, l.sy * width) <= 1.0
     }
 
-    /// Fractional digits for writing the pen-space path, given what device
-    /// space uses: L stretches a rounding error by up to `stretch`, so add
-    /// its decimal magnitude back.
-    fn decimals(&self, device: usize) -> usize {
+    /// Fractional digits to add, over device space's, when writing
+    /// pen-space numbers (path, width, dashes) to SVG or PDF: L stretches a
+    /// rounding error by up to `stretch`, and the width floor is
+    /// `0.1/stretch`, so add the stretch's decimal magnitude.
+    fn extra_decimals(&self) -> usize {
         let extra = fmath::log10(self.stretch).ceil().max(0.0) as usize;
-        device + extra.min(6)
+        extra.min(6)
     }
 }
 
@@ -705,6 +706,40 @@ impl PsPath {
         }
         pb.finish()
     }
+}
+
+/// `pts` with the points dropped that lie within `tol` of the chord the
+/// kept points on either side make (greedy, at most 64 points per chord).
+/// tiny-skia's anti-aliased hairline under-covers a run of very short
+/// segments (a line drawn as 0.02 px steps gets about half its ink, under
+/// any CTM), so `Gfx::pen_hairlines` hands it the run's real extent.
+fn simplify_polyline(pts: &[DevPoint], tol: f32) -> Vec<DevPoint> {
+    let mut out = vec![pts[0]];
+    let mut pending: Vec<DevPoint> = Vec::new();
+    let within = |a: DevPoint, b: DevPoint, q: DevPoint| {
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len = fmath::hypotf(dx, dy);
+        if len == 0.0 {
+            return fmath::hypotf(q.x - a.x, q.y - a.y) <= tol;
+        }
+        // Distance from the chord's line, and inside the chord's span.
+        let along = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len;
+        ((q.x - a.x) * dy - (q.y - a.y) * dx).abs() / len <= tol && (0.0..=len).contains(&along)
+    };
+    for &p in &pts[1..] {
+        let anchor = out[out.len() - 1];
+        if pending.len() < 64 && pending.iter().all(|&q| within(anchor, p, q)) {
+            pending.push(p);
+            continue;
+        }
+        if let Some(&last) = pending.last() {
+            out.push(last);
+        }
+        pending.clear();
+        pending.push(p);
+    }
+    out.extend(pending.last());
+    out
 }
 
 fn push_seg(pb: &mut PathBuilder, seg: &Seg) {
@@ -2147,17 +2182,12 @@ impl Gfx {
                     self.pixmap
                         .fill_path(outline, &paint, FillRule::Winding, *l, mask.as_deref())
                 }
-                StrokeDraw::Hairlines(buckets) => {
-                    for (width, path) in buckets {
-                        let thin = Stroke {
-                            width: *width,
-                            dash: None,
-                            ..stroke.clone()
-                        };
+                StrokeDraw::Hairlines(groups) => {
+                    for (thin, path) in groups {
                         self.pixmap.stroke_path(
                             path,
                             &paint,
-                            &thin,
+                            thin,
                             Transform::identity(),
                             mask.as_deref(),
                         );
@@ -2170,7 +2200,6 @@ impl Gfx {
                 self.state.line_join,
                 self.state.miter_limit,
             );
-            let to_device = pen.as_ref().map(|p| p.to_device);
             // SVG and PDF recording are independent output targets —
             // gating one behind the other (as this block used to do,
             // nesting the PDF write inside `if self.svg.is_some()`)
@@ -2181,15 +2210,16 @@ impl Gfx {
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = match &pen {
-                    Some(pen) => pen.path.to_svg_data_with(pen.decimals(3)),
+                    Some(pen) => pen.path.to_svg_data_with(3 + pen.extra_decimals()),
                     None => self.state.path.to_svg_data(),
                 };
                 let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+                let pen_map = pen.as_ref().map(|p| (p.to_device, p.extra_decimals()));
                 if let Some(svg) = &mut self.svg {
                     svg.stroke(
                         &d,
-                        to_device,
+                        pen_map,
                         rgb,
                         w,
                         cap,
@@ -2207,10 +2237,7 @@ impl Gfx {
                 let Gfx { pdf, state, .. } = self;
                 if let Some(pdf) = pdf {
                     let (path, pen_map) = match &pen {
-                        Some(pen) => (
-                            &pen.path,
-                            Some((pen.to_device, pen.decimals(crate::pdf::PATH_DECIMALS))),
-                        ),
+                        Some(pen) => (&pen.path, Some((pen.to_device, pen.extra_decimals()))),
                         None => (&state.path, None),
                     };
                     pdf.stroke(
@@ -2286,19 +2313,28 @@ impl Gfx {
         dashed.stroke(stroke, res_scale)
     }
 
-    /// A sub-pixel pen's stroke as device-space segments grouped by their
-    /// own device width (#1196): `p·|Lᵀn|` across a segment with unit
+    /// A sub-pixel pen's stroke as device-space hairlines grouped by
+    /// their own device width (#1196): `p·|Lᵀn|` across a segment with unit
     /// normal `n`, floored at the 0.1 px every thin stroke gets, in steps
     /// of 1/256 px. Each group then draws as tiny-skia's modulated
     /// hairline, exactly as a thin line under a similarity CTM does, so a
     /// side's ink is its own width wherever it falls on the pixel grid.
     /// Dashes are cut in pen space first, so their lengths stay right.
-    /// Under a pixel there are no joins to keep.
+    ///
+    /// Consecutive segments of one width stay one connected polyline, so
+    /// their joins are a hairline's joins, as before. Every group is drawn
+    /// butt-capped (`LineCap::Butt` in the returned strokes); a round or
+    /// square cap is instead added at the true ends of an open subpath, by
+    /// extending its first and last points as far as tiny-skia's hairline
+    /// cap would (π/8 or 1/2 px). A subpath with no length (`moveto
+    /// closepath`, a zero-length dash) is a dot under round or square caps,
+    /// drawn as a zero-length hairline with its cap, and nothing under butt
+    /// caps, as in PostScript.
     fn pen_hairlines(
         &self,
         pen: &PenSpace,
         stroke: &Stroke,
-    ) -> Option<Vec<(f32, tiny_skia::Path)>> {
+    ) -> Option<Vec<(Stroke, tiny_skia::Path)>> {
         let path = pen.path.to_skia_for_stroke(stroke.width)?;
         let res_scale = tiny_skia::PathStroker::compute_resolution_scale(&pen.to_device);
         let dashed = match &stroke.dash {
@@ -2310,49 +2346,106 @@ impl Gfx {
         let across = |a: DevPoint, b: DevPoint| {
             let (ux, uy) = (b.x - a.x, b.y - a.y);
             let len = fmath::hypotf(ux, uy);
-            if len == 0.0 {
-                // A dot (a zero-length dash or subpath with round or
-                // square caps): the pen's mean width.
-                return stroke.width;
-            }
             let (nx, ny) = (-uy / len, ux / len);
             stroke.width * fmath::hypotf(l.sx * nx + l.ky * ny, l.kx * nx + l.sy * ny)
         };
-        let mut buckets: std::collections::BTreeMap<u32, PathBuilder> =
-            std::collections::BTreeMap::new();
-        let mut add = |a: DevPoint, b: DevPoint| {
-            let width = across(a, b).max(0.1);
-            let key = (width * 256.0).round() as u32;
-            let pb = buckets.entry(key).or_default();
-            pb.move_to(a.x, a.y);
-            pb.line_to(b.x, b.y);
+        let key_of = |width: f32| (width.max(0.1) * 256.0).round() as u32;
+        let cap_outset = match stroke.line_cap {
+            LineCap::Butt => 0.0,
+            LineCap::Square => 0.5,
+            LineCap::Round => std::f32::consts::PI / 8.0,
         };
-        let (mut cur, mut start) = (None::<DevPoint>, None::<DevPoint>);
+        // (width key, dot) -> the group's path.
+        let mut groups: std::collections::BTreeMap<(u32, bool), PathBuilder> =
+            std::collections::BTreeMap::new();
+        let mut subpath = |pts: &mut Vec<DevPoint>, closed: bool| {
+            pts.dedup();
+            if closed && pts.len() > 1 && pts.first() != pts.last() {
+                pts.push(pts[0]);
+            }
+            if pts.len() < 2 {
+                if let (Some(&p), false) = (pts.first(), cap_outset == 0.0) {
+                    // A dot: the pen's mean device width (det L = ±1).
+                    let pb = groups.entry((key_of(stroke.width), true)).or_default();
+                    pb.move_to(p.x, p.y);
+                    pb.line_to(p.x, p.y);
+                }
+                return;
+            }
+            if !closed && cap_outset > 0.0 {
+                let n = pts.len();
+                let extend = |end: DevPoint, from: DevPoint| {
+                    let (dx, dy) = (end.x - from.x, end.y - from.y);
+                    let len = fmath::hypotf(dx, dy);
+                    DevPoint {
+                        x: end.x + dx / len * cap_outset,
+                        y: end.y + dy / len * cap_outset,
+                    }
+                };
+                pts[0] = extend(pts[0], pts[1]);
+                pts[n - 1] = extend(pts[n - 1], pts[n - 2]);
+            }
+            // Runs of one width, each a polyline.
+            let mut chains: Vec<(u32, Vec<DevPoint>)> = Vec::new();
+            for w in pts.windows(2) {
+                let key = key_of(across(w[0], w[1]));
+                match chains.last_mut() {
+                    Some((k, run)) if *k == key => run.push(w[1]),
+                    _ => chains.push((key, vec![w[0], w[1]])),
+                }
+            }
+            for (key, run) in chains {
+                let pb = groups.entry((key, false)).or_default();
+                let run = simplify_polyline(&run, 1.0 / 32.0);
+                pb.move_to(run[0].x, run[0].y);
+                for p in &run[1..] {
+                    pb.line_to(p.x, p.y);
+                }
+            }
+        };
+        // The open subpath so far, and whether it has a segment: a lone
+        // moveto (or the start point a closepath leaves) draws nothing.
+        let mut pts: Vec<DevPoint> = Vec::new();
+        let mut drawn = false;
         for seg in &device.segs {
             match *seg {
                 Seg::Move(p) => {
-                    cur = Some(p);
-                    start = Some(p);
+                    if drawn {
+                        subpath(&mut pts, false);
+                    }
+                    pts.clear();
+                    pts.push(p);
+                    drawn = false;
                 }
                 Seg::Line(p) | Seg::Curve(_, _, p) => {
-                    if let Some(c) = cur {
-                        add(c, p);
-                    }
-                    cur = Some(p);
+                    pts.push(p);
+                    drawn = true;
                 }
                 Seg::Close => {
-                    if let (Some(c), Some(s0)) = (cur, start)
-                        && c != s0
-                    {
-                        add(c, s0);
-                    }
-                    cur = start;
+                    let start = pts.first().copied();
+                    subpath(&mut pts, true);
+                    pts.clear();
+                    // closepath leaves the current point at the start: a
+                    // segment after it, without a moveto, begins there.
+                    pts.extend(start);
+                    drawn = false;
                 }
             }
         }
-        let out: Vec<(f32, tiny_skia::Path)> = buckets
+        if drawn {
+            subpath(&mut pts, false);
+        }
+        let out: Vec<(Stroke, tiny_skia::Path)> = groups
             .into_iter()
-            .filter_map(|(key, pb)| Some((key as f32 / 256.0, pb.finish()?)))
+            .filter_map(|((key, dot), pb)| {
+                let thin = Stroke {
+                    width: key as f32 / 256.0,
+                    line_cap: if dot { stroke.line_cap } else { LineCap::Butt },
+                    dash: None,
+                    ..stroke.clone()
+                };
+                Some((thin, pb.finish()?))
+            })
             .collect();
         (!out.is_empty()).then_some(out)
     }
@@ -2406,9 +2499,11 @@ impl Gfx {
     ///
     /// The round device pen is kept when it is within 1/16 px of the true
     /// one: L stretches by at most `σ` (its larger singular value; the
-    /// smaller is `1/σ`), so a pen edge moves by up to `(σ - 1)·s·w/2`,
-    /// and with a dash set, a dash boundary by up to `(σ - 1)` times the
-    /// path's length. Also `None` for a hairline (`0 setlinewidth` is one
+    /// smaller is `1/σ`), so a point of the outline `r·s·w/2` from the path
+    /// moves by up to `(σ - 1)·r·s·w/2`, where `r` is 1 for an edge or a
+    /// round join or cap, the miter limit under miter joins, and √2 under
+    /// square caps. With a dash set, a dash boundary moves by up to
+    /// `(σ - 1)` times the path's length. Also `None` for a hairline (`0 setlinewidth` is one
     /// device pixel, whatever the CTM), a singular CTM, and a pen so flat
     /// (`σ²` past 10⁶) or a path so far out that pen space leaves f32
     /// range: those keep the device-space approximation rather than risk
@@ -2433,7 +2528,19 @@ impl Gfx {
         }
         let stretch = fmath::sqrt((norm_sq + fmath::sqrt(norm_sq * norm_sq - 4.0)) / 2.0);
         let excess = stretch - 1.0;
-        let pen_error = excess * self.state.line_width * s / 2.0;
+        // A pen edge is half a width from the path, but a miter tip is up
+        // to `miter limit` half-widths out and a square cap's corner √2,
+        // and the round pen's error grows with that distance.
+        let reach = match self.state.line_join {
+            LineJoin::Miter | LineJoin::MiterClip => f64::from(self.state.miter_limit),
+            _ => 1.0,
+        }
+        .max(if self.state.line_cap == LineCap::Square {
+            std::f64::consts::SQRT_2
+        } else {
+            1.0
+        });
+        let pen_error = excess * self.state.line_width * s / 2.0 * reach;
         let dash_error = || excess * f64::from(self.state.path.device_length());
         if pen_error <= MAX_ERROR_PX && (self.state.dash.is_none() || dash_error() <= MAX_ERROR_PX)
         {

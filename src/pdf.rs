@@ -528,10 +528,19 @@ Q",
             tiny_skia::LineJoin::Bevel => 2,
             _ => 0,
         };
+        // A pen-space width and dashes (#1196) get the same extra decimals
+        // as the path, and a nonzero one never reads as 0.
+        let num = |v: f32| match pen {
+            Some((_, extra)) => {
+                let s = fmt_num(v, 3 + extra);
+                if s == "0" && v != 0.0 { p(v) } else { s }
+            }
+            None => f(v),
+        };
         let dash = match dash {
             Some((pattern, phase)) => {
-                let list: Vec<String> = pattern.iter().map(|d| f(*d)).collect();
-                format!("[{}] {} d ", list.join(" "), f(phase))
+                let list: Vec<String> = pattern.iter().map(|d| num(*d)).collect();
+                format!("[{}] {} d ", list.join(" "), num(phase))
             }
             None => String::new(),
         };
@@ -542,21 +551,21 @@ Q",
         // near 1, where three decimals would move a far point), and the
         // path at the extra decimals the caller asks for, since the `cm`
         // stretches its rounding too.
-        let (pen, path_text) = match pen {
-            Some((l, decimals)) => (
+        let (pen_cm, path_text) = match pen {
+            Some((l, extra)) => (
                 format!("{} {} {} {} 0 0 cm ", p(l.sx), p(l.ky), p(l.kx), p(l.sy)),
-                path.to_pdf_ops_with(false, decimals),
+                path.to_pdf_ops_with(false, PATH_DECIMALS + extra),
             ),
             None => (String::new(), path_ops(path, false)),
         };
         let _ = writeln!(
             self.content,
-            "q {gs}{pen}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
+            "q {gs}{pen_cm}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
 Q",
             f(rgb.0),
             f(rgb.1),
             f(rgb.2),
-            f(width),
+            num(width),
             f(miter_limit),
             path_text,
         );
