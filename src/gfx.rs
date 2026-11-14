@@ -353,16 +353,20 @@ impl PsPath {
         })
     }
 
-    /// This path without its subpaths that never leave their first point.
-    fn without_point_subpaths(&self) -> PsPath {
-        let mut out = PsPath::default();
+    /// Each subpath's segments, and whether it never leaves its first
+    /// point (`moveto closepath`, or a `lineto` back to the start).
+    fn subpaths(&self) -> impl Iterator<Item = (&[Seg], bool)> {
         let mut i = 0;
-        while i < self.segs.len() {
+        std::iter::from_fn(move || {
+            if i >= self.segs.len() {
+                return None;
+            }
             let end = self.segs[i + 1..]
                 .iter()
                 .position(|s| matches!(s, Seg::Move(_)))
                 .map_or(self.segs.len(), |n| i + 1 + n);
             let sub = &self.segs[i..end];
+            i = end;
             let start = match sub[0] {
                 Seg::Move(p) => Some(p),
                 _ => None,
@@ -372,14 +376,25 @@ impl PsPath {
                 Seg::Line(p) => Some(p) != start,
                 Seg::Curve(a, b, p) => [a, b, p].iter().any(|q| Some(*q) != start),
             });
-            if moves || start.is_none() {
+            Some((sub, start.is_some() && !moves))
+        })
+    }
+
+    /// This path without its subpaths that never leave their first point,
+    /// or `None` when it has none (so a caller clones nothing then).
+    fn without_point_subpaths(&self) -> Option<PsPath> {
+        if !self.subpaths().any(|(_, point)| point) {
+            return None;
+        }
+        let mut out = PsPath::default();
+        for (sub, point) in self.subpaths() {
+            if !point {
                 out.segs.extend_from_slice(sub);
             }
-            i = end;
         }
         out.current = self.current;
         out.subpath_start = self.subpath_start;
-        out
+        Some(out)
     }
 
     /// The length of the path's control polygon in device space, an upper
@@ -2193,7 +2208,8 @@ impl Gfx {
             self.newpath();
             return;
         }
-        let pen = self.stroke_space();
+        let dropped = self.stroke_dropped();
+        let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
         // In pen space (#1196) the outline is made here and filled, mapped
         // by L, which is what tiny-skia's `stroke_path` does for any pen it
@@ -2208,9 +2224,9 @@ impl Gfx {
             Some(pen) => self
                 .pen_outline(pen, &stroke)
                 .map(|o| StrokeDraw::PenOutline(o, pen.to_device)),
-            None => self
-                .state
-                .path
+            None => dropped
+                .as_ref()
+                .unwrap_or(&self.state.path)
                 .to_skia_for_stroke(stroke.width)
                 .map(StrokeDraw::Device),
         };
@@ -2259,7 +2275,7 @@ impl Gfx {
             if self.svg.is_some() {
                 let d = match &pen {
                     Some(pen) => pen.path.to_svg_data_with(3 + pen.extra_decimals()),
-                    None => self.state.path.to_svg_data(),
+                    None => dropped.as_ref().unwrap_or(&self.state.path).to_svg_data(),
                 };
                 let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
@@ -2286,7 +2302,7 @@ impl Gfx {
                 if let Some(pdf) = pdf {
                     let (path, pen_map) = match &pen {
                         Some(pen) => (&pen.path, Some((pen.to_device, pen.extra_decimals()))),
-                        None => (&state.path, None),
+                        None => (dropped.as_ref().unwrap_or(&state.path), None),
                     };
                     pdf.stroke(
                         path,
@@ -2419,7 +2435,7 @@ impl Gfx {
             }
             if pts.len() < 2 {
                 // A dot under round caps only: gs paints nothing for a
-                // zero-length subpath under square caps (`stroke_space`
+                // zero-length subpath under square caps (`stroke_dropped`
                 // drops those before they get here).
                 if let (Some(&p), LineCap::Round) = (pts.first(), stroke.line_cap) {
                     // A dot: the pen's mean device width (det L = ±1).
@@ -2516,15 +2532,16 @@ impl Gfx {
     /// a lone moveto, a zero-length subpath under butt caps) leaves an
     /// empty path, as in gs.
     pub fn stroke_path(&mut self) {
-        let pen = self.stroke_space();
+        let dropped = self.stroke_dropped();
+        let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
         let (stroke, _) = self.stroke_params(pen.as_ref());
         let outline = match &pen {
             Some(pen) => self
                 .pen_outline(pen, &stroke)
                 .and_then(|o| o.transform(pen.to_device)),
-            None => self
-                .state
-                .path
+            None => dropped
+                .as_ref()
+                .unwrap_or(&self.state.path)
                 .to_skia_for_stroke(stroke.width)
                 .and_then(|path| {
                     let dashed = match &stroke.dash {
@@ -2539,7 +2556,25 @@ impl Gfx {
             .map_or_else(PsPath::default, PsPath::from_skia);
     }
 
-    /// Where `stroke` strokes the current path when the pen is not round
+    /// The current path without its zero-length subpaths, when they must
+    /// not be stroked, and `None` when the path is stroked as it is. gs
+    /// paints nothing for a zero-length subpath under square caps
+    /// (`moveto closepath`, or a `lineto` back to the point, at any
+    /// width, hairline included), and reads none back from a PDF either.
+    /// tiny-skia and SVG would draw the square, so every output stroke
+    /// takes the path through here (#1215), before dashing. A round cap
+    /// still makes a dot. Zero-length dashes of a real subpath are not
+    /// subpaths and stay.
+    fn stroke_dropped(&self) -> Option<PsPath> {
+        if self.state.line_cap == LineCap::Square {
+            self.state.path.without_point_subpaths()
+        } else {
+            None
+        }
+    }
+
+    /// Where `stroke` strokes `path` (the current path, less what
+    /// `stroke_dropped` removes) when the pen is not round
     /// in device space (#1196). `None` means "stroke the device path as
     /// it is", the exact answer when the CTM is a similarity, and the
     /// only change-free one for every render that never uses an
@@ -2564,7 +2599,7 @@ impl Gfx {
     /// (`σ²` past 10⁶) or a path so far out that pen space leaves f32
     /// range: those keep the device-space approximation rather than risk
     /// a stroke tiny-skia would silently drop.
-    fn stroke_space(&self) -> Option<PenSpace> {
+    fn stroke_space(&self, path: &PsPath) -> Option<PenSpace> {
         const MAX_ERROR_PX: f64 = 1.0 / 16.0;
         const MAX_NORM_SQ: f64 = 1e6;
         if self.state.line_width <= 0.0 {
@@ -2604,14 +2639,7 @@ impl Gfx {
         }
         let det = l[0] * l[3] - l[1] * l[2];
         let inverse = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
-        let mut path = self.state.path.linear_mapped(inverse)?;
-        if self.state.line_cap == LineCap::Square {
-            // gs paints nothing for a zero-length subpath under square
-            // caps (`moveto closepath`, or a lineto back to the point), and
-            // reads none back from a PDF either; leave it out of the
-            // raster, SVG and PDF alike.
-            path = path.without_point_subpaths();
-        }
+        let path = path.linear_mapped(inverse)?;
         let to_device =
             Transform::from_row(l[0] as f32, l[1] as f32, l[2] as f32, l[3] as f32, 0.0, 0.0);
         Some(PenSpace {
