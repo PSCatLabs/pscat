@@ -120,6 +120,21 @@ OpenAI-managed client certificate presented on TLS (mTLS).
   `get_renderer_info` and `validate_postscript`. The shared skills
   (`plugin/skills/pscat/SKILL.md` line 285 on, `references/mcp.md`) describe the
   local set and are unchanged here.
+- The `--remote` ZIP still ships `pscat-chatgpt-setup` (#1089), whose steps
+  install a local pscat. Its description says to fire when the pscat MCP tools
+  are not available, and step 1 checks for the `pscat` command, not the tools,
+  so an agent might start the download although the hosted tools are
+  connected. Untested; the skill is left alone here.
+- Limiting a no-auth Cloud Run service to ChatGPT (paraphrased, from
+  <https://docs.cloud.google.com/run/docs/securing/ingress>, which lists the
+  ingress setting "Internal and Cloud Load Balancers" for an External
+  Application Load Balancer and a "Disable the default URL" section, and
+  from Google's Cloud Armor pages, which put an IP allowlist in a security
+  policy on that load balancer): an allowlist is a Cloud Armor policy on an
+  external Application Load Balancer, with ingress limited to it and the
+  default `run.app` URL disabled so callers cannot go around it. It is not a
+  setting of the service itself. An mTLS check was not researched (a load
+  balancer or the server itself).
 - Nothing here was tried in a ChatGPT session: the ZIP's label, whether a
   personal account can install it, and the connector flow on the real server.
 
@@ -132,5 +147,7 @@ OpenAI-managed client certificate presented on TLS (mTLS).
 - After the owner's decision: OAuth on pscat-mcp (a pscat-mcp issue), or a
   separate no-auth staging service; then a `--remote-auth oauth` choice in the
   builder with the matching `auth` stanza.
+- `pscat-chatgpt-setup`: step 1 should look for the pscat MCP tools first and
+  stop when they are there (skill change, its own PR).
 - Once a ChatGPT session has tried it: fix the "Desktop only" and personal ZIP
   upload statements in `docs/guides/chatgpt-hosted.md`.

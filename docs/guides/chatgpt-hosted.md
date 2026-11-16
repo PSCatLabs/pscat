@@ -8,8 +8,8 @@ the one open question: how the server proves who is calling.
 Status (November 2026): the hosted server is in staging and protected by a
 static bearer token. **ChatGPT cannot send a static bearer token**, so it
 cannot connect to that server as it stands. The owner has to pick between
-OAuth on the server and a no-authentication variant first (the decision is in
-the pull request for #1240). Everything else below is ready.
+OAuth on the server and a no-authentication variant first (the decision is on
+issue #1240). Everything else below is ready.
 
 ## What ChatGPT accepts
 
@@ -74,6 +74,13 @@ does not work against it:
   20 seconds. Keep programs small, or render at a lower DPI.
 - Anything that needs local files or the `pscat` command line.
 
+The ZIP still holds the ChatGPT-only `pscat-chatgpt-setup` skill, which
+installs a local `pscat` through the GitHub connector when the pscat MCP tools
+are missing. Its description says to run when those tools are not available,
+but nothing here has tested that an agent with the hosted tools connected
+skips it. If it starts a download anyway, say that the pscat tools are
+connected and ask it to use them.
+
 The skills are shared with Claude Code, Codex and Cowork and stay unchanged
 here, so an agent may name a tool the hosted server lacks. If it does, tell
 it to use only the seven tools above.
@@ -119,6 +126,13 @@ personal account can use the upload at all.
   abuse. OpenAI documents two ways to limit callers to ChatGPT: allow only
   ChatGPT's [published egress IP ranges](https://developers.openai.com/api/docs/guides/ip-addresses),
   and check the OpenAI-managed client certificate on the TLS connection (mTLS).
+  On Cloud Run neither is a setting of the service itself. Google's
+  documentation puts an IP allowlist in a Cloud Armor policy on an external
+  Application Load Balancer, with the service's ingress set to internal and
+  load-balancer traffic and its default `run.app` URL disabled (otherwise
+  callers go around the policy), so the server's address would change. The
+  mTLS check would sit in the server or the load balancer; neither was
+  checked here.
   The server's 2 concurrent renders and 20-second limit bound each request,
   not the total bill.
 - **OAuth**: callers sign in, so a leaked URL is harmless. It means an
