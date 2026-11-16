@@ -485,7 +485,7 @@ without the limits above:
     and look at the limits while building the list for the interpreter;
     under a memory cap, once the list would not fit, the interpreter does
     the whole image instead. With any limit set the list is held to 256 MiB
-    (about 4 million pixels) even with no memory cap (#1235: 64 million
+    (about 2.4 million pixels) even with no memory cap (#1235: 64 million
     retired pixels were 1.3 GB under only `--max-time`).
   - `cliprestore` that remakes a clip for another page size looks at the
     limits too (#1235), and a limited `fill` or `clip` of very many edges
