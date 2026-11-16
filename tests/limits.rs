@@ -1261,3 +1261,174 @@ mod one_operator {
         }
     }
 }
+
+/// Step accounting inside one slice (#1213). The limits are read between
+/// slices, but an operator that looks at them from the inside (a decode
+/// drain, a path walk, a read) used to see the steps the program had left
+/// when the slice began, and a slice that ended in a finish or an error
+/// never charged its own steps. A program could run past `--max-steps` by
+/// up to one slice, unreported.
+mod slice_accounting_1213 {
+    use super::*;
+
+    /// A zlib stream of `n` spaces, as the hex a `/ASCIIHexDecode` source reads.
+    fn zlib_spaces_hex(n: usize) -> String {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&vec![b' '; n]).expect("compress in memory");
+        z.finish()
+            .expect("compress in memory")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// The program's current path as `pathforall` sees it: elements.
+    fn path_elements(it: &mut Interp) -> String {
+        it.set_limits(Limits::none()).expect("no limits");
+        it.capture_stdout();
+        it.run_str(
+            "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall =",
+        )
+        .expect("pathforall");
+        String::from_utf8_lossy(it.captured_stdout())
+            .trim()
+            .to_string()
+    }
+
+    /// Run `tail` under a 20-step cap after draining `spaces` decoded
+    /// spaces (15 steps for 16,000).
+    fn drain_then(spaces: usize, tail: &str) -> (Result<(), PsError>, String) {
+        let mut it = Interp::new();
+        it.run_str(&format!(
+            "/f <{}> /FlateDecode filter def",
+            zlib_spaces_hex(spaces)
+        ))
+        .expect("the setup runs");
+        it.set_limits(steps(20)).expect("limits apply");
+        it.capture_stdout();
+        let r = it.run_str(&format!("f flushfile {tail}"));
+        let report = match &r {
+            Err(e) => it.error_report(e),
+            Ok(()) => String::new(),
+        };
+        let out = String::from_utf8_lossy(it.captured_stdout()).to_string();
+        (r, format!("{report} stdout: {out}"))
+    }
+
+    #[test]
+    fn a_drain_and_a_few_objects_past_the_cap_end_in_the_step_limit() {
+        // 16,000 spaces are 15 steps, under the cap of 20 on their own; the
+        // objects that follow take it past. Both programs used to finish
+        // clean or with their own error.
+        let (r, report) = drain_then(16_000, "1 2 add pop 1 2 add pop 1 2 add pop (survived) =");
+        assert_eq!(r, Err(PsError::StepsExceeded), "{report}");
+        assert!(report.contains("limitexceeded (steps)"), "{report}");
+
+        let (r, report) = drain_then(16_000, "1 2 add pop 1 2 add pop 1 2 add pop 1 0 div");
+        assert_eq!(r, Err(PsError::StepsExceeded), "{report}");
+        assert!(report.contains("limitexceeded (steps)"), "{report}");
+        assert!(!report.contains("undefinedresult"), "{report}");
+    }
+
+    #[test]
+    fn a_drain_inside_the_cap_still_finishes() {
+        // The same drain with few objects: 15 steps and 4 objects, 20 or fewer.
+        let (r, report) = drain_then(16_000, "(survived) =");
+        assert_eq!(r, Ok(()), "{report}");
+        assert!(report.contains("survived"), "{report}");
+    }
+
+    #[test]
+    fn a_program_of_exactly_the_cap_passes_and_one_more_object_fails() {
+        // Ten objects under a cap of ten: the pass that finds the program
+        // done is not a step.
+        let mut it = limited(steps(10));
+        assert_eq!(it.run_str("1 pop 1 pop 1 pop 1 pop 1 pop"), Ok(()));
+        assert_eq!(it.steps_used(), 10, "the count is exact for a straight run");
+        let mut it = limited(steps(10));
+        assert_eq!(
+            it.run_str("1 pop 1 pop 1 pop 1 pop 1 pop 1"),
+            Err(PsError::StepsExceeded)
+        );
+        // The same at the end of a program that fails: the failing step
+        // counts, and over the cap it is the step limit that is reported.
+        let mut it = limited(steps(10));
+        assert_eq!(
+            it.run_str("1 pop 1 pop 1 pop 1 1 0 div"),
+            Err(PsError::UndefinedResult)
+        );
+        let mut it = limited(steps(10));
+        assert_eq!(
+            it.run_str("1 pop 1 pop 1 pop 1 pop 1 0 div"),
+            Err(PsError::StepsExceeded)
+        );
+    }
+
+    #[test]
+    fn the_count_does_not_depend_on_how_the_program_is_sliced() {
+        let src = "1 1 3000 { pop } for 500 { 1 2 add pop } repeat 20 { 1 pop } repeat";
+        let mut used = Vec::new();
+        for slice in [1usize, 7, 512, 4096, 1 << 20] {
+            let mut it = limited(steps(1_000_000));
+            it.begin_source(src.as_bytes());
+            while it.step_n(slice).expect("within the cap") {}
+            used.push(it.steps_used());
+        }
+        assert!(
+            used.iter().all(|&u| u == used[0]),
+            "steps by slice: {used:?}"
+        );
+        assert!(used[0] > 3000, "{used:?}");
+    }
+
+    #[test]
+    fn a_playground_frame_re_armed_each_call_never_trips_its_own_cap() {
+        // `ps_set_max_steps` before each `ps_step`: the cap restarts, and a
+        // frame well inside it must never stop.
+        for src in ["1 1 1000000000 { pop } for", "{ 1 pop } loop"] {
+            let mut it = Interp::new();
+            it.set_limits(steps(20_000)).unwrap();
+            it.begin_source(src.as_bytes());
+            for frame in 0..50 {
+                it.set_limits(steps(20_000)).unwrap();
+                assert_eq!(it.step_n(4000), Ok(true), "{src}: frame {frame}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_failing_flattenpath_leaves_the_path_it_was_given() {
+        // Objects run earlier in the same slice use up steps, so the
+        // preflight must be held to what is left now (the #1217 review): it
+        // passed against the start-of-slice figure, replaced the path, and
+        // only then did the slice raise the limit.
+        let mut it = Interp::new();
+        it.run_str("newpath 0 0 moveto 30 { 1e20 1e20 -1e20 1e20 0 0 curveto } repeat")
+            .unwrap();
+        it.set_limits(steps(2000)).unwrap();
+        assert_eq!(
+            it.run_str("500 { 1 pop } repeat flattenpath"),
+            Err(PsError::StepsExceeded)
+        );
+        assert_eq!(path_elements(&mut it), "31", "moveto and 30 curvetos");
+    }
+
+    #[test]
+    fn a_fused_run_counts_the_same_as_running_each_element() {
+        // `--profile-ops` never fuses a conditional (#864): the steps used
+        // are the same either way.
+        let src = "{ 1 1 50 { dup 25 lt { pop 0 } if dup 40 gt { 1 } { 2 } ifelse pop pop } for } bind exec";
+        let used = |profiled: bool| {
+            let mut it = limited(steps(1_000_000));
+            if profiled {
+                it.enable_profile_ops();
+            }
+            it.run_str(src).expect("within the cap");
+            it.steps_used()
+        };
+        assert_eq!(used(false), used(true));
+        assert!(used(false) > 700);
+    }
+}
