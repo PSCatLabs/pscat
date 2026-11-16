@@ -501,6 +501,8 @@ without the limits above:
     the whole image instead. With any limit set the list is held to 256 MiB
     (about 2.4 million pixels) even with no memory cap (#1235: 64 million
     retired pixels were 1.3 GB under only `--max-time`).
+  - `shfill` with a `/BBox` paints in strips under the limits when its box is
+    big (#1235), as one with no box does.
   - `cliprestore` that remakes a clip for another page size looks at the
     limits too (#1235), and a limited `fill` or `clip` of very many edges
     lays them into a page-sized accumulator as it flattens them instead of
@@ -508,9 +510,6 @@ without the limits above:
 
   These are still known to run long inside one call (decode filters look
   at the limits themselves since #1187, below):
-  - a single `shfill` with a `/BBox` costs up to pixels × 1024 stops (0.6 s for
-    the resampled 4095-leg ramp at 300 dpi letter) and does not look at the
-    clock (without a `/BBox` it paints in strips and does, #1219);
   - a Type 1 glyph still decrypts each subroutine it calls in full, once,
     so the overshoot is one subroutine's decryption.
 

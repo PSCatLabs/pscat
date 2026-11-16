@@ -1,8 +1,6 @@
 ## Four leftovers of #1219 (issue #1235, 2026-11-16)
 
-#1219 (`notes/1219-limits-clip-shfill-type1.md`) left four paths. Three are
-fixed here; the `/BBox` shfill waits for #1040, which works the same paint
-path (`/Extend`), and is not in this change.
+#1219 (`notes/1219-limits-clip-shfill-type1.md`) left four paths. Items 1, 3 and 4 shipped in #1238; item 2 (`/BBox` shfill) followed #1040.
 
 Measured on a release build of `main` (cc661d3) and of this branch, this
 machine, 72 dpi unless stated.
@@ -105,9 +103,39 @@ edge. It has no limit to hit and its output is the corpus's, so it was left
 exactly as compiled before. A follow-up could stream it for a page of a few
 million cells.
 
-### 2. `shfill` with `/BBox` (not done)
+### 2. `shfill` with `/BBox` (PR after #1040)
 
-Waits for #1040 (`/Extend false`), which changes the same paint path.
+With no `/BBox` the paint region is the page rectangle and strips of whole
+rows paint the same pixels as the one fill (#1219). A `/BBox` is a
+parallelogram with anti-aliased edges, so a strip cannot cut the path. Instead
+the path's coverage is made once as a mask (`Mask::fill_path`, the same
+rasteriser `fill_path` runs), and each strip is a rectangle of the box's
+columns filled through it (`fill_rect` with that mask), so the shader runs
+only where the box is. Under the limits and over `POLLED_BBOX_SHFILL_WORK`
+(2^28 units of `shfill_work` for the box, about 0.07 s; a two-stop ramp needs
+a 16-million-pixel box), nothing else changes: the page copy, the pending
+erase, the SVG and PDF records are all kept for after the last strip, so a
+limit still leaves all of them as they were. Below it, or with no limits, it
+is the one `fill_path` as before.
+
+Pixel identity, checked first as the issue asked: a randomised comparison of
+`fill_path` against the mask and strips (rotated boxes, alpha, Multiply,
+200-stop gradient) was byte-identical in every case with no clip. With a clip,
+the strips multiply the box's coverage and the clip into one 8-bit mask where
+the pipeline rounds twice, and 23 edge pixels in all differed by one level across
+the 12 clipped cases (max difference 1). So with a clip the polled route is
+a documented deviation of at most one level on edge pixels, as #1219's polled
+clip is; below the threshold, which no gallery piece reaches, nothing differs.
+The 2550 x 3300 box with and without a clip, at a heavy ramp, came out
+byte-identical to the one fill (scratch programs, not committed).
+
+`/Extend`'s transparent end stops (#1040) are part of the ramp, so `nstops`
+counts them. The two-root layer of a cone (`two_root_layer`) was painted in
+strips already, and the box then fills through it as a pattern: that part is
+cheap, so the cone case stops inside `shfill` in the layer with or without
+this change; the test pins the box over it. Measured on 4000 x 4000 with a
+1026-stop ramp, a box over the page: 1.1 s in one fill that never read the
+clock; with the strips it stops at the limit.
 
 ### Tests
 

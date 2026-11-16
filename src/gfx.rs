@@ -140,6 +140,13 @@ fn shfill_strip_rows(w: usize, stops: usize) -> usize {
 /// Units of `shfill` work between two looks at the limits.
 const SHFILL_STRIP_WORK: u64 = 1 << 22;
 
+/// A `shfill` with a `/BBox` whose box costs less than this many units (about
+/// 0.07 s) is one `fill_path`, as with no limits; a dearer one is painted in
+/// strips through a coverage mask (#1235), which can differ from the one
+/// fill by a level on an edge pixel under a clip. Nothing ordinary reaches it:
+/// 16 units a pixel is a box of 16 million pixels for a two-stop ramp.
+const POLLED_BBOX_SHFILL_WORK: u64 = 1 << 28;
+
 /// A clip whose [`PsPath::raster_work`] reaches this many units is rasterised
 /// by [`crate::coverage`], which can be stopped, not by tiny-skia (#1219).
 const POLLED_CLIP_WORK: u64 = 1 << 25;
@@ -2427,7 +2434,7 @@ impl Gfx {
                 // anti-alias, so strips of its rows paint the same pixels
                 // as the one fill (which, with nothing to look at, it is). A
                 // `/BBox` is a parallelogram, whose edges a strip would cut:
-                // that stays one fill.
+                // it is the other branch, below.
                 let rows = if *probe == crate::limits::LimitProbe::NONE {
                     ph
                 } else {
@@ -2446,13 +2453,58 @@ impl Gfx {
                 }
             } else {
                 probe.check(0)?;
-                target.fill_path(
-                    &skia_path,
-                    &paint,
-                    FillRule::Winding,
-                    Transform::identity(),
-                    mask.as_deref(),
+                // The box's pixels, to the page: what a strip must cover.
+                let b = skia_path.bounds();
+                let (bx0, by0) = (b.left().floor().max(0.0), b.top().floor().max(0.0));
+                let (bx1, by1) = (
+                    b.right().ceil().min(pw as f32),
+                    b.bottom().ceil().min(ph as f32),
                 );
+                let (bw, bh) = ((bx1 - bx0).max(0.0) as usize, (by1 - by0).max(0.0) as usize);
+                let box_work = shfill_work(bw, bh, nstops);
+                if *probe == crate::limits::LimitProbe::NONE || box_work < POLLED_BBOX_SHFILL_WORK {
+                    target.fill_path(
+                        &skia_path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::identity(),
+                        mask.as_deref(),
+                    );
+                } else if bw > 0 && bh > 0 {
+                    // A box that costs more than the one fill may take is
+                    // painted in strips of rows (#1235). Its edges are
+                    // anti-aliased, so a strip cannot cut the path: the
+                    // path's coverage is made once, as a mask (what
+                    // `fill_path` computes, which a test pins), and each
+                    // strip is a rectangle of the box's columns filled
+                    // through it, the shader running only where the box
+                    // is. Under a clip the two coverages are multiplied
+                    // into one mask first, which rounds once where the
+                    // pipeline rounds twice: an edge pixel can differ by
+                    // one level (docs/dev/HANDOFF.md). Without a clip the
+                    // pixels are the one fill's.
+                    probe.check_alloc(pw * ph)?;
+                    let mut cover =
+                        tiny_skia::Mask::new(pw as u32, ph as u32).ok_or(PsError::Limitcheck)?;
+                    cover.fill_path(&skia_path, FillRule::Winding, true, Transform::identity());
+                    if let Some(clip) = mask.as_deref() {
+                        for (c, k) in cover.data_mut().iter_mut().zip(clip.data()) {
+                            *c = ((u16::from(*c) * u16::from(*k)) / 255) as u8;
+                        }
+                    }
+                    let rows = shfill_strip_rows(bw, nstops);
+                    let mut y = by0 as usize;
+                    while y < by1 as usize {
+                        let y1 = (y + rows).min(by1 as usize);
+                        probe.check(0)?;
+                        if let Some(strip) =
+                            tiny_skia::Rect::from_ltrb(bx0, y as f32, bx1, y1 as f32)
+                        {
+                            target.fill_rect(strip, &paint, Transform::identity(), Some(&cover));
+                        }
+                        y = y1;
+                    }
+                }
             }
             if let Some(copy) = scratch {
                 self.prepare_paint();
