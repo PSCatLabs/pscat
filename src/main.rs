@@ -1198,31 +1198,54 @@ fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) 
     }
 }
 
-/// An unnamed temporary file: in the system temp directory and already
-/// unlinked (on Windows, deleted when closed), so nothing is left behind
-/// however the process ends.
-fn spool_file() -> std::io::Result<std::fs::File> {
+/// A new temporary file in `dir`, for the spool below: only its owner can
+/// open it (mode 0600; on Windows no sharing, and deleted when closed), from
+/// the moment it exists. Returns the file and its name; a name that is taken
+/// is retried a few times.
+fn open_spool(dir: &std::path::Path) -> std::io::Result<(std::fs::File, std::path::PathBuf)> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt as _;
-        // FILE_FLAG_DELETE_ON_CLOSE
-        options.custom_flags(0x0400_0000);
+        // FILE_FLAG_DELETE_ON_CLOSE, and no other process may open it.
+        options.custom_flags(0x0400_0000).share_mode(0);
     }
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    let path = std::env::temp_dir().join(format!(
-        "pscat-pdf-{}-{nanos}-{}.tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let file = options.open(&path)?;
+    let mut last = None;
+    for _ in 0..8 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let path = dir.join(format!(
+            "pscat-pdf-{}-{nanos}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.expect("the loop ran"))
+}
+
+/// An unnamed temporary file: in the system temp directory and already
+/// unlinked (on Windows, deleted when closed), so nothing is left behind
+/// however the process ends.
+fn spool_file() -> std::io::Result<std::fs::File> {
+    let (file, path) = open_spool(&std::env::temp_dir())?;
     #[cfg(not(windows))]
     std::fs::remove_file(&path)?;
+    #[cfg(windows)]
+    let _ = path;
     Ok(file)
 }
 
@@ -2881,5 +2904,26 @@ mod sweep_tests {
     #[test]
     fn seed_spec_rejects_non_integers() {
         assert!(parse_seed_spec("1.5,2").is_err());
+    }
+}
+
+#[cfg(test)]
+mod spool_tests {
+    use super::open_spool;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_spool_is_private_from_the_moment_it_exists() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("pscat-spool-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A permissive umask must not widen it.
+        let (file, path) = open_spool(&dir).expect("opens");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode of {}", path.display());
+        let again = open_spool(&dir).expect("a second one gets its own name");
+        assert_ne!(path, again.1);
+        drop((file, again));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
