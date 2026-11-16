@@ -1316,6 +1316,52 @@ fn step_and_memory_limits_are_server_flags() {
     assert_eq!(result["isError"], false, "{result}");
 }
 
+/// A program that keeps 20 MiB deflate cannot shrink in a pdfmark stream:
+/// it runs inside `--max-memory 44`, but packing it for a PDF does not fit
+/// 44 plus the writer's 16 MiB (#1107).
+fn pdf_that_cannot_be_packed() -> String {
+    let mut x: u64 = 0x2545_f491_4f6c_dd1d;
+    let hex: String = (0..40_000)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            format!("{:02x}", (x >> 24) as u8)
+        })
+        .collect();
+    format!(
+        "/r <{hex}> def [ /_objdef {{s}} /type /stream /OBJ pdfmark \
+         1 1 525 {{ pop [ {{s}} r /PUT pdfmark }} for showpage"
+    )
+}
+
+#[test]
+fn a_pdf_the_memory_limit_refuses_is_a_limit_error_with_no_file() {
+    let source = pdf_that_cannot_be_packed();
+    let dir = common::scratch_dir("mcp-pdf-memory");
+    // Refused: the child's stderr carries the limit line, and no file is left.
+    let mut s = Server::start_in(&dir, &["--max-memory", "44"]);
+    initialized(&mut s);
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "format": "pdf", "out_path": "refused.pdf" }),
+    );
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], "memory");
+    assert!(!dir.join("refused.pdf").exists(), "no file is left behind");
+    drop(s);
+    // The same render with room is written.
+    let mut s = Server::start_in(&dir, &["--max-memory", "72"]);
+    initialized(&mut s);
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "format": "pdf", "out_path": "ok.pdf" }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let pdf = std::fs::read(dir.join("ok.pdf")).expect("the PDF is written");
+    assert!(pdf.starts_with(b"%PDF-1.4\n") && pdf.ends_with(b"%%EOF\n"));
+}
+
 #[test]
 fn handwrite_is_bounded_by_the_step_limit_not_only_the_timeout() {
     // Issue #701 (found by #711): `pscat handwrite` did not get the server's

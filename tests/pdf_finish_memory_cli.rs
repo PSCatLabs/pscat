@@ -34,20 +34,26 @@ fn incompressible() -> String {
 /// stderr, and the file if there is one.
 fn run(src: &str, mib: u32) -> (bool, String, Option<Vec<u8>>) {
     let dir = common::scratch_dir("pdf_finish_memory");
-    let doc = dir.join("doc.ps");
     let pdf = dir.join("doc.pdf");
-    std::fs::write(&doc, src).expect("write doc");
     let _ = std::fs::remove_file(&pdf);
+    let (ok, stderr) = run_to(src, mib, &pdf, &dir);
+    (ok, stderr, std::fs::read(&pdf).ok())
+}
+
+/// The same, writing to `out` (a path of the test's choosing); the source
+/// is a file in `dir`.
+fn run_to(src: &str, mib: u32, out: &std::path::Path, dir: &std::path::Path) -> (bool, String) {
+    let doc = dir.join("doc.ps");
+    std::fs::write(&doc, src).expect("write doc");
     let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
         .args(["--max-memory", &mib.to_string(), "--pdf"])
-        .arg(&pdf)
+        .arg(out)
         .arg(&doc)
         .output_deadline()
         .expect("run pscat");
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
-        std::fs::read(&pdf).ok(),
     )
 }
 
@@ -98,4 +104,78 @@ fn a_run_a_limit_stopped_still_writes_its_page() {
         "{stderr}"
     );
     assert!(file.is_some_and(|f| f.ends_with(b"%%EOF\n")), "{stderr}");
+}
+
+#[test]
+fn a_long_non_ascii_title_is_written_a_piece_at_a_time() {
+    // A DSC title is held once, but as UTF-16 hex it is four bytes of file
+    // for each of its own: building that value before writing it would need
+    // several times the room the writer has (Codex, PR #1236).
+    let mut src = b"%%Title: ".to_vec();
+    src.extend(std::iter::repeat_n(b'A', 12 << 20));
+    src.extend("\u{e9}\nshowpage\n".bytes());
+    let src = String::from_utf8(src).unwrap();
+    let (ok, stderr, file) = run(&src, 30);
+    assert!(ok, "{stderr}");
+    let file = file.expect("the file is written");
+    assert!(file.len() > 48 << 20, "{} bytes", file.len());
+    assert!(
+        file.windows(10).any(|w| w == b"/Title <FE"),
+        "the title is a UTF-16 hex string"
+    );
+}
+
+/// A refused write leaves an existing file, and the file a symlink points
+/// to, exactly as they were; a good write through a symlink updates the
+/// target and keeps the link (Codex, PR #1236).
+#[cfg(unix)]
+#[test]
+fn a_refused_write_leaves_the_existing_file_and_a_symlinked_target_alone() {
+    let src = incompressible();
+    let dir = common::scratch_dir("pdf_finish_memory_dest");
+    let old = b"%PDF-1.4\nan earlier document\n%%EOF\n";
+
+    let plain = dir.join("plain.pdf");
+    std::fs::write(&plain, old).unwrap();
+    let (ok, stderr) = run_to(&src, 44, &plain, &dir);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("limitexceeded (memory)"), "{stderr}");
+    assert_eq!(std::fs::read(&plain).unwrap(), old, "a plain file");
+
+    let real = dir.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let target = real.join("target.pdf");
+    std::fs::write(&target, old).unwrap();
+    let link = dir.join("link.pdf");
+    std::os::unix::fs::symlink("real/target.pdf", &link).unwrap();
+    let (ok, stderr) = run_to(&src, 44, &link, &dir);
+    assert!(!ok, "{stderr}");
+    assert_eq!(std::fs::read(&target).unwrap(), old, "the link's target");
+    assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+
+    // Nothing is left beside them but themselves.
+    let mut left: Vec<String> = std::fs::read_dir(&real)
+        .unwrap()
+        .chain(std::fs::read_dir(&dir).unwrap())
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert!(
+        left.iter().all(|n| !n.contains(".tmp")),
+        "a temporary file is left: {left:?}"
+    );
+
+    // With room, the write goes through the link to the target.
+    let (ok, stderr) = run_to(&src, 72, &link, &dir);
+    assert!(ok, "{stderr}");
+    assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+    let written = std::fs::read(&target).unwrap();
+    assert!(written.starts_with(b"%PDF-1.4\n") && written.ends_with(b"%%EOF\n"));
+    assert!(
+        std::fs::read_dir(&real).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp"))
+    );
 }

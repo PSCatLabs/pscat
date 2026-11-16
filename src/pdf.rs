@@ -1315,7 +1315,10 @@ Q",
                 let _ = write!(out, " /{key} ");
                 v.write_pdf(&mut *out, &refs);
             } else if let Some(s) = dsc {
-                let _ = write!(out, " /{key} {}", pdf_string(s));
+                // Straight into the file: a non-ASCII title is four bytes of
+                // file for each of its bytes, and a DSC line has no length cap.
+                let _ = write!(out, " /{key} ");
+                let _ = write_text_bytes(&mut *out, s.as_bytes());
             }
         }
         for (key, value) in &self.docinfo {
@@ -1787,25 +1790,11 @@ fn p(v: f32) -> String {
 /// the standard `FEFF` BOM prefix, the PDF spec's documented mechanism
 /// for non-PDFDocEncoding text strings. Either form round-trips
 /// through gs (tests/pdf.rs), so there's no silent mojibake either way.
+#[cfg(test)]
 fn pdf_string(s: &str) -> String {
-    if s.chars().all(|c| c.is_ascii() && !c.is_ascii_control()) {
-        let mut out = String::from("(");
-        for c in s.chars() {
-            if c == '(' || c == ')' || c == '\\' {
-                out.push('\\');
-            }
-            out.push(c);
-        }
-        out.push(')');
-        out
-    } else {
-        let mut out = String::from("<FEFF");
-        for unit in s.encode_utf16() {
-            let _ = write!(out, "{unit:04X}");
-        }
-        out.push('>');
-        out
-    }
+    let mut out = String::new();
+    let _ = write_text_bytes(&mut out, s.as_bytes());
+    out
 }
 
 /// A byte string as a PDF literal string: `(`, `)` and `\` escaped, and
@@ -1847,30 +1836,52 @@ fn write_literal_string(out: &mut dyn std::fmt::Write, bytes: &[u8]) -> std::fmt
 /// spelled (gs writes the UTF-8 bytes as they are, which a reader decodes
 /// as PDFDocEncoding: mojibake); anything else is written byte for byte.
 fn write_text_bytes(out: &mut dyn std::fmt::Write, bytes: &[u8]) -> std::fmt::Result {
-    if bytes.starts_with(&[0xfe, 0xff]) {
-        out.write_char('<')?;
-        for b in bytes {
-            write!(out, "{b:02X}")?;
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    // Pieces of a few hundred bytes, so the writer is called once for many.
+    let mut piece = String::with_capacity(512);
+    let flush = |piece: &mut String, out: &mut dyn std::fmt::Write| -> std::fmt::Result {
+        if piece.len() >= 500 {
+            out.write_str(piece)?;
+            piece.clear();
         }
-        return out.write_char('>');
+        Ok(())
+    };
+    let hex = |piece: &mut String, b: u8| {
+        piece.push(char::from(HEX[usize::from(b >> 4)]));
+        piece.push(char::from(HEX[usize::from(b & 15)]));
+    };
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        piece.push('<');
+        for &b in bytes {
+            hex(&mut piece, b);
+            flush(&mut piece, out)?;
+        }
+        piece.push('>');
+        return out.write_str(&piece);
     }
     match std::str::from_utf8(bytes) {
         Ok(s) if s.chars().all(|c| c.is_ascii() && !c.is_ascii_control()) => {
-            out.write_char('(')?;
+            piece.push('(');
             for c in s.chars() {
                 if c == '(' || c == ')' || c == '\\' {
-                    out.write_char('\\')?;
+                    piece.push('\\');
                 }
-                out.write_char(c)?;
+                piece.push(c);
+                flush(&mut piece, out)?;
             }
-            out.write_char(')')
+            piece.push(')');
+            out.write_str(&piece)
         }
         Ok(s) => {
-            out.write_str("<FEFF")?;
+            piece.push_str("<FEFF");
             for unit in s.encode_utf16() {
-                write!(out, "{unit:04X}")?;
+                let [hi, lo] = unit.to_be_bytes();
+                hex(&mut piece, hi);
+                hex(&mut piece, lo);
+                flush(&mut piece, out)?;
             }
-            out.write_char('>')
+            piece.push('>');
+            out.write_str(&piece)
         }
         Err(_) => write_literal_string(out, bytes),
     }

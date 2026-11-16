@@ -1198,17 +1198,88 @@ fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) 
     }
 }
 
+/// Where `--pdf PATH` writes while the document is built (#1107): to a
+/// temporary file beside the real target, renamed over it once the document
+/// is complete, so a refusal or an error leaves an existing file (or the
+/// file a symlink points to) as it was, as it did when the document was
+/// built whole before the file was touched. A path that is not a plain file
+/// (stdout, a device, a FIFO) is written to directly.
+enum PdfDest {
+    Direct,
+    Staged {
+        tmp: std::path::PathBuf,
+        to: std::path::PathBuf,
+    },
+}
+
+/// The file `path` names after following symlinks (a dangling one too).
+fn resolve_links(path: &std::path::Path) -> std::path::PathBuf {
+    let mut at = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&at) {
+            Ok(m) if m.file_type().is_symlink() => match std::fs::read_link(&at) {
+                Ok(link) => {
+                    at = match at.parent() {
+                        Some(dir) if link.is_relative() => dir.join(link),
+                        _ => link,
+                    }
+                }
+                Err(_) => break,
+            },
+            _ => break,
+        }
+    }
+    at
+}
+
+/// Open the output for `--pdf PATH`: the file and how it is finished.
+fn open_pdf_dest(path: &str) -> std::io::Result<(std::fs::File, PdfDest)> {
+    use std::path::Path;
+    let to = resolve_links(Path::new(path));
+    // `/dev/stdout` and `/proc/self/fd/N` name what the process was given,
+    // even when it is a plain file: replacing the file would leave that
+    // descriptor pointing at the old one.
+    let process_owned = to.starts_with("/dev") || to.starts_with("/proc");
+    let plain = match std::fs::metadata(&to) {
+        Ok(m) => m.is_file(),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    };
+    if plain && !process_owned {
+        let dir = match to.parent() {
+            Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+            _ => std::path::PathBuf::from("."),
+        };
+        let name = to
+            .file_name()
+            .map_or_else(|| "out".into(), |n| n.to_string_lossy().into_owned());
+        let tmp = dir.join(format!(".{name}.pscat-{}.tmp", std::process::id()));
+        let made = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp);
+        if let Ok(file) = made {
+            // The file it replaces keeps its permissions.
+            if let Ok(m) = std::fs::metadata(&to) {
+                let _ = std::fs::set_permissions(&tmp, m.permissions());
+            }
+            return Ok((file, PdfDest::Staged { tmp, to }));
+        }
+        // A directory we cannot add to, around a file we can write: as before.
+    }
+    Ok((std::fs::File::create(path)?, PdfDest::Direct))
+}
+
 /// Write the document `--pdf PATH` asks for, as it is built (#1107): the
 /// file is the only place it exists, so what it takes beside the program's
 /// own memory is the largest compressed page or image stream. False, with
-/// the reason on stderr and no file left behind, when it cannot be written;
-/// a document that would pass `--max-memory` is refused like a program that
-/// does, naming the limit the way the interpreter's own report does (the
-/// MCP server reads that line back as a `limit_exceeded`).
+/// the reason on stderr, when it cannot be written, and then the file is as
+/// it was before; a document that would pass `--max-memory` is refused like
+/// a program that does, naming the limit the way the interpreter's own
+/// report does (the MCP server reads that line back as a `limit_exceeded`).
 fn write_pdf_file(interp: &Interp, path: &str) -> bool {
     use std::io::Write as _;
-    let file = match std::fs::File::create(path) {
-        Ok(f) => f,
+    let (file, dest) = match open_pdf_dest(path) {
+        Ok(opened) => opened,
         Err(e) => {
             eprintln!("pscat: cannot write {path}: {e}");
             return false;
@@ -1219,28 +1290,32 @@ fn write_pdf_file(interp: &Interp, path: &str) -> bool {
         // Recording was never on, so there is no document: as before.
         None => {
             drop(sink);
-            remove_partial(path);
+            discard_pdf(&dest, path);
             return true;
         }
         Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
         Some(Err(e)) => Err(e),
     };
     drop(sink);
+    let written = match (&dest, written) {
+        (PdfDest::Staged { tmp, to }, Ok(())) => {
+            std::fs::rename(tmp, to).map_err(pscat::pdf::PdfWriteError::Io)
+        }
+        (_, written) => written,
+    };
     match written {
         Ok(()) => {
             eprintln!("pscat: wrote {path}");
             true
         }
         Err(e) => {
-            // A partial document is worse than none: a reader of the file
-            // cannot tell it from a finished one until it fails to open.
-            remove_partial(path);
+            discard_pdf(&dest, path);
             match e {
                 pscat::pdf::PdfWriteError::Memory => {
                     let limit = pscat::Limit::Memory;
                     eprintln!(
                         "pscat: cannot write {path}: the document needs more memory than \
-                         --max-memory allows; no file was written"
+                         --max-memory allows; the file was not written"
                     );
                     eprintln!("%%[ Error: limitexceeded ({limit}); OffendingCommand: --pdf ]%%");
                 }
@@ -1251,12 +1326,19 @@ fn write_pdf_file(interp: &Interp, path: &str) -> bool {
     }
 }
 
-/// Take away the file `--pdf` made and could not finish, if it is a plain
-/// file: `--pdf /dev/stdout` and the like name something that is not ours to
-/// delete.
-fn remove_partial(path: &str) {
-    if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
-        let _ = std::fs::remove_file(path);
+/// Throw away what `--pdf` could not finish: the temporary file, or a file
+/// written in place if it is a plain one (`--pdf /dev/stdout` and the like
+/// name something that is not ours to delete).
+fn discard_pdf(dest: &PdfDest, path: &str) {
+    match dest {
+        PdfDest::Staged { tmp, .. } => {
+            let _ = std::fs::remove_file(tmp);
+        }
+        PdfDest::Direct => {
+            if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 }
 

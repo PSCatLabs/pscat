@@ -374,7 +374,7 @@ command line and in the library, and on by default in the MCP server:
   that wants a `Vec`, whose bytes) would pass the cap plus a fixed 16 MiB
   (`pdf::WRITE_MARGIN`: a run a limit stopped is already at its cap, and its
   page is still written) is refused before the allocation with
-  `limitexceeded (memory)`; the CLI then leaves no file. A
+  `limitexceeded (memory)`; the CLI writes through a temporary file beside the target and renames it on success, so a refusal leaves an existing file untouched. A
   (The writer's room is the cap plus that margin: a run stopped because the
   recorded page text itself filled the cap can have a packed page larger than
   the margin, and then its partial PDF is refused where it used to be
