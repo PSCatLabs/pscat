@@ -484,14 +484,16 @@ without the limits above:
   - `kernelimage`/`kernelarray` order their retired pixels in linear time
     and look at the limits while building the list for the interpreter;
     under a memory cap, once the list would not fit, the interpreter does
-    the whole image instead.
+    the whole image instead. With any limit set the list is held to 256 MiB
+    (about 4 million pixels) even with no memory cap (#1235: 64 million
+    retired pixels were 1.3 GB under only `--max-time`).
+  - `cliprestore` that remakes a clip for another page size looks at the
+    limits too (#1235), and a limited `fill` or `clip` of very many edges
+    lays them into a page-sized accumulator as it flattens them instead of
+    keeping them: 100,000 curves clipped at 300 dpi peak at 160 MiB, not 830.
 
   These are still known to run long inside one call (decode filters look
   at the limits themselves since #1187, below):
-  - a `kernelimage` whose pixels nearly all retire, without a memory limit:
-    its retired-pixel list (16 bytes a pixel, then two objects a pixel for
-    the interpreter) is not bounded except by the time limit, which it
-    does look at;
   - a single `shfill` costs up to pixels × 1024 stops (0.6 s for the
     resampled 4095-leg ramp at 300 dpi letter) and does not look at the
     clock;

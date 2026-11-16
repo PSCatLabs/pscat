@@ -956,8 +956,7 @@ fn clipsave(it: &mut Interp) -> Result<(), PsError> {
 /// started with (no clip at the top level). Semantics pinned against
 /// Ghostscript 10.07.1 (`notes/494-clipsave-cliprestore.md`).
 fn cliprestore(it: &mut Interp) -> Result<(), PsError> {
-    it.do_cliprestore();
-    Ok(())
+    it.do_cliprestore()
 }
 
 fn pathbbox(it: &mut Interp) -> Result<(), PsError> {

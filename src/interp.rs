@@ -3107,12 +3107,15 @@ impl Interp {
 
     /// `cliprestore` (#494): this needs the innermost save's snapshot,
     /// the clip a level opened by `save` started with.
-    pub(crate) fn do_cliprestore(&mut self) {
+    pub(crate) fn do_cliprestore(&mut self) -> Result<(), PsError> {
+        let probe = self.limit_probe();
         let boundary = self
             .save_stack
             .last()
             .map(|rec| (rec.gfx_depth, &*rec.gfx_state));
-        self.gfx.cliprestore(boundary);
+        let work = self.gfx.cliprestore(boundary, &probe)?;
+        self.charge_probed_steps(work / 1024);
+        Ok(())
     }
 
     #[doc(hidden)]
@@ -3531,6 +3534,11 @@ impl Interp {
         if !self.limits.is_none() {
             self.charge_steps(n);
         }
+    }
+
+    /// Whether any limit (steps, time or memory) is set.
+    pub(crate) fn limits_set(&self) -> bool {
+        !self.limits.is_none()
     }
 
     /// Heap growth the memory limit still allows, or `None` with no memory
