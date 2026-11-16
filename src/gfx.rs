@@ -2670,21 +2670,21 @@ impl Gfx {
             } => {
                 let dr = r1 - r0;
                 // Not nested (or not a number): both, as promised above.
-                let nested = (x1 - x0).hypot(y1 - y0) <= dr.abs();
+                let nested = fmath::hypot(x1 - x0, y1 - y0) <= dr.abs();
                 if !nested || dr == 0.0 {
                     return BOTH;
                 }
                 // Some corner outside the circle: the region leaves it.
                 let leaves = |cx: f64, cy: f64, r: f64| {
                     corners.iter().any(|&(x, y)| {
-                        let d = (x - cx).hypot(y - cy);
+                        let d = fmath::hypot(x - cx, y - cy);
                         d.is_nan() || d > r
                     })
                 };
                 // The region's box meets the open disk.
                 let meets = |cx: f64, cy: f64, r: f64| {
                     let [lx, ly, ux, uy] = corners_box(corners);
-                    let d = (cx.clamp(lx, ux) - cx).hypot(cy.clamp(ly, uy) - cy);
+                    let d = fmath::hypot(cx.clamp(lx, ux) - cx, cy.clamp(ly, uy) - cy);
                     r > 0.0 && (d.is_nan() || d < r)
                 };
                 if dr > 0.0 {

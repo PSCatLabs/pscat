@@ -567,17 +567,20 @@ fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
 #[test]
 fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
     let page = b"0.5 setgray 0 0 500 500 rectfill ";
-    let cases: [(&str, &str, &[(u32, u32)]); 3] = [
-        ("2", "150 0 350 0", &[(50, 250), (450, 250), (250, 250)]),
+    // ShadingType, Coords, and pixels to compare: before the start, past
+    // the end, and one in range.
+    type Case<'a> = (&'a str, &'a str, [(u32, u32); 3]);
+    let cases: [Case; 3] = [
+        ("2", "150 0 350 0", [(50, 250), (450, 250), (250, 250)]),
         (
             "3",
             "250 250 50 250 250 175",
-            &[(250, 250), (20, 20), (250, 140)],
+            [(250, 250), (20, 20), (250, 140)],
         ),
         (
             "3",
             "125 250 50 325 250 100",
-            &[(325, 250), (475, 250), (25, 250)],
+            [(325, 250), (475, 250), (25, 250)],
         ),
     ];
     for (case, (ty, coords, points)) in cases.into_iter().enumerate() {
@@ -603,7 +606,7 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
             }
             assert_gs_matches(&pdf, &canvas, &name);
             let theirs = gs_rasterize(&pdf, &name);
-            for &(x, y) in points {
+            for (x, y) in points {
                 let (a, b) = (
                     canvas.pixel(x, y).expect("ours"),
                     theirs.pixel(x, y).expect("gs"),
