@@ -1187,19 +1187,131 @@ fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) 
         }
     }
     if let Some(path) = &options.pdf
-        && let Some(doc) = interp.gfx().pdf_document()
+        && !write_pdf_file(interp, path)
     {
-        if let Err(e) = std::fs::write(path, doc) {
-            eprintln!("pscat: cannot write {path}: {e}");
-            return ExitCode::FAILURE;
-        }
-        eprintln!("pscat: wrote {path}");
+        return ExitCode::FAILURE;
     }
     if ok && !lint_failed {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// A new temporary file in `dir`, for the spool below: only its owner can
+/// open it (mode 0600; on Windows no sharing, and deleted when closed), from
+/// the moment it exists. Returns the file and its name; a name that is taken
+/// is retried a few times.
+fn open_spool(dir: &std::path::Path) -> std::io::Result<(std::fs::File, std::path::PathBuf)> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_FLAG_DELETE_ON_CLOSE, and no other process may open it.
+        options.custom_flags(0x0400_0000).share_mode(0);
+    }
+    let mut last = None;
+    for _ in 0..8 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let path = dir.join(format!(
+            "pscat-pdf-{}-{nanos}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.expect("the loop ran"))
+}
+
+/// An unnamed temporary file: in the system temp directory and already
+/// unlinked (on Windows, deleted when closed), so nothing is left behind
+/// however the process ends.
+fn spool_file() -> std::io::Result<std::fs::File> {
+    let (file, path) = open_spool(&std::env::temp_dir())?;
+    #[cfg(not(windows))]
+    std::fs::remove_file(&path)?;
+    #[cfg(windows)]
+    let _ = path;
+    Ok(file)
+}
+
+/// Write the document `--pdf PATH` asks for (#1107). It is built into an
+/// unnamed temporary file, so the heap beside the program's own memory is
+/// the largest compressed page or image stream, and only a document that is
+/// complete is copied to `PATH`, opened the way it always was (`File::create`,
+/// in place): a refusal or an error before that never touches `PATH`, and
+/// permissions, ACLs, descriptors and read-only files behave as they did when
+/// the document was built whole in memory. A document that would pass
+/// `--max-memory` is refused like a program that does, naming the limit the
+/// way the interpreter's own report does (the MCP server reads that line back
+/// as a `limit_exceeded`). False, with the reason on stderr, when it cannot be
+/// written.
+fn write_pdf_file(interp: &Interp, path: &str) -> bool {
+    use std::io::{Seek as _, Write as _};
+    let spool = match spool_file() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: no temporary file for the document: {e}");
+            return false;
+        }
+    };
+    let mut sink = std::io::BufWriter::new(spool);
+    let built = match interp.write_pdf(&mut sink) {
+        // Recording was never on, so there is no document: as before.
+        None => return true,
+        Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
+        Some(Err(e)) => Err(e),
+    };
+    match built {
+        Ok(()) => {}
+        Err(pscat::pdf::PdfWriteError::Memory) => {
+            let limit = pscat::Limit::Memory;
+            eprintln!(
+                "pscat: cannot write {path}: the document needs more memory than \
+                 --max-memory allows; the file was not written"
+            );
+            eprintln!("%%[ Error: limitexceeded ({limit}); OffendingCommand: --pdf ]%%");
+            return false;
+        }
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: {e}");
+            return false;
+        }
+    }
+    let mut spool = match sink.into_inner() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: {e}");
+            return false;
+        }
+    };
+    let copied = spool
+        .rewind()
+        .and_then(|()| std::fs::File::create(path))
+        .and_then(|mut dest| {
+            std::io::copy(&mut spool, &mut dest)?;
+            dest.flush()
+        });
+    if let Err(e) = copied {
+        eprintln!("pscat: cannot write {path}: {e}");
+        return false;
+    }
+    eprintln!("pscat: wrote {path}");
+    true
 }
 
 /// Write `pages` as `--png PATH` does: one page to PATH itself, several to
@@ -2792,5 +2904,25 @@ mod sweep_tests {
     #[test]
     fn seed_spec_rejects_non_integers() {
         assert!(parse_seed_spec("1.5,2").is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod spool_tests {
+    use super::open_spool;
+
+    #[test]
+    fn the_spool_is_private_from_the_moment_it_exists() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("pscat-spool-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A permissive umask must not widen it.
+        let (file, path) = open_spool(&dir).expect("opens");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode of {}", path.display());
+        let again = open_spool(&dir).expect("a second one gets its own name");
+        assert_ne!(path, again.1);
+        drop((file, again));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -46,6 +46,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   `to_png()` and `save_png()`.
 - For SVG or PDF, call `interp.enable_svg()` or `interp.enable_pdf()` before
   running, then read `interp.svg_pages()` or `interp.pdf_document()`.
+  Under a memory limit (`Limits::with_max_memory`), write the PDF with
+  `interp.write_pdf(&mut sink)` (a file: nothing but one compressed stream
+  is held besides the program) or read it with `interp.pdf_document_limited()`.
+  Both refuse with `PdfWriteError::Memory`, before the allocation, once the
+  document would take the heap past the limit plus 16 MiB. `pdf_document()`
+  is not limited: it cannot report a refusal.
 - The PostScript libraries in `lib/` (artkit, graph, dataviz and the rest) are
   compiled into the crate, so `(lib/artkit.ps) run` works with nothing on disk.
   The search order for files a program loads is in

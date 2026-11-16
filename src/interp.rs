@@ -3763,6 +3763,33 @@ impl Interp {
         self.gfx.pdf_document()
     }
 
+    /// [`pdf_document`](Self::pdf_document) under the memory limit (#1107):
+    /// with [`Limits::max_memory`] set, the document is refused with
+    /// [`PdfWriteError::Memory`](crate::pdf::PdfWriteError::Memory) before
+    /// the output, or a buffer made while writing it, would take the heap
+    /// past the cap plus [`WRITE_MARGIN`](crate::pdf::WRITE_MARGIN) (a run
+    /// that a limit stopped is at its cap, and its page is still written). `None` if
+    /// [`enable_pdf`](Self::enable_pdf) was not called. (`pdf_document`
+    /// itself is not limited: it cannot report a refusal.) For a file, or
+    /// any sink that does not keep the bytes, [`write_pdf`](Self::write_pdf)
+    /// holds far less.
+    pub fn pdf_document_limited(&self) -> Option<Result<Vec<u8>, crate::pdf::PdfWriteError>> {
+        self.gfx.pdf_document_limited()
+    }
+
+    /// Write the whole document to `sink` as it is built, under the memory
+    /// limit (#1107). The bytes are [`pdf_document`](Self::pdf_document)'s;
+    /// the document is never held in memory, so a sink that is a file keeps
+    /// the peak at the program's own memory plus the largest compressed page
+    /// or image stream. On `Err` the sink holds a partial document to
+    /// discard. `None` if [`enable_pdf`](Self::enable_pdf) was not called.
+    pub fn write_pdf(
+        &self,
+        sink: &mut dyn std::io::Write,
+    ) -> Option<Result<(), crate::pdf::PdfWriteError>> {
+        self.gfx.write_pdf(sink)
+    }
+
     #[doc(hidden)]
     pub fn gfx(&self) -> &Gfx {
         &self.gfx

@@ -3315,6 +3315,46 @@ impl Gfx {
             .map(|pdf| pdf.finish(self.painted_since_page))
     }
 
+    /// The memory cap the PDF writer works under: the run's `--max-memory`
+    /// plus [`WRITE_MARGIN`](crate::pdf::WRITE_MARGIN), because a run that a
+    /// limit stopped is already at its cap and its page must still be
+    /// written (#1107).
+    fn pdf_write_probe(&self) -> crate::limits::LimitProbe {
+        crate::limits::LimitProbe::memory_only(
+            self.mem_budget
+                .map(|(base, max)| (base, max.saturating_add(crate::pdf::WRITE_MARGIN))),
+        )
+    }
+
+    /// The finished PDF document under the run's `--max-memory` (None when
+    /// recording is off), #1107: refused with
+    /// [`PdfWriteError::Memory`](crate::pdf::PdfWriteError::Memory) before
+    /// the output or a working buffer would pass the cap plus
+    /// [`WRITE_MARGIN`](crate::pdf::WRITE_MARGIN). With no memory limit set
+    /// it is [`pdf_document`](Self::pdf_document).
+    pub fn pdf_document_limited(&self) -> Option<Result<Vec<u8>, crate::pdf::PdfWriteError>> {
+        self.pdf
+            .as_ref()
+            .map(|pdf| pdf.finish_limited(self.painted_since_page, self.pdf_write_probe()))
+    }
+
+    /// Write the finished PDF document to `sink` as it is built (None when
+    /// recording is off), under the run's `--max-memory`, #1107. The bytes
+    /// are [`pdf_document`](Self::pdf_document)'s, but the document is not
+    /// held: what is alive beside the recorded program is the largest
+    /// compressed page or image stream. Refused with
+    /// [`PdfWriteError::Memory`](crate::pdf::PdfWriteError::Memory) before
+    /// a working buffer would pass the cap, leaving a partial file in the
+    /// sink, which the caller should discard.
+    pub fn write_pdf(
+        &self,
+        sink: &mut dyn std::io::Write,
+    ) -> Option<Result<(), crate::pdf::PdfWriteError>> {
+        self.pdf
+            .as_ref()
+            .map(|pdf| pdf.write_document(self.painted_since_page, self.pdf_write_probe(), sink))
+    }
+
     /// Set the PDF document's `/Info` metadata (issue #8) — a no-op if
     /// PDF recording isn't enabled. Typically fed from
     /// `pdf::scan_document_info` on the source's DSC header comments.

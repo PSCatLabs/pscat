@@ -979,6 +979,23 @@ renders eight examples in both and compares block-downsampled output).
    It skips without the wasm target or node. The `npm` workflow, the only
    CI job that has both, runs only `--test wasm`, so CI does not run this
    check yet; run it locally after touching `src/pdf.rs`.
+   `PdfRecorder::finish` writes through `write_document` (#1107): objects
+   go to a sink in file order as they are built, offsets come from the
+   writer's own count, page content is deflated from the recorder's own
+   `String` (`snapshot_tail` gives the open page's suffix, so nothing is
+   cloned), and every `PdfValue` is written straight into the sink (a NUL
+   byte is four bytes of file). Keep it that way: a new object is written
+   in place, never built as a `Vec<Vec<u8>>` first. Under `--max-memory`
+   `Out`/`BudgetedVec` ask the cap (plus `pdf::WRITE_MARGIN`, 16 MiB, so a
+   run that a limit stopped can still write its page) before a buffer grows
+   (`LimitProbe::check_alloc`) and the CLI writes `--pdf` through `Interp::write_pdf`, so a
+   refused write is `PdfWriteError::Memory` (stderr
+   `%%[ Error: limitexceeded (memory); OffendingCommand: --pdf ]%%`, which
+   the MCP server reads as `limit_exceeded`, no file left).
+   `pdf_document()` is unlimited by signature; new callers that run under
+   limits use `pdf_document_limited`/`write_pdf`. Byte identity of PDF
+   output is checked by a `cmp` loop over `examples/` and `gallery/` with
+   the base and head binaries; `scripts/identity_check.sh` compares PNG only.
 4. Dry media (epic #232): **read `docs/dev/design/DRYMEDIA.md` and
    `docs/dev/design/drymedia/REFERENCES.md` before starting #234–#242.** The design
    (#233) is approved, with every recommended answer to its Q1–Q9.

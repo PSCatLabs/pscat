@@ -1914,7 +1914,16 @@ pub fn run_with_limits(d: &Driver, format: Format, limits: Limits) -> Result<Vec
             .and_then(|p| p.into_iter().next())
             .map(String::into_bytes)
             .ok_or_else(missing),
-        Format::Pdf => interp.pdf_document().ok_or_else(missing),
+        // Under the memory limit too (#1107): a refusal reads as the
+        // limit error a run that passed it reports.
+        Format::Pdf => match interp.pdf_document_limited() {
+            Some(Ok(doc)) => Ok(doc),
+            Some(Err(crate::pdf::PdfWriteError::Memory)) => Err(ChalkError::Render(
+                interp.error_report(&crate::PsError::MemoryExceeded),
+            )),
+            Some(Err(e)) => Err(ChalkError::Render(format!("PDF output: {e}"))),
+            None => Err(missing()),
+        },
     }
 }
 
