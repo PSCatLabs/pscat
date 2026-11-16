@@ -1224,15 +1224,10 @@ impl Interp {
         self.poll_in = POLL_PERIOD;
         self.steps_used = self.steps_used.saturating_add(pending).saturating_add(ran);
         self.sync_decode_budget();
-        let over = |this: &Self, ran: u64| {
-            this.limits
-                .max_steps
-                .is_some_and(|max| this.steps_used.saturating_sub(ran) > max)
-        };
         match result {
             Err(e) => {
-                let past = self.steps_over_cap();
-                Err(if past && e.limit().is_none() {
+                // An ordinary error past the cap is the cap's: see above.
+                Err(if e.limit().is_none() && self.steps_over_cap() {
                     PsError::StepsExceeded
                 } else {
                     e
@@ -1245,7 +1240,9 @@ impl Interp {
                 // it always was, and a host that re-arms the cap per slice
                 // (the playground) never meets its own cap in one frame.
                 let past = if more {
-                    over(self, ran)
+                    self.limits
+                        .max_steps
+                        .is_some_and(|max| self.steps_used.saturating_sub(ran) > max)
                 } else {
                     self.steps_over_cap()
                 };
