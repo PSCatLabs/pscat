@@ -1570,7 +1570,8 @@ renders eight examples in both and compares block-downsampled output).
     `accumulate_at`), so a cell sums its edges in the same order and the
     coverage is bit for bit the banded walk's (unit-tested against it, work
     count included). 100,000 curves clipped at 300 dpi: 830 MiB to 160. Keep
-    it so: the output must not depend on whether a limit is set. `fit_clip`
+    it so: the rasteriser's output must not depend on whether a limit is
+    set (the one exception, below, is documented). `fit_clip`
     (`cliprestore`) takes the probe and charges its work like `clip`.
     `shfill` with a `/BBox` over `POLLED_BBOX_SHFILL_WORK` paints in strips
     through a coverage mask under limits (`Gfx::shfill_limited`): byte-identical

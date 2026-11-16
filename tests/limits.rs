@@ -1425,7 +1425,7 @@ mod one_operator {
                     (255, 0, 0),
                     "showpage {showpage}: the page is untouched"
                 );
-                assert_eq!(pages, 0, "showpage {showpage}: nothing recorded");
+                assert_eq!(pages, 0, "showpage {showpage}: nothing in the SVG or PDF");
             }
         }
 
@@ -1525,6 +1525,16 @@ mod one_operator {
             bbox_shfill(side, &format!("2 /Coords [0 0 {side} 0]"))
         }
 
+        /// An axial that ends inside the box and extends neither way: each
+        /// end is closed by a transparent stop (#1040), the shader tiny-skia
+        /// paints slowest.
+        fn closed_axial(side: usize) -> String {
+            bbox_shfill(
+                side,
+                &format!("2 /Coords [{} 0 {} 0]", side / 4, side * 3 / 4),
+            )
+        }
+
         /// Two circles neither inside the other, the end not extended: a
         /// page-sized layer under a pattern shader (`two_root_layer`, #1040).
         fn cone(side: usize) -> String {
@@ -1554,6 +1564,17 @@ mod one_operator {
                 "bbox shfill",
                 bbox_setup(4000),
                 leaked(axial(4000)),
+                "shfill",
+                Duration::from_millis(700),
+            );
+        }
+
+        #[test]
+        fn a_bbox_shfill_with_transparent_end_stops_stops_inside_shfill() {
+            stops_inside(
+                "bbox closed shfill",
+                bbox_setup(4000),
+                leaked(closed_axial(4000)),
                 "shfill",
                 Duration::from_millis(700),
             );
@@ -1597,6 +1618,7 @@ mod one_operator {
                 let (err, px, pages) = on_a_deadline("bbox shfill all or nothing", move || {
                     let mut it = Interp::new();
                     it.enable_svg();
+                    it.enable_pdf();
                     it.run_str(&bbox_setup(2000)).expect("setup");
                     it.run_str("1 0 0 setrgbcolor 0 0 2000 2000 rectfill")
                         .expect("red");
@@ -1605,13 +1627,19 @@ mod one_operator {
                     }
                     it.set_limits(untrusted(Duration::from_millis(50)))
                         .expect("limits");
-                    let err = it.run_str(&axial(2000)).expect_err("the clock stops it");
+                    let err = it
+                        .run_str(&closed_axial(2000))
+                        .expect_err("the clock stops it");
                     let px = it.gfx().pixmap.pixel(1000, 1000).expect("pixel");
                     let svg = it.svg_pages().unwrap_or_default().concat();
+                    let pdf = it.pdf_document().unwrap_or_default();
                     (
                         err,
                         (px.red(), px.green(), px.blue()),
-                        svg.matches("<linearGradient").count(),
+                        svg.matches("<linearGradient").count()
+                            + String::from_utf8_lossy(&pdf)
+                                .matches("/ShadingType")
+                                .count(),
                     )
                 });
                 assert_eq!(err, PsError::TimeExceeded);
@@ -1620,7 +1648,7 @@ mod one_operator {
                     (255, 0, 0),
                     "showpage {showpage}: the page is untouched"
                 );
-                assert_eq!(pages, 0, "showpage {showpage}: nothing recorded");
+                assert_eq!(pages, 0, "showpage {showpage}: nothing in the SVG or PDF");
             }
         }
 
@@ -1648,6 +1676,8 @@ mod one_operator {
             for (what, pre, shading) in [
                 ("axial", "", axial(1200)),
                 ("axial tilted", tilted, axial(1200)),
+                ("closed axial", "", closed_axial(1200)),
+                ("closed axial tilted", tilted, closed_axial(1200)),
                 ("cone", "", cone(1200)),
             ] {
                 let one = paint(pre, Limits::none(), shading.clone());

@@ -127,7 +127,7 @@ the 12 clipped cases (max difference 1). So with a clip the polled route is
 a documented deviation of at most one level on edge pixels, as #1219's polled
 clip is; below the threshold, which no gallery piece reaches, nothing differs.
 The 2550 x 3300 box with and without a clip, at a heavy ramp, came out
-byte-identical to the one fill (`bb.ps`, `bbclip.ps` in the PR).
+byte-identical to the one fill (scratch programs, not committed).
 
 `/Extend`'s transparent end stops (#1040) are part of the ramp, so `nstops`
 counts them. The two-root layer of a cone (`two_root_layer`) was painted in
