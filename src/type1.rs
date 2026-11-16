@@ -48,6 +48,15 @@ const CALL_DEPTH_LIMIT: usize = 30;
 /// writing the `type1_charstring` fuzz target, issue #704).
 const OP_BUDGET: usize = 100_000;
 
+/// The most plaintext bytes of one charstring or subroutine a glyph can
+/// read (#1219). An operator costs one of [`OP_BUDGET`], reads its own byte
+/// and at most four operand bytes after it (255 and a 32-bit number), so
+/// the budget stops the glyph at the first operator past the
+/// `OP_BUDGET`th, whose own byte is at index 5 x `OP_BUDGET` at most, and
+/// no byte after it is read. Decrypting past that many bytes is wasted: a
+/// 16 MB subroutine was decrypted in full, 25 ms, to run its first byte.
+pub(crate) const MAX_CODE_BYTES: usize = 5 * OP_BUDGET + 1;
+
 pub(crate) fn run(code: &[u8], font: &FontData) -> Result<Glyph, PsError> {
     let mut exec = Exec {
         stack: Vec::new(),

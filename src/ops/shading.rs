@@ -27,5 +27,10 @@ fn shfill(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let spec = crate::shading::parse_shading_dict(&d.borrow())?;
-    it.gfx.shfill(spec)
+    let probe = it.limit_probe();
+    let work = it.gfx.shfill_limited(spec, &probe)?;
+    // A step per 1024 units, held against the step limit before the page
+    // was painted (#1219), so this only counts them.
+    it.charge_probed_steps(work / 1024);
+    Ok(())
 }

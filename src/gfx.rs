@@ -121,6 +121,71 @@ pub struct DevPoint {
     pub y: f32,
 }
 
+/// Units of work one `shfill` of a `w` x `h` page with `stops` gradient
+/// stops is: tiny-skia walks the stops for each pixel, so the cost is the
+/// pixels times a base plus a share of the walk (#1219). About 0.6 s at 300
+/// dpi letter for 1024 stops.
+fn shfill_work(w: usize, h: usize, stops: usize) -> u64 {
+    (w as u64)
+        .saturating_mul(h as u64)
+        .saturating_mul(16 + (stops as u64) / 4)
+}
+
+/// Rows of the page one `shfill` strip paints between looks at the limits:
+/// about [`SHFILL_STRIP_WORK`] units, so a strip is milliseconds.
+fn shfill_strip_rows(w: usize, stops: usize) -> usize {
+    (SHFILL_STRIP_WORK / shfill_work(w.max(1), 1, stops).max(1)).max(1) as usize
+}
+
+/// Units of `shfill` work between two looks at the limits.
+const SHFILL_STRIP_WORK: u64 = 1 << 22;
+
+/// A clip whose [`PsPath::raster_work`] reaches this many units is rasterised
+/// by [`crate::coverage`], which can be stopped, not by tiny-skia (#1219).
+const POLLED_CLIP_WORK: u64 = 1 << 25;
+
+/// Work units charged for making one edge in [`PsPath::raster_work`]: a
+/// cubic's setup is a good deal more than one sub-scanline's walk.
+const EDGE_SETUP_WORK: f64 = 16.0;
+
+/// [`PsPath::raster_work`] for one cubic, given the y of its four points:
+/// it is cut at the turns in y, and each piece is an edge.
+fn cubic_y_work(y: [f64; 4], span: &impl Fn(f64, f64) -> f64) -> f64 {
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        s * s * s * y[0] + 3.0 * s * s * t * y[1] + 3.0 * s * t * t * y[2] + t * t * t * y[3]
+    };
+    // B'(t) / 3 = a t^2 + b t + c.
+    let (d0, d1, d2) = (y[1] - y[0], y[2] - y[1], y[3] - y[2]);
+    let (a, b, c) = (d0 - 2.0 * d1 + d2, 2.0 * (d1 - d0), d0);
+    let mut ts = [0.0f64, 0.0, 0.0, 1.0];
+    let mut n = 1;
+    let mut add = |t: f64| {
+        if t > 0.0 && t < 1.0 {
+            ts[n] = t;
+            n += 1;
+        }
+    };
+    if a.abs() > 1e-12 * (b.abs() + c.abs()).max(1e-300) {
+        let disc = b * b - 4.0 * a * c;
+        if disc >= 0.0 {
+            let q = disc.sqrt();
+            let (r1, r2) = ((-b - q) / (2.0 * a), (-b + q) / (2.0 * a));
+            add(r1.min(r2));
+            add(r1.max(r2));
+        }
+    } else if b != 0.0 {
+        add(-c / b);
+    }
+    ts[n] = 1.0;
+    n += 1;
+    let mut work = 0.0;
+    for w in ts[..n].windows(2) {
+        work += EDGE_SETUP_WORK + span(at(w[0]), at(w[1]));
+    }
+    work
+}
+
 #[derive(Clone)]
 enum Seg {
     Move(DevPoint),
@@ -193,6 +258,63 @@ impl PsPath {
             }
         }
         out
+    }
+
+    /// What filling this path costs a scan converter whose cost grows with
+    /// the rows its edges cross (tiny-skia's 4x4 supersampler, which
+    /// visits every active edge on each of four sub-scanlines a row): one
+    /// unit per sub-scanline an edge spans on a canvas `height` rows tall,
+    /// and [`EDGE_SETUP_WORK`] an edge for building it (#1219). A curve is
+    /// split where it turns in y, as the scan converter does, and a
+    /// subpath is closed as a fill closes it. An estimate from the
+    /// endpoints and the turning points alone, in one pass over the
+    /// segments, so a path can be told apart from a cheap one before
+    /// anything is rasterised. NaN and infinite coordinates cost nothing.
+    pub(crate) fn raster_work(&self, height: f32) -> u64 {
+        let h = f64::from(height);
+        // Sub-scanlines an edge from `a` to `b` crosses on the canvas.
+        let span = |a: f64, b: f64| -> f64 {
+            let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+            let (lo, hi) = (lo.max(0.0), hi.min(h));
+            if hi > lo { (hi - lo) * 4.0 } else { 0.0 }
+        };
+        let mut work = 0.0f64;
+        let (mut cur, mut start): (Option<DevPoint>, Option<DevPoint>) = (None, None);
+        let close = |work: &mut f64, cur: Option<DevPoint>, start: Option<DevPoint>| {
+            if let (Some(c), Some(s)) = (cur, start)
+                && c != s
+            {
+                *work += EDGE_SETUP_WORK + span(f64::from(c.y), f64::from(s.y));
+            }
+        };
+        for seg in &self.segs {
+            match *seg {
+                Seg::Move(p) => {
+                    close(&mut work, cur, start);
+                    cur = Some(p);
+                    start = Some(p);
+                }
+                Seg::Line(p) => {
+                    if let Some(c) = cur {
+                        work += EDGE_SETUP_WORK + span(f64::from(c.y), f64::from(p.y));
+                    }
+                    cur = Some(p);
+                }
+                Seg::Curve(c1, c2, p) => {
+                    if let Some(c) = cur {
+                        let y = [c.y, c1.y, c2.y, p.y].map(f64::from);
+                        work += cubic_y_work(y, &span);
+                    }
+                    cur = Some(p);
+                }
+                Seg::Close => {
+                    close(&mut work, cur, start);
+                    cur = start;
+                }
+            }
+        }
+        close(&mut work, cur, start);
+        work as u64
     }
 
     /// Device-space bounding box `[llx, lly, urx, ury]` of every path
@@ -2035,10 +2157,20 @@ impl Gfx {
     /// idiom already bounds the painted region with an explicit clip,
     /// so the only visible effect of implementing `false` would be an
     /// edge case nobody's `clip shfill` triggers. Documented deviation.
-    pub(crate) fn shfill(&mut self, shading: crate::shading::Shading) -> Result<(), PsError> {
+    ///
+    /// Under the limits (#1219) the page is painted in strips of rows, the
+    /// limits looked at between them, and the work (a step per 1024 units,
+    /// charged by the operator) is held against the step limit before
+    /// anything is painted. It returns that work.
+    pub(crate) fn shfill_limited(
+        &mut self,
+        shading: crate::shading::Shading,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         if self.painting_off() {
-            return Ok(());
+            return Ok(0);
         }
+        let nstops = shading.raster_stops().len();
         let stops: Vec<GradientStop> = shading
             .raster_stops()
             .iter()
@@ -2073,7 +2205,7 @@ impl Gfx {
             && x0 == x1
             && y0 == y1
         {
-            return Ok(());
+            return Ok(0);
         }
         let ctm = self.state.ctm;
         // A safety margin comfortably above tiny-skia's own internal
@@ -2160,8 +2292,12 @@ impl Gfx {
         // path — it paints the clip region, per the PLRM — so both the
         // degenerate no-op below and the normal case leave it alone.
         let Some(shader) = shader else {
-            return Ok(());
+            return Ok(0);
         };
+        // Every pixel the page has costs the gradient a walk of its stops.
+        let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
+        let work = shfill_work(pw, ph, nstops);
+        probe.check(work / 1024)?;
         self.prepare_paint();
         // /BBox further restricts the painted region to a rectangle in
         // the same user space as Coords (confirmed against gs: pixels
@@ -2204,13 +2340,38 @@ impl Gfx {
             };
             let comp = self.composite();
             let mask = self.clip_mask();
-            self.pixmap.fill_path(
-                &skia_path,
-                &paint,
-                FillRule::Winding,
-                Transform::identity(),
-                mask.as_deref(),
-            );
+            if shading.bbox.is_none() {
+                // The whole page, an integer rectangle with no edge to
+                // anti-alias, so strips of its rows paint the same pixels
+                // as the one fill. A `/BBox` is a parallelogram, whose edges
+                // a strip would cut: that stays one fill.
+                let rows = shfill_strip_rows(pw, nstops);
+                let mut y = 0;
+                while y < ph {
+                    let y1 = (y + rows).min(ph);
+                    probe.check(0)?;
+                    if let Some(strip) =
+                        tiny_skia::Rect::from_ltrb(0.0, y as f32, pw as f32, y1 as f32)
+                    {
+                        self.pixmap.fill_rect(
+                            strip,
+                            &paint,
+                            Transform::identity(),
+                            mask.as_deref(),
+                        );
+                    }
+                    y = y1;
+                }
+            } else {
+                probe.check(0)?;
+                self.pixmap.fill_path(
+                    &skia_path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    mask.as_deref(),
+                );
+            }
             if self.svg.is_some() {
                 let svg_kind = sh_kind(shading.kind, 1.0);
                 let svg_ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
@@ -2335,7 +2496,7 @@ impl Gfx {
             }
             self.dirty = true;
         }
-        Ok(())
+        Ok(work)
     }
 
     pub fn stroke(&mut self) {
@@ -3410,11 +3571,22 @@ impl Gfx {
     /// Intersect the clip with the current path. Unlike painting, `clip`
     /// leaves the current path in place, per the PLRM.
     pub fn clip(&mut self, rule: FillRule) -> Result<(), PsError> {
+        // No limit to exceed, so it cannot fail but for the mask's size.
+        self.clip_limited(rule, &crate::limits::LimitProbe::NONE)
+            .map(|_| ())
+    }
+
+    /// [`clip`](Self::clip) under the limits (#1219), and the work it
+    /// comes to, for the operator to charge (a step per 1024). The clip is
+    /// replaced only once its mask is made, so a limit leaves it, and the
+    /// current path, as they were.
+    pub(crate) fn clip_limited(
+        &mut self,
+        rule: FillRule,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         let (w, h) = (self.pixmap.width(), self.pixmap.height());
-        let mut mask = tiny_skia::Mask::new(w, h).ok_or(PsError::Limitcheck)?;
-        if let Some(path) = self.state.path.to_skia() {
-            mask.fill_path(&path, rule, true, Transform::identity());
-        }
+        let (mut mask, work) = Self::clip_coverage(&self.state.path, rule, (w, h), probe)?;
         // An empty path clips everything away: the fresh mask is already
         // all-zero, which is exactly that.
         if let Some(prev) = &self.state.clip {
@@ -3432,7 +3604,51 @@ impl Gfx {
                 parent,
             }),
         });
-        Ok(())
+        Ok(work)
+    }
+
+    /// The coverage of `path` alone, as a mask of `size` pixels (`clip`'s
+    /// and `fit_clip`'s: one rasteriser for both, so a clip refitted to
+    /// another canvas keeps the pixels it had), and the work it came to.
+    ///
+    /// tiny-skia's `Mask::fill_path` cannot be stopped, and costs about
+    /// the sub-scanlines each edge crosses: 100,000 page-sized curves took
+    /// 1.4 s at 72 dpi and 5.6 s at 300, whatever `--max-time` said. A
+    /// path whose [`raster_work`](PsPath::raster_work) is under
+    /// [`POLLED_CLIP_WORK`], which is every path of the gallery, the
+    /// examples and the self-test, keeps `fill_path` and its pixels. A
+    /// bigger one goes through [`crate::coverage`], which looks at the
+    /// limits as it goes (and holds the step count against the limit
+    /// before it makes the mask). It measures a pixel's coverage by area,
+    /// where tiny-skia samples 4x4, so an edge's anti-aliasing differs by a
+    /// shade (docs/dev/HANDOFF.md).
+    fn clip_coverage(
+        path: &PsPath,
+        rule: FillRule,
+        (w, h): (u32, u32),
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(tiny_skia::Mask, u64), PsError> {
+        let mut mask = tiny_skia::Mask::new(w, h).ok_or(PsError::Limitcheck)?;
+        let work = path.raster_work(h as f32);
+        probe.check(work / 1024)?;
+        let Some(skia) = path.to_skia() else {
+            return Ok((mask, 0));
+        };
+        if work < POLLED_CLIP_WORK {
+            mask.fill_path(&skia, rule, true, Transform::identity());
+            return Ok((mask, work));
+        }
+        let (runs, done) =
+            crate::coverage::rasterize_limited(&skia, rule.into(), &mut mask, None, probe)?;
+        // A solid run is not written into the mask: it is full coverage.
+        let stride = w as usize;
+        for run in runs.iter().filter(|r| r.solid) {
+            let r = run.rect;
+            for y in r.y0 as usize..r.y1 as usize {
+                mask.data_mut()[y * stride + r.x0 as usize..y * stride + r.x1 as usize].fill(255);
+            }
+        }
+        Ok((mask, work.max(done)))
     }
 
     pub fn initclip(&mut self) {
@@ -3524,10 +3740,13 @@ impl Gfx {
             } else {
                 PsPath::default()
             };
-            let mut one = tiny_skia::Mask::new(w, h)?;
-            if let Some(skia) = path.to_skia() {
-                one.fill_path(&skia, FillRule::Winding, true, Transform::identity());
-            }
+            let (one, _) = Self::clip_coverage(
+                &path,
+                FillRule::Winding,
+                (w, h),
+                &crate::limits::LimitProbe::NONE,
+            )
+            .ok()?;
             return Some(ClipState {
                 mask: std::rc::Rc::new(one),
                 node: std::rc::Rc::new(ClipNode {
@@ -3539,10 +3758,13 @@ impl Gfx {
         }
         let mut first = true;
         for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
-            let mut one = tiny_skia::Mask::new(w, h)?;
-            if let Some(path) = link.path.to_skia() {
-                one.fill_path(&path, link.rule, true, Transform::identity());
-            }
+            let (one, _) = Self::clip_coverage(
+                &link.path,
+                link.rule,
+                (w, h),
+                &crate::limits::LimitProbe::NONE,
+            )
+            .ok()?;
             if first {
                 mask = one;
                 first = false;
