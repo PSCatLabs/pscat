@@ -796,16 +796,17 @@ Q",
     /// Without it `sh` paints the whole clip, as the raster's page rect
     /// does.
     ///
-    /// `/Extend` is always `[true true]`: the raster pads both ends
-    /// (`Gfx::shfill`'s documented deviation), and the PDF must look like
-    /// the PNG. `/Background` is ignored by `shfill` (PLRM), so it is not
-    /// written either.
+    /// `extend` is the shading's own `/Extend` (#1040; before, always
+    /// `[true true]`), which the raster honours as a PDF reader does.
+    /// `/Background` is ignored by `shfill` (PLRM), so it is not written
+    /// either.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shfill(
         &mut self,
         kind: &crate::svg::ShKind,
         ctm: [f32; 6],
         stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
         region: Option<&crate::gfx::PsPath>,
         comp: Composite,
         chain: &Chain,
@@ -840,9 +841,10 @@ Q",
                 i
             }
         };
+        let ext = format!("/Extend [{} {}]", extend[0], extend[1]);
         let body = match *kind {
             crate::svg::ShKind::Axial { x0, y0, x1, y1 } => format!(
-                "/ShadingType 2 /ColorSpace /DeviceRGB /Coords [{} {} {} {}] /Extend [true true]",
+                "/ShadingType 2 /ColorSpace /DeviceRGB /Coords [{} {} {} {}] {ext}",
                 p(x0),
                 p(y0),
                 p(x1),
@@ -856,7 +858,7 @@ Q",
                 y1,
                 r1,
             } => format!(
-                "/ShadingType 3 /ColorSpace /DeviceRGB /Coords [{} {} {} {} {} {}] /Extend [true true]",
+                "/ShadingType 3 /ColorSpace /DeviceRGB /Coords [{} {} {} {} {} {}] {ext}",
                 p(x0),
                 p(y0),
                 p(r0),

@@ -176,7 +176,9 @@ More on the less obvious ones:
   2 and 3, with exponential and stitching functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
   `<linearGradient>`/`<radialGradient>`, and PDF uses real PDF shadings
-  (`sh` with a `/Shading` resource). [artkit](artkit.md) has helpers that build the shading
+  (`sh` with a `/Shading` resource). `/Extend [start end]` says whether each
+  end paints on past its point or circle; without the key neither does, as in
+  Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each

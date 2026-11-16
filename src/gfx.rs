@@ -2153,11 +2153,12 @@ impl Gfx {
     /// needs for width (module doc). Verified empirically (render.rs's
     /// `shfill_axial_gradient_respects_rotation_and_scale`).
     ///
-    /// `/Extend` is validated for shape at parse time but always
-    /// behaves as `[true true]` here (`SpreadMode::Pad`): the realistic
-    /// idiom already bounds the painted region with an explicit clip,
-    /// so the only visible effect of implementing `false` would be an
-    /// edge case nobody's `clip shfill` triggers. Documented deviation.
+    /// `/Extend` (#1040): each end that does not extend (both, when the
+    /// key is missing) leaves the region past it unpainted, as gs does: a
+    /// transparent stop closes that end of the ramp (`extend_ramp`). A
+    /// radial whose circles are not nested, with its end not extended,
+    /// paints from a two-root layer (`two_root_layer`), and a degenerate
+    /// radial paints gs's disk (`degenerate_radial_inside`).
     ///
     /// Under the limits (#1219) the page is painted in strips of rows, the
     /// limits looked at between them, and the work (a step per 1024 units,
@@ -2171,14 +2172,23 @@ impl Gfx {
         if self.painting_off() {
             return Ok(0);
         }
-        let nstops = shading.raster_stops().len();
-        let stops: Vec<GradientStop> = shading
-            .raster_stops()
-            .iter()
-            .map(|&(pos, r, g, b)| {
-                GradientStop::new(pos, Color::from_rgba(r, g, b, 1.0).unwrap_or(Color::BLACK))
-            })
-            .collect();
+        // An end that does not extend, but whose far side the painted
+        // region never reaches, is painted as if it did: the same pixels,
+        // and an opaque shader, which tiny-skia paints several times faster
+        // than one with a transparent stop (#1040).
+        let reached = self.shfill_ends_reached(&shading);
+        let extend = [
+            shading.extend[0] || !reached[0],
+            shading.extend[1] || !reached[1],
+        ];
+        // The raster's ramp with each end that does not extend closed by a
+        // transparent stop at the same position (#1040). The stops always
+        // run from 0 to 1, and with a zero-width step tiny-skia's gradient
+        // takes the general (unclamped) stage: below 0 its first stop, from
+        // 1 on its last, so past that end nothing is painted. Added after
+        // `raster_stops`, whose resampling would blur the step.
+        let ramp = extend_ramp(&shading.raster_stops(), extend);
+        let nstops = ramp.len();
         // Coincident axial endpoints (Coords [x y x y]) are a no-op in
         // gs — nothing painted, even with Extend true. tiny-skia
         // 0.12's LinearGradient::new in Pad mode does *not* return
@@ -2230,6 +2240,9 @@ impl Gfx {
         // 10-device-pixel gradient, wrongly flattened to solid C1
         // without this).
         const SAFE_LEN: f32 = 1.0;
+        // The gradient of the smaller root, for a radial whose larger root
+        // can fall past an end that does not extend (`two_root_layer`).
+        let mut smaller_root = None;
         let shader = match shading.kind {
             crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
                 let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
@@ -2242,7 +2255,7 @@ impl Gfx {
                 LinearGradient::new(
                     Point::from_xy(x0 * k, y0 * k),
                     Point::from_xy(x1 * k, y1 * k),
-                    stops,
+                    gradient_stops(&ramp),
                     SpreadMode::Pad,
                     ctm.pre_scale(1.0 / k, 1.0 / k),
                 )
@@ -2264,15 +2277,46 @@ impl Gfx {
                 } else {
                     1.0
                 };
-                RadialGradient::new(
+                let (p0, p1) = (
                     Point::from_xy(x0 * k, y0 * k),
-                    r0 * k,
                     Point::from_xy(x1 * k, y1 * k),
-                    r1 * k,
-                    stops,
-                    SpreadMode::Pad,
-                    ctm.pre_scale(1.0 / k, 1.0 / k),
-                )
+                );
+                let (r0, r1) = (r0 * k, r1 * k);
+                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+                let dist = fmath::hypotf(p1.x - p0.x, p1.y - p0.y);
+                let stops = if degenerate_radial(dist, r0, r1) {
+                    // tiny-skia paints the first stop inside the circle and
+                    // the last outside; give it gs's picture (#1040).
+                    match degenerate_radial_inside(&shading) {
+                        Some(c) => vec![
+                            GradientStop::new(0.0, c),
+                            GradientStop::new(1.0, Color::TRANSPARENT),
+                        ],
+                        None => return Ok(0),
+                    }
+                } else {
+                    // Circles neither inside the other (a cone): a point can
+                    // lie on two of them, and gs paints the larger t that
+                    // is in range. tiny-skia finds only the larger root, so
+                    // where that one is past an end that does not extend,
+                    // the smaller one is painted from a second gradient,
+                    // the same circles run backwards.
+                    if !extend[1] && dist > (r1 - r0).abs() {
+                        let reversed: Vec<(f32, Color)> =
+                            ramp.iter().rev().map(|&(t, c)| (1.0 - t, c)).collect();
+                        smaller_root = RadialGradient::new(
+                            p1,
+                            r1,
+                            p0,
+                            r0,
+                            gradient_stops(&reversed),
+                            SpreadMode::Pad,
+                            m,
+                        );
+                    }
+                    gradient_stops(&ramp)
+                };
+                RadialGradient::new(p0, r0, p1, r1, stops, SpreadMode::Pad, m)
             }
         };
         // Degenerate geometry that genuinely has no shader (e.g. both
@@ -2280,25 +2324,43 @@ impl Gfx {
         // than an error, consistent with how other geometric
         // degeneracies in this file (e.g. a singular CTM at
         // device_to_user) fail soft rather than raising. A coincident-
-        // center, equal-*positive*-radius radial does *not* fall here
-        // — tiny-skia's own degenerate fallback for that (a solid disk
-        // of the start color, Pad-extended with nothing beyond it)
-        // already matches gs, verified directly by rendering
-        // `/Coords [50 50 20 50 50 20] /Extend [true true]` against
-        // both (a Codex review raised this as a suspected gap from
-        // reading this comment's own earlier, overbroad wording — not
-        // from an actual repro — so the fix here is the comment, not
-        // the behavior).
+        // center, equal-*positive*-radius radial does *not* fall here:
+        // tiny-skia paints it as its first stop inside the circle and its
+        // last outside, and the stops handed to it above make that gs's
+        // disk (`degenerate_radial_inside`, #1040).
         // Unlike `fill`/`stroke`, `shfill` never touches the current
         // path — it paints the clip region, per the PLRM — so both the
         // degenerate no-op below and the normal case leave it alone.
         let Some(shader) = shader else {
             return Ok(0);
         };
-        // Every pixel the page has costs the gradient a walk of its stops.
+        // Every pixel the page has costs the gradient a walk of its stops
+        // (three walks with a two-root layer: two gradients and its paint).
         let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
-        let work = shfill_work(pw, ph, nstops);
+        let passes = if smaller_root.is_some() { 3 } else { 1 };
+        let work = shfill_work(pw, ph, nstops).saturating_mul(passes);
         probe.check(work / 1024)?;
+        let layer = match smaller_root {
+            Some(smaller) => Some(two_root_layer(
+                smaller,
+                shader.clone(),
+                pw,
+                ph,
+                nstops,
+                probe,
+            )?),
+            None => None,
+        };
+        let shader = match &layer {
+            Some(layer) => tiny_skia::Pattern::new(
+                layer.as_ref(),
+                SpreadMode::Pad,
+                tiny_skia::FilterQuality::Nearest,
+                1.0,
+                Transform::identity(),
+            ),
+            None => shader,
+        };
         // /BBox further restricts the painted region to a rectangle in
         // the same user space as Coords (confirmed against gs: pixels
         // outside it stay untouched even though the shading's own
@@ -2408,7 +2470,15 @@ impl Gfx {
                 // the whole page bounded only by the clip.
                 let region_d = path.to_svg_data();
                 if let Some(svg) = &mut self.svg {
-                    svg.shfill(&svg_kind, svg_ctm, &shading.stops, &region_d, comp, &chain);
+                    svg.shfill(
+                        &svg_kind,
+                        svg_ctm,
+                        &shading.stops,
+                        shading.extend,
+                        &region_d,
+                        comp,
+                        &chain,
+                    );
                 }
             }
             if self.pdf.is_some() {
@@ -2447,19 +2517,16 @@ impl Gfx {
                 let mut kind = sh_kind(shading.kind, k);
                 // Two (nearly) coincident circles of (nearly) one radius:
                 // tiny-skia's degenerate case, decided with its own
-                // tolerance (`DEGENERATE_THRESHOLD`, 2^-15, on the rescaled
-                // numbers). It paints the first stop's colour inside the end
-                // circle and the last one outside, with a hard edge; a PDF
-                // reader paints those circles as nothing (CoreGraphics) or
-                // just a disk (gs). Record the raster's picture exactly: a
-                // radial from the centre out to twice the radius, constant
-                // first colour to the halfway bound, then constant last
-                // colour, padded (Codex reviews of #1028).
-                const DEGENERATE: f32 = 1.0 / (1 << 15) as f32;
+                // tolerance on the rescaled numbers. The raster paints gs's
+                // picture of it (#1040): a disk of one colour, or nothing
+                // (and then never gets here). A PDF reader paints those
+                // circles as nothing (CoreGraphics), so record the disk: a
+                // radial from the centre out to the radius, one colour,
+                // extending neither end (Codex reviews of #1028).
                 let fallback;
                 let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
-                // The scale the recorded geometry carries; the `cm` undoes it.
-                let mut k_pdf = k;
+                let mut extend = shading.extend;
+                let mut nothing = false;
                 if let crate::svg::ShKind::Radial {
                     x0,
                     y0,
@@ -2468,54 +2535,50 @@ impl Gfx {
                     y1,
                     r1,
                 } = kind
-                    && fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE
-                    && (r0 - r1).abs() <= DEGENERATE
-                    && r1 > DEGENERATE
-                    && let (Some(first), Some(last)) = (stops.first(), stops.last())
+                    && degenerate_radial(fmath::hypotf(x1 - x0, y1 - y0), r0, r1)
                 {
-                    // Twice the radius, written at half scale (the `cm`
-                    // doubles it back), so a radius near f32::MAX stays
-                    // finite.
+                    let c = degenerate_radial_inside(&shading);
+                    nothing = c.is_none();
+                    let c = c.unwrap_or(Color::TRANSPARENT);
                     kind = crate::svg::ShKind::Radial {
-                        x0: x0 * 0.5,
-                        y0: y0 * 0.5,
+                        x0,
+                        y0,
                         r0: 0.0,
-                        x1: x0 * 0.5,
-                        y1: y0 * 0.5,
+                        x1: x0,
+                        y1: y0,
                         r1,
                     };
-                    k_pdf = k * 0.5;
-                    let (f, l) = ((first.1, first.2, first.3), (last.1, last.2, last.3));
-                    fallback = [
-                        (0.0, f.0, f.1, f.2),
-                        (0.5, f.0, f.1, f.2),
-                        (0.5, l.0, l.1, l.2),
-                        (1.0, l.0, l.1, l.2),
-                    ];
+                    let (r, g, b) = (c.red(), c.green(), c.blue());
+                    fallback = [(0.0, r, g, b), (1.0, r, g, b)];
                     stops = &fallback;
+                    extend = [false, false];
                 }
-                let m = ctm.pre_scale(1.0 / k_pdf, 1.0 / k_pdf);
+                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
                 let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let region = shading.bbox.map(|_| &path);
                 // An axis that tiny-skia finds degenerate (its tolerance, on
                 // the same f32 numbers: distinct f64 Coords can collapse)
-                // paints the last stop's colour, solid, over the region; a
-                // PDF reader paints such a shading as nothing. Record that
-                // solid fill instead (a Codex review of #1028).
+                // paints the last stop, solid, over the region: the end
+                // colour if the end extends, else nothing (its closing stop
+                // is transparent). A PDF reader paints such a shading as
+                // nothing. Record that solid fill instead (a Codex review of
+                // #1028).
                 let solid = match kind {
                     crate::svg::ShKind::Axial { x0, y0, x1, y1 }
                         if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
                     {
-                        stops.last().map(|l| (l.1, l.2, l.3))
+                        Some(stops.last().filter(|_| extend[1]).map(|l| (l.1, l.2, l.3)))
                     }
+                    _ if nothing => Some(None),
                     _ => None,
                 };
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
                     match solid {
-                        Some(rgb) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
-                        None => pdf.shfill(&kind, pdf_ctm, stops, region, comp, &chain),
+                        Some(Some(rgb)) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
+                        Some(None) => {}
+                        None => pdf.shfill(&kind, pdf_ctm, stops, extend, region, comp, &chain),
                     }
                 }
             }
@@ -2526,6 +2589,111 @@ impl Gfx {
             self.prepare_paint();
         }
         Ok(work)
+    }
+
+    /// Whether the region a `shfill` can paint reaches past each end of
+    /// `shading` (#1040), conservatively: a `true` may be wrong, a `false`
+    /// never is. The region is bounded, in device space, by the page, the
+    /// `/BBox` and every clip path's box; its corners, back in the
+    /// shading's own space, are tested against the ends. An axial's t is
+    /// affine, so its range over the region is at the corners. For nested
+    /// circles, past the start is inside the first circle when they grow
+    /// (outside it when they shrink) and past the end outside the second
+    /// (inside it). Circles that are not nested are taken to reach both.
+    fn shfill_ends_reached(&self, shading: &crate::shading::Shading) -> [bool; 2] {
+        const BOTH: [bool; 2] = [true, true];
+        // The shader is sampled at pixel centres: the page's outermost are
+        // half a pixel in. An anti-aliased edge pixel of a clip or the
+        // `/BBox` can have its centre outside the path, so their boxes are
+        // taken a pixel wider.
+        let (w, h) = (self.pixmap.width() as f32, self.pixmap.height() as f32);
+        let mut b = [0.5, 0.5, w - 0.5, h - 0.5];
+        let mut meet = |o: [f32; 4]| {
+            b = [
+                b[0].max(o[0] - 1.0),
+                b[1].max(o[1] - 1.0),
+                b[2].min(o[2] + 1.0),
+                b[3].min(o[3] + 1.0),
+            ];
+        };
+        if let Some((llx, lly, urx, ury)) = shading.bbox {
+            let c = [(llx, lly), (urx, lly), (urx, ury), (llx, ury)].map(|(x, y)| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            });
+            meet(corners_box(c).map(|v| v as f32));
+        }
+        let mut node = self.state.clip.as_ref().map(|c| c.node.clone());
+        while let Some(n) = node {
+            if let Some(nb) = n.path.device_bbox() {
+                meet(nb);
+            }
+            node = n.parent.clone();
+        }
+        if !(b[0] <= b[2] && b[1] <= b[3]) {
+            return [false, false];
+        }
+        let Some(inv) = self.state.ctm.invert() else {
+            return BOTH;
+        };
+        let corners = [(b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3])].map(|(x, y)| {
+            let mut p = [Point::from_xy(x, y)];
+            inv.map_points(&mut p);
+            (f64::from(p[0].x), f64::from(p[0].y))
+        });
+        if corners
+            .iter()
+            .any(|&(x, y)| !x.is_finite() || !y.is_finite())
+        {
+            return BOTH;
+        }
+        match shading.kind {
+            crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
+                let (dx, dy) = (x1 - x0, y1 - y0);
+                let len2 = dx * dx + dy * dy;
+                if len2 == 0.0 || !len2.is_finite() {
+                    return BOTH;
+                }
+                let t = corners.map(|(x, y)| ((x - x0) * dx + (y - y0) * dy) / len2);
+                [
+                    t.iter().any(|&t| t.is_nan() || t < 0.0),
+                    t.iter().any(|&t| t.is_nan() || t > 1.0),
+                ]
+            }
+            crate::shading::ShadingKind::Radial {
+                x0,
+                y0,
+                r0,
+                x1,
+                y1,
+                r1,
+            } => {
+                let dr = r1 - r0;
+                // Not nested (or not a number): both, as promised above.
+                let nested = fmath::hypot(x1 - x0, y1 - y0) <= dr.abs();
+                if !nested || dr == 0.0 {
+                    return BOTH;
+                }
+                // Some corner outside the circle: the region leaves it.
+                let leaves = |cx: f64, cy: f64, r: f64| {
+                    corners.iter().any(|&(x, y)| {
+                        let d = fmath::hypot(x - cx, y - cy);
+                        d.is_nan() || d > r
+                    })
+                };
+                // The region's box meets the open disk.
+                let meets = |cx: f64, cy: f64, r: f64| {
+                    let [lx, ly, ux, uy] = corners_box(corners);
+                    let d = fmath::hypot(cx.clamp(lx, ux) - cx, cy.clamp(ly, uy) - cy);
+                    r > 0.0 && (d.is_nan() || d < r)
+                };
+                if dr > 0.0 {
+                    [meets(x0, y0, r0), leaves(x1, y1, r1)]
+                } else {
+                    [leaves(x0, y0, r0), meets(x1, y1, r1)]
+                }
+            }
+        }
     }
 
     pub fn stroke(&mut self) {
@@ -4357,6 +4525,114 @@ fn clamp01(v: f64) -> f32 {
 
 fn to_u8(v: f32) -> u8 {
     (v * 255.0).round() as u8
+}
+
+/// A shading's raster ramp as tiny-skia colours, with a transparent stop
+/// closing each end `extend` leaves off (#1040), at that end's own
+/// position: a zero-width step, so the ramp itself is unchanged.
+fn extend_ramp(stops: &[(f32, f32, f32, f32)], extend: [bool; 2]) -> Vec<(f32, Color)> {
+    let mut ramp = Vec::with_capacity(stops.len() + 2);
+    if !extend[0] {
+        ramp.push((0.0, Color::TRANSPARENT));
+    }
+    ramp.extend(
+        stops
+            .iter()
+            .map(|&(t, r, g, b)| (t, Color::from_rgba(r, g, b, 1.0).unwrap_or(Color::BLACK))),
+    );
+    if !extend[1] {
+        ramp.push((1.0, Color::TRANSPARENT));
+    }
+    ramp
+}
+
+/// The bounding box `[llx, lly, urx, ury]` of four points.
+fn corners_box(c: [(f64, f64); 4]) -> [f64; 4] {
+    c.iter().fold(
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ],
+        |b, &(x, y)| [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)],
+    )
+}
+
+fn gradient_stops(ramp: &[(f32, Color)]) -> Vec<GradientStop> {
+    ramp.iter().map(|&(t, c)| GradientStop::new(t, c)).collect()
+}
+
+/// tiny-skia's degenerate radial (its `DEGENERATE_THRESHOLD`, 2^-15, on the
+/// numbers it is given): (nearly) one circle twice, which it paints as its
+/// first stop inside and its last outside.
+const DEGENERATE: f32 = 1.0 / (1 << 15) as f32;
+
+fn degenerate_radial(dist: f32, r0: f32, r1: f32) -> bool {
+    dist <= DEGENERATE && (r0 - r1).abs() <= DEGENERATE && r1 > DEGENERATE
+}
+
+/// What gs paints inside a degenerate radial's circle (#1040): the start
+/// colour if the start extends, but for circles that shrink the end colour
+/// if the end extends. Outside, nothing, whatever `/Extend` says.
+/// Confirmed with gs 10.07.1 on `[50 50 20 50 50 20]`, `20.00001 -> 20` and
+/// `20 -> 20.00001` under each of the four `/Extend`s.
+fn degenerate_radial_inside(shading: &crate::shading::Shading) -> Option<Color> {
+    let crate::shading::ShadingKind::Radial { r0, r1, .. } = shading.kind else {
+        return None;
+    };
+    let ((r, g, b), on) = if r0 > r1 {
+        (
+            shading.stops.last().map(|s| (s.1, s.2, s.3))?,
+            shading.extend[1],
+        )
+    } else {
+        (
+            shading.stops.first().map(|s| (s.1, s.2, s.3))?,
+            shading.extend[0],
+        )
+    };
+    on.then(|| Color::from_rgba(r, g, b, 1.0).unwrap_or(Color::BLACK))
+}
+
+/// A `w` x `h` layer of a radial shading whose circles are not nested, so a
+/// point can lie on two of them (#1040). gs paints the larger t in range;
+/// tiny-skia's gradient knows only the larger root, which an end that does
+/// not extend leaves transparent. `smaller` (the circles run backwards, so
+/// its larger root is the smaller one) is painted first and `larger` over
+/// it. Painted in strips under the limits, as `shfill` paints the page.
+fn two_root_layer(
+    smaller: tiny_skia::Shader<'static>,
+    larger: tiny_skia::Shader<'static>,
+    w: usize,
+    h: usize,
+    nstops: usize,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Pixmap, PsError> {
+    probe.check_alloc(w.saturating_mul(h).saturating_mul(4))?;
+    let mut layer = Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    let rows = if *probe == crate::limits::LimitProbe::NONE {
+        h
+    } else {
+        shfill_strip_rows(w, nstops)
+    };
+    for shader in [smaller, larger] {
+        let paint = Paint {
+            shader,
+            force_hq_pipeline: true,
+            ..Default::default()
+        };
+        let mut y = 0;
+        while y < h {
+            let y1 = (y + rows).min(h);
+            probe.check(0)?;
+            if let Some(strip) = tiny_skia::Rect::from_ltrb(0.0, y as f32, w as f32, y1 as f32) {
+                layer.fill_rect(strip, &paint, Transform::identity(), None);
+            }
+            y = y1;
+        }
+    }
+    Ok(layer)
 }
 
 /// `shfill` geometry for the vector recorders, its lengths multiplied by

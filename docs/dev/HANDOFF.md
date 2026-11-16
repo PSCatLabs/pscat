@@ -698,15 +698,22 @@ renders eight examples in both and compares block-downsampled output).
   `/DeviceRGB`/`/DeviceCMYK` (no Indexed/Separation, no
   array-of-functions form). `/Range` is honored only on the top-level
   Function a shading dict names directly, not recursively per
-  stitching leg. `/Extend` is validated but always behaves as
-  `[true true]` — the `gsave <path> clip shfill grestore` idiom
-  already bounds the painted region, so `false`'s "transparent beyond
-  the axis" is an edge case that idiom never hits. SVG export gets
-  real `<linearGradient>`/`<radialGradient>`; PDF export writes a real
+  stitching leg. `/Extend` is honoured per end in all three outputs
+  (#1040; a missing key is `[false false]`, as in gs; before, always
+  `[true true]`): the raster closes an unextended end of the ramp with a
+  transparent stop, but only when the painted region (page, `/BBox`,
+  clip boxes) can reach past it (`Gfx::shfill_ends_reached`), since a
+  transparent stop costs tiny-skia its opaque fast path. A radial whose
+  circles are not nested, end unextended, paints from a two-gradient
+  layer (`two_root_layer`) so a point takes its smaller root as gs does,
+  and a degenerate radial paints gs's disk. SVG export gets
+  real `<linearGradient>`/`<radialGradient>`, lengthened past an
+  unextended end with a transparent run (`extended_for_svg`); PDF export writes a real
   `sh` on a `/Shading` resource (#1028: before, a flat fill in the
   ramp's average colour), its Function built from the same RGB stops the
-  raster and SVG paint, with `/Extend [true true]` to match the raster
-  and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`).
+  raster and SVG paint, with the shading's own `/Extend`
+  and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
+  `notes/1040-shfill-extend.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
@@ -722,7 +729,9 @@ renders eight examples in both and compares block-downsampled output).
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
   off-center `ShadingType` 3 that fails that (valid PostScript; no
   such constraint exists there) isn't detected or worked around, so
-  its SVG export can visibly diverge from the raster.
+  its SVG export can visibly diverge from the raster. With its end not
+  extended it also shows a hole where the raster and PDF paint a point's
+  smaller root: SVG has no way to ask for that root.
 - `setalpha`/`currentalpha` and `setblendmode`/`currentblendmode`
   (issue #47) are **pscat extensions, not PLRM operators** — real
   Ghostscript has no PostScript-callable alpha operator at all

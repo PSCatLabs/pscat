@@ -91,7 +91,8 @@
         -900 6 1400 { /mx exch def
             mx 0 moveto mx 900 add 900 lineto stroke
             mx 900 add 0 moveto mx 900 lineto stroke } for
-        0 100 0 300 [ JB 0.78 shade  JB 1 shade ] axialsh shfill
+        % padded both ways: the light-to-dark falloff covers the whole body
+        0 100 0 300 [ JB 0.78 shade  JB 1 shade ] axialsh dup /Extend [true true] put shfill
     grestore
 
     % yokes, side panels, sleeve and hem stripes, clipped to the body

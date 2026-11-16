@@ -1429,6 +1429,38 @@ mod one_operator {
             }
         }
 
+        /// A radial cone (circles not nested) with its end not extended
+        /// paints a two-gradient layer first (#1040): that is polled too,
+        /// and a limit inside it still leaves the page untouched.
+        const CONE: &str = "<< /ShadingType 3 /ColorSpace /DeviceRGB \
+             /Coords [400 1650 100 2000 1650 400] \
+             /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+             /Bounds bounds /Encode encode >> >> shfill";
+
+        #[test]
+        fn a_cone_shfill_stops_inside_its_layer_and_paints_nothing() {
+            stops_inside(
+                "shfill cone",
+                ramp_setup(),
+                CONE,
+                "shfill",
+                Duration::from_millis(1500),
+            );
+            let (err, px) = on_a_deadline("shfill cone all or nothing", move || {
+                let mut it = Interp::new();
+                it.run_str(&ramp_setup()).expect("setup");
+                it.run_str("1 0 0 setrgbcolor 0 0 2550 3300 rectfill")
+                    .expect("red");
+                it.set_limits(untrusted(Duration::from_millis(100)))
+                    .expect("limits");
+                let err = it.run_str(CONE).expect_err("the clock stops it");
+                let px = it.gfx().pixmap.pixel(1000, 1650).expect("pixel");
+                (err, (px.red(), px.green(), px.blue()))
+            });
+            assert_eq!(err, PsError::TimeExceeded);
+            assert_eq!(px, (255, 0, 0), "the page is untouched");
+        }
+
         #[test]
         fn type1_subroutines_decrypt_only_the_bytes_a_glyph_can_reach() {
             // One glyph calls a 16 MB subroutine (about 25 ms to decrypt in
