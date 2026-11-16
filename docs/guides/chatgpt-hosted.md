@@ -41,8 +41,8 @@ connect only a server you trust.
    server will fail here).
 5. Read the risk warning, select **I understand and want to continue**, then
    **Create as a plugin**.
-6. Review the tools ChatGPT discovered, then install the plugin from your
-   personal plugins (or the workspace where you made it).
+6. Find the resulting plugin in your personal plugins (or the workspace where
+   you created it) and install it before using it.
 7. In a new conversation, type `@` and pick `pscat`.
 
 What you should see at step 6: seven tools, `chalkboard_math`,
@@ -56,8 +56,9 @@ can take a second or two longer (scale to zero).
 Try: `Use the pscat app's render_postscript tool to draw a red circle on a
 white page and show me the PNG.`
 
-After the server changes its tools, open the connection at ChatGPT Plugins and
-select **Refresh**.
+After the server changes its tools, use the plugin's details page in ChatGPT's
+settings to refresh its tools (OpenAI's wording: "refresh apps to pull new
+tools, descriptions, and server instructions").
 
 ## The skills with a hosted server
 
@@ -94,7 +95,7 @@ for the hosted server (skills and everything else byte for byte the same):
 ```sh
 gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS
 python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
-    --remote https://<your-pscat-mcp-host>/mcp --remote-auth none
+    --remote 'https://<your-pscat-mcp-host>/mcp' --remote-auth none
 # dist/pscat-chatgpt-plugin-<version>-remote.zip
 ```
 
@@ -110,6 +111,9 @@ python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
   committed. No token goes in the ZIP, and no `headers` entry either (OpenAI's
   public submission rejects nonempty server headers).
 - It cannot be combined with `--skills-only`.
+- The ZIP still carries the local launcher scripts, `pscat-release` and the
+  manifest description that mentions the local server. Nothing uses them when
+  `mcp.json` names only the remote server; they are dead weight, not a risk.
 
 OpenAI documents the custom-server route above and publishing to a workspace
 for plugins you have added, but not the steps for uploading a plugin ZIP to a
@@ -133,6 +137,10 @@ personal account can use the upload at all.
   callers go around the policy), so the server's address would change. The
   mTLS check would sit in the server or the load balancer; neither was
   checked here.
+  Neither restricts it to you: OpenAI says an IP allowlist "identifies traffic
+  from an OpenAI-operated network, not a specific user or workspace, and does
+  not replace request authentication", so another ChatGPT user who has the URL
+  can still reach it. They keep out other callers, not other ChatGPT users.
   The server's 2 concurrent renders and 20-second limit bound each request,
   not the total bill.
 - **OAuth**: callers sign in, so a leaked URL is harmless. It means an

@@ -44,6 +44,7 @@ the problems.
 """
 
 import argparse
+import ipaddress
 import json
 import pathlib
 import re
@@ -88,8 +89,18 @@ def check_remote_url(url):
     """The hosted server's MCP endpoint, or a SystemExit saying what is wrong.
 
     OpenAI wants a public HTTPS endpoint "without embedded credentials or
-    fragments"; a query string is refused too, so a token cannot ride in it."""
-    u = urllib.parse.urlsplit(url)
+    fragments"; a query string is refused too, so a token cannot ride in it.
+    A token in the path is not detectable here: pass the endpoint only."""
+    if not url.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        raise SystemExit("--remote: the URL must be plain ASCII with no whitespace or "
+                         "control characters (use the xn-- form for an international host)")
+    if re.search(r"[<>{}]", url):
+        raise SystemExit(f"--remote {url!r}: replace the placeholder with the real host")
+    try:
+        u = urllib.parse.urlsplit(url)
+        u.port  # raises ValueError for a bad port
+    except ValueError as e:
+        raise SystemExit(f"--remote {url!r}: not a valid URL ({e})")
     if u.scheme != "https" or not u.hostname:
         raise SystemExit(f"--remote {url!r}: expected an https:// URL with a host")
     if u.username is not None or u.password is not None or "@" in u.netloc:
@@ -97,11 +108,18 @@ def check_remote_url(url):
     if u.query or u.fragment or "?" in url or "#" in url:
         raise SystemExit("--remote: the URL must not have a query string or fragment "
                          "(a token must never travel in the URL)")
-    if re.search(r"[<>{}\s]", url):
-        raise SystemExit(f"--remote {url!r}: replace the placeholder with the real host")
-    if u.path in ("", "/"):
+    if not u.path.strip("/"):
         raise SystemExit("--remote: include the MCP path, usually /mcp")
-    return url
+    # OpenAI needs a public endpoint; a loopback or private address cannot be one.
+    try:
+        addr = ipaddress.ip_address(u.hostname)
+    except ValueError:
+        addr = None
+    if (addr is not None and not addr.is_global) or u.hostname == "localhost" \
+            or u.hostname.endswith(".localhost"):
+        raise SystemExit(f"--remote {url!r}: ChatGPT needs a public host, not a local or "
+                         "private address")
+    return u._replace(scheme="https", netloc=u.netloc.lower()).geturl()
 
 
 def remote_mcp_json(url, auth):

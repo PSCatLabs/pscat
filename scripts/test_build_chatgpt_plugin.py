@@ -182,9 +182,24 @@ class Remote(Fixture):
             ("https://<your-pscat-mcp-host>/mcp", "placeholder"),
             ("https://h.example", "MCP path"),
             ("https://h.example/", "MCP path"),
+            ("https://h.example//", "MCP path"),
+            ("https://[::1/mcp", "not a valid URL"),
+            ("https://h.example:99999/mcp", "not a valid URL"),
+            ("https://h.example:abc/mcp", "not a valid URL"),
+            ("https://h.example/mcp\n", "whitespace"),
+            ("https://h.example/mcp ", "whitespace"),
+            ("https://ex\u00e4mple.com/mcp", "ASCII"),
+            ("https://localhost/mcp", "public host"),
+            ("https://127.0.0.1/mcp", "public host"),
+            ("https://[::1]/mcp", "public host"),
+            ("https://10.0.0.5:8443/mcp", "public host"),
         ]:
             with self.subTest(url=bad), self.assertRaisesRegex(SystemExit, why):
                 self.build(remote=bad, remote_auth="none")
+
+    def test_url_is_normalised(self):
+        path = self.build(remote="HTTPS://H.Example:8443/Mcp", remote_auth="none")
+        self.assertEqual(self.mcp(path)["mcpServers"]["pscat"]["url"], "https://h.example:8443/Mcp")
 
     def test_auth_is_required_and_checked(self):
         with self.assertRaisesRegex(SystemExit, "--remote-auth"):
@@ -211,6 +226,15 @@ class Remote(Fixture):
                              capture_output=True, text=True)
         self.assertEqual(bad.returncode, 1)
         self.assertIn("https", bad.stderr)
+        for extra, why in [(["--remote", URL], "--remote-auth"),
+                           (["--remote", URL, "--remote-auth", "none", "--skills-only"],
+                            "cannot be combined"),
+                           (["--remote", "https://[::1/mcp", "--remote-auth", "none"],
+                            "not a valid URL")]:
+            r = subprocess.run(base + extra, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn(why, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
 
 
 class Check(Fixture):

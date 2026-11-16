@@ -40,7 +40,8 @@ custom MCP server**. Enter a name ... Under **Connection**, enter your
 **Server URL** ... Configure authentication for your server ... Select
 **Create as a plugin**." "Supported MCP protocols: SSE and streaming HTTP."
 <https://developers.openai.com/plugins/deploy/connect-chatgpt>: enter "the MCP
-server URL, including the `/mcp` path". "Access: Use ChatGPT on the web."
+server URL, including the `/mcp` path". The developer-mode guide adds
+"Access: Use ChatGPT on the web."
 <https://developers.openai.com/plugins/deploy/app-review> sends private use
 here: "For private or workspace-only use, use a custom MCP server connection
 instead." The steps for uploading a plugin ZIP to a personal account are still
