@@ -88,7 +88,7 @@ fn cvs(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let any = it.pop()?;
-    let text = any.text();
+    let text = any.cvs_text();
     buf.write_at(0, text.as_bytes())?;
     it.push(Object::lit(Value::String(buf.interval(0, text.len())?)));
     Ok(())

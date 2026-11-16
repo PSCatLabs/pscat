@@ -1501,7 +1501,7 @@ impl Interp {
     #[inline(never)]
     fn timed_op(&mut self, name: &'static str, func: crate::object::OpFn) -> Result<(), PsError> {
         let t0 = crate::clock::Clock::mono_ns();
-        let r = func(self);
+        let r = self.run_op(func, name);
         let ns = crate::clock::Clock::mono_ns().saturating_sub(t0);
         if let Some(p) = self.profile.as_mut() {
             p.record_op(name, ns);
@@ -1543,7 +1543,7 @@ impl Interp {
             // top: its first element runs in this same step, as it always
             // has.
             let done = match self.proc_step::<false>() {
-                ProcStep::Op(func) => func(self),
+                ProcStep::Op(func) => self.run_op(func, ""),
                 ProcStep::Name(id) => self.execute_name(id),
                 ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
@@ -1555,7 +1555,7 @@ impl Interp {
                     }
                     Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
                     Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
-                        ProcStep::Op(func) => func(self),
+                        ProcStep::Op(func) => self.run_op(func, ""),
                         ProcStep::Name(id) => self.execute_name(id),
                         // `Other`: a run of empty loop iterations paused
                         // with no procedure on top (#900), a step that
@@ -1828,7 +1828,7 @@ impl Interp {
                     };
                     // Any object can be there: an errordict handler
                     // stores the one it was run on (issue #372).
-                    let cmd = d.get("command").map(|o| o.text());
+                    let cmd = d.get("command").map(|o| o.cvs_text());
                     (flag, name, cmd)
                 }
                 _ => (false, None, None),
@@ -1862,7 +1862,7 @@ impl Interp {
     /// run on is the offending command, for `$error /command` and for
     /// the report of an error nothing catches.
     pub(crate) fn set_error_command(&mut self, obj: Object) {
-        self.last_name = Some(crate::name::intern(&obj.text()).id());
+        self.last_name = Some(crate::name::intern(&obj.cvs_text()).id());
         self.error_command = Some(obj);
     }
 
@@ -2358,7 +2358,7 @@ impl Interp {
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
             (Value::Name(n), true) => self.execute_name(n.id()),
-            (Value::Operator(op), true) => (op.func)(self),
+            (Value::Operator(op), true) => self.run_op(op.func, op.name),
             _ => {
                 self.push(obj);
                 Ok(())
@@ -2485,7 +2485,7 @@ impl Interp {
                 return Ok(());
             }
             match &obj.value {
-                Value::Operator(op) => return (op.func)(self),
+                Value::Operator(op) => return self.run_op(op.func, op.name),
                 Value::Array(_) => {
                     // Move the body out rather than cloning it (and then
                     // dropping `obj`): one refcount round trip fewer.
@@ -2576,8 +2576,18 @@ impl Interp {
 
     /// `exec` and the conditional operators: run an object with full
     /// executable semantics (procedures run rather than being pushed).
+    ///
+    /// A name it does not find is the offending command itself, as in
+    /// Ghostscript (`/x cvx exec` names `x`), not the operator that ran it
+    /// (#1047); an operator it runs names itself (see `run_op`).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
-        self.execute_resolved(obj, NO_NAME)
+        let done = self.execute_resolved(obj, NO_NAME);
+        if let Err(PsError::Undefined(n)) = &done
+            && self.error_command.is_none()
+        {
+            self.error_command = Some(Object::exec(Value::Name(crate::name::intern(n))));
+        }
+        done
     }
 
     /// Run `file` as program source loaded by `run` under `name`, so an
@@ -3204,6 +3214,79 @@ impl Interp {
     #[doc(hidden)]
     pub fn push(&mut self, obj: Object) {
         self.ostack.push(obj);
+    }
+
+    /// Run operator `func`; if it fails, it is the error's offending
+    /// command (#1047, #1074): `$error /command` holds the operator and the
+    /// report names it, as in Ghostscript, not the procedure it ran in or
+    /// the last name looked up. `name` is its name, or empty when the
+    /// caller has only the function (a procedure element: a name in the
+    /// step slows every step down), and `blame_op` finds it. Costs nothing
+    /// on success beyond the check the step loop makes anyway.
+    #[inline(always)]
+    pub(crate) fn run_op(
+        &mut self,
+        func: crate::object::OpFn,
+        name: &'static str,
+    ) -> Result<(), PsError> {
+        match func(self) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(self.blame_op(e, func, name)),
+        }
+    }
+
+    /// The failed operator becomes the offending command, unless something
+    /// more specific already is: an `errordict` handler's object (#372), or
+    /// a name `exec` did not find, or an operator `exec` ran.
+    #[cold]
+    #[inline(never)]
+    fn blame_op(&mut self, e: PsError, func: crate::object::OpFn, name: &'static str) -> PsError {
+        if self.error_command.is_none() {
+            let name = if name.is_empty() {
+                self.operator_name(func)
+            } else {
+                Some(name)
+            };
+            if let Some(name) = name {
+                self.error_command = Some(Object::exec(Value::Operator(crate::object::Operator {
+                    name,
+                    func,
+                })));
+                self.last_name = Some(crate::name::intern(name).id());
+            }
+        }
+        e
+    }
+
+    /// The name of operator `func`, which a procedure element just ran and
+    /// which failed. The element is still in the procedure on top of the
+    /// execution stack unless it was the last one (a tail call drops the
+    /// frame before the element runs). Then the last name looked up is
+    /// tried (an unbound call), and last systemdict. Functions are
+    /// compared by address: a match is that operator, and the rare
+    /// function registered under two names gets one of them.
+    fn operator_name(&self, func: crate::object::OpFn) -> Option<&'static str> {
+        let same = |o: &Object| match &o.value {
+            Value::Operator(op) if o.executable && std::ptr::fn_addr_eq(op.func, func) => {
+                Some(op.name)
+            }
+            _ => None,
+        };
+        if let Some(Frame::Proc { body, pc }) = self.estack.last()
+            && *pc > 0
+            && let Some(Some(name)) = body.peek(*pc - 1, same)
+        {
+            return Some(name);
+        }
+        if let Some(id) = self.last_name
+            && let Some(o) = self.load_id(id)
+            && let Some(name) = same(&o)
+        {
+            return Some(name);
+        }
+        let system = self.systemdict();
+        let system = system.borrow();
+        system.name_values().find_map(same)
     }
 
     #[doc(hidden)]

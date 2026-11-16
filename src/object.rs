@@ -453,6 +453,16 @@ impl Object {
         }
     }
 
+    /// What `cvs` writes: `text()`, except that an operator gives its name,
+    /// as in the PLRM and Ghostscript (`=` still prints `--nostringval--`).
+    /// Also how an operator in `$error /command` is named in a report.
+    pub(crate) fn cvs_text(&self) -> String {
+        match &self.value {
+            Value::Operator(op) => op.name.to_string(),
+            _ => self.text(),
+        }
+    }
+
     /// `text()` with strings and names cut to `max` bytes (then
     /// ` ... truncated`), for `stack`. Everything else is already short.
     pub fn text_bounded(&self, max: usize) -> String {
@@ -1062,6 +1072,11 @@ impl Dict {
 
     pub fn is_empty(&self) -> bool {
         self.names.is_empty() && self.exotic.is_empty()
+    }
+
+    /// The values under name keys, in the map's (fixed) order.
+    pub(crate) fn name_values(&self) -> impl Iterator<Item = &Object> {
+        self.names.values()
     }
 
     /// Snapshot of (key, value) pairs for `forall`/`copy`. Name keys come

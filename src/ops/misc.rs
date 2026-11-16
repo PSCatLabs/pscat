@@ -94,7 +94,7 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
             _ => None,
         })
     });
-    let text = command.as_ref().map(|c| c.text());
+    let text = command.as_ref().map(|c| c.cvs_text());
     if let Some(c) = command {
         it.set_error_command(c);
     }
