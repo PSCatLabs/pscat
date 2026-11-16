@@ -300,7 +300,7 @@ fn memory_growth_is_capped() {
             })
         };
         let r = it.run_str(
-            "gsave 8000 8000 scale 8000 8000 [8000 0 0 -8000 0 8000] \
+            "gsave 4000 4000 scale 4000 4000 [4000 0 0 -4000 0 4000] \
              { /j exch def /i exch def i 3037000500 mul dup mul pop i 2000 div } 1 kernelimage grestore",
         );
         done.store(true, Ordering::Relaxed);

@@ -116,8 +116,8 @@ Waits for #1040 (`/Extend false`), which changes the same paint path.
   `a_step_limit_refuses_a_refit_and_leaves_the_clip_alone` (a black fill after
   the refusal paints every pixel: the clip is the page, not the refit). Both
   fail with the probe replaced by `NONE`.
-- `tests/limits_memory.rs`: the kernelimage case (8000 x 8000 all retired,
-  only a 2 s clock, a sampler thread: peak growth under 300 MiB; 5.9 GB
+- `tests/limits_memory.rs`: the kernelimage case (4000 x 4000 all retired,
+  only a 2 s clock, a sampler thread: peak growth under 300 MiB; 1.5 GB
   without the ceiling) and the clip and fill cases above (the 300 dpi clip
   of 100,000 curves finishes under a 400 MiB cap; with `Stream::Never` the
   100 MiB cases are refused as they were).

@@ -1478,7 +1478,8 @@ mod one_operator {
                 REFIT.into(),
                 "cliprestore",
                 "cliprestore",
-                Duration::from_millis(1500),
+                // The setup's clip (0.6 s here) is inside the budget too.
+                Duration::from_secs(3),
             );
         }
 

@@ -1223,6 +1223,11 @@ mod tests {
             deadline_ns: None,
             memory: None,
         };
+        let mut kept = Vec::new();
+        flatten(&path, 0.0, 0.0, &std::cell::Cell::new(false), |l| {
+            push_clipped(&mut kept, l, w as f32)
+        });
+        assert!(kept.len() > 3000, "{} edges", kept.len());
         for rule in [Rule::NonZero, Rule::EvenOdd] {
             for c in [None, Some(&clip)] {
                 let mut a = Mask::new(w, h).unwrap();
@@ -1246,6 +1251,7 @@ mod tests {
                 // the first edge, from the 500th, and from the last few
                 // (the edges kept so far are laid first): the same runs, the
                 // same mask bytes, the same work.
+                // (The path keeps well over 1500 edges: asserted above.)
                 for at in [0, 1, 500, 1500] {
                     let mut m = Mask::new(w, h).unwrap();
                     let (rm, wm) =
