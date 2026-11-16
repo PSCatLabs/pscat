@@ -1572,6 +1572,9 @@ renders eight examples in both and compares block-downsampled output).
     count included). 100,000 curves clipped at 300 dpi: 830 MiB to 160. Keep
     it so: the output must not depend on whether a limit is set. `fit_clip`
     (`cliprestore`) takes the probe and charges its work like `clip`.
+    `shfill` with a `/BBox` over `POLLED_BBOX_SHFILL_WORK` paints in strips
+    through a coverage mask under limits (`Gfx::shfill_limited`): byte-identical
+    without a clip, at most one level on an edge pixel under one.
     `kernelimage`/`kernelarray` hold their retired list to
     `RETIRE_CEILING_BYTES` whenever any limit is set (`Interp::limits_set`).
   - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep

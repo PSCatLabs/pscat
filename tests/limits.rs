@@ -1492,6 +1492,179 @@ mod one_operator {
     mod issue_1235 {
         use super::*;
 
+        // --- `shfill` with a `/BBox` (item 2) -----------------------------
+
+        /// A ramp of 4095 legs on a `side` x `side` page (one pixel a
+        /// point), as `ramp_setup` makes one for letter.
+        fn bbox_setup(side: usize) -> String {
+            format!(
+                "<< /PageSize [{side} {side}] >> setpagedevice /n 4095 def \
+                 /fns [ 0 1 n 1 sub {{ 2 mod 0 eq \
+                   {{ << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> }} \
+                   {{ << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> }} ifelse }} for ] def \
+                 /bounds [ 1 1 n 1 sub {{ n div }} for ] def \
+                 /encode [ 0 1 n 1 sub {{ pop 0 1 }} for ] def"
+            )
+        }
+
+        /// The shading, with a box a little inside the page and off the
+        /// pixel grid, so its edges are anti-aliased.
+        fn bbox_shfill(side: usize, shading: &str) -> String {
+            let s = side as f64;
+            format!(
+                "<< /ShadingType {shading} /ColorSpace /DeviceRGB \
+                 /BBox [10.3 20.7 {} {}] \
+                 /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+                 /Bounds bounds /Encode encode >> >> shfill",
+                s - 9.4,
+                s - 10.1
+            )
+        }
+
+        fn axial(side: usize) -> String {
+            bbox_shfill(side, &format!("2 /Coords [0 0 {side} 0]"))
+        }
+
+        /// Two circles neither inside the other, the end not extended: a
+        /// page-sized layer under a pattern shader (`two_root_layer`, #1040).
+        fn cone(side: usize) -> String {
+            bbox_shfill(
+                side,
+                &format!(
+                    "3 /Coords [{} {} 10 {} {} {}] /Extend [true false]",
+                    side / 4,
+                    side / 2,
+                    side * 3 / 4,
+                    side / 2,
+                    side / 8
+                ),
+            )
+        }
+
+        fn leaked(src: String) -> &'static str {
+            Box::leak(src.into_boxed_str())
+        }
+
+        #[test]
+        fn a_bbox_shfill_stops_inside_shfill() {
+            // About 1.1 s of painting in one `fill_path` on a 4000 x 4000
+            // page that never read the clock (#1219 left it); the box is
+            // painted in strips now. The setup's clock is in the budget.
+            stops_inside(
+                "bbox shfill",
+                bbox_setup(4000),
+                leaked(axial(4000)),
+                "shfill",
+                Duration::from_millis(700),
+            );
+        }
+
+        #[test]
+        fn a_bbox_cone_shfill_stops_inside_shfill() {
+            // The two-root layer is painted under the limits already (#1219,
+            // #1040), and is the long part: this stops there with or without
+            // the strips, which a pattern shader makes cheap. It pins that
+            // the cone with a box stops inside `shfill`, and (with the
+            // pixel test below) that the strips over it paint what the one
+            // fill did.
+            stops_inside(
+                "bbox cone shfill",
+                bbox_setup(4000),
+                leaked(cone(4000)),
+                "shfill",
+                Duration::from_millis(700),
+            );
+        }
+
+        #[test]
+        fn a_step_limit_refuses_a_bbox_shfill_before_it_paints() {
+            stops_inside_with(
+                "bbox shfill steps",
+                bbox_setup(2000),
+                leaked(axial(2000)),
+                "shfill",
+                Duration::from_millis(1500),
+                steps(1000),
+                PsError::StepsExceeded,
+            );
+        }
+
+        #[test]
+        fn a_bbox_shfill_a_limit_stops_paints_nothing() {
+            // All or nothing under a limit, a pending `showpage` erase and
+            // the exports included, as for a shfill with no box.
+            for showpage in [false, true] {
+                let (err, px, pages) = on_a_deadline("bbox shfill all or nothing", move || {
+                    let mut it = Interp::new();
+                    it.enable_svg();
+                    it.run_str(&bbox_setup(2000)).expect("setup");
+                    it.run_str("1 0 0 setrgbcolor 0 0 2000 2000 rectfill")
+                        .expect("red");
+                    if showpage {
+                        it.run_str("showpage").expect("showpage");
+                    }
+                    it.set_limits(untrusted(Duration::from_millis(50)))
+                        .expect("limits");
+                    let err = it.run_str(&axial(2000)).expect_err("the clock stops it");
+                    let px = it.gfx().pixmap.pixel(1000, 1000).expect("pixel");
+                    let svg = it.svg_pages().unwrap_or_default().concat();
+                    (
+                        err,
+                        (px.red(), px.green(), px.blue()),
+                        svg.matches("<linearGradient").count(),
+                    )
+                });
+                assert_eq!(err, PsError::TimeExceeded);
+                assert_eq!(
+                    px,
+                    (255, 0, 0),
+                    "showpage {showpage}: the page is untouched"
+                );
+                assert_eq!(pages, 0, "showpage {showpage}: nothing recorded");
+            }
+        }
+
+        #[test]
+        fn a_polled_bbox_shfill_paints_the_pixels_of_the_one_fill() {
+            // The strips go through a coverage mask. Without a clip it is
+            // the coverage `fill_path` computes: the same bytes. Under a
+            // clip the two coverages are rounded together once, where the
+            // pipeline rounds each: an edge pixel may differ by one level,
+            // and only those. A 1200 x 1200 box of 1026 stops is over the
+            // threshold for strips, so a limit that never fires takes them.
+            let paint = |clip: &str, limits: Limits, shading: String| -> Vec<u8> {
+                let mut it = Interp::new();
+                it.run_str(&bbox_setup(1200)).expect("setup");
+                it.run_str("0.9 0.9 0.7 setrgbcolor 0 0 1200 1200 rectfill")
+                    .expect("paper");
+                it.set_limits(limits).expect("limits");
+                it.run_str(&format!("{clip} {shading}"))
+                    .expect("the shading paints");
+                it.gfx().pixmap.data().to_vec()
+            };
+            let roomy = || Limits::none().with_max_time(Duration::from_secs(600));
+            let tilted = "gsave 0.1 rotate 40 10 translate";
+            let clip = "gsave 100 100 moveto 1100 200 lineto 900 1100 lineto 50 1000 lineto closepath clip newpath";
+            for (what, pre, shading) in [
+                ("axial", "", axial(1200)),
+                ("axial tilted", tilted, axial(1200)),
+                ("cone", "", cone(1200)),
+            ] {
+                let one = paint(pre, Limits::none(), shading.clone());
+                let strips = paint(pre, roomy(), shading.clone());
+                assert!(one == strips, "{what}: no clip, the same bytes");
+                let one = paint(&format!("{pre} {clip}"), Limits::none(), shading.clone());
+                let strips = paint(&format!("{pre} {clip}"), roomy(), shading);
+                let worst = one
+                    .iter()
+                    .zip(&strips)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap_or(0);
+                assert!(worst <= 1, "{what}: under a clip, worst difference {worst}");
+            }
+        }
+
         /// A clip of 100,000 page-sized curves made on a 200 x 300 canvas,
         /// then a `gsave` and a smaller page: `cliprestore` falls back to
         /// that clip and remakes its mask for the new canvas (#909). That
