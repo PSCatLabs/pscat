@@ -900,10 +900,18 @@ fn rectclip(it: &mut Interp) -> Result<(), PsError> {
             r[2] = -r[2];
         }
     }
-    it.gfx.newpath();
-    append_rects(it, &rects)?;
-    clip_common(it, FillRule::Winding)?;
-    it.gfx.newpath();
+    // The rectangles are built in the current path, which `rectclip` leaves
+    // empty. Any error (a limit refusing the clip included, #1219) puts the
+    // program's own path back: a refused operator changes nothing.
+    let saved = std::mem::take(&mut it.gfx.state_mut().path);
+    let done = append_rects(it, &rects).and_then(|()| clip_common(it, FillRule::Winding));
+    match done {
+        Ok(()) => it.gfx.newpath(),
+        Err(e) => {
+            it.gfx.state_mut().path = saved;
+            return Err(e);
+        }
+    }
     Ok(())
 }
 

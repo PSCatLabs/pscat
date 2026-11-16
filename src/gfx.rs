@@ -2299,7 +2299,6 @@ impl Gfx {
         let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
         let work = shfill_work(pw, ph, nstops);
         probe.check(work / 1024)?;
-        self.prepare_paint();
         // /BBox further restricts the painted region to a rectangle in
         // the same user space as Coords (confirmed against gs: pixels
         // outside it stay untouched even though the shading's own
@@ -2319,6 +2318,7 @@ impl Gfx {
             }
             None => self.page_rect_path(),
         };
+        let mut prepared = false;
         if let Some(skia_path) = path.to_skia() {
             // A gradient carries its own shader rather than a flat
             // color, so `paint()`'s alpha byte can't reach it —
@@ -2341,12 +2341,36 @@ impl Gfx {
             };
             let comp = self.composite();
             let mask = self.clip_mask();
+            // Under the limits the page is painted on a copy and kept only
+            // once every strip has painted, so a limit leaves the page, the
+            // pending erase and the SVG and PDF as they were, as a refused
+            // `fill` does: output is still written after a limit error (the
+            // CLI writes the canvas, and the exports, of a stopped run), so a
+            // half-painted raster beside records of nothing would show.
+            let mut scratch = if *probe == crate::limits::LimitProbe::NONE {
+                self.prepare_paint();
+                prepared = true;
+                None
+            } else {
+                probe.check_alloc((pw * ph).saturating_mul(4))?;
+                let mut copy = self.pixmap.clone();
+                if self.pending_erase {
+                    copy.fill(self.background);
+                }
+                Some(copy)
+            };
+            let target = scratch.as_mut().unwrap_or(&mut self.pixmap);
             if shading.bbox.is_none() {
                 // The whole page, an integer rectangle with no edge to
                 // anti-alias, so strips of its rows paint the same pixels
-                // as the one fill. A `/BBox` is a parallelogram, whose edges
-                // a strip would cut: that stays one fill.
-                let rows = shfill_strip_rows(pw, nstops);
+                // as the one fill (which, with nothing to look at, it is). A
+                // `/BBox` is a parallelogram, whose edges a strip would cut:
+                // that stays one fill.
+                let rows = if *probe == crate::limits::LimitProbe::NONE {
+                    ph
+                } else {
+                    shfill_strip_rows(pw, nstops)
+                };
                 let mut y = 0;
                 while y < ph {
                     let y1 = (y + rows).min(ph);
@@ -2354,24 +2378,24 @@ impl Gfx {
                     if let Some(strip) =
                         tiny_skia::Rect::from_ltrb(0.0, y as f32, pw as f32, y1 as f32)
                     {
-                        self.pixmap.fill_rect(
-                            strip,
-                            &paint,
-                            Transform::identity(),
-                            mask.as_deref(),
-                        );
+                        target.fill_rect(strip, &paint, Transform::identity(), mask.as_deref());
                     }
                     y = y1;
                 }
             } else {
                 probe.check(0)?;
-                self.pixmap.fill_path(
+                target.fill_path(
                     &skia_path,
                     &paint,
                     FillRule::Winding,
                     Transform::identity(),
                     mask.as_deref(),
                 );
+            }
+            if let Some(copy) = scratch {
+                self.prepare_paint();
+                prepared = true;
+                self.pixmap = copy;
             }
             if self.svg.is_some() {
                 let svg_kind = sh_kind(shading.kind, 1.0);
@@ -2496,6 +2520,10 @@ impl Gfx {
                 }
             }
             self.dirty = true;
+        }
+        if !prepared {
+            // Nothing to paint (a degenerate region), but the page is begun.
+            self.prepare_paint();
         }
         Ok(work)
     }

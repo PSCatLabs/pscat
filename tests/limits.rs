@@ -1318,6 +1318,38 @@ mod one_operator {
             assert_eq!(after, "0.0\n110.0\n110.0\n10.0\n10.0\n", "{after}");
         }
 
+        #[test]
+        fn a_refused_rectclip_leaves_the_current_path_and_clip_alone() {
+            // `rectclip` builds its rectangles in the current path: a limit
+            // that refuses the clip must hand the program's path back
+            // (Codex, PR #1232: it was left empty, `currentpoint` 0 0).
+            let (err, report, after) = on_a_deadline("rectclip steps", || {
+                let mut it = Interp::new();
+                it.run_str("10 10 100 100 rectclip").expect("a small clip");
+                // 1000 page-sized rectangles: 6 million units of work.
+                it.run_str("/R [ 1000 { 0 0 612 792 } repeat ] def")
+                    .expect("the rectangles");
+                it.set_limits(steps(1000)).expect("limits");
+                let err = it
+                    .run_str("17 19 moveto R rectclip")
+                    .expect_err("the step limit stops it");
+                let report = it.error_report(&err);
+                it.set_limits(Limits::none()).expect("limits off");
+                it.capture_stdout();
+                it.run_str("currentpoint exch = = clippath pathbbox 4 { = } repeat")
+                    .expect("currentpoint");
+                (
+                    err,
+                    report,
+                    String::from_utf8_lossy(it.captured_stdout()).into_owned(),
+                )
+            });
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(report.contains("OffendingCommand: rectclip;"), "{report}");
+            // The path is the program's, the clip the small rectangle.
+            assert_eq!(after, "17.0\n19.0\n110.0\n110.0\n10.0\n10.0\n", "{after}");
+        }
+
         /// Setup for a 4095-leg ramp over a 300 dpi letter page (2550 x
         /// 3300 pixels at one pixel a point): resampled to 1024 stops, a
         /// `shfill` of it was 0.6 s of painting that never read the clock.
@@ -1357,6 +1389,44 @@ mod one_operator {
                 steps(1000),
                 PsError::StepsExceeded,
             );
+        }
+
+        #[test]
+        fn a_shfill_a_limit_stops_paints_nothing() {
+            // Under a limit the page is painted on a copy and kept once every
+            // strip has painted, as a refused `fill` paints nothing, so the
+            // raster, a pending `showpage` erase and the exports agree
+            // (Codex, PR #1232: strips already painted stayed, with nothing
+            // recorded for SVG or PDF).
+            for showpage in [false, true] {
+                let (err, px, pages) = on_a_deadline("shfill all or nothing", move || {
+                    let mut it = Interp::new();
+                    it.enable_svg();
+                    it.run_str(&ramp_setup()).expect("setup");
+                    it.run_str("1 0 0 setrgbcolor 0 0 2550 3300 rectfill")
+                        .expect("red");
+                    if showpage {
+                        it.run_str("showpage").expect("showpage");
+                    }
+                    it.set_limits(untrusted(Duration::from_millis(100)))
+                        .expect("limits");
+                    let err = it.run_str(RAMP).expect_err("the clock stops it");
+                    let px = it.gfx().pixmap.pixel(10, 10).expect("pixel");
+                    let svg = it.svg_pages().unwrap_or_default().concat();
+                    (
+                        err,
+                        (px.red(), px.green(), px.blue()),
+                        svg.matches("<linearGradient").count(),
+                    )
+                });
+                assert_eq!(err, PsError::TimeExceeded);
+                assert_eq!(
+                    px,
+                    (255, 0, 0),
+                    "showpage {showpage}: the page is untouched"
+                );
+                assert_eq!(pages, 0, "showpage {showpage}: nothing recorded");
+            }
         }
 
         #[test]

@@ -709,7 +709,9 @@ renders eight examples in both and compares block-downsampled output).
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
   its neighbours there; SVG and PDF keep every stop. With no `/BBox` the
   raster paints the page in strips of rows, looking at the limits between
-  them (#1219; same pixels, an integer rectangle has no edge to cut).
+  them (#1219; same pixels, an integer rectangle has no edge to cut). Under
+  limits the strips paint a copy of the page that replaces it only once
+  they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
   ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
   `/Pattern` colour spaces) are not implemented at all, in any output.
   SVG's two-circle radial

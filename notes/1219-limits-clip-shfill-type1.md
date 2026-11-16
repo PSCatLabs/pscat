@@ -67,10 +67,18 @@ units each, a few ms) look at the probe between them, and the work
 that case stays one fill, preceded by a look at the limits. SVG and PDF are
 recorded after the raster has painted, as before.
 
-A limit found between strips leaves the raster partly painted, with nothing
-recorded for SVG or PDF; a refused `fill` paints nothing. A step limit is
-held before anything is painted, so only the clock and the heap can stop one
-part-way.
+Codex round 1 (PR #1232): output is written after a limit error (the CLI
+writes the canvas of a stopped run, and its SVG and PDF), so a half-painted
+raster with nothing recorded would show. `fill` is all or nothing: its
+rasteriser runs before anything is painted. `shfill` is now too. Under limits
+the strips paint a copy of the page (counted against the heap cap first;
+a pending `showpage` erase is applied to the copy), and the copy replaces the
+page, with `prepare_paint` and the recorders, only once every strip has
+painted. A limit leaves the raster, the pending erase and the exports as they
+were. With no limits there is no copy and one fill of the whole page, as
+before, so an ordinary run pays nothing for it. The same review found that
+`rectclip` builds its rectangles in the current path: a refused clip now gives
+the program's own path back, on any error.
 
 The `/BBox` case is therefore still unpolled: at most the 0.6 s a 1024-stop
 ramp costs at 300 dpi letter (2.4 s at 600 dpi).
@@ -111,7 +119,9 @@ changes nothing in the result.
 - `a_clip_of_very_many_curves_stops_inside_clip` (`clip`, `eoclip`) and the
   nested variant (a clip in force already) stop with `limitexceeded (time)`
   blamed on the operator;
-- `a_step_limit_refuses_a_huge_clip_and_leaves_the_clip_alone`;
+- `a_step_limit_refuses_a_huge_clip_and_leaves_the_clip_alone` and
+  `a_refused_rectclip_leaves_the_current_path_and_clip_alone`;
+- `a_shfill_a_limit_stops_paints_nothing` (page, pending erase and SVG);
 - `shfill_painting_stops_inside_shfill` and
   `a_step_limit_refuses_a_shfill_before_it_paints`;
 - `type1_subroutines_decrypt_only_the_bytes_a_glyph_can_reach`, a budget
