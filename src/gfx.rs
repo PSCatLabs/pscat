@@ -271,6 +271,19 @@ impl PsPath {
     /// segments, so a path can be told apart from a cheap one before
     /// anything is rasterised. NaN and infinite coordinates cost nothing.
     pub(crate) fn raster_work(&self, height: f32) -> u64 {
+        self.raster_work_with(height, true)
+    }
+
+    /// An upper bound on [`raster_work`](Self::raster_work), at a fifth of
+    /// its cost: a curve is taken as three pieces each as tall as its
+    /// control points (the most a cubic makes), where the exact one finds
+    /// where it turns. Equal for a path of lines. For a caller that only
+    /// needs to know a path is cheap.
+    pub(crate) fn raster_work_bound(&self, height: f32) -> u64 {
+        self.raster_work_with(height, false)
+    }
+
+    fn raster_work_with(&self, height: f32, exact: bool) -> u64 {
         let h = f64::from(height);
         // Sub-scanlines an edge from `a` to `b` crosses on the canvas.
         let span = |a: f64, b: f64| -> f64 {
@@ -303,7 +316,13 @@ impl PsPath {
                 Seg::Curve(c1, c2, p) => {
                     if let Some(c) = cur {
                         let y = [c.y, c1.y, c2.y, p.y].map(f64::from);
-                        work += cubic_y_work(y, &span);
+                        work += if exact {
+                            cubic_y_work(y, &span)
+                        } else {
+                            let lo = y.iter().copied().fold(f64::INFINITY, f64::min);
+                            let hi = y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                            3.0 * (EDGE_SETUP_WORK + span(lo, hi))
+                        };
                     }
                     cur = Some(p);
                 }
@@ -3629,7 +3648,15 @@ impl Gfx {
         probe: &crate::limits::LimitProbe,
     ) -> Result<(tiny_skia::Mask, u64), PsError> {
         let mut mask = tiny_skia::Mask::new(w, h).ok_or(PsError::Limitcheck)?;
-        let work = path.raster_work(h as f32);
+        // With no limit the number is only compared with the threshold: the
+        // cheap bound settles every path under it (nothing is charged).
+        let work = match probe == &crate::limits::LimitProbe::NONE {
+            true => match path.raster_work_bound(h as f32) {
+                bound if bound < POLLED_CLIP_WORK => bound,
+                _ => path.raster_work(h as f32),
+            },
+            false => path.raster_work(h as f32),
+        };
         probe.check(work / 1024)?;
         let Some(skia) = path.to_skia() else {
             return Ok((mask, 0));
@@ -3638,17 +3665,29 @@ impl Gfx {
             mask.fill_path(&skia, rule, true, Transform::identity());
             return Ok((mask, work));
         }
+        let done = Self::polled_mask(&skia, rule, &mut mask, probe)?;
+        Ok((mask, work.max(done)))
+    }
+
+    /// `skia`'s coverage into the fresh, all-zero `mask` with the
+    /// rasteriser that looks at the limits, and its work.
+    fn polled_mask(
+        skia: &tiny_skia::Path,
+        rule: FillRule,
+        mask: &mut tiny_skia::Mask,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         let (runs, done) =
-            crate::coverage::rasterize_limited(&skia, rule.into(), &mut mask, None, probe)?;
+            crate::coverage::rasterize_limited(skia, rule.into(), mask, None, probe)?;
         // A solid run is not written into the mask: it is full coverage.
-        let stride = w as usize;
+        let stride = mask.width() as usize;
         for run in runs.iter().filter(|r| r.solid) {
             let r = run.rect;
             for y in r.y0 as usize..r.y1 as usize {
                 mask.data_mut()[y * stride + r.x0 as usize..y * stride + r.x1 as usize].fill(255);
             }
         }
-        Ok((mask, work.max(done)))
+        Ok(done)
     }
 
     pub fn initclip(&mut self) {
@@ -4601,5 +4640,85 @@ mod tests {
         }
         assert_eq!(BlendMode::from_ps_name("Screen"), None);
         assert_eq!(BlendMode::from_ps_name("multiply"), None);
+    }
+
+    fn quad(pts: [(f32, f32); 4]) -> PsPath {
+        let mut p = PsPath::default();
+        p.move_to(DevPoint {
+            x: pts[0].0,
+            y: pts[0].1,
+        });
+        for q in &pts[1..] {
+            p.line_to(DevPoint { x: q.0, y: q.1 });
+        }
+        p.close();
+        p
+    }
+
+    #[test]
+    fn raster_work_counts_edges_and_the_sub_scanlines_they_cross() {
+        // 10 x 10 rectangle: two vertical edges of 10 rows, four sub-scanlines
+        // a row, and two horizontal edges that cross none; closed implicitly.
+        let r = quad([(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]);
+        assert_eq!(r.raster_work(100.0), 4 * 16 + 2 * 40);
+        // An edge past the canvas counts only the rows on it.
+        let tall = quad([(0.0, -1e9), (1.0, -1e9), (1.0, 1e9), (0.0, 1e9)]);
+        assert_eq!(tall.raster_work(100.0), 4 * 16 + 2 * 400);
+        // A cubic is cut where it turns in y: up to 75 and back, 150 rows.
+        let mut c = PsPath::default();
+        c.move_to(DevPoint { x: 0.0, y: 0.0 });
+        c.curve_to(
+            DevPoint { x: 10.0, y: 100.0 },
+            DevPoint { x: 20.0, y: 100.0 },
+            DevPoint { x: 30.0, y: 0.0 },
+        );
+        // Two pieces, and the closing line along y = 0.
+        assert_eq!(c.raster_work(200.0), 3 * 16 + 4 * 150);
+        // The cheap bound never undercounts, and is exact for lines.
+        assert!(c.raster_work_bound(200.0) >= c.raster_work(200.0));
+        assert_eq!(r.raster_work_bound(100.0), r.raster_work(100.0));
+        // No coordinate makes it panic or overflow.
+        let nan = quad([
+            (f32::NAN, 0.0),
+            (1.0, f32::INFINITY),
+            (f32::MAX, f32::MIN),
+            (0.0, 0.0),
+        ]);
+        let _ = nan.raster_work(100.0);
+        assert_eq!(PsPath::default().raster_work(100.0), 0);
+    }
+
+    #[test]
+    fn the_polled_clip_mask_is_the_supersampled_one_to_within_a_shade() {
+        // A huge clip goes through the area-coverage rasteriser instead of
+        // tiny-skia's 4x4 sampler (#1219); the two differ on an edge pixel
+        // by a few levels and agree everywhere else.
+        let mut p = PsPath::default();
+        p.move_to(DevPoint { x: 10.3, y: 7.1 });
+        p.curve_to(
+            DevPoint { x: 70.0, y: -20.0 },
+            DevPoint { x: 90.2, y: 60.7 },
+            DevPoint { x: 40.9, y: 85.4 },
+        );
+        p.line_to(DevPoint { x: 12.6, y: 50.2 });
+        p.close();
+        let skia = p.to_skia().expect("path");
+        for rule in [FillRule::Winding, FillRule::EvenOdd] {
+            let mut want = tiny_skia::Mask::new(96, 96).expect("mask");
+            want.fill_path(&skia, rule, true, Transform::identity());
+            let mut got = tiny_skia::Mask::new(96, 96).expect("mask");
+            Gfx::polled_mask(&skia, rule, &mut got, &crate::limits::LimitProbe::NONE)
+                .expect("no limit");
+            let (mut worst, mut sum, mut full) = (0u32, 0u64, 0);
+            for (a, b) in want.data().iter().zip(got.data()) {
+                let d = u32::from(a.abs_diff(*b));
+                worst = worst.max(d);
+                sum += u64::from(d);
+                full += usize::from(*a == 255 && *b == 255);
+            }
+            assert!(full > 1000, "an interior of full coverage: {full}");
+            assert!(worst <= 48, "edge pixels within a shade: {worst}");
+            assert!(sum < 96 * 96 * 2, "and on average much closer: {sum}");
+        }
     }
 }
