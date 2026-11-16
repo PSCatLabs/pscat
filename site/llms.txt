@@ -38,6 +38,7 @@ Open the guide that matches the job.
 ## Agents and MCP
 
 - [pscat for AI agents](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/agents.md): the skills, the `pscat-mcp` server and its tools, how to register it, and which tool does which job
+- [pscat in ChatGPT through the hosted MCP server](https://raw.githubusercontent.com/PSCatLabs/pscat/main/docs/guides/chatgpt-hosted.md): what ChatGPT accepts for a remote MCP server and its authentication, the connector setup, and the `--remote` plugin ZIP
 - [Plugin README](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/README.md): installing the Claude Code and Codex plugin, requirements, example prompts and privacy
 - [pscat skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/pscat/SKILL.md): the tool reference for rendering, debugging, handwriting, typed pages and chalkboard math
 - [psart skill](https://raw.githubusercontent.com/PSCatLabs/pscat/main/plugin/skills/psart/SKILL.md): the render-look-refine loop for generative art, painting, dry media and style packs

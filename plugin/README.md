@@ -367,3 +367,12 @@ workflow's artifacts expire 90 days after the release, so the setup skill
 works for a release that recent. Install steps for ChatGPT come once the
 trial has confirmed them; `notes/1089-chatgpt-github-artifact.md` has the
 details.
+
+For ChatGPT on the web, the MCP tools come from the hosted `pscat-mcp`
+server, a remote HTTPS server, which is a connector (ChatGPT Plugins, **Add
+custom MCP server**) or a ZIP built with `--remote URL --remote-auth none`.
+Neither has been tried in ChatGPT yet. The staging server is protected by a
+static bearer token, which ChatGPT cannot send, so its authentication is an
+owner decision: see
+[pscat in ChatGPT through the hosted MCP server](../docs/guides/chatgpt-hosted.md)
+(#1240).

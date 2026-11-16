@@ -128,6 +128,115 @@ class Build(Fixture):
             self.build()
 
 
+URL = "https://pscat-mcp.example.run.app/mcp"
+
+
+class Remote(Fixture):
+    """--remote (#1240): the hosted server's mcp.json in place of the local one."""
+
+    def mcp(self, path):
+        with zipfile.ZipFile(path) as z:
+            return json.loads(z.read("mcp.json"))
+
+    def test_none(self):
+        path = self.build(remote=URL, remote_auth="none")
+        self.assertTrue(path.name.endswith("-remote.zip"))
+        self.assertEqual(self.mcp(path), {
+            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+            "mcpServers": {"pscat": {
+                "type": "streamable-http", "url": URL,
+                "extensions": {"com.openai": {"auth": {"type": "none"}}}}}})
+
+    def test_bearer_declares_api_key_without_a_token(self):
+        auth = self.mcp(self.build(remote=URL, remote_auth="bearer"))[
+            "mcpServers"]["pscat"]["extensions"]["com.openai"]["auth"]
+        self.assertEqual(auth, {"type": "api_key", "headerScheme": "bearer"})
+
+    def test_no_headers_entry(self):
+        for auth in ("none", "bearer"):
+            server = self.mcp(self.build(remote=URL, remote_auth=auth))["mcpServers"]["pscat"]
+            self.assertNotIn("headers", server)
+
+    def test_everything_else_unchanged(self):
+        local = self.names(self.build())
+        path = self.build(remote=URL, remote_auth="none")
+        self.assertEqual(self.names(path), local)
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(z.read("skills/demo/SKILL.md"),
+                             (self.root / "plugin/skills/demo/SKILL.md").read_bytes())
+            self.assertEqual(z.getinfo("mcp.json").external_attr >> 16, 0o100644)
+
+    def test_reproducible(self):
+        first = self.build(remote=URL, remote_auth="none").read_bytes()
+        self.assertEqual(first, self.build(remote=URL, remote_auth="none").read_bytes())
+
+    def test_bad_urls(self):
+        for bad, why in [
+            ("http://h.example/mcp", "https"),
+            ("https:///mcp", "https"),
+            ("https://user:pw@h.example/mcp", "credentials"),
+            ("https://@h.example/mcp", "credentials"),
+            ("https://h.example/mcp?token=abc", "query"),
+            ("https://h.example/mcp?", "query"),
+            ("https://h.example/mcp#frag", "query string or fragment"),
+            ("https://<your-pscat-mcp-host>/mcp", "placeholder"),
+            ("https://h.example", "MCP path"),
+            ("https://h.example/", "MCP path"),
+            ("https://h.example//", "MCP path"),
+            ("https://[::1/mcp", "not a valid URL"),
+            ("https://h.example:99999/mcp", "not a valid URL"),
+            ("https://h.example:abc/mcp", "not a valid URL"),
+            ("https://h.example/mcp\n", "whitespace"),
+            ("https://h.example/mcp ", "whitespace"),
+            ("https://ex\u00e4mple.com/mcp", "ASCII"),
+            ("https://localhost/mcp", "public host"),
+            ("https://127.0.0.1/mcp", "public host"),
+            ("https://[::1]/mcp", "public host"),
+            ("https://10.0.0.5:8443/mcp", "public host"),
+        ]:
+            with self.subTest(url=bad), self.assertRaisesRegex(SystemExit, why):
+                self.build(remote=bad, remote_auth="none")
+
+    def test_url_is_normalised(self):
+        path = self.build(remote="HTTPS://H.Example:8443/Mcp", remote_auth="none")
+        self.assertEqual(self.mcp(path)["mcpServers"]["pscat"]["url"], "https://h.example:8443/Mcp")
+
+    def test_auth_is_required_and_checked(self):
+        with self.assertRaisesRegex(SystemExit, "--remote-auth"):
+            self.build(remote=URL)
+        with self.assertRaisesRegex(SystemExit, "one of"):
+            self.build(remote=URL, remote_auth="oauth")
+        with self.assertRaisesRegex(SystemExit, "needs --remote"):
+            self.build(remote_auth="none")
+
+    def test_not_with_skills_only(self):
+        with self.assertRaisesRegex(SystemExit, "cannot be combined"):
+            self.build(remote=URL, remote_auth="none", skills_only=True)
+
+    def test_cli(self):
+        script = str(ROOT / "scripts/build_chatgpt_plugin.py")
+        base = [sys.executable, script, "--root", str(self.root), "--sums", str(self.sums),
+                "--out", str(self.out)]
+        ok = subprocess.run(base + ["--remote", URL, "--remote-auth", "bearer"],
+                            capture_output=True, text=True)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn("cannot send it", ok.stderr)  # the bearer warning
+        self.assertTrue(ok.stdout.strip().endswith("-remote.zip"))
+        bad = subprocess.run(base + ["--remote", "http://h.example/mcp", "--remote-auth", "none"],
+                             capture_output=True, text=True)
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("https", bad.stderr)
+        for extra, why in [(["--remote", URL], "--remote-auth"),
+                           (["--remote", URL, "--remote-auth", "none", "--skills-only"],
+                            "cannot be combined"),
+                           (["--remote", "https://[::1/mcp", "--remote-auth", "none"],
+                            "not a valid URL")]:
+            r = subprocess.run(base + extra, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn(why, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
+
 class Check(Fixture):
     def errors(self):
         errors = []
@@ -187,6 +296,21 @@ class Repo(unittest.TestCase):
         errors = []
         pc.check_chatgpt(str(ROOT), errors)
         self.assertEqual(errors, [])
+
+    def test_repo_remote_build_differs_only_in_mcp_json(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        tag = b.release_tag(ROOT)
+        (tmp / "SHA256SUMS").write_text(sums_text(tag[1:]))
+        local = b.build(ROOT, tmp / "SHA256SUMS", tmp / "a")
+        remote = b.build(ROOT, tmp / "SHA256SUMS", tmp / "b", remote=URL, remote_auth="none")
+        with zipfile.ZipFile(local) as zl, zipfile.ZipFile(remote) as zr:
+            self.assertEqual(zl.namelist(), zr.namelist())
+            differ = [n for n in zl.namelist() if zl.read(n) != zr.read(n)]
+            self.assertEqual(differ, ["mcp.json"])
+            server = json.loads(zr.read("mcp.json"))["mcpServers"]
+            self.assertEqual(list(server), ["pscat"])
+            self.assertNotIn("command", server["pscat"])  # no local stdio server left
 
 
 if __name__ == "__main__":

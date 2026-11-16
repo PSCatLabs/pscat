@@ -3,10 +3,14 @@
 
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --skills-only
+    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth none
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --out DIR --root ROOT
 
+URL is the hosted server's endpoint, https://<your-pscat-mcp-host>/mcp.
+
 Writes DIR/pscat-chatgpt-plugin-<version>.zip (with --skills-only,
-pscat-chatgpt-plugin-<version>-skills-only.zip; DIR defaults to dist/).
+pscat-chatgpt-plugin-<version>-skills-only.zip; with --remote,
+pscat-chatgpt-plugin-<version>-remote.zip; DIR defaults to dist/).
 `--sums` is the pinned release's SHA256SUMS: get it with
 `gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS`.
 The build itself makes no network request.
@@ -22,7 +26,15 @@ The ZIP is the Agent Plugins 1.0 layout with `plugin.json` at its root:
   `{{PSCAT_VERSION}}` and `{{SHA256:<target>}}` placeholders are filled in
   from `plugin/pscat-release` and `--sums`; any other `{{...}}` is an error;
 - with `--skills-only`, no `mcp.json` (a plugin that declares a local MCP
-  server is "Desktop only" in ChatGPT).
+  server is "Desktop only" in ChatGPT);
+- with `--remote URL`, an `mcp.json` generated for the hosted pscat-mcp
+  server in place of the local one: a `streamable-http` entry named `pscat`
+  (#1240; notes/1240-chatgpt-remote-mcp.md). The URL is an argument, never
+  committed, and `--remote-auth` is required, because what ChatGPT can send
+  differs by choice: `none` declares no authentication; `bearer` declares a
+  fixed bearer token (`api_key`), which the manifest schema accepts but
+  ChatGPT's connection form cannot send (the build says so). The build never
+  puts a token, or a `headers` entry, in the ZIP.
 
 The other skills are copied unchanged. Only tracked files are used (`git
 ls-files`), so caches and untracked files never ship. The ZIP is
@@ -32,11 +44,13 @@ the problems.
 """
 
 import argparse
+import ipaddress
 import json
 import pathlib
 import re
 import subprocess
 import sys
+import urllib.parse
 import zipfile
 
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
@@ -63,6 +77,63 @@ def tracked(root, top):
 def excluded(rel, skills_only):
     return (rel.startswith("hooks/") or rel in ("README.md", ".claude-plugin/plugin.json")
             or (skills_only and rel == "mcp.json"))
+
+
+REMOTE_AUTH = {
+    "none": {"type": "none"},
+    "bearer": {"type": "api_key", "headerScheme": "bearer"},
+}
+
+
+def check_remote_url(url):
+    """The hosted server's MCP endpoint, or a SystemExit saying what is wrong.
+
+    OpenAI wants a public HTTPS endpoint "without embedded credentials or
+    fragments"; a query string is refused too, so a token cannot ride in it.
+    A token in the path is not detectable here: pass the endpoint only."""
+    if not url.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        raise SystemExit("--remote: the URL must be plain ASCII with no whitespace or "
+                         "control characters (use the xn-- form for an international host)")
+    if re.search(r"[<>{}]", url):
+        raise SystemExit(f"--remote {url!r}: replace the placeholder with the real host")
+    try:
+        u = urllib.parse.urlsplit(url)
+        u.port  # raises ValueError for a bad port
+    except ValueError as e:
+        raise SystemExit(f"--remote {url!r}: not a valid URL ({e})")
+    if u.scheme != "https" or not u.hostname:
+        raise SystemExit(f"--remote {url!r}: expected an https:// URL with a host")
+    if u.username is not None or u.password is not None or "@" in u.netloc:
+        raise SystemExit("--remote: the URL must not carry credentials (user:password@)")
+    if u.query or u.fragment or "?" in url or "#" in url:
+        raise SystemExit("--remote: the URL must not have a query string or fragment "
+                         "(a token must never travel in the URL)")
+    if not u.path.strip("/"):
+        raise SystemExit("--remote: include the MCP path, usually /mcp")
+    # OpenAI needs a public endpoint; a loopback or private address cannot be one.
+    try:
+        addr = ipaddress.ip_address(u.hostname)
+    except ValueError:
+        addr = None
+    if (addr is not None and not addr.is_global) or u.hostname == "localhost" \
+            or u.hostname.endswith(".localhost"):
+        raise SystemExit(f"--remote {url!r}: ChatGPT needs a public host, not a local or "
+                         "private address")
+    return u._replace(scheme="https", netloc=u.netloc.lower()).geturl()
+
+
+def remote_mcp_json(url, auth):
+    """The ZIP's mcp.json for the hosted server (Agent Plugins 1.0)."""
+    if auth not in REMOTE_AUTH:
+        raise SystemExit(f"--remote-auth: expected one of {', '.join(REMOTE_AUTH)}")
+    entry = {
+        "type": "streamable-http",
+        "url": check_remote_url(url),
+        "extensions": {"com.openai": {"auth": dict(REMOTE_AUTH[auth])}},
+    }
+    doc = {"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+           "mcpServers": {"pscat": entry}}
+    return (json.dumps(doc, indent=2) + "\n").encode()
 
 
 def release_tag(root):
@@ -97,7 +168,17 @@ def fill(text, where, values):
     return PLACEHOLDER.sub(sub, text)
 
 
-def build(root, sums_path, out_dir, skills_only=False):
+def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=None):
+    if remote is not None and skills_only:
+        raise SystemExit("--remote and --skills-only cannot be combined "
+                         "(one drops mcp.json, the other replaces it)")
+    if remote is None and remote_auth is not None:
+        raise SystemExit("--remote-auth needs --remote")
+    if remote is not None:
+        if remote_auth is None:
+            raise SystemExit("--remote needs --remote-auth none|bearer: say how the "
+                             "server is protected, there is no default")
+        remote_json = remote_mcp_json(remote, remote_auth)
     root = pathlib.Path(root).resolve()
     manifest = json.loads((root / "plugin/plugin.json").read_text())
     version = manifest["version"]
@@ -119,8 +200,12 @@ def build(root, sums_path, out_dir, skills_only=False):
             entries[rel] = (data, exe)
     if "plugin.json" not in entries:
         raise SystemExit("plugin/plugin.json is not tracked")
+    if remote is not None:
+        if "mcp.json" not in entries:
+            raise SystemExit("plugin/mcp.json is not tracked")
+        entries["mcp.json"] = (remote_json, False)
 
-    suffix = "-skills-only" if skills_only else ""
+    suffix = "-skills-only" if skills_only else "-remote" if remote is not None else ""
     out = pathlib.Path(out_dir) / f"pscat-chatgpt-plugin-{version}{suffix}.zip"
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w") as z:
@@ -140,9 +225,22 @@ def main(argv):
     ap.add_argument("--out", default="dist", help="output directory (default dist/)")
     ap.add_argument("--root", default=pathlib.Path(__file__).resolve().parent.parent)
     ap.add_argument("--skills-only", action="store_true", help="leave out mcp.json")
+    ap.add_argument("--remote", metavar="URL",
+                    help="replace the local MCP server with the hosted one at this https URL "
+                         "(its /mcp endpoint, e.g. https://<your-pscat-mcp-host>/mcp)")
+    ap.add_argument("--remote-auth", choices=sorted(REMOTE_AUTH),
+                    help="how the hosted server is protected (required with --remote): none, "
+                         "or bearer (a fixed token; ChatGPT cannot send one, see "
+                         "docs/guides/chatgpt-hosted.md)")
     args = ap.parse_args(argv)
     try:
-        print(build(args.root, args.sums, args.out, args.skills_only))
+        out = build(args.root, args.sums, args.out, args.skills_only, args.remote,
+                    args.remote_auth)
+        if args.remote_auth == "bearer":
+            print("warning: ChatGPT's connection form has no bearer-token input; this ZIP "
+                  "declares one but ChatGPT cannot send it (docs/guides/chatgpt-hosted.md)",
+                  file=sys.stderr)
+        print(out)
     except SystemExit as e:
         if isinstance(e.code, str):
             print(e.code, file=sys.stderr)
