@@ -306,8 +306,14 @@ fn shfill_ends_that_do_not_extend_pad_transparent() {
         "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true false] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     )[0];
-    assert!(svg.contains("x1=\"0\" y1=\"0\" x2=\"200\" y2=\"0\""), "{svg}");
-    assert!(svg.contains("<stop offset=\"0\" stop-color=\"#ff0000\"/>"), "{svg}");
+    assert!(
+        svg.contains("x1=\"0\" y1=\"0\" x2=\"200\" y2=\"0\""),
+        "{svg}"
+    );
+    assert!(
+        svg.contains("<stop offset=\"0\" stop-color=\"#ff0000\"/>"),
+        "{svg}"
+    );
 
     // Radial 10 -> 40 about one centre: back to radius 0 (a third of the
     // way), forward one more t (to radius 70), so no `fr` is needed.

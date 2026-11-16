@@ -357,8 +357,16 @@ fn shfill_axial_extends_each_end_independently() {
     // page is untouched; a missing /Extend extends neither end.
     for ext in EXTENDS {
         let it = render_extend(2, "30 0 70 0", ext);
-        assert_eq!(pixel(&it, 10, 50), past(ext, 0, RED), "{ext:?}: before the start");
-        assert_eq!(pixel(&it, 90, 50), past(ext, 1, BLUE), "{ext:?}: past the end");
+        assert_eq!(
+            pixel(&it, 10, 50),
+            past(ext, 0, RED),
+            "{ext:?}: before the start"
+        );
+        assert_eq!(
+            pixel(&it, 90, 50),
+            past(ext, 1, BLUE),
+            "{ext:?}: past the end"
+        );
         let (r, _, b) = pixel(&it, 50, 50);
         assert!(r > 100 && b > 100, "{ext:?}: the axis itself is painted");
     }

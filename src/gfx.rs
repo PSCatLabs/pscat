@@ -2277,7 +2277,10 @@ impl Gfx {
                 } else {
                     1.0
                 };
-                let (p0, p1) = (Point::from_xy(x0 * k, y0 * k), Point::from_xy(x1 * k, y1 * k));
+                let (p0, p1) = (
+                    Point::from_xy(x0 * k, y0 * k),
+                    Point::from_xy(x1 * k, y1 * k),
+                );
                 let (r0, r1) = (r0 * k, r1 * k);
                 let m = ctm.pre_scale(1.0 / k, 1.0 / k);
                 let dist = fmath::hypotf(p1.x - p0.x, p1.y - p0.y);
@@ -2321,15 +2324,10 @@ impl Gfx {
         // than an error, consistent with how other geometric
         // degeneracies in this file (e.g. a singular CTM at
         // device_to_user) fail soft rather than raising. A coincident-
-        // center, equal-*positive*-radius radial does *not* fall here
-        // — tiny-skia's own degenerate fallback for that (a solid disk
-        // of the start color, Pad-extended with nothing beyond it)
-        // already matches gs, verified directly by rendering
-        // `/Coords [50 50 20 50 50 20] /Extend [true true]` against
-        // both (a Codex review raised this as a suspected gap from
-        // reading this comment's own earlier, overbroad wording — not
-        // from an actual repro — so the fix here is the comment, not
-        // the behavior).
+        // center, equal-*positive*-radius radial does *not* fall here:
+        // tiny-skia paints it as its first stop inside the circle and its
+        // last outside, and the stops handed to it above make that gs's
+        // disk (`degenerate_radial_inside`, #1040).
         // Unlike `fill`/`stroke`, `shfill` never touches the current
         // path — it paints the clip region, per the PLRM — so both the
         // degenerate no-op below and the normal case leave it alone.
@@ -2343,7 +2341,14 @@ impl Gfx {
         let work = shfill_work(pw, ph, nstops).saturating_mul(passes);
         probe.check(work / 1024)?;
         let layer = match smaller_root {
-            Some(smaller) => Some(two_root_layer(smaller, shader.clone(), pw, ph, nstops, probe)?),
+            Some(smaller) => Some(two_root_layer(
+                smaller,
+                shader.clone(),
+                pw,
+                ph,
+                nstops,
+                probe,
+            )?),
             None => None,
         };
         let shader = match &layer {
@@ -2636,7 +2641,10 @@ impl Gfx {
             inv.map_points(&mut p);
             (f64::from(p[0].x), f64::from(p[0].y))
         });
-        if corners.iter().any(|&(x, y)| !x.is_finite() || !y.is_finite()) {
+        if corners
+            .iter()
+            .any(|&(x, y)| !x.is_finite() || !y.is_finite())
+        {
             return BOTH;
         }
         match shading.kind {
@@ -4495,7 +4503,12 @@ fn extend_ramp(stops: &[(f32, f32, f32, f32)], extend: [bool; 2]) -> Vec<(f32, C
 /// The bounding box `[llx, lly, urx, ury]` of four points.
 fn corners_box(c: [(f64, f64); 4]) -> [f64; 4] {
     c.iter().fold(
-        [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ],
         |b, &(x, y)| [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)],
     )
 }
@@ -4523,9 +4536,15 @@ fn degenerate_radial_inside(shading: &crate::shading::Shading) -> Option<Color> 
         return None;
     };
     let ((r, g, b), on) = if r0 > r1 {
-        (shading.stops.last().map(|s| (s.1, s.2, s.3))?, shading.extend[1])
+        (
+            shading.stops.last().map(|s| (s.1, s.2, s.3))?,
+            shading.extend[1],
+        )
     } else {
-        (shading.stops.first().map(|s| (s.1, s.2, s.3))?, shading.extend[0])
+        (
+            shading.stops.first().map(|s| (s.1, s.2, s.3))?,
+            shading.extend[0],
+        )
     };
     on.then(|| Color::from_rgba(r, g, b, 1.0).unwrap_or(Color::BLACK))
 }

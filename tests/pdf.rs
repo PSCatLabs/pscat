@@ -461,7 +461,10 @@ fn equal_coincident_circles_export_the_rasters_disk() {
         text.contains("/Coords [250 250 0 250 250 150] /Extend [false false]"),
         "{text}"
     );
-    assert!(text.contains("/C0 [1 0 0] /C1 [1 0 0]"), "one colour: {text}");
+    assert!(
+        text.contains("/C0 [1 0 0] /C1 [1 0 0]"),
+        "one colour: {text}"
+    );
     assert_gs_matches(&pdf, &canvas, "sh_equal_circles");
 }
 
@@ -508,7 +511,10 @@ fn nearly_equal_and_huge_equal_circles_export_the_disk() {
         b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150 250 250 150]
              /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
-    assert!(!pdf_text(&pdf).contains("/ShadingType"), "nothing to record");
+    assert!(
+        !pdf_text(&pdf).contains("/ShadingType"),
+        "nothing to record"
+    );
     assert_eq!(canvas.pixel(250, 250).map(|c| c.red()), Some(255));
     assert_eq!(canvas.pixel(250, 250).map(|c| c.green()), Some(255));
 }
@@ -541,9 +547,16 @@ fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
              /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
     let c = canvas.pixel(100, 100).expect("pixel");
-    assert_eq!((c.red(), c.green(), c.blue()), (255, 255, 255), "raster: nothing");
+    assert_eq!(
+        (c.red(), c.green(), c.blue()),
+        (255, 255, 255),
+        "raster: nothing"
+    );
     let content = page_content(&pdf);
-    assert!(!content.contains(" rg") && !content.contains(" sh"), "{content}");
+    assert!(
+        !content.contains(" rg") && !content.contains(" sh"),
+        "{content}"
+    );
 }
 
 /// Each `/Extend` on an axial and on radials (nested; a cone, whose
@@ -556,8 +569,16 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
     let page = b"0.5 setgray 0 0 500 500 rectfill ";
     let cases: [(&str, &str, &[(u32, u32)]); 3] = [
         ("2", "150 0 350 0", &[(50, 250), (450, 250), (250, 250)]),
-        ("3", "250 250 50 250 250 175", &[(250, 250), (20, 20), (250, 140)]),
-        ("3", "125 250 50 325 250 100", &[(325, 250), (475, 250), (25, 250)]),
+        (
+            "3",
+            "250 250 50 250 250 175",
+            &[(250, 250), (20, 20), (250, 140)],
+        ),
+        (
+            "3",
+            "125 250 50 325 250 100",
+            &[(325, 250), (475, 250), (25, 250)],
+        ),
     ];
     for (case, (ty, coords, points)) in cases.into_iter().enumerate() {
         for ext in [[false, false], [false, true], [true, false], [true, true]] {
@@ -571,7 +592,10 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
             let (pdf, canvas) = pdf_and_canvas(&[page.as_slice(), src.as_bytes()].concat());
             let text = pdf_text(&pdf);
             assert!(
-                text.contains(&format!("/Coords [{coords}] /Extend [{} {}]", ext[0], ext[1])),
+                text.contains(&format!(
+                    "/Coords [{coords}] /Extend [{} {}]",
+                    ext[0], ext[1]
+                )),
                 "{name}: {text}"
             );
             if !common::gs_available() {
@@ -580,8 +604,14 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
             assert_gs_matches(&pdf, &canvas, &name);
             let theirs = gs_rasterize(&pdf, &name);
             for &(x, y) in points {
-                let (a, b) = (canvas.pixel(x, y).expect("ours"), theirs.pixel(x, y).expect("gs"));
-                let (a, b) = ([a.red(), a.green(), a.blue()], [b.red(), b.green(), b.blue()]);
+                let (a, b) = (
+                    canvas.pixel(x, y).expect("ours"),
+                    theirs.pixel(x, y).expect("gs"),
+                );
+                let (a, b) = (
+                    [a.red(), a.green(), a.blue()],
+                    [b.red(), b.green(), b.blue()],
+                );
                 assert!(
                     a.iter().zip(b).all(|(p, q)| p.abs_diff(q) <= 8),
                     "{name} at ({x},{y}): ours {a:?}, gs {b:?}"
