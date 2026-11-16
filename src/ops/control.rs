@@ -30,28 +30,68 @@ pub(crate) fn pop_proc(it: &mut Interp) -> Result<PsArray, PsError> {
     }
 }
 
-fn pop_bool(it: &mut Interp) -> Result<bool, PsError> {
-    match it.pop()?.value {
-        Value::Boolean(b) => Ok(b),
-        _ => Err(PsError::Typecheck),
-    }
+/// A procedure: what `if` and `ifelse` run. Anything else is a
+/// `typecheck`, a literal array or an executable name included, as in
+/// Ghostscript.
+fn is_proc(o: &Object) -> bool {
+    o.executable && matches!(o.value, Value::Array(_))
 }
 
 fn ps_if(it: &mut Interp) -> Result<(), PsError> {
-    let proc = it.pop()?;
-    let cond = pop_bool(it)?;
-    if cond { it.exec_object(proc) } else { Ok(()) }
+    // Checked on the stack, in Ghostscript's order (the procedure's type,
+    // then the depth, then the boolean), before anything is popped: a
+    // failure leaves the operands where they were, and since nothing can
+    // fail after, they skip the ledger (#1047).
+    let cond = match it.operand_stack() {
+        [] => return Err(PsError::StackUnderflow),
+        [.., p] if !is_proc(p) => return Err(PsError::Typecheck),
+        [_] => return Err(PsError::StackUnderflow),
+        [.., c, _] => match c.value {
+            Value::Boolean(b) => b,
+            _ => return Err(PsError::Typecheck),
+        },
+    };
+    if cond && let [.., p] = it.operand_stack() {
+        it.exec_room(p)?;
+    }
+    let proc = it.pop_settled();
+    it.pop_settled();
+    match proc {
+        Some(proc) if cond => it.exec_object(proc),
+        _ => Ok(()),
+    }
 }
 
 fn ifelse(it: &mut Interp) -> Result<(), PsError> {
-    let proc_false = it.pop()?;
-    let proc_true = it.pop()?;
-    let cond = pop_bool(it)?;
-    it.exec_object(if cond { proc_true } else { proc_false })
+    let cond = match it.operand_stack() {
+        [] => return Err(PsError::StackUnderflow),
+        [.., f] if !is_proc(f) => return Err(PsError::Typecheck),
+        [_] => return Err(PsError::StackUnderflow),
+        [.., t, _] if !is_proc(t) => return Err(PsError::Typecheck),
+        [_, _] => return Err(PsError::StackUnderflow),
+        [.., c, _, _] => match c.value {
+            Value::Boolean(b) => b,
+            _ => return Err(PsError::Typecheck),
+        },
+    };
+    if let [.., t, f] = it.operand_stack() {
+        it.exec_room(if cond { t } else { f })?;
+    }
+    let proc_false = it.pop_settled();
+    let proc_true = it.pop_settled();
+    it.pop_settled();
+    match if cond { proc_true } else { proc_false } {
+        Some(proc) => it.exec_object(proc),
+        None => Ok(()),
+    }
 }
 
 pub(crate) fn exec(it: &mut Interp) -> Result<(), PsError> {
-    let obj = it.pop()?;
+    // Nothing can fail before the object runs: no ledger (#1047).
+    if let Some(o) = it.operand_stack().last() {
+        it.exec_room(o)?;
+    }
+    let obj = it.pop_settled().ok_or(PsError::StackUnderflow)?;
     it.exec_object(obj)
 }
 

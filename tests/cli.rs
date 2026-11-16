@@ -716,7 +716,7 @@ fn pstack_dump_small_output_is_pinned() {
     assert_eq!(
         stderr,
         "%%[ Error: undefinedresult; OffendingCommand: div; Line: 2 ]%%\n\
-         Operand stack (8): 1 (a\\n) /n [1 2 {3}] null -mark- -dict- --add--\n",
+         Operand stack (10): 1 (a\\n) /n [1 2 {3}] null -mark- -dict- --add-- 1 0\n",
     );
 }
 

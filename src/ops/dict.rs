@@ -33,6 +33,15 @@ pub fn install(dict: &mut Dict) {
 /// takes the out-of-line general path in `Interp::define_key` so it adds no
 /// work to the hot one (#323).
 fn def(it: &mut Interp) -> Result<(), PsError> {
+    // `/name value def` cannot fail: its operands skip the ledger (#1047).
+    if let [.., key, _] = it.ostack.as_slice()
+        && matches!(key.value, Value::Name(_))
+        && let (Some(value), Some(key)) = (it.pop_settled(), it.pop_settled())
+        && let Value::Name(n) = &key.value
+    {
+        it.define_name(n, value);
+        return Ok(());
+    }
     let value = it.pop()?;
     let key = it.pop()?;
     if let Value::Name(n) = &key.value {
@@ -82,6 +91,14 @@ fn load(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn known(it: &mut Interp) -> Result<(), PsError> {
+    // A dictionary and a name cannot fail: no ledger (#1047).
+    if let [.., d, key] = it.operand_stack()
+        && let (Value::Dict(d), Value::Name(n)) = (&d.value, &key.value)
+    {
+        let found = d.borrow().get_id_ref(n.id()).is_some();
+        it.replace_top2(Value::Boolean(found));
+        return Ok(());
+    }
     let key = it.pop()?;
     let d = pop_dict_operand(it)?;
     let found = d.borrow().known(&key)?;

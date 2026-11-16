@@ -526,11 +526,11 @@ renders eight examples in both and compares block-downsampled output).
   Ghostscript 10.07.1 on the tangent points and the path: one cubic per
   corner whatever its sweep, a line only for collinear points, a line plus
   a zero-length cubic for `r = 0`, a negative `r` mirrored through the
-  corner, `undefinedresult` for p0 = p1 or p1 = p2. They differ in two
-  places: a failed call consumes its operands like every pscat operator
-  (gs leaves them), and where rounding decides (short legs or exact
-  fold-backs under a rotation, tiny scales) the f32 device current point
-  and gs's fixed-point grid give different noise. The decision itself is
+  corner, `undefinedresult` for p0 = p1 or p1 = p2. They differ where
+  rounding decides (short legs or exact fold-backs under a rotation, tiny
+  scales): the f32 device current point and gs's fixed-point grid give
+  different noise. (A failed call leaves its operands, as in gs, since
+  #1047.) The decision itself is
   gs's: exact collinearity, no tolerance, `limitcheck` past gs's
   fixed-point range. `tests/arcto.rs` compares against `gs`, including a
   sweep over 32 transforms.
@@ -619,8 +619,11 @@ renders eight examples in both and compares block-downsampled output).
   pull their own input one byte at a time, so they never read past EOD.
 - errordict holds a handler per error name (#372, so `errordict /name
   get exec` re-raises), but a handler a program installs there is not
-  consulted on a real error; error-time operand-stack restoration not
-  done (PLRM handlers see pre-error operands).
+  consulted on a real error. A failed operator's operands are back on the
+  stack (#1047), as a PLRM handler would see them.
+- An error inside an image's data procedure names the operator that
+  failed in `$error /command`; gs names `image` (#1047,
+  `tests/operand_restore.rs`).
 - `nulldevice` is a flag in the graphics state (#739): marking operators
   consume their operands and paint and record nothing, `showpage`/
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
@@ -1345,6 +1348,28 @@ renders eight examples in both and compares block-downsampled output).
    drivers today, not the decision record's 16) rather than performed.
 
 ## Gotchas for the next implementer
+
+- **A failed operator's operands come back through the operand ledger**
+  (#1047, `notes/1047-operand-ledger.md`). `Interp::run_op` wraps every
+  operator dispatch: `pop`, `pop_num` and `pop_int` record the caller's
+  values they take (numbers and booleans as bits in fixed slots, anything
+  else as a copy in `op_objs`), and an error cuts the stack back and pushes
+  them back. A new operator that pops through those gets this for free.
+  Rules for one that does not: an operator that changes `ostack` directly
+  must check before it changes it (as `roll`, `cleartomark` and `astore`
+  do); `pop_settled` is only for operands taken after every check that can
+  fail (the hot operators' fast paths: `def`, `get`, `put`, `if`,
+  `ifelse`, `exec`); an operator that hands an operand on to run calls
+  `exec_object`, which spends the ledger, so an error in what runs is that
+  code's own; an operator that sets the stack itself before failing (the
+  kernel's fallback) calls `keep_operand_stack`. The ledger costs about 1%
+  of instructions on real programs; copying whole `Object`s per pop cost
+  30-50% (the copy stops `pop_num` inlining), so keep numbers as bits.
+  Errors also name the operator: `$error /command` holds the operator
+  object and `OffendingCommand` its name, found from the procedure on top
+  of the execution stack or systemdict when the step carried only the
+  function. `ProcStep` stays one word plus a tag: adding the name to it
+  cost 15% on a step-heavy loop.
 
 - **Ghostscript tests go through `common::gs_available()`** (#985,
   `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe

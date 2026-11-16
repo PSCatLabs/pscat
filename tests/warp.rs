@@ -124,7 +124,8 @@ fn the_scope_suppresses_showpage_and_rebalances_after_errors() {
          countdictstack $error /errorname get",
     );
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(stack, ["true", "2", "/undefinedresult"]);
+    // `div` leaves its operands (#1047)
+    assert_eq!(stack, ["1", "0", "true", "2", "/undefinedresult"]);
     // a program that only leaves dictionaries open
     run("{ 5 dict begin } << >> wp-run-decorated");
 }
@@ -351,11 +352,12 @@ fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
         numbers("{ 42 } << /stopped { } >> wp-run-decorated countdictstack"),
         [42.0, 2.0]
     );
-    // an error inside still re-raises, with the scope closed
+    // an error inside still re-raises, with the scope closed (`div` leaves
+    // its operands, #1047)
     let it =
         run("{ { 1 0 div } << /exec { } /stopped { } >> wp-run-decorated } stopped countdictstack");
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(stack, ["true", "2"], "{stack:?}");
+    assert_eq!(stack, ["1", "0", "true", "2"], "{stack:?}");
 }
 
 /// The show-family programs the decorators must draw through the warp
@@ -713,7 +715,8 @@ fn a_failing_warp_leaves_the_stack_and_graphics_state_as_the_call_had_them() {
     for (op, call) in PAINTERS {
         let (name, command) = painter_after_failure(op, call, "{ pop pop 1 0 div } 2 wp-run");
         assert_eq!(name, "/undefinedresult", "{op}");
-        assert_eq!(command, "div", "{op}");
+        // The operator object, as gs stores it (#1047).
+        assert_eq!(command, "--div--", "{op}");
     }
 }
 
@@ -726,7 +729,8 @@ fn a_path_transform_that_fails_with_its_own_mark_open_is_unwound_by_depth() {
     for (op, call) in PAINTERS {
         let (name, command) = painter_after_failure(op, call, "{ mark 1 0 div } 2 wp-run-path");
         assert_eq!(name, "/undefinedresult", "{op}");
-        assert_eq!(command, "div", "{op}");
+        // The operator object, as gs stores it (#1047).
+        assert_eq!(command, "--div--", "{op}");
         // a mark and more of the transform's own debris
         let (name, _) = painter_after_failure(
             op,
@@ -979,6 +983,6 @@ fn rect_operators_with_bad_operands_or_the_array_form_go_to_the_real_operator() 
     let it = run("77 { 1 2 (a) 4 rectfill } stopped $error /command get");
     assert_eq!(
         it.operand_stack().last().map(|o| o.repr()).as_deref(),
-        Some("rectfill")
+        Some("--rectfill--")
     );
 }

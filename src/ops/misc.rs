@@ -82,19 +82,19 @@ pub(crate) fn install_errordict(dict: &mut Dict) {
 /// `$error` and an uncaught one is reported, both under `name`.
 ///
 /// Deviation, on an empty operand stack: Ghostscript dies with an
-/// unrecoverable `stackunderflow`. pscat does not restore an operator's
-/// operands when it fails (docs/dev/HANDOFF.md), so after a catch the stack is
-/// often empty where Ghostscript's holds the failed operands. The
-/// handler then falls back to the command `$error` already holds, which
-/// keeps the error name, the thing a re-raise exists to preserve.
+/// unrecoverable `stackunderflow`. The handler falls back to the command
+/// `$error` already holds instead, which keeps the error name, the thing a
+/// re-raise exists to preserve.
 fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
-    let command = it.ostack.pop().or_else(|| {
+    // A handler consumes the object it is run on (Ghostscript leaves the
+    // stack without it), so it skips the operand ledger (#1047).
+    let command = it.pop_settled().or_else(|| {
         it.load("$error").and_then(|e| match &e.value {
             Value::Dict(d) => d.borrow().get("command"),
             _ => None,
         })
     });
-    let text = command.as_ref().map(|c| c.text());
+    let text = command.as_ref().map(|c| c.cvs_text());
     if let Some(c) = command {
         it.set_error_command(c);
     }
@@ -138,8 +138,10 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
         (
             d.get("errorname")
                 .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
+            // An operator (what a failed operator leaves, #1047) by name,
+            // as the CLI report gives it.
             d.get("command")
-                .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
+                .map(|o| cap_text(&o.cvs_text(), ERROR_NAME_LIMIT)),
         )
     };
     let line = format!(

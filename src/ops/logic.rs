@@ -153,14 +153,16 @@ fn bitwise(
     bool_op: fn(bool, bool) -> bool,
     int_op: fn(i64, i64) -> i64,
 ) -> Result<(), PsError> {
-    let b = it.pop()?;
-    let a = it.pop()?;
+    // Computed in place: a typecheck leaves both operands (#1047).
+    let [.., a, b] = it.operand_stack() else {
+        return Err(PsError::StackUnderflow);
+    };
     let result = match (&a.value, &b.value) {
         (Value::Boolean(x), Value::Boolean(y)) => Value::Boolean(bool_op(*x, *y)),
         (Value::Integer(x), Value::Integer(y)) => Value::Integer(int_op(*x, *y)),
         _ => return Err(PsError::Typecheck),
     };
-    it.push(Object::lit(result));
+    it.replace_top2(result);
     Ok(())
 }
 
@@ -177,11 +179,12 @@ fn xor(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn not(it: &mut Interp) -> Result<(), PsError> {
-    let result = match it.pop()?.value {
-        Value::Boolean(b) => Value::Boolean(!b),
-        Value::Integer(i) => Value::Integer(!i),
-        _ => return Err(PsError::Typecheck),
+    let result = match it.operand_stack().last().map(|o| &o.value) {
+        Some(Value::Boolean(b)) => Value::Boolean(!b),
+        Some(Value::Integer(i)) => Value::Integer(!i),
+        Some(_) => return Err(PsError::Typecheck),
+        None => return Err(PsError::StackUnderflow),
     };
-    it.push(Object::lit(result));
+    it.replace_top(result);
     Ok(())
 }

@@ -184,11 +184,12 @@ fn post_save_dict_on_dict_stack_is_tolerated() {
 fn stopped_error_inside_save_context_recovers() {
     // The journal must stay consistent when errors unwind mid-context:
     // the failed put still rolls back, and $error's writes roll back
-    // with it (they're VM writes like any other).
+    // with it (they're VM writes like any other). The failed `put` leaves
+    // its three operands (#1047), dropped before the restore.
     let mut it = run("/a [1] def
          save
          { a 0 2 put a 99 3 put } stopped
-         exch restore a 0 get exch");
+         4 1 roll pop pop pop exch restore a 0 get exch");
     assert_eq!(top_repr(&mut it), "true", "inner error was caught");
     assert_eq!(top_repr(&mut it), "1", "successful put rolled back too");
 }

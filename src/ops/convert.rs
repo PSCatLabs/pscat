@@ -40,6 +40,15 @@ fn parse_string_number(obj: &Object) -> Result<Num, PsError> {
 }
 
 fn cvi(it: &mut Interp) -> Result<(), PsError> {
+    // A number converts in place; a real out of range leaves it (#1047).
+    if let Some(n) = it.top_num() {
+        let i = match n {
+            Num::Int(i) => i,
+            Num::Real(r) => real_to_int(r)?,
+        };
+        it.replace_top(Value::Integer(i));
+        return Ok(());
+    }
     let obj = it.pop()?;
     let n = match obj.value {
         Value::Integer(i) => i,
@@ -88,7 +97,7 @@ fn cvs(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let any = it.pop()?;
-    let text = any.text();
+    let text = any.cvs_text();
     buf.write_at(0, text.as_bytes())?;
     it.push(Object::lit(Value::String(buf.interval(0, text.len())?)));
     Ok(())

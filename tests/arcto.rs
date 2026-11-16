@@ -217,10 +217,13 @@ fn a_non_uniform_ctm_bends_the_circle_into_an_ellipse() {
 fn coincident_points_are_undefinedresult_and_leave_the_path_alone() {
     for (args, name) in [("0 0 100 100 10", "P0 = P1"), ("100 0 100 0 10", "P1 = P2")] {
         let got = run_case(&format!("{{ 0 0 moveto {args} arcto }}"));
-        // pscat consumes the operands of a failed operator (HANDOFF.md,
-        // "error-time operand restoration"); gs leaves them. The path is
-        // untouched in both.
-        assert_eq!(got, "c => undefinedresult stack: path: m 0.0 0.0", "{name}");
+        // The operands stay on the stack and the path is untouched, as in
+        // gs (#1047).
+        assert_eq!(
+            got,
+            format!("c => undefinedresult stack: {args} path: m 0.0 0.0"),
+            "{name}"
+        );
     }
 }
 
@@ -288,11 +291,11 @@ fn a_hairpin_past_the_device_range_is_limitcheck_as_in_gs() {
     assert!(fits.contains("ok stack: -838"), "{fits}");
     assert_eq!(
         run_case("{ 0 0 moveto 100 0 -50 0.0003576 10 arcto }"),
-        "c => limitcheck stack: path: m 0.0 0.0"
+        "c => limitcheck stack: 100 0 -50 0.0 10 path: m 0.0 0.0"
     );
     assert_eq!(
         run_case("{ 0 0 moveto 100 0 -50 0.0001 10 arct }"),
-        "c => limitcheck stack: path: m 0.0 0.0"
+        "c => limitcheck stack: 100 0 -50 0.0 10 path: m 0.0 0.0"
     );
 }
 
@@ -370,11 +373,10 @@ fn errors_are_the_ones_gs_raises() {
             "{what}: path changed: {got}"
         );
     }
-    // pscat's convention (the same as `lineto`'s): the operands the
-    // operator popped before it failed are gone.
+    // The operands stay on the stack, as in gs (#1047).
     assert_eq!(
         run_case("{ 0 0 moveto 100 0 100 (a) 10 arcto }"),
-        "c => typecheck stack: 100 0 100 path: m 0.0 0.0"
+        "c => typecheck stack: 100 0 100 a 10 path: m 0.0 0.0"
     );
 }
 
