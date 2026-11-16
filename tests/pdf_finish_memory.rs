@@ -87,11 +87,11 @@ impl Write for Hasher {
             let c = std::mem::take(&mut self.carry);
             self.word(&c);
         }
-        let mut words = data.chunks_exact(8);
-        for w in words.by_ref() {
+        let (words, rest) = data.as_chunks::<8>();
+        for w in words {
             self.word(w);
         }
-        self.carry.extend_from_slice(words.remainder());
+        self.carry.extend_from_slice(rest);
         Ok(len)
     }
     fn flush(&mut self) -> std::io::Result<()> {
