@@ -511,12 +511,14 @@ mod one_operator {
     #[test]
     fn bind_with_a_deep_dictionary_stack_stops_inside_bind() {
         // Each unresolved name is looked up through every dictionary on the
-        // stack: 60,000 names under 2,000 dictionaries is 1.2e8 probes in
-        // one `bind` (Codex, PR #1186: 1.3 s past a 0.1 s limit, blamed on
-        // the next operator). The walk counts lookups as work.
+        // stack: 200,000 names under 2,000 dictionaries is 4e8 probes in
+        // one `bind` (Codex, PR #1186: 60,000 names ran 1.3 s past a 0.1 s
+        // limit, blamed on the next operator; the CI runner's `bind` later
+        // finished those inside 0.1 s, so the test went red on main, #1219).
+        // The walk counts lookups as work.
         stops_inside(
             "bind under a deep dictionary stack",
-            "2000 { 1 dict begin } repeat /p [ 60000 { /zz_not_defined cvx } repeat ] cvx def"
+            "2000 { 1 dict begin } repeat /p [ 200000 { /zz_not_defined cvx } repeat ] cvx def"
                 .into(),
             "/p load bind pop",
             "bind",
@@ -1258,6 +1260,199 @@ mod one_operator {
                 steps(20),
                 PsError::StepsExceeded,
             );
+        }
+    }
+    // --- #1219: the four one-operator paths #1217 left ---------------------
+    mod issue_1219 {
+        use super::*;
+
+        /// 100,000 page-sized curves as the current path: `Mask::fill_path`
+        /// cannot be stopped and took 1.4 s here at 72 dpi (5.6 s at 300),
+        /// whatever the limits said. Built with no limits, as the setup.
+        const MANY_CURVES: &str = "newpath 100000 { 0 0 moveto 600 700 -300 900 612 792 curveto \
+             0 792 lineto closepath } repeat";
+
+        #[test]
+        fn a_clip_of_very_many_curves_stops_inside_clip() {
+            for op in ["clip", "eoclip"] {
+                stops_inside(op, MANY_CURVES.into(), op, op, Duration::from_millis(1500));
+            }
+        }
+
+        #[test]
+        fn a_nested_clip_of_very_many_curves_stops_inside_clip() {
+            // Under a clip already in force the new mask is multiplied by it.
+            stops_inside(
+                "nested clip",
+                format!("0 0 612 792 rectclip {MANY_CURVES}"),
+                "clip",
+                "clip",
+                Duration::from_millis(1500),
+            );
+        }
+
+        #[test]
+        fn a_step_limit_refuses_a_huge_clip_and_leaves_the_clip_alone() {
+            // The whole work is held against the step limit before the clip
+            // is replaced (the lesson of Codex's review of #1217).
+            let (err, report, after) = on_a_deadline("clip steps", || {
+                let mut it = Interp::new();
+                it.run_str("10 10 100 100 rectclip").expect("a small clip");
+                it.run_str(MANY_CURVES).expect("the path");
+                it.set_limits(steps(1000)).expect("limits");
+                let err = it.run_str("clip").expect_err("the step limit stops it");
+                let report = it.error_report(&err);
+                it.set_limits(Limits::none()).expect("limits off");
+                it.capture_stdout();
+                // The clip is still the rectangle and the path still there.
+                it.run_str("currentpoint pop = clippath pathbbox 4 { = } repeat")
+                    .expect("clippath");
+                (
+                    err,
+                    report,
+                    String::from_utf8_lossy(it.captured_stdout()).into_owned(),
+                )
+            });
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(report.contains("OffendingCommand: clip;"), "{report}");
+            assert_eq!(after, "0.0\n110.0\n110.0\n10.0\n10.0\n", "{after}");
+        }
+
+        #[test]
+        fn a_refused_rectclip_leaves_the_current_path_and_clip_alone() {
+            // `rectclip` builds its rectangles in the current path: a limit
+            // that refuses the clip must hand the program's path back
+            // (Codex, PR #1232: it was left empty, `currentpoint` 0 0).
+            let (err, report, after) = on_a_deadline("rectclip steps", || {
+                let mut it = Interp::new();
+                it.run_str("10 10 100 100 rectclip").expect("a small clip");
+                // 1000 page-sized rectangles: 6 million units of work.
+                it.run_str("/R [ 1000 { 0 0 612 792 } repeat ] def")
+                    .expect("the rectangles");
+                it.set_limits(steps(1000)).expect("limits");
+                let err = it
+                    .run_str("17 19 moveto R rectclip")
+                    .expect_err("the step limit stops it");
+                let report = it.error_report(&err);
+                it.set_limits(Limits::none()).expect("limits off");
+                it.capture_stdout();
+                it.run_str("currentpoint exch = = clippath pathbbox 4 { = } repeat")
+                    .expect("currentpoint");
+                (
+                    err,
+                    report,
+                    String::from_utf8_lossy(it.captured_stdout()).into_owned(),
+                )
+            });
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(report.contains("OffendingCommand: rectclip;"), "{report}");
+            // The path is the program's, the clip the small rectangle.
+            assert_eq!(after, "17.0\n19.0\n110.0\n110.0\n10.0\n10.0\n", "{after}");
+        }
+
+        /// Setup for a 4095-leg ramp over a 300 dpi letter page (2550 x
+        /// 3300 pixels at one pixel a point): resampled to 1024 stops, a
+        /// `shfill` of it was 0.6 s of painting that never read the clock.
+        fn ramp_setup() -> String {
+            "<< /PageSize [2550 3300] >> setpagedevice /n 4095 def \
+             /fns [ 0 1 n 1 sub { 2 mod 0 eq \
+               { << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> } \
+               { << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> } ifelse } for ] def \
+             /bounds [ 1 1 n 1 sub { n div } for ] def \
+             /encode [ 0 1 n 1 sub { pop 0 1 } for ] def"
+                .into()
+        }
+
+        const RAMP: &str = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 2550 0] \
+             /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+             /Bounds bounds /Encode encode >> >> shfill";
+
+        #[test]
+        fn shfill_painting_stops_inside_shfill() {
+            stops_inside(
+                "shfill",
+                ramp_setup(),
+                RAMP,
+                "shfill",
+                Duration::from_millis(1500),
+            );
+        }
+
+        #[test]
+        fn a_step_limit_refuses_a_shfill_before_it_paints() {
+            stops_inside_with(
+                "shfill steps",
+                ramp_setup(),
+                RAMP,
+                "shfill",
+                Duration::from_millis(1500),
+                steps(1000),
+                PsError::StepsExceeded,
+            );
+        }
+
+        #[test]
+        fn a_shfill_a_limit_stops_paints_nothing() {
+            // Under a limit the page is painted on a copy and kept once every
+            // strip has painted, as a refused `fill` paints nothing, so the
+            // raster, a pending `showpage` erase and the exports agree
+            // (Codex, PR #1232: strips already painted stayed, with nothing
+            // recorded for SVG or PDF).
+            for showpage in [false, true] {
+                let (err, px, pages) = on_a_deadline("shfill all or nothing", move || {
+                    let mut it = Interp::new();
+                    it.enable_svg();
+                    it.run_str(&ramp_setup()).expect("setup");
+                    it.run_str("1 0 0 setrgbcolor 0 0 2550 3300 rectfill")
+                        .expect("red");
+                    if showpage {
+                        it.run_str("showpage").expect("showpage");
+                    }
+                    it.set_limits(untrusted(Duration::from_millis(100)))
+                        .expect("limits");
+                    let err = it.run_str(RAMP).expect_err("the clock stops it");
+                    let px = it.gfx().pixmap.pixel(10, 10).expect("pixel");
+                    let svg = it.svg_pages().unwrap_or_default().concat();
+                    (
+                        err,
+                        (px.red(), px.green(), px.blue()),
+                        svg.matches("<linearGradient").count(),
+                    )
+                });
+                assert_eq!(err, PsError::TimeExceeded);
+                assert_eq!(
+                    px,
+                    (255, 0, 0),
+                    "showpage {showpage}: the page is untouched"
+                );
+                assert_eq!(pages, 0, "showpage {showpage}: nothing recorded");
+            }
+        }
+
+        #[test]
+        fn type1_subroutines_decrypt_only_the_bytes_a_glyph_can_reach() {
+            // One glyph calls a 16 MB subroutine (about 25 ms to decrypt in
+            // full) and 200 of them were 5 s. A glyph's operator budget
+            // reaches 500 KB of it. A budget test: nothing here stops at a
+            // limit, the 30 s clock only keeps a regression from hanging.
+            let src: &'static str = Box::leak(
+                common::type1_probe(
+                    16_000_000,
+                    0,
+                    0,
+                    1,
+                    "200 { (A) show } repeat currentpoint pop =",
+                )
+                .into_boxed_str(),
+            );
+            let (r, out) = run(
+                "type1 huge subr",
+                untrusted(Duration::from_secs(30)),
+                Duration::from_secs(1),
+                src,
+            );
+            assert_eq!(r, Ok(()));
+            assert_eq!(out, "1210.0\n", "200 advances of 6");
         }
     }
 }

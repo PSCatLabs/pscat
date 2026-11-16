@@ -1664,7 +1664,11 @@ fn type1_glyph(
     let next_look = std::cell::Cell::new(DECRYPT_POLL);
     // Decrypt `s`, looking at the limits as above; `None` on a limit.
     let decrypt = |s: &crate::object::PsString| -> Option<Vec<u8>> {
-        let len = s.len();
+        // Only the bytes the operator budget can reach (#1219): the first
+        // `len_iv` are the cipher's lead, dropped from the plaintext.
+        let len = s
+            .len()
+            .min(len_iv.saturating_add(crate::type1::MAX_CODE_BYTES));
         let total = bytes.get().saturating_add(len);
         bytes.set(total);
         let look = total >= next_look.get();
@@ -1682,7 +1686,7 @@ fn type1_glyph(
                 return fail(e);
             }
         }
-        let code = crate::file::decrypt_charstring(&s.borrow_bytes(), len_iv);
+        let code = crate::file::decrypt_charstring(&s.borrow_bytes()[..len], len_iv);
         if look && let Err(e) = probe.check(0) {
             return fail(e);
         }

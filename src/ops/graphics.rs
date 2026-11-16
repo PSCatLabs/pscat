@@ -900,19 +900,38 @@ fn rectclip(it: &mut Interp) -> Result<(), PsError> {
             r[2] = -r[2];
         }
     }
-    it.gfx.newpath();
-    append_rects(it, &rects)?;
-    it.gfx.clip(FillRule::Winding)?;
-    it.gfx.newpath();
+    // The rectangles are built in the current path, which `rectclip` leaves
+    // empty. Any error (a limit refusing the clip included, #1219) puts the
+    // program's own path back: a refused operator changes nothing.
+    let saved = std::mem::take(&mut it.gfx.state_mut().path);
+    let done = append_rects(it, &rects).and_then(|()| clip_common(it, FillRule::Winding));
+    match done {
+        Ok(()) => it.gfx.newpath(),
+        Err(e) => {
+            it.gfx.state_mut().path = saved;
+            return Err(e);
+        }
+    }
     Ok(())
 }
 
 fn clip(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.clip(FillRule::Winding)
+    clip_common(it, FillRule::Winding)
 }
 
 fn eoclip(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.clip(FillRule::EvenOdd)
+    clip_common(it, FillRule::EvenOdd)
+}
+
+/// `clip`/`eoclip`/`rectclip` under the limits (#1219): a clip of very many
+/// curves is rasterised where the limits are looked at, and its work is
+/// charged a step per 1024 units, as `fill`'s is. A refused clip leaves the
+/// clip and the path as they were.
+fn clip_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
+    let probe = it.limit_probe();
+    let work = it.gfx.clip_limited(rule, &probe)?;
+    it.charge_probed_steps(work / 1024);
+    Ok(())
 }
 
 fn clippath(it: &mut Interp) -> Result<(), PsError> {

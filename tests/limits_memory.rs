@@ -176,6 +176,16 @@ fn memory_growth_is_capped() {
         it.run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat fill"),
         Err(PsError::MemoryExceeded)
     );
+    // `clip` of the same path (#1219): over the work a stoppable
+    // rasteriser takes it, and stops at the cap inside `clip` as `fill` does.
+    let mut it = limited(100);
+    let err = it
+        .run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat clip")
+        .unwrap_err();
+    assert_eq!(err, PsError::MemoryExceeded);
+    let report = it.error_report(&err);
+    assert!(report.contains("OffendingCommand: clip;"), "{report}");
+    drop(it);
     let before = pscat::memtrack::live_bytes();
     let mut it = limited(100);
     assert_eq!(
@@ -208,17 +218,18 @@ fn memory_growth_is_capped() {
 
     // A Type 1 glyph that calls a 16 MB subroutine (Codex, PR #1217): its
     // decrypted copy was made, used and freed inside one step, past a 20 MiB
-    // cap. The decryption is held against the cap before it is made.
-    let mut it = Interp::new();
-    it.run_str(&common::type1_probe(16_000_000, 0, 0, 1, ""))
-        .unwrap();
-    it.set_limits(Limits::none().with_max_memory(20 * MIB))
-        .expect("the allocator is installed");
-    assert_eq!(
-        it.run_str("(A) show (survived) ="),
-        Err(PsError::MemoryExceeded)
-    );
-    drop(it);
+    // cap. The decryption is held against the cap before it is made. Only
+    // the bytes the glyph's operator budget can reach are decrypted (#1219),
+    // about 500 KB of it, so 20 MiB holds it and 512 KiB does not.
+    for (cap, want) in [(20 * MIB, Ok(())), (MIB / 2, Err(PsError::MemoryExceeded))] {
+        let mut it = Interp::new();
+        it.run_str(&common::type1_probe(16_000_000, 0, 0, 1, ""))
+            .unwrap();
+        it.set_limits(Limits::none().with_max_memory(cap))
+            .expect("the allocator is installed");
+        assert_eq!(it.run_str("(A) show (survived) ="), want, "cap {cap}");
+        drop(it);
+    }
 
     // A kernelimage whose every pixel retires to the interpreter (#1188):
     // its list of 4 million retired pixels was 64 MB, made with no look at

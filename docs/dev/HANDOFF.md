@@ -707,7 +707,11 @@ renders eight examples in both and compares block-downsampled output).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
-  its neighbours there; SVG and PDF keep every stop.
+  its neighbours there; SVG and PDF keep every stop. With no `/BBox` the
+  raster paints the page in strips of rows, looking at the limits between
+  them (#1219; same pixels, an integer rectangle has no edge to cut). Under
+  limits the strips paint a copy of the page that replaces it only once
+  they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
   ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
   `/Pattern` colour spaces) are not implemented at all, in any output.
   SVG's two-circle radial
@@ -1511,6 +1515,19 @@ renders eight examples in both and compares block-downsampled output).
     filter-drain rows (the image drain, the skip loops, the scanner, and
     FlateDecode's accidental cap) and #1188 most of the rest
     (`notes/1188-single-operator-limits-remaining.md`).
+  - `clip` of a path with very many edges (#1219) is the one place the
+    raster's anti-aliasing depends on the path: tiny-skia's `Mask::fill_path`
+    cannot be stopped, so `Gfx::clip_coverage` estimates the work first
+    (`PsPath::raster_work`: sub-scanlines each edge crosses, plus a setup
+    cost per edge, about 2.9 ns a unit) and sends a path of 2^25 units or
+    more (`POLLED_CLIP_WORK`, about 0.1 s of tiny-skia; the gallery,
+    examples and self-test top out at 6.5M at 300 dpi) through
+    `coverage::rasterize_limited`, which polls. Its area coverage differs
+    from the 4x4 sampler by a shade on an edge pixel (unit-tested). Below
+    the threshold the pixels are tiny-skia's, as before. `fit_clip` uses the
+    same helper, so a refit keeps the pixels. Type 1 charstrings decrypt only
+    `type1::MAX_CODE_BYTES` (5 x `OP_BUDGET` + 1): the operator budget cannot
+    read further. `notes/1219-limits-clip-shfill-type1.md`.
   - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep
     each band's edges in the original order: the coverage sums are f32 and
     their order is what makes a fill byte-identical to the edges x bands
