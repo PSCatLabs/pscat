@@ -95,6 +95,7 @@ thread_local! {
 const RECORD_SVG: u32 = 1;
 const RECORD_PDF: u32 = 2;
 const SVG_TEXT: u32 = 4;
+const PDF_TEXT: u32 = 8;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_alloc(len: usize) -> *mut u8 {
@@ -158,8 +159,9 @@ pub unsafe extern "C" fn ps_begin_vector(
     scale: f32,
     flags: u32,
 ) -> i32 {
-    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT) != 0
+    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT | PDF_TEXT) != 0
         || (flags & SVG_TEXT != 0 && flags & RECORD_SVG == 0)
+        || (flags & PDF_TEXT != 0 && flags & RECORD_PDF == 0)
         || !(scale.is_finite() && scale > 0.0)
     {
         return -1;
@@ -177,6 +179,9 @@ pub unsafe extern "C" fn ps_begin_vector(
         it.enable_svg();
     }
     if flags & RECORD_PDF != 0 {
+        if flags & PDF_TEXT != 0 {
+            it.set_pdf_text(crate::PdfText::Text);
+        }
         it.enable_pdf();
         let (title, author) = crate::pdf::scan_document_info(&source);
         it.gfx_mut().set_pdf_info(title, author);

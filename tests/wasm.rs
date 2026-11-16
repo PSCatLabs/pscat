@@ -500,6 +500,128 @@ console.log('TEXT_OK');
     }
 }
 
+/// A Hangul page for the `--pdf-text` parity check: the Unicode-mode
+/// NotoSansKR face (a catalog face on disk for the CLI, `addFont` in the
+/// browser build), mixed with Latin in a standard face.
+const HANGUL_DOC: &str = "%!PS
+/NotoSansKR-Regular findfont 30 scalefont setfont
+72 700 moveto (\u{c548}\u{b155}\u{d558}\u{c138}\u{c694} \u{d55c}\u{ad6d}\u{c5b4}) show
+/Helvetica findfont 14 scalefont setfont
+72 660 moveto (Hello, \u{d55c}\u{ad6d}) show
+showpage
+";
+
+/// `--pdf-text` PDF from the wasm build equals the CLI's byte for byte,
+/// through the raw ABI (`record.pdfText`) and the npm Renderer
+/// (`pdfText: true`), for a Latin page and a Hangul page (the face given to
+/// `addFont`); and the flag really changes the output (#1205).
+#[test]
+fn wasm_pdf_text_matches_the_cli() {
+    if !wasm_ready() {
+        return;
+    }
+    let root = root();
+    let dir = common::scratch_dir("pscat-wasm-pdf-text");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let pages = [("latin", TEXT_DOC), ("hangul", HANGUL_DOC)];
+    for (name, src) in pages {
+        std::fs::write(dir.join(format!("{name}.ps")), src).expect("write doc");
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .current_dir(root)
+            .args(["--page", "612x792", "--pdf-text", "--pdf"])
+            .arg(dir.join(format!("native-{name}.pdf")))
+            .arg(dir.join(format!("{name}.ps")))
+            .output_deadline()
+            .expect("run pscat");
+        assert!(
+            out.status.success(),
+            "pscat --pdf-text failed on {name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let npm = dir.join("npm");
+    std::fs::create_dir_all(&npm).expect("npm dir");
+    std::fs::copy(root.join("npm/renderer.js"), npm.join("renderer.js")).expect("renderer.js");
+    std::fs::copy(root.join("web/pscat.js"), npm.join("core.js")).expect("core.js");
+    let driver = format!(
+        r#"
+import {{ readFileSync, writeFileSync }} from 'node:fs';
+import {{ Pscat }} from 'file://{lib}';
+import {{ instantiate }} from 'file://{renderer}';
+const bytes = readFileSync('{wasm}');
+const kr = readFileSync('{kr}');
+const out = (name, data) => writeFileSync('{dir}/' + name, data);
+const ps = await Pscat.instantiate(bytes);
+ps.addFont('NotoSansKR-Regular', kr);
+const r = await instantiate(await WebAssembly.compile(bytes));
+r.addFont('NotoSansKR-Regular', kr);
+for (const name of ['latin', 'hangul']) {{
+  const src = readFileSync(`{dir}/${{name}}.ps`);
+  if (ps.run(src, 612, 792, 1, {{ pdf: true, pdfText: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+  out(`abi-${{name}}.pdf`, ps.pdf());
+  if (ps.run(src, 612, 792, 1, {{ pdf: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+  out(`abi-outlines-${{name}}.pdf`, ps.pdf());
+  r.render(src, {{ width: 612, height: 792, pdf: true, pdfText: true }});
+  out(`npm-${{name}}.pdf`, r.pdf());
+}}
+try {{ r.render('showpage', {{ pdfText: true }}); console.error('pdfText without pdf was accepted'); process.exit(1); }}
+catch (e) {{ if (!(e instanceof TypeError)) throw e; }}
+try {{ r.render('showpage', {{ svg: true, pdfText: true }}); console.error('pdfText with only svg was accepted'); process.exit(1); }}
+catch (e) {{ if (!(e instanceof TypeError)) throw e; }}
+console.log('PDF_TEXT_OK');
+"#,
+        lib = root.join("web/pscat.js").display(),
+        renderer = npm.join("renderer.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+        kr = root
+            .join("fonts/catalog/NotoSansKR/NotoSansKR-Regular.ttf")
+            .display(),
+        dir = dir.display(),
+    );
+    let script = dir.join("pdf-text.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output_deadline()
+        .expect("run node");
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("PDF_TEXT_OK"),
+        "node pdf-text driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let read = |name: String| {
+        std::fs::read(dir.join(&name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
+    };
+    for (name, _) in pages {
+        let native = read(format!("native-{name}.pdf"));
+        // The CLI really wrote text objects (so a face that fell back the
+        // same way on both sides cannot pass for parity)...
+        let doc = common::pdf_text(&native);
+        assert!(
+            doc.contains(" BT ") && doc.contains(" Tf "),
+            "the CLI wrote no text objects for {name}"
+        );
+        if name == "hangul" {
+            assert!(
+                doc.contains("+NotoSansKR-Regular /Encoding") && doc.contains("> <C548>"),
+                "the CLI did not embed NotoSansKR for the Hangul page: {doc}"
+            );
+        }
+        // ...and the wasm build wrote the same bytes.
+        for file in [format!("abi-{name}.pdf"), format!("npm-{name}.pdf")] {
+            assert!(
+                read(file.clone()) == native,
+                "{file} differs from pscat --pdf-text"
+            );
+        }
+        // Without pdfText the PDF is the outline PDF: no text objects.
+        assert!(
+            !common::pdf_text(&read(format!("abi-outlines-{name}.pdf"))).contains(" BT "),
+            "a run without pdfText wrote text objects ({name})"
+        );
+    }
+}
+
 /// Run a node driver (an ES module body that has `ps`, `fail` and the
 /// bomb helpers in scope) against the real wasm module; the driver prints
 /// `OK` when every check passed.

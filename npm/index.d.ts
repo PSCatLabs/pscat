@@ -41,6 +41,12 @@ export interface PageOptions {
    * `pscat --svg-text` does. Default false.
    */
   svgText?: boolean;
+  /**
+   * With pdf: write text as selectable, searchable, extractable PDF text in
+   * embedded subset fonts (a face given to addFont is embedded too) rather
+   * than glyph outlines, as `pscat --pdf-text` does. Default false.
+   */
+  pdfText?: boolean;
 }
 
 export interface FrameOptions extends PageOptions {
