@@ -247,11 +247,11 @@ fn an_uncaught_errordict_handler_is_reported_under_its_own_name() {
     );
 }
 
-/// The reported name survives the idiom the issue was found with: catch
-/// a real error, then raise it again through errordict. The failed
-/// operand stack is not restored (docs/dev/HANDOFF.md), so the handler finds it
-/// empty and falls back to the command `$error` already holds, where
-/// Ghostscript would die with an unrecoverable stackunderflow.
+/// The idiom the issue was found with: catch a real error, then raise it
+/// again through errordict. The failed operator's operands are back on the
+/// stack (#1047), so the handler takes the top one, `5`, as the offending
+/// command, as Ghostscript does (`Error: /rangecheck in 5`, gs 10.07.1).
+/// A re-raise that wants `get` pushes `$error /command get` first.
 #[test]
 fn an_errordict_re_raise_after_a_catch_keeps_the_name_and_command() {
     let mut it = Interp::new();
@@ -264,8 +264,8 @@ fn an_errordict_re_raise_after_a_catch_keeps_the_name_and_command() {
     assert_eq!(e, PsError::Rangecheck);
     let report = it.error_report(&e);
     assert!(
-        report.contains("rangecheck") && report.contains("OffendingCommand: get"),
-        "a re-raise must keep rangecheck and get, got {report}"
+        report.contains("rangecheck") && report.contains("OffendingCommand: 5;"),
+        "a re-raise must keep rangecheck and take 5, got {report}"
     );
     // The handler's lookup is no longer an error of its own: both
     // spellings of the guard from lib/paintkit.ps find it.

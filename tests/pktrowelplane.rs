@@ -437,7 +437,8 @@ fn a_row_error_that_is_not_undefined_is_raised_again_under_its_name() {
         ),
     );
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(stack[stack.len() - 2..], ["/rangecheck", "get"]);
+    // The operator itself, as gs stores it (#1047).
+    assert_eq!(stack[stack.len() - 2..], ["/rangecheck", "--get--"]);
     let mut it = fresh(100, 100);
     let src = format!("{TRI_PAGE} << /Width 12 /Pressure {{ pop [1] 5 get }} >> pktrowelplane");
     let e = it.run_str(&src).unwrap_err();

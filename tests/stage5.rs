@@ -164,7 +164,8 @@ fn stopped_catches_stop_and_errors() {
     assert_eq!(eval("{1 2 add} stopped"), ["3", "false"]);
     assert_eq!(eval("{1 stop 2} stopped"), ["1", "true"]);
     // A genuine error is caught the same way...
-    assert_eq!(eval("{1 0 div} stopped"), ["true"]);
+    // The failed operator's operands stay, as in Ghostscript (#1047).
+    assert_eq!(eval("{1 0 div} stopped"), ["1", "0", "true"]);
     assert_eq!(eval("{undefined_thing} stopped"), ["true"]);
     // ...and execution continues afterward.
     assert_eq!(eval("{frob} stopped pop 40 2 add"), ["42"]);
@@ -173,7 +174,7 @@ fn stopped_catches_stop_and_errors() {
     // $error records what happened.
     assert_eq!(
         eval("{1 0 div} stopped pop $error /errorname get"),
-        ["/undefinedresult"]
+        ["1", "0", "/undefinedresult"]
     );
     assert_eq!(
         eval("{frobnicate} stopped pop $error /command get"),
@@ -182,7 +183,7 @@ fn stopped_catches_stop_and_errors() {
     // newerror flips only when an error is actually caught.
     assert_eq!(
         eval("$error /newerror get {1 0 div} stopped pop $error /newerror get"),
-        ["false", "true"]
+        ["false", "1", "0", "true"]
     );
 }
 
@@ -261,7 +262,7 @@ fn ascii85_string_literals() {
 fn handleerror_reports_and_resets() {
     assert_eq!(
         eval("{1 0 div} stopped pop handleerror $error /newerror get"),
-        ["false"]
+        ["1", "0", "false"]
     );
 }
 

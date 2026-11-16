@@ -541,6 +541,12 @@ library, called from your program, reports your program's line that called it.
 `%5D`, `%0A`, `%0D`). `--pstack-on-error`
 adds the operand stack to the report.
 
+`OffendingCommand` is the operator that failed, also when it ran inside a
+procedure (`curveto`, not the procedure that called it). As in Ghostscript, a
+failed operator leaves its operands on the stack as they were before it ran,
+so the stack `--pstack-on-error` shows, or that a program sees after
+`stopped`, still holds them, and `$error /command` is the operator itself.
+
 ## Which pscat is running
 
 `product` returns `(pscat)` and `version` the release, for example

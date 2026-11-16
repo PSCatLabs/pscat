@@ -1879,7 +1879,7 @@ impl Interp {
                     };
                     // Any object can be there: an errordict handler
                     // stores the one it was run on (issue #372).
-                    let cmd = d.get("command").map(|o| o.cvs_text());
+                    let cmd = d.get("command");
                     (flag, name, cmd)
                 }
                 _ => (false, None, None),
@@ -1893,7 +1893,8 @@ impl Interp {
             return None;
         }
         let name = errorname?;
-        let rebuilt = PsError::from_name(&name, command.clone())?;
+        let text = command.as_ref().map(Object::cvs_text);
+        let rebuilt = PsError::from_name(&name, text.clone())?;
         // Rebuilt from `$error` for everything `$error` can express,
         // which is everything but `syntaxerror`'s detail — matching the
         // cache on the name alone is not enough, since two different
@@ -1903,9 +1904,12 @@ impl Interp {
             (PsError::Syntax(_), Some(cached @ PsError::Syntax(_))) => cached.clone(),
             _ => rebuilt,
         };
-        if let Some(c) = command {
+        if let Some(c) = text {
             self.last_name = Some(crate::name::intern(&c).id());
         }
+        // `stop` raises this error: it stays the recorded command's, not
+        // `stop`'s (#1047).
+        self.error_command = command;
         Some(err)
     }
 
@@ -3371,20 +3375,19 @@ impl Interp {
         outer: usize,
     ) -> PsError {
         self.ostack.truncate(self.op_low);
-        let n = self.op_saved;
-        let mut objs = std::mem::take(&mut self.op_objs).into_iter();
-        let mut back = Vec::with_capacity(n);
-        for i in 0..n {
+        // The ledger is topmost first, so it goes back from its end, and
+        // the copies come off the end of `op_objs`, which is in the same
+        // order. Nothing is allocated: the stack held all of these before.
+        for i in (0..self.op_saved).rev() {
             let tag = self.op_tags.get(i).copied().unwrap_or(TAG_OBJ);
             let o = if tag & TAG_OBJ != 0 {
-                objs.next()
+                self.op_objs.pop()
             } else {
                 Some(ledger_value(self.op_bits[i], tag))
             };
-            back.extend(o);
+            self.ostack.extend(o);
         }
-        // Topmost first in the ledger: the deepest goes back first.
-        self.ostack.extend(back.into_iter().rev());
+        self.op_objs.clear();
         self.op_saved = 0;
         self.op_low = outer.min(self.ostack.len());
         self.blame_op(e, func, name)
@@ -4104,6 +4107,58 @@ mod tests {
         let mut it = Interp::new();
         it.run_str("/foo").expect("literal name");
         assert_eq!(it.pop().expect("name").repr(), "/foo");
+    }
+
+    fn stack_reprs(it: &Interp) -> Vec<String> {
+        it.operand_stack().iter().map(Object::repr).collect()
+    }
+
+    /// Pops twelve operands (past the ledger's slots), pushes and pops a
+    /// value of its own, then fails.
+    fn pop_twelve_then_fail(it: &mut Interp) -> Result<(), PsError> {
+        for _ in 0..12 {
+            it.pop()?;
+        }
+        it.push(Object::int(-1));
+        it.pop()?;
+        it.push(Object::int(-2));
+        Err(PsError::Rangecheck)
+    }
+
+    /// The operand ledger (#1047) puts back operands past its fixed slots
+    /// too, of every kind, in order, and drops what the operator pushed.
+    #[test]
+    fn a_failed_operator_gives_back_more_operands_than_the_ledger_slots() {
+        let mut it = Interp::new();
+        it.run_str("0 1 2.5 (s) /n [7] true null 8 9 10 11 12")
+            .expect("operands");
+        let before = stack_reprs(&it);
+        let done = it.run_op(pop_twelve_then_fail, "t");
+        assert!(matches!(done, Err(PsError::Rangecheck)));
+        assert_eq!(stack_reprs(&it), before);
+        assert_eq!((it.op_saved, it.op_objs.len(), it.op_low), (0, 0, 0));
+    }
+
+    /// An operator run from inside another (`exec` of an operator object)
+    /// gives back its own operands; the outer one's are spent.
+    #[test]
+    fn an_operator_run_by_exec_gives_back_only_its_own_operands() {
+        let mut it = Interp::new();
+        it.run_str("77 { 1 (a) /add load exec } stopped")
+            .expect("program");
+        assert_eq!(stack_reprs(&it), ["77", "1", "(a)", "true"]);
+        assert_eq!((it.op_saved, it.op_low), (0, 0));
+    }
+
+    /// Outside an operator a pop records nothing (a host calling `pop`).
+    #[test]
+    fn a_pop_outside_an_operator_records_nothing() {
+        let mut it = Interp::new();
+        it.run_str("1 (a) [2]").expect("operands");
+        for _ in 0..3 {
+            it.pop().expect("operand");
+        }
+        assert_eq!((it.op_saved, it.op_objs.len()), (0, 0));
     }
 
     #[test]

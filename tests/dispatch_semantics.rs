@@ -40,49 +40,48 @@ fn uncaught(src: &str) -> String {
 
 /// The cases: body text, then what `caught` gives for it unbound, then
 /// bound (and in tail position, which matches bound). The body runs after
-/// `0 /pre { } def pre`. Unbound, the offending command is the failing
-/// operator's own name; bound, an operator fetched as a fn pointer does not
-/// update it, so it stays `pre` (or the last name executed, like `true`).
+/// `0 /pre { } def pre`. Since #1047 a failed operator leaves its operands
+/// and is the offending command (the operator object) in all three shapes,
+/// as in Ghostscript; before, a bound operator was reported as `pre`.
 /// Pinned as it is: a fast path must not change either.
 const STEP_CAP_NEED: u64 = 806;
 
 const CASES: &[(&str, &str, &str)] = &[
-    // Arithmetic: operands come off one at a time, each checked as it is
-    // popped, so a failure leaves the stack partly consumed.
+    // Arithmetic: a failure leaves the operands where they were.
     (
         "1 (a) add",
-        "0 1 /typecheck add true",
-        "0 1 /typecheck pre true",
+        "0 1 (a) /typecheck --add-- true",
+        "0 1 (a) /typecheck --add-- true",
     ),
     (
         "(a) 1 add",
-        "0 /typecheck add true",
-        "0 /typecheck pre true",
+        "0 (a) 1 /typecheck --add-- true",
+        "0 (a) 1 /typecheck --add-- true",
     ),
     (
         "clear 1 add",
-        "/stackunderflow add true",
-        "/stackunderflow pre true",
+        "1 /stackunderflow --add-- true",
+        "1 /stackunderflow --add-- true",
     ),
     (
         "clear 2 add",
-        "/stackunderflow add true",
-        "/stackunderflow pre true",
+        "2 /stackunderflow --add-- true",
+        "2 /stackunderflow --add-- true",
     ),
     (
         "clear add",
-        "/stackunderflow add true",
-        "/stackunderflow pre true",
+        "/stackunderflow --add-- true",
+        "/stackunderflow --add-- true",
     ),
     (
         "1 0 div",
-        "0 /undefinedresult div true",
-        "0 /undefinedresult pre true",
+        "0 1 0 /undefinedresult --div-- true",
+        "0 1 0 /undefinedresult --div-- true",
     ),
     (
         "1 0.0 div",
-        "0 /undefinedresult div true",
-        "0 /undefinedresult pre true",
+        "0 1 0.0 /undefinedresult --div-- true",
+        "0 1 0.0 /undefinedresult --div-- true",
     ),
     ("1.5 2 div", "0 0.75 false", "0 0.75 false"),
     ("7 2 div", "0 3.5 false", "0 3.5 false"),
@@ -106,29 +105,29 @@ const CASES: &[(&str, &str, &str)] = &[
     ("2.5 2 mul", "0 5.0 false", "0 5.0 false"),
     (
         "true 1 add",
-        "0 /typecheck add true",
-        "0 /typecheck true true",
+        "0 true 1 /typecheck --add-- true",
+        "0 true 1 /typecheck --add-- true",
     ),
     (
         "1 null mul",
-        "0 1 /typecheck mul true",
-        "0 1 /typecheck null true",
+        "0 1 null /typecheck --mul-- true",
+        "0 1 null /typecheck --mul-- true",
     ),
     (
         "7 0 idiv",
-        "0 /undefinedresult idiv true",
-        "0 /undefinedresult pre true",
+        "0 7 0 /undefinedresult --idiv-- true",
+        "0 7 0 /undefinedresult --idiv-- true",
     ),
     (
         "7 0 mod",
-        "0 /undefinedresult mod true",
-        "0 /undefinedresult pre true",
+        "0 7 0 /undefinedresult --mod-- true",
+        "0 7 0 /undefinedresult --mod-- true",
     ),
     // Edge values the number fast paths must treat as the general path does.
     (
         "1e308 10 mul dup sub 1 lt",
-        "0 /undefinedresult lt true",
-        "0 /undefinedresult pre true",
+        "0 NaN 1 /undefinedresult --lt-- true",
+        "0 NaN 1 /undefinedresult --lt-- true",
     ),
     (
         "1e308 10 mul dup sub dup eq",
@@ -138,8 +137,8 @@ const CASES: &[(&str, &str, &str)] = &[
     ("-0.0 0 eq", "0 true false", "0 true false"),
     (
         "1 -0.0 div",
-        "0 /undefinedresult div true",
-        "0 /undefinedresult pre true",
+        "0 1 -0.0 /undefinedresult --div-- true",
+        "0 1 -0.0 /undefinedresult --div-- true",
     ),
     ("3 -0.0 mul", "0 -0.0 false", "0 -0.0 false"),
     ("1 cvx 2 add xcheck", "0 false false", "0 false false"),
@@ -155,50 +154,58 @@ const CASES: &[(&str, &str, &str)] = &[
         "0 true true true true false",
     ),
     ("(a) (b) lt", "0 true false", "0 true false"),
-    ("1 (a) lt", "0 /typecheck lt true", "0 /typecheck pre true"),
-    ("(a) 1 gt", "0 /typecheck gt true", "0 /typecheck pre true"),
+    (
+        "1 (a) lt",
+        "0 1 (a) /typecheck --lt-- true",
+        "0 1 (a) /typecheck --lt-- true",
+    ),
+    (
+        "(a) 1 gt",
+        "0 (a) 1 /typecheck --gt-- true",
+        "0 (a) 1 /typecheck --gt-- true",
+    ),
     (
         "clear 1 lt",
-        "/stackunderflow lt true",
-        "/stackunderflow pre true",
+        "1 /stackunderflow --lt-- true",
+        "1 /stackunderflow --lt-- true",
     ),
     (
         "clear lt",
-        "/stackunderflow lt true",
-        "/stackunderflow pre true",
+        "/stackunderflow --lt-- true",
+        "/stackunderflow --lt-- true",
     ),
     ("1 1.0 eq 1 2 ne", "0 true true false", "0 true true false"),
     // Stack operators.
     (
         "clear pop",
-        "/stackunderflow pop true",
-        "/stackunderflow pre true",
+        "/stackunderflow --pop-- true",
+        "/stackunderflow --pop-- true",
     ),
     (
         "clear 1 exch",
-        "1 /stackunderflow exch true",
-        "1 /stackunderflow pre true",
+        "1 /stackunderflow --exch-- true",
+        "1 /stackunderflow --exch-- true",
     ),
     (
         "clear dup",
-        "/stackunderflow dup true",
-        "/stackunderflow pre true",
+        "/stackunderflow --dup-- true",
+        "/stackunderflow --dup-- true",
     ),
     ("1 2 3 1 index", "0 1 2 3 2 false", "0 1 2 3 2 false"),
     (
         "1 2 3 9 index",
-        "0 1 2 3 /stackunderflow index true",
-        "0 1 2 3 /stackunderflow pre true",
+        "0 1 2 3 9 /stackunderflow --index-- true",
+        "0 1 2 3 9 /stackunderflow --index-- true",
     ),
     (
         "1 2 3 -1 index",
-        "0 1 2 3 /rangecheck index true",
-        "0 1 2 3 /rangecheck pre true",
+        "0 1 2 3 -1 /rangecheck --index-- true",
+        "0 1 2 3 -1 /rangecheck --index-- true",
     ),
     (
         "1 2 (x) index",
-        "0 1 2 /typecheck index true",
-        "0 1 2 /typecheck pre true",
+        "0 1 2 (x) /typecheck --index-- true",
+        "0 1 2 (x) /typecheck --index-- true",
     ),
     ("1 2 exch pop", "0 2 false", "0 2 false"),
     // Literals of every kind come through the procedure fetch.
@@ -216,8 +223,8 @@ const CASES: &[(&str, &str, &str)] = &[
     ("true { 1 } if", "0 1 false", "0 1 false"),
     (
         "1 { 1 } if",
-        "0 /typecheck if true",
-        "0 /typecheck pre true",
+        "0 1 {1} /typecheck --if-- true",
+        "0 1 {1} /typecheck --if-- true",
     ),
     ("/v 3 def v v mul", "0 9 false", "0 9 false"),
     ("/f { 2 mul } def 5 f f", "0 20 false", "0 20 false"),
@@ -233,18 +240,18 @@ const CASES: &[(&str, &str, &str)] = &[
     ("true { false { 1 } if 2 } if", "0 2 false", "0 2 false"),
     (
         "clear { 5 } if",
-        "/stackunderflow if true",
-        "/stackunderflow pre true",
+        "{5} /stackunderflow --if-- true",
+        "{5} /stackunderflow --if-- true",
     ),
     (
         "(a) { 5 } if",
-        "0 /typecheck if true",
-        "0 /typecheck pre true",
+        "0 (a) {5} /typecheck --if-- true",
+        "0 (a) {5} /typecheck --if-- true",
     ),
     (
         "null { 5 } if",
-        "0 /typecheck if true",
-        "0 /typecheck null true",
+        "0 null {5} /typecheck --if-- true",
+        "0 null {5} /typecheck --if-- true",
     ),
     ("true { 1 } { 2 } ifelse", "0 1 false", "0 1 false"),
     ("false { 1 } { 2 } ifelse", "0 2 false", "0 2 false"),
@@ -252,25 +259,29 @@ const CASES: &[(&str, &str, &str)] = &[
     ("false { 1 } { } ifelse", "0 false", "0 false"),
     (
         "1 { 1 } { 2 } ifelse",
-        "0 /typecheck ifelse true",
-        "0 /typecheck pre true",
+        "0 1 {1} {2} /typecheck --ifelse-- true",
+        "0 1 {1} {2} /typecheck --ifelse-- true",
     ),
     (
         "clear { 1 } { 2 } ifelse",
-        "/stackunderflow ifelse true",
-        "/stackunderflow pre true",
+        "{1} {2} /stackunderflow --ifelse-- true",
+        "{1} {2} /stackunderflow --ifelse-- true",
     ),
-    ("true { 1 } 2 ifelse", "0 1 false", "0 1 false"),
+    (
+        "true { 1 } 2 ifelse",
+        "0 true {1} 2 /typecheck --ifelse-- true",
+        "0 true {1} 2 /typecheck --ifelse-- true",
+    ),
     // The true branch fails: its own error, raised inside the branch.
     (
         "true { 1 (a) add } if",
-        "0 1 /typecheck add true",
-        "0 1 /typecheck true true",
+        "0 1 (a) /typecheck --add-- true",
+        "0 1 (a) /typecheck --add-- true",
     ),
     (
         "false { 1 } { (a) 1 sub } ifelse",
-        "0 /typecheck sub true",
-        "0 /typecheck false true",
+        "0 (a) 1 /typecheck --sub-- true",
+        "0 (a) 1 /typecheck --sub-- true",
     ),
     // A redefined `if` or `ifelse` is what an unbound body runs; a bound
     // one already holds the operator.
@@ -292,8 +303,8 @@ const CASES: &[(&str, &str, &str)] = &[
     ("5 /v exch def 6 /v exch def v", "0 6 false", "0 6 false"),
     (
         "clear /v exch def",
-        "/v /stackunderflow exch true",
-        "/v /stackunderflow pre true",
+        "/v /stackunderflow --exch-- true",
+        "/v /stackunderflow --exch-- true",
     ),
     (
         "/v 1 def save 5 /v exch def restore v",
@@ -352,19 +363,19 @@ fn uncaught_errors_report_the_same_command_and_keep_the_same_stack() {
     let cases: &[(&str, &str)] = &[
         (
             "/p { 1 (a) add } bind def 5 p",
-            "%%[ Error: typecheck; OffendingCommand: p; Line: 1 ]%% | 5 1",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 5 1 (a)",
         ),
         (
             "/p { 1 (a) add } def 5 p",
-            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 5 1",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 5 1 (a)",
         ),
         (
             "/p { pop pop } bind def 5 p",
-            "%%[ Error: stackunderflow; OffendingCommand: p; Line: 1 ]%% | ",
+            "%%[ Error: stackunderflow; OffendingCommand: pop; Line: 1 ]%% | ",
         ),
         (
             "/p { 1 0 div } bind def p",
-            "%%[ Error: undefinedresult; OffendingCommand: p; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "/p { 1 2 nosuch } bind def p",
@@ -372,7 +383,7 @@ fn uncaught_errors_report_the_same_command_and_keep_the_same_stack() {
         ),
         (
             "1 1 3 { 10 mul } bind for (x) 1 add",
-            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 10 20 30",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 10 20 30 (x) 1",
         ),
     ];
     let mut failures = Vec::new();
@@ -648,7 +659,7 @@ fn the_fused_paths_are_taken_where_they_apply_and_only_there() {
         // or the top level (not a procedure).
         ("{ 1 { 1 } if } stopped", 0),
         ("{ true { 1 } exec } bind exec", 0),
-        ("{ true { 1 } 2 ifelse } bind exec", 0),
+        ("{ true { 1 } 2 ifelse } bind stopped", 0),
         ("/myif /if load def { true { 9 } myif } exec", 0),
         (
             "1 dict begin /if { pop pop 7 } def { true { 1 } if } exec end",
@@ -801,63 +812,63 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "0 3 { 1 (a) add } repeat",
-        "0 1 /typecheck add true",
-        "0 1 /typecheck stopped true",
+        "0 1 (a) /typecheck --add-- true",
+        "0 1 (a) /typecheck --add-- true",
     ),
     (
         "1 1 3 { 0 div } for",
-        "/undefinedresult div true",
-        "/undefinedresult stopped true",
+        "1 0 /undefinedresult --div-- true",
+        "1 0 /undefinedresult --div-- true",
     ),
     (
         "1 1 3 { dup 2 eq { 0 div } if } for",
-        "1 /undefinedresult div true",
-        "1 /undefinedresult stopped true",
+        "1 2 0 /undefinedresult --div-- true",
+        "1 2 0 /undefinedresult --div-- true",
     ),
     (
         "[1 (a) 3] { 1 add } forall",
-        "2 /typecheck add true",
-        "2 /typecheck [ true",
+        "2 (a) 1 /typecheck --add-- true",
+        "2 (a) 1 /typecheck --add-- true",
     ),
     (
         "(ab) { pop pop } forall",
-        "/stackunderflow pop true",
-        "/stackunderflow stopped true",
+        "/stackunderflow --pop-- true",
+        "/stackunderflow --pop-- true",
     ),
     (
         "<< /a 1 >> { pop pop pop } forall",
-        "/stackunderflow pop true",
-        "/stackunderflow << true",
+        "/stackunderflow --pop-- true",
+        "/stackunderflow --pop-- true",
     ),
     (
         "0 { 1 add dup 3 eq { pop pop } if } loop",
-        "/stackunderflow pop true",
-        "/stackunderflow stopped true",
+        "/stackunderflow --pop-- true",
+        "/stackunderflow --pop-- true",
     ),
     (
         "/q { 1 1 3 { 0 div } for } def q",
-        "/undefinedresult div true",
-        "/undefinedresult q true",
+        "1 0 /undefinedresult --div-- true",
+        "1 0 /undefinedresult --div-- true",
     ),
     (
         "2 { 2 { 1 0 idiv } repeat } repeat",
-        "/undefinedresult idiv true",
-        "/undefinedresult stopped true",
+        "1 0 /undefinedresult --idiv-- true",
+        "1 0 /undefinedresult --idiv-- true",
     ),
     (
         "-1 { } repeat",
-        "/rangecheck repeat true",
-        "/rangecheck stopped true",
+        "-1 {} /rangecheck --repeat-- true",
+        "-1 {} /rangecheck --repeat-- true",
     ),
     (
         "1 (a) 3 { } for",
-        "1 /typecheck for true",
-        "1 /typecheck stopped true",
+        "1 (a) 3 {} /typecheck --for-- true",
+        "1 (a) 3 {} /typecheck --for-- true",
     ),
     (
         "5 { } forall",
-        "/typecheck forall true",
-        "/typecheck stopped true",
+        "5 {} /typecheck --forall-- true",
+        "5 {} /typecheck --forall-- true",
     ),
     ("3 { exit } stopped", "3 true false", "3 true false"),
     // An inner loop that is the outer body's last element: it runs with
@@ -879,8 +890,8 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "2 { 3 { 1 0 div } repeat } repeat",
-        "/undefinedresult div true",
-        "/undefinedresult stopped true",
+        "1 0 /undefinedresult --div-- true",
+        "1 0 /undefinedresult --div-- true",
     ),
     (
         "2 { [1 2] { 9 } forall } repeat",
@@ -920,17 +931,17 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
     (
         "/b { 1 /b load 0 2 index 1 add put } def 3 /b load repeat",
         "1 2 3 false",
-        "1 /invalidaccess stopped true",
+        "1 {1 /b --load-- 0 2 --index-- 1 --add-- --put--} 0 2 /invalidaccess --put-- true",
     ),
     (
         "/b { /b load 5 8 put 0 } def 2 /b load repeat",
         "8 8 false",
-        "/invalidaccess stopped true",
+        "{/b --load-- 5 8 --put-- 0} 5 8 /invalidaccess --put-- true",
     ),
     (
         "/a { /a load 4 7 put 1 } def 2 /a load 0 5 getinterval cvx repeat",
         "{/a load 4 7 7 1} 4 7 7 false",
-        "/invalidaccess stopped true",
+        "{/a --load-- 4 7 --put-- 1} 4 7 /invalidaccess --put-- true",
     ),
     (
         "/a [ 1 2 3 4 ] cvx def 2 /a load 1 2 getinterval repeat",
@@ -939,14 +950,14 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "/b { 1 /b load 1 [ 9 /pop load ] putinterval 2 3 } def 2 /b load repeat",
-        "1 2 3 /typecheck putinterval true",
-        "1 /invalidaccess [ true",
+        "1 2 3 1 1 [9 --pop--] /typecheck --putinterval-- true",
+        "1 {1 /b --load-- 1 [ 9 /pop --load-- --]-- --putinterval-- 2 3} 1 [9 --pop--] /invalidaccess --putinterval-- true",
     ),
     // `restore` puts back an element of the running body.
     (
         "/b { 1 pop /b load 0 get exch restore save } def save /b load 0 2 put 2 /b load repeat pop",
         "2 1 false",
-        "-save- /invalidaccess stopped true",
+        "-save- {1 --pop-- /b --load-- 0 --get-- --exch-- --restore-- --save--} 0 2 /invalidaccess --put-- true",
     ),
     (
         "/b { 1 } def 3 { /b load } repeat",
@@ -985,23 +996,23 @@ fn uncaught_errors_in_loops_report_the_same_command_and_stack() {
         ),
         (
             "1 1 3 { 0 div } for",
-            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "1 1 3 { 0 div } bind for",
-            "%%[ Error: undefinedresult; OffendingCommand: for; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "/p { 1 1 3 { 0 div } bind for } bind def p",
-            "%%[ Error: undefinedresult; OffendingCommand: p; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "[1 (a)] { 1 add } forall",
-            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 2",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 2 (a) 1",
         ),
         (
             "[1 (a)] { 1 add } bind forall",
-            "%%[ Error: typecheck; OffendingCommand: forall; Line: 1 ]%% | 2",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 2 (a) 1",
         ),
         (
             "0 { 1 add dup 3 eq { pop pop } if } loop",
@@ -1018,15 +1029,15 @@ fn uncaught_errors_in_loops_report_the_same_command_and_stack() {
         ),
         (
             "2 { 3 { 1 0 div } repeat } repeat",
-            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "2 { 3 { 1 0 div } bind repeat } bind repeat",
-            "%%[ Error: undefinedresult; OffendingCommand: repeat; Line: 1 ]%% | ",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | 1 0",
         ),
         (
             "1 1 3 { pop exit } for 1 (a) add",
-            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 1",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 1 (a)",
         ),
     ];
     let mut failures = Vec::new();
