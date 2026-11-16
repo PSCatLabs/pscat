@@ -84,3 +84,18 @@ fn a_document_that_cannot_be_packed_inside_the_limit_is_refused() {
     assert!(ok, "{stderr}");
     assert!(file.is_some_and(|f| f.ends_with(b"%%EOF\n")));
 }
+
+#[test]
+fn a_run_a_limit_stopped_still_writes_its_page() {
+    // The run is stopped at its cap, so the writer works in the margin: the
+    // page drawn before the stop is written, as it was before this limit.
+    let src = "0.2 0.4 0.8 setrgbcolor 50 50 300 300 rectfill \
+               /keep 100000 array def 0 1 99999 { keep exch 100000 array put } for";
+    let (ok, stderr, file) = run(src, 50);
+    assert!(!ok, "{stderr}");
+    assert!(
+        stderr.contains("limitexceeded (memory); OffendingCommand: array"),
+        "{stderr}"
+    );
+    assert!(file.is_some_and(|f| f.ends_with(b"%%EOF\n")), "{stderr}");
+}

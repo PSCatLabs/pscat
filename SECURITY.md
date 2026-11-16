@@ -375,6 +375,10 @@ command line and in the library, and on by default in the MCP server:
   (`pdf::WRITE_MARGIN`: a run a limit stopped is already at its cap, and its
   page is still written) is refused before the allocation with
   `limitexceeded (memory)`; the CLI then leaves no file. A
+  (The writer's room is the cap plus that margin: a run stopped because the
+  recorded page text itself filled the cap can have a packed page larger than
+  the margin, and then its partial PDF is refused where it used to be
+  written; a run stopped by anything else still writes its page.) A
   library caller gets that from `Interp::write_pdf` and
   `Interp::pdf_document_limited`; `Interp::pdf_document` keeps its signature
   and is not limited, as it cannot report a refusal.

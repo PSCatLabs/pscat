@@ -1031,7 +1031,7 @@ Q",
     pub fn finish(&self, trailing_art: bool) -> Vec<u8> {
         // No budget, so nothing refuses and a `Vec` sink cannot fail.
         self.finish_limited(trailing_art, LimitProbe::NONE)
-            .unwrap_or_default()
+            .expect("an unlimited write to a Vec cannot fail")
     }
 
     /// The document as a `Vec`, refused with [`PdfWriteError::Memory`]

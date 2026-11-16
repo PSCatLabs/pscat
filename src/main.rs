@@ -1219,7 +1219,7 @@ fn write_pdf_file(interp: &Interp, path: &str) -> bool {
         // Recording was never on, so there is no document: as before.
         None => {
             drop(sink);
-            let _ = std::fs::remove_file(path);
+            remove_partial(path);
             return true;
         }
         Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
@@ -1234,7 +1234,7 @@ fn write_pdf_file(interp: &Interp, path: &str) -> bool {
         Err(e) => {
             // A partial document is worse than none: a reader of the file
             // cannot tell it from a finished one until it fails to open.
-            let _ = std::fs::remove_file(path);
+            remove_partial(path);
             match e {
                 pscat::pdf::PdfWriteError::Memory => {
                     let limit = pscat::Limit::Memory;
@@ -1248,6 +1248,15 @@ fn write_pdf_file(interp: &Interp, path: &str) -> bool {
             }
             false
         }
+    }
+}
+
+/// Take away the file `--pdf` made and could not finish, if it is a plain
+/// file: `--pdf /dev/stdout` and the like name something that is not ours to
+/// delete.
+fn remove_partial(path: &str) {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+        let _ = std::fs::remove_file(path);
     }
 }
 
