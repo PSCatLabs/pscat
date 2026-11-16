@@ -521,17 +521,23 @@ without the limits above:
   that allocates and drops it again within 512 steps passes. Measured: a
   100,000-element procedure literal that is scanned and then `pop`ped (4 MB)
   runs clean under `--max-memory 1`; kept with `def`, it fails.
-- **A step limit is approximate by up to a slice.** Objects are held to the cap
-  (the inner loop is given no more steps than the program has left). Loop
-  iterations are charged in blocks of 1024, and a program that ends inside its
-  last slice is not charged for that slice's objects, so a finishing program
-  can pass the cap by under one slice (4096 steps, 512 with a time or memory
-  limit) plus 1023 loop iterations: `9 {} repeat 1 2 3` runs clean under
-  `--max-steps 10`. A program that does not finish is stopped within a slice,
-  and within 1024 iterations inside a loop. The count is not kept at all when no
-  limit is set. Counting every step exactly means returning the executed count
-  from the interpreter's inner loop; a version that did cost 1.9% in
-  instructions retired on `fillkit.ps`.
+- **A step limit is counted per slice, and a slice that overruns is reported
+  (#1213).** Objects are held to the cap (the inner loop is given no more
+  steps than the program has left). Every slice charges what it ran when it
+  ends, whether it ended in more work, a finish or an error, and loop
+  iterations are charged with it, so a program that finishes or fails past the
+  cap fails with `limitexceeded (steps)` (an error it hit on the way is
+  replaced by the cap, the cause) and `9 {} repeat 1 2 3` is stopped under
+  `--max-steps 10`. A finishing program may still run up to one slice (4096
+  steps, 512 with a time or memory limit) before the limit is raised, as a
+  program that does not finish may. An operator that looks at the limits from
+  inside (`flattenpath`, `fill`, a whole-file read) is held to the steps left
+  now, counting the objects its own slice has run; a decode filter is held to
+  the figure at the start of the slice, and the end-of-slice check reports
+  what that left. The count is not kept at all when no limit is set. It costs
+  the inner loop nothing: the steps a slice has run are `slice_budget -
+  slice_left`, which the loop keeps anyway (returning an executed count from
+  the loop cost 1.9% in instructions retired on `fillkit.ps`).
 - **No limit on output volume from `=` and `print`**, nor on writes to
   `%stdout` and `%stderr` (printing, and counted the same): on the command
   line a program can print as much as it likes with them, bounded only by

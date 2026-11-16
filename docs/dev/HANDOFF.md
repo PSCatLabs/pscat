@@ -1533,6 +1533,19 @@ renders eight examples in both and compares block-downsampled output).
     bulk through `PsFile::with_input` and consumes only what the inflater
     took, so the source still stops at the byte after the stream; see
     `notes/1187-flatedecode-bulk-decode-and-limits.md`.
+  - Step accounting inside a slice (#1213): `step_n_inner` keeps `slice_left`;
+    `slice_budget - slice_left` is the steps the running slice has run, and
+    `Interp::steps_so_far()` adds them (and the loop iterations `tick` has not
+    charged) to `steps_used`. `remaining_budget` / `limit_probe`, `poll_slow`,
+    `poll_read` and `poll_limits` use it, so an operator is held to the steps
+    left *now*. `after_slice` charges the slice on every exit (more, finish,
+    error; the pass that finds the program done is not a step, so those early
+    returns give `slice_left` back) and turns an ordinary error past the cap
+    into `StepsExceeded`. A new early return from the step loops must keep
+    `slice_budget - slice_left` equal to the steps that really ran. The count
+    costs the hot loop nothing (one store per slice). `DecodeBudget` still
+    holds the figure from the slice's start; the end-of-slice check reports
+    what that leaves. `notes/1213-step-limit-slice-overrun.md`.
   - The scanner asks the cap before a token's buffer grows (#1209):
     `Lexer::put` / `room` compare length to capacity and, only then, call
     the interpreter's `DecodeBudget` (`Lexer::with_limits`: every scanner the

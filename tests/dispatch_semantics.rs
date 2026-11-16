@@ -44,7 +44,7 @@ fn uncaught(src: &str) -> String {
 /// operator's own name; bound, an operator fetched as a fn pointer does not
 /// update it, so it stays `pre` (or the last name executed, like `true`).
 /// Pinned as it is: a fast path must not change either.
-const STEP_CAP_NEED: u64 = 756;
+const STEP_CAP_NEED: u64 = 806;
 
 const CASES: &[(&str, &str, &str)] = &[
     // Arithmetic: operands come off one at a time, each checked as it is
@@ -503,7 +503,9 @@ fn the_step_cap_counts_every_element_of_a_fused_run() {
             .expect("limits apply");
         it.run_str(src)
     };
-    // Pinned on the tree before #864: the smallest cap the program passes.
+    // The smallest cap the program passes: its objects and iterations, as
+    // on the tree before #864 (re-pinned in #1213, which counts the iterations
+    // of a program that fits one slice as well).
     let need = STEP_CAP_NEED;
     assert_eq!(run(need), Ok(()));
     assert_eq!(run(need - 1), Err(PsError::StepsExceeded));
@@ -1126,19 +1128,22 @@ fn steps_needed(src: &str) -> u64 {
 
 #[test]
 fn the_step_cap_counts_loops_as_before() {
-    // Pinned on the tree before #875. A loop iteration counts as a step
-    // of its own under limits, on top of its body's elements.
+    // A loop iteration counts as a step of its own under limits, on top of
+    // its body's elements. Pinned on the tree before #875, and re-pinned in
+    // #1213: the last slice of a program is counted now, so a program that
+    // fits one slice needs its objects as well as its iterations (before,
+    // only the iterations, the objects of a short run going unreported).
     let cases: &[(&str, u64)] = &[
-        ("5000 { } repeat", 5000),
-        ("0 1 1 3000 { add } for pop", 3007),
-        ("0 1 1 3000 { add } bind for pop", 3008),
-        ("0 { 1 add dup 2500 eq { exit } if } bind loop pop", 19846),
-        ("2000 array { pop } forall", 2004),
-        ("1500 string { pop } bind forall", 1505),
-        ("50 { 50 { 1 pop } repeat } repeat", 7180),
+        ("5000 { } repeat", 5007),
+        ("0 1 1 3000 { add } for pop", 6007),
+        ("0 1 1 3000 { add } bind for pop", 6008),
+        ("0 { 1 add dup 2500 eq { exit } if } bind loop pop", 20006),
+        ("2000 array { pop } forall", 4004),
+        ("1500 string { pop } bind forall", 3005),
+        ("50 { 50 { 1 pop } repeat } repeat", 7703),
         (
             "1 1 600 { dup 2 mod 0 eq { pop } { 3 mul pop } ifelse } bind for",
-            6415,
+            6606,
         ),
     ];
     let mut failures = Vec::new();

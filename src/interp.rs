@@ -362,6 +362,11 @@ pub struct Interp {
     /// it on entry (`step_n_timed` to zero, so it never fuses); nothing
     /// runs a step loop from inside an operator, so it is not reentered.
     slice_left: usize,
+    /// The budget of the running slice (#1213): `slice_budget - slice_left`
+    /// is the steps it has run, which the step cap counts the moment an
+    /// operator looks at it, not at the end of the slice. Equal to
+    /// `slice_left` between slices, so it then reads zero.
+    slice_budget: usize,
     /// The error most recently caught by a `stopped`, kept so that a
     /// `stop` which reaches the top level can report it the way
     /// Ghostscript's outermost job wrapper does (issue #142).
@@ -687,6 +692,7 @@ impl Interp {
             ifelse_id: crate::name::intern("ifelse").id(),
             fused_steps: 0,
             slice_left: 0,
+            slice_budget: 0,
             caught_error: None,
             error_command: None,
             last_line: None,
@@ -781,6 +787,7 @@ impl Interp {
             .set_memory_budget(limits.max_memory.map(|max| (self.mem_base, max)));
         self.steps_used = 0;
         self.poll_in = POLL_PERIOD;
+        self.slice_budget = self.slice_left;
         self.run_clock = crate::clock::Clock::start();
         self.decode_budget.reset(self.limit_probe());
         self.refresh_frame_probes();
@@ -1023,12 +1030,32 @@ impl Interp {
         let steps = self
             .limits
             .max_steps
-            .map(|m| m.saturating_sub(self.steps_used));
+            .map(|m| m.saturating_sub(self.steps_so_far()));
         let deadline = self.limits.max_time.map(|t| {
             let left = (t.as_millis() as i64 - self.run_clock.elapsed_ms()).max(0) as u64;
             crate::clock::Clock::mono_ns().saturating_add(left.saturating_mul(1_000_000))
         });
         (steps, deadline)
+    }
+
+    /// Steps the program has run: the count taken at the end of the last
+    /// slice, and the running slice's own so far (#1213). Its objects are
+    /// `slice_budget - slice_left`, which the step loop keeps anyway, and
+    /// its loop iterations `tick` has not charged yet are `poll_in` short of
+    /// a period, so counting them costs the step loop nothing.
+    fn steps_so_far(&self) -> u64 {
+        let objects = self.slice_budget.saturating_sub(self.slice_left) as u64;
+        let ticks = u64::from(POLL_PERIOD - self.poll_in);
+        self.steps_used
+            .saturating_add(objects)
+            .saturating_add(ticks)
+    }
+
+    /// The step cap is passed, counting the running slice's steps so far.
+    fn steps_over_cap(&self) -> bool {
+        self.limits
+            .max_steps
+            .is_some_and(|max| self.steps_so_far() > max)
     }
 
     /// The limits for a loop that cannot borrow the interpreter (#1176,
@@ -1076,8 +1103,11 @@ impl Interp {
     /// Interpreter steps the current program has run, counted only while
     /// some [`Limits`] are set (otherwise 0). A KiB read by `file` or `run`
     /// counts as one step. The count moves in slices (up
-    /// to 4096 steps, 512 with a time or memory limit), so it can trail the
-    /// true figure by a slice.
+    /// to 4096 steps, 512 with a time or memory limit); a slice's steps are
+    /// added when it ends, whether it ended in more work, a finish or an
+    /// error (#1213), so the figure is the same however the program is
+    /// sliced. Between slices it is exact; inside an operator, the operator
+    /// sees the steps its own slice has run too.
     pub fn steps_used(&self) -> u64 {
         self.steps_used
     }
@@ -1097,6 +1127,7 @@ impl Interp {
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
+            self.slice_budget = self.slice_left;
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
             self.refresh_frame_probes();
@@ -1137,7 +1168,7 @@ impl Interp {
             self.step_n_inner(budget)
         };
         if limited {
-            result = self.after_slice(result, budget);
+            result = self.after_slice(result);
         }
         if result.is_err() || self.quit_requested {
             // Every uncaught error, limits included, passes here with the
@@ -1173,29 +1204,55 @@ impl Interp {
         Ok(n)
     }
 
-    /// After a slice under `Limits`: count the loop iterations `tick` has not
-    /// charged yet, so a program that finishes inside a poll period is held
-    /// to the step cap too; add the slice's steps; and look at the clock and
-    /// the heap again, so a program that passes the time or memory cap in its
-    /// last slice is reported, not let through as a clean run.
+    /// After a slice under `Limits`: charge what the slice ran (#1213) and
+    /// the loop iterations `tick` has not charged yet, whether it ended in
+    /// more work, a finish or an error, so a program that finishes inside a
+    /// slice is held to the step cap too and the count is the same however
+    /// the program is sliced; then look at the steps, the clock and the heap
+    /// again, so a program that passes a cap in its last slice is reported,
+    /// not let through as a clean run. A slice that errors past the step cap
+    /// reports the cap, not the error it hit on the way: the overrun is the
+    /// root cause, and an error from a later object would hide it.
     #[cold]
     #[inline(never)]
-    fn after_slice(&mut self, result: Result<bool, PsError>, n: usize) -> Result<bool, PsError> {
-        let more = result?;
+    fn after_slice(&mut self, result: Result<bool, PsError>) -> Result<bool, PsError> {
+        let ran = self.slice_budget.saturating_sub(self.slice_left) as u64;
+        // Between slices the running count is zero again (before anything
+        // that reads the limits below, which count it).
+        self.slice_budget = self.slice_left;
         let pending = u64::from(POLL_PERIOD - self.poll_in);
         self.poll_in = POLL_PERIOD;
-        self.steps_used = self.steps_used.saturating_add(pending);
+        self.steps_used = self.steps_used.saturating_add(pending).saturating_add(ran);
         self.sync_decode_budget();
-        if let Some(max) = self.limits.max_steps
-            && self.steps_used > max
-        {
-            return Err(PsError::StepsExceeded);
+        match result {
+            Err(e) => {
+                // An ordinary error past the cap is the cap's: see above.
+                Err(if e.limit().is_none() && self.steps_over_cap() {
+                    PsError::StepsExceeded
+                } else {
+                    e
+                })
+            }
+            Ok(more) => {
+                // A slice that ran its whole budget is held to the cap by
+                // the next `limit_budget`, which sees the steps it ran:
+                // the pass that only finds the program done is allowed, as
+                // it always was, and a host that re-arms the cap per slice
+                // (the playground) never meets its own cap in one frame.
+                let past = if more {
+                    self.limits
+                        .max_steps
+                        .is_some_and(|max| self.steps_used.saturating_sub(ran) > max)
+                } else {
+                    self.steps_over_cap()
+                };
+                if past {
+                    return Err(PsError::StepsExceeded);
+                }
+                self.check_time_and_memory()?;
+                Ok(more)
+            }
         }
-        if more {
-            self.steps_used = self.steps_used.saturating_add(n as u64);
-        }
-        self.check_time_and_memory()?;
-        Ok(more)
     }
 
     fn check_time_and_memory(&self) -> Result<(), PsError> {
@@ -1243,9 +1300,7 @@ impl Interp {
         // executes.
         self.steps_used = self.steps_used.saturating_add(u64::from(POLL_PERIOD));
         self.sync_decode_budget();
-        if let Some(max) = self.limits.max_steps
-            && self.steps_used > max
-        {
+        if self.steps_over_cap() {
             return Err(PsError::StepsExceeded);
         }
         self.check_time_and_memory()
@@ -1273,9 +1328,7 @@ impl Interp {
     pub(crate) fn poll_read(&mut self, kib: usize, will_alloc: usize) -> Result<(), PsError> {
         self.steps_used = self.steps_used.saturating_add(kib as u64);
         self.sync_decode_budget();
-        if let Some(max) = self.limits.max_steps
-            && self.steps_used > max
-        {
+        if self.steps_over_cap() {
             return Err(PsError::StepsExceeded);
         }
         if will_alloc > 0 {
@@ -1303,9 +1356,7 @@ impl Interp {
     fn poll_limits_slow(&mut self, steps: u64) -> Result<(), PsError> {
         self.steps_used = self.steps_used.saturating_add(steps);
         self.sync_decode_budget();
-        if let Some(max) = self.limits.max_steps
-            && self.steps_used > max
-        {
+        if self.steps_over_cap() {
             return Err(PsError::StepsExceeded);
         }
         self.check_time_and_memory()
@@ -1397,15 +1448,22 @@ impl Interp {
     fn step_n_timed(&mut self, budget: usize) -> Result<bool, PsError> {
         // No steps to spare: a procedure literal is pushed alone, never
         // fused, so every operator is still timed and counted on its own.
+        // `slice_budget` then counts the steps run (#1213).
         self.slice_left = 0;
+        self.slice_budget = 0;
         for _ in 0..budget {
+            self.slice_budget += 1;
             if self.quit_requested {
+                self.slice_budget -= 1;
                 return Ok(false);
             }
             let mut step = self.proc_step::<true>();
             if let ProcStep::Other = step {
                 match self.next_item() {
-                    Ok(None) => return Ok(false),
+                    Ok(None) => {
+                        self.slice_budget -= 1;
+                        return Ok(false);
+                    }
                     Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
@@ -1470,9 +1528,12 @@ impl Interp {
         // An explicit count of the steps left, so a fused run of several
         // elements (#864) can charge each of them.
         self.slice_left = budget;
+        self.slice_budget = budget;
         while self.slice_left > 0 {
             self.slice_left -= 1;
             if self.quit_requested {
+                // Nothing ran: not a step (#1213).
+                self.slice_left += 1;
                 return Ok(false);
             }
             // A procedure element (nearly every step of a bound library)
@@ -1486,7 +1547,12 @@ impl Interp {
                 ProcStep::Name(id) => self.execute_name(id),
                 ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
-                    Ok(None) => return Ok(false),
+                    Ok(None) => {
+                        // The pass that finds the program done runs no
+                        // object: not a step (#1213).
+                        self.slice_left += 1;
+                        return Ok(false);
+                    }
                     Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
                     Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => func(self),
