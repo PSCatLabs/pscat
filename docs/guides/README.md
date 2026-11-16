@@ -17,6 +17,9 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   quick start.
 - [pscat for AI agents](agents.md): the skills, the `pscat-mcp` server and how
   to register it.
+- [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md): what
+  ChatGPT accepts for a remote server (and for its authentication), the
+  connector setup, and the `--remote` plugin ZIP.
 - [pscat as a Rust library](library.md): the crate's API, its `window`
   feature, the supported builds and the stability policy.
 
