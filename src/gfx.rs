@@ -3820,7 +3820,12 @@ impl Gfx {
         }
         let mut first = true;
         for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
-            let Some((one, done)) = Self::fitted_coverage(&link.path, link.rule, (w, h), probe)?
+            // The links before this one have used steps the probe still
+            // counts as left (#1235): a long chain must not get the whole
+            // budget a link at a time.
+            let mut rest = *probe;
+            rest.steps_left = probe.steps_left.map(|s| s.saturating_sub(work / 1024));
+            let Some((one, done)) = Self::fitted_coverage(&link.path, link.rule, (w, h), &rest)?
             else {
                 return Ok((None, work));
             };
@@ -3839,6 +3844,9 @@ impl Gfx {
                 parent: Some(node),
             });
         }
+        // The whole chain's work against the step limit before a clip is
+        // returned: a refusal must come before the caller assigns it.
+        probe.check(work / 1024)?;
         Ok((
             Some(ClipState {
                 mask: std::rc::Rc::new(mask),
