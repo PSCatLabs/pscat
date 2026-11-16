@@ -243,12 +243,22 @@ fn abs(it: &mut Interp) -> Result<(), PsError> {
 /// ceiling/floor/round/truncate return the same type they were given:
 /// an integer is already its own rounding.
 fn rounding(it: &mut Interp, f: fn(f64) -> f64) -> Result<(), PsError> {
-    let obj = match it.pop_num()? {
-        Num::Int(i) => Object::int(i),
-        Num::Real(r) => Object::real(f(r)),
+    let v = match it.top_num().ok_or_else(|| top_error(it))? {
+        Num::Int(i) => Value::Integer(i),
+        Num::Real(r) => Value::Real(f(r)),
     };
-    it.push(obj);
+    it.replace_top(v);
     Ok(())
+}
+
+/// The error for a unary number operator whose operand is missing or not
+/// a number.
+fn top_error(it: &Interp) -> PsError {
+    if it.operand_stack().is_empty() {
+        PsError::StackUnderflow
+    } else {
+        PsError::Typecheck
+    }
 }
 
 fn ceiling(it: &mut Interp) -> Result<(), PsError> {
@@ -272,10 +282,12 @@ fn round(it: &mut Interp) -> Result<(), PsError> {
     })
 }
 
+/// Computed in place: an error (`sqrt` of a negative) leaves the operand
+/// where it was (#1047).
 fn unary_real(it: &mut Interp, f: impl Fn(f64) -> Result<f64, PsError>) -> Result<(), PsError> {
-    let x = it.pop_num()?.to_f64();
+    let x = it.top_num().ok_or_else(|| top_error(it))?.to_f64();
     let r = f(x)?;
-    it.push(Object::real(r));
+    it.replace_top(Value::Real(r));
     Ok(())
 }
 

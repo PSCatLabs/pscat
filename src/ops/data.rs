@@ -2,9 +2,13 @@
 //! real-world PostScript leans on constantly. Interval results are
 //! *views* sharing the source's storage, per the PLRM.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::error::PsError;
 use crate::interp::{ForallSrc, Interp};
-use crate::object::{Dict, Object, Value};
+use crate::name::PsName;
+use crate::object::{Dict, Object, PsArray, Value};
 
 use super::control::pop_proc;
 use super::stack::copy_n;
@@ -144,6 +148,24 @@ fn length(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn get(it: &mut Interp) -> Result<(), PsError> {
+    // An array element or a dictionary entry that is there: nothing can
+    // fail, so the operands skip the ledger (#1047).
+    if let [.., obj, key] = it.ostack.as_slice() {
+        let found = match (&obj.value, &key.value) {
+            (Value::Array(a), &Value::Integer(i)) => usize::try_from(i).ok().and_then(|i| a.get(i)),
+            (Value::Dict(d), Value::Name(n)) => d.borrow().get_id(n.id()),
+            _ => None,
+        };
+        if let Some(el) = found {
+            for _ in 0..2 {
+                if let Some(o) = it.pop_settled() {
+                    o.drop_inline();
+                }
+            }
+            it.push(el);
+            return Ok(());
+        }
+    }
     let key = it.pop()?;
     let obj = it.pop()?;
     match &obj.value {
@@ -168,6 +190,39 @@ fn get(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn put(it: &mut Interp) -> Result<(), PsError> {
+    // A writable array and an index in it, or a dictionary and a name: the
+    // write cannot fail, so the operands skip the ledger (#1047).
+    if let [.., obj, key, _] = it.operand_stack() {
+        enum Target {
+            Array(PsArray, usize),
+            Dict(Rc<RefCell<Dict>>, PsName),
+        }
+        let target = match (&obj.value, &key.value) {
+            (Value::Array(a), &Value::Integer(i)) if !obj.is_readonly() => usize::try_from(i)
+                .ok()
+                .filter(|&i| i < a.len())
+                .map(|i| Target::Array(a.clone(), i)),
+            (Value::Dict(d), Value::Name(n)) => Some(Target::Dict(d.clone(), n.clone())),
+            _ => None,
+        };
+        if let Some(target) = target
+            && let Some(value) = it.pop_settled()
+        {
+            it.pop_settled();
+            it.pop_settled();
+            return match target {
+                Target::Array(a, i) => {
+                    it.journal_array(&a);
+                    a.put(i, value)
+                }
+                Target::Dict(d, n) => {
+                    it.journal_dict(&d);
+                    d.borrow_mut().put_name(&n, value);
+                    Ok(())
+                }
+            };
+        }
+    }
     let value = it.pop()?;
     let key = it.pop()?;
     let obj = it.pop()?;
@@ -382,11 +437,15 @@ fn astore(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     obj.check_writable()?;
+    // Enough operands, checked first: a `stackunderflow` leaves the array
+    // as it was, as in Ghostscript, and once the check passes nothing can
+    // fail, so the elements skip the operand ledger (#1047).
+    let n = a.len();
+    let Some(base) = it.operand_stack().len().checked_sub(n) else {
+        return Err(PsError::StackUnderflow);
+    };
     it.journal_array(a);
-    // Elements come off the stack top-down, filling the array back-to-
-    // front, so a0..an-1 land in order.
-    for i in (0..a.len()).rev() {
-        let el = it.pop()?;
+    for (i, el) in it.ostack.drain(base..).enumerate() {
         a.put(i, el)?;
     }
     it.push(obj.clone());

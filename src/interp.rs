@@ -57,6 +57,33 @@ fn report_name(name: &str) -> String {
         .replace('\r', "%0D")
 }
 
+/// The values the operand ledger keeps in place (#1047); an operator that
+/// pops more spills to a `Vec`.
+const LEDGER_SLOTS: usize = 8;
+/// `op_tags`: a real, not an integer; the value was executable; the value
+/// is in `op_objs`; a boolean.
+const TAG_REAL: u8 = 1;
+const TAG_EXEC: u8 = 2;
+const TAG_OBJ: u8 = 4;
+const TAG_BOOL: u8 = 8;
+
+/// The object a ledger entry of `bits` and `tag` stands for.
+fn ledger_value(bits: u64, tag: u8) -> Object {
+    let value = if tag & TAG_BOOL != 0 {
+        Value::Boolean(bits != 0)
+    } else if tag & TAG_REAL != 0 {
+        Value::Real(f64::from_bits(bits))
+    } else {
+        Value::Integer(bits as i64)
+    };
+    Object {
+        value,
+        executable: tag & TAG_EXEC != 0,
+        readonly: false,
+        packed: false,
+    }
+}
+
 /// How many innermost `run` frames an error report's `Run chain` names
 /// before eliding to the outermost one (issue #1043).
 const ERROR_CHAIN_LIMIT: usize = 8;
@@ -537,6 +564,25 @@ pub struct Interp {
     /// returned as `ProcStep::Op`, for `step_n_timed` to label its row with
     /// (the step itself carries only the function). Written only there.
     op_name: &'static str,
+    /// The operand ledger (#1047). While an operator runs, `op_low` is the
+    /// stack depth below which it has popped only its caller's values; each
+    /// of those is recorded as it is popped, topmost first, so that if the
+    /// operator fails [`run_op`](Self::run_op) can cut the stack back to
+    /// `op_low` and push them back: the stack is as it was before the
+    /// operator ran, as in Ghostscript. Zero outside an operator, so a pop
+    /// there records nothing.
+    op_low: usize,
+    /// How many values the ledger holds.
+    op_saved: usize,
+    /// The first [`LEDGER_SLOTS`] values, as `op_tags` says: a number's
+    /// bits in `op_bits` (numbers are nearly everything an operator pops,
+    /// and keeping eight bytes is what keeps the ledger off the step's
+    /// cost), anything else a copy in `op_objs`.
+    op_bits: [u64; LEDGER_SLOTS],
+    op_tags: [u8; LEDGER_SLOTS],
+    /// The ledger's other values, in order: the non-numbers among the first
+    /// `LEDGER_SLOTS`, then every value after them.
+    op_objs: Vec<Object>,
     pub(crate) gfx: Gfx,
 }
 
@@ -736,6 +782,11 @@ impl Interp {
             max_write_bytes: None,
             profile: None,
             op_name: "",
+            op_low: 0,
+            op_saved: 0,
+            op_bits: [0; LEDGER_SLOTS],
+            op_tags: [0; LEDGER_SLOTS],
+            op_objs: Vec::new(),
             gfx,
         })
     }
@@ -1766,8 +1817,8 @@ impl Interp {
     /// Otherwise propagate; the front end reports it.
     #[inline(always)]
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
-        let command = self.error_command.take();
         self.blame_image();
+        let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
         // runaway program swallow it and carry on (issue #604).
         if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
@@ -2220,7 +2271,14 @@ impl Interp {
                     }
                     Frame::Image(ctx) => {
                         if ctx.waiting() {
-                            // The data-source procedure's result.
+                            // The data-source procedure's result, which must
+                            // be a string; anything else stays on the stack
+                            // for the error, as in Ghostscript (#1047).
+                            match ostack.last().map(|o| &o.value) {
+                                Some(Value::String(_)) => {}
+                                Some(_) => return Err(PsError::Typecheck),
+                                None => return Err(PsError::StackUnderflow),
+                            }
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
                         }
@@ -2581,6 +2639,7 @@ impl Interp {
     /// Ghostscript (`/x cvx exec` names `x`), not the operator that ran it
     /// (#1047); an operator it runs names itself (see `run_op`).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
+        self.forget_operands();
         let done = self.execute_resolved(obj, NO_NAME);
         if let Err(PsError::Undefined(n)) = &done
             && self.error_command.is_none()
@@ -3223,16 +3282,135 @@ impl Interp {
     /// caller has only the function (a procedure element: a name in the
     /// step slows every step down), and `blame_op` finds it. Costs nothing
     /// on success beyond the check the step loop makes anyway.
+    ///
+    /// The operand ledger is on while it runs (see `op_low`): if it fails,
+    /// the operand stack goes back to what it was before it ran. `op_low`
+    /// is put back on both exits, so an operator run from inside another
+    /// one (`/add load exec`) leaves the outer one's ledger as it was.
     #[inline(always)]
     pub(crate) fn run_op(
         &mut self,
         func: crate::object::OpFn,
         name: &'static str,
     ) -> Result<(), PsError> {
-        match func(self) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(self.blame_op(e, func, name)),
+        let outer = self.op_low;
+        self.op_low = self.ostack.len();
+        let done = func(self);
+        if let Err(e) = done {
+            return Err(self.op_failed(e, func, name, outer));
         }
+        if self.op_saved != 0 {
+            self.ledger_clear();
+        }
+        self.op_low = outer;
+        Ok(())
+    }
+
+    /// Empty the ledger: one store, unless it holds copies of objects.
+    #[inline(always)]
+    fn ledger_clear(&mut self) {
+        self.op_saved = 0;
+        if !self.op_objs.is_empty() {
+            self.ledger_release();
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn ledger_release(&mut self) {
+        self.op_objs.clear();
+        // A huge `astore` or the like gives its memory back.
+        self.op_objs.shrink_to(4 * LEDGER_SLOTS);
+    }
+
+    /// Record a number the running operator popped from its caller.
+    #[inline(always)]
+    fn ledger_number(&mut self, n: Num, executable: bool) {
+        let (bits, tag) = match n {
+            Num::Int(v) => (v as u64, 0),
+            Num::Real(r) => (r.to_bits(), TAG_REAL),
+        };
+        self.ledger_bits(bits, tag | if executable { TAG_EXEC } else { 0 });
+    }
+
+    /// Record a number or boolean as its bits and tag, or, past the slots,
+    /// as an object.
+    #[inline(always)]
+    fn ledger_bits(&mut self, bits: u64, tag: u8) {
+        let i = self.op_saved;
+        if i < LEDGER_SLOTS {
+            self.op_bits[i] = bits;
+            self.op_tags[i] = tag;
+            self.op_saved = i + 1;
+        } else {
+            self.ledger_object(&ledger_value(bits, tag));
+        }
+    }
+
+    /// Record a copy of any other value the running operator popped from
+    /// its caller (or of a number past the slots).
+    #[inline(never)]
+    fn ledger_object(&mut self, o: &Object) {
+        let i = self.op_saved;
+        if i < LEDGER_SLOTS {
+            self.op_tags[i] = TAG_OBJ;
+        }
+        self.op_objs.push(o.clone());
+        self.op_saved = i + 1;
+    }
+
+    /// The running operator failed (#1047): drop whatever it pushed and put
+    /// its caller's operands back, then blame it.
+    #[cold]
+    #[inline(never)]
+    fn op_failed(
+        &mut self,
+        e: PsError,
+        func: crate::object::OpFn,
+        name: &'static str,
+        outer: usize,
+    ) -> PsError {
+        self.ostack.truncate(self.op_low);
+        let n = self.op_saved;
+        let mut objs = std::mem::take(&mut self.op_objs).into_iter();
+        let mut back = Vec::with_capacity(n);
+        for i in 0..n {
+            let tag = self.op_tags.get(i).copied().unwrap_or(TAG_OBJ);
+            let o = if tag & TAG_OBJ != 0 {
+                objs.next()
+            } else {
+                Some(ledger_value(self.op_bits[i], tag))
+            };
+            back.extend(o);
+        }
+        // Topmost first in the ledger: the deepest goes back first.
+        self.ostack.extend(back.into_iter().rev());
+        self.op_saved = 0;
+        self.op_low = outer.min(self.ostack.len());
+        self.blame_op(e, func, name)
+    }
+
+    /// The running operator has set the operand stack as it is to be seen
+    /// if it fails (the kernel's fallback puts its caller's operands back
+    /// itself): the ledger leaves it as it is (#1047).
+    pub(crate) fn keep_operand_stack(&mut self) {
+        if self.op_saved != 0 {
+            self.ledger_clear();
+        }
+        self.op_low = usize::MAX;
+    }
+
+    /// The running operator gives up the operands it has popped so far:
+    /// they are not put back if it fails (#1047). For an operator that
+    /// hands its operand on to run (`exec`, `if`: an error there belongs to
+    /// what runs, as in Ghostscript, where the object has moved to the
+    /// execution stack), and for an `errordict` handler, which consumes its
+    /// operand by definition.
+    pub(crate) fn forget_operands(&mut self) {
+        if self.op_saved != 0 {
+            self.ledger_clear();
+        }
+        self.op_low = self.op_low.min(self.ostack.len());
     }
 
     /// The failed operator becomes the offending command, unless something
@@ -3289,9 +3467,57 @@ impl Interp {
         system.name_values().find_map(same)
     }
 
+    /// Pop the top operand. Inside an operator, a value from under what
+    /// the operator pushed itself is its caller's, and goes to the operand
+    /// ledger so that a failure can put it back (#1047).
     #[doc(hidden)]
+    #[inline]
     pub fn pop(&mut self) -> Result<Object, PsError> {
-        self.ostack.pop().ok_or(PsError::StackUnderflow)
+        let o = self.ostack.pop().ok_or(PsError::StackUnderflow)?;
+        let len = self.ostack.len();
+        if len < self.op_low {
+            self.op_low = len;
+            let exec = if o.executable { TAG_EXEC } else { 0 };
+            match o.value {
+                Value::Integer(i) => self.ledger_bits(i as u64, exec),
+                Value::Real(r) => self.ledger_bits(r.to_bits(), TAG_REAL | exec),
+                Value::Boolean(b) => self.ledger_bits(u64::from(b), TAG_BOOL | exec),
+                _ => self.ledger_object(&o),
+            }
+        }
+        Ok(o)
+    }
+
+    /// Pop the top operand without recording it in the operand ledger
+    /// (#1047). Only for an operator that has checked everything that could
+    /// fail, so that it cannot fail after this: the hot operators' common
+    /// cases (`/x 1 def`, `a 0 get`, `c { } if`) take their operands this
+    /// way and leave the ledger alone.
+    #[inline(always)]
+    pub(crate) fn pop_settled(&mut self) -> Option<Object> {
+        self.ostack.pop()
+    }
+
+    /// Pop the top operand, which must be a number; a `typecheck` leaves it
+    /// on the stack.
+    #[inline(always)]
+    fn pop_number(&mut self) -> Result<Num, PsError> {
+        let top = self.ostack.last().ok_or(PsError::StackUnderflow)?;
+        let n = match top.value {
+            Value::Integer(i) => Num::Int(i),
+            Value::Real(r) => Num::Real(r),
+            _ => return Err(PsError::Typecheck),
+        };
+        let executable = top.executable;
+        if let Some(o) = self.ostack.pop() {
+            o.drop_inline();
+        }
+        let len = self.ostack.len();
+        if len < self.op_low {
+            self.op_low = len;
+            self.ledger_number(n, executable);
+        }
+        Ok(n)
     }
 
     /// The top two operands, if both are numbers (deeper one first). The
@@ -3306,6 +3532,23 @@ impl Interp {
         Some((a.num()?, b.num()?))
     }
 
+    /// The top operand, if it is a number. The unary number operators'
+    /// fast path: they compute from it in place ([`replace_top`]
+    /// (Self::replace_top)), so a failure leaves it on the stack (#1047).
+    #[inline(always)]
+    pub(crate) fn top_num(&self) -> Option<Num> {
+        self.ostack.last()?.num()
+    }
+
+    /// Replace the top operand, a number `top_num` returned, with the
+    /// literal `v`.
+    #[inline(always)]
+    pub(crate) fn replace_top(&mut self, v: Value) {
+        if let Some(a) = self.ostack.last_mut() {
+            std::mem::replace(a, Object::lit(v)).drop_inline();
+        }
+    }
+
     /// Replace the top two operands with the literal `v`. For the fast
     /// paths above, once `top2_nums` has said both are numbers.
     #[inline(always)]
@@ -3318,20 +3561,25 @@ impl Interp {
         }
     }
 
+    /// Pop a number; a `typecheck` leaves the operand on the stack.
     #[doc(hidden)]
     pub fn pop_num(&mut self) -> Result<Num, PsError> {
-        match self.pop()?.value {
-            Value::Integer(i) => Ok(Num::Int(i)),
-            Value::Real(r) => Ok(Num::Real(r)),
-            _ => Err(PsError::Typecheck),
-        }
+        self.pop_number()
     }
 
+    /// Pop an integer; a `typecheck` leaves the operand on the stack.
     #[doc(hidden)]
     pub fn pop_int(&mut self) -> Result<i64, PsError> {
-        match self.pop()?.value {
-            Value::Integer(i) => Ok(i),
-            _ => Err(PsError::Typecheck),
+        if let Some(Object {
+            value: Value::Real(_),
+            ..
+        }) = self.ostack.last()
+        {
+            return Err(PsError::Typecheck);
+        }
+        match self.pop_number()? {
+            Num::Int(i) => Ok(i),
+            Num::Real(_) => Err(PsError::Typecheck),
         }
     }
 
@@ -3644,11 +3892,21 @@ impl Interp {
     /// procedure, whose frames would be above it: blame the operator that
     /// began the image, not the procedure's last one (#1188).
     #[cold]
+    ///
+    /// The operator object goes in `$error /command`, as Ghostscript puts
+    /// it (#1047), unless an operator in the procedure has already named
+    /// itself: then both name that one.
     fn blame_image(&mut self) {
-        if let Some(Frame::Image(ctx)) = self.estack.last()
-            && ctx.op_name.is_some()
+        if self.error_command.is_none()
+            && let Some(Frame::Image(ctx)) = self.estack.last()
+            && let Some(id) = ctx.op_name
         {
-            self.last_name = ctx.op_name;
+            self.last_name = Some(id);
+            if let Some(o) = self.load_id(id)
+                && matches!(o.value, Value::Operator(_))
+            {
+                self.error_command = Some(o);
+            }
         }
     }
 }

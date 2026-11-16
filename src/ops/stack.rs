@@ -22,7 +22,12 @@ pub fn install(dict: &mut Dict) {
 }
 
 fn pop(it: &mut Interp) -> Result<(), PsError> {
-    it.pop()?.drop_inline();
+    // Straight off the stack, not through the operand ledger (#1047): a
+    // `pop` that has popped something cannot fail.
+    it.ostack
+        .pop()
+        .ok_or(PsError::StackUnderflow)?
+        .drop_inline();
     Ok(())
 }
 

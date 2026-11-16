@@ -1498,6 +1498,7 @@ fn give_up(it: &mut Interp, ks: &mut Dict) -> Result<(), PsError> {
     }
     it.ostack.clear();
     it.ostack.extend(base.snapshot());
+    it.keep_operand_stack();
     ks.put("Fail".into(), Object::bool(true));
     ks.put("Busy".into(), Object::bool(false));
     Ok(())
@@ -1846,6 +1847,7 @@ fn kadone(it: &mut Interp) -> Result<(), PsError> {
         }
         it.ostack.clear();
         it.ostack.extend(base.snapshot());
+        it.keep_operand_stack();
         ks.put("Busy".into(), Object::bool(false));
         drop(ks);
         it.kernel_stats.1 -= 1;
