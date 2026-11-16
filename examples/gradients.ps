@@ -60,7 +60,7 @@ gsave
   40 60 translate
   newpath 0 0 moveto 260 0 lineto 260 220 lineto 0 220 lineto closepath
   130 110 0 130 110 140 [[1.0 0.95 0.6] [0.85 0.2 0.1]]
-  radialsh gradfill
+  radialsh dup /Extend [true true] put gradfill   % pad past the end circle
   0 0 0 setrgbcolor 1 setlinewidth
   newpath 0 0 moveto 260 0 lineto 260 220 lineto 0 220 lineto closepath stroke
   /Palatino findfont 11 scalefont setfont
@@ -72,7 +72,7 @@ gsave
   350 60 translate
   newpath 0 0 moveto 260 0 lineto 260 220 lineto 0 220 lineto closepath
   90 150 15 150 90 150 [[0.95 0.95 1.0] [0.1 0.15 0.45]]
-  radialsh gradfill
+  radialsh dup /Extend [true true] put gradfill   % fill the inner circle and the corners
   0 0 0 setrgbcolor 1 setlinewidth
   newpath 0 0 moveto 260 0 lineto 260 220 lineto 0 220 lineto closepath stroke
   /Palatino findfont 11 scalefont setfont

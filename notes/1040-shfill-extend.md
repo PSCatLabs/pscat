@@ -69,10 +69,18 @@ The remaining gap is SVG's own: it paints only a point's larger root, so a
 cone with its end not extended shows a hole where PNG and PDF paint the
 smaller root.
 
-**Corpus.** Only `gallery/varsity_backs.ps` and `examples/gradients.ps`
-change (130 pages compared). Both now match gs. In the jersey, the side
-panels and the hem band layer as the code describes: before, the last
-padded `shfill` covered the whole body. In the specimen sheet, the radial
-cells stop at their end circles. artkit's `axialsh`/`radialsh` keep the
-spec default; its header and guide show `dup /Extend [true true] put` for
-padding.
+**Corpus.** Only `gallery/varsity_backs.ps` and `examples/gradients.ps` relied
+on the old padding (130 pages compared). Rendered to the spec, both looked
+broken to the perceptual reviewer (round 1, FAIL), though both matched gs:
+- the jersey's last vertical shading stopped in a hard seam across the body;
+- the specimen's radial panels left white corners and a hard-edged hole.
+
+Both files now ask for the extension they rely on (`dup /Extend [true true]
+put`), which also makes gs paint them as intended.
+- `gradients.ps` renders byte-identical to before.
+- `varsity_backs.ps` differs only in anti-aliased clip-edge pixels: the
+  earlier unextended layers no longer paint there. Against gs it is the
+  closest it has been.
+
+artkit's `axialsh`/`radialsh` keep the spec default; its header and guide
+show `dup /Extend [true true] put` for padding.
