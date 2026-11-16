@@ -132,7 +132,9 @@ More on the less obvious ones:
   (a page of Times went from 741 KB to 8 KB). Type 1 and Type 3 fonts
   from a program, `charpath` text, Symbol and Dingbats glyphs, and fonts
   whose licence bits forbid embedding stay outlines. PNG and SVG output
-  are not affected (`notes/1193-pdf-text.md`).
+  are not affected (`notes/1193-pdf-text.md`). The browser build and npm
+  package have it too: `{ pdf: true, pdfText: true }`, the same bytes as the
+  command line (`notes/1205-pdf-text-wasm.md`).
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded

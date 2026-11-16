@@ -102,6 +102,23 @@ test('svgText: standard-font text as selectable <text>, opt-in, needs svg', asyn
   assert.throws(() => r.render(doc, { svg: true, svgText: 1 }), TypeError);
 });
 
+test('pdfText: standard-font text as PDF text objects in embedded fonts, opt-in, needs pdf', async () => {
+  // Byte equality with `pscat --pdf --pdf-text` is checked in tests/wasm.rs.
+  const r = await createRenderer();
+  const doc = '/Helvetica findfont 12 scalefont setfont 10 40 moveto (Hi) show showpage';
+  const page = { width: 100, height: 80, pdf: true };
+  const latin1 = (b) => Buffer.from(b).toString('latin1');
+  r.render(doc, { ...page, pdfText: true });
+  const text = latin1(r.pdf());
+  assert.match(text, /\/Subtype \/Type0/);
+  assert.match(text, /\/ToUnicode/);
+  r.render(doc, page);
+  assert.doesNotMatch(latin1(r.pdf()), /\/Type0|\/ToUnicode/);
+  assert.throws(() => r.render(doc, { pdfText: true }), /pdfText needs pdf: true/);
+  assert.throws(() => r.render(doc, { svg: true, pdfText: true }), /pdfText needs pdf: true/);
+  assert.throws(() => r.render(doc, { pdf: true, pdfText: 1 }), TypeError);
+});
+
 test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async () => {
   // Byte equality with `pscat --svg`/`--pdf` is checked in tests/wasm.rs.
   const r = await createRenderer();
