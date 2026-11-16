@@ -410,7 +410,7 @@ fn stitched_shfill_keeps_its_legs_and_hard_edge() {
 /// blue, not green (a Codex review of #1028 found the end dropped).
 #[test]
 fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
-    let src = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [100 0 400 0]
+    let src = b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [100 0 400 0] /Extend [true true]
        /Function << /FunctionType 3 /Domain [0 1] /Bounds [0 0.99999988 1] /Encode [0 1 0 1 0 1 0 1]
          /Functions [
            << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >>
