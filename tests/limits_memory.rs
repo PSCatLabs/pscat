@@ -176,6 +176,16 @@ fn memory_growth_is_capped() {
         it.run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat fill"),
         Err(PsError::MemoryExceeded)
     );
+    // `clip` of the same path (#1219): over the work a stoppable
+    // rasteriser takes it, and stops at the cap inside `clip` as `fill` does.
+    let mut it = limited(100);
+    let err = it
+        .run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat clip")
+        .unwrap_err();
+    assert_eq!(err, PsError::MemoryExceeded);
+    let report = it.error_report(&err);
+    assert!(report.contains("OffendingCommand: clip;"), "{report}");
+    drop(it);
     let before = pscat::memtrack::live_bytes();
     let mut it = limited(100);
     assert_eq!(

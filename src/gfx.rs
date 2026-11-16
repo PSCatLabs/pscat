@@ -269,21 +269,9 @@ impl PsPath {
     /// subpath is closed as a fill closes it. An estimate from the
     /// endpoints and the turning points alone, in one pass over the
     /// segments, so a path can be told apart from a cheap one before
-    /// anything is rasterised. NaN and infinite coordinates cost nothing.
+    /// anything is rasterised. A NaN or infinite coordinate counts as the edge
+    /// of the canvas, so such an edge costs at most the canvas's rows.
     pub(crate) fn raster_work(&self, height: f32) -> u64 {
-        self.raster_work_with(height, true)
-    }
-
-    /// An upper bound on [`raster_work`](Self::raster_work), at a fifth of
-    /// its cost: a curve is taken as three pieces each as tall as its
-    /// control points (the most a cubic makes), where the exact one finds
-    /// where it turns. Equal for a path of lines. For a caller that only
-    /// needs to know a path is cheap.
-    pub(crate) fn raster_work_bound(&self, height: f32) -> u64 {
-        self.raster_work_with(height, false)
-    }
-
-    fn raster_work_with(&self, height: f32, exact: bool) -> u64 {
         let h = f64::from(height);
         // Sub-scanlines an edge from `a` to `b` crosses on the canvas.
         let span = |a: f64, b: f64| -> f64 {
@@ -316,13 +304,7 @@ impl PsPath {
                 Seg::Curve(c1, c2, p) => {
                     if let Some(c) = cur {
                         let y = [c.y, c1.y, c2.y, p.y].map(f64::from);
-                        work += if exact {
-                            cubic_y_work(y, &span)
-                        } else {
-                            let lo = y.iter().copied().fold(f64::INFINITY, f64::min);
-                            let hi = y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                            3.0 * (EDGE_SETUP_WORK + span(lo, hi))
-                        };
+                        work += cubic_y_work(y, &span);
                     }
                     cur = Some(p);
                 }
@@ -3648,19 +3630,11 @@ impl Gfx {
         probe: &crate::limits::LimitProbe,
     ) -> Result<(tiny_skia::Mask, u64), PsError> {
         let mut mask = tiny_skia::Mask::new(w, h).ok_or(PsError::Limitcheck)?;
-        // With no limit the number is only compared with the threshold: the
-        // cheap bound settles every path under it (nothing is charged).
-        let work = match probe == &crate::limits::LimitProbe::NONE {
-            true => match path.raster_work_bound(h as f32) {
-                bound if bound < POLLED_CLIP_WORK => bound,
-                _ => path.raster_work(h as f32),
-            },
-            false => path.raster_work(h as f32),
-        };
-        probe.check(work / 1024)?;
         let Some(skia) = path.to_skia() else {
             return Ok((mask, 0));
         };
+        let work = path.raster_work(h as f32);
+        probe.check(work / 1024)?;
         if work < POLLED_CLIP_WORK {
             mask.fill_path(&skia, rule, true, Transform::identity());
             return Ok((mask, work));
@@ -4674,9 +4648,6 @@ mod tests {
         );
         // Two pieces, and the closing line along y = 0.
         assert_eq!(c.raster_work(200.0), 3 * 16 + 4 * 150);
-        // The cheap bound never undercounts, and is exact for lines.
-        assert!(c.raster_work_bound(200.0) >= c.raster_work(200.0));
-        assert_eq!(r.raster_work_bound(100.0), r.raster_work(100.0));
         // No coordinate makes it panic or overflow.
         let nan = quad([
             (f32::NAN, 0.0),

@@ -7,7 +7,7 @@ ran past `--max-time` / `--max-memory`. Each was measured on `main` first
 | Item | Before | After |
 |---|---|---|
 | `clip` of 100,000 page-sized curves, `--max-time 0.2` | 1.9 s at 72 dpi, 7.4 s at 300, blamed on the next operator | stops inside `clip` at 0.23 s / 0.25 s |
-| the same, no limit | 1.9 s / 7.4 s | 1.3 s / 5.6 s |
+| the same, no limit | 1.9 s / 7.4 s, 87 / 119 MB | 1.3 s / 4.8 s, 369 / 650 MB |
 | `shfill`, 4095-leg ramp (1024 stops), 300 dpi letter, `--max-time 0.2` | ran 0.63 s in full, blamed on the next operator | stops inside `shfill` at 0.24 s |
 | Type 1, one glyph calling a 16 MB subroutine, 200 glyphs | 4.6 s of CPU | under 0.2 s (500 KB decrypted a glyph) |
 | `kernelimage`, 8000 x 8000, every pixel retired, `--max-time 1` | 2.2 GB RSS, stops at 1.4 s | not changed (see below) |
@@ -43,6 +43,16 @@ unit.
   difference on a curved shape: no pixel differs by more than 48 of 255, and
   the mean is far below that. Nothing in the corpus reaches the threshold, so
   no committed render changes (identity check below).
+- Memory: the rasteriser keeps every chord (16 bytes), where tiny-skia made
+  its edges as the scan went. For the 100,000-curve path the peak RSS is
+  369 MB at 72 dpi (87 MB before) and 650 MB at 300 dpi (119 MB before), and
+  `--max-memory 1024` (the MCP preset) now refuses it at 300 dpi with
+  `limitexceeded (memory)` inside `clip`, where it used to finish in 7 s. A
+  `fill` of the same path already behaves so. It is stopped by a 100 MiB cap
+  inside `clip` (`tests/limits_memory.rs`).
+- A dense clip of many small shapes is faster, not slower: 200,000 circles of
+  radius 7 over a 300 dpi page took 81 s on main and 3.3 s here (no limits;
+  main's tiny-skia sorts every active edge each sub-scanline).
 - The operator charges `work / 1024` steps, as `fill` does, so `steps_used`
   moves for a program that clips under a limit (a rectangle at 72 dpi is 3).
 
@@ -56,6 +66,11 @@ units each, a few ms) look at the probe between them, and the work
 `prepare_paint`. A `/BBox` is a parallelogram whose edges a strip would cut, so
 that case stays one fill, preceded by a look at the limits. SVG and PDF are
 recorded after the raster has painted, as before.
+
+A limit found between strips leaves the raster partly painted, with nothing
+recorded for SVG or PDF; a refused `fill` paints nothing. A step limit is
+held before anything is painted, so only the clock and the heap can stop one
+part-way.
 
 The `/BBox` case is therefore still unpolled: at most the 0.6 s a 1024-stop
 ramp costs at 300 dpi letter (2.4 s at 600 dpi).
