@@ -2907,11 +2907,10 @@ mod sweep_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod spool_tests {
     use super::open_spool;
 
-    #[cfg(unix)]
     #[test]
     fn the_spool_is_private_from_the_moment_it_exists() {
         use std::os::unix::fs::PermissionsExt as _;
