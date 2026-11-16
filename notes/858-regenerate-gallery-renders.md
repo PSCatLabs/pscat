@@ -19,7 +19,8 @@ or library changes: only PNGs, and this note.
   `--seed 7` integral from `docs/guides/dry-media.md`), `lib/styles/specimen_{steampunk,psychedelic,scifi,toon}.png`,
   `lib/fonts/specimen.png` (108 dpi: the committed size, 918 x 1188, is 1.5x; the header's command is 72 dpi),
   `lib/fonts/specimen2.png`, `fonts/catalog/specimen-{1,2}.png`, and the five `docs/guides/hybrid/*` sheets
-  (`pscat sheet` commands in `examples/hybrid/compare_*.ps`).
+  (`pscat sheet` commands in `examples/hybrid/compare_*.ps`). The `sky_talk_compare.png` sheet was rendered
+  but **not committed**: see "Not committed: a regression" below.
 - **Byte-identical, left untouched:** 10 gallery stills (`varsity_backs`, `four_readings`, `ring_unrolled`,
   `blueprint_rose`, `family_tree`, `painters_city`, `mirror_garden`, `mandelbulb`, `dreaming_network`,
   `mochi_in_oils`), `pscat_card`, `art/brand/renders/{social-preview,certificate}.png` and the
@@ -31,8 +32,8 @@ Every render exited 0 with nothing on stderr but the "wrote" line.
 
 ## Classification
 
-Pixels were compared decoded (RGBA, same size). 48 files changed: **36 edge-level, 5 edge-located but strong
-(grain), 7 larger**. Crops of three of the five strong ones are in
+Pixels were compared decoded (RGBA, same size). 47 files changed: **36 edge-level, 5 edge-located but strong
+(grain), 6 larger**. Crops of three of the five strong ones are in
 `docs/dev/review-log/pending/858-regenerate-gallery-renders/`.
 
 To find the cause, the changed pieces were also rendered with binaries built at `56006db` (just before
@@ -43,7 +44,7 @@ To find the cause, the changed pieces were also rendered with binaries built at 
   and `evening_stream`, which differ by 2 to 13 levels on under 0.1% of pixels from small library edits
   since they were committed.
 - **#778** (exact-area coverage, #692) is the whole of the edge change: up to 50 levels on anti-aliased
-  edges and glyphs. The strongest shifts (84 to 137 levels, on under 1% of pixels) are in the five grain-heavy
+  edges and glyphs in the gallery stills (two style specimens reach 104 and 73 levels on a few dozen edge pixels). The strongest shifts (84 to 137 levels, on under 1% of pixels) are in the five grain-heavy
   pieces `crayon_drawing`, `lincoln_charcoal`, `fugitive_pigments`, `flying_white_reeds` and `alpine_lake`:
   thousands of sub-pixel shapes that now keep their gray. The largest connected region of such a change is a
   dozen pixels.
@@ -56,14 +57,13 @@ To find the cause, the changed pieces were also rendered with binaries built at 
   `bbb9037` one, except `released_memo`, which differs on 0.0% of pixels by 19 levels at most, on glyph
   edges. That change comes from a PR after #852 and was not traced to one.
 
-### Larger than edge-level (7), each explained
+### Larger than edge-level (6), each explained
 
 | file | what changed | caused by |
 |---|---|---|
 | `gallery/renders/hybrid_menu_card.png` | menu type sizes, margins, the QR caption | #1145 (#1029, #1042) |
 | `gallery/renders/hybrid_alpine_trail.png` | the dashes follow the photographed route above the hut; the leader lines have a wider dark halo | #1145 |
 | `gallery/renders/hybrid_sky_talk.png` | the QR caption moved 12 px | #1145 |
-| `docs/guides/hybrid/sky_talk_compare.png` | the same caption in panel (c) | #1145 |
 | `gallery/renders/first_rain.png` | flat tone shift, 13 levels at most, mean +0.2 | #852 |
 | `fonts/catalog/specimen-2.png` | page 2 of the catalog now lists the Korean, Japanese and Thai faces and the two Korean ones | the specimen program grew in Stage 22 and 23 (July); the still dates from Stage 18 |
 | `docs/dev/design/drymedia/chalk_cli_demo.png` | the faint ghost writing sits in different places | #698 (PR #812), merged two days after the demo was rendered |
@@ -73,11 +73,27 @@ were already re-rendered after #1145.
 
 ### Sizes
 
-The 48 files grow from 32.2 MB to 32.8 MB in total (+1.9%). The largest growth, from sub-pixel shapes
-keeping their gray (less compressible): `fonts/catalog/specimen-2.png` (83 -> 149 KB, more content),
-`specimen-1.png` (55 -> 93 KB), `compositors_proof` (153 -> 251 KB, 1.64x), `ring_of_type` (517 -> 745 KB),
-`out_of_register` (1.32 -> 1.89 MB), `fugitive_pigments` (412 -> 580 KB). Fifteen files shrink
-(`chalkboard_lecture` by 16%, `crayon_drawing` by 24%, `lincoln_charcoal` by 10%).
+The 47 files grow from 31.1 MB to 31.7 MB in total (+2.0%). The largest growth, from sub-pixel shapes
+keeping their gray (less compressible), in KiB: `fonts/catalog/specimen-2.png` (81 -> 145, more content),
+`specimen-1.png` (54 -> 90), `compositors_proof` (149 -> 245, 1.64x), `ring_of_type` (504 -> 727),
+`out_of_register` (1286 -> 1844), `fugitive_pigments` (402 -> 566), `plum_branch` (86 -> 116). Fourteen
+files shrink (`chalkboard_lecture` by 16%, `crayon_drawing` by 24%, `lincoln_charcoal` by 10%).
+
+### Not committed: a regression found by this regeneration
+
+`docs/guides/hybrid/sky_talk_compare.png` (panel (b), "pscat alone") renders with a one-pixel white seam
+across the whole panel at the sea and sky boundary, behind the "Scan: how this poster was made" caption.
+Rendered with this tree's `lib/` and `examples/`, the `946290c` (#778) and `bbb9037` (#852) binaries give
+the committed sheet's pixels (0 pixels differ by more than 32 levels from it), so the seam arrives with a
+later change to the binary. The cause is #1040 (shfill honours `/Extend`): the program's `vramp`
+(`examples/hybrid/sky_talk.ps`, line 107 on) says in a comment that "the shading pads its end colours past
+y0 and y1" and clips the band 3 pt above y1, but its shading dictionary has no `/Extend`. Before #1040 every
+shading padded; now a missing key is `[false false]`, as in Ghostscript, so the 3 pt lap over the horizon is
+bare paper. The fix is one line in the program (`/Extend [true true]`), and this regeneration may not change
+sources, so the old sheet stays. It still shows the pre-#1145 caption position in panel (c).
+`pscat sheet`'s other three hybrid sheets (`menu_card`, `ferry`, `alpine_trail`) came out byte-identical, so
+they do not have the problem. `examples/hybrid/alpine_trail.ps` and `lib/lettering.ps` also call `shfill`
+without `/Extend` and are worth the same audit.
 
 ## Per-file table (gallery stills)
 
