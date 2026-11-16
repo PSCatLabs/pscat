@@ -405,6 +405,19 @@ const CASES: &[(&str, &str, &str)] = &[
         r"1 (a) true /add load if",
         "77 1 (a) true --add-- true cmd=--if--",
     ),
+    ("dict-odd", r"<< 1 >>", "77 -mark- 1 true cmd=-->>--"),
+    (
+        "dict-nullkey",
+        r"<< null 1 >>",
+        "77 -mark- null 1 true cmd=-->>--",
+    ),
+    ("arr-nomark", r"1 2 ]", "77 1 2 true cmd=--]--"),
+    ("dict-nomark", r"1 2 >>", "77 1 2 true cmd=-->>--"),
+    (
+        "cshow-inner",
+        r"0 0 moveto /Helvetica 12 selectfont { pop pop cvi 1 (x) add } (ab) cshow",
+        "77 97 1 (x) true cmd=--add--",
+    ),
     (
         "fill-ok-then-fail",
         r"newpath 0 0 moveto 1 1 lineto fill 1 (a) add",
@@ -523,4 +536,19 @@ fn an_uncaught_error_names_the_operator() {
             "{src}: {report}"
         );
     }
+}
+
+/// A deliberate difference: a Separation tint transform that returns a
+/// non-number. The result stays on the stack in pscat (`77 (x)`); gs leaves
+/// its own internal state there and names an internal operator
+/// (`77 [4] -mark- null null null (x) true cmd=/--@anonymous_operator--`,
+/// gs 10.07.1). pscat names the last name the transform ran.
+#[test]
+fn a_tint_transform_with_a_bad_result_leaves_it_on_the_stack() {
+    let cases = [(
+        "sep-tint-bad",
+        "[/Separation /Foo /DeviceRGB { pop (x) }] setcolorspace 0.5 setcolor",
+        "77 (x) true cmd=pop",
+    )];
+    assert_eq!(pscat_lines(&program(&cases)), want(&cases));
 }

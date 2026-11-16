@@ -36,8 +36,8 @@ reported `f`).
   systemdict by function address. `cvs` of an operator gives its name (PLRM,
   gs), and the report and the re-raise read `/command` through it.
 - *Local fixes.* `astore` checks the depth before it writes (gs leaves the
-  array untouched). An image data procedure's non-string result stays on the
-  stack. `if` and `ifelse` require procedures, in gs's check order (the
+  array untouched). An image data procedure's non-string result, and a
+  Separation tint transform's non-number one, stay on the stack. `if` and `ifelse` require procedures, in gs's check order (the
   procedure's type, the depth, the boolean): `true 5 if` was running `5`.
 
 **Performance.** The first designs copied each popped `Object` (40 bytes) to
@@ -67,12 +67,29 @@ base, 1.677 s branch; the mixed loop 0.676 s, 0.643 s; the number loop 0.389 s,
 0.413 s (best of 15; its fewest cycles over five runs are 1.516 G and 1.521 G,
 so that gap is the machine, not more work).
 
-**Deviations kept.** An error inside an image's data procedure names the
-operator that failed; gs names `image` (`77 1 (x) true cmd=--image--`). Two
+**Limit errors.** `limitexceeded` (steps, time, memory) ends the run and is
+never catchable; the restore runs for it the same way, so `--pstack-on-error`
+and a host reading the stack see the operator's operands. A restore pushes
+back only values that were on the stack moments before, into capacity the
+stack already has, and allocates nothing (`op_failed` takes the copies off
+the end of `op_objs`); `op_objs` gives back what one huge pop asked for once
+it is emptied.
+
+**Deviations kept** (each probed in both; gs 10.07.1 quoted):
+
+| case | gs | pscat |
+|---|---|---|
+| error inside an image data procedure, `{ 1 (x) add }` | `77 1 (x) true cmd=--image--` | `77 1 (x) true cmd=--add--`: the operator that failed, as inside any other procedure |
+| Separation tint transform returns `(x)` | `77 [4] -mark- null null null (x) true cmd=/--@anonymous_operator--` (gs's own internals) | `77 (x) true cmd=pop`: the bad result stays; the command is the last name the transform ran |
+| `<< /PageSize 5 >> setpagedevice` | `77 false true` (gs's PostScript-level `setpagedevice` leaves a flag) | `77 -dict- true`: the operand comes back |
+| `(Times-Roman) {..} 100 string /Font resourceforall` | runs the procedure | `undefined`: pscat has no `resourceforall` (unchanged) |
+| `cshow`'s width operands | `6.67188` | `6.673828125`: real formatting and glyph width, not this change; the table's `cshow` row converts with `cvi` |
+
+`findfont` of a non-name substitutes a font in both (no error). Two
 operators registered under one function would be named by whichever
 systemdict finds first, only for a tail-call failure in a bound procedure.
 
-**Verified against.** Ghostscript 10.07.1: `tests/operand_restore.rs` pins 113
+**Verified against.** Ghostscript 10.07.1: `tests/operand_restore.rs` pins 118
 cases (operator families × error kinds, stack contents and `$error /command`)
 and runs them through `gs` when it is installed.
 

@@ -2255,6 +2255,15 @@ impl Interp {
                         match op {
                             PostOp::SeparationColor { alt_ncomp } => {
                                 let n = *alt_ncomp as usize;
+                                // Checked before anything is popped: a bad
+                                // result stays on the stack (#1047).
+                                let Some(top) = ostack.len().checked_sub(n).map(|i| &ostack[i..])
+                                else {
+                                    return Err(PsError::StackUnderflow);
+                                };
+                                if top.iter().any(|o| o.num().is_none()) {
+                                    return Err(PsError::Typecheck);
+                                }
                                 let mut comps = [0f64; 4];
                                 for slot in comps[..n].iter_mut().rev() {
                                     let o = ostack.pop().ok_or(PsError::StackUnderflow)?;
