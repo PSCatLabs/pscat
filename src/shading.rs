@@ -363,11 +363,13 @@ pub(crate) enum ShadingKind {
 
 /// A parsed, ready-to-paint shading: geometry plus a pre-sampled color
 /// ramp (`(position 0..1, r, g, b)`, all already resolved to RGB).
-/// `/Extend` is validated for shape but not otherwise honored — `shfill`
-/// always extends both ends (documented in `Gfx::shfill`).
 pub(crate) struct Shading {
     pub(crate) kind: ShadingKind,
     pub(crate) stops: Vec<(f32, f32, f32, f32)>,
+    /// `/Extend [start end]` (#1040): whether the shading paints past its
+    /// first and its last point or circle. A missing key is `[false
+    /// false]`, the PLRM default, as in gs.
+    pub(crate) extend: [bool; 2],
     /// Optional `/BBox [llx lly urx ury]`, in the same user space as
     /// `Coords` — confirmed against gs it further clips the painted
     /// region (`Gfx::shfill` builds its paint path from this instead
@@ -737,10 +739,10 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<Shading, PsError> {
         None => (0.0, 1.0),
         Some(_) => get_domain(d)?,
     };
-    // /Extend, if present, must have the PLRM shape — accepted and
-    // validated but not otherwise honored; see Gfx::shfill. Length and
+    // /Extend, if present, must have the PLRM shape. Length and
     // element-type mismatches get different errors (confirmed against
     // gs: a wrong-length array is a rangecheck, not a typecheck).
+    let mut extend = [false, false];
     if let Some(ext) = d.get("Extend") {
         let Value::Array(a) = ext.value else {
             return Err(PsError::Typecheck);
@@ -748,8 +750,11 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<Shading, PsError> {
         if a.len() != 2 {
             return Err(PsError::Rangecheck);
         }
-        if !(0..2).all(|i| matches!(a.get(i).map(|o| o.value), Some(Value::Boolean(_)))) {
-            return Err(PsError::Typecheck);
+        for (i, e) in extend.iter_mut().enumerate() {
+            match a.get(i).map(|o| o.value) {
+                Some(Value::Boolean(b)) => *e = b,
+                _ => return Err(PsError::Typecheck),
+            }
         }
     }
     let kind = match shading_type {
@@ -791,7 +796,12 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<Shading, PsError> {
         }
     };
     let stops = build_stops(cs, &function, range.as_deref(), shading_domain)?;
-    Ok(Shading { kind, stops, bbox })
+    Ok(Shading {
+        kind,
+        stops,
+        extend,
+        bbox,
+    })
 }
 
 #[cfg(test)]
@@ -1156,6 +1166,7 @@ mod tests {
                     (t, t, 1.0 - t, 0.5)
                 })
                 .collect(),
+            extend: [true, true],
             bbox: None,
         };
         let small = ramp(MAX_RASTER_STOPS);

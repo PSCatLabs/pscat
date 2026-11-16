@@ -80,6 +80,7 @@ pub(crate) type Chain = Option<Rc<ClipNode>>;
 
 /// `shfill`'s geometry, mirroring `crate::shading::ShadingKind` without
 /// pulling that module's PsFunction/parsing machinery in here.
+#[derive(Clone, Copy)]
 pub(crate) enum ShKind {
     Axial {
         x0: f32,
@@ -438,12 +439,21 @@ impl SvgRecorder {
     /// SVG's matrix(a b c d e f) is the same convention as the CTM's
     /// own [a b c d tx ty] (`ops/matrix.rs`), so `ctm` here is passed
     /// through as-is: `[sx, ky, kx, sy, tx, ty]`.
+    ///
+    /// An end `extend` leaves off (#1040) is drawn as SVG can: the gradient
+    /// runs on past it (`extended_for_svg`) and is transparent there, so the
+    /// padding beyond is transparent too. SVG paints only a point's larger
+    /// root, so a radial whose circles are not nested, its end not extended,
+    /// leaves a point whose larger root is past the end unpainted where the
+    /// raster and PDF paint its smaller root (the circles-not-nested gap
+    /// below already applies to such a radial).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shfill(
         &mut self,
         kind: &ShKind,
         ctm: [f32; 6],
         stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
         region_d: &str,
         comp: Composite,
         chain: &Chain,
@@ -451,14 +461,16 @@ impl SvgRecorder {
         self.flush_text();
         let id = self.next_grad;
         self.next_grad += 1;
-        let stop_tags = |stops: &[(f32, f32, f32, f32)]| {
+        let (kind, stops) = &extended_for_svg(kind, stops, extend);
+        let stop_tags = |stops: &[SvgStop]| {
             let mut tags = String::new();
-            for &(pos, r, g, b) in stops {
+            for &(pos, r, g, b, a) in stops {
                 let _ = write!(
                     tags,
-                    "<stop offset=\"{}\" stop-color=\"{}\"/>",
+                    "<stop offset=\"{}\" stop-color=\"{}\"{}/>",
                     fmt_precise(pos),
                     Self::color((r, g, b)),
+                    if a < 1.0 { " stop-opacity=\"0\"" } else { "" },
                 );
             }
             tags
@@ -531,9 +543,9 @@ impl SvgRecorder {
                     (x1, y1, r1, x0, y0, r0, false)
                 };
                 let tags = if shrinking {
-                    let mut reversed: Vec<(f32, f32, f32, f32)> = stops
+                    let mut reversed: Vec<SvgStop> = stops
                         .iter()
-                        .map(|&(p, r, g, b)| (1.0 - p, r, g, b))
+                        .map(|&(p, r, g, b, a)| (1.0 - p, r, g, b, a))
                         .collect();
                     reversed.reverse();
                     stop_tags(&reversed)
@@ -689,6 +701,89 @@ fn fmt_frame(v: f64) -> String {
 /// collapses the whole gradient). `{v}`'s plain Display impl for f32
 /// already gives the shortest string that round-trips exactly, so no
 /// manual truncation is needed here the way `fmt_f32` needs one.
+/// A gradient stop as the SVG writes it: position, RGB, and opacity (1, or
+/// 0 for the transparent run past an end that does not extend).
+type SvgStop = (f32, f32, f32, f32, f32);
+
+/// The shading for SVG with each end `extend` leaves off made transparent
+/// (#1040). SVG pads with the outermost stop's colour, so the gradient is
+/// lengthened past that end, in its own t, and given a transparent run
+/// there, starting with a zero-width step at the real end: that run's stop
+/// is the outermost, so the padding is transparent, and no renderer has to
+/// settle two stops at one terminal offset. A radial is run back only as
+/// far as a circle of radius 0, past which no circle exists to paint
+/// (a growing radial's start, a shrinking one's end), and not at all from a
+/// radius of 0. Both ends extended is the shading as it was.
+fn extended_for_svg(
+    kind: &ShKind,
+    stops: &[(f32, f32, f32, f32)],
+    extend: [bool; 2],
+) -> (ShKind, Vec<SvgStop>) {
+    // How far each end runs on, in units of the shading's own t.
+    let (before, after) = match *kind {
+        ShKind::Axial { .. } => (f32::from(!extend[0]), f32::from(!extend[1])),
+        ShKind::Radial { r0, r1, .. } => {
+            let dr = r1 - r0;
+            let before = match extend[0] {
+                true => 0.0,
+                false if dr > 0.0 => (r0 / dr).min(1.0),
+                false => 1.0,
+            };
+            let after = match extend[1] {
+                true => 0.0,
+                false if dr < 0.0 => (r1 / -dr).min(1.0),
+                false => 1.0,
+            };
+            (before, after)
+        }
+    };
+    let opaque = stops.iter().map(|&(t, r, g, b)| (t, r, g, b, 1.0));
+    if before == 0.0 && after == 0.0 {
+        return (*kind, opaque.collect());
+    }
+    let span = 1.0 + before + after;
+    let at = |t: f32| (t + before) / span;
+    let mut out = Vec::with_capacity(stops.len() + 4);
+    if let Some(&(_, r, g, b)) = stops.first()
+        && before > 0.0
+    {
+        out.push((0.0, r, g, b, 0.0));
+        out.push((at(0.0), r, g, b, 0.0));
+    }
+    out.extend(opaque.map(|(t, r, g, b, a)| (at(t), r, g, b, a)));
+    if let Some(&(_, r, g, b)) = stops.last()
+        && after > 0.0
+    {
+        out.push((at(1.0), r, g, b, 0.0));
+        out.push((1.0, r, g, b, 0.0));
+    }
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let kind = match *kind {
+        ShKind::Axial { x0, y0, x1, y1 } => ShKind::Axial {
+            x0: lerp(x0, x1, -before),
+            y0: lerp(y0, y1, -before),
+            x1: lerp(x0, x1, 1.0 + after),
+            y1: lerp(y0, y1, 1.0 + after),
+        },
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => ShKind::Radial {
+            x0: lerp(x0, x1, -before),
+            y0: lerp(y0, y1, -before),
+            r0: lerp(r0, r1, -before).max(0.0),
+            x1: lerp(x0, x1, 1.0 + after),
+            y1: lerp(y0, y1, 1.0 + after),
+            r1: lerp(r0, r1, 1.0 + after).max(0.0),
+        },
+    };
+    (kind, out)
+}
+
 fn fmt_precise(v: f32) -> String {
     format!("{v}")
 }
