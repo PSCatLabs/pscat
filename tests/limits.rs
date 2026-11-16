@@ -1408,9 +1408,14 @@ mod slice_accounting_1213 {
         it.run_str("newpath 0 0 moveto 30 { 1e20 1e20 -1e20 1e20 0 0 curveto } repeat")
             .unwrap();
         it.set_limits(steps(2000)).unwrap();
-        assert_eq!(
-            it.run_str("500 { 1 pop } repeat flattenpath"),
-            Err(PsError::StepsExceeded)
+        let err = it
+            .run_str("500 { 1 pop } repeat flattenpath")
+            .expect_err("the step cap stops it");
+        let report = it.error_report(&err);
+        assert_eq!(err, PsError::StepsExceeded, "{report}");
+        assert!(
+            report.contains("OffendingCommand: flattenpath;"),
+            "refused by flattenpath's own look, not after it: {report}"
         );
         assert_eq!(path_elements(&mut it), "31", "moveto and 30 curvetos");
     }
