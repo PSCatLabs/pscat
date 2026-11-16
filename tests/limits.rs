@@ -511,12 +511,14 @@ mod one_operator {
     #[test]
     fn bind_with_a_deep_dictionary_stack_stops_inside_bind() {
         // Each unresolved name is looked up through every dictionary on the
-        // stack: 60,000 names under 2,000 dictionaries is 1.2e8 probes in
-        // one `bind` (Codex, PR #1186: 1.3 s past a 0.1 s limit, blamed on
-        // the next operator). The walk counts lookups as work.
+        // stack: 200,000 names under 2,000 dictionaries is 4e8 probes in
+        // one `bind` (Codex, PR #1186: 60,000 names ran 1.3 s past a 0.1 s
+        // limit, blamed on the next operator; the CI runner's `bind` later
+        // finished those inside 0.1 s, so the test went red on main, #1219).
+        // The walk counts lookups as work.
         stops_inside(
             "bind under a deep dictionary stack",
-            "2000 { 1 dict begin } repeat /p [ 60000 { /zz_not_defined cvx } repeat ] cvx def"
+            "2000 { 1 dict begin } repeat /p [ 200000 { /zz_not_defined cvx } repeat ] cvx def"
                 .into(),
             "/p load bind pop",
             "bind",
