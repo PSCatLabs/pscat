@@ -122,7 +122,9 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   again.
 - **Gradients.** `gradfn`, `axialsh`, `radialsh` and `gradfill` build shading
   dictionaries from a plain array of `[r g b]` colours; see
-  `examples/gradients.ps`.
+  `examples/gradients.ps`. The dicts have no `/Extend`, so nothing is painted
+  past either end (the PLRM default); `dup /Extend [true true] put` pads with
+  the end colours instead.
 
 The gallery pieces named above live in `gallery/`; the
 [gallery](https://pscatlabs.github.io/pscat/gallery.html)

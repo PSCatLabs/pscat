@@ -129,7 +129,7 @@ fn single_page_program_yields_one_document() {
 #[test]
 fn shfill_axial_becomes_a_linear_gradient() {
     let pages = svg_pages(
-        "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] \
+        "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
@@ -150,7 +150,7 @@ fn shfill_axial_becomes_a_linear_gradient() {
 fn shfill_radial_burst_omits_fr_but_two_circle_includes_it() {
     // r0 = 0 (the common burst case): plain SVG 1.1 markup, no `fr`.
     let pages = svg_pages(
-        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [50 50 0 50 50 40] \
+        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [50 50 0 50 50 40] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
@@ -171,7 +171,7 @@ fn shfill_radial_burst_omits_fr_but_two_circle_includes_it() {
     // module doc in svg.rs for why that's a documented gap, not
     // something this file works around).
     let pages = svg_pages(
-        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [60 50 10 50 50 40] \
+        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [60 50 10 50 50 40] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
@@ -190,7 +190,7 @@ fn sh_shrinking_radial_swaps_circles_and_reverses_stops() {
     // reversed to compensate (SVG's offset 0 is always the focal
     // circle, offset 1 the outer one).
     let pages = svg_pages(
-        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [50 50 40 50 50 10] \
+        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [50 50 40 50 50 10] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
@@ -222,7 +222,7 @@ fn sh_gradient_local_coordinates_keep_full_precision() {
     // formatting layer instead.
     let pages = svg_pages(
         "100000 100000 scale \
-         << /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 0.0004 0] \
+         << /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 0.0004 0] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
@@ -273,6 +273,53 @@ fn opaque_normal_output_carries_no_compositing_attributes() {
 /// element rather than `paint()`'s color — the seam most likely to be
 /// forgotten, and the one that would silently make `--svg` diverge
 /// from `--png` for a shaded wash.
+/// An end that does not extend (#1040): SVG pads with the outermost stop,
+/// so the gradient runs on past that end, transparent, from a zero-width
+/// step at the real end. An axial runs a whole axis further each way; a
+/// growing radial's start runs back only to the circle of radius 0.
+#[test]
+fn shfill_ends_that_do_not_extend_pad_transparent() {
+    let svg = &svg_pages(
+        "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] \
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    )[0];
+    assert!(
+        svg.contains("x1=\"-100\" y1=\"0\" x2=\"200\" y2=\"0\""),
+        "{svg}"
+    );
+    let stops: Vec<&str> = svg.split("<stop ").skip(1).collect();
+    assert_eq!(stops.len(), 6, "{svg}");
+    for (stop, (offset, opaque)) in stops.iter().zip([
+        ("0", false),
+        ("0.33333334", false),
+        ("0.33333334", true),
+        ("0.6666667", true),
+        ("0.6666667", false),
+        ("1", false),
+    ]) {
+        assert!(stop.starts_with(&format!("offset=\"{offset}\"")), "{stop}");
+        assert_eq!(!stop.contains("stop-opacity=\"0\""), opaque, "{stop}");
+    }
+
+    // Start extended, end not: only the end runs on.
+    let svg = &svg_pages(
+        "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true false] \
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    )[0];
+    assert!(svg.contains("x1=\"0\" y1=\"0\" x2=\"200\" y2=\"0\""), "{svg}");
+    assert!(svg.contains("<stop offset=\"0\" stop-color=\"#ff0000\"/>"), "{svg}");
+
+    // Radial 10 -> 40 about one centre: back to radius 0 (a third of the
+    // way), forward one more t (to radius 70), so no `fr` is needed.
+    let svg = &svg_pages(
+        "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [50 50 10 50 50 40] \
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    )[0];
+    assert!(svg.contains("cx=\"50\" cy=\"50\" r=\"70\""), "{svg}");
+    assert!(!svg.contains("fr=\""), "{svg}");
+    assert_eq!(svg.matches("stop-opacity=\"0\"").count(), 4, "{svg}");
+}
+
 #[test]
 fn shfill_region_carries_alpha_too() {
     let pages = svg_pages(

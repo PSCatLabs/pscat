@@ -217,13 +217,9 @@ fn shfill_radial_gradient_burst_from_center() {
         b > 215 && r < 40,
         "edge of burst should be near-blue, got r={r} b={b}"
     );
-    // Beyond the radius: Pad extend keeps the edge color (documented
-    // deviation — shfill always extends both ends, see Gfx::shfill).
-    let (r, _, b) = pixel(&it, 50, 2);
-    assert!(
-        b > 215 && r < 40,
-        "beyond radius should stay pad-extended blue, got r={r} b={b}"
-    );
+    // Beyond the radius: no /Extend is [false false], so nothing is
+    // painted there (#1040).
+    assert_eq!(pixel(&it, 50, 2), WHITE, "beyond the radius: untouched");
 }
 
 #[test]
@@ -305,18 +301,105 @@ fn shfill_rejects_malformed_shading_dicts() {
 }
 
 #[test]
-fn shfill_accepts_extend_true_true_even_though_it_is_not_otherwise_honored() {
+fn shfill_accepts_extend_true_true() {
     // /Extend [true true] is near-universal in real-world shading
-    // content (it's what most gradient-producing tools emit). It's
-    // validated for shape but always behaves as if true regardless of
-    // its actual value (Gfx::shfill's module doc) -- this pins that the
-    // validator itself doesn't reject the common case.
+    // content (it's what most gradient-producing tools emit).
     let mut it = Interp::with_page(100, 100).expect("test page");
     it.run_str(
         "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true true] \
          /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >> >> shfill",
     )
     .expect("Extend [true true] must be accepted");
+}
+
+/// Mid gray: neither end colour of the red-to-blue ramps below, so an
+/// unpainted pixel is told from one painted either colour.
+const GRAY: (u8, u8, u8) = (128, 128, 128);
+const RED: (u8, u8, u8) = (255, 0, 0);
+const BLUE: (u8, u8, u8) = (0, 0, 255);
+
+/// The `/Extend` entry for `[start end]`, or none at all for `None`.
+fn extend_key(ext: Option<[bool; 2]>) -> String {
+    ext.map_or(String::new(), |[a, b]| format!("/Extend [{a} {b}]"))
+}
+
+/// A red-to-blue `shfill` of `coords` over a gray page.
+fn render_extend(shading_type: u8, coords: &str, ext: Option<[bool; 2]>) -> Interp {
+    render(&format!(
+        "0.5 setgray 0 0 100 100 rectfill \
+         << /ShadingType {shading_type} /ColorSpace /DeviceRGB /Coords [{coords}] {} \
+         /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+        extend_key(ext)
+    ))
+}
+
+/// What a point past an end shows: the end colour if it extends, else the
+/// page under it (#1040). A missing /Extend is [false false].
+fn past(ext: Option<[bool; 2]>, end: usize, colour: (u8, u8, u8)) -> (u8, u8, u8) {
+    if ext.unwrap_or([false, false])[end] {
+        colour
+    } else {
+        GRAY
+    }
+}
+
+const EXTENDS: [Option<[bool; 2]>; 5] = [
+    None,
+    Some([false, false]),
+    Some([false, true]),
+    Some([true, false]),
+    Some([true, true]),
+];
+
+#[test]
+fn shfill_axial_extends_each_end_independently() {
+    // Confirmed with gs 10.07.1: past an end that does not extend, the
+    // page is untouched; a missing /Extend extends neither end.
+    for ext in EXTENDS {
+        let it = render_extend(2, "30 0 70 0", ext);
+        assert_eq!(pixel(&it, 10, 50), past(ext, 0, RED), "{ext:?}: before the start");
+        assert_eq!(pixel(&it, 90, 50), past(ext, 1, BLUE), "{ext:?}: past the end");
+        let (r, _, b) = pixel(&it, 50, 50);
+        assert!(r > 100 && b > 100, "{ext:?}: the axis itself is painted");
+    }
+}
+
+#[test]
+fn shfill_radial_extends_each_end_independently() {
+    // Nested circles: before the start is inside the first circle, past
+    // the end outside the second (gs 10.07.1 the same).
+    for ext in EXTENDS {
+        let it = render_extend(3, "50 50 10 50 50 35", ext);
+        assert_eq!(pixel(&it, 50, 50), past(ext, 0, RED), "{ext:?}: inside r0");
+        assert_eq!(pixel(&it, 3, 3), past(ext, 1, BLUE), "{ext:?}: outside r1");
+        let (r, _, b) = pixel(&it, 50, 28);
+        assert!(r > 60 && b > 60, "{ext:?}: between the circles is painted");
+    }
+    // Circles that shrink: past the end is inside the second circle.
+    for ext in EXTENDS {
+        let it = render_extend(3, "45 50 35 55 50 10", ext);
+        assert_eq!(pixel(&it, 55, 50), past(ext, 1, BLUE), "{ext:?}: inside r1");
+        assert_eq!(pixel(&it, 3, 3), past(ext, 0, RED), "{ext:?}: outside r0");
+    }
+}
+
+#[test]
+fn shfill_radial_cone_paints_the_smaller_t_past_an_unextended_end() {
+    // Circles neither inside the other (25,50 r10 to 65,50 r20): the
+    // second circle's centre lies on the circle of t = 0.6 and on that of
+    // t = 5/3. gs paints the larger t in range: purple with the end not
+    // extended, blue with it extended. Never a hole.
+    let it = render_extend(3, "25 50 10 65 50 20", None);
+    let (r, g, b) = pixel(&it, 65, 50);
+    assert!(
+        (80..130).contains(&r) && g == 0 && (130..180).contains(&b),
+        "t = 0.6, got ({r},{g},{b})"
+    );
+    assert_eq!(pixel(&it, 95, 50), GRAY, "past the end circle");
+    assert_eq!(pixel(&it, 5, 50), GRAY, "before the start circle");
+    let it = render_extend(3, "25 50 10 65 50 20", Some([false, true]));
+    assert_eq!(pixel(&it, 65, 50), BLUE, "t = 5/3, extended");
+    assert_eq!(pixel(&it, 95, 50), BLUE, "past the end circle, extended");
 }
 
 #[test]
@@ -647,26 +730,27 @@ fn shfill_bbox_restricts_svg_export_too() {
 
 #[test]
 fn shfill_coincident_center_equal_radius_radial_matches_gs() {
-    // Confirmed directly against gs 10.07.1: /Coords [50 50 20 50 50
-    // 20] /Extend [true true] paints a solid disk of C0 for r<=20 and
-    // leaves everything outside untouched (not C1-extended, despite
-    // Extend true) -- tiny-skia's own degenerate fallback for this
-    // exact shape (coincident centers, equal *positive* radii) already
-    // produces this, so this pins the current-correct behavior rather
-    // than fixing anything (a round-5 Codex review raised this as a
-    // suspected gap from an overbroad code comment, not an actual
-    // repro; verified by direct rendering against gs before touching
-    // any code, and the comment was the only thing that needed
-    // fixing).
-    let it = render(
-        "1 1 1 setrgbcolor 0 0 100 100 rectfill \
-         << /ShadingType 3 /ColorSpace /DeviceGray /Coords [50 50 20 50 50 20] \
-         /Extend [true true] \
-         /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >> shfill",
-    );
-    assert_eq!(pixel(&it, 50, 50), BLACK, "center: inside the disk");
-    assert_eq!(pixel(&it, 50, 45), BLACK, "well inside the disk");
-    assert_eq!(pixel(&it, 50, 15), WHITE, "outside the disk: untouched");
+    // Confirmed with gs 10.07.1 on a gray page, under each /Extend: one
+    // circle twice paints a disk of C0 when the start extends and nothing
+    // otherwise, and never anything outside the circle. Nearly one circle
+    // (tiny-skia's degenerate tolerance) follows gs the same way, except
+    // that circles shrinking by a hair paint C1 when the end extends.
+    for (coords, inside_end) in [
+        ("50 50 20 50 50 20", 0),
+        ("50 50 20 50 50 20.00001", 0),
+        ("50 50 20.00001 50 50 20", 1),
+    ] {
+        for ext in EXTENDS {
+            let it = render_extend(3, coords, ext);
+            let colour = [RED, BLUE][inside_end];
+            assert_eq!(
+                pixel(&it, 50, 50),
+                past(ext, inside_end, colour),
+                "{coords} {ext:?}: inside"
+            );
+            assert_eq!(pixel(&it, 50, 15), GRAY, "{coords} {ext:?}: outside");
+        }
+    }
 }
 
 #[test]

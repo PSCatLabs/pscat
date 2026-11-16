@@ -3622,6 +3622,12 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
 %   0 0 moveto 400 0 lineto 400 400 lineto 0 400 lineto closepath
 %   50 50 0 350 350 40 [[1 0 0] [0 0 1]] radialsh gradfill
 %
+% The dicts carry no /Extend, so the gradient stops at its two ends (the
+% PLRM default, [false false]: past the first point or circle and past the
+% last, nothing is painted). To pad the region with the end colours, add
+% the key before painting:
+%   0 0 400 0 [[1 0 0] [0 0 1]] axialsh dup /Extend [true true] put gradfill
+%
 % `gradfn` always builds a FunctionType 3 (stitching) function, even
 % for a two-color ramp -- one code path for both the simple two-stop
 % case and a multi-stop gradient, with legs evenly spaced across [0 1].

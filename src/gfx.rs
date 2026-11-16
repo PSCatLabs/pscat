@@ -2172,7 +2172,15 @@ impl Gfx {
         if self.painting_off() {
             return Ok(0);
         }
-        let extend = shading.extend;
+        // An end that does not extend, but whose far side the painted
+        // region never reaches, is painted as if it did: the same pixels,
+        // and an opaque shader, which tiny-skia paints several times faster
+        // than one with a transparent stop (#1040).
+        let reached = self.shfill_ends_reached(&shading);
+        let extend = [
+            shading.extend[0] || !reached[0],
+            shading.extend[1] || !reached[1],
+        ];
         // The raster's ramp with each end that does not extend closed by a
         // transparent stop at the same position (#1040). The stops always
         // run from 0 to 1, and with a zero-width step tiny-skia's gradient
@@ -2576,6 +2584,108 @@ impl Gfx {
             self.prepare_paint();
         }
         Ok(work)
+    }
+
+    /// Whether the region a `shfill` can paint reaches past each end of
+    /// `shading` (#1040), conservatively: a `true` may be wrong, a `false`
+    /// never is. The region is bounded, in device space, by the page, the
+    /// `/BBox` and every clip path's box; its corners, back in the
+    /// shading's own space, are tested against the ends. An axial's t is
+    /// affine, so its range over the region is at the corners. For nested
+    /// circles, past the start is inside the first circle when they grow
+    /// (outside it when they shrink) and past the end outside the second
+    /// (inside it). Circles that are not nested are taken to reach both.
+    fn shfill_ends_reached(&self, shading: &crate::shading::Shading) -> [bool; 2] {
+        const BOTH: [bool; 2] = [true, true];
+        // The shader is sampled at pixel centres: the page's outermost are
+        // half a pixel in. An anti-aliased edge pixel of a clip or the
+        // `/BBox` can have its centre outside the path, so their boxes are
+        // taken a pixel wider.
+        let (w, h) = (self.pixmap.width() as f32, self.pixmap.height() as f32);
+        let mut b = [0.5, 0.5, w - 0.5, h - 0.5];
+        let mut meet = |o: [f32; 4]| {
+            b = [
+                b[0].max(o[0] - 1.0),
+                b[1].max(o[1] - 1.0),
+                b[2].min(o[2] + 1.0),
+                b[3].min(o[3] + 1.0),
+            ];
+        };
+        if let Some((llx, lly, urx, ury)) = shading.bbox {
+            let c = [(llx, lly), (urx, lly), (urx, ury), (llx, ury)].map(|(x, y)| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            });
+            meet(corners_box(c).map(|v| v as f32));
+        }
+        let mut node = self.state.clip.as_ref().map(|c| c.node.clone());
+        while let Some(n) = node {
+            if let Some(nb) = n.path.device_bbox() {
+                meet(nb);
+            }
+            node = n.parent.clone();
+        }
+        if !(b[0] <= b[2] && b[1] <= b[3]) {
+            return [false, false];
+        }
+        let Some(inv) = self.state.ctm.invert() else {
+            return BOTH;
+        };
+        let corners = [(b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3])].map(|(x, y)| {
+            let mut p = [Point::from_xy(x, y)];
+            inv.map_points(&mut p);
+            (f64::from(p[0].x), f64::from(p[0].y))
+        });
+        if corners.iter().any(|&(x, y)| !x.is_finite() || !y.is_finite()) {
+            return BOTH;
+        }
+        match shading.kind {
+            crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
+                let (dx, dy) = (x1 - x0, y1 - y0);
+                let len2 = dx * dx + dy * dy;
+                if len2 == 0.0 || !len2.is_finite() {
+                    return BOTH;
+                }
+                let t = corners.map(|(x, y)| ((x - x0) * dx + (y - y0) * dy) / len2);
+                [
+                    t.iter().any(|&t| t.is_nan() || t < 0.0),
+                    t.iter().any(|&t| t.is_nan() || t > 1.0),
+                ]
+            }
+            crate::shading::ShadingKind::Radial {
+                x0,
+                y0,
+                r0,
+                x1,
+                y1,
+                r1,
+            } => {
+                let dr = r1 - r0;
+                // Not nested (or not a number): both, as promised above.
+                let nested = (x1 - x0).hypot(y1 - y0) <= dr.abs();
+                if !nested || dr == 0.0 {
+                    return BOTH;
+                }
+                // Some corner outside the circle: the region leaves it.
+                let leaves = |cx: f64, cy: f64, r: f64| {
+                    corners.iter().any(|&(x, y)| {
+                        let d = (x - cx).hypot(y - cy);
+                        d.is_nan() || d > r
+                    })
+                };
+                // The region's box meets the open disk.
+                let meets = |cx: f64, cy: f64, r: f64| {
+                    let [lx, ly, ux, uy] = corners_box(corners);
+                    let d = (cx.clamp(lx, ux) - cx).hypot(cy.clamp(ly, uy) - cy);
+                    r > 0.0 && (d.is_nan() || d < r)
+                };
+                if dr > 0.0 {
+                    [meets(x0, y0, r0), leaves(x1, y1, r1)]
+                } else {
+                    [leaves(x0, y0, r0), meets(x1, y1, r1)]
+                }
+            }
+        }
     }
 
     pub fn stroke(&mut self) {
@@ -4380,6 +4490,14 @@ fn extend_ramp(stops: &[(f32, f32, f32, f32)], extend: [bool; 2]) -> Vec<(f32, C
         ramp.push((1.0, Color::TRANSPARENT));
     }
     ramp
+}
+
+/// The bounding box `[llx, lly, urx, ury]` of four points.
+fn corners_box(c: [(f64, f64); 4]) -> [f64; 4] {
+    c.iter().fold(
+        [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+        |b, &(x, y)| [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)],
+    )
 }
 
 fn gradient_stops(ramp: &[(f32, Color)]) -> Vec<GradientStop> {

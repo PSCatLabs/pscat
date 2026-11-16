@@ -439,14 +439,15 @@ fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
     assert_gs_matches(&pdf, &canvas, "sh_end_edges");
 }
 
-/// Two coincident circles of one radius: the raster paints the first
-/// colour inside and the last outside; written as is, a PDF reader paints
-/// nothing (CoreGraphics) or only the disk (gs). The PDF records the
-/// raster's picture as a hairline ring (a Codex review of #1028).
+/// Two coincident circles of one radius: gs paints a disk of the first
+/// colour if the start extends, nothing outside (#1040), and so does the
+/// raster; written as is, CoreGraphics would paint nothing. The PDF records
+/// the disk: a radial from the centre, one colour, extending neither end.
 #[test]
-fn equal_coincident_circles_export_the_rasters_disk_and_surround() {
+fn equal_coincident_circles_export_the_rasters_disk() {
     let src = b"0.5 setgray 0 0 500 500 rectfill
       << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150 250 250 150]
+         /Extend [true true]
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
     let (pdf, canvas) = pdf_and_canvas(src);
     let px = |x: u32, y: u32| {
@@ -454,53 +455,73 @@ fn equal_coincident_circles_export_the_rasters_disk_and_surround() {
         (c.red(), c.green(), c.blue())
     };
     assert_eq!(px(250, 250), (255, 0, 0), "raster: first colour inside");
-    assert_eq!(px(20, 20), (0, 0, 255), "raster: last colour outside");
+    assert_eq!(px(20, 20), (128, 128, 128), "raster: nothing outside");
     let text = pdf_text(&pdf);
-    assert!(text.contains("/Coords [125 125 0 125 125 150]"), "{text}");
     assert!(
-        text.contains("/Bounds [0.5]"),
-        "a hard edge, not a ramp: {text}"
+        text.contains("/Coords [250 250 0 250 250 150] /Extend [false false]"),
+        "{text}"
     );
+    assert!(text.contains("/C0 [1 0 0] /C1 [1 0 0]"), "one colour: {text}");
     assert_gs_matches(&pdf, &canvas, "sh_equal_circles");
 }
 
-/// The same fallback for circles only nearly equal (tiny-skia's tolerance),
-/// and with no ramp at the edge however far the circle is magnified.
+/// The same disk for circles only nearly equal (tiny-skia's tolerance;
+/// shrinking by a hair, so the end colour, as gs), and however far the
+/// circle is magnified. With the start not extended there is nothing.
 #[test]
-fn nearly_equal_and_huge_equal_circles_keep_a_hard_edge() {
-    for (name, src) in [
+fn nearly_equal_and_huge_equal_circles_export_the_disk() {
+    for (name, src, colour) in [
         (
             "sh_near_equal",
             &b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150.00001 250 250 150]
+               /Extend [true true]
                /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+            "0 0 1",
         ),
         (
             "sh_max_equal",
             &b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 0 2e38 0 0 2e38]
+               /Extend [true true]
                /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+            "1 0 0",
         ),
         (
             "sh_huge_equal",
             &b"-999800 0 translate
                << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 250 1000000 0 250 1000000]
+               /Extend [true true]
                /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"[..],
+            "1 0 0",
         ),
     ] {
         let (pdf, canvas) = pdf_and_canvas(src);
         let text = pdf_text(&pdf);
-        assert!(text.contains("/Bounds [0.5]"), "{name}");
+        assert!(
+            text.contains(&format!("/C0 [{colour}] /C1 [{colour}]")),
+            "{name}: {text}"
+        );
+        assert!(text.contains("/Extend [false false]"), "{name}: {text}");
         assert!(!text.contains("inf") && !text.contains("NaN"), "{name}: {text}");
         assert_gs_matches(&pdf, &canvas, name);
     }
+    let (pdf, canvas) = pdf_and_canvas(
+        b"<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [250 250 150 250 250 150]
+             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    );
+    assert!(!pdf_text(&pdf).contains("/ShadingType"), "nothing to record");
+    assert_eq!(canvas.pixel(250, 250).map(|c| c.red()), Some(255));
+    assert_eq!(canvas.pixel(250, 250).map(|c| c.green()), Some(255));
 }
 
 /// Coords distinct in f64 but one point in f32: the raster paints the last
-/// colour solid (tiny-skia's degenerate axis), so the PDF must too, not a
-/// zero-length shading readers skip (a Codex review of #1028).
+/// stop solid (tiny-skia's degenerate axis), so the PDF must too, not a
+/// zero-length shading readers skip (a Codex review of #1028). With the
+/// end not extended that stop is transparent, and nothing is recorded.
 #[test]
 fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
     let (pdf, canvas) = pdf_and_canvas(
         b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
+             /Extend [true true]
              /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
     );
     let c = canvas.pixel(100, 100).expect("pixel");
@@ -515,6 +536,59 @@ fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
         "{content}"
     );
     assert_gs_matches(&pdf, &canvas, "sh_collapsed_axis");
+    let (pdf, canvas) = pdf_and_canvas(
+        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
+             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+    );
+    let c = canvas.pixel(100, 100).expect("pixel");
+    assert_eq!((c.red(), c.green(), c.blue()), (255, 255, 255), "raster: nothing");
+    let content = page_content(&pdf);
+    assert!(!content.contains(" rg") && !content.contains(" sh"), "{content}");
+}
+
+/// Each `/Extend` on an axial and on radials (nested; a cone, whose
+/// second circle's centre takes its smaller t when the end does not
+/// extend), on a gray page: the PDF carries the key, and gs's raster of
+/// it agrees with ours, block by block and at points past each end
+/// (#1040).
+#[test]
+fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
+    let page = b"0.5 setgray 0 0 500 500 rectfill ";
+    let cases: [(&str, &str, &[(u32, u32)]); 3] = [
+        ("2", "150 0 350 0", &[(50, 250), (450, 250), (250, 250)]),
+        ("3", "250 250 50 250 250 175", &[(250, 250), (20, 20), (250, 140)]),
+        ("3", "125 250 50 325 250 100", &[(325, 250), (475, 250), (25, 250)]),
+    ];
+    for (case, (ty, coords, points)) in cases.into_iter().enumerate() {
+        for ext in [[false, false], [false, true], [true, false], [true, true]] {
+            let name = format!("sh_extend_{case}_{}_{}", ext[0], ext[1]);
+            let src = format!(
+                "<< /ShadingType {ty} /ColorSpace /DeviceRGB /Coords [{coords}]
+                   /Extend [{} {}]
+                   /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
+                ext[0], ext[1]
+            );
+            let (pdf, canvas) = pdf_and_canvas(&[page.as_slice(), src.as_bytes()].concat());
+            let text = pdf_text(&pdf);
+            assert!(
+                text.contains(&format!("/Coords [{coords}] /Extend [{} {}]", ext[0], ext[1])),
+                "{name}: {text}"
+            );
+            if !common::gs_available() {
+                continue;
+            }
+            assert_gs_matches(&pdf, &canvas, &name);
+            let theirs = gs_rasterize(&pdf, &name);
+            for &(x, y) in points {
+                let (a, b) = (canvas.pixel(x, y).expect("ours"), theirs.pixel(x, y).expect("gs"));
+                let (a, b) = ([a.red(), a.green(), a.blue()], [b.red(), b.green(), b.blue()]);
+                assert!(
+                    a.iter().zip(b).all(|(p, q)| p.abs_diff(q) <= 8),
+                    "{name} at ({x},{y}): ours {a:?}, gs {b:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
