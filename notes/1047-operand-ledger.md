@@ -55,13 +55,17 @@ operators and `cvi` compute in place. Instructions retired (macOS
 
 | program | base | branch | change |
 |---|---|---|---|
-| `examples/fillkit.ps` | TIMING_FILLKIT |
-| `gallery/chalkboard_lecture.ps` | TIMING_CHALK |
-| `gallery/fern.ps` | TIMING_FERN |
-| number-operator loop (moveto, lineto, cvi, atan) | TIMING_NUM |
-| mixed loop (def, get, exch, copy, cvi) | TIMING_LOOP |
+| `examples/fillkit.ps` | 34.338 G | 34.517 G | +0.5% |
+| `gallery/chalkboard_lecture.ps` | 85.855 G | 85.593 G | -0.3% |
+| `gallery/fern.ps` | 3.667 G | 3.683 G | +0.4% |
+| `gallery/frost_mandala.ps` | 514.3 M | 516.3 M | +0.4% |
+| number-operator loop (moveto, lineto, cvi, atan; 2M iterations) | 8.350 G | 8.329 G | -0.3% |
+| mixed loop (def, get, exch, copy, cvi; 3M iterations) | 14.775 G | 14.520 G | -1.7% |
 
-CPU time, best of N, is within noise on a loaded machine (TIMING_CPU).
+CPU time, best of 9 on a loaded machine (load average 9-13): fillkit 1.699 s
+base, 1.677 s branch; the mixed loop 0.676 s, 0.643 s; the number loop 0.389 s,
+0.413 s (best of 15; its fewest cycles over five runs are 1.516 G and 1.521 G,
+so that gap is the machine, not more work).
 
 **Deviations kept.** An error inside an image's data procedure names the
 operator that failed; gs names `image` (`77 1 (x) true cmd=--image--`). Two
