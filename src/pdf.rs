@@ -1335,7 +1335,7 @@ Q",
         out.bytes(b"0000000000 65535 f \n");
         for i in 0..count {
             let off = out.offset(i);
-            let _ = write!(out, "{off:010} 00000 n \n");
+            let _ = writeln!(out, "{off:010} 00000 n ");
         }
         let _ = write!(
             out,
@@ -1500,7 +1500,7 @@ impl<'a> Out<'a> {
         let at = self.pos();
         self.offsets.push(at);
         let n = self.offsets.len();
-        let _ = write!(self, "{n} 0 obj\n");
+        let _ = writeln!(self, "{n} 0 obj");
     }
 
     /// End the object; `Err` when a write has failed, to stop early.
