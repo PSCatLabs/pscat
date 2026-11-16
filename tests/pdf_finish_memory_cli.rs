@@ -179,3 +179,31 @@ fn a_refused_write_leaves_the_existing_file_and_a_symlinked_target_alone() {
             .contains(".tmp"))
     );
 }
+
+/// A read-only destination is refused as it always was, and kept: the
+/// document is built first, and the file is opened only to copy it in.
+#[cfg(unix)]
+#[test]
+fn a_read_only_destination_is_refused_and_kept() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = common::scratch_dir("pdf_finish_memory_ro");
+    let target = dir.join("locked.pdf");
+    let old = b"%PDF-1.4\nan earlier document\n%%EOF\n";
+    std::fs::write(&target, old).unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new()
+        .write(true)
+        .open(&target)
+        .is_ok()
+    {
+        return; // root, or a file system that ignores modes: nothing to test
+    }
+    let (ok, stderr) = run_to(NULS, 16, &target, &dir);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("cannot write"), "{stderr}");
+    assert_eq!(std::fs::read(&target).unwrap(), old);
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o444
+    );
+}

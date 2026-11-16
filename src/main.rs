@@ -1198,148 +1198,97 @@ fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) 
     }
 }
 
-/// Where `--pdf PATH` writes while the document is built (#1107): to a
-/// temporary file beside the real target, renamed over it once the document
-/// is complete, so a refusal or an error leaves an existing file (or the
-/// file a symlink points to) as it was, as it did when the document was
-/// built whole before the file was touched. A path that is not a plain file
-/// (stdout, a device, a FIFO) is written to directly.
-enum PdfDest {
-    Direct,
-    Staged {
-        tmp: std::path::PathBuf,
-        to: std::path::PathBuf,
-    },
-}
-
-/// The file `path` names after following symlinks (a dangling one too).
-fn resolve_links(path: &std::path::Path) -> std::path::PathBuf {
-    let mut at = path.to_path_buf();
-    for _ in 0..40 {
-        match std::fs::symlink_metadata(&at) {
-            Ok(m) if m.file_type().is_symlink() => match std::fs::read_link(&at) {
-                Ok(link) => {
-                    at = match at.parent() {
-                        Some(dir) if link.is_relative() => dir.join(link),
-                        _ => link,
-                    }
-                }
-                Err(_) => break,
-            },
-            _ => break,
-        }
+/// An unnamed temporary file: in the system temp directory and already
+/// unlinked (on Windows, deleted when closed), so nothing is left behind
+/// however the process ends.
+fn spool_file() -> std::io::Result<std::fs::File> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_FLAG_DELETE_ON_CLOSE
+        options.custom_flags(0x0400_0000);
     }
-    at
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "pscat-pdf-{}-{nanos}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let file = options.open(&path)?;
+    #[cfg(not(windows))]
+    std::fs::remove_file(&path)?;
+    Ok(file)
 }
 
-/// Open the output for `--pdf PATH`: the file and how it is finished.
-fn open_pdf_dest(path: &str) -> std::io::Result<(std::fs::File, PdfDest)> {
-    use std::path::Path;
-    let to = resolve_links(Path::new(path));
-    // `/dev/stdout` and `/proc/self/fd/N` name what the process was given,
-    // even when it is a plain file: replacing the file would leave that
-    // descriptor pointing at the old one.
-    let process_owned = to.starts_with("/dev") || to.starts_with("/proc");
-    let plain = match std::fs::metadata(&to) {
-        Ok(m) => m.is_file(),
-        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
-    };
-    if plain && !process_owned {
-        let dir = match to.parent() {
-            Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
-            _ => std::path::PathBuf::from("."),
-        };
-        let name = to
-            .file_name()
-            .map_or_else(|| "out".into(), |n| n.to_string_lossy().into_owned());
-        let tmp = dir.join(format!(".{name}.pscat-{}.tmp", std::process::id()));
-        let made = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp);
-        if let Ok(file) = made {
-            // The file it replaces keeps its permissions.
-            if let Ok(m) = std::fs::metadata(&to) {
-                let _ = std::fs::set_permissions(&tmp, m.permissions());
-            }
-            return Ok((file, PdfDest::Staged { tmp, to }));
-        }
-        // A directory we cannot add to, around a file we can write: as before.
-    }
-    Ok((std::fs::File::create(path)?, PdfDest::Direct))
-}
-
-/// Write the document `--pdf PATH` asks for, as it is built (#1107): the
-/// file is the only place it exists, so what it takes beside the program's
-/// own memory is the largest compressed page or image stream. False, with
-/// the reason on stderr, when it cannot be written, and then the file is as
-/// it was before; a document that would pass `--max-memory` is refused like
-/// a program that does, naming the limit the way the interpreter's own
-/// report does (the MCP server reads that line back as a `limit_exceeded`).
+/// Write the document `--pdf PATH` asks for (#1107). It is built into an
+/// unnamed temporary file, so the heap beside the program's own memory is
+/// the largest compressed page or image stream, and only a document that is
+/// complete is copied to `PATH`, opened the way it always was (`File::create`,
+/// in place): a refusal or an error before that never touches `PATH`, and
+/// permissions, ACLs, descriptors and read-only files behave as they did when
+/// the document was built whole in memory. A document that would pass
+/// `--max-memory` is refused like a program that does, naming the limit the
+/// way the interpreter's own report does (the MCP server reads that line back
+/// as a `limit_exceeded`). False, with the reason on stderr, when it cannot be
+/// written.
 fn write_pdf_file(interp: &Interp, path: &str) -> bool {
-    use std::io::Write as _;
-    let (file, dest) = match open_pdf_dest(path) {
-        Ok(opened) => opened,
+    use std::io::{Seek as _, Write as _};
+    let spool = match spool_file() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: no temporary file for the document: {e}");
+            return false;
+        }
+    };
+    let mut sink = std::io::BufWriter::new(spool);
+    let built = match interp.write_pdf(&mut sink) {
+        // Recording was never on, so there is no document: as before.
+        None => return true,
+        Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
+        Some(Err(e)) => Err(e),
+    };
+    match built {
+        Ok(()) => {}
+        Err(pscat::pdf::PdfWriteError::Memory) => {
+            let limit = pscat::Limit::Memory;
+            eprintln!(
+                "pscat: cannot write {path}: the document needs more memory than \
+                 --max-memory allows; the file was not written"
+            );
+            eprintln!("%%[ Error: limitexceeded ({limit}); OffendingCommand: --pdf ]%%");
+            return false;
+        }
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: {e}");
+            return false;
+        }
+    }
+    let mut spool = match sink.into_inner() {
+        Ok(f) => f,
         Err(e) => {
             eprintln!("pscat: cannot write {path}: {e}");
             return false;
         }
     };
-    let mut sink = std::io::BufWriter::new(file);
-    let written = match interp.write_pdf(&mut sink) {
-        // Recording was never on, so there is no document: as before.
-        None => {
-            drop(sink);
-            discard_pdf(&dest, path);
-            return true;
-        }
-        Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
-        Some(Err(e)) => Err(e),
-    };
-    drop(sink);
-    let written = match (&dest, written) {
-        (PdfDest::Staged { tmp, to }, Ok(())) => {
-            std::fs::rename(tmp, to).map_err(pscat::pdf::PdfWriteError::Io)
-        }
-        (_, written) => written,
-    };
-    match written {
-        Ok(()) => {
-            eprintln!("pscat: wrote {path}");
-            true
-        }
-        Err(e) => {
-            discard_pdf(&dest, path);
-            match e {
-                pscat::pdf::PdfWriteError::Memory => {
-                    let limit = pscat::Limit::Memory;
-                    eprintln!(
-                        "pscat: cannot write {path}: the document needs more memory than \
-                         --max-memory allows; the file was not written"
-                    );
-                    eprintln!("%%[ Error: limitexceeded ({limit}); OffendingCommand: --pdf ]%%");
-                }
-                e => eprintln!("pscat: cannot write {path}: {e}"),
-            }
-            false
-        }
+    let copied = spool
+        .rewind()
+        .and_then(|()| std::fs::File::create(path))
+        .and_then(|mut dest| {
+            std::io::copy(&mut spool, &mut dest)?;
+            dest.flush()
+        });
+    if let Err(e) = copied {
+        eprintln!("pscat: cannot write {path}: {e}");
+        return false;
     }
-}
-
-/// Throw away what `--pdf` could not finish: the temporary file, or a file
-/// written in place if it is a plain one (`--pdf /dev/stdout` and the like
-/// name something that is not ours to delete).
-fn discard_pdf(dest: &PdfDest, path: &str) {
-    match dest {
-        PdfDest::Staged { tmp, .. } => {
-            let _ = std::fs::remove_file(tmp);
-        }
-        PdfDest::Direct => {
-            if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
+    eprintln!("pscat: wrote {path}");
+    true
 }
 
 /// Write `pages` as `--png PATH` does: one page to PATH itself, several to
