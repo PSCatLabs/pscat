@@ -2603,6 +2603,24 @@ impl Interp {
         }
     }
 
+    /// `execstackoverflow` if running `obj` would need a frame and the
+    /// execution stack is full: `if`, `ifelse` and `exec` ask before they
+    /// take their operands, so the error leaves them on the stack, as in
+    /// Ghostscript (#1047).
+    #[inline]
+    pub(crate) fn exec_room(&self, obj: &Object) -> Result<(), PsError> {
+        let needs_frame = obj.executable
+            && match &obj.value {
+                Value::Array(a) => !a.is_empty(),
+                Value::String(_) | Value::File(_) => true,
+                _ => false,
+            };
+        if needs_frame && self.estack.len() >= EXEC_STACK_LIMIT {
+            return Err(PsError::ExecStackOverflow);
+        }
+        Ok(())
+    }
+
     #[inline(always)]
     fn push_proc_frame(&mut self, body: PsArray) -> Result<(), PsError> {
         if body.is_empty() {
@@ -2760,9 +2778,15 @@ impl Interp {
         self.push_frame(Frame::Show(Box::new(ctx)))
     }
 
-    /// Queue an image (image/imagemask/colorimage) frame.
-    pub(crate) fn begin_image(&mut self, mut ctx: ImageCtx) -> Result<(), PsError> {
-        ctx.op_name = self.last_name;
+    /// Queue an image (image/imagemask/colorimage) frame. `op` is the
+    /// operator that began it, for an error the frame raises later: the last
+    /// name run is not it when the operator was bound (#1047).
+    pub(crate) fn begin_image(
+        &mut self,
+        mut ctx: ImageCtx,
+        op: &'static str,
+    ) -> Result<(), PsError> {
+        ctx.op_name = Some(crate::name::intern(op).id());
         // For the SVG and PDF recorders (#1188), checked with no steps.
         ctx.probe = self.limit_probe();
         // The SVG and PDF recorders decode the whole image into a buffer of

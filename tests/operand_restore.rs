@@ -405,6 +405,17 @@ const CASES: &[(&str, &str, &str)] = &[
         r"1 (a) true /add load if",
         "77 1 (a) true --add-- true cmd=--if--",
     ),
+    // A bound image's bad data names the operator that began the image (gs).
+    (
+        "image-bound-bad-data",
+        r"/f { 1 1 8 [1 0 0 1 0 0] (zz) /ASCIIHexDecode filter image } bind def f",
+        "77 true cmd=--image--",
+    ),
+    (
+        "imagemask-bound-bad-data",
+        r"/f { 1 1 true [1 0 0 1 0 0] (zz) /ASCIIHexDecode filter imagemask } bind def f",
+        "77 true cmd=--imagemask--",
+    ),
     ("dict-odd", r"<< 1 >>", "77 -mark- 1 true cmd=-->>--"),
     (
         "dict-nullkey",
@@ -551,4 +562,59 @@ fn a_tint_transform_with_a_bad_result_leaves_it_on_the_stack() {
         "77 (x) true cmd=pop",
     )];
     assert_eq!(pscat_lines(&program(&cases)), want(&cases));
+}
+
+/// `handleerror` names a failed operator as the report does (`div`), not
+/// `--nostringval--` (#1047, Codex review round 1; gs prints
+/// `Error: /undefinedresult in --div--`).
+#[test]
+fn handleerror_names_the_failed_operator() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["-e", "{ 1 0 div } stopped pop handleerror"])
+        .output_deadline()
+        .expect("run pscat");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "%%[ Error: undefinedresult; OffendingCommand: div ]%%\n"
+    );
+}
+
+/// `if`, `ifelse` and `exec` check for room on the execution stack before
+/// they take their operands, so an `execstackoverflow` leaves them, as in
+/// Ghostscript. (gs grows its execution stack far past pscat's limit, so
+/// these are pscat's own: the recursion is not in tail position, or it would
+/// run in constant depth.)
+#[test]
+fn an_execstackoverflow_leaves_the_operands() {
+    for (def, want) in [
+        (
+            "/r { true { r } if 0 pop } def",
+            "/execstackoverflow --if-- {r} true",
+        ),
+        (
+            "/r { true { r } if 0 pop } bind def",
+            "/execstackoverflow --if-- {r} true",
+        ),
+        (
+            "/r { true { r } { } ifelse 0 pop } def",
+            "/execstackoverflow --ifelse-- {} {r} true",
+        ),
+        (
+            "/r { { r } exec 0 pop } def",
+            "/execstackoverflow --exec-- {r}",
+        ),
+    ] {
+        let mut it = Interp::new();
+        it.capture_stdout();
+        it.run_str(&format!(
+            "{def} {{ r }} stopped pop $error /errorname get == $error /command get == \
+             count {{ == }} repeat"
+        ))
+        .unwrap_or_else(|e| panic!("{def}: {}", it.error_report(&e)));
+        assert_eq!(
+            tidy(&String::from_utf8_lossy(it.captured_stdout())).join(" "),
+            want,
+            "{def}"
+        );
+    }
 }

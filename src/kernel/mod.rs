@@ -645,17 +645,20 @@ fn paint(it: &mut Interp, a: &Args, bytes: Vec<u8>) -> Result<(), PsError> {
     for _ in 0..a.ncomp {
         decode.extend([0.0, 1.0]);
     }
-    it.begin_image(ImageCtx::new(
-        a.w,
-        a.h,
-        8,
-        a.ncomp as u32,
-        decode,
-        a.matrix,
-        None,
-        ImageColor::Direct,
-        ImageSource::Bytes(bytes),
-    ))
+    it.begin_image(
+        ImageCtx::new(
+            a.w,
+            a.h,
+            8,
+            a.ncomp as u32,
+            decode,
+            a.matrix,
+            None,
+            ImageColor::Direct,
+            ImageSource::Bytes(bytes),
+        ),
+        "kernelimage",
+    )
 }
 
 /// The batch's tile, columns by rows (#1101): 8x2 ran fewest instructions

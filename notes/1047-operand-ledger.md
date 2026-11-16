@@ -96,3 +96,13 @@ and runs them through `gs` when it is installed.
 **Not done.** A handler a program installs in `errordict` is still not run on
 a real error. Operators that change the stack directly were audited, not
 moved onto the ledger: each checks before it changes anything.
+
+**Codex review, round 1.** `handleerror` named an operator in `$error
+/command` as `--nostringval--`; it now writes its name (`div`), as the
+report does. An image frame took its blame from the last name run, which a
+bound `image` does not set (`[` was blamed); each image operator now passes
+its own name to `begin_image` (`image`, `imagemask`, `colorimage`,
+`kernelimage`). `if`, `ifelse` and `exec` check for room on the execution
+stack before taking their operands (`Interp::exec_room`, a compare per call,
+not per step), so an `execstackoverflow` leaves them, as gs does. All three
+are pinned in `tests/operand_restore.rs`.

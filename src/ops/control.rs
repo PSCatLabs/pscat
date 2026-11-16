@@ -51,6 +51,9 @@ fn ps_if(it: &mut Interp) -> Result<(), PsError> {
             _ => return Err(PsError::Typecheck),
         },
     };
+    if cond && let [.., p] = it.operand_stack() {
+        it.exec_room(p)?;
+    }
     let proc = it.pop_settled();
     it.pop_settled();
     match proc {
@@ -71,6 +74,9 @@ fn ifelse(it: &mut Interp) -> Result<(), PsError> {
             _ => return Err(PsError::Typecheck),
         },
     };
+    if let [.., t, f] = it.operand_stack() {
+        it.exec_room(if cond { t } else { f })?;
+    }
     let proc_false = it.pop_settled();
     let proc_true = it.pop_settled();
     it.pop_settled();
@@ -82,6 +88,9 @@ fn ifelse(it: &mut Interp) -> Result<(), PsError> {
 
 pub(crate) fn exec(it: &mut Interp) -> Result<(), PsError> {
     // Nothing can fail before the object runs: no ledger (#1047).
+    if let Some(o) = it.operand_stack().last() {
+        it.exec_room(o)?;
+    }
     let obj = it.pop_settled().ok_or(PsError::StackUnderflow)?;
     it.exec_object(obj)
 }

@@ -102,17 +102,20 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
     if w > 0 && h > 0 {
         check_invertible(&matrix)?;
     }
-    it.begin_image(ImageCtx::new(
-        w,
-        h,
-        bits as u32,
-        1,
-        default_decode(1),
-        matrix,
-        None,
-        ImageColor::Direct,
-        source,
-    ))
+    it.begin_image(
+        ImageCtx::new(
+            w,
+            h,
+            bits as u32,
+            1,
+            default_decode(1),
+            matrix,
+            None,
+            ImageColor::Direct,
+            source,
+        ),
+        "image",
+    )
 }
 
 /// width height polarity matrix datasrc imagemask, or dict imagemask.
@@ -130,17 +133,20 @@ fn imagemask(it: &mut Interp) -> Result<(), PsError> {
     };
     let (w, h) = pop_dims(it)?;
     check_invertible(&matrix)?;
-    it.begin_image(ImageCtx::new(
-        w,
-        h,
-        1,
-        1,
-        default_decode(1),
-        matrix,
-        Some(polarity),
-        ImageColor::Direct,
-        source,
-    ))
+    it.begin_image(
+        ImageCtx::new(
+            w,
+            h,
+            1,
+            1,
+            default_decode(1),
+            matrix,
+            Some(polarity),
+            ImageColor::Direct,
+            source,
+        ),
+        "imagemask",
+    )
 }
 
 /// width height bits matrix datasrc(s) multi ncomp colorimage.
@@ -169,21 +175,24 @@ fn colorimage(it: &mut Interp) -> Result<(), PsError> {
     if w > 0 && h > 0 {
         check_invertible(&matrix)?; // as `image`
     }
-    it.begin_image(with_sources(
-        ImageCtx::new(
-            w,
-            h,
-            bits as u32,
-            ncomp as u32,
-            default_decode(ncomp as u32),
-            matrix,
-            None,
-            ImageColor::Direct,
-            ImageSource::Bytes(Vec::new()),
+    it.begin_image(
+        with_sources(
+            ImageCtx::new(
+                w,
+                h,
+                bits as u32,
+                ncomp as u32,
+                default_decode(ncomp as u32),
+                matrix,
+                None,
+                ImageColor::Direct,
+                ImageSource::Bytes(Vec::new()),
+            ),
+            sources,
+            multi,
         ),
-        sources,
-        multi,
-    ))
+        "colorimage",
+    )
 }
 
 /// Attach the data: one interleaved source, or (`multi`) one per component.
@@ -204,7 +213,7 @@ fn dict_image(
     mask: Option<bool>,
 ) -> Result<(), PsError> {
     let ctx = image_ctx(it, &d.borrow(), ncomp, mask)?;
-    it.begin_image(ctx)
+    it.begin_image(ctx, if mask.is_some() { "imagemask" } else { "image" })
 }
 
 /// Level 3 `ImageType 3` (#739): an image gated by a 1-bit stencil.
@@ -245,7 +254,7 @@ fn image_type3(
         // plain `imagemask` dict, whose default [0 1] paints the 0s.
         stencil.mask = Some(true);
     }
-    it.begin_image(image.with_stencil(stencil))
+    it.begin_image(image.with_stencil(stencil), "image")
 }
 
 /// Build the engine context for one Level 2 image dictionary.

@@ -138,8 +138,10 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
         (
             d.get("errorname")
                 .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
+            // An operator (what a failed operator leaves, #1047) by name,
+            // as the CLI report gives it.
             d.get("command")
-                .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
+                .map(|o| cap_text(&o.cvs_text(), ERROR_NAME_LIMIT)),
         )
     };
     let line = format!(
