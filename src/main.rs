@@ -1187,18 +1187,67 @@ fn finish_headless(ok: bool, interp: &Interp, options: &Options, source: &[u8]) 
         }
     }
     if let Some(path) = &options.pdf
-        && let Some(doc) = interp.gfx().pdf_document()
+        && !write_pdf_file(interp, path)
     {
-        if let Err(e) = std::fs::write(path, doc) {
-            eprintln!("pscat: cannot write {path}: {e}");
-            return ExitCode::FAILURE;
-        }
-        eprintln!("pscat: wrote {path}");
+        return ExitCode::FAILURE;
     }
     if ok && !lint_failed {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+/// Write the document `--pdf PATH` asks for, as it is built (#1107): the
+/// file is the only place it exists, so what it takes beside the program's
+/// own memory is the largest compressed page or image stream. False, with
+/// the reason on stderr and no file left behind, when it cannot be written;
+/// a document that would pass `--max-memory` is refused like a program that
+/// does, naming the limit the way the interpreter's own report does (the
+/// MCP server reads that line back as a `limit_exceeded`).
+fn write_pdf_file(interp: &Interp, path: &str) -> bool {
+    use std::io::Write as _;
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("pscat: cannot write {path}: {e}");
+            return false;
+        }
+    };
+    let mut sink = std::io::BufWriter::new(file);
+    let written = match interp.write_pdf(&mut sink) {
+        // Recording was never on, so there is no document: as before.
+        None => {
+            drop(sink);
+            let _ = std::fs::remove_file(path);
+            return true;
+        }
+        Some(Ok(())) => sink.flush().map_err(pscat::pdf::PdfWriteError::Io),
+        Some(Err(e)) => Err(e),
+    };
+    drop(sink);
+    match written {
+        Ok(()) => {
+            eprintln!("pscat: wrote {path}");
+            true
+        }
+        Err(e) => {
+            // A partial document is worse than none: a reader of the file
+            // cannot tell it from a finished one until it fails to open.
+            let _ = std::fs::remove_file(path);
+            match e {
+                pscat::pdf::PdfWriteError::Memory => {
+                    let limit = pscat::Limit::Memory;
+                    eprintln!(
+                        "pscat: cannot write {path}: the document needs more memory than \
+                         --max-memory allows; no file was written"
+                    );
+                    eprintln!("%%[ Error: limitexceeded ({limit}); OffendingCommand: --pdf ]%%");
+                }
+                e => eprintln!("pscat: cannot write {path}: {e}"),
+            }
+            false
+        }
     }
 }
 

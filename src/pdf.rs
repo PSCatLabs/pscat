@@ -58,11 +58,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::io::{self, Write as _};
 use std::rc::Rc;
+
+use thiserror::Error;
 
 use tiny_skia::FillRule;
 
 use crate::gfx::{ClipNode, Composite};
+use crate::limits::LimitProbe;
 use crate::pdf_font::{OBJECTS_PER_FONT, UsedGlyphs};
 use crate::svg::Chain;
 use crate::textrun::{GlyphText, Placement, TextRun};
@@ -198,7 +202,7 @@ pub(crate) enum PdfValue {
     /// A byte string, written as an escaped literal.
     Str(Vec<u8>),
     /// A text string (a `/DOCINFO` value): UTF-8 becomes UTF-16BE, see
-    /// [`pdf_text_bytes`].
+    /// [`write_text_bytes`].
     Text(Vec<u8>),
     Array(Vec<PdfValue>),
     Dict(Vec<(String, PdfValue)>),
@@ -537,29 +541,10 @@ impl PdfRecorder {
     /// the run stays open, so a mid-run read (`pdf_document`) shows the
     /// text so far and later glyphs on the line still join it.
     fn snapshot(&self) -> String {
-        let mut s = self.content.clone();
-        let mut open = self.open_clip.is_some();
-        if let Some(run) = &self.run {
-            let same = match (&self.open_clip, &run.text.chain) {
-                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            };
-            if !same {
-                if open {
-                    s.push_str("Q\n");
-                }
-                open = run.text.chain.is_some();
-                if open {
-                    let _ = writeln!(s, "q {}", self.clip_prelude(&run.text.chain));
-                }
-            }
-            // Inside the run's clip group, before the group's `Q`.
-            Self::write_run(&mut s, run);
-        }
-        if open {
-            s.push_str("Q\n");
-        }
+        let tail = self.snapshot_tail();
+        let mut s = String::with_capacity(self.content.len() + tail.len());
+        s.push_str(&self.content);
+        s.push_str(&tail);
         s
     }
 
@@ -1044,25 +1029,105 @@ Q",
 
     /// Serialize the whole document.
     pub fn finish(&self, trailing_art: bool) -> Vec<u8> {
-        let mut pages = self.pages.clone();
-        let mut page_images = self.page_images.clone();
-        let mut page_gstates = self.page_gstates.clone();
-        let mut page_sizes = self.page_sizes.clone();
-        let mut page_shadings = self.page_shadings.clone();
-        let mut page_fonts = self.page_fonts.clone();
+        // No budget, so nothing refuses and a `Vec` sink cannot fail.
+        self.finish_limited(trailing_art, LimitProbe::NONE)
+            .unwrap_or_default()
+    }
+
+    /// The document as a `Vec`, refused with [`PdfWriteError::Memory`]
+    /// before the `Vec` or any working buffer would pass the memory cap
+    /// `probe` carries (#1107).
+    pub(crate) fn finish_limited(
+        &self,
+        trailing_art: bool,
+        probe: LimitProbe,
+    ) -> Result<Vec<u8>, PdfWriteError> {
+        let mut sink = BudgetedVec {
+            v: Vec::new(),
+            probe,
+        };
+        self.write_document(trailing_art, probe, &mut sink)?;
+        Ok(sink.v)
+    }
+
+    /// Write the document to `sink` as it is built (#1107): no object list
+    /// and no copy of the output is kept, so what is held beside the
+    /// recorder is one compressed page or image stream at a time. The bytes
+    /// are the ones `finish` returns.
+    pub(crate) fn write_document(
+        &self,
+        trailing_art: bool,
+        probe: LimitProbe,
+        sink: &mut dyn io::Write,
+    ) -> Result<(), PdfWriteError> {
+        let mut out = Out::new(sink, probe);
+        let _ = self.write_objects(trailing_art, &mut out);
+        out.finish()
+    }
+
+    /// The tail of `snapshot`: what an open group, a pending text run and
+    /// the closing `Q` add after `content`, so the finished document can
+    /// deflate `content` in place instead of cloning it.
+    fn snapshot_tail(&self) -> String {
+        let mut s = String::new();
+        let mut open = self.open_clip.is_some();
+        if let Some(run) = &self.run {
+            let same = match (&self.open_clip, &run.text.chain) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                if open {
+                    s.push_str("Q\n");
+                }
+                open = run.text.chain.is_some();
+                if open {
+                    let _ = writeln!(s, "q {}", self.clip_prelude(&run.text.chain));
+                }
+            }
+            // Inside the run's clip group, before the group's `Q`.
+            Self::write_run(&mut s, run);
+        }
+        if open {
+            s.push_str("Q\n");
+        }
+        s
+    }
+
+    /// Every object, in file order, then the xref table and trailer. An
+    /// error is kept in `out` (and the rest of the writes skipped), `Err`
+    /// only says to stop early.
+    fn write_objects(&self, trailing_art: bool, out: &mut Out) -> Result<(), ()> {
+        // The pages, finished ones then (if it holds art) the open one,
+        // borrowed: only the open page's small tail is built.
+        let mut pages: Vec<PageSrc> = Vec::with_capacity(self.pages.len() + 1);
+        for (i, content) in self.pages.iter().enumerate() {
+            pages.push(PageSrc {
+                content,
+                tail: String::new(),
+                size: self.page_sizes[i],
+                images: &self.page_images[i],
+                gstates: &self.page_gstates[i],
+                shadings: &self.page_shadings[i],
+                fonts: &self.page_fonts[i],
+            });
+        }
         if pages.is_empty() || trailing_art {
-            pages.push(self.snapshot());
-            page_sizes.push((self.width, self.height));
-            page_images.push(self.current_images.clone());
-            page_gstates.push(self.current_gstates.clone());
-            page_shadings.push(self.current_shadings.clone());
-            page_fonts.push(self.current_fonts.clone());
+            pages.push(PageSrc {
+                content: &self.content,
+                tail: self.snapshot_tail(),
+                size: (self.width, self.height),
+                images: &self.current_images,
+                gstates: &self.current_gstates,
+                shadings: &self.current_shadings,
+                fonts: &self.current_fonts,
+            });
         }
         let npages = pages.len();
 
         // Object layout: 1 catalog, 2 pages tree, then per page
         // [page, contents], then all images, in that order.
-        let mut objects: Vec<Vec<u8>> = Vec::new();
         let kids: Vec<String> = (0..npages).map(|i| format!("{} 0 R", 3 + i * 2)).collect();
         let image_base = 3 + npages * 2;
         // Shading functions, then shadings, follow the images (#1028), so a
@@ -1076,41 +1141,36 @@ Q",
         // Embedded fonts (#1193) follow the named objects, so a document
         // without text output keeps every object number it had.
         let font_base = named_base + self.named.len();
+        out.bytes(b"%PDF-1.4\n");
+        out.begin_obj();
         if self.embeds.is_empty() {
-            objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+            out.bytes(b"<< /Type /Catalog /Pages 2 0 R >>");
         } else {
             // One root node holding every key, sorted by bytes as a name
             // tree must be.
             let mut embeds: Vec<&(Vec<u8>, PdfValue)> = self.embeds.iter().collect();
             embeds.sort_by(|a, b| a.0.cmp(&b.0));
-            let mut names = String::new();
+            out.bytes(b"<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [");
             for (key, fs) in embeds {
-                let _ = write!(names, " {} {}", literal_string(key), fs.to_pdf(&refs));
+                out.bytes(b" ");
+                let _ = write_literal_string(&mut *out, key);
+                out.bytes(b" ");
+                fs.write_pdf(&mut *out, &refs);
             }
-            objects.push(
-                format!(
-                    "<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [{names} ] >> >> >>"
-                )
-                .into_bytes(),
-            );
+            out.bytes(b" ] >> >> >>");
         }
-        objects.push(
-            format!(
-                "<< /Type /Pages /Kids [{}] /Count {npages} >>",
-                kids.join(" ")
-            )
-            .into_bytes(),
+        out.end_obj()?;
+        out.begin_obj();
+        let _ = write!(
+            out,
+            "<< /Type /Pages /Kids [{}] /Count {npages} >>",
+            kids.join(" ")
         );
-        for (i, (((((content, imgs), gss), shs), &(width, height)), fonts)) in pages
-            .iter()
-            .zip(&page_images)
-            .zip(&page_gstates)
-            .zip(&page_shadings)
-            .zip(&page_sizes)
-            .zip(&page_fonts)
-            .enumerate()
-        {
-            let xobjects: Vec<String> = imgs
+        out.end_obj()?;
+        for (i, page) in pages.iter().enumerate() {
+            let (width, height) = page.size;
+            let xobjects: Vec<String> = page
+                .images
                 .iter()
                 .map(|&idx| format!("/Im{idx} {} 0 R", image_base + idx))
                 .collect();
@@ -1119,7 +1179,8 @@ Q",
             // handful of numbers each, and keeping them out of the
             // numbered-object list means the kids/image_base
             // positional math above needs no adjustment at all.
-            let extgstates: Vec<String> = gss
+            let extgstates: Vec<String> = page
+                .gstates
                 .iter()
                 .map(|&idx| format!("/GS{idx} << {} >>", self.gstates[idx]))
                 .collect();
@@ -1130,15 +1191,17 @@ Q",
             if !extgstates.is_empty() {
                 let _ = write!(parts, " /ExtGState << {} >>", extgstates.join(" "));
             }
-            if !shs.is_empty() {
-                let list: Vec<String> = shs
+            if !page.shadings.is_empty() {
+                let list: Vec<String> = page
+                    .shadings
                     .iter()
                     .map(|&idx| format!("/Sh{idx} {} 0 R", shading_base + idx))
                     .collect();
                 let _ = write!(parts, " /Shading << {} >>", list.join(" "));
             }
-            if !fonts.is_empty() {
-                let list: Vec<String> = fonts
+            if !page.fonts.is_empty() {
+                let list: Vec<String> = page
+                    .fonts
                     .iter()
                     .map(|&idx| format!("/F{idx} {} 0 R", font_base + idx * OBJECTS_PER_FONT))
                     .collect();
@@ -1149,74 +1212,87 @@ Q",
             } else {
                 format!(" /Resources <<{parts} >>")
             };
-            objects.push(
-                format!(
-                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}]{resources} \
-                     /Contents {} 0 R >>",
-                    width,
-                    height,
-                    3 + i * 2 + 1,
-                )
-                .into_bytes(),
+            out.begin_obj();
+            let _ = write!(
+                out,
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}]{resources} \
+                 /Contents {} 0 R >>",
+                width,
+                height,
+                3 + i * 2 + 1,
             );
+            out.end_obj()?;
             // The page content is Flate-compressed like the image
             // XObjects: it is highly repetitive text (a stroke-heavy
             // gallery piece is hundreds of MB raw, ~3.5x smaller
             // deflated; issue #244). The `cm` prefix is part of the
-            // compressed stream. If the encoder ever failed (it can't
-            // on a `Vec` sink) the stream is written plain instead.
+            // compressed stream. It is deflated straight from the
+            // recorder's own text (#1107), and only the packed stream is
+            // held while it is written.
             let prefix = format!("1 0 0 -1 0 {height} cm\n");
-            let mut stream = match deflate(&[prefix.as_bytes(), content.as_bytes()]) {
-                Some(z) => {
-                    let mut st =
-                        format!("<< /Length {} /Filter /FlateDecode >>\nstream\n", z.len())
-                            .into_bytes();
-                    st.extend_from_slice(&z);
-                    st
-                }
-                None => {
-                    let mut st =
-                        format!("<< /Length {} >>\nstream\n", prefix.len() + content.len())
-                            .into_bytes();
-                    st.extend_from_slice(prefix.as_bytes());
-                    st.extend_from_slice(content.as_bytes());
-                    st
-                }
+            let z = match deflate_budgeted(
+                &[
+                    prefix.as_bytes(),
+                    page.content.as_bytes(),
+                    page.tail.as_bytes(),
+                ],
+                out.probe,
+            ) {
+                Ok(z) => z,
+                Err(e) => return out.fail(e),
             };
-            stream.extend_from_slice(b"\nendstream");
-            objects.push(stream);
+            out.begin_obj();
+            let _ = write!(
+                out,
+                "<< /Length {} /Filter /FlateDecode >>\nstream\n",
+                z.len()
+            );
+            out.bytes(&z);
+            out.bytes(b"\nendstream");
+            out.end_obj()?;
         }
         for img in &self.images {
-            let mut obj = img.head.clone();
+            out.begin_obj();
+            out.bytes(&img.head);
             if let Some(at) = img.smask {
-                obj.extend_from_slice(format!("/SMask {} 0 R ", image_base + at).as_bytes());
+                let _ = write!(out, "/SMask {} 0 R ", image_base + at);
             }
-            obj.extend_from_slice(&img.tail);
-            objects.push(obj);
+            out.bytes(&img.tail);
+            out.end_obj()?;
         }
         for func in &self.functions {
-            objects.push(func.clone().into_bytes());
+            out.begin_obj();
+            out.bytes(func.as_bytes());
+            out.end_obj()?;
         }
         for (body, fidx) in &self.shadings {
-            objects
-                .push(format!("<< {body} /Function {} 0 R >>", function_base + fidx).into_bytes());
+            out.begin_obj();
+            let _ = write!(out, "<< {body} /Function {} 0 R >>", function_base + fidx);
+            out.end_obj()?;
         }
         for obj in &self.named {
-            objects.push(obj.to_pdf(&refs));
+            out.begin_obj();
+            obj.write_pdf(out, &refs);
+            out.end_obj()?;
         }
         for (i, (fid, used)) in self.fonts.iter().enumerate() {
             let face = crate::font::embed_face(*fid);
             // `face` gives the descriptor's metrics and the name; the
             // glyphs were built as they were shown.
             let first = font_base + i * OBJECTS_PER_FONT;
-            debug_assert_eq!(first, objects.len() + 1);
-            objects.extend(crate::pdf_font::font_objects(
+            debug_assert_eq!(first, out.objects() + 1);
+            let objs = crate::pdf_font::font_objects(
                 face.as_ref().map(|(f, _)| *f),
                 face.as_ref().map_or("Font", |(_, n)| n.as_str()),
                 i,
                 used,
                 first,
-            ));
+            );
+            for obj in &objs {
+                out.begin_obj();
+                out.bytes(obj);
+                out.end_obj()?;
+            }
         }
 
         // /Info is appended last, after every page/image object, so it
@@ -1230,46 +1306,272 @@ Q",
         // `/Title` mark replaces `%%Title:`, and `%%For:` stays the
         // author when no mark sets one). Title and Author keep their place
         // after Producer; the other marked keys follow in first-set order.
-        let mut info = String::from("<< /Producer (pscat)");
+        let info_obj_num = out.objects() + 1;
+        out.begin_obj();
+        out.bytes(b"<< /Producer (pscat)");
         let marked = |key: &str| self.docinfo.iter().find(|(k, _)| k == key).map(|e| &e.1);
         for (key, dsc) in [("Title", &self.title), ("Author", &self.author)] {
             if let Some(v) = marked(key) {
-                let _ = write!(info, " /{key} {}", v.to_pdf(&refs));
+                let _ = write!(out, " /{key} ");
+                v.write_pdf(&mut *out, &refs);
             } else if let Some(s) = dsc {
-                let _ = write!(info, " /{key} {}", pdf_string(s));
+                let _ = write!(out, " /{key} {}", pdf_string(s));
             }
         }
         for (key, value) in &self.docinfo {
             if key != "Title" && key != "Author" {
-                let _ = write!(info, " {} {}", pdf_name(key), value.to_pdf(&refs));
+                out.bytes(b" ");
+                let _ = write_name(&mut *out, key);
+                out.bytes(b" ");
+                value.write_pdf(&mut *out, &refs);
             }
         }
-        info.push_str(" >>");
-        let info_obj_num = objects.len() + 1;
-        objects.push(info.into_bytes());
+        out.bytes(b" >>");
+        out.end_obj()?;
 
-        let mut out = b"%PDF-1.4\n".to_vec();
-        let mut offsets = Vec::with_capacity(objects.len());
-        for (i, obj) in objects.iter().enumerate() {
-            offsets.push(out.len());
-            out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
-            out.extend_from_slice(obj);
-            out.extend_from_slice(b"\nendobj\n");
+        let xref_at = out.pos();
+        let count = out.objects();
+        let _ = write!(out, "xref\n0 {}\n", count + 1);
+        out.bytes(b"0000000000 65535 f \n");
+        for i in 0..count {
+            let off = out.offset(i);
+            let _ = write!(out, "{off:010} 00000 n \n");
         }
-        let xref_at = out.len();
-        out.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
-        out.extend_from_slice(b"0000000000 65535 f \n");
-        for off in offsets {
-            out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
-        }
-        out.extend_from_slice(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R /Info {info_obj_num} 0 R >>\nstartxref\n{xref_at}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .as_bytes(),
+        let _ = write!(
+            out,
+            "trailer\n<< /Size {} /Root 1 0 R /Info {info_obj_num} 0 R >>\nstartxref\n{xref_at}\n%%EOF\n",
+            count + 1
         );
-        out
+        out.check()
+    }
+}
+
+/// What the PDF writer may take past the run's `--max-memory`, in bytes
+/// (#1107): a run that a limit stopped is at its cap, and its page is still
+/// written, so the writer's own working memory (the largest packed page or
+/// image stream, a 64 KiB piece) gets this much more. A document that fits
+/// the limit while running is written inside it plus this.
+pub const WRITE_MARGIN: usize = 16 << 20;
+
+/// One page as `write_objects` has it: borrowed from the recorder, so a
+/// big content stream is not cloned (#1107).
+struct PageSrc<'a> {
+    content: &'a str,
+    /// What the open page's pending run and groups add after `content`
+    /// (`snapshot_tail`); empty for a finished page.
+    tail: String,
+    size: (u32, u32),
+    images: &'a [usize],
+    gstates: &'a [usize],
+    shadings: &'a [usize],
+    fonts: &'a [usize],
+}
+
+/// Why a PDF could not be written ([`Interp::write_pdf`](crate::Interp::write_pdf),
+/// [`Interp::pdf_document_limited`](crate::Interp::pdf_document_limited)).
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PdfWriteError {
+    /// Writing the document would take the heap past
+    /// [`Limits::max_memory`](crate::Limits::max_memory). It was refused
+    /// before the allocation that would pass it; nothing more was written,
+    /// and what had been written is incomplete.
+    #[error("limitexceeded: memory (the PDF needs more than --max-memory allows)")]
+    Memory,
+    /// The sink refused a write.
+    #[error("{0}")]
+    Io(io::Error),
+}
+
+/// The `io::Error` the writers raise for the memory cap, told from a
+/// sink's own failure by its payload.
+#[derive(Debug)]
+struct MemoryLimit;
+
+impl std::fmt::Display for MemoryLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the memory limit")
+    }
+}
+
+impl std::error::Error for MemoryLimit {}
+
+fn memory_refused() -> io::Error {
+    io::Error::new(io::ErrorKind::OutOfMemory, MemoryLimit)
+}
+
+/// A failure of a sink or of the memory cap, as the caller sees it.
+fn classify(e: io::Error) -> PdfWriteError {
+    if e.get_ref().is_some_and(|r| r.is::<MemoryLimit>()) {
+        PdfWriteError::Memory
+    } else {
+        PdfWriteError::Io(e)
+    }
+}
+
+/// A growing `Vec<u8>` that asks the memory cap before it takes more
+/// room, growing by half again (not doubling) so the last step stays small.
+struct BudgetedVec {
+    v: Vec<u8>,
+    probe: LimitProbe,
+}
+
+impl io::Write for BudgetedVec {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        let need = self.v.len() + data.len();
+        let cap = self.v.capacity();
+        if need > cap {
+            let target = need.max(cap + cap / 2);
+            self.probe
+                .check_alloc(target - cap)
+                .map_err(|_| memory_refused())?;
+            self.v.reserve_exact(target - self.v.len());
+        }
+        self.v.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Zlib-compress the concatenation of `parts`, refusing before the packed
+/// bytes pass the memory cap (#1107).
+fn deflate_budgeted(parts: &[&[u8]], probe: LimitProbe) -> io::Result<Vec<u8>> {
+    use flate2::{Compression, write::ZlibEncoder};
+    let mut enc = ZlibEncoder::new(
+        BudgetedVec {
+            v: Vec::new(),
+            probe,
+        },
+        Compression::default(),
+    );
+    for part in parts {
+        enc.write_all(part)?;
+    }
+    Ok(enc.finish()?.v)
+}
+
+/// Where `write_objects` puts the file: pieces of up to `OUT_CHUNK` bytes
+/// go on to the sink, and the first failure is kept and every later write
+/// skipped. It also counts, so object offsets need no copy of the output.
+struct Out<'a> {
+    sink: &'a mut dyn io::Write,
+    buf: Vec<u8>,
+    /// Bytes already handed to `sink`.
+    written: usize,
+    err: Option<io::Error>,
+    probe: LimitProbe,
+    /// Where each object so far starts.
+    offsets: Vec<usize>,
+}
+
+/// Bytes `Out` collects before it hands them on (and looks at the memory
+/// cap).
+const OUT_CHUNK: usize = 64 << 10;
+
+impl<'a> Out<'a> {
+    fn new(sink: &'a mut dyn io::Write, probe: LimitProbe) -> Self {
+        Out {
+            sink,
+            buf: Vec::with_capacity(OUT_CHUNK + 4096),
+            written: 0,
+            err: None,
+            probe,
+            offsets: Vec::new(),
+        }
+    }
+
+    /// Offset of the next byte.
+    fn pos(&self) -> usize {
+        self.written + self.buf.len()
+    }
+
+    fn objects(&self) -> usize {
+        self.offsets.len()
+    }
+
+    fn offset(&self, i: usize) -> usize {
+        self.offsets[i]
+    }
+
+    fn begin_obj(&mut self) {
+        let at = self.pos();
+        self.offsets.push(at);
+        let n = self.offsets.len();
+        let _ = write!(self, "{n} 0 obj\n");
+    }
+
+    /// End the object; `Err` when a write has failed, to stop early.
+    fn end_obj(&mut self) -> Result<(), ()> {
+        self.bytes(b"\nendobj\n");
+        self.check()
+    }
+
+    fn check(&self) -> Result<(), ()> {
+        if self.err.is_some() { Err(()) } else { Ok(()) }
+    }
+
+    /// Record `e` as the failure and say to stop.
+    fn fail(&mut self, e: io::Error) -> Result<(), ()> {
+        if self.err.is_none() {
+            self.err = Some(e);
+        }
+        Err(())
+    }
+
+    fn bytes(&mut self, data: &[u8]) {
+        if self.err.is_some() {
+            return;
+        }
+        if data.len() >= OUT_CHUNK {
+            self.flush_buf();
+            self.pass(data);
+        } else {
+            self.buf.extend_from_slice(data);
+            if self.buf.len() >= OUT_CHUNK {
+                self.flush_buf();
+            }
+        }
+    }
+
+    fn flush_buf(&mut self) {
+        let buf = std::mem::take(&mut self.buf);
+        self.pass(&buf);
+        self.buf = buf;
+        self.buf.clear();
+    }
+
+    /// Hand `data` to the sink, after a look at the memory cap: whatever
+    /// working buffers are alive now (a packed stream, say) are counted.
+    fn pass(&mut self, data: &[u8]) {
+        if self.err.is_some() || data.is_empty() {
+            return;
+        }
+        if self.probe.check_alloc(0).is_err() {
+            self.err = Some(memory_refused());
+            return;
+        }
+        match self.sink.write_all(data) {
+            Ok(()) => self.written += data.len(),
+            Err(e) => self.err = Some(e),
+        }
+    }
+
+    fn finish(mut self) -> Result<(), PdfWriteError> {
+        self.flush_buf();
+        match self.err {
+            Some(e) => Err(classify(e)),
+            None => Ok(()),
+        }
+    }
+}
+
+impl std::fmt::Write for Out<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.bytes(s.as_bytes());
+        Ok(())
     }
 }
 
@@ -1294,13 +1596,7 @@ pub(crate) enum ImageData {
 
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
 pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write as _;
-    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-    for part in parts {
-        enc.write_all(part).ok()?;
-    }
-    enc.finish().ok()
+    deflate_budgeted(parts, LimitProbe::NONE).ok()
 }
 
 /// Index of `body` in `list` (looked up through `ids`), appending it if new.
@@ -1515,23 +1811,33 @@ fn pdf_string(s: &str) -> String {
 /// A byte string as a PDF literal string: `(`, `)` and `\` escaped, and
 /// every byte outside printable ASCII written as a 3-digit octal escape,
 /// so the object text stays ASCII and reads back as exactly these bytes.
-fn literal_string(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() + 2);
-    out.push('(');
+/// Written straight into `out`, so a big string is never built twice
+/// (#1107: a NUL byte is four bytes of file).
+fn write_literal_string(out: &mut dyn std::fmt::Write, bytes: &[u8]) -> std::fmt::Result {
+    // Pieces of a few hundred bytes, so the writer is called once for many.
+    let mut piece = String::with_capacity(512);
+    piece.push('(');
     for &b in bytes {
         match b {
             b'(' | b')' | b'\\' => {
-                out.push('\\');
-                out.push(b as char);
+                piece.push('\\');
+                piece.push(b as char);
             }
-            0x20..=0x7e => out.push(b as char),
+            0x20..=0x7e => piece.push(b as char),
             _ => {
-                let _ = write!(out, "\\{b:03o}");
+                piece.push('\\');
+                piece.push(char::from(b'0' + (b >> 6)));
+                piece.push(char::from(b'0' + ((b >> 3) & 7)));
+                piece.push(char::from(b'0' + (b & 7)));
             }
         }
+        if piece.len() >= 500 {
+            out.write_str(&piece)?;
+            piece.clear();
+        }
     }
-    out.push(')');
-    out
+    piece.push(')');
+    out.write_str(&piece)
 }
 
 /// A text string (a `/DOCINFO` value, #1032). Bytes that already start
@@ -1540,18 +1846,33 @@ fn literal_string(bytes: &[u8]) -> String {
 /// UTF-8 becomes UTF-16BE, so a reader shows the characters the source
 /// spelled (gs writes the UTF-8 bytes as they are, which a reader decodes
 /// as PDFDocEncoding: mojibake); anything else is written byte for byte.
-fn pdf_text_bytes(bytes: &[u8]) -> String {
+fn write_text_bytes(out: &mut dyn std::fmt::Write, bytes: &[u8]) -> std::fmt::Result {
     if bytes.starts_with(&[0xfe, 0xff]) {
-        let mut out = String::from("<");
+        out.write_char('<')?;
         for b in bytes {
-            let _ = write!(out, "{b:02X}");
+            write!(out, "{b:02X}")?;
         }
-        out.push('>');
-        return out;
+        return out.write_char('>');
     }
     match std::str::from_utf8(bytes) {
-        Ok(s) => pdf_string(s),
-        Err(_) => literal_string(bytes),
+        Ok(s) if s.chars().all(|c| c.is_ascii() && !c.is_ascii_control()) => {
+            out.write_char('(')?;
+            for c in s.chars() {
+                if c == '(' || c == ')' || c == '\\' {
+                    out.write_char('\\')?;
+                }
+                out.write_char(c)?;
+            }
+            out.write_char(')')
+        }
+        Ok(s) => {
+            out.write_str("<FEFF")?;
+            for unit in s.encode_utf16() {
+                write!(out, "{unit:04X}")?;
+            }
+            out.write_char('>')
+        }
+        Err(_) => write_literal_string(out, bytes),
     }
 }
 
@@ -1560,20 +1881,18 @@ fn pdf_text_bytes(bytes: &[u8]) -> String {
 /// written as `#XX` (PDF 1.2+). So a PostScript `/text#2Fplain` keeps its
 /// `#` and comes out `/text#232Fplain`, as gs writes it; spell the name
 /// `(text/plain) cvn` to get `/text#2Fplain` in the file.
-fn pdf_name(name: &str) -> String {
-    let mut out = String::from("/");
+fn write_name(out: &mut dyn std::fmt::Write, name: &str) -> std::fmt::Result {
+    out.write_char('/')?;
     for &b in name.as_bytes() {
         match b {
             b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%' | b'#' => {
-                let _ = write!(out, "#{b:02X}");
+                write!(out, "#{b:02X}")?
             }
-            0x21..=0x7e => out.push(b as char),
-            _ => {
-                let _ = write!(out, "#{b:02X}");
-            }
+            0x21..=0x7e => out.write_char(b as char)?,
+            _ => write!(out, "#{b:02X}")?,
         }
     }
-    out
+    Ok(())
 }
 
 /// A real as the shortest decimal that reads back as the same `f64`
@@ -1587,88 +1906,96 @@ fn pdf_real(v: f64) -> String {
     if s.contains('.') { s } else { format!("{s}.0") }
 }
 
-fn write_entries(out: &mut String, entries: &[(String, PdfValue)], refs: &dyn Fn(usize) -> usize) {
+fn write_entries(
+    out: &mut dyn std::fmt::Write,
+    entries: &[(String, PdfValue)],
+    refs: &dyn Fn(usize) -> usize,
+) {
     for (key, value) in entries {
-        out.push(' ');
-        out.push_str(&pdf_name(key));
-        out.push(' ');
+        let _ = out.write_char(' ');
+        let _ = write_name(out, key);
+        let _ = out.write_char(' ');
         value.write_pdf(out, refs);
     }
 }
 
 impl PdfValue {
-    /// This value in PDF syntax; `refs` maps a named object to its
-    /// object number.
-    fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> String {
-        let mut out = String::new();
-        self.write_pdf(&mut out, refs);
-        out
-    }
-
-    /// Append this value's PDF syntax to `out`: one buffer for the whole
-    /// object, so a big array is not built again at every level.
-    fn write_pdf(&self, out: &mut String, refs: &dyn Fn(usize) -> usize) {
+    /// Append this value's PDF syntax to `out`, which is the file itself
+    /// (#1107): a value is not built as text and copied again. `refs` maps
+    /// a named object to its object number.
+    fn write_pdf(&self, out: &mut dyn std::fmt::Write, refs: &dyn Fn(usize) -> usize) {
         match self {
-            PdfValue::Null => out.push_str("null"),
-            PdfValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            PdfValue::Null => {
+                let _ = out.write_str("null");
+            }
+            PdfValue::Bool(b) => {
+                let _ = out.write_str(if *b { "true" } else { "false" });
+            }
             PdfValue::Int(i) => {
                 let _ = write!(out, "{i}");
             }
-            PdfValue::Real(r) => out.push_str(&pdf_real(*r)),
-            PdfValue::Name(n) => out.push_str(&pdf_name(n)),
-            PdfValue::Str(s) => out.push_str(&literal_string(s)),
-            PdfValue::Text(s) => out.push_str(&pdf_text_bytes(s)),
+            PdfValue::Real(r) => {
+                let _ = out.write_str(&pdf_real(*r));
+            }
+            PdfValue::Name(n) => {
+                let _ = write_name(out, n);
+            }
+            PdfValue::Str(s) => {
+                let _ = write_literal_string(out, s);
+            }
+            PdfValue::Text(s) => {
+                let _ = write_text_bytes(out, s);
+            }
             PdfValue::Array(items) => {
-                out.push('[');
+                let _ = out.write_char('[');
                 for (i, v) in items.iter().enumerate() {
                     if i > 0 {
-                        out.push(' ');
+                        let _ = out.write_char(' ');
                     }
                     v.write_pdf(out, refs);
                 }
-                out.push(']');
+                let _ = out.write_char(']');
             }
             PdfValue::Dict(entries) => write_dict(out, entries, refs),
             PdfValue::Ref(i) => {
                 let _ = write!(out, "{} 0 R", refs(*i));
             }
             // Every stored value was resolved; never reached.
-            PdfValue::Named(_) => out.push_str("null"),
+            PdfValue::Named(_) => {
+                let _ = out.write_str("null");
+            }
         }
     }
 }
 
-fn write_dict(out: &mut String, entries: &[(String, PdfValue)], refs: &dyn Fn(usize) -> usize) {
-    out.push_str("<<");
+fn write_dict(
+    out: &mut dyn std::fmt::Write,
+    entries: &[(String, PdfValue)],
+    refs: &dyn Fn(usize) -> usize,
+) {
+    let _ = out.write_str("<<");
     write_entries(out, entries, refs);
-    out.push_str(" >>");
+    let _ = out.write_str(" >>");
 }
 
 impl NamedObj {
-    /// The object's body. A stream's data is Flate-compressed unless the
-    /// program gave a `/Filter` (then the data is taken as already
+    /// Write the object's body. A stream's data is Flate-compressed unless
+    /// the program gave a `/Filter` (then the data is taken as already
     /// encoded), and `/Length` is always the real one.
-    fn to_pdf(&self, refs: &dyn Fn(usize) -> usize) -> Vec<u8> {
+    fn write_pdf(&self, out: &mut Out, refs: &dyn Fn(usize) -> usize) {
         match self.kind {
-            ObjKind::Dict => {
-                let mut out = String::new();
-                write_dict(&mut out, &self.dict, refs);
-                out.into_bytes()
-            }
+            ObjKind::Dict => write_dict(out, &self.dict, refs),
             ObjKind::Array => {
-                let mut out = String::from("[");
+                out.bytes(b"[");
                 for (i, v) in self.items.iter().enumerate() {
                     if i > 0 {
-                        out.push(' ');
+                        out.bytes(b" ");
                     }
-                    v.write_pdf(&mut out, refs);
+                    v.write_pdf(out, refs);
                 }
-                out.push(']');
-                out.into_bytes()
+                out.bytes(b"]");
             }
             ObjKind::Stream => {
-                let mut head = String::from("<<");
-                write_entries(&mut head, &self.dict, refs);
                 // `/DecodeParms` without `/Filter` means nothing to a
                 // reader, but pscat's own Flate filter must not pick it up.
                 let has_filter = self
@@ -1678,20 +2005,26 @@ impl NamedObj {
                 let packed = if has_filter {
                     None
                 } else {
-                    deflate(&[&self.data])
+                    match deflate_budgeted(&[&self.data], out.probe) {
+                        Ok(z) => Some(z),
+                        Err(e) => {
+                            let _ = out.fail(e);
+                            return;
+                        }
+                    }
                 };
+                out.bytes(b"<<");
+                write_entries(out, &self.dict, refs);
                 let body: &[u8] = match &packed {
                     Some(z) => {
-                        head.push_str(" /Filter /FlateDecode");
+                        out.bytes(b" /Filter /FlateDecode");
                         z
                     }
                     None => &self.data,
                 };
-                let _ = write!(head, " /Length {} >>\nstream\n", body.len());
-                let mut out = head.into_bytes();
-                out.extend_from_slice(body);
-                out.extend_from_slice(b"\nendstream");
-                out
+                let _ = write!(out, " /Length {} >>\nstream\n", body.len());
+                out.bytes(body);
+                out.bytes(b"\nendstream");
             }
         }
     }

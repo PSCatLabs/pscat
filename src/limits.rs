@@ -183,6 +183,16 @@ impl LimitProbe {
         memory: None,
     };
 
+    /// Only the memory cap: `budget` is `(heap base, max growth)` as `Gfx`
+    /// holds it. For the PDF writer, which runs after the program (#1107).
+    pub(crate) const fn memory_only(budget: Option<(usize, usize)>) -> LimitProbe {
+        LimitProbe {
+            steps_left: None,
+            deadline_ns: None,
+            memory: budget,
+        }
+    }
+
     /// `StepsExceeded` once `steps` (the work done so far, in steps) passes
     /// what was left, `TimeExceeded` past the deadline, `MemoryExceeded`
     /// past the heap cap: the errors the interpreter's own check between

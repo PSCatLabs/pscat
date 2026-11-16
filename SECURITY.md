@@ -368,6 +368,16 @@ command line and in the library, and on by default in the MCP server:
   process's heap, not the resident set and not one interpreter's share, so
   another thread's allocations count too. The MCP default is 1024 MiB; the
   heaviest gallery piece peaked at 0.4 GiB resident, canvas included.
+  Writing the PDF is held to it too (#1107): the file is written as it is
+  built, so beside the recorded program only one compressed page or image
+  stream is alive, and a document whose stream (or, for a library caller
+  that wants a `Vec`, whose bytes) would pass the cap plus a fixed 16 MiB
+  (`pdf::WRITE_MARGIN`: a run a limit stopped is already at its cap, and its
+  page is still written) is refused before the allocation with
+  `limitexceeded (memory)`; the CLI then leaves no file. A
+  library caller gets that from `Interp::write_pdf` and
+  `Interp::pdf_document_limited`; `Interp::pdf_document` keeps its signature
+  and is not limited, as it cannot report a refusal.
 
 A program stopped by a limit gets the error `limitexceeded (steps)`,
 `(time)` or `(memory)` (`PsError::StepsExceeded`, `TimeExceeded` or `MemoryExceeded` in the library; `%%[ Error:
