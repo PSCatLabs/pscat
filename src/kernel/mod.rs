@@ -800,9 +800,19 @@ where
     // interpreter does the whole image instead, from the same procedure, so
     // the result is the same (#1188: 64 million retired pixels were 1 GB
     // here and 4 GB there, made with no look at the limits).
-    let retire_cap = it.memory_left().map(|left| {
-        left / (std::mem::size_of::<(usize, usize)>() + 2 * std::mem::size_of::<Object>())
-    });
+    //
+    // With any limit set the list is also held to a fixed ceiling, with no
+    // memory limit to size it by (#1235: 64 million retired pixels were 1.3
+    // GB under only `--max-time`, a shared host's whole share): past
+    // `RETIRE_CEILING_BYTES` the interpreter does the whole image, which is
+    // the same pixels, slower, and under the clock. With no limit at all
+    // nothing changes.
+    let per_pixel = std::mem::size_of::<(usize, usize)>() + 2 * std::mem::size_of::<Object>();
+    let retire_cap = match (it.memory_left(), it.limits_set()) {
+        (Some(left), _) => Some(left.min(RETIRE_CEILING_BYTES) / per_pixel),
+        (None, true) => Some(RETIRE_CEILING_BYTES / per_pixel),
+        (None, false) => None,
+    };
     let retired_count = std::sync::atomic::AtomicUsize::new(0);
     let seeds: Mutex<Vec<(usize, i64)>> = Mutex::new(Vec::new());
     let dispatched = std::sync::atomic::AtomicU64::new(0);
@@ -1031,6 +1041,12 @@ fn final_rand_state(
     it.charge_steps(ctl.steps.load(std::sync::atomic::Ordering::Relaxed));
     r
 }
+
+/// The heap a run under any limit may spend on the pixels it retires to the
+/// interpreter (#1235): each costs its (row, column) in the kernel's list
+/// and two objects in the interpreter's, so this is a few million pixels; a
+/// compiled image with that many retired is mostly interpreted anyway.
+const RETIRE_CEILING_BYTES: usize = 256 << 20;
 
 /// Pixels (row, column) retired to the interpreter, as (first row, its
 /// pixels in raster order) per band of rows, and how many retired for each

@@ -1455,6 +1455,113 @@ mod one_operator {
             assert_eq!(out, "1210.0\n", "200 advances of 6");
         }
     }
+
+    // --- #1235: leftovers of #1219 ------------------------------------------
+    mod issue_1235 {
+        use super::*;
+
+        /// A clip of 100,000 page-sized curves made on a 200 x 300 canvas,
+        /// then a `gsave` and a smaller page: `cliprestore` falls back to
+        /// that clip and remakes its mask for the new canvas (#909). That
+        /// was `LimitProbe::NONE`: half a second at this size, 1.3 s at
+        /// letter, and 5 s at 300 dpi, whatever the limits said. The setup
+        /// runs with no limits.
+        const REFIT: &str = "<< /PageSize [200 300] >> setpagedevice \
+             newpath 100000 { 0 0 moveto 600 700 -300 900 612 792 curveto \
+             0 792 lineto closepath } repeat clip \
+             gsave << /PageSize [190 290] >> setpagedevice";
+
+        #[test]
+        fn a_clip_refitted_by_cliprestore_stops_inside_cliprestore() {
+            stops_inside(
+                "cliprestore",
+                REFIT.into(),
+                "cliprestore",
+                "cliprestore",
+                // The setup's clip (0.6 s here) is inside the budget too.
+                Duration::from_secs(3),
+            );
+        }
+
+        #[test]
+        fn a_step_limit_refuses_a_long_chain_before_the_clip_changes() {
+            // Thirty nested clips, each a triangle a fraction of a step
+            // alone: every link was given the whole step budget and the
+            // clip was assigned before the total was charged (Codex, PR
+            // #1238: `--max-steps 50` ended in `limitexceeded (steps)` with
+            // the clip already cut to the triangles). The bounds of the clip
+            // in force must be the same after the refusal.
+            let setup = "0 0 999 999 rectclip \
+                 30 { newpath 0 0 moveto 500 0 lineto 0 500 lineto closepath clip } repeat \
+                 gsave << /PageSize [999 999] >> setpagedevice";
+            let (err, report, before, after, black) =
+                on_a_deadline("cliprestore chain", move || {
+                    let mut it = Interp::new();
+                    it.run_str(setup).expect("the setup runs");
+                    it.capture_stdout();
+                    let show = "clippath pathbbox 4 { = } repeat";
+                    it.run_str(show).expect("clippath");
+                    let before = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+                    it.set_limits(steps(50)).expect("limits");
+                    let err = it
+                        .run_str("cliprestore")
+                        .expect_err("the step limit stops it");
+                    let report = it.error_report(&err);
+                    it.set_limits(Limits::none()).expect("limits off");
+                    it.run_str(show).expect("clippath");
+                    let after = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+                    it.run_str("0 setgray 0 0 999 999 rectfill").expect("fill");
+                    let black = it
+                        .gfx()
+                        .pixmap
+                        .pixels()
+                        .iter()
+                        .filter(|p| p.red() == 0 && p.alpha() == 255)
+                        .count();
+                    (err, report, before, after, black)
+                });
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(
+                report.contains("OffendingCommand: cliprestore;"),
+                "{report}"
+            );
+            assert_eq!(after, format!("{before}{before}"), "the clip bounds");
+            assert_eq!(black, 999 * 999, "the clip is as it was");
+        }
+
+        #[test]
+        fn a_step_limit_refuses_a_refit_and_leaves_the_clip_alone() {
+            // The refit's work is held against the step limit, and a refused
+            // `cliprestore` changes nothing: the clip in force is the whole
+            // page (`setpagedevice` reset it), so a black fill paints every
+            // pixel, where the refitted clip (the curves' region) misses some.
+            let (err, report, black) = on_a_deadline("cliprestore steps", || {
+                let mut it = Interp::new();
+                it.run_str(REFIT).expect("the setup runs");
+                it.set_limits(steps(1000)).expect("limits");
+                let err = it
+                    .run_str("cliprestore")
+                    .expect_err("the step limit stops it");
+                let report = it.error_report(&err);
+                it.set_limits(Limits::none()).expect("limits off");
+                it.run_str("0 setgray 0 0 190 290 rectfill").expect("fill");
+                let black = it
+                    .gfx()
+                    .pixmap
+                    .pixels()
+                    .iter()
+                    .filter(|p| p.red() == 0 && p.alpha() == 255)
+                    .count();
+                (err, report, black)
+            });
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(
+                report.contains("OffendingCommand: cliprestore;"),
+                "{report}"
+            );
+            assert_eq!(black, 190 * 290, "the clip is as it was");
+        }
+    }
 }
 
 /// Step accounting inside one slice (#1213). The limits are read between

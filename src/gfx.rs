@@ -3710,10 +3710,14 @@ impl Gfx {
     /// is that save's gsave depth and state), else the newest `gsave`'s
     /// copy, else no clip at all. Only the clip changes, never the CTM,
     /// path or colour.
-    pub(crate) fn cliprestore(&mut self, save_boundary: Option<(usize, &GraphicsState)>) {
+    pub(crate) fn cliprestore(
+        &mut self,
+        save_boundary: Option<(usize, &GraphicsState)>,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         if let Some(clip) = self.state.clip_stack.pop() {
             self.state.clip = clip;
-            return;
+            return Ok(0);
         }
         let outer = match save_boundary {
             // `<=` only as a guard: since #505 the `grestore` operator stops
@@ -3724,8 +3728,9 @@ impl Gfx {
         let Some(outer) = outer else {
             // The bottom level: the job's initial state, with no clip, on
             // the device the job started on.
-            self.state.clip = self.fit_clip(None, self.initial_device.px);
-            return;
+            let (clip, work) = self.fit_clip(None, self.initial_device.px, probe)?;
+            self.state.clip = clip;
+            return Ok(work);
         };
         // Under `nulldevice` the level's clip was empty whatever its `clip`
         // says: the null device has no area, a 0x0 page here.
@@ -3736,18 +3741,31 @@ impl Gfx {
         };
         let clip = outer.clip.clone();
         // The level may have started on another page device (#909): the clip
-        // it started with is then that device's, remade for this canvas.
-        self.state.clip = self.fit_clip(clip, from);
+        // it started with is then that device's, remade for this canvas. A
+        // limit leaves the clip in force as it was (#1235).
+        let (clip, work) = self.fit_clip(clip, from, probe)?;
+        self.state.clip = clip;
+        Ok(work)
     }
 
     /// A clip made on a canvas of `from` pixels, for the current canvas
     /// (#909). On the same size it is itself. Otherwise it is what gs
     /// keeps: the old page's rectangle (its implicit clip) intersected with
     /// the chain's device-space paths, rasterised again on this canvas.
-    fn fit_clip(&self, clip: Option<ClipState>, from: (u32, u32)) -> Option<ClipState> {
+    ///
+    /// Under the limits (#1235): the masks are made where they are looked
+    /// at, as `clip`'s is, and the work they come to is returned for the
+    /// operator to charge. A limit is an error and nothing is changed here.
+    /// A canvas too big to make a mask for is no clip, as before.
+    fn fit_clip(
+        &self,
+        clip: Option<ClipState>,
+        from: (u32, u32),
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(Option<ClipState>, u64), PsError> {
         let (w, h) = (self.pixmap.width(), self.pixmap.height());
         if from == (w, h) {
-            return clip;
+            return Ok((clip, 0));
         }
         let mut chain = Vec::new();
         let mut link = clip.as_ref().map(|c| &c.node);
@@ -3762,7 +3780,10 @@ impl Gfx {
         page.line_to(DevPoint { x: fw, y: fh });
         page.line_to(DevPoint { x: 0.0, y: fh });
         page.close();
-        let mut mask = tiny_skia::Mask::new(w, h)?;
+        let Some(mut mask) = tiny_skia::Mask::new(w, h) else {
+            return Ok((None, 0));
+        };
+        let mut work = 0u64;
         let mut node = std::rc::Rc::new(ClipNode {
             path: page,
             rule: FillRule::Winding,
@@ -3781,31 +3802,34 @@ impl Gfx {
             } else {
                 PsPath::default()
             };
-            let (one, _) = Self::clip_coverage(
-                &path,
-                FillRule::Winding,
-                (w, h),
-                &crate::limits::LimitProbe::NONE,
-            )
-            .ok()?;
-            return Some(ClipState {
-                mask: std::rc::Rc::new(one),
-                node: std::rc::Rc::new(ClipNode {
-                    path,
-                    rule: FillRule::Winding,
-                    parent: None,
+            let Some((one, done)) = Self::fitted_coverage(&path, FillRule::Winding, (w, h), probe)?
+            else {
+                return Ok((None, 0));
+            };
+            return Ok((
+                Some(ClipState {
+                    mask: std::rc::Rc::new(one),
+                    node: std::rc::Rc::new(ClipNode {
+                        path,
+                        rule: FillRule::Winding,
+                        parent: None,
+                    }),
                 }),
-            });
+                done,
+            ));
         }
         let mut first = true;
         for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
-            let (one, _) = Self::clip_coverage(
-                &link.path,
-                link.rule,
-                (w, h),
-                &crate::limits::LimitProbe::NONE,
-            )
-            .ok()?;
+            // The links before this one have used steps the probe still
+            // counts as left (#1235): a long chain must not get the whole
+            // budget a link at a time.
+            let mut rest = *probe;
+            rest.steps_left = probe.steps_left.map(|s| s.saturating_sub(work / 1024));
+            let Some((one, done)) = Self::fitted_coverage(&link.path, link.rule, (w, h), &rest)?
+            else {
+                return Ok((None, work));
+            };
+            work = work.saturating_add(done);
             if first {
                 mask = one;
                 first = false;
@@ -3820,10 +3844,32 @@ impl Gfx {
                 parent: Some(node),
             });
         }
-        Some(ClipState {
-            mask: std::rc::Rc::new(mask),
-            node,
-        })
+        // The whole chain's work against the step limit before a clip is
+        // returned: a refusal must come before the caller assigns it.
+        probe.check(work / 1024)?;
+        Ok((
+            Some(ClipState {
+                mask: std::rc::Rc::new(mask),
+                node,
+            }),
+            work,
+        ))
+    }
+
+    /// [`clip_coverage`](Self::clip_coverage) for `fit_clip`: `None` when
+    /// the mask cannot be made (a plain `limitcheck`: no clip, as before),
+    /// an error for a limit.
+    fn fitted_coverage(
+        path: &PsPath,
+        rule: FillRule,
+        size: (u32, u32),
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<Option<(tiny_skia::Mask, u64)>, PsError> {
+        match Self::clip_coverage(path, rule, size, probe) {
+            Ok(done) => Ok(Some(done)),
+            Err(PsError::Limitcheck) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);

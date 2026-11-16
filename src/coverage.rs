@@ -133,11 +133,29 @@ pub(crate) fn rasterize_limited(
     probe: &LimitProbe,
 ) -> Result<(Vec<Run>, u64), PsError> {
     if *probe == LimitProbe::NONE {
-        rasterize_body::<false>(path, rule, mask, clip, probe)
+        rasterize_body::<false>(path, rule, mask, clip, probe, Stream::Never)
     } else {
-        rasterize_body::<true>(path, rule, mask, clip, probe)
+        rasterize_body::<true>(path, rule, mask, clip, probe, Stream::Auto)
     }
 }
+
+/// When a limited rasterisation stops keeping its edges (#1235).
+#[derive(Clone, Copy)]
+enum Stream {
+    Never,
+    /// Once the edge list is bigger than the accumulator that would take its
+    /// place (and at least [`STREAM_MIN_EDGES`] long).
+    Auto,
+    /// Once the list has this many edges (tests).
+    #[cfg(test)]
+    At(usize),
+}
+
+/// Fewest edges worth the switch: no ordinary shape comes near it.
+const STREAM_MIN_EDGES: usize = 1 << 16;
+/// Most cells (4 + 1 bytes of accumulator and 4 of touched-cell list each)
+/// a page-sized accumulator may have.
+const STREAM_MAX_CELLS: usize = 1 << 25;
 
 /// [`rasterize_limited`]'s body; `LIMITED` false compiles out every look at
 /// the limits and the band walk (every edge then visits every band).
@@ -147,6 +165,7 @@ fn rasterize_body<const LIMITED: bool>(
     mask: &mut Mask,
     clip: Option<&Mask>,
     probe: &LimitProbe,
+    stream: Stream,
 ) -> Result<(Vec<Run>, u64), PsError> {
     let mut out = Vec::new();
     let (mw, mh) = (mask.width(), mask.height());
@@ -167,9 +186,31 @@ fn rasterize_body<const LIMITED: bool>(
     // right of it, so it collapses onto x = 0; one right of it affects
     // nothing visible and collapses onto x = w.
     let mut lines = Vec::new();
-    // The edge count is the work so far: looked at every `POLL_WORK` of
-    // them.
-    let mut poll_at = POLL_WORK as usize;
+    let stride = w + 2;
+    let band = (BAND_FLOATS / stride).clamp(1, h);
+    // Under limits (#1235) a path of very many edges stops keeping them.
+    // 100,000 page-sized curves are 32 million edges at 16 bytes, and the
+    // band walk takes 8 more an edge: 830 MiB at 300 dpi, where the page-sized
+    // accumulator that sums them is 41 MB. Past a point (`stream_at`) the
+    // edges so far are laid into that accumulator, and every later one as
+    // it is made. Each edge is cut at the same band boundaries and laid
+    // into all its bands before the next, so a cell sums its edges in the
+    // same order with the same arithmetic: the coverage is bit for bit the
+    // banded walk's.
+    let cells = stride * h;
+    let mut stream_at = match stream {
+        _ if !LIMITED || cells > STREAM_MAX_CELLS => usize::MAX,
+        Stream::Never => usize::MAX,
+        Stream::Auto => STREAM_MIN_EDGES.max(cells * 5 / std::mem::size_of::<Line>() + 1),
+        #[cfg(test)]
+        Stream::At(n) => n,
+    };
+    let mut streamed: Option<Acc> = None;
+    let mut scratch: Vec<Line> = Vec::new();
+    // The work so far (a chord made, kept or not; an edge laid in a band):
+    // looked at every `POLL_WORK` of them.
+    let mut units = 0u64;
+    let mut poll_at = POLL_WORK;
     let mut chords = 0usize;
     let mut stopped = None;
     let stop = std::cell::Cell::new(false);
@@ -186,12 +227,46 @@ fn rasterize_body<const LIMITED: bool>(
             // dropped below, and a path of flat curves is all of those
             // (Codex, PR #1217: 512M chords, none kept, ran unpolled).
             chords += 1;
-            push_clipped(&mut lines, l, w as f32);
-            if chords < poll_at {
+            units += 1;
+            if let Some(acc) = &mut streamed {
+                scratch.clear();
+                push_clipped(&mut scratch, l, w as f32);
+                for e in &scratch {
+                    units += lay_edge(acc, stride, band, h, e);
+                }
+            } else {
+                push_clipped(&mut lines, l, w as f32);
+                if lines.len() >= stream_at {
+                    stream_at = usize::MAX;
+                    // Asked first: a refusal keeps the edges, which the
+                    // limits then stop as before.
+                    if probe.check_alloc(cells.saturating_mul(9)).is_ok() {
+                        let mut acc = Acc {
+                            vals: vec![0.0; cells],
+                            hit: vec![false; cells],
+                            list: Vec::new(),
+                        };
+                        for (n, e) in lines.iter().enumerate() {
+                            units += lay_edge(&mut acc, stride, band, h, e);
+                            if n % 4096 == 4095 && units >= poll_at {
+                                poll_at = units + POLL_WORK;
+                                if let Err(e) = probe.check(units / 1024) {
+                                    stopped = Some(e);
+                                    stop.set(true);
+                                    return;
+                                }
+                            }
+                        }
+                        lines = Vec::new();
+                        streamed = Some(acc);
+                    }
+                }
+            }
+            if units < poll_at {
                 return;
             }
-            poll_at = chords + POLL_WORK as usize;
-            if let Err(e) = probe.check(chords as u64 / 1024) {
+            poll_at = units + POLL_WORK;
+            if let Err(e) = probe.check(units / 1024) {
                 stopped = Some(e);
                 stop.set(true);
             }
@@ -200,7 +275,7 @@ fn rasterize_body<const LIMITED: bool>(
     if let Some(e) = stopped {
         return Err(e);
     }
-    if lines.is_empty() {
+    if streamed.is_none() && lines.is_empty() {
         if LIMITED {
             probe.check(chords as u64 / 1024)?;
         }
@@ -214,48 +289,58 @@ fn rasterize_body<const LIMITED: bool>(
             mask.data_mut()[py * mstride + ox as usize..][..w].fill(0);
         }
     }
-    let stride = w + 2;
-    let band = (BAND_FLOATS / stride).clamp(1, h);
-    let mut acc = Acc {
+    // A streamed run has laid every edge: its one accumulator covers the
+    // page and is read back in one pass.
+    let laid = streamed.is_some();
+    let read_band = if laid { h } else { band };
+    let mut acc = streamed.take().unwrap_or_else(|| Acc {
         vals: vec![0.0; stride * band],
         hit: vec![false; stride * band],
         list: Vec::new(),
-    };
+    });
     let mut merger = Merger::default();
     let mut spans: Vec<(u32, u32, bool)> = Vec::new();
     let mstride = mw as usize;
-    let mut bands = if LIMITED {
+    let mut bands = if LIMITED && !laid {
         BandWalk::new(&lines, band, h)
     } else {
         None
     };
     // The whole work is known before any band is laid: the edges, and each
     // edge once per band it reaches. A step limit it would pass stops the
-    // fill here, before anything is painted (#1188).
+    // fill here, before anything is painted (#1188). A streamed run knows
+    // it only now, and its edges are laid already: nothing is painted
+    // before it either.
     let visits = bands.as_ref().map_or(lines.len() as u64, |b| b.visits);
-    let total = chords as u64 + visits;
+    let total = if laid { units } else { chords as u64 + visits };
     if LIMITED {
         probe.check(total / 1024)?;
     }
     let mut work = Work {
-        done: chords as u64,
-        next_poll: chords as u64 + POLL_WORK,
+        done: if laid { total } else { chords as u64 },
+        next_poll: if laid {
+            total + POLL_WORK
+        } else {
+            chords as u64 + POLL_WORK
+        },
         probe,
     };
     let mut by = 0;
     while by < h {
-        let bh = band.min(h - by);
-        match &mut bands {
-            Some(walk) => {
-                let mine = walk.band(by / band).iter().map(|&i| &lines[i as usize]);
-                lay(&mut acc, stride, by, bh, mine, &mut work)?;
-            }
-            None if !LIMITED => {
-                for l in &lines {
-                    accumulate(&mut acc, stride, by, bh, l);
+        let bh = read_band.min(h - by);
+        if !laid {
+            match &mut bands {
+                Some(walk) => {
+                    let mine = walk.band(by / band).iter().map(|&i| &lines[i as usize]);
+                    lay(&mut acc, stride, by, bh, mine, &mut work)?;
                 }
+                None if !LIMITED => {
+                    for l in &lines {
+                        accumulate(&mut acc, stride, by, bh, l);
+                    }
+                }
+                None => lay(&mut acc, stride, by, bh, lines.iter(), &mut work)?,
             }
-            None => lay(&mut acc, stride, by, bh, lines.iter(), &mut work)?,
         }
         acc.list.sort_unstable();
         let mut cells = std::mem::take(&mut acc.list);
@@ -425,20 +510,7 @@ impl BandWalk {
             return None;
         }
         let top = nb - 1;
-        // Bands `[floor(ymin / band), floor(ymax / band)]`: below the first,
-        // a band ends at or above ymin; past the last, one starts above
-        // ymax; `accumulate` keeps an edge for neither. Not a number: every
-        // band, as before.
-        let range = |l: &Line| -> Option<(usize, usize)> {
-            // `f32::min` drops a NaN operand, so look at the ends first.
-            if l.y0.is_nan() || l.y1.is_nan() {
-                return Some((0, top));
-            }
-            let (lo, hi) = (l.y0.min(l.y1), l.y0.max(l.y1));
-            let q = |y: f32| (f64::from(y) / band as f64).floor();
-            let (k0, k1) = (q(lo).max(0.0), q(hi).min(top as f64));
-            (k0 <= k1).then_some((k0 as usize, k1 as usize))
-        };
+        let range = |l: &Line| band_range(l, band, top);
         let mut start = vec![0usize; nb + 1];
         let mut last = vec![0u32; lines.len()];
         let mut visits = 0u64;
@@ -727,6 +799,42 @@ fn push_clipped(out: &mut Vec<Line>, l: Line, w: f32) {
     }
 }
 
+/// Lay `l` into a page-sized accumulator (#1235), cut at the same band
+/// boundaries a banded run would cut it at (`accumulate` restarts its x at
+/// each band's top, so one walk down the page would round differently), and
+/// the work it came to: one a band it reaches.
+fn lay_edge(acc: &mut Acc, stride: usize, band: usize, h: usize, l: &Line) -> u64 {
+    let nb = h.div_ceil(band);
+    if nb <= 1 {
+        accumulate(acc, stride, 0, h, l);
+        return 1;
+    }
+    let Some((k0, k1)) = band_range(l, band, nb - 1) else {
+        return 0;
+    };
+    for k in k0..=k1 {
+        let by = k * band;
+        let bh = band.min(h - by);
+        accumulate_at(acc, stride, by, bh, by * stride, l);
+    }
+    (k1 - k0 + 1) as u64
+}
+
+/// The bands `[floor(ymin / band), floor(ymax / band)]` of `0..=top` that
+/// edge `l` reaches: below the first, a band ends at or above ymin; past
+/// the last, one starts above ymax; `accumulate` keeps an edge for neither.
+/// Not a number: every band.
+fn band_range(l: &Line, band: usize, top: usize) -> Option<(usize, usize)> {
+    // `f32::min` drops a NaN operand, so look at the ends first.
+    if l.y0.is_nan() || l.y1.is_nan() {
+        return Some((0, top));
+    }
+    let (lo, hi) = (l.y0.min(l.y1), l.y0.max(l.y1));
+    let q = |y: f32| (f64::from(y) / band as f64).floor();
+    let (k0, k1) = (q(lo).max(0.0), q(hi).min(top as f64));
+    (k0 <= k1).then_some((k0 as usize, k1 as usize))
+}
+
 /// Add the signed area of edge `l` to the rows `[by, by + bh)` of the
 /// accumulation buffer (`acc` row 0 is row `by`). x is already in
 /// `[0, stride - 2]`. After a running sum along a row, each cell holds
@@ -734,6 +842,13 @@ fn push_clipped(out: &mut Vec<Line>, l: Line, w: f32) {
 /// arithmetic is font-rs's (Raph Levien, Apache-2.0/MIT).
 #[inline(always)]
 fn accumulate(acc: &mut Acc, stride: usize, by: usize, bh: usize, l: &Line) {
+    accumulate_at(acc, stride, by, bh, 0, l);
+}
+
+/// [`accumulate`] with row `by` of the page at cell `row0` of `acc`: a
+/// page-sized accumulator takes each band's rows where they lie.
+#[inline(always)]
+fn accumulate_at(acc: &mut Acc, stride: usize, by: usize, bh: usize, row0: usize, l: &Line) {
     let (dir, a, b) = if l.y0 < l.y1 {
         (1.0f32, (l.x0, l.y0), (l.x1, l.y1))
     } else {
@@ -752,7 +867,7 @@ fn accumulate(acc: &mut Acc, stride: usize, by: usize, bh: usize, l: &Line) {
     let first = ys.floor() as usize;
     let last = (ye.ceil() as usize).min(by + bh);
     for y in first..last {
-        let row = (y - by) * stride;
+        let row = row0 + (y - by) * stride;
         let fy = y as f32;
         let dy = (fy + 1.0).min(ye) - fy.max(ys);
         if dy <= 0.0 {
@@ -1108,12 +1223,19 @@ mod tests {
             deadline_ns: None,
             memory: None,
         };
+        let mut kept = Vec::new();
+        flatten(&path, 0.0, 0.0, &std::cell::Cell::new(false), |l| {
+            push_clipped(&mut kept, l, w as f32)
+        });
+        assert!(kept.len() > 3000, "{} edges", kept.len());
         for rule in [Rule::NonZero, Rule::EvenOdd] {
             for c in [None, Some(&clip)] {
                 let mut a = Mask::new(w, h).unwrap();
                 let mut z = Mask::new(w, h).unwrap();
-                let (ra, wa) = rasterize_body::<true>(&path, rule, &mut a, c, &probe).unwrap();
-                let (rz, _) = rasterize_body::<false>(&path, rule, &mut z, c, &probe).unwrap();
+                let (ra, wa) =
+                    rasterize_body::<true>(&path, rule, &mut a, c, &probe, Stream::Never).unwrap();
+                let (rz, _) =
+                    rasterize_body::<false>(&path, rule, &mut z, c, &probe, Stream::Never).unwrap();
                 assert_eq!(ra, rz, "{rule:?} clip {}", c.is_some());
                 for r in &ra {
                     for y in r.rect.y0..r.rect.y1 {
@@ -1125,6 +1247,20 @@ mod tests {
                     }
                 }
                 assert!(wa > 0);
+                // #1235: the edges laid into one page-sized accumulator, from
+                // the first edge, from the 500th, and from the last few
+                // (the edges kept so far are laid first): the same runs, the
+                // same mask bytes, the same work.
+                // (The path keeps well over 1500 edges: asserted above.)
+                for at in [0, 1, 500, 1500] {
+                    let mut m = Mask::new(w, h).unwrap();
+                    let (rm, wm) =
+                        rasterize_body::<true>(&path, rule, &mut m, c, &probe, Stream::At(at))
+                            .unwrap();
+                    assert_eq!(rm, ra, "{rule:?} streamed at {at}");
+                    assert_eq!(wm, wa, "{rule:?} streamed at {at}: the work");
+                    assert!(m.data() == a.data(), "{rule:?} streamed at {at}: the mask");
+                }
             }
         }
     }

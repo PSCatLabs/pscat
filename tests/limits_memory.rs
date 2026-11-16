@@ -171,21 +171,47 @@ fn memory_growth_is_capped() {
     // (#1188). The fill's 10^8 edges were freed again before the next look
     // at the limits, so a 100 MiB cap never saw them; the flattened path
     // replaced the current one and stayed, about 1 GB.
-    let mut it = limited(100);
-    assert_eq!(
-        it.run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat fill"),
-        Err(PsError::MemoryExceeded)
-    );
-    // `clip` of the same path (#1219): over the work a stoppable
-    // rasteriser takes it, and stops at the cap inside `clip` as `fill` does.
-    let mut it = limited(100);
-    let err = it
-        .run_str("newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat clip")
-        .unwrap_err();
-    assert_eq!(err, PsError::MemoryExceeded);
-    let report = it.error_report(&err);
-    assert!(report.contains("OffendingCommand: clip;"), "{report}");
+    //
+    // A limited rasteriser stops keeping its edges once there are more of
+    // them than a page-sized accumulator would take (#1235), so on a page
+    // of up to 2^25 cells these two programs need 31 MiB, not 500, and finish
+    // under 100. The edge list is still policed where the page is bigger than
+    // that (6000 x 6000 here: the accumulator would be 1.5 GB).
+    const CURVES: &str = "newpath 0 0 moveto 100000 { 600 800 -200 900 300 0 curveto } repeat";
+    for op in ["fill", "clip"] {
+        let mut it = Interp::new();
+        it.run_str("<< /PageSize [6000 6000] >> setpagedevice")
+            .unwrap();
+        it.set_limits(Limits::none().with_max_memory(100 * MIB))
+            .expect("the allocator is installed");
+        // Scaled up so the path's bounds are the whole page.
+        let err = it
+            .run_str(&format!("10 10 scale {CURVES} {op}"))
+            .unwrap_err();
+        assert_eq!(err, PsError::MemoryExceeded, "{op} on a big page");
+        // `clip` (#1219) is over the work a stoppable rasteriser takes it,
+        // and stops at the cap inside `clip` as `fill` does.
+        let report = it.error_report(&err);
+        assert!(
+            report.contains(&format!("OffendingCommand: {op};")),
+            "{report}"
+        );
+        drop(it);
+        // The default page: the edges are laid as they are made.
+        let mut it = limited(100);
+        it.run_str(&format!("{CURVES} {op}"))
+            .unwrap_or_else(|e| panic!("{op} streams its edges: {e:?}"));
+        drop(it);
+    }
+    // The MCP preset's 1 GiB held 100,000 curves clipped at 300 dpi only
+    // just (the edges were 830 MiB, #1235): now 160. Half of it is plenty.
+    let mut it = limited(400);
+    it.run_str(&format!(
+        "<< /PageSize [2550 3300] >> setpagedevice 300 72 div dup scale {CURVES} clip"
+    ))
+    .expect("a 300 dpi clip of 100,000 curves fits 400 MiB");
     drop(it);
+
     let before = pscat::memtrack::live_bytes();
     let mut it = limited(100);
     assert_eq!(
@@ -250,6 +276,44 @@ fn memory_growth_is_capped() {
         ),
         Err(PsError::TimeExceeded)
     );
+
+    // With no memory limit at all, only a clock, the retired list had nothing
+    // to size it by: 64 million retired pixels were 1.3 GB (2.2 GB on a
+    // slower machine), a shared host's whole share, before the clock stopped
+    // it (#1235). Any limit now holds the list to a fixed ceiling, past which
+    // the interpreter does the whole image: the same pixels, under the clock.
+    {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let mut it = Interp::new();
+        it.set_limits(Limits::none().with_max_time(std::time::Duration::from_secs(2)))
+            .expect("a time limit always applies");
+        let before = pscat::memtrack::live_bytes();
+        let peak = std::sync::Arc::new(AtomicUsize::new(before));
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let sampler = {
+            let (peak, done) = (peak.clone(), done.clone());
+            std::thread::spawn(move || {
+                while !done.load(Ordering::Relaxed) {
+                    peak.fetch_max(pscat::memtrack::live_bytes(), Ordering::Relaxed);
+                    std::thread::yield_now();
+                }
+            })
+        };
+        let r = it.run_str(
+            "gsave 4000 4000 scale 4000 4000 [4000 0 0 -4000 0 4000] \
+             { /j exch def /i exch def i 3037000500 mul dup mul pop i 2000 div } 1 kernelimage grestore",
+        );
+        done.store(true, Ordering::Relaxed);
+        sampler.join().unwrap();
+        let grew = peak.load(Ordering::Relaxed).saturating_sub(before);
+        assert_eq!(r, Err(PsError::TimeExceeded));
+        assert!(
+            grew < 300 * MIB,
+            "the retired list is held to its ceiling: peak growth {} MiB",
+            grew / MIB
+        );
+        drop(it);
+    }
 
     // A decompression bomb read into something that grows (#1187): 4 GiB
     // from a 150 KB FlateDecode + RunLengthDecode string, read as a 225 MB

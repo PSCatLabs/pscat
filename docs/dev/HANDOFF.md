@@ -1528,6 +1528,18 @@ renders eight examples in both and compares block-downsampled output).
     same helper, so a refit keeps the pixels. Type 1 charstrings decrypt only
     `type1::MAX_CODE_BYTES` (5 x `OP_BUDGET` + 1): the operator budget cannot
     read further. `notes/1219-limits-clip-shfill-type1.md`.
+  - Under limits, `rasterize_body::<true>` stops keeping its edges once the
+    list is longer than a page-sized accumulator (`Stream::Auto`: 5 bytes a
+    cell, at least 65,536 edges, and at most 2^25 cells; #1235). It lays the
+    kept edges into that accumulator and each later one as it is flattened,
+    each cut at the same band boundaries (`lay_edge`, `band_range`,
+    `accumulate_at`), so a cell sums its edges in the same order and the
+    coverage is bit for bit the banded walk's (unit-tested against it, work
+    count included). 100,000 curves clipped at 300 dpi: 830 MiB to 160. Keep
+    it so: the output must not depend on whether a limit is set. `fit_clip`
+    (`cliprestore`) takes the probe and charges its work like `clip`.
+    `kernelimage`/`kernelarray` hold their retired list to
+    `RETIRE_CEILING_BYTES` whenever any limit is set (`Interp::limits_set`).
   - The fill rasteriser's band walk (#1188, `coverage::BandWalk`) must keep
     each band's edges in the original order: the coverage sums are f32 and
     their order is what makes a fill byte-identical to the edges x bands
