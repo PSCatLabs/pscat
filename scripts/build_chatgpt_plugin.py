@@ -10,7 +10,7 @@ URL is the hosted server's endpoint, https://<your-pscat-mcp-host>/mcp.
 
 Writes DIR/pscat-chatgpt-plugin-<version>.zip (with --skills-only,
 pscat-chatgpt-plugin-<version>-skills-only.zip; with --remote,
-pscat-chatgpt-plugin-<version>-remote.zip; DIR defaults to dist/).
+pscat-cloud-chatgpt-plugin-<version>.zip; DIR defaults to dist/).
 `--sums` is the pinned release's SHA256SUMS: get it with
 `gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS`.
 The build itself makes no network request.
@@ -28,8 +28,11 @@ The ZIP is the Agent Plugins 1.0 layout with `plugin.json` at its root:
 - with `--skills-only`, no `mcp.json` (a plugin that declares a local MCP
   server is "Desktop only" in ChatGPT);
 - with `--remote URL`, an `mcp.json` generated for the hosted pscat-mcp
-  server in place of the local one: a `streamable-http` entry named `pscat`
-  (#1240; notes/1240-chatgpt-remote-mcp.md). The URL is an argument, never
+  server in place of the local one: a `streamable-http` entry named
+  `pscat-cloud` (#1240; notes/1240-chatgpt-remote-mcp.md). The plugin is
+  renamed `pscat-cloud` too (plugin.json `name`, display name, short
+  description and description), so it installs beside the local `pscat`
+  plugin: ChatGPT refuses a second plugin of the same name (#1254). The URL is an argument, never
   committed, and `--remote-auth` is required, because what ChatGPT can send
   differs by choice: `none` declares no authentication; `bearer` declares a
   fixed bearer token (`api_key`), which the manifest schema accepts but
@@ -132,8 +135,33 @@ def remote_mcp_json(url, auth):
         "extensions": {"com.openai": {"auth": dict(REMOTE_AUTH[auth])}},
     }
     doc = {"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-           "mcpServers": {"pscat": entry}}
+           "mcpServers": {REMOTE_NAME: entry}}
     return (json.dumps(doc, indent=2) + "\n").encode()
+
+
+REMOTE_NAME = "pscat-cloud"
+REMOTE_DISPLAY_NAME = "pscat cloud"
+REMOTE_SHORT_DESCRIPTION = "Hosted PostScript renderer"  # OpenAI's limit is 30 characters
+REMOTE_DESCRIPTION = (
+    "PostScript for precision and imagination: render documents, charts and generative "
+    "art to PNG, SVG and PDF with the pscat interpreter. Agent skills plus a connection "
+    "to the hosted pscat-mcp server, so nothing needs to be installed.")
+
+
+def remote_manifest(manifest):
+    """plugin.json for the --remote build: a different plugin from the local one.
+
+    ChatGPT refuses to install a plugin whose name is already taken (#1254), so the
+    hosted build is `pscat-cloud` and the local `pscat` plugin can sit beside it. The
+    local description ("Uses your installed pscat, or downloads...") is wrong here."""
+    doc = json.loads(json.dumps(manifest))  # deep copy
+    doc["name"] = REMOTE_NAME
+    doc["description"] = REMOTE_DESCRIPTION
+    iface = doc.setdefault("extensions", {}).setdefault("com.openai", {}).setdefault(
+        "interface", {})
+    iface["displayName"] = REMOTE_DISPLAY_NAME
+    iface["shortDescription"] = REMOTE_SHORT_DESCRIPTION
+    return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()
 
 
 def release_tag(root):
@@ -204,9 +232,13 @@ def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=
         if "mcp.json" not in entries:
             raise SystemExit("plugin/mcp.json is not tracked")
         entries["mcp.json"] = (remote_json, False)
+        entries["plugin.json"] = (remote_manifest(manifest), entries["plugin.json"][1])
 
-    suffix = "-skills-only" if skills_only else "-remote" if remote is not None else ""
-    out = pathlib.Path(out_dir) / f"pscat-chatgpt-plugin-{version}{suffix}.zip"
+    if remote is not None:
+        name = f"{REMOTE_NAME}-chatgpt-plugin-{version}.zip"
+    else:
+        name = f"pscat-chatgpt-plugin-{version}{'-skills-only' if skills_only else ''}.zip"
+    out = pathlib.Path(out_dir) / name
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w") as z:
         for rel in sorted(entries):

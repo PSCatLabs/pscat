@@ -140,22 +140,64 @@ class Remote(Fixture):
 
     def test_none(self):
         path = self.build(remote=URL, remote_auth="none")
-        self.assertTrue(path.name.endswith("-remote.zip"))
+        self.assertEqual(path.name, "pscat-cloud-chatgpt-plugin-1.2.3.zip")
         self.assertEqual(self.mcp(path), {
             "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-            "mcpServers": {"pscat": {
+            "mcpServers": {"pscat-cloud": {
                 "type": "streamable-http", "url": URL,
                 "extensions": {"com.openai": {"auth": {"type": "none"}}}}}})
 
     def test_bearer_declares_api_key_without_a_token(self):
         auth = self.mcp(self.build(remote=URL, remote_auth="bearer"))[
-            "mcpServers"]["pscat"]["extensions"]["com.openai"]["auth"]
+            "mcpServers"]["pscat-cloud"]["extensions"]["com.openai"]["auth"]
         self.assertEqual(auth, {"type": "api_key", "headerScheme": "bearer"})
 
     def test_no_headers_entry(self):
         for auth in ("none", "bearer"):
-            server = self.mcp(self.build(remote=URL, remote_auth=auth))["mcpServers"]["pscat"]
+            server = self.mcp(self.build(remote=URL, remote_auth=auth))["mcpServers"]["pscat-cloud"]
             self.assertNotIn("headers", server)
+
+    def manifest(self, path):
+        with zipfile.ZipFile(path) as z:
+            return json.loads(z.read("plugin.json"))
+
+    def test_renamed_so_it_installs_beside_the_local_plugin(self):
+        """#1254: ChatGPT refuses a second plugin named pscat."""
+        local = self.build()
+        path = self.build(remote=URL, remote_auth="none")
+        self.assertNotEqual(path.name, local.name)
+        self.assertEqual(self.manifest(local)["name"], "p")  # the local build is untouched
+        m = self.manifest(path)
+        self.assertEqual(m["name"], "pscat-cloud")
+        self.assertEqual(m["version"], "1.2.3")
+        iface = m["extensions"]["com.openai"]["interface"]
+        self.assertEqual(iface["displayName"], "pscat cloud")
+        self.assertIn("Hosted", iface["shortDescription"])
+        # the mcp.json server key matches the plugin name, so tool names do not collide
+        self.assertEqual(list(self.mcp(path)["mcpServers"]), [m["name"]])
+
+    def test_manifest_fits_openai_limits(self):
+        iface = self.manifest(self.build(remote=URL, remote_auth="none"))[
+            "extensions"]["com.openai"]["interface"]
+        for key in ("displayName", "shortDescription"):
+            self.assertLessEqual(len(iface[key]), pc.OPENAI_TEXT_LIMITS[key], key)
+
+    def test_description_is_about_the_hosted_server(self):
+        desc = self.manifest(self.build(remote=URL, remote_auth="none"))["description"]
+        self.assertNotIn("installed pscat", desc)
+        self.assertNotIn("downloads", desc)
+        self.assertIn("hosted pscat-mcp server", desc)
+        self.assertIn("nothing needs to be installed", desc)
+
+    def test_only_the_manifest_fields_change(self):
+        local = self.manifest(self.build())
+        remote = self.manifest(self.build(remote=URL, remote_auth="none"))
+        for m in (local, remote):
+            for key in ("name", "description"):
+                m.pop(key, None)
+            for key in ("displayName", "shortDescription"):
+                m["extensions"]["com.openai"]["interface"].pop(key)
+        self.assertEqual(local, remote)
 
     def test_everything_else_unchanged(self):
         local = self.names(self.build())
@@ -199,7 +241,7 @@ class Remote(Fixture):
 
     def test_url_is_normalised(self):
         path = self.build(remote="HTTPS://H.Example:8443/Mcp", remote_auth="none")
-        self.assertEqual(self.mcp(path)["mcpServers"]["pscat"]["url"], "https://h.example:8443/Mcp")
+        self.assertEqual(self.mcp(path)["mcpServers"]["pscat-cloud"]["url"], "https://h.example:8443/Mcp")
 
     def test_auth_is_required_and_checked(self):
         with self.assertRaisesRegex(SystemExit, "--remote-auth"):
@@ -221,7 +263,7 @@ class Remote(Fixture):
                             capture_output=True, text=True)
         self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertIn("cannot send it", ok.stderr)  # the bearer warning
-        self.assertTrue(ok.stdout.strip().endswith("-remote.zip"))
+        self.assertTrue(ok.stdout.strip().endswith("/pscat-cloud-chatgpt-plugin-1.2.3.zip"))
         bad = subprocess.run(base + ["--remote", "http://h.example/mcp", "--remote-auth", "none"],
                              capture_output=True, text=True)
         self.assertEqual(bad.returncode, 1)
@@ -297,7 +339,7 @@ class Repo(unittest.TestCase):
         pc.check_chatgpt(str(ROOT), errors)
         self.assertEqual(errors, [])
 
-    def test_repo_remote_build_differs_only_in_mcp_json(self):
+    def test_repo_remote_build_differs_only_in_mcp_json_and_manifest(self):
         tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp)
         tag = b.release_tag(ROOT)
@@ -307,10 +349,16 @@ class Repo(unittest.TestCase):
         with zipfile.ZipFile(local) as zl, zipfile.ZipFile(remote) as zr:
             self.assertEqual(zl.namelist(), zr.namelist())
             differ = [n for n in zl.namelist() if zl.read(n) != zr.read(n)]
-            self.assertEqual(differ, ["mcp.json"])
+            self.assertEqual(differ, ["mcp.json", "plugin.json"])
+            self.assertEqual(json.loads(zr.read("plugin.json"))["name"], "pscat-cloud")
+            self.assertEqual(json.loads(zl.read("plugin.json"))["name"], "pscat")
+            self.assertNotEqual(local.name, remote.name)
             server = json.loads(zr.read("mcp.json"))["mcpServers"]
-            self.assertEqual(list(server), ["pscat"])
-            self.assertNotIn("command", server["pscat"])  # no local stdio server left
+            self.assertEqual(list(server), ["pscat-cloud"])
+            self.assertNotIn("command", server["pscat-cloud"])  # no local stdio server left
+            iface = json.loads(zr.read("plugin.json"))["extensions"]["com.openai"]["interface"]
+            for key in ("displayName", "shortDescription"):
+                self.assertLessEqual(len(iface[key]), pc.OPENAI_TEXT_LIMITS[key], key)
 
 
 if __name__ == "__main__":
