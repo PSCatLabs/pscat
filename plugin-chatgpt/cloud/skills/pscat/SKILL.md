@@ -44,9 +44,10 @@ The command-line options that other pscat guides mention map onto the tools:
 are `format`; `--halftone` is `halftone`; `--lint` and `--headless` are
 `validate_postscript`; `--capabilities` and `--fonts` are
 `describe_art_capabilities`; `pscat sheet` is `review_sheet`; `pscat handwrite`
-and `pscat chalk` are `handwrite` and `chalkboard_math`. Typewritten pages, sweeps
-(`--sweep-seed`), photo-to-engraving, the live window and `--bands` have no
-tool: write the PostScript for them yourself, as the reference files describe.
+and `pscat chalk` are `handwrite` and `chalkboard_math`. Typewritten pages are
+written in PostScript (see the `typewriter.md` reference) and seed or parameter
+sweeps are done with `review_sheet`. Photo-to-engraving, the live window, local
+fonts and files, `--bands` and `--profile` are not available here.
 <!-- cloud: drop "## In the browser or Node" -->
 <!-- cloud: sub "## Render a file (the common case)" -->
 ## Render with `render_postscript` (the common case)

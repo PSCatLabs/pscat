@@ -67,9 +67,9 @@ come from the `extras` font pack; Korean/Japanese/Thai
 Adding a piece to the gallery is a contributor task: see `gallery/README.md`
 in a checkout." -->
 <!-- cloud: sub "A `--sweep-seed` also seeds
-  noise" -->
-A seed sweep also seeds
-  noise
+  noise, unless the program calls `noiseseed`." -->
+To compare seeds, set `N noiseseed` as well as `N srand`: native noise keeps its
+  own seed table.
 <!-- cloud: sub "`pscat: warning: font … is in the … font pack` on stderr;" -->
 `pscat: warning: font … is in the … font pack` in the reply;
 <!-- cloud: sub "so check `--fonts`." -->

@@ -23,11 +23,13 @@ There are at most 32 cells, and the cells and the sheet have pixel and time
 limits that `get_renderer_info` reports.
 
 **To compare seeds or parameters**, write one entry per value and put the value
-at the top of each program: `7 srand` at the start of a program for a seed, or
-`/Density 20 def` for a parameter that the program reads with
-`/Density where { pop Density } { 10 } ifelse`. Give each entry a label such as
-`seed=7`, and use a small `dpi` (36 or so) so a dozen cells fit on one sheet.
-A program that calls `srand` itself keeps its own seed.
+at the top of each program: `7 srand 7 noiseseed` for a seed (`srand` seeds
+`rand`; the native noise operators `gnoise2` and `fbm2` keep their own table, so a
+noise piece needs `noiseseed` too), or `/Density 20 def` for a parameter that the
+program reads with `/Density where { pop Density } { 10 } ifelse`. Give each
+entry a label such as `seed=7`, and use a small `dpi` (36 or so) so a dozen
+cells fit on one sheet. If a program already sets its own seed (an `N srand`
+line), change that line in each entry instead of adding another.
 
 **To judge an icon at small sizes**, give one entry a `dpi` list such as
 `[96, 9, {"dpi": 9, "zoom": 4}]`.

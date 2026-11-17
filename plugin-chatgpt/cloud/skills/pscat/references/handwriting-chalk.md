@@ -43,8 +43,7 @@ writing shows, 0 to 1, or `false`), `irregular` (0 clean and level, up to 5),
 400), `dpi` (default 144) and `config` for the rest (groups `layout`, `chalk`
 and `board`, and `seed`).
 
-TeX outside mathkit's subset fails with one line naming it
-(`unsupported LaTeX command \aleph`). SVG and PDF keep every chalk grain as a
+TeX outside mathkit's subset fails with an error that names the command. SVG and PDF keep every chalk grain as a
 vector mark, so a board is megabytes as SVG: prefer PNG unless a vector is
 needed. For a composed piece (several formulas, words, annotations, a board of
 your own) use mathkit from PostScript, which the `psart` skill's board-math
