@@ -54,7 +54,7 @@ prompt before the first render in a conversation (you can remember the
 approval for that conversation). A first call after the server has been idle
 can take a second or two longer (scale to zero).
 
-Try: `Use the pscat app's render_postscript tool to draw a red circle on a
+Try: `Use the pscat-cloud app's render_postscript tool to draw a red circle on a
 white page and show me the PNG.`
 
 After the server changes its tools, use the plugin's details page in ChatGPT's
