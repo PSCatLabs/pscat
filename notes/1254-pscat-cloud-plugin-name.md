@@ -32,8 +32,8 @@ weight. Dropping them would need those skills changed too. The setup skill's
 description still says it fires when the pscat MCP tools are missing; that is
 unchanged and untested against the hosted tools (see notes/1240).
 
-## Follow-up outside this repo
+## Other text updated
 
-#1253 (publish the remote ZIP as a release asset) names the old file
-`pscat-chatgpt-plugin-<version>-remote.zip`; it should say
+#1253 (publish the remote ZIP as a release asset) named the old file
+`pscat-chatgpt-plugin-<version>-remote.zip` in its body; it now says
 `pscat-cloud-chatgpt-plugin-<version>.zip`.

@@ -125,8 +125,7 @@ python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
 - The ZIP still carries the local launcher scripts and `pscat-release`. The
   `pscat` skill and `pscat-chatgpt-setup` both send an agent to
   `scripts/pscat-mcp.sh --locate` to fetch a local `pscat` command line when
-  the MCP tools are missing, so they are not dead weight; nothing runs them
-  while the hosted tools are connected.
+  the MCP tools are missing, so the files are referenced, not dead weight.
 
 OpenAI documents the custom-server route above and publishing to a workspace
 for plugins you have added, but not the steps for uploading a plugin ZIP to a
