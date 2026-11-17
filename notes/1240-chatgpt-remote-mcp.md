@@ -97,6 +97,8 @@ OpenAI-managed client certificate presented on TLS (mTLS).
   the ZIP with its `mcp.json` replaced by one `streamable-http` entry named
   `pscat`; everything else is byte for byte the local ZIP (a repo test checks
   `mcp.json` is the only difference). Output `...-remote.zip`.
+  (#1254 renamed it: plugin and server `pscat-cloud`, output
+  `pscat-cloud-chatgpt-plugin-<version>.zip`; see notes/1254-pscat-cloud-plugin-name.md.)
   - `--remote-auth` is required and there is no default: the staging server
     is protected, and OpenAI says not to configure a protected server as
     `none`. `bearer` writes the `api_key` declaration and prints a warning that

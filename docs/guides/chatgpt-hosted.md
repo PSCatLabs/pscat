@@ -31,7 +31,8 @@ connect only a server you trust.
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins), select the plus
    button, then **Add custom MCP server**.
-2. Name: `pscat`. Description: "Render PostScript to PNG, SVG and PDF."
+2. Name: `pscat-cloud` (not `pscat`: that name is the local plugin's, and ChatGPT
+   refuses a second plugin of the same name). Description: "Render PostScript to PNG, SVG and PDF."
 3. Under **Connection**, enter the **Server URL**, with the `/mcp` path:
    `https://<your-pscat-mcp-host>/mcp`. The staging host is a Cloud Run
    `run.app` address and production will differ, so take it from the
@@ -43,7 +44,7 @@ connect only a server you trust.
    **Create as a plugin**.
 6. Find the resulting plugin in your personal plugins (or the workspace where
    you created it) and install it before using it.
-7. In a new conversation, type `@` and pick `pscat`.
+7. In a new conversation, type `@` and pick `pscat-cloud`.
 
 What you should see at step 6: seven tools, `chalkboard_math`,
 `describe_art_capabilities`, `get_renderer_info`, `handwrite`,
@@ -53,7 +54,7 @@ prompt before the first render in a conversation (you can remember the
 approval for that conversation). A first call after the server has been idle
 can take a second or two longer (scale to zero).
 
-Try: `Use the pscat app's render_postscript tool to draw a red circle on a
+Try: `Use the pscat-cloud app's render_postscript tool to draw a red circle on a
 white page and show me the PNG.`
 
 After the server changes its tools, use the plugin's details page in ChatGPT's
@@ -88,15 +89,19 @@ it to use only the seven tools above.
 
 ## The plugin ZIP, remote build
 
-`scripts/build_chatgpt_plugin.py --remote` builds the same plugin ZIP as
+`scripts/build_chatgpt_plugin.py --remote` builds the plugin ZIP that
 `plugin/README.md` describes, with its local `mcp.json` replaced by one entry
-for the hosted server (skills and everything else byte for byte the same):
+for the hosted server, and the plugin renamed **`pscat-cloud`** (skills and
+everything else byte for byte the same). The new name matters: ChatGPT refuses
+to install a plugin whose name is taken ("A plugin named 'pscat' already
+exists"), so the local `pscat` plugin and this hosted one can both be installed
+in one account (#1254):
 
 ```sh
 gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS
 python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
     --remote 'https://<your-pscat-mcp-host>/mcp' --remote-auth none
-# dist/pscat-chatgpt-plugin-<version>-remote.zip
+# dist/pscat-cloud-chatgpt-plugin-<version>.zip
 ```
 
 - `--remote-auth` is required, with no default, because the server's
@@ -111,9 +116,16 @@ python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
   committed. No token goes in the ZIP, and no `headers` entry either (OpenAI's
   public submission rejects nonempty server headers).
 - It cannot be combined with `--skills-only`.
-- The ZIP still carries the local launcher scripts, `pscat-release` and the
-  manifest description that mentions the local server. Nothing uses them when
-  `mcp.json` names only the remote server; they are dead weight, not a risk.
+- What differs from the local ZIP: `plugin.json` has `name` `pscat-cloud`,
+  display name "pscat cloud", short description "Hosted PostScript renderer"
+  and a description that says it connects to the hosted `pscat-mcp` server and
+  needs nothing installed; `mcp.json` names its one server `pscat-cloud`, so its
+  tools do not collide with the local plugin's `pscat` server; the file is
+  `pscat-cloud-chatgpt-plugin-<version>.zip`. Every other file is the same.
+- The ZIP still carries the local launcher scripts and `pscat-release`. The
+  `pscat` skill and `pscat-chatgpt-setup` both send an agent to
+  `scripts/pscat-mcp.sh --locate` to fetch a local `pscat` command line when
+  the MCP tools are missing, so the files are referenced, not dead weight.
 
 OpenAI documents the custom-server route above and publishing to a workspace
 for plugins you have added, but not the steps for uploading a plugin ZIP to a
