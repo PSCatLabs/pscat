@@ -32,14 +32,41 @@ The ZIP is the Agent Plugins 1.0 layout with `plugin.json` at its root:
   `pscat-cloud` (#1240; notes/1240-chatgpt-remote-mcp.md). The plugin is
   renamed `pscat-cloud` too (plugin.json `name`, display name, short
   description and description), so it installs beside the local `pscat`
-  plugin: ChatGPT refuses a second plugin of the same name (#1254). The URL is an argument, never
+  plugin: ChatGPT refuses a second plugin of the same name (#1254). The
+  cloud profile (#1256) also leaves out everything that installs or runs a
+  local pscat (`scripts/`, `pscat-release`, the `pscat-chatgpt-setup` skill)
+  and rewrites the shared skills' local-only wording from the overlay in
+  `plugin-chatgpt/cloud/` (see "Cloud overlay" below). The URL is an argument, never
   committed, and `--remote-auth` is required, because what ChatGPT can send
   differs by choice: `none` declares no authentication; `bearer` declares a
   fixed bearer token (`api_key`), which the manifest schema accepts but
   ChatGPT's connection form cannot send (the build says so). The build never
   puts a token, or a `headers` entry, in the ZIP.
 
-The other skills are copied unchanged. Only tracked files are used (`git
+Cloud overlay (`--remote` only). `plugin/skills/` is also what Claude Code and
+Codex install, so it cannot carry cloud-only markers, and the local and
+`--skills-only` ZIPs must stay byte for byte what they were. Instead
+`plugin-chatgpt/cloud/<path of a ZIP file>` holds edits that the remote build
+applies to that file, in the order written; the directory itself never ships.
+A line of the form `<!-- cloud: OP "ANCHOR" -->` starts an edit, and the lines
+up to the next such line are its new text (blank lines at either end do not
+count). OP is one of:
+
+- `replace-file` (no anchor, the only edit in its file): the file becomes the
+  new text;
+- `sub`: the text ANCHOR, which must occur exactly once, becomes the new text;
+- `replace` / `drop`: a section or a block. An ANCHOR starting with `#` is a
+  heading line, and the section is that heading through the line before the next
+  heading. Any other ANCHOR is text found in exactly one blank-line-separated
+  block, and that block is the target. Neither may sit inside a code fence;
+- `replace-item` / `drop-item`: the one line that starts with ANCHOR, with the
+  indented lines that continue it (a wrapped list item).
+
+An anchor that matches nothing, or twice, fails the build, so a change to the
+shared skill's wording that the overlay depended on is caught by
+`python3 scripts/test_build_chatgpt_plugin.py`.
+
+The other files are copied unchanged. Only tracked files are used (`git
 ls-files`), so caches and untracked files never ship. The ZIP is
 reproducible: entries sorted, timestamps fixed at 1980-01-01, modes 0644
 or 0755 from Git's executable bit. Exit 0 and print the path, or 1 with
@@ -57,6 +84,9 @@ import urllib.parse
 import zipfile
 
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
+CLOUD_DIR = "cloud/"  # under plugin-chatgpt/: the --remote overlay, never shipped
+# What the --remote build leaves out: it installs and runs no local pscat.
+REMOTE_EXCLUDE = ("scripts/", "pscat-release", "skills/pscat-chatgpt-setup/")
 PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
 TARGETS = ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
 
@@ -164,6 +194,102 @@ def remote_manifest(manifest):
     return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()
 
 
+DIRECTIVE = re.compile(r'^<!-- cloud: (replace-file|replace|drop|sub|replace-item|drop-item)'
+                       r'(?: "(.*?)")? -->$', re.M | re.S)
+HEADING = re.compile(r"#{1,6} ")
+FENCE_LINE = re.compile(r"\s*(?:`{3,}|~{3,})")
+
+
+def parse_overlay(where, text):
+    """[(op, anchor, new text)] from a cloud overlay file. An anchor may span lines."""
+    found = list(DIRECTIVE.finditer(text))
+    lead = text[:found[0].start()] if found else text
+    if re.sub(r"<!--.*?-->", "", lead, flags=re.S).strip():
+        raise SystemExit(f"{where}: text before the first <!-- cloud: ... --> line")
+    out = []
+    for m, nxt in zip(found, found[1:] + [None]):
+        op, anchor = m.group(1), m.group(2)
+        if (op == "replace-file") != (anchor is None) or anchor == "":
+            raise SystemExit(f"{where}: {op} "
+                             f"{'needs an anchor' if anchor is None else 'takes no anchor'}")
+        new = text[m.end():nxt.start() if nxt else len(text)].strip("\n")
+        if op in ("drop", "drop-item") and new:
+            raise SystemExit(f"{where}: {op} {anchor!r} takes no new text")
+        out.append((op, anchor, new))
+    if any(op == "replace-file" for op, _, _ in out) and len(out) != 1:
+        raise SystemExit(f"{where}: replace-file must be the only edit in its file")
+    return out
+
+
+def _once(where, op, anchor, hits):
+    if len(hits) != 1:
+        raise SystemExit(f"{where}: {op} {anchor!r} matches {len(hits)} times, expected "
+                         "exactly once (the shared text changed? update the overlay)")
+    return hits[0]
+
+
+def _blocks(text):
+    """(blocks, tail): blank-line separated blocks, and for each whether it starts in a code fence."""
+    body = text.rstrip("\n")
+    blocks = re.split(r"\n{2,}", body)
+    infence, inside = [], False
+    for b in blocks:
+        infence.append(inside)
+        if sum(1 for l in b.split("\n") if FENCE_LINE.match(l)) % 2:
+            inside = not inside
+    return blocks, infence, text[len(body):]
+
+
+def apply_overlay(where, text, overlay):
+    """The shared file `text` with the overlay's edits applied (see the module docstring)."""
+    ops = parse_overlay(where, overlay)
+    if not ops:
+        raise SystemExit(f"{where}: the overlay file has no edits")
+    if ops[0][0] == "replace-file":
+        return ops[0][2] + "\n"
+    blocks_ops = []
+    for op, anchor, new in ops:
+        if op == "sub":
+            _once(where, op, anchor, [0] * text.count(anchor))
+            text = text.replace(anchor, new)
+        elif op in ("replace-item", "drop-item"):
+            lines = text.split("\n")
+            i = _once(where, op, anchor, [i for i, l in enumerate(lines) if l.startswith(anchor)])
+            j = i + 1
+            while j < len(lines) and lines[j][:1] in (" ", "\t") and lines[j].strip():
+                j += 1
+            lines[i:j] = [new] if op == "replace-item" else []
+            text = "\n".join(lines)
+        else:
+            blocks_ops.append((op, anchor, new))
+    if not blocks_ops:
+        return text
+    blocks, infence, tail = _blocks(text)
+    heads = [i for i, b in enumerate(blocks)
+             if not infence[i] and HEADING.match(b.split("\n")[0])]
+    ranges = []
+    for op, anchor, new in blocks_ops:
+        if anchor.startswith("#"):
+            i = _once(where, op, anchor, [i for i in heads if blocks[i].split("\n")[0] == anchor])
+            j = next((h for h in heads if h > i), len(blocks))
+        else:
+            i = _once(where, op, anchor, [i for i, b in enumerate(blocks) if anchor in b])
+            j = i + 1
+            if infence[i] or sum(1 for l in blocks[i].split("\n") if FENCE_LINE.match(l)) % 2:
+                raise SystemExit(f"{where}: {op} {anchor!r} falls inside a code fence")
+        ranges.append((i, j, new))
+    ranges.sort()
+    for (_, j, _), (i2, _, _) in zip(ranges, ranges[1:]):
+        if i2 < j:
+            raise SystemExit(f"{where}: two edits overlap")
+    out, k = [], 0
+    for i, j, new in ranges:
+        out += blocks[k:i] + ([new] if new else [])
+        k = j
+    out += blocks[k:]
+    return "\n\n".join(out) + tail
+
+
 def release_tag(root):
     lines = [l.strip() for l in (root / "plugin/pscat-release").read_text().splitlines()]
     tags = [l for l in lines if l and not l.startswith("#")]
@@ -216,9 +342,15 @@ def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=
     values.update({f"SHA256:{t}": h for t, h in sums.items()})
 
     entries = {}
+    overlays = {}
     for top, templated in (("plugin", False), ("plugin-chatgpt", True)):
         for rel, exe in tracked(root, top):
+            if top == "plugin-chatgpt" and rel.startswith(CLOUD_DIR):
+                overlays[rel[len(CLOUD_DIR):]] = (root / top / rel).read_text()
+                continue
             if top == "plugin" and excluded(rel, skills_only):
+                continue
+            if remote is not None and rel.startswith(REMOTE_EXCLUDE):
                 continue
             if rel in entries:
                 raise SystemExit(f"{top}/{rel}: also in another source directory")
@@ -226,6 +358,13 @@ def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=
             if templated:
                 data = fill(data.decode(), f"{top}/{rel}", values).encode()
             entries[rel] = (data, exe)
+    if remote is not None:
+        for rel, overlay in sorted(overlays.items()):
+            where = f"plugin-chatgpt/{CLOUD_DIR}{rel}"
+            if rel not in entries:
+                raise SystemExit(f"{where}: no file {rel} in the ZIP to apply it to")
+            data, exe = entries[rel]
+            entries[rel] = (apply_overlay(where, data.decode(), overlay).encode(), exe)
     if "plugin.json" not in entries:
         raise SystemExit("plugin/plugin.json is not tracked")
     if remote is not None:
