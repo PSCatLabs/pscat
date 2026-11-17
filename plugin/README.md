@@ -371,7 +371,9 @@ details.
 For ChatGPT on the web, the MCP tools come from the hosted `pscat-mcp`
 server, a remote HTTPS server, which is a connector (ChatGPT Plugins, **Add
 custom MCP server**) or a ZIP built with `--remote URL --remote-auth none` (a separate plugin
-named `pscat-cloud`, so it installs beside this one).
+named `pscat-cloud`, so it installs beside this one; it leaves out `scripts/`,
+`pscat-release` and the setup skill, and rewrites the skills' local-only
+wording for the hosted tools from `plugin-chatgpt/cloud/`, #1256).
 Neither has been tried in ChatGPT yet. The staging server is protected by a
 static bearer token, which ChatGPT cannot send, so its authentication is an
 owner decision: see

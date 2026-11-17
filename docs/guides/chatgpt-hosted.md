@@ -63,36 +63,36 @@ tools, descriptions, and server instructions").
 
 ## The skills with a hosted server
 
-The pscat skills describe the local server's ten tools. The hosted one has
-seven: five of those (`chalkboard_math`, `describe_art_capabilities`,
-`handwrite`, `render_postscript`, `review_sheet`) plus `get_renderer_info` and
-`validate_postscript`. It limits renders to **2 at a time and 20 seconds each**. What
-does not work against it:
+The local pscat plugin's skills describe the local server's ten tools and the
+`pscat` command line. The hosted server has seven: five of those
+(`chalkboard_math`, `describe_art_capabilities`, `handwrite`,
+`render_postscript`, `review_sheet`) plus `get_renderer_info` and
+`validate_postscript`. It limits renders to **2 at a time and 20 seconds each**.
+What it does not have:
 
 - `eval_postscript` (print what a program prints): use `validate_postscript`
-  or a render instead.
+  or a render instead; both return what the program printed.
 - The long-render tools `start_render`, `render_status`, `render_result` and
   `cancel_render`, and any step that relies on a render running longer than
   20 seconds. Keep programs small, or render at a lower DPI.
 - Anything that needs local files or the `pscat` command line.
 
-The ZIP still holds the ChatGPT-only `pscat-chatgpt-setup` skill, which
-installs a local `pscat` through the GitHub connector when the pscat MCP tools
-are missing. Its description says to run when those tools are not available,
-but nothing here has tested that an agent with the hosted tools connected
-skips it. If it starts a download anyway, say that the pscat tools are
-connected and ask it to use them.
-
-The skills are shared with Claude Code, Codex and Cowork and stay unchanged
-here, so an agent may name a tool the hosted server lacks. If it does, tell
-it to use only the seven tools above.
+The `--remote` ZIP's skills are written for exactly this (#1256): the `pscat`
+skill names the seven tools and their arguments, tells the agent to report a
+connection failure and stop (it never installs or runs a local pscat, and does
+not substitute another renderer), and its reference files, and the `psart`
+and `psviz` skills, point at the tools instead of the command line. The ZIP has
+no `pscat-chatgpt-setup` skill, whose job is to install a local pscat. The
+local ZIPs, the Claude Code plugin and the Codex plugin keep the shared wording
+unchanged. If an agent with an older ZIP still names a tool the hosted server
+lacks, tell it to use only the seven tools above.
 
 ## The plugin ZIP, remote build
 
 `scripts/build_chatgpt_plugin.py --remote` builds the plugin ZIP that
 `plugin/README.md` describes, with its local `mcp.json` replaced by one entry
-for the hosted server, and the plugin renamed **`pscat-cloud`** (skills and
-everything else byte for byte the same). The new name matters: ChatGPT refuses
+for the hosted server, the plugin renamed **`pscat-cloud`**, and the local
+install machinery and wording left out (below). The new name matters: ChatGPT refuses
 to install a plugin whose name is taken ("A plugin named 'pscat' already
 exists"), so the local `pscat` plugin and this hosted one can both be installed
 in one account (#1254):
@@ -121,11 +121,19 @@ python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
   and a description that says it connects to the hosted `pscat-mcp` server and
   needs nothing installed; `mcp.json` names its one server `pscat-cloud`, so its
   tools do not collide with the local plugin's `pscat` server; the file is
-  `pscat-cloud-chatgpt-plugin-<version>.zip`. Every other file is the same.
-- The ZIP still carries the local launcher scripts and `pscat-release`. The
-  `pscat` skill and `pscat-chatgpt-setup` both send an agent to
-  `scripts/pscat-mcp.sh --locate` to fetch a local `pscat` command line when
-  the MCP tools are missing, so the files are referenced, not dead weight.
+  `pscat-cloud-chatgpt-plugin-<version>.zip`. The skill files that the overlay
+  edits differ; every other file is the same.
+- The cloud profile (#1256) leaves out `scripts/` (the local launchers),
+  `pscat-release` (a binary version pin) and the `pscat-chatgpt-setup` skill, so
+  the ZIP holds `plugin.json`, `mcp.json`, the icon and the four skills with
+  their references. The shared skills' local-only wording (the install and
+  `--locate` steps, the command-line examples, `out_path`, render jobs, local
+  files) is rewritten at build time from `plugin-chatgpt/cloud/`: one overlay
+  file per skill file, each edit naming the heading, paragraph or exact text it
+  replaces in the shared source, so the guidance that is not local-only has one
+  source. A shared sentence that an edit depended on, once reworded, fails the
+  build and `scripts/test_build_chatgpt_plugin.py`; update the overlay then. The
+  local and `--skills-only` ZIPs never read the overlay.
 
 OpenAI documents the custom-server route above and publishing to a workspace
 for plugins you have added, but not the steps for uploading a plugin ZIP to a

@@ -1925,6 +1925,17 @@ renders eight examples in both and compares block-downsampled output).
   reference files too, and fails on a reference file `SKILL.md` does not link.
   The skill loads in full on every request, so put new material in a reference
   file and add one index line to `SKILL.md`.
+- **The `pscat-cloud` ChatGPT ZIP rewrites the skills' local-only wording at
+  build time (#1256).** `plugin/skills/` is what Claude Code and Codex install
+  verbatim, so it carries no cloud markers. `scripts/build_chatgpt_plugin.py
+  --remote` applies the edit files under `plugin-chatgpt/cloud/<ZIP path>` (see
+  its docstring for the `<!-- cloud: sub|replace|drop|... "anchor" -->` forms)
+  and leaves out `scripts/`, `pscat-release` and the setup skill. The hosted
+  server has seven tools and no CLI, files, `out_path` or jobs. **When you reword
+  a passage in `plugin/skills/`, `python3 scripts/test_build_chatgpt_plugin.py`
+  fails if an overlay anchor stops matching: update the overlay's text too.** A
+  new reference file in a skill needs no overlay unless it is local-only. See
+  `notes/1256-pscat-cloud-profile.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a
