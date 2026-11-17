@@ -203,3 +203,8 @@ Each line says when to open which reference file in `references/`.
   forgiving" -->
 pscat's render is
   forgiving
+<!-- cloud: sub "so a bare
+install has them:" -->
+so the server has them:
+<!-- cloud: sub "Full reference: `docs/guides/qr-codes.md`." -->
+Full reference: [qr-codes.md](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/qr-codes.md).

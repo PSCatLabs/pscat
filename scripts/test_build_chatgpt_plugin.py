@@ -473,6 +473,15 @@ class CloudRepo(unittest.TestCase):
         for tool in SEVEN_TOOLS:
             self.assertIn(f"`{tool}`", mcp)
 
+    def test_6h_the_warp_example_is_not_a_file_run_and_repo_paths_are_urls(self):
+        text = self.md_texts()["skills/functional-postscript/SKILL.md"]
+        self.assertNotIn("(file.ps) warp", text)
+        self.assertIn("wp-lens 3 wp-run", text)
+        everything = " ".join(self.md_texts().values())
+        for path in ("`docs/guides/functional.md`", "`docs/functional-postscript/WARP.md`",
+                     "`docs/guides/qr-codes.md`", "a bare\ninstall has them"):
+            self.assertNotIn(path, everything)
+
     def test_6d_links_between_the_files_resolve(self):
         link = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
         for name, text in self.md_texts().items():
@@ -592,6 +601,29 @@ class Overlay(unittest.TestCase):
             self.apply("<!-- only a comment -->\n")
         with self.assertRaisesRegex(SystemExit, "needs an anchor"):
             self.apply("<!-- cloud: sub -->\nx\n")
+
+    def test_a_malformed_directive_fails_the_build(self):
+        for bad in ('<!-- cloud: subs "intro" -->\nx\n', '<!-- cloud: sub "intro" -\nx\n',
+                    '<!-- cloud: sub "intro -->\nx\n', '<!-- cloud: Sub "intro" -->\nx\n',
+                    '<!-- cloud: drop "intro" -->\n  <!-- cloud: sunb "two" -->\n',
+                    '<!-- cloud: drop "intro" -->\n<!-- cloud: -->\n'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(SystemExit, "not a valid cloud edit"):
+                self.apply(bad)
+
+    def test_trailing_whitespace_after_a_directive_is_fine(self):
+        out = self.apply('<!-- cloud: drop "intro" -->  \n<!-- cloud: sub "two body" --> \t\n2\n')
+        self.assertNotIn("intro", out)
+        self.assertIn("\n2\n", out)
+
+    def test_a_directive_text_inside_a_multiline_anchor_is_not_stray(self):
+        doc = "a\n<!-- cloud: x -->\nb\n"
+        out = b.apply_overlay("t", doc, '<!-- cloud: sub "a\n<!-- cloud: x -->\nb" -->\nok\n')
+        self.assertEqual(out, "ok\n")
+
+    def test_edits_apply_in_order_and_blocks_last(self):
+        out = self.apply('<!-- cloud: replace "two body" -->\nTWO\n'
+                         '<!-- cloud: sub "last" -->\nfinal\n')
+        self.assertIn("\nTWO\n\n## Three\n\nfinal\n", out)
 
     def test_a_leading_comment_is_allowed(self):
         out = self.apply('<!-- Contributors: why -->\n<!-- cloud: drop "intro" -->\n')

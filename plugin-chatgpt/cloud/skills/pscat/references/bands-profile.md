@@ -17,5 +17,7 @@ passes it fails. What helps instead:
   calls `fbm2` or `ridged2` for every pixel, or a loop with many thousands of
   small fills. Lower the pixel count of the image and scale it up, cache values
   you compute twice, and draw fewer, larger marks.
-- A program that reads `/BandBBox` to skip rows outside its band still works:
-  that key is simply absent here, so it paints every row.
+- A program that guards its use of `/BandBBox` with `/BandBBox where { ... } if`
+  still works: the key is absent here, so the guard does nothing and every row is
+  painted. A program that reads `BandBBox` without that guard fails with
+  `undefined`.

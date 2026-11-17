@@ -62,7 +62,11 @@ count). OP is one of:
 - `replace-item` / `drop-item`: the one line that starts with ANCHOR, with the
   indented lines that continue it (a wrapped list item).
 
-An anchor that matches nothing, or twice, fails the build, so a change to the
+The edits that do not need blocks (`sub`, `replace-item`, `drop-item`) apply
+first, in the order written, each to the result of the one before; `replace` and
+`drop` are then resolved together against that result. A line that starts with
+`<!-- cloud:` but is not one of these forms fails the build. An anchor that
+matches nothing, or twice, fails the build, so a change to the
 shared skill's wording that the overlay depended on is caught by
 `python3 scripts/test_build_chatgpt_plugin.py`.
 
@@ -195,7 +199,7 @@ def remote_manifest(manifest):
 
 
 DIRECTIVE = re.compile(r'^<!-- cloud: (replace-file|replace|drop|sub|replace-item|drop-item)'
-                       r'(?: "(.*?)")? -->$', re.M | re.S)
+                       r'(?: "(.*?)")? -->[ \t]*$', re.M | re.S)
 HEADING = re.compile(r"#{1,6} ")
 FENCE_LINE = re.compile(r"\s*(?:`{3,}|~{3,})")
 
@@ -203,6 +207,10 @@ FENCE_LINE = re.compile(r"\s*(?:`{3,}|~{3,})")
 def parse_overlay(where, text):
     """[(op, anchor, new text)] from a cloud overlay file. An anchor may span lines."""
     found = list(DIRECTIVE.finditer(text))
+    rest = DIRECTIVE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    stray = re.search(r"^[ \t]*<!-- cloud:.*$", rest, re.M)
+    if stray:  # a typo'd op, a missing quote or ` -->`: never ship it as text
+        raise SystemExit(f"{where}: not a valid cloud edit: {stray.group(0).strip()!r}")
     lead = text[:found[0].start()] if found else text
     if re.sub(r"<!--.*?-->", "", lead, flags=re.S).strip():
         raise SystemExit(f"{where}: text before the first <!-- cloud: ... --> line")

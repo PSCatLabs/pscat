@@ -40,10 +40,10 @@ documented in each file's header and in
 renders on N threads and gives the same PNG bytes, but only when the program
 reads `/BandBBox [llx lly urx ury]` (user space; also `/BandIndex`,
 `/BandCount`) and skips the rows outside it, plus a margin of two:" -->
- The server has no `bands` option and each render has a time limit. This program
-skips the rows outside `/BandBBox [llx lly urx ury]` (user space; also
-`/BandIndex`, `/BandCount`) when that key exists, plus a margin of two. It does
-not exist here, so every row is painted, and the loop's cost is what to keep
+ The server has no `bands` option and each render has a time limit. The
+`/BandBBox where { ... } if` line in this program is a no-op here (the key does
+not exist, so every row is painted): keep it, since it does no harm and the
+program then also runs under `bands` elsewhere. The loop's cost is what to keep
 down:
 <!-- cloud: replace "Render it with `pscat --page 400x400 --png cloud.png cloud.ps`" -->
 Render it with `render_postscript` (`width` 400, `height` 400). An older renderer has
