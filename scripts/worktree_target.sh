@@ -14,6 +14,8 @@
 #           under the root (a trailing slash on the root is fine); anything else is left
 #           alone and reported. A no-op when PSCAT_TARGET_ROOT is unset or target is no link.
 #
+# Two worktrees linked under one NAME share one folder, and `unlink` of either deletes it: give each
+# a unique NAME (issue-<N>, idbase-<N>).
 # Run `unlink` BEFORE `git worktree remove`. Every `git worktree add` in this repo, by hand or
 # by a skill, is followed by `link`, and every removal by `unlink` (CLAUDE.md).
 # Bash 3.2 compatible: no arrays, no readlink -f. Test: scripts/test_worktree_target.sh.
@@ -25,6 +27,7 @@ cmd=$1; wt=$2
 root=${PSCAT_TARGET_ROOT:-}
 while [ "${#root}" -gt 1 ] && [ "${root%/}" != "$root" ]; do root=${root%/}; done   # strip trailing slashes
 [ -n "$root" ] && [ -d "$root" ] || exit 0
+root=$(cd "$root" && pwd)   # absolute, so a link made from a relative root cannot dangle
 # A name is one path component: no slash, not empty, not . or ..
 ok_name() { case "$1" in ''|.|..|*/*) return 1 ;; esac; }
 case "$cmd" in

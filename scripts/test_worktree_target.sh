@@ -9,6 +9,7 @@ REAL_ROOT="${PSCAT_TARGET_ROOT:-}"
 REAL_LIST=""; [ -n "$REAL_ROOT" ] && [ -d "$REAL_ROOT" ] && REAL_LIST="$(ls -A "$REAL_ROOT")"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/wt-target-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TMP"' EXIT
+TMP="$(cd "$TMP" && pwd)"   # TMPDIR may end in a slash; the helper normalizes the root
 n=0
 fresh() { n=$((n + 1)); ROOT="$TMP/root$n"; WT="$TMP/wt$n"; mkdir -p "$ROOT" "$WT"; }
 run() { PSCAT_TARGET_ROOT="$ROOT" bash "$H" "$@" >/dev/null 2>&1; }
@@ -74,6 +75,12 @@ fresh; mkdir "$WT/target"; echo x > "$WT/target/f"; run unlink "$WT"
 fresh; run unlink "$WT" || bad "unlink with no target must exit 0"
 fresh; run link "$WT" a; (unset PSCAT_TARGET_ROOT; bash "$H" unlink "$WT") >/dev/null 2>&1
 [ -d "$ROOT/a" ] && [ -L "$WT/target" ] || bad "unlink with an unset root must do nothing"
+
+# a relative root is made absolute, so the link cannot dangle
+fresh; (cd "$TMP" && PSCAT_TARGET_ROOT="root$n" bash "$H" link "$WT" a >/dev/null 2>&1)
+[ "$(readlink "$WT/target")" = "$ROOT/a" ] && [ -d "$WT/target" ] || bad "relative root"
+(cd "$TMP" && PSCAT_TARGET_ROOT="root$n" bash "$H" unlink "$WT" >/dev/null 2>&1)
+[ ! -e "$ROOT/a" ] || bad "unlink with a relative root"
 
 # usage errors
 bash "$H" >/dev/null 2>&1 && bad "no arguments must fail"
