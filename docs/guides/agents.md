@@ -217,6 +217,10 @@ codex mcp add pscat -- pscat-mcp           # Codex
 launch a crate by its name; the [MCP Registry](https://registry.modelcontextprotocol.io/)
 lists pscat as `io.github.PSCatLabs/pscat` (from 0.6.3) and runs it that way.
 
+For Muse, which has no plugin marketplace, see [pscat in Muse](muse.md): a
+prompt that has Muse install the release binary and register `pscat-mcp`
+itself, and one for the hosted server.
+
 For OpenClaw, Hermes, or any other MCP client, the generic stdio config:
 
 ```json
