@@ -530,16 +530,19 @@ Before tagging:
       accurate for this release.
 - [ ] `CHANGELOG.md` reads well. The release's GitHub notes and the
       `/announce-release` e-mail are drafted from its section (git-cliff
-      writes it from merged PR titles), so for 0.7.0 polish it to carry a
-      "Use pscat in Muse" item linking
+      writes it from merged PR titles).
+- [ ] (0.7.0 only; delete this line after 0.7.0 ships.) The CHANGELOG section
+      carries a "Use pscat in Muse" item linking
       [`docs/guides/muse.md`](../guides/muse.md) (#1260).
-- [ ] Release candidate pins in `docs/guides/` now point at this release:
-      `grep -rn -e '-rc\.' docs/guides` lists them (for example the
-      0.7.0-rc.5 archive and SHA256SUMS URLs in `muse.md`, and the rc.4
-      installs in `browser.md` and `when-to-use-pscat.md`). Move each to the
-      final version, and delete the passages marked `rc-only` (the "not on
-      cargo or npm" warnings in `muse.md`). In `muse.md`'s hosted section, do
-      not just bump the version: re-check it with `get_renderer_info`, or cut
+- [ ] Release candidate install pins in `docs/guides/` now point at this
+      release: the download URLs and the versions a reader is told to
+      install (`grep -rn -e '-rc\.' docs/guides` finds candidates; the
+      0.7.0-rc.5 archive and SHA256SUMS URLs in `muse.md` and the rc.4
+      `npm install` URL in `browser.md` are examples). Leave history alone
+      ("since 0.7.0-rc.4"), the `vX.Y.Z-rc.N` templates, and the hosted
+      server's own version (`pscat-mcp 0.1.0-rc.1`). Delete the passages
+      marked `rc-only` (the "not on cargo or npm" warnings in `muse.md`). In
+      `muse.md`'s hosted section, re-check with `get_renderer_info` or cut
       Option B if the anonymous staging preview has ended. `release.sh` does
       not edit guides.
 - [ ] The owner read the visible changes merged since the last release

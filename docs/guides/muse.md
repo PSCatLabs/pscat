@@ -1,12 +1,10 @@
 # pscat in Muse
 
 Tested by the project owner in Muse on 2026-11-17, with both routes below
-working. The local prompt below adds three steps that were checked against the
-release archive and the code, but not re-run in Muse: stripping the archive's
-top folder, passing `--out-root`, and fetching `SHA256SUMS` instead of
-comparing against a pasted hash. pscat is a PostScript interpreter in Rust: it renders PostScript to
-PNG, SVG and PDF, writes handwriting-style notes, and draws LaTeX formulas on a
-chalkboard. This page covers 0.7.0-rc.5, a GitHub pre-release.
+working (what was and was not re-checked is at the end of this page). pscat is
+a PostScript interpreter in Rust: it renders PostScript to PNG, SVG and PDF,
+writes handwriting-style notes, and draws LaTeX formulas on a chalkboard. This
+page covers 0.7.0-rc.5, a GitHub pre-release.
 
 Muse has no plugin marketplace and no MCP slot you click to install pscat.
 Instead you ask Muse to set up a small connector in its own workspace: paste
@@ -59,10 +57,11 @@ so that pscat, pscat-mcp and lib/ sit together in bin/. Keep them together.
 Confirm bin/pscat --version says 0.7.0-rc.5. Create
 ~/workspace/custom-connectors/custom.pscat/output/ first, then start the MCP
 server over stdio with protocol 2025-11-25 as
-bin/pscat-mcp --out-root <the absolute path of that output folder>
-(a literal ~ does not work in --out-root, and bin/pscat mcp is the same
-server), run tools/list, and confirm it lists 10
-tools. Test it with eval_postscript on "40 2 add =" (expect 42) and a small
+<the absolute path of bin/pscat-mcp> --out-root <the absolute path of that
+output folder> (use absolute paths, not ~ or a relative path: the server does
+not expand ~, and you do not know which folder it starts in; the absolute path
+of bin/pscat mcp starts the same server), run tools/list, and confirm it lists
+10 tools. Test it with eval_postscript on "40 2 add =" (expect 42) and a small
 render_postscript. Save the connector details in
 ~/workspace/custom-connectors/custom.pscat/CONNECTOR.md and save pscat as a
 reusable skill so a later session can find it.
@@ -75,7 +74,8 @@ What Muse should report back:
 - `tools/list` returns 10 tools: `render_postscript`, `eval_postscript`,
   `handwrite`, `chalkboard_math`, `review_sheet`, `describe_art_capabilities`,
   `start_render`, `render_status`, `render_result`, `cancel_render`.
-- `40 2 add =` prints 42, and a test render produces a PNG.
+- `40 2 add =` prints 42 (`eval_postscript` returns just `42`, with no
+  warning), and a test render produces a PNG.
 
 Notes on the prompt:
 
@@ -86,11 +86,14 @@ Notes on the prompt:
   it moves.
 - `pscat-mcp` and `pscat mcp` are the same server. Use whichever your client
   can launch.
-- `--out-root DIR` is where the tools may write a file (the `out_path`
-  argument: PDF output, and SVG or PDF from `chalkboard_math`). It must be the
-  absolute path of an existing folder: the server does not expand `~`, and it
-  refuses to start on a path that does not exist. Without it the server uses the folder it was started in, and
-  switches `out_path` off if that is `/`.
+- `--out-root DIR` is the one folder the tools may write files into. The
+  `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet` tools
+  take an optional `out_path` to save the result there; it is required only for
+  a PDF from `render_postscript`, and for SVG or PDF from `chalkboard_math`.
+  `DIR` must be the absolute path of an existing folder: the server does not
+  expand `~`, and it refuses to start on a path that does not exist. Without
+  `--out-root` the server uses the folder it was started in, and switches
+  `out_path` off if that is `/`.
 - Check the hash against the release's `SHA256SUMS`, not against a number
   copied into a guide or a chat, which can go stale.
 
@@ -112,8 +115,7 @@ now.
 **This is a staging preview, and its anonymous access ends on 2026-11-19 at
 17:00 UTC.** After that time the server no longer accepts anonymous
 requests, and there is no way for the public to get a token. A public hosted
-server is planned (PSCatLabs/pscat-cloud#26, in a private repository). Until it
-launches, use Option A.
+server is planned. Until it launches, use Option A.
 
 Copy and paste this into Muse:
 
@@ -133,7 +135,9 @@ What Muse should report back:
 - `tools/list` returns 7 tools: `chalkboard_math`, `describe_art_capabilities`,
   `get_renderer_info`, `handwrite`, `render_postscript`, `review_sheet`,
   `validate_postscript`.
-- `validate_postscript` on `40 2 add =` says valid, with program output 42.
+- `validate_postscript` on `40 2 add =` says valid, with program output 42. It
+  also gives a `blank-page` warning, because that program draws nothing. That
+  is expected, not a failure.
 
 ### How the hosted server differs from the local one
 
@@ -142,12 +146,11 @@ What Muse should report back:
 - **No render jobs.** `start_render`, `render_status`, `render_result` and
   `cancel_render` are local only.
 - **Nothing is written to a file.** There is no `out_path`. Pictures come back
-  inside the response, and Muse saves them for you.
-  - PNG is an image block per page.
-  - PDF is one embedded blob holding every page.
-  - SVG is an embedded text resource per page. When all the pages together are
-    over 131,072 bytes (128 KiB), they come back as base64 blob resources
-    instead of text.
+  inside the reply, and Muse saves them for you.
+  - PNG: one picture per page.
+  - PDF: one file holding every page.
+  - SVG: the SVG text of each page. When all the pages together are over
+    131,072 bytes (128 KiB), they come back as encoded files instead of text.
 - **Tighter limits** (from `get_renderer_info`):
 
   | Limit | Value |
@@ -162,8 +165,9 @@ What Muse should report back:
 
   The local server's defaults are looser (60 s per call, 40,000,000 pixels,
   and long renders through `start_render`).
-- **No files of your own.** Programs run in a sandbox: no file writes, no
-  network, and reads only from pscat's built-in `lib/`.
+- **No files of your own.** Programs run in a restricted environment: they
+  cannot write files or use the network, and can read only pscat's built-in
+  `lib/`.
 - If a first call fails with a dropped connection, ask Muse to retry it. The
   server can be asleep, and the retry works.
 
@@ -192,8 +196,9 @@ Two things worth knowing:
   the text you give `handwrite` is lowercased first: "Hello, World" comes out
   as "hello, world". The font draws the letters a to z, the digits 0 to 9, and
   the marks `. , - ' ! ?`. Any other character (an at sign, an accent, an
-  emoji) is not an error: it draws nothing and the line moves along, so it
-  leaves a gap.
+  emoji) draws nothing and the line moves along, so it leaves a gap. If none
+  of the characters can be drawn, the hosted server refuses the call ("text has
+  no character this hand can draw"), and the local one returns a blank note.
 - **Text in SVG is drawn as shapes by default.** Every glyph is an outline, so
   the SVG looks the same everywhere but the text cannot be selected or
   searched, and the file is larger. The command-line option `--svg-text`
@@ -219,8 +224,9 @@ Two things worth knowing:
 - **A render fails with a PostScript error.** Ask Muse for the exact error and
   the line it names. Common causes are a `curveto` with fewer than 6 numbers,
   and a `translate` that puts the picture off the page.
-- **Handwriting comes out blank or with gaps.** Characters outside a to z, 0 to
-  9 and `. , - ' ! ?` are skipped (see above). Capital letters are fine.
+- **Handwriting comes out blank or with gaps, or the hosted server says "text
+  has no character this hand can draw".** Characters outside a to z, 0 to 9 and
+  `. , - ' ! ?` are skipped (see above). Capital letters are fine.
 
 ## What was and was not checked
 
@@ -228,3 +234,8 @@ The tool lists, limits and versions above were read from the release archive and
 from the staging server on 2026-11-17 (`notes/1260-muse-guide.md` has the
 details). What Muse itself does with them, such as how it stores a connector
 or shows an image, is as the owner saw it on that day.
+
+The local prompt adds three steps that the owner's tested prompt did not have.
+They were checked against the release archive and the code, but not re-run in
+Muse: stripping the archive's top folder, passing `--out-root`, and fetching
+`SHA256SUMS` instead of comparing against a pasted hash.
