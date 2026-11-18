@@ -1,14 +1,15 @@
 # pscat in Muse
 
-Tested by the project owner in Muse on 2026-11-17, with both routes below
-working (what was and was not re-checked is at the end of this page). pscat is
+Tested by the project owner in Muse on 2026-11-17, when both routes below
+worked; the hosted route has been paused since 2026-11-18 (what was and was
+not re-checked is at the end of this page). pscat is
 a PostScript interpreter in Rust: it renders PostScript to PNG, SVG and PDF,
 writes handwriting-style notes, and draws LaTeX formulas on a chalkboard. This
 page covers 0.7.0-rc.5, a GitHub pre-release.
 
 Muse has no plugin marketplace and no MCP slot you click to install pscat.
 Instead you ask Muse to set up a small connector in its own workspace: paste
-one of the prompts below and Muse does the setup itself. You do not need to
+the prompt below and Muse does the setup itself. You do not need to
 write any code.
 
 Muse is not Meta AI. Meta AI (the meta.ai chat) has no MCP support, so none of
@@ -118,7 +119,7 @@ public server launches
 page will then have a new prompt. If you set up the hosted connector before
 2026-11-18, remove it or switch it off, so Muse does not keep trying it.
 
-Two things about the hosted server stay true when it returns:
+As of 2026-11-18, the staging server differs from the local one in two ways:
 
 - It has 7 tools, not 10: no `eval_postscript` (use `validate_postscript`),
   no render jobs, and no `out_path`. Pictures come back in the reply, or, if
