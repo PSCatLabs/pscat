@@ -539,11 +539,11 @@ Before tagging:
       install (`grep -rn -e '-rc\.' docs/guides` finds candidates; the
       0.7.0-rc.5 archive and SHA256SUMS URLs in `muse.md` and the rc.4
       `npm install` URL in `browser.md` are examples). Leave history alone
-      ("since 0.7.0-rc.4"), the `vX.Y.Z-rc.N` templates, and the hosted
-      server's own version (`pscat-mcp 0.1.0-rc.1`). Delete the passages
-      marked `rc-only` (the "not on cargo or npm" warnings in `muse.md`). In
-      `muse.md`'s hosted section, re-check with `get_renderer_info` or cut
-      Option B if the anonymous staging preview has ended. `release.sh` does
+      ("since 0.7.0-rc.4") and the `vX.Y.Z-rc.N` templates. Delete the passages
+      marked `rc-only` (the "not on cargo or npm" warnings in `muse.md`).
+      `muse.md`'s Option B is paused (anonymous access ended 2026-11-18):
+      leave it paused unless a server Muse can reach (OAuth, pscat-cloud#15,
+      or production, #26) is live, and then write its prompt. `release.sh` does
       not edit guides.
 - [ ] The owner read the visible changes merged since the last release
       ([`review-log/pending/`](review-log/README.md), #674); each rejected

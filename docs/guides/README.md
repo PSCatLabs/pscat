@@ -21,7 +21,7 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   ChatGPT accepts for a remote server (and for its authentication), the
   connector setup, and the `--remote` plugin ZIP.
 - [pscat in Muse](muse.md): install pscat in Muse with a prebuilt local binary
-  or the hosted MCP server, with the prompts to paste and what Muse should
+  (the hosted MCP server is paused), with the prompts to paste and what Muse should
   report back.
 - [pscat as a Rust library](library.md): the crate's API, its `window`
   feature, the supported builds and the stability policy.

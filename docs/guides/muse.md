@@ -1,14 +1,15 @@
 # pscat in Muse
 
-Tested by the project owner in Muse on 2026-11-17, with both routes below
-working (what was and was not re-checked is at the end of this page). pscat is
+Tested by the project owner in Muse on 2026-11-17, when both routes below
+worked; the hosted route has been paused since 2026-11-18 (what was and was
+not re-checked is at the end of this page). pscat is
 a PostScript interpreter in Rust: it renders PostScript to PNG, SVG and PDF,
 writes handwriting-style notes, and draws LaTeX formulas on a chalkboard. This
 page covers 0.7.0-rc.5, a GitHub pre-release.
 
 Muse has no plugin marketplace and no MCP slot you click to install pscat.
 Instead you ask Muse to set up a small connector in its own workspace: paste
-one of the prompts below and Muse does the setup itself. You do not need to
+the prompt below and Muse does the setup itself. You do not need to
 write any code.
 
 Muse is not Meta AI. Meta AI (the meta.ai chat) has no MCP support, so none of
@@ -16,8 +17,8 @@ this works there.
 
 Use the local install (Option A) if you can. The binary runs in Muse's
 workspace and calls nothing on the pscat project's servers, so it is also the
-one that keeps working. Use the hosted server (Option B) only while it is
-available and the local install does not work for you.
+one that keeps working. The hosted server (Option B) is paused: its
+anonymous preview ended on 2026-11-18.
 
 For the other clients (Claude Code, Codex, ChatGPT) see
 [pscat for AI agents](agents.md) and
@@ -103,80 +104,31 @@ still give 0.6.3, which has only 4 MCP tools, no `chalkboard_math` and no
 `pscat chalk` command. 0.7.0-rc.5 is a GitHub pre-release only: it is not on
 crates.io, npm or the MCP Registry.
 
-## Option B: hosted server
+## Option B: hosted server (paused)
 
-No download and no binary to maintain. The server is at
-`https://pscat-mcp-145279231681.us-central1.run.app/mcp`. The transport is
-Streamable HTTP, MCP protocol 2025-11-25. On 2026-11-17 it was pscat-mcp
-0.1.0-rc.1 running the same pscat 0.7.0-rc.5 renderer as the local install, so
-the same program gave the same picture. Ask `get_renderer_info` what it runs
-now.
+**The hosted preview is paused.** Its anonymous access ended on 2026-11-18,
+a day earlier than first announced. The staging server
+(`https://pscat-mcp-145279231681.us-central1.run.app/mcp`) now accepts only
+bearer tokens, and there is no public way to get one, so Muse's no-auth
+connector gets `401 Unauthorized`. Use Option A.
 
-**This is a staging preview, and its anonymous access ends on 2026-11-19 at
-17:00 UTC.** After that time the server no longer accepts anonymous
-requests, and there is no way for the public to get a token. A public hosted
-server is planned. Until it launches, use Option A.
+The hosted route comes back when the server supports sign-in with OAuth
+([pscat-cloud#15](https://github.com/PSCatLabs/pscat-cloud/issues/15)) or a
+public server launches
+([pscat-cloud#26](https://github.com/PSCatLabs/pscat-cloud/issues/26)). This
+page will then have a new prompt. If you set up the hosted connector before
+2026-11-18, remove it or switch it off, so Muse does not keep trying it.
 
-Copy and paste this into Muse:
+As of 2026-11-18, the staging server differs from the local one in two ways:
 
-```text
-Connect Muse to the hosted pscat MCP server at
-https://pscat-mcp-145279231681.us-central1.run.app/mcp using Streamable HTTP,
-with no auth. Run initialize with protocol 2025-11-25, then tools/list, and
-confirm the tools. Test it with get_renderer_info, then validate_postscript on
-"40 2 add =" (expect 42), then a small render_postscript. Save the connector
-details in ~/workspace/custom-connectors/custom.pscat-cloud/CONNECTOR.md,
-including the endpoint, the tool list, and the limits you find.
-```
+- It has 7 tools, not 10: no `eval_postscript` (use `validate_postscript`),
+  no render jobs, and no `out_path`. Pictures come back in the reply, or, if
+  the client asks with `delivery`, as a short-lived download link.
+- Its limits are tighter than the local server's: 20 seconds per render,
+  16,000,000 pixels per page, 10 pages, and 8 MiB of output.
 
-What Muse should report back:
-
-- Server pscat-mcp 0.1.0-rc.1, renderer pscat 0.7.0-rc.5.
-- `tools/list` returns 7 tools: `chalkboard_math`, `describe_art_capabilities`,
-  `get_renderer_info`, `handwrite`, `render_postscript`, `review_sheet`,
-  `validate_postscript`.
-- `validate_postscript` on `40 2 add =` says valid, with program output 42. It
-  also gives a `blank-page` warning, because that program draws nothing. That
-  is expected, not a failure.
-
-### How the hosted server differs from the local one
-
-- **No `eval_postscript`.** Use `validate_postscript` to check a program and
-  see what it prints.
-- **No render jobs.** `start_render`, `render_status`, `render_result` and
-  `cancel_render` are local only.
-- **Nothing is written to a file.** There is no `out_path`. Pictures come back
-  inside the reply, and Muse saves them for you.
-  - PNG: one picture per page.
-  - PDF: one file holding every page.
-  - SVG: the SVG text of each page. When all the pages together are over
-    131,072 bytes (128 KiB), they come back as encoded files instead of text.
-- **Tighter limits** (from `get_renderer_info`):
-
-  | Limit | Value |
-  | --- | --- |
-  | Time per render | 20 seconds |
-  | Pixels per page | 16,000,000 |
-  | Longest side | 8000 px |
-  | Program size | 262,144 bytes |
-  | Pages | 10 |
-  | Output | 8 MiB |
-  | Renders at once | 2 |
-
-  The local server's defaults are looser (60 s per call, 40,000,000 pixels,
-  and long renders through `start_render`).
-- **No files of your own.** Programs run in a restricted environment: they
-  cannot write files or use the network, and can read only pscat's built-in
-  `lib/`.
-- If a first call fails with a dropped connection, ask Muse to retry it. The
-  server can be asleep, and the retry works.
-
-### Authentication
-
-No authentication is needed until 2026-11-19 17:00 UTC, as above. There is no
-public way to get a token, so do not look for one. If Muse ever asks you for a
-token for a pscat server, never paste it into the chat: give it to Muse only
-through its secure entry flow.
+If Muse ever asks you for a token for a pscat server, never paste it into the
+chat: give it to Muse only through its secure entry flow.
 
 ## Using pscat once it is installed
 
@@ -213,9 +165,8 @@ Two things worth knowing:
 - **Muse reports 0.6.3, or only 4 tools.** You have the old stable release.
   Install 0.7.0-rc.5 from the GitHub release in Option A, not from cargo or
   npm.
-- **Muse cannot list tools on the hosted server.** Ask it to retry once, then
-  check that the URL ends in `/mcp`. If it is after 2026-11-19 17:00 UTC, the
-  anonymous preview has ended: use Option A.
+- **The hosted server answers `401 Unauthorized`.** The anonymous preview
+  ended on 2026-11-18 (see Option B). Use Option A.
 - **The binary will not run ("cannot execute", "exec format error").** The
   archive does not match the workspace's platform. Ask Muse to run `uname -sm`
   and pick the matching row of the Option A table.
