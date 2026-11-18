@@ -24,8 +24,12 @@ gh issue edit <N> --remove-label in-review --remove-label in-progress
 gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
 gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'   # both counts >= 1
 gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback|Agent) review, round"))] | length'
-# #1033: if target/ is a link into PSCAT_TARGET_ROOT, delete that build folder (only that exact path).
-T=$(readlink "$WORKTREE_DIR/target" 2>/dev/null) && [ -n "${PSCAT_TARGET_ROOT:-}" ] && [ "$T" = "$PSCAT_TARGET_ROOT/issue-<N>" ] && rm -rf "$T"
+# #1033, #1281: delete each worktree's external build folder BEFORE removing the worktree. The helper
+# is the one in $WORKTREE_DIR (the main checkout may be stale; a detached base tree may predate it).
+# It touches only the folder `target` links to, and only directly under PSCAT_TARGET_ROOT.
+WT="$WORKTREE_DIR/scripts/worktree_target.sh"
+bash "$WT" unlink "$WORKTREE_DIR"
+for W in "${EXTRA_WORKTREES[@]}"; do bash "$WT" unlink "$W"; done
 git worktree remove "$WORKTREE_DIR" 2>&1 || true
 # Extra step-5 worktrees: only the exact paths in EXTRA_WORKTREES above, never a pattern over
 # `git worktree list` (other agents' `-issue-<M>` trees sit in it). --force: a base tree may carry a
@@ -71,6 +75,9 @@ gh label create wontfix --color FFFFFF --description "This will not be worked on
 gh issue edit <N> --add-label wontfix --remove-label in-progress --remove-label in-review
 gh issue close <N> --reason "not planned" --comment "Not changed, per the findings above."
 gh issue view <N> --json state,stateReason,labels --jq '[.state, .stateReason, ([.labels[].name] | join(","))]'   # CLOSED / NOT_PLANNED, neither in-* label
+WT="$WORKTREE_DIR/scripts/worktree_target.sh"   # #1281: drop the external build folders before the trees go
+bash "$WT" unlink "$WORKTREE_DIR"
+for W in "${EXTRA_WORKTREES[@]}"; do bash "$WT" unlink "$W"; done
 git worktree remove --force "$WORKTREE_DIR" 2>&1 || true
 for W in "${EXTRA_WORKTREES[@]}"; do git worktree remove --force "$W" 2>&1 || true; done
 git branch -D "$BRANCH" 2>&1 || true

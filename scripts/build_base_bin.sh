@@ -6,6 +6,7 @@
 #
 # BASE_WORKTREE is a checkout of the branch's base commit, usually
 #   git worktree add --detach ../<repo>-idbase origin/main
+#   scripts/worktree_target.sh link ../<repo>-idbase idbase   # target/ on PSCAT_TARGET_ROOT (#1281)
 # made right after the work-issue step 5.5 rebase. The release binary is built
 # INSIDE it, so tree and binary match by construction, then copied to OUT_BIN
 # (a path outside both trees). The copy matters: a shared CARGO_TARGET_DIR or a
