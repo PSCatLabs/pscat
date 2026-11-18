@@ -1,7 +1,10 @@
 # pscat in Muse
 
 Tested by the project owner in Muse on 2026-11-17, with both routes below
-working. pscat is a PostScript interpreter in Rust: it renders PostScript to
+working. The local prompt below adds three steps that were checked against the
+release archive and the code, but not re-run in Muse: stripping the archive's
+top folder, passing `--out-root`, and fetching `SHA256SUMS` instead of
+comparing against a pasted hash. pscat is a PostScript interpreter in Rust: it renders PostScript to
 PNG, SVG and PDF, writes handwriting-style notes, and draws LaTeX formulas on a
 chalkboard. This page covers 0.7.0-rc.5, a GitHub pre-release.
 
@@ -54,10 +57,11 @@ differ. Extract the archive into ~/workspace/custom-connectors/custom.pscat/bin/
 without its top-level folder (tar -xzf <archive> --strip-components=1 -C <bin>),
 so that pscat, pscat-mcp and lib/ sit together in bin/. Keep them together.
 Confirm bin/pscat --version says 0.7.0-rc.5. Create
-~/workspace/custom-connectors/custom.pscat/output/, then start the MCP server
-over stdio with protocol 2025-11-25 as
-bin/pscat-mcp --out-root ~/workspace/custom-connectors/custom.pscat/output
-(bin/pscat mcp is the same server), run tools/list, and confirm it lists 10
+~/workspace/custom-connectors/custom.pscat/output/ first, then start the MCP
+server over stdio with protocol 2025-11-25 as
+bin/pscat-mcp --out-root <the absolute path of that output folder>
+(a literal ~ does not work in --out-root, and bin/pscat mcp is the same
+server), run tools/list, and confirm it lists 10
 tools. Test it with eval_postscript on "40 2 add =" (expect 42) and a small
 render_postscript. Save the connector details in
 ~/workspace/custom-connectors/custom.pscat/CONNECTOR.md and save pscat as a
@@ -83,12 +87,12 @@ Notes on the prompt:
 - `pscat-mcp` and `pscat mcp` are the same server. Use whichever your client
   can launch.
 - `--out-root DIR` is where the tools may write a file (the `out_path`
-  argument: PDF output, and SVG or PDF from `chalkboard_math`). It must be an
-  existing folder. Without it the server uses the folder it was started in, and
+  argument: PDF output, and SVG or PDF from `chalkboard_math`). It must be the
+  absolute path of an existing folder: the server does not expand `~`, and it
+  refuses to start on a path that does not exist. Without it the server uses the folder it was started in, and
   switches `out_path` off if that is `/`.
 - Check the hash against the release's `SHA256SUMS`, not against a number
-  copied into a guide or a chat, which can go stale. For this release the
-  Linux x86_64 line starts `bf7a94ee` and ends `d2d4`.
+  copied into a guide or a chat, which can go stale.
 
 <!-- rc-only: delete at 0.7.0 (docs/dev/RELEASING.md) -->
 Do not use `cargo install pscat` or `npm install pscat` for this version. Both
@@ -100,16 +104,16 @@ crates.io, npm or the MCP Registry.
 
 No download and no binary to maintain. The server is at
 `https://pscat-mcp-145279231681.us-central1.run.app/mcp`. The transport is
-Streamable HTTP, MCP protocol 2025-11-25. It is pscat-mcp 0.1.0-rc.1 running
-the same pscat 0.7.0-rc.5 renderer as the local install, so the same program
-gives the same picture.
+Streamable HTTP, MCP protocol 2025-11-25. On 2026-11-17 it was pscat-mcp
+0.1.0-rc.1 running the same pscat 0.7.0-rc.5 renderer as the local install, so
+the same program gave the same picture. Ask `get_renderer_info` what it runs
+now.
 
 **This is a staging preview, and its anonymous access ends on 2026-11-19 at
 17:00 UTC.** After that time the server no longer accepts anonymous
 requests, and there is no way for the public to get a token. A public hosted
-server is tracked in
-[PSCatLabs/pscat-cloud#26](https://github.com/PSCatLabs/pscat-cloud/issues/26).
-Until it launches, use Option A.
+server is planned (PSCatLabs/pscat-cloud#26, in a private repository). Until it
+launches, use Option A.
 
 Copy and paste this into Muse:
 
@@ -200,6 +204,7 @@ Two things worth knowing:
 
 ## Troubleshooting
 
+<!-- rc-only: delete the next bullet at 0.7.0 (docs/dev/RELEASING.md) -->
 - **Muse reports 0.6.3, or only 4 tools.** You have the old stable release.
   Install 0.7.0-rc.5 from the GitHub release in Option A, not from cargo or
   npm.

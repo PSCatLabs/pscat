@@ -534,11 +534,14 @@ Before tagging:
       "Use pscat in Muse" item linking
       [`docs/guides/muse.md`](../guides/muse.md) (#1260).
 - [ ] Release candidate pins in `docs/guides/` now point at this release:
-      `grep -rn -e '-rc\.' docs/guides` lists them (for example the 0.7.0-rc.5
-      URLs and SHA256SUMS note in `muse.md`, and the rc.4 installs in
-      `browser.md` and `when-to-use-pscat.md`). Move each to the final
-      version, and delete the passages marked `rc-only` (the "not on cargo or
-      npm" warning in `muse.md`). `release.sh` does not edit guides.
+      `grep -rn -e '-rc\.' docs/guides` lists them (for example the
+      0.7.0-rc.5 archive and SHA256SUMS URLs in `muse.md`, and the rc.4
+      installs in `browser.md` and `when-to-use-pscat.md`). Move each to the
+      final version, and delete the passages marked `rc-only` (the "not on
+      cargo or npm" warnings in `muse.md`). In `muse.md`'s hosted section, do
+      not just bump the version: re-check it with `get_renderer_info`, or cut
+      Option B if the anonymous staging preview has ended. `release.sh` does
+      not edit guides.
 - [ ] The owner read the visible changes merged since the last release
       ([`review-log/pending/`](review-log/README.md), #674); each rejected
       entry has a revert PR or a fix ticket. The release PR moves
