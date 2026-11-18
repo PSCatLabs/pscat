@@ -528,7 +528,17 @@ Before tagging:
       plugin only when they ship.
 - [ ] `SECURITY.md`, `THIRD_PARTY_NOTICES.md` and `docs/STABILITY.md` are
       accurate for this release.
-- [ ] `CHANGELOG.md` reads well.
+- [ ] `CHANGELOG.md` reads well. The release's GitHub notes and the
+      `/announce-release` e-mail are drafted from its section (git-cliff
+      writes it from merged PR titles), so for 0.7.0 polish it to carry a
+      "Use pscat in Muse" item linking
+      [`docs/guides/muse.md`](../guides/muse.md) (#1260).
+- [ ] Release candidate pins in `docs/guides/` now point at this release:
+      `grep -rn -e '-rc\.' docs/guides` lists them (for example the 0.7.0-rc.5
+      URLs and SHA256SUMS note in `muse.md`, and the rc.4 installs in
+      `browser.md` and `when-to-use-pscat.md`). Move each to the final
+      version, and delete the passages marked `rc-only` (the "not on cargo or
+      npm" warning in `muse.md`). `release.sh` does not edit guides.
 - [ ] The owner read the visible changes merged since the last release
       ([`review-log/pending/`](review-log/README.md), #674); each rejected
       entry has a revert PR or a fix ticket. The release PR moves

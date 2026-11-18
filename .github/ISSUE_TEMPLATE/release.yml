@@ -30,7 +30,8 @@ body:
         - label: README's install section lists only the channels this release ships
         - label: SECURITY.md, THIRD_PARTY_NOTICES.md and docs/STABILITY.md are accurate
         - label: "The owner read docs/dev/review-log/pending/ (each rejected entry has a revert or fix ticket); the release PR moves it to review-log/vX.Y.Z/"
-        - label: CHANGELOG.md reads well; the owner merged the release PR
+        - label: "CHANGELOG.md reads well (for 0.7.0 it carries a \"Use pscat in Muse\" item linking docs/guides/muse.md); the owner merged the release PR"
+        - label: "Release candidate pins in docs/guides now name this release (`grep -rn -e '-rc\\.' docs/guides`), and the `rc-only` passages are gone"
   - type: checkboxes
     id: publish
     attributes:
