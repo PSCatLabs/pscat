@@ -28,8 +28,8 @@ gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Co
 # is the one in $WORKTREE_DIR (the main checkout may be stale; a detached base tree may predate it).
 # It touches only the folder `target` links to, and only directly under PSCAT_TARGET_ROOT.
 WT="$WORKTREE_DIR/scripts/worktree_target.sh"
-bash "$WT" unlink "$WORKTREE_DIR"
-for W in "${EXTRA_WORKTREES[@]}"; do bash "$WT" unlink "$W"; done
+[ -f "$WT" ] && bash "$WT" unlink "$WORKTREE_DIR"   # skipped when the tree or the script is gone (a rerun, an old branch)
+for W in "${EXTRA_WORKTREES[@]}"; do [ -f "$WT" ] && bash "$WT" unlink "$W"; done
 git worktree remove "$WORKTREE_DIR" 2>&1 || true
 # Extra step-5 worktrees: only the exact paths in EXTRA_WORKTREES above, never a pattern over
 # `git worktree list` (other agents' `-issue-<M>` trees sit in it). --force: a base tree may carry a
@@ -76,8 +76,8 @@ gh issue edit <N> --add-label wontfix --remove-label in-progress --remove-label 
 gh issue close <N> --reason "not planned" --comment "Not changed, per the findings above."
 gh issue view <N> --json state,stateReason,labels --jq '[.state, .stateReason, ([.labels[].name] | join(","))]'   # CLOSED / NOT_PLANNED, neither in-* label
 WT="$WORKTREE_DIR/scripts/worktree_target.sh"   # #1281: drop the external build folders before the trees go
-bash "$WT" unlink "$WORKTREE_DIR"
-for W in "${EXTRA_WORKTREES[@]}"; do bash "$WT" unlink "$W"; done
+[ -f "$WT" ] && bash "$WT" unlink "$WORKTREE_DIR"   # skipped when the tree or the script is gone (a rerun, an old branch)
+for W in "${EXTRA_WORKTREES[@]}"; do [ -f "$WT" ] && bash "$WT" unlink "$W"; done
 git worktree remove --force "$WORKTREE_DIR" 2>&1 || true
 for W in "${EXTRA_WORKTREES[@]}"; do git worktree remove --force "$W" 2>&1 || true; done
 git branch -D "$BRANCH" 2>&1 || true

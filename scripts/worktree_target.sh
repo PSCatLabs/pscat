@@ -24,9 +24,11 @@ die() { echo "worktree_target.sh: $*" >&2; exit 64; }
 [ $# -ge 2 ] || die "usage: worktree_target.sh link WORKTREE [NAME] | unlink WORKTREE"
 cmd=$1; wt=$2
 [ -d "$wt" ] || die "'$wt' is not a folder"
+case "$cmd" in link|unlink) ;; *) die "unknown command '$cmd' (link or unlink)" ;; esac
 root=${PSCAT_TARGET_ROOT:-}
 while [ "${#root}" -gt 1 ] && [ "${root%/}" != "$root" ]; do root=${root%/}; done   # strip trailing slashes
 [ -n "$root" ] && [ -d "$root" ] || exit 0
+[ "$root" != / ] || exit 0   # a root of / is a misconfiguration
 root=$(cd "$root" && pwd)   # absolute, so a link made from a relative root cannot dangle
 # A name is one path component: no slash, not empty, not . or ..
 ok_name() { case "$1" in ''|.|..|*/*) return 1 ;; esac; }

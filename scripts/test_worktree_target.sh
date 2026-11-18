@@ -9,6 +9,7 @@ REAL_ROOT="${PSCAT_TARGET_ROOT:-}"
 REAL_LIST=""; [ -n "$REAL_ROOT" ] && [ -d "$REAL_ROOT" ] && REAL_LIST="$(ls -A "$REAL_ROOT")"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/wt-target-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/default-root"; export PSCAT_TARGET_ROOT="$TMP/default-root"   # never the real drive
 TMP="$(cd "$TMP" && pwd)"   # TMPDIR may end in a slash; the helper normalizes the root
 n=0
 fresh() { n=$((n + 1)); ROOT="$TMP/root$n"; WT="$TMP/wt$n"; mkdir -p "$ROOT" "$WT"; }
@@ -86,6 +87,8 @@ fresh; (cd "$TMP" && PSCAT_TARGET_ROOT="root$n" bash "$H" link "$WT" a >/dev/nul
 bash "$H" >/dev/null 2>&1 && bad "no arguments must fail"
 bash "$H" link "$TMP/no-such-dir" >/dev/null 2>&1 && bad "missing worktree must fail"
 fresh; run frob "$WT" && bad "unknown command must fail"
+(unset PSCAT_TARGET_ROOT; bash "$H" frob "$WT") >/dev/null 2>&1 && bad "unknown command with no root must fail"
+fresh; PSCAT_TARGET_ROOT=/ bash "$H" link "$WT" zz >/dev/null 2>&1; [ ! -e "$WT/target" ] && [ ! -e /zz ] || bad "root / must be refused"
 
 # the real root is untouched
 if [ -n "$REAL_ROOT" ] && [ -d "$REAL_ROOT" ] && [ "$(ls -A "$REAL_ROOT")" != "$REAL_LIST" ]; then bad "the real PSCAT_TARGET_ROOT changed"; fi

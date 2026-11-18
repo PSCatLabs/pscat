@@ -36,7 +36,6 @@ emerge (preferred tool usage patterns, things that trip up this particular
 setup, etc.), add them here rather than in `AGENTS.md`, which should stay
 tool-agnostic.
 
-<!-- sdlcify:managed:start -->
 ## Worktrees keep `target/` off the main drive
 
 Any `git worktree add` in this repo, by hand (an integration or train tree, a
@@ -47,6 +46,7 @@ worktree's Cargo `target/` under `$PSCAT_TARGET_ROOT` (the owner's external
 drive) and is a no-op when that is unset, so it is always safe to run.
 `work-issue` already does this for its own trees.
 
+<!-- sdlcify:managed:start -->
 ## SDLC
 
 `SDLC.md` is the authoritative record of this repo's development
