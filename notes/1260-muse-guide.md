@@ -46,6 +46,13 @@ with the corrections the issue lists. Evidence, all taken 2026-11-17.
   MCP `format` value maps only to `--svg` (`src/mcp_server.rs`), and the hosted
   `render_postscript` schema has no such argument.
 
+- Handwriting text with no drawable character (`@@ é`): the hosted server returns
+  an error, `Handwrite failed (invalid_request): text has no character this hand
+  can draw: ...` (that check is in the hosted server, not this repo); the local
+  `pscat handwrite` and the local MCP `handwrite` (rc.4) return a blank note.
+- `validate_postscript` on `40 2 add =` (hosted) gives `valid: true`, output 42
+  and a `blank-page` lint; local `eval_postscript` gives just `42`.
+
 ## Not verified (taken from the draft or the issue)
 
 - That Muse has no plugin marketplace or MCP slot, that its workspace is Linux
