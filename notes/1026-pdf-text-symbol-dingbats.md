@@ -20,7 +20,7 @@ with strokeglyphs, not the Symbol font, so its PDFs are not affected.
 
 **What was built.**
 - `encodings::symbol_name_to_char` and `dingbat_name_to_char`: sorted
-  name → code point tables (159 Symbol names, 187 Dingbats names), read by
+  name → code point tables (165 Symbol names, 187 Dingbats names), read by
   binary search. Source: the Unicode Consortium's Adobe mapping files
   `symbol.txt` and `zdingbat.txt` (the Dingbats encoding was already
   checked against `zdingbat.txt` in #563), cross-checked against Adobe's
@@ -36,10 +36,15 @@ with strokeglyphs, not the Symbol font, so its PDFs are not affected.
 
 **Choices.**
 - *Corporate Use entries are left out.* `symbol.txt` maps 29 names
-  (bracket and integral pieces, `radicalex`, the serif and sans-serif
-  ©®™) and `zdingbat.txt` 14 (`a85`-`a96`, `a205`, `a206`, the ornamental
-  brackets) into the private-use area. A private-use value means nothing to
-  a search or a screen reader, so those glyphs keep their outlines. The AGL
+  (bracket, brace and integral pieces, `radicalex`, the arrow extenders,
+  the serif and sans-serif ©®™) and `zdingbat.txt` 14 (`a85`-`a96`,
+  `a205`, `a206`, the ornamental brackets) into the private-use area. A
+  private-use value means nothing to a search or a screen reader, so those
+  glyphs keep their outlines, with one exception: the six serif and
+  sans-serif ©®™ (design variants of the plain signs, which groff and eqn
+  output sets from Symbol) map to U+00A9, U+00AE and U+2122 (agent review).
+  The pieces have Unicode values too (U+239B-23AE, U+23AF/23D0), but a
+  search would never look for half a brace. The AGL
   maps the 14 Dingbats brackets to U+2768-2775 (Unicode 3.2); pscat's
   Dingbats encoding leaves those codes `.notdef` anyway (#605).
 - *Duplicates.* Where `symbol.txt` gives a name two values the Greek letter

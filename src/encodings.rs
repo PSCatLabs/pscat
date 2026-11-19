@@ -493,10 +493,11 @@ pub fn name_to_char(name: &str) -> Option<char> {
 /// (`--pdf-text`'s `/ToUnicode`, #1026). Only the text output asks: glyph
 /// lookup still goes through the face's own names, so nothing is drawn
 /// differently. From Unicode's `MAPPINGS/VENDORS/ADOBE/symbol.txt` (the same
-/// source family as the Dingbats encoding below), without its 29 Corporate
+/// source family as the Dingbats encoding below), without its Corporate
 /// Use entries: a private-use value means nothing to a reader, so those
-/// glyphs (bracket and radical pieces, sans-serif marks) keep their
-/// outlines. Where the file gives a name two values the Greek letter wins
+/// glyphs (bracket, brace, integral and radical pieces, arrow extenders)
+/// keep their outlines. The serif and sans-serif ©®™, which the file also
+/// puts there, are the plain signs here. Where the file gives a name two values the Greek letter wins
 /// (`Delta`, `Omega`, `mu`), as a search for the letter expects, and
 /// `fraction` is U+2044 as in the Adobe Glyph List.
 pub(crate) fn symbol_name_to_char(name: &str) -> Option<char> {
@@ -519,8 +520,11 @@ fn table_char(table: &[(&str, u32)], name: &str) -> Option<char> {
 
 // Glyph name -> Unicode, sorted by name for `binary_search_by`. Factual
 // mappings from the Unicode Consortium's files named above; see
-// THIRD_PARTY_NOTICES.md. `space` is left out: it is in
-// `name_to_char` already.
+// THIRD_PARTY_NOTICES.md. `space` is left out (the files give it two values,
+// U+0020 and U+00A0; `name_to_char` has it). Symbol's serif and sans-serif
+// copyright, registered and trademark signs are the one change from the
+// source: it puts them in the Corporate Use area as design variants, and a
+// reader searching for the sign wants U+00A9, U+00AE and U+2122.
 const SYMBOL_NAMES: &[(&str, u32)] = &[
     ("Alpha", 0x0391),
     ("Beta", 0x0392),
@@ -583,6 +587,8 @@ const SYMBOL_NAMES: &[(&str, u32)] = &[
     ("colon", 0x003A),
     ("comma", 0x002C),
     ("congruent", 0x2245),
+    ("copyrightsans", 0x00A9),
+    ("copyrightserif", 0x00A9),
     ("degree", 0x00B0),
     ("delta", 0x03B4),
     ("diamond", 0x2666),
@@ -655,6 +661,8 @@ const SYMBOL_NAMES: &[(&str, u32)] = &[
     ("radical", 0x221A),
     ("reflexsubset", 0x2286),
     ("reflexsuperset", 0x2287),
+    ("registersans", 0x00AE),
+    ("registerserif", 0x00AE),
     ("rho", 0x03C1),
     ("second", 0x2033),
     ("semicolon", 0x003B),
@@ -672,6 +680,8 @@ const SYMBOL_NAMES: &[(&str, u32)] = &[
     ("theta", 0x03B8),
     ("theta1", 0x03D1),
     ("three", 0x0033),
+    ("trademarksans", 0x2122),
+    ("trademarkserif", 0x2122),
     ("two", 0x0032),
     ("underscore", 0x005F),
     ("union", 0x222A),
@@ -1248,6 +1258,7 @@ mod tests {
         assert_eq!(symbol_name_to_char("Omega"), Some('\u{3A9}'));
         assert_eq!(symbol_name_to_char("mu"), Some('\u{3BC}'));
         assert_eq!(symbol_name_to_char("radicalex"), None, "private use");
+        assert_eq!(symbol_name_to_char("copyrightserif"), Some('\u{A9}'));
         assert_eq!(dingbat_name_to_char("a1"), Some('\u{2701}'));
         assert_eq!(dingbat_name_to_char("a89"), None, "private use");
         assert_eq!(symbol_name_to_char("a1"), None);
@@ -1261,9 +1272,6 @@ mod tests {
             "radicalex",
             "arrowvertex",
             "arrowhorizex",
-            "registersans",
-            "copyrightsans",
-            "trademarksans",
             "parenlefttp",
             "parenleftex",
             "parenleftbt",
@@ -1284,9 +1292,6 @@ mod tests {
             "bracerighttp",
             "bracerightmid",
             "bracerightbt",
-            "registerserif",
-            "copyrightserif",
-            "trademarkserif",
         ];
         for name in symbol_encoding() {
             if name == ".notdef" || symbol_pua.contains(&name) {

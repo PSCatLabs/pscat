@@ -956,8 +956,9 @@ renders eight examples in both and compares block-downsampled output).
    pinned instance), for any face whose `fsType` allows it
    (`notes/1193-pdf-text.md`; Symbol and Dingbats glyph names get their
    text character from tables in `encodings.rs` that only PDF text reads,
-   `notes/1026-pdf-text-symbol-dingbats.md`; the wasm flag bit 8 / npm `pdfText`, #1205,
-   needs `pdf` as `svgText` needs `svg`, and `tests/wasm.rs` holds the
+   `notes/1026-pdf-text-symbol-dingbats.md`; the wasm flag bit 8 / npm
+   `pdfText`, #1205, needs `pdf` as `svgText` needs `svg`, and
+   `tests/wasm.rs` holds the
    CLI-vs-wasm byte check). The PDF's open text run is written at the
    top of `enter_clip`, so a new PDF hook that goes through `enter_clip`
    keeps paint order for free; one that writes `content` directly must

@@ -133,8 +133,8 @@ More on the less obvious ones:
   maths signs and ZapfDingbats' dingbats extract as their Unicode
   characters (`notes/1026-pdf-text-symbol-dingbats.md`). Type 1 and Type 3
   fonts from a program, `charpath` text, the few Symbol and Dingbats glyphs
-  with no Unicode value (bracket and radical pieces, the ornamental
-  brackets), and fonts whose licence bits forbid embedding stay outlines. PNG and SVG output
+  with no Unicode value (bracket, brace and radical pieces, arrow
+  extenders, the ornamental brackets), and fonts whose licence bits forbid embedding stay outlines. PNG and SVG output
   are not affected (`notes/1193-pdf-text.md`). The browser build and npm
   package have it too: `{ pdf: true, pdfText: true }`, the same bytes as the
   command line (`notes/1205-pdf-text-wasm.md`).
