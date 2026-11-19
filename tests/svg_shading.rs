@@ -273,3 +273,60 @@ fn huge_geometry_is_lengthened_at_an_eighth_of_its_size() {
     );
     assert!(attr(d, "r").is_finite(), "{d}");
 }
+
+/// What each remaining case writes, under each `/Extend`, in the SVG's own
+/// terms (the pixel test above checks what a renderer makes of it):
+/// - an axis that collapses in f32 is a plain `<path>` in the end colour
+///   when the end extends (the PNG's solid fill), else nothing;
+/// - circles nearly equal are the disk, in the colour of the end that
+///   pads: the end colour when shrinking by a hair, the start colour when
+///   growing;
+/// - huge circles stay one finite radial.
+#[test]
+fn each_degenerate_case_writes_what_the_png_paints() {
+    for ext in EXTENDS {
+        let [start, end] = {
+            let mut it = ext.split(' ').map(|e| e == "true");
+            [it.next().unwrap(), it.next().unwrap()]
+        };
+        let (_, svg) = png_and_svg(&program("collapsed-axis", "", CASES[6].2, ext));
+        assert!(!svg.contains("Gradient"), "collapsed [{ext}]: {svg}");
+        assert_eq!(
+            svg.contains("fill=\"#0000ff\""),
+            end,
+            "collapsed [{ext}]: {svg}"
+        );
+        for (case, colour, on) in [(2, "#0000ff", end), (3, "#ff0000", start)] {
+            let (name, pre, dict) = CASES[case];
+            let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
+            let d = defs(&svg);
+            assert_eq!(d.contains("<radialGradient"), on, "{name} [{ext}]: {d}");
+            if on {
+                assert!(
+                    d.contains(colour) && !d.contains("fr=\""),
+                    "{name} [{ext}]: {d}"
+                );
+                assert_eq!(
+                    d.matches("stop-opacity=\"0\"").count(),
+                    2,
+                    "{name} [{ext}]: {d}"
+                );
+            }
+        }
+        for case in [5, 11] {
+            let (name, pre, dict) = CASES[case];
+            let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
+            let d = defs(&svg);
+            if name == "huge-equal" && !start {
+                assert!(!d.contains("Gradient"), "{name} [{ext}]: {d}");
+                continue;
+            }
+            assert_eq!(
+                d.matches("<radialGradient").count(),
+                1,
+                "{name} [{ext}]: {d}"
+            );
+            assert!(attr(d, "r").is_finite(), "{name} [{ext}]: {d}");
+        }
+    }
+}
