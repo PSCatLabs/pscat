@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [lexer, interp, truetype, type1_charstring, type1_font, filters, image]
+        target: [lexer, check_syntax, interp, truetype, type1_charstring, type1_font, filters, image]
     defaults:
       run:
         shell: bash

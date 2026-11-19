@@ -626,11 +626,12 @@ without the limits above:
 
 The scanner, the whole interpreter, the font loaders, the decode filters and
 the image operators are fuzzed with
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`). Seven targets:
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`). Eight targets:
 
 | Target | What it feeds |
 |---|---|
 | `lexer` | the scanner, token by token |
+| `check_syntax` | the public `pscat::syntax::check_syntax` on raw bytes (the lexer's seeds): it must return `Ok` or `Err`, never panic |
 | `interp` | the whole interpreter, under tight limits |
 | `truetype` | a font file (TrueType, OpenType/CFF, a `.ttc` collection, a variable font) through the loader `findfont` and `addFont` use, then a sample of glyph outlines and widths |
 | `type1_charstring` | one decrypted Type 1 charstring plus its subroutines and `seac` components |

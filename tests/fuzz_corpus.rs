@@ -78,6 +78,17 @@ fn inputs(target: &str) -> Vec<PathBuf> {
     files
 }
 
+/// `check_syntax` as a fuzz entry: the result is discarded, so the replay
+/// fails only on a panic or a hang.
+fn check_syntax_entry(data: &[u8]) {
+    let _ = pscat::syntax::check_syntax(data);
+}
+
+#[test]
+fn check_syntax_seeds_do_not_panic() {
+    replay_all("check_syntax", 10, check_syntax_entry);
+}
+
 #[test]
 fn lexer_seeds_do_not_panic() {
     replay_all("lexer", 10, pscat::fuzzing::lexer);
