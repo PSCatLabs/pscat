@@ -720,6 +720,11 @@ renders eight examples in both and compares block-downsampled output).
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
   `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
   the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
+  Both vector recorders take the shading from `vector_shading` (#1041): the
+  raster's sub-unit rescale, its degenerate disk and its collapsed-axis
+  solid fill, so SVG and PDF show what the PNG shows (`tests/svg_shading.rs`
+  checks every case under resvg). Equal concentric circles follow gs's disk,
+  not its one-pixel ring (`notes/1041-svg-shading-edge-cases.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into

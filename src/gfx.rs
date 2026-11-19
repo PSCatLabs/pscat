@@ -2246,7 +2246,7 @@ impl Gfx {
         // `/Coords [0 0 1e-7 0]` under `1e8 1e8 scale` (a visible
         // 10-device-pixel gradient, wrongly flattened to solid C1
         // without this).
-        const SAFE_LEN: f32 = 1.0;
+        const SAFE_LEN: f32 = SHFILL_SAFE_LEN;
         // The gradient of the smaller root, for a radial whose larger root
         // can fall past an end that does not extend (`two_root_layer`).
         let mut smaller_root = None;
@@ -2511,126 +2511,47 @@ impl Gfx {
                 prepared = true;
                 self.pixmap = copy;
             }
-            if self.svg.is_some() {
-                let svg_kind = sh_kind(shading.kind, 1.0);
-                let svg_ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
+            if self.svg.is_some() || self.pdf.is_some() {
+                // The same shading for both vector recorders (#1028,
+                // #1041): rescaled as the raster is, and its degenerate
+                // cases recorded as the raster paints them.
+                let vector = vector_shading(&shading, ctm);
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
-                // The same device-space path the raster painted with
-                // (whole page, or the BBox parallelogram) — passing its
-                // SVG path data through means the exported region
-                // matches exactly, /BBox included, rather than always
-                // the whole page bounded only by the clip.
-                let region_d = path.to_svg_data();
                 if let Some(svg) = &mut self.svg {
-                    svg.shfill(
-                        &svg_kind,
-                        svg_ctm,
-                        &shading.stops,
-                        shading.extend,
-                        &region_d,
-                        comp,
-                        &chain,
-                    );
+                    // The same device-space path the raster painted with
+                    // (whole page, or the BBox parallelogram) — passing its
+                    // SVG path data through means the exported region
+                    // matches exactly, /BBox included, rather than always
+                    // the whole page bounded only by the clip.
+                    let region_d = path.to_svg_data();
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Solid(rgb) => {
+                            svg.fill(&region_d, FillRule::Winding, *rgb, comp, &chain);
+                        }
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                        } => svg.shfill(kind, *ctm, stops, *extend, &region_d, comp, &chain),
+                    }
                 }
-            }
-            if self.pdf.is_some() {
-                // A real PDF shading (#1028): the same stops under the
-                // same CTM. Geometry whose characteristic length is under
-                // SAFE_LEN is rescaled, with the inverse folded into the
-                // `cm`, exactly as for the raster above: the composed map
-                // is unchanged, and the numbers the PDF carries stay in a
-                // range every reader holds precisely.
-                // The same k as the raster's (same f32 arithmetic), so the
-                // degenerate test below sees the numbers tiny-skia saw.
-                let char_len = match shading.kind {
-                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                        let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
-                        fmath::hypotf(x1 - x0, y1 - y0)
-                    }
-                    crate::shading::ShadingKind::Radial {
-                        x0,
-                        y0,
-                        r0,
-                        x1,
-                        y1,
-                        r1,
-                    } => {
-                        let (x0, y0, r0, x1, y1, r1) = (
-                            x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
-                        );
-                        r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
-                    }
-                };
-                let k = if char_len > 0.0 && char_len < SAFE_LEN {
-                    SAFE_LEN / char_len
-                } else {
-                    1.0
-                };
-                let mut kind = sh_kind(shading.kind, k);
-                // Two (nearly) coincident circles of (nearly) one radius:
-                // tiny-skia's degenerate case, decided with its own
-                // tolerance on the rescaled numbers. The raster paints gs's
-                // picture of it (#1040): a disk of one colour, or nothing
-                // (and then never gets here). A PDF reader paints those
-                // circles as nothing (CoreGraphics), so record the disk: a
-                // radial from the centre out to the radius, one colour,
-                // extending neither end (Codex reviews of #1028).
-                let fallback;
-                let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
-                let mut extend = shading.extend;
-                let mut nothing = false;
-                if let crate::svg::ShKind::Radial {
-                    x0,
-                    y0,
-                    r0,
-                    x1,
-                    y1,
-                    r1,
-                } = kind
-                    && degenerate_radial(fmath::hypotf(x1 - x0, y1 - y0), r0, r1)
-                {
-                    let c = degenerate_radial_inside(&shading);
-                    nothing = c.is_none();
-                    let c = c.unwrap_or(Color::TRANSPARENT);
-                    kind = crate::svg::ShKind::Radial {
-                        x0,
-                        y0,
-                        r0: 0.0,
-                        x1: x0,
-                        y1: y0,
-                        r1,
-                    };
-                    let (r, g, b) = (c.red(), c.green(), c.blue());
-                    fallback = [(0.0, r, g, b), (1.0, r, g, b)];
-                    stops = &fallback;
-                    extend = [false, false];
-                }
-                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
-                let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
-                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
-                let region = shading.bbox.map(|_| &path);
-                // An axis that tiny-skia finds degenerate (its tolerance, on
-                // the same f32 numbers: distinct f64 Coords can collapse)
-                // paints the last stop, solid, over the region: the end
-                // colour if the end extends, else nothing (its closing stop
-                // is transparent). A PDF reader paints such a shading as
-                // nothing. Record that solid fill instead (a Codex review of
-                // #1028).
-                let solid = match kind {
-                    crate::svg::ShKind::Axial { x0, y0, x1, y1 }
-                        if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
-                    {
-                        Some(stops.last().filter(|_| extend[1]).map(|l| (l.1, l.2, l.3)))
-                    }
-                    _ if nothing => Some(None),
-                    _ => None,
-                };
-                let Gfx { pdf, .. } = self;
-                if let Some(pdf) = pdf {
-                    match solid {
-                        Some(Some(rgb)) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
-                        Some(None) => {}
-                        None => pdf.shfill(&kind, pdf_ctm, stops, extend, region, comp, &chain),
+                if let Some(pdf) = &mut self.pdf {
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Solid(rgb) => {
+                            pdf.fill(&path, FillRule::Winding, *rgb, comp, &chain);
+                        }
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                        } => {
+                            let region = shading.bbox.map(|_| &path);
+                            pdf.shfill(kind, *ctm, stops, *extend, region, comp, &chain);
+                        }
                     }
                 }
             }
@@ -4727,8 +4648,125 @@ fn two_root_layer(
     Ok(layer)
 }
 
+/// The characteristic length under which `shfill` rescales a shading's
+/// geometry before tiny-skia sees it (`Gfx::shfill_limited`).
+const SHFILL_SAFE_LEN: f32 = 1.0;
+
+/// What the SVG and PDF recorders write for one `shfill`
+/// (`vector_shading`).
+enum VectorShading<'a> {
+    /// Nothing painted.
+    Nothing,
+    /// The region filled in one colour.
+    Solid((f32, f32, f32)),
+    /// A real gradient: geometry under `SHFILL_SAFE_LEN` rescaled, with the
+    /// inverse folded into `ctm`.
+    Shading {
+        kind: crate::svg::ShKind,
+        ctm: [f32; 6],
+        stops: std::borrow::Cow<'a, [(f32, f32, f32, f32)]>,
+        extend: [bool; 2],
+    },
+}
+
+/// The shading as the vector recorders write it, so a reader paints what
+/// the raster painted (#1028 for PDF, #1041 for SVG).
+///
+/// Geometry whose characteristic length is under `SHFILL_SAFE_LEN` is
+/// rescaled, with the inverse folded into the transform, exactly as for the
+/// raster: the composed map is unchanged, and the numbers stay in a range
+/// every reader holds precisely. resvg, for one, has tiny-skia's 2^-15
+/// tolerance, and would flatten `/Coords [0 0 1e-7 0]` under `1e8 scale`.
+/// The same k as the raster's (same f32 arithmetic), so the degenerate
+/// tests below see the numbers tiny-skia saw.
+///
+/// Two (nearly) coincident circles of (nearly) one radius are tiny-skia's
+/// degenerate case, and the raster paints gs's picture of it (#1040): a
+/// disk of one colour, or nothing. Readers paint those circles otherwise
+/// (CoreGraphics nothing, an SVG renderer the last colour everywhere), so
+/// the disk is recorded: a radial from the centre out to the radius, one
+/// colour, extending neither end (Codex reviews of #1028).
+///
+/// An axis that tiny-skia finds degenerate (its tolerance, on the same f32
+/// numbers: distinct f64 Coords can collapse) paints the last stop, solid,
+/// over the region: the end colour if the end extends, else nothing (its
+/// closing stop is transparent). A PDF reader paints such a shading as
+/// nothing, so that solid fill is recorded instead (a Codex review of
+/// #1028).
+fn vector_shading(shading: &crate::shading::Shading, ctm: Transform) -> VectorShading<'_> {
+    use crate::shading::ShadingKind as K;
+    let char_len = match shading.kind {
+        K::Axial { x0, y0, x1, y1 } => {
+            let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+            fmath::hypotf(x1 - x0, y1 - y0)
+        }
+        K::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => {
+            let (x0, y0, r0, x1, y1, r1) = (
+                x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
+            );
+            r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
+        }
+    };
+    let k = if char_len > 0.0 && char_len < SHFILL_SAFE_LEN {
+        SHFILL_SAFE_LEN / char_len
+    } else {
+        1.0
+    };
+    let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+    let ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
+    match sh_kind(shading.kind, k) {
+        crate::svg::ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } if degenerate_radial(fmath::hypotf(x1 - x0, y1 - y0), r0, r1) => {
+            let Some(c) = degenerate_radial_inside(shading) else {
+                return VectorShading::Nothing;
+            };
+            let (r, g, b) = (c.red(), c.green(), c.blue());
+            VectorShading::Shading {
+                kind: crate::svg::ShKind::Radial {
+                    x0,
+                    y0,
+                    r0: 0.0,
+                    x1: x0,
+                    y1: y0,
+                    r1,
+                },
+                ctm,
+                stops: std::borrow::Cow::Owned(vec![(0.0, r, g, b), (1.0, r, g, b)]),
+                extend: [false, false],
+            }
+        }
+        crate::svg::ShKind::Axial { x0, y0, x1, y1 }
+            if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
+        {
+            match shading.stops.last().filter(|_| shading.extend[1]) {
+                Some(l) => VectorShading::Solid((l.1, l.2, l.3)),
+                None => VectorShading::Nothing,
+            }
+        }
+        kind => VectorShading::Shading {
+            kind,
+            ctm,
+            stops: std::borrow::Cow::Borrowed(&shading.stops),
+            extend: shading.extend,
+        },
+    }
+}
+
 /// `shfill` geometry for the vector recorders, its lengths multiplied by
-/// `k` (1 for SVG; the SAFE_LEN rescale for PDF, `Gfx::shfill`).
+/// `k` (the SAFE_LEN rescale, `vector_shading`).
 fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
     use crate::shading::ShadingKind as K;
     match kind {
