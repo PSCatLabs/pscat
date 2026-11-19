@@ -744,7 +744,11 @@ renders eight examples in both and compares block-downsampled output).
   *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
   state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
   whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
-  a pattern paints only in the context (page or capture) it was made in;
+  a pattern used in a context (page or capture) other than the one it was
+  made in is placed as gs places it, its device matrix read in gs's
+  pattern-accumulator coordinates (#1300, `Capture::to_gs`,
+  `pattern::foreign_placement`; PDF writes a copy of the pattern stream
+  under the new `/Matrix`);
   text output modes keep outlines under a pattern. `imagemask` paints the
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`

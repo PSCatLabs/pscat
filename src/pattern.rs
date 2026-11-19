@@ -338,14 +338,16 @@ pub(crate) fn foreign_placement(
 /// whose coordinates map to gs's by `parent_to_gs`: the capture canvas to
 /// the parent's coordinates (through the tile's shader), to gs's, less
 /// the accumulator's origin: the top-left corner of the `/BBox` in gs's
-/// device space, rounded to the nearest pixel (measured against gs
-/// 10.07.1 with fractional corners on both sides of a half pixel).
+/// device space under the pattern's own matrix (before the whole-pixel
+/// adjustment), rounded to the nearest pixel (measured against gs 10.07.1
+/// with fractional corners and translations on both sides of a half
+/// pixel).
 pub(crate) fn capture_to_gs(
     spec: &TileSpec,
     geom: &Geometry,
     parent_to_gs: Transform,
 ) -> Transform {
-    let to_gs = parent_to_gs.pre_concat(geom.matrix);
+    let to_gs = parent_to_gs.pre_concat(spec.matrix);
     let [x0, y0, x1, y1] = spec.bbox.map(|v| v as f32);
     let mut pts = [
         tiny_skia::Point::from_xy(x0, y0),
@@ -530,6 +532,40 @@ mod tests {
         let g = geometry(&spec(m, [0.0, 0.0, 10.0, 10.0], 10.0, 10.0)).unwrap();
         assert!(!g.exact);
         assert_eq!(g.period, (10, 10));
+    }
+
+    #[test]
+    fn a_capture_maps_to_gs_from_its_rounded_bbox_corner() {
+        // Outer pattern at scale 2, translated (4, 7), on a 205 px page
+        // (y flipped); /BBox corner x = -13.3 -> -22.6 in device, y top
+        // 27.2 -> 198 - 54.4 = 143.6. gs anchors at (-23, 144).
+        let m = Transform::from_row(2.0, 0.0, 0.0, -2.0, 4.0, 198.0);
+        let sp = spec(m, [-13.3, -21.0, 30.0, 27.2], 400.0, 400.0);
+        let g = geometry(&sp).unwrap();
+        let to_gs = capture_to_gs(&sp, &g, Transform::identity());
+        // Pattern space through the capture CTM, then to gs: the pattern
+        // origin lands at its device point less the anchor.
+        let mut p = [tiny_skia::Point::from_xy(0.0, 0.0)];
+        g.capture.map_points(&mut p);
+        to_gs.map_points(&mut p);
+        assert!(
+            (p[0].x - 27.0).abs() < 1e-3 && (p[0].y - 54.0).abs() < 1e-3,
+            "{p:?}"
+        );
+    }
+
+    #[test]
+    fn only_pixel_to_pixel_maps_sample_nearest() {
+        let flip = Transform::from_row(1.0, 0.0, 0.0, -1.0, 3.0002, 7.0);
+        assert_eq!(
+            pixel_exact(flip),
+            Some(Transform::from_row(1.0, 0.0, 0.0, -1.0, 3.0, 7.0))
+        );
+        let swap = Transform::from_row(0.0, 1.0, -1.0, 0.0, 2.0, 5.0);
+        assert!(pixel_exact(swap).is_some());
+        assert!(pixel_exact(Transform::from_row(1.0, 0.0, 0.0, 1.0, 0.5, 0.0)).is_none());
+        assert!(pixel_exact(Transform::from_scale(1.5, 1.0)).is_none());
+        assert!(pixel_exact(Transform::from_row(0.866, 0.5, -0.5, 0.866, 0.0, 0.0)).is_none());
     }
 
     #[test]

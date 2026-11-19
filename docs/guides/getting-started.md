@@ -190,7 +190,9 @@ More on the less obvious ones:
   (PatternType 1): hatching, dots, tiled motifs, coloured or uncoloured
   (`[/Pattern /DeviceRGB] setcolorspace r g b pattern setcolor` paints one
   pattern in any colour). `fill`, `stroke`, text and `imagemask` all take
-  them, and the tiles are seamless. SVG output gets a real `<pattern>` and PDF a real
+  them, and the tiles are seamless. A pattern can paint with another
+  pattern inside its `PaintProc` (a hatch inside a motif) and lands where
+  Ghostscript puts it. SVG output gets a real `<pattern>` and PDF a real
   `/Pattern` resource. Shading patterns (PatternType 2) are not supported
   yet; use `clip` and `shfill`. `examples/patterns.ps` is the specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
