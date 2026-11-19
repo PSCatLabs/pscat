@@ -570,8 +570,9 @@ renders eight examples in both and compares block-downsampled output).
   drops the mode to local (global afterwards only if it is global now and was
   at every discarded `save`), not the PLRM's reset to the saved value
   (`src/ops/vm.rs`, `VmMode`; `tests/status_setglobal.rs` pins the matrix
-  against gs). `globaldict` (a plain dictionary, not on the dictionary
-  stack, never rolled back by `restore`) and `gcheck` (true for simple
+  against gs). `globaldict` (a plain dictionary between systemdict and
+  userdict on the dictionary stack, so `countdictstack` starts at 3 as in gs,
+  never rolled back by `restore`) and `gcheck` (true for simple
   objects, `systemdict` and `globaldict`; false for every other composite)
   stand in for global VM (#1159, `notes/1159-gcheck-globaldict.md`,
   `tests/gcheck_globaldict.rs`): a composite made in global mode reports

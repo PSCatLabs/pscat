@@ -2,7 +2,7 @@
 //! `setglobal`/`currentglobal` (#1146, `tests/status_setglobal.rs`). Every
 //! expected value was measured against Ghostscript 10.07.1
 //! (`gs -dNOSAFER -dNODISPLAY`); `the_probes_agree_with_ghostscript` runs both
-//! again when `gs` is installed.
+//! again when `gs` is installed (the `deviation_*` tests are pscat only).
 //!
 //! pscat has one VM, so the model is: `globaldict` and `systemdict` are the
 //! composites that are in global VM, every other string, array, dictionary
@@ -76,6 +76,22 @@ const PROBES: &[(&str, &[&str])] = &[
     ("globaldict systemdict eq", &["false"]),
     ("globaldict globaldict eq", &["true"]),
     ("globaldict /k 7 put globaldict /k get", &["7"]),
+    // On the dictionary stack: bare names find its entries, and it counts.
+    ("globaldict /gx 5 put gx", &["5"]),
+    ("/Pg { 11 } globaldict begin def end Pg", &["11"]),
+    ("countdictstack", &["3"]),
+    ("currentdict globaldict eq", &["false"]),
+    ("globaldict begin currentdict globaldict eq end", &["true"]),
+    (
+        "globaldict /gx 5 put /gx where { globaldict eq } { false } ifelse",
+        &["true"],
+    ),
+    ("/ux 1 def globaldict /ux 2 put ux", &["1"]),
+    ("cleardictstack countdictstack", &["3"]),
+    (
+        "{ end end end end } stopped { $error /errorname get /dictstackunderflow eq } { false } ifelse",
+        &["true"],
+    ),
     (
         "globaldict /k 7 put globaldict /k undef globaldict /k known",
         &["false"],
@@ -120,10 +136,11 @@ fn the_probes_give_the_values_gs_gives() {
     }
 }
 
-/// Entries put into globaldict outlive a restore even for a dict that
-/// holds a local array: only globaldict's own slots are exempt.
+/// pscat only (gs: `invalidaccess` for a local array stored in globaldict).
+/// globaldict's own slots outlive a restore; an array it holds is still
+/// rolled back like any array.
 #[test]
-fn globaldict_is_exempt_from_restore_but_what_it_holds_is_not() {
+fn deviation_globaldict_is_exempt_from_restore_but_what_it_holds_is_not() {
     assert_eq!(
         stack(
             "globaldict /a [1 2] put save globaldict /a get 0 99 put restore globaldict /a get 0 get"
@@ -167,7 +184,7 @@ fn harness(cases: &[String]) -> String {
         "/T { mark exch stopped { $error /errorname get == clear } { ] == } ifelse } def\n",
     );
     for c in cases {
-        src.push_str(&format!("{{ {c} }} T\n"));
+        src.push_str(&format!("{{ false setglobal {c} }} T\n"));
     }
     src
 }
