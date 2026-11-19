@@ -107,6 +107,25 @@ impl Sampled {
     /// as 0, as in gs. `x.len()` is the input count, checked by every
     /// caller (`nin`), so the 2^m corners here are at most 4.
     fn eval_into(&self, x: &[f64], out: &mut [f64]) {
+        let mut u = [0.0; 2];
+        for (i, ui) in u.iter_mut().enumerate().take(self.size.len().min(2)) {
+            let (d0, d1) = self.domain[i];
+            let (e0, e1) = self.encode[i];
+            let xi = x.get(i).copied().unwrap_or(0.0).clamp(d0, d1);
+            *ui = if d1 > d0 {
+                e0 + (xi - d0) * (e1 - e0) / (d1 - d0)
+            } else {
+                e0
+            };
+        }
+        self.eval_index(&u, out);
+    }
+
+    /// [`eval_into`](Self::eval_into) at a position of the sample grid
+    /// itself (`u[i]` in `0..Size[i]-1`, clamped there), past Domain and
+    /// Encode: what the PDF copy of a Type 1 shading samples at the
+    /// table's own nodes (Codex round 1 on #1322).
+    fn eval_index(&self, u: &[f64; 2], out: &mut [f64]) {
         let m = self.size.len();
         let n = self.range.len();
         // Lower node and fraction per input; strides in samples.
@@ -115,16 +134,8 @@ impl Sampled {
         let mut stride = [0u64; 2];
         let mut s = 1u64;
         for i in 0..m.min(2) {
-            let (d0, d1) = self.domain[i];
-            let (e0, e1) = self.encode[i];
-            let xi = x.get(i).copied().unwrap_or(0.0).clamp(d0, d1);
-            let e = if d1 > d0 {
-                e0 + (xi - d0) * (e1 - e0) / (d1 - d0)
-            } else {
-                e0
-            };
             let top = (self.size[i] - 1) as f64;
-            let e = e.clamp(0.0, top);
+            let e = u[i].clamp(0.0, top);
             let fl = e.floor().min((top - 1.0).max(0.0));
             lo[i] = fl as u64;
             frac[i] = e - fl;
@@ -324,6 +335,15 @@ impl PsFunction {
     /// `b - eps` isn't: it's what still gets the leg *before* the edge
     /// its true, uncollapsed value.
     fn interior_bound_positions(&self, shading_domain: (f64, f64)) -> Vec<f64> {
+        // An array of functions (#1039): every component's own bounds
+        // (Codex round 1 on #1322: only a lone stitching dict kept its
+        // hard edges).
+        if let PsFunction::Components(parts) = self {
+            return parts
+                .iter()
+                .flat_map(|p| p.interior_bound_positions(shading_domain))
+                .collect();
+        }
         let PsFunction::Stitching { bounds, .. } = self else {
             return Vec::new();
         };
@@ -377,6 +397,12 @@ impl PsFunction {
     /// stop is enough to render the flat region exactly with no
     /// further samples — not just an approximation of it.
     fn clamp_corner_positions(&self, shading_domain: (f64, f64)) -> Vec<f64> {
+        if let PsFunction::Components(parts) = self {
+            return parts
+                .iter()
+                .flat_map(|p| p.clamp_corner_positions(shading_domain))
+                .collect();
+        }
         let (d0, d1) = shading_domain;
         let span = d1 - d0;
         // Exactly zero, not a small-epsilon threshold: /Domain units
@@ -945,6 +971,25 @@ fn parse_function_range(
     func_obj: &crate::object::Object,
     ncomp: usize,
 ) -> Result<Option<Vec<(f64, f64)>>, PsError> {
+    // An array of one-output functions (#1039): each dictionary's own
+    // `/Range` clips its component, validated as for a lone dictionary
+    // (Codex round 1 on #1322: they were ignored). A component with none
+    // is unclipped.
+    if let Value::Array(a) = &func_obj.value {
+        let mut out = Vec::with_capacity(a.len());
+        let mut any = false;
+        for i in 0..a.len() {
+            let part = a.get(i).ok_or(PsError::Rangecheck)?;
+            match parse_function_range(&part, 1)? {
+                Some(r) => {
+                    any = true;
+                    out.push(r[0]);
+                }
+                None => out.push((f64::NEG_INFINITY, f64::INFINITY)),
+            }
+        }
+        return Ok(any.then_some(out));
+    }
     let Value::Dict(dr) = &func_obj.value else {
         return Ok(None);
     };
@@ -1034,9 +1079,29 @@ pub(crate) struct FunctionShading {
     /// Shading space to user space, `[a b c d tx ty]`.
     pub(crate) matrix: [f64; 6],
     pub(crate) bbox: Option<(f64, f64, f64, f64)>,
-    /// The `/Size` of the sampled function behind it, per input, when there
-    /// is one (`pdf_grid` aligns the PDF's samples to its nodes).
-    sizes: Option<[usize; 2]>,
+    /// The sampled function behind it, when there is one (every component
+    /// with the same Size, Domain and Encode): `pdf_samples` puts the PDF's
+    /// nodes on its table's own nodes.
+    leaf: Option<Leaf>,
+}
+
+/// A sampled function's grid as the PDF copy needs it: per input, its
+/// Domain, Encode and Size.
+#[derive(Clone, Copy, PartialEq)]
+struct Leaf {
+    domain: [(f64, f64); 2],
+    encode: [(f64, f64); 2],
+    size: [usize; 2],
+}
+
+/// One axis of the PDF's sampled copy: `nodes` nodes, node `j` at the
+/// source table's index `f0 + j / k`, and the PDF `/Encode` pair that maps
+/// the shading Domain onto them.
+struct PdfAxis {
+    f0: f64,
+    k: usize,
+    nodes: usize,
+    encode: (f64, f64),
 }
 
 impl FunctionShading {
@@ -1057,39 +1122,108 @@ impl FunctionShading {
         (fin(r), fin(g), fin(b))
     }
 
-    /// Nodes per axis for the PDF's sampled copy of this shading: 65, or
-    /// a grid holding every node of the sampled function behind it (a
-    /// multiple of its Size less one, plus one), so a bilinear table
-    /// comes back exactly; at most 257 per axis.
-    pub(crate) fn pdf_grid(&self) -> [usize; 2] {
-        let sizes = self.sizes.unwrap_or([2, 2]);
-        sizes.map(|s| {
-            if s < 2 {
-                return 2;
+    /// The PDF copy's grid on axis `a` when a sampled function is behind
+    /// the shading: nodes on the table's own nodes (each source interval
+    /// split `k` ways), over just the interval the shading Domain reaches
+    /// through `/Encode`, so a bilinear table comes back exactly whatever
+    /// its Encode (Codex round 1 on #1322: a uniform grid over the Domain
+    /// missed the nodes of a nondefault Encode); at most 257 nodes.
+    fn pdf_axis(&self, a: usize) -> Option<PdfAxis> {
+        let leaf = self.leaf?;
+        let (d0, d1) = leaf.domain[a];
+        let (e0, e1) = leaf.encode[a];
+        let (x0, x1) = (self.domain[2 * a], self.domain[2 * a + 1]);
+        let enc = |x: f64| {
+            if d1 > d0 {
+                e0 + (x - d0) * (e1 - e0) / (d1 - d0)
+            } else {
+                e0
             }
-            let k = 64usize.div_ceil(s - 1).max(1);
-            let g = (s - 1) * k + 1;
-            if g <= 257 { g } else { s.min(257) }
+        };
+        let top = (leaf.size[a] - 1) as f64;
+        let (u0, u1) = (enc(x0), enc(x1));
+        if !(u0.is_finite() && u1.is_finite()) {
+            return None;
+        }
+        let (lo, hi) = (u0.min(u1).clamp(0.0, top), u0.max(u1).clamp(0.0, top));
+        let f0 = lo.floor();
+        let n = ((hi.ceil() - f0) as usize).max(1);
+        let k = 64usize.div_ceil(n).max(1);
+        let k = if n * k < 257 { k } else { 1 };
+        if n >= 257 {
+            return None;
+        }
+        Some(PdfAxis {
+            f0,
+            k,
+            nodes: n * k + 1,
+            encode: ((u0 - f0) * k as f64, (u1 - f0) * k as f64),
         })
+    }
+
+    /// The colour at sample-grid position `u` of the sampled function
+    /// behind the shading (`pdf_axis`), with the shading's Range and
+    /// colour space applied as `rgb_at` does.
+    fn rgb_at_index(&self, u: [f64; 2]) -> (f32, f32, f32) {
+        let mut out = [0.0; 4];
+        match &self.function {
+            PsFunction::Sampled(s) => s.eval_index(&u, &mut out),
+            PsFunction::Components(parts) => {
+                for (o, part) in out.iter_mut().zip(parts) {
+                    if let PsFunction::Sampled(s) = part {
+                        let mut one = [0.0; 4];
+                        s.eval_index(&u, &mut one);
+                        *o = one[0];
+                    }
+                }
+            }
+            _ => {}
+        }
+        let comps = &mut out[..self.cs.ncomp()];
+        if let Some(range) = &self.range {
+            for (c, &(lo, hi)) in comps.iter_mut().zip(range) {
+                *c = c.clamp(lo, hi);
+            }
+        }
+        let (r, g, b) = self.cs.to_rgb(comps);
+        let fin = |v: f64| if v.is_finite() { v as f32 } else { 0.0 };
+        (fin(r), fin(g), fin(b))
     }
 }
 
 impl FunctionShading {
-    /// The shading's RGB colours at the nodes of `pdf_grid` over its
-    /// Domain, 8 bits a component, the first input varying fastest: the
-    /// sample table of a PDF FunctionType 0 (#1039).
-    pub(crate) fn pdf_samples(&self) -> ([usize; 2], Vec<u8>) {
-        let [gx, gy] = self.pdf_grid();
+    /// The sample table of a PDF FunctionType 0 copy of the shading
+    /// (#1039): its Size, its `/Encode` (`[0 Size-1]` per input when no
+    /// sampled function is behind it) and its RGB colours, 8 bits a
+    /// component, the first input varying fastest. On the source table's
+    /// nodes when there is one (`pdf_axis`, both axes), else 65 nodes a
+    /// side, uniform over the Domain.
+    pub(crate) fn pdf_samples(&self) -> ([usize; 2], [(f64, f64); 2], Vec<u8>) {
+        let to8 = |(r, g, b): (f32, f32, f32)| {
+            [r, g, b].map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
+        };
+        if let (Some(ax), Some(ay)) = (self.pdf_axis(0), self.pdf_axis(1)) {
+            let mut out = Vec::with_capacity(ax.nodes * ay.nodes * 3);
+            for j in 0..ay.nodes {
+                let v = ay.f0 + j as f64 / ay.k as f64;
+                for i in 0..ax.nodes {
+                    let u = ax.f0 + i as f64 / ax.k as f64;
+                    out.extend(to8(self.rgb_at_index([u, v])));
+                }
+            }
+            return ([ax.nodes, ay.nodes], [ax.encode, ay.encode], out);
+        }
+        let (gx, gy) = (65, 65);
         let [x0, x1, y0, y1] = self.domain;
         let at = |i: usize, g: usize, a: f64, b: f64| a + (b - a) * i as f64 / (g - 1) as f64;
         let mut out = Vec::with_capacity(gx * gy * 3);
         for j in 0..gy {
             for i in 0..gx {
-                let (r, g, b) = self.rgb_at(at(i, gx, x0, x1), at(j, gy, y0, y1));
-                out.extend([r, g, b].map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8));
+                out.extend(to8(self.rgb_at(at(i, gx, x0, x1), at(j, gy, y0, y1))));
             }
         }
-        ([gx, gy], out)
+        let full = |g: usize| (0.0, (g - 1) as f64);
+        ([gx, gy], [full(gx), full(gy)], out)
     }
 }
 
@@ -1138,20 +1272,24 @@ fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsErr
     if !all_inside {
         return Err(PsError::Rangecheck);
     }
-    let leaf_sizes = |f: &PsFunction| match f {
-        PsFunction::Sampled(s) => Some([s.size[0], s.size[1]]),
+    let leaf_of = |f: &PsFunction| match f {
+        PsFunction::Sampled(s) => Some(Leaf {
+            domain: [s.domain[0], s.domain[1]],
+            encode: [s.encode[0], s.encode[1]],
+            size: [s.size[0], s.size[1]],
+        }),
         _ => None,
     };
-    let sizes = match &function {
+    let leaf = match &function {
         PsFunction::Components(parts) => {
-            let first = parts.first().and_then(leaf_sizes);
+            let first = parts.first().and_then(leaf_of);
             parts
                 .iter()
-                .all(|p| leaf_sizes(p) == first)
+                .all(|p| leaf_of(p) == first)
                 .then_some(first)
                 .flatten()
         }
-        f => leaf_sizes(f),
+        f => leaf_of(f),
     };
     Ok(FunctionShading {
         cs,
@@ -1160,7 +1298,7 @@ fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsErr
         domain,
         matrix,
         bbox: parse_bbox(d)?,
-        sizes,
+        leaf,
     })
 }
 

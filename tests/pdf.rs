@@ -462,6 +462,26 @@ fn function_based_shfill_is_a_real_pdf_shading() {
     assert_gs_matches(&pdf, &canvas, "sh_function");
 }
 
+/// A sampled function with a nondefault `/Encode`: the PDF's table sits on
+/// the source table's own nodes, so the narrow white stripe that Encode
+/// puts near x = 1/128 survives (Codex round 1 on #1322: a uniform grid
+/// over the Domain sampled only black).
+#[test]
+fn function_based_shfill_keeps_the_nodes_of_a_nondefault_encode() {
+    let src = b"<< /ShadingType 1 /ColorSpace /DeviceGray /Matrix [300 0 0 300 100 100]
+       /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1] /Size [3 2]
+         /Encode [0 128 0 1] /BitsPerSample 8 /DataSource <00ff00 00ff00> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 1);
+    let text = pdf_text(&pdf);
+    // Index 0..2 split 32 ways (65 nodes), the Domain mapped to 0..4096.
+    assert!(
+        text.contains("/Size [65 65] /Encode [0 4096 0 64]"),
+        "{text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_function_encode");
+}
+
 /// Rotated, under a `/BBox` and a clip: the PDF clips to the BBox as the
 /// raster cuts it, and gs's render matches.
 #[test]

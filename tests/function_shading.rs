@@ -624,3 +624,31 @@ fn a_step_limit_stops_it_before_it_paints() {
             .all(|p| p == [255, 255, 255, 255])
     );
 }
+
+/// A `/Function` array's components keep their own `/Range` (Codex round 1
+/// on #1322): a constant-one gray component with `/Range [0 0.25]` paints
+/// quarter gray, not white.
+#[test]
+fn a_function_array_component_keeps_its_range() {
+    let it = render(
+        "<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 200 0]
+           /Function [ << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [1] /N 1
+                          /Range [0 0.25] >> ] >> shfill",
+    );
+    near(at(&it, 100.0, 100.0), [63.75; 3], 2.0, "quarter gray");
+}
+
+/// A stitching function inside a `/Function` array keeps its hard edge
+/// (Codex round 1 on #1322): black to white at the middle, not a ramp.
+#[test]
+fn a_stitching_component_keeps_its_hard_edge() {
+    let it = render(
+        "<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 200 0]
+           /Function [ << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1]
+             /Functions [ << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [0] /N 1 >>
+                          << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [1] /N 1 >> ] >> ]
+         >> shfill",
+    );
+    near(at(&it, 99.0, 100.0), [0.0; 3], 2.0, "left of the edge");
+    near(at(&it, 101.0, 100.0), [255.0; 3], 2.0, "right of the edge");
+}

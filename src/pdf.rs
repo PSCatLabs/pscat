@@ -1043,17 +1043,22 @@ Q",
         if !all.chain(ctm).all(f32::is_finite) {
             return;
         }
-        let ([gx, gy], samples) = shading.pdf_samples();
+        let ([gx, gy], [(ex0, ex1), (ey0, ey1)], samples) = shading.pdf_samples();
         let Some(data) = deflate(&[&samples]) else {
             return;
         };
         let mut func = format!(
             "<< /FunctionType 0 /Domain [{} {} {} {}] /Range [0 1 0 1 0 1] \
-             /Size [{gx} {gy}] /BitsPerSample 8 /Filter /FlateDecode /Length {} >>\nstream\n",
+             /Size [{gx} {gy}] /Encode [{} {} {} {}] /BitsPerSample 8 \
+             /Filter /FlateDecode /Length {} >>\nstream\n",
             num(x0),
             num(x1),
             num(y0),
             num(y1),
+            num(ex0),
+            num(ex1),
+            num(ey0),
+            num(ey1),
             data.len()
         )
         .into_bytes();
