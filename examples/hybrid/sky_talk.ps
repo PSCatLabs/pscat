@@ -104,7 +104,8 @@ PscatOnly {
   % function a stitching function (FunctionType 3) with a leg between each
   % pair of stops, so the gradient is smooth at any resolution and the PDF
   % holds a real /Shading, not hundreds of strips. y0 y1 [ [t r g b] ... ] -
-  % The shading pads its end colours past y0 and y1; the band is clipped to
+  % /Extend [true true] pads its end colours past y0 and y1 (a shading with
+  % no /Extend paints nothing there); the band is clipped to
   % y0 .. y1+3, so the three points over y1 take the last stop's colour (the
   % sea laps the horizon by that much and the sky's top edge is off the page).
   /vramp {
@@ -121,6 +122,7 @@ PscatOnly {
     gsave
       0 vr_y0 PW vr_y1 vr_y0 sub 3 add rectclip
       << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 vr_y0 0 vr_y1]
+         /Extend [true true]
          /Function << /FunctionType 3 /Domain [0 1]
                       /Functions vr_f /Bounds vr_b /Encode vr_e >> >> shfill
     grestore } def
