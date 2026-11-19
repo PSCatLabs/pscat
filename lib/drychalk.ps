@@ -1118,7 +1118,8 @@
 %   8 mul 610 (2.40) << /Size 20 >> sgwidth sub 10 sub le (the last dot clears the price by the gap) mustbe
 %   8 mul 110 (Croissant) << /Size 20 >> sgwidth add 10 add ge (the first dot clears the word by the gap) mustbe
 %   gsave (Croissant) (2.40) 110 610 370 << /Size 20 /Gap 3 /Pitch 5 >> dcleader grestore
-%   dcscratch /dcRa get 5 mul 110 (Croissant) << /Size 20 >> sgwidth add 3 add ge (a given /Gap and /Pitch are honoured) mustbe
+%   dcscratch /dcRa get 5 mul 110 (Croissant) << /Size 20 >> sgwidth add 3 add 2 copy ge (a given /Gap and /Pitch are honoured) mustbe
+%   5 add lt (and the first dot is within a pitch of the gap) mustbe
 %   % the dots' strength is the lettering's plus 0.15, capped at 1, never out of range
 %   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Strength 0.95 >> dcleader grestore } (a strong /Strength) mustpass
 %   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Strength 1 >> dcleader grestore } (/Strength 1) mustpass

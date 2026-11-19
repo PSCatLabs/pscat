@@ -35,7 +35,7 @@ swipe at some point, so the figures are for the whole menu, left to right:
 | middle third (the swipe and smudge) | 62 to 72 | 105 to 119 |
 | left third (the swipe and its edge) | 55 to 72 | 66 to 106 |
 
-Cinnamon roll, left third, is the weakest after the change (55 to 66): the
+The Cinnamon roll row's left third is the weakest cell and rises only from 55 to 66: the
 densest part of the smudge streak still reads a little dimmer than clean board,
 which the perceptual reviewer noted as polish.
 
