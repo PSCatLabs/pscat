@@ -13,22 +13,27 @@ of the four `/Extend`s, by rasterising the SVG with resvg
 | `/Coords [0 0 1e-7 0]` under `1e8 scale`, axial and radial | all | flattened to one colour: resvg has tiny-skia's 2^-15 tolerance on the raw numbers (4,500–250,000 px) |
 | radial with radii near 1e38 | an end not extended | `extended_for_svg` lengthened it past f32::MAX: `r="inf"` (62,828–250,000 px) |
 | hard edge at either end of the axis | all | matched under resvg, but wrote two stops at offset 1 |
-| axis that collapses in f32 | all | matched |
+| axis that collapses in f32 (`[250 0 250.000001 0]`) | all | matched the PNG; both wrong against gs (below) |
+| the same, region all before the axis (`[1000 0 1000.00001 0]`) | start only, or neither | nothing, where the PNG painted C1 over the page |
 
 **What changed** (`vector_shading`, `src/gfx.rs`; `SvgRecorder::shfill`,
 `src/svg.rs`):
 
 - The PDF branch's preparation is now a free function used by both
-  recorders: the SAFE_LEN rescale with its inverse in the transform, the
-  degenerate radial recorded as the raster's disk (or nothing), and the
-  collapsed axis as a solid fill (or nothing). The SVG writes the disk as a
-  radial from the centre, one colour, transparent past the radius, and the
-  solid case as a plain `<path>` fill. PDF output is unchanged byte for byte.
+  recorders: the SAFE_LEN rescale with its inverse in the transform, and the
+  degenerate radial recorded as the raster's disk (or nothing). The SVG
+  writes the disk as a radial from the centre, one colour, transparent past
+  the radius.
+- An axis that collapses in f32 paints nothing in all three outputs, as gs
+  does (below). Before, the raster painted tiny-skia's solid last stop and
+  the PDF recorded it (#1028); with the region wholly before the axis and
+  the end not extended, the raster still painted it (the unreached end kept
+  its opaque shader), which the review of this PR found.
 - If lengthening the gradient for an unextended end is not finite, it is
   done at an eighth of the size, with `gradientTransform` multiplying it back
   (a power of two, so exact). If that still is not finite, nothing is
   written, as the PDF does.
-- A hard edge at an end that pads is never two stops at offset 0 (or 1).
+- A hard edge at the end, when it pads, is never two stops at offset 1.
   The inner stop moves in by 1e-6 (the PDF's `EDGE`), or onto its neighbour
   if that is nearer. Chrome 158 and resvg pad with the outermost stop either
   way. #1040 found renderers differ on duplicate terminal stops, so this is
@@ -36,6 +41,18 @@ of the four `/Extend`s, by rasterising the SVG with resvg
 
 After: every case under every `/Extend` matches (0 pixels off), and no SVG
 carries `inf` or `NaN`.
+
+### An axis that collapses in f32
+
+gs 10.07.1, the same page and colours, pixels as above: `[1000 0 1000.00001 0]`
+and `[250 0 250.000001 0]` paint nothing (127 gray everywhere) under every
+`/Extend`, including `[true true]`. The spec has no length-zero axis to
+extend. A short axis distinct in f32 is a gradient in gs: `[0 0 1e-7 0]`
+under `1e8 scale` runs (242,0,12) at x=0 to (0,0,255) by x=10. So pscat now
+decides coincidence on the f32 Coords (`Gfx::shfill_limited`), where it
+used to compare the f64 ones; PNG, SVG and PDF all paint nothing.
+`an_axis_that_collapses_in_f32_paints_nothing` (`tests/pdf.rs`) checks the
+raster, the PDF and gs on the PostScript itself.
 
 ### Equal concentric circles: the decision
 

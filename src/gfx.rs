@@ -2219,9 +2219,16 @@ impl Gfx {
         // construction (equal points stay equal under any linear
         // transform); anything short of that renders as an ordinary,
         // if very sharp, gradient — exactly what gs would do too.
+        //
+        // Coincidence is decided on the f32 Coords tiny-skia is given
+        // (#1041): `[250 0 250.000001 0]` is one point there, and gs 10.07.1
+        // paints nothing for it, or for `[1000 0 1000.00001 0]`, under every
+        // `/Extend`. pscat used to paint tiny-skia's solid last stop (and the
+        // PDF recorded it, #1028), which only gs's picture of the f64-equal
+        // case ruled out. `[0 0 1e-7 0]` stays a gradient: distinct in f32.
         if let crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } = shading.kind
-            && x0 == x1
-            && y0 == y1
+            && x0 as f32 == x1 as f32
+            && y0 as f32 == y1 as f32
         {
             return Ok(0);
         }
@@ -2514,7 +2521,7 @@ impl Gfx {
             if self.svg.is_some() || self.pdf.is_some() {
                 // The same shading for both vector recorders (#1028,
                 // #1041): rescaled as the raster is, and its degenerate
-                // cases recorded as the raster paints them.
+                // radial recorded as the raster paints it.
                 let vector = vector_shading(&shading, ctm);
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(svg) = &mut self.svg {
@@ -2526,9 +2533,6 @@ impl Gfx {
                     let region_d = path.to_svg_data();
                     match &vector {
                         VectorShading::Nothing => {}
-                        VectorShading::Solid(rgb) => {
-                            svg.fill(&region_d, FillRule::Winding, *rgb, comp, &chain);
-                        }
                         VectorShading::Shading {
                             kind,
                             ctm,
@@ -2540,9 +2544,6 @@ impl Gfx {
                 if let Some(pdf) = &mut self.pdf {
                     match &vector {
                         VectorShading::Nothing => {}
-                        VectorShading::Solid(rgb) => {
-                            pdf.fill(&path, FillRule::Winding, *rgb, comp, &chain);
-                        }
                         VectorShading::Shading {
                             kind,
                             ctm,
@@ -4657,8 +4658,6 @@ const SHFILL_SAFE_LEN: f32 = 1.0;
 enum VectorShading<'a> {
     /// Nothing painted.
     Nothing,
-    /// The region filled in one colour.
-    Solid((f32, f32, f32)),
     /// A real gradient: geometry under `SHFILL_SAFE_LEN` rescaled, with the
     /// inverse folded into `ctm`.
     Shading {
@@ -4687,12 +4686,8 @@ enum VectorShading<'a> {
 /// the disk is recorded: a radial from the centre out to the radius, one
 /// colour, extending neither end (Codex reviews of #1028).
 ///
-/// An axis that tiny-skia finds degenerate (its tolerance, on the same f32
-/// numbers: distinct f64 Coords can collapse) paints the last stop, solid,
-/// over the region: the end colour if the end extends, else nothing (its
-/// closing stop is transparent). A PDF reader paints such a shading as
-/// nothing, so that solid fill is recorded instead (a Codex review of
-/// #1028).
+/// An axis that collapses in f32 never gets here: like gs, the raster
+/// paints nothing for it (#1041).
 fn vector_shading(shading: &crate::shading::Shading, ctm: Transform) -> VectorShading<'_> {
     use crate::shading::ShadingKind as K;
     let char_len = match shading.kind {
@@ -4746,14 +4741,6 @@ fn vector_shading(shading: &crate::shading::Shading, ctm: Transform) -> VectorSh
                 ctm,
                 stops: std::borrow::Cow::Owned(vec![(0.0, r, g, b), (1.0, r, g, b)]),
                 extend: [false, false],
-            }
-        }
-        crate::svg::ShKind::Axial { x0, y0, x1, y1 }
-            if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
-        {
-            match shading.stops.last().filter(|_| shading.extend[1]) {
-                Some(l) => VectorShading::Solid((l.1, l.2, l.3)),
-                None => VectorShading::Nothing,
             }
         }
         kind => VectorShading::Shading {

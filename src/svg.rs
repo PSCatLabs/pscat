@@ -757,18 +757,18 @@ fn extended_for_svg(
         .iter()
         .map(|&(t, r, g, b)| (t, r, g, b, 1.0))
         .collect();
-    // A hard edge at an end that pads (two stops at offset 0, or at 1):
-    // the raster pads with the outermost stop, but renderers differ on two
+    // A hard edge at the end, when it pads (two stops at offset 1): the
+    // raster pads with the outermost stop, but renderers differ on two
     // stops at one terminal offset, so the inner one is moved in by a
     // sliver, `EDGE` (as the PDF writer does, #1028), or onto its
-    // neighbour if that is nearer (#1041).
+    // neighbour if that is nearer (#1041). Only the end needs it: a
+    // stitching bound at the domain's start is not interior
+    // (`interior_bound_positions`), so no stop of another colour lands at 0,
+    // while one just under 1 can round to 1 in f32.
     const EDGE: f32 = 1e-6;
     let n = opaque.len();
-    if extend[0] && n >= 3 && opaque[1].0 <= opaque[0].0 {
-        opaque[1].0 = EDGE.min(opaque[2].0);
-    }
     if extend[1] && n >= 3 && opaque[n - 2].0 >= opaque[n - 1].0 {
-        opaque[n - 2].0 = (1.0 - EDGE).max(opaque[n - 3].0);
+        opaque[n - 2].0 = (1.0 - EDGE).max(opaque[n - 3].0).min(opaque[n - 1].0);
     }
     if before == 0.0 && after == 0.0 {
         return (*kind, opaque);

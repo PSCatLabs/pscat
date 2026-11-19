@@ -721,9 +721,9 @@ renders eight examples in both and compares block-downsampled output).
   `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
   the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
   Both vector recorders take the shading from `vector_shading` (#1041): the
-  raster's sub-unit rescale, its degenerate disk and its collapsed-axis
-  solid fill, so SVG and PDF show what the PNG shows (`tests/svg_shading.rs`
-  checks every case under resvg). Equal concentric circles follow gs's disk,
+  raster's sub-unit rescale and its degenerate disk, so SVG and PDF show
+  what the PNG shows (`tests/svg_shading.rs` checks every case under
+  resvg). An axis that collapses in f32 paints nothing anywhere, as in gs. Equal concentric circles follow gs's disk,
   not its one-pixel ring (`notes/1041-svg-shading-edge-cases.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs

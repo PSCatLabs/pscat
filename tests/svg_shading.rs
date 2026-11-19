@@ -12,8 +12,10 @@ const SIZE: u32 = 500;
 
 const RED_BLUE: &str = "/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>";
 
-/// A hard edge at each end of the axis: red for an instant at 0, blue for
-/// an instant at 1, green between.
+/// A stitching function with zero-width legs at both ends: green across
+/// the axis and blue from its last instant (red, the first leg, spans
+/// nothing: t = 0 already takes the green leg), so the stops end in a hard
+/// edge at offset 1.
 const HARD_EDGES: &str = "/Function << /FunctionType 3 /Domain [0 1] /Bounds [0 0.99999988 1]
      /Encode [0 1 0 1 0 1 0 1] /Functions [
        << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >>
@@ -24,7 +26,7 @@ const HARD_EDGES: &str = "/Function << /FunctionType 3 /Domain [0 1] /Bounds [0 
 const EXTENDS: [&str; 4] = ["false false", "true false", "false true", "true true"];
 
 /// (name, what goes before the dictionary, the dictionary's own keys).
-const CASES: [(&str, &str, &str); 12] = [
+const CASES: [(&str, &str, &str); 13] = [
     ("edges", "", "/ShadingType 2 /Coords [100 0 400 0]"),
     (
         "equal",
@@ -72,6 +74,11 @@ const CASES: [(&str, &str, &str); 12] = [
         "/ShadingType 3 /Coords [250 250 1e38 250 250 3e38]",
     ),
     ("max-axial", "", "/ShadingType 2 /Coords [-3e38 0 3e38 0]"),
+    (
+        "collapsed-axis-off-page",
+        "",
+        "/ShadingType 2 /Coords [1000 0 1000.00001 0]",
+    ),
     (
         "max-radial-shrink",
         "",
@@ -184,7 +191,7 @@ fn every_edge_case_rasterises_as_the_png() {
     }
 }
 
-/// A hard edge at an end that pads: never two stops at offset 0 (or 1),
+/// A hard edge at the end, when it pads: never two stops at offset 1,
 /// which renderers settle differently; the inner one moves in by a sliver,
 /// and the outermost stops keep the padded colours.
 #[test]
@@ -276,8 +283,8 @@ fn huge_geometry_is_lengthened_at_an_eighth_of_its_size() {
 
 /// What each remaining case writes, under each `/Extend`, in the SVG's own
 /// terms (the pixel test above checks what a renderer makes of it):
-/// - an axis that collapses in f32 is a plain `<path>` in the end colour
-///   when the end extends (the PNG's solid fill), else nothing;
+/// - an axis that collapses in f32, across the page or off it, is nothing,
+///   as gs paints it (and the PNG);
 /// - circles nearly equal are the disk, in the colour of the end that
 ///   pads: the end colour when shrinking by a hair, the start colour when
 ///   growing;
@@ -289,13 +296,13 @@ fn each_degenerate_case_writes_what_the_png_paints() {
             let mut it = ext.split(' ').map(|e| e == "true");
             [it.next().unwrap(), it.next().unwrap()]
         };
-        let (_, svg) = png_and_svg(&program("collapsed-axis", "", CASES[6].2, ext));
-        assert!(!svg.contains("Gradient"), "collapsed [{ext}]: {svg}");
-        assert_eq!(
-            svg.contains("fill=\"#0000ff\""),
-            end,
-            "collapsed [{ext}]: {svg}"
-        );
+        for case in [6, 11] {
+            let (name, pre, dict) = CASES[case];
+            let (png, svg) = png_and_svg(&program(name, pre, dict, ext));
+            assert!(!svg.contains("Gradient"), "{name} [{ext}]: {svg}");
+            assert!(!svg.contains("#0000ff"), "{name} [{ext}]: {svg}");
+            assert_eq!(rgb(&png, 100, 100), [128, 128, 128], "{name} [{ext}]");
+        }
         for (case, colour, on) in [(2, "#0000ff", end), (3, "#ff0000", start)] {
             let (name, pre, dict) = CASES[case];
             let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
@@ -313,7 +320,7 @@ fn each_degenerate_case_writes_what_the_png_paints() {
                 );
             }
         }
-        for case in [5, 11] {
+        for case in [5, 12] {
             let (name, pre, dict) = CASES[case];
             let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
             let d = defs(&svg);
