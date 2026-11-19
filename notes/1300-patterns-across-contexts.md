@@ -99,10 +99,14 @@ stripes 4 and 5 px wide in turn, hence its 1.8-1.9; hayro resamples a
 pattern inside a pattern stream (blurred, same placement), so the
 first two skip it.
 
-Single-context patterns are unchanged: the two-binary identity check
-(base `feature/0.7.1` against this branch) renders PNG, SVG and PDF of
-every earlier picture in `tests/patterns.rs` and `examples/patterns.ps`
-byte for byte alike.
+Single-context patterns are unchanged. With the base binary (built from
+`feature/0.7.1` at 561581ab) and this branch's: the eleven earlier
+pictures in `tests/patterns.rs` and `examples/patterns.ps` render PNG,
+SVG and PDF byte for byte alike, the four new ones all differ (the
+control), and the base binary against itself is stable on all fifteen.
+`scripts/identity_check.sh` with `--base-bin/--head-bin` on
+`examples/patterns.ps` (plus its default drivers): 20 of 20 pages
+identical, the control (the first picture above) differing.
 
 ## Gaps
 
@@ -114,3 +118,22 @@ byte for byte alike.
   resampled twice (into the outer tile, then onto the page); gs draws the
   outer cell at a whole-pixel position per copy, pscat at its exact
   lattice position.
+- A pattern painted inside an *uncoloured* pattern's `PaintProc` (from
+  the page or made there): the raster takes its coverage, as gs does,
+  but the PDF stream of an uncoloured pattern takes no colour, so it
+  fills solid there, and SVG writes the inner pattern's own colours.
+  This already happened before this change for a pattern made in that
+  `PaintProc` itself; a follow-up.
+- pscat runs a `PaintProc` at `makepattern`, gs at first use, so a
+  `PaintProc` that names a page pattern made after the outer
+  `makepattern` is `undefined` in pscat and works in gs. This feature
+  makes the difference reachable.
+- At a 127.35 px outer step (outer scale 1.5, `/YStep 84.9`) the inner
+  lattice is a pixel off gs's; sixteen other measured cases match.
+  Single-context patterns at half-pixel steps can already differ in
+  phase from gs (gs moves cells so the `/BBox` corner lands on a pixel,
+  pscat rounds the pattern origin).
+
+A three-level case (a page pattern inside Q's `PaintProc`, Q made inside
+R's, R on the page with fractional translations) matches gs's raster
+(0.3% of pixels, edges only).
