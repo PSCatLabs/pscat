@@ -623,3 +623,26 @@ fn an_uncoloured_pattern_made_in_a_pattern_space_still_paints() {
         "the second pattern is missing: {blue} blue pixels"
     );
 }
+
+/// A pattern fill under `setalpha` keeps its pattern: the 16-bit fill
+/// shadow (#731) composites a flat colour, so it must not take a pattern
+/// fill's translucent or edge runs (they turned a flat grey once both
+/// landed on feature/0.7.1).
+#[test]
+fn a_translucent_pattern_fill_keeps_its_pattern() {
+    let out = render(&HATCH.replace("hatch setpattern", "hatch setpattern 0.5 setalpha"));
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    let (mut white, mut blue) = (0, 0);
+    for y in 150..250 {
+        for x in 150..250 {
+            let p = px(x, y);
+            if p.red() >= 250 && p.green() >= 250 && p.blue() >= 250 {
+                white += 1;
+            } else if u16::from(p.blue()) > u16::from(p.red()) + 40 {
+                blue += 1;
+            }
+        }
+    }
+    assert!(white > 1500, "the hatch's gaps stay white: {white}");
+    assert!(blue > 1000, "the hatch's lines stay blue: {blue}");
+}

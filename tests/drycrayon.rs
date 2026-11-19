@@ -154,10 +154,17 @@ fn dycrayon_every_documented_parameter_changes_the_render() {
         ("Strength", "/Strength 0.5"),
         ("Seed", "/Seed 12"),
     ];
-    for (_, extra) in varied {
+    for (key, extra) in varied {
+        // At /Touch 0.7 the landing's press already saturates the core, so
+        // it is compared at a light touch (#731: the 8-bit page used to
+        // round a level differently on 2 pixels, which made it look live).
+        let (got, want) = if key == "Landing" {
+            (stroke(&format!("/Touch 0.3 {extra}")), stroke("/Touch 0.3"))
+        } else {
+            (stroke(extra), baseline.clone())
+        };
         assert_ne!(
-            stroke(extra),
-            baseline,
+            got, want,
             "{extra} rendered the same as the baseline: a no-op"
         );
     }
