@@ -227,7 +227,7 @@ impl CapabilityFilter {
     }
 
     fn matches(&self, c: &Capability) -> bool {
-        (self.names.is_empty() || self.names.iter().any(|n| *n == c.name))
+        (self.names.is_empty() || self.names.contains(&c.name))
             && self.kind.as_deref().is_none_or(|k| c.kind.as_str() == k)
             && self
                 .source
