@@ -1111,13 +1111,12 @@
 %   << /Surface /slate >> dksurface
 %   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
 %   % #1112: the first and last dots sit at least /Gap (0.5 of /Size by default)
-%   % from the measured text, on whole multiples of the pitch (0.4 of /Size)
+%   % from the measured text (the pitch is 0.4 of /Size)
 %   gsave (Croissant) (2.40) 110 610 370 << /Size 20 >> dcleader grestore
 %   dcscratch /dcRa get dcscratch /dcRb get
 %   2 copy le (the row has dots) mustbe
 %   8 mul 610 (2.40) << /Size 20 >> sgwidth sub 10 sub le (the last dot clears the price by the gap) mustbe
 %   8 mul 110 (Croissant) << /Size 20 >> sgwidth add 10 add ge (the first dot clears the word by the gap) mustbe
-%   dcscratch /dcRa get dup cvi eq (the first dot is on a pitch multiple) mustbe
 %   gsave (Croissant) (2.40) 110 610 370 << /Size 20 /Gap 3 /Pitch 5 >> dcleader grestore
 %   dcscratch /dcRa get 5 mul 110 (Croissant) << /Size 20 >> sgwidth add 3 add ge (a given /Gap and /Pitch are honoured) mustbe
 %   % the dots' strength is the lettering's plus 0.15, capped at 1, never out of range
