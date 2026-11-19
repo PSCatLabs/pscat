@@ -129,9 +129,12 @@ More on the less obvious ones:
   included. It looks the same as the outlines (the glyphs are the same
   shapes at the same positions, `ashow`/`kshow`/`xyshow` spacing
   included), copies and searches as text, and a text page is far smaller
-  (a page of Times went from 741 KB to 8 KB). Type 1 and Type 3 fonts
-  from a program, `charpath` text, Symbol and Dingbats glyphs, and fonts
-  whose licence bits forbid embedding stay outlines. PNG and SVG output
+  (a page of Times went from 741 KB to 8 KB). Symbol's Greek letters and
+  maths signs and ZapfDingbats' dingbats extract as their Unicode
+  characters (`notes/1026-pdf-text-symbol-dingbats.md`). Type 1 and Type 3
+  fonts from a program, `charpath` text, the few Symbol and Dingbats glyphs
+  with no Unicode value (bracket, brace and radical pieces, arrow
+  extenders, the ornamental brackets), and fonts whose licence bits forbid embedding stay outlines. PNG and SVG output
   are not affected (`notes/1193-pdf-text.md`). The browser build and npm
   package have it too: `{ pdf: true, pdfText: true }`, the same bytes as the
   command line (`notes/1205-pdf-text-wasm.md`).
