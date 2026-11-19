@@ -163,6 +163,11 @@ impl Lexer {
         }
     }
 
+    /// The limits this scanner charges its work to, if any (#1123).
+    pub(crate) fn decode_budget(&self) -> Option<&DecodeBudget> {
+        self.limits.as_deref()
+    }
+
     /// Have this scanner's token buffers ask `limits` before they grow.
     pub(crate) fn with_limits(mut self, limits: Rc<DecodeBudget>) -> Self {
         self.limits = Some(limits);
