@@ -7450,9 +7450,9 @@ systemdict /setalpha known /pwhasalpha exch def
         pvn 0 lt { /pvn 0 def } if
         pvn 60000 gt { pkpaper-grain-count-exceeds-safety-limit } if
 
-        % The caller's alpha, read before the gsave below resets it, so a
-        % `gsave 0.6 setalpha ... pkpaper grestore` fades the ground and
-        % its grain together, the same rule pkwash follows (#1161, #1075).
+        % The caller's alpha, read once here (the code below sets its own
+        % inside a gsave), so a `gsave 0.6 setalpha ... pkpaper grestore`
+        % fades the ground and its grain together, the same rule pkwash follows (#1161, #1075).
         % At 1 the products are exact, so a ground made under the default
         % alpha is unchanged. The fallback paints opaque flattened tones
         % and has no alpha to fade.

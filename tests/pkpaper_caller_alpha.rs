@@ -63,19 +63,39 @@ fn alpha_one_is_the_ground_with_no_caller_alpha_at_all() {
 }
 
 #[test]
-fn the_caller_alpha_multiplies_the_grain_alpha_exactly() {
-    // With no grain the ground alone is compared: a plain half-alpha fill.
+fn a_faded_ground_with_no_grain_is_a_plain_half_alpha_fill() {
     let ground = paper(0.5, "/Tone [0.96 0.94 0.88] /Grain 0 /Seed 3");
     let plain =
         page("gsave 0.5 setalpha 0.96 0.94 0.88 setrgbcolor 20 20 160 160 rectfill grestore");
     assert_eq!(ground, plain);
-    // Halving is exact: 0.5 x /Alpha 0.4 is /Alpha 0.2 for every grain mark,
-    // but the ground is half-faded in one and opaque in the other, so compare
-    // the grain over a ground that is the same in both (/Tone as the backdrop
-    // colour is not possible here): check grain strength moves with alpha.
-    let a = paper(0.5, OPTS);
-    let b = paper(0.5, "/Tone [0.96 0.94 0.88] /Grain 0.6 /Alpha 0.2 /Seed 3");
-    assert_ne!(a, b, "grain alpha must still follow /Alpha");
+}
+
+/// Largest per-channel difference between two pages.
+fn max_diff(a: &[u8], b: &[u8]) -> u8 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| x.abs_diff(*y))
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn the_caller_alpha_multiplies_the_grain_alpha() {
+    // The tone is the backdrop colour, so the ground itself is invisible
+    // at any alpha and only the grain shows. Caller 0.5 x /Alpha 0.4 must
+    // then look like caller 1 x /Alpha 0.2 (up to rounding in the half-alpha
+    // ground fill), and nothing like caller 1 x /Alpha 0.4.
+    let o =
+        |alpha: &str| format!("/Tone [0.1 0.2 0.8] /Grain 0.6 /Depth 0.6 /Alpha {alpha} /Seed 3");
+    let faded = paper(0.5, &o("0.4"));
+    let same = paper(1.0, &o("0.2"));
+    let strong = paper(1.0, &o("0.4"));
+    assert!(max_diff(&faded, &same) <= 2, "{}", max_diff(&faded, &same));
+    assert!(
+        max_diff(&faded, &strong) > 10,
+        "{}",
+        max_diff(&faded, &strong)
+    );
 }
 
 #[test]
@@ -86,4 +106,9 @@ fn the_callers_alpha_is_back_after_the_ground() {
         .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
     let top = format!("{:?}", it.operand_stack().last());
     assert!(top.contains("0.6"), "{top}");
+    // Blend mode is the caller's too: the ground sets /Normal inside its gsave.
+    it.run_str("/Multiply setblendmode 0 0 100 100 << /Seed 1 >> pkpaper currentblendmode")
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let top = format!("{:?}", it.operand_stack().last());
+    assert!(top.contains("Multiply"), "{top}");
 }
