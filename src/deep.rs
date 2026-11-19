@@ -62,7 +62,8 @@ pub(crate) struct Source {
 impl Source {
     pub(crate) fn new(rgb8: [u8; 3], alpha: f32, blend: Blend) -> Self {
         Source {
-            rgb: rgb8.map(|c| f32::from(c) * FROM_U8),
+            // As tiny-skia's `Color::from_rgba8` (`NormalizedF32::new_u8`).
+            rgb: rgb8.map(|c| f32::from(c) / 255.0),
             alpha: alpha.clamp(0.0, 1.0),
             blend,
         }
@@ -265,6 +266,8 @@ fn blend_span<const COV: bool, const MUL: bool>(
 ) {
     let sa = s[3];
     let inv_sa = 1.0 - sa;
+    // The colour's bytes when the source is opaque source-over.
+    let opaque = (!MUL && sa >= 1.0).then(|| s.map(|v| (v * 255.0).round() as u8));
     for (i, (d16, p8)) in deep
         .chunks_exact_mut(4)
         .zip(page.chunks_exact_mut(4))
@@ -276,7 +279,20 @@ fn blend_span<const COV: bool, const MUL: bool>(
                 // tiny-skia's lerp by 0 stores the pixel unchanged.
                 continue;
             }
-            f32::from(m) * FROM_U8
+            if m == 255
+                && let Some(px) = opaque
+            {
+                // An opaque source-over at full coverage is the colour
+                // (tiny-skia's `(s - d) * 1 + d` rounds back to its byte):
+                // the inside of a clipped opaque fill.
+                p8.copy_from_slice(&px);
+                for c in 0..4 {
+                    d16[c] = u16::from(px[c]) * 257;
+                }
+                continue;
+            }
+            // As tiny-skia's `lerp_u8`.
+            f32::from(m) / 255.0
         } else {
             1.0
         };
@@ -390,6 +406,28 @@ mod tests {
                     skia(backdrop, rgb, 255, sk, m),
                     "{dp:?} {rgb:?} over {backdrop:?} at coverage {m}"
                 );
+            }
+        }
+    }
+
+    /// Every coverage over every grey backdrop, for a few colours: the
+    /// sampled test above, made exhaustive where ties are likeliest.
+    #[test]
+    fn every_coverage_over_every_grey_matches_tiny_skia() {
+        for rgb in [[0, 0, 0], [255, 255, 255], [128, 64, 200], [1, 254, 127]] {
+            for m in 0..=255_u8 {
+                for g in 0..=255_u8 {
+                    for (sk, dp) in [
+                        (BlendMode::SourceOver, Blend::Normal),
+                        (BlendMode::Multiply, Blend::Multiply),
+                    ] {
+                        assert_eq!(
+                            deep([g, g, g, 255], rgb, 1.0, dp, m),
+                            skia([g, g, g, 255], rgb, 255, sk, m),
+                            "{dp:?} {rgb:?} over grey {g} at coverage {m}"
+                        );
+                    }
+                }
             }
         }
     }

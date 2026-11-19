@@ -191,6 +191,27 @@ fn artkit_piece_matches_byte_for_byte() {
     );
 }
 
+/// Stacked faint fills composite in the 16-bit shadow (#731): each band
+/// keeps its own, and a band's rows come out as the plain render's.
+const FAINT_STACK: &str = "0 setgray 0 0 120 90 rectfill 1 setgray
+0.002 setalpha 1000 { 3 3 60 40 rectfill } repeat
+0.01 setalpha 200 { 90 45 30 0 360 arc fill } repeat
+showpage
+";
+
+#[test]
+fn a_stack_of_faint_fills_matches_byte_for_byte() {
+    let dir = common::scratch_dir("bands-faint");
+    let file = write_source(&dir, "faint.ps", FAINT_STACK);
+    let file = file.to_str().expect("utf-8 path");
+    assert_bands_match(
+        "bands-faint-r",
+        file,
+        &["--page", "120x90", "--dpi", "100"],
+        &[2, 5],
+    );
+}
+
 #[test]
 fn every_page_of_a_multi_page_program_is_banded() {
     let dir = common::scratch_dir("bands-pages");

@@ -1483,14 +1483,16 @@ renders eight examples in both and compares block-downsampled output).
 
 - **Fills and glyphs composite in a 16-bit shadow of the page**
   (`src/deep.rs`, #731 part 2). `fill_coverage_limited` blends every run
-  except an opaque, fully covered one in f32 with the exact alpha, and
-  writes both the shadow and the 8-bit `pixmap`, which stays the page every
+  except an opaque, fully covered one at 16 bits with the exact alpha
+  (integers for translucent source-over, f32 in tiny-skia's order for the
+  rest), and writes both the shadow and the 8-bit `pixmap`, which stays the page every
   reader sees. Strokes, images and `shfill` still write only the 8-bit
   pixmap through tiny-skia; each shadow pixel checks itself against the
   8-bit one and reloads from it when another writer moved it, so a new
   writer needs no hook. Clear the shadow (`self.deep.clear()`) wherever
   the page is erased. A first blend at alpha 1 gives tiny-skia's bytes
-  exactly (a test pins it), so only stacked or translucent pixels move.
+  exactly (a test pins it), so only stacked or translucent pixels move
+  (an edge a second fill blends over counts as stacked).
   Under `--max-memory` the shadow is off when a page of it (8 bytes a
   pixel) would pass a quarter of the cap. See
   `notes/731-16bit-compositing-shadow.md`.
