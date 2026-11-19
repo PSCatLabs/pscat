@@ -55,7 +55,7 @@ pub(crate) const MAX_TILE_PIXELS: u64 = 1 << 26;
 
 /// Most copies of the capture canvas folded into the period: a cell
 /// thousands of steps wide is refused, not drawn thousands of times over.
-const MAX_FOLD_COPIES: u64 = 1 << 16;
+pub(crate) const MAX_FOLD_COPIES: u64 = 1 << 16;
 
 /// What `makepattern` read from a PatternType 1 dictionary.
 #[derive(Clone, Debug)]

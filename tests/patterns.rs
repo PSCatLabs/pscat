@@ -551,3 +551,40 @@ fn sethsbcolor_leaves_a_pattern_space_for_devicergb_as_in_gs() {
         "[/DeviceRGB] 0.75 0.5 0.5 0.0"
     );
 }
+
+/// A pattern set before an anisotropic CTM, painted by a thick stroke
+/// (drawn in pen space, #1196): the stripes stay where `makepattern` put
+/// them on the page, as gs paints them, in PNG and SVG alike (Codex round
+/// 1 on #1301: the pen transform also moved the pattern).
+const PEN_STROKE: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 20 20] /XStep 20 /YStep 20
+   /PaintProc { pop 0.8 0.1 0.1 setrgbcolor 0 0 10 20 rectfill } >> matrix makepattern /stripes exch def
+stripes setpattern
+gsave 3 1 scale 30 setlinewidth 10 60 moveto 120 340 lineto stroke grestore
+gsave [1 0.4 0 1 0 0] concat 24 setlinewidth 40 20 moveto 300 120 lineto stroke grestore
+340 340 40 40 rectfill
+";
+
+#[test]
+fn a_pattern_stroke_under_an_anisotropic_ctm_stays_in_place() {
+    check_all("pen stroke", PEN_STROKE, 1, true);
+}
+
+/// A cell 100 steps wide whose art sits in its first step: every copy that
+/// reaches the cell is in the SVG, so it is not blank (Codex round 1 on
+/// #1301: a 64-step cap kept steps -99..-36 and lost the one at 0).
+const WIDE_CELL: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 100 1] /XStep 1 /YStep 1
+   /PaintProc { pop 0.1 0.2 0.8 setrgbcolor 0 0 1 1 rectfill } >> matrix makepattern /wide exch def
+gsave 4 4 scale wide setpattern 5 5 40 40 rectfill grestore
+";
+
+#[test]
+fn a_cell_many_steps_wide_keeps_every_copy_in_svg() {
+    let out = check_all("wide cell", WIDE_CELL, 1, false);
+    // The raster is filled where the rect is.
+    let p = out.png.pixel(100, SIZE - 100).expect("pixel");
+    assert!(p.blue() > 150 && p.red() < 100, "{p:?}");
+}

@@ -2895,9 +2895,21 @@ impl Gfx {
                     Transform::identity(),
                     mask.as_deref(),
                 ),
+                // Mapped to device space here rather than by `fill_path`'s
+                // transform, which would also move a pattern shader off the
+                // device-space placement `makepattern` gave it. tiny-skia
+                // maps the path the same way itself, so a colour stroke is
+                // unchanged.
                 StrokeDraw::PenOutline(outline, l) => {
-                    self.pixmap
-                        .fill_path(outline, &paint, FillRule::Winding, *l, mask.as_deref())
+                    if let Some(device) = outline.clone().transform(*l) {
+                        self.pixmap.fill_path(
+                            &device,
+                            &paint,
+                            FillRule::Winding,
+                            Transform::identity(),
+                            mask.as_deref(),
+                        )
+                    }
                 }
                 StrokeDraw::Hairlines(groups) => {
                     for (thin, path) in groups {

@@ -84,7 +84,9 @@ pub struct SvgRecorder {
     /// Pattern defs on this page (#1038), by tile identity and, for an
     /// uncoloured tile, colour; the `Rc` keeps the address from being
     /// reused while the entry exists, as in `clip_ids`.
-    pattern_ids: HashMap<(usize, Option<String>), (Rc<PatternTile>, usize)>,
+    /// Keyed by tile, uncoloured colour and, for a pen-space stroke, the
+    /// pen's linear map's bits (the `<pattern>` is placed through its inverse).
+    pattern_ids: HashMap<(usize, Option<String>, Option<[u32; 4]>), (Rc<PatternTile>, usize)>,
     /// Tiles whose content group is already in this page's defs.
     tile_groups: HashMap<usize, Rc<PatternTile>>,
     next_pattern: usize,
@@ -152,12 +154,14 @@ impl SvgRecorder {
     }
 
     /// The paint attribute value for `ink`: a colour, or a reference to the
-    /// pattern def, written into this page's defs on first use.
-    fn ink_attr(&mut self, ink: &Ink) -> String {
+    /// pattern def, written into this page's defs on first use. `pen` is the
+    /// linear map of a pen-space stroke's own `transform` (#1196), which a
+    /// `userSpaceOnUse` pattern would otherwise inherit.
+    fn ink_attr(&mut self, ink: &Ink, pen: Option<tiny_skia::Transform>) -> String {
         match ink {
             Ink::Rgb(_) if self.uncolored => "currentColor".to_string(),
             Ink::Rgb(rgb) => Self::color(*rgb),
-            Ink::Pattern(tile, rgb) => self.pattern_ref(tile, *rgb),
+            Ink::Pattern(tile, rgb) => self.pattern_ref(tile, *rgb, pen),
         }
     }
 
@@ -172,14 +176,23 @@ impl SvgRecorder {
     /// clip go in the page's defs once per tile. Its
     /// `patternTransform` is the tile's adjusted pattern matrix, the one
     /// the raster paints with. An uncoloured tile's content is in
-    /// `currentColor`, set by a `color` on the cell's group.
-    fn pattern_ref(&mut self, tile: &Rc<PatternTile>, rgb: (f32, f32, f32)) -> String {
+    /// `currentColor`, set by a `color` on the cell's group. For a stroke
+    /// drawn in pen space under `pen` (its element `transform`), the
+    /// `patternTransform` is `pen`'s inverse times that matrix, so the
+    /// pattern lands where it does on the page, as in the raster.
+    fn pattern_ref(
+        &mut self,
+        tile: &Rc<PatternTile>,
+        rgb: (f32, f32, f32),
+        pen: Option<tiny_skia::Transform>,
+    ) -> String {
         let Some(st) = &tile.svg else {
             return "none".to_string();
         };
         let tkey = Rc::as_ptr(tile) as usize;
         let colour = tile.uncolored.then(|| Self::color(rgb));
-        let key = (tkey, colour.clone());
+        let pen_bits = pen.map(|l| [l.sx, l.ky, l.kx, l.sy].map(f32::to_bits));
+        let key = (tkey, colour.clone(), pen_bits);
         if let Some((_, id)) = self.pattern_ids.get(&key) {
             return format!("url(#{}p{id})", self.prefix);
         }
@@ -202,12 +215,17 @@ impl SvgRecorder {
         let id = self.next_pattern;
         self.next_pattern += 1;
         let (ax, ay) = (tile.spec.xstep.abs() as f32, tile.spec.ystep.abs() as f32);
+        let placement = match pen.and_then(|l| l.invert()) {
+            Some(inv) => inv.pre_concat(tile.geom.matrix),
+            None => tile.geom.matrix,
+        };
         // The content is written out at each step rather than `<use>`d:
         // resvg drops `<use>` copies shifted out of the cell's own box.
         let inv = svg_matrix(tile.geom.capture.invert().unwrap_or_default());
         let mut uses = String::new();
-        for j in cell_steps(by0, by1, ay) {
-            for i in cell_steps(bx0, bx1, ax) {
+        let (xs, ys) = cell_lattice(cell_steps(bx0, bx1, ax), cell_steps(by0, by1, ay));
+        for j in ys {
+            for i in xs.clone() {
                 uses.push_str("<g");
                 if i != 0 || j != 0 {
                     let _ = write!(
@@ -234,7 +252,7 @@ impl SvgRecorder {
              width=\"{}\" height=\"{}\" patternTransform=\"{}\">{content}</pattern>",
             fmt_precise(ax),
             fmt_precise(ay),
-            svg_matrix(tile.geom.matrix),
+            svg_matrix(placement),
         );
         self.pattern_ids.insert(key, (tile.clone(), id));
         format!("url(#{prefix}p{id})")
@@ -435,7 +453,7 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
-        let paint = self.ink_attr(ink);
+        let paint = self.ink_attr(ink, None);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let _ = write!(
             self.body,
@@ -460,7 +478,10 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
-        let paint = self.ink_attr(ink);
+        // The pen's linear part, as the path's `transform` below writes it.
+        let pen_linear =
+            pen.map(|(l, _)| tiny_skia::Transform::from_row(l.sx, l.ky, l.kx, l.sy, 0.0, 0.0));
+        let paint = self.ink_attr(ink, pen_linear);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let cap = match cap {
             tiny_skia::LineCap::Round => "round",
@@ -803,12 +824,50 @@ fn svg_matrix(t: tiny_skia::Transform) -> String {
 }
 
 /// The whole steps `k` (in units of `step`) at which `[lo, hi]` shifted by
-/// `k * step` overlaps the cell `[0, step)`. At most 64 of them.
+/// `k * step` overlaps the cell `[0, step)`.
 fn cell_steps(lo: f32, hi: f32, step: f32) -> std::ops::RangeInclusive<i64> {
     let (lo, hi, step) = (f64::from(lo), f64::from(hi), f64::from(step));
     let first = (-hi / step).floor() as i64 + 1;
     let last = (1.0 - lo / step).ceil() as i64 - 1;
-    first..=last.min(first + 63)
+    first..=last
+}
+
+/// Both axes' [`cell_steps`], cut to the copy budget the raster's fold has
+/// (`crate::pattern::MAX_FOLD_COPIES`), so SVG keeps every copy the PNG
+/// draws. `makepattern` refuses a tile over that budget in device pixels;
+/// the pattern-space count can still be larger when a step is under a
+/// pixel, and then each axis keeps the steps nearest 0.
+fn cell_lattice(
+    xs: std::ops::RangeInclusive<i64>,
+    ys: std::ops::RangeInclusive<i64>,
+) -> (std::ops::RangeInclusive<i64>, std::ops::RangeInclusive<i64>) {
+    let len = |r: &std::ops::RangeInclusive<i64>| {
+        u64::try_from(r.end().saturating_sub(*r.start()).saturating_add(1)).unwrap_or(0)
+    };
+    let budget = crate::pattern::MAX_FOLD_COPIES;
+    let (nx, ny) = (len(&xs), len(&ys));
+    if nx.saturating_mul(ny) <= budget {
+        return (xs, ys);
+    }
+    let side = budget.isqrt();
+    let (kx, ky) = if nx <= side {
+        (nx, budget / nx.max(1))
+    } else if ny <= side {
+        (budget / ny.max(1), ny)
+    } else {
+        (side, side)
+    };
+    (near_zero(xs, kx), near_zero(ys, ky))
+}
+
+/// The `n` consecutive steps of `r` nearest 0.
+fn near_zero(r: std::ops::RangeInclusive<i64>, n: u64) -> std::ops::RangeInclusive<i64> {
+    let (first, last) = (*r.start(), *r.end());
+    let n = i64::try_from(n.max(1)).unwrap_or(i64::MAX);
+    let centre = 0i64.clamp(first, last.max(first));
+    let start = centre.saturating_sub((n - 1) / 2).max(first);
+    let end = start.saturating_add(n - 1).min(last);
+    end.saturating_sub(n - 1).max(first)..=end
 }
 
 fn fmt_f32(v: f32) -> String {
