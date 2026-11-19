@@ -6,13 +6,15 @@ stdout has gone: `a_closed_stdout_ends_quietly`,
 `only_the_error_from_the_closed_stdout_is_silenced`.
 
 **The race.** A test that spawns the child with a piped stdout and drops its
-read end afterwards races the child. If the child writes its output into the
-pipe buffer before the drop, it never sees `EPIPE`. A REPL then writes its
-banner and prompt, finds nothing wrong, and waits on its open stdin until the
-test deadline kills it (the CI flake of #1294: `crate (ubuntu-latest)` ->
+read end afterwards races the child. If the child writes into the pipe buffer
+before the drop, it never sees `EPIPE`. A REPL then writes its banner and
+prompt, finds nothing wrong, and waits on its open stdin until the test
+deadline kills it. That is the CI flake of #1294 (`crate (ubuntu-latest)` ->
 "Tests without default features", runs 43158341398 and 43151418309). A short
-`--capabilities` would exit 0 instead of 141. The two other tests escaped only
-because they print far more than a pipe holds.
+`--capabilities` would exit 0 instead of 141 for the same reason (reproduced
+here with a delay, not seen on CI). The other two tests did not hang only
+because the child usually started later than the test's drop, or kept
+writing: that is timing, not safety.
 
 **Already fixed for one test.** #1186 (eb44371, 2026-11-13 UTC) moved
 `a_repl_stops_when_its_stdout_reader_goes` to close-before-spawn. Both CI
@@ -27,7 +29,11 @@ it, so each sees `EPIPE` on the child's first write whatever the pipe's size
 child runs. The 200000-iteration loops stay: they still test that a program
 stops quietly, but no longer depend on out-writing the pipe.
 
-**Checks.** Each test, run 50 times as the built test binary (with and without
-default features, some under load), plus a scratch copy with the old pattern
-and a 200 ms delay between `spawn` and the drop, to see the old race fail and
-the helper survive the same delay. Results are in the PR.
+**Checks (2026-11-18, this Mac).** Each of the three tests, run 50 times as the
+built test binary: 150/150 on a debug build, 150/150 on the ci profile, 150/150
+under 8 busy processes, and without default features 150/150 plus 60/60 under 8
+busy processes. The old pattern with a 200 ms delay between `spawn` and the drop:
+`--capabilities` exited 0 instead of 141, and the REPL test hit its deadline once
+the binary was warm. On a freshly built binary the child started slower than the
+delay, so the old pattern passed twice (macOS delays the first run of a new
+binary). Not committed; the helper has no such window.

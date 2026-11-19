@@ -1245,10 +1245,11 @@ fn the_wrote_report_is_not_on_stdout() {
 ///
 /// The read end is closed before `spawn`, so the child's first write finds no
 /// reader and fails with `EPIPE`, whatever the pipe's size and however fast the
-/// child runs. Dropping the read end after `spawn` raced the child instead (seen
-/// on Linux CI): a child that wrote its output into the pipe's buffer first got
-/// no `EPIPE`, so a REPL then waited on its open stdin until the deadline
-/// killed it, and a short `--capabilities` exited 0 rather than 141.
+/// child runs. Dropping the read end after `spawn` raced the child instead: a
+/// child that wrote its output into the pipe's buffer first got no `EPIPE`. A
+/// REPL then waited on its open stdin until the deadline killed it (seen on
+/// Linux CI), and a short `--capabilities` exited 0 rather than 141 (seen with
+/// a delay injected between `spawn` and the drop).
 /// `child.stdout` is `None`, and stderr is piped for `common::wait_output`.
 #[cfg(unix)]
 fn spawn_with_closed_stdout(args: &[&str], stdin: Stdio) -> std::process::Child {
