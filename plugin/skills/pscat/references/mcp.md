@@ -25,7 +25,7 @@ client may truncate that. Ask for the part you need:
   parameter, its unit and default, and the `load` line; names no entry has come
   back in `unmatched_names`;
 - `kind` is one of `font`, `type3_face`, `palette`, `template`, `procedure`,
-  `operator`, `dial`; `source` is a library file (`paintkit` or `lib/paintkit.ps`)
+  `operator`, `dial`; `names` takes at most 256 names; `source` is a library file (`paintkit` or `lib/paintkit.ps`)
   or `systemdict` for native operators.
 
 A narrowed answer adds `matched` and `total` and keeps the whole catalog's

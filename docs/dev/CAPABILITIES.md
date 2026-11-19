@@ -256,8 +256,8 @@ that `/Spread` and `/Load` keep their one shared meaning.
   (`font`, `type3_face`, `palette`, `template`, `procedure`, `operator`,
   `dial`), `--source FILE` (`paintkit`, `paintkit.ps`, `lib/paintkit.ps`
   or `systemdict`; case does not matter) and `--brief` (name, kind,
-  source and the description's first sentence, at most 110 characters:
-  no `parameters`, `load` or `example`). `describe_art_capabilities`
+  source, availability as one word and the description's first sentence,
+  at most 110 characters: no `parameters`, `load` or `example`). `describe_art_capabilities`
   takes `names`, `kind`, `source` and `brief`. A filtered payload keeps
   `pscat_version`, the whole catalog's `catalog_signature` and
   `font_packs`, and adds `matched`, `total` and, if a requested name

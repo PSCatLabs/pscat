@@ -22,7 +22,9 @@ test that it matches the kinds the catalog carries).
 | `brief` + `kind: palette` | 3,824 |
 | `names: ["pkwash"]` | 2,672 |
 
-`brief` keeps the first sentence of the description, cut at 110 characters. Plain
+`brief` keeps `availability` as one word (`builtin`, `catalog`, `library`), so
+an agent can tell a standard face from a pack face, and the first sentence of
+the description, cut at 110 characters. Plain
 `brief` was first tried with the whole description and was 137 KB, which still
 truncates, so it is the first sentence only.
 

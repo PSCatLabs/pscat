@@ -2927,6 +2927,9 @@ fn sheet_timeout(cfg: &Config) -> ToolError {
     .with("limit_seconds", json!(cfg.timeout.as_secs()))
 }
 
+/// Most entry names one `describe_art_capabilities` call may ask for.
+const MAX_CAPABILITY_NAMES: usize = 256;
+
 fn describe_art_capabilities(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("--capabilities");
@@ -2934,6 +2937,12 @@ fn describe_art_capabilities(cfg: &Config, args: &Value) -> Result<Value, ToolEr
     match args.get("names") {
         None | Some(Value::Null) => {}
         Some(Value::Array(names)) => {
+            if names.len() > MAX_CAPABILITY_NAMES {
+                return Err(ToolError::invalid(format!(
+                    "names takes at most {MAX_CAPABILITY_NAMES} entries, got {}",
+                    names.len()
+                )));
+            }
             for name in names {
                 let Some(name) = name.as_str() else {
                     return Err(ToolError::invalid("names must be a list of strings"));

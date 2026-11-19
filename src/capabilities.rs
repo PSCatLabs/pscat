@@ -179,6 +179,8 @@ impl Capability {
             "kind": self.kind.as_str(),
             "description": first_sentence(&self.description),
             "source": self.source,
+            // `builtin`, `catalog` or `library`, without the long note.
+            "availability": self.availability.split(" (").next().unwrap_or(""),
         })
     }
 
@@ -212,8 +214,9 @@ pub struct CapabilityFilter {
     /// `paintkit.ps`). `systemdict` selects the native operators. `None`
     /// matches every source.
     pub source: Option<String>,
-    /// Name, kind, source and the first sentence of the description only:
-    /// no `parameters`, `load` or `example`.
+    /// Name, kind, source, availability (`builtin`, `catalog` or
+    /// `library`) and the first sentence of the description only: no
+    /// `parameters`, `load` or `example`.
     pub brief: bool,
 }
 

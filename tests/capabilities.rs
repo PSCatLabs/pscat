@@ -857,10 +857,21 @@ fn cli_capabilities_kind_source_and_brief() {
         .args(["--capabilities", "--brief"])
         .output_deadline()
         .expect("run");
+    // The ratio holds whatever fonts are installed; the absolute bound is
+    // for the entries that do not depend on them.
     assert!(
-        brief_out.stdout.len() * 3 < full_len * 2 && brief_out.stdout.len() < 100_000,
+        brief_out.stdout.len() * 3 < full_len * 2,
         "brief is {} bytes against {full_len} in full",
         brief_out.stdout.len()
+    );
+    let procedures = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--capabilities", "--brief", "--kind", "procedure"])
+        .output_deadline()
+        .expect("run");
+    assert!(
+        procedures.stdout.len() < 100_000,
+        "brief procedures are {} bytes",
+        procedures.stdout.len()
     );
     let brief: serde_json::Value = serde_json::from_slice(&brief_out.stdout).unwrap();
     for cap in brief["capabilities"].as_array().unwrap() {
@@ -871,7 +882,10 @@ fn cli_capabilities_kind_source_and_brief() {
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["description", "kind", "name", "source"]);
+        assert_eq!(
+            keys,
+            ["availability", "description", "kind", "name", "source"]
+        );
         let d = cap["description"].as_str().unwrap();
         assert!(d.chars().count() <= 113, "brief description too long: {d}");
     }

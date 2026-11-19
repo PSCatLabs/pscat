@@ -242,7 +242,9 @@ capabilities -- `--capabilities` on the CLI and `describe_art_
 capabilities` on `pscat-mcp` both print one JSON payload covering
 fonts, the Type 3 program faces, artkit's mood palettes, the
 `pagekit.ps` templates, and artkit's/the style packs' major
-procedures (`src/capabilities.rs`). Fonts are the one section built
+procedures (`src/capabilities.rs`; `--capabilities` takes `--name`,
+`--kind`, `--source` and `--brief`, and the tool `names`, `kind`, `source`
+and `brief`, #1079: the full payload is over 300 KB). Fonts are the one section built
 dynamically, off the same `font::catalog_entries()` `--fonts` and
 `findfont` resolution already use, so that section can't drift from
 what's actually installed; everything else is hand-maintained (no
