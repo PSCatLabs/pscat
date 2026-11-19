@@ -103,8 +103,9 @@ test('an error inside a run file names the file and the run chain (#1116)', asyn
     assert.equal(e.errorName, 'undefined');
     assert.equal(e.command, 'bogus');
     assert.equal(e.file, 'lib/artkit.ps');
-    assert.equal(e.line, 66);
-    assert.equal(e.runChain, 'lib/artkit.ps:66 <- line 1');
+    // Which line of the lib file holds its first `def` may move; the chain must agree with `line`.
+    assert.ok(e.line > 0);
+    assert.equal(e.runChain, `lib/artkit.ps:${e.line} <- line 1`);
     return true;
   });
 });

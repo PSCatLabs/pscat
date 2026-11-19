@@ -12,8 +12,10 @@ inner3.ps:5 <- line 2` (#1043). `pscat-mcp` already split that into `line`,
 - Parsing follows `ps_error_fields` in `src/mcp_server.rs`: split the
   `%%[ ... ]%%` row on `"; "`, then each part on the first `": "`. The file
   is whatever sits between the first ` (` and the closing `)`, so a name
-  with spaces or parentheses survives. A name containing `"; "` would split
-  early, as in `pscat-mcp`.
+  with spaces or parentheses survives. The interpreter escapes `;` and `]`
+  in a run file's name as `%3B` and `%5D` (`report_name`, `src/interp.rs`), so
+  a name cannot split the row; `file` and `runChain` carry the escaped
+  spelling, as in `pscat-mcp`.
 - Not parsed into an array: the chain is a display string, and the one place
   that structures it (`pscat-mcp`) keeps it a string too.
 - Tests: `npm/test/api.test.mjs` feeds the constructor the report from
