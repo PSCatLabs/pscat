@@ -40,7 +40,7 @@ Helvetica, Times or Courier (and their variants) is written as selectable, searc
 instead of one outline per glyph, a much smaller file (three short lines: about 52 KB as outlines).
 Other fonts stay outlines, and the text then looks as the viewer's own font does, not pscat's.
 Without it the SVG is unchanged. It is ignored for `png` and `pdf` (not an error); a non-boolean is
-`invalid_argument`. Same argument name as the hosted server.
+`invalid_argument`.
 
 ## GPU preview
 

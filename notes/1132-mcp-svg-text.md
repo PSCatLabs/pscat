@@ -6,7 +6,8 @@ plugin always drew every glyph as an outline.
 
 **What was built.**
 - `render_postscript` and `start_render` take `svg_text` (boolean, default
-  false), the name the hosted pscat-mcp server uses so the two agree. It lives
+  false), named to match the argument pscat-mcp (the hosted server) uses, so
+  the two agree. It lives
   in the shared render schema and `RenderPlan`, so both tools get it from one
   place.
 - It is applied only when `format` is `svg`: `render_run` then passes

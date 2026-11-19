@@ -512,8 +512,8 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
 [getting started](getting-started.md)), writing Helvetica, Times and Courier
 text as selectable SVG `<text>` and so a much smaller file. Without it, or
 with `false`, the SVG is unchanged. It only applies to SVG: `png` and `pdf`
-ignore it, and anything but a boolean is `invalid_argument`. The hosted
-server takes the same argument name.
+ignore it, and anything but a boolean is `invalid_argument`. The name is
+the one the hosted pscat-mcp server uses for its own SVG text option.
 
 ### GPU preview
 
