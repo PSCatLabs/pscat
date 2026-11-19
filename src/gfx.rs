@@ -2048,10 +2048,11 @@ impl Gfx {
     /// for a solid colour (and for the null pattern, which
     /// [`ink`](Self::ink) keeps from painting at all).
     fn pattern_source(&self) -> Option<(std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality)> {
-        self.state
-            .pattern
-            .as_ref()
-            .map(|p| p.tile.raster(self.state.rgb))
+        // From `ink`, so the raster and the recorders never disagree.
+        match self.ink()? {
+            crate::pattern::Ink::Pattern(tile, rgb) => Some(tile.raster(rgb)),
+            crate::pattern::Ink::Rgb(_) => None,
+        }
     }
 
     /// [`paint`](Self::paint), with the pattern `src` as its shader when

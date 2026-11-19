@@ -75,7 +75,13 @@ fn render(src: &str) -> Outputs {
     }
 }
 
+/// gs's raster of `input` at `SIZE` px, rendered at `k` times the
+/// resolution and box-averaged down.
 fn gs_png(input: &[u8], ext: &str, name: &str) -> Pixmap {
+    gs_png_at(input, ext, name, 1)
+}
+
+fn gs_png_at(input: &[u8], ext: &str, name: &str, k: u32) -> Pixmap {
     let dir = common::scratch_dir("pscat_patterns");
     let src = dir.join(format!("{name}.{ext}"));
     let out = dir.join(format!("{name}.{ext}.png"));
@@ -89,8 +95,8 @@ fn gs_png(input: &[u8], ext: &str, name: &str) -> Pixmap {
             "-sDEVICE=png16m",
             "-dGraphicsAlphaBits=4",
             "-dTextAlphaBits=4",
-            &format!("-g{SIZE}x{SIZE}"),
-            "-r72",
+            &format!("-g{}x{}", SIZE * k, SIZE * k),
+            &format!("-r{}", 72 * k),
         ])
         .arg(format!("-o{}", out.display()))
         .arg(&src)
@@ -100,7 +106,27 @@ fn gs_png(input: &[u8], ext: &str, name: &str) -> Pixmap {
     let data = std::fs::read(&out).expect("read gs png");
     let _ = std::fs::remove_file(&src);
     let _ = std::fs::remove_file(&out);
-    Pixmap::decode_png(&data).expect("decode png")
+    let big = Pixmap::decode_png(&data).expect("decode png");
+    if k == 1 {
+        return big;
+    }
+    let mut small = Pixmap::new(SIZE, SIZE).expect("pixmap");
+    let (bw, src_px) = (big.width() as usize, big.data());
+    let k = k as usize;
+    for y in 0..SIZE as usize {
+        for x in 0..SIZE as usize {
+            for c in 0..4 {
+                let mut sum = 0u32;
+                for dy in 0..k {
+                    for dx in 0..k {
+                        sum += u32::from(src_px[((y * k + dy) * bw + x * k + dx) * 4 + c]);
+                    }
+                }
+                small.data_mut()[(y * SIZE as usize + x) * 4 + c] = (sum / (k * k) as u32) as u8;
+            }
+        }
+    }
+    small
 }
 
 fn resvg_png(svg: &str) -> Pixmap {
@@ -229,10 +255,19 @@ fn check_all(name: &str, src: &str, paint_type: u8, hayro: bool) -> Outputs {
         );
     }
     if common::gs_available() {
-        // gs paints our PDF exactly as it paints the program itself: the
-        // PDF means what the PostScript means. (gs paints pattern cells
-        // without anti-aliasing, so its pixels are heavier than pscat's,
-        // resvg's and hayro's; that is the only difference from our PNG.)
+        // gs's raster of our PDF against our PNG. gs paints pattern cells
+        // without anti-aliasing (GraphicsAlphaBits does not reach them), so
+        // at 72 dpi its cells are heavier (8-9 here, 3.1 at 4x); rendered at
+        // 8x and averaged down, the aliasing goes and the PDF's meaning
+        // remains.
+        assert_close(
+            &format!("{name}: our PDF via gs at 8x"),
+            &out.png,
+            &gs_png_at(&out.pdf, "pdf", name, 8),
+            3.0,
+        );
+        // And gs paints our PDF exactly as it paints the program itself:
+        // the PDF means what the PostScript means.
         let ps = format!("%!PS\n{src}\nshowpage\n");
         assert_close(
             &format!("{name}: our PDF via gs against the program in gs"),
@@ -443,5 +478,73 @@ fn an_error_in_the_paintproc_leaves_the_page_as_it_was() {
             .matches("<path")
             .count(),
         2
+    );
+}
+
+#[test]
+fn a_limit_inside_the_paintproc_leaves_every_output_on_the_page() {
+    let mut it = Interp::with_page(60, 60).expect("page");
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    it.set_limits(pscat::Limits::none().with_max_steps(5000))
+        .expect("limits");
+    let src = "1 0 0 setrgbcolor 0 0 30 30 rectfill \
+               << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+                  /XStep 10 /YStep 10 /PaintProc { pop 0 0 5 5 rectfill { } loop } >> \
+               matrix makepattern";
+    assert!(
+        it.run_source(src.as_bytes()).is_err(),
+        "the step limit stops it"
+    );
+    let pm = &it.gfx().pixmap;
+    assert_eq!((pm.width(), pm.height()), (60, 60));
+    let p = pm.pixel(5, 55).expect("pixel");
+    assert_eq!((p.red(), p.green(), p.blue()), (255, 0, 0));
+    let svg = &it.gfx().svg_pages().expect("svg")[0];
+    assert!(svg.contains("fill=\"#ff0000\""), "{svg}");
+    assert!(!svg.contains("t1_"), "{svg}");
+    let pdf = pdf_text(&it.gfx().pdf_document().expect("pdf"));
+    assert!(pdf.contains("1 0 0 rg"), "{pdf}");
+    assert!(!pdf.contains("/Pattern"), "{pdf}");
+}
+
+#[test]
+fn setalpha_reaches_a_pattern() {
+    let src = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+               /XStep 10 /YStep 10 /PaintProc { pop 0 0 0 setrgbcolor 0 0 10 10 rectfill } >> \
+               matrix makepattern setpattern 0.5 setalpha 0 0 400 400 rectfill";
+    let out = render(src);
+    let p = out.png.pixel(200, 200).expect("pixel");
+    assert!((126..=129).contains(&p.red()), "{}", p.red());
+    assert!(pdf_text(&out.pdf).contains("/ca 0.5"));
+    assert!(out.svg.contains("fill-opacity=\"0.5\""));
+}
+
+/// A pattern made inside another's PaintProc, and used there: the inner
+/// pattern's matrix is relative to the outer pattern's space in PDF.
+const NESTED: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 40 40] /XStep 40 /YStep 40
+   /PaintProc { pop
+     << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 6 6] /XStep 6 /YStep 6
+        /PaintProc { pop 0.8 0.2 0.1 setrgbcolor 0 0 3 3 rectfill } >> matrix makepattern
+     setpattern 0 0 20 20 rectfill
+     0.1 0.3 0.7 setrgbcolor 20 20 20 20 rectfill } >> matrix makepattern
+setpattern 20 20 360 360 rectfill
+";
+
+#[test]
+fn a_pattern_inside_a_paintproc_places_alike_in_all_outputs() {
+    check_all("nested", NESTED, 1, true);
+}
+
+#[test]
+fn sethsbcolor_leaves_a_pattern_space_for_devicergb_as_in_gs() {
+    assert_eq!(
+        eval(&format!(
+            "{DICT} matrix makepattern setpattern 0.5 0.5 0.5 sethsbcolor currentcolorspace \
+             currentcmykcolor"
+        )),
+        "[/DeviceRGB] 0.75 0.5 0.5 0.0"
     );
 }

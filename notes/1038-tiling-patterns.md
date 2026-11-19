@@ -100,18 +100,21 @@ PDF, and holds them against each other:
 - hayro's raster of our PDF against our PNG: at most 3/255 (1.6 and 0.4).
   hayro paints only one copy of a cell whose BBox is larger than its step,
   so the third picture skips it.
-- gs's raster of our PDF against gs running the program itself: identical
-  (0.000). The issue asked for gs's raster of the PDF against our PNG within
-  3/255; that measures 8-9, and gs's own run of the program is just as far
+- gs's raster of our PDF against our PNG, the issue's check: at most 3/255
+  with gs rendering at 8x and box-averaged down (about 2 measured for the
+  uncoloured dots; 3.1 at 4x). At 72 dpi it measures 8-9, and gs's run of the program itself is just as far
   from our PNG: gs paints pattern cells without anti-aliasing (its
   `GraphicsAlphaBits` does not reach them), so its hatch lines and dots are
-  heavier, and a cell turned off the axes shows seams. The PDF means exactly
-  what the program means to gs; the remaining difference is gs's tile
-  rasteriser, which pscat does not copy.
+  heavier, and a cell turned off the axes shows seams. Supersampling removes
+  the aliasing and leaves what the PDF means.
+- gs's raster of our PDF against gs running the program itself: identical
+  (0.000). The PDF means exactly what the program means to gs.
 
 Plus seam-freeness (every 8 px hatch tile identical), the PDF holding a real
-`/Pattern`, gs's errors and read-backs, the null pattern, and an error inside
-a `PaintProc` leaving the page as it was. Chrome showed the specimen's SVG
+`/Pattern`, gs's errors and read-backs, the null pattern, `setalpha` under a
+pattern, a pattern made and used inside another's `PaintProc` (all outputs
+agree), and an error or a step limit inside a `PaintProc` leaving every
+output on the page. Chrome showed the specimen's SVG
 (`examples/patterns.ps`) as pscat's PNG. That check found the one SVG trap:
 viewers (Chrome and resvg alike) draw a `<pattern>`'s content relative to its
 `x`/`y`, so the cell sits at the pattern-space origin with no `x`/`y`.
