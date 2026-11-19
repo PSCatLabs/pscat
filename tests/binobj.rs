@@ -480,7 +480,10 @@ fn an_executable_string_in_a_procedure_runs() {
     assert_eq!(run_stack("[ (8 9 add) cvx ] cvx 0 get"), ["(8 9 add)"]);
     // Elements around it still run in order; an empty string adds nothing.
     assert_eq!(run_stack("[ () cvx ] cvx 5 exch exec"), ["5"]);
-    assert_eq!(run_stack("[ 1 (2 3) cvx 4 ] cvx exec"), ["1", "2", "3", "4"]);
+    assert_eq!(
+        run_stack("[ 1 (2 3) cvx 4 ] cvx exec"),
+        ["1", "2", "3", "4"]
+    );
     // A string that scans a procedure leaves it as a value.
     assert_eq!(run_stack("[ ({9}) cvx ] cvx exec"), ["{9}"]);
     // A literal string in the body is still pushed.
@@ -703,6 +706,10 @@ fn ghostscript_runs_the_executable_strings_of_a_token_array() {
         let mut it = Interp::with_page(50, 50).unwrap();
         it.capture_stdout();
         it.run_str(prog).unwrap();
-        assert_eq!(String::from_utf8_lossy(it.captured_stdout()), want, "{prog}");
+        assert_eq!(
+            String::from_utf8_lossy(it.captured_stdout()),
+            want,
+            "{prog}"
+        );
     }
 }
