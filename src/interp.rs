@@ -369,6 +369,9 @@ pub struct Interp {
     save_stack: Vec<SaveRecord>,
     /// `setglobal`'s allocation mode and the modes `save` recorded (#1146).
     pub(crate) vm_mode: crate::ops::vm::VmMode,
+    /// `globaldict` (#1159): the dictionary that stands in for global VM.
+    /// Not on the dictionary stack; `restore` never rolls it back.
+    pub(crate) globaldict: Rc<RefCell<Dict>>,
     pub(crate) quit_requested: bool,
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
@@ -723,6 +726,11 @@ impl Interp {
         system
             .borrow_mut()
             .put("userdict".into(), Object::lit(Value::Dict(user.clone())));
+        let globaldict = Rc::new(RefCell::new(Dict::new()));
+        system.borrow_mut().put(
+            "globaldict".into(),
+            Object::lit(Value::Dict(globaldict.clone())),
+        );
         Some(Interp {
             ostack: Vec::new(),
             dstack: vec![system, user],
@@ -730,6 +738,7 @@ impl Interp {
             journal: Vec::new(),
             save_stack: Vec::new(),
             vm_mode: Default::default(),
+            globaldict,
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
@@ -3045,6 +3054,11 @@ impl Interp {
 
     /// The dict counterpart of [`journal_array`].
     pub(crate) fn journal_dict(&mut self, d: &Rc<RefCell<Dict>>) {
+        // Global VM outlives a `restore` (measured with gs 10.07.1, whichever
+        // mode the `save` was made in), so `globaldict` is never rolled back.
+        if Rc::ptr_eq(d, &self.globaldict) {
+            return;
+        }
         let Some(rec) = self.save_stack.last_mut() else {
             return;
         };
@@ -3834,7 +3848,7 @@ impl Drop for Interp {
         // a `borrow()` of it must not turn a drop into a panic (a second
         // panic while unwinding aborts the process). That dictionary is
         // simply left alone, as it was before #625.
-        for dict in self.dstack.iter().take(2) {
+        for dict in self.dstack.iter().take(2).chain([&self.globaldict]) {
             let contents = dict.try_borrow_mut().map(|mut d| std::mem::take(&mut *d));
             drop(contents);
         }

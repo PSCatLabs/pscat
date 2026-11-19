@@ -570,8 +570,12 @@ renders eight examples in both and compares block-downsampled output).
   drops the mode to local (global afterwards only if it is global now and was
   at every discarded `save`), not the PLRM's reset to the saved value
   (`src/ops/vm.rs`, `VmMode`; `tests/status_setglobal.rs` pins the matrix
-  against gs). `gcheck` and `globaldict` do not exist, so a program that
-  asks which VM an object lives in stops at `undefined`.
+  against gs). `globaldict` (a plain dictionary, not on the dictionary
+  stack, never rolled back by `restore`) and `gcheck` (true for simple
+  objects, `systemdict` and `globaldict`; false for every other composite)
+  stand in for global VM (#1159, `notes/1159-gcheck-globaldict.md`,
+  `tests/gcheck_globaldict.rs`): a composite made in global mode reports
+  local here, and no `invalidaccess` guards `globaldict`.
 - **`string status`** (#952) is the file-existence probe: `pages bytes
   referenced created true`, or `false`. It resolves the name through the
   same search order and the same read roots as `file`/`run`
