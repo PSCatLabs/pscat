@@ -1,9 +1,8 @@
 # Testing and measurements
 
 Tests exercise the shipped libraries through PSCat, not a second implementation.
-No engine source or dependency changes were made. Full validation status and
-checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
-[review handoff](REVIEW-HANDOFF.md).
+No engine source or dependency changes were made. The measured numbers are in
+[MEASUREMENTS.json](MEASUREMENTS.json).
 
 ## Automated coverage
 
@@ -90,8 +89,7 @@ variants differ. The `#[ignore]`d `saved_showcase_pngs_match_current_renders`
 compares today's renders with the committed PNGs when the showcase is rebuilt
 ([WASM-STUDIO.md](WASM-STUDIO.md)). It does not replace inspecting the poster for legibility/composition.
 The default poster, all colourways, primitive sheet and detail were visually
-inspected during implementation; independent perceptual assessment remains for
-Opus. Rerender with `python3 scripts/functional_demo.py render` only for an
+inspected during implementation; an independent review assessed them for #923. Rerender with `python3 scripts/functional_demo.py render` only for an
 intentional image change, inspect it, then update/commit expected evidence.
 
 ## Performance method and observations
@@ -147,8 +145,6 @@ node scripts/check_functional_browser.mjs 9338
 The optional standard-library CDP script verifies actual WASM execution over
 file://, all six treatments and eight fonts, text changes, diagnostic/fault toggles, changed-word counts,
 invalid-input rejection, watch/stop/restart, actual PNG download and desktop/mobile
-layout. It records current page-source hashes and results in
-[LIVE-BROWSER-VALIDATION.json](LIVE-BROWSER-VALIDATION.json). This supplements the
-original [saved-view browser report](BROWSER-VALIDATION.json). Neither browser
-is a new runtime dependency or a CI prerequisite. Source/display paths and the
+layout. It prints a report of its checks and the current page-source hashes; nothing is
+committed. The browser is not a new runtime dependency or a CI prerequisite. Source/display paths and the
 7.1 MB bundled-runtime tradeoff are documented in [WASM-STUDIO](WASM-STUDIO.md).
