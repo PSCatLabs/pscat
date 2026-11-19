@@ -630,11 +630,11 @@ fn bad_input_is_refused_with_a_message() {
         (&["-o", out, "--captions", "a,b", &a], "needs a --sweep"),
         (
             &["-o", out, "--sweep", "W=1,2,3", "--captions", "a,b", &a],
-            "2 captions but the sweep",
+            "2 entries but the sweep",
         ),
         (
             &["-o", out, "--sweep-seed", "1:2", "--captions", "a", &a],
-            "1 captions but the sweep",
+            "1 entries but the sweep",
         ),
         (
             &[

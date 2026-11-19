@@ -668,7 +668,7 @@ fn push(o: &mut Opts, path: String, pending: &mut Pending) -> Result<(), String>
             }
             Some(s) if s.len() != names.len() => {
                 return Err(format!(
-                    "--captions gives {} captions but the sweep for {path} has {} values",
+                    "--captions has {} entries but the sweep for {path} has {} values",
                     names.len(),
                     s.len()
                 ));
