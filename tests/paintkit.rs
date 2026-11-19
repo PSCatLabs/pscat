@@ -3229,12 +3229,12 @@ fn pkpaper_tone_components_are_validated_individually() {
         .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
 }
 
-/// `pkpaper`'s ground is a ground: opaque and source-over whatever the
-/// caller had set. /Alpha and /Blend are documented as *grain* options,
-/// so an ambient `setalpha` used to make the paper itself translucent
-/// with nothing in the contract saying so (Codex review, PR #109).
+/// `pkpaper`'s ground is source-over whatever blend mode the caller had
+/// set (/Blend is a *grain* option; Codex review, PR #109). Its alpha is
+/// the caller's own since #1161, as `pkwash`'s is since #1075: a faded
+/// call fades the paper too.
 #[test]
-fn the_paper_ground_does_not_inherit_the_callers_compositing() {
+fn the_paper_ground_follows_the_callers_alpha_but_not_its_blend_mode() {
     let ground = |prelude: &str| {
         let it = wash_pixmap(&format!(
             "0 0 0 setrgbcolor newpath 0 0 moveto 200 0 lineto 200 200 lineto 0 200 lineto \
@@ -3245,7 +3245,13 @@ fn the_paper_ground_does_not_inherit_the_callers_compositing() {
     };
     let plain = ground("");
     assert!(plain > 200, "the ground covers the black under it: {plain}");
-    assert_eq!(ground("0.2 setalpha"), plain, "ambient alpha leaked in");
+    // 0.2 x the 0.9 tone over black is about 46 of 255 (it was `plain`
+    // when the ground ignored the caller's alpha).
+    let faded = ground("0.2 setalpha");
+    assert!(
+        (44..=48).contains(&faded),
+        "ambient alpha not applied: {faded}"
+    );
     assert_eq!(
         ground("/Multiply setblendmode"),
         plain,
