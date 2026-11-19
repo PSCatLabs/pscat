@@ -5271,6 +5271,35 @@ fn two_root_layer(
     Ok(layer)
 }
 
+/// The convex polygon `poly` clipped to the rectangle `(x0, y0, x1, y1)`
+/// (Sutherland-Hodgman, one edge at a time).
+fn clip_polygon(poly: &[(f64, f64)], (x0, y0, x1, y1): (f64, f64, f64, f64)) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = poly.to_vec();
+    // (axis, bound, keep the side >= bound?)
+    for (axis, bound, above) in [(0, x0, true), (0, x1, false), (1, y0, true), (1, y1, false)] {
+        let input = std::mem::take(&mut out);
+        let coord = |p: (f64, f64)| if axis == 0 { p.0 } else { p.1 };
+        let inside = |p: (f64, f64)| {
+            if above {
+                coord(p) >= bound
+            } else {
+                coord(p) <= bound
+            }
+        };
+        for (i, &cur) in input.iter().enumerate() {
+            let prev = input[(i + input.len() - 1) % input.len()];
+            if inside(cur) != inside(prev) {
+                let t = (bound - coord(prev)) / (coord(cur) - coord(prev));
+                out.push((prev.0 + t * (cur.0 - prev.0), prev.1 + t * (cur.1 - prev.1)));
+            }
+            if inside(cur) {
+                out.push(cur);
+            }
+        }
+    }
+    out
+}
+
 /// A Type 1 shading's layer (#1039): `w` x `h` device pixels from
 /// `(x0, y0)`, each the function's colour at its centre (`to_shading` maps
 /// a device point into shading space), multiplied by the coverage of the
@@ -5286,7 +5315,15 @@ fn function_layer(
 ) -> Result<Pixmap, PsError> {
     let mut layer = Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
     let mut cover = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    // Clipped to the layer (a pixel of margin) in f64 first: tiny-skia's
+    // anti-aliased fill panics or drops a path whose corners lie around
+    // 1e9 device pixels away, which a crafted Matrix, Domain or BBox
+    // reaches (gs paints those). The clipped polygon covers the same pixels.
     let quad = |q: &[(f64, f64)]| {
+        let q = clip_polygon(q, (-1.0, -1.0, w as f64 + 1.0, h as f64 + 1.0));
+        if q.len() < 3 {
+            return None;
+        }
         let mut pb = tiny_skia::PathBuilder::new();
         pb.move_to(q[0].0 as f32, q[0].1 as f32);
         for &(x, y) in &q[1..] {

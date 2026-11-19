@@ -459,6 +459,29 @@ fn huge_tables_and_domains() {
     // Within the cap, mostly past the data: reads 0 there, no panic.
     let it = render(&sh("8192 8192", 2, "200 0 0 200 0 0"));
     assert_eq!(at(&it, 199.0, 199.0), [0, 0, 0]);
+    // Corners around 1e9 device pixels away (tiny-skia's fill panicked on
+    // them before the quads were clipped to the layer): gs paints red.
+    for matrix in ["2e9 0 0 2e9 0 0", "1e10 0 0 1e10 0 0"] {
+        let it = render(&sh("2 2", 8, matrix));
+        near(at(&it, 100.0, 100.0), [255.0, 0.0, 0.0], 2.0, matrix);
+    }
+    let it = render(&format!(
+        "<< /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [200 0 0 200 0 0] /BBox [-2e9 -2e9 2e9 2e9]
+           /Function {S0} >> shfill"
+    ));
+    near(
+        at(&it, 100.0, 100.0),
+        bilinear(0.5025, 0.5025),
+        2.0,
+        "huge BBox",
+    );
+    // A shading Domain past the function's: rangecheck, as in gs.
+    assert_eq!(
+        run_err(&format!(
+            "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [0 2 0 2] /Function {S0} >> shfill"
+        )),
+        Err(PsError::Rangecheck)
+    );
     let it = render(&sh("2 2", 8, "1e6 0 0 1e6 -5e5 -5e5"));
     for (x, y) in [(0.0, 0.0), (100.0, 100.0), (199.0, 199.0)] {
         near(

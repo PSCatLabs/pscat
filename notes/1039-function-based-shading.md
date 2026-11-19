@@ -38,6 +38,8 @@ one-output functions.
   - No `/Function`: `undefined`.
   - A one-input function on Type 1: `rangecheck`.
   - A Domain other than four numbers, or with a reversed pair: `rangecheck`.
+  - A shading Domain not inside the sampled function's own Domain:
+    `rangecheck` (from the agent review of PR #1322).
   - A Matrix: wrong length is `rangecheck`, a non-number in it is
     `typecheck`, and a singular one is `undefinedresult`.
   - Output count not matching the colour space: `rangecheck`.
@@ -65,6 +67,13 @@ one-output functions.
 - A one-input sampled function on an axial or radial shading is sampled at
   the 64 even positions the ramp uses for any non-linear function. A table
   of many more nodes than that is smoothed.
+
+The Domain and BBox quads are clipped to the layer in f64 before
+tiny-skia fills them. Its anti-aliased fill panics on corners about 1e9
+device pixels away (`/Matrix [2e9 0 0 2e9 0 0]`, `/BBox [-2e9 -2e9 2e9
+2e9]`; gs paints both). A gradient with such a `/BBox` still panics the
+same way in `paint_shfill`. That predates this change (0.7.0 does it too)
+and is a follow-up.
 
 **How it paints** (`Gfx::shfill_function_limited`, `function_layer`):
 

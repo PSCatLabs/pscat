@@ -1122,6 +1122,22 @@ fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsErr
             m
         }
     };
+    // gs 10.07.1: a shading Domain not inside the function's own is a
+    // rangecheck ("Additional information: [/Domain [0 1 0 1]]").
+    let inside = |f: &PsFunction| match f {
+        PsFunction::Sampled(s) => {
+            let ((a0, a1), (b0, b1)) = (s.domain[0], s.domain[1]);
+            domain[0] >= a0 && domain[1] <= a1 && domain[2] >= b0 && domain[3] <= b1
+        }
+        _ => true,
+    };
+    let all_inside = match &function {
+        PsFunction::Components(parts) => parts.iter().all(inside),
+        f => inside(f),
+    };
+    if !all_inside {
+        return Err(PsError::Rangecheck);
+    }
     let leaf_sizes = |f: &PsFunction| match f {
         PsFunction::Sampled(s) => Some([s.size[0], s.size[1]]),
         _ => None,
