@@ -171,7 +171,10 @@ More on the less obvious ones:
   (`'96,9+9@#222'`: a 96 dpi cell, then the 9 dpi render over its dark-mat
   copy), so small cells stop taking a wide column each. `--cols N` wraps a long
   row onto more lines, for sweeps and sheets that would pass 8000 px. Quote a
-  `--dpi` list that has `#` or `+`. `pscat sheet --help` has the rest.
+  `--dpi` list that has `#` or `+`. A sweep's captions can be words instead of
+  `seed=7` (#1000): `--captions '(a) before,(b) after'` gives one per value, and
+  `--no-values` leaves the value out for cells that already say what they are.
+  `pscat sheet --help` has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
   2 and 3, with exponential and stitching functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native

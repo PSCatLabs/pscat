@@ -56,6 +56,16 @@ Render each FILE as a row of cells and compose them into one labelled PNG.
                      Density=10,20,40 or Density=10:50:10). A sweep takes every
                      --dpi cell once per value, and puts the value under each
                      cell as its caption: seed=7, Density=20.
+      --captions LIST
+                     the next file's sweep only: a readable caption for each
+                     value in place of seed=7 or Density=20, comma-separated,
+                     one per value: --sweep Panel=1,2,3 --captions
+                     '(a) image model,(b) pscat,(c) hybrid'. A caption cannot
+                     contain a comma; an empty one (a,,c) leaves that value's
+                     caption out. A failure message still names the value
+      --no-values    omit the sweep value from each caption (the pixel size
+                     stays, unless --no-sizes), for a sheet whose cells already
+                     say what they are. --captions then has nothing to show
       --cols N       wrap a row of more than N columns onto further lines (the
                      label only above the first); columns line up across lines
       --label TEXT   the next file's row label (default: its file name without .ps);
@@ -136,6 +146,10 @@ struct Entry {
     /// `--dpi`'s columns: each a stack of one or more cells.
     columns: Vec<Vec<CellSpec>>,
     sweep: Option<Sweep>,
+    /// `--captions`: what to draw for each sweep value in place of
+    /// [`Sweep::label`] (an empty entry draws none). Always as long as the
+    /// sweep, which [`push`] checks.
+    captions: Option<Vec<String>>,
 }
 
 /// One cell to draw: what `--dpi` says, and which sweep value it takes.
@@ -175,6 +189,8 @@ struct Opts {
     entries: Vec<Entry>,
     labels: bool,
     sizes: bool,
+    /// `--no-values` turns this off: the sweep value in each caption.
+    values: bool,
     cols: Option<usize>,
     /// `--max-steps`, `--max-time`, `--max-memory` (issue #701), per cell.
     limits: Limits,
@@ -232,8 +248,14 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
             let (w, h) = probe(e.page, d)?;
             // The caption: the sweep value if any, then the size.
             let mut parts = Vec::new();
-            if let (Some(v), Some(sweep)) = (planned.value, &e.sweep) {
-                parts.push(sweep.label(v));
+            if let (true, Some(v), Some(sweep)) = (opts.values, planned.value, &e.sweep) {
+                let shown = match &e.captions {
+                    Some(names) => names[v].clone(),
+                    None => sweep.label(v),
+                };
+                if !shown.is_empty() {
+                    parts.push(shown);
+                }
             }
             if opts.sizes {
                 let note = if zoom > 1 {
@@ -546,6 +568,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         entries: Vec::new(),
         labels: true,
         sizes: true,
+        values: true,
         cols: None,
         limits: Limits::none(),
     };
@@ -558,6 +581,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         }]],
         label: None,
         sweep: None,
+        captions: None,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -580,19 +604,26 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
                     Sweep::Seed(parse_seed_spec(&spec)?)
                 });
             }
+            "--captions" => {
+                if pending.captions.is_some() {
+                    return Err("one --captions per file: it cannot be repeated".into());
+                }
+                pending.captions = Some(parse_captions(&args.value(&arg)?));
+            }
             "--cols" => o.cols = Some(parse_cols(&args.value(&arg)?)?),
             "--no-labels" => o.labels = false,
             "--no-sizes" => o.sizes = false,
+            "--no-values" => o.values = false,
             _ if take_limit_flag(&mut o.limits, &arg, &mut args)? => {}
             "--" => {
                 for rest in args.remaining() {
-                    push(&mut o, rest, &mut pending);
+                    push(&mut o, rest, &mut pending)?;
                 }
             }
             s if s.starts_with('-') && s.len() > 1 => {
                 return Err(format!("unknown option: {s}"));
             }
-            _ => push(&mut o, arg, &mut pending),
+            _ => push(&mut o, arg, &mut pending)?,
         }
     }
     if let Some(l) = pending.label {
@@ -601,26 +632,59 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
     if pending.sweep.is_some() {
         return Err("--sweep-seed/--sweep has no file after it".into());
     }
+    if pending.captions.is_some() {
+        return Err("--captions has no file after it".into());
+    }
     Ok(Some(o))
 }
 
 /// What the files that follow take from the options so far: `--page` and
-/// `--dpi` stay; `--label` and the sweep apply to the next file only.
+/// `--dpi` stay; `--label`, the sweep and `--captions` apply to the next
+/// file only.
 struct Pending {
     page: (u32, u32),
     columns: Vec<Vec<CellSpec>>,
     label: Option<String>,
     sweep: Option<Sweep>,
+    captions: Option<Vec<String>>,
 }
 
-fn push(o: &mut Opts, path: String, pending: &mut Pending) {
+/// `--captions`: one caption per comma-separated entry. Nothing is
+/// trimmed, so a space after a comma is part of the caption; an empty entry
+/// is a caption left out.
+fn parse_captions(list: &str) -> Vec<String> {
+    list.split(',').map(str::to_string).collect()
+}
+
+fn push(o: &mut Opts, path: String, pending: &mut Pending) -> Result<(), String> {
+    let sweep = pending.sweep.take();
+    let captions = pending.captions.take();
+    if let Some(names) = &captions {
+        match &sweep {
+            None => {
+                return Err(format!(
+                    "--captions needs a --sweep or --sweep-seed for the same file ({path})"
+                ));
+            }
+            Some(s) if s.len() != names.len() => {
+                return Err(format!(
+                    "--captions has {} entries but the sweep for {path} has {} values",
+                    names.len(),
+                    s.len()
+                ));
+            }
+            Some(_) => {}
+        }
+    }
     o.entries.push(Entry {
         path,
         label: pending.label.take(),
         page: pending.page,
         columns: pending.columns.clone(),
-        sweep: pending.sweep.take(),
+        sweep,
+        captions,
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -711,6 +775,7 @@ mod tests {
             page: (10, 10),
             columns: parse_dpis("72,9+9@#222").unwrap(),
             sweep: Some(Sweep::Seed(vec![3, 4])),
+            captions: None,
         };
         let (cells, column_len) = e.plan();
         assert_eq!(e.cell_count(), cells.len());
@@ -720,6 +785,13 @@ mod tests {
         assert_eq!(e.sweep.as_ref().unwrap().label(1), "seed=4");
         let p = parse_param_sweep("D=10:30:10").unwrap();
         assert_eq!((p.len(), p.label(2).as_str()), (3, "D=30"));
+    }
+
+    #[test]
+    fn captions_split_on_commas_and_keep_empty_entries() {
+        assert_eq!(parse_captions("(a) x,(b) y"), ["(a) x", "(b) y"]);
+        assert_eq!(parse_captions("a,,c,"), ["a", "", "c", ""]);
+        assert_eq!(parse_captions(""), [""]);
     }
 
     #[test]

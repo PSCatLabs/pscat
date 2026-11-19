@@ -1853,6 +1853,11 @@ renders eight examples in both and compares block-downsampled output).
   `--cols` wrapping, through `Layout::packed` and `PackedRow` (`Layout::new` delegates to
   it and is unchanged for single-cell columns). With none of the new options the sheet is
   byte-identical to before. See `notes/706-sheet-sweeps-mat-cols.md`.
+  #1000 added `--captions LIST` (readable words for a sweep's values; next file only, one per
+  value, checked in `push`) and `--no-values` (no sweep value in the caption); the failure
+  message still names the value (`Sweep::label`). `review_sheet` has no sweeps, so it has
+  nothing to mirror. The five hybrid comparison sheets use `--no-values`: their panels
+  already carry (a), (b), (c). See `notes/1000-sheet-sweep-captions.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
