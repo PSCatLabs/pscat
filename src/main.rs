@@ -1648,6 +1648,13 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
 
             let ok = match interp.run_source(source) {
                 Ok(()) => true,
+                // The reader of stdout went away (`| head`): not the
+                // program's fault, and its `ioerror` would be noise (#1117).
+                // The frame's page is still written, as are the other frames'.
+                Err(PsError::Io) if interp.stdout_epipe_error() => {
+                    note_stdout_closed();
+                    true
+                }
                 Err(e) => {
                     eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
                     eprintln!("{}", interp.error_report(&e));

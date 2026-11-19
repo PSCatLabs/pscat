@@ -826,6 +826,10 @@ renders eight examples in both and compares block-downsampled output).
   panicking; `main` then exits 141. A new CLI line that is not program output
   is `eprintln!`. The flag, not an early exit, so the page and any open
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
+  `pscat fonts` (library crate, `src/fontpacks/cli.rs`) has its own local
+  shadow with the same exit 141, and a sweep frame that met the closed pipe
+  is not reported or marked failed (#1117,
+  `notes/1117-fonts-and-sweep-closed-stdout.md`).
 
 - **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
   relative name's search-order candidate is opened once by `Probe::open`

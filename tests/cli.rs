@@ -1345,6 +1345,67 @@ fn a_repl_stops_when_its_stdout_reader_goes() {
     assert_eq!(out.status.code(), Some(141), "{stderr}");
 }
 
+/// #1117: `pscat fonts list | head` is as quiet as the rest of the CLI: no
+/// panic, the SIGPIPE status. The reader is gone before the child starts, so
+/// the failed write is certain rather than a race.
+#[cfg(unix)]
+#[test]
+fn fonts_list_stops_quietly_when_its_stdout_reader_goes() {
+    let home = common::scratch_dir("pscat-cli-fonts-epipe");
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["fonts", "list"])
+        .env("PSCAT_HOME", &home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "the SIGPIPE status");
+}
+
+/// #1117: a sweep whose stdout reader has gone reports no `ioerror` for the
+/// frame that met it, as a plain render reports none, and still writes every
+/// frame's PNG.
+#[cfg(unix)]
+#[test]
+fn a_sweep_stops_quietly_when_its_stdout_reader_goes() {
+    let dir = common::scratch_dir("pscat-cli-sweep-epipe");
+    let png = dir.join("f.png");
+    let prog = dir.join("p.ps");
+    std::fs::write(&prog, "0 0 10 10 rectfill 1 1 200000 { = } for\n").unwrap();
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["--page", "20x20", "--sweep", "X=1,2,3", "--png"])
+        .arg(&png)
+        .arg(&prog)
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("ioerror"), "{stderr}");
+    assert!(!stderr.contains("failed"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+    for n in 1..=3 {
+        let f = dir.join(format!("f-{n:03}.png"));
+        assert!(f.exists(), "{}: the frame is still written", f.display());
+    }
+}
+
 /// An `ioerror` the program raises later is still reported after it caught
 /// the one from a closed stdout: only the error that came from the failed
 /// write is silenced.
