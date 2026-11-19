@@ -146,10 +146,10 @@ pub struct PdfRecorder {
     open_clip: Option<Rc<ClipNode>>,
     /// Function dict bodies for shadings (#1028), deduped by content so a
     /// ramp reused by many `shfill`s is written once.
-    functions: Vec<String>,
+    functions: Vec<Vec<u8>>,
     /// `functions` by body, so interning is one hash lookup: a generative
     /// piece may `shfill` thousands of times.
-    function_ids: HashMap<String, usize>,
+    function_ids: HashMap<Vec<u8>, usize>,
     /// The function index each stop list (as bits) already produced, so a
     /// repeated ramp skips building and merging its function text.
     stops_ids: HashMap<Vec<[u32; 4]>, usize>,
@@ -988,7 +988,7 @@ Q",
         let fidx = match self.stops_ids.get(&stops_key) {
             Some(&i) => i,
             None => {
-                let func = stops_function(stops);
+                let func = stops_function(stops).into_bytes();
                 let i = intern(&mut self.functions, &mut self.function_ids, func);
                 self.stops_ids.insert(stops_key, i);
                 i
@@ -1020,6 +1020,68 @@ Q",
                 p(r1)
             ),
         };
+        self.paint_shading(body, fidx, ctm, region, comp, chain);
+    }
+
+    /// A Type 1 (function-based) `shfill` (#1039): a `/ShadingType 1` with
+    /// the shading's own `/Domain` and `/Matrix`, its function a FunctionType
+    /// 0 table of its RGB colours over the Domain (`pdf_samples`), which a
+    /// reader interpolates bilinearly. RGB, as the raster converts it.
+    /// `ctm` and `region` are as for `shfill`.
+    pub(crate) fn shfill_function(
+        &mut self,
+        shading: &crate::shading::FunctionShading,
+        ctm: [f32; 6],
+        region: Option<&crate::gfx::PsPath>,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        let num = |v: f64| p(v as f32);
+        let [x0, x1, y0, y1] = shading.domain;
+        let m = shading.matrix;
+        let all = shading.domain.iter().chain(&m).map(|&v| v as f32);
+        if !all.chain(ctm).all(f32::is_finite) {
+            return;
+        }
+        let ([gx, gy], samples) = shading.pdf_samples();
+        let Some(data) = deflate(&[&samples]) else {
+            return;
+        };
+        let mut func = format!(
+            "<< /FunctionType 0 /Domain [{} {} {} {}] /Range [0 1 0 1 0 1] \
+             /Size [{gx} {gy}] /BitsPerSample 8 /Filter /FlateDecode /Length {} >>\nstream\n",
+            num(x0),
+            num(x1),
+            num(y0),
+            num(y1),
+            data.len()
+        )
+        .into_bytes();
+        func.extend_from_slice(&data);
+        func.extend_from_slice(b"\nendstream");
+        let fidx = intern(&mut self.functions, &mut self.function_ids, func);
+        let body = format!(
+            "/ShadingType 1 /ColorSpace /DeviceRGB /Domain [{} {} {} {}] /Matrix [{}]",
+            num(x0),
+            num(x1),
+            num(y0),
+            num(y1),
+            m.map(num).join(" ")
+        );
+        self.paint_shading(body, fidx, ctm, region, comp, chain);
+    }
+
+    /// Interns the shading `body` (its function at `fidx`) and paints it
+    /// with `sh` under `ctm`, clipped to `region` (#1028, #1039).
+    fn paint_shading(
+        &mut self,
+        body: String,
+        fidx: usize,
+        ctm: [f32; 6],
+        region: Option<&crate::gfx::PsPath>,
+        comp: Composite,
+        chain: &Chain,
+    ) {
         let key = (body, fidx);
         let sidx = match self.shading_ids.get(&key) {
             Some(&i) => i,
@@ -1423,7 +1485,7 @@ Q",
         }
         for func in &self.functions {
             out.begin_obj();
-            out.bytes(func.as_bytes());
+            out.bytes(func);
             out.end_obj()?;
         }
         for (body, fidx) in &self.shadings {
@@ -1874,7 +1936,7 @@ pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
 }
 
 /// Index of `body` in `list` (looked up through `ids`), appending it if new.
-fn intern(list: &mut Vec<String>, ids: &mut HashMap<String, usize>, body: String) -> usize {
+fn intern(list: &mut Vec<Vec<u8>>, ids: &mut HashMap<Vec<u8>, usize>, body: Vec<u8>) -> usize {
     if let Some(&i) = ids.get(&body) {
         return i;
     }

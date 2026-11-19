@@ -439,6 +439,47 @@ fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
     assert_gs_matches(&pdf, &canvas, "sh_end_edges");
 }
 
+/// A Type 1 (function-based) `shfill` is a real `/ShadingType 1` (#1039):
+/// the shading's own Domain and Matrix, its function a FunctionType 0
+/// table of RGB samples that gs interpolates as the raster evaluates.
+#[test]
+fn function_based_shfill_is_a_real_pdf_shading() {
+    let src = b"<< /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [300 0 0 300 100 100]
+       /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [3 2]
+         /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff 000000 ffffff ff00ff> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 1);
+    let text = pdf_text(&pdf);
+    assert!(
+        text.contains("/Domain [0 1 0 1] /Matrix [300 0 0 300 100 100]"),
+        "{text}"
+    );
+    // Size 3 across: 2 x 32 + 1 nodes hold its middle node exactly.
+    assert!(
+        text.contains("/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [65 65]"),
+        "{text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_function");
+}
+
+/// Rotated, under a `/BBox` and a clip: the PDF clips to the BBox as the
+/// raster cuts it, and gs's render matches.
+#[test]
+fn function_based_shfill_keeps_bbox_and_clip() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill 60 40 400 300 rectclip
+       250 250 translate 30 rotate
+       << /ShadingType 1 /ColorSpace /DeviceRGB /Domain [-1 1 -1 1] /Matrix [180 0 0 120 0 0]
+          /BBox [-200 -60 150 200]
+          /Function << /FunctionType 0 /Domain [-1 1 -1 1] /Range [0 1 0 1 0 1] /Size [2 2]
+            /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let content = page_content(&pdf);
+    assert!(content.contains(" W n "), "the BBox clip: {content}");
+    assert!(content.contains(" cm /Sh0 sh\n"), "{content}");
+    assert_q_balanced(&pdf);
+    assert_gs_matches(&pdf, &canvas, "sh_function_bbox");
+}
+
 /// Two coincident circles of one radius: gs paints a disk of the first
 /// colour if the start extends, nothing outside (#1040), and so does the
 /// raster; written as is, CoreGraphics would paint nothing. The PDF records

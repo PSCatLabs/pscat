@@ -735,8 +735,15 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (PatternType 2) are not
-  implemented at all, in any output.
+  ShadingType 1 (function-based) and FunctionType 0 (sampled) since #1039
+  (`notes/1039-function-based-shading.md`): the raster evaluates the
+  function at each device pixel into a layer cut by the Domain
+  parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
+  paint path); SVG embeds that layer as an image; PDF writes a real
+  `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
+  (meshes) and shading patterns (PatternType 2) are not implemented, in
+  any output.
 - Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
   `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
   `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the

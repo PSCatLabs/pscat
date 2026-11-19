@@ -1,6 +1,11 @@
 //! Shading dictionaries for the `shfill` operator (issue #20) — the engine;
 //! `ops/shading.rs` is the operand-stack adapter.
 //!
+//! `ShadingType` 1 (function-based) and `FunctionType` 0 (sampled) came
+//! with #1039 (`FunctionShading`, `Sampled`; a sampled function reads its
+//! string's bytes and runs no PostScript, so the paragraph below still
+//! holds); `notes/1039-function-based-shading.md`. Otherwise:
+//!
 //! Scoped to `ShadingType` 2 (axial) and 3 (radial), `ColorSpace`
 //! `/DeviceGray`/`/DeviceRGB`/`/DeviceCMYK`, and `FunctionType` 2
 //! (exponential interpolation) and 3 (stitching — what makes
@@ -12,9 +17,7 @@
 //! which all need the `Frame::PostOp` continuation pattern
 //! (`ops/color.rs`) because they *do* execute program-supplied code.
 //! Staying inside 2/3 keeps this fully synchronous. Documented gaps:
-//! `FunctionType` 0/4, an array of one-in-one-out functions in place
-//! of a single N-out function, and Indexed/Separation as a shading's
-//! `ColorSpace`.
+//! `FunctionType` 4 and Indexed/Separation as a shading's `ColorSpace`.
 //!
 //! A shading's color ramp is pre-sampled into a fixed list of stops
 //! (`Shading::stops`) rather than evaluated per-pixel: `Gfx::shfill` hands
@@ -73,6 +76,112 @@ pub(crate) enum PsFunction {
         bounds: Vec<f64>,
         encode: Vec<(f64, f64)>,
     },
+    /// `FunctionType` 0 (#1039): a table of samples, interpolated.
+    Sampled(Box<Sampled>),
+    /// A shading's `/Function` given as an array of one-output functions,
+    /// one per colour component (#1039), which gs accepts for every
+    /// shading type. Only at the top level, as the PLRM puts it.
+    Components(Vec<PsFunction>),
+}
+
+/// A `FunctionType` 0 dictionary (#1039, PLRM 3.10.2): `m` inputs, `n`
+/// outputs, samples read lazily from the `/DataSource` string's bytes.
+#[derive(Clone)]
+pub(crate) struct Sampled {
+    domain: Vec<(f64, f64)>,
+    range: Vec<(f64, f64)>,
+    size: Vec<usize>,
+    bits: u32,
+    encode: Vec<(f64, f64)>,
+    decode: Vec<(f64, f64)>,
+    data: Vec<u8>,
+}
+
+impl Sampled {
+    /// Evaluates at `x` (one value per input) into `out` (one per output):
+    /// each input clamped to its Domain and mapped through Encode onto the
+    /// sample grid, the samples at the surrounding nodes interpolated
+    /// multilinearly, then mapped through Decode and clamped to Range.
+    /// `/Order 3` is interpolated linearly too (a documented gap: gs's
+    /// cubic differs, notes/1039). A sample past the end of the data reads
+    /// as 0, as in gs. `x.len()` is the input count, checked by every
+    /// caller (`nin`), so the 2^m corners here are at most 4.
+    fn eval_into(&self, x: &[f64], out: &mut [f64]) {
+        let m = self.size.len();
+        let n = self.range.len();
+        // Lower node and fraction per input; strides in samples.
+        let mut lo = [0u64; 2];
+        let mut frac = [0f64; 2];
+        let mut stride = [0u64; 2];
+        let mut s = 1u64;
+        for i in 0..m.min(2) {
+            let (d0, d1) = self.domain[i];
+            let (e0, e1) = self.encode[i];
+            let xi = x.get(i).copied().unwrap_or(0.0).clamp(d0, d1);
+            let e = if d1 > d0 {
+                e0 + (xi - d0) * (e1 - e0) / (d1 - d0)
+            } else {
+                e0
+            };
+            let top = (self.size[i] - 1) as f64;
+            let e = e.clamp(0.0, top);
+            let fl = e.floor().min((top - 1.0).max(0.0));
+            lo[i] = fl as u64;
+            frac[i] = e - fl;
+            stride[i] = s;
+            s = s.saturating_mul(self.size[i] as u64);
+        }
+        let max = ((1u64 << self.bits) - 1) as f64;
+        for (j, o) in out.iter_mut().enumerate().take(n) {
+            let mut acc = 0.0;
+            for corner in 0..(1usize << m.min(2)) {
+                let mut w = 1.0;
+                let mut index = 0u64;
+                for i in 0..m.min(2) {
+                    let up = corner >> i & 1 == 1;
+                    w *= if up { frac[i] } else { 1.0 - frac[i] };
+                    let node = lo[i] + u64::from(up);
+                    index = index.saturating_add(node.saturating_mul(stride[i]));
+                }
+                if w == 0.0 {
+                    continue;
+                }
+                acc += w * self.sample(index, j, n) as f64;
+            }
+            let (d0, d1) = self.decode[j];
+            let (r0, r1) = self.range[j];
+            *o = (d0 + acc * (d1 - d0) / max).clamp(r0, r1);
+        }
+    }
+
+    /// Output `j` of sample `index`: `bits` bits, big-endian, from the
+    /// data's bit stream; bits past its end read as 0.
+    fn sample(&self, index: u64, j: usize, n: usize) -> u64 {
+        let bits = u64::from(self.bits);
+        let start = index
+            .saturating_mul(n as u64)
+            .saturating_add(j as u64)
+            .saturating_mul(bits);
+        let byte_at = |i: u64| {
+            usize::try_from(i)
+                .ok()
+                .and_then(|i| self.data.get(i))
+                .map_or(0, |&b| u64::from(b))
+        };
+        if bits % 8 == 0 {
+            // Whole bytes (8, 16, 24, 32): start is byte-aligned.
+            (0..bits / 8).fold(0, |v, k| v << 8 | byte_at(start / 8 + k))
+        } else if bits < 8 {
+            // 1, 2 or 4 bits never straddle a byte.
+            byte_at(start / 8) >> (8 - bits - start % 8) & ((1 << bits) - 1)
+        } else {
+            // 12 bits: a bit at a time.
+            (0..bits).fold(0, |v, b| {
+                let at = start.saturating_add(b);
+                v << 1 | (byte_at(at / 8) >> (7 - at % 8) & 1)
+            })
+        }
+    }
 }
 
 impl PsFunction {
@@ -82,11 +191,48 @@ impl PsFunction {
             PsFunction::Stitching { functions, .. } => {
                 functions.first().map(PsFunction::ncomp).unwrap_or(0)
             }
+            PsFunction::Sampled(s) => s.range.len(),
+            PsFunction::Components(parts) => parts.len(),
+        }
+    }
+
+    /// The number of inputs: 1 for types 2 and 3, `m` for a sampled one.
+    fn nin(&self) -> usize {
+        match self {
+            PsFunction::Exponential { .. } | PsFunction::Stitching { .. } => 1,
+            PsFunction::Sampled(s) => s.size.len(),
+            PsFunction::Components(parts) => parts.first().map_or(0, PsFunction::nin),
+        }
+    }
+
+    /// A two-input function at `(x, y)` into `out` (#1039), for a Type 1
+    /// shading: no allocation, as it runs once a device pixel. Only called
+    /// on a function whose `nin` is 2.
+    fn eval2(&self, x: f64, y: f64, out: &mut [f64; 4]) {
+        match self {
+            PsFunction::Sampled(s) => s.eval_into(&[x, y], out),
+            PsFunction::Components(parts) => {
+                for (o, part) in out.iter_mut().zip(parts) {
+                    let mut one = [0.0; 4];
+                    part.eval2(x, y, &mut one);
+                    *o = one[0];
+                }
+            }
+            PsFunction::Exponential { .. } | PsFunction::Stitching { .. } => {}
         }
     }
 
     fn eval(&self, x: f64) -> Vec<f64> {
         match self {
+            PsFunction::Sampled(s) => {
+                let mut out = vec![0.0; s.range.len()];
+                s.eval_into(&[x], &mut out);
+                out
+            }
+            PsFunction::Components(parts) => parts
+                .iter()
+                .map(|p| p.eval(x).first().copied().unwrap_or(0.0))
+                .collect(),
             PsFunction::Exponential { domain, c0, c1, n } => {
                 let x = x.clamp(domain.0.min(domain.1), domain.0.max(domain.1));
                 let xn = crate::fmath::powf(x, *n);
@@ -139,6 +285,7 @@ impl PsFunction {
             PsFunction::Stitching { functions, .. } => functions.iter().all(
                 |f| matches!(f, PsFunction::Exponential { n, .. } if (*n - 1.0).abs() < 1e-12),
             ),
+            PsFunction::Sampled(_) | PsFunction::Components(_) => false,
         }
     }
 
@@ -211,6 +358,8 @@ impl PsFunction {
             PsFunction::Exponential { domain, .. } | PsFunction::Stitching { domain, .. } => {
                 *domain
             }
+            PsFunction::Sampled(s) => s.domain.first().copied().unwrap_or((0.0, 1.0)),
+            PsFunction::Components(parts) => parts.first().map_or((0.0, 1.0), Self::own_domain),
         }
     }
 
@@ -520,6 +669,12 @@ fn parse_function_at_depth(
         return Err(PsError::Typecheck);
     };
     let d = dr.borrow();
+    if matches!(
+        d.get("FunctionType").map(|o| o.value),
+        Some(Value::Integer(0))
+    ) {
+        return parse_sampled(&d).map(|s| PsFunction::Sampled(Box::new(s)));
+    }
     // /Domain is required on a function dict (confirmed against gs:
     // omitting it is a rangecheck) -- unlike a *shading*'s top-level
     // /Domain, which is optional and defaults to [0 1].
@@ -582,7 +737,7 @@ fn parse_function_at_depth(
                 })
                 .collect::<Result<_, _>>()?;
             let ncomp = functions[0].ncomp();
-            if functions.iter().any(|f| f.ncomp() != ncomp) {
+            if functions.iter().any(|f| f.ncomp() != ncomp || f.nin() != 1) {
                 return Err(PsError::Rangecheck);
             }
             let bounds = get_farray(&d, "Bounds")?;
@@ -614,6 +769,88 @@ fn parse_function_at_depth(
         }
         _ => Err(PsError::Rangecheck),
     }
+}
+
+/// `[a0 b0 a1 b1 ...]` as `count` non-decreasing pairs (rangecheck
+/// otherwise, as gs reports a reversed Domain, Range, or a wrong length).
+fn get_pairs(d: &Dict, key: &str, count: usize) -> Result<Vec<(f64, f64)>, PsError> {
+    let flat = get_farray(d, key)?;
+    if flat.len() != count * 2 {
+        return Err(PsError::Rangecheck);
+    }
+    Ok(flat.chunks(2).map(|c| (c[0], c[1])).collect())
+}
+
+/// The most inputs or outputs a sampled function may have. No shading
+/// reads more than 2 inputs or 4 outputs; this only bounds the parse.
+const MAX_SAMPLED_DIMS: usize = 32;
+
+/// `FunctionType` 0 (#1039), checked as gs checks it (10.07.1): `/Domain`,
+/// `/Range`, `/Size`, `/BitsPerSample` and `/DataSource` required; each
+/// Domain and Range pair non-decreasing; `/Size` one positive integer per
+/// input (gs takes `2.0` too); `/BitsPerSample` 1, 2, 4, 8, 12, 16, 24 or
+/// 32; `/Order` 1 or 3; `/Encode` and `/Decode` of the right length. All
+/// of those are rangecheck. `/DataSource` must be a string here: gs also
+/// reads a file, which pscat does not (rangecheck, a documented gap), and
+/// rejects an array as this does. A string shorter than the table is
+/// accepted, the missing samples 0, as gs paints them.
+fn parse_sampled(d: &Dict) -> Result<Sampled, PsError> {
+    let flat = get_farray(d, "Domain")?;
+    let m = flat.len() / 2;
+    if flat.len() % 2 != 0 || m == 0 || m > MAX_SAMPLED_DIMS {
+        return Err(PsError::Rangecheck);
+    }
+    let domain = get_pairs(d, "Domain", m)?;
+    let rflat = get_farray(d, "Range")?;
+    let n = rflat.len() / 2;
+    if rflat.len() % 2 != 0 || n == 0 || n > MAX_SAMPLED_DIMS {
+        return Err(PsError::Rangecheck);
+    }
+    let range = get_pairs(d, "Range", n)?;
+    if domain.iter().chain(&range).any(|&(a, b)| a > b) {
+        return Err(PsError::Rangecheck);
+    }
+    let size: Vec<usize> = get_farray(d, "Size")?
+        .into_iter()
+        .map(|v| {
+            if v >= 1.0 && v.fract() == 0.0 && v <= u32::MAX as f64 {
+                Ok(v as usize)
+            } else {
+                Err(PsError::Rangecheck)
+            }
+        })
+        .collect::<Result<_, _>>()?;
+    if size.len() != m {
+        return Err(PsError::Rangecheck);
+    }
+    let bits = get_int(d, "BitsPerSample")?;
+    if ![1, 2, 4, 8, 12, 16, 24, 32].contains(&bits) {
+        return Err(PsError::Rangecheck);
+    }
+    if d.get("Order").is_some() && !matches!(get_int(d, "Order")?, 1 | 3) {
+        return Err(PsError::Rangecheck);
+    }
+    let encode = match d.get("Encode") {
+        Some(_) => get_pairs(d, "Encode", m)?,
+        None => size.iter().map(|&s| (0.0, (s - 1) as f64)).collect(),
+    };
+    let decode = match d.get("Decode") {
+        Some(_) => get_pairs(d, "Decode", n)?,
+        None => range.clone(),
+    };
+    let data = match get(d, "DataSource")?.value {
+        Value::String(s) => s.borrow_bytes().to_vec(),
+        _ => return Err(PsError::Rangecheck),
+    };
+    Ok(Sampled {
+        domain,
+        range,
+        size,
+        bits: bits as u32,
+        encode,
+        decode,
+        data,
+    })
 }
 
 fn parse_colorspace(obj: &crate::object::Object) -> Result<CsKind, PsError> {
@@ -722,18 +959,198 @@ fn get_required(d: &Dict, key: &str) -> Result<crate::object::Object, PsError> {
         .ok_or_else(|| PsError::Undefined(key.to_string()))
 }
 
-pub(crate) fn parse_shading_dict(d: &Dict) -> Result<Shading, PsError> {
+/// A shading's `/Function`: one dictionary, or an array of one-output
+/// functions, one per colour component (#1039; gs takes either for every
+/// shading type, and an array of the wrong length is a rangecheck). Every
+/// one must take `nin` inputs (rangecheck otherwise, as gs reports a
+/// one-input function on a Type 1 shading).
+fn parse_shading_function(
+    func_obj: &crate::object::Object,
+    cs: CsKind,
+    nin: usize,
+) -> Result<PsFunction, PsError> {
+    let function = match &func_obj.value {
+        Value::Array(a) => {
+            if a.len() != cs.ncomp() {
+                return Err(PsError::Rangecheck);
+            }
+            let parts: Vec<PsFunction> = (0..a.len())
+                .map(|i| parse_function(&a.get(i).expect("len checked")))
+                .collect::<Result<_, _>>()?;
+            if parts.iter().any(|f| f.ncomp() != 1) {
+                return Err(PsError::Rangecheck);
+            }
+            PsFunction::Components(parts)
+        }
+        _ => parse_function(func_obj)?,
+    };
+    if function.ncomp() != cs.ncomp() || function.nin() != nin {
+        return Err(PsError::Rangecheck);
+    }
+    if let PsFunction::Components(parts) = &function
+        && parts.iter().any(|f| f.nin() != nin)
+    {
+        return Err(PsError::Rangecheck);
+    }
+    Ok(function)
+}
+
+/// What `shfill` paints: a gradient (types 2 and 3) or a function-based
+/// shading (type 1, #1039).
+pub(crate) enum ParsedShading {
+    Gradient(Shading),
+    Function(FunctionShading),
+}
+
+/// A `ShadingType` 1 shading (#1039): colour is a two-input function of a
+/// point `(x, y)` of its own space, which `/Matrix` maps into user space,
+/// painted only over the `/Domain` rectangle (and `/BBox`, if given).
+pub(crate) struct FunctionShading {
+    cs: CsKind,
+    function: PsFunction,
+    range: Option<Vec<(f64, f64)>>,
+    /// `[x0 x1 y0 y1]`, each pair non-decreasing.
+    pub(crate) domain: [f64; 4],
+    /// Shading space to user space, `[a b c d tx ty]`.
+    pub(crate) matrix: [f64; 6],
+    pub(crate) bbox: Option<(f64, f64, f64, f64)>,
+    /// The `/Size` of the sampled function behind it, per input, when there
+    /// is one (`pdf_grid` aligns the PDF's samples to its nodes).
+    sizes: Option<[usize; 2]>,
+}
+
+impl FunctionShading {
+    /// The colour at `(x, y)` of shading space, clamped to the Domain.
+    pub(crate) fn rgb_at(&self, x: f64, y: f64) -> (f32, f32, f32) {
+        let [x0, x1, y0, y1] = self.domain;
+        let mut out = [0.0; 4];
+        self.function
+            .eval2(x.clamp(x0, x1), y.clamp(y0, y1), &mut out);
+        let comps = &mut out[..self.cs.ncomp()];
+        if let Some(range) = &self.range {
+            for (c, &(lo, hi)) in comps.iter_mut().zip(range) {
+                *c = c.clamp(lo, hi);
+            }
+        }
+        let (r, g, b) = self.cs.to_rgb(comps);
+        let fin = |v: f64| if v.is_finite() { v as f32 } else { 0.0 };
+        (fin(r), fin(g), fin(b))
+    }
+
+    /// Nodes per axis for the PDF's sampled copy of this shading: 65, or
+    /// a grid holding every node of the sampled function behind it (a
+    /// multiple of its Size less one, plus one), so a bilinear table
+    /// comes back exactly; at most 257 per axis.
+    pub(crate) fn pdf_grid(&self) -> [usize; 2] {
+        let sizes = self.sizes.unwrap_or([2, 2]);
+        sizes.map(|s| {
+            if s < 2 {
+                return 2;
+            }
+            let k = 64usize.div_ceil(s - 1).max(1);
+            let g = (s - 1) * k + 1;
+            if g <= 257 { g } else { s.min(257) }
+        })
+    }
+}
+
+impl FunctionShading {
+    /// The shading's RGB colours at the nodes of `pdf_grid` over its
+    /// Domain, 8 bits a component, the first input varying fastest: the
+    /// sample table of a PDF FunctionType 0 (#1039).
+    pub(crate) fn pdf_samples(&self) -> ([usize; 2], Vec<u8>) {
+        let [gx, gy] = self.pdf_grid();
+        let [x0, x1, y0, y1] = self.domain;
+        let at = |i: usize, g: usize, a: f64, b: f64| a + (b - a) * i as f64 / (g - 1) as f64;
+        let mut out = Vec::with_capacity(gx * gy * 3);
+        for j in 0..gy {
+            for i in 0..gx {
+                let (r, g, b) = self.rgb_at(at(i, gx, x0, x1), at(j, gy, y0, y1));
+                out.extend([r, g, b].map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8));
+            }
+        }
+        ([gx, gy], out)
+    }
+}
+
+/// Type 1 (#1039): `/Domain` (default `[0 1 0 1]`) and `/Matrix` (default
+/// identity) as gs 10.07.1 checks them. A Domain of other than four
+/// numbers, or with a pair reversed, is a rangecheck; a Matrix of other
+/// than six is a rangecheck, a non-number in it a typecheck, and a
+/// singular one `undefinedresult`. `/Coords` and `/Extend` mean nothing
+/// here and are not read, and `/Background` is ignored by `shfill`.
+fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsError> {
+    let func_obj = get_required(d, "Function")?;
+    let function = parse_shading_function(&func_obj, cs, 2)?;
+    let range = parse_function_range(&func_obj, function.ncomp())?;
+    let domain = match d.get("Domain") {
+        None => [0.0, 1.0, 0.0, 1.0],
+        Some(_) => match get_farray(d, "Domain")?.as_slice() {
+            &[x0, x1, y0, y1] if x0 <= x1 && y0 <= y1 => [x0, x1, y0, y1],
+            _ => return Err(PsError::Rangecheck),
+        },
+    };
+    let matrix = match d.get("Matrix") {
+        None => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        Some(_) => {
+            let m: [f64; 6] = get_farray(d, "Matrix")?
+                .try_into()
+                .map_err(|_| PsError::Rangecheck)?;
+            if m[0] * m[3] - m[1] * m[2] == 0.0 {
+                return Err(PsError::UndefinedResult);
+            }
+            m
+        }
+    };
+    let leaf_sizes = |f: &PsFunction| match f {
+        PsFunction::Sampled(s) => Some([s.size[0], s.size[1]]),
+        _ => None,
+    };
+    let sizes = match &function {
+        PsFunction::Components(parts) => {
+            let first = parts.first().and_then(leaf_sizes);
+            parts
+                .iter()
+                .all(|p| leaf_sizes(p) == first)
+                .then_some(first)
+                .flatten()
+        }
+        f => leaf_sizes(f),
+    };
+    Ok(FunctionShading {
+        cs,
+        function,
+        range,
+        domain,
+        matrix,
+        bbox: parse_bbox(d)?,
+        sizes,
+    })
+}
+
+/// Optional `/BBox [llx lly urx ury]`, in the shading's user space.
+fn parse_bbox(d: &Dict) -> Result<Option<(f64, f64, f64, f64)>, PsError> {
+    match d.get("BBox") {
+        None => Ok(None),
+        Some(_) => match get_farray(d, "BBox")?.as_slice() {
+            [llx, lly, urx, ury] => Ok(Some((*llx, *lly, *urx, *ury))),
+            _ => Err(PsError::Rangecheck),
+        },
+    }
+}
+
+pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
     let shading_type = match get_required(d, "ShadingType")?.value {
         Value::Integer(n) => n,
         _ => return Err(PsError::Typecheck),
     };
     let cs = parse_colorspace(&get_required(d, "ColorSpace")?)?;
+    if shading_type == 1 {
+        return parse_function_shading(d, cs).map(ParsedShading::Function);
+    }
     let coords = get_farray(d, "Coords")?;
     let func_obj = get_required(d, "Function")?;
-    let function = parse_function(&func_obj)?;
-    if function.ncomp() != cs.ncomp() {
-        return Err(PsError::Rangecheck);
-    }
+    let function = parse_shading_function(&func_obj, cs, 1)?;
     let range = parse_function_range(&func_obj, function.ncomp())?;
     let shading_domain = match d.get("Domain") {
         None => (0.0, 1.0),
@@ -785,23 +1202,14 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<Shading, PsError> {
         },
         _ => return Err(PsError::Rangecheck),
     };
-    let bbox = match d.get("BBox") {
-        None => None,
-        Some(_) => {
-            let flat = get_farray(d, "BBox")?;
-            match flat.as_slice() {
-                [llx, lly, urx, ury] => Some((*llx, *lly, *urx, *ury)),
-                _ => return Err(PsError::Rangecheck),
-            }
-        }
-    };
+    let bbox = parse_bbox(d)?;
     let stops = build_stops(cs, &function, range.as_deref(), shading_domain)?;
-    Ok(Shading {
+    Ok(ParsedShading::Gradient(Shading {
         kind,
         stops,
         extend,
         bbox,
-    })
+    }))
 }
 
 #[cfg(test)]
