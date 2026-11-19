@@ -405,6 +405,15 @@ const TEXT_DOC: &str = "%!PS
 showpage
 ";
 
+/// Symbol and ZapfDingbats text (#1026): Greek, maths and dingbats become
+/// text in `--pdf-text`, with `/ToUnicode` from the Symbol and Dingbats
+/// tables.
+const SYMBOL_DOC: &str = "%!PS
+/Symbol findfont 24 scalefont setfont 72 700 moveto (a + b \\345 g \\243 \\245 pqW) show
+/ZapfDingbats findfont 24 scalefont setfont 72 650 moveto (3456 nlu) show
+showpage
+";
+
 /// `--svg-text` SVG from the wasm build equals the CLI's byte for byte,
 /// through the raw ABI (`record.svgText`) and the npm Renderer
 /// (`svgText: true`), at 72 and 144 dpi; and the flag really changes the
@@ -523,7 +532,11 @@ fn wasm_pdf_text_matches_the_cli() {
     let root = root();
     let dir = common::scratch_dir("pscat-wasm-pdf-text");
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let pages = [("latin", TEXT_DOC), ("hangul", HANGUL_DOC)];
+    let pages = [
+        ("latin", TEXT_DOC),
+        ("hangul", HANGUL_DOC),
+        ("symbols", SYMBOL_DOC),
+    ];
     for (name, src) in pages {
         std::fs::write(dir.join(format!("{name}.ps")), src).expect("write doc");
         let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
@@ -555,7 +568,7 @@ const ps = await Pscat.instantiate(bytes);
 ps.addFont('NotoSansKR-Regular', kr);
 const r = await instantiate(await WebAssembly.compile(bytes));
 r.addFont('NotoSansKR-Regular', kr);
-for (const name of ['latin', 'hangul']) {{
+for (const name of ['latin', 'hangul', 'symbols']) {{
   const src = readFileSync(`{dir}/${{name}}.ps`);
   if (ps.run(src, 612, 792, 1, {{ pdf: true, pdfText: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
   out(`abi-${{name}}.pdf`, ps.pdf());
@@ -605,6 +618,12 @@ console.log('PDF_TEXT_OK');
             assert!(
                 doc.contains("+NotoSansKR-Regular /Encoding") && doc.contains("> <C548>"),
                 "the CLI did not embed NotoSansKR for the Hangul page: {doc}"
+            );
+        }
+        if name == "symbols" {
+            assert!(
+                doc.contains("> <03B1>") && doc.contains("> <2713>"),
+                "the CLI wrote no Symbol or Dingbats text: {doc}"
             );
         }
         // ...and the wasm build wrote the same bytes.

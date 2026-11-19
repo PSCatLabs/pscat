@@ -75,6 +75,18 @@ gsave /Multiply setblendmode 1 0.6 0 setrgbcolor /Helvetica findfont 40 scalefon
   60 110 moveto (Blend) show grestore
 ";
 
+/// Symbol and ZapfDingbats (#1026): Greek letters, maths operators and
+/// dingbats, whose glyph names (`alpha`, `summation`, `a20`) the general
+/// glyph-name table does not know. `\140` is Symbol's `radicalex`, a
+/// Corporate Use glyph with no Unicode value, which keeps its outline.
+const SYMBOLS: &str = "
+/Times-Roman findfont 24 scalefont setfont 30 450 moveto (Sum: ) show
+/Symbol findfont 24 scalefont setfont (abg \\345 \\243 \\245 pqW m \\140) show
+/Symbol findfont 40 scalefont setfont 30 380 moveto (\\362 \\326 \\245) show
+/ZapfDingbats findfont 30 scalefont setfont 30 300 moveto (3456 nlu) show
+0 0 0.8 setrgbcolor /ZapfDingbats findfont 60 scalefont setfont 30 200 moveto (H\\250) show
+";
+
 #[test]
 fn the_default_pdf_has_no_fonts_and_equals_explicit_paths() {
     for file in ["examples/postcard.ps", "examples/specimen.ps"] {
@@ -191,6 +203,48 @@ fn ineligible_glyphs_keep_their_outlines() {
     assert!(doc.contains(" f\nQ"), "the outlines are fills: {doc}");
 }
 
+/// Symbol and Dingbats glyphs are text with their Unicode characters in
+/// `/ToUnicode` (#1026); a Corporate Use glyph keeps its outline.
+#[test]
+fn symbol_and_dingbats_glyphs_are_text() {
+    let pdf = text_pdf(SYMBOLS);
+    let doc = content(&pdf);
+    for utf16 in [
+        "03B1", "03B2", "03B3", "2211", "2264", "221E", "03C0", "03A9", "03BC",
+    ] {
+        cid_of(&doc, utf16);
+    }
+    for utf16 in ["2713", "2714", "25CF", "25A0", "2605", "2663"] {
+        cid_of(&doc, utf16);
+    }
+    assert!(doc.contains("+StandardSymbolsPS /Encoding"), "{doc}");
+    assert!(doc.contains("+D050000L /Encoding"), "{doc}");
+    // `radicalex` is the one outline on the page.
+    assert_eq!(doc.matches(" f\nQ").count(), 1, "{doc}");
+}
+
+/// The Symbol names are read only in the Symbol face: a copy of Times
+/// re-encoded with `/alpha` (which Liberation Serif draws) keeps that
+/// glyph's outline, as it did before #1026, and gives no text for it.
+#[test]
+fn symbol_names_outside_the_symbol_face_are_not_text() {
+    let pdf = text_pdf(
+        "/Times-Roman findfont dup length dict begin
+           { 1 index /FID ne { def } { pop pop } ifelse } forall
+           /Encoding StandardEncoding 256 array copy dup 65 /alpha put def
+         currentdict end /Times-Alpha exch definefont 30 scalefont setfont
+         20 100 moveto (xAx) show",
+    );
+    let doc = content(&pdf);
+    assert!(!doc.contains("> <03B1>"), "{doc}");
+    assert_eq!(
+        doc.matches(" f\nQ").count(),
+        1,
+        "alpha is an outline: {doc}"
+    );
+    cid_of(&doc, "0078");
+}
+
 #[test]
 fn pages_list_only_the_fonts_they_use() {
     let pdf = text_pdf(
@@ -273,7 +327,7 @@ fn tool_available(tool: &str) -> bool {
 }
 
 #[test]
-fn pdftotext_extracts_latin_and_hangul() {
+fn pdftotext_extracts_latin_hangul_and_symbols() {
     if !tool_available("pdftotext") {
         return;
     }
@@ -323,6 +377,20 @@ fn pdftotext_extracts_latin_and_hangul() {
         "Half",
     ] {
         assert!(text.contains(want), "{want:?} not in {text}");
+    }
+    // pdftotext's layout spaces the wide maths glyphs out; compare the
+    // characters.
+    let symbols: String = extract(&text_pdf(SYMBOLS))
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    for want in [
+        "Sum:\u{3b1}\u{3b2}\u{3b3}\u{2211}\u{2264}\u{221e}\u{3c0}\u{3b8}\u{3a9}\u{3bc}",
+        "\u{222b}\u{221a}\u{221e}",
+        "\u{2713}\u{2714}\u{2715}\u{2716}\u{25a0}\u{25cf}\u{25c6}",
+        "\u{2605}\u{2663}",
+    ] {
+        assert!(symbols.contains(want), "{want:?} not in {symbols}");
     }
     // ashow/kshow spacing reads as letters, not lost glyphs.
     let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -422,19 +490,26 @@ fn rasterize(tool: &str, pdf: &[u8], name: &str) -> Pixmap {
 /// the same tool's raster of the outline PDF. 3.0 is the mean block
 /// difference `tests/pdf.rs` allows its PDF round trips.
 fn assert_renders_like_outlines(tool: &str) {
-    let (outline_pdf, canvas) = render(None, SAMPLE.as_bytes());
-    let (text, canvas2) = render(Some(PdfText::Text), SAMPLE.as_bytes());
-    assert_eq!(canvas.data(), canvas2.data(), "the raster never changes");
-    let theirs_text = rasterize(tool, &text, &format!("{tool}-text"));
-    let theirs_outline = rasterize(tool, &outline_pdf, &format!("{tool}-outline"));
-    let vs_canvas = mean_block_diff(&canvas, &theirs_text);
-    let vs_outline = mean_block_diff(&theirs_outline, &theirs_text);
-    eprintln!("{tool}: text PDF vs canvas {vs_canvas:.3}, vs outline PDF {vs_outline:.3}");
-    assert!(vs_canvas < 3.0, "{tool}: text PDF vs canvas {vs_canvas:.2}");
-    assert!(
-        vs_outline < 3.0,
-        "{tool}: text PDF vs outline PDF {vs_outline:.2}"
-    );
+    for (name, src) in [("sample", SAMPLE), ("symbols", SYMBOLS)] {
+        let (outline_pdf, canvas) = render(None, src.as_bytes());
+        let (text, canvas2) = render(Some(PdfText::Text), src.as_bytes());
+        assert_eq!(canvas.data(), canvas2.data(), "the raster never changes");
+        let theirs_text = rasterize(tool, &text, &format!("{tool}-{name}-text"));
+        let theirs_outline = rasterize(tool, &outline_pdf, &format!("{tool}-{name}-outline"));
+        let vs_canvas = mean_block_diff(&canvas, &theirs_text);
+        let vs_outline = mean_block_diff(&theirs_outline, &theirs_text);
+        eprintln!(
+            "{tool} {name}: text PDF vs canvas {vs_canvas:.3}, vs outline PDF {vs_outline:.3}"
+        );
+        assert!(
+            vs_canvas < 3.0,
+            "{tool} {name}: text PDF vs canvas {vs_canvas:.2}"
+        );
+        assert!(
+            vs_outline < 3.0,
+            "{tool} {name}: text PDF vs outline PDF {vs_outline:.2}"
+        );
+    }
 }
 
 #[test]

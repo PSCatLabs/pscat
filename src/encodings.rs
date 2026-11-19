@@ -489,6 +489,389 @@ pub fn name_to_char(name: &str) -> Option<char> {
     char::from_u32(cp)
 }
 
+/// The character a Symbol-encoded glyph stands for in extracted text
+/// (`--pdf-text`'s `/ToUnicode`, #1026). Only the text output asks: glyph
+/// lookup still goes through the face's own names, so nothing is drawn
+/// differently. From Unicode's `MAPPINGS/VENDORS/ADOBE/symbol.txt` (the same
+/// source family as the Dingbats encoding below), without its 29 Corporate
+/// Use entries: a private-use value means nothing to a reader, so those
+/// glyphs (bracket and radical pieces, sans-serif marks) keep their
+/// outlines. Where the file gives a name two values the Greek letter wins
+/// (`Delta`, `Omega`, `mu`), as a search for the letter expects, and
+/// `fraction` is U+2044 as in the Adobe Glyph List.
+pub(crate) fn symbol_name_to_char(name: &str) -> Option<char> {
+    table_char(SYMBOL_NAMES, name)
+}
+
+/// [`symbol_name_to_char`] for the ZapfDingbats glyph names (`a1` ...),
+/// from Unicode's `MAPPINGS/VENDORS/ADOBE/zdingbat.txt`, again without its
+/// Corporate Use entries (the ornamental brackets `a85`-`a96`, `a205`,
+/// `a206`). These names mean something only in a Dingbats face, so the
+/// caller asks only for one.
+pub(crate) fn dingbat_name_to_char(name: &str) -> Option<char> {
+    table_char(DINGBAT_NAMES, name)
+}
+
+fn table_char(table: &[(&str, u32)], name: &str) -> Option<char> {
+    let i = table.binary_search_by(|(n, _)| (*n).cmp(name)).ok()?;
+    char::from_u32(table[i].1)
+}
+
+// Glyph name -> Unicode, sorted by name for `binary_search_by`. Factual
+// mappings from the Unicode Consortium's files named above; see
+// THIRD_PARTY_NOTICES.md. `space` is left out: it is in
+// `name_to_char` already.
+const SYMBOL_NAMES: &[(&str, u32)] = &[
+    ("Alpha", 0x0391),
+    ("Beta", 0x0392),
+    ("Chi", 0x03A7),
+    ("Delta", 0x0394),
+    ("Epsilon", 0x0395),
+    ("Eta", 0x0397),
+    ("Euro", 0x20AC),
+    ("Gamma", 0x0393),
+    ("Ifraktur", 0x2111),
+    ("Iota", 0x0399),
+    ("Kappa", 0x039A),
+    ("Lambda", 0x039B),
+    ("Mu", 0x039C),
+    ("Nu", 0x039D),
+    ("Omega", 0x03A9),
+    ("Omicron", 0x039F),
+    ("Phi", 0x03A6),
+    ("Pi", 0x03A0),
+    ("Psi", 0x03A8),
+    ("Rfraktur", 0x211C),
+    ("Rho", 0x03A1),
+    ("Sigma", 0x03A3),
+    ("Tau", 0x03A4),
+    ("Theta", 0x0398),
+    ("Upsilon", 0x03A5),
+    ("Upsilon1", 0x03D2),
+    ("Xi", 0x039E),
+    ("Zeta", 0x0396),
+    ("aleph", 0x2135),
+    ("alpha", 0x03B1),
+    ("ampersand", 0x0026),
+    ("angle", 0x2220),
+    ("angleleft", 0x2329),
+    ("angleright", 0x232A),
+    ("approxequal", 0x2248),
+    ("arrowboth", 0x2194),
+    ("arrowdblboth", 0x21D4),
+    ("arrowdbldown", 0x21D3),
+    ("arrowdblleft", 0x21D0),
+    ("arrowdblright", 0x21D2),
+    ("arrowdblup", 0x21D1),
+    ("arrowdown", 0x2193),
+    ("arrowleft", 0x2190),
+    ("arrowright", 0x2192),
+    ("arrowup", 0x2191),
+    ("asteriskmath", 0x2217),
+    ("bar", 0x007C),
+    ("beta", 0x03B2),
+    ("braceleft", 0x007B),
+    ("braceright", 0x007D),
+    ("bracketleft", 0x005B),
+    ("bracketright", 0x005D),
+    ("bullet", 0x2022),
+    ("carriagereturn", 0x21B5),
+    ("chi", 0x03C7),
+    ("circlemultiply", 0x2297),
+    ("circleplus", 0x2295),
+    ("club", 0x2663),
+    ("colon", 0x003A),
+    ("comma", 0x002C),
+    ("congruent", 0x2245),
+    ("degree", 0x00B0),
+    ("delta", 0x03B4),
+    ("diamond", 0x2666),
+    ("divide", 0x00F7),
+    ("dotmath", 0x22C5),
+    ("eight", 0x0038),
+    ("element", 0x2208),
+    ("ellipsis", 0x2026),
+    ("emptyset", 0x2205),
+    ("epsilon", 0x03B5),
+    ("equal", 0x003D),
+    ("equivalence", 0x2261),
+    ("eta", 0x03B7),
+    ("exclam", 0x0021),
+    ("existential", 0x2203),
+    ("five", 0x0035),
+    ("florin", 0x0192),
+    ("four", 0x0034),
+    ("fraction", 0x2044),
+    ("gamma", 0x03B3),
+    ("gradient", 0x2207),
+    ("greater", 0x003E),
+    ("greaterequal", 0x2265),
+    ("heart", 0x2665),
+    ("infinity", 0x221E),
+    ("integral", 0x222B),
+    ("integralbt", 0x2321),
+    ("integraltp", 0x2320),
+    ("intersection", 0x2229),
+    ("iota", 0x03B9),
+    ("kappa", 0x03BA),
+    ("lambda", 0x03BB),
+    ("less", 0x003C),
+    ("lessequal", 0x2264),
+    ("logicaland", 0x2227),
+    ("logicalnot", 0x00AC),
+    ("logicalor", 0x2228),
+    ("lozenge", 0x25CA),
+    ("minus", 0x2212),
+    ("minute", 0x2032),
+    ("mu", 0x03BC),
+    ("multiply", 0x00D7),
+    ("nine", 0x0039),
+    ("notelement", 0x2209),
+    ("notequal", 0x2260),
+    ("notsubset", 0x2284),
+    ("nu", 0x03BD),
+    ("numbersign", 0x0023),
+    ("omega", 0x03C9),
+    ("omega1", 0x03D6),
+    ("omicron", 0x03BF),
+    ("one", 0x0031),
+    ("parenleft", 0x0028),
+    ("parenright", 0x0029),
+    ("partialdiff", 0x2202),
+    ("percent", 0x0025),
+    ("period", 0x002E),
+    ("perpendicular", 0x22A5),
+    ("phi", 0x03C6),
+    ("phi1", 0x03D5),
+    ("pi", 0x03C0),
+    ("plus", 0x002B),
+    ("plusminus", 0x00B1),
+    ("product", 0x220F),
+    ("propersubset", 0x2282),
+    ("propersuperset", 0x2283),
+    ("proportional", 0x221D),
+    ("psi", 0x03C8),
+    ("question", 0x003F),
+    ("radical", 0x221A),
+    ("reflexsubset", 0x2286),
+    ("reflexsuperset", 0x2287),
+    ("rho", 0x03C1),
+    ("second", 0x2033),
+    ("semicolon", 0x003B),
+    ("seven", 0x0037),
+    ("sigma", 0x03C3),
+    ("sigma1", 0x03C2),
+    ("similar", 0x223C),
+    ("six", 0x0036),
+    ("slash", 0x002F),
+    ("spade", 0x2660),
+    ("suchthat", 0x220B),
+    ("summation", 0x2211),
+    ("tau", 0x03C4),
+    ("therefore", 0x2234),
+    ("theta", 0x03B8),
+    ("theta1", 0x03D1),
+    ("three", 0x0033),
+    ("two", 0x0032),
+    ("underscore", 0x005F),
+    ("union", 0x222A),
+    ("universal", 0x2200),
+    ("upsilon", 0x03C5),
+    ("weierstrass", 0x2118),
+    ("xi", 0x03BE),
+    ("zero", 0x0030),
+    ("zeta", 0x03B6),
+];
+const DINGBAT_NAMES: &[(&str, u32)] = &[
+    ("a1", 0x2701),
+    ("a10", 0x2721),
+    ("a100", 0x275E),
+    ("a101", 0x2761),
+    ("a102", 0x2762),
+    ("a103", 0x2763),
+    ("a104", 0x2764),
+    ("a105", 0x2710),
+    ("a106", 0x2765),
+    ("a107", 0x2766),
+    ("a108", 0x2767),
+    ("a109", 0x2660),
+    ("a11", 0x261B),
+    ("a110", 0x2665),
+    ("a111", 0x2666),
+    ("a112", 0x2663),
+    ("a117", 0x2709),
+    ("a118", 0x2708),
+    ("a119", 0x2707),
+    ("a12", 0x261E),
+    ("a120", 0x2460),
+    ("a121", 0x2461),
+    ("a122", 0x2462),
+    ("a123", 0x2463),
+    ("a124", 0x2464),
+    ("a125", 0x2465),
+    ("a126", 0x2466),
+    ("a127", 0x2467),
+    ("a128", 0x2468),
+    ("a129", 0x2469),
+    ("a13", 0x270C),
+    ("a130", 0x2776),
+    ("a131", 0x2777),
+    ("a132", 0x2778),
+    ("a133", 0x2779),
+    ("a134", 0x277A),
+    ("a135", 0x277B),
+    ("a136", 0x277C),
+    ("a137", 0x277D),
+    ("a138", 0x277E),
+    ("a139", 0x277F),
+    ("a14", 0x270D),
+    ("a140", 0x2780),
+    ("a141", 0x2781),
+    ("a142", 0x2782),
+    ("a143", 0x2783),
+    ("a144", 0x2784),
+    ("a145", 0x2785),
+    ("a146", 0x2786),
+    ("a147", 0x2787),
+    ("a148", 0x2788),
+    ("a149", 0x2789),
+    ("a15", 0x270E),
+    ("a150", 0x278A),
+    ("a151", 0x278B),
+    ("a152", 0x278C),
+    ("a153", 0x278D),
+    ("a154", 0x278E),
+    ("a155", 0x278F),
+    ("a156", 0x2790),
+    ("a157", 0x2791),
+    ("a158", 0x2792),
+    ("a159", 0x2793),
+    ("a16", 0x270F),
+    ("a160", 0x2794),
+    ("a161", 0x2192),
+    ("a162", 0x27A3),
+    ("a163", 0x2194),
+    ("a164", 0x2195),
+    ("a165", 0x2799),
+    ("a166", 0x279B),
+    ("a167", 0x279C),
+    ("a168", 0x279D),
+    ("a169", 0x279E),
+    ("a17", 0x2711),
+    ("a170", 0x279F),
+    ("a171", 0x27A0),
+    ("a172", 0x27A1),
+    ("a173", 0x27A2),
+    ("a174", 0x27A4),
+    ("a175", 0x27A5),
+    ("a176", 0x27A6),
+    ("a177", 0x27A7),
+    ("a178", 0x27A8),
+    ("a179", 0x27A9),
+    ("a18", 0x2712),
+    ("a180", 0x27AB),
+    ("a181", 0x27AD),
+    ("a182", 0x27AF),
+    ("a183", 0x27B2),
+    ("a184", 0x27B3),
+    ("a185", 0x27B5),
+    ("a186", 0x27B8),
+    ("a187", 0x27BA),
+    ("a188", 0x27BB),
+    ("a189", 0x27BC),
+    ("a19", 0x2713),
+    ("a190", 0x27BD),
+    ("a191", 0x27BE),
+    ("a192", 0x279A),
+    ("a193", 0x27AA),
+    ("a194", 0x27B6),
+    ("a195", 0x27B9),
+    ("a196", 0x2798),
+    ("a197", 0x27B4),
+    ("a198", 0x27B7),
+    ("a199", 0x27AC),
+    ("a2", 0x2702),
+    ("a20", 0x2714),
+    ("a200", 0x27AE),
+    ("a201", 0x27B1),
+    ("a202", 0x2703),
+    ("a203", 0x2750),
+    ("a204", 0x2752),
+    ("a21", 0x2715),
+    ("a22", 0x2716),
+    ("a23", 0x2717),
+    ("a24", 0x2718),
+    ("a25", 0x2719),
+    ("a26", 0x271A),
+    ("a27", 0x271B),
+    ("a28", 0x271C),
+    ("a29", 0x2722),
+    ("a3", 0x2704),
+    ("a30", 0x2723),
+    ("a31", 0x2724),
+    ("a32", 0x2725),
+    ("a33", 0x2726),
+    ("a34", 0x2727),
+    ("a35", 0x2605),
+    ("a36", 0x2729),
+    ("a37", 0x272A),
+    ("a38", 0x272B),
+    ("a39", 0x272C),
+    ("a4", 0x260E),
+    ("a40", 0x272D),
+    ("a41", 0x272E),
+    ("a42", 0x272F),
+    ("a43", 0x2730),
+    ("a44", 0x2731),
+    ("a45", 0x2732),
+    ("a46", 0x2733),
+    ("a47", 0x2734),
+    ("a48", 0x2735),
+    ("a49", 0x2736),
+    ("a5", 0x2706),
+    ("a50", 0x2737),
+    ("a51", 0x2738),
+    ("a52", 0x2739),
+    ("a53", 0x273A),
+    ("a54", 0x273B),
+    ("a55", 0x273C),
+    ("a56", 0x273D),
+    ("a57", 0x273E),
+    ("a58", 0x273F),
+    ("a59", 0x2740),
+    ("a6", 0x271D),
+    ("a60", 0x2741),
+    ("a61", 0x2742),
+    ("a62", 0x2743),
+    ("a63", 0x2744),
+    ("a64", 0x2745),
+    ("a65", 0x2746),
+    ("a66", 0x2747),
+    ("a67", 0x2748),
+    ("a68", 0x2749),
+    ("a69", 0x274A),
+    ("a7", 0x271E),
+    ("a70", 0x274B),
+    ("a71", 0x25CF),
+    ("a72", 0x274D),
+    ("a73", 0x25A0),
+    ("a74", 0x274F),
+    ("a75", 0x2751),
+    ("a76", 0x25B2),
+    ("a77", 0x25BC),
+    ("a78", 0x25C6),
+    ("a79", 0x2756),
+    ("a8", 0x271F),
+    ("a81", 0x25D7),
+    ("a82", 0x2758),
+    ("a83", 0x2759),
+    ("a84", 0x275A),
+    ("a9", 0x2720),
+    ("a97", 0x275B),
+    ("a98", 0x275C),
+    ("a99", 0x275D),
+];
+
 // Symbol and ZapfDingbats encodings, used by the font catalog for the URW
 // StandardSymbolsPS and D050000L faces. Both were first dumped from
 // Ghostscript's SymbolEncoding/DingbatsEncoding (gs as oracle, as everywhere
@@ -833,6 +1216,99 @@ mod tests {
             if *name != ".notdef" {
                 assert!(name_to_char(name).is_some(), "no unicode for {name}");
             }
+        }
+    }
+
+    /// The Symbol and Dingbats text tables (#1026): sorted for the binary
+    /// search, no private-use or control values, and in agreement with
+    /// `name_to_char` wherever both know a name, but for `mu`.
+    #[test]
+    fn symbolic_text_tables_are_sorted_and_readable() {
+        for table in [SYMBOL_NAMES, DINGBAT_NAMES] {
+            assert!(
+                table.windows(2).all(|w| w[0].0 < w[1].0),
+                "sorted, no duplicates"
+            );
+            for &(name, cp) in table {
+                let c = char::from_u32(cp).expect("a scalar value");
+                assert!(!(0xE000..=0xF8FF).contains(&cp), "{name} is private use");
+                assert!(!c.is_control(), "{name} is a control");
+                // `mu` is the Latin-1 micro sign in a text face and the
+                // Greek letter in Symbol; the Symbol face asks its table
+                // first.
+                if let Some(general) = name_to_char(name)
+                    && name != "mu"
+                {
+                    assert_eq!(general, c, "{name} disagrees with name_to_char");
+                }
+            }
+        }
+        assert_eq!(symbol_name_to_char("alpha"), Some('\u{3B1}'));
+        assert_eq!(symbol_name_to_char("summation"), Some('\u{2211}'));
+        assert_eq!(symbol_name_to_char("Omega"), Some('\u{3A9}'));
+        assert_eq!(symbol_name_to_char("mu"), Some('\u{3BC}'));
+        assert_eq!(symbol_name_to_char("radicalex"), None, "private use");
+        assert_eq!(dingbat_name_to_char("a1"), Some('\u{2701}'));
+        assert_eq!(dingbat_name_to_char("a89"), None, "private use");
+        assert_eq!(symbol_name_to_char("a1"), None);
+    }
+
+    /// Every name the Symbol and Dingbats encodings hold has a character for
+    /// PDF text, except the Corporate Use ones the tables leave out.
+    #[test]
+    fn symbolic_encodings_are_covered_for_text() {
+        let symbol_pua = [
+            "radicalex",
+            "arrowvertex",
+            "arrowhorizex",
+            "registersans",
+            "copyrightsans",
+            "trademarksans",
+            "parenlefttp",
+            "parenleftex",
+            "parenleftbt",
+            "bracketlefttp",
+            "bracketleftex",
+            "bracketleftbt",
+            "bracelefttp",
+            "braceleftmid",
+            "braceleftbt",
+            "braceex",
+            "integralex",
+            "parenrighttp",
+            "parenrightex",
+            "parenrightbt",
+            "bracketrighttp",
+            "bracketrightex",
+            "bracketrightbt",
+            "bracerighttp",
+            "bracerightmid",
+            "bracerightbt",
+            "registerserif",
+            "copyrightserif",
+            "trademarkserif",
+        ];
+        for name in symbol_encoding() {
+            if name == ".notdef" || symbol_pua.contains(&name) {
+                continue;
+            }
+            assert!(
+                name_to_char(name)
+                    .or_else(|| symbol_name_to_char(name))
+                    .is_some(),
+                "Symbol {name}"
+            );
+        }
+        for name in dingbats_encoding() {
+            if name == ".notdef" {
+                continue;
+            }
+            assert!(
+                name_to_char(name)
+                    .or_else(|| dingbat_name_to_char(name))
+                    .is_some(),
+                "Dingbats {name}"
+            );
         }
     }
 }

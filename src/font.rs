@@ -845,6 +845,28 @@ pub(crate) fn is_unicode_font(fid: i64) -> bool {
         .is_some_and(|c| matches!(c.encoding, CatalogEncoding::Unicode))
 }
 
+/// The character a Symbol or ZapfDingbats glyph name (`alpha`,
+/// `summation`, `a12` ...) stands for, when the face is the Symbol or
+/// Dingbats catalog face and PDF text is being written (#1026). It comes
+/// before `name_to_char`, which reads `mu` as the Latin-1 micro sign: in
+/// Symbol it is the Greek letter. Only the text a PDF reader extracts
+/// uses it: SVG text never takes these faces (`textrun::standard_face`),
+/// and the glyph itself is still found by its name in the face. Asked
+/// only with `--pdf-text` on, so other output does not pay for the
+/// catalog lock per glyph.
+fn symbolic_text_char(gfx: &Gfx, fid: i64, name: &str) -> Option<char> {
+    if !gfx.pdf_text_wanted() {
+        return None;
+    }
+    let idx = usize::try_from(fid).ok()?.checked_sub(BUILTINS.len())?;
+    let encoding = CATALOG.read().ok()?.get(idx)?.encoding;
+    match encoding {
+        CatalogEncoding::Symbol => encodings::symbol_name_to_char(name),
+        CatalogEncoding::Dingbats => encodings::dingbat_name_to_char(name),
+        CatalogEncoding::Standard | CatalogEncoding::Unicode => None,
+    }
+}
+
 /// Whether a Type 3 font dict opted into Unicode-mode `BuildChar` — the
 /// procedural-font counterpart of `is_unicode_font`'s bundled-TrueType
 /// mechanism (see `docs/dev/FONTS.md`'s "Unicode-mode Type 3 BuildChar"
@@ -1580,7 +1602,9 @@ fn outline_glyph(
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let gid = resolve_glyph(face, name);
-    let text = encodings::name_to_char(name).map(|c| (fs.fid, c));
+    let text = symbolic_text_char(gfx, fs.fid, name)
+        .or_else(|| encodings::name_to_char(name))
+        .map(|c| (fs.fid, c));
     Ok(paint_resolved_glyph(
         gfx, face, fs.matrix, gid, mode, pen, text,
     ))
