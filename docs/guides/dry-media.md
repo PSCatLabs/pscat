@@ -247,7 +247,7 @@ skeletons with TeX's box model. The subset covers:
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
 - the escaped literals `\$ \% \& \# \_ \{ \}`, each the character itself as in
-  TeX (inside `\text{}` too; a bare `_ # & $` there is refused, as in TeX);
+  TeX (inside `\text{}` too; a bare `_ # &` there is refused, as in TeX);
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
