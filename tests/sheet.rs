@@ -414,6 +414,87 @@ fn a_parameter_sweep_draws_one_labelled_cell_per_value() {
     assert_eq!(Pixmap::load_png(&out2).unwrap().height(), 12 + 52 + 12);
 }
 
+/// Issue #1000: `--captions` replaces the drawn value (`W=20`) with a
+/// readable caption, and `--no-values` leaves the value out; neither
+/// changes what the cells draw.
+#[test]
+fn sweep_captions_replace_or_hide_the_value() {
+    let d = dir();
+    let prog = write(&d, "w.ps", "1 0 0 setrgbcolor 0 0 W 50 rectfill");
+    let render = |name: &str, extra: &[&str]| {
+        let out = d.join(name);
+        let mut args = vec![
+            "-o",
+            out.to_str().unwrap(),
+            "--no-labels",
+            "--no-sizes",
+            "--page",
+            "100x50",
+        ];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["--sweep", "W=20,60", &prog]);
+        let (ok, _, stderr) = sheet(&args);
+        assert!(ok, "{extra:?}: {stderr}");
+        std::fs::read(&out).unwrap()
+    };
+    let plain = render("plain.png", &[]);
+    // Captions that spell out the default are the default, byte for byte.
+    assert_eq!(render("same.png", &["--captions", "W=20,W=60"]), plain);
+    // Other words draw other ink, over cells that are unchanged.
+    let named = render("named.png", &["--captions", "(a) narrow,(b) wide"]);
+    assert_ne!(named, plain);
+    let (pn, pp) = (
+        Pixmap::decode_png(&named).unwrap(),
+        Pixmap::decode_png(&plain).unwrap(),
+    );
+    assert_eq!(px(&pn, 13 + 10, 30), [255, 0, 0, 255]);
+    assert_eq!(px(&pn, 13 + 40, 30), WHITE);
+    assert_eq!(pn.height(), pp.height());
+    // An empty entry leaves one caption out; the other is still drawn.
+    let half = Pixmap::decode_png(&render("half.png", &["--captions", ",W=60"])).unwrap();
+    let ink = |p: &Pixmap, x0: u32, x1: u32| {
+        (12 + 52 + 5..p.height()).any(|y| (x0..x1).any(|x| px(p, x, y)[0] < 100))
+    };
+    let x2 = 12 + 102 + 14 + 1;
+    assert!(!ink(&half, 12, 114) && ink(&half, x2, x2 + 100));
+    // With nothing to caption (value hidden, size hidden) the strip under
+    // the cells goes: the sheet is as tall as the cells and the margins.
+    let bare = render("bare.png", &["--no-values"]);
+    assert_eq!(Pixmap::decode_png(&bare).unwrap().height(), 12 + 52 + 12);
+    // --no-values wins over --captions.
+    assert_eq!(
+        render("both.png", &["--captions", "a,b", "--no-values"]),
+        bare
+    );
+    assert_eq!(render("blank.png", &["--captions", ","]), bare);
+}
+
+/// A failing cell is still reported by its value, not by its caption.
+#[test]
+fn a_failure_names_the_value_not_the_caption() {
+    let d = dir();
+    let prog = write(
+        &d,
+        "f.ps",
+        "W 40 gt { nosuchoperator } if 0 0 W 50 rectfill",
+    );
+    let out = d.join("fail.png");
+    let (ok, _, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--page",
+        "100x50",
+        "--sweep",
+        "W=20,60",
+        "--captions",
+        "small,large",
+        &prog,
+    ]);
+    assert!(!ok);
+    assert!(stderr.contains("W=60 failed"), "{stderr}");
+    assert!(!stderr.contains("large failed"), "{stderr}");
+}
+
 /// `--sweep-seed` reseeds each cell; a program that never seeds is told so.
 #[test]
 fn a_seed_sweep_reseeds_each_cell_and_warns_when_nothing_seeds() {
@@ -545,6 +626,34 @@ fn bad_input_is_refused_with_a_message() {
         (&["-o", out, "--sweep", "nope", &a], "NAME=SPEC"),
         (&["-o", out, "--sweep-seed", "x", &a], "seed"),
         (&["-o", out, "--cols", "0", &a], "--cols"),
+        // #1000: --captions pairs with a sweep of the same file, one each.
+        (&["-o", out, "--captions", "a,b", &a], "needs a --sweep"),
+        (
+            &["-o", out, "--sweep", "W=1,2,3", "--captions", "a,b", &a],
+            "2 captions but the sweep",
+        ),
+        (
+            &["-o", out, "--sweep-seed", "1:2", "--captions", "a", &a],
+            "1 captions but the sweep",
+        ),
+        (
+            &[
+                "-o",
+                out,
+                "--sweep",
+                "W=1,2",
+                "--captions",
+                "a,b",
+                "--captions",
+                "c,d",
+                &a,
+            ],
+            "one --captions per file",
+        ),
+        (
+            &["-o", out, &a, "--sweep", "W=1,2", "--captions", "a,b"],
+            "no file after",
+        ),
         (&["-o", out, "--dpi", "72@red", &a], "mat colour"),
         (&["-o", out, "--dpi", "72+", &a], "--dpi"),
         // 8000 px of page at 72 dpi, twice across: past the sheet's limit.
