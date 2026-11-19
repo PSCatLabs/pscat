@@ -1648,6 +1648,13 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
 
             let ok = match interp.run_source(source) {
                 Ok(()) => true,
+                // The reader of stdout went away (`| head`): not the
+                // program's fault, and its `ioerror` would be noise (#1117).
+                // The frame's page is still written; the loop stops below.
+                Err(PsError::Io) if interp.stdout_epipe_error() => {
+                    note_stdout_closed();
+                    true
+                }
                 Err(e) => {
                     eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
                     eprintln!("{}", interp.error_report(&e));
@@ -1745,6 +1752,13 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 }
                 pscat::contact_sheet::blit_cell(sheet, cols, pscat::contact_sheet::GAP, i, &page);
             }
+        }
+        // Nobody is reading the progress lines or the program's output any
+        // more: stop rendering frames (#1117). This frame's files are
+        // written, and so is a requested contact sheet, with the cells that
+        // rendered.
+        if stdout_is_closed() {
+            break;
         }
     }
 

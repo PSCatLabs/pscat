@@ -1,11 +1,47 @@
 //! `pscat fonts ...` (issue #599). Kept out of `main.rs`, which only
 //! hands over `argv` after the word `fonts`.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::install::{self, Curl, Request, Source};
 use super::{PINNED_INDEX, packs};
+
+/// The exit status of a run whose stdout reader went away (`| head`): 128 +
+/// SIGPIPE, what a shell reports for a tool that `SIGPIPE` killed. The main
+/// CLI ends the same way (#1059).
+const EXIT_STDOUT_CLOSED: u8 = 141;
+
+/// Set once a `println!` of this module found its reader gone.
+static STDOUT_CLOSED: AtomicBool = AtomicBool::new(false);
+
+fn stdout_closed() -> bool {
+    STDOUT_CLOSED.load(Ordering::Relaxed)
+}
+
+/// What `println!` writes in this module (#1117). Rust ignores `SIGPIPE`, so a
+/// write to a closed pipe fails with `EPIPE`, and the std macro turns that
+/// into a panic. Here the text is dropped and [`main`] ends with
+/// [`EXIT_STDOUT_CLOSED`]. Any other write error is a real failure and
+/// panics as the std macro does.
+fn stdout_line(args: std::fmt::Arguments<'_>) {
+    if stdout_closed() {
+        return;
+    }
+    let mut out = std::io::stdout().lock();
+    if let Err(e) = out.write_fmt(args).and_then(|()| out.write_all(b"\n")) {
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            panic!("failed printing to stdout: {e}");
+        }
+        STDOUT_CLOSED.store(true, Ordering::Relaxed);
+    }
+}
+
+macro_rules! println {
+    ($($arg:tt)*) => { stdout_line(format_args!($($arg)*)) };
+}
 
 const USAGE: &str = "\
 usage: pscat fonts install [--version <fonts-YYYY.MM[.N]>|latest] [--from <file>] [--pack <name>]...
@@ -32,7 +68,13 @@ override installed packs; `pscat fonts list` shows them.";
 
 /// Run `pscat fonts <args>`.
 pub fn main(args: &[String]) -> ExitCode {
-    match run(args) {
+    let result = run(args);
+    // A reader that went away is not a failure to report: say nothing more
+    // and end as a Unix tool killed by SIGPIPE does.
+    if stdout_closed() {
+        return ExitCode::from(EXIT_STDOUT_CLOSED);
+    }
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
             eprintln!("pscat fonts: {msg}");
@@ -140,6 +182,10 @@ fn cmd_list() -> Result<(), String> {
     let installed = super::installed();
     let mut bad = false;
     for p in &installed {
+        // Nobody is reading: skip hashing the rest of the packs.
+        if stdout_closed() {
+            return Ok(());
+        }
         let check = match install::verify(p) {
             Ok(n) => format!("{n} files verified"),
             Err(problems) => {
