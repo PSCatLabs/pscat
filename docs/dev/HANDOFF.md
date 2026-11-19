@@ -713,7 +713,8 @@ renders eight examples in both and compares block-downsampled output).
   ramp's average colour), its Function built from the same RGB stops the
   raster and SVG paint, with the shading's own `/Extend`
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
-  `notes/1040-shfill-extend.md`).
+  `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
+  the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into

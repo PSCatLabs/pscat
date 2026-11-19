@@ -2894,6 +2894,15 @@ fn axialsh_and_radialsh_build_shading_dicts_with_correct_shape() {
         ),
         ["2", "/DeviceRGB", "10", "20", "30", "40"]
     );
+    // Both helpers pad with the end colours by default (#1286).
+    assert_eq!(
+        eval("0 0 1 1 [[1 0 0] [0 0 1]] axialsh /Extend get aload pop"),
+        ["true", "true"]
+    );
+    assert_eq!(
+        eval("0 0 1 1 1 1 [[1 0 0] [0 0 1]] radialsh /Extend get aload pop"),
+        ["true", "true"]
+    );
     assert_eq!(
         eval(
             "1 2 3 4 5 6 [[1 0 0] [0 0 1]] radialsh dup /ShadingType get exch /Coords get aload pop"
@@ -2915,6 +2924,27 @@ fn gradfill_paints_an_axial_gradient_clipped_to_the_path() {
     assert!(r < 40, "near t=0 should be dark, got {r}");
     let (r, _, _) = pixel(&it, 95, 50);
     assert!(r > 215, "near t=1 should be light, got {r}");
+}
+
+#[test]
+fn gradfill_pads_past_the_axis_ends_and_extend_false_confines_it() {
+    // The axis runs 30..70; the box is the whole page (#1286).
+    let paint = |extend: &str| {
+        let mut it = Interp::with_page(100, 100).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath \
+             30 0 70 0 [[0 0 0] [1 1 1]] axialsh {extend} gradfill"
+        ))
+        .unwrap_or_else(|e| panic!("gradfill failed: {}", it.error_report(&e)));
+        it
+    };
+    let it = paint("");
+    assert!(pixel(&it, 5, 50).0 < 10, "start colour pads left");
+    assert!(pixel(&it, 95, 50).0 > 245, "end colour pads right");
+    let it = paint("dup /Extend [false false] put");
+    assert_eq!(pixel(&it, 5, 50), (255, 255, 255), "opt-out leaves paper");
+    assert_eq!(pixel(&it, 95, 50), (255, 255, 255), "opt-out leaves paper");
 }
 
 #[test]
