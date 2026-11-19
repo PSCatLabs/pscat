@@ -235,6 +235,67 @@ for (const [w, h, scale, src, out] of [{jobs}]) {{
     }
 }
 
+/// The wasm `pageCount()` is the library's `Interp::page_count` (#1162):
+/// an empty program, one showpage, a trailing unshown page and two pages.
+#[test]
+fn wasm_page_count_matches_the_library() {
+    if !wasm_ready() {
+        return;
+    }
+    let root = root();
+    let dir = common::scratch_dir("pscat-wasm-pagecount");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let programs: [&str; 5] = [
+        "",
+        "showpage",
+        "showpage 0 0 5 5 rectfill",
+        "0 0 5 5 rectfill showpage 0 0 5 5 rectfill showpage",
+        "0 0 5 5 rectfill showpage showpage",
+    ];
+    let driver = format!(
+        r#"
+import {{ readFileSync }} from 'node:fs';
+import {{ Pscat }} from 'file://{lib}';
+const ps = await Pscat.instantiate(readFileSync('{wasm}'));
+const counts = [];
+for (const src of {programs:?}) {{
+  if (ps.run(src, 20, 20, 1) !== 0) {{ console.error(src + ': ' + ps.error); process.exit(1); }}
+  counts.push(ps.pageCount());
+}}
+console.log(counts.join(','));
+"#,
+        lib = root.join("web/pscat.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+    );
+    let script = dir.join("pagecount.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output()
+        .expect("run node");
+    assert!(
+        out.status.success(),
+        "node driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let wasm: Vec<usize> = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .split(',')
+        .map(|n| n.parse().expect("a count"))
+        .collect();
+    let native: Vec<usize> = programs
+        .iter()
+        .map(|src| {
+            let mut it = pscat::Interp::with_page(20, 20).expect("page");
+            it.run_str(src)
+                .unwrap_or_else(|e| panic!("native {src:?}: {e}"));
+            it.page_count()
+        })
+        .collect();
+    assert_eq!(wasm, native, "wasm and library page counts differ");
+    assert_eq!(native, [1, 1, 2, 2, 2]);
+}
+
 /// A two-page document for the vector tests (#1003): text in two built-in
 /// faces, an arc, strokes under rotation (trig, where native and wasm libm
 /// could round apart), a curve, and the DSC comments the CLI turns into

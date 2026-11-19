@@ -452,6 +452,82 @@ fn a_scanned_executable_string_runs() {
     assert_eq!(stack(&it), ["7"]);
 }
 
+/// Run `src` and return the operand stack as `==` would print it.
+fn run_stack(src: &str) -> Vec<String> {
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+    stack(&it)
+}
+
+/// An executable string met in an executing procedure runs as source, not
+/// pushed (#1122). gs 10.07.1: `[ (8 9 add) cvx ] cvx exec pstack` leaves
+/// 17, `[ (8 9 add) cvx ] cvx 0 get` returns the string, `[ () cvx ] cvx 5
+/// exch exec` leaves 5, `[ ({9}) cvx ] cvx exec` leaves `{9}`.
+#[test]
+fn an_executable_string_in_a_procedure_runs() {
+    for src in [
+        "[ (8 9 add) cvx ] cvx exec",
+        "[ (8 9 add) cvx ] cvx bind exec",
+        "{ [ (8 9 add) cvx ] cvx exec } exec",
+    ] {
+        assert_eq!(run_stack(src), ["17"], "{src}");
+    }
+    assert_eq!(
+        run_stack("3 { [ (7) cvx ] cvx exec } repeat"),
+        ["7", "7", "7"]
+    );
+    // Only running the array runs it: reading the element does not.
+    assert_eq!(run_stack("[ (8 9 add) cvx ] cvx 0 get"), ["(8 9 add)"]);
+    // Elements around it still run in order; an empty string adds nothing.
+    assert_eq!(run_stack("[ () cvx ] cvx 5 exch exec"), ["5"]);
+    assert_eq!(
+        run_stack("[ 1 (2 3) cvx 4 ] cvx exec"),
+        ["1", "2", "3", "4"]
+    );
+    // A string that scans a procedure leaves it as a value.
+    assert_eq!(run_stack("[ ({9}) cvx ] cvx exec"), ["{9}"]);
+    // A literal string in the body is still pushed.
+    assert_eq!(run_stack("[ (8 9 add) ] cvx exec"), ["(8 9 add)"]);
+}
+
+/// The same for an executable file (gs: `[ g ] cvx exec` with `g` the
+/// executable file `1 2 add` leaves 3).
+#[test]
+fn an_executable_file_in_a_procedure_runs() {
+    let (root, mut it) = setup("bo-exec-file");
+    std::fs::write(root.join("p.ps"), "1 2 add").unwrap();
+    let f = ps(&root.join("p.ps"));
+    it.run_str(&format!("/g {f} (r) file cvx def [ g ] cvx exec"))
+        .unwrap();
+    assert_eq!(stack(&it), ["3"]);
+}
+
+/// `token` on a binary sequence returns an executable array whose
+/// executable strings run when it is executed, as in gs (#1122). gs:
+/// `<seq of (8 9 add) cvx> token pop exec` leaves 17.
+#[test]
+fn token_on_a_sequence_with_an_executable_string_runs_it() {
+    let s = seq(&[[0x85, 0, 0, 3, 0, 0, 0, 8]], b"1 2");
+    let t = |tail: &str| format!("({}) token pop exch pop {tail}", escaped(&s));
+    assert_eq!(run_stack(&t("exec")), ["1", "2"]);
+    // Reading the element does not run it.
+    assert_eq!(run_stack(&t("0 get")), ["(1 2)"]);
+    // Two top-level objects: the string runs, the procedure it scans is a value.
+    let s = seq(
+        &[[0x85, 0, 0, 3, 0, 0, 0, 16], [0x85, 0, 0, 3, 0, 0, 0, 19]],
+        b"1 2{9}",
+    );
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!("({}) token pop exch pop exec", escaped(&s)))
+        .unwrap();
+    assert_eq!(stack(&it), ["1", "2", "{9}"]);
+    // And as a program, `cvx exec` gives the same.
+    assert_eq!(
+        run_stack(&format!("({}) cvx exec", escaped(&s))),
+        ["1", "2", "{9}"]
+    );
+}
+
 #[test]
 fn restore_brings_back_the_object_format() {
     let mut it = Interp::with_page(50, 50).unwrap();
@@ -507,14 +583,6 @@ fn an_error_inside_a_sequence_reports_its_own_line() {
 
 // ------------------------------------------------------------ Ghostscript
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn gs(prog: &str) -> Vec<u8> {
     let out = std::process::Command::new("gs")
         .args([
@@ -538,8 +606,7 @@ fn gs(prog: &str) -> Vec<u8> {
 /// only sequences under 65535 bytes are compared.
 #[test]
 fn ghostscript_writes_the_same_bytes() {
-    if !gs_available() {
-        eprintln!("skipping gs byte comparison: gs not installed");
+    if !common::gs_available() {
         return;
     }
     for fmt in 1..=4 {
@@ -554,8 +621,7 @@ fn ghostscript_writes_the_same_bytes() {
 /// the long header (which pscat writes per the PLRM).
 #[test]
 fn ghostscript_reads_what_pscat_writes() {
-    if !gs_available() {
-        eprintln!("skipping gs read-back check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     for (fmt, obj) in [
@@ -591,4 +657,48 @@ fn ghostscript_reads_what_pscat_writes() {
     )))
     .unwrap();
     assert_eq!(got.split_whitespace().collect::<Vec<_>>(), ["1", "4"]);
+}
+
+/// gs agrees on what `token` on a sequence with executable strings does
+/// when the array it returns is executed.
+#[test]
+fn ghostscript_runs_the_executable_strings_of_a_token_array() {
+    if !common::gs_available() {
+        return;
+    }
+    let s = seq(
+        &[[0x85, 0, 0, 3, 0, 0, 0, 16], [0x85, 0, 0, 3, 0, 0, 0, 19]],
+        b"1 2{9}",
+    );
+    for tail in ["exec", "0 get", "dup exec exec"] {
+        let prog = format!(
+            "count 0 gt {{ clear }} if ({}) token pop exch pop {tail} count 1 sub -1 0 {{ index == }} for",
+            escaped(&s)
+        );
+        let want = String::from_utf8(gs(&prog)).unwrap();
+        let mut it = Interp::with_page(50, 50).unwrap();
+        it.capture_stdout();
+        it.run_str(&prog).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(it.captured_stdout()),
+            want,
+            "{tail}"
+        );
+    }
+    // A plain procedure, no sequence involved.
+    for prog in [
+        "[ (8 9 add) cvx ] cvx exec ==",
+        "[ () cvx ] cvx 5 exch exec ==",
+        "[ ({9}) cvx ] cvx exec ==",
+    ] {
+        let want = String::from_utf8(gs(prog)).unwrap();
+        let mut it = Interp::with_page(50, 50).unwrap();
+        it.capture_stdout();
+        it.run_str(prog).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(it.captured_stdout()),
+            want,
+            "{prog}"
+        );
+    }
 }

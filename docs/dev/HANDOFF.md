@@ -570,8 +570,13 @@ renders eight examples in both and compares block-downsampled output).
   drops the mode to local (global afterwards only if it is global now and was
   at every discarded `save`), not the PLRM's reset to the saved value
   (`src/ops/vm.rs`, `VmMode`; `tests/status_setglobal.rs` pins the matrix
-  against gs). `gcheck` and `globaldict` do not exist, so a program that
-  asks which VM an object lives in stops at `undefined`.
+  against gs). `globaldict` (a plain dictionary between systemdict and
+  userdict on the dictionary stack, so `countdictstack` starts at 3 as in gs,
+  never rolled back by `restore`) and `gcheck` (true for simple
+  objects, `systemdict` and `globaldict`; false for every other composite)
+  stand in for global VM (#1159, `notes/1159-gcheck-globaldict.md`,
+  `tests/gcheck_globaldict.rs`): a composite made in global mode reports
+  local here, and no `invalidaccess` guards `globaldict`.
 - **`string status`** (#952) is the file-existence probe: `pages bytes
   referenced created true`, or `false`. It resolves the name through the
   same search order and the same read roots as `file`/`run`
@@ -715,6 +720,11 @@ renders eight examples in both and compares block-downsampled output).
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
   `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
   the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
+  Both vector recorders take the shading from `vector_shading` (#1041): the
+  raster's sub-unit rescale and its degenerate disk, so SVG and PDF show
+  what the PNG shows (`tests/svg_shading.rs` checks every case under
+  resvg). An axis that collapses in f32 paints nothing anywhere, as in gs. Equal concentric circles follow gs's disk,
+  not its one-pixel ring (`notes/1041-svg-shading-edge-cases.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
@@ -723,8 +733,20 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
-  `/Pattern` colour spaces) are not implemented at all, in any output.
+  ShadingType 1 and 4–7 and shading patterns (PatternType 2) are not
+  implemented at all, in any output.
+- Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
+  `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
+  `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the
+  `PaintProc` at once (gs: at first use), through `Frame::Pattern`, into a
+  *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
+  state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
+  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
+  a pattern paints only in the context (page or capture) it was made in;
+  text output modes keep outlines under a pattern. `imagemask` paints the
+  pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
+  `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
+  mid-run for display should use `Gfx::page_pixmap`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
@@ -802,7 +824,8 @@ renders eight examples in both and compares block-downsampled output).
   the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
-  and `run_chain` fields. Tagging procedure bodies with scan positions
+  and `run_chain` fields, and npm's `PostScriptError` into `file` and
+  `runChain` (#1116, parsed the same way). Tagging procedure bodies with scan positions
   would mean a position per array element: not done
   (`notes/1048-identity-operators-run-error-location.md`).
 - `product` `(pscat)`, `version` (the crate version string), `revision`
@@ -826,6 +849,10 @@ renders eight examples in both and compares block-downsampled output).
   panicking; `main` then exits 141. A new CLI line that is not program output
   is `eprintln!`. The flag, not an early exit, so the page and any open
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
+  `pscat fonts` (library crate, `src/fontpacks/cli.rs`) has its own local
+  shadow with the same exit 141, and a sweep frame that met the closed pipe
+  is not reported or marked failed (#1117,
+  `notes/1117-fonts-and-sweep-closed-stdout.md`).
 
 - **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
   relative name's search-order candidate is opened once by `Probe::open`
@@ -1168,6 +1195,9 @@ renders eight examples in both and compares block-downsampled output).
    #1157: the supported facade has the same list: `chalkboard::Driver::explain(printed, err)`
    and `ChalkError::problems() -> &[chalkboard::Problem]` (empty for config/render/position-less errors).
    The hidden `ChalkError::Problems` stays for pscat-mcp until 0.7.0.
+   #1252: `chalkboard::user_output(printed) -> Cow<[u8]>` is the one place that drops the
+   `CKPROBLEM` lines (same prefix test as the parser) from program output shown to a user;
+   `pscat chalk` and `chalkboard_math` capture stdout and never return it, so they need no call.
    #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem
@@ -1459,8 +1489,24 @@ renders eight examples in both and compares block-downsampled output).
   The default lowp pipeline rounds each blend with a bias, so a stack of
   faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
   `Paint` built anywhere in pscat must set the flag too, or its pixels drift
-  by a level from the rest. Storage is still 8-bit, rounded per blend (the
-  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+  by a level from the rest. See `notes/731-hq-compositing-pipeline.md`.
+
+- **Fills and glyphs composite in a 16-bit shadow of the page**
+  (`src/deep.rs`, #731 part 2). `fill_coverage_limited` blends every run
+  except an opaque, fully covered one at 16 bits with the exact alpha
+  (integers for translucent source-over, f32 in tiny-skia's order for the
+  rest), and writes both the shadow and the 8-bit `pixmap`, which stays the page every
+  reader sees. Strokes, images and `shfill` still write only the 8-bit
+  pixmap through tiny-skia; each shadow pixel checks itself against the
+  8-bit one and reloads from it when another writer moved it, so a new
+  writer needs no hook. Clear the shadow (`self.deep.clear()`) wherever
+  the page is erased. A first blend at alpha 1 gives tiny-skia's bytes
+  exactly (a test pins it), so only stacked or translucent pixels move
+  (an edge a second fill blends over counts as stacked).
+  Under `--max-memory` the shadow is off when a page of it (8 bytes a
+  pixel) would pass a quarter of the cap; fills then blend on the 8-bit
+  page. A `--bands` run keeps a shadow only for its own rows. See
+  `notes/731-16bit-compositing-shadow.md`.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
@@ -1762,6 +1808,11 @@ renders eight examples in both and compares block-downsampled output).
   `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
   beside findings. A new lint check that reads the canvas must go through
   the stitched pages, not `check_band`.
+  After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
+  end-of-run findings (#942, #947) except those in
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  only if it reads state that survives the abort and can name the cause
+  (`notes/1110-lint-notes-in-a-failed-render.md`).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
@@ -1828,7 +1879,12 @@ renders eight examples in both and compares block-downsampled output).
   array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
   strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
-  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`. The decode charges the
+  interpreter's `DecodeBudget` (#1123, `notes/1123-binary-sequence-decode-limits.md`), so a
+  step or time limit stops a long decode inside it; keep that charge when changing `decode`.
+  An executable string or file met as an element of a running procedure runs as source, as in gs
+  (`ProcStep::Src`, `Interp::proc_source`, #1122, `notes/1122-executable-strings-in-procedures.md`), which
+  is also why `token`'s array runs a sequence's executable strings.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
@@ -1847,6 +1903,11 @@ renders eight examples in both and compares block-downsampled output).
   `--cols` wrapping, through `Layout::packed` and `PackedRow` (`Layout::new` delegates to
   it and is unchanged for single-cell columns). With none of the new options the sheet is
   byte-identical to before. See `notes/706-sheet-sweeps-mat-cols.md`.
+  #1000 added `--captions LIST` (readable words for a sweep's values; next file only, one per
+  value, checked in `push`) and `--no-values` (no sweep value in the caption); the failure
+  message still names the value (`Sweep::label`). `review_sheet` has no sweeps, so it has
+  nothing to mirror. The five hybrid comparison sheets use `--no-values`: their panels
+  already carry (a), (b), (c). See `notes/1000-sheet-sweep-captions.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).

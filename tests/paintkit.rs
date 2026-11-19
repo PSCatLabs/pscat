@@ -6943,7 +6943,7 @@ fn wet_survives_a_proc_that_raises_with_a_dict_still_open() {
     it.run_str(
         "0 0 0 setrgbcolor 5 srand \
          { { 5 dict begin nosuchname } << /Layers 2 >> pkwet } stopped pop \
-         countdictstack 3 eq { end } if \
+         countdictstack 4 eq { end } if \
          userdict /pqdepth get",
     )
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
@@ -10999,20 +10999,21 @@ fn loading_unset_is_byte_identical() {
     ];
     // Taken from the pre-slice library (origin/main at cb6ea9a).
     // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
-    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest), then
+    // for #731 part 2 (fills composite at 16 bits).
     let pinned: [u64; 12] = [
-        0xd7ac1a58bc31246b,
-        0x1c54b3258a072779,
-        0x4543eb35c6262046,
-        0x75fd7021157e0d3d,
-        0xd15bce842b1387bc,
-        0x8d14a8f0789ba4f8,
-        0x78140e9faf4e5ac9,
-        0x4a7d658c5c34b2a0,
-        0xf20ef564d3bcfe0b,
-        0xf89a991835f81935,
-        0xb7d1250596be7763,
-        0x19a860afdb957f1c,
+        0x320122ca16c73149,
+        0x4c8d0d8fe9a3bbe5,
+        0xf318b7f6d144808b,
+        0xe261af879568a545,
+        0xf507c4e1bddd9dac,
+        0x9b3f9d69aea9eea4,
+        0xcf23f2e6f63d3cdb,
+        0x728bf65a6260dc32,
+        0x1fb9cc0be358617d,
+        0xef636849b90f38d,
+        0x5837c656e3f3745b,
+        0x8c25ffecfcb417d6,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12089,12 +12090,13 @@ fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
 
 /// Test 10. Growing pkwet's frames changes neither specimen: both render
 /// to the hashes they had before the slice (origin/main at 91013c3).
-/// Both re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline).
+/// Both re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline,
+/// then the 16-bit fill compositing of part 2).
 #[test]
 fn wet_frame_slots_do_not_change_pkwet() {
     for (name, w, h, pinned) in [
-        ("paintkit_wet_demo.ps", 620, 560, 0xbf1de29ac6f50258u64),
-        ("paintkit_wet_pull_demo.ps", 780, 640, 0xd710397bbaa70e03u64),
+        ("paintkit_wet_demo.ps", 620, 560, 0xa3041cc92860597bu64),
+        ("paintkit_wet_pull_demo.ps", 780, 640, 0x52a0af825c997d8du64),
     ] {
         let source = std::fs::read(format!("examples/{name}"))
             .unwrap_or_else(|e| panic!("read {name}: {e}"));
@@ -12154,17 +12156,18 @@ fn fan_loading_unset_is_byte_identical() {
     ];
     // Taken from the pre-slice library (origin/main at f1eae7d).
     // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
-    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest), then
+    // for #731 part 2 (fills composite at 16 bits).
     let pinned: [u64; 9] = [
-        0x190888b8fe7434bb,
-        0xb1e913f0c75dae75,
-        0x687fa38e24f52894,
-        0x147e637857fa85a7,
-        0xaf0df839e21a1cf9,
-        0x4fef25d37ef8e350,
-        0x9f5414f14f67173b,
-        0x486df36c95fd0565,
-        0x64dc6102c94ef2ac,
+        0x4bff6479146b62ae,
+        0x6b12c81a5473bdf6,
+        0xaa7e989314a92611,
+        0x4e4df8910b99cc73,
+        0xf0fd5626cd4818b8,
+        0xadf9aff3e4c1189f,
+        0xc3d890c74a2f92cc,
+        0x45519735223f0d43,
+        0x4730f3831bb67881,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12407,21 +12410,22 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
     ];
     // Taken from the pre-slice library (origin/main at ebebfed).
     // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
-    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest), then
+    // for #731 part 2 (fills composite at 16 bits).
     let pinned: [u64; 9] = [
-        0x608dc8717057489c,
-        0x78dbd2d867a477ea,
-        0xd2e4ff5ee13d6fc6,
-        0x2fcca87b4b9da47f,
-        0x727505e8d3e8bfbf,
-        0xfd357e86461cc921,
-        0x6b08330e3edde42c,
-        0xd12a257bbb29232c,
+        0xd64f227a0d53d10e,
+        0x8ea5e2a88c0a801f,
+        0x9c08b0d9ed6cdfc1,
+        0xcb54dff6630cf0b2,
+        0x67168d88974a8950,
+        0xdf0cd6cd19ceac74,
+        0x954847aa72fe9fec,
+        0x50544460de787150,
         // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
         // Apple's libm and glibc's (musl's gave this value already); it moved
         // when math went through src/fmath (#738), whose results are musl's on
         // every platform.
-        0xa692610578b5794b,
+        0x78a352fd731e72d7,
     ];
     let got: Vec<u64> = scenarios
         .iter()

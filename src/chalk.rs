@@ -1421,7 +1421,7 @@ struct Locator {
 }
 
 /// What the generated program prints for each problem its check pass finds.
-const PROBLEM_TAG: &str = "CKPROBLEM";
+pub(crate) const PROBLEM_TAG: &str = "CKPROBLEM";
 
 impl Driver {
     /// The problems the program printed (`printed` is its standard output),
@@ -2096,6 +2096,22 @@ mod tests {
         ] {
             assert_eq!(a(&tex), RowAlign::Relation, "{tex}");
         }
+    }
+
+    #[test]
+    fn the_escaped_literals_are_not_delimiters_comments_or_columns() {
+        // issue #1160: \$ \% \& \# \_ are characters, not the delimiter,
+        // comment, alignment or subscript mark each is bare
+        assert_eq!(l(r"50\% of \$5"), [r"50\% of \$5"]);
+        assert_eq!(l(r"R\&D"), [r"R\&D"]);
+        assert_eq!(l(r"a\_b \#1"), [r"a\_b \#1"]);
+        assert_eq!(l(r"$\$5$"), [r"\$5"]);
+        assert_eq!(l(r"\(50\%\)"), [r"50\%"]);
+        // a real comment still goes
+        assert_eq!(l("50\\% % tail"), [r"50\%"]);
+        assert_eq!(l("a \\\\ b\\% % note"), ["a", r"b\%"]);
+        // no alignment column from \&: one row of three atoms
+        assert_eq!(l(r"x \& y \\ z"), [r"x \& y", "z"]);
     }
 
     #[test]

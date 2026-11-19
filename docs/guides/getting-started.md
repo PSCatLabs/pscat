@@ -174,7 +174,10 @@ More on the less obvious ones:
   (`'96,9+9@#222'`: a 96 dpi cell, then the 9 dpi render over its dark-mat
   copy), so small cells stop taking a wide column each. `--cols N` wraps a long
   row onto more lines, for sweeps and sheets that would pass 8000 px. Quote a
-  `--dpi` list that has `#` or `+`. `pscat sheet --help` has the rest.
+  `--dpi` list that has `#` or `+`. A sweep's captions can be words instead of
+  `seed=7` (#1000): `--captions '(a) before,(b) after'` gives one per value, and
+  `--no-values` leaves the value out for cells that already say what they are.
+  `pscat sheet --help` has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
   2 and 3, with exponential and stitching functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
@@ -183,6 +186,13 @@ More on the less obvious ones:
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.
+- **Patterns.** `makepattern` and `setpattern` paint with tiling patterns
+  (PatternType 1): hatching, dots, tiled motifs, coloured or uncoloured
+  (`[/Pattern /DeviceRGB] setcolorspace r g b pattern setcolor` paints one
+  pattern in any colour). `fill`, `stroke`, text and `imagemask` all take
+  them, and the tiles are seamless. SVG output gets a real `<pattern>` and PDF a real
+  `/Pattern` resource. Shading patterns (PatternType 2) are not supported
+  yet; use `clip` and `shfill`. `examples/patterns.ps` is the specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh

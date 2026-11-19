@@ -21,6 +21,26 @@ pub struct LintFinding {
     pub message: String,
 }
 
+/// The checks whose findings can *explain* a run that ended in an error
+/// (issue #1110), so `--lint` still reports them after one. The rest read
+/// where the program ended (a page with no ink, an open `gsave` or `begin`,
+/// values left on the stack), and an aborted run ends wherever the error hit,
+/// so those describe the abort and are dropped (#942, #947).
+///
+/// `shadowed-operator` reads `userdict`, which still holds every `def` that
+/// ran before the error: `/sub (hello) def` and a later `5 3 sub` is a
+/// `typecheck` that never mentions `sub`, and this finding names the cause.
+///
+/// `pscat-mcp`'s `split_lint_findings` (this crate's `mcp_server`) uses the
+/// same list, so the two cannot drift.
+pub const ERROR_EXPLAINING_CHECKS: &[&str] = &["shadowed-operator"];
+
+/// Whether `check` (a [`LintFinding::check`] slug) is in
+/// [`ERROR_EXPLAINING_CHECKS`].
+pub fn explains_an_error(check: &str) -> bool {
+    ERROR_EXPLAINING_CHECKS.contains(&check)
+}
+
 /// Run every lint check against a finished (or crashed — the checks are
 /// still meaningful on a partial canvas) interpreter. `render_checks`
 /// gates the checks that only make sense when a page was actually meant
@@ -473,17 +493,17 @@ fn check_stack_leaks(interp: &Interp, render_checks: bool, findings: &mut Vec<Li
             });
         }
     }
-    // systemdict + userdict are the permanent baseline (see
+    // systemdict, globaldict and userdict are the permanent baseline (see
     // `Interp::pop_dict`); anything deeper is an unmatched `begin` —
     // true regardless of whether a render was requested, unlike the
     // operand stack, so this isn't gated by `render_checks`.
     let dict_depth = interp.dict_stack_len();
-    if dict_depth > 2 {
+    if dict_depth > crate::interp::PERMANENT_DICTS {
         findings.push(LintFinding {
             check: "dict-leak",
             message: format!(
                 "{} dictionary(ies) still open at the end of the program (missing `end`)",
-                dict_depth - 2
+                dict_depth - crate::interp::PERMANENT_DICTS
             ),
         });
     }

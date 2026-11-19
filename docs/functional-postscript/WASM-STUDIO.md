@@ -230,6 +230,5 @@ same-coordinate target identity have separate checks. A layout regression
 checks I, J, Q, WIDE and MWMW for all fonts, including height bounds, negative
 sidebearings and captured-font identity after TypeFont changes. Browser checks exercise text/palette changes, inspection/fault
 toggles, changed word counts, invalid input, stop/restart, desktop/mobile layout,
-PNG export and source display, with no page HTTP(S) requests. See the current
-validation record in [PROGRESS](PROGRESS.md). These checks support the included
+PNG export and source display, with no page HTTP(S) requests. These checks support the included
 examples, not general PostScript or all browser implementations.

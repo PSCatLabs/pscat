@@ -20,7 +20,9 @@
 //! back into the TeX error it stands for, with every unsupported command or
 //! character the program found and where each is
 //! ([`ChalkError::problems`]); [`explain`] alone names the first, without a
-//! place.
+//! place. The check pass reports on the program's standard output, so to show
+//! the program's own output to a user, pass it through [`user_output`], which
+//! leaves those lines out.
 //!
 //! ```
 //! use pscat::chalkboard::BoardConfig;
@@ -46,6 +48,7 @@
 //! # Ok::<(), pscat::chalkboard::ChalkError>(())
 //! ```
 
+use std::borrow::Cow;
 use std::fmt;
 
 use serde_json::Value;
@@ -187,18 +190,56 @@ impl Driver {
     /// problem's [`Problem::code`].
     ///
     /// The check pass's lines are internal, not API; their format may
-    /// change. Each starts with `CKPROBLEM` and a tab, so a caller that shows
-    /// the program's output to a user can drop the lines that start with
-    /// [`PROBLEM_LINE_PREFIX`].
+    /// change. A caller that shows the program's output to a user passes it
+    /// through [`user_output`] first, which leaves those lines out.
     pub fn explain(&self, printed: &[u8], err: &PsError) -> Option<ChalkError> {
         self.0.explain(printed, err).map(ChalkError::new)
     }
 }
 
 /// What every line the chalkboard program prints for a problem starts with
-/// ([`Driver::explain`]): strip such lines from program output shown to a
-/// user. The rest of the line's format is internal.
+/// ([`Driver::explain`]). To show the program's output to a user, call
+/// [`user_output`] rather than matching this yourself. The rest of the line's
+/// format is internal.
 pub const PROBLEM_LINE_PREFIX: &str = "CKPROBLEM\t";
+
+/// What the program printed (`printed`, from [`Interp::captured_stdout`])
+/// without the check pass's lines: the output to show a user, which is only
+/// what the program itself printed.
+///
+/// A line is dropped, with its line ending (`\n` or `\r\n`), when it starts
+/// with [`PROBLEM_LINE_PREFIX`]: the same lines [`Driver::explain`] reads, a
+/// last line cut short by a limit included. Every other byte comes back as it
+/// was, so output that is not UTF-8 stays intact, and a line cut off before
+/// the tab (`CKPROB`) is kept. A check line is recognised only at the start
+/// of a line, as [`Driver::explain`] reads them: the program's own output
+/// that ends without a newline would run into the next check line. With no
+/// such line the input is returned without a copy. Call it on the same bytes
+/// you give [`Driver::explain`], which still needs the check lines.
+///
+/// ```
+/// use pscat::chalkboard::user_output;
+///
+/// let printed = b"hello\nCKPROBLEM\t0\t2\t8\tunsupported-command\t\\aleph\nbye\n";
+/// assert_eq!(user_output(printed).as_ref(), b"hello\nbye\n");
+/// ```
+pub fn user_output(printed: &[u8]) -> Cow<'_, [u8]> {
+    let tag = PROBLEM_LINE_PREFIX.as_bytes();
+    if !printed
+        .split_inclusive(|&b| b == b'\n')
+        .any(|l| l.starts_with(tag))
+    {
+        return Cow::Borrowed(printed);
+    }
+    Cow::Owned(
+        printed
+            .split_inclusive(|&b| b == b'\n')
+            .filter(|l| !l.starts_with(tag))
+            .flatten()
+            .copied()
+            .collect(),
+    )
+}
 
 /// Why a board could not be made.
 #[derive(Clone, Debug, PartialEq)]
@@ -365,4 +406,59 @@ impl std::error::Error for ChalkError {}
 /// ```
 pub fn explain(err: &PsError) -> Option<ChalkError> {
     chalk::explain(err).map(ChalkError::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_output_drops_only_the_check_lines_and_keeps_every_other_byte() {
+        let owned = |s: &[u8]| user_output(s).into_owned();
+        // between the program's own lines, `\r\n` endings included
+        assert_eq!(
+            owned(b"a\nCKPROBLEM\t0\t1\t2\tk\tt\nb\r\nCKPROBLEM\tx\r\nc"),
+            b"a\nb\r\nc"
+        );
+        // a first line, and a last line with no newline (a limit fired mid-print)
+        assert_eq!(owned(b"CKPROBLEM\t0\t1\nz\n"), b"z\n");
+        assert_eq!(owned(b"z\nCKPROBLEM\t0\t1"), b"z\n");
+        assert_eq!(owned(b"CKPROBLEM\t"), b"");
+        // not UTF-8, and not a check line: a cut tag, an indented one, one mid-line
+        let keep = b"\xff\xfe\nCKPROB\n CKPROBLEM\tx\nabCKPROBLEM\tx\nCKPROBLEM no tab\n";
+        assert_eq!(owned(keep), keep);
+    }
+
+    #[test]
+    fn user_output_borrows_when_there_is_nothing_to_drop() {
+        for printed in [&b""[..], b"hello\n", b"no newline", b"\xff"] {
+            assert!(matches!(user_output(printed), Cow::Borrowed(_)));
+        }
+        assert!(matches!(user_output(b"CKPROBLEM\t1"), Cow::Owned(_)));
+    }
+
+    /// The same lines the parser reads: what `user_output` drops is exactly
+    /// what `Driver::problems` finds, and nothing it keeps parses as a problem.
+    #[test]
+    fn user_output_drops_exactly_the_lines_explain_tries_to_parse() {
+        let prefix = PROBLEM_LINE_PREFIX.as_bytes();
+        assert_eq!(prefix, [chalk::PROBLEM_TAG.as_bytes(), b"\t"].concat());
+
+        let driver = BoardConfig::default()
+            .driver(r"x + \aleph + \beth")
+            .expect("balanced");
+        let (w, h) = driver.page_size();
+        let mut interp = Interp::with_page_scaled(w, h, 1.0).expect("valid page");
+        interp.capture_stdout();
+        interp.run_str(r"(own\r\n) print").unwrap();
+        interp
+            .run_str(driver.source())
+            .expect_err("outside the subset");
+        let mut printed = interp.captured_stdout().to_vec();
+        printed.extend_from_slice(b"tail\nCKPROBLEM\t0\t0\t1\tunsupported-command\tq");
+        assert_eq!(driver.0.problems(&printed).len(), 3);
+        let shown = user_output(&printed);
+        assert_eq!(shown.as_ref(), b"own\r\ntail\n");
+        assert!(driver.0.problems(&shown).is_empty());
+    }
 }

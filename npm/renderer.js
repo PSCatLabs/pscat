@@ -8,6 +8,32 @@ import { Pscat } from './core.js';
 
 const DEFAULT_PAGE = { width: 612, height: 792, dpi: 72 };
 
+// The `file` and `run chain` fields of a report's `%%[ ... ]%%` line, read as
+// pscat-mcp's ps_error_fields does: split on "; ", `Line: 5 (inner.ps)` names
+// the file, `Run chain: ...` is kept as written. Linear: no regex over the
+// report's text.
+function runFileFields(report) {
+  const out = { file: undefined, runChain: undefined };
+  const row = report.split('\n').find((l) => l.includes('%%[ Error: '));
+  if (row === undefined) return out;
+  const start = row.indexOf('%%[ ') + 4;
+  let end = row.indexOf(' ]%%', start);
+  if (end < 0) end = row.length;
+  for (const part of row.slice(start, end).split('; ')) {
+    const at = part.indexOf(': ');
+    if (at < 0) continue;
+    const key = part.slice(0, at);
+    const value = part.slice(at + 2);
+    if (key === 'Line') {
+      const sp = value.indexOf(' (');
+      if (sp >= 0 && value.endsWith(')')) out.file = value.slice(sp + 2, -1);
+    } else if (key === 'Run chain') {
+      out.runChain = value;
+    }
+  }
+  return out;
+}
+
 /**
  * A PostScript error (`undefined`, `typecheck`, `stackunderflow`, ...),
  * raised by render() and step(). The renderer stays usable, and the
@@ -21,6 +47,7 @@ export class PostScriptError extends Error {
     // over the report's spaces.
     const cmd = /OffendingCommand: ([^;\]]*)/.exec(report);
     const line = /Line:\s*(\d+)/.exec(report);
+    const where = runFileFields(report);
     super(report.split('\n')[0] || 'PostScript error');
     this.name = 'PostScriptError';
     /** The PostScript error name, e.g. 'undefined'. */
@@ -29,6 +56,17 @@ export class PostScriptError extends Error {
     this.command = cmd ? cmd[1].trim() : undefined;
     /** The source line the error happened on, when known. */
     this.line = line ? Number(line[1]) : undefined;
+    /**
+     * The `run` file the error happened in, as the program named it, when the
+     * error was raised while a file was being read; `line` is then that file's
+     * line. Undefined for an error in the main program.
+     */
+    this.file = where.file;
+    /**
+     * The open `run` frames, innermost first (`inner.ps:5 <- outer.ps:2 <- line 1`),
+     * when the error was raised inside a run file. Undefined otherwise.
+     */
+    this.runChain = where.runChain;
     /** The full report, `%%[ Error: ...; OffendingCommand: ... ]%%` plus any hint. */
     this.report = report;
     /** What the program printed before the error. */

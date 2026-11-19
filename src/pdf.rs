@@ -42,7 +42,8 @@
 //!   written before the next mark of any kind (every writer goes through
 //!   `enter_clip`), so paint order holds.
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
-//!   1-bit `/ImageMask` stencils painted in the current fill color,
+//!   1-bit `/ImageMask` stencils painted in the current fill color or
+//!   pattern (#1299),
 //!   which is precisely PostScript's own semantics.
 //! - `shfill` becomes the `sh` operator on a `/Shading` resource
 //!   (issue #1028; before it, a flat fill in the ramp's average colour).
@@ -67,6 +68,7 @@ use tiny_skia::FillRule;
 
 use crate::gfx::{ClipNode, Composite};
 use crate::limits::LimitProbe;
+use crate::pattern::Ink;
 use crate::pdf_font::{OBJECTS_PER_FONT, UsedGlyphs};
 use crate::svg::Chain;
 use crate::textrun::{GlyphText, Placement, TextRun};
@@ -187,6 +189,50 @@ pub struct PdfRecorder {
     /// Which fonts each finished page references.
     page_fonts: Vec<Vec<usize>>,
     current_fonts: Vec<usize>,
+    /// Tiling pattern streams (#1038), document-global, numbered after the
+    /// fonts; pages (and patterns) reference them by index, like `images`.
+    /// Empty for a program that paints with no pattern, so such documents
+    /// keep every object number they had.
+    patterns: Vec<PdfPattern>,
+    /// Which patterns each finished page references.
+    page_patterns: Vec<Vec<usize>>,
+    current_patterns: Vec<usize>,
+    /// Whether each finished page paints an uncoloured pattern, which
+    /// needs the `[/Pattern /DeviceRGB]` colour space resource.
+    page_pattern_cs: Vec<bool>,
+    current_pattern_cs: bool,
+    /// Recording an uncoloured pattern's content stream (#1038): no
+    /// colour operators, and no colour images or shadings, which an
+    /// uncoloured pattern may not hold.
+    uncolored: bool,
+}
+
+/// A `/PatternType 1` pattern stream (#1038): the dictionary's own keys,
+/// its content, and the resources the content uses.
+struct PdfPattern {
+    dict: String,
+    content: String,
+    images: Vec<usize>,
+    gstates: Vec<usize>,
+    shadings: Vec<usize>,
+    fonts: Vec<usize>,
+    patterns: Vec<usize>,
+    pattern_cs: bool,
+}
+
+/// The page state a pattern capture swapped out of the recorder
+/// (`PdfRecorder::begin_capture`, #1038).
+pub(crate) struct PdfCapture {
+    content: String,
+    open_clip: Option<Rc<ClipNode>>,
+    images: Vec<usize>,
+    gstates: Vec<usize>,
+    shadings: Vec<usize>,
+    shading_set: HashSet<usize>,
+    fonts: Vec<usize>,
+    patterns: Vec<usize>,
+    pattern_cs: bool,
+    uncolored: bool,
 }
 
 /// A PDF object built by `pdfmark` (#1032): the interpreter converts the
@@ -289,6 +335,132 @@ impl PdfRecorder {
             font_ids: HashMap::new(),
             page_fonts: Vec::new(),
             current_fonts: Vec::new(),
+            patterns: Vec::new(),
+            page_patterns: Vec::new(),
+            current_patterns: Vec::new(),
+            page_pattern_cs: Vec::new(),
+            current_pattern_cs: false,
+            uncolored: false,
+        }
+    }
+
+    /// Start recording a pattern's content stream (#1038): the page's
+    /// stream and resource lists are set aside, and marks go to an empty
+    /// stream until [`end_capture`](Self::end_capture).
+    pub(crate) fn begin_capture(&mut self, uncolored: bool) -> PdfCapture {
+        self.flush_text();
+        PdfCapture {
+            content: std::mem::take(&mut self.content),
+            open_clip: self.open_clip.take(),
+            images: std::mem::take(&mut self.current_images),
+            gstates: std::mem::take(&mut self.current_gstates),
+            shadings: std::mem::take(&mut self.current_shadings),
+            shading_set: std::mem::take(&mut self.current_shading_set),
+            fonts: std::mem::take(&mut self.current_fonts),
+            patterns: std::mem::take(&mut self.current_patterns),
+            pattern_cs: std::mem::take(&mut self.current_pattern_cs),
+            uncolored: std::mem::replace(&mut self.uncolored, uncolored),
+        }
+    }
+
+    /// Put the page state back; what was captured comes back as a
+    /// pattern (its content and resources).
+    fn restore_capture(&mut self, saved: PdfCapture) -> PdfPattern {
+        self.flush_text();
+        self.close_clip();
+        self.current_shading_set = saved.shading_set;
+        self.open_clip = saved.open_clip;
+        self.uncolored = saved.uncolored;
+        PdfPattern {
+            dict: String::new(),
+            content: std::mem::replace(&mut self.content, saved.content),
+            images: std::mem::replace(&mut self.current_images, saved.images),
+            gstates: std::mem::replace(&mut self.current_gstates, saved.gstates),
+            shadings: std::mem::replace(&mut self.current_shadings, saved.shadings),
+            fonts: std::mem::replace(&mut self.current_fonts, saved.fonts),
+            patterns: std::mem::replace(&mut self.current_patterns, saved.patterns),
+            pattern_cs: std::mem::replace(&mut self.current_pattern_cs, saved.pattern_cs),
+        }
+    }
+
+    /// The pattern's content is complete: store it as a pattern stream and
+    /// return its index. `matrix` maps pattern space to the default space
+    /// of the stream that will paint with it; `to_pattern` maps the
+    /// captured content (in the capture canvas's coordinates) to pattern
+    /// space, written as the stream's first `cm`.
+    pub(crate) fn end_capture(
+        &mut self,
+        saved: PdfCapture,
+        spec: &crate::pattern::TileSpec,
+        matrix: tiny_skia::Transform,
+        to_pattern: tiny_skia::Transform,
+    ) -> usize {
+        let mut pat = self.restore_capture(saved);
+        let num = |v: f64| p(v as f32);
+        let [x0, y0, x1, y1] = spec.bbox;
+        pat.dict = format!(
+            "/Type /Pattern /PatternType 1 /PaintType {} /TilingType {} /BBox [{} {} {} {}] \
+             /XStep {} /YStep {} /Matrix [{}]",
+            if spec.uncolored { 2 } else { 1 },
+            spec.tiling_type,
+            num(x0),
+            num(y0),
+            num(x1),
+            num(y1),
+            num(spec.xstep),
+            num(spec.ystep),
+            matrix_text(matrix),
+        );
+        pat.content = format!("{} cm\n{}", matrix_text(to_pattern), pat.content);
+        self.patterns.push(pat);
+        self.patterns.len() - 1
+    }
+
+    /// The pattern's `PaintProc` was unwound: put the page state back and
+    /// drop what was captured.
+    pub(crate) fn abort_capture(&mut self, saved: PdfCapture) {
+        let _ = self.restore_capture(saved);
+    }
+
+    /// The colour-setting operators for `ink`, fill (`rg`, `cs`/`scn`) or
+    /// stroke (`RG`, `CS`/`SCN`), with a trailing space; empty in an
+    /// uncoloured pattern's content, which takes no colour.
+    fn ink_ops(&mut self, ink: &Ink, stroking: bool) -> String {
+        if self.uncolored {
+            return String::new();
+        }
+        match ink {
+            Ink::Rgb(rgb) => format!(
+                "{} {} {} {} ",
+                f(rgb.0),
+                f(rgb.1),
+                f(rgb.2),
+                if stroking { "RG" } else { "rg" }
+            ),
+            Ink::Pattern(tile, rgb) => {
+                let Some(idx) = tile.pdf else {
+                    return String::new();
+                };
+                if !self.current_patterns.contains(&idx) {
+                    self.current_patterns.push(idx);
+                }
+                let (cs, scn) = if stroking {
+                    ("CS", "SCN")
+                } else {
+                    ("cs", "scn")
+                };
+                if tile.uncolored {
+                    self.current_pattern_cs = true;
+                    format!(
+                        "/PCS {cs} {} {} {} /P{idx} {scn} ",
+                        f(rgb.0),
+                        f(rgb.1),
+                        f(rgb.2)
+                    )
+                } else {
+                    format!("/Pattern {cs} /P{idx} {scn} ")
+                }
+            }
         }
     }
 
@@ -683,19 +855,17 @@ impl PdfRecorder {
         &mut self,
         path: &crate::gfx::PsPath,
         rule: FillRule,
-        rgb: (f32, f32, f32),
+        ink: &Ink,
         comp: Composite,
         chain: &Chain,
     ) {
         self.enter_clip(chain);
         let gs = self.gs_ref(comp);
+        let colour = self.ink_ops(ink, false);
         let _ = writeln!(
             self.content,
-            "q {gs}{} {} {} rg {} {}
+            "q {gs}{colour}{} {}
 Q",
-            f(rgb.0),
-            f(rgb.1),
-            f(rgb.2),
             path_ops(path, true),
             match rule {
                 FillRule::EvenOdd => "f*",
@@ -709,7 +879,7 @@ Q",
         &mut self,
         path: &crate::gfx::PsPath,
         pen: Option<(tiny_skia::Transform, usize)>,
-        rgb: (f32, f32, f32),
+        ink: &Ink,
         width: f32,
         cap: tiny_skia::LineCap,
         join: tiny_skia::LineJoin,
@@ -720,6 +890,7 @@ Q",
     ) {
         self.enter_clip(chain);
         let gs = self.gs_ref(comp);
+        let colour = self.ink_ops(ink, true);
         let cap = match cap {
             tiny_skia::LineCap::Round => 1,
             tiny_skia::LineCap::Square => 2,
@@ -762,11 +933,8 @@ Q",
         };
         let _ = writeln!(
             self.content,
-            "q {gs}{pen_cm}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
+            "q {gs}{pen_cm}{colour}{} w {cap} J {join} j {} M {dash}{} S
 Q",
-            f(rgb.0),
-            f(rgb.1),
-            f(rgb.2),
             num(width),
             f(miter_limit),
             path_text,
@@ -886,7 +1054,9 @@ Q",
 
     /// An image: `rgb_or_mask` is either interleaved RGB samples or,
     /// for masks, packed 1-bit rows; `t` maps sample coords to device
-    /// space (the rasterizer's own transform).
+    /// space (the rasterizer's own transform). A mask paints `ink`, the
+    /// current colour or pattern (#1299: `/Pattern cs /Pn scn` before the
+    /// `Do`, which PDF allows for a stencil mask).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn image(
         &mut self,
@@ -894,7 +1064,7 @@ Q",
         h: usize,
         data: ImageData,
         t: [f32; 6],
-        fill_rgb: (f32, f32, f32),
+        ink: &Ink,
         interpolate: bool,
         comp: Composite,
         chain: &Chain,
@@ -907,6 +1077,10 @@ Q",
         } else {
             ""
         };
+        // An uncoloured pattern's content may hold no colour image (#1038).
+        if self.uncolored && !matches!(data, ImageData::Mask { .. }) {
+            return;
+        }
         // A soft mask is its own image entry (never in a page's XObject
         // resources), referenced from the main image by index.
         let (dict_extra, raw, smask): (String, Vec<u8>, Option<usize>) = match data {
@@ -957,13 +1131,11 @@ Q",
         // `ca` and `BM` apply to images and stencils alike (#766); an
         // SMask's own alpha multiplies with `ca`. Empty for the default.
         let gs = self.gs_ref(comp);
+        let colour = self.ink_ops(ink, false);
         let _ = writeln!(
             self.content,
-            "q {gs}{} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
+            "q {gs}{colour}{} {} {} {} {} {} cm /Im{idx} Do
 Q",
-            f(fill_rgb.0),
-            f(fill_rgb.1),
-            f(fill_rgb.2),
             f(m.sx),
             f(m.ky),
             f(m.kx),
@@ -1009,6 +1181,8 @@ Q",
         self.current_gstates.clear();
         self.current_shadings.clear();
         self.current_shading_set.clear();
+        self.current_patterns.clear();
+        self.current_pattern_cs = false;
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -1027,6 +1201,8 @@ Q",
         self.page_gstates.push(self.current_gstates.clone());
         self.page_shadings.push(self.current_shadings.clone());
         self.page_fonts.push(self.current_fonts.clone());
+        self.page_patterns.push(self.current_patterns.clone());
+        self.page_pattern_cs.push(self.current_pattern_cs);
     }
 
     /// Serialize the whole document.
@@ -1113,6 +1289,8 @@ Q",
                 gstates: &self.page_gstates[i],
                 shadings: &self.page_shadings[i],
                 fonts: &self.page_fonts[i],
+                patterns: &self.page_patterns[i],
+                pattern_cs: self.page_pattern_cs[i],
             });
         }
         if pages.is_empty() || trailing_art {
@@ -1124,6 +1302,8 @@ Q",
                 gstates: &self.current_gstates,
                 shadings: &self.current_shadings,
                 fonts: &self.current_fonts,
+                patterns: &self.current_patterns,
+                pattern_cs: self.current_pattern_cs,
             });
         }
         let npages = pages.len();
@@ -1143,6 +1323,13 @@ Q",
         // Embedded fonts (#1193) follow the named objects, so a document
         // without text output keeps every object number it had.
         let font_base = named_base + self.named.len();
+        // Pattern streams (#1038) follow the fonts, for the same reason.
+        let bases = Bases {
+            image: image_base,
+            shading: shading_base,
+            font: font_base,
+            pattern: font_base + self.fonts.len() * OBJECTS_PER_FONT,
+        };
         out.bytes(b"%PDF-1.4\n");
         out.begin_obj();
         if self.embeds.is_empty() {
@@ -1171,44 +1358,16 @@ Q",
         out.end_obj()?;
         for (i, page) in pages.iter().enumerate() {
             let (width, height) = page.size;
-            let xobjects: Vec<String> = page
-                .images
-                .iter()
-                .map(|&idx| format!("/Im{idx} {} 0 R", image_base + idx))
-                .collect();
-            // ExtGStates are written inline in the page's own
-            // /Resources rather than as indirect objects: they're a
-            // handful of numbers each, and keeping them out of the
-            // numbered-object list means the kids/image_base
-            // positional math above needs no adjustment at all.
-            let extgstates: Vec<String> = page
-                .gstates
-                .iter()
-                .map(|&idx| format!("/GS{idx} << {} >>", self.gstates[idx]))
-                .collect();
-            let mut parts = String::new();
-            if !xobjects.is_empty() {
-                let _ = write!(parts, " /XObject << {} >>", xobjects.join(" "));
-            }
-            if !extgstates.is_empty() {
-                let _ = write!(parts, " /ExtGState << {} >>", extgstates.join(" "));
-            }
-            if !page.shadings.is_empty() {
-                let list: Vec<String> = page
-                    .shadings
-                    .iter()
-                    .map(|&idx| format!("/Sh{idx} {} 0 R", shading_base + idx))
-                    .collect();
-                let _ = write!(parts, " /Shading << {} >>", list.join(" "));
-            }
-            if !page.fonts.is_empty() {
-                let list: Vec<String> = page
-                    .fonts
-                    .iter()
-                    .map(|&idx| format!("/F{idx} {} 0 R", font_base + idx * OBJECTS_PER_FONT))
-                    .collect();
-                let _ = write!(parts, " /Font << {} >>", list.join(" "));
-            }
+            let parts = resource_parts(
+                self,
+                &bases,
+                page.images,
+                page.gstates,
+                page.shadings,
+                page.fonts,
+                page.patterns,
+                page.pattern_cs,
+            );
             let resources = if parts.is_empty() {
                 String::new()
             } else {
@@ -1296,6 +1455,33 @@ Q",
                 out.end_obj()?;
             }
         }
+        for (i, pat) in self.patterns.iter().enumerate() {
+            let parts = resource_parts(
+                self,
+                &bases,
+                &pat.images,
+                &pat.gstates,
+                &pat.shadings,
+                &pat.fonts,
+                &pat.patterns,
+                pat.pattern_cs,
+            );
+            let z = match deflate_budgeted(&[pat.content.as_bytes()], out.probe) {
+                Ok(z) => z,
+                Err(e) => return out.fail(e),
+            };
+            debug_assert_eq!(out.objects() + 1, bases.pattern + i);
+            out.begin_obj();
+            let _ = write!(
+                out,
+                "<< {} /Resources <<{parts} >> /Length {} /Filter /FlateDecode >>\nstream\n",
+                pat.dict,
+                z.len()
+            );
+            out.bytes(&z);
+            out.bytes(b"\nendstream");
+            out.end_obj()?;
+        }
 
         // /Info is appended last, after every page/image object, so it
         // never shifts the kids/image_base positional math above —
@@ -1370,6 +1556,76 @@ struct PageSrc<'a> {
     gstates: &'a [usize],
     shadings: &'a [usize],
     fonts: &'a [usize],
+    patterns: &'a [usize],
+    pattern_cs: bool,
+}
+
+/// Object numbers `write_objects` laid out, for resource dicts.
+struct Bases {
+    image: usize,
+    shading: usize,
+    font: usize,
+    pattern: usize,
+}
+
+/// A `/Resources` entry list (with a leading space each), empty when the
+/// content uses nothing. Pages and pattern streams both use it.
+#[allow(clippy::too_many_arguments)]
+fn resource_parts(
+    rec: &PdfRecorder,
+    b: &Bases,
+    images: &[usize],
+    gstates: &[usize],
+    shadings: &[usize],
+    fonts: &[usize],
+    patterns: &[usize],
+    pattern_cs: bool,
+) -> String {
+    let xobjects: Vec<String> = images
+        .iter()
+        .map(|&idx| format!("/Im{idx} {} 0 R", b.image + idx))
+        .collect();
+    // ExtGStates are written inline in the page's own
+    // /Resources rather than as indirect objects: they're a
+    // handful of numbers each, and keeping them out of the
+    // numbered-object list means the kids/image_base
+    // positional math above needs no adjustment at all.
+    let extgstates: Vec<String> = gstates
+        .iter()
+        .map(|&idx| format!("/GS{idx} << {} >>", rec.gstates[idx]))
+        .collect();
+    let mut parts = String::new();
+    if !xobjects.is_empty() {
+        let _ = write!(parts, " /XObject << {} >>", xobjects.join(" "));
+    }
+    if !extgstates.is_empty() {
+        let _ = write!(parts, " /ExtGState << {} >>", extgstates.join(" "));
+    }
+    if !shadings.is_empty() {
+        let list: Vec<String> = shadings
+            .iter()
+            .map(|&idx| format!("/Sh{idx} {} 0 R", b.shading + idx))
+            .collect();
+        let _ = write!(parts, " /Shading << {} >>", list.join(" "));
+    }
+    if !fonts.is_empty() {
+        let list: Vec<String> = fonts
+            .iter()
+            .map(|&idx| format!("/F{idx} {} 0 R", b.font + idx * OBJECTS_PER_FONT))
+            .collect();
+        let _ = write!(parts, " /Font << {} >>", list.join(" "));
+    }
+    if !patterns.is_empty() {
+        let list: Vec<String> = patterns
+            .iter()
+            .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
+            .collect();
+        let _ = write!(parts, " /Pattern << {} >>", list.join(" "));
+    }
+    if pattern_cs {
+        parts.push_str(" /ColorSpace << /PCS [/Pattern /DeviceRGB] >>");
+    }
+    parts
 }
 
 /// Why a PDF could not be written ([`Interp::write_pdf`](crate::Interp::write_pdf),
@@ -1597,6 +1853,19 @@ pub(crate) enum ImageData {
     /// 8-bit RGB plus a same-size 8-bit alpha plane, written as an
     /// `/SMask` (`ImageType 3`, #739).
     RgbA { rgb: Vec<u8>, alpha: Vec<u8> },
+}
+
+/// `a b c d e f` at full precision, for a `cm` or a `/Matrix`.
+fn matrix_text(t: tiny_skia::Transform) -> String {
+    format!(
+        "{} {} {} {} {} {}",
+        p(t.sx),
+        p(t.ky),
+        p(t.kx),
+        p(t.sy),
+        p(t.tx),
+        p(t.ty)
+    )
 }
 
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).

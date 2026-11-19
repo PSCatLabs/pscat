@@ -298,6 +298,18 @@ pub fn cpu_time_of<T>(f: impl FnOnce() -> T) -> (T, Duration) {
     (value, thread_cpu_time().saturating_sub(t0))
 }
 
+/// The least CPU time `f` used over `tries` runs. One slow run (a noisy
+/// neighbour, a page fault storm) costs nothing; a real slowdown shows in
+/// every run. For a growth ratio between two sizes, which is profile- and
+/// machine-neutral, unlike `within_cpu_budget`'s absolute figure.
+pub fn best_cpu_time_of<T>(tries: usize, mut f: impl FnMut() -> T) -> Duration {
+    assert!(tries >= 1);
+    (0..tries)
+        .map(|_| cpu_time_of(&mut f).1)
+        .min()
+        .expect("at least one try")
+}
+
 /// How many times slower an unoptimised build is allowed to be than the
 /// optimised one the absolute budgets are written for (issue #886).
 ///

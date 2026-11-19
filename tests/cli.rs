@@ -168,7 +168,13 @@ fn lint_after_an_error_reports_no_consequence_findings() {
                 stderr.contains("pscat: lint: [run-error]"),
                 "{src}: {stderr}"
             );
-            for check in ["blank-page", "gsave-imbalance", "dict-leak", "stack-leak"] {
+            for check in [
+                "blank-page",
+                "gsave-imbalance",
+                "dict-leak",
+                "stack-leak",
+                "shadowed-operator",
+            ] {
                 assert!(
                     !stderr.contains(&format!("[{check}]")),
                     "{flag} {src}: [{check}] is a consequence of the error: {stderr}"
@@ -183,6 +189,34 @@ fn lint_after_an_error_reports_no_consequence_findings() {
     assert!(stderr.contains("[dict-leak]"), "{stderr}");
     let (_ok, _out, stderr) = run(&["--lint", "-"], "showpage");
     assert!(stderr.contains("[blank-page]"), "{stderr}");
+}
+
+/// #1110: a redefined operator can be why the run failed (`5 3 sub` with
+/// `/sub` a string is a `typecheck` that never says `sub`), so `--lint` keeps
+/// that finding after an error, behind the report and the `run-error` line.
+/// The consequences of the abort stay dropped, and the allow comment still
+/// silences it.
+#[test]
+fn lint_after_an_error_keeps_a_redefined_operator_that_may_explain_it() {
+    let body = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke\nshowpage\n";
+    for flag in ["--lint", "--lint-strict"] {
+        let (ok, _out, stderr) = run(&[flag, "-"], body);
+        assert!(!ok, "{flag}: {stderr}");
+        let report = stderr.find("%%[ Error").expect("the error report");
+        let run_error = stderr.find("[run-error]").expect("the run-error line");
+        let shadow = stderr
+            .find("[shadowed-operator] /sub was redefined as a string")
+            .unwrap_or_else(|| panic!("{flag}: the shadow finding is kept: {stderr}"));
+        assert!(report < run_error && run_error < shadow, "{stderr}");
+        assert!(!stderr.contains("blank-page"), "{stderr}");
+        assert!(!stderr.contains("lint: clean"), "{stderr}");
+        assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    }
+    let allowed = format!("%lint: allow shadowed-operator\n{body}");
+    let (ok, _out, stderr) = run(&["--lint", "-"], &allowed);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("[run-error]"), "{stderr}");
+    assert!(!stderr.contains("[shadowed-operator]"), "{stderr}");
 }
 
 #[test]
@@ -1343,6 +1377,67 @@ fn a_repl_stops_when_its_stdout_reader_goes() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert_eq!(out.status.code(), Some(141), "{stderr}");
+}
+
+/// #1117: `pscat fonts list | head` is as quiet as the rest of the CLI: no
+/// panic, the SIGPIPE status. The reader is gone before the child starts, so
+/// the failed write is certain rather than a race.
+#[cfg(unix)]
+#[test]
+fn fonts_list_stops_quietly_when_its_stdout_reader_goes() {
+    let home = common::scratch_dir("pscat-cli-fonts-epipe");
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["fonts", "list"])
+        .env("PSCAT_HOME", &home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "the SIGPIPE status");
+}
+
+/// #1117: a sweep whose stdout reader has gone reports no `ioerror` for the
+/// frame that met it, as a plain render reports none, and still writes every
+/// frame's PNG.
+#[cfg(unix)]
+#[test]
+fn a_sweep_stops_quietly_when_its_stdout_reader_goes() {
+    let dir = common::scratch_dir("pscat-cli-sweep-epipe");
+    let png = dir.join("f.png");
+    let prog = dir.join("p.ps");
+    std::fs::write(&prog, "0 0 10 10 rectfill 1 1 200000 { = } for\n").unwrap();
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["--page", "20x20", "--sweep", "X=1,2,3", "--png"])
+        .arg(&png)
+        .arg(&prog)
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("ioerror"), "{stderr}");
+    assert!(!stderr.contains("failed"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+    for n in 1..=3 {
+        let f = dir.join(format!("f-{n:03}.png"));
+        assert!(f.exists(), "{}: the frame is still written", f.display());
+    }
 }
 
 /// An `ioerror` the program raises later is still reported after it caught

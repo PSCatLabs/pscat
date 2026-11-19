@@ -519,44 +519,45 @@ fn nearly_equal_and_huge_equal_circles_export_the_disk() {
     assert_eq!(canvas.pixel(250, 250).map(|c| c.green()), Some(255));
 }
 
-/// Coords distinct in f64 but one point in f32: the raster paints the last
-/// stop solid (tiny-skia's degenerate axis), so the PDF must too, not a
-/// zero-length shading readers skip (a Codex review of #1028). With the
-/// end not extended that stop is transparent, and nothing is recorded.
+/// Coords distinct in f64 but one point in f32 (#1041): gs 10.07.1 paints
+/// nothing for them under every `/Extend`, and so do the raster and the PDF
+/// (#1028 had recorded tiny-skia's solid last stop). The region on one side
+/// of the axis only, as well as across it.
 #[test]
-fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
-    let (pdf, canvas) = pdf_and_canvas(
-        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
-             /Extend [true true]
-             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
-    );
-    let c = canvas.pixel(100, 100).expect("pixel");
-    assert_eq!(
-        (c.red(), c.green(), c.blue()),
-        (0, 0, 255),
-        "raster: solid C1"
-    );
-    let content = page_content(&pdf);
-    assert!(
-        content.contains("0 0 1 rg") && !content.contains(" sh"),
-        "{content}"
-    );
-    assert_gs_matches(&pdf, &canvas, "sh_collapsed_axis");
-    let (pdf, canvas) = pdf_and_canvas(
-        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
-             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
-    );
-    let c = canvas.pixel(100, 100).expect("pixel");
-    assert_eq!(
-        (c.red(), c.green(), c.blue()),
-        (255, 255, 255),
-        "raster: nothing"
-    );
-    let content = page_content(&pdf);
-    assert!(
-        !content.contains(" rg") && !content.contains(" sh"),
-        "{content}"
-    );
+fn an_axis_that_collapses_in_f32_paints_nothing() {
+    for coords in ["250 0 250.000001 0", "1000 0 1000.00001 0"] {
+        for ext in ["false false", "true false", "false true", "true true"] {
+            let src = format!(
+                "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{coords}] /Extend [{ext}]
+                   /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"
+            );
+            let (pdf, canvas) = pdf_and_canvas(src.as_bytes());
+            let c = canvas.pixel(100, 100).expect("pixel");
+            assert_eq!(
+                (c.red(), c.green(), c.blue()),
+                (255, 255, 255),
+                "[{coords}] [{ext}]: raster paints nothing"
+            );
+            let content = page_content(&pdf);
+            assert!(
+                !content.contains(" rg") && !content.contains(" sh"),
+                "[{coords}] [{ext}]: {content}"
+            );
+            if !common::gs_available() {
+                continue;
+            }
+            // gs on the PostScript itself (it reads it by its header), the
+            // reference the raster follows.
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            let theirs = gs_rasterize(ps.as_bytes(), "sh_collapsed_axis_ps");
+            let g = theirs.pixel(100, 100).expect("gs");
+            assert_eq!(
+                (g.red(), g.green(), g.blue()),
+                (255, 255, 255),
+                "[{coords}] [{ext}]: gs paints nothing"
+            );
+        }
+    }
 }
 
 /// Each `/Extend` on an axial and on radials (nested; a cone, whose

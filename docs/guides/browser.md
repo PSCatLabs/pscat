@@ -135,7 +135,9 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   `pdfText: true` (with `pdf`) writes text as selectable PDF text in embedded
   fonts, like `--pdf-text`.
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
-  offending `command`, the `line`, the full `report`, what the
+  offending `command`, the `line`, the `file` and `runChain` when the error
+  was raised inside a `run` file (`line` is then that file's line; both are
+  undefined for an error in the main program), the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - `pageCount()` is the number of pages the run holds now: those `showpage`

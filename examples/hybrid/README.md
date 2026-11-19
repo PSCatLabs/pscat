@@ -40,15 +40,15 @@ lays the three panels side by side:
 
 ```sh
 pscat sheet -o docs/guides/hybrid/sky_talk_compare.png --page 595x1032 \
-  --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+  --dpi 48 --no-sizes --no-values --sweep Panel=1,2,3 \
   --label "Why Is the Sky Blue?: (a) image model alone, (b) pscat alone, (c) hybrid" \
   examples/hybrid/compare_sky_talk.ps
 pscat sheet -o docs/guides/hybrid/menu_card_compare.png --page 612x982 \
-  --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+  --dpi 48 --no-sizes --no-values --sweep Panel=1,2,3 \
   --label "The Lantern Pear: (a) image model alone, (b) pscat alone, (c) hybrid" \
   examples/hybrid/compare_menu_card.ps
 pscat sheet -o docs/guides/hybrid/ferry_compare.png --page 595x1032 \
-  --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+  --dpi 48 --no-sizes --no-values --sweep Panel=1,2,3 \
   --label "Harbour Ferry: (a) image model alone, (b) pscat alone, (c) hybrid" \
   examples/hybrid/compare_ferry.ps
 ```
@@ -849,11 +849,11 @@ The comparison and the process sheet ([`compare_alpine_trail.ps`](compare_alpine
 
 ```sh
 pscat sheet -o docs/guides/hybrid/alpine_trail_compare.png --page 576x1054 \
-  --dpi 48 --no-sizes --sweep Panel=1,2,3 \
+  --dpi 48 --no-sizes --no-values --sweep Panel=1,2,3 \
   --label "Piz Calderan: (a) image model alone, (b) pscat alone, (c) reversed hybrid" \
   examples/hybrid/compare_alpine_trail.ps
 pscat sheet -o docs/guides/hybrid/alpine_trail_process.png --page 576x1054 \
-  --dpi 36 --no-sizes --sweep Panel=4,5,6,7 \
+  --dpi 36 --no-sizes --no-values --sweep Panel=4,5,6,7 \
   --label "Piz Calderan: one layout, two photographs, one exact layer" \
   examples/hybrid/compare_alpine_trail.ps
 ```

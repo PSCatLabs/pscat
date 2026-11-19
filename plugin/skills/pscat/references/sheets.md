@@ -59,6 +59,18 @@ operators (`N noiseseed`), so noise art varies per cell; a program that calls
 to judge an icon on dark and light. `+` joins cells into one stacked column.
 `--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.
 
+A sweep caption defaults to the value (`Density=20`). To name the cells instead,
+give `--captions` one entry per value (the next file's sweep only; commas
+separate the entries, so a caption cannot hold one; an empty entry leaves that
+cell's caption out). To hide the value, because the cells already say what they
+are, use `--no-values` (the pixel size stays unless `--no-sizes`):
+
+```sh
+pscat sheet -o d.png --page 300x300 --sweep Panel=1,2,3 \
+    --captions '(a) image model,(b) pscat,(c) hybrid' piece.ps
+pscat sheet -o d.png --page 300x300 --no-sizes --no-values --sweep Panel=1,2,3 piece.ps
+```
+
 ## Over MCP: `review_sheet`
 
 With only the MCP server connected, call `review_sheet` instead: the programs

@@ -9,8 +9,8 @@ The libraries began as an experiment (Codex-built, 2026-10-27/28) in writing
 seven functional combinators and five explicit procedure decorators in plain
 PostScript, with no interpreter changes, for reusable, deterministic
 agent-made art. An independent review merged them in PR #923 for 0.7.0
-(`notes/923-functional-postscript.md`). Pages below that describe a review
-still to come, or a branch not yet merged, are the record of that time.
+(`notes/923-functional-postscript.md`). The agent work log and review brief
+from that time are in the git history, not in this folder.
 
 The [illustrated introduction](index.html) and the
 [live offline WASM studio](live-studio.html) open straight from a checkout.
@@ -45,11 +45,8 @@ calls /Calls get == % 1
 | [Live WASM studio](WASM-STUDIO.md) | Typography, contracts and actual local browser rendering. |
 | [Demo](DEMO.md) | Poster source, composition pipeline, colourways and reproduction. |
 | [Agent guide](AGENT-GUIDE.md) | Effective patterns, debugging and common mistakes. |
-| [Decisions](DESIGN-DECISIONS.md) | Tradeoffs, rejected alternatives and future work. |
+| [Design](DESIGN-DECISIONS.md) | Scope, the execution-model problem, research sources, decisions, rejected alternatives and future work. |
 | [Engine friction](ENGINE-FRICTION.md) | Prioritized bugs, limits, usability findings and enhancements. |
-| [Review handoff](REVIEW-HANDOFF.md) | The brief for the independent review (historical). |
-| [Progress](PROGRESS.md) | Session checkpoints, commands and validation status. |
-| [Initial design](DESIGN.md) | Phase A scope and primary research references. |
 
 The showcased image is procedural graphics rendered by PSCat from ordinary
 PostScript; no image model output or third-party runtime code is used.

@@ -157,6 +157,11 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
     }
 }
 
+/// The dictionaries that are always on the dictionary stack, bottom first:
+/// systemdict, globaldict (#1159), userdict. `end` and `cleardictstack`
+/// never go below them, and `countdictstack` is 3 at the start, as in gs.
+pub(crate) const PERMANENT_DICTS: usize = 3;
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -196,6 +201,11 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
+    /// A pattern's `PaintProc` running for `makepattern` (#1038), the
+    /// pattern dictionary it will return held here. Reached, the tile is
+    /// made and the dictionary pushed; unwound, the capture is dropped and
+    /// the page put back (`Gfx::abort_pattern`).
+    Pattern(Box<Object>),
     /// `--profile` (issue #737): planted under the body of a procedure
     /// called through a name. Reached, or unwound, it closes that call in
     /// the profiler. Only exists while profiling.
@@ -227,6 +237,9 @@ enum ProcStep {
     /// from an operator. The plain loop gets it as
     /// `Op(proc_literal_op)` (#864), so it has no arm of its own there.
     Lit,
+    /// A procedure element that is an executable string or file: it runs
+    /// as source, as in Ghostscript, via [`Interp::proc_source`].
+    Src,
     /// A procedure element that is pushed (a literal other than a
     /// procedure body): already on the operand stack.
     Pushed,
@@ -369,6 +382,9 @@ pub struct Interp {
     save_stack: Vec<SaveRecord>,
     /// `setglobal`'s allocation mode and the modes `save` recorded (#1146).
     pub(crate) vm_mode: crate::ops::vm::VmMode,
+    /// `globaldict` (#1159): the dictionary that stands in for global VM.
+    /// Always on the dictionary stack, under userdict; `restore` never rolls it back.
+    pub(crate) globaldict: Rc<RefCell<Dict>>,
     pub(crate) quit_requested: bool,
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
@@ -474,6 +490,17 @@ pub struct Interp {
     /// Non-Font resource categories (ops/level2.rs). Font shares
     /// FontDirectory instead.
     resources: crate::ops::level2::CategoryMap,
+    /// Patterns `makepattern` made (#1038), by the address of the pattern
+    /// dictionary it returned. The weak reference tells a live entry from
+    /// one whose dictionary is gone (and whose address may be reused);
+    /// dead entries are dropped as new ones come.
+    pub(crate) patterns: std::collections::HashMap<
+        usize,
+        (
+            std::rc::Weak<RefCell<Dict>>,
+            Rc<crate::pattern::PatternTile>,
+        ),
+    >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
@@ -723,13 +750,19 @@ impl Interp {
         system
             .borrow_mut()
             .put("userdict".into(), Object::lit(Value::Dict(user.clone())));
+        let globaldict = Rc::new(RefCell::new(Dict::new()));
+        system.borrow_mut().put(
+            "globaldict".into(),
+            Object::lit(Value::Dict(globaldict.clone())),
+        );
         Some(Interp {
             ostack: Vec::new(),
-            dstack: vec![system, user],
+            dstack: vec![system, globaldict.clone(), user],
             estack: Vec::new(),
             journal: Vec::new(),
             save_stack: Vec::new(),
             vm_mode: Default::default(),
+            globaldict,
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
@@ -755,6 +788,7 @@ impl Interp {
             object_format: 2,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
+            patterns: Default::default(),
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
@@ -1450,6 +1484,8 @@ impl Interp {
             // A profiled call unwound by `stop`, an error, `exit` or `quit`
             // ends here.
             Frame::ProfReturn => self.prof_exit(),
+            // A PaintProc unwound: the page comes back (#1038).
+            Frame::Pattern(_) => self.gfx.abort_pattern(),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -1463,7 +1499,9 @@ impl Interp {
             // program-owned dict of its own before stopping/erroring
             // must not have that dict popped out from under it here
             // (round 6 of PR #59's review: an unconditional pop did).
-            Frame::Scanner(lexer) if lexer.pop_systemdict && self.dstack.len() > 2 => {
+            Frame::Scanner(lexer)
+                if lexer.pop_systemdict && self.dstack.len() > PERMANENT_DICTS =>
+            {
                 if let Some(top) = self.dstack.last()
                     && Rc::ptr_eq(top, &self.dstack[0])
                 {
@@ -1538,6 +1576,7 @@ impl Interp {
                 // A procedure literal is not an operator: not timed
                 // (and never fused here, `slice_left` being zero).
                 ProcStep::Lit => self.proc_literal(),
+                ProcStep::Src => self.proc_source(),
                 ProcStep::Op(func) => self.timed_op(self.op_name, func),
                 ProcStep::Name(id) => self.execute_name_timed(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
@@ -1596,6 +1635,7 @@ impl Interp {
             let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => self.run_op(func, ""),
                 ProcStep::Name(id) => self.execute_name(id),
+                ProcStep::Src => self.proc_source(),
                 ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
                     Ok(None) => {
@@ -1608,6 +1648,7 @@ impl Interp {
                     Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => self.run_op(func, ""),
                         ProcStep::Name(id) => self.execute_name(id),
+                        ProcStep::Src => self.proc_source(),
                         // `Other`: a run of empty loop iterations paused
                         // with no procedure on top (#900), a step that
                         // did nothing.
@@ -1675,6 +1716,9 @@ impl Interp {
                             ProcStep::Op(proc_literal_op)
                         };
                     }
+                    // Run as source, not pushed (#1122). Off the hot path:
+                    // only an executable string or file reaches it.
+                    Value::String(_) | Value::File(_) => return ProcStep::Src,
                     _ => {}
                 }
             }
@@ -1694,6 +1738,29 @@ impl Interp {
             }
         }
         step
+    }
+
+    /// The executable string or file at the top frame's `pc` (#1122): take
+    /// it, advance past it, and run it as source, as Ghostscript does for
+    /// one met in an executing procedure (`[ (8 9 add) cvx ] cvx exec`
+    /// leaves 17). As in `proc_step`, the frame is popped as it yields its
+    /// last element, before that element runs.
+    #[inline(never)]
+    fn proc_source(&mut self) -> Result<(), PsError> {
+        let Some(Frame::Proc { body, pc }) = self.estack.last_mut() else {
+            unreachable!("a procedure source with no procedure frame on top")
+        };
+        let i = *pc;
+        let Some(obj) = body.peek(i, |o| o.clone()) else {
+            return Ok(());
+        };
+        *pc = i + 1;
+        if *pc >= body.len()
+            && let Some(Frame::Proc { body, .. }) = self.estack.pop()
+        {
+            drop(body);
+        }
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The procedure literal at the top frame's `pc` (#864): push it, or
@@ -2112,6 +2179,8 @@ impl Interp {
             PopRunScanner,
             /// A profiled call returned (`--profile`).
             ProfExit,
+            /// A pattern's `PaintProc` returned (#1038).
+            PatternDone,
         }
         // Iterations of an empty body yield nothing, so they run here, in a
         // row, inside one step. After `EMPTY_RUN` of them the call returns
@@ -2237,6 +2306,7 @@ impl Interp {
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
                     Frame::ProfReturn => Action::ProfExit,
+                    Frame::Pattern(_) => Action::PatternDone,
                     Frame::Show(ctx) => {
                         stepped_show = true;
                         let step = ctx.step(gfx)?;
@@ -2392,22 +2462,9 @@ impl Interp {
                     // the sequence belong to its line, as for a plain token.
                     self.sync_scan_line();
                     let items = self.decode_sequence(&bytes)?;
-                    // A scanned executable string runs, as a token read from
-                    // a file would; a procedure body only pushes it. So each
-                    // one is followed by `exec` (the operator itself, not a
-                    // lookup a program could have redefined).
-                    let mut run = Vec::with_capacity(items.len());
-                    for o in items {
-                        let exec_string = o.executable && matches!(o.value, Value::String(_));
-                        run.push(o);
-                        if exec_string {
-                            run.push(Object::exec(Value::Operator(crate::object::Operator {
-                                name: "exec",
-                                func: crate::ops::control::exec,
-                            })));
-                        }
-                    }
-                    self.push_proc_frame(PsArray::from_vec(run))?;
+                    // An executable string in the sequence runs as the
+                    // procedure frame meets it (`proc_source`, #1122).
+                    self.push_proc_frame(PsArray::from_vec(items))?;
                 }
                 Action::PopRunScanner => {
                     self.estack.pop();
@@ -2416,6 +2473,11 @@ impl Interp {
                 Action::ProfExit => {
                     self.estack.pop();
                     self.prof_exit();
+                }
+                Action::PatternDone => {
+                    if let Some(Frame::Pattern(dict)) = self.estack.pop() {
+                        self.finish_pattern(*dict)?;
+                    }
                 }
             }
         }
@@ -2633,6 +2695,54 @@ impl Interp {
         Ok(())
     }
 
+    /// `makepattern` (#1038): with the tile's capture begun, run the
+    /// pattern's `PaintProc` on `dict` (the pattern dictionary it returns),
+    /// finishing in [`finish_pattern`](Self::finish_pattern).
+    pub(crate) fn begin_pattern_proc(
+        &mut self,
+        dict: Object,
+        proc: &Object,
+    ) -> Result<(), PsError> {
+        let Value::Array(body) = &proc.value else {
+            return Err(PsError::Typecheck);
+        };
+        if let Err(e) = self.push_frame(Frame::Pattern(Box::new(dict.clone()))) {
+            self.gfx.abort_pattern();
+            return Err(e);
+        }
+        self.push(dict);
+        self.push_proc_frame(body.clone())
+    }
+
+    /// The `PaintProc` returned: make the tile, remember it by the
+    /// dictionary, and push the dictionary.
+    fn finish_pattern(&mut self, dict: Object) -> Result<(), PsError> {
+        let tile = self.gfx.end_pattern()?;
+        let Value::Dict(d) = &dict.value else {
+            return Err(PsError::Typecheck);
+        };
+        // Drop entries whose dictionaries are gone, so a loop of
+        // makepatterns keeps only the tiles still reachable. (A weak
+        // reference keeps its allocation, so a live entry's address is
+        // never another dictionary's.)
+        self.patterns.retain(|_, (weak, _)| weak.strong_count() > 0);
+        self.patterns
+            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), tile));
+        self.push(dict);
+        Ok(())
+    }
+
+    /// The tile `makepattern` made for `d`, if it made one.
+    pub(crate) fn pattern_tile(
+        &self,
+        d: &Rc<RefCell<Dict>>,
+    ) -> Option<Rc<crate::pattern::PatternTile>> {
+        self.patterns
+            .get(&(Rc::as_ptr(d) as usize))
+            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
+            .map(|(_, tile)| tile.clone())
+    }
+
     /// Park `post` as a continuation, put `operands` on the operand
     /// stack, and run `proc` above it — the pattern for any operator
     /// that needs a PostScript procedure's result (never recurse).
@@ -2716,7 +2826,7 @@ impl Interp {
     /// limit is asked about that much before anything is built.
     fn decode_sequence(&self, bytes: &[u8]) -> Result<Vec<Object>, PsError> {
         self.check_alloc(bytes.len() / 8 * std::mem::size_of::<Object>())?;
-        decode_sequence(bytes, &self.dstack)
+        decode_sequence(bytes, &self.dstack, Some(&self.decode_budget))
     }
 
     fn scan_one(&self, lexer: &mut Lexer) -> Result<Option<(Object, usize)>, PsError> {
@@ -2877,7 +2987,8 @@ impl Interp {
                     | Frame::StopMark
                     | Frame::Show(_)
                     | Frame::Image(_)
-                    | Frame::PostOp(_),
+                    | Frame::PostOp(_)
+                    | Frame::Pattern(_),
                 ) => {
                     return Err(PsError::InvalidExit);
                 }
@@ -2928,7 +3039,7 @@ impl Interp {
     }
 
     pub(crate) fn clear_dict_stack(&mut self) {
-        self.dstack.truncate(2);
+        self.dstack.truncate(PERMANENT_DICTS);
     }
 
     /// `where`: the topmost dictionary defining `key`, if any.
@@ -2950,7 +3061,7 @@ impl Interp {
 
     /// `end`: systemdict and userdict are permanent, per the PLRM.
     pub(crate) fn pop_dict(&mut self) -> Result<(), PsError> {
-        if self.dstack.len() <= 2 {
+        if self.dstack.len() <= PERMANENT_DICTS {
             return Err(PsError::DictStackUnderflow);
         }
         self.dstack.pop();
@@ -3045,6 +3156,11 @@ impl Interp {
 
     /// The dict counterpart of [`journal_array`].
     pub(crate) fn journal_dict(&mut self, d: &Rc<RefCell<Dict>>) {
+        // Global VM outlives a `restore` (measured with gs 10.07.1, whichever
+        // mode the `save` was made in), so `globaldict` is never rolled back.
+        if Rc::ptr_eq(d, &self.globaldict) {
+            return;
+        }
         let Some(rec) = self.save_stack.last_mut() else {
             return;
         };
@@ -3204,7 +3320,7 @@ impl Interp {
             number(llx + w as f32 / scale),
             number(user_y(top)),
         ]);
-        let user = self.dstack[1].clone();
+        let user = self.dstack[2].clone();
         self.journal_dict(&user);
         // Detached, as the band names were first defined (#868).
         let key = crate::name::detached(|| crate::name::intern("BandBBox"));
@@ -3834,7 +3950,7 @@ impl Drop for Interp {
         // a `borrow()` of it must not turn a drop into a panic (a second
         // panic while unwinding aborts the process). That dictionary is
         // simply left alone, as it was before #625.
-        for dict in self.dstack.iter().take(2) {
+        for dict in self.dstack.iter().take(PERMANENT_DICTS) {
             let contents = dict.try_borrow_mut().map(|mut d| std::mem::take(&mut *d));
             drop(contents);
         }
@@ -3882,8 +3998,12 @@ fn resolve_immediate(name: &str, dicts: &[Rc<RefCell<Dict>>]) -> Result<Object, 
 }
 
 /// The top-level objects of a scanned binary object sequence (#733).
-fn decode_sequence(bytes: &[u8], dicts: &[Rc<RefCell<Dict>>]) -> Result<Vec<Object>, PsError> {
-    crate::binobj::decode(bytes, &mut |n| resolve_immediate(n, dicts))
+fn decode_sequence(
+    bytes: &[u8],
+    dicts: &[Rc<RefCell<Dict>>],
+    budget: Option<&crate::limits::DecodeBudget>,
+) -> Result<Vec<Object>, PsError> {
+    crate::binobj::decode(bytes, budget, &mut |n| resolve_immediate(n, dicts))
 }
 
 /// Collect tokens up to the matching `}` into a procedure object. Called
@@ -3908,7 +4028,11 @@ fn scan_procedure(
             Some(Token::LBrace) => items.push(scan_procedure(lexer, depth + 1, dicts)?),
             Some(Token::ImmediateName(n)) => items.push(resolve_immediate(&n, dicts)?),
             Some(Token::BinarySeq(bytes)) => {
-                items.push(Object::procedure(decode_sequence(&bytes, dicts)?));
+                items.push(Object::procedure(decode_sequence(
+                    &bytes,
+                    dicts,
+                    lexer.decode_budget(),
+                )?));
             }
             Some(tok) => items.push(token_to_object(tok)),
         }
@@ -4016,7 +4140,8 @@ mod tests {
         .expect("probe program runs");
         let mut weaks = vec![
             ("systemdict", std::rc::Rc::downgrade(&it.dstack[0])),
-            ("userdict", std::rc::Rc::downgrade(&it.dstack[1])),
+            ("globaldict", std::rc::Rc::downgrade(&it.dstack[1])),
+            ("userdict", std::rc::Rc::downgrade(&it.dstack[2])),
         ];
         for name in ["$error", "errordict", "FontDirectory", "nested /a", "held"] {
             match it.pop().expect("dict on the operand stack").value {
@@ -4133,12 +4258,14 @@ mod tests {
     #[test]
     fn dropping_an_interp_with_no_program_frees_both_permanent_dicts() {
         let interp = Interp::new();
-        let (system, user) = (
+        let (system, global, user) = (
             std::rc::Rc::downgrade(&interp.dstack[0]),
             std::rc::Rc::downgrade(&interp.dstack[1]),
+            std::rc::Rc::downgrade(&interp.dstack[2]),
         );
         drop(interp);
         assert!(system.upgrade().is_none(), "systemdict must be freed");
+        assert!(global.upgrade().is_none(), "globaldict must be freed");
         assert!(user.upgrade().is_none(), "userdict must be freed");
     }
 
@@ -4345,8 +4472,8 @@ mod tests {
         it.run_source(&src).expect_err("1 0 div still errors");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive an aborted run"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive an aborted run"
         );
     }
 
@@ -4389,8 +4516,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive a caught stop"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive a caught stop"
         );
         assert_eq!(
             it.load("probe").expect("defined").repr(),
@@ -4422,8 +4549,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own still-open dict, per the PLRM's \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own still-open dict, per the PLRM's \
              stopped-doesn't-restore-the-dict-stack rule -- not eexec's copy, which the \
              program's own `end` already removed, and not popped again by cleanup"
         );
@@ -4450,8 +4577,8 @@ mod tests {
             .expect("plain completion, nothing errors");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own dict left open across eexec's natural \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own dict left open across eexec's natural \
              end -- not eexec's injected copy, which the program's own `end` already removed"
         );
     }

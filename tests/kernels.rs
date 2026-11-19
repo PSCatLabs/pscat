@@ -469,16 +469,13 @@ fn a_long_chain_of_merges_compiles_in_linear_time() {
     );
 }
 
-/// A join costs about the names in scope, not their square (#1094): a
-/// pixel dictionary of thousands of names (fractal_clouds' scenes) made
-/// every `if` join and loop fixpoint scan it once per name. 2,000 names
-/// and 2,000 joins took 7 s; it is now tens of milliseconds. Shared bodies
-/// (`/large`) take the sharing frames' path through the joins too.
-#[test]
-fn joins_over_many_names_compile_in_linear_time() {
-    let n = 2000;
+/// The program behind `joins_over_many_names_compile_in_linear_time`:
+/// `names` names in the pixel dictionary and `joins` branch joins over the
+/// first `joins` of them (`joins <= names`).
+fn many_names_program(names: usize, joins: usize) -> String {
+    assert!(joins <= names);
     let mut prog = String::from("/pixel { /j exch def /i exch def /c i 1 gt def ");
-    for k in 0..n {
+    for k in 0..names {
         prog.push_str(&format!("/v{k} 0 def "));
     }
     // A shared body that defines names under a branch: its joins consult
@@ -488,26 +485,76 @@ fn joins_over_many_names_compile_in_linear_time() {
         prog.push_str(&format!("v{k} add "));
     }
     prog.push_str("} def 0 ");
-    for k in 0..n {
+    for k in 0..joins {
         prog.push_str(&format!("c {{ /v{k} {k} def }} if "));
         if k % 100 == 0 {
             prog.push_str(&format!("0 1 3 {{ /v{k} exch def }} for f "));
         }
     }
     prog.push_str("v0 v1 v2 add add add 1000 div dup dup } def");
+    prog
+}
+
+/// A join costs about the names in scope, not their square (#1094): a
+/// pixel dictionary of thousands of names (fractal_clouds' scenes) made
+/// every `if` join and loop fixpoint scan it once per name. 2,000 names
+/// and 2,000 joins took 7 s; it is now tens of milliseconds. Shared bodies
+/// (`/large`) take the sharing frames' path through the joins too.
+///
+/// The check is a growth ratio, not a figure (#1293): an absolute budget
+/// flaked on the Windows runner, which is several times slower and noisier
+/// than the machine it was tuned on (and times wall-clock there: see
+/// `common::thread_cpu_time`). The number of joins is held fixed and the
+/// names in scope grow 4x. A join costing about the names costs about 4x as
+/// much then (3-6x measured); the old scan per name per join costs about 15x
+/// (measured on the pre-#1094 compiler: 1.1 s to 16.7 s). Both hold on any
+/// machine, so the bound sits between, at 10x. Each side is the best of
+/// five runs, so a slow outlier is absorbed and a real regression is slow
+/// every time. The loose absolute backstop below still catches a
+/// catastrophe (the old compile took seconds). Growth in the join count
+/// alone is covered by `a_long_chain_of_merges_compiles_in_linear_time`.
+#[test]
+fn joins_over_many_names_compile_in_linear_time() {
+    const JOINS: usize = 1000;
+    const SMALL: usize = 1000;
+    const LARGE: usize = 4000;
+    const MAX_RATIO: f64 = 10.0;
+    let growth = (LARGE / SMALL) as f64;
     for mode in ["auto", "large"] {
-        let src = format!("/{mode} .kernelshare {prog}");
+        let cpu_of = |names: usize| {
+            let src = format!("/{mode} .kernelshare {}", many_names_program(names, JOINS));
+            common::best_cpu_time_of(5, || {
+                let (ok, why) = compiles(&src);
+                assert!(ok, "{why}");
+            })
+        };
+        let small = cpu_of(SMALL);
+        let large = cpu_of(LARGE);
+        // Under a millisecond of CPU the ratio is noise; the backstop speaks then.
+        let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-3);
+        eprintln!(
+            "kernelcompile /{mode}: {JOINS} joins over {SMALL} names {small:.3?}, over {LARGE} \
+             names {large:.3?}, ratio {ratio:.1} (linear {growth}, quadratic {})",
+            growth * growth
+        );
+        assert!(
+            ratio < common::scale_budget(Duration::from_secs_f64(MAX_RATIO)).as_secs_f64(),
+            "/{mode}: {LARGE} names took {ratio:.1}x the CPU of {SMALL} names ({large:?} vs \
+             {small:?}), {JOINS} joins either way; linear is {growth}x, quadratic {}x",
+            growth * growth
+        );
         common::within_cpu_budget(
-            &format!("kernelcompile of {n} joins over {n} names, /{mode}"),
-            Duration::from_millis(400),
+            &format!("kernelcompile of {JOINS} joins over {LARGE} names, /{mode}"),
+            Duration::from_millis(1500),
             3,
             || {
+                let src = format!("/{mode} .kernelshare {}", many_names_program(LARGE, JOINS));
                 let (ok, why) = compiles(&src);
                 assert!(ok, "{why}");
             },
         );
     }
-    same_small(&prog);
+    same_small(&many_names_program(2000, 2000));
 }
 
 #[test]

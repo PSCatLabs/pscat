@@ -102,22 +102,22 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 #[test]
 fn the_five_formulas_render_as_pinned() {
     // All five re-pinned for #692 (exact-area fill coverage), then for #731
-    // (tiny-skia f32 pipeline); the Windows cases value is from #731's
-    // windows-latest CI run.
+    // (tiny-skia f32 pipeline, then part 2's 16-bit fill compositing); the
+    // Windows cases value is from #731's windows-latest CI run.
     let pinned: [u64; 5] = [
-        0x7746bc8158136515,
-        0xbd469dc457c6ec34,
-        0x76fd19b982eacda1,
+        0x77e56b62ee521faf,
+        0xce8a3ed9f44a44ef,
+        0xcb31041ae26f099c,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x95f4ff7905b0d31c
+            0x97e14df3576b5980
         } else {
-            0x573d23cd11025399
+            0xb61620c5dd29d8f1
         },
-        0x669f03b794585f39,
+        0xc6a28449e4e5911e,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -148,12 +148,13 @@ fn the_overlay_renders_as_pinned() {
     let png = chalk::render(FORMULAS[0].1, &cfg, Format::Png).expect("overlay");
     let pm = Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    // Re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline):
+    // Re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline,
+    // then 16-bit fill compositing):
     // the √ and the superscript checked over a dark page each time, as solid
     // as before or fuller.
     assert_eq!(
         fnv1a(pm.data()),
-        0xb7eb785d15bdb85b,
+        0xda5c390dc07f86ac,
         "the overlay moved: {:#x}",
         fnv1a(pm.data())
     );
@@ -530,9 +531,50 @@ fn unsupported_input_fails_with_the_named_error() {
             "{tex}: a PostScript report: {err}"
         );
         assert!(!dir.join("bad.png").exists(), "{tex}: wrote a file");
+        // the check pass's lines are internal: neither stream shows them
+        assert!(
+            !String::from_utf8_lossy(&out.stdout).contains("CKPROBLEM")
+                && !err.contains("CKPROBLEM"),
+            "{tex}: a check line leaked"
+        );
 
         let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
         assert_eq!(e.code(), code);
+    }
+}
+
+/// `\$ \% \& \# \_` (issue #1160) are TeX's escaped literals: each draws
+/// the character, in math and in `\text{}`, and the bare forms keep the
+/// meaning they have in TeX (the delimiter, comment, column mark and
+/// subscript mark), or are refused where TeX refuses them.
+#[test]
+fn the_escaped_literals_render_and_the_bare_ones_keep_their_meaning() {
+    let dir = scratch("literals");
+    for tex in [
+        r"50\% of \$5",
+        r"R\&D",
+        r"a\_b \#1",
+        r"\text{50\% of \$5, R\&D, a\_b, \#1}",
+        r"\mathrm{\$\%\&\#\_}",
+        r"\text{\{x\}} = \{x\}",
+        r"$\$5$ \quad \(\% \)",
+        "50\\% % a comment",
+    ] {
+        let out = pscat(&dir, &["chalk", tex, "-o", "lit.png"], None);
+        assert!(out.status.success(), "{tex}: {}", stderr(&out));
+        assert!(dir.join("lit.png").exists(), "{tex}: wrote nothing");
+        let png = chalk::render(tex, &small(), Format::Png).unwrap();
+        assert!(png.starts_with(b"\x89PNG"), "{tex}");
+    }
+    // a bare one inside \text is refused, as in TeX
+    for (tex, says) in [
+        (r"\text{a_b}", "unsupported character: _"),
+        (r"\text{R&D}", "unsupported character: &"),
+        (r"\text{#1}", "unsupported character: #"),
+    ] {
+        let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);
+        assert!(!out.status.success(), "{tex} succeeded");
+        assert!(stderr(&out).contains(says), "{tex}: {}", stderr(&out));
     }
 }
 
@@ -724,6 +766,32 @@ fn the_library_problem_list_is_the_cli_list() {
     ] {
         assert!(driver.explain(junk, &run_err).is_some());
     }
+}
+
+/// A failing formula's printed output has the program's own prints and no
+/// check lines once it goes through `user_output` (issue #1252), while
+/// `explain` still reads the raw bytes.
+#[test]
+fn user_output_leaves_the_programs_prints_without_the_check_lines() {
+    use pscat::chalkboard::{BoardConfig, user_output};
+    let driver = BoardConfig::default()
+        .driver(r"x + \aleph + ☃")
+        .expect("the delimiters are balanced");
+    let (w, h) = driver.page_size();
+    let mut interp = pscat::Interp::with_page_scaled(w, h, 1.0).expect("valid page");
+    interp.capture_stdout();
+    interp.run_str("(before\n) print").unwrap();
+    let err = interp
+        .run_str(driver.source())
+        .expect_err("outside the subset");
+    let printed = interp.captured_stdout().to_vec();
+    assert!(
+        String::from_utf8_lossy(&printed).contains("CKPROBLEM"),
+        "the check pass printed its lines"
+    );
+    assert_eq!(user_output(&printed).as_ref(), b"before\n");
+    let e = driver.explain(&printed, &err).expect("a TeX error");
+    assert_eq!(e.problems().len(), 2, "{e}");
 }
 
 /// A structural error (a missing brace) is listed with the unsupported

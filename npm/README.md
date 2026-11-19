@@ -108,6 +108,8 @@ try {
     e.errorName; // 'undefined'
     e.command;   // 'bogus'
     e.line;      // 1
+    e.file;      // undefined; the file's name when the error was inside a `run` file
+    e.runChain;  // undefined; `inner.ps:5 <- line 2` inside a `run` file
     e.report;    // '%%[ Error: undefined; OffendingCommand: bogus; Line: 1 ]%%'
     e.output;    // what the program printed before the error
   }
@@ -181,7 +183,7 @@ as Ghostscript does.
 | `imageData()` | The page as an `ImageData` (browsers and workers). |
 | `paintTo(canvas)` | Draw the page into a canvas or `OffscreenCanvas`. |
 | `addFont(name, bytes)` | Make a TrueType or OpenType font available to `findfont`. |
-| `PostScriptError` | Thrown by `render` and `step`. It has `errorName`, `command`, `line`, `report`, `output` and `warnings` (the font notes up to the error). |
+| `PostScriptError` | Thrown by `render` and `step`. It has `errorName`, `command`, `line`, `file`, `runChain`, `report`, `output` and `warnings` (the font notes up to the error). |
 
 There is no file system and no clock: `usertime` and `realtime` read 0.
 The [browser guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/browser.md)

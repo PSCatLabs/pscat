@@ -1,0 +1,125 @@
+# #1038: tiling patterns (makepattern, setpattern, /Pattern)
+
+First part of #1038: **PatternType 1** (tiling) patterns, coloured
+(PaintType 1) and uncoloured (PaintType 2), all three TilingTypes, in PNG,
+SVG and PDF. Shading patterns (PatternType 2) are a follow-up; an
+`imagemask` painted with a pattern came in #1299.
+
+## What a program can do now
+
+- `dict matrix makepattern pattern`, with gs's errors: a missing key is
+  `undefined`, a wrong type `typecheck`, an empty or inverted `/BBox`, a zero
+  step, PaintType outside 1-2, TilingType outside 1-3 and PatternType other
+  than 1 are `rangecheck`. The result is a copy of the dictionary with an
+  `/Implementation` entry, as in gs.
+- `/Pattern`, `[/Pattern]` and `[/Pattern base]` colour spaces (a device
+  base), `setcolor` with a pattern (and an uncoloured pattern's components),
+  `setpattern` (outside a pattern space it first sets `[/Pattern cs]` over the
+  current space, as gs does even for coloured patterns), `currentcolor`
+  (components, then the dictionary; `null` for the null pattern) and
+  `currentcolorspace` (`[/Pattern [/DeviceRGB]]`, as gs prints it).
+- `fill`, `eofill`, `stroke`, `rectfill` and the show family paint with the
+  pattern. A pattern space with no pattern yet paints nothing (gs's null
+  pattern). `sethsbcolor` now sets DeviceRGB, as the PLRM says, so it leaves a
+  pattern space like the other device colour operators.
+
+## How (`src/pattern.rs`)
+
+- **Eager PaintProc.** `makepattern` runs the `PaintProc` once, through a
+  `Frame::Pattern` continuation (never a recursive call into the machine),
+  on the new dictionary. gs runs it lazily at first use; the PLRM allows
+  either and the results are cached either way. A `PaintProc` that prints or
+  reads changing state therefore runs at a different time than in gs.
+- **Capture.** While it runs, `Gfx` paints into a capture: the page canvas,
+  the SVG recorder and the PDF page state (content stream, resource lists,
+  open clip group) are set aside and replaced by a tile-sized canvas, a
+  recorder with prefixed def ids, and an empty stream. The graphics state is
+  the current one inside a `gsave` (as a Type 3 glyph's), with the CTM the
+  capture matrix and the clip the `/BBox`. Showpage, copypage and erasepage
+  do nothing there, `setpagedevice` is `invalidaccess`, and an error or
+  `stop` out of the `PaintProc` puts everything back (`Gfx::abort_pattern`).
+  A live window keeps showing the page (`Gfx::page_pixmap`).
+- **Whole-pixel steps.** The pattern matrix is adjusted so each step is a
+  whole number of device pixels (TilingType 1 and 3 allow a pixel of
+  distortion for this; gs does the same). With the pattern's axes along the
+  device's, the raster maps the period pixmap one-to-one at a whole-pixel
+  offset with nearest sampling: no seams, no blur. Turned off the axes, the
+  period is resampled bilinearly. SVG and PDF are given the same adjusted
+  matrix, so cells line up across the outputs instead of drifting by the
+  rounding per cell (a 7.3 pt step at 72 dpi would drift ~20 px across a
+  page otherwise).
+- **Raster.** The capture canvas covers the BBox; it is folded into one
+  period of the lattice (drawn at every whole step that reaches the period),
+  so a BBox larger than its step wraps. Fills and strokes use it as a
+  repeating `tiny_skia::Pattern` shader, with the graphics state's alpha as
+  the shader's opacity. Uncoloured: the period's coverage is recoloured to
+  the current colour (the last colour is cached).
+- **SVG.** Per page, the tile's content is one group in the defs (captured
+  elements under the capture-to-pattern matrix, clipped to the BBox), and
+  each `<pattern>` is one `XStep` x `YStep` cell holding a `<use>` of it at
+  every step that reaches the cell. Uncoloured content is `currentColor`, set
+  by a `color` on the cell, one `<pattern>` per colour.
+- **PDF.** A `/PatternType 1` stream, `/Matrix` the adjusted matrix into the
+  page's default space (or the enclosing pattern's space), content the
+  captured stream after a `cm` back to pattern space, with its own
+  `/Resources`. Pattern objects are numbered after the fonts, so a document
+  without patterns keeps every object number it had. Pages paint with
+  `/Pattern cs /Pn scn`; uncoloured with `/PCS cs r g b /Pn scn` and a
+  `/PCS [/Pattern /DeviceRGB]` colour space resource. An uncoloured
+  pattern's stream holds no colour operators, colour images or shadings.
+- The pattern registry (`Interp::patterns`) is keyed by the returned
+  dictionary's address with a weak reference, so only a dictionary
+  `makepattern` returned paints, and a dropped one frees its tile.
+
+## Limits
+
+A capture canvas or period is at most 16384 px a side and 2^26 px
+(`limitcheck`), and both count against `--max-memory`. A BBox more than
+2^16 periods' worth of copies is `limitcheck`.
+
+## Gaps (documented, not silent misplacement)
+
+- A pattern paints only in the context it was made in: one made on the page
+  and used inside another pattern's `PaintProc`, or made inside one and used
+  after it, paints nothing.
+- Text output modes (`--svg-text`, `--pdf-text`) keep glyph outlines under a
+  pattern.
+- `imagemask` under a pattern: done in #1299 (`notes/1299-imagemask-pattern.md`).
+- TilingType 2 is adjusted like 1 and 3: its cells are scaled to the
+  whole-pixel step (a 7.3 pt step paints a 3.65 pt mark 3.5 px wide at
+  72 dpi). gs keeps a Type 2 cell undistorted and lets the spacing vary
+  instead (gaps of 3 and 4 px, measured with gs 10.07). Follow-up (Codex
+  round 2 on #1301).
+- An uncoloured `PaintProc`'s images and shadings are dropped; an imagemask in
+  one keeps its own colour in SVG.
+
+## Verification
+
+`tests/patterns.rs` renders three pictures (a hatch filling a circle, one
+uncoloured pattern in two colours, and a sheet with a 7.3 pt step, a BBox
+wider than its step, a patterned stroke and patterned text) to PNG, SVG and
+PDF, and holds them against each other:
+
+- resvg's raster of our SVG against our PNG: mean block difference at most
+  3/255 (0.1-0.4 measured).
+- hayro's raster of our PDF against our PNG: at most 3/255 (1.6 and 0.4).
+  hayro paints only one copy of a cell whose BBox is larger than its step,
+  so the third picture skips it.
+- gs's raster of our PDF against our PNG, the issue's check: at most 3/255
+  with gs rendering at 8x and box-averaged down (about 2 measured for the
+  uncoloured dots; 3.1 at 4x). At 72 dpi it measures 8-9, and gs's run of the program itself is just as far
+  from our PNG: gs paints pattern cells without anti-aliasing (its
+  `GraphicsAlphaBits` does not reach them), so its hatch lines and dots are
+  heavier, and a cell turned off the axes shows seams. Supersampling removes
+  the aliasing and leaves what the PDF means.
+- gs's raster of our PDF against gs running the program itself: identical
+  (0.000). The PDF means exactly what the program means to gs.
+
+Plus seam-freeness (every 8 px hatch tile identical), the PDF holding a real
+`/Pattern`, gs's errors and read-backs, the null pattern, `setalpha` under a
+pattern, a pattern made and used inside another's `PaintProc` (all outputs
+agree), and an error or a step limit inside a `PaintProc` leaving every
+output on the page. Chrome showed the specimen's SVG
+(`examples/patterns.ps`) as pscat's PNG. That check found the one SVG trap:
+viewers (Chrome and resvg alike) draw a `<pattern>`'s content relative to its
+`x`/`y`, so the cell sits at the pattern-space origin with no `x`/`y`.

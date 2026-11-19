@@ -611,6 +611,47 @@ fn an_errored_render_has_no_lint_block_but_keeps_the_error_and_the_page() {
     }
 }
 
+/// #1110: when a program redefines an operator and then fails, the result
+/// carries the `[shadowed-operator]` note, in its own `Lint:` block apart from
+/// the `PostScript error:` one. The consequence findings stay out (#942).
+#[test]
+fn an_errored_render_after_a_shadowed_operator_def_shows_the_lint_note() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke showpage";
+    for tool in ["render_postscript", "start_render"] {
+        for bands in [1, 2] {
+            let args = json!({ "source": source, "width": 40, "height": 40, "bands": bands });
+            let result = if tool == "render_postscript" {
+                s.tool(tool, args)
+            } else {
+                job_result_of(&mut s, args)
+            };
+            let what = format!("{tool} bands {bands}: {result}");
+            let texts = texts(&result);
+            let err = texts
+                .iter()
+                .find(|t| t.starts_with("PostScript error:"))
+                .unwrap_or_else(|| panic!("an error block, {what}"));
+            assert!(!err.contains("shadowed-operator"), "{err} ({what})");
+            let lint = texts
+                .iter()
+                .find(|t| t.starts_with("Lint:"))
+                .unwrap_or_else(|| panic!("a Lint block, {what}"));
+            assert!(
+                lint.contains("[shadowed-operator] /sub was redefined as a string"),
+                "{what}"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .all(|t| !t.contains("[blank-page]") && !t.contains("run-error")),
+                "{what}"
+            );
+        }
+    }
+}
+
 /// #942: the other tools do not lint, so an error there has no `Lint:` text
 /// to mislead either.
 #[test]
@@ -2045,7 +2086,7 @@ fn chalkboard_math_draws_the_pinned_board() {
     );
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    assert_eq!(fnv1a(pm.data()), 0x7746bc8158136515, "the board moved");
+    assert_eq!(fnv1a(pm.data()), 0x77e56b62ee521faf, "the board moved");
     let cfg = pscat::chalk::Config::from_json(
         r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
     )
@@ -2108,6 +2149,8 @@ fn chalkboard_math_reports_every_problem_at_once() {
         "{text}"
     );
     assert!(!text.contains("%%["), "{text}");
+    // the check pass's lines are internal (#1252): the reply never carries them
+    assert!(!result.to_string().contains("CKPROBLEM"), "{result}");
     assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
 }
 
@@ -3894,4 +3937,95 @@ fn gpu_preview_renders_under_the_call_limits() {
         assert!(text.contains("limitexceeded (steps)"), "{text}");
     }
     assert_eq!(images(&result).len(), 1, "{result}");
+}
+
+// --- svg_text (#1132) -----------------------------------------------------
+
+/// Standard-font text, so `--svg-text` has something to write as `<text>`.
+const HELLO: &str = "/Helvetica findfont 12 scalefont setfont 10 10 moveto (Hello) show showpage";
+
+/// Only the two render tools take `svg_text`, as a boolean.
+#[test]
+fn svg_text_is_in_the_render_schemas() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let list = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let mut seen = 0;
+    for tool in list["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let arg = &tool["inputSchema"]["properties"]["svg_text"];
+        if !["render_postscript", "start_render"].contains(&name) {
+            assert!(arg.is_null(), "{name} takes no svg_text");
+            continue;
+        }
+        seen += 1;
+        assert_eq!(arg["type"], "boolean", "{name}: {arg}");
+        let about = arg["description"].as_str().unwrap();
+        assert!(about.contains("svg only"), "{name}: {about}");
+    }
+    assert_eq!(seen, 2);
+}
+
+/// Anything but a boolean is refused, for every format.
+#[test]
+fn svg_text_must_be_a_boolean() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for tool in ["render_postscript", "start_render"] {
+        for format in ["png", "svg"] {
+            for bad in [json!("yes"), json!(1), json!([true])] {
+                let result = s.tool(
+                    tool,
+                    json!({ "source": HELLO, "format": format, "svg_text": bad }),
+                );
+                assert_eq!(error_kind(&result), "invalid_argument", "{tool}: {result}");
+                assert!(
+                    texts(&result).join("\n").contains("svg_text"),
+                    "{tool}: {result}"
+                );
+            }
+        }
+    }
+}
+
+/// `svg_text: true` writes the text as `<text>` in a smaller file; without
+/// it, or with `false`, the SVG is the same outlines as before; `start_render`
+/// gives the same SVG; png and pdf accept the option and ignore it.
+#[test]
+fn svg_text_writes_text_elements_only_for_svg() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let svg = |s: &mut Server, extra: Value| {
+        let mut args = json!({ "source": HELLO, "width": 100, "height": 40, "format": "svg" });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        let result = s.tool("render_postscript", args);
+        assert_eq!(result["isError"], false, "{result}");
+        texts(&result).join("\n")
+    };
+    let plain = svg(&mut s, json!({}));
+    let off = svg(&mut s, json!({ "svg_text": false }));
+    let on = svg(&mut s, json!({ "svg_text": true }));
+    assert!(!plain.contains("<text"), "outlines by default");
+    assert_eq!(off, plain, "false is the default");
+    assert!(on.contains("<text") && on.contains("Hello"), "{on}");
+    assert!(on.len() < plain.len(), "{} < {}", on.len(), plain.len());
+
+    let job = job_result_of(
+        &mut s,
+        json!({ "source": HELLO, "width": 100, "height": 40, "format": "svg", "svg_text": true }),
+    );
+    assert_eq!(texts(&job).join("\n"), on, "start_render");
+
+    let png = s.tool(
+        "render_postscript",
+        json!({ "source": HELLO, "width": 100, "height": 40 }),
+    );
+    let png_on = s.tool(
+        "render_postscript",
+        json!({ "source": HELLO, "width": 100, "height": 40, "svg_text": true }),
+    );
+    assert_eq!(png_on["isError"], false, "{png_on}");
+    assert!(images(&png_on) == images(&png), "png ignores svg_text");
 }

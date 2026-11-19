@@ -789,7 +789,16 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             _ => ShowMode::Width,
         };
         let pen = DevPoint { x: 8.0, y: 40.0 };
-        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen, None);
+        paint_resolved_glyph(
+            gfx,
+            face,
+            fm,
+            Some(GlyphId(g)),
+            &mode,
+            pen,
+            None,
+            GlyphId(0),
+        );
     }
     // Names the encodings resolve, and code points through the cmap.
     for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
@@ -802,6 +811,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             &ShowMode::Charpath,
             DevPoint { x: 8.0, y: 40.0 },
             None,
+            GlyphId(0),
         );
     }
     for c in [
@@ -823,6 +833,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
                 &ShowMode::Paint,
                 DevPoint { x: 8.0, y: 40.0 },
                 None,
+                GlyphId(0),
             );
         }
     }
@@ -1463,6 +1474,10 @@ fn encoding_name(fs: &FontState, byte: u8) -> crate::name::PsName {
 /// was reached through a name that has one; with SVG text output on
 /// (#1119) a glyph of a standard face is recorded as that character
 /// instead of its outline (`crate::textrun`).
+///
+/// `missing` is the glyph whose advance a missing glyph (`gid` is `None`)
+/// takes: `.notdef` (glyph 0) for most faces, see [`missing_glyph`].
+#[allow(clippy::too_many_arguments)]
 fn paint_resolved_glyph(
     gfx: &mut Gfx,
     face: &Face,
@@ -1471,6 +1486,7 @@ fn paint_resolved_glyph(
     mode: &ShowMode,
     pen: DevPoint,
     text: Option<(i64, char)>,
+    missing: GlyphId,
 ) -> (f64, f64) {
     let k = 1000.0 / f64::from(face.units_per_em());
     // Glyph-space → user-space linear part (FontMatrix over 1000-unit
@@ -1521,11 +1537,12 @@ fn paint_resolved_glyph(
     }
 
     // Missing glyphs still advance — by .notdef's width, like a real
-    // interpreter showing an unencoded character. Width is in raw glyph
-    // units; `g` already carries the em normalization.
+    // interpreter showing an unencoded character (`missing` says whose
+    // width stands for it). Width is in raw glyph units; `g` already
+    // carries the em normalization.
     let w = f64::from(
         gid.and_then(|g| advance_of(face, g))
-            .or_else(|| advance_of(face, GlyphId(0)))
+            .or_else(|| advance_of(face, missing))
             .unwrap_or(0),
     );
     (g[0] * w, g[1] * w)
@@ -1591,6 +1608,29 @@ pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
     Some((face, name))
 }
 
+/// The glyph whose advance a missing glyph takes on face `fid` (#1115).
+/// Ghostscript's URW faces give `.notdef` the width of a space (278 for
+/// Helvetica, 250 for Times, 600 for Courier, 250 for Palatino, ...), where
+/// the faces that stand in for them have a wider `.notdef` box (Liberation
+/// 750 and 778, TeX Gyre 500 and 280). So a missing glyph on one of the
+/// standard 35 (`BUILTINS` and [`EMBEDDED`]) takes the `space` advance
+/// instead. Every other face (user and pack fonts) keeps its own `.notdef`.
+fn missing_glyph(face: &Face, fid: i64) -> GlyphId {
+    let standard = match usize::try_from(fid) {
+        Ok(i) if i < BUILTINS.len() => true,
+        Ok(i) => CATALOG
+            .read()
+            .unwrap()
+            .get(i - BUILTINS.len())
+            .is_some_and(|c| EMBEDDED.iter().any(|(k, _)| k.eq_ignore_ascii_case(&c.key))),
+        Err(_) => false,
+    };
+    standard
+        .then(|| resolve_glyph(face, "space"))
+        .flatten()
+        .unwrap_or(GlyphId(0))
+}
+
 /// One outline-font glyph by name: the Encoding name of a shown byte
 /// (live dict read), or `glyphshow`'s operand → glyph id.
 fn outline_glyph(
@@ -1605,8 +1645,14 @@ fn outline_glyph(
     let text = symbolic_text_char(gfx, fs.fid, name)
         .or_else(|| encodings::name_to_char(name))
         .map(|c| (fs.fid, c));
+    // Only a missing glyph needs it: skip the name lookup per shown glyph.
+    let missing = if gid.is_none() {
+        missing_glyph(face, fs.fid)
+    } else {
+        GlyphId(0)
+    };
     Ok(paint_resolved_glyph(
-        gfx, face, fs.matrix, gid, mode, pen, text,
+        gfx, face, fs.matrix, gid, mode, pen, text, missing,
     ))
 }
 
@@ -1635,6 +1681,7 @@ fn unicode_glyph(
         mode,
         pen,
         ch.map(|c| (fs.fid, c)),
+        GlyphId(0),
     ))
 }
 
