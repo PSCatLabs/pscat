@@ -64,7 +64,7 @@ reported in one pass, with its line and column):
   text, fonts   \text{} \mathrm{} \mathbf{} \mathbb{} \mathcal{} (the last
                 two: capital letters only). \text{} sets ASCII letters and
                 digits and !'()*+,-./:;<=>?[]| and spaces, and the literals
-                below (a bare _ # & $ is refused, as in TeX); accent commands
+                below (a bare _ # & is refused, as in TeX); accent commands
                 (\"o), quotes, other symbols and backslash commands are not
                 drawn, and a letter the board hand lacks is reported (write
                 the plain letter, Goedel for Gödel)
