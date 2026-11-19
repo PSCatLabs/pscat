@@ -305,7 +305,9 @@ Cheapest first, before the long gate:
    is compared page by page. Order matters: rebase LAST (step 5.5), then create the base worktree
    from the rebased branch's base, `git worktree add --detach <path> "$(git -C "$WORKTREE_DIR"
    merge-base HEAD origin/main)"`, then run the check. Pick `<path>` outside the repo and NOT ending
-   `-issue-<N>` (step 3 resumes on that suffix); write the exact path down for step 9. A rebase after
+   `-issue-<N>` (step 3 resumes on that suffix); write the exact path down for step 9. Right after
+   `git worktree add` run `bash "$WORKTREE_DIR/scripts/worktree_target.sh" link <path> idbase-<N>`
+   so the base build lands on the external drive too (#1281); step 9 unlinks it. A rebase after
    the check leaves a stale base: re-create the base and re-run (matrix in "Rebase and merge
    rules"). The control driver may live in `<SCRATCH>`: pass it by absolute path. A pure
    refactor has no new key to use as the control: append a marker (`printf '\n/probe true def\n' >>
@@ -512,7 +514,8 @@ refuse). Then restore the worktree: if `git worktree list` shows one ending
 `-issue-<N>`, take step 3's reuse branch. If it is gone, **do not** take
 step 3's "Otherwise" route (it cuts a new branch from `origin/main` and
 would lose the PR's work, or fail on the existing branch); make one on
-the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH"`
+the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH" && bash "$WORKTREE_DIR/scripts/worktree_target.sh" link "$WORKTREE_DIR" issue-<N>`
+(#1281: the link puts `target/` on the external drive, as step 3 does; a no-op when it is not configured)
 (find `$BRANCH` with `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("/<N>-"))'`).
 Find the PR with `gh pr list --state open --head "$BRANCH" --json number,url`.
 **Then sync the worktree with the PR head before choosing a row** (Codex

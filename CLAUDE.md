@@ -36,6 +36,16 @@ emerge (preferred tool usage patterns, things that trip up this particular
 setup, etc.), add them here rather than in `AGENTS.md`, which should stay
 tool-agnostic.
 
+## Worktrees keep `target/` off the main drive
+
+Any `git worktree add` in this repo, by hand (an integration or train tree, a
+docs-only fix, an identity-check base) or from a skill, is followed by
+`scripts/worktree_target.sh link <worktree> [name]`, and any removal is
+preceded by `scripts/worktree_target.sh unlink <worktree>`. It puts the
+worktree's Cargo `target/` under `$PSCAT_TARGET_ROOT` (the owner's external
+drive) and is a no-op when that is unset, so it is always safe to run.
+`work-issue` already does this for its own trees.
+
 <!-- sdlcify:managed:start -->
 ## SDLC
 

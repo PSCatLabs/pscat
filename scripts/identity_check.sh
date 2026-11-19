@@ -20,7 +20,9 @@
 #                  work-issue step 5.5), NOT a newer origin/main: files a later
 #                  merge changed would show up as differences that are not the
 #                  branch's. `git worktree add --detach <path> origin/main` right
-#                  after the step 5.5 rebase is the usual way to make one.
+#                  after the step 5.5 rebase is the usual way to make one. Follow it with
+#                  `scripts/worktree_target.sh link <path> idbase-<N>` (its target/ goes on
+#                  PSCAT_TARGET_ROOT, #1281) and `... unlink <path>` before removing it.
 #   BIN            the pscat binary. Default: the release binary in Cargo's
 #                  target directory (from `cargo metadata`), built first with
 #                  `cargo build --release --bin pscat`. A BIN you pass is used
