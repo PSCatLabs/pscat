@@ -2108,6 +2108,8 @@ fn chalkboard_math_reports_every_problem_at_once() {
         "{text}"
     );
     assert!(!text.contains("%%["), "{text}");
+    // the check pass's lines are internal (#1252): the reply never carries them
+    assert!(!result.to_string().contains("CKPROBLEM"), "{result}");
     assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
 }
 
