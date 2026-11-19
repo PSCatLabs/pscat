@@ -60,7 +60,7 @@ repository variable `RELEASE_ENABLED` is `true`. Everything else is a **dry
 run** that stops after `assemble`:
 
 - a pull request that touches the pipeline;
-- a manual "Run workflow", with an optional `ref` input.
+- a manual "Run workflow" on the branch you pick (there is no `ref` input).
 
 The `publish` job writes a release report (ref, commit, checksums, and each
 stage's result) to the job summary and to the `release-report-<attempt>`
@@ -679,15 +679,17 @@ and `release-manifest.json` record the same digests unsigned.
   `about.*`, `Cargo.toml`, `Cargo.lock`) runs `verify`, `binaries` and
   `assemble`. That is all five archives, the npm tarball, the manifest, the rehearsal and the
   read-only plan. Nothing is published.
-- **A manual dry run:** Actions → release → Run workflow, with an optional
-  branch, tag or commit as `ref`. It is always a dry run. A real release
-  starts only from a pushed tag. To rehearse a **release candidate**, point
-  `ref` at a scratch commit made with
-  `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (push that
-  as a branch, never a tag). Its rehearsal runs the rc scenarios below.
-  The workflow file comes from the default branch but the scripts from
-  `ref`, so a `ref` older than the workflow's script options (`version-info`,
-  #854; `manifest --npm-from`, #1006) fails in `verify` or `assemble`.
+- **A manual dry run:** Actions → release → Run workflow, choosing the
+  branch to rehearse under "Use workflow from". It is always a dry run. A
+  real release starts only from a pushed tag. There is no `ref` input (it was
+  removed in #669: a ref named by the dispatcher is an untrusted checkout to
+  CodeQL's cache-poisoning rule). To rehearse a **release candidate**, push a
+  scratch branch whose commit was made with
+  `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (a branch,
+  never a tag) and run the workflow on it. Its rehearsal runs the rc
+  scenarios below. The workflow file and the scripts now both come from that
+  branch, so the rehearsal exercises the workflow as it will be merged. To
+  rehearse a bare commit, push a branch at it.
 - **The rehearsal** (`python3 scripts/release_stages.py rehearse --dist DIR
   --crate FILE`) runs these scenarios against fresh fake registries with the
   real artifacts:
