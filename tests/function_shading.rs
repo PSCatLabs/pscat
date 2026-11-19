@@ -435,6 +435,41 @@ fn errors_match_gs() {
     }
 }
 
+/// A table gs cannot allocate is refused (gs 10.07.1: `/Size [65536
+/// 65536]` of RGB bytes is a VMerror, pscat's limitcheck; a Size whose
+/// table size overflows is a rangecheck in both), and a huge Domain
+/// mapped far past the page still paints all of it (gs paints the page).
+#[test]
+fn huge_tables_and_domains() {
+    let sh = |size: &str, bits: u32, matrix: &str| {
+        format!(
+            "<< /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [{matrix}]
+               /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [{size}]
+                 /BitsPerSample {bits} /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill"
+        )
+    };
+    assert_eq!(
+        run_err(&sh("65536 65536", 8, "100 0 0 100 0 0")),
+        Err(PsError::Limitcheck)
+    );
+    assert_eq!(
+        run_err(&sh("4294967295 4294967295", 2, "100 0 0 100 0 0")),
+        Err(PsError::Rangecheck)
+    );
+    // Within the cap, mostly past the data: reads 0 there, no panic.
+    let it = render(&sh("8192 8192", 2, "200 0 0 200 0 0"));
+    assert_eq!(at(&it, 199.0, 199.0), [0, 0, 0]);
+    let it = render(&sh("2 2", 8, "1e6 0 0 1e6 -5e5 -5e5"));
+    for (x, y) in [(0.0, 0.0), (100.0, 100.0), (199.0, 199.0)] {
+        near(
+            at(&it, x, y),
+            bilinear(0.5, 0.5),
+            2.0,
+            &format!("({x},{y})"),
+        );
+    }
+}
+
 /// A one-input sampled function drives an axial shading too.
 #[test]
 fn a_sampled_function_drives_an_axial_shading() {

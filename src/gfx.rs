@@ -2889,9 +2889,9 @@ impl Gfx {
         let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
         // Evaluating the function costs about a 64-stop gradient's walk a
         // pixel; painting the layer, a two-stop one.
-        let work = shfill_work(bw, bh, 64).saturating_add(shfill_work(pw, ph, 2));
+        let work = shfill_work(bw, bh, 64).saturating_add(shfill_work(bw, bh, 2));
         probe.check(work / 1024)?;
-        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(5))?;
+        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(6))?;
         let inv = [t[3] / det, -t[1] / det, -t[2] / det, t[0] / det];
         let to_shading = |dx: f64, dy: f64| {
             let (u, v) = (dx - t[4], dy - t[5]);

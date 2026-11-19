@@ -162,6 +162,11 @@ impl Sampled {
             .saturating_mul(n as u64)
             .saturating_add(j as u64)
             .saturating_mul(bits);
+        if start / 8 >= self.data.len() as u64 {
+            // Past the data (a short string reads as 0, as in gs); also
+            // keeps the bit arithmetic below off a saturated `start`.
+            return 0;
+        }
         let byte_at = |i: u64| {
             usize::try_from(i)
                 .ok()
@@ -785,6 +790,9 @@ fn get_pairs(d: &Dict, key: &str, count: usize) -> Result<Vec<(f64, f64)>, PsErr
 /// reads more than 2 inputs or 4 outputs; this only bounds the parse.
 const MAX_SAMPLED_DIMS: usize = 32;
 
+/// The largest sample table a sampled function may describe, in bytes.
+const MAX_SAMPLED_TABLE: u64 = 1 << 30;
+
 /// `FunctionType` 0 (#1039), checked as gs checks it (10.07.1): `/Domain`,
 /// `/Range`, `/Size`, `/BitsPerSample` and `/DataSource` required; each
 /// Domain and Range pair non-decreasing; `/Size` one positive integer per
@@ -826,6 +834,18 @@ fn parse_sampled(d: &Dict) -> Result<Sampled, PsError> {
     let bits = get_int(d, "BitsPerSample")?;
     if ![1, 2, 4, 8, 12, 16, 24, 32].contains(&bits) {
         return Err(PsError::Rangecheck);
+    }
+    // gs allocates the whole table: `/Size [65536 65536]` of RGB bytes is a
+    // VMerror there, and a Size whose product overflows a rangecheck. Past
+    // MAX_SAMPLED_TABLE bytes this is a limitcheck (pscat has no VMerror).
+    let table_bits = size
+        .iter()
+        .try_fold(1u64, |a, &s| a.checked_mul(s as u64))
+        .and_then(|c| c.checked_mul(n as u64))
+        .and_then(|c| c.checked_mul(bits as u64))
+        .ok_or(PsError::Rangecheck)?;
+    if table_bits / 8 > MAX_SAMPLED_TABLE {
+        return Err(PsError::Limitcheck);
     }
     if d.get("Order").is_some() && !matches!(get_int(d, "Order")?, 1 | 3) {
         return Err(PsError::Rangecheck);
