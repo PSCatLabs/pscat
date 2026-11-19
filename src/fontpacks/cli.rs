@@ -69,17 +69,17 @@ override installed packs; `pscat fonts list` shows them.";
 /// Run `pscat fonts <args>`.
 pub fn main(args: &[String]) -> ExitCode {
     let result = run(args);
-    // A reader that went away is not a failure to report: say nothing more
-    // and end as a Unix tool killed by SIGPIPE does.
-    if stdout_closed() {
-        return ExitCode::from(EXIT_STDOUT_CLOSED);
+    // An error that is not the closed pipe is still reported on stderr; a
+    // reader that went away ends the run as a Unix tool killed by SIGPIPE does.
+    if let Err(msg) = &result {
+        eprintln!("pscat fonts: {msg}");
     }
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(msg) => {
-            eprintln!("pscat fonts: {msg}");
-            ExitCode::FAILURE
-        }
+    if stdout_closed() {
+        ExitCode::from(EXIT_STDOUT_CLOSED)
+    } else if result.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 
@@ -184,7 +184,7 @@ fn cmd_list() -> Result<(), String> {
     for p in &installed {
         // Nobody is reading: skip hashing the rest of the packs.
         if stdout_closed() {
-            return Ok(());
+            break;
         }
         let check = match install::verify(p) {
             Ok(n) => format!("{n} files verified"),

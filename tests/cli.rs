@@ -1374,7 +1374,8 @@ fn fonts_list_stops_quietly_when_its_stdout_reader_goes() {
 }
 
 /// #1117: a sweep whose stdout reader has gone reports no `ioerror` for the
-/// frame that met it, writes that frame's PNG, and stops there.
+/// frame that met it, as a plain render reports none, and still writes every
+/// frame's PNG.
 #[cfg(unix)]
 #[test]
 fn a_sweep_stops_quietly_when_its_stdout_reader_goes() {
@@ -1399,8 +1400,10 @@ fn a_sweep_stops_quietly_when_its_stdout_reader_goes() {
     assert!(!stderr.contains("ioerror"), "{stderr}");
     assert!(!stderr.contains("failed"), "{stderr}");
     assert_eq!(out.status.code(), Some(141), "{stderr}");
-    assert!(dir.join("f-001.png").exists(), "the frame is still written");
-    assert!(!dir.join("f-002.png").exists(), "the sweep stopped");
+    for n in 1..=3 {
+        let f = dir.join(format!("f-{n:03}.png"));
+        assert!(f.exists(), "{}: the frame is still written", f.display());
+    }
 }
 
 /// An `ioerror` the program raises later is still reported after it caught

@@ -10,7 +10,7 @@ its own `println!`/`print!` in `src/main.rs`. Two paths were left:
   verifying the remaining packs once the reader is gone. No new public item.
 - A sweep frame whose program wrote to the dead pipe reported `ioerror` and
   marked the frame failed. The frame now takes the same arm as a plain render
-  (`stdout_epipe_error`): no report, not failed, its PNG written. The loop then
-  stops (it also stops when the sweep's own progress line meets the closed
-  pipe). A requested `--contact-sheet` is still written, with the cells that
-  rendered, as a plain render still writes its page.
+  (`stdout_epipe_error`): no report, not failed, its PNG written. The sweep
+  carries on and writes every frame (and a requested contact sheet), by the
+  rule that a closed stdout is a flag, not an early exit (#1058, #1059): the
+  outputs are what the run is for. `main` ends with 141.
