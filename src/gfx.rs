@@ -2186,7 +2186,13 @@ impl Gfx {
             }
         };
         let max_memory = self.mem_budget.map(|(_, max)| max);
-        let deep = !runs.is_empty() && crate::deep::Deep::allowed(w, h, max_memory);
+        // The shadow composites a flat colour, so a pattern fill (#1038)
+        // and a pattern's capture canvas paint through tiny-skia instead.
+        let pattern = self.pattern_source();
+        let deep = !runs.is_empty()
+            && pattern.is_none()
+            && self.captures.is_empty()
+            && crate::deep::Deep::allowed(w, h, max_memory);
         let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
         // A `--bands` run keeps only its own rows, so only they get a
         // shadow: the rest paint on the 8-bit page as before, and the
@@ -2215,8 +2221,7 @@ impl Gfx {
         // PR #1217: a refused fill after showpage made a blank last page).
         self.prepare_paint();
         if !runs.is_empty() {
-            let src = self.pattern_source();
-            let mut paint = self.paint_from(&src);
+            let mut paint = self.paint_from(&pattern);
             paint.anti_alias = false;
             let (r, g, b) = self.state.rgb;
             let rgb8 = [to_u8(r), to_u8(g), to_u8(b)];
