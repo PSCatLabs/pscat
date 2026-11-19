@@ -6772,8 +6772,10 @@
 % times the `setalpha` in effect at the call (#1075), so `gsave 0.6
 % setalpha ... pkwash grestore` fades a whole wash, or a whole procedure
 % built from washes, without reaching into its options. A caller at the
-% default alpha 1 gets exactly the wash it always did. (Blend mode is
-% still the wash's own, /Blend.)
+% default alpha 1 gets exactly the wash it always did. `pkpaper` follows
+% the same rule (#1161): the ground fill and each grain mark are
+% multiplied by the caller's alpha, so a wash and its paper fade
+% together. (Blend mode is still each call's own, /Blend.)
 %
 % Wash order. Under the default /Blend /Normal, washes composite
 % source-over: a later wash reads as fresher paint over a drier one,
@@ -7365,11 +7367,11 @@ systemdict /setalpha known /pwhasalpha exch def
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Lays a paper ground for watercolor: a tone fill over the given rectangle plus seeded grain speckle and fiber flecks. Paint it first; washes go over it. Uses setalpha where available and falls back to flattened tones elsewhere.
+% @summary: Lays a paper ground for watercolor: a tone fill over the given rectangle plus seeded grain speckle and fiber flecks. Paint it first; washes go over it. The caller's setalpha multiplies the ground and its grain, so gsave 0.5 setalpha ... grestore fades the whole ground like a pkwash. Uses setalpha where available and falls back to flattened tones elsewhere.
 % @example: 0 0 612 792 << /Tone [0.97 0.955 0.92] /Grain 0.6 >> pkpaper
 % @param: /Tone [rgb array] Paper color as a 3-element array (default [0.965 0.95 0.915])
 % @param: /Grain [0..1] Grain density, 0..1 (default 0.5)
-% @param: /Alpha [0..1] Strength of each grain mark, 0..1 (default 0.18)
+% @param: /Alpha [0..1] Strength of each grain mark, 0..1 (default 0.18); multiplied by the caller's setalpha in effect at the call
 % @param: /Depth [0..1] How much darker than the tone a grain mark is, 0..1 (default 0.28)
 % @param: /Fiber [0..1] Fraction of grain marks drawn as elongated paper fibers rather than specks, 0..1 (default 0.18)
 % @param: /Blend [name] /Normal or /Multiply, for the grain marks (default /Normal)
@@ -7448,16 +7450,21 @@ systemdict /setalpha known /pwhasalpha exch def
         pvn 0 lt { /pvn 0 def } if
         pvn 60000 gt { pkpaper-grain-count-exceeds-safety-limit } if
 
+        % The caller's alpha, read before the gsave below resets it, so a
+        % `gsave 0.6 setalpha ... pkpaper grestore` fades the ground and
+        % its grain together, the same rule pkwash follows (#1161, #1075).
+        % At 1 the products are exact, so a ground made under the default
+        % alpha is unchanged. The fallback paints opaque flattened tones
+        % and has no alpha to fade.
+        /pvca pwhasalpha pkalphaok and { currentalpha } { 1 } ifelse def
         gsave
-        % The ground is a ground: opaque and source-over, whatever the
-        % caller had set. /Alpha and /Blend are documented as *grain*
-        % options, so inheriting an ambient `setalpha`/`setblendmode`
-        % here would make the paper itself translucent with nothing in
-        % the contract saying so. Keyed off `pwhasalpha`, not
-        % `pkalphaok`, so it also holds in a forced-fallback preview --
-        % see that dial's own header (Codex review, PR #109, rounds 3
-        % and 4).
-        pwhasalpha { 1 setalpha /Normal setblendmode } if
+        % The ground is source-over whatever blend mode the caller had set
+        % (/Blend is a *grain* option, so an ambient `setblendmode` must
+        % not leak into the paper), and its alpha is the caller's own.
+        % Keyed off `pwhasalpha`, not `pkalphaok`, so it also holds in a
+        % forced-fallback preview -- see that dial's own header (Codex
+        % review, PR #109, rounds 3 and 4).
+        pwhasalpha { pvca setalpha /Normal setblendmode } if
         pvrect
         pvtr pvtg pvtb setrgbcolor
         fill
@@ -7473,7 +7480,7 @@ systemdict /setalpha known /pwhasalpha exch def
                 pkalphaok {
                     % Explicit, for the same reason as pkwash's above.
                     pvblend setblendmode
-                    pvalpha setalpha
+                    pvalpha pvca mul setalpha
                     pvtr 1 pvdepth sub mul
                     pvtg 1 pvdepth sub mul
                     pvtb 1 pvdepth sub mul
