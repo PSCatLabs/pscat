@@ -61,8 +61,7 @@ bytes gs writes for 19 objects in all four formats (local only; CI has no gs).
   new storage (`syntaxerror` past that).
 - `0 setobjectformat` turns binary scanning off: a token starting with 128 to 131 is then an
   ordinary name, as in gs (`Lexer::binary_tokens`, set from the format before each token).
-- A scanned executable string runs (an `exec` follows it in the frame the scanner builds); inside a
-  procedure body it is still only pushed.
+- A scanned executable string runs (since #1122 because a procedure frame runs any executable string it meets, as gs does; round 1 had added an `exec` after it).
 - The object format is saved by `save` and brought back by `restore`.
 
 **Scope note: this cannot save a million-element array.** The slot's length field is 16 bits, so
@@ -71,11 +70,8 @@ an array holds at most 65535 elements. A long numeric array should go through `w
 as one array either.
 
 **Not done (follow-ups).**
-- Executable strings (and executable files from a type-6 name) inside a sequence run when the
-  scanner reads the sequence as a program (`run`, `cvx exec`), but the array that `token` returns
-  holds them as ordinary elements, so `<seq> token pop exec` pushes the string where Ghostscript
-  runs it (Codex round 3). Matching it needs the returned array to carry gs's run-the-elements
-  mark; rare enough to leave.
+- ~~Executable strings inside a sequence, and `token` returning them~~ Done in #1122: see
+  `notes/1122-executable-strings-in-procedures.md`.
 - Binary tokens 132 to 159 (a lone 32-bit integer, 16-bit and 8-bit integers, a real, a boolean,
   a string, a system name index). They still scan as names. Rare in files; the object sequence
   is what these operators produce.

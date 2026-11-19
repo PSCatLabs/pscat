@@ -237,6 +237,9 @@ enum ProcStep {
     /// from an operator. The plain loop gets it as
     /// `Op(proc_literal_op)` (#864), so it has no arm of its own there.
     Lit,
+    /// A procedure element that is an executable string or file: it runs
+    /// as source, as in Ghostscript, via [`Interp::proc_source`].
+    Src,
     /// A procedure element that is pushed (a literal other than a
     /// procedure body): already on the operand stack.
     Pushed,
@@ -1573,6 +1576,7 @@ impl Interp {
                 // A procedure literal is not an operator: not timed
                 // (and never fused here, `slice_left` being zero).
                 ProcStep::Lit => self.proc_literal(),
+                ProcStep::Src => self.proc_source(),
                 ProcStep::Op(func) => self.timed_op(self.op_name, func),
                 ProcStep::Name(id) => self.execute_name_timed(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
@@ -1631,6 +1635,7 @@ impl Interp {
             let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => self.run_op(func, ""),
                 ProcStep::Name(id) => self.execute_name(id),
+                ProcStep::Src => self.proc_source(),
                 ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
                     Ok(None) => {
@@ -1643,6 +1648,7 @@ impl Interp {
                     Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => self.run_op(func, ""),
                         ProcStep::Name(id) => self.execute_name(id),
+                        ProcStep::Src => self.proc_source(),
                         // `Other`: a run of empty loop iterations paused
                         // with no procedure on top (#900), a step that
                         // did nothing.
@@ -1710,6 +1716,9 @@ impl Interp {
                             ProcStep::Op(proc_literal_op)
                         };
                     }
+                    // Run as source, not pushed (#1122). Off the hot path:
+                    // only an executable string or file reaches it.
+                    Value::String(_) | Value::File(_) => return ProcStep::Src,
                     _ => {}
                 }
             }
@@ -1729,6 +1738,29 @@ impl Interp {
             }
         }
         step
+    }
+
+    /// The executable string or file at the top frame's `pc` (#1122): take
+    /// it, advance past it, and run it as source, as Ghostscript does for
+    /// one met in an executing procedure (`[ (8 9 add) cvx ] cvx exec`
+    /// leaves 17). As in `proc_step`, the frame is popped as it yields its
+    /// last element, before that element runs.
+    #[inline(never)]
+    fn proc_source(&mut self) -> Result<(), PsError> {
+        let Some(Frame::Proc { body, pc }) = self.estack.last_mut() else {
+            unreachable!("a procedure source with no procedure frame on top")
+        };
+        let i = *pc;
+        let Some(obj) = body.peek(i, |o| o.clone()) else {
+            return Ok(());
+        };
+        *pc = i + 1;
+        if *pc >= body.len()
+            && let Some(Frame::Proc { body, .. }) = self.estack.pop()
+        {
+            drop(body);
+        }
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The procedure literal at the top frame's `pc` (#864): push it, or
@@ -2430,22 +2462,9 @@ impl Interp {
                     // the sequence belong to its line, as for a plain token.
                     self.sync_scan_line();
                     let items = self.decode_sequence(&bytes)?;
-                    // A scanned executable string runs, as a token read from
-                    // a file would; a procedure body only pushes it. So each
-                    // one is followed by `exec` (the operator itself, not a
-                    // lookup a program could have redefined).
-                    let mut run = Vec::with_capacity(items.len());
-                    for o in items {
-                        let exec_string = o.executable && matches!(o.value, Value::String(_));
-                        run.push(o);
-                        if exec_string {
-                            run.push(Object::exec(Value::Operator(crate::object::Operator {
-                                name: "exec",
-                                func: crate::ops::control::exec,
-                            })));
-                        }
-                    }
-                    self.push_proc_frame(PsArray::from_vec(run))?;
+                    // An executable string in the sequence runs as the
+                    // procedure frame meets it (`proc_source`, #1122).
+                    self.push_proc_frame(PsArray::from_vec(items))?;
                 }
                 Action::PopRunScanner => {
                     self.estack.pop();
