@@ -1037,7 +1037,7 @@ impl ImageCtx {
         let smooth = magnified.filter(|_| self.interpolate && self.mask.is_none());
         if patterned {
             let rect = [px0, py0, px1.max(px0), py1.max(py0)].map(|v| v as u32);
-            return self.rasterize_patterned(gfx, inv, unit, rect, probe);
+            return self.rasterize_patterned(gfx, inv, unit, rect);
         }
         let paint_rgb = gfx.rgb();
         let comp = gfx.composite();
@@ -1130,14 +1130,15 @@ impl ImageCtx {
     /// the solid-colour loop samples it and with the clip folded in, goes
     /// to [`Gfx::fill_pattern_stencil`], which fills `rect` (device
     /// pixels, already cut to the page and the band) with the pattern
-    /// through it, as a fill paints its coverage.
+    /// through it, as a fill paints its coverage. Like the solid-colour
+    /// loop it checks no limit: the SVG and PDF recorders have already
+    /// taken the stencil, and stopping here would leave the PNG without it.
     fn rasterize_patterned(
         &self,
         gfx: &mut Gfx,
         inv: tiny_skia::Transform,
         unit: bool,
         rect: [u32; 4],
-        probe: &crate::limits::LimitProbe,
     ) -> Result<(), PsError> {
         let paint_ones = self.mask.unwrap_or(true);
         let clip = gfx.clip_mask_data();
@@ -1145,7 +1146,6 @@ impl ImageCtx {
         let painted = gfx.fill_pattern_stencil(rect, |cov, width| {
             let mut marked = false;
             for py in py0..py1 {
-                probe.check(0)?;
                 for px in px0..px1 {
                     let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
                     let ux = inv.sx * cx + inv.kx * cy + inv.tx;
