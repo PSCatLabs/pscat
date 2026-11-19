@@ -7,8 +7,8 @@
 % space (PatternType 1, tiling). Plain PostScript, no libraries; renders
 % the same in Ghostscript. Six panels: a diagonal hatch, a cross-hatch, one
 % uncoloured dot pattern in three colours, bricks (a cell larger than its
-% step), stripes turned 30 degrees, and text and a stroke painted with
-% patterns.
+% step), stripes turned 30 degrees, and text, a stroke and an imagemask
+% stencil (#1299) painted with patterns.
 %
 %   pscat --page 612x792 examples/patterns.ps
 %   gs -sDEVICE=png16m -r72 -o patterns.png examples/patterns.ps
@@ -78,11 +78,18 @@ grestore
 } panel
 324 300 (bricks: a cell wider than its step) { bricks setpattern 324 300 240 170 rectfill } panel
 48 80 (stripes made at 30 degrees) { stripes setpattern 48 80 240 170 rectfill } panel
-324 80 (text and a stroke, painted with patterns) {
+324 80 (text, a stroke and an imagemask, painted with patterns) {
   0.97 0.96 0.92 setrgbcolor 324 80 240 170 rectfill
   /Helvetica-Bold findfont 64 scalefont setfont
   hatch setpattern 340 160 moveto (Tile) show
   bricks setpattern 14 setlinewidth 1 setlinecap 345 110 moveto 545 110 lineto stroke
+  % A 16 x 16 heart stencil: imagemask paints the pattern through it.
+  stripes setpattern
+  gsave 478 132 translate 80 80 scale
+    16 16 true [16 0 0 -16 0 16]
+    {<0000 1c38 3e7c 7ffe 7ffe 7ffe 7ffe 3ffc 1ff8 0ff0 07e0 03c0 0180 0000 0000 0000>}
+    imagemask
+  grestore
 } panel
 
 showpage

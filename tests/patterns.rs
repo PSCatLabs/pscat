@@ -129,9 +129,58 @@ fn gs_png_at(input: &[u8], ext: &str, name: &str, k: u32) -> Pixmap {
     small
 }
 
+/// An embedded PNG as an SVG of one rect per run of like pixels: resvg is
+/// built without raster-image decoding (`default-features = false`), so
+/// the tests hand it each image (an imagemask's stencil, #1299) as vector
+/// art with the same pixels, sharp-edged as `image-rendering="pixelated"`.
+fn png_as_svg(
+    _mime: &str,
+    data: std::sync::Arc<Vec<u8>>,
+    opts: &resvg::usvg::Options,
+) -> Option<resvg::usvg::ImageKind> {
+    let pm = Pixmap::decode_png(&data).ok()?;
+    let (w, h) = (pm.width(), pm.height());
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" \
+         shape-rendering=\"crispEdges\">"
+    );
+    for y in 0..h {
+        let mut x = 0;
+        while x < w {
+            let p = pm.pixel(x, y)?;
+            let mut end = x + 1;
+            while end < w && pm.pixel(end, y)? == p {
+                end += 1;
+            }
+            if p.alpha() > 0 {
+                let c = p.demultiply();
+                svg.push_str(&format!(
+                    "<rect x=\"{x}\" y=\"{y}\" width=\"{}\" height=\"1\" \
+                     fill=\"rgb({},{},{})\" fill-opacity=\"{}\"/>",
+                    end - x,
+                    c.red(),
+                    c.green(),
+                    c.blue(),
+                    f32::from(c.alpha()) / 255.0
+                ));
+            }
+            x = end;
+        }
+    }
+    svg.push_str("</svg>");
+    let tree = resvg::usvg::Tree::from_str(&svg, opts).ok()?;
+    Some(resvg::usvg::ImageKind::SVG(tree))
+}
+
 fn resvg_png(svg: &str) -> Pixmap {
-    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
-        .expect("parse SVG");
+    let opts = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: Box::new(png_as_svg),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &opts).expect("parse SVG");
     let size = tree.size();
     let mut pm = resvg::tiny_skia::Pixmap::new(SIZE, SIZE).expect("pixmap");
     resvg::render(
@@ -673,8 +722,10 @@ fn check_masked(name: &str, src: &str, select: &str, hayro: bool) -> Outputs {
     );
     assert!(out.svg.contains("<mask "), "{}", out.svg);
     assert!(out.svg.contains("<pattern "), "{}", out.svg);
-    assert!(
-        !out.svg.contains("<image width"),
+    // Every image is a mask's stencil: no coloured PNG stands in.
+    assert_eq!(
+        out.svg.matches("<image ").count(),
+        out.svg.matches("<mask ").count(),
         "a coloured PNG stands in"
     );
     assert_close(
@@ -713,9 +764,10 @@ fn check_masked(name: &str, src: &str, select: &str, hayro: bool) -> Outputs {
 fn an_imagemask_paints_a_coloured_pattern_in_all_three_outputs() {
     let out = check_masked("masked hatch", MASKED_HATCH, "/Pattern cs /P0 scn", true);
     let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
-    // The frame's bottom edge (device rows 180-190, the stencil's last
-    // row) shows both stripes, and never the green set before the pattern.
-    let row: Vec<_> = (20..190).map(|x| px(x, 185)).collect();
+    // The frame's bottom edge (the stencil's last row, device rows
+    // 370-380) shows both stripes, and never the green set before the
+    // pattern.
+    let row: Vec<_> = (20..190).map(|x| px(x, 375)).collect();
     assert!(
         row.iter().any(|p| p.red() > 150 && p.blue() < 60),
         "no red stripe"
@@ -729,7 +781,8 @@ fn an_imagemask_paints_a_coloured_pattern_in_all_three_outputs() {
         "flat green"
     );
     // Inside the frame, off the diagonals: paper.
-    assert_eq!(px(60, 105).red(), 255);
+    let paper = px(60, 295);
+    assert_eq!((paper.red(), paper.green(), paper.blue()), (255, 255, 255));
 }
 
 #[test]
