@@ -956,8 +956,7 @@ impl ImageCtx {
         };
         // An imagemask paints the current colour, a pattern included
         // (#1299). With no pattern to paint (the null pattern a pattern
-        // space starts with, or one from another context) it paints and
-        // records nothing, as a fill does. Other images paint their own
+        // space starts with) it paints and records nothing, as a fill does. Other images paint their own
         // samples whatever the colour.
         let patterned = match self.mask {
             Some(_) => match gfx.ink() {

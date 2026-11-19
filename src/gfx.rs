@@ -2056,7 +2056,9 @@ impl Gfx {
     fn pattern_source(&self) -> Option<(std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality)> {
         // From `ink`, so the raster and the recorders never disagree.
         match self.ink()? {
-            crate::pattern::Ink::Pattern(tile, rgb) => Some(tile.raster(rgb)),
+            crate::pattern::Ink::Pattern(tile, rgb, place) => {
+                Some(tile.raster(rgb, place.as_ref()))
+            }
             crate::pattern::Ink::Rgb(_) => None,
         }
     }
@@ -2140,19 +2142,39 @@ impl Gfx {
 
     /// What a mark paints with, for the recorders: the colour, or the
     /// pattern (#1038). `None` paints nothing: the null pattern a
-    /// pattern space starts with, or a pattern made in another context
-    /// (the page's used in a `PaintProc`, or the other way round; see
-    /// `crate::pattern`).
+    /// pattern space starts with. A pattern made in another context (the
+    /// page's used in a `PaintProc`, or the other way round) carries
+    /// where it paints here, as gs places it (#1300, `crate::pattern`).
     pub(crate) fn ink(&self) -> Option<crate::pattern::Ink> {
         let rgb = self.state.rgb;
         if !matches!(self.state.colorspace, ColorSpace::Pattern { .. }) {
             return Some(crate::pattern::Ink::Rgb(rgb));
         }
         let p = self.state.pattern.as_ref()?;
-        if p.tile.context != self.context() {
-            return None;
+        let place = if p.tile.context == self.context() {
+            None
+        } else {
+            let here = self
+                .captures
+                .last()
+                .map_or(Transform::identity(), |c| c.to_gs);
+            Some(crate::pattern::foreign_placement(
+                &p.tile,
+                here,
+                self.pattern_default_space(),
+            )?)
+        };
+        Some(crate::pattern::Ink::Pattern(p.tile.clone(), rgb, place))
+    }
+
+    /// The current context's coordinates to the default space of the PDF
+    /// stream painting there (#1038): the page's (y up, `1 0 0 -1 0 H`
+    /// from device), or the capturing pattern's space.
+    fn pattern_default_space(&self) -> Transform {
+        match self.captures.last() {
+            Some(outer) => outer.geom.capture.invert().unwrap_or_default(),
+            None => Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, self.pixmap.height() as f32),
         }
-        Some(crate::pattern::Ink::Pattern(p.tile.clone(), rgb))
     }
 
     /// The capture now painting (#1038), 0 for the page.
@@ -4074,6 +4096,11 @@ impl Gfx {
         self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
         let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
         let context = self.context();
+        let parent_to_gs = self
+            .captures
+            .last()
+            .map_or(Transform::identity(), |c| c.to_gs);
+        let to_gs = crate::pattern::capture_to_gs(&spec, &geom, parent_to_gs);
         self.next_capture += 1;
         let id = self.next_capture;
         let svg = if self.svg.is_some() {
@@ -4102,6 +4129,7 @@ impl Gfx {
             suppress_paint: std::mem::take(&mut self.suppress_paint),
             coverage: self.coverage.take(),
             snapshot,
+            to_gs,
         });
         self.state.ctm = geom.capture;
         self.state.path = PsPath::default();
@@ -4170,12 +4198,12 @@ impl Gfx {
         let (mut cap, content, svg) = self.leave_capture();
         let svg = svg.map(|rec| rec.into_tile());
         // PDF's pattern matrix maps to the default space of the stream that
-        // paints with it: the page's (y up, `1 0 0 -1 0 H` from device), or
-        // the enclosing pattern's space.
-        let to_default = match self.captures.last() {
-            Some(outer) => outer.geom.capture.invert().unwrap_or_default(),
-            None => Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, self.pixmap.height() as f32),
-        };
+        // paints with it, here the one `makepattern` ran in.
+        let to_default = self.pattern_default_space();
+        let made_in_to_gs = self
+            .captures
+            .last()
+            .map_or(Transform::identity(), |c| c.to_gs);
         let pdf = match (cap.pdf.take(), &mut self.pdf) {
             (Some(saved), Some(rec)) => Some(rec.end_capture(
                 saved,
@@ -4194,6 +4222,7 @@ impl Gfx {
             period,
             svg,
             pdf,
+            made_in_to_gs,
         )))
     }
 

@@ -194,6 +194,10 @@ pub struct PdfRecorder {
     /// Empty for a program that paints with no pattern, so such documents
     /// keep every object number they had.
     patterns: Vec<PdfPattern>,
+    /// Copies of a pattern stream under another `/Matrix` (#1300), for a
+    /// pattern painted in a context other than the one it was made in,
+    /// by original index and the matrix's bits.
+    pattern_variants: HashMap<(usize, [u32; 6]), usize>,
     /// Which patterns each finished page references.
     page_patterns: Vec<Vec<usize>>,
     current_patterns: Vec<usize>,
@@ -209,6 +213,7 @@ pub struct PdfRecorder {
 
 /// A `/PatternType 1` pattern stream (#1038): the dictionary's own keys,
 /// its content, and the resources the content uses.
+#[derive(Clone)]
 struct PdfPattern {
     dict: String,
     content: String,
@@ -336,6 +341,7 @@ impl PdfRecorder {
             page_fonts: Vec::new(),
             current_fonts: Vec::new(),
             patterns: Vec::new(),
+            pattern_variants: HashMap::new(),
             page_patterns: Vec::new(),
             current_patterns: Vec::new(),
             page_pattern_cs: Vec::new(),
@@ -416,6 +422,29 @@ impl PdfRecorder {
         self.patterns.len() - 1
     }
 
+    /// Pattern `idx` under `matrix` instead of its own `/Matrix` (#1300):
+    /// the same content and resources in a new pattern stream, made once
+    /// per matrix. A pattern's `/Matrix` maps to the default space of the
+    /// stream that paints with it, so one used in another context needs
+    /// its own.
+    fn pattern_variant(&mut self, idx: usize, matrix: tiny_skia::Transform) -> usize {
+        let bits = [
+            matrix.sx, matrix.ky, matrix.kx, matrix.sy, matrix.tx, matrix.ty,
+        ]
+        .map(f32::to_bits);
+        if let Some(&v) = self.pattern_variants.get(&(idx, bits)) {
+            return v;
+        }
+        let mut pat = self.patterns[idx].clone();
+        let keep = pat.dict.rfind(" /Matrix [").unwrap_or(pat.dict.len());
+        pat.dict.truncate(keep);
+        let _ = write!(pat.dict, " /Matrix [{}]", matrix_text(matrix));
+        self.patterns.push(pat);
+        let v = self.patterns.len() - 1;
+        self.pattern_variants.insert((idx, bits), v);
+        v
+    }
+
     /// The pattern's `PaintProc` was unwound: put the page state back and
     /// drop what was captured.
     pub(crate) fn abort_capture(&mut self, saved: PdfCapture) {
@@ -437,9 +466,13 @@ impl PdfRecorder {
                 f(rgb.2),
                 if stroking { "RG" } else { "rg" }
             ),
-            Ink::Pattern(tile, rgb) => {
+            Ink::Pattern(tile, rgb, place) => {
                 let Some(idx) = tile.pdf else {
                     return String::new();
+                };
+                let idx = match place {
+                    Some(p) => self.pattern_variant(idx, p.pdf_matrix),
+                    None => idx,
                 };
                 if !self.current_patterns.contains(&idx) {
                     self.current_patterns.push(idx);
