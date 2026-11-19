@@ -1174,6 +1174,9 @@ renders eight examples in both and compares block-downsampled output).
    #1157: the supported facade has the same list: `chalkboard::Driver::explain(printed, err)`
    and `ChalkError::problems() -> &[chalkboard::Problem]` (empty for config/render/position-less errors).
    The hidden `ChalkError::Problems` stays for pscat-mcp until 0.7.0.
+   #1252: `chalkboard::user_output(printed) -> Cow<[u8]>` is the one place that drops the
+   `CKPROBLEM` lines (same prefix test as the parser) from program output shown to a user;
+   `pscat chalk` and `chalkboard_math` capture stdout and never return it, so they need no call.
    #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem
