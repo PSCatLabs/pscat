@@ -105,8 +105,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
   or a PDF written to `out_path`), with page size, `dpi`, `halftone`,
-  `bands` and `gpu_preview` options (see "Banded renders" and "GPU preview"
-  below). Errors still return the partial render with the error text.
+  `bands`, `svg_text` and `gpu_preview` options (see "Banded renders" and
+  "GPU preview" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
   operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
@@ -504,6 +504,16 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
   measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
   CPU (18x at one row per band), and a large band count multiplies the
   per-band step and time budgets. An agent has no measurement to tune it by.
+
+### SVG text
+
+`render_postscript` and `start_render` take `svg_text` (#1132), a boolean:
+`true` with `format: "svg"` renders as `pscat --svg --svg-text` does (see
+[getting started](getting-started.md)), writing Helvetica, Times and Courier
+text as selectable SVG `<text>` and so a much smaller file. Without it, or
+with `false`, the SVG is unchanged. It only applies to SVG: `png` and `pdf`
+ignore it, and anything but a boolean is `invalid_argument`. The hosted
+server takes the same argument name.
 
 ### GPU preview
 

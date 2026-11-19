@@ -1,7 +1,7 @@
 # The pscat MCP server in full
 
 Read this when the pscat MCP tools are connected and you need a job, a limit,
-`bands`, `gpu_preview`, or the registration command. Back to [SKILL.md](../SKILL.md).
+`bands`, `svg_text`, `gpu_preview`, or the registration command. Back to [SKILL.md](../SKILL.md).
 
 `pscat-mcp` (installed beside `pscat`) serves ten tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
@@ -32,6 +32,15 @@ Both render tools take **`bands`** (1 to the server's `--max-bands`, default 4):
 [bands-profile.md](bands-profile.md)). PNG only; the `Lint:` block covers band 0 and the
 stitched page, and a job's `pages_done` stays 0 until it ends. The step and time limits
 apply to each band; the call's or job's wall-clock limit to the whole render.
+
+## SVG text
+
+Both render tools take **`svg_text: true`** (`pscat --svg-text`) with `format: "svg"`: text set in
+Helvetica, Times or Courier (and their variants) is written as selectable, searchable SVG `<text>`
+instead of one outline per glyph, a much smaller file (three short lines: about 52 KB as outlines).
+Other fonts stay outlines, and the text then looks as the viewer's own font does, not pscat's.
+Without it the SVG is unchanged. It is ignored for `png` and `pdf` (not an error); a non-boolean is
+`invalid_argument`. Same argument name as the hosted server.
 
 ## GPU preview
 

@@ -155,9 +155,10 @@ Two things worth knowing:
   the SVG looks the same everywhere but the text cannot be selected or
   searched, and the file is larger. The command-line option `--svg-text`
   (Helvetica, Times and Courier become `<text>`; see
-  [getting started](getting-started.md)) is not an argument of the MCP tools,
-  local or hosted, so Muse cannot turn it on through them. Run `bin/pscat
-  --svg-text --svg ...` from the shell if you need it.
+  [getting started](getting-started.md)) is the `svg_text` argument of the
+  local server's `render_postscript` and `start_render`. Whether the hosted
+  server in your build has it depends on its release; if it does not, run
+  `bin/pscat --svg-text --svg ...` from the shell.
 
 ## Troubleshooting
 

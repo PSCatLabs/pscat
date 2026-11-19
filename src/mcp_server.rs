@@ -1133,6 +1133,7 @@ fn tool_list(cfg: &Config) -> Value {
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
+            "svg_text": { "type": "boolean", "description": "Write Helvetica, Times and Courier text as selectable SVG <text> instead of outlines, a much smaller file (pscat --svg-text; svg only, ignored for png and pdf; other fonts stay outlines)" },
             "bands": { "type": "integer", "minimum": 1, "maximum": cfg.max_bands, "description": bands_description(cfg) },
             "gpu_preview": { "type": "boolean", "description": gpu_preview_description() },
             "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
@@ -1544,6 +1545,10 @@ struct RenderPlan {
     bbox: bool,
     dpi: Option<f64>,
     halftone: bool,
+    /// `--svg-text` (issue #1132): standard-font text as SVG `<text>`. Only
+    /// ever true for an SVG render; the CLI refuses the flag with any other
+    /// output.
+    svg_text: bool,
     /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
     bands: u32,
     /// `--gpu-preview` (issue #1065): compiled kernels in f32 on the GPU.
@@ -1590,6 +1595,9 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
     };
     let dpi = optional_number(args, "dpi", 9.0, 1200.0)?;
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
+    // Checked for every format, so a wrong type is refused rather than
+    // ignored; then dropped unless the output is SVG (#1132).
+    let svg_text = optional_bool(args, "svg_text")?.unwrap_or(false) && format == "svg";
     // The canvas is allocated before `--max-memory` counts, so a page over
     // the pixel cap is refused before a child starts (#711). Every format
     // draws on the same raster.
@@ -1616,6 +1624,7 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         bbox,
         dpi,
         halftone,
+        svg_text,
         bands,
         gpu_preview,
         dest,
@@ -1697,6 +1706,7 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         bbox,
         dpi,
         halftone,
+        svg_text,
         bands,
         gpu_preview,
         dest,
@@ -1731,6 +1741,9 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     }
     if *gpu_preview {
         cmd.arg("--gpu-preview");
+    }
+    if *svg_text {
+        cmd.arg("--svg-text");
     }
     // A page the program's `setpagedevice` asks for is held to the same cap
     // as the first one, in the child (#909).
