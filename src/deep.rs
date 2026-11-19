@@ -138,7 +138,11 @@ impl Deep {
         let q =
             [color.red(), color.green(), color.blue(), color.alpha()].map(|c| u16::from(c) * 257);
         let x1 = x1.min(self.width);
-        for px in row[x0.min(x1) * 4..x1 * 4].chunks_exact_mut(4) {
+        for px in row[x0.min(x1) * 4..x1 * 4]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+        {
             px.copy_from_slice(&q);
         }
     }
@@ -198,8 +202,10 @@ impl Deep {
 fn over_span<const COV: bool>(deep: &mut [u16], page: &mut [u8], cov: &[u8], s: [f32; 4]) {
     let s16 = s.map(|v| (v * 65535.0).round() as u32);
     for (i, (d16, p8)) in deep
-        .chunks_exact_mut(4)
-        .zip(page.chunks_exact_mut(4))
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(page.as_chunks_mut::<4>().0.iter_mut())
         .enumerate()
     {
         let sc = if COV {
@@ -257,8 +263,10 @@ fn blend_span<const COV: bool, const MUL: bool>(
     // The colour's bytes when the source is opaque source-over.
     let opaque = (!MUL && sa >= 1.0).then(|| s.map(|v| (v * 255.0).round() as u8));
     for (i, (d16, p8)) in deep
-        .chunks_exact_mut(4)
-        .zip(page.chunks_exact_mut(4))
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(page.as_chunks_mut::<4>().0.iter_mut())
         .enumerate()
     {
         let k = if COV {
