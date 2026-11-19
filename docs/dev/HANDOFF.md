@@ -735,8 +735,15 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (PatternType 2) are not
-  implemented at all, in any output.
+  ShadingType 1 (function-based) and FunctionType 0 (sampled) since #1039
+  (`notes/1039-function-based-shading.md`): the raster evaluates the
+  function at each device pixel into a layer cut by the Domain
+  parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
+  paint path); SVG embeds that layer as an image; PDF writes a real
+  `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
+  (meshes) and shading patterns (PatternType 2) are not implemented, in
+  any output.
 - Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
   `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
   `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the
@@ -1204,6 +1211,13 @@ renders eight examples in both and compares block-downsampled output).
    #1252: `chalkboard::user_output(printed) -> Cow<[u8]>` is the one place that drops the
    `CKPROBLEM` lines (same prefix test as the parser) from program output shown to a user;
    `pscat chalk` and `chalkboard_math` capture stdout and never return it, so they need no call.
+   #1111: `chalk.hand` (0..1, default 0) is drychalk's `/Hand`: `pscat chalk --hand` /
+   `--hand-amount A`, `chalkboard_math`'s `hand`, and the `chalk` JSON group (so the
+   supported `chalkboard::BoardConfig` takes it too). The driver adds ` /Hand A` to
+   `ckink` only above 0, so every existing board is byte for byte unchanged. It is
+   not the top-level `hand` key (the lettering face, reserved). The hidden
+   `chalk::Config` gained a public `hand` field: a downstream struct literal needs
+   `..Default::default()` (`notes/1111-chalk-hand.md`).
    #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem

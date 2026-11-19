@@ -374,7 +374,7 @@ the generated program instead of rendering it.
 
 The config is JSON. Every key is optional and an unknown key is an error;
 flags (`--seed`, `--size`, `--irregular`, `--color`, `--width`,
-`--height`, `--dpi`, `--no-board`) override it, and `--json '{...}'` takes it
+`--height`, `--dpi`, `--no-board`, `--hand`, `--hand-amount`) override it, and `--json '{...}'` takes it
 inline.
 
 ```json
@@ -382,7 +382,7 @@ inline.
   "layout": {"size": 64, "irregular": 1, "align": "center", "margin": 40,
              "width": 800, "height": 400, "dpi": 144},
   "chalk":  {"color": "white", "strength": 0.55, "pressure": 0.68,
-             "tilt": 0, "dust": 0.5},
+             "tilt": 0, "dust": 0.5, "hand": 0},
   "board":  {"tone": "slate", "haze": 0.4, "ghosting": 0.4,
              "swipes": 6, "wipes": 2, "smudges": 3, "ledge": 18},
   "seed": 1
@@ -404,6 +404,7 @@ inline.
 | `chalk.pressure` | 0.68 (0.34 with no board) | drychalk's `/Touch`: how much of the tooth catches |
 | `chalk.tilt` | 0 | degrees; toward 90 the stick lies on its side |
 | `chalk.dust` | 0.5 | loose dust beside each stroke |
+| `chalk.hand` | 0 | drychalk's `/Hand`, 0..1: how freehand the strokes are. 0 follows every stroke exactly; toward 1 a long stroke (a fraction bar, a radical's roof, a bracket, an integral) drifts to either side and runs a little past its ends. Lettering moves little, because the drift fades in over the first 44 stroke widths. `pscat chalk --hand` sets 1, `--hand-amount A` any amount; `chalkboard_math` takes `hand`. Not the top-level `hand` below |
 | `chalk.width` | 0.048 × size | stroke width in points |
 | `board.tone` | `slate` | `slate`, `greenboard`, or `[r, g, b]` |
 | `board.haze` | 0.4 | the dust film, 0 (freshly washed) to 1 |
@@ -412,7 +413,7 @@ inline.
 | `board.ledge` | 18 | the dusty band along the bottom, in points |
 | `board` | | `false` for chalk alone on a transparent page |
 | `seed` | 1 | the layout, chalk and board all follow it |
-| `hand` | `strokeglyphs` | reserved: the only hand there is |
+| `hand` | `strokeglyphs` | reserved: the lettering face, the only one there is (the freehand amount is `chalk.hand`) |
 
 The generator is `pscat::chalk` (`src/chalk.rs`), plain Rust with no file or
 environment access, so other front ends share it: `chalk::render(latex,

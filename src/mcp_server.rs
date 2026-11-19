@@ -1237,6 +1237,7 @@ fn tool_list(cfg: &Config) -> Value {
                     "jitter": { "type": "number", "minimum": 0, "maximum": 0.5, "description": "Each glyph's wobble as a fraction of the size (default 0.016)" },
                     "align": { "type": "string", "enum": ["center", "left"], "description": "Where the lines sit across the board (default center)" },
                     "color": { "type": "string", "enum": pscat::chalk::CHALK_COLORS, "description": "Chalk colour (default white)" },
+                    "hand": { "type": "number", "minimum": 0, "maximum": 1, "description": "How freehand the chalk strokes are: 0 follows every stroke exactly (default), 1 lets long strokes (fraction bars, radicals, matrix brackets, integrals) drift and overshoot as a hand does; lettering moves little. The chalk.hand key of config; not the lettering face" },
                     "board": {
                         "description": "The board: true (default, a slate), false (chalk alone on a transparent page), \"slate\", \"greenboard\", [r, g, b] in 0..1, or an object of board keys (tone, haze, ghosting, swipes, wipes, smudges, ledge)",
                         "anyOf": [
@@ -1258,7 +1259,7 @@ fn tool_list(cfg: &Config) -> Value {
                     "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board height in points (default 400)" },
                     "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Resolution (default 144: the default board is 1600x800 pixels)" },
                     "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png; svg and pdf need out_path)" },
-                    "config": { "type": "object", "description": "The full board config, as pscat chalk --json takes it: groups layout (size, irregular, slope, jitter, align, margin, width, height, dpi), chalk (color, strength, pressure, tilt, dust, width), board (or false), and seed. The keys above are laid over it" },
+                    "config": { "type": "object", "description": "The full board config, as pscat chalk --json takes it: groups layout (size, irregular, slope, jitter, align, margin, width, height, dpi), chalk (color, strength, pressure, tilt, dust, hand, width), board (or false), and seed. The keys above are laid over it" },
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["latex"]
@@ -2293,7 +2294,7 @@ fn pixels_allowed(cfg: &Config, w: u64, h: u64) -> bool {
 
 /// The flat `chalkboard_math` keys that map onto one key of the #555 config:
 /// (argument, group, key).
-const CHALK_FLAT_KEYS: [(&str, &str, &str); 9] = [
+const CHALK_FLAT_KEYS: [(&str, &str, &str); 10] = [
     ("size", "layout", "size"),
     ("irregular", "layout", "irregular"),
     ("slope", "layout", "slope"),
@@ -2303,6 +2304,7 @@ const CHALK_FLAT_KEYS: [(&str, &str, &str); 9] = [
     ("height", "layout", "height"),
     ("dpi", "layout", "dpi"),
     ("color", "chalk", "color"),
+    ("hand", "chalk", "hand"),
 ];
 
 fn present<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
