@@ -24,7 +24,7 @@ with strokeglyphs, not the Symbol font, so its PDFs are not affected.
   binary search. Source: the Unicode Consortium's Adobe mapping files
   `symbol.txt` and `zdingbat.txt` (the Dingbats encoding was already
   checked against `zdingbat.txt` in #563), cross-checked against Adobe's
-  AGL `zapfdingbats.txt`: they agree on every name both list.
+  AGL `zapfdingbats.txt`: they agree on every name the table keeps.
 - `font::symbolic_text_char`: the character for a glyph name when the face
   is the Symbol or Dingbats catalog face (`CatalogEncoding::Symbol` /
   `Dingbats`) and PDF text is on. It is asked before `name_to_char`,
