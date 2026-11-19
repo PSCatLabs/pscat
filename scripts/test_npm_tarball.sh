@@ -8,8 +8,9 @@
 # Checks: it installs with no install scripts; `import 'pscat'` resolves
 # through the exports map to the Node entry and renders a page (pixels and
 # output) and records SVG and PDF; the embedded lib/ loads; a PostScript error is a PostScriptError;
-# `pscat/node.js` resolves (CJS and ESM) and imports (#1163); `pscat/pscat.wasm` and `pscat/package.json` resolve; `pscat/pscat.global.js` (#1025) parses as a
-# classic script and renders through the `pscat` global it defines. Unless --no-types,
+# `pscat/node.js` resolves (CJS and ESM) and imports (#1163); `pscat/pscat.wasm` and
+# `pscat/package.json` resolve; `pscat/pscat.global.js` (#1025) parses as a classic script and
+# renders through the `pscat` global it defines. Unless --no-types,
 # a TypeScript consumer type-checks against index.d.ts (needs the network
 # once, for the pinned typescript).
 set -euo pipefail
