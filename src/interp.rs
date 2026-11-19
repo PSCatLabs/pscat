@@ -3101,10 +3101,11 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
-        if self.shadow_trace.is_some() {
-            if let Some(scope) = self.shadow_scope_of_index(self.dstack.len() - 1) {
-                self.note_shadow(name, &obj, scope);
-            }
+        if self.shadow_trace.is_some()
+            && let Some(top) = self.dstack.last()
+            && let Some(scope) = self.shadow_scope_of(top)
+        {
+            self.note_shadow(name, &obj, scope);
         }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
@@ -3125,6 +3126,7 @@ impl Interp {
     /// `[shadowed-operator]` lint (issue #1109): it reports that line, and
     /// the shadows in a dictionary that has since ended. Off by default
     /// (a `def` then costs one extra branch); `--lint` turns it on.
+    #[doc(hidden)]
     pub fn trace_operator_shadows(&mut self) {
         self.shadow_trace.get_or_insert_with(Default::default);
     }
@@ -3133,21 +3135,18 @@ impl Interp {
         self.shadow_trace.as_deref()
     }
 
-    /// The traced scope of the dictionary at `dstack[index]`: `userdict`
-    /// and `systemdict` only (see [`crate::lint::ShadowTrace`]).
-    fn shadow_scope_of_index(&self, index: usize) -> Option<crate::lint::ShadowScope> {
-        use crate::lint::ShadowScope;
-        match index {
-            0 => Some(ShadowScope::System),
-            2 => Some(ShadowScope::User),
-            _ => None,
-        }
-    }
-
-    /// The traced scope of `dict`, a dictionary `store` found on the stack.
+    /// The traced scope of `dict`: `userdict` or `systemdict` (see
+    /// [`crate::lint::ShadowTrace`]), however it got to be on top of the
+    /// dictionary stack (`userdict begin` puts it there twice).
     fn shadow_scope_of(&self, dict: &Rc<RefCell<Dict>>) -> Option<crate::lint::ShadowScope> {
-        let index = self.dstack.iter().rposition(|d| Rc::ptr_eq(d, dict))?;
-        self.shadow_scope_of_index(index)
+        use crate::lint::ShadowScope;
+        if self.dstack.first().is_some_and(|d| Rc::ptr_eq(d, dict)) {
+            Some(ShadowScope::System)
+        } else if self.dstack.get(2).is_some_and(|d| Rc::ptr_eq(d, dict)) {
+            Some(ShadowScope::User)
+        } else {
+            None
+        }
     }
 
     /// `store`'s half of the shadow trace: `key` is about to be bound to
@@ -3175,16 +3174,15 @@ impl Interp {
         value: &Object,
         scope: crate::lint::ShadowScope,
     ) {
-        let Some(builtin) = self
-            .dstack
-            .first()
-            .and_then(|d| d.borrow().get_id(name.id()))
-        else {
+        // One probe of systemdict, and a clone only for an operator's name.
+        let Some(builtin) = self.dstack.first().and_then(|d| {
+            d.borrow()
+                .get_id_ref(name.id())
+                .filter(|o| matches!(o.value, Value::Operator(_)))
+                .cloned()
+        }) else {
             return;
         };
-        if !matches!(builtin.value, Value::Operator(_)) {
-            return;
-        }
         // Copies taken first: the trace is borrowed mutably below. The text
         // is built only for a binding the trace has not seen yet. It names
         // the line the scanner was on, which is the `def`'s own line unless

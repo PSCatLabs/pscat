@@ -29,6 +29,14 @@ at that point, and the wording ("when the program reached") claims no more than 
 both. Pointing at the `def` inside a body would need a source position on each scanned
 procedure element: a follow-up.
 
+Cost: a plain render pays nothing. A `--lint` run (and so every `pscat-mcp` render, which
+passes `--lint`) pays one systemdict probe per `def` into userdict or systemdict, plus a
+clone and a map entry only when the name is an operator's. Measured with the release
+binary, `0 1 3000000 { /x exch def } for`: 0.15 s with and without `--lint`; the same
+loop on an operator's name (`/ln`, the worst case): 0.15 s plain, 0.19 s with `--lint`
+(about 13 ns per `def`). A `def` made after `userdict begin` or `systemdict begin` is
+classified by the dictionary itself, not by its place on the stack, so it keeps its line.
+
 ## 2. Closed local dictionaries: kept as the opt-out, on data
 
 Other linters flag shadows in inner scopes (pylint `redefined-builtin`, ESLint

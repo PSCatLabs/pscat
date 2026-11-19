@@ -384,14 +384,6 @@ pub(crate) enum ShadowScope {
     System,
 }
 
-/// What [`Interp::trace_operator_shadows`] keeps about one shadowing binding.
-pub(crate) struct ShadowSite {
-    kind: &'static str,
-    /// `when the program reached line N`, with ` (file)` for a `run`
-    /// file; `None` when the scanner's line is unknown.
-    location: Option<String>,
-}
-
 /// The bindings of an operator's name to a plain value that the interpreter
 /// saw as they happened (issue #1109), when tracing is on. Keyed by name and
 /// scope, so a loop that redefines the name a million times holds one entry.
@@ -404,7 +396,10 @@ pub(crate) struct ShadowSite {
 /// bound as `/stop`), so it is not reported (notes/1109).
 #[derive(Default)]
 pub(crate) struct ShadowTrace {
-    sites: std::collections::HashMap<(u32, ShadowScope), (String, ShadowSite)>,
+    /// Per name and scope: where the program had reached when the binding
+    /// was made, as `when the program reached line N` (` (file)` for a
+    /// `run` file), `None` when the scanner's line is unknown.
+    sites: std::collections::HashMap<(u32, ShadowScope), Option<String>>,
 }
 
 impl ShadowTrace {
@@ -422,16 +417,9 @@ impl ShadowTrace {
     ) {
         let key = (name.id(), scope);
         match shadow_kind(builtin, value) {
-            Some(kind) => match self.sites.get_mut(&key) {
-                Some((_, site)) => site.kind = kind,
-                None => {
-                    let site = ShadowSite {
-                        kind,
-                        location: location(),
-                    };
-                    self.sites.insert(key, (name.to_string(), site));
-                }
-            },
+            Some(_) => {
+                self.sites.entry(key).or_insert_with(location);
+            }
             // A later `/sub { ... } def` ends the shadow, except in
             // `systemdict`, where the operator it replaced is already gone.
             None if scope != ShadowScope::System => {
@@ -441,9 +429,9 @@ impl ShadowTrace {
         }
     }
 
-    fn site(&self, name: &str, scope: ShadowScope) -> Option<&ShadowSite> {
+    fn location(&self, name: &str, scope: ShadowScope) -> Option<String> {
         let id = crate::name::intern(name).id();
-        self.sites.get(&(id, scope)).map(|(_, site)| site)
+        self.sites.get(&(id, scope)).cloned().flatten()
     }
 }
 
@@ -509,12 +497,12 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
     };
     let trace = interp.shadow_trace();
     let mut shadowed: Vec<Shadow> = Vec::new();
-    let mut push = |name: &str, scope, kind, trace_site: Option<&ShadowSite>| {
+    let mut push = |name: &str, scope, kind, location: Option<String>| {
         shadowed.push(Shadow {
             name: name.to_string(),
             scope,
             kind,
-            location: trace_site.and_then(|s| s.location.clone()),
+            location,
         });
     };
     for (key, value) in user.borrow().pairs() {
@@ -531,7 +519,7 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
             name,
             ShadowScope::User,
             kind,
-            trace.and_then(|t| t.site(name, ShadowScope::User)),
+            trace.and_then(|t| t.location(name, ShadowScope::User)),
         );
     }
     // Operators that `store` or `put` replaced in `systemdict`.
@@ -554,7 +542,7 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
             name,
             ShadowScope::System,
             kind,
-            trace.and_then(|t| t.site(name, ShadowScope::System)),
+            trace.and_then(|t| t.location(name, ShadowScope::System)),
         );
     }
     // `pairs` order depends on the interner, so sort for stable output.
@@ -1120,6 +1108,24 @@ mod tests {
         let it = traced("0 1 5000 { /ln exch def } for");
         assert_eq!(shadow_messages(&it).len(), 1);
         assert_eq!(it.shadow_trace().expect("tracing").sites.len(), 1);
+    }
+
+    #[test]
+    fn a_def_into_userdict_or_systemdict_made_current_still_names_its_line() {
+        let found = shadow_messages(&traced("userdict begin\n/sub 1 def\nend"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains("when the program reached line 2, replacing"),
+            "{found:?}"
+        );
+        let found = shadow_messages(&traced("systemdict begin\n/sub 1 def\nend"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with(
+                "/sub was redefined as an integer in systemdict when the program reached line 2,"
+            ),
+            "{found:?}"
+        );
     }
 
     #[test]
