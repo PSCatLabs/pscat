@@ -16,10 +16,11 @@ here with a delay, not seen on CI). The other two tests did not hang only
 because the child usually started later than the test's drop, or kept
 writing: that is timing, not safety.
 
-**Already fixed for one test.** #1186 (eb44371, 2026-11-13 UTC) moved
-`a_repl_stops_when_its_stdout_reader_goes` to close-before-spawn. Both CI
-flakes in #1294 are from 2026-11-12, before that commit, and no later failed CI
-run names the test. #1294 had no further race to find.
+**Already fixed for one test.** #1186 (eb44371, 2026-11-12 21:55 PST) moved
+`a_repl_stops_when_its_stdout_reader_goes` to close-before-spawn. The CI
+failures of that test all predate it (runs 43151418309, 43158341398 and
+43171090022, and 43366642609 on the #1186 branch itself), and no later failed
+CI run names the test. #1294 had no further race to find in that test.
 
 **This change (#1201 and the rest of #1294).** One helper,
 `spawn_with_closed_stdout(args, stdin)`, makes the pipe with
@@ -36,4 +37,5 @@ busy processes. The old pattern with a 200 ms delay between `spawn` and the drop
 `--capabilities` exited 0 instead of 141, and the REPL test hit its deadline once
 the binary was warm. On a freshly built binary the child started slower than the
 delay, so the old pattern passed twice (macOS delays the first run of a new
-binary). Not committed; the helper has no such window.
+binary). The delay edit to `tests/cli.rs` was a scratch change, reverted before
+committing; the helper has no such window.
