@@ -64,12 +64,15 @@ pscat does not. The check now compares `systemdict` with the operators a fresh
 interpreter installs (`ops::install_all` into a scratch dictionary) and reports any
 that is now a plain value, so it holds for every caller (embedders without the trace,
 `--bands`), and `systemdict /sub 5 put` is caught the same way. Message:
-`/sub was redefined as an integer at line 2 in systemdict, replacing the operator sub
-for the whole program: ...`. The line comes from the trace, so a `put` has none.
+`/sub was redefined as an integer in systemdict when the program reached line 2,
+replacing the operator sub for the whole program: ...`. The line comes from the trace of
+`def` and `store`, so a `put` has none of its own.
 
 Same slug, so `%lint: allow shadowed-operator` and `ERROR_EXPLAINING_CHECKS` cover it.
 
 ## Not done
 
-- `(sub) 1 def` (a string key) and a shadow undone by `restore` are not traced.
+- `(sub) 1 def` (a string key) and `put` are not traced. A trace entry is dropped only by
+  a later procedure binding, not by `restore` or `undef`, so a shadow made again after one
+  of those reports the line of the first binding (the finding itself is still right).
 - Making pscat's systemdict read-only like gs is an interpreter decision, not lint's.

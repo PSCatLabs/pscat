@@ -265,7 +265,7 @@ fn lint_says_the_line_of_a_redefined_operator() {
         ),
         "{stderr}"
     );
-    // After an error the kept finding carries its line too.
+    // The run failed (`5 3 sub` on a string); the kept finding above carries its line.
     assert!(stderr.contains("[run-error]"), "{stderr}");
     // A def made by a procedure names the line that ran it.
     let (_ok, _out, stderr) = run(&["--lint", "-e", "/f {\n /ln 1 def\n} def\n\nf"], "");
