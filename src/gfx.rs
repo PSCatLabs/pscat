@@ -1404,6 +1404,10 @@ pub struct Gfx {
     /// reused across fills; only the filled path's pixel bounds are
     /// written (and read) each time.
     coverage: Option<tiny_skia::Mask>,
+    /// The 16-bit shadow of the page that fills and glyphs composite in
+    /// (#731): a stack of faint layers reaches the colour the arithmetic
+    /// gives rather than stalling at 8 bits. See [`crate::deep`].
+    deep: crate::deep::Deep,
     /// `pscat --bands` (#736): this run is band `index` of `count`, so its
     /// page is composited from [`band_rows_of`] of the page's height (which
     /// `setpagedevice` can change, #909). Work that only touches other rows
@@ -1562,6 +1566,7 @@ impl Gfx {
             pdf_text: crate::pdf::PdfText::Paths,
             suppress_paint: 0,
             coverage: None,
+            deep: crate::deep::Deep::default(),
             band: None,
             captures: Vec::new(),
             next_capture: 0,
@@ -1768,6 +1773,7 @@ impl Gfx {
             }
         }
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
@@ -2122,6 +2128,7 @@ impl Gfx {
         if self.pending_erase {
             self.pending_erase = false;
             self.pixmap.fill(self.background);
+            self.deep.clear();
             if let Some(svg) = &mut self.svg {
                 svg.erase();
             }
@@ -2186,16 +2193,55 @@ impl Gfx {
             let src = self.pattern_source();
             let mut paint = self.paint_from(&src);
             paint.anti_alias = false;
-            // Fully covered runs go through tiny-skia without the mask (its
-            // opaque fast path), so a page-sized fill costs what it did.
+            let max_memory = self.mem_budget.map(|(_, max)| max);
+            let deep = crate::deep::Deep::allowed(w, h, max_memory);
+            let (r, g, b) = self.state.rgb;
+            let rgb8 = [to_u8(r), to_u8(g), to_u8(b)];
+            let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
+            let src = crate::deep::Source::new(
+                rgb8,
+                self.state.alpha,
+                match self.state.blend {
+                    BlendMode::Normal => crate::deep::Blend::Normal,
+                    BlendMode::Multiply => crate::deep::Blend::Multiply,
+                },
+            );
+            let stride = w as usize;
             for run in runs {
                 let r = run.rect;
-                if let Some(rect) =
-                    tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
-                {
-                    let mask = if run.solid { None } else { Some(&cov) };
-                    self.pixmap
-                        .fill_rect(rect, &paint, Transform::identity(), mask);
+                let (x0, x1) = (r.x0 as usize, r.x1 as usize);
+                // Fully covered opaque runs go through tiny-skia without the
+                // mask (its memset fast path), so a page-sized fill costs
+                // what it did; the shadow only notes the new colour.
+                if !deep || (run.solid && opaque) {
+                    if let Some(rect) = tiny_skia::Rect::from_ltrb(
+                        r.x0 as f32,
+                        r.y0 as f32,
+                        r.x1 as f32,
+                        r.y1 as f32,
+                    ) {
+                        let mask = if run.solid { None } else { Some(&cov) };
+                        self.pixmap
+                            .fill_rect(rect, &paint, Transform::identity(), mask);
+                    }
+                    if deep {
+                        let color = tiny_skia::PremultipliedColorU8::from_rgba(
+                            rgb8[0], rgb8[1], rgb8[2], 255,
+                        )
+                        .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+                        for y in r.y0 as usize..r.y1 as usize {
+                            self.deep.note_opaque(&self.pixmap, y, x0, x1, color);
+                        }
+                    }
+                    continue;
+                }
+                for y in r.y0 as usize..r.y1 as usize {
+                    let mask = if run.solid {
+                        None
+                    } else {
+                        Some(&cov.data()[y * stride + x0..y * stride + x1])
+                    };
+                    self.deep.composite(&mut self.pixmap, y, x0, x1, mask, &src);
                 }
             }
         }
@@ -3347,6 +3393,7 @@ impl Gfx {
     pub fn set_transparent_background(&mut self) {
         self.background = tiny_skia::Color::TRANSPARENT;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.set_transparent(true);
         }
@@ -3359,6 +3406,7 @@ impl Gfx {
         self.pending_erase = false;
         self.painted_since_page = true;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
