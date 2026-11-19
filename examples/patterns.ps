@@ -1,0 +1,88 @@
+%!PS-Adobe-3.0
+%%Title: Patterns — a tiling pattern specimen sheet
+%%BoundingBox: 0 0 612 792
+%%EndComments
+
+% Specimen sheet for #1038: makepattern, setpattern and the /Pattern colour
+% space (PatternType 1, tiling). Plain PostScript, no libraries; renders
+% the same in Ghostscript. Six panels: a diagonal hatch, a cross-hatch, one
+% uncoloured dot pattern in three colours, bricks (a cell larger than its
+% step), stripes turned 30 degrees, and text and a stroke painted with
+% patterns.
+%
+%   pscat --page 612x792 examples/patterns.ps
+%   gs -sDEVICE=png16m -r72 -o patterns.png examples/patterns.ps
+
+/Helvetica-Bold findfont 24 scalefont setfont
+0.12 setgray 306 740 moveto (Tiling Patterns) dup stringwidth pop 2 div neg 0 rmoveto show
+/Helvetica findfont 11 scalefont setfont
+306 722 moveto (makepattern, setpattern and the /Pattern colour space)
+dup stringwidth pop 2 div neg 0 rmoveto show
+
+% A panel: x y (label) { paint } -> the paint procedure fills a 240 x 170
+% panel at x y (on white), which then gets a frame and a label under it.
+/panel {
+  4 dict begin /proc exch def /label exch def /y exch def /x exch def
+  gsave
+    newpath x y 240 170 rectclip
+    x y 240 170 rectfill /proc load exec
+  grestore
+  gsave 0.2 setgray 1 setlinewidth x y 240 170 rectstroke grestore
+  gsave /Helvetica findfont 10 scalefont setfont 0.25 setgray
+  x y 14 sub moveto label show grestore
+  end
+} def
+
+% 1. A diagonal hatch. The lines run off the cell's edges and meet their
+%    neighbours' with no seam.
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 8 8] /XStep 8 /YStep 8
+   /PaintProc { pop 0.1 0.2 0.55 setrgbcolor 1.2 setlinewidth
+                -1 -1 moveto 9 9 lineto stroke
+                -1 7 moveto 1 9 lineto stroke
+                7 -1 moveto 9 1 lineto stroke } >> matrix makepattern /hatch exch def
+
+% 2. A cross-hatch.
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 10 10] /XStep 10 /YStep 10
+   /PaintProc { pop 0.55 0.15 0.1 setrgbcolor 0.8 setlinewidth
+                0 5 moveto 10 5 lineto stroke 5 0 moveto 5 10 lineto stroke } >> matrix makepattern /cross exch def
+
+% 3. Uncoloured dots: the pattern has no colour of its own.
+<< /PatternType 1 /PaintType 2 /TilingType 1
+   /BBox [0 0 14 14] /XStep 14 /YStep 14
+   /PaintProc { pop 7 7 4.5 0 360 arc fill } >> matrix makepattern /dots exch def
+
+% 4. Bricks: the cell is a row and a half wide, wrapping round its step.
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 48 24] /XStep 32 /YStep 24
+   /PaintProc { pop 0.72 0.33 0.22 setrgbcolor
+                1 1 30 10 rectfill 17 13 30 10 rectfill } >> matrix makepattern /bricks exch def
+
+% 5. Stripes, made under a 30 degree rotation: the cells turn with them.
+gsave 30 rotate
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 12 12] /XStep 12 /YStep 12
+   /PaintProc { pop 0.45 0.1 0.45 setrgbcolor 0 0 5 12 rectfill
+                0.95 0.75 0.2 setrgbcolor 5 0 2 12 rectfill } >> matrix makepattern /stripes exch def
+grestore
+
+1 setgray
+48 520 (a hatch: fill with hatch setpattern) { hatch setpattern 168 605 70 0 360 arc fill } panel
+324 520 (a cross-hatch) { cross setpattern 344 540 200 130 rectfill } panel
+48 300 (one uncoloured pattern in three colours) {
+  [/Pattern /DeviceRGB] setcolorspace
+  0.85 0.2 0.15 dots setcolor 48 300 80 170 rectfill
+  0.15 0.55 0.3 dots setcolor 128 300 80 170 rectfill
+  0.15 0.3 0.8 dots setcolor 208 300 80 170 rectfill
+} panel
+324 300 (bricks: a cell wider than its step) { bricks setpattern 324 300 240 170 rectfill } panel
+48 80 (stripes made at 30 degrees) { stripes setpattern 48 80 240 170 rectfill } panel
+324 80 (text and a stroke, painted with patterns) {
+  0.97 0.96 0.92 setrgbcolor 324 80 240 170 rectfill
+  /Helvetica-Bold findfont 64 scalefont setfont
+  hatch setpattern 340 160 moveto (Tile) show
+  bricks setpattern 14 setlinewidth 1 setlinecap 345 110 moveto 545 110 lineto stroke
+} panel
+
+showpage

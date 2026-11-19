@@ -1609,6 +1609,16 @@
    "page": "612x792"
   },
   {
+   "id": "patterns",
+   "group": "classic",
+   "title": "Tiling patterns",
+   "alt": "A specimen sheet of tiling patterns: a hatch, a cross-hatch, dots in three colours, bricks, rotated stripes and patterned text",
+   "blurb": "makepattern and setpattern: hatching, uncoloured dots in any colour, cells wider than their step, rotated tiles, and text painted with a pattern.",
+   "source": "examples/patterns.ps",
+   "page": "612x792",
+   "playground": true
+  },
+  {
    "id": "type3_ransom",
    "group": "type3",
    "title": "Ransom note",

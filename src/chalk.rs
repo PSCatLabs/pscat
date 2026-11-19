@@ -1421,7 +1421,7 @@ struct Locator {
 }
 
 /// What the generated program prints for each problem its check pass finds.
-const PROBLEM_TAG: &str = "CKPROBLEM";
+pub(crate) const PROBLEM_TAG: &str = "CKPROBLEM";
 
 impl Driver {
     /// The problems the program printed (`printed` is its standard output),

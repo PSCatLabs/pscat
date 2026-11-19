@@ -313,9 +313,9 @@ pub unsafe extern "C" fn ps_run(src: *const u8, len: usize, w: u32, h: u32) -> i
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_pixels() -> *const u8 {
     INTERP.with(|s| {
-        s.borrow()
-            .as_ref()
-            .map_or(std::ptr::null(), |it| it.gfx().pixmap.data().as_ptr())
+        s.borrow().as_ref().map_or(std::ptr::null(), |it| {
+            it.gfx().page_pixmap().data().as_ptr()
+        })
     })
 }
 
@@ -324,18 +324,26 @@ pub extern "C" fn ps_pixels_len() -> usize {
     INTERP.with(|s| {
         s.borrow()
             .as_ref()
-            .map_or(0, |it| it.gfx().pixmap.data().len())
+            .map_or(0, |it| it.gfx().page_pixmap().data().len())
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_width() -> u32 {
-    INTERP.with(|s| s.borrow().as_ref().map_or(0, |it| it.gfx().pixmap.width()))
+    INTERP.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(0, |it| it.gfx().page_pixmap().width())
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_height() -> u32 {
-    INTERP.with(|s| s.borrow().as_ref().map_or(0, |it| it.gfx().pixmap.height()))
+    INTERP.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(0, |it| it.gfx().page_pixmap().height())
+    })
 }
 
 #[unsafe(no_mangle)]

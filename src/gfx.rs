@@ -1042,6 +1042,22 @@ pub(crate) enum ColorSpace {
         tint_proc: crate::object::Object,
         src: crate::object::Object,
     },
+    /// `/Pattern` (#1038): the colour is a pattern from `makepattern`.
+    /// `base` is the underlying space an uncoloured pattern's colour
+    /// components are in (`[/Pattern /DeviceRGB]`), `None` for plain
+    /// `/Pattern`.
+    Pattern {
+        base: Option<Box<ColorSpace>>,
+        src: crate::object::Object,
+    },
+}
+
+/// The current colour in a `/Pattern` space (#1038): the tile, and the
+/// pattern dictionary `currentcolor` gives back.
+#[derive(Clone)]
+pub(crate) struct PatternColor {
+    pub(crate) tile: std::rc::Rc<crate::pattern::PatternTile>,
+    pub(crate) dict: crate::object::Object,
 }
 
 pub(crate) struct IndexedTable {
@@ -1090,6 +1106,9 @@ impl ColorSpace {
             ColorSpace::Gray | ColorSpace::Indexed { .. } | ColorSpace::Separation { .. } => 1,
             ColorSpace::Rgb => 3,
             ColorSpace::Cmyk => 4,
+            // Never image data (the image operators refuse a pattern
+            // space); one, so nothing sizes a buffer by zero.
+            ColorSpace::Pattern { .. } => 1,
         }
     }
 }
@@ -1244,6 +1263,10 @@ pub struct GraphicsState {
     /// whose device is not the current one reinstalls it
     /// ([`Gfx::sync_device`]).
     device: std::rc::Rc<PageDevice>,
+    /// The pattern `setpattern`/`setcolor` set in a `/Pattern` space
+    /// (#1038); `None` there is the initial null pattern, which paints
+    /// nothing. Always `None` outside a pattern space.
+    pattern: Option<PatternColor>,
 }
 
 impl GraphicsState {
@@ -1256,13 +1279,27 @@ impl GraphicsState {
         if let Some(font) = self.font.take() {
             out.push(Object::lit(Value::Dict(font.dict)));
         }
-        match std::mem::replace(&mut self.colorspace, ColorSpace::Gray) {
-            ColorSpace::Indexed { src, .. } => out.push(src),
-            ColorSpace::Separation { tint_proc, src, .. } => {
-                out.push(tint_proc);
-                out.push(src);
+        if let Some(p) = self.pattern.take() {
+            out.push(p.dict);
+        }
+        let mut cs = std::mem::replace(&mut self.colorspace, ColorSpace::Gray);
+        loop {
+            match cs {
+                ColorSpace::Indexed { src, .. } => out.push(src),
+                ColorSpace::Separation { tint_proc, src, .. } => {
+                    out.push(tint_proc);
+                    out.push(src);
+                }
+                ColorSpace::Pattern { base, src } => {
+                    out.push(src);
+                    if let Some(base) = base {
+                        cs = *base;
+                        continue;
+                    }
+                }
+                ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
             }
-            ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
+            break;
         }
     }
 }
@@ -1374,6 +1411,11 @@ pub struct Gfx {
     /// PostScript clip: `clippath` and every other operator still see the
     /// full page.
     band: Option<(u32, u32)>,
+    /// Pattern `PaintProc`s running now (#1038), innermost last: each
+    /// holds what its capture swapped out of the page.
+    captures: Vec<crate::pattern::Capture>,
+    /// Ids for captures and the tiles they make; 0 is the page.
+    next_capture: usize,
 }
 
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
@@ -1521,6 +1563,8 @@ impl Gfx {
             suppress_paint: 0,
             coverage: None,
             band: None,
+            captures: Vec::new(),
+            next_capture: 0,
         })
     }
 
@@ -1700,6 +1744,10 @@ impl Gfx {
         &mut self,
         device: std::rc::Rc<PageDevice>,
     ) -> Result<(), PsError> {
+        if !self.captures.is_empty() {
+            // `setpagedevice` in a pattern's PaintProc (#1038).
+            return Err(PsError::InvalidAccess);
+        }
         let (w, h) = device.px;
         if (w, h) != (self.pixmap.width(), self.pixmap.height()) {
             if let Some((base, max)) = self.mem_budget {
@@ -1995,6 +2043,59 @@ impl Gfx {
         paint
     }
 
+    /// The raster source of the current colour when it is a pattern
+    /// (#1038): the period, its shader transform and sampling. `None`
+    /// for a solid colour (and for the null pattern, which
+    /// [`ink`](Self::ink) keeps from painting at all).
+    fn pattern_source(&self) -> Option<(std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality)> {
+        // From `ink`, so the raster and the recorders never disagree.
+        match self.ink()? {
+            crate::pattern::Ink::Pattern(tile, rgb) => Some(tile.raster(rgb)),
+            crate::pattern::Ink::Rgb(_) => None,
+        }
+    }
+
+    /// [`paint`](Self::paint), with the pattern `src` as its shader when
+    /// there is one. The shader takes the alpha the colour would have.
+    fn paint_from<'a>(
+        &self,
+        src: &'a Option<(std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality)>,
+    ) -> Paint<'a> {
+        let mut paint: Paint<'a> = self.paint();
+        if let Some((pm, t, quality)) = src {
+            paint.shader = tiny_skia::Pattern::new(
+                pm.as_ref().as_ref(),
+                SpreadMode::Repeat,
+                *quality,
+                self.state.alpha,
+                *t,
+            );
+        }
+        paint
+    }
+
+    /// What a mark paints with, for the recorders: the colour, or the
+    /// pattern (#1038). `None` paints nothing: the null pattern a
+    /// pattern space starts with, or a pattern made in another context
+    /// (the page's used in a `PaintProc`, or the other way round; see
+    /// `crate::pattern`).
+    pub(crate) fn ink(&self) -> Option<crate::pattern::Ink> {
+        let rgb = self.state.rgb;
+        if !matches!(self.state.colorspace, ColorSpace::Pattern { .. }) {
+            return Some(crate::pattern::Ink::Rgb(rgb));
+        }
+        let p = self.state.pattern.as_ref()?;
+        if p.tile.context != self.context() {
+            return None;
+        }
+        Some(crate::pattern::Ink::Pattern(p.tile.clone(), rgb))
+    }
+
+    /// The capture now painting (#1038), 0 for the page.
+    pub(crate) fn context(&self) -> usize {
+        self.captures.last().map_or(0, |c| c.id)
+    }
+
     /// The current alpha/blend as the exporters want it.
     pub(crate) fn composite(&self) -> Composite {
         Composite {
@@ -2082,7 +2183,8 @@ impl Gfx {
         // PR #1217: a refused fill after showpage made a blank last page).
         self.prepare_paint();
         if !runs.is_empty() {
-            let mut paint = self.paint();
+            let src = self.pattern_source();
+            let mut paint = self.paint_from(&src);
             paint.anti_alias = false;
             // Fully covered runs go through tiny-skia without the mask (its
             // opaque fast path), so a page-sized fill costs what it did.
@@ -2116,24 +2218,23 @@ impl Gfx {
     ) -> Result<u64, PsError> {
         let mut work = 0;
         if !self.painting_off()
+            && let Some(ink) = self.ink()
             && let Some(path) = self.state.path.to_skia()
         {
             work = self.fill_coverage_limited(&path, rule, probe)?;
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = self.state.path.to_svg_data();
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(svg) = &mut self.svg {
-                    svg.fill(&d, rule, rgb, comp, &chain);
+                    svg.fill(&d, rule, &ink, comp, &chain);
                 }
             }
             {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let Gfx { pdf, state, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.fill(&state.path, rule, rgb, comp, &chain);
+                    pdf.fill(&state.path, rule, &ink, comp, &chain);
                 }
             }
             self.dirty = true;
@@ -2176,7 +2277,7 @@ impl Gfx {
         shading: crate::shading::Shading,
         probe: &crate::limits::LimitProbe,
     ) -> Result<u64, PsError> {
-        if self.painting_off() {
+        if self.painting_off() || self.capturing_uncolored() {
             return Ok(0);
         }
         // An end that does not extend, but whose far side the painted
@@ -2671,10 +2772,10 @@ impl Gfx {
     }
 
     pub fn stroke(&mut self) {
-        if self.painting_off() {
+        let Some(ink) = self.ink().filter(|_| !self.painting_off()) else {
             self.newpath();
             return;
-        }
+        };
         let dropped = self.stroke_dropped();
         let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
@@ -2699,7 +2800,8 @@ impl Gfx {
         };
         if let Some(draw) = drawable {
             self.prepare_paint();
-            let paint = self.paint();
+            let src = self.pattern_source();
+            let paint = self.paint_from(&src);
             let mask = self.clip_mask();
             match &draw {
                 StrokeDraw::Device(path) => self.pixmap.stroke_path(
@@ -2709,9 +2811,21 @@ impl Gfx {
                     Transform::identity(),
                     mask.as_deref(),
                 ),
+                // Mapped to device space here rather than by `fill_path`'s
+                // transform, which would also move a pattern shader off the
+                // device-space placement `makepattern` gave it. tiny-skia
+                // maps the path the same way itself, so a colour stroke is
+                // unchanged.
                 StrokeDraw::PenOutline(outline, l) => {
-                    self.pixmap
-                        .fill_path(outline, &paint, FillRule::Winding, *l, mask.as_deref())
+                    if let Some(device) = outline.clone().transform(*l) {
+                        self.pixmap.fill_path(
+                            &device,
+                            &paint,
+                            FillRule::Winding,
+                            Transform::identity(),
+                            mask.as_deref(),
+                        )
+                    }
                 }
                 StrokeDraw::Hairlines(groups) => {
                     for (thin, path) in groups {
@@ -2744,14 +2858,13 @@ impl Gfx {
                     Some(pen) => pen.path.to_svg_data_with(3 + pen.extra_decimals()),
                     None => dropped.as_ref().unwrap_or(&self.state.path).to_svg_data(),
                 };
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let pen_map = pen.as_ref().map(|p| (p.to_device, p.extra_decimals()));
                 if let Some(svg) = &mut self.svg {
                     svg.stroke(
                         &d,
                         pen_map,
-                        rgb,
+                        &ink,
                         w,
                         cap,
                         join,
@@ -2763,7 +2876,6 @@ impl Gfx {
                 }
             }
             if self.pdf.is_some() {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let Gfx { pdf, state, .. } = self;
                 if let Some(pdf) = pdf {
@@ -2774,7 +2886,7 @@ impl Gfx {
                     pdf.stroke(
                         path,
                         pen_map,
-                        rgb,
+                        &ink,
                         w,
                         cap,
                         join,
@@ -3157,7 +3269,7 @@ impl Gfx {
     }
 
     pub fn erase(&mut self) {
-        if self.painting_off() {
+        if self.painting_off() || !self.captures.is_empty() {
             return;
         }
         self.pending_erase = false;
@@ -3178,8 +3290,10 @@ impl Gfx {
     /// The graphics-state reset (initgraphics, pinned against gs) is
     /// the operator's job.
     pub fn showpage(&mut self) {
-        if self.state.null_device {
-            return; // the null device emits no page (#739)
+        // The null device emits no page (#739); nor does a pattern's
+        // PaintProc, which paints a tile, not a page (#1038).
+        if self.state.null_device || !self.captures.is_empty() {
+            return;
         }
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
@@ -3196,7 +3310,7 @@ impl Gfx {
 
     /// `copypage` (Level 1): emit the page but keep canvas and state.
     pub fn copypage(&mut self) {
-        if self.state.null_device {
+        if self.state.null_device || !self.captures.is_empty() {
             return;
         }
         self.completed.push(self.pixmap.clone());
@@ -3271,7 +3385,14 @@ impl Gfx {
 
     /// Whether a glyph shown now should reach the SVG recorder as text.
     pub(crate) fn svg_text_wanted(&self) -> bool {
-        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted()
+        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted() && self.text_ink()
+    }
+
+    /// Text output writes glyphs in a solid colour: not under a pattern,
+    /// nor while a pattern's tile is being captured (#1038), where glyphs
+    /// keep their outlines.
+    fn text_ink(&self) -> bool {
+        self.captures.is_empty() && !matches!(self.state.colorspace, ColorSpace::Pattern { .. })
     }
 
     /// Turn on PDF recording (`--pdf`).
@@ -3355,7 +3476,7 @@ impl Gfx {
 
     /// Whether a glyph shown now may reach the PDF recorder as text.
     pub(crate) fn pdf_text_wanted(&self) -> bool {
-        self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted()
+        self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted() && self.text_ink()
     }
 
     pub(crate) fn pdf_wanted(&self) -> bool {
@@ -3450,6 +3571,7 @@ impl Gfx {
             clip_stack: Vec::new(),
             null_device: false,
             device,
+            pattern: None,
         }
     }
 
@@ -3534,8 +3656,21 @@ impl Gfx {
         self.state.cmyk = Some(cmyk);
     }
 
+    /// Set the colour space. Any space, a pattern space included, starts
+    /// with no pattern: in a pattern space that is the null pattern.
     pub(crate) fn set_colorspace(&mut self, cs: ColorSpace) {
         self.state.colorspace = cs;
+        self.state.pattern = None;
+    }
+
+    /// The pattern a `/Pattern` space's `setcolor` chose (#1038).
+    pub(crate) fn set_pattern(&mut self, p: PatternColor) {
+        self.state.pattern = Some(p);
+    }
+
+    /// The pattern of the current colour, if it is one.
+    pub(crate) fn pattern(&self) -> Option<&PatternColor> {
+        self.state.pattern.as_ref()
     }
 
     pub fn line_cap(&self) -> i64 {
@@ -3638,23 +3773,24 @@ impl Gfx {
         if self.painting_off() {
             return;
         }
+        let Some(ink) = self.ink() else {
+            return;
+        };
         if let Some(p) = path.to_skia() {
             self.prepare_paint();
             self.fill_coverage(&p, FillRule::Winding);
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = path.to_svg_data();
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(svg) = &mut self.svg {
-                    svg.fill(&d, FillRule::Winding, rgb, comp, &chain);
+                    svg.fill(&d, FillRule::Winding, &ink, comp, &chain);
                 }
             }
             if self.pdf.is_some() {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(pdf) = &mut self.pdf {
-                    pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                    pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
                 }
             }
             self.dirty = true;
@@ -3676,6 +3812,9 @@ impl Gfx {
             }
             return;
         }
+        // Text is written in a colour (`svg_text_wanted`/`pdf_text_wanted`
+        // turn it off under a pattern), so this ink is always one.
+        let ink = crate::pattern::Ink::Rgb(self.state.rgb);
         let skia = path.to_skia();
         if skia.is_none() && self.pending_erase {
             // A blank glyph opening a page would otherwise land on the old
@@ -3694,7 +3833,7 @@ impl Gfx {
             match svg_text {
                 Some(g) => svg.glyph(g, rgb, comp, &chain),
                 None if skia.is_some() => {
-                    svg.fill(&path.to_svg_data(), FillRule::Winding, rgb, comp, &chain)
+                    svg.fill(&path.to_svg_data(), FillRule::Winding, &ink, comp, &chain)
                 }
                 None => {}
             }
@@ -3704,10 +3843,10 @@ impl Gfx {
                 // A glyph the font writer refuses keeps its outline.
                 Some(g) => {
                     if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
-                        pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                        pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
                     }
                 }
-                None if skia.is_some() => pdf.fill(path, FillRule::Winding, rgb, comp, &chain),
+                None if skia.is_some() => pdf.fill(path, FillRule::Winding, &ink, comp, &chain),
                 None => {}
             }
         }
@@ -3745,6 +3884,179 @@ impl Gfx {
         self.saved.truncate(depth);
         self.state = *state;
         self.sync_device();
+    }
+
+    // --- patterns (#1038) -------------------------------------------------
+
+    /// Refuse `bytes` more than `--max-memory` leaves room for.
+    fn budget_allows(&mut self, bytes: usize) -> Result<(), PsError> {
+        if let Some((base, max)) = self.mem_budget {
+            let grown = crate::memtrack::live_bytes().saturating_sub(base);
+            if grown.saturating_add(bytes) > max {
+                self.mem_refused = true;
+                return Err(PsError::MemoryExceeded);
+            }
+        }
+        Ok(())
+    }
+
+    /// Start capturing a tiling pattern's tile (`makepattern`, #1038):
+    /// from here until [`end_pattern`](Self::end_pattern) (or
+    /// [`abort_pattern`](Self::abort_pattern)) every mark goes to a
+    /// tile-sized canvas, a fresh SVG recorder and an empty PDF content
+    /// stream instead of the page. The state is the current one inside a
+    /// `gsave`, as for a Type 3 glyph, with the CTM the tile's capture
+    /// matrix, no path, and the clip the pattern's `/BBox`.
+    pub(crate) fn begin_pattern(&mut self, spec: crate::pattern::TileSpec) -> Result<(), PsError> {
+        let geom = crate::pattern::geometry(&spec)?;
+        crate::pattern::check_fold(&geom)?;
+        let (cw, ch) = geom.content;
+        let (pw, ph) = geom.period;
+        self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
+        let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
+        let context = self.context();
+        self.next_capture += 1;
+        let id = self.next_capture;
+        let svg = if self.svg.is_some() {
+            let rec = crate::svg::SvgRecorder::capture(cw, ch, format!("t{id}_"), spec.uncolored);
+            self.svg.replace(Box::new(rec))
+        } else {
+            None
+        };
+        let pdf = self.pdf.as_mut().map(|p| p.begin_capture(spec.uncolored));
+        let uncolored = spec.uncolored;
+        let snapshot = self.glyph_enter();
+        let page = std::mem::replace(&mut self.pixmap, content);
+        let bbox = spec.bbox;
+        self.captures.push(crate::pattern::Capture {
+            id,
+            context,
+            spec,
+            geom,
+            page,
+            svg,
+            pdf,
+            pending_erase: std::mem::take(&mut self.pending_erase),
+            painted_since_page: std::mem::take(&mut self.painted_since_page),
+            dirty: self.dirty,
+            band: self.band.take(),
+            suppress_paint: std::mem::take(&mut self.suppress_paint),
+            coverage: self.coverage.take(),
+            snapshot,
+        });
+        self.state.ctm = geom.capture;
+        self.state.path = PsPath::default();
+        self.state.clip = None;
+        self.state.null_device = false;
+        // An uncoloured cell is coverage only, so it paints in solid ink
+        // whatever colour space `makepattern` ran in: a pattern space
+        // inherited here would paint nothing (the null pattern, or a
+        // pattern of another context), as gs does not.
+        if uncolored {
+            self.set_colorspace(ColorSpace::Gray);
+            self.set_rgb(0.0, 0.0, 0.0);
+        }
+        let [x0, y0, x1, y1] = bbox;
+        self.moveto(x0, y0);
+        let clipped = self
+            .lineto(x1, y0)
+            .and_then(|()| self.lineto(x1, y1))
+            .and_then(|()| self.lineto(x0, y1))
+            .and_then(|()| {
+                self.closepath();
+                self.clip(FillRule::Winding)
+            });
+        self.newpath();
+        if let Err(e) = clipped {
+            self.abort_pattern();
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Put back what the innermost capture swapped out; its canvas, SVG
+    /// recorder and PDF state come back to the caller.
+    fn leave_capture(
+        &mut self,
+    ) -> (
+        crate::pattern::Capture,
+        Pixmap,
+        Option<Box<crate::svg::SvgRecorder>>,
+    ) {
+        let mut cap = self.captures.pop().expect("a pattern capture is open");
+        let content = std::mem::replace(
+            &mut self.pixmap,
+            std::mem::replace(&mut cap.page, Pixmap::new(1, 1).expect("1x1")),
+        );
+        let svg = match cap.svg.take() {
+            Some(page) => self.svg.replace(page),
+            None => None,
+        };
+        self.pending_erase = cap.pending_erase;
+        self.painted_since_page = cap.painted_since_page;
+        self.dirty = cap.dirty;
+        self.band = cap.band;
+        self.suppress_paint = cap.suppress_paint;
+        self.coverage = cap.coverage.take();
+        let (depth, state) =
+            std::mem::replace(&mut cap.snapshot, (0, Box::new(self.state.clone())));
+        self.restore_glyph_snapshot(depth, state);
+        (cap, content, svg)
+    }
+
+    /// The `PaintProc` returned: make the tile from what it painted.
+    pub(crate) fn end_pattern(
+        &mut self,
+    ) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
+        let (mut cap, content, svg) = self.leave_capture();
+        let svg = svg.map(|rec| rec.into_tile());
+        // PDF's pattern matrix maps to the default space of the stream that
+        // paints with it: the page's (y up, `1 0 0 -1 0 H` from device), or
+        // the enclosing pattern's space.
+        let to_default = match self.captures.last() {
+            Some(outer) => outer.geom.capture.invert().unwrap_or_default(),
+            None => Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, self.pixmap.height() as f32),
+        };
+        let pdf = match (cap.pdf.take(), &mut self.pdf) {
+            (Some(saved), Some(rec)) => Some(rec.end_capture(
+                saved,
+                &cap.spec,
+                to_default.pre_concat(cap.geom.matrix),
+                cap.geom.capture.invert().unwrap_or_default(),
+            )),
+            _ => None,
+        };
+        let period = crate::pattern::fold(&content, &cap.geom).ok_or(PsError::Limitcheck)?;
+        Ok(std::rc::Rc::new(crate::pattern::PatternTile::new(
+            cap.id,
+            cap.context,
+            cap.spec,
+            cap.geom,
+            period,
+            svg,
+            pdf,
+        )))
+    }
+
+    /// The `PaintProc` was unwound (an error, `stop`): drop the tile.
+    pub(crate) fn abort_pattern(&mut self) {
+        let (mut cap, _, _) = self.leave_capture();
+        if let (Some(saved), Some(rec)) = (cap.pdf.take(), &mut self.pdf) {
+            rec.abort_capture(saved);
+        }
+    }
+
+    /// Whether an uncoloured pattern's tile is being captured: its
+    /// `PaintProc` paints only coverage, so shadings (which PDF forbids
+    /// there) are dropped.
+    fn capturing_uncolored(&self) -> bool {
+        self.captures.last().is_some_and(|c| c.spec.uncolored)
+    }
+
+    /// The page canvas, even while a pattern's tile is being captured
+    /// into `pixmap` (#1038): what a live view should show.
+    pub fn page_pixmap(&self) -> &Pixmap {
+        self.captures.first().map_or(&self.pixmap, |c| &c.page)
     }
 
     /// True while marking operators must leave page and recorders alone:
@@ -4520,6 +4832,12 @@ impl Gfx {
             ColorSpace::Cmyk => (false, true),
             ColorSpace::Indexed { table, .. } => (table.base_ncomp == 1, true),
             ColorSpace::Separation { alt_ncomp, .. } => (*alt_ncomp == 1, true),
+            // An uncoloured pattern's components in its base space.
+            ColorSpace::Pattern { base, .. } => match base.as_deref() {
+                Some(ColorSpace::Cmyk) => (false, true),
+                Some(ColorSpace::Rgb) => (false, false),
+                _ => (true, false),
+            },
         };
         match self.state.cmyk {
             Some(c) if native_ok => c.map(f64::from),

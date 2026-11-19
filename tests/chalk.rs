@@ -530,6 +530,12 @@ fn unsupported_input_fails_with_the_named_error() {
             "{tex}: a PostScript report: {err}"
         );
         assert!(!dir.join("bad.png").exists(), "{tex}: wrote a file");
+        // the check pass's lines are internal: neither stream shows them
+        assert!(
+            !String::from_utf8_lossy(&out.stdout).contains("CKPROBLEM")
+                && !err.contains("CKPROBLEM"),
+            "{tex}: a check line leaked"
+        );
 
         let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
         assert_eq!(e.code(), code);
@@ -724,6 +730,32 @@ fn the_library_problem_list_is_the_cli_list() {
     ] {
         assert!(driver.explain(junk, &run_err).is_some());
     }
+}
+
+/// A failing formula's printed output has the program's own prints and no
+/// check lines once it goes through `user_output` (issue #1252), while
+/// `explain` still reads the raw bytes.
+#[test]
+fn user_output_leaves_the_programs_prints_without_the_check_lines() {
+    use pscat::chalkboard::{BoardConfig, user_output};
+    let driver = BoardConfig::default()
+        .driver(r"x + \aleph + ☃")
+        .expect("the delimiters are balanced");
+    let (w, h) = driver.page_size();
+    let mut interp = pscat::Interp::with_page_scaled(w, h, 1.0).expect("valid page");
+    interp.capture_stdout();
+    interp.run_str("(before\n) print").unwrap();
+    let err = interp
+        .run_str(driver.source())
+        .expect_err("outside the subset");
+    let printed = interp.captured_stdout().to_vec();
+    assert!(
+        String::from_utf8_lossy(&printed).contains("CKPROBLEM"),
+        "the check pass printed its lines"
+    );
+    assert_eq!(user_output(&printed).as_ref(), b"before\n");
+    let e = driver.explain(&printed, &err).expect("a TeX error");
+    assert_eq!(e.problems().len(), 2, "{e}");
 }
 
 /// A structural error (a missing brace) is listed with the unsupported
