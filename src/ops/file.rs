@@ -340,7 +340,7 @@ fn currentfile(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// - currentfilename string (a pscat extension, issue #1056). The name of
+/// `currentfilename` (`- currentfilename string`; a pscat extension, issue #1056): the name of
 /// the file being run, exactly as the program or the command line gave it
 /// (`lib/sheet.ps` for a library, the path as written for `run`): the file
 /// an error report's `Line:` names. `undefined` when no named file is
