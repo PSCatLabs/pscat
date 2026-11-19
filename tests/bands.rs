@@ -767,6 +767,10 @@ fn lint_with_bands_reports_a_shadowed_operator_once_and_honours_the_allow() {
     let src = format!("/sub (hello) def {PAINTS}");
     let (_ok, err) = bands_stderr("bands-lint-shadow", &["--lint"], &src);
     assert_eq!(findings(&err, "shadowed-operator"), 1, "{err}");
+    assert!(
+        err.contains("/sub was redefined as a string when the program reached line 1,"),
+        "{err}"
+    );
     let allowed = format!("%lint: allow shadowed-operator\n{src}");
     let (_ok, err) = bands_stderr("bands-lint-shadow-allowed", &["--lint"], &allowed);
     assert_eq!(findings(&err, "shadowed-operator"), 0, "{err}");

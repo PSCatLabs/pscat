@@ -109,7 +109,7 @@ PIL composite. A one-call typewriter or chart is not added yet.
   below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
-  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
+  operator name such as `/sub` redefined as a plain value, with the line it was redefined on: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page, and no `Lint:` block for the findings that describe
   where the run stopped: they would only be consequences of the error (#942).

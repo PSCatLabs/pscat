@@ -438,6 +438,10 @@ pub struct Interp {
     /// The `run` file `last_line` belongs to (issue #1043); `None` when it
     /// is a line of the main program.
     last_file: Option<Rc<str>>,
+    /// The operator-name shadows seen as `def` and `store` ran, when
+    /// [`Interp::trace_operator_shadows`] turned tracing on (issue #1109);
+    /// `None` otherwise, which costs `def` one branch.
+    shadow_trace: Option<Box<crate::lint::ShadowTrace>>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `step_n` before it unwinds the execution
@@ -776,6 +780,7 @@ impl Interp {
             error_command: None,
             last_line: None,
             last_file: None,
+            shadow_trace: None,
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
@@ -3096,6 +3101,11 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
+        if self.shadow_trace.is_some() {
+            if let Some(scope) = self.shadow_scope_of_index(self.dstack.len() - 1) {
+                self.note_shadow(name, &obj, scope);
+            }
+        }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
         if self.save_stack.is_empty() {
@@ -3107,6 +3117,91 @@ impl Interp {
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_name(name, obj);
+        }
+    }
+
+    /// Have `def` and `store` note every binding of an operator's name to a
+    /// plain value, with the line the scanner was on, for the
+    /// `[shadowed-operator]` lint (issue #1109): it reports that line, and
+    /// the shadows in a dictionary that has since ended. Off by default
+    /// (a `def` then costs one extra branch); `--lint` turns it on.
+    pub fn trace_operator_shadows(&mut self) {
+        self.shadow_trace.get_or_insert_with(Default::default);
+    }
+
+    pub(crate) fn shadow_trace(&self) -> Option<&crate::lint::ShadowTrace> {
+        self.shadow_trace.as_deref()
+    }
+
+    /// The traced scope of the dictionary at `dstack[index]`: `userdict`
+    /// and `systemdict` only (see [`crate::lint::ShadowTrace`]).
+    fn shadow_scope_of_index(&self, index: usize) -> Option<crate::lint::ShadowScope> {
+        use crate::lint::ShadowScope;
+        match index {
+            0 => Some(ShadowScope::System),
+            2 => Some(ShadowScope::User),
+            _ => None,
+        }
+    }
+
+    /// The traced scope of `dict`, a dictionary `store` found on the stack.
+    fn shadow_scope_of(&self, dict: &Rc<RefCell<Dict>>) -> Option<crate::lint::ShadowScope> {
+        let index = self.dstack.iter().rposition(|d| Rc::ptr_eq(d, dict))?;
+        self.shadow_scope_of_index(index)
+    }
+
+    /// `store`'s half of the shadow trace: `key` is about to be bound to
+    /// `value` in `dict`.
+    pub(crate) fn note_store_shadow(
+        &mut self,
+        key: &Object,
+        value: &Object,
+        dict: &Rc<RefCell<Dict>>,
+    ) {
+        if self.shadow_trace.is_some()
+            && let Value::Name(name) = &key.value
+            && let Some(scope) = self.shadow_scope_of(dict)
+        {
+            self.note_shadow(name, value, scope);
+        }
+    }
+
+    /// Record `name` bound to `value` in a dictionary of `scope`, if that
+    /// shadows an operator.
+    #[inline(never)]
+    fn note_shadow(
+        &mut self,
+        name: &crate::name::PsName,
+        value: &Object,
+        scope: crate::lint::ShadowScope,
+    ) {
+        let Some(builtin) = self
+            .dstack
+            .first()
+            .and_then(|d| d.borrow().get_id(name.id()))
+        else {
+            return;
+        };
+        if !matches!(builtin.value, Value::Operator(_)) {
+            return;
+        }
+        // Copies taken first: the trace is borrowed mutably below. The text
+        // is built only for a binding the trace has not seen yet. It names
+        // the line the scanner was on, which is the `def`'s own line unless
+        // a procedure ran it (then the line that called the procedure): a
+        // procedure's last element runs after its frame is gone, so the two
+        // cases cannot be told apart here and the wording claims no more.
+        let line = self.last_line;
+        let file = self.last_file.clone();
+        let location = move || {
+            let file = file
+                .as_deref()
+                .map(|f| format!(" ({})", report_name(f)))
+                .unwrap_or_default();
+            Some(format!("when the program reached line {}{file}", line?))
+        };
+        if let Some(trace) = self.shadow_trace.as_mut() {
+            trace.note(name, &builtin, value, scope, location);
         }
     }
 
