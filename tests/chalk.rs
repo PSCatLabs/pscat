@@ -102,12 +102,12 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 #[test]
 fn the_five_formulas_render_as_pinned() {
     // All five re-pinned for #692 (exact-area fill coverage), then for #731
-    // (tiny-skia f32 pipeline); the Windows cases value is from #731's
-    // windows-latest CI run.
+    // (tiny-skia f32 pipeline, then part 2's 16-bit fill compositing); the
+    // Windows cases value is from #731's windows-latest CI run.
     let pinned: [u64; 5] = [
-        0x7746bc8158136515,
-        0xbd469dc457c6ec34,
-        0x76fd19b982eacda1,
+        0x77e56b62ee521faf,
+        0xce8a3ed9f44a44ef,
+        0xcb31041ae26f099c,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
@@ -115,9 +115,9 @@ fn the_five_formulas_render_as_pinned() {
         if cfg!(windows) {
             0x95f4ff7905b0d31c
         } else {
-            0x573d23cd11025399
+            0xb61620c5dd29d8f1
         },
-        0x669f03b794585f39,
+        0xc6a28449e4e5911e,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -148,12 +148,13 @@ fn the_overlay_renders_as_pinned() {
     let png = chalk::render(FORMULAS[0].1, &cfg, Format::Png).expect("overlay");
     let pm = Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    // Re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline):
+    // Re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline,
+    // then 16-bit fill compositing):
     // the √ and the superscript checked over a dark page each time, as solid
     // as before or fuller.
     assert_eq!(
         fnv1a(pm.data()),
-        0xb7eb785d15bdb85b,
+        0xda5c390dc07f86ac,
         "the overlay moved: {:#x}",
         fnv1a(pm.data())
     );
