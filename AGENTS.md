@@ -127,6 +127,9 @@ predates it.
   thread while writing (the MCP `Server` does), and never poll `try_wait`
   with a piped stream left unread. Check the machine with: a non-blocking
   write loop to `os.pipe()` in Python, which prints the capacity.
+  **A test that wants a closed stdout closes the reader before it spawns**
+  (`spawn_with_closed_stdout` in `tests/cli.rs`, `notes/1294-closed-stdout-tests.md`):
+  dropping the read end after `spawn` races a child that writes first.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a
