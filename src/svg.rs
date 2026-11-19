@@ -86,7 +86,7 @@ pub struct SvgRecorder {
     /// reused while the entry exists, as in `clip_ids`.
     /// Keyed by tile, uncoloured colour and, for a pen-space stroke, the
     /// pen's linear map's bits (the `<pattern>` is placed through its inverse).
-    pattern_ids: HashMap<(usize, Option<String>, Option<[u32; 4]>), (Rc<PatternTile>, usize)>,
+    pattern_ids: HashMap<PatternKey, (Rc<PatternTile>, usize)>,
     /// Tiles whose content group is already in this page's defs.
     tile_groups: HashMap<usize, Rc<PatternTile>>,
     next_pattern: usize,
@@ -809,6 +809,10 @@ impl SvgRecorder {
         pages
     }
 }
+
+/// A `<pattern>`'s identity: the tile, its colour if uncoloured, and the
+/// bits of the pen map a pen-space stroke places it through.
+type PatternKey = (usize, Option<String>, Option<[u32; 4]>);
 
 /// `matrix(a b c d e f)` at full precision.
 fn svg_matrix(t: tiny_skia::Transform) -> String {
