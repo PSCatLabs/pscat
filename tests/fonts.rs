@@ -467,3 +467,31 @@ fn glyphshow_on_type3_passes_the_name_or_a_code() {
     assert_eq!(pop_f64(&mut it), 6.0, "BuildGlyph width");
     assert_eq!(it.pop().expect("name").repr(), "/zzz");
 }
+
+/// #1115: a missing glyph advances like Ghostscript's URW `.notdef`, a
+/// space's width (not Liberation's wide `.notdef` box), through `show`
+/// (an unencoded byte) and `glyphshow` (an unknown name) alike.
+#[test]
+fn a_missing_glyph_advances_by_a_space_as_in_ghostscript() {
+    // (face, gs width at 1000 units, tolerance for TTF rounding)
+    for (face, gs) in [
+        ("Helvetica", 278.0),
+        ("Helvetica-BoldOblique", 278.0),
+        ("Times-Roman", 250.0),
+        ("Times-BoldItalic", 250.0),
+        ("Courier", 600.0),
+        ("Symbol", 250.0),
+        ("ZapfDingbats", 278.0),
+    ] {
+        let mut it = run(&format!(
+            "/{face} findfont 1000 scalefont setfont (\\001) stringwidth pop"
+        ));
+        let w = pop_f64(&mut it);
+        assert!((w - gs).abs() < 0.5, "{face}: unencoded byte {w}, gs {gs}");
+        let mut it = run(&format!(
+            "/{face} findfont 1000 scalefont setfont 0 0 moveto /zzzz_missing glyphshow currentpoint pop"
+        ));
+        let w = pop_f64(&mut it);
+        assert!((w - gs).abs() < 0.5, "{face}: glyphshow {w}, gs {gs}");
+    }
+}

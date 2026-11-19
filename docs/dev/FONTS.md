@@ -99,7 +99,10 @@ type's existence).
 2. glyph name → `GlyphId`: try the face's `post`/CFF name table
    (`glyph_index_by_name`); fall back to an Adobe Glyph List subset
    (name → Unicode → `cmap`). Missing glyphs render as `.notdef`
-   (conventionally blank) and still advance.
+   (conventionally blank) and still advance. On the twelve Liberation
+   faces behind the base-13 names the advance is the `space` glyph's
+   (278 Helvetica, 250 Times, 600 Courier), as in Ghostscript, not
+   Liberation's wide `.notdef` box (#1115).
 3. Outline points go **glyph units → font space → user space →
    device space**: scale by 1000/upem into the Type 1 convention
    (so bundled font dicts carry the familiar
