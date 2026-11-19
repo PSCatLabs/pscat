@@ -623,3 +623,149 @@ fn an_uncoloured_pattern_made_in_a_pattern_space_still_paints() {
         "the second pattern is missing: {blue} blue pixels"
     );
 }
+
+// --- imagemask painted with a pattern (#1299) ------------------------------
+
+/// A 16x16 stencil: a frame with its diagonals, painting the 1s.
+const STENCIL: &str = "
+/stencil { 16 16 true [16 0 0 -16 0 16]
+  {<ffff c003 a005 9009 8811 8421 8241 8181 8181 8241 8421 8811 9009 a005 c003 ffff>}
+  imagemask } def
+";
+
+/// A two-colour stripe pattern through the stencil, upright and turned.
+const MASKED_HATCH: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 8 8] /XStep 8 /YStep 8
+   /PaintProc { pop 0.8 0 0 setrgbcolor 0 0 4 8 rectfill
+                0 0 0.8 setrgbcolor 4 0 4 8 rectfill } >> matrix makepattern /hatch exch def
+0 1 0 setrgbcolor hatch setpattern
+gsave 20 20 translate 170 170 scale stencil grestore
+gsave 300 210 translate 30 rotate 120 120 scale stencil grestore
+";
+
+/// An uncoloured dot pattern through the stencil, in two colours, one
+/// stencil painting its 0s.
+const MASKED_DOTS: &str = "
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+   /PaintProc { pop 5 5 3 0 360 arc fill } >> matrix makepattern /dots exch def
+[/Pattern /DeviceRGB] setcolorspace
+0 0.5 0 dots setcolor gsave 20 20 translate 170 170 scale stencil grestore
+0.7 0.2 0 dots setcolor
+gsave 210 210 translate 170 170 scale
+  16 16 false [16 0 0 -16 0 16]
+  {<ffff c003 a005 9009 8811 8421 8241 8181 8181 8241 8421 8811 9009 a005 c003 ffff>}
+  imagemask grestore
+";
+
+/// Every output of an imagemask under a pattern: the PDF paints a real
+/// `/ImageMask` after selecting the pattern in the same `q ... Q`, the
+/// SVG fills the footprint with the `<pattern>` through a `<mask>`, and
+/// all of them agree with the raster (and gs's run of the program).
+fn check_masked(name: &str, src: &str, select: &str, hayro: bool) -> Outputs {
+    let src = format!("{STENCIL}{src}");
+    let out = render(&src);
+    let pdf = pdf_text(&out.pdf);
+    assert!(pdf.contains("/ImageMask true"), "{pdf}");
+    assert!(
+        pdf.lines()
+            .any(|l| l.starts_with("q ") && l.contains(select) && l.contains(" Do")),
+        "no `{select}` before the stencil's Do: {pdf}"
+    );
+    assert!(out.svg.contains("<mask "), "{}", out.svg);
+    assert!(out.svg.contains("<pattern "), "{}", out.svg);
+    assert!(
+        !out.svg.contains("<image width"),
+        "a coloured PNG stands in"
+    );
+    assert_close(
+        &format!("{name}: SVG via resvg"),
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    if hayro {
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
+    }
+    if common::gs_available() {
+        assert_close(
+            &format!("{name}: our PDF via gs at 8x"),
+            &out.png,
+            &gs_png_at(&out.pdf, "pdf", name, 8),
+            3.0,
+        );
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        assert_close(
+            &format!("{name}: our PDF via gs against the program in gs"),
+            &gs_png(ps.as_bytes(), "ps", name),
+            &gs_png(&out.pdf, "pdf", name),
+            0.5,
+        );
+    }
+    out
+}
+
+#[test]
+fn an_imagemask_paints_a_coloured_pattern_in_all_three_outputs() {
+    let out = check_masked("masked hatch", MASKED_HATCH, "/Pattern cs /P0 scn", true);
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    // The frame's bottom edge (device rows 180-190, the stencil's last
+    // row) shows both stripes, and never the green set before the pattern.
+    let row: Vec<_> = (20..190).map(|x| px(x, 185)).collect();
+    assert!(
+        row.iter().any(|p| p.red() > 150 && p.blue() < 60),
+        "no red stripe"
+    );
+    assert!(
+        row.iter().any(|p| p.blue() > 150 && p.red() < 60),
+        "no blue stripe"
+    );
+    assert!(
+        row.iter().all(|p| p.green() < 60 || p.red() > 200),
+        "flat green"
+    );
+    // Inside the frame, off the diagonals: paper.
+    assert_eq!(px(60, 105).red(), 255);
+}
+
+#[test]
+fn an_imagemask_paints_an_uncoloured_pattern_in_its_colour() {
+    let out = check_masked("masked dots", MASKED_DOTS, "/PCS cs", true);
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    let green = (20..190)
+        .flat_map(|x| (210..380).map(move |y| (x, y)))
+        .filter(|&(x, y)| px(x, y).green() > 100 && px(x, y).red() < 40)
+        .count();
+    let orange = (210..380)
+        .flat_map(|x| (20..190).map(move |y| (x, y)))
+        .filter(|&(x, y)| px(x, y).red() > 150 && px(x, y).blue() < 40)
+        .count();
+    assert!(
+        green > 1000 && orange > 1000,
+        "green {green}, orange {orange}"
+    );
+}
+
+#[test]
+fn an_imagemask_under_the_null_pattern_paints_nothing() {
+    let out = render(&format!(
+        "{STENCIL} 0.5 setgray [/Pattern] setcolorspace 20 20 translate 300 300 scale stencil"
+    ));
+    assert!(out.png.pixels().iter().all(|p| p.red() == 255));
+    assert!(!out.svg.contains("<mask") && !out.svg.contains("<image"));
+    assert!(!pdf_text(&out.pdf).contains(" Do"));
+}
+
+#[test]
+fn an_image_still_paints_its_samples_in_a_pattern_space() {
+    // gs 10.07: `image` paints its own grey samples under the null pattern.
+    let out =
+        render("[/Pattern] setcolorspace 0 0 400 400 scale 2 1 8 [2 0 0 1 0 0] {<00ff>} image");
+    let p = out.png.pixel(100, 200).expect("pixel");
+    assert_eq!((p.red(), p.green(), p.blue()), (0, 0, 0));
+    assert!(pdf_text(&out.pdf).contains("/Subtype /Image"));
+}

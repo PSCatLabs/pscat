@@ -2055,6 +2055,55 @@ impl Gfx {
         }
     }
 
+    /// Paint the current pattern through a stencil (`imagemask`, #1299):
+    /// `cover` writes each device pixel's coverage (0-255, the clip already
+    /// folded in) into a zeroed canvas-sized mask, `width` bytes a row,
+    /// inside `rect` (`x0, y0, x1, y1` in device pixels); the pattern then
+    /// fills `rect` through it, as a fill's coverage would, so alpha, blend
+    /// and the shader's placement are a fill's. Does nothing for a solid
+    /// colour. Returns whether `cover` marked any pixel.
+    pub(crate) fn fill_pattern_stencil(
+        &mut self,
+        rect: [u32; 4],
+        cover: impl FnOnce(&mut [u8], usize) -> Result<bool, PsError>,
+    ) -> Result<bool, PsError> {
+        let src = self.pattern_source();
+        if src.is_none() {
+            return Ok(false);
+        }
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        let mut cov = match self.coverage.take() {
+            Some(m) if m.width() == w && m.height() == h => m,
+            _ => match tiny_skia::Mask::new(w, h) {
+                Some(m) => m,
+                None => return Ok(false),
+            },
+        };
+        cov.data_mut().fill(0);
+        let marked = match cover(cov.data_mut(), w as usize) {
+            Ok(m) => m,
+            Err(e) => {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        };
+        if marked
+            && let Some(r) = tiny_skia::Rect::from_ltrb(
+                rect[0] as f32,
+                rect[1] as f32,
+                rect[2] as f32,
+                rect[3] as f32,
+            )
+        {
+            let mut paint = self.paint_from(&src);
+            paint.anti_alias = false;
+            self.pixmap
+                .fill_rect(r, &paint, Transform::identity(), Some(&cov));
+        }
+        self.coverage = Some(cov);
+        Ok(marked)
+    }
+
     /// [`paint`](Self::paint), with the pattern `src` as its shader when
     /// there is one. The shader takes the alpha the colour would have.
     fn paint_from<'a>(
@@ -3575,11 +3624,30 @@ impl Gfx {
         t: [f32; 6],
         interpolate: bool,
     ) {
-        let fill = self.state.rgb;
+        // A stencil paints the current colour, a pattern included (#1299);
+        // a colour image's own samples need no colour.
+        let ink = match (&data, self.ink()) {
+            (crate::pdf::ImageData::Mask { .. }, Some(ink)) => ink,
+            _ => crate::pattern::Ink::Rgb(self.state.rgb),
+        };
         let comp = self.composite();
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(pdf) = &mut self.pdf {
-            pdf.image(w, h, data, t, fill, interpolate, comp, &chain);
+            pdf.image(w, h, data, t, &ink, interpolate, comp, &chain);
+        }
+    }
+
+    /// An imagemask painted with a pattern, for SVG (#1299): `png` is the
+    /// stencil, opaque white where it paints, under the device transform
+    /// `t` (source pixels to device space).
+    pub(crate) fn svg_stencil(&mut self, png: &[u8], w: usize, h: usize, t: [f32; 6]) {
+        let Some(ink) = self.ink() else {
+            return;
+        };
+        let comp = self.composite();
+        let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+        if let Some(svg) = &mut self.svg {
+            svg.stencil(png, w, h, t, &ink, comp, &chain);
         }
     }
 

@@ -579,6 +579,67 @@ impl SvgRecorder {
         );
     }
 
+    /// An imagemask painted with a pattern (#1299): the stencil `png`
+    /// (opaque white where it paints, transparent elsewhere) becomes a
+    /// `<mask>` def, and the image's footprint, written in device space
+    /// with no `transform` so the `userSpaceOnUse` pattern lands where the
+    /// raster puts it, is filled with `ink` through it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stencil(
+        &mut self,
+        png: &[u8],
+        w: usize,
+        h: usize,
+        t: [f32; 6],
+        ink: &Ink,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        self.flush_text();
+        // Masks share the gradients' counter: the letter keeps ids apart.
+        let id = self.next_grad;
+        self.next_grad += 1;
+        let prefix = self.prefix.clone();
+        let _ = write!(
+            self.defs,
+            "<mask id=\"{prefix}m{id}\"><image width=\"{w}\" height=\"{h}\" \
+             preserveAspectRatio=\"none\" image-rendering=\"pixelated\" \
+             transform=\"matrix({} {} {} {} {} {})\" \
+             xlink:href=\"data:image/png;base64,{}\"/></mask>",
+            fmt_f32(t[0]),
+            fmt_f32(t[1]),
+            fmt_f32(t[2]),
+            fmt_f32(t[3]),
+            fmt_f32(t[4]),
+            fmt_f32(t[5]),
+            base64(png),
+        );
+        let (wf, hf) = (w as f32, h as f32);
+        let mut d = String::new();
+        for (i, (x, y)) in [(0.0, 0.0), (wf, 0.0), (wf, hf), (0.0, hf)]
+            .into_iter()
+            .enumerate()
+        {
+            let dx = t[0] * x + t[2] * y + t[4];
+            let dy = t[1] * x + t[3] * y + t[5];
+            let _ = write!(
+                d,
+                "{}{} {}",
+                if i == 0 { "M" } else { "L" },
+                fmt_precise(dx),
+                fmt_precise(dy)
+            );
+        }
+        d.push('Z');
+        let paint = self.ink_attr(ink, None);
+        let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let _ = write!(
+            self.body,
+            "{open}<path d=\"{d}\" fill=\"{paint}\" mask=\"url(#{prefix}m{id})\"{}{leftover}/>{close}",
+            Self::opacity_attr(comp, false),
+        );
+    }
+
     /// `shfill` (issue #20): a native `<linearGradient>`/`<radialGradient>`
     /// def, painted as a full-page rect (clipped like any other fill).
     /// `gradientUnits="userSpaceOnUse"` plus `gradientTransform` set to

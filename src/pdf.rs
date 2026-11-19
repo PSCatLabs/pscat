@@ -42,7 +42,8 @@
 //!   written before the next mark of any kind (every writer goes through
 //!   `enter_clip`), so paint order holds.
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
-//!   1-bit `/ImageMask` stencils painted in the current fill color,
+//!   1-bit `/ImageMask` stencils painted in the current fill color or
+//!   pattern (#1299),
 //!   which is precisely PostScript's own semantics.
 //! - `shfill` becomes the `sh` operator on a `/Shading` resource
 //!   (issue #1028; before it, a flat fill in the ramp's average colour).
@@ -1053,7 +1054,9 @@ Q",
 
     /// An image: `rgb_or_mask` is either interleaved RGB samples or,
     /// for masks, packed 1-bit rows; `t` maps sample coords to device
-    /// space (the rasterizer's own transform).
+    /// space (the rasterizer's own transform). A mask paints `ink`, the
+    /// current colour or pattern (#1299: `/Pattern cs /Pn scn` before the
+    /// `Do`, which PDF allows for a stencil mask).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn image(
         &mut self,
@@ -1061,7 +1064,7 @@ Q",
         h: usize,
         data: ImageData,
         t: [f32; 6],
-        fill_rgb: (f32, f32, f32),
+        ink: &Ink,
         interpolate: bool,
         comp: Composite,
         chain: &Chain,
@@ -1128,7 +1131,7 @@ Q",
         // `ca` and `BM` apply to images and stencils alike (#766); an
         // SMask's own alpha multiplies with `ca`. Empty for the default.
         let gs = self.gs_ref(comp);
-        let colour = self.ink_ops(&Ink::Rgb(fill_rgb), false);
+        let colour = self.ink_ops(ink, false);
         let _ = writeln!(
             self.content,
             "q {gs}{colour}{} {} {} {} {} {} cm /Im{idx} Do
