@@ -543,6 +543,41 @@ fn unsupported_input_fails_with_the_named_error() {
     }
 }
 
+/// `\$ \% \& \# \_` (issue #1160) are TeX's escaped literals: each draws
+/// the character, in math and in `\text{}`, and the bare forms keep the
+/// meaning they have in TeX (the delimiter, comment, column mark and
+/// subscript mark), or are refused where TeX refuses them.
+#[test]
+fn the_escaped_literals_render_and_the_bare_ones_keep_their_meaning() {
+    let dir = scratch("literals");
+    for tex in [
+        r"50\% of \$5",
+        r"R\&D",
+        r"a\_b \#1",
+        r"\text{50\% of \$5, R\&D, a\_b, \#1}",
+        r"\mathrm{\$\%\&\#\_}",
+        r"\text{\{x\}} = \{x\}",
+        r"$\$5$ \quad \(\% \)",
+        "50\\% % a comment",
+    ] {
+        let out = pscat(&dir, &["chalk", tex, "-o", "lit.png"], None);
+        assert!(out.status.success(), "{tex}: {}", stderr(&out));
+        assert!(dir.join("lit.png").exists(), "{tex}: wrote nothing");
+        let png = chalk::render(tex, &small(), Format::Png).unwrap();
+        assert!(png.starts_with(b"\x89PNG"), "{tex}");
+    }
+    // a bare one inside \text is refused, as in TeX
+    for (tex, says) in [
+        (r"\text{a_b}", "unsupported character: _"),
+        (r"\text{R&D}", "unsupported character: &"),
+        (r"\text{#1}", "unsupported character: #"),
+    ] {
+        let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);
+        assert!(!out.status.success(), "{tex} succeeded");
+        assert!(stderr(&out).contains(says), "{tex}: {}", stderr(&out));
+    }
+}
+
 /// Every unsupported character and command is reported in one pass, each
 /// with its line and column in the input, and the command is named as the
 /// user wrote it (issue #1080). The input is the issue's: three rounds of

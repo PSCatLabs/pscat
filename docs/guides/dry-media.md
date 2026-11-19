@@ -246,6 +246,8 @@ skeletons with TeX's box model. The subset covers:
   `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
+- the escaped literals `\$ \% \& \# \_ \{ \}`, each the character itself as in
+  TeX (inside `\text{}` too; a bare `_ # & $` there is refused, as in TeX);
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
@@ -359,7 +361,7 @@ pscat chalk: 4 problems in the LaTeX (line:column):
 (`pscat chalk --help` lists the supported subset)
 ```
 
-`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; accent
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|`` and the literals above; accent
 commands (`\"o`) and quotes inside it are not drawn, and a letter the board
 hand lacks is reported (`pscat chalk --help` says so).
 
