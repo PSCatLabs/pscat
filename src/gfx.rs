@@ -2057,8 +2057,8 @@ impl Gfx {
 
     /// Paint the current pattern through a stencil (`imagemask`, #1299):
     /// `cover` writes each device pixel's coverage (0-255, the clip already
-    /// folded in) into a zeroed canvas-sized mask, `width` bytes a row,
-    /// inside `rect` (`x0, y0, x1, y1` in device pixels); the pattern then
+    /// folded in) into a canvas-sized mask, `width` bytes a row, zeroed
+    /// inside `rect` and written only there (`x0, y0, x1, y1` in device pixels); the pattern then
     /// fills `rect` through it, as a fill's coverage would, so alpha, blend
     /// and the shader's placement are a fill's. Does nothing for a solid
     /// colour. Returns whether `cover` marked any pixel.
@@ -2079,7 +2079,16 @@ impl Gfx {
                 None => return Ok(false),
             },
         };
-        cov.data_mut().fill(0);
+        // Only `rect` is read back below, so only its rows are cleared; the
+        // fills that share this mask read only the bytes they write.
+        {
+            let (x0, x1) = (rect[0].min(w) as usize, rect[2].min(w) as usize);
+            let data = cov.data_mut();
+            for y in rect[1].min(h)..rect[3].min(h) {
+                let row = y as usize * w as usize;
+                data[row + x0..row + x1.max(x0)].fill(0);
+            }
+        }
         let marked = match cover(cov.data_mut(), w as usize) {
             Ok(m) => m,
             Err(e) => {

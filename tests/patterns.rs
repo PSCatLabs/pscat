@@ -816,9 +816,22 @@ fn an_imagemask_under_the_null_pattern_paints_nothing() {
 #[test]
 fn an_image_still_paints_its_samples_in_a_pattern_space() {
     // gs 10.07: `image` paints its own grey samples under the null pattern.
-    let out =
-        render("[/Pattern] setcolorspace 0 0 400 400 scale 2 1 8 [2 0 0 1 0 0] {<00ff>} image");
+    let out = render("[/Pattern] setcolorspace 400 400 scale 2 1 8 [2 0 0 1 0 0] {<00ff>} image");
     let p = out.png.pixel(100, 200).expect("pixel");
     assert_eq!((p.red(), p.green(), p.blue()), (0, 0, 0));
     assert!(pdf_text(&out.pdf).contains("/Subtype /Image"));
+}
+
+#[test]
+fn fills_after_a_patterned_imagemask_paint_as_without_it() {
+    // The stencil's coverage goes through the mask fills reuse: a fill
+    // after it, over the same pixels, must not pick any of it up.
+    let circle = "1 setgray 0 0 400 400 rectfill 0 setgray 150 150 90 0 360 arc fill \
+                  0.3 setgray 210 140 moveto 330 330 lineto 2.3 setlinewidth stroke";
+    let after = render(&format!(
+        "{STENCIL}{MASKED_HATCH} gsave 20 20 translate 360 360 scale stencil grestore \
+         0 setgray {circle}"
+    ));
+    let alone = render(circle);
+    assert!(after.png.data() == alone.png.data(), "stale coverage");
 }
