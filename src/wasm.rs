@@ -411,15 +411,10 @@ pub extern "C" fn ps_svg_count() -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_page_count() -> u32 {
-    // The rule svg_pages and pdf_document use: a page the program is still
-    // drawing on counts when it holds art, and an empty document has one.
-    INTERP.with(|s| {
-        s.borrow().as_ref().map_or(0, |it| {
-            let gfx = it.gfx();
-            let shown = gfx.pages().len();
-            (shown + usize::from(shown == 0 || gfx.has_trailing_art())) as u32
-        })
-    })
+    // The library's own rule (`Interp::page_count`), the one `pages`,
+    // `svg_pages` and `pdf_document` use, so the npm `pageCount()` and the
+    // native count cannot drift apart (#1162).
+    INTERP.with(|s| s.borrow().as_ref().map_or(0, |it| it.page_count() as u32))
 }
 
 #[unsafe(no_mangle)]

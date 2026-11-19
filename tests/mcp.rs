@@ -611,6 +611,47 @@ fn an_errored_render_has_no_lint_block_but_keeps_the_error_and_the_page() {
     }
 }
 
+/// #1110: when a program redefines an operator and then fails, the result
+/// carries the `[shadowed-operator]` note, in its own `Lint:` block apart from
+/// the `PostScript error:` one. The consequence findings stay out (#942).
+#[test]
+fn an_errored_render_after_a_shadowed_operator_def_shows_the_lint_note() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke showpage";
+    for tool in ["render_postscript", "start_render"] {
+        for bands in [1, 2] {
+            let args = json!({ "source": source, "width": 40, "height": 40, "bands": bands });
+            let result = if tool == "render_postscript" {
+                s.tool(tool, args)
+            } else {
+                job_result_of(&mut s, args)
+            };
+            let what = format!("{tool} bands {bands}: {result}");
+            let texts = texts(&result);
+            let err = texts
+                .iter()
+                .find(|t| t.starts_with("PostScript error:"))
+                .unwrap_or_else(|| panic!("an error block, {what}"));
+            assert!(!err.contains("shadowed-operator"), "{err} ({what})");
+            let lint = texts
+                .iter()
+                .find(|t| t.starts_with("Lint:"))
+                .unwrap_or_else(|| panic!("a Lint block, {what}"));
+            assert!(
+                lint.contains("[shadowed-operator] /sub was redefined as a string"),
+                "{what}"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .all(|t| !t.contains("[blank-page]") && !t.contains("run-error")),
+                "{what}"
+            );
+        }
+    }
+}
+
 /// #942: the other tools do not lint, so an error there has no `Lint:` text
 /// to mislead either.
 #[test]
@@ -2045,7 +2086,7 @@ fn chalkboard_math_draws_the_pinned_board() {
     );
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    assert_eq!(fnv1a(pm.data()), 0x7746bc8158136515, "the board moved");
+    assert_eq!(fnv1a(pm.data()), 0x77e56b62ee521faf, "the board moved");
     let cfg = pscat::chalk::Config::from_json(
         r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
     )

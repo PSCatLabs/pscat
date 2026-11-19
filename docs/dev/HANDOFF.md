@@ -823,7 +823,8 @@ renders eight examples in both and compares block-downsampled output).
   the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
-  and `run_chain` fields. Tagging procedure bodies with scan positions
+  and `run_chain` fields, and npm's `PostScriptError` into `file` and
+  `runChain` (#1116, parsed the same way). Tagging procedure bodies with scan positions
   would mean a position per array element: not done
   (`notes/1048-identity-operators-run-error-location.md`).
 - `product` `(pscat)`, `version` (the crate version string), `revision`
@@ -1484,8 +1485,24 @@ renders eight examples in both and compares block-downsampled output).
   The default lowp pipeline rounds each blend with a bias, so a stack of
   faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
   `Paint` built anywhere in pscat must set the flag too, or its pixels drift
-  by a level from the rest. Storage is still 8-bit, rounded per blend (the
-  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+  by a level from the rest. See `notes/731-hq-compositing-pipeline.md`.
+
+- **Fills and glyphs composite in a 16-bit shadow of the page**
+  (`src/deep.rs`, #731 part 2). `fill_coverage_limited` blends every run
+  except an opaque, fully covered one at 16 bits with the exact alpha
+  (integers for translucent source-over, f32 in tiny-skia's order for the
+  rest), and writes both the shadow and the 8-bit `pixmap`, which stays the page every
+  reader sees. Strokes, images and `shfill` still write only the 8-bit
+  pixmap through tiny-skia; each shadow pixel checks itself against the
+  8-bit one and reloads from it when another writer moved it, so a new
+  writer needs no hook. Clear the shadow (`self.deep.clear()`) wherever
+  the page is erased. A first blend at alpha 1 gives tiny-skia's bytes
+  exactly (a test pins it), so only stacked or translucent pixels move
+  (an edge a second fill blends over counts as stacked).
+  Under `--max-memory` the shadow is off when a page of it (8 bytes a
+  pixel) would pass a quarter of the cap; fills then blend on the 8-bit
+  page. A `--bands` run keeps a shadow only for its own rows. See
+  `notes/731-16bit-compositing-shadow.md`.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
@@ -1787,6 +1804,11 @@ renders eight examples in both and compares block-downsampled output).
   `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
   beside findings. A new lint check that reads the canvas must go through
   the stitched pages, not `check_band`.
+  After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
+  end-of-run findings (#942, #947) except those in
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  only if it reads state that survives the abort and can name the cause
+  (`notes/1110-lint-notes-in-a-failed-render.md`).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
@@ -1853,7 +1875,9 @@ renders eight examples in both and compares block-downsampled output).
   array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
   strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
-  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`. The decode charges the
+  interpreter's `DecodeBudget` (#1123, `notes/1123-binary-sequence-decode-limits.md`), so a
+  step or time limit stops a long decode inside it; keep that charge when changing `decode`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

@@ -1974,3 +1974,77 @@ mod slice_accounting_1213 {
         assert!(used(false) > 700);
     }
 }
+
+/// Decoding a long binary object sequence looks at the limits as it goes
+/// (#1123). A sequence can be 64 MiB and decode to eight million objects,
+/// about a second of work, all in one scanner step: without a look inside it,
+/// `--max-time` would be noticed only after it. Measured by the error, never
+/// by the clock (this file's header).
+mod binary_sequences_1123 {
+    use super::*;
+
+    /// A long-header sequence file of eight top-level arrays that share one
+    /// block of 65535 integers: 524280 objects from 5 MiB of mostly padding.
+    /// The program that scans it only pushes eight arrays.
+    fn many_objects_file(tag: &str) -> String {
+        let (arrays, block, total) = (8usize, 65_535usize, 5usize << 20);
+        let mut v = vec![0x80, 0];
+        v.extend_from_slice(&(arrays as u16).to_be_bytes());
+        v.extend_from_slice(&(total as u32).to_be_bytes());
+        for _ in 0..arrays {
+            v.extend_from_slice(&[9, 0, 0xff, 0xff]);
+            v.extend_from_slice(&((arrays * 8) as u32).to_be_bytes());
+        }
+        for i in 0..block {
+            v.extend_from_slice(&[1, 0, 0, 0]);
+            v.extend_from_slice(&(i as u32).to_be_bytes());
+        }
+        v.resize(total, 0);
+        let path = common::scratch_dir(tag).join("big.bos");
+        std::fs::write(&path, v).unwrap();
+        format!("({}) run", common::ps_path(&path))
+    }
+
+    /// Stopped inside the decode: none of the eight arrays was pushed.
+    fn assert_no_array_pushed(it: &Interp) {
+        let n = it
+            .operand_stack()
+            .iter()
+            .filter(|o| o.type_name() == "arraytype")
+            .count();
+        assert_eq!(n, 0, "arrays reached the stack: the decode ran to its end");
+    }
+
+    #[test]
+    fn the_sequence_decodes_with_no_limits_or_roomy_ones() {
+        let src = many_objects_file("bos-1123-ok");
+        let mut it = Interp::new();
+        it.run_str(&format!("{src} count =")).unwrap();
+        let mut it = limited(steps(1_000_000));
+        it.run_str(&src).expect("a roomy cap lets it decode");
+        let mut it = limited(Limits::none().with_max_time(Duration::from_secs(600)));
+        it.run_str(&src).expect("so does a roomy clock");
+    }
+
+    #[test]
+    fn a_step_cap_stops_a_long_decode() {
+        // Reading the 5 MiB file is 5120 steps (a KiB each), and 524280 slots
+        // at 8 bytes are 4095 more. The cap lets the read through and not
+        // the decode: without a look inside the decode this would pass.
+        let src = many_objects_file("bos-1123-steps");
+        let mut it = limited(steps(6_000));
+        assert_eq!(it.run_str(&src), Err(PsError::StepsExceeded));
+        assert_no_array_pushed(&it);
+    }
+
+    #[test]
+    fn a_time_limit_stops_a_long_decode() {
+        let src = many_objects_file("bos-1123-time");
+        let mut it = limited(Limits::none().with_max_time(Duration::from_millis(1)));
+        assert_eq!(it.run_str(&src), Err(PsError::TimeExceeded));
+        assert_no_array_pushed(&it);
+        // The interpreter is still usable afterwards.
+        let mut it = limited(Limits::none().with_max_time(Duration::from_secs(600)));
+        assert_eq!(it.run_str("1 2 add pop"), Ok(()));
+    }
+}
