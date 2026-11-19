@@ -720,6 +720,11 @@ renders eight examples in both and compares block-downsampled output).
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
   `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
   the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
+  Both vector recorders take the shading from `vector_shading` (#1041): the
+  raster's sub-unit rescale and its degenerate disk, so SVG and PDF show
+  what the PNG shows (`tests/svg_shading.rs` checks every case under
+  resvg). An axis that collapses in f32 paints nothing anywhere, as in gs. Equal concentric circles follow gs's disk,
+  not its one-pixel ring (`notes/1041-svg-shading-edge-cases.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
@@ -819,7 +824,8 @@ renders eight examples in both and compares block-downsampled output).
   the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
-  and `run_chain` fields. Tagging procedure bodies with scan positions
+  and `run_chain` fields, and npm's `PostScriptError` into `file` and
+  `runChain` (#1116, parsed the same way). Tagging procedure bodies with scan positions
   would mean a position per array element: not done
   (`notes/1048-identity-operators-run-error-location.md`).
 - `product` `(pscat)`, `version` (the crate version string), `revision`
@@ -1870,7 +1876,9 @@ renders eight examples in both and compares block-downsampled output).
   array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
   strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
-  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`. The decode charges the
+  interpreter's `DecodeBudget` (#1123, `notes/1123-binary-sequence-decode-limits.md`), so a
+  step or time limit stops a long decode inside it; keep that charge when changing `decode`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

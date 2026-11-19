@@ -668,9 +668,25 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
+        // Lengthening the gradient past an end (`extended_for_svg`) can
+        // overflow f32 for geometry near f32::MAX, and `inf` is no SVG
+        // number. Then it is done at an eighth of the size, the transform
+        // multiplying it back (a power of two, so exact); if even that is
+        // not finite, nothing is written, as the PDF writes nothing.
+        let mut ctm = ctm;
+        let mut extended = extended_for_svg(kind, stops, extend);
+        if !sh_finite(&extended.0) {
+            extended = extended_for_svg(&sh_scaled(kind, 0.125), stops, extend);
+            for v in &mut ctm[..4] {
+                *v *= 8.0;
+            }
+        }
+        if !sh_finite(&extended.0) || !ctm.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        let (kind, stops) = &extended;
         let id = self.next_grad;
         self.next_grad += 1;
-        let (kind, stops) = &extended_for_svg(kind, stops, extend);
         let stop_tags = |stops: &[SvgStop]| {
             let mut tags = String::new();
             for &(pos, r, g, b, a) in stops {
@@ -1015,9 +1031,25 @@ fn extended_for_svg(
             (before, after)
         }
     };
-    let opaque = stops.iter().map(|&(t, r, g, b)| (t, r, g, b, 1.0));
+    let mut opaque: Vec<SvgStop> = stops
+        .iter()
+        .map(|&(t, r, g, b)| (t, r, g, b, 1.0))
+        .collect();
+    // A hard edge at the end, when it pads (two stops at offset 1): the
+    // raster pads with the outermost stop, but renderers differ on two
+    // stops at one terminal offset, so the inner one is moved in by a
+    // sliver, `EDGE` (as the PDF writer does, #1028), or onto its
+    // neighbour if that is nearer (#1041). Only the end needs it: a
+    // stitching bound at the domain's start is not interior
+    // (`interior_bound_positions`), so no stop of another colour lands at 0,
+    // while one just under 1 can round to 1 in f32.
+    const EDGE: f32 = 1e-6;
+    let n = opaque.len();
+    if extend[1] && n >= 3 && opaque[n - 2].0 >= opaque[n - 1].0 {
+        opaque[n - 2].0 = (1.0 - EDGE).max(opaque[n - 3].0).min(opaque[n - 1].0);
+    }
     if before == 0.0 && after == 0.0 {
-        return (*kind, opaque.collect());
+        return (*kind, opaque);
     }
     let span = 1.0 + before + after;
     let at = |t: f32| (t + before) / span;
@@ -1028,7 +1060,11 @@ fn extended_for_svg(
         out.push((0.0, r, g, b, 0.0));
         out.push((at(0.0), r, g, b, 0.0));
     }
-    out.extend(opaque.map(|(t, r, g, b, a)| (at(t), r, g, b, a)));
+    out.extend(
+        opaque
+            .into_iter()
+            .map(|(t, r, g, b, a)| (at(t), r, g, b, a)),
+    );
     if let Some(&(_, r, g, b)) = stops.last()
         && after > 0.0
     {
@@ -1060,6 +1096,48 @@ fn extended_for_svg(
         },
     };
     (kind, out)
+}
+
+/// Whether every number of `kind` is finite.
+fn sh_finite(kind: &ShKind) -> bool {
+    match *kind {
+        ShKind::Axial { x0, y0, x1, y1 } => [x0, y0, x1, y1].iter().all(|v| v.is_finite()),
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => [x0, y0, r0, x1, y1, r1].iter().all(|v| v.is_finite()),
+    }
+}
+
+/// `kind` with every length multiplied by `k`.
+fn sh_scaled(kind: &ShKind, k: f32) -> ShKind {
+    match *kind {
+        ShKind::Axial { x0, y0, x1, y1 } => ShKind::Axial {
+            x0: x0 * k,
+            y0: y0 * k,
+            x1: x1 * k,
+            y1: y1 * k,
+        },
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => ShKind::Radial {
+            x0: x0 * k,
+            y0: y0 * k,
+            r0: r0 * k,
+            x1: x1 * k,
+            y1: y1 * k,
+            r1: r1 * k,
+        },
+    }
 }
 
 fn fmt_precise(v: f32) -> String {
