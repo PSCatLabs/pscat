@@ -702,6 +702,8 @@ arithmetic gives: 1000 fills of white at 0.002 over black come to 221 of
 255, not the 128 an 8-bit page stalls at. Volume splats, glows and
 airbrush built from many faint fills need no workaround. Strokes, images
 and `shfill` still blend at 8 bits, so build a very deep stack from fills.
+(Under a `--max-memory` cap, a page too big for a quarter of the cap at 8
+bytes a pixel blends fills at 8 bits too.)
 
 This is also a part of pscat that does **not** render the
 same way under plain `gs file.ps`: Ghostscript has no

@@ -64,7 +64,12 @@ impl Source {
         Source {
             // As tiny-skia's `Color::from_rgba8` (`NormalizedF32::new_u8`).
             rgb: rgb8.map(|c| f32::from(c) / 255.0),
-            alpha: alpha.clamp(0.0, 1.0),
+            // A NaN alpha paints nothing, as its byte (0) did.
+            alpha: if alpha.is_nan() {
+                0.0
+            } else {
+                alpha.clamp(0.0, 1.0)
+            },
             blend,
         }
     }

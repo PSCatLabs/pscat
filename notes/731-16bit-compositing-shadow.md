@@ -24,6 +24,8 @@ downstream changed.
   writer moved is reloaded from the page. A pixel another writer left in
   the same bucket keeps the 16-bit value, which is within half a level of
   what that writer meant.
+- **NaN alpha.** `setalpha` keeps a NaN; it paints nothing, as its byte 0
+  did, rather than a NaN blend writing a transparent hole.
 - **Erase** (`erasepage`, a showpage's pending erase, a new page device,
   `--transparent`) drops the shadow. A size change drops it too (`fit`).
 - **Matching tiny-skia.** At alpha 1 a first blend over a pixel the shadow
@@ -51,8 +53,11 @@ used only when a whole page of it takes at most a quarter of the cap
 (`Deep::allowed`). The rule depends only on the page size and the cap, so
 a render never depends on how much heap is free at the moment; with the
 shadow off, fills composite on the 8-bit page as in part 1. At the
-untrusted cap (1 GiB, the MCP server's) that is pages up to 32 million
-pixels, a 5,600 x 5,600 canvas.
+untrusted cap (1 GiB, the MCP server's) that is pages up to about 33.5
+million pixels (a 5,790 x 5,790 canvas); a bigger page under that cap
+renders as part 1 did, so its bytes differ from an uncapped CLI render.
+Under `--bands` each band keeps a shadow only for its own rows (the rest
+are discarded at the stitch), so the bands' shadows add up to one page.
 
 ## Numbers
 

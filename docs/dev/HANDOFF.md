@@ -1494,7 +1494,8 @@ renders eight examples in both and compares block-downsampled output).
   exactly (a test pins it), so only stacked or translucent pixels move
   (an edge a second fill blends over counts as stacked).
   Under `--max-memory` the shadow is off when a page of it (8 bytes a
-  pixel) would pass a quarter of the cap. See
+  pixel) would pass a quarter of the cap; fills then blend on the 8-bit
+  page. A `--bands` run keeps a shadow only for its own rows. See
   `notes/731-16bit-compositing-shadow.md`.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and

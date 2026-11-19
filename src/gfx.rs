@@ -2207,35 +2207,46 @@ impl Gfx {
                 },
             );
             let stride = w as usize;
-            for run in runs {
+            // A `--bands` run keeps only its own rows, so only they get a
+            // shadow: the rest paint on the 8-bit page as before, and the
+            // bands' shadows add up to one page, not one page each.
+            let (b0, b1) = self.band_rows().unwrap_or((0, h));
+            let skia_rows = |pixmap: &mut Pixmap, run: &crate::coverage::Run, y0: u32, y1: u32| {
+                let r = run.rect;
+                if let Some(rect) =
+                    tiny_skia::Rect::from_ltrb(r.x0 as f32, y0 as f32, r.x1 as f32, y1 as f32)
+                {
+                    let mask = if run.solid { None } else { Some(&cov) };
+                    pixmap.fill_rect(rect, &paint, Transform::identity(), mask);
+                }
+            };
+            for run in &runs {
                 let r = run.rect;
                 let (x0, x1) = (r.x0 as usize, r.x1 as usize);
                 // Fully covered opaque runs go through tiny-skia without the
                 // mask (its memset fast path), so a page-sized fill costs
                 // what it did; the shadow only notes the new colour.
                 if !deep || (run.solid && opaque) {
-                    if let Some(rect) = tiny_skia::Rect::from_ltrb(
-                        r.x0 as f32,
-                        r.y0 as f32,
-                        r.x1 as f32,
-                        r.y1 as f32,
-                    ) {
-                        let mask = if run.solid { None } else { Some(&cov) };
-                        self.pixmap
-                            .fill_rect(rect, &paint, Transform::identity(), mask);
-                    }
+                    skia_rows(&mut self.pixmap, run, r.y0, r.y1);
                     if deep {
                         let color = tiny_skia::PremultipliedColorU8::from_rgba(
                             rgb8[0], rgb8[1], rgb8[2], 255,
                         )
                         .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
-                        for y in r.y0 as usize..r.y1 as usize {
+                        for y in r.y0.max(b0) as usize..r.y1.min(b1) as usize {
                             self.deep.note_opaque(&self.pixmap, y, x0, x1, color);
                         }
                     }
                     continue;
                 }
-                for y in r.y0 as usize..r.y1 as usize {
+                let (d0, d1) = (r.y0.max(b0), r.y1.min(b1).max(r.y0.max(b0)));
+                if r.y0 < d0 {
+                    skia_rows(&mut self.pixmap, run, r.y0, d0.min(r.y1));
+                }
+                if d1 < r.y1 {
+                    skia_rows(&mut self.pixmap, run, d1.max(r.y0), r.y1);
+                }
+                for y in d0 as usize..d1 as usize {
                     let mask = if run.solid {
                         None
                     } else {
@@ -5425,6 +5436,23 @@ mod tests {
             got.abs_diff(want) <= 1,
             "sub-pixel stack: {got}, float {want}"
         );
+    }
+
+    /// A NaN alpha (`setalpha` keeps it; PostScript can make one) paints
+    /// nothing, as its alpha byte of 0 did before the 16-bit shadow, rather
+    /// than a NaN blend cutting a transparent hole.
+    #[test]
+    fn a_nan_alpha_paints_nothing() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(1.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(0.0, 0.0, 1.0);
+        gfx.state_mut().alpha = f32::NAN;
+        stack_rect(&mut gfx, 2.5);
+        for x in 0..4 {
+            let p = gfx.pixmap.pixel(x, 0).expect("pixel");
+            assert_eq!((p.red(), p.blue(), p.alpha()), (255, 0, 255), "pixel {x}");
+        }
     }
 
     /// The shadow follows the page: a stroke (which writes the 8-bit page
