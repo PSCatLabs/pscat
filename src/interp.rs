@@ -2807,7 +2807,7 @@ impl Interp {
     /// limit is asked about that much before anything is built.
     fn decode_sequence(&self, bytes: &[u8]) -> Result<Vec<Object>, PsError> {
         self.check_alloc(bytes.len() / 8 * std::mem::size_of::<Object>())?;
-        decode_sequence(bytes, &self.dstack)
+        decode_sequence(bytes, &self.dstack, Some(&self.decode_budget))
     }
 
     fn scan_one(&self, lexer: &mut Lexer) -> Result<Option<(Object, usize)>, PsError> {
@@ -3979,8 +3979,12 @@ fn resolve_immediate(name: &str, dicts: &[Rc<RefCell<Dict>>]) -> Result<Object, 
 }
 
 /// The top-level objects of a scanned binary object sequence (#733).
-fn decode_sequence(bytes: &[u8], dicts: &[Rc<RefCell<Dict>>]) -> Result<Vec<Object>, PsError> {
-    crate::binobj::decode(bytes, &mut |n| resolve_immediate(n, dicts))
+fn decode_sequence(
+    bytes: &[u8],
+    dicts: &[Rc<RefCell<Dict>>],
+    budget: Option<&crate::limits::DecodeBudget>,
+) -> Result<Vec<Object>, PsError> {
+    crate::binobj::decode(bytes, budget, &mut |n| resolve_immediate(n, dicts))
 }
 
 /// Collect tokens up to the matching `}` into a procedure object. Called
@@ -4005,7 +4009,11 @@ fn scan_procedure(
             Some(Token::LBrace) => items.push(scan_procedure(lexer, depth + 1, dicts)?),
             Some(Token::ImmediateName(n)) => items.push(resolve_immediate(&n, dicts)?),
             Some(Token::BinarySeq(bytes)) => {
-                items.push(Object::procedure(decode_sequence(&bytes, dicts)?));
+                items.push(Object::procedure(decode_sequence(
+                    &bytes,
+                    dicts,
+                    lexer.decode_budget(),
+                )?));
             }
             Some(tok) => items.push(token_to_object(tok)),
         }

@@ -1870,7 +1870,9 @@ renders eight examples in both and compares block-downsampled output).
   array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
   strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
-  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`. The decode charges the
+  interpreter's `DecodeBudget` (#1123, `notes/1123-binary-sequence-decode-limits.md`), so a
+  step or time limit stops a long decode inside it; keep that charge when changing `decode`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

@@ -21,7 +21,8 @@ pub fn lexer(data: &[u8]) {
             // A binary object sequence is only framed by the lexer; decode
             // it too, since the decoder reads untrusted bytes (#733).
             Ok(Some(crate::lexer::Token::BinarySeq(bytes))) => {
-                let _ = crate::binobj::decode(&bytes, &mut |_| Ok(crate::object::Object::int(0)));
+                let _ =
+                    crate::binobj::decode(&bytes, None, &mut |_| Ok(crate::object::Object::int(0)));
             }
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => break,
