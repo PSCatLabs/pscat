@@ -1588,13 +1588,22 @@ pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
 
 /// The glyph whose advance a missing glyph takes on face `fid` (#1115).
 /// Ghostscript's URW faces give `.notdef` the width of a space (278 for
-/// Helvetica, 250 for Times, 600 for Courier), where Liberation's `.notdef`
-/// is a wide box (750, 778 and 600), so unknown glyphs on the faces that
-/// stand in for those (`BUILTINS`) take the `space` advance instead. Every
-/// other face keeps its own `.notdef`.
+/// Helvetica, 250 for Times, 600 for Courier, 250 for Palatino, ...), where
+/// the faces that stand in for them have a wider `.notdef` box (Liberation
+/// 750 and 778, TeX Gyre 500 and 280). So a missing glyph on one of the
+/// standard 35 (`BUILTINS` and [`EMBEDDED`]) takes the `space` advance
+/// instead. Every other face (user and pack fonts) keeps its own `.notdef`.
 fn missing_glyph(face: &Face, fid: i64) -> GlyphId {
-    let builtin = usize::try_from(fid).is_ok_and(|i| i < BUILTINS.len());
-    builtin
+    let standard = match usize::try_from(fid) {
+        Ok(i) if i < BUILTINS.len() => true,
+        Ok(i) => CATALOG
+            .read()
+            .unwrap()
+            .get(i - BUILTINS.len())
+            .is_some_and(|c| EMBEDDED.iter().any(|(k, _)| k.eq_ignore_ascii_case(&c.key))),
+        Err(_) => false,
+    };
+    standard
         .then(|| resolve_glyph(face, "space"))
         .flatten()
         .unwrap_or(GlyphId(0))

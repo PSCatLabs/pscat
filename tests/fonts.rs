@@ -473,7 +473,8 @@ fn glyphshow_on_type3_passes_the_name_or_a_code() {
 /// (an unencoded byte) and `glyphshow` (an unknown name) alike.
 #[test]
 fn a_missing_glyph_advances_by_a_space_as_in_ghostscript() {
-    // (face, gs width at 1000 units, tolerance for TTF rounding)
+    // (face, Ghostscript 10.07's width at 1000 units); the font's own space
+    // width is the rule, TTF/OTF rounding aside (hence the 0.5 tolerance).
     for (face, gs) in [
         ("Helvetica", 278.0),
         ("Helvetica-BoldOblique", 278.0),
@@ -482,6 +483,17 @@ fn a_missing_glyph_advances_by_a_space_as_in_ghostscript() {
         ("Courier", 600.0),
         ("Symbol", 250.0),
         ("ZapfDingbats", 278.0),
+        ("AvantGarde-Book", 277.0),
+        ("AvantGarde-Demi", 280.0),
+        ("Bookman-Demi", 340.0),
+        ("Bookman-Light", 320.0),
+        ("Bookman-LightItalic", 300.0),
+        ("Helvetica-Narrow", 228.0),
+        ("NewCenturySchlbk-Roman", 278.0),
+        ("NewCenturySchlbk-Bold", 287.0),
+        ("Palatino-Roman", 250.0),
+        ("Palatino-BoldItalic", 250.0),
+        ("ZapfChancery-MediumItalic", 220.0),
     ] {
         let mut it = run(&format!(
             "/{face} findfont 1000 scalefont setfont (\\001) stringwidth pop"
