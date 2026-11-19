@@ -219,7 +219,7 @@ fn every_bits_per_sample_reads_the_table() {
             let v: u64 = if c == 1 { (1u64 << bits) - 1 } else { 0 };
             bitstr += &format!("{v:0w$b}", w = bits as usize);
         }
-        while bitstr.len() % 8 != 0 {
+        while !bitstr.len().is_multiple_of(8) {
             bitstr.push('0');
         }
         (0..bitstr.len() / 8)

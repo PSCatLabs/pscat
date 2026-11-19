@@ -2917,8 +2917,12 @@ impl Gfx {
         let comp = self.composite();
         if self.paint_shfill(shader, &region, false, 2, probe)? {
             let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+            // An image embedded in an SVG, not a file pscat writes: no
+            // resolution to record (as in `image.rs`).
+            #[allow(clippy::disallowed_methods)]
+            let encoded = self.svg.is_some().then(|| layer.encode_png());
             if let Some(svg) = &mut self.svg
-                && let Ok(png) = layer.encode_png()
+                && let Some(Ok(png)) = encoded
             {
                 let at = [1.0, 0.0, 0.0, 1.0, bx0 as f32, by0 as f32];
                 svg.image(&png, bw, bh, at, true, comp, &chain);
