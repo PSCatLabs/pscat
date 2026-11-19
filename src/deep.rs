@@ -168,12 +168,13 @@ impl Deep {
         let sa = src.alpha;
         let s = [src.rgb[0] * sa, src.rgb[1] * sa, src.rgb[2] * sa, sa];
         // One loop per case, so the compiler drops the branches it does not
-        // need from each (a page-sized wash runs the solid ones).
+        // need from each.
         match (cov, src.blend) {
-            (None, Blend::Normal) => solid_over(deep, page, s),
-            // Translucent edges: no tiny-skia bytes to match (its alpha was
-            // a byte), so the integer loop.
-            (Some(c), Blend::Normal) if sa < 1.0 => masked_over(deep, page, c, s),
+            // Translucent source-over: the integer loop.
+            (None, Blend::Normal) if sa < 1.0 => over_span::<false>(deep, page, &[], s),
+            (Some(c), Blend::Normal) if sa < 1.0 => over_span::<true>(deep, page, c, s),
+            // The rest: tiny-skia's float operations (its bytes when opaque).
+            (None, Blend::Normal) => blend_span::<false, false>(deep, page, &[], s),
             (None, Blend::Multiply) => blend_span::<false, true>(deep, page, &[], s),
             (Some(c), Blend::Normal) => blend_span::<true, false>(deep, page, c, s),
             (Some(c), Blend::Multiply) => blend_span::<true, true>(deep, page, c, s),
@@ -181,71 +182,53 @@ impl Deep {
     }
 }
 
-/// Source-over of premultiplied `s` at full coverage, in 16-bit integers:
-/// the case a page-sized translucent wash runs, about twice as fast as the
-/// float loop. No tiny-skia bytes to match here (an opaque solid run is
-/// tiny-skia's memset), only the 16-bit precision.
-fn solid_over(deep: &mut [u16], page: &mut [u8], s: [f32; 4]) {
-    // 1 - alpha in Q16 (0..=65536), and the source in 16-bit units.
-    let inv = ((1.0 - s[3]) * 65536.0).round() as u32;
+/// Source-over of premultiplied `s` (translucent) into every pixel of
+/// `page` and its shadow `deep` in 16-bit integers, with coverage `cov` when
+/// `COV` folded into the source and its alpha (source-over is linear in the
+/// source, so that is the same as blending and then interpolating by
+/// coverage). The case a page-sized translucent wash runs, about twice
+/// as fast as the float loop. There are no tiny-skia bytes to match here
+/// (its alpha was a byte), only the 16-bit precision. (Multiply's three
+/// products came out slower in integers than in floats.)
+fn over_span<const COV: bool>(deep: &mut [u16], page: &mut [u8], cov: &[u8], s: [f32; 4]) {
     let s16 = s.map(|v| (v * 65535.0).round() as u32);
-    for (d16, p8) in deep.chunks_exact_mut(4).zip(page.chunks_exact_mut(4)) {
+    for (i, (d16, p8)) in deep
+        .chunks_exact_mut(4)
+        .zip(page.chunks_exact_mut(4))
+        .enumerate()
+    {
+        let sc = if COV {
+            let m = u32::from(cov[i]);
+            if m == 0 {
+                continue;
+            }
+            s16.map(|v| (v * m + 127) / 255)
+        } else {
+            s16
+        };
+        let sa = sc[3];
         let mut stale = false;
         for c in 0..4 {
             stale |= (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() > BUCKET;
         }
-        let mut q = [0_u32; 4];
+        let mut d = [0_u32; 4];
         for c in 0..4 {
-            let d = if stale {
+            d[c] = if stale {
                 u32::from(p8[c]) * 257
             } else {
                 u32::from(d16[c])
             };
-            q[c] = (s16[c] + ((d * inv + 32768) >> 16)).min(65535);
+        }
+        // 1 - alpha in Q16.
+        let inv = 65536 - ((sa << 16) + 32767) / 65535;
+        let mut q = [0_u32; 4];
+        for c in 0..4 {
+            q[c] = (sc[c] + ((d[c] * inv + 32768) >> 16)).min(65535);
         }
         for c in 0..4 {
             let v = if c < 3 { q[c].min(q[3]) } else { q[3] };
             d16[c] = v as u16;
             // Nearest level: within 128 of 257 times it.
-            p8[c] = ((v + 128) / 257) as u8;
-        }
-    }
-}
-
-/// [`solid_over`] through coverage `cov`: the source and its alpha scaled
-/// by each pixel's coverage.
-fn masked_over(deep: &mut [u16], page: &mut [u8], cov: &[u8], s: [f32; 4]) {
-    // The source in 16-bit units times 255, so coverage scales it exactly.
-    let s16 = s.map(|v| (v * 65535.0).round() as u32);
-    for ((d16, p8), &m) in deep
-        .chunks_exact_mut(4)
-        .zip(page.chunks_exact_mut(4))
-        .zip(cov)
-    {
-        if m == 0 {
-            continue;
-        }
-        let m = u32::from(m);
-        let a = (s16[3] * m + 127) / 255;
-        // 1 - a in Q16.
-        let inv = 65536 - ((a << 16) + 32767) / 65535;
-        let mut stale = false;
-        for c in 0..4 {
-            stale |= (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() > BUCKET;
-        }
-        let mut q = [0_u32; 4];
-        for c in 0..4 {
-            let d = if stale {
-                u32::from(p8[c]) * 257
-            } else {
-                u32::from(d16[c])
-            };
-            let sc = if c == 3 { a } else { (s16[c] * m + 127) / 255 };
-            q[c] = (sc + ((d * inv + 32768) >> 16)).min(65535);
-        }
-        for c in 0..4 {
-            let v = if c < 3 { q[c].min(q[3]) } else { q[3] };
-            d16[c] = v as u16;
             p8[c] = ((v + 128) / 257) as u8;
         }
     }

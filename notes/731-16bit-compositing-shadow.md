@@ -34,10 +34,14 @@ downstream changed.
   order (`source_over`/`multiply`, `lerp_u8`, round to nearest even). So
   the edges and glyphs of opaque art render as before; only stacked or
   translucent pixels move.
-- **Three loops.** Translucent source-over runs (solid and masked) blend
-  in integers (16-bit values, `1 - alpha` in Q16), which keeps a page-sized
-  wash near tiny-skia's speed. Opaque masked runs and Multiply use the
-  float loop above, where the tiny-skia match matters.
+- **Two loops.** Translucent source-over runs (solid and masked) blend
+  in integers (16-bit values, `1 - alpha` in Q16, coverage folded into the
+  source), which keeps a page-sized wash near tiny-skia's speed. Opaque
+  runs and Multiply use the float loop above, where the tiny-skia match
+  matters. An opaque source-over pixel at full coverage inside a masked
+  run (the inside of a clipped fill) is written as the colour directly.
+  Multiply in integers (three products over 65535, in `u64`) measured
+  slower than the float loop, so it stays in floats.
 
 ## Memory
 
@@ -78,11 +82,21 @@ base = `feature/0.7.1` at b131039). The control is the base binary run again:
 | gallery/crayon_drawing.ps | 6.34 | 6.36 | 6.29 |
 | gallery/firefly_census.ps | 0.74 | 0.74 | 0.74 |
 
-All within the noise floor. Two synthetic worst cases show the cost of the
-compositing itself: 300 page-sized fills at 0.05 alpha take 0.97 s against
-0.75 s (+29%), and 20,000 small discs at 0.3 alpha 0.14 s against 0.10 s.
-The first float-only version took 7 s on the wash; the integer loops for
-translucent source-over brought it to this.
+All within the noise floor. Synthetic cases at `--dpi 144`, min of 3 CPU
+seconds, base / head / control:
+
+| program | base | head | control |
+|---|---|---|---|
+| 300 page-sized fills at 0.05 alpha | 0.76 | 0.97 | 0.75 |
+| 300 page-sized Multiply fills at 0.05 alpha | 0.99 | 1.61 | 1.00 |
+| 300 opaque page fills inside a circular clip | 0.79 | 0.40 | 0.82 |
+| 20,000 small discs at 0.3 alpha | 0.11 | 0.14 | 0.11 |
+
+The translucent wash and the Multiply wash pay for the extra 16-bit
+read and write on every pixel. A clipped opaque fill got faster, because
+its inside is written as the colour rather than blended. The first,
+float-only version took 7 s on the wash; the integer loop brought it to
+this.
 
 **Render change.** All 232 pages of examples, gallery, selftest drivers and
 site/learn, base binary against head (`scripts/identity_check.sh
