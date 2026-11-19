@@ -4369,8 +4369,8 @@ mod tests {
         it.run_source(&src).expect_err("1 0 div still errors");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive an aborted run"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive an aborted run"
         );
     }
 
@@ -4413,8 +4413,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive a caught stop"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive a caught stop"
         );
         assert_eq!(
             it.load("probe").expect("defined").repr(),
@@ -4446,8 +4446,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own still-open dict, per the PLRM's \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own still-open dict, per the PLRM's \
              stopped-doesn't-restore-the-dict-stack rule -- not eexec's copy, which the \
              program's own `end` already removed, and not popped again by cleanup"
         );
@@ -4474,8 +4474,8 @@ mod tests {
             .expect("plain completion, nothing errors");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own dict left open across eexec's natural \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own dict left open across eexec's natural \
              end -- not eexec's injected copy, which the program's own `end` already removed"
         );
     }
