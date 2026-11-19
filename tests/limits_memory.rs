@@ -692,5 +692,17 @@ fn memory_growth_is_capped() {
         assert_eq!(r, Err(PsError::MemoryExceeded), "{report}");
         assert!(report.contains("OffendingCommand: rectfill;"), "{report}");
         assert_eq!(red, 255, "the refused fill left the page white");
+
+        // A second page's shadow replaces the first's, which the erase
+        // frees first, so a run whose first translucent page fits fits its
+        // second too (Codex round 2 on #1306: the preflight counted both).
+        let mut it = Interp::with_page(1000, 1000).expect("page");
+        it.set_limits(Limits::none().with_max_memory(cap))
+            .expect("the allocator is installed");
+        let page = "0 0 0 setrgbcolor 0.5 setalpha 0 0 1000 1000 rectfill";
+        let r = it.run_str(&format!(
+            "/held [ 1 1 450 {{ pop 60000 string }} for ] def {page} showpage {page}"
+        ));
+        assert_eq!(r, Ok(()), "the second page fits as the first did");
     }
 }

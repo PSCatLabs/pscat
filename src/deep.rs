@@ -104,7 +104,9 @@ impl Deep {
     /// overlap) of a `width` x `height` page would allocate: each row not
     /// yet allocated, and the row table if the shadow does not fit the page
     /// yet. `fresh`: count as if the shadow were cleared first (a pending
-    /// showpage erase). For the memory preflight (#731, Codex round 1).
+    /// showpage erase), less what that clear frees, since the old shadow is
+    /// dropped before the new rows are allocated (Codex round 2). For the
+    /// memory preflight (#731, Codex round 1).
     pub(crate) fn new_bytes(
         &self,
         width: u32,
@@ -131,10 +133,25 @@ impl Deep {
         } else {
             h.saturating_mul(std::mem::size_of::<Vec<u16>>())
         };
-        count
+        let need = count
             .saturating_mul(w)
             .saturating_mul(4 * std::mem::size_of::<u16>())
-            .saturating_add(table)
+            .saturating_add(table);
+        if fresh {
+            need.saturating_sub(self.held_bytes())
+        } else {
+            need
+        }
+    }
+
+    /// The heap the shadow holds now: its row table and allocated rows.
+    fn held_bytes(&self) -> usize {
+        let rows: usize = self
+            .rows
+            .iter()
+            .map(|r| r.capacity() * std::mem::size_of::<u16>())
+            .sum();
+        rows.saturating_add(self.rows.capacity() * std::mem::size_of::<Vec<u16>>())
     }
 
     /// Forget everything: the page was erased or replaced.
