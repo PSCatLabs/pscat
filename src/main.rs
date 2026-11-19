@@ -336,8 +336,11 @@ impl Options {
             interp.trace_operator_shadows();
         }
         // `currentfilename` (#1056) answers with the file as given; `-e`
-        // wins over a file argument, and `-` is stdin, which has no name.
+        // wins over a file argument, `-` is stdin, which has no name, and an
+        // `--interactive` file is a prelude whose name would otherwise
+        // answer for every line typed after it.
         if self.eval.is_none()
+            && !self.interactive
             && let Some(path) = self.file.as_deref().filter(|p| *p != "-")
         {
             interp.set_main_file_name(Some(path));

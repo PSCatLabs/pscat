@@ -1281,7 +1281,7 @@ fn an_installed_library_runs_by_name_over_mcp() {
         .env("PSCAT_NO_CHECKOUT", "1")
         .args(["lib", "install"])
         .arg(&pkg)
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(install.status.success(), "{install:?}");
 
