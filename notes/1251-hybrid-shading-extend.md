@@ -24,4 +24,7 @@ Renders checked with a release build of this branch (no source change under `src
 - `plugin/.claude-plugin/icon.png` and `art/logo/renders/pscat-logo-d-512.png` re-render
   byte-identical (the logo uses no shading).
 
-A grep of `lib/`, `examples/` and `gallery/` found no other shading dict without `/Extend`.
+Not touched (outside this issue's scope): `lib/artkit.ps` `linearsh`/`radialsh` and
+`examples/gradients.ps` also build shading dicts with no `/Extend`; the issue's grep missed them
+because the dict spans lines. They now paint nothing past their ends, as the PLRM and gs do. Whether
+that is what their callers want is a separate question.
