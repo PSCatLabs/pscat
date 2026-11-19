@@ -249,10 +249,12 @@ dependencies = [
 
 [[package]]
 name = "pscat"
-version = "0.7.0-rc.4"
+version = "0.7.0-rc.5"
 dependencies = [
  "flate2",
+ "libc",
  "libm",
+ "memchr",
  "ruzstd",
  "serde_json",
  "sha2",

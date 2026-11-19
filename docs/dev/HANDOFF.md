@@ -1698,8 +1698,8 @@ renders eight examples in both and compares block-downsampled output).
   - Fuzzing: `fuzz/` (own workspace; `cargo +nightly fuzz run interp fuzz/corpus/interp fuzz/seeds/interp`),
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
-    input goes in `fuzz/regressions/<target>/`. Seven targets (#604, #704): `lexer`,
-    `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
+    input goes in `fuzz/regressions/<target>/`. Eight targets (#604, #704, #1134): `lexer`,
+    `check_syntax` (`syntax::check_syntax`, seeded from the lexer's), `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
     `type1_charstring` (decrypted charstring bytes into `type1::run`), `type1_font` (a
     whole PFA through `eexec`/`definefont`, then text in every defined font), `filters`
     (ASCIIHex/85, RunLength, eexec, Flate, LZW, DCT, chained) and `image` (a `%!`
