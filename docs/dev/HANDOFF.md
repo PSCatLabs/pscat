@@ -818,7 +818,8 @@ renders eight examples in both and compares block-downsampled output).
   the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
-  and `run_chain` fields. Tagging procedure bodies with scan positions
+  and `run_chain` fields, and npm's `PostScriptError` into `file` and
+  `runChain` (#1116, parsed the same way). Tagging procedure bodies with scan positions
   would mean a position per array element: not done
   (`notes/1048-identity-operators-run-error-location.md`).
 - `product` `(pscat)`, `version` (the crate version string), `revision`
