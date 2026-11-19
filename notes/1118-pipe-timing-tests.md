@@ -8,8 +8,9 @@ two different causes. Both reproduce on an untouched `feature/0.7.1`.
 
 **Pipe deadlocks (the first two).** On this Mac a pipe held 512 bytes, not
 the usual 16-64 KB: the kernel falls back to that when system pipe memory is
-exhausted (measured with a non-blocking write loop on `os.pipe()`; a
-long-running stray `pscat` process was holding it). A test that is correct on
+exhausted (measured with a non-blocking write loop on `os.pipe()`). What
+exhausted it is not known: the 11-day `pscat` spinning at 98% CPU that issue
+comments blame holds no pipes (`lsof`), and no other cause was found. A test that is correct on
 a normal pipe then deadlocks:
 
 - `concurrent_replies_never_interleave` writes about 3 KB of requests before
@@ -27,7 +28,8 @@ a normal pipe then deadlocks:
 
 **First run of a fresh binary (the third).** `review_sheet` runs the sibling
 `pscat` inside the server's 1 s budget. On macOS the first run of a freshly
-built binary waits 1-8 s for the system's security assessment, using no CPU
+built binary waits 1-8 s, most likely for the system's security
+assessment, using no CPU
 (`time` shows 0.00 s user and 8 s real), so a test run right after a build
 timed out. Fix: the test runs `pscat --version` first, outside the budget.
 What is left is plain contention against a 1 s clock (3 misses in 40 runs
