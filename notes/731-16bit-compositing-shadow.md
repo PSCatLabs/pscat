@@ -66,7 +66,34 @@ opaque 0.05 px rectangles) and `the_shadow_follows_strokes_and_new_pages`.
 
 ## Cost
 
-CORPUS_AND_PERF_PLACEHOLDER
+**Speed.** CPU seconds (`scripts/bench_compare.sh`, min of 3, `--dpi 144`,
+base = `feature/0.7.1` at b131039). The control is the base binary run again:
+
+| file | base | head | control |
+|---|---|---|---|
+| gallery/alpine_lake.ps (watercolor washes) | 21.42 | 21.49 | 20.34 |
+| gallery/first_rain.ps | 0.20 | 0.19 | 0.19 |
+| gallery/chalkboard_lecture.ps | 4.81 | 4.81 | 4.82 |
+| gallery/time_traveler_memo.ps (typed text) | 3.33 | 3.24 | 3.23 |
+| gallery/crayon_drawing.ps | 6.34 | 6.36 | 6.29 |
+| gallery/firefly_census.ps | 0.74 | 0.74 | 0.74 |
+
+All within the noise floor. Two synthetic worst cases show the cost of the
+compositing itself: 300 page-sized fills at 0.05 alpha take 0.97 s against
+0.75 s (+29%), and 20,000 small discs at 0.3 alpha 0.14 s against 0.10 s.
+The first float-only version took 7 s on the wash; the integer loops for
+translucent source-over brought it to this.
+
+**Render change.** All 232 pages of examples, gallery, selftest drivers and
+site/learn, base binary against head (`scripts/identity_check.sh
+--base-bin/--head-bin --files`): 136 move, by at most 4 levels; 133 of
+them by at most 3, and the mean change on changed pixels is about 1.0
+level. The changed pixels are translucent ones (the alpha is now exact,
+not a byte) and edges that a second fill blends over (a shared edge, an
+overlapping glyph), now blended from the 16-bit value. The largest are
+paintkit's wet demos (`paintkit_wet_pull_demo`: max 4, 27 pixels over 2
+levels). Nothing is visible at a glance; a deep stack of faint fills, as
+in the issue's splat clouds, is where the change shows.
 
 ## Not done
 
