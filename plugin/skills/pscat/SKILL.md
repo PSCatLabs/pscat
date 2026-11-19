@@ -233,8 +233,20 @@ the per-user data directory, so a library installed there works over MCP too;
 another directory needs the server's `--allow-read` (see
 [references/mcp.md](references/mcp.md)). The full list:
 [Where pscat finds its files](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files).
-A program cannot ask for the name of the file it is running, so a library that
-loads sibling files needs its directory passed in.
+
+**Install a library of your own** with `pscat lib install DIR [--name NAME]`: it
+copies DIR's files to `lib/NAME/` in the per-user data directory (in
+`$PSCAT_HOME` if that is set; the command prints where), and
+`(lib/NAME/x.ps) run` then works from any directory, in the CLI and over MCP.
+`pscat lib list` shows what is installed. Running it again replaces the package
+(files DIR no longer has are removed). NAME may not match a built-in library
+(`artkit`, `qr`, ...), so an install cannot shadow one. `currentfilename`
+(`- currentfilename string`, a pscat extension: not in Ghostscript, probe with
+`systemdict /currentfilename known`) returns the name the running file was
+loaded by, so a library can load siblings: read it at the file's top level
+(`/mydir currentfilename dirname def`, with your own `dirname`), because a
+procedure called later reports its caller's file. It is `undefined` for `-e`,
+stdin and the main program of an MCP call.
 
 ## QR codes (lib/qr.ps)
 

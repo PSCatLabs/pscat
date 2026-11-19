@@ -1899,6 +1899,24 @@ renders eight examples in both and compares block-downsampled output).
   An executable string or file met as an element of a running procedure runs as source, as in gs
   (`ProcStep::Src`, `Interp::proc_source`, #1122, `notes/1122-executable-strings-in-procedures.md`), which
   is also why `token`'s array runs a sequence's executable strings.
+- **`currentfilename` and `pscat lib install` (#1056).** `currentfilename` (a pscat
+  extension, `- currentfilename string`) answers with the name of the file the error
+  report's `Line:` would name: the innermost `run` file's `Lexer::run_name`, else the main
+  program's name, which the CLI hands `Interp::set_main_file_name` from `Options::new_interp`
+  (a file argument, not `-e`, not `-`). The main name is deliberately **not** `run_name`: a
+  main-program line must stay a bare number in `error_location` and in the MCP server's
+  `Line:` parser. Strings, eexec streams and exec'd file objects are skipped, so the answer
+  is the file around them; it is the file running *now*, so a library reads it at its top
+  level. `pscat lib install DIR [--name NAME]` / `pscat lib list` (`src/subcmd/lib_pkg.rs`)
+  copy a package to `lib/NAME/` under `Roots::lib_install_dir` (`$PSCAT_HOME`, else the
+  per-user data directory, as `pscat fonts install` chooses). They change **nothing** about
+  the `lib/` search order or the read roots (pscat-mcp#87/#92 depend on that): a file in
+  that directory outranks the compiled-in copy, which is exactly why `install` refuses any
+  NAME (compared case-insensitively) or file that matches a compiled-in `lib/` entry,
+  copies only regular files (a symlink would carry a file from outside into a directory
+  the MCP server may read), and swaps a re-install in from a staging directory so no stale
+  file survives. `tests/lib_pkg.rs` (shadow test included) and the `mcp.rs` test pin it.
+  See `notes/1056-currentfilename-and-lib-install.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

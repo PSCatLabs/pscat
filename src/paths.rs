@@ -268,6 +268,17 @@ impl Roots {
             .collect()
     }
 
+    /// Where `pscat lib install` puts a package: `lib/` under `$PSCAT_HOME`
+    /// (or `$PSCAT_ROOT`), otherwise under the per-user data directory,
+    /// the same choice [`Roots::pack_install_dir`] makes. Both are places
+    /// the `lib/` search reads and the MCP server may read.
+    pub fn lib_install_dir(&self) -> Option<PathBuf> {
+        self.home
+            .as_ref()
+            .or(self.user_data.as_ref())
+            .map(|r| r.join("lib"))
+    }
+
     /// Where `pscat fonts install` writes: `$PSCAT_HOME` (or
     /// `$PSCAT_ROOT`), otherwise the per-user data directory.
     pub fn pack_install_dir(&self) -> Option<PathBuf> {
@@ -737,6 +748,9 @@ mod tests {
             Some(PathBuf::from("/data/fonts/packs"))
         );
         assert_eq!(Roots::default().pack_install_dir(), None);
+        assert_eq!(roots.lib_install_dir(), Some(PathBuf::from("/home/lib")));
+        assert_eq!(no_home.lib_install_dir(), Some(PathBuf::from("/data/lib")));
+        assert_eq!(Roots::default().lib_install_dir(), None);
     }
 
     #[test]

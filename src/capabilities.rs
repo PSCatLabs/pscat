@@ -533,6 +533,15 @@ static ENTRIES: &[Entry] = &[
         BUILTIN
     ),
     entry!(
+        "currentfilename",
+        CapabilityKind::Operator,
+        "pscat extension (#1056); Ghostscript has no such operator, so probe with systemdict /currentfilename known. The name of the file being run, exactly as the program or the command line gave it (lib/mylib/main.ps for a library, the path as written for run); the file an error report's Line: names. A procedure called later reports the file running at that moment, so read it at the library file's top level to find sibling files. undefined where no named file runs (-e, stdin, the REPL, an MCP tool call's program).",
+        &[],
+        SYSTEMDICT,
+        "- currentfilename string",
+        BUILTIN
+    ),
+    entry!(
         "noiseseed",
         CapabilityKind::Operator,
         "pscat extension. Seeds the native noise table from an integer; never touches rand. A fresh interpreter behaves as if 0 noiseseed had run. nrseed is the PostScript twin.",

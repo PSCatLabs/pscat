@@ -2,6 +2,8 @@
 //! `pscat photo-etch` (issue #600), ports of `scripts/handwrite.sh`,
 //! `scripts/typewrite.sh` and `scripts/photo_etch.sh`; and `pscat chalk`
 //! (issue #555), a front over the `pscat::chalk` driver generator; and
+//! `pscat lib` (issue #1056), which installs a library of your own where
+//! `(lib/NAME/x.ps) run` finds it, and lists what is installed; and
 //! `pscat sheet` (issue #693), a labelled review sheet of several files at
 //! several sizes, which composes finished renders rather than driving a library.
 //!
@@ -29,6 +31,7 @@ use crate::Options;
 
 mod chalk;
 mod handwrite;
+mod lib_pkg;
 mod photo_etch;
 mod sheet;
 mod typewrite;
@@ -44,6 +47,7 @@ pub(crate) fn dispatch(mut args: impl Iterator<Item = String>) -> Option<ExitCod
         "photo-etch" => photo_etch::run,
         "chalk" => chalk::run,
         "sheet" => sheet::run,
+        "lib" => lib_pkg::run,
         _ => return None,
     };
     let cmd = first;

@@ -32,6 +32,24 @@ operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 known` in code that must run in both. Also pscat-only: `gstate .sameclip
 bool` (is the clip in force the one the gstate captured).
 
+## currentfilename: where a library was loaded from (pscat extension)
+
+```postscript partial
+currentfilename           % - currentfilename string
+% (lib/mylib/main.ps) run, inside that file:  /dir currentfilename dirname def
+```
+
+The name of the file being run, exactly as the program or the command line gave
+it: `lib/mylib/main.ps` for a library, the path as written to `run`, the file
+argument as written for the main program. It is the file an error report's
+`Line:` names. It raises `undefined` where no named file runs (`-e`, stdin,
+the REPL, an MCP tool call's program), and a call from a procedure reports the
+file running at that moment, its caller's. So read it at the library file's top
+level, and build sibling paths from that (the dirname and concat procedures are
+in [getting-started.md](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files)).
+Not a PLRM operator: probe with `systemdict /currentfilename known`. Pair it
+with `pscat lib install DIR` (SKILL.md, "Where `(lib/...) run` finds a file").
+
 ## Noise: gnoise2 / fbm2 / ... (pscat extensions)
 
 ```postscript partial

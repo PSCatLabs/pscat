@@ -442,6 +442,12 @@ pub struct Interp {
     /// [`Interp::trace_operator_shadows`] turned tracing on (issue #1109);
     /// `None` otherwise, which costs `def` one branch.
     shadow_trace: Option<Box<crate::lint::ShadowTrace>>,
+    /// The file the CLI gave as the main program (issue #1056), for
+    /// `currentfilename`. Kept apart from `Lexer::run_name` so that a
+    /// main-program line stays a bare number in error reports. Set only
+    /// by [`Interp::set_main_file_name`]; `None` for `-e`, stdin and
+    /// library users.
+    main_file_name: Option<Rc<str>>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `step_n` before it unwinds the execution
@@ -781,6 +787,7 @@ impl Interp {
             last_line: None,
             last_file: None,
             shadow_trace: None,
+            main_file_name: None,
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
@@ -2924,6 +2931,31 @@ impl Interp {
             Frame::Scanner(lx) => lx.file().cloned(),
             _ => None,
         })
+    }
+
+    /// Name the main program's file, as the command line gave it, so that
+    /// `currentfilename` can return it while that program's own text is
+    /// being read (issue #1056). Error reports do not use it: a main-program
+    /// line stays a bare number. Persists across runs on this interpreter.
+    pub fn set_main_file_name(&mut self, name: Option<&str>) {
+        self.main_file_name = name.map(Rc::from);
+    }
+
+    /// `currentfilename`: the name of the file whose text is being read,
+    /// the one an error report's `Line:` would name. The innermost `run`
+    /// file's name as the program gave it, or the main program's name if
+    /// the CLI set one. Executable strings, eexec streams and file objects
+    /// executed directly are skipped, as for `currentfile`: the answer is
+    /// the file around them. `None` outside any named file.
+    pub(crate) fn current_file_name(&self) -> Option<Rc<str>> {
+        self.estack.iter().rev().find_map(|f| match f {
+            Frame::Scanner(lx) => match lx.run_name() {
+                Some(name) => Some(Some(name.clone())),
+                None if lx.is_main() => Some(self.main_file_name.clone()),
+                None => None,
+            },
+            _ => None,
+        })?
     }
 
     /// `eexec`: run a decrypting view of `file` as program source, with

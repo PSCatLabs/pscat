@@ -1246,6 +1246,77 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     assert!(!up.contains("away"), "{up}");
 }
 
+/// `pscat lib install` (#1056) puts a package where `(lib/NAME/x.ps) run`
+/// works over MCP too, with the read roots and the search order unchanged:
+/// the install directory is one of the server's own roots, and the program
+/// still cannot read outside them or shadow the compiled-in library.
+#[test]
+fn an_installed_library_runs_by_name_over_mcp() {
+    let base = common::scratch_dir("mcp-lib-install");
+    let home = base.join("home");
+    let cwd = base.join("project");
+    let outside = base.join("outside");
+    let pkg = base.join("src/mypkg");
+    for d in [&cwd, &outside, &pkg] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
+    std::fs::write(
+        pkg.join("main.ps"),
+        "/dirname { dup length { dup 0 eq { pop pop () exit } if \
+         1 sub 2 copy get 47 eq { 1 add 0 exch getinterval exit } if } loop } def\n\
+         /concat { /b exch def /a exch def a length b length add string \
+         dup 0 a putinterval dup a length b putinterval } def\n\
+         currentfilename dirname (sib.ps) concat run\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("sib.ps"),
+        "(sibling of ) print currentfilename print\n",
+    )
+    .unwrap();
+    let install = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(&base)
+        .env("PSCAT_HOME", &home)
+        .env("PSCAT_NO_CHECKOUT", "1")
+        .args(["lib", "install"])
+        .arg(&pkg)
+        .output()
+        .unwrap();
+    assert!(install.status.success(), "{install:?}");
+
+    let env = [
+        ("PSCAT_HOME", home.to_str().unwrap()),
+        ("PSCAT_NO_CHECKOUT", "1"),
+    ];
+    let mut pscat_mcp = std::process::Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+    pscat_mcp.envs(env);
+    let mut pscat_sub = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"));
+    pscat_sub.arg("mcp").envs(env);
+    // The standalone server and `pscat mcp`, from a directory that holds
+    // neither the package nor a lib/.
+    for cmd in [pscat_mcp, pscat_sub] {
+        let mut s = Server::spawn(cmd, &cwd, &[]);
+        initialized(&mut s);
+        let result = s.tool(
+            "eval_postscript",
+            json!({ "source": "(lib/mypkg/main.ps) run" }),
+        );
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(texts(&result)[0], "sibling of lib/mypkg/sib.ps", "{result}");
+        // The program itself has no file name.
+        assert_eq!(eval_error(&mut s, "currentfilename"), "undefined");
+        // Read roots are what they were: outside them is still refused.
+        let away = common::ps_path(&outside.join("away.ps"));
+        assert_eq!(
+            eval_error(&mut s, &format!("({away}) run")),
+            "invalidfileaccess"
+        );
+        // And the bundled library is still the compiled-in one.
+        assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+    }
+}
+
 /// `string status` (#952) must not become a way to probe for files the read
 /// roots keep a program from opening: outside them it answers `false`, with
 /// no error, exactly as for a missing file.
