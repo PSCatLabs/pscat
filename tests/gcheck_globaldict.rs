@@ -172,13 +172,6 @@ fn deviation_a_composite_made_in_global_mode_is_reported_local() {
     }
 }
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn harness(cases: &[String]) -> String {
     let mut src = String::from(
         "/T { mark exch stopped { $error /errorname get == clear } { ] == } ifelse } def\n",
@@ -212,8 +205,7 @@ fn run_gs(dir: &Path, program: &str) -> String {
 
 #[test]
 fn the_probes_agree_with_ghostscript() {
-    if !gs_available() {
-        eprintln!("skipping: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let cases: Vec<String> = PROBES.iter().map(|(src, _)| src.to_string()).collect();
