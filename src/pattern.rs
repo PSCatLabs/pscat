@@ -373,6 +373,7 @@ pub(crate) fn capture_to_gs(
 }
 
 impl PatternTile {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: usize,
         context: usize,
