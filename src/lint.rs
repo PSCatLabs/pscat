@@ -473,17 +473,17 @@ fn check_stack_leaks(interp: &Interp, render_checks: bool, findings: &mut Vec<Li
             });
         }
     }
-    // systemdict + userdict are the permanent baseline (see
+    // systemdict, globaldict and userdict are the permanent baseline (see
     // `Interp::pop_dict`); anything deeper is an unmatched `begin` —
     // true regardless of whether a render was requested, unlike the
     // operand stack, so this isn't gated by `render_checks`.
     let dict_depth = interp.dict_stack_len();
-    if dict_depth > 2 {
+    if dict_depth > crate::interp::PERMANENT_DICTS {
         findings.push(LintFinding {
             check: "dict-leak",
             message: format!(
                 "{} dictionary(ies) still open at the end of the program (missing `end`)",
-                dict_depth - 2
+                dict_depth - crate::interp::PERMANENT_DICTS
             ),
         });
     }

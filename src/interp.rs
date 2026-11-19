@@ -160,7 +160,7 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
 /// The dictionaries that are always on the dictionary stack, bottom first:
 /// systemdict, globaldict (#1159), userdict. `end` and `cleardictstack`
 /// never go below them, and `countdictstack` is 3 at the start, as in gs.
-const PERMANENT_DICTS: usize = 3;
+pub(crate) const PERMANENT_DICTS: usize = 3;
 
 enum Frame {
     /// Tokens being scanned incrementally from program source.
