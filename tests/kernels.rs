@@ -505,14 +505,14 @@ fn many_names_program(names: usize, joins: usize) -> String {
 /// flaked on the Windows runner, which is several times slower and noisier
 /// than the machine it was tuned on (and times wall-clock there: see
 /// `common::thread_cpu_time`). The number of joins is held fixed and the
-/// names in scope grow 4x. A join costing about the names costs 4x as much
-/// then (less, with the fixed part); the old scan per name per join costs
-/// about 15x (measured on the pre-#1094 compiler: 15x, 1.1 s to 16.7 s). Both
-/// hold on any machine, so the bound sits between, at 10x (healthy runs
-/// measured 3-6x, 20 runs under load). Each
-/// side is the best of several runs, so a slow outlier costs a retry and a
-/// real regression is slow every time. The loose absolute backstop below
-/// still catches a catastrophe (the old compile took seconds).
+/// names in scope grow 4x. A join costing about the names costs about 4x as
+/// much then (3-6x measured); the old scan per name per join costs about 15x
+/// (measured on the pre-#1094 compiler: 1.1 s to 16.7 s). Both hold on any
+/// machine, so the bound sits between, at 10x. Each side is the best of
+/// five runs, so a slow outlier is absorbed and a real regression is slow
+/// every time. The loose absolute backstop below still catches a
+/// catastrophe (the old compile took seconds). Growth in the join count
+/// alone is covered by `a_long_chain_of_merges_compiles_in_linear_time`.
 #[test]
 fn joins_over_many_names_compile_in_linear_time() {
     const JOINS: usize = 1000;

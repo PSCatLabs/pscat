@@ -11,12 +11,17 @@ with the names in scope at 1,000 and at 4,000, holding the join count at 1,000,
 takes the best of 5 CPU times for each, and asserts the ratio is under 10.
 A slower or noisier machine scales both sides, so the ratio holds; best-of-5
 absorbs one slow sample. A loose absolute backstop (1.5 s for 1,000 joins over
-4,000 names, 15x the Mac figure) stays for a catastrophic regression.
+4,000 names, 17-23x the Mac figure) stays for a catastrophic regression.
 
 **Why hold the joins fixed.** The first draft grew names and joins together.
 That is quadratic even in the fixed compiler (measured 14.5x for 4x), which is
-too close to a regression to separate. Per join cost is what #1094 made linear in the names, so only the names
-vary.
+too close to a regression to separate. Per-join cost is what #1094 made
+linear in the names, so only the names vary. Growth in the join count alone
+is covered by `a_long_chain_of_merges_compiles_in_linear_time`.
+
+The ratio does not catch a mild superlinear exponent (n^1.5 gives 8x, under
+the bound), and the backstop is looser than the old 400 ms budget. That is the
+trade for a test that does not flake.
 
 **Measured** (`--profile ci`, M-series Mac):
 
