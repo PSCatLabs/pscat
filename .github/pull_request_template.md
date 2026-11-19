@@ -1,14 +1,35 @@
 <!--
 Only when the owner must act on this PR (it touches a .github/CODEOWNERS path, the reviewer agent
-failed a visible change twice, or a design choice is the owner's), copy this block to the very top,
-outside the comment. Put images inline, pinned to a commit SHA, never a branch:
-https://github.com/PSCatLabs/pscat/blob/<sha>/<path>?raw=true
+failed a visible change twice, or a design choice is the owner's), copy the block below to the very
+top of the body, outside this comment, and fill it in. It is the same Decision block the work-issue
+skill writes; the full rules (and why each line is there) are in
+.claude/skills/work-issue/references/perceptual-review.md, "The Decision block". The owner reads it
+cold, often days later, so it must stand alone: link the issues, explain any jargon, give full URLs
+and exact values. Pin images to a commit SHA, never a branch. A PR that changes no output says
+"no visible change" instead of a table. A PR that needs nothing beyond the merge says "Nothing to do
+but merge" and drops the steps.
 
 ## Decision
 
-- **Look at:** the one thing to check, in plain words
-- **Choice:** merge as is | A or B | ...
-- **Recommendation:** what you recommend, and why, in one line
+**Source issue:** #<N> (<what it asks for, in a few words>), part of #<M> (<what the parent is>). Related: #<X> (<what>).
+
+**Why this PR exists.** <the problem, in plain words>
+
+**Merge is yours** (tier c: <the CODEOWNERS paths it touches>). CI is <green | state>. Codex: <rounds and verdict | combined wave review (dispatcher)>.
+
+- **Look at:** <the one thing to check, in plain words>
+- **Choice:** <merge as is | A or B | ...>
+- **Recommendation:** <what you recommend, and why, in one line; whether the steps below are required or optional>
+
+### What to do (omit when merging as is needs nothing)
+1. Open <full URL>.
+2. Click **<button>**. In <field> type `<exact value>`.
+3. **Do not click <button>:** <what it would do>.
+4. A good result looks like <...>; a bad one <...>. If bad, comment on <PR or issue link>.
+
+| before | after |
+|---|---|
+| ![before](https://github.com/PSCatLabs/pscat/blob/<sha>/<path>?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/<sha>/<path>?raw=true) |
 -->
 ## Summary
 
