@@ -421,8 +421,8 @@ fn a_file_put_reads_through_the_read_roots() {
 // ---------------------------------------------------------------------
 // CLI and wasm write the same bytes.
 //
-// The `npm` CI workflow runs only `tests/wasm.rs` with the wasm target
-// installed; elsewhere this skips, as tests/wasm.rs does.
+// The `npm` CI workflow runs `wasm_pdfmark_document_matches_the_cli` (#1104)
+// with the wasm target installed; elsewhere this skips, as tests/wasm.rs does.
 // ---------------------------------------------------------------------
 
 fn root() -> &'static std::path::Path {

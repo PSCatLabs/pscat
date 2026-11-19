@@ -2,7 +2,9 @@
 # (scripts/build_npm.sh, the same wasm build as the site's playground), run
 # its API tests, compare the wasm pages with the native renderer's
 # (tests/wasm.rs, which the `test` job skips for want of the wasm target),
-# then install the packed tarball into a fresh project and render with it.
+# check that a PDF with pdfmark is byte-identical from the CLI and wasm
+# (tests/pdf_pdfmark.rs, #1104), then install the packed tarball into a
+# fresh project and render with it.
 # build_npm.sh --pack also checks the tarball's file list and size budget.
 #
 # Not in `required_status_checks` (SDLC.md): it starts only when a pull
@@ -27,6 +29,7 @@ on:
       - "scripts/test_npm_tarball.sh"
       - "scripts/release_stages.py"
       - "tests/wasm.rs"
+      - "tests/pdf_pdfmark.rs"
       - "LICENSE-*"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/assets.json"
@@ -49,6 +52,7 @@ on:
       - "scripts/test_npm_tarball.sh"
       - "scripts/release_stages.py"
       - "tests/wasm.rs"
+      - "tests/pdf_pdfmark.rs"
       - "LICENSE-*"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/assets.json"
@@ -92,6 +96,17 @@ jobs:
         run: npm test
       - name: wasm pages match the native renderer
         run: cargo test --profile ci --test wasm
+      # The test skips (passes without checking) when the wasm target or node
+      # is missing. Here that must fail: grep for its skip line and fail on it.
+      - name: pdfmark PDF is byte-identical from the CLI and wasm
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --profile ci --test pdf_pdfmark -- --exact wasm_pdfmark_document_matches_the_cli --nocapture 2>&1 | tee pdfmark-wasm.log
+          if grep -q 'skipping wasm parity' pdfmark-wasm.log; then
+            echo "::error::the wasm pdfmark parity check was skipped in CI"
+            exit 1
+          fi
       - name: Install the tarball into a fresh project and render
         run: ./scripts/test_npm_tarball.sh pack/pscat-*.tgz
       - name: Size
