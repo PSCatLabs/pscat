@@ -1967,13 +1967,16 @@ renders eight examples in both and compares block-downsampled output).
   per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
-  with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
-  `zoom_nearest`). It repeats `src/subcmd/sheet.rs`'s composition loop and its
-  two type sizes (`SHEET_LABEL_PX`, `SHEET_CAPTION_PX`), so a change to the CLI
-  sheet's look must change both; `tests/mcp.rs`
-  `review_sheet_is_byte_identical_to_pscat_sheet` fails when they drift. The
-  fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
-  composer in the library (see `notes/708-mcp-review-sheet.md`).
+  with `pscat::contact_sheet::{SheetPlan, compose_sheet}`, the one composition
+  path (#744) that `pscat sheet` draws with too: layout, labels, captions,
+  frames, zoom, mats and the two type sizes (`LABEL_PX`, `CAPTION_PX`) live there
+  once. Each caller describes its cells (`SheetRow`/`SheetCell`), makes a plan
+  (which sizes the text and the layout before any cell renders, so the caller can
+  refuse an oversized sheet), and gives `compose_sheet` a closure that renders one
+  cell; only the rendering (in process for the CLI, a limited child for the tool)
+  and the caller's own size caps and error wording stay separate.
+  `tests/mcp.rs` `review_sheet_is_byte_identical_to_pscat_sheet` still pins the
+  two together (see `notes/708-mcp-review-sheet.md`, `notes/744-shared-contact-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz, functional-postscript; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
