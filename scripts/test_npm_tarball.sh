@@ -8,7 +8,7 @@
 # Checks: it installs with no install scripts; `import 'pscat'` resolves
 # through the exports map to the Node entry and renders a page (pixels and
 # output) and records SVG and PDF; the embedded lib/ loads; a PostScript error is a PostScriptError;
-# `pscat/pscat.wasm` and `pscat/package.json` resolve; `pscat/pscat.global.js` (#1025) parses as a
+# `pscat/node.js` resolves (CJS and ESM) and imports (#1163); `pscat/pscat.wasm` and `pscat/package.json` resolve; `pscat/pscat.global.js` (#1025) parses as a
 # classic script and renders through the `pscat` global it defines. Unless --no-types,
 # a TypeScript consumer type-checks against index.d.ts (needs the network
 # once, for the pinned typescript).
@@ -35,6 +35,7 @@ EOF
 cat > consumer.mjs <<'EOF'
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { createRenderer, PostScriptError } from 'pscat';
 import pkg from 'pscat/package.json' with { type: 'json' };
@@ -59,6 +60,12 @@ r.render('0 0 1 setrgbcolor 10 10 50 50 rectfill', { width: 100, height: 100, sv
 assert.match(r.svg(0), /^<svg /);
 assert.ok(new TextDecoder().decode(r.pdf().slice(0, 5)) === '%PDF-');
 assert.ok(import.meta.resolve('pscat/pscat.wasm').endsWith('/node_modules/pscat/pscat.wasm'));
+// The Node entry by its subpath (#1150): CJS and ESM resolution both reach it, and it imports.
+const cjs = createRequire(import.meta.url);
+assert.ok(cjs.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
+assert.ok(import.meta.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
+const nodeEntry = await import('pscat/node.js');
+assert.equal(typeof nodeEntry.createRenderer, 'function');
 // The classic-script build: a script that is not a module (vm.Script would throw on one).
 const globalSrc = await readFile(new URL(import.meta.resolve('pscat/pscat.global.js')), 'utf8');
 assert.doesNotThrow(() => new vm.Script(globalSrc));
