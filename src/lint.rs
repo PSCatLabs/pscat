@@ -532,9 +532,9 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
         let Some(now) = system.borrow().get(name) else {
             continue;
         };
-        if matches!(now.value, Value::Operator(_)) {
-            continue;
-        }
+        // `shadow_kind` lets the same operator through, so a different
+        // one stored over it is reported, as in userdict (Codex round 1
+        // on #1323: `/sub /add load store` was skipped).
         let Some(kind) = shadow_kind(&original, &now) else {
             continue;
         };
@@ -1161,6 +1161,19 @@ mod tests {
             found[0].contains("when the program reached line 1, replacing"),
             "{found:?}"
         );
+    }
+
+    #[test]
+    fn another_operator_stored_into_systemdict_is_flagged() {
+        // Codex round 1 on #1323: `sub` now adds; an operator stored over
+        // itself is still no shadow.
+        let found = shadow_messages(&run("/sub /add load store"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with("/sub was redefined as an operator in systemdict"),
+            "{found:?}"
+        );
+        assert!(shadow_messages(&run("/sub /sub load store")).is_empty());
     }
 
     #[test]
