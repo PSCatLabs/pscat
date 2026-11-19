@@ -60,6 +60,8 @@ test('a PostScript error is a PostScriptError naming the error, and the renderer
     assert.equal(e.errorName, 'undefined');
     assert.equal(e.command, 'bogus');
     assert.equal(e.line, 1);
+    assert.equal(e.file, undefined);
+    assert.equal(e.runChain, undefined);
     assert.equal(e.output, 'before');
     assert.match(e.report, /^%%\[ Error: undefined;/);
     assert.deepEqual(e.warnings, []);
@@ -69,6 +71,42 @@ test('a PostScript error is a PostScriptError naming the error, and the renderer
   assert.throws(() => r.render('{ 1 2'), { errorName: 'syntaxerror' });
   assert.throws(() => r.render('pop'), { errorName: 'stackunderflow' });
   assert.equal(r.render('0 0 5 5 rectfill', { width: 10, height: 10 }).width, 10);
+});
+
+test('PostScriptError reads the file and run chain of an error inside a run file (#1116)', () => {
+  const e = new PostScriptError(
+    '%%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); Run chain: inner3.ps:5 <- outer.ps:2 <- line 1 ]%%',
+  );
+  assert.equal(e.errorName, 'undefinedresult');
+  assert.equal(e.command, 'div');
+  assert.equal(e.line, 5);
+  assert.equal(e.file, 'inner3.ps');
+  assert.equal(e.runChain, 'inner3.ps:5 <- outer.ps:2 <- line 1');
+  // A hint line after the report changes nothing, and a name with a space or
+  // a parenthesis is kept whole.
+  const odd = new PostScriptError('%%[ Error: undefined; OffendingCommand: x; Line: 2 (my (odd) file.ps) ]%%\nhint');
+  assert.equal(odd.line, 2);
+  assert.equal(odd.file, 'my (odd) file.ps');
+  assert.equal(odd.runChain, undefined);
+  // A main-program report has neither.
+  const main = new PostScriptError('%%[ Error: undefined; OffendingCommand: bogus; Line: 1 ]%%');
+  assert.equal(main.file, undefined);
+  assert.equal(main.runChain, undefined);
+  assert.equal(new PostScriptError('').file, undefined);
+});
+
+test('an error inside a run file names the file and the run chain (#1116)', async () => {
+  const r = await createRenderer();
+  // Shadow `def` so the first definition inside the bundled lib file fails.
+  assert.throws(() => r.render('/def { bogus } def (lib/artkit.ps) run', { width: 10, height: 10 }), (e) => {
+    assert.ok(e instanceof PostScriptError);
+    assert.equal(e.errorName, 'undefined');
+    assert.equal(e.command, 'bogus');
+    assert.equal(e.file, 'lib/artkit.ps');
+    assert.equal(e.line, 66);
+    assert.equal(e.runChain, 'lib/artkit.ps:66 <- line 1');
+    return true;
+  });
 });
 
 test('the stepped API ends on the same page render() draws', async () => {
