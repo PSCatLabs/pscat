@@ -170,6 +170,9 @@ impl Deep {
         // need from each (a page-sized wash runs the solid ones).
         match (cov, src.blend) {
             (None, Blend::Normal) => solid_over(deep, page, s),
+            // Translucent edges: no tiny-skia bytes to match (its alpha was
+            // a byte), so the integer loop.
+            (Some(c), Blend::Normal) if sa < 1.0 => masked_over(deep, page, c, s),
             (None, Blend::Multiply) => blend_span::<false, true>(deep, page, &[], s),
             (Some(c), Blend::Normal) => blend_span::<true, false>(deep, page, c, s),
             (Some(c), Blend::Multiply) => blend_span::<true, true>(deep, page, c, s),
@@ -203,6 +206,45 @@ fn solid_over(deep: &mut [u16], page: &mut [u8], s: [f32; 4]) {
             let v = if c < 3 { q[c].min(q[3]) } else { q[3] };
             d16[c] = v as u16;
             // Nearest level: within 128 of 257 times it.
+            p8[c] = ((v + 128) / 257) as u8;
+        }
+    }
+}
+
+/// [`solid_over`] through coverage `cov`: the source and its alpha scaled
+/// by each pixel's coverage.
+fn masked_over(deep: &mut [u16], page: &mut [u8], cov: &[u8], s: [f32; 4]) {
+    // The source in 16-bit units times 255, so coverage scales it exactly.
+    let s16 = s.map(|v| (v * 65535.0).round() as u32);
+    for ((d16, p8), &m) in deep
+        .chunks_exact_mut(4)
+        .zip(page.chunks_exact_mut(4))
+        .zip(cov)
+    {
+        if m == 0 {
+            continue;
+        }
+        let m = u32::from(m);
+        let a = (s16[3] * m + 127) / 255;
+        // 1 - a in Q16.
+        let inv = 65536 - ((a << 16) + 32767) / 65535;
+        let mut stale = false;
+        for c in 0..4 {
+            stale |= (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() > BUCKET;
+        }
+        let mut q = [0_u32; 4];
+        for c in 0..4 {
+            let d = if stale {
+                u32::from(p8[c]) * 257
+            } else {
+                u32::from(d16[c])
+            };
+            let sc = if c == 3 { a } else { (s16[c] * m + 127) / 255 };
+            q[c] = (sc + ((d * inv + 32768) >> 16)).min(65535);
+        }
+        for c in 0..4 {
+            let v = if c < 3 { q[c].min(q[3]) } else { q[3] };
+            d16[c] = v as u16;
             p8[c] = ((v + 128) / 257) as u8;
         }
     }
