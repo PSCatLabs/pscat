@@ -3622,11 +3622,13 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
 %   0 0 moveto 400 0 lineto 400 400 lineto 0 400 lineto closepath
 %   50 50 0 350 350 40 [[1 0 0] [0 0 1]] radialsh gradfill
 %
-% The dicts carry no /Extend, so the gradient stops at its two ends (the
-% PLRM default, [false false]: past the first point or circle and past the
-% last, nothing is painted). To pad the region with the end colours, add
-% the key before painting:
-%   0 0 400 0 [[1 0 0] [0 0 1]] axialsh dup /Extend [true true] put gradfill
+% The dicts carry /Extend [true true], so the gradient pads with its end
+% colours past both ends and fills whatever region it is clipped to. (A raw
+% shading dict with no /Extend paints nothing past its ends, the PLRM
+% default, [false false]; these helpers differ because art callers almost
+% always want the pad.) To confine the gradient to its own span, say so
+% before painting, as a layered band does:
+%   0 0 400 0 [[1 0 0] [0 0 1]] axialsh dup /Extend [false false] put gradfill
 %
 % `gradfn` always builds a FunctionType 3 (stitching) function, even
 % for a two-color ramp -- one code path for both the simple two-stop
@@ -3660,6 +3662,7 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
     /gdy1 exch def /gdx1 exch def /gdy0 exch def /gdx0 exch def
     << /ShadingType 2 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdx1 gdy1]
+       /Extend [true true]
        /Function gdcolors gradfn >>
 } bind def
 
@@ -3669,6 +3672,7 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
     /gdr0 exch def /gdy0 exch def /gdx0 exch def
     << /ShadingType 3 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdr0 gdx1 gdy1 gdr1]
+       /Extend [true true]
        /Function gdcolors gradfn >>
 } bind def
 
