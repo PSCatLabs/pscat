@@ -1,10 +1,11 @@
 # Engine friction and enhancement findings
 
-No core interpreter change was needed. No new crash, stack corruption or
-blocking graphics defect was found. Findings below distinguish confirmed
-engine/spec differences, standard PostScript limitations, library tradeoffs
-and unmeasured enhancement ideas. They are observations for Opus review;
-no issues have been filed automatically.
+No core interpreter change was needed for the library. No new crash, stack
+corruption or blocking graphics defect was found. Findings below distinguish
+confirmed engine/spec differences, standard PostScript limitations, library
+tradeoffs and unmeasured enhancement ideas. They were written during the
+experiment (2026-10-27/28); where main has since moved, the entry says so.
+A1 (`usertime` is wall time) was re-checked against `src/clock.rs` and still holds.
 
 ## A. Engine bugs / specification differences
 
@@ -187,7 +188,7 @@ no issues have been filed automatically.
   rendering, actual stdout and no HTTP(S) requests. Modern browser APIs are
   required; saved previews remain available when unsupported.
 - **Relevant source:** `scripts/build_functional_studio.py`, studio.js and
-  `LIVE-BROWSER-VALIDATION.json`; detailed rebuilds in WASM-STUDIO.md.
+  `scripts/check_functional_browser.mjs`; detailed rebuilds in WASM-STUDIO.md.
 - **Core change required:** no. This is packaging around an existing supported API.
 
 ## D. General platform enhancements
@@ -243,13 +244,12 @@ no issues have been filed automatically.
 - **Core change required:** yes for packing/access fidelity, neither is required
   for this feature.
 
-## Priority for independent review
+## Where to start
 
-1. Verify callback scope, executable capture and absence of frame cycles (C1/C2).
-2. Check honest CPU/timing terminology and clock finding A1; separate future fix.
-3. Evaluate traversal costs B1/B2 against useful agent-art workloads before
-   proposing optimization or native operators.
-4. Assess effect tooling and diagnostics C3/C4/D1; these could improve agent
-   outcomes without changing PS semantics.
-5. Defer profiler provenance and packed/access implementation unless a concrete
-   follow-up use case justifies them. No core enhancement blocks this library.
+1. Clock terminology (A1): `usertime` is wall time; keep the benchmark on CPU time.
+2. Traversal costs (B1/B2): weigh them against real agent-art workloads before
+   proposing optimisation or native operators.
+3. Effect tooling and diagnostics (C3/C4/D1) could improve agent outcomes
+   without changing PostScript semantics.
+4. Profiler provenance (D2) and packed/access fidelity (D3) wait for a concrete
+   use case. No core enhancement blocks this library.
