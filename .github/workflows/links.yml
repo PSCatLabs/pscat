@@ -32,3 +32,6 @@ jobs:
       # The review-tier matcher (SDLC.md step 8): which PRs get a Codex review.
       - name: Review-tier checker tests
         run: python3 scripts/test_review_tier.py
+      # The helper that keeps a worktree's target/ on PSCAT_TARGET_ROOT (#1281): no-op and path-safety cases.
+      - name: worktree_target.sh tests
+        run: /bin/bash scripts/test_worktree_target.sh

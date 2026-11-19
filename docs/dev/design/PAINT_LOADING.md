@@ -496,7 +496,9 @@ that edits a preset or `pkwet`) is `scripts/identity_check.sh` (#263):
 
 ```sh
 git worktree add --detach ../base-wt-<N> "$(git merge-base HEAD origin/main)"
+scripts/worktree_target.sh link ../base-wt-<N> idbase-<N>
 scripts/identity_check.sh ../base-wt-<N> --gallery-still --control path/to/control.ps
+scripts/worktree_target.sh unlink ../base-wt-<N>
 git worktree remove --force ../base-wt-<N>
 ```
 
