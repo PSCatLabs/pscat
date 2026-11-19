@@ -51,6 +51,12 @@ of every font, Type 3 face, palette, template and major procedure this
 build has, with each paintkit parameter's unit; prefer it over guessing a
 name from prose.
 
+The whole inventory is over 300,000 characters, which an MCP client may cut
+short. Narrow it: `describe_art_capabilities` with `kind`, `source` or `names`,
+and `brief: true` for names and one-line descriptions (CLI:
+`pscat --capabilities --name pkwash`, `--kind palette`, `--source paintkit`,
+`--brief`). `names: ["pkwash"]` returns that entry's full parameter table.
+
 ## The toolkit (`(lib/artkit.ps) run`)
 
 - **Random**: `n chance` (0..n-1), `j jit` (-j..j; integer j gives an

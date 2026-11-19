@@ -108,6 +108,19 @@ pub enum CapabilityKind {
 }
 
 impl CapabilityKind {
+    /// Every kind, in the order the catalog documents them. The `--kind`
+    /// filter, its error message and the MCP tool's schema all read this
+    /// one list.
+    pub const ALL: [CapabilityKind; 7] = [
+        CapabilityKind::Font,
+        CapabilityKind::Type3Face,
+        CapabilityKind::Palette,
+        CapabilityKind::Template,
+        CapabilityKind::Procedure,
+        CapabilityKind::Operator,
+        CapabilityKind::Dial,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             CapabilityKind::Font => "font",
@@ -159,6 +172,18 @@ pub struct Capability {
 }
 
 impl Capability {
+    /// The `brief` shape: enough to find an entry, none of the tables.
+    fn to_brief_json(&self) -> Value {
+        json!({
+            "name": self.name,
+            "kind": self.kind.as_str(),
+            "description": first_sentence(&self.description),
+            "source": self.source,
+            // `builtin`, `catalog` or `library`, without the long note.
+            "availability": self.availability.split(" (").next().unwrap_or(""),
+        })
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "name": self.name,
@@ -172,6 +197,67 @@ impl Capability {
         })
     }
 }
+
+/// What a caller wants of the catalog (#1079): the whole payload is over
+/// 300 KB, and a client that truncates it can lose the entry it came for.
+/// The default filter selects everything, in full.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CapabilityFilter {
+    /// Exact entry names (case-sensitive), any of which matches. Empty
+    /// matches every name.
+    pub names: Vec<String>,
+    /// One kind, as [`CapabilityKind::as_str`] spells it (`procedure`,
+    /// `palette`, `type3_face`, ...). `None` matches every kind.
+    pub kind: Option<String>,
+    /// A library file, as an entry's `source` shows it
+    /// (`lib/paintkit.ps`), or just its stem or file name (`paintkit`,
+    /// `paintkit.ps`). `systemdict` selects the native operators. `None`
+    /// matches every source.
+    pub source: Option<String>,
+    /// Name, kind, source, availability (`builtin`, `catalog` or
+    /// `library`) and the first sentence of the description only: no
+    /// `parameters`, `load` or `example`.
+    pub brief: bool,
+}
+
+impl CapabilityFilter {
+    /// True when this filter changes the payload at all.
+    pub fn is_active(&self) -> bool {
+        !self.names.is_empty() || self.kind.is_some() || self.source.is_some() || self.brief
+    }
+
+    fn matches(&self, c: &Capability) -> bool {
+        (self.names.is_empty() || self.names.contains(&c.name))
+            && self.kind.as_deref().is_none_or(|k| c.kind.as_str() == k)
+            && self
+                .source
+                .as_deref()
+                .is_none_or(|want| source_matches(&c.source, want))
+    }
+}
+
+/// `want` names `source` exactly, by file name (`paintkit.ps`) or by stem
+/// (`paintkit`), compared ignoring case.
+fn source_matches(source: &str, want: &str) -> bool {
+    let (source, want) = (source.to_ascii_lowercase(), want.to_ascii_lowercase());
+    let file = source.rsplit('/').next().unwrap_or(&source);
+    let stem = file.strip_suffix(".ps").unwrap_or(file);
+    source == want || file == want || stem == want
+}
+
+/// The description's first sentence, at most [`BRIEF_DESCRIPTION_CHARS`]
+/// characters, with `...` when it was cut.
+fn first_sentence(text: &str) -> String {
+    let end = text.find(". ").map_or(text.len(), |i| i + 1);
+    let sentence = text[..end].trim();
+    if sentence.chars().count() <= BRIEF_DESCRIPTION_CHARS {
+        return sentence.to_string();
+    }
+    let cut: String = sentence.chars().take(BRIEF_DESCRIPTION_CHARS).collect();
+    format!("{}...", cut.trim_end())
+}
+
+const BRIEF_DESCRIPTION_CHARS: usize = 110;
 
 /// The `run` sequence needed to get `source` into scope, given `kind`.
 /// A page template or style-pack procedure needs `lib/artkit.ps`
@@ -2425,4 +2511,62 @@ pub fn payload_json() -> Value {
         "font_packs": crate::fontpacks::status_json(),
         "capabilities": caps.iter().map(Capability::to_json).collect::<Vec<_>>(),
     })
+}
+
+/// [`payload_json`] narrowed by `filter` (#1079). An inactive filter gives
+/// exactly `payload_json()`. Otherwise `capabilities` holds only the
+/// matching entries (`brief` ones if asked) and the payload gains
+/// `matched` and `total` (entries in the whole catalog), plus
+/// `unmatched_names` for each requested name nothing carries. The
+/// `catalog_signature` is still the whole catalog's, so a client can tell
+/// a narrowed answer from a changed catalog.
+///
+/// # Errors
+///
+/// An unknown `kind`: the message lists the valid ones.
+pub fn payload_json_filtered(filter: &CapabilityFilter) -> Result<Value, String> {
+    if let Some(kind) = filter.kind.as_deref()
+        && !CapabilityKind::ALL.iter().any(|k| k.as_str() == kind)
+    {
+        let valid: Vec<&str> = CapabilityKind::ALL.iter().map(|k| k.as_str()).collect();
+        return Err(format!(
+            "unknown capability kind {kind:?} (expected one of: {})",
+            valid.join(", ")
+        ));
+    }
+    if !filter.is_active() {
+        return Ok(payload_json());
+    }
+    let mut caps = catalog();
+    caps.sort_by(|a, b| (&a.name, a.kind.as_str()).cmp(&(&b.name, b.kind.as_str())));
+    let total = caps.len();
+    let signature = catalog_signature(&caps);
+    let unmatched: Vec<&String> = filter
+        .names
+        .iter()
+        .filter(|n| !caps.iter().any(|c| c.name == **n))
+        .collect();
+    let rows: Vec<Value> = caps
+        .iter()
+        .filter(|c| filter.matches(c))
+        .map(|c| {
+            if filter.brief {
+                c.to_brief_json()
+            } else {
+                c.to_json()
+            }
+        })
+        .collect();
+    let mut payload = json!({
+        "pscat_version": env!("CARGO_PKG_VERSION"),
+        "catalog_signature": signature,
+        "font_packs": crate::fontpacks::status_json(),
+        "matched": rows.len(),
+        "total": total,
+        "capabilities": rows,
+    });
+    if !unmatched.is_empty() {
+        payload["unmatched_names"] = json!(unmatched);
+    }
+    Ok(payload)
 }

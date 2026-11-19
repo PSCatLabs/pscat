@@ -32,6 +32,7 @@ and the toolkit.
 <!-- cloud: sub "`pscat --capabilities`
 (MCP: `describe_art_capabilities`) prints the real, structured inventory" -->
 `describe_art_capabilities` returns the real, structured inventory
+<!-- cloud: drop "The whole inventory is over 300,000 characters" -->
 <!-- cloud: sub "documented in each file's header and in
 `--capabilities`:" -->
 documented in each file's header and in
