@@ -67,7 +67,18 @@ with strokeglyphs, not the Symbol font, so its PDFs are not affected.
 - `tests/wasm.rs` `wasm_pdf_text_matches_the_cli`: a third page of Symbol
   and Dingbats text, byte-equal between `pscat --pdf --pdf-text`, the raw
   wasm ABI and the npm Renderer.
-- EVIDENCE_SWEEP
+- Merge-base (`296b335`) and this branch's `ci` binaries on the 45
+  `examples/` and `selftest/drivers/` files that set type (the paint and
+  dry-media pieces left out for time): `--pdf`, `--pdf --pdf-text` and
+  `--svg --svg-text` (every page) are byte-identical for all of them
+  except `examples/font_catalog.ps` under `--pdf-text`, the one file with
+  Symbol and Dingbats text. Its Symbol row now extracts as
+  `αβγδεπφϕκλμνωθ√∞↔` (before, only `µ`, Symbol's `mu` read as the micro
+  sign) and its Dingbats row as `❁❂❃❄❅❆❇★✩✪✫✬✭✮` (before, nothing), and the
+  file is 3.6 KB smaller (344,118 to 340,550 B; the outline PDF is
+  566,645 B). qpdf 12.4 (`check_pdf_syntax`, through pikepdf) finds no
+  problem, and gs (`-dPDFSTOPONERROR`) and pdftoppm render both pages
+  without a message.
 
 **What #1026 still lists, not done here.**
 - *Text as the default, `--text-as-paths` as the opt-out.* An owner
