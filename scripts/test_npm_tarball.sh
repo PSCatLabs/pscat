@@ -61,7 +61,7 @@ r.render('0 0 1 setrgbcolor 10 10 50 50 rectfill', { width: 100, height: 100, sv
 assert.match(r.svg(0), /^<svg /);
 assert.ok(new TextDecoder().decode(r.pdf().slice(0, 5)) === '%PDF-');
 assert.ok(import.meta.resolve('pscat/pscat.wasm').endsWith('/node_modules/pscat/pscat.wasm'));
-// The Node entry by its subpath (#1150): CJS and ESM resolution both reach it, and it imports.
+// The Node entry by its subpath (added in #1150, checked since #1163): CJS and ESM resolution both reach it, and it imports.
 const cjs = createRequire(import.meta.url);
 assert.ok(cjs.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
 assert.ok(import.meta.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
