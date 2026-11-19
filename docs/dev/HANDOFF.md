@@ -743,8 +743,9 @@ renders eight examples in both and compares block-downsampled output).
   state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
   whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
   a pattern paints only in the context (page or capture) it was made in;
-  text output modes keep outlines under a pattern; `imagemask` ignores a
-  pattern (paints its solid colour). Anything that reads `gfx.pixmap`
+  text output modes keep outlines under a pattern. `imagemask` paints the
+  pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
+  `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
   mid-run for display should use `Gfx::page_pixmap`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely

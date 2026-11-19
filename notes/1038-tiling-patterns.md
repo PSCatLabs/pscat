@@ -2,8 +2,8 @@
 
 First part of #1038: **PatternType 1** (tiling) patterns, coloured
 (PaintType 1) and uncoloured (PaintType 2), all three TilingTypes, in PNG,
-SVG and PDF. Shading patterns (PatternType 2) and an `imagemask` painted
-with a pattern are follow-ups.
+SVG and PDF. Shading patterns (PatternType 2) are a follow-up; an
+`imagemask` painted with a pattern came in #1299.
 
 ## What a program can do now
 
@@ -84,7 +84,7 @@ A capture canvas or period is at most 16384 px a side and 2^26 px
   after it, paints nothing.
 - Text output modes (`--svg-text`, `--pdf-text`) keep glyph outlines under a
   pattern.
-- `imagemask` under a pattern still paints the solid colour (follow-up).
+- `imagemask` under a pattern: done in #1299 (`notes/1299-imagemask-pattern.md`).
 - TilingType 2 is adjusted like 1 and 3: its cells are scaled to the
   whole-pixel step (a 7.3 pt step paints a 3.65 pt mark 3.5 px wide at
   72 dpi). gs keeps a Type 2 cell undistorted and lets the spacing vary
