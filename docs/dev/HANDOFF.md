@@ -1479,8 +1479,21 @@ renders eight examples in both and compares block-downsampled output).
   The default lowp pipeline rounds each blend with a bias, so a stack of
   faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
   `Paint` built anywhere in pscat must set the flag too, or its pixels drift
-  by a level from the rest. Storage is still 8-bit, rounded per blend (the
-  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+  by a level from the rest. See `notes/731-hq-compositing-pipeline.md`.
+
+- **Fills and glyphs composite in a 16-bit shadow of the page**
+  (`src/deep.rs`, #731 part 2). `fill_coverage_limited` blends every run
+  except an opaque, fully covered one in f32 with the exact alpha, and
+  writes both the shadow and the 8-bit `pixmap`, which stays the page every
+  reader sees. Strokes, images and `shfill` still write only the 8-bit
+  pixmap through tiny-skia; each shadow pixel checks itself against the
+  8-bit one and reloads from it when another writer moved it, so a new
+  writer needs no hook. Clear the shadow (`self.deep.clear()`) wherever
+  the page is erased. A first blend at alpha 1 gives tiny-skia's bytes
+  exactly (a test pins it), so only stacked or translucent pixels move.
+  Under `--max-memory` the shadow is off when a page of it (8 bytes a
+  pixel) would pass a quarter of the cap. See
+  `notes/731-16bit-compositing-shadow.md`.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and

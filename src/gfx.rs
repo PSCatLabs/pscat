@@ -5349,55 +5349,117 @@ mod tests {
         );
     }
 
-    /// Issue #731 part 1: stacked faint `setalpha` fills must lose no more
-    /// than 8-bit storage forces. The reference is that 8-bit model: alpha
-    /// quantised to 1/255 (the byte tiny-skia receives) and each blend
-    /// rounded once to the nearest level. tiny-skia's lowp pipeline rounded
-    /// worse (`div255` as `(v+255)>>8`): white at 0.01 x 200 stalled at 192
-    /// where the model reaches 213. A second column composites through the
-    /// coverage mask (a half-covered pixel column), the path every
-    /// anti-aliased edge and glyph takes since #692.
+    /// White over black, `layers` fills of a 4x2 canvas at `alpha`: columns
+    /// 0-1 fully covered, column 2 half covered.
+    fn stack_white(gfx: &mut Gfx, alpha: f32, layers: u32) {
+        stack_rect(gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = alpha;
+        for _ in 0..layers {
+            stack_rect(gfx, 2.5);
+        }
+    }
+
+    fn stack_rect(gfx: &mut Gfx, w: f64) {
+        gfx.newpath();
+        gfx.moveto(0.0, 0.0);
+        gfx.lineto(w, 0.0).expect("lineto");
+        gfx.lineto(w, 2.0).expect("lineto");
+        gfx.lineto(0.0, 2.0).expect("lineto");
+        gfx.closepath();
+        gfx.fill(FillRule::Winding);
+    }
+
+    /// `255 (1 - (1 - a c)^n)`: what `layers` blends of white at `alpha`
+    /// and coverage `c` over black come to with no rounding.
+    fn float_stack(alpha: f32, coverage: f32, layers: u32) -> u8 {
+        let a = f64::from(alpha * coverage);
+        (255.0 * (1.0 - (1.0 - a).powi(layers as i32))).round() as u8
+    }
+
+    /// Issue #731: stacked faint `setalpha` fills reach the colour the
+    /// arithmetic gives. The issue's rows: on the 8-bit page alone 0.002 x
+    /// 1000 stalled at 128 and 0.01 x 200 at 213; the 16-bit shadow
+    /// (`crate::deep`) brings them to 221. The half-covered column goes
+    /// through the coverage mask, the path every anti-aliased edge and glyph
+    /// takes since #692.
     #[test]
-    fn stacked_low_alpha_matches_the_8bit_model() {
-        let model = |alpha: f32, coverage: f32, layers: u32| -> u8 {
-            let a = f32::from(to_u8(alpha)) / 255.0 * coverage;
-            let mut v = 0.0_f32;
-            for _ in 0..layers {
-                v = (v + (255.0 - v) * a).round();
-            }
-            v as u8
-        };
-        let rect = |gfx: &mut Gfx, w: f64| {
-            gfx.newpath();
-            gfx.moveto(0.0, 0.0);
-            gfx.lineto(w, 0.0).expect("lineto");
-            gfx.lineto(w, 2.0).expect("lineto");
-            gfx.lineto(0.0, 2.0).expect("lineto");
-            gfx.closepath();
-            gfx.fill(FillRule::Winding);
-        };
+    fn stacked_low_alpha_reaches_the_float_value() {
         for (alpha, layers) in [(0.01_f32, 200_u32), (0.05, 40), (0.002, 1000)] {
             let mut gfx = Gfx::new(4, 2).expect("pixmap");
             gfx.set_rgb(0.0, 0.0, 0.0);
-            rect(&mut gfx, 4.0);
-            gfx.set_rgb(1.0, 1.0, 1.0);
-            gfx.state_mut().alpha = alpha;
-            for _ in 0..layers {
-                // Columns 0-1 fully covered, column 2 half covered.
-                rect(&mut gfx, 2.5);
-            }
+            stack_white(&mut gfx, alpha, layers);
             let full = gfx.pixmap.pixel(0, 0).expect("pixel").red();
             let half = gfx.pixmap.pixel(2, 0).expect("pixel").red();
-            let (want_full, want_half) = (model(alpha, 1.0, layers), model(alpha, 0.5, layers));
+            let (want_full, want_half) = (
+                float_stack(alpha, 1.0, layers),
+                float_stack(alpha, 0.5, layers),
+            );
             assert!(
                 full.abs_diff(want_full) <= 1,
-                "alpha {alpha} x {layers}, full coverage: {full}, 8-bit model {want_full}"
+                "alpha {alpha} x {layers}, full coverage: {full}, float {want_full}"
             );
             assert!(
                 half.abs_diff(want_half) <= 2,
-                "alpha {alpha} x {layers}, half coverage: {half}, 8-bit model {want_half}"
+                "alpha {alpha} x {layers}, half coverage: {half}, float {want_half}"
             );
         }
+    }
+
+    /// An opaque shape thinner than a pixel composites by its coverage, so a
+    /// stack of them climbs like a stack of faint fills: 200 rectangles
+    /// 0.01 px wide reach the float value too.
+    #[test]
+    fn stacked_sub_pixel_shapes_reach_the_float_value() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 0.05);
+        }
+        let got = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        // Coverage 0.05 is the byte 13 (0.051) in the mask.
+        let want = float_stack(13.0 / 255.0, 1.0, 200);
+        assert!(
+            got.abs_diff(want) <= 1,
+            "sub-pixel stack: {got}, float {want}"
+        );
+    }
+
+    /// The shadow follows the page: a stroke (which writes the 8-bit page
+    /// only) and a new page each start the stack again from what the page
+    /// shows, not from the shadow's old value.
+    #[test]
+    fn the_shadow_follows_strokes_and_new_pages() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_white(&mut gfx, 0.002, 1000);
+        // A black opaque stroke over the stack.
+        gfx.state_mut().alpha = 1.0;
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().line_width = 10.0;
+        gfx.newpath();
+        gfx.moveto(-5.0, 1.0);
+        gfx.lineto(10.0, 1.0).expect("lineto");
+        gfx.stroke();
+        assert_eq!(gfx.pixmap.pixel(0, 0).expect("pixel").red(), 0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = 0.002;
+        for _ in 0..1000 {
+            stack_rect(&mut gfx, 2.5);
+        }
+        let again = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(again.abs_diff(221) <= 1, "after the stroke: {again}");
+        // Page 2 starts white and stacks black from there.
+        gfx.showpage();
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().alpha = 0.01;
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 4.0);
+        }
+        let page2 = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(page2.abs_diff(255 - 221) <= 1, "page 2: {page2}");
     }
 
     #[test]

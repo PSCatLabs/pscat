@@ -156,66 +156,125 @@ impl Deep {
         }
         let x1 = x1.min(w);
         let row = &mut self.rows[y];
-        let fresh = row.is_empty();
-        if fresh {
+        if row.is_empty() {
+            // Zeros: every pixel that is not transparent black reads as
+            // changed behind the shadow, so it loads from the page.
             row.resize(w * 4, 0);
         }
         let deep = &mut row[x0 * 4..x1 * 4];
-        let page = &mut pixmap.pixels_mut()[y * w + x0..y * w + x1];
+        let page = &mut pixmap.data_mut()[(y * w + x0) * 4..(y * w + x1) * 4];
         // The source, premultiplied in f32 as tiny-skia's `premultiply`.
         let sa = src.alpha;
         let s = [src.rgb[0] * sa, src.rgb[1] * sa, src.rgb[2] * sa, sa];
-        for (i, (d16, p8)) in deep.chunks_exact_mut(4).zip(page.iter_mut()).enumerate() {
-            let k = match cov {
-                Some(c) => match c[i] {
-                    0 => continue,
-                    255 => None,
-                    m => Some(f32::from(m) * FROM_U8),
-                },
-                None => None,
-            };
-            let p = [p8.red(), p8.green(), p8.blue(), p8.alpha()];
-            let mut d = [0.0_f32; 4];
-            let stale =
-                fresh || (0..4).any(|c| (i32::from(d16[c]) - i32::from(p[c]) * 257).abs() > BUCKET);
-            for c in 0..4 {
-                // A value that is exactly the 8-bit one loads as tiny-skia
-                // loads that byte, so a first blend matches its bytes.
-                let q = u16::from(p[c]) * 257;
-                d[c] = if stale || d16[c] == q {
-                    f32::from(p[c]) * FROM_U8
-                } else {
-                    f32::from(d16[c]) * FROM_U16
-                };
-            }
-            let da = d[3];
-            let mut out = [0.0_f32; 4];
-            for c in 0..4 {
-                let r = match src.blend {
-                    Blend::Normal => d[c] * (1.0 - sa) + s[c],
-                    Blend::Multiply => s[c] * (1.0 - da) + d[c] * (1.0 - sa) + s[c] * d[c],
-                };
-                out[c] = match k {
-                    Some(k) => (r - d[c]) * k + d[c],
-                    None => r,
-                };
-            }
-            let mut b = [0_u8; 4];
-            for c in 0..4 {
-                let v = out[c].clamp(0.0, 1.0);
-                b[c] = (v * 255.0).round_ties_even() as u8;
-                d16[c] = (v * 65535.0).round_ties_even() as u16;
-            }
-            // Premultiplied: no channel above alpha (each is rounded on
-            // its own, so a colour can pass the alpha by one at the top).
-            let a = b[3];
-            *p8 = PremultipliedColorU8::from_rgba(b[0].min(a), b[1].min(a), b[2].min(a), a)
-                .unwrap_or(PremultipliedColorU8::TRANSPARENT);
-            let a16 = d16[3];
-            for c in 0..3 {
-                d16[c] = d16[c].min(a16);
-            }
+        // One loop per case, so the compiler drops the branches it does not
+        // need from each (a page-sized wash runs the solid ones).
+        match (cov, src.blend) {
+            (None, Blend::Normal) => solid_over(deep, page, s),
+            (None, Blend::Multiply) => blend_span::<false, true>(deep, page, &[], s),
+            (Some(c), Blend::Normal) => blend_span::<true, false>(deep, page, c, s),
+            (Some(c), Blend::Multiply) => blend_span::<true, true>(deep, page, c, s),
         }
+    }
+}
+
+/// Source-over of premultiplied `s` at full coverage, in 16-bit integers:
+/// the case a page-sized translucent wash runs, about twice as fast as the
+/// float loop. No tiny-skia bytes to match here (an opaque solid run is
+/// tiny-skia's memset), only the 16-bit precision.
+fn solid_over(deep: &mut [u16], page: &mut [u8], s: [f32; 4]) {
+    // 1 - alpha in Q16 (0..=65536), and the source in 16-bit units.
+    let inv = ((1.0 - s[3]) * 65536.0).round() as u32;
+    let s16 = s.map(|v| (v * 65535.0).round() as u32);
+    for (d16, p8) in deep.chunks_exact_mut(4).zip(page.chunks_exact_mut(4)) {
+        let mut stale = false;
+        for c in 0..4 {
+            stale |= (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() > BUCKET;
+        }
+        let mut q = [0_u32; 4];
+        for c in 0..4 {
+            let d = if stale {
+                u32::from(p8[c]) * 257
+            } else {
+                u32::from(d16[c])
+            };
+            q[c] = (s16[c] + ((d * inv + 32768) >> 16)).min(65535);
+        }
+        for c in 0..4 {
+            let v = if c < 3 { q[c].min(q[3]) } else { q[3] };
+            d16[c] = v as u16;
+            // Nearest level: within 128 of 257 times it.
+            p8[c] = ((v + 128) / 257) as u8;
+        }
+    }
+}
+
+/// Blend premultiplied source `s` into every pixel of `page` (8-bit RGBA)
+/// and `deep` (its 16-bit shadow), with coverage `cov` when `COV`,
+/// source-over or (`MUL`) multiply. The float operations are tiny-skia's
+/// f32 pipeline's, in its order (`source_over`/`multiply`, then `lerp_u8`
+/// for a masked fill, then `store_8888`), so a pixel loaded from the page
+/// comes out as tiny-skia would write it.
+#[inline(always)]
+fn blend_span<const COV: bool, const MUL: bool>(
+    deep: &mut [u16],
+    page: &mut [u8],
+    cov: &[u8],
+    s: [f32; 4],
+) {
+    let sa = s[3];
+    let inv_sa = 1.0 - sa;
+    for (i, (d16, p8)) in deep
+        .chunks_exact_mut(4)
+        .zip(page.chunks_exact_mut(4))
+        .enumerate()
+    {
+        let k = if COV {
+            let m = cov[i];
+            if m == 0 {
+                // tiny-skia's lerp by 0 stores the pixel unchanged.
+                continue;
+            }
+            f32::from(m) * FROM_U8
+        } else {
+            1.0
+        };
+        let mut stale = false;
+        for c in 0..4 {
+            stale |= (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() > BUCKET;
+        }
+        let mut d = [0.0_f32; 4];
+        for c in 0..4 {
+            // A value that is exactly the 8-bit one loads as tiny-skia
+            // loads that byte, so a first blend matches its bytes.
+            let from8 = f32::from(p8[c]) * FROM_U8;
+            let from16 = f32::from(d16[c]) * FROM_U16;
+            d[c] = if stale | (d16[c] == u16::from(p8[c]) * 257) {
+                from8
+            } else {
+                from16
+            };
+        }
+        let inv_da = 1.0 - d[3];
+        let mut b = [0_u8; 4];
+        let mut q = [0_u16; 4];
+        for c in 0..4 {
+            let r = if MUL {
+                s[c] * inv_da + d[c] * inv_sa + s[c] * d[c]
+            } else {
+                d[c] * inv_sa + s[c]
+            };
+            let out = if COV { (r - d[c]) * k + d[c] } else { r };
+            let v = out.clamp(0.0, 1.0);
+            b[c] = (v * 255.0).round_ties_even() as u8;
+            q[c] = (v * 65535.0).round_ties_even() as u16;
+        }
+        // Premultiplied: no channel above alpha (each is rounded on its own).
+        for c in 0..3 {
+            p8[c] = b[c].min(b[3]);
+            d16[c] = q[c].min(q[3]);
+        }
+        p8[3] = b[3];
+        d16[3] = q[3];
     }
 }
 
@@ -225,7 +284,8 @@ mod tests {
     use tiny_skia::{BlendMode, Mask, Paint, Rect, Transform};
 
     /// tiny-skia's f32 pipeline filling a 1x1 pixel of `backdrop` with
-    /// `rgb`/`alpha8` at coverage `m`, as `fill_coverage` did before.
+    /// `rgb`/`alpha8` through a mask of coverage `m`, or with no mask (a solid
+    /// run) when `m` is 0, as `fill_coverage` did before.
     fn skia(backdrop: [u8; 4], rgb: [u8; 3], alpha8: u8, blend: BlendMode, m: u8) -> [u8; 4] {
         let mut pm = Pixmap::new(1, 1).unwrap();
         pm.pixels_mut()[0] =
@@ -239,7 +299,7 @@ mod tests {
         let mut mask = Mask::new(1, 1).unwrap();
         mask.data_mut()[0] = m;
         let rect = Rect::from_ltrb(0.0, 0.0, 1.0, 1.0).unwrap();
-        let mask = if m == 255 { None } else { Some(&mask) };
+        let mask = if m == 0 { None } else { Some(&mask) };
         pm.fill_rect(rect, &paint, Transform::identity(), mask);
         let p = pm.pixels()[0];
         [p.red(), p.green(), p.blue(), p.alpha()]
@@ -252,7 +312,9 @@ mod tests {
                 .unwrap();
         let mut deep = Deep::default();
         let src = Source::new(rgb, alpha, blend);
-        deep.composite(&mut pm, 0, 0, 1, Some(&[m]), &src);
+        let cov = [m];
+        let cov = if m == 0 { None } else { Some(&cov[..]) };
+        deep.composite(&mut pm, 0, 0, 1, cov, &src);
         let p = pm.pixels()[0];
         [p.red(), p.green(), p.blue(), p.alpha()]
     }
@@ -264,7 +326,8 @@ mod tests {
     }
 
     /// At alpha 1 a first blend gives tiny-skia's bytes exactly, for both
-    /// blend modes, any coverage, over opaque and translucent backdrops: the
+    /// blend modes, any coverage and a solid run, over opaque and
+    /// translucent backdrops: the
     /// shadow changes only what stacking changes.
     #[test]
     fn a_first_opaque_blend_matches_tiny_skia() {

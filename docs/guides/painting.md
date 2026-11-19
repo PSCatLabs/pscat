@@ -696,6 +696,13 @@ alpha 1 nothing changes. `pkpaper` follows the same rule: the ground fill and
 each grain mark are multiplied by the caller's alpha, so a wash and the paper
 under it fade together. (`/Blend` is still each call's own.)
 
+Fills and text composite in 16-bit precision with the exact `setalpha`
+(#731), so a stack of hundreds of faint layers reaches the colour the
+arithmetic gives: 1000 fills of white at 0.002 over black come to 221 of
+255, not the 128 an 8-bit page stalls at. Volume splats, glows and
+airbrush built from many faint fills need no workaround. Strokes, images
+and `shfill` still blend at 8 bits, so build a very deep stack from fills.
+
 This is also a part of pscat that does **not** render the
 same way under plain `gs file.ps`: Ghostscript has no
 PostScript-callable alpha operator at all. Rather than error there,
