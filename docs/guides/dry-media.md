@@ -130,9 +130,10 @@ newpath 40 60 moveto 300 80 lineto
   `/Strength`) goes to `dcchalk`. `/Width` defaults to 0.048 × `/Size`.
 - **`dcleader`** (`(left) (right) x1 x2 y opts`) is a menu, price-list or
   contents row. The left string starts at x1 and the right one ends at
-  x2, with a dotted leader of chalk dots between them. The dots are
-  thinner and fainter than the lettering, and `/Leader << ... >>` styles
-  them. They sit on whole multiples of `/Pitch`, so stacked rows line
+  x2, with a dotted leader of chalk dots between them, clear of both
+  strings by `/Gap` (half the size by default). The dots are thinner than
+  the lettering and a little brighter, so they stay visible over a
+  smudge, and `/Leader << ... >>` styles them. They sit on whole multiples of `/Pitch`, so stacked rows line
   their dots up, as typeset leaders do.
 
 A sign's wood frame, nails and doodles are part of the piece itself, so
