@@ -49,7 +49,8 @@
 # actions/cache-poisoning/poisonable-step has no untrusted checkout to flag
 # (#669). Every job checks out github.sha, which is the commit `verify`
 # checked. This workflow writes no cache and must not gain one: a cache
-# written here is readable by the default branch's later runs.
+# written by a run in the default branch's scope is restorable by every
+# other ref's runs.
 # Publishing credentials exist only inside the `release`
 # environment's job (crates.io trusted publishing over OIDC; `id-token:
 # write` appears nowhere else, which scripts/check_workflows.py enforces).
