@@ -211,9 +211,11 @@ pub const PROBLEM_LINE_PREFIX: &str = "CKPROBLEM\t";
 /// with [`PROBLEM_LINE_PREFIX`]: the same lines [`Driver::explain`] reads, a
 /// last line cut short by a limit included. Every other byte comes back as it
 /// was, so output that is not UTF-8 stays intact, and a line cut off before
-/// the tab (`CKPROB`) is kept. With no such line the input is returned
-/// without a copy. Call it on the same bytes you give [`Driver::explain`],
-/// which still needs the check lines.
+/// the tab (`CKPROB`) is kept. A check line is recognised only at the start
+/// of a line, as [`Driver::explain`] reads them: the program's own output
+/// that ends without a newline would run into the next check line. With no
+/// such line the input is returned without a copy. Call it on the same bytes
+/// you give [`Driver::explain`], which still needs the check lines.
 ///
 /// ```
 /// use pscat::chalkboard::user_output;
@@ -435,11 +437,28 @@ mod tests {
         assert!(matches!(user_output(b"CKPROBLEM\t1"), Cow::Owned(_)));
     }
 
-    /// The same lines the parser reads: whatever `Driver::problems` skips as
-    /// not a check line, `user_output` keeps.
+    /// The same lines the parser reads: what `user_output` drops is exactly
+    /// what `Driver::problems` finds, and nothing it keeps parses as a problem.
     #[test]
     fn user_output_drops_exactly_the_lines_explain_tries_to_parse() {
         let prefix = PROBLEM_LINE_PREFIX.as_bytes();
         assert_eq!(prefix, [chalk::PROBLEM_TAG.as_bytes(), b"\t"].concat());
+
+        let driver = BoardConfig::default()
+            .driver(r"x + \aleph + \beth")
+            .expect("balanced");
+        let (w, h) = driver.page_size();
+        let mut interp = Interp::with_page_scaled(w, h, 1.0).expect("valid page");
+        interp.capture_stdout();
+        interp.run_str(r"(own\r\n) print").unwrap();
+        interp
+            .run_str(driver.source())
+            .expect_err("outside the subset");
+        let mut printed = interp.captured_stdout().to_vec();
+        printed.extend_from_slice(b"tail\nCKPROBLEM\t0\t0\t1\tunsupported-command\tq");
+        assert_eq!(driver.0.problems(&printed).len(), 3);
+        let shown = user_output(&printed);
+        assert_eq!(shown.as_ref(), b"own\r\ntail\n");
+        assert!(driver.0.problems(&shown).is_empty());
     }
 }
