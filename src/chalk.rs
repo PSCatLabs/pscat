@@ -136,6 +136,10 @@ pub struct Config {
     pub tilt: f64,
     /// Loose dust beside each stroke, 0..1.
     pub dust: f64,
+    /// How freehand the strokes are (drychalk's `/Hand`, issue #1111), 0..1: 0
+    /// follows every path exactly, 1 lets a long stroke drift and overshoot as
+    /// a hand does. Not the top-level `hand` key, which names the lettering face.
+    pub hand: f64,
     /// Stroke width in points; `None` is 0.048 of the fitted size.
     pub stroke_width: Option<f64>,
     // board
@@ -162,6 +166,7 @@ impl Default for Config {
             pressure: None,
             tilt: 0.0,
             dust: 0.5,
+            hand: 0.0,
             stroke_width: None,
             board: Some(Board::default()),
             seed: 1,
@@ -550,7 +555,9 @@ impl Config {
             let ch = group(
                 "chalk",
                 ch,
-                &["color", "strength", "pressure", "tilt", "dust", "width"],
+                &[
+                    "color", "strength", "pressure", "tilt", "dust", "hand", "width",
+                ],
             )?;
             for (k, v) in ch {
                 let key = format!("chalk.{k}");
@@ -567,6 +574,7 @@ impl Config {
                     "pressure" => self.pressure = Some(num(&key, v, 0.0, 1.0)?),
                     "tilt" => self.tilt = num(&key, v, 0.0, 90.0)?,
                     "dust" => self.dust = num(&key, v, 0.0, 1.0)?,
+                    "hand" => self.hand = num(&key, v, 0.0, 1.0)?,
                     "width" => self.stroke_width = Some(positive(&key, v, 100.0)?),
                     _ => unreachable!(),
                 }
@@ -657,6 +665,7 @@ impl Config {
         }
         num("chalk.tilt", &Value::from(self.tilt), 0.0, 90.0)?;
         num("chalk.dust", &Value::from(self.dust), 0.0, 1.0)?;
+        num("chalk.hand", &Value::from(self.hand), 0.0, 1.0)?;
         if let Some(v) = self.stroke_width {
             positive("chalk.width", &Value::from(v), 100.0)?;
         }
@@ -1697,6 +1706,12 @@ ckmeasure
         }
     }
     p.push_str(&format!("/{} dcchalkcolor\n", cfg.color));
+    // /Hand only when asked for: a board without it is byte for byte what it was
+    let under = if cfg.hand > 0.0 {
+        format!(" /Hand {}{under}", n(cfg.hand))
+    } else {
+        under
+    };
     p.push_str(&format!(
         "/ckink {{ 1000 mul {seed} add << /Seed 3 -1 roll /Width ckw /Touch {} /Strength {} /Tilt {} /Dust {}{under} >> dcchalk }} bind def\n",
         n(cfg
@@ -2275,6 +2290,13 @@ mod tests {
             ),
             (
                 Config {
+                    hand: 1.5,
+                    ..Config::default()
+                },
+                "chalk.hand",
+            ),
+            (
+                Config {
                     seed: i64::MAX,
                     ..Config::default()
                 },
@@ -2428,6 +2450,32 @@ mod tests {
         assert_eq!(e.to_string(), "unsupported character: \u{2603} (U+2603)");
         assert!(explain(&PsError::Undefined("foo".into())).is_none());
         assert!(explain(&PsError::Typecheck).is_none());
+    }
+
+    #[test]
+    fn chalk_hand_is_asked_for_and_left_out_otherwise() {
+        let plain = driver(r"\frac{1}{2}", &Config::default()).unwrap().source;
+        assert!(!plain.contains("/Hand"), "{plain}");
+        let mut c = Config::default();
+        c.apply(&serde_json::json!({"chalk": {"hand": 0.5}}))
+            .unwrap();
+        assert_eq!(c.hand, 0.5);
+        let by_hand = driver(r"\frac{1}{2}", &c).unwrap().source;
+        assert!(
+            by_hand.contains(" /Dust 0.5 /Hand 0.5 >> dcchalk"),
+            "{by_hand}"
+        );
+        // an explicit zero is the default: the very same program
+        c.apply(&serde_json::json!({"chalk": {"hand": 0}})).unwrap();
+        assert_eq!(driver(r"\frac{1}{2}", &c).unwrap().source, plain);
+        // the top-level `hand` stays the reserved lettering face
+        for bad in [
+            r#"{"chalk": {"hand": 1.5}}"#,
+            r#"{"chalk": {"hand": "wild"}}"#,
+        ] {
+            let e = Config::from_json(bad).unwrap_err().to_string();
+            assert!(e.contains("chalk.hand"), "{e}");
+        }
     }
 
     #[test]
