@@ -43,7 +43,15 @@
 # `draft` and `publish`, and only once the repository variable
 # RELEASE_ENABLED is 'true'. A pull request touching the pipeline, or a
 # manual "Run workflow", is a dry run: everything up to `assemble`, with the
-# rehearsal. Publishing credentials exist only inside the `release`
+# rehearsal. A manual run rehearses the branch chosen under "Use workflow
+# from" (a scratch branch for a release candidate); there is no `ref` input
+# and no job names a checkout ref from outside the run, so CodeQL's
+# actions/cache-poisoning/poisonable-step has no untrusted checkout to flag
+# (#669). Every job checks out github.sha, which is the commit `verify`
+# checked. This workflow writes no cache and must not gain one: a cache
+# written by a run in the default branch's scope is restorable by every
+# other ref's runs.
+# Publishing credentials exist only inside the `release`
 # environment's job (crates.io trusted publishing over OIDC; `id-token:
 # write` appears nowhere else, which scripts/check_workflows.py enforces).
 # Actions are pinned to commit SHAs.
@@ -52,12 +60,9 @@ name: release
 on:
   push:
     tags: ["v*.*.*"]
+  # A manual dry run rehearses the branch picked under "Use workflow from";
+  # there is deliberately no `ref` input (#669, see the header).
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Branch, tag or commit to rehearse (always a dry run; a real release starts only from a pushed v* tag)"
-        required: false
-        default: ""
   pull_request:
     paths:
       - ".github/workflows/release.yml"
@@ -113,7 +118,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Real release or dry run?
@@ -125,6 +129,12 @@ jobs:
         run: |
           VERSION=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import release_stages as r; print(r.cargo_version())')
           COMMIT=$(git rev-parse HEAD)
+          # The jobs after this one check out github.sha (#669); that is this
+          # commit, because the checkout above names no ref. Fail closed if not.
+          if [ "$COMMIT" != "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]; then
+            echo "::error::HEAD $COMMIT is not the triggering commit $GITHUB_SHA"
+            exit 1
+          fi
           if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
             REAL=true
             TAG="$REF_NAME"
@@ -283,10 +293,12 @@ jobs:
     steps:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
@@ -324,10 +336,12 @@ jobs:
       run:
         shell: bash
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -391,10 +405,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -433,10 +449,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
