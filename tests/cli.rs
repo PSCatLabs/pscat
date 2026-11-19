@@ -1241,25 +1241,35 @@ fn the_wrote_report_is_not_on_stdout() {
     }
 }
 
+/// A child whose stdout reader is already gone when it starts (#1294, #1201).
+///
+/// The read end is closed before `spawn`, so the child's first write finds no
+/// reader and fails with `EPIPE`, whatever the pipe's size and however fast the
+/// child runs. Dropping the read end after `spawn` raced the child instead (seen
+/// on Linux CI): a child that wrote its output into the pipe's buffer first got
+/// no `EPIPE`, so a REPL then waited on its open stdin until the deadline
+/// killed it, and a short `--capabilities` exited 0 rather than 141.
+/// `child.stdout` is `None`, and stderr is piped for `common::wait_output`.
+#[cfg(unix)]
+fn spawn_with_closed_stdout(args: &[&str], stdin: Stdio) -> std::process::Child {
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    Command::new(BIN)
+        .args(args)
+        .stdin(stdin)
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat")
+}
+
 /// #1059: a reader that goes away (`| head`) is not a crash. The CLI's own
 /// stdout writes end quietly, and so does a program's `print`: no Rust panic,
 /// no `ioerror` report, a non-zero status, and the page still written.
 #[cfg(unix)]
 #[test]
 fn a_closed_stdout_ends_quietly() {
-    // Far more than a pipe holds, so the write cannot all land before the
-    // test closes its end.
-    let spawn = |args: &[&str]| {
-        let mut child = Command::new(BIN)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn pscat");
-        drop(child.stdout.take());
-        common::wait_output(child)
-    };
+    let spawn = |args: &[&str]| common::wait_output(spawn_with_closed_stdout(args, Stdio::null()));
     let out = spawn(&["--capabilities"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("panicked"), "{stderr}");
@@ -1320,22 +1330,11 @@ fn a_closed_stdout_ends_quietly() {
 /// #1059: a REPL whose stdout reader has gone stops at once, flushing as it
 /// leaves, instead of waiting on a stdin that stays open.
 ///
-/// The reader is gone before the child starts. Dropping it after `spawn`
-/// raced the child (seen on Linux CI, on main too): a child that wrote its
-/// banner and first prompt into the pipe's buffer before the test closed the
-/// read end got no `EPIPE`, and then waited on the open stdin until the
-/// deadline killed it.
+/// The reader is gone before the child starts (`spawn_with_closed_stdout`).
 #[cfg(unix)]
 #[test]
 fn a_repl_stops_when_its_stdout_reader_goes() {
-    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
-    drop(reader);
-    let mut child = Command::new(BIN)
-        .stdin(Stdio::piped())
-        .stdout(writer)
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn pscat");
+    let mut child = spawn_with_closed_stdout(&[], Stdio::piped());
     // Held open until the child has exited: it must not need the EOF.
     let stdin = child.stdin.take();
     let out = common::wait_output(child);
@@ -1351,18 +1350,14 @@ fn a_repl_stops_when_its_stdout_reader_goes() {
 #[cfg(unix)]
 #[test]
 fn only_the_error_from_the_closed_stdout_is_silenced() {
-    let mut child = Command::new(BIN)
-        .args([
+    let child = spawn_with_closed_stdout(
+        &[
             "--headless",
             "-e",
             "{ 1 1 200000 { = } for } stopped pop (%stdout) (w) file read",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn pscat");
-    drop(child.stdout.take());
+        ],
+        Stdio::null(),
+    );
     let out = common::wait_output(child);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("ioerror"), "the read's own error: {stderr}");
