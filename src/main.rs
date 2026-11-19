@@ -1356,8 +1356,10 @@ const RUN_ERROR_CHECK: &str = "run-error";
 /// parse them back out of the child's stderr). Returns whether anything
 /// was found, which is what `--lint-strict` turns into a non-zero exit;
 /// plain `--lint` stays advisory, as it has been since issue #17. After
-/// an error (`ok` false) it prints the `run-error` line and no findings:
-/// they would be consequences of the abort, not of the program (#947).
+/// an error (`ok` false) it prints the `run-error` line and only the
+/// findings that can explain the error (`pscat::lint::ERROR_EXPLAINING_CHECKS`,
+/// #1110): the rest would be consequences of the abort, not of the program
+/// (#947).
 ///
 /// `ok` is whether the program ran to the end. An errored run is never
 /// "clean" (issue #369): the verdict line used to say so right under the
@@ -1401,12 +1403,26 @@ pub(crate) fn print_lint(
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
         );
-        // Every other check reads end-of-run state, so after an abort it
-        // reports the abort (a blank page, an unbalanced gsave, a leaked
-        // dict), not the program (#947, as `pscat-mcp` since #942). The
-        // note explains findings and there are none, so it is left out
-        // too. The errored run fails on its own, whatever `--lint-strict`
-        // says.
+        // Most checks read end-of-run state, so after an abort they report
+        // the abort (a blank page, an unbalanced gsave, a leaked dict), not
+        // the program (#947, as `pscat-mcp` since #942). The exception is a
+        // finding that can explain the error, such as a redefined operator
+        // (#1110): it follows the `run-error` line, with the note that says
+        // what was linted, which would otherwise explain nothing. The errored
+        // run fails on its own, whatever `--lint-strict` says, and these
+        // findings add no footer.
+        let kept: Vec<_> = findings
+            .iter()
+            .filter(|f| pscat::lint::explains_an_error(f.check))
+            .collect();
+        if !kept.is_empty() {
+            if let Some(note) = note {
+                eprintln!("pscat: lint: {LINT_NOTE}{note}");
+            }
+            for f in kept {
+                eprintln!("pscat: lint: [{}] {}", f.check, f.message);
+            }
+        }
         return true;
     }
     if let Some(note) = note {

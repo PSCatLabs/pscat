@@ -1782,6 +1782,11 @@ renders eight examples in both and compares block-downsampled output).
   `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
   beside findings. A new lint check that reads the canvas must go through
   the stitched pages, not `check_band`.
+  After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
+  end-of-run findings (#942, #947) except those in
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  only if it reads state that survives the abort and can name the cause
+  (`notes/1110-lint-notes-in-a-failed-render.md`).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
