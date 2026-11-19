@@ -200,7 +200,10 @@ fn assert_real_pattern(pdf: &[u8], paint_type: u8) {
     );
     assert!(text.contains("/Pattern << /P0 "), "page resource: {text}");
     assert!(text.contains(" scn "), "no pattern fill: {text}");
-    assert!(!text.contains("/Subtype /Image"), "a raster stands in: {text}");
+    assert!(
+        !text.contains("/Subtype /Image"),
+        "a raster stands in: {text}"
+    );
 }
 
 /// `hayro`: also hold hayro's raster of the PDF against ours. hayro paints
@@ -211,9 +214,19 @@ fn check_all(name: &str, src: &str, paint_type: u8, hayro: bool) -> Outputs {
     let out = render(src);
     assert_real_pattern(&out.pdf, paint_type);
     assert!(out.svg.contains("<pattern "), "{}", out.svg);
-    assert_close(&format!("{name}: SVG via resvg"), &out.png, &resvg_png(&out.svg), 3.0);
+    assert_close(
+        &format!("{name}: SVG via resvg"),
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
     if hayro {
-        assert_close(&format!("{name}: PDF via hayro"), &out.png, &hayro_png(&out.pdf), 3.0);
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
     }
     if common::gs_available() {
         // gs paints our PDF exactly as it paints the program itself: the
@@ -337,11 +350,17 @@ fn makepattern_errors_are_the_ones_gs_gives() {
         let got = eval(&src);
         assert!(got.ends_with(&format!("/{want}")), "{edit}: {got}");
     }
-    assert!(eval(&format!("{DICT} [1 0 0 1 0] {{ makepattern }} stopped {{ $error /errorname get }} if"))
-        .ends_with("/typecheck"));
+    assert!(
+        eval(&format!(
+            "{DICT} [1 0 0 1 0] {{ makepattern }} stopped {{ $error /errorname get }} if"
+        ))
+        .ends_with("/typecheck")
+    );
     // A negative step is a step.
     assert_eq!(
-        eval(&format!("{DICT} dup /XStep -10 put matrix makepattern type")),
+        eval(&format!(
+            "{DICT} dup /XStep -10 put matrix makepattern type"
+        )),
         "dicttype"
     );
 }
@@ -369,7 +388,9 @@ fn colour_space_readbacks_match_gs() {
     );
     // The copy is a new dictionary with /Implementation, as in gs.
     assert_eq!(
-        eval(&format!("{DICT} dup matrix makepattern dup /Implementation known 3 1 roll eq")),
+        eval(&format!(
+            "{DICT} dup matrix makepattern dup /Implementation known 3 1 roll eq"
+        )),
         "true false"
     );
     // A device colour operator leaves the pattern space.
@@ -418,7 +439,9 @@ fn an_error_in_the_paintproc_leaves_the_page_as_it_was() {
     let pdf = pdf_text(&it.gfx().pdf_document().expect("pdf"));
     assert!(!pdf.contains("/Pattern"), "{pdf}");
     assert_eq!(
-        it.gfx().svg_pages().expect("svg")[0].matches("<path").count(),
+        it.gfx().svg_pages().expect("svg")[0]
+            .matches("<path")
+            .count(),
         2
     );
 }

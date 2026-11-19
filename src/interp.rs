@@ -2679,7 +2679,11 @@ impl Interp {
     /// `makepattern` (#1038): with the tile's capture begun, run the
     /// pattern's `PaintProc` on `dict` (the pattern dictionary it returns),
     /// finishing in [`finish_pattern`](Self::finish_pattern).
-    pub(crate) fn begin_pattern_proc(&mut self, dict: Object, proc: &Object) -> Result<(), PsError> {
+    pub(crate) fn begin_pattern_proc(
+        &mut self,
+        dict: Object,
+        proc: &Object,
+    ) -> Result<(), PsError> {
         let Value::Array(body) = &proc.value else {
             return Err(PsError::Typecheck);
         };
@@ -2710,7 +2714,10 @@ impl Interp {
     }
 
     /// The tile `makepattern` made for `d`, if it made one.
-    pub(crate) fn pattern_tile(&self, d: &Rc<RefCell<Dict>>) -> Option<Rc<crate::pattern::PatternTile>> {
+    pub(crate) fn pattern_tile(
+        &self,
+        d: &Rc<RefCell<Dict>>,
+    ) -> Option<Rc<crate::pattern::PatternTile>> {
         self.patterns
             .get(&(Rc::as_ptr(d) as usize))
             .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)

@@ -2728,7 +2728,13 @@ impl Gfx {
                 let Gfx { pdf, .. } = self;
                 if let Some(pdf) = pdf {
                     match solid {
-                        Some(Some(rgb)) => pdf.fill(&path, FillRule::Winding, &crate::pattern::Ink::Rgb(rgb), comp, &chain),
+                        Some(Some(rgb)) => pdf.fill(
+                            &path,
+                            FillRule::Winding,
+                            &crate::pattern::Ink::Rgb(rgb),
+                            comp,
+                            &chain,
+                        ),
                         Some(None) => {}
                         None => pdf.shfill(&kind, pdf_ctm, stops, extend, region, comp, &chain),
                     }
@@ -4054,16 +4060,16 @@ impl Gfx {
         self.band = cap.band;
         self.suppress_paint = cap.suppress_paint;
         self.coverage = cap.coverage.take();
-        let (depth, state) = std::mem::replace(
-            &mut cap.snapshot,
-            (0, Box::new(self.state.clone())),
-        );
+        let (depth, state) =
+            std::mem::replace(&mut cap.snapshot, (0, Box::new(self.state.clone())));
         self.restore_glyph_snapshot(depth, state);
         (cap, content, svg)
     }
 
     /// The `PaintProc` returned: make the tile from what it painted.
-    pub(crate) fn end_pattern(&mut self) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
+    pub(crate) fn end_pattern(
+        &mut self,
+    ) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
         let (mut cap, content, svg) = self.leave_capture();
         let svg = svg.map(|rec| rec.into_tile());
         // PDF's pattern matrix maps to the default space of the stream that

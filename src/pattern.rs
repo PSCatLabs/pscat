@@ -150,10 +150,7 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
             true,
         )
     } else if across {
-        (
-            [0.0, sign(ky), sign(kx), 0.0, tx.round(), ty.round()],
-            true,
-        )
+        ([0.0, sign(ky), sign(kx), 0.0, tx.round(), ty.round()], true)
     } else {
         ([sx_ / rsx, ky / rsx, kx / rsy, sy_ / rsy, tx, ty], false)
     };
@@ -186,14 +183,7 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
     if ix0.abs() > 1e9 || iy0.abs() > 1e9 {
         return Err(PsError::Limitcheck);
     }
-    let capture = Transform::from_row(
-        rsx as f32,
-        0.0,
-        0.0,
-        rsy as f32,
-        -ix0 as f32,
-        -iy0 as f32,
-    );
+    let capture = Transform::from_row(rsx as f32, 0.0, 0.0, rsy as f32, -ix0 as f32, -iy0 as f32);
     Ok(Geometry {
         capture,
         shader: shader_t,
@@ -238,14 +228,7 @@ pub(crate) fn fold(content: &Pixmap, g: &Geometry) -> Option<Pixmap> {
     let paint = PixmapPaint::default();
     for &y in &ys {
         for &x in &xs {
-            out.draw_pixmap(
-                x,
-                y,
-                content.as_ref(),
-                &paint,
-                Transform::identity(),
-                None,
-            );
+            out.draw_pixmap(x, y, content.as_ref(), &paint, Transform::identity(), None);
         }
     }
     Some(out)

@@ -392,11 +392,7 @@ impl SvgRecorder {
             // i == 0 is the outermost emitted group, the one that
             // composites into the page.
             let style = if i == 0 { blend_style } else { "" };
-            let _ = write!(
-                open,
-                "<g clip-path=\"url(#{}c{id})\"{style}>",
-                self.prefix
-            );
+            let _ = write!(open, "<g clip-path=\"url(#{}c{id})\"{style}>", self.prefix);
         }
         let leftover = if ids.is_empty() { blend_style } else { "" };
         (open, "</g>".repeat(ids.len()), leftover.to_string())

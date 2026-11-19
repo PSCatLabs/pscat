@@ -66,8 +66,8 @@ use thiserror::Error;
 use tiny_skia::FillRule;
 
 use crate::gfx::{ClipNode, Composite};
-use crate::pattern::Ink;
 use crate::limits::LimitProbe;
+use crate::pattern::Ink;
 use crate::pdf_font::{OBJECTS_PER_FONT, UsedGlyphs};
 use crate::svg::Chain;
 use crate::textrun::{GlyphText, Placement, TextRun};
@@ -443,7 +443,11 @@ impl PdfRecorder {
                 if !self.current_patterns.contains(&idx) {
                     self.current_patterns.push(idx);
                 }
-                let (cs, scn) = if stroking { ("CS", "SCN") } else { ("cs", "scn") };
+                let (cs, scn) = if stroking {
+                    ("CS", "SCN")
+                } else {
+                    ("cs", "scn")
+                };
                 if tile.uncolored {
                     self.current_pattern_cs = true;
                     format!(

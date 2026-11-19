@@ -351,8 +351,7 @@ fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), P
         4 => it.gfx.set_cmyk(comps[0], comps[1], comps[2], comps[3]),
         _ => {}
     }
-    it.gfx
-        .set_pattern(crate::gfx::PatternColor { tile, dict });
+    it.gfx.set_pattern(crate::gfx::PatternColor { tile, dict });
     Ok(())
 }
 
@@ -365,7 +364,9 @@ fn setpattern(it: &mut Interp) -> Result<(), PsError> {
     top_pattern(it)?;
     if !matches!(it.gfx.colorspace(), ColorSpace::Pattern { .. }) {
         let base = match it.gfx.colorspace() {
-            cs @ (ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk) => Some(Box::new(cs.clone())),
+            cs @ (ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk) => {
+                Some(Box::new(cs.clone()))
+            }
             _ => None,
         };
         currentcolorspace(it)?;
