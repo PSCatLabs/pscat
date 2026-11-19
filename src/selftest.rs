@@ -916,9 +916,11 @@ fn run_block(
         failure_count,
         error,
         gsave_depth: interp.gfx().gsave_depth(),
-        // systemdict + userdict are the permanent baseline (see
+        // systemdict, globaldict and userdict are the permanent baseline (see
         // `Interp::pop_dict`), same rule `lint`'s dict-leak check uses.
-        dict_depth: interp.dict_stack_len().saturating_sub(2),
+        dict_depth: interp
+            .dict_stack_len()
+            .saturating_sub(crate::interp::PERMANENT_DICTS),
         operand_delta: interp.operand_stack().len() as i64 - operand_baseline as i64,
         assertions: assertion_count(&interp),
     };

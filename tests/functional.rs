@@ -21,7 +21,7 @@ fn run(src: &str) -> Interp {
     let mut it = interpreter();
     it.run_str(src)
         .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
-    assert_eq!(it.dict_stack_len(), 2, "library dictionary leaked");
+    assert_eq!(it.dict_stack_len(), 3, "library dictionary leaked");
     it
 }
 
@@ -157,13 +157,13 @@ fn callback_errors_propagate_without_private_dictionary_leaks() {
             matches!(it.run_str(src), Err(PsError::Undefined(_))),
             "{src}"
         );
-        assert_eq!(it.dict_stack_len(), 2, "{src}");
+        assert_eq!(it.dict_stack_len(), 3, "{src}");
     }
     assert_eq!(
         eval(
             "{[1] {pop missing_callback} fp-map} stopped $error /command get countdictstack [2] {1 add} fp-map"
         ),
-        ["true", "missing_callback", "2", "[3]"]
+        ["true", "missing_callback", "3", "[3]"]
     );
 }
 
@@ -180,7 +180,7 @@ fn added_callbacks_propagate_errors_without_private_dictionary_leaks() {
             matches!(it.run_str(src), Err(PsError::Undefined(_))),
             "{src}"
         );
-        assert_eq!(it.dict_stack_len(), 2, "{src}");
+        assert_eq!(it.dict_stack_len(), 3, "{src}");
     }
 }
 
@@ -246,7 +246,7 @@ fn sort_keys_and_other_helpers_hide_private_state_from_callbacks() {
     );
     assert_eq!(
         eval(
-            "100 [3 1 2] {count 2 eq countdictstack 2 eq and {neg} {bad_scope} ifelse} fp-sort-by"
+            "100 [3 1 2] {count 2 eq countdictstack 3 eq and {neg} {bad_scope} ifelse} fp-sort-by"
         ),
         ["100", "[3 2 1]"],
         "operand and dictionary stacks are exactly the caller's plus the element"
@@ -315,7 +315,7 @@ fn callbacks_can_catch_their_own_errors_or_stop_outward() {
     assert_eq!(eval("[1] {pop {missing} stopped} fp-map"), ["[true]"]);
     assert_eq!(
         eval("{[1 2] {pop stop} fp-each 99} stopped countdictstack"),
-        ["true", "2"]
+        ["true", "3"]
     );
 }
 
@@ -481,7 +481,7 @@ fn poster_variations_match_the_imperative_control() {
                 "/Style {style} def (examples/functional/{driver}.ps) run"
             ))
             .unwrap_or_else(|e| panic!("{driver}/{style}: {}", it.error_report(&e)));
-            assert_eq!(it.dict_stack_len(), 2);
+            assert_eq!(it.dict_stack_len(), 3);
             assert!(it.operand_stack().is_empty());
             assert_eq!(
                 it.captured_stdout(),
@@ -524,7 +524,7 @@ fn render_study(width: u32, height: u32, source: &str) -> Interp {
     it.capture_stdout();
     it.run_str(source)
         .unwrap_or_else(|e| panic!("study: {}", it.error_report(&e)));
-    assert_eq!(it.dict_stack_len(), 2);
+    assert_eq!(it.dict_stack_len(), 3);
     assert!(it.operand_stack().is_empty());
     it
 }

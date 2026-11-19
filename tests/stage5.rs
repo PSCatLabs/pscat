@@ -107,10 +107,10 @@ fn dict_literals_and_conveniences() {
     assert_eq!(eval("/zzz_undefined where"), ["false"]);
     // store replaces in the defining dict, not the current one.
     assert_eq!(eval("/x 1 def 2 dict begin /x 2 store end x"), ["2"]);
-    assert_eq!(eval("countdictstack"), ["2"]);
+    assert_eq!(eval("countdictstack"), ["3"]);
     assert_eq!(
         eval("2 dict begin 2 dict begin cleardictstack countdictstack"),
-        ["2"]
+        ["3"]
     );
     assert_eq!(eval("2 dict dup /a 1 put dup /a undef /a known"), ["false"]);
     assert_eq!(eval("currentdict type"), ["dicttype"]);

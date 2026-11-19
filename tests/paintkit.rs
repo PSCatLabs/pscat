@@ -6943,7 +6943,7 @@ fn wet_survives_a_proc_that_raises_with_a_dict_still_open() {
     it.run_str(
         "0 0 0 setrgbcolor 5 srand \
          { { 5 dict begin nosuchname } << /Layers 2 >> pkwet } stopped pop \
-         countdictstack 3 eq { end } if \
+         countdictstack 4 eq { end } if \
          userdict /pqdepth get",
     )
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));

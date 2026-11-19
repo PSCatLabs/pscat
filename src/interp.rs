@@ -157,6 +157,11 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
     }
 }
 
+/// The dictionaries that are always on the dictionary stack, bottom first:
+/// systemdict, globaldict (#1159), userdict. `end` and `cleardictstack`
+/// never go below them, and `countdictstack` is 3 at the start, as in gs.
+pub(crate) const PERMANENT_DICTS: usize = 3;
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -369,6 +374,9 @@ pub struct Interp {
     save_stack: Vec<SaveRecord>,
     /// `setglobal`'s allocation mode and the modes `save` recorded (#1146).
     pub(crate) vm_mode: crate::ops::vm::VmMode,
+    /// `globaldict` (#1159): the dictionary that stands in for global VM.
+    /// Always on the dictionary stack, under userdict; `restore` never rolls it back.
+    pub(crate) globaldict: Rc<RefCell<Dict>>,
     pub(crate) quit_requested: bool,
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
@@ -723,13 +731,19 @@ impl Interp {
         system
             .borrow_mut()
             .put("userdict".into(), Object::lit(Value::Dict(user.clone())));
+        let globaldict = Rc::new(RefCell::new(Dict::new()));
+        system.borrow_mut().put(
+            "globaldict".into(),
+            Object::lit(Value::Dict(globaldict.clone())),
+        );
         Some(Interp {
             ostack: Vec::new(),
-            dstack: vec![system, user],
+            dstack: vec![system, globaldict.clone(), user],
             estack: Vec::new(),
             journal: Vec::new(),
             save_stack: Vec::new(),
             vm_mode: Default::default(),
+            globaldict,
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
@@ -1463,7 +1477,9 @@ impl Interp {
             // program-owned dict of its own before stopping/erroring
             // must not have that dict popped out from under it here
             // (round 6 of PR #59's review: an unconditional pop did).
-            Frame::Scanner(lexer) if lexer.pop_systemdict && self.dstack.len() > 2 => {
+            Frame::Scanner(lexer)
+                if lexer.pop_systemdict && self.dstack.len() > PERMANENT_DICTS =>
+            {
                 if let Some(top) = self.dstack.last()
                     && Rc::ptr_eq(top, &self.dstack[0])
                 {
@@ -2928,7 +2944,7 @@ impl Interp {
     }
 
     pub(crate) fn clear_dict_stack(&mut self) {
-        self.dstack.truncate(2);
+        self.dstack.truncate(PERMANENT_DICTS);
     }
 
     /// `where`: the topmost dictionary defining `key`, if any.
@@ -2950,7 +2966,7 @@ impl Interp {
 
     /// `end`: systemdict and userdict are permanent, per the PLRM.
     pub(crate) fn pop_dict(&mut self) -> Result<(), PsError> {
-        if self.dstack.len() <= 2 {
+        if self.dstack.len() <= PERMANENT_DICTS {
             return Err(PsError::DictStackUnderflow);
         }
         self.dstack.pop();
@@ -3045,6 +3061,11 @@ impl Interp {
 
     /// The dict counterpart of [`journal_array`].
     pub(crate) fn journal_dict(&mut self, d: &Rc<RefCell<Dict>>) {
+        // Global VM outlives a `restore` (measured with gs 10.07.1, whichever
+        // mode the `save` was made in), so `globaldict` is never rolled back.
+        if Rc::ptr_eq(d, &self.globaldict) {
+            return;
+        }
         let Some(rec) = self.save_stack.last_mut() else {
             return;
         };
@@ -3204,7 +3225,7 @@ impl Interp {
             number(llx + w as f32 / scale),
             number(user_y(top)),
         ]);
-        let user = self.dstack[1].clone();
+        let user = self.dstack[2].clone();
         self.journal_dict(&user);
         // Detached, as the band names were first defined (#868).
         let key = crate::name::detached(|| crate::name::intern("BandBBox"));
@@ -3834,7 +3855,7 @@ impl Drop for Interp {
         // a `borrow()` of it must not turn a drop into a panic (a second
         // panic while unwinding aborts the process). That dictionary is
         // simply left alone, as it was before #625.
-        for dict in self.dstack.iter().take(2) {
+        for dict in self.dstack.iter().take(PERMANENT_DICTS) {
             let contents = dict.try_borrow_mut().map(|mut d| std::mem::take(&mut *d));
             drop(contents);
         }
@@ -4016,7 +4037,8 @@ mod tests {
         .expect("probe program runs");
         let mut weaks = vec![
             ("systemdict", std::rc::Rc::downgrade(&it.dstack[0])),
-            ("userdict", std::rc::Rc::downgrade(&it.dstack[1])),
+            ("globaldict", std::rc::Rc::downgrade(&it.dstack[1])),
+            ("userdict", std::rc::Rc::downgrade(&it.dstack[2])),
         ];
         for name in ["$error", "errordict", "FontDirectory", "nested /a", "held"] {
             match it.pop().expect("dict on the operand stack").value {
@@ -4133,12 +4155,14 @@ mod tests {
     #[test]
     fn dropping_an_interp_with_no_program_frees_both_permanent_dicts() {
         let interp = Interp::new();
-        let (system, user) = (
+        let (system, global, user) = (
             std::rc::Rc::downgrade(&interp.dstack[0]),
             std::rc::Rc::downgrade(&interp.dstack[1]),
+            std::rc::Rc::downgrade(&interp.dstack[2]),
         );
         drop(interp);
         assert!(system.upgrade().is_none(), "systemdict must be freed");
+        assert!(global.upgrade().is_none(), "globaldict must be freed");
         assert!(user.upgrade().is_none(), "userdict must be freed");
     }
 
@@ -4345,8 +4369,8 @@ mod tests {
         it.run_source(&src).expect_err("1 0 div still errors");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive an aborted run"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive an aborted run"
         );
     }
 
@@ -4389,8 +4413,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            2,
-            "systemdict/userdict only -- eexec's push must not survive a caught stop"
+            PERMANENT_DICTS,
+            "the permanent dicts only -- eexec's push must not survive a caught stop"
         );
         assert_eq!(
             it.load("probe").expect("defined").repr(),
@@ -4422,8 +4446,8 @@ mod tests {
             .expect("stopped catches it; overall run succeeds");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own still-open dict, per the PLRM's \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own still-open dict, per the PLRM's \
              stopped-doesn't-restore-the-dict-stack rule -- not eexec's copy, which the \
              program's own `end` already removed, and not popped again by cleanup"
         );
@@ -4450,8 +4474,8 @@ mod tests {
             .expect("plain completion, nothing errors");
         assert_eq!(
             it.dict_stack_len(),
-            3,
-            "systemdict/userdict + the program's own dict left open across eexec's natural \
+            PERMANENT_DICTS + 1,
+            "the permanent dicts + the program's own dict left open across eexec's natural \
              end -- not eexec's injected copy, which the program's own `end` already removed"
         );
     }
