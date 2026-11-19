@@ -583,14 +583,6 @@ fn an_error_inside_a_sequence_reports_its_own_line() {
 
 // ------------------------------------------------------------ Ghostscript
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn gs(prog: &str) -> Vec<u8> {
     let out = std::process::Command::new("gs")
         .args([
@@ -614,8 +606,7 @@ fn gs(prog: &str) -> Vec<u8> {
 /// only sequences under 65535 bytes are compared.
 #[test]
 fn ghostscript_writes_the_same_bytes() {
-    if !gs_available() {
-        eprintln!("skipping gs byte comparison: gs not installed");
+    if !common::gs_available() {
         return;
     }
     for fmt in 1..=4 {
@@ -630,8 +621,7 @@ fn ghostscript_writes_the_same_bytes() {
 /// the long header (which pscat writes per the PLRM).
 #[test]
 fn ghostscript_reads_what_pscat_writes() {
-    if !gs_available() {
-        eprintln!("skipping gs read-back check: gs not installed");
+    if !common::gs_available() {
         return;
     }
     for (fmt, obj) in [
@@ -670,11 +660,10 @@ fn ghostscript_reads_what_pscat_writes() {
 }
 
 /// gs agrees on what `token` on a sequence with executable strings does
-/// when the array it returns is executed (local only; CI has no gs).
+/// when the array it returns is executed.
 #[test]
 fn ghostscript_runs_the_executable_strings_of_a_token_array() {
-    if !gs_available() {
-        eprintln!("skipping gs comparison: gs not installed");
+    if !common::gs_available() {
         return;
     }
     let s = seq(
