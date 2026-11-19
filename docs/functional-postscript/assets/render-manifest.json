@@ -4,36 +4,36 @@
     "style": 0,
     "page": "720x960",
     "sha256": "43f2a9a4b69f1a23495c919fe4682698e9f35e808322aea59465e9082bd99c2e",
-    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/ultraviolet.png\n"
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\n"
   },
   {
     "file": "sunprint.png",
     "style": 1,
     "page": "720x960",
     "sha256": "5beb5ef502587685dcc344f78cd78c44d21285a1141a7ae0b0224957239e919d",
-    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/sunprint.png\n"
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\n"
   },
   {
     "file": "blue-hour.png",
     "style": 2,
     "page": "720x960",
     "sha256": "68b02a024b729ca3ce8c8e71bcf1b8ef0f882877749ad6f578d014705634f058",
-    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/blue-hour.png\n"
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\n"
   },
   {
     "file": "primitives.png",
     "page": "720x300",
-    "sha256": "dc10de5d16035eaf341637b426f0148e775f0127e8320a89f3271de14623debb"
+    "sha256": "39a9d29ae263986d868702d3be25edfcb0fa7d99c2db2daff98ba83eb1a217c3"
   },
   {
     "file": "detail.png",
     "page": "480x480",
-    "sha256": "31f894487c815b5f42c563704bf98631c981457381801999969a2648d60a38e4"
+    "sha256": "e7e4b6fe659bce999d1487d7486ef9b919d53d2e84093cb501c8c6c3d66affbb"
   },
   {
     "file": "ground.png",
     "page": "720x960",
-    "sha256": "3c6a0ccde631acb16e00a74769eb8e31c5aac8cf5d91a7e1690c0eac7b2933a2"
+    "sha256": "98f8258b7acea5f56c039f59cfe0475bf7571f18b210d50eb33e2b2d0042c50b"
   },
   {
     "file": "type-nocturne.png",
