@@ -131,8 +131,8 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
     );
     let (ax, ay) = (spec.xstep.abs(), spec.ystep.abs());
     // Device length of one step along each pattern axis.
-    let lx = ax * sx_.hypot(ky);
-    let ly = ay * kx.hypot(sy_);
+    let lx = ax * crate::fmath::hypot(sx_, ky);
+    let ly = ay * crate::fmath::hypot(kx, sy_);
     if !(lx.is_finite() && ly.is_finite()) || lx <= 0.0 || ly <= 0.0 {
         return Err(PsError::Rangecheck);
     }
@@ -403,7 +403,8 @@ mod tests {
 
     #[test]
     fn a_rotated_pattern_is_resampled() {
-        let m = Transform::from_rotate(30.0);
+        // 30 degrees.
+        let m = Transform::from_row(0.866_025_4, 0.5, -0.5, 0.866_025_4, 0.0, 0.0);
         let g = geometry(&spec(m, [0.0, 0.0, 10.0, 10.0], 10.0, 10.0)).unwrap();
         assert!(!g.exact);
         assert_eq!(g.period, (10, 10));

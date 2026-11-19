@@ -210,8 +210,11 @@ fn assert_close(what: &str, ours: &Pixmap, theirs: &Pixmap, max: f64) {
     {
         let dir = std::path::PathBuf::from(dir);
         let name = what.replace([' ', ':'], "_");
-        let _ = ours.save_png(dir.join(format!("{name}_ours.png")));
-        let _ = theirs.save_png(dir.join(format!("{name}_theirs.png")));
+        for (pm, side) in [(ours, "ours"), (theirs, "theirs")] {
+            if let Ok(png) = pscat::png::encode(pm, 1.0) {
+                let _ = std::fs::write(dir.join(format!("{name}_{side}.png")), png);
+            }
+        }
     }
     assert!(mean <= max, "{what}: mean block diff {mean:.2} > {max}");
 }

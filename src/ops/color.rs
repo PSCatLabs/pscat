@@ -430,8 +430,7 @@ fn makepattern(it: &mut Interp) -> Result<(), PsError> {
         if !proc.executable || !matches!(proc.value, Value::Array(_)) {
             return Err(PsError::Typecheck);
         }
-        if !(b[0] < b[2] && b[1] < b[3])
-            || !b.iter().all(|v| v.is_finite())
+        if !(b[0] < b[2] && b[1] < b[3] && b.iter().all(|v| v.is_finite()))
             || xstep == 0.0
             || ystep == 0.0
             || !xstep.is_finite()

@@ -186,8 +186,8 @@ impl SvgRecorder {
         let prefix = self.prefix.clone();
         let tid = tile.id;
         let [bx0, by0, bx1, by1] = tile.spec.bbox.map(|v| v as f32);
-        if !self.tile_groups.contains_key(&tkey) {
-            self.tile_groups.insert(tkey, tile.clone());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.tile_groups.entry(tkey) {
+            e.insert(tile.clone());
             let _ = write!(
                 self.defs,
                 "{}<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
