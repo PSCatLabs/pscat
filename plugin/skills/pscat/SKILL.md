@@ -208,6 +208,13 @@ command-line counterpart of the browser build's `renderer.addFont(name, bytes)`.
 has (fonts, palettes, templates, procedures, native operators) as JSON; prefer
 it over guessing a name from prose, this file included.
 
+The whole inventory is over 300,000 characters, which an MCP client may cut
+short. `pscat --capabilities --brief` lists names with one-line descriptions;
+`--name N` (repeatable), `--kind K` (`font`, `type3_face`, `palette`,
+`template`, `procedure`, `operator`, `dial`) and `--source FILE` (`paintkit`,
+`systemdict`) pick entries, in full unless `--brief`. The MCP tool
+`describe_art_capabilities` takes the same as `names`, `kind`, `source` and `brief`.
+
 ## Where `(lib/...) run` finds a file
 
 A `lib/` name tries, in order: `$PSCAT_LIB` (one directory that stands in for

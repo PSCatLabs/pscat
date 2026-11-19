@@ -249,10 +249,22 @@ that `/Spread` and `/Load` keep their one shared meaning.
   fails if the name is not a real operator in `systemdict`. The `nr*`
   procedures in `lib/noiseref.ps` name their native twin in their
   summary, and a test keeps that pointer honest.
-- **No `--capabilities <kind>` filter.** The CLI always prints the
-  full payload; an agent that wants just palettes filters the JSON
-  itself. Simpler for a first version — revisit if the payload size
-  becomes a real problem in practice.
+- **Filters (#1079).** The full payload is over 300,000 characters,
+  which an MCP client may truncate (one cut it at 100,000, in the middle
+  of the paintkit parameters). `--capabilities` therefore takes, right
+  after it, any of `--name NAME` (repeatable, exact), `--kind KIND`
+  (`font`, `type3_face`, `palette`, `template`, `procedure`, `operator`,
+  `dial`), `--source FILE` (`paintkit`, `paintkit.ps`, `lib/paintkit.ps`
+  or `systemdict`; case does not matter) and `--brief` (name, kind,
+  source and the description's first sentence, at most 110 characters:
+  no `parameters`, `load` or `example`). `describe_art_capabilities`
+  takes `names`, `kind`, `source` and `brief`. A filtered payload keeps
+  `pscat_version`, the whole catalog's `catalog_signature` and
+  `font_packs`, and adds `matched`, `total` and, if a requested name
+  matches nothing, `unmatched_names`. With no filter the payload is
+  exactly what it was before, with none of those keys: callers that
+  parse it need not change. The kinds are `CapabilityKind::ALL`, which
+  the `--kind` error message and the MCP schema's `enum` both read.
 - **Positional-argument procedures get no structured `parameters`.**
   See "Payload shape" above — PostScript's stack arguments don't map
   onto named, defaulted `Param`s, and forcing a fit would mean

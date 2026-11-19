@@ -155,7 +155,11 @@ PIL composite. A one-call typewriter or chart is not added yet.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
-  [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)).
+  [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)). With no arguments it
+  returns all of it, over 300,000 characters, which a client may cut short;
+  `names`, `kind`, `source` and `brief` ask for less (`{"names": ["pkwash"]}`
+  for one entry's parameter table, `{"kind": "palette", "brief": true}` for a
+  list).
 - `eval_postscript` — run headlessly, get back what the program printed
   (plus a `Warnings:` item for anything it wrote to stderr), or the error (name, offending command, line) plus an operand-stack
   post-mortem.

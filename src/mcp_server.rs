@@ -1006,7 +1006,7 @@ fn tools_call(server: &Arc<Server>, id: Value, params: &Value) -> Option<Value> 
         "handwrite" => Tool::Child(handwrite),
         "chalkboard_math" => Tool::Child(chalkboard_math),
         "review_sheet" => Tool::Child(review_sheet),
-        "describe_art_capabilities" => Tool::Child(|cfg, _| describe_art_capabilities(cfg)),
+        "describe_art_capabilities" => Tool::Child(describe_art_capabilities),
         "eval_postscript" => Tool::Child(eval_postscript),
         "start_render" => Tool::Job(start_render),
         "render_status" => Tool::Job(render_status),
@@ -1327,10 +1327,32 @@ fn tool_list(cfg: &Config) -> Value {
                 Type 3 program faces, mood palettes, page templates, artkit/style-pack procedures, and \
                 native pscat operators. \
                 Structured JSON, safe to call instead of assuming names from documentation, which can \
-                drift from what's really loadable.",
+                drift from what's really loadable. With no arguments it returns every entry in full, \
+                over 300,000 characters, which a client may cut short. Ask for less: `brief` with a \
+                `kind` or `source` lists names and one-line descriptions, and `names` returns the \
+                full parameter tables of just the entries you name (for example `[\"pkwash\"]`).",
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "names": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Only these entries, by exact name (case-sensitive). Names no entry has come back in `unmatched_names`"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": pscat::capabilities::CapabilityKind::ALL.map(pscat::capabilities::CapabilityKind::as_str),
+                        "description": "Only entries of this kind"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Only entries from this library file, such as `paintkit` or `lib/paintkit.ps`; `systemdict` is the native operators"
+                    },
+                    "brief": {
+                        "type": "boolean",
+                        "description": "Give each entry's name, kind, source and first description sentence, without its parameters, load or example (default false)"
+                    }
+                },
                 "required": []
             }
         },
@@ -2905,9 +2927,53 @@ fn sheet_timeout(cfg: &Config) -> ToolError {
     .with("limit_seconds", json!(cfg.timeout.as_secs()))
 }
 
-fn describe_art_capabilities(cfg: &Config) -> Result<Value, ToolError> {
+fn describe_art_capabilities(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("--capabilities");
+    // The filters ride on the CLI's own, so the two answer alike (#1079).
+    match args.get("names") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(names)) => {
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return Err(ToolError::invalid("names must be a list of strings"));
+                };
+                // A value starting `--` would be read as the next flag.
+                if name.starts_with("--") {
+                    return Err(ToolError::invalid(format!(
+                        "names must be entry names, got {name:?}"
+                    )));
+                }
+                cmd.arg("--name").arg(name);
+            }
+        }
+        Some(_) => return Err(ToolError::invalid("names must be a list of strings")),
+    }
+    if let Some(kind) = optional_str(args, "kind")? {
+        if !pscat::capabilities::CapabilityKind::ALL
+            .iter()
+            .any(|k| k.as_str() == kind)
+        {
+            let valid: Vec<&str> = pscat::capabilities::CapabilityKind::ALL
+                .iter()
+                .map(|k| k.as_str())
+                .collect();
+            return Err(ToolError::invalid(format!(
+                "unknown kind {kind:?} (expected one of: {})",
+                valid.join(", ")
+            )));
+        }
+        cmd.arg("--kind").arg(kind);
+    }
+    if let Some(source) = optional_str(args, "source")? {
+        if source.starts_with("--") {
+            return Err(ToolError::invalid("source must not start with --"));
+        }
+        cmd.arg("--source").arg(source);
+    }
+    if optional_bool(args, "brief")?.unwrap_or(false) {
+        cmd.arg("--brief");
+    }
     let run = run_child(cfg, &mut cmd, b"")?;
     if !run.success {
         return Err(ToolError::new(

@@ -2149,7 +2149,26 @@ fn parse_args() -> Result<Options, String> {
                 exit_after_printing();
             }
             "--capabilities" => {
-                println!("{}", pscat::capabilities::payload_json());
+                // Filters follow the flag and are read only here, so a stray
+                // `--name` elsewhere stays an unknown option (#1079).
+                let mut filter = pscat::capabilities::CapabilityFilter::default();
+                while let Some(flag) = args
+                    .next_if(|a| matches!(a.as_str(), "--name" | "--kind" | "--source" | "--brief"))
+                {
+                    if flag == "--brief" {
+                        filter.brief = true;
+                        continue;
+                    }
+                    let value = args
+                        .next_if(|v| !v.starts_with("--"))
+                        .ok_or_else(|| format!("missing value after --capabilities {flag}"))?;
+                    match flag.as_str() {
+                        "--name" => filter.names.push(value),
+                        "--kind" => filter.kind = Some(value),
+                        _ => filter.source = Some(value),
+                    }
+                }
+                println!("{}", pscat::capabilities::payload_json_filtered(&filter)?);
                 exit_after_printing();
             }
             "-e" | "--eval" => {
@@ -2512,6 +2531,10 @@ fn print_usage() {
     println!(
         "      --capabilities  print the agent-usable art catalog (fonts, palettes, templates, procedures) as JSON, then exit"
     );
+    println!("                      narrow it by following with any of: --name NAME (repeatable),");
+    println!("                      --kind KIND (font, type3_face, palette, template, procedure,");
+    println!("                      operator, dial), --source FILE (paintkit, lib/paintkit.ps,");
+    println!("                      systemdict), --brief (name, kind, source, one sentence)");
     println!();
     println!("Sweeps (render file.ps once per value, needing --png and/or --contact-sheet):");
     println!("      --sweep-seed SPEC   reseed with each value in turn (A:B, A:B:STEP, or");

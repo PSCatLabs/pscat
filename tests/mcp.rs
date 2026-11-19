@@ -451,6 +451,106 @@ fn pscat_mcp_subcommand_is_the_same_server() {
     assert_eq!(result["isError"], false, "{result}");
 }
 
+/// The text of a successful tool result's first content item.
+fn first_text(result: &Value) -> &str {
+    result["content"][0]["text"].as_str().expect("a text item")
+}
+
+/// #1079: `describe_art_capabilities` takes filters, and its schema's
+/// `kind` enum is the catalog's own list of kinds.
+#[test]
+fn describe_art_capabilities_filters() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let tool = resp["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "describe_art_capabilities")
+        .expect("the tool is listed");
+    let props = &tool["inputSchema"]["properties"];
+    let kinds: Vec<&str> = pscat::capabilities::CapabilityKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    assert_eq!(props["kind"]["enum"], json!(kinds));
+    for key in ["names", "source", "brief"] {
+        assert!(props.get(key).is_some(), "schema lacks {key}");
+    }
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "names": ["pkwash", "nosuch"] }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert_eq!(payload["matched"], 1);
+    assert_eq!(payload["capabilities"][0]["name"], "pkwash");
+    assert!(
+        payload["capabilities"][0]["parameters"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 3
+    );
+    assert_eq!(payload["unmatched_names"], json!(["nosuch"]));
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "kind": "palette", "brief": true }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    let caps = payload["capabilities"].as_array().unwrap();
+    assert!(!caps.is_empty());
+    assert!(
+        caps.iter()
+            .all(|c| c["kind"] == "palette" && c.get("parameters").is_none())
+    );
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "source": "paintkit", "brief": true }),
+    );
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert!(
+        payload["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "pkwash")
+    );
+
+    // No arguments: the whole catalog, with no filter keys.
+    let result = s.tool("describe_art_capabilities", json!({}));
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert!(payload.get("matched").is_none());
+    assert!(payload["capabilities"].as_array().unwrap().len() > 100);
+}
+
+#[test]
+fn describe_art_capabilities_rejects_bad_arguments() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for args in [
+        json!({ "kind": "procedur" }),
+        json!({ "kind": 3 }),
+        json!({ "names": "pkwash" }),
+        json!({ "names": [1] }),
+        json!({ "names": ["--kind"] }),
+        json!({ "source": "--brief" }),
+        json!({ "brief": "yes" }),
+    ] {
+        let result = s.tool("describe_art_capabilities", args.clone());
+        assert_eq!(result["isError"], true, "{args}: {result}");
+        assert_eq!(
+            result["structuredContent"]["error"]["kind"], "invalid_argument",
+            "{args}"
+        );
+    }
+}
+
 #[test]
 fn render_returns_a_png_image() {
     let mut s = Server::start();

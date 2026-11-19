@@ -14,6 +14,24 @@ chalkboard PNG; same file), `review_sheet` (the review sheet in
 `pscat sheet` writes) and `describe_art_capabilities`, plus render jobs for
 anything slow.
 
+## Asking `describe_art_capabilities` for less
+
+With no arguments it returns every entry in full, over 300,000 characters, and a
+client may truncate that. Ask for the part you need:
+
+- `{"kind": "procedure", "brief": true}` (or `"source": "paintkit"`) lists names
+  with one-line descriptions, a few tens of kilobytes at most;
+- `{"names": ["pkwash", "pkpaper"]}` returns those entries in full, with every
+  parameter, its unit and default, and the `load` line; names no entry has come
+  back in `unmatched_names`;
+- `kind` is one of `font`, `type3_face`, `palette`, `template`, `procedure`,
+  `operator`, `dial`; `source` is a library file (`paintkit` or `lib/paintkit.ps`)
+  or `systemdict` for native operators.
+
+A narrowed answer adds `matched` and `total` and keeps the whole catalog's
+`catalog_signature`. The same filters work on the command line, after
+`--capabilities`: `--name`, `--kind`, `--source`, `--brief`.
+
 ## Time limits and render jobs
 
 Each call has a time limit (60 s by default; whoever registers the server raises it with

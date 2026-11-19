@@ -760,6 +760,162 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
     }
 }
 
+/// `pscat --capabilities` plus `args`, parsed.
+fn cli_capabilities(args: &[&str]) -> serde_json::Value {
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--capabilities")
+        .args(args)
+        .output_deadline()
+        .expect("run pscat --capabilities");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).expect("--capabilities prints valid JSON")
+}
+
+/// #1079: `--name` returns just those entries, in full, and says what
+/// nothing carries; the whole catalog's signature stays.
+#[test]
+fn cli_capabilities_name_filter_returns_those_entries_in_full() {
+    let all = cli_capabilities(&[]);
+    let json = cli_capabilities(&["--name", "pkwash", "--name", "pkpaper", "--name", "nosuch"]);
+    let caps = json["capabilities"].as_array().expect("capabilities array");
+    let names: Vec<&str> = caps.iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        names,
+        ["pkpaper", "pkwash"],
+        "sorted, as the full payload is"
+    );
+    for cap in caps {
+        assert!(cap["parameters"].as_array().is_some_and(|p| !p.is_empty()));
+        assert!(cap["example"].as_str().is_some_and(|e| !e.is_empty()));
+    }
+    assert_eq!(json["unmatched_names"], serde_json::json!(["nosuch"]));
+    assert_eq!(json["matched"], 2);
+    assert_eq!(json["total"], all["capabilities"].as_array().unwrap().len());
+    assert_eq!(json["catalog_signature"], all["catalog_signature"]);
+    // An entry is the same in the filtered and the full payload.
+    let full_pkwash = all["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "pkwash")
+        .expect("pkwash in the catalog");
+    assert_eq!(
+        full_pkwash,
+        caps.iter().find(|c| c["name"] == "pkwash").unwrap()
+    );
+    // The default payload has no filter keys: the shape other tools parse.
+    for key in ["matched", "total", "unmatched_names"] {
+        assert!(
+            all.get(key).is_none(),
+            "{key} leaked into the default payload"
+        );
+    }
+}
+
+/// #1079: `--kind` and `--source` select, `--brief` drops the tables, and
+/// the brief catalog is a fraction of the full one.
+#[test]
+fn cli_capabilities_kind_source_and_brief() {
+    let palettes = cli_capabilities(&["--kind", "palette"]);
+    let caps = palettes["capabilities"].as_array().unwrap();
+    assert!(!caps.is_empty() && caps.iter().all(|c| c["kind"] == "palette"));
+
+    for source in [
+        "paintkit",
+        "paintkit.ps",
+        "lib/paintkit.ps",
+        "LIB/PaintKit.ps",
+    ] {
+        let paint = cli_capabilities(&["--source", source]);
+        let caps = paint["capabilities"].as_array().unwrap();
+        assert!(
+            caps.iter().any(|c| c["name"] == "pkwash")
+                && caps.iter().all(|c| c["source"] == "lib/paintkit.ps"),
+            "--source {source}"
+        );
+    }
+    let native = cli_capabilities(&["--source", "systemdict", "--kind", "operator"]);
+    assert!(
+        native["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "setalpha")
+    );
+
+    let full_len = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--capabilities")
+        .output_deadline()
+        .expect("run")
+        .stdout
+        .len();
+    let brief_out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--capabilities", "--brief"])
+        .output_deadline()
+        .expect("run");
+    assert!(
+        brief_out.stdout.len() * 3 < full_len * 2 && brief_out.stdout.len() < 100_000,
+        "brief is {} bytes against {full_len} in full",
+        brief_out.stdout.len()
+    );
+    let brief: serde_json::Value = serde_json::from_slice(&brief_out.stdout).unwrap();
+    for cap in brief["capabilities"].as_array().unwrap() {
+        let mut keys: Vec<&str> = cap
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["description", "kind", "name", "source"]);
+        let d = cap["description"].as_str().unwrap();
+        assert!(d.chars().count() <= 113, "brief description too long: {d}");
+    }
+}
+
+/// #1079: a bad kind fails and names the valid ones from
+/// `CapabilityKind::ALL`; a filter flag with no value fails; the filters
+/// mean nothing without `--capabilities`.
+#[test]
+fn cli_capabilities_filter_errors() {
+    let exe = env!("CARGO_BIN_EXE_pscat");
+    let bad = Command::new(exe)
+        .args(["--capabilities", "--kind", "procedur"])
+        .output_deadline()
+        .expect("run");
+    assert!(!bad.status.success());
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    for kind in CapabilityKind::ALL {
+        assert!(stderr.contains(kind.as_str()), "{stderr}");
+    }
+    let missing = Command::new(exe)
+        .args(["--capabilities", "--name"])
+        .output_deadline()
+        .expect("run");
+    assert!(!missing.status.success());
+    let stray = Command::new(exe)
+        .args(["--name", "pkwash"])
+        .output_deadline()
+        .expect("run");
+    assert!(!stray.status.success(), "--name without --capabilities");
+}
+
+/// The kinds `ALL` lists are exactly the kinds the catalog carries, so
+/// the `--kind` filter and the MCP schema neither miss one nor invent one.
+#[test]
+fn capability_kind_all_matches_the_catalog() {
+    let used: BTreeSet<&str> = capabilities::catalog()
+        .iter()
+        .map(|c| c.kind.as_str())
+        .collect();
+    let listed: BTreeSet<&str> = CapabilityKind::ALL.iter().map(|k| k.as_str()).collect();
+    assert_eq!(used, listed);
+}
+
 /// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention
 /// (its units are checked by `every_migrated_parameter_states_its_unit`)
 /// and never uses `/Spread` or `/Density` (docs/dev/design/DRYMEDIA.md 3.1); nor does
