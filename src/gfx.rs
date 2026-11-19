@@ -1404,6 +1404,10 @@ pub struct Gfx {
     /// reused across fills; only the filled path's pixel bounds are
     /// written (and read) each time.
     coverage: Option<tiny_skia::Mask>,
+    /// The 16-bit shadow of the page that fills and glyphs composite in
+    /// (#731): a stack of faint layers reaches the colour the arithmetic
+    /// gives rather than stalling at 8 bits. See [`crate::deep`].
+    deep: crate::deep::Deep,
     /// `pscat --bands` (#736): this run is band `index` of `count`, so its
     /// page is composited from [`band_rows_of`] of the page's height (which
     /// `setpagedevice` can change, #909). Work that only touches other rows
@@ -1562,6 +1566,7 @@ impl Gfx {
             pdf_text: crate::pdf::PdfText::Paths,
             suppress_paint: 0,
             coverage: None,
+            deep: crate::deep::Deep::default(),
             band: None,
             captures: Vec::new(),
             next_capture: 0,
@@ -1768,6 +1773,7 @@ impl Gfx {
             }
         }
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
@@ -2180,6 +2186,7 @@ impl Gfx {
         if self.pending_erase {
             self.pending_erase = false;
             self.pixmap.fill(self.background);
+            self.deep.clear();
             if let Some(svg) = &mut self.svg {
                 svg.erase();
             }
@@ -2236,24 +2243,97 @@ impl Gfx {
                 return Err(e);
             }
         };
+        let max_memory = self.mem_budget.map(|(_, max)| max);
+        // The shadow composites a flat colour, so a pattern fill (#1038)
+        // and a pattern's capture canvas paint through tiny-skia instead.
+        let pattern = self.pattern_source();
+        let deep = !runs.is_empty()
+            && pattern.is_none()
+            && self.captures.is_empty()
+            && crate::deep::Deep::allowed(w, h, max_memory);
+        let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
+        // A `--bands` run keeps only its own rows, so only they get a
+        // shadow: the rest paint on the 8-bit page as before, and the
+        // bands' shadows add up to one page, not one page each.
+        let (b0, b1) = self.band_rows().unwrap_or((0, h));
+        if deep {
+            // The shadow rows this fill will allocate, checked against the
+            // memory cap before anything is painted (Codex round 1, #731):
+            // `allowed` only compares a whole shadow with the cap, not with
+            // the headroom left.
+            let need = self.deep.new_bytes(
+                w,
+                h,
+                self.pending_erase,
+                runs.iter()
+                    .filter(|run| !(run.solid && opaque))
+                    .map(|run| (run.rect.y0.max(b0), run.rect.y1.min(b1))),
+            );
+            if let Err(e) = probe.check_alloc(need) {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        }
         // Only now, so a fill a limit refuses leaves the page as it was: a
         // showpage's pending erase not done, nothing marked painted (Codex,
         // PR #1217: a refused fill after showpage made a blank last page).
         self.prepare_paint();
         if !runs.is_empty() {
-            let src = self.pattern_source();
-            let mut paint = self.paint_from(&src);
+            let mut paint = self.paint_from(&pattern);
             paint.anti_alias = false;
-            // Fully covered runs go through tiny-skia without the mask (its
-            // opaque fast path), so a page-sized fill costs what it did.
-            for run in runs {
+            let (r, g, b) = self.state.rgb;
+            let rgb8 = [to_u8(r), to_u8(g), to_u8(b)];
+            let src = crate::deep::Source::new(
+                rgb8,
+                self.state.alpha,
+                match self.state.blend {
+                    BlendMode::Normal => crate::deep::Blend::Normal,
+                    BlendMode::Multiply => crate::deep::Blend::Multiply,
+                },
+            );
+            let stride = w as usize;
+            let skia_rows = |pixmap: &mut Pixmap, run: &crate::coverage::Run, y0: u32, y1: u32| {
                 let r = run.rect;
                 if let Some(rect) =
-                    tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
+                    tiny_skia::Rect::from_ltrb(r.x0 as f32, y0 as f32, r.x1 as f32, y1 as f32)
                 {
                     let mask = if run.solid { None } else { Some(&cov) };
-                    self.pixmap
-                        .fill_rect(rect, &paint, Transform::identity(), mask);
+                    pixmap.fill_rect(rect, &paint, Transform::identity(), mask);
+                }
+            };
+            for run in &runs {
+                let r = run.rect;
+                let (x0, x1) = (r.x0 as usize, r.x1 as usize);
+                // Fully covered opaque runs go through tiny-skia without the
+                // mask (its memset fast path), so a page-sized fill costs
+                // what it did; the shadow only notes the new colour.
+                if !deep || (run.solid && opaque) {
+                    skia_rows(&mut self.pixmap, run, r.y0, r.y1);
+                    if deep {
+                        let color = tiny_skia::PremultipliedColorU8::from_rgba(
+                            rgb8[0], rgb8[1], rgb8[2], 255,
+                        )
+                        .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+                        for y in r.y0.max(b0) as usize..r.y1.min(b1) as usize {
+                            self.deep.note_opaque(&self.pixmap, y, x0, x1, color);
+                        }
+                    }
+                    continue;
+                }
+                let (d0, d1) = (r.y0.max(b0), r.y1.min(b1).max(r.y0.max(b0)));
+                if r.y0 < d0 {
+                    skia_rows(&mut self.pixmap, run, r.y0, d0.min(r.y1));
+                }
+                if d1 < r.y1 {
+                    skia_rows(&mut self.pixmap, run, d1.max(r.y0), r.y1);
+                }
+                for y in d0 as usize..d1 as usize {
+                    let mask = if run.solid {
+                        None
+                    } else {
+                        Some(&cov.data()[y * stride + x0..y * stride + x1])
+                    };
+                    self.deep.composite(&mut self.pixmap, y, x0, x1, mask, &src);
                 }
             }
         }
@@ -3405,6 +3485,7 @@ impl Gfx {
     pub fn set_transparent_background(&mut self) {
         self.background = tiny_skia::Color::TRANSPARENT;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.set_transparent(true);
         }
@@ -3417,6 +3498,7 @@ impl Gfx {
         self.pending_erase = false;
         self.painted_since_page = true;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
@@ -5378,55 +5460,134 @@ mod tests {
         );
     }
 
-    /// Issue #731 part 1: stacked faint `setalpha` fills must lose no more
-    /// than 8-bit storage forces. The reference is that 8-bit model: alpha
-    /// quantised to 1/255 (the byte tiny-skia receives) and each blend
-    /// rounded once to the nearest level. tiny-skia's lowp pipeline rounded
-    /// worse (`div255` as `(v+255)>>8`): white at 0.01 x 200 stalled at 192
-    /// where the model reaches 213. A second column composites through the
-    /// coverage mask (a half-covered pixel column), the path every
-    /// anti-aliased edge and glyph takes since #692.
+    /// White over black, `layers` fills of a 4x2 canvas at `alpha`: columns
+    /// 0-1 fully covered, column 2 half covered.
+    fn stack_white(gfx: &mut Gfx, alpha: f32, layers: u32) {
+        stack_rect(gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = alpha;
+        for _ in 0..layers {
+            stack_rect(gfx, 2.5);
+        }
+    }
+
+    fn stack_rect(gfx: &mut Gfx, w: f64) {
+        gfx.newpath();
+        gfx.moveto(0.0, 0.0);
+        gfx.lineto(w, 0.0).expect("lineto");
+        gfx.lineto(w, 2.0).expect("lineto");
+        gfx.lineto(0.0, 2.0).expect("lineto");
+        gfx.closepath();
+        gfx.fill(FillRule::Winding);
+    }
+
+    /// `255 (1 - (1 - a c)^n)`: what `layers` blends of white at `alpha`
+    /// and coverage `c` over black come to with no rounding.
+    fn float_stack(alpha: f32, coverage: f32, layers: u32) -> u8 {
+        let a = f64::from(alpha * coverage);
+        (255.0 * (1.0 - (1.0 - a).powi(layers as i32))).round() as u8
+    }
+
+    /// Issue #731: stacked faint `setalpha` fills reach the colour the
+    /// arithmetic gives. The issue's rows: on the 8-bit page alone 0.002 x
+    /// 1000 stalled at 128 and 0.01 x 200 at 213; the 16-bit shadow
+    /// (`crate::deep`) brings them to 221. The half-covered column goes
+    /// through the coverage mask, the path every anti-aliased edge and glyph
+    /// takes since #692.
     #[test]
-    fn stacked_low_alpha_matches_the_8bit_model() {
-        let model = |alpha: f32, coverage: f32, layers: u32| -> u8 {
-            let a = f32::from(to_u8(alpha)) / 255.0 * coverage;
-            let mut v = 0.0_f32;
-            for _ in 0..layers {
-                v = (v + (255.0 - v) * a).round();
-            }
-            v as u8
-        };
-        let rect = |gfx: &mut Gfx, w: f64| {
-            gfx.newpath();
-            gfx.moveto(0.0, 0.0);
-            gfx.lineto(w, 0.0).expect("lineto");
-            gfx.lineto(w, 2.0).expect("lineto");
-            gfx.lineto(0.0, 2.0).expect("lineto");
-            gfx.closepath();
-            gfx.fill(FillRule::Winding);
-        };
+    fn stacked_low_alpha_reaches_the_float_value() {
         for (alpha, layers) in [(0.01_f32, 200_u32), (0.05, 40), (0.002, 1000)] {
             let mut gfx = Gfx::new(4, 2).expect("pixmap");
             gfx.set_rgb(0.0, 0.0, 0.0);
-            rect(&mut gfx, 4.0);
-            gfx.set_rgb(1.0, 1.0, 1.0);
-            gfx.state_mut().alpha = alpha;
-            for _ in 0..layers {
-                // Columns 0-1 fully covered, column 2 half covered.
-                rect(&mut gfx, 2.5);
-            }
+            stack_white(&mut gfx, alpha, layers);
             let full = gfx.pixmap.pixel(0, 0).expect("pixel").red();
             let half = gfx.pixmap.pixel(2, 0).expect("pixel").red();
-            let (want_full, want_half) = (model(alpha, 1.0, layers), model(alpha, 0.5, layers));
+            let (want_full, want_half) = (
+                float_stack(alpha, 1.0, layers),
+                float_stack(alpha, 0.5, layers),
+            );
             assert!(
                 full.abs_diff(want_full) <= 1,
-                "alpha {alpha} x {layers}, full coverage: {full}, 8-bit model {want_full}"
+                "alpha {alpha} x {layers}, full coverage: {full}, float {want_full}"
             );
             assert!(
                 half.abs_diff(want_half) <= 2,
-                "alpha {alpha} x {layers}, half coverage: {half}, 8-bit model {want_half}"
+                "alpha {alpha} x {layers}, half coverage: {half}, float {want_half}"
             );
         }
+    }
+
+    /// An opaque shape thinner than a pixel composites by its coverage, so a
+    /// stack of them climbs like a stack of faint fills: 200 rectangles
+    /// 0.01 px wide reach the float value too.
+    #[test]
+    fn stacked_sub_pixel_shapes_reach_the_float_value() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 0.05);
+        }
+        let got = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        // Coverage 0.05 is the byte 13 (0.051) in the mask.
+        let want = float_stack(13.0 / 255.0, 1.0, 200);
+        assert!(
+            got.abs_diff(want) <= 1,
+            "sub-pixel stack: {got}, float {want}"
+        );
+    }
+
+    /// A NaN alpha (`setalpha` keeps it; PostScript can make one) paints
+    /// nothing, as its alpha byte of 0 did before the 16-bit shadow, rather
+    /// than a NaN blend cutting a transparent hole.
+    #[test]
+    fn a_nan_alpha_paints_nothing() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(1.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(0.0, 0.0, 1.0);
+        gfx.state_mut().alpha = f32::NAN;
+        stack_rect(&mut gfx, 2.5);
+        for x in 0..4 {
+            let p = gfx.pixmap.pixel(x, 0).expect("pixel");
+            assert_eq!((p.red(), p.blue(), p.alpha()), (255, 0, 255), "pixel {x}");
+        }
+    }
+
+    /// The shadow follows the page: a stroke (which writes the 8-bit page
+    /// only) and a new page each start the stack again from what the page
+    /// shows, not from the shadow's old value.
+    #[test]
+    fn the_shadow_follows_strokes_and_new_pages() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_white(&mut gfx, 0.002, 1000);
+        // A black opaque stroke over the stack.
+        gfx.state_mut().alpha = 1.0;
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().line_width = 10.0;
+        gfx.newpath();
+        gfx.moveto(-5.0, 1.0);
+        gfx.lineto(10.0, 1.0).expect("lineto");
+        gfx.stroke();
+        assert_eq!(gfx.pixmap.pixel(0, 0).expect("pixel").red(), 0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = 0.002;
+        for _ in 0..1000 {
+            stack_rect(&mut gfx, 2.5);
+        }
+        let again = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(again.abs_diff(221) <= 1, "after the stroke: {again}");
+        // Page 2 starts white and stacks black from there.
+        gfx.showpage();
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().alpha = 0.01;
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 4.0);
+        }
+        let page2 = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(page2.abs_diff(255 - 221) <= 1, "page 2: {page2}");
     }
 
     #[test]

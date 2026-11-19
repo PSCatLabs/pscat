@@ -162,6 +162,7 @@ pub(crate) mod clock;
 #[doc(hidden)]
 pub mod contact_sheet;
 pub(crate) mod coverage;
+pub(crate) mod deep;
 #[doc(hidden)]
 pub mod encodings;
 #[doc(hidden)]
