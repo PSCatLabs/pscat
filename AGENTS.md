@@ -119,6 +119,14 @@ predates it.
   default is 60 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
   child and its descendants and fails the test with the command in the message.
   `tests/child_deadline.rs` proves it and scans for raw calls.
+  **A test never waits on one pipe while the child waits on another**
+  (`notes/1118-pipe-timing-tests.md`). A macOS pipe holds 16-64 KB, but only
+  512 bytes once the system is out of pipe memory, and then a test that writes
+  all its input before reading the output, or reads stderr only after the
+  child exits, deadlocks against the child. Read the child's output on a
+  thread while writing (the MCP `Server` does), and never poll `try_wait`
+  with a piped stream left unread. Check the machine with: a non-blocking
+  write loop to `os.pipe()` in Python, which prints the capacity.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a

@@ -7,13 +7,20 @@ use common::CommandDeadline as _;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 use serde_json::{Value, json};
 
 struct Server {
     child: Child,
-    reader: BufReader<ChildStdout>,
+    /// The server's stdout, one line per item, read on a thread of its own
+    /// (#1118). The test never blocks on the child's output while it writes
+    /// the child's input, so neither side can deadlock on a full pipe: a
+    /// macOS pipe holds 16-64 KB, but only 512 bytes when the system is out
+    /// of pipe memory, and the server answers a `ping` as it reads it.
+    /// The channel closes when the child's stdout does.
+    lines: Receiver<String>,
     /// Kills a hung server after the shared deadline (see `tests/common`).
     watchdog: Option<common::Watchdog>,
 }
@@ -76,12 +83,26 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn pscat-mcp");
-        let reader = BufReader::new(child.stdout.take().expect("stdout"));
-        // A hung server fails the test (EOF on `reader`) instead of hanging it.
+        let mut reader = BufReader::new(child.stdout.take().expect("stdout"));
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => {
+                        if tx.send(line).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        // A hung server fails the test (EOF on `lines`) instead of hanging it.
         let watchdog = Some(common::Watchdog::new(&child, common::default_deadline()));
         Server {
             child,
-            reader,
+            lines,
             watchdog,
         }
     }
@@ -96,8 +117,9 @@ impl Server {
     /// The next stdout line, which must be one JSON-RPC 2.0 message: the
     /// "stdout carries clean JSON-RPC" check runs on every reply read.
     fn read(&mut self) -> Value {
-        let mut line = String::new();
-        self.reader.read_line(&mut line).expect("read response");
+        let line = self.lines.recv().unwrap_or_else(|_| {
+            panic!("pscat-mcp closed its stdout: it exited, or the watchdog killed it")
+        });
         let v: Value = serde_json::from_str(&line)
             .unwrap_or_else(|e| panic!("stdout line is not JSON ({e}): {line:?}"));
         assert_eq!(v["jsonrpc"], "2.0", "not a JSON-RPC message: {line}");
@@ -139,14 +161,10 @@ impl Server {
     /// is left on stdout up to its end.
     fn close_and_drain(&mut self) -> Vec<Value> {
         drop(self.child.stdin.take());
-        let mut rest = Vec::new();
-        loop {
-            let mut line = String::new();
-            if self.reader.read_line(&mut line).expect("read") == 0 {
-                return rest;
-            }
-            rest.push(serde_json::from_str(&line).expect("JSON line"));
-        }
+        self.lines
+            .iter()
+            .map(|line| serde_json::from_str(&line).expect("JSON line"))
+            .collect()
     }
 
     fn ping_ok(&mut self) {
@@ -2463,13 +2481,35 @@ fn review_sheet_has_one_time_budget_for_all_cells() {
 /// budget left for a cell is never rounded to "no limit".
 #[test]
 fn review_sheet_works_under_the_smallest_timeout() {
+    // The server runs the sibling `pscat` inside the 1 s budget. On macOS the
+    // first run of a freshly built binary waits 1-8 s for the system's
+    // security assessment, with no CPU used (#1118): that is not what this
+    // test measures, so run the binary once, outside the budget.
+    let warm = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--version")
+        .output_deadline()
+        .expect("run pscat");
+    assert!(warm.status.success(), "{warm:?}");
     let mut s = Server::start_in(&common::scratch_dir("mcp-sheet-1s"), &["--timeout", "1"]);
     initialized(&mut s);
-    let result = s.tool(
-        "review_sheet",
-        json!({ "entries": [{ "source": mark("0.8 0.2 0.1"), "label": "x" }], "width": 50, "height": 50 }),
-    );
-    assert_eq!(sheet_png(&result)[..4], [0x89, b'P', b'N', b'G']);
+    // A 1 s wall clock is also a race against the other work on the machine
+    // (a loaded host misses it a few times in a hundred). A `timeout` reply
+    // is the server doing what it was asked, so ask again; any other reply,
+    // or five misses in a row, fails the test.
+    let mut misses = Vec::new();
+    for _ in 0..5 {
+        let started = std::time::Instant::now();
+        let result = s.tool(
+            "review_sheet",
+            json!({ "entries": [{ "source": mark("0.8 0.2 0.1"), "label": "x" }], "width": 50, "height": 50 }),
+        );
+        if result["isError"] != true || error_kind(&result) != "timeout" {
+            assert_eq!(sheet_png(&result)[..4], [0x89, b'P', b'N', b'G']);
+            return;
+        }
+        misses.push(started.elapsed());
+    }
+    panic!("the sheet timed out on all 5 tries under --timeout 1 (took {misses:?})");
 }
 
 #[test]
