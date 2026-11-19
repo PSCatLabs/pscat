@@ -287,7 +287,11 @@ fn lint_says_the_line_of_a_redefined_operator() {
     // A `run` file is named with its line.
     let lib = tmp("shadow-lib.ps");
     std::fs::write(&lib, "% lib\n\n/sub 7 def\n").expect("write lib");
-    let main = format!("1 2 add pop\n({}) run\n", lib.to_str().unwrap());
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
     let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
     assert!(
         stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
