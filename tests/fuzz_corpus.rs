@@ -48,7 +48,10 @@ fn replay(name: &str, data: &[u8], entry: fn(&[u8])) {
 
 /// Replay every committed input of `target` through `entry`.
 fn replay_all(target: &str, min_seeds: usize, entry: fn(&[u8])) {
-    let files = inputs(target);
+    replay_files(target, inputs(target), min_seeds, entry);
+}
+
+fn replay_files(target: &str, files: Vec<PathBuf>, min_seeds: usize, entry: fn(&[u8])) {
     assert!(
         files.len() >= min_seeds,
         "{target}: seed corpus went missing: {files:?}"
@@ -60,9 +63,16 @@ fn replay_all(target: &str, min_seeds: usize, entry: fn(&[u8])) {
 }
 
 fn inputs(target: &str) -> Vec<PathBuf> {
+    inputs_from(target, target)
+}
+
+/// The committed inputs for a target: `fuzz/seeds/<seeds>` plus
+/// `fuzz/regressions/<regressions>`. Almost every target uses one name for
+/// both; `check_syntax` borrows the lexer's seeds.
+fn inputs_from(seeds: &str, regressions: &str) -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
     let mut files = Vec::new();
-    for kind in ["seeds", "regressions"] {
+    for (kind, target) in [("seeds", seeds), ("regressions", regressions)] {
         let dir = root.join(kind).join(target);
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -86,7 +96,15 @@ fn check_syntax_entry(data: &[u8]) {
 
 #[test]
 fn check_syntax_seeds_do_not_panic() {
-    replay_all("check_syntax", 10, check_syntax_entry);
+    // Read the lexer's seeds directly, not through the `fuzz/seeds/check_syntax`
+    // symlink (the fuzz job uses that), which is a plain text file on a Windows
+    // checkout without symlink support.
+    replay_files(
+        "check_syntax",
+        inputs_from("lexer", "check_syntax"),
+        10,
+        check_syntax_entry,
+    );
 }
 
 #[test]

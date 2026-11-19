@@ -1,4 +1,5 @@
-# Scheduled fuzzing (issues #604, #704): the lexer, the whole interpreter, the
+# Scheduled fuzzing (issues #604, #704, #1134): the lexer, the syntax checker
+# (check_syntax), the whole interpreter, the
 # font loaders (TrueType/OpenType, Type 1 charstrings and whole Type 1 fonts),
 # the decode filters and the image operators, under cargo-fuzz (libFuzzer), a
 # time-boxed run per target every week. A crash

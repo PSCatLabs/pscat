@@ -12,3 +12,7 @@ host's worker instead of returning a syntax error.
   `tests/fuzz_corpus.rs` replays it (`check_syntax_seeds_do_not_panic`).
 - CI: `check_syntax` is a row of the `fuzz` workflow matrix.
 - No change to `src/` (so no overlap with #1309 in `src/fuzzing.rs`).
+- The symlink is for the fuzz job only. The replay test reads
+  `fuzz/seeds/lexer` and `fuzz/regressions/check_syntax` directly, so plain
+  `cargo test` does not depend on the link, which is a text file on a Windows
+  checkout with `core.symlinks=false` (agent review, round 1).
