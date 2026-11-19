@@ -195,6 +195,7 @@ pub mod object;
 pub mod ops;
 #[doc(hidden)]
 pub mod paths;
+pub(crate) mod pattern;
 #[doc(hidden)]
 pub mod pdf;
 pub(crate) mod pdf_font;

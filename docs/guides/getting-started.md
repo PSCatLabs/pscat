@@ -183,6 +183,13 @@ More on the less obvious ones:
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.
+- **Patterns.** `makepattern` and `setpattern` paint with tiling patterns
+  (PatternType 1): hatching, dots, tiled motifs, coloured or uncoloured
+  (`[/Pattern /DeviceRGB] setcolorspace r g b pattern setcolor` paints one
+  pattern in any colour). `fill`, `stroke` and text all take them, and the
+  tiles are seamless. SVG output gets a real `<pattern>` and PDF a real
+  `/Pattern` resource. Shading patterns (PatternType 2) are not supported
+  yet; use `clip` and `shfill`.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh

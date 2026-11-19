@@ -1,0 +1,424 @@
+//! Tiling patterns (#1038): `makepattern`, `setpattern` and the
+//! `/Pattern` colour space, PatternType 1, in PNG, SVG and PDF.
+//!
+//! Each picture renders three ways and is held against the raster:
+//! Ghostscript rasterising our PDF, resvg rasterising our SVG, and (for
+//! the semantics) Ghostscript running the PostScript itself. The PDF must
+//! hold a real `/Pattern` resource, not a raster or a flat colour.
+
+use std::process::Command;
+
+mod common;
+
+use common::pdf_text;
+use pscat::Interp;
+use tiny_skia::Pixmap;
+
+const SIZE: u32 = 400;
+const BLOCK: u32 = 10;
+
+/// A diagonal hatch whose lines cross the tile's edges, filling a circle.
+const HATCH: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 8 8] /XStep 8 /YStep 8
+   /PaintProc { pop 0 0 0.6 setrgbcolor 1.5 setlinewidth
+                -1 -1 moveto 9 9 lineto stroke
+                -1 7 moveto 1 9 lineto stroke
+                7 -1 moveto 9 1 lineto stroke } >> matrix makepattern /hatch exch def
+hatch setpattern
+200 200 150 0 360 arc fill
+";
+
+/// One uncoloured pattern of dots in two colours. The PaintProc's own
+/// colour is ignored.
+const UNCOLOURED: &str = "
+<< /PatternType 1 /PaintType 2 /TilingType 1
+   /BBox [0 0 12 12] /XStep 12 /YStep 12
+   /PaintProc { pop 1 0 0 setrgbcolor 6 6 4 0 360 arc fill } >> matrix makepattern /dots exch def
+[/Pattern /DeviceRGB] setcolorspace
+0.8 0.1 0.1 dots setcolor 20 20 170 360 rectfill
+0.1 0.3 0.8 dots setpattern 210 20 170 360 rectfill
+";
+
+/// A step of 7.3 pt (not a whole pixel), a cell larger than its step,
+/// a stroke and text painted with patterns.
+const MIXED: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 7.3 7.3] /XStep 7.3 /YStep 7.3
+   /PaintProc { pop 0.9 0.4 0 setrgbcolor 0 0 3.65 3.65 rectfill } >> matrix makepattern /frac exch def
+frac setpattern 10 210 180 180 rectfill
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [-6 -6 16 16] /XStep 10 /YStep 10
+   /PaintProc { pop 0 0.5 0 setrgbcolor 5 5 7 0 360 arc 0.7 setlinewidth stroke } >> matrix makepattern /big exch def
+big setpattern 210 210 180 180 rectfill
+frac setpattern 12 setlinewidth 30 30 moveto 170 170 lineto stroke
+/Helvetica-Bold findfont 60 scalefont setfont big setpattern 215 120 moveto (Pat) show
+";
+
+struct Outputs {
+    png: Pixmap,
+    svg: String,
+    pdf: Vec<u8>,
+}
+
+fn render(src: &str) -> Outputs {
+    let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    let svg = it.gfx().svg_pages().expect("svg on").remove(0);
+    Outputs {
+        png: it.gfx().pixmap.clone(),
+        svg,
+        pdf: it.gfx().pdf_document().expect("pdf on"),
+    }
+}
+
+fn gs_png(input: &[u8], ext: &str, name: &str) -> Pixmap {
+    let dir = common::scratch_dir("pscat_patterns");
+    let src = dir.join(format!("{name}.{ext}"));
+    let out = dir.join(format!("{name}.{ext}.png"));
+    std::fs::write(&src, input).expect("write input");
+    let status = Command::new("gs")
+        .args([
+            "-q",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-dSAFER",
+            "-sDEVICE=png16m",
+            "-dGraphicsAlphaBits=4",
+            "-dTextAlphaBits=4",
+            &format!("-g{SIZE}x{SIZE}"),
+            "-r72",
+        ])
+        .arg(format!("-o{}", out.display()))
+        .arg(&src)
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected {name}.{ext}");
+    let data = std::fs::read(&out).expect("read gs png");
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&out);
+    Pixmap::decode_png(&data).expect("decode png")
+}
+
+fn resvg_png(svg: &str) -> Pixmap {
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
+        .expect("parse SVG");
+    let size = tree.size();
+    let mut pm = resvg::tiny_skia::Pixmap::new(SIZE, SIZE).expect("pixmap");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            SIZE as f32 / size.width(),
+            SIZE as f32 / size.height(),
+        ),
+        &mut pm.as_mut(),
+    );
+    let mut out = Pixmap::new(pm.width(), pm.height()).expect("pixmap");
+    out.data_mut().copy_from_slice(pm.data());
+    out
+}
+
+/// hayro, an independent pure-Rust PDF rasteriser, on our PDF: it
+/// anti-aliases pattern cells as pscat does, where gs paints them aliased.
+fn hayro_png(pdf: &[u8]) -> Pixmap {
+    let doc = hayro::Pdf::new(std::sync::Arc::new(pdf.to_vec())).expect("parse PDF");
+    let pages = doc.pages();
+    let pm = hayro::render(
+        &pages[0],
+        &hayro::InterpreterSettings::default(),
+        &hayro::RenderSettings {
+            x_scale: 1.0,
+            y_scale: 1.0,
+            ..Default::default()
+        },
+    );
+    let (w, h) = (u32::from(pm.width()), u32::from(pm.height()));
+    let bytes = pm.take_u8();
+    let mut out = Pixmap::new(w, h).expect("pixmap");
+    // hayro's pixels are premultiplied over transparent; put them on white.
+    for (dst, src) in out.data_mut().chunks_mut(4).zip(bytes.chunks(4)) {
+        for c in 0..3 {
+            dst[c] = (u16::from(src[c]) + 255 - u16::from(src[3])) as u8;
+        }
+        dst[3] = 255;
+    }
+    out
+}
+
+/// Mean absolute difference of `BLOCK`-pixel block averages, out of 255.
+fn mean_block_diff(a: &Pixmap, b: &Pixmap) -> f64 {
+    let down = |pm: &Pixmap| {
+        let (w, h) = (pm.width(), pm.height());
+        let (bw, bh) = (w / BLOCK, h / BLOCK);
+        let mut cells = vec![[0f64; 3]; (bw * bh) as usize];
+        let data = pm.data();
+        for y in 0..bh * BLOCK {
+            for x in 0..bw * BLOCK {
+                let i = ((y * w + x) * 4) as usize;
+                let cell = &mut cells[((y / BLOCK) * bw + x / BLOCK) as usize];
+                for (ch, c) in cell.iter_mut().enumerate() {
+                    *c += f64::from(data[i + ch]);
+                }
+            }
+        }
+        cells
+    };
+    let n = f64::from(BLOCK * BLOCK);
+    let (da, db) = (down(a), down(b));
+    let total: f64 = da
+        .iter()
+        .zip(&db)
+        .map(|(x, y)| (0..3).map(|c| (x[c] - y[c]).abs() / n).sum::<f64>())
+        .sum();
+    total / (da.len() * 3) as f64
+}
+
+fn assert_close(what: &str, ours: &Pixmap, theirs: &Pixmap, max: f64) {
+    let mean = mean_block_diff(ours, theirs);
+    eprintln!("{what}: mean block diff {mean:.3}");
+    if mean > max
+        && let Some(dir) = std::env::var_os("PSCAT_PATTERN_DUMP")
+    {
+        let dir = std::path::PathBuf::from(dir);
+        let name = what.replace([' ', ':'], "_");
+        let _ = ours.save_png(dir.join(format!("{name}_ours.png")));
+        let _ = theirs.save_png(dir.join(format!("{name}_theirs.png")));
+    }
+    assert!(mean <= max, "{what}: mean block diff {mean:.2} > {max}");
+}
+
+/// The PDF holds a real tiling pattern, painted by name, and no
+/// image stands in for it.
+fn assert_real_pattern(pdf: &[u8], paint_type: u8) {
+    let text = pdf_text(pdf);
+    assert!(
+        text.contains(&format!("/PatternType 1 /PaintType {paint_type} ")),
+        "{text}"
+    );
+    assert!(text.contains("/Pattern << /P0 "), "page resource: {text}");
+    assert!(text.contains(" scn "), "no pattern fill: {text}");
+    assert!(!text.contains("/Subtype /Image"), "a raster stands in: {text}");
+}
+
+/// `hayro`: also hold hayro's raster of the PDF against ours. hayro paints
+/// only one copy of a cell whose `/BBox` is larger than its step (gs paints
+/// the overlapping copies, as the PLRM and pscat do), so a picture with
+/// such a cell skips it.
+fn check_all(name: &str, src: &str, paint_type: u8, hayro: bool) -> Outputs {
+    let out = render(src);
+    assert_real_pattern(&out.pdf, paint_type);
+    assert!(out.svg.contains("<pattern "), "{}", out.svg);
+    assert_close(&format!("{name}: SVG via resvg"), &out.png, &resvg_png(&out.svg), 3.0);
+    if hayro {
+        assert_close(&format!("{name}: PDF via hayro"), &out.png, &hayro_png(&out.pdf), 3.0);
+    }
+    if common::gs_available() {
+        // gs paints our PDF exactly as it paints the program itself: the
+        // PDF means what the PostScript means. (gs paints pattern cells
+        // without anti-aliasing, so its pixels are heavier than pscat's,
+        // resvg's and hayro's; that is the only difference from our PNG.)
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        assert_close(
+            &format!("{name}: our PDF via gs against the program in gs"),
+            &gs_png(ps.as_bytes(), "ps", name),
+            &gs_png(&out.pdf, "pdf", name),
+            0.5,
+        );
+    }
+    out
+}
+
+#[test]
+fn a_hatch_fills_a_circle_in_all_three_outputs() {
+    let out = check_all("hatch", HATCH, 1, true);
+    // Inside the circle the hatch's ink, outside it white.
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    assert_eq!(px(10, 10).red(), 255);
+    let inked = (150..250)
+        .flat_map(|y| (150..250).map(move |x| (x, y)))
+        .filter(|&(x, y)| u16::from(px(x, y).blue()) > u16::from(px(x, y).red()) + 40)
+        .count();
+    assert!(inked > 1500, "too little hatch: {inked}");
+}
+
+#[test]
+fn hatch_tiles_have_no_seams() {
+    // Every 8x8 tile of the raster inside the fill is the same pixels:
+    // no tile edge is lighter, darker or shifted.
+    let out = render(HATCH);
+    let pm = &out.png;
+    let tile = |tx: u32, ty: u32| -> Vec<u8> {
+        let mut v = Vec::new();
+        for y in 0..8 {
+            for x in 0..8 {
+                let p = pm.pixel(tx + x, ty + y).expect("pixel");
+                v.extend([p.red(), p.green(), p.blue()]);
+            }
+        }
+        v
+    };
+    let first = tile(160, 160);
+    for ty in (160..232).step_by(8) {
+        for tx in (160..232).step_by(8) {
+            assert_eq!(tile(tx, ty), first, "tile at {tx},{ty} differs");
+        }
+    }
+}
+
+#[test]
+fn an_uncoloured_pattern_paints_in_two_colours() {
+    let out = check_all("uncoloured", UNCOLOURED, 2, true);
+    let reddish = |x: u32, y: u32| {
+        let p = out.png.pixel(x, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    // A dot centre in each half (y down: user y 30 is row 370).
+    assert_eq!(reddish(30, 370), (204, 26, 26));
+    assert_eq!(reddish(222, 370), (26, 77, 204));
+    // The PDF sets the colour with the pattern, in [/Pattern /DeviceRGB].
+    let text = pdf_text(&out.pdf);
+    assert!(text.contains("/PCS [/Pattern /DeviceRGB]"), "{text}");
+    assert!(text.contains("/PCS cs 0.8 0.1 0.1 /P0 scn"), "{text}");
+    // The pattern's own content carries no colour.
+    assert!(out.svg.contains("currentColor"), "{}", out.svg);
+}
+
+#[test]
+fn fractional_steps_wide_cells_strokes_and_text_agree_across_outputs() {
+    check_all("mixed", MIXED, 1, false);
+}
+
+#[test]
+fn pattern_free_programs_write_no_pattern() {
+    let out = render("0 0 1 setrgbcolor 10 10 100 100 rectfill");
+    assert!(!pdf_text(&out.pdf).contains("/Pattern"));
+    assert!(!out.svg.contains("<pattern"));
+}
+
+fn eval(src: &str) -> String {
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    let mut out = String::new();
+    while let Ok(o) = it.pop() {
+        out = format!("{} {out}", o.repr());
+    }
+    out.trim().to_string()
+}
+
+const DICT: &str = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+                    /XStep 10 /YStep 10 /PaintProc { pop 0 0 5 5 rectfill } >>";
+
+#[test]
+fn makepattern_errors_are_the_ones_gs_gives() {
+    let cases = [
+        ("/PaintProc", "undefined"),
+        ("/PaintType 3 def", "rangecheck"),
+        ("/TilingType 4 def", "rangecheck"),
+        ("/BBox [0 0 0 10] def", "rangecheck"),
+        ("/BBox [10 10 0 0] def", "rangecheck"),
+        ("/BBox [0 0 10] def", "rangecheck"),
+        ("/XStep 0 def", "rangecheck"),
+        ("/PatternType 3 def", "rangecheck"),
+        ("/PaintProc 5 def", "typecheck"),
+    ];
+    for (edit, want) in cases {
+        let edit = if edit.ends_with("def") {
+            format!("dup begin {edit} end")
+        } else {
+            format!("dup {edit} undef")
+        };
+        let src = format!(
+            "{DICT} {edit} matrix {{ makepattern }} stopped {{ $error /errorname get }} if"
+        );
+        let got = eval(&src);
+        assert!(got.ends_with(&format!("/{want}")), "{edit}: {got}");
+    }
+    assert!(eval(&format!("{DICT} [1 0 0 1 0] {{ makepattern }} stopped {{ $error /errorname get }} if"))
+        .ends_with("/typecheck"));
+    // A negative step is a step.
+    assert_eq!(
+        eval(&format!("{DICT} dup /XStep -10 put matrix makepattern type")),
+        "dicttype"
+    );
+}
+
+#[test]
+fn colour_space_readbacks_match_gs() {
+    assert_eq!(
+        eval(&format!(
+            "{DICT} matrix makepattern /p exch def /DeviceGray setcolorspace p setpattern \
+             currentcolorspace currentcolor p eq"
+        )),
+        "[/Pattern [/DeviceGray]] true"
+    );
+    assert_eq!(
+        eval("[/Pattern /DeviceRGB] setcolorspace currentcolorspace currentcolor"),
+        "[/Pattern [/DeviceRGB]] null"
+    );
+    let up = DICT.replace("/PaintType 1", "/PaintType 2");
+    assert_eq!(
+        eval(&format!(
+            "{up} matrix makepattern /u exch def [/Pattern /DeviceRGB] setcolorspace \
+             1 0 0.5 u setcolor currentcolor pop"
+        )),
+        "1.0 0.0 0.5"
+    );
+    // The copy is a new dictionary with /Implementation, as in gs.
+    assert_eq!(
+        eval(&format!("{DICT} dup matrix makepattern dup /Implementation known 3 1 roll eq")),
+        "true false"
+    );
+    // A device colour operator leaves the pattern space.
+    assert_eq!(
+        eval(&format!(
+            "{DICT} matrix makepattern setpattern 0.5 setgray currentcolorspace"
+        )),
+        "[/DeviceGray]"
+    );
+    // Not a pattern: undefined; not a dictionary: typecheck.
+    assert!(
+        eval("[/Pattern] setcolorspace << >> { setcolor } stopped { $error /errorname get } if")
+            .ends_with("/undefined")
+    );
+    assert!(
+        eval("[/Pattern] setcolorspace 5 { setcolor } stopped { $error /errorname get } if")
+            .ends_with("/typecheck")
+    );
+}
+
+#[test]
+fn the_null_pattern_paints_nothing() {
+    let out = render("0.5 setgray [/Pattern] setcolorspace 0 0 400 400 rectfill");
+    assert!(out.png.pixels().iter().all(|p| p.red() == 255));
+}
+
+#[test]
+fn an_error_in_the_paintproc_leaves_the_page_as_it_was() {
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    let src = "1 0 0 setrgbcolor 0 0 20 20 rectfill \
+               << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+                  /XStep 10 /YStep 10 /PaintProc { pop 0 0 5 5 rectfill nosuchname } >> \
+               matrix { makepattern } stopped pop clear \
+               currentrgbcolor 0 20 20 20 rectfill";
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    let pm = &it.gfx().pixmap;
+    assert_eq!((pm.width(), pm.height()), (50, 50));
+    // Both squares red on the page: the colour and CTM came back.
+    for (x, y) in [(5, 45), (5, 15)] {
+        let p = pm.pixel(x, y).expect("pixel");
+        assert_eq!((p.red(), p.green(), p.blue()), (255, 0, 0), "{x},{y}");
+    }
+    let pdf = pdf_text(&it.gfx().pdf_document().expect("pdf"));
+    assert!(!pdf.contains("/Pattern"), "{pdf}");
+    assert_eq!(
+        it.gfx().svg_pages().expect("svg")[0].matches("<path").count(),
+        2
+    );
+}

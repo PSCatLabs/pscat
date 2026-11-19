@@ -314,6 +314,8 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
         match it.gfx.colorspace() {
             ColorSpace::Indexed { table, .. } => ImageColor::Indexed(table.clone()),
             ColorSpace::Separation { .. } => ImageColor::SeparationApprox,
+            // Samples cannot be patterns (#1038).
+            ColorSpace::Pattern { .. } => return Err(PsError::Rangecheck),
             _ => ImageColor::Direct,
         }
     };

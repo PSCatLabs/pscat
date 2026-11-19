@@ -25,6 +25,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentcolorspace", currentcolorspace);
     op(dict, "setcolor", setcolor);
     op(dict, "currentcolor", currentcolor);
+    op(dict, "makepattern", makepattern);
+    op(dict, "setpattern", setpattern);
 }
 
 fn device_space(name: &str) -> Option<ColorSpace> {
@@ -55,6 +57,13 @@ fn base_ncomp(obj: &Object) -> Result<u32, PsError> {
 fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     match &obj.value {
+        Value::Name(n) if &**n == "Pattern" => {
+            it.gfx.set_colorspace(ColorSpace::Pattern {
+                base: None,
+                src: Object::array(vec![Object::name("Pattern")]),
+            });
+            Ok(())
+        }
         Value::Name(n) => {
             let cs = device_space(n).ok_or_else(|| PsError::Undefined(n.to_string()))?;
             set_device_space(it, cs);
@@ -102,6 +111,38 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
                     it.gfx.set_spot(0.0);
                     it.gfx
                         .set_colorspace(ColorSpace::Indexed { table, src: obj });
+                    Ok(())
+                }
+                // `[/Pattern]` or `[/Pattern base]` (#1038): the colour is
+                // the null pattern until `setcolor` gives one. The base,
+                // an uncoloured pattern's component space, is a device
+                // space; it reads back as an array, as in gs.
+                "Pattern" => {
+                    let (base, src) = match a.len() {
+                        1 => (None, Object::array(vec![Object::name("Pattern")])),
+                        2 => {
+                            let b = a.get(1).expect("len checked");
+                            let name = match &b.value {
+                                Value::Name(n) => n.clone(),
+                                Value::Array(inner) if inner.len() == 1 => {
+                                    match inner.get(0).map(|o| o.value) {
+                                        Some(Value::Name(n)) => n,
+                                        _ => return Err(PsError::Typecheck),
+                                    }
+                                }
+                                _ => return Err(PsError::Typecheck),
+                            };
+                            let cs = device_space(&name)
+                                .ok_or_else(|| PsError::Undefined(name.to_string()))?;
+                            let src = Object::array(vec![
+                                Object::name("Pattern"),
+                                Object::array(vec![Object::name(&name)]),
+                            ]);
+                            (Some(Box::new(cs)), src)
+                        }
+                        _ => return Err(PsError::Rangecheck),
+                    };
+                    it.gfx.set_colorspace(ColorSpace::Pattern { base, src });
                     Ok(())
                 }
                 "Separation" => {
@@ -168,6 +209,21 @@ fn currentcolor(it: &mut Interp) -> Result<(), PsError> {
             .collect(),
         ColorSpace::Indexed { .. } => vec![Object::int(it.gfx.spot() as i64)],
         ColorSpace::Separation { .. } => vec![Object::real(f32_readback(f64::from(it.gfx.spot())))],
+        // The pattern dictionary, after an uncoloured pattern's components
+        // in the base space; `null` for the null pattern (gs).
+        ColorSpace::Pattern { base, .. } => match it.gfx.pattern() {
+            None => vec![Object::lit(Value::Null)],
+            Some(p) => {
+                let mut out = Vec::new();
+                if p.tile.uncolored
+                    && let Some(base) = base
+                {
+                    out = base_components(it, base);
+                }
+                out.push(p.dict.clone());
+                out
+            }
+        },
     };
     for o in out {
         it.push(o);
@@ -180,7 +236,9 @@ fn currentcolorspace(it: &mut Interp) -> Result<(), PsError> {
         ColorSpace::Gray => Object::array(vec![Object::name("DeviceGray")]),
         ColorSpace::Rgb => Object::array(vec![Object::name("DeviceRGB")]),
         ColorSpace::Cmyk => Object::array(vec![Object::name("DeviceCMYK")]),
-        ColorSpace::Indexed { src, .. } | ColorSpace::Separation { src, .. } => src.clone(),
+        ColorSpace::Indexed { src, .. }
+        | ColorSpace::Separation { src, .. }
+        | ColorSpace::Pattern { src, .. } => src.clone(),
     };
     it.push(obj);
     Ok(())
@@ -235,5 +293,171 @@ fn setcolor(it: &mut Interp) -> Result<(), PsError> {
                 &tint_proc,
             )
         }
+        ColorSpace::Pattern { base, .. } => set_pattern_color(it, base.as_deref()),
     }
+}
+
+/// The current colour's components in a device `base` space, as
+/// `currentcolor` gives them.
+fn base_components(it: &Interp, base: &ColorSpace) -> Vec<Object> {
+    let real = |v: f64| Object::real(f32_readback(v));
+    match base {
+        ColorSpace::Rgb => {
+            let (r, g, b) = it.gfx.rgb();
+            vec![real(r), real(g), real(b)]
+        }
+        ColorSpace::Cmyk => it.gfx.cmyk().into_iter().map(real).collect(),
+        _ => vec![real(it.gfx.rgb().0)],
+    }
+}
+
+/// The pattern dictionary on top of the stack and its tile (#1038):
+/// `typecheck` for a non-dictionary, `undefined` for a dictionary
+/// `makepattern` did not return (gs).
+fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::PatternTile>), PsError> {
+    let top = it.ostack.last().ok_or(PsError::StackUnderflow)?;
+    let Value::Dict(d) = &top.value else {
+        return Err(PsError::Typecheck);
+    };
+    let tile = it
+        .pattern_tile(d)
+        .ok_or_else(|| PsError::Undefined("Implementation".to_string()))?;
+    Ok((top.clone(), tile))
+}
+
+/// `setcolor` in a pattern space (#1038): `pattern` alone, or an
+/// uncoloured pattern's components in the base space under it. Checked
+/// before anything is popped. With no base (`[/Pattern]`) an uncoloured
+/// pattern takes no components and paints in the colour already set, as
+/// gs takes it.
+fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), PsError> {
+    let (dict, tile) = top_pattern(it)?;
+    let n = match base {
+        Some(base) if tile.uncolored => base.ncomp() as usize,
+        _ => 0,
+    };
+    let len = it.ostack.len();
+    if len < n + 1 {
+        return Err(PsError::StackUnderflow);
+    }
+    let mut comps = [0f64; 4];
+    for (slot, o) in comps.iter_mut().zip(&it.ostack[len - 1 - n..len - 1]) {
+        *slot = o.num().ok_or(PsError::Typecheck)?.to_f64();
+    }
+    it.ostack.truncate(len - 1 - n);
+    match n {
+        1 => it.gfx.set_rgb(comps[0], comps[0], comps[0]),
+        3 => it.gfx.set_rgb(comps[0], comps[1], comps[2]),
+        4 => it.gfx.set_cmyk(comps[0], comps[1], comps[2], comps[3]),
+        _ => {}
+    }
+    it.gfx
+        .set_pattern(crate::gfx::PatternColor { tile, dict });
+    Ok(())
+}
+
+/// `pattern setpattern` / `comp1 ... compn pattern setpattern` (#1038):
+/// outside a pattern space, first set `[/Pattern cs]` over the current
+/// space `cs` (gs does this for coloured patterns too), then `setcolor`.
+/// A current space that is not a device space gives a pattern space
+/// with no base.
+fn setpattern(it: &mut Interp) -> Result<(), PsError> {
+    top_pattern(it)?;
+    if !matches!(it.gfx.colorspace(), ColorSpace::Pattern { .. }) {
+        let base = match it.gfx.colorspace() {
+            cs @ (ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk) => Some(Box::new(cs.clone())),
+            _ => None,
+        };
+        currentcolorspace(it)?;
+        let current = it.pop()?;
+        let src = Object::array(vec![Object::name("Pattern"), current]);
+        it.gfx.set_colorspace(ColorSpace::Pattern { base, src });
+    }
+    setcolor(it)
+}
+
+/// `dict matrix makepattern pattern` (#1038): PatternType 1 (tiling).
+/// The pattern matrix is `matrix` times the CTM; the dictionary returned
+/// is a copy of `dict` with an `/Implementation` entry, as in gs, and the
+/// `PaintProc` runs now, on it, to make the tile (`crate::pattern`).
+/// Errors as gs gives them: a missing key is `undefined`, a value of the
+/// wrong type `typecheck`, out of range (including an empty or inverted
+/// `/BBox` and a zero step) `rangecheck`. PatternType 2 (shading
+/// patterns) is not implemented yet: `rangecheck`.
+fn makepattern(it: &mut Interp) -> Result<(), PsError> {
+    let len = it.ostack.len();
+    if len < 2 {
+        return Err(PsError::StackUnderflow);
+    }
+    let matrix = super::matrix::read_matrix(&it.ostack[len - 1]).map_err(|_| PsError::Typecheck)?;
+    let Value::Dict(d) = &it.ostack[len - 2].value else {
+        return Err(PsError::Typecheck);
+    };
+    let d = d.clone();
+    let (spec, proc) = {
+        let dict = d.borrow();
+        let get = |key: &str| {
+            dict.get(key)
+                .ok_or_else(|| PsError::Undefined(key.to_string()))
+        };
+        let int = |key: &str| match get(key)?.value {
+            Value::Integer(n) => Ok(n),
+            _ => Err(PsError::Typecheck),
+        };
+        let num = |o: &Object| o.num().map(|n| n.to_f64()).ok_or(PsError::Typecheck);
+        if int("PatternType")? != 1 {
+            return Err(PsError::Rangecheck);
+        }
+        let paint_type = int("PaintType")?;
+        let tiling_type = int("TilingType")?;
+        if !(1..=2).contains(&paint_type) || !(1..=3).contains(&tiling_type) {
+            return Err(PsError::Rangecheck);
+        }
+        let Value::Array(bbox) = get("BBox")?.value else {
+            return Err(PsError::Typecheck);
+        };
+        if bbox.len() != 4 {
+            return Err(PsError::Rangecheck);
+        }
+        let mut b = [0f64; 4];
+        for (i, slot) in b.iter_mut().enumerate() {
+            *slot = num(&bbox.get(i).expect("len checked"))?;
+        }
+        let xstep = num(&get("XStep")?)?;
+        let ystep = num(&get("YStep")?)?;
+        let proc = get("PaintProc")?;
+        if !proc.executable || !matches!(proc.value, Value::Array(_)) {
+            return Err(PsError::Typecheck);
+        }
+        if !(b[0] < b[2] && b[1] < b[3])
+            || !b.iter().all(|v| v.is_finite())
+            || xstep == 0.0
+            || ystep == 0.0
+            || !xstep.is_finite()
+            || !ystep.is_finite()
+        {
+            return Err(PsError::Rangecheck);
+        }
+        let spec = crate::pattern::TileSpec {
+            uncolored: paint_type == 2,
+            tiling_type: tiling_type as u8,
+            bbox: b,
+            xstep,
+            ystep,
+            matrix: it.gfx.ctm().pre_concat(matrix),
+        };
+        (spec, proc)
+    };
+    if matrix.invert().is_none() {
+        return Err(PsError::Typecheck);
+    }
+    let mut copy = Dict::new();
+    for (k, v) in d.borrow().pairs() {
+        copy.put_obj(&k, v)?;
+    }
+    copy.put("Implementation".into(), Object::array(Vec::new()));
+    let pattern = Object::lit(Value::Dict(Rc::new(std::cell::RefCell::new(copy))));
+    it.gfx.begin_pattern(spec)?;
+    it.ostack.truncate(len - 2);
+    it.begin_pattern_proc(pattern, &proc)
 }

@@ -728,6 +728,9 @@ fn sethsbcolor(it: &mut Interp) -> Result<(), PsError> {
     let s = it.pop_f64()?;
     let h = it.pop_f64()?;
     it.gfx.set_hsb(h, s, b);
+    // sethsbcolor sets DeviceRGB like setrgbcolor (PLRM), which also
+    // leaves a pattern space (#1038).
+    it.gfx.set_colorspace(crate::gfx::ColorSpace::Rgb);
     Ok(())
 }
 

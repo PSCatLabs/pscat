@@ -201,6 +201,11 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
+    /// A pattern's `PaintProc` running for `makepattern` (#1038), the
+    /// pattern dictionary it will return held here. Reached, the tile is
+    /// made and the dictionary pushed; unwound, the capture is dropped and
+    /// the page put back (`Gfx::abort_pattern`).
+    Pattern(Box<Object>),
     /// `--profile` (issue #737): planted under the body of a procedure
     /// called through a name. Reached, or unwound, it closes that call in
     /// the profiler. Only exists while profiling.
@@ -482,6 +487,17 @@ pub struct Interp {
     /// Non-Font resource categories (ops/level2.rs). Font shares
     /// FontDirectory instead.
     resources: crate::ops::level2::CategoryMap,
+    /// Patterns `makepattern` made (#1038), by the address of the pattern
+    /// dictionary it returned. The weak reference tells a live entry from
+    /// one whose dictionary is gone (and whose address may be reused);
+    /// dead entries are dropped as new ones come.
+    pub(crate) patterns: std::collections::HashMap<
+        usize,
+        (
+            std::rc::Weak<RefCell<Dict>>,
+            Rc<crate::pattern::PatternTile>,
+        ),
+    >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
@@ -769,6 +785,7 @@ impl Interp {
             object_format: 2,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
+            patterns: Default::default(),
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
@@ -1464,6 +1481,8 @@ impl Interp {
             // A profiled call unwound by `stop`, an error, `exit` or `quit`
             // ends here.
             Frame::ProfReturn => self.prof_exit(),
+            // A PaintProc unwound: the page comes back (#1038).
+            Frame::Pattern(_) => self.gfx.abort_pattern(),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -2128,6 +2147,8 @@ impl Interp {
             PopRunScanner,
             /// A profiled call returned (`--profile`).
             ProfExit,
+            /// A pattern's `PaintProc` returned (#1038).
+            PatternDone,
         }
         // Iterations of an empty body yield nothing, so they run here, in a
         // row, inside one step. After `EMPTY_RUN` of them the call returns
@@ -2253,6 +2274,7 @@ impl Interp {
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
                     Frame::ProfReturn => Action::ProfExit,
+                    Frame::Pattern(_) => Action::PatternDone,
                     Frame::Show(ctx) => {
                         stepped_show = true;
                         let step = ctx.step(gfx)?;
@@ -2432,6 +2454,11 @@ impl Interp {
                 Action::ProfExit => {
                     self.estack.pop();
                     self.prof_exit();
+                }
+                Action::PatternDone => {
+                    if let Some(Frame::Pattern(dict)) = self.estack.pop() {
+                        self.finish_pattern(*dict)?;
+                    }
                 }
             }
         }
@@ -2647,6 +2674,47 @@ impl Interp {
         }
         self.estack.push(Frame::Proc { body, pc: 0 });
         Ok(())
+    }
+
+    /// `makepattern` (#1038): with the tile's capture begun, run the
+    /// pattern's `PaintProc` on `dict` (the pattern dictionary it returns),
+    /// finishing in [`finish_pattern`](Self::finish_pattern).
+    pub(crate) fn begin_pattern_proc(&mut self, dict: Object, proc: &Object) -> Result<(), PsError> {
+        let Value::Array(body) = &proc.value else {
+            return Err(PsError::Typecheck);
+        };
+        if let Err(e) = self.push_frame(Frame::Pattern(Box::new(dict.clone()))) {
+            self.gfx.abort_pattern();
+            return Err(e);
+        }
+        self.push(dict);
+        self.push_proc_frame(body.clone())
+    }
+
+    /// The `PaintProc` returned: make the tile, remember it by the
+    /// dictionary, and push the dictionary.
+    fn finish_pattern(&mut self, dict: Object) -> Result<(), PsError> {
+        let tile = self.gfx.end_pattern()?;
+        let Value::Dict(d) = &dict.value else {
+            return Err(PsError::Typecheck);
+        };
+        // Drop entries whose dictionaries are gone, so a loop of
+        // makepatterns keeps only the tiles still reachable. (A weak
+        // reference keeps its allocation, so a live entry's address is
+        // never another dictionary's.)
+        self.patterns.retain(|_, (weak, _)| weak.strong_count() > 0);
+        self.patterns
+            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), tile));
+        self.push(dict);
+        Ok(())
+    }
+
+    /// The tile `makepattern` made for `d`, if it made one.
+    pub(crate) fn pattern_tile(&self, d: &Rc<RefCell<Dict>>) -> Option<Rc<crate::pattern::PatternTile>> {
+        self.patterns
+            .get(&(Rc::as_ptr(d) as usize))
+            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
+            .map(|(_, tile)| tile.clone())
     }
 
     /// Park `post` as a continuation, put `operands` on the operand
@@ -2893,7 +2961,8 @@ impl Interp {
                     | Frame::StopMark
                     | Frame::Show(_)
                     | Frame::Image(_)
-                    | Frame::PostOp(_),
+                    | Frame::PostOp(_)
+                    | Frame::Pattern(_),
                 ) => {
                     return Err(PsError::InvalidExit);
                 }

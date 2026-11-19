@@ -26,6 +26,7 @@ use std::rc::Rc;
 use tiny_skia::FillRule;
 
 use crate::gfx::{BlendMode, ClipNode, Composite};
+use crate::pattern::{Ink, PatternTile, SvgTile};
 use crate::textrun::{GlyphText, Placement, TextRun};
 
 /// How SVG output writes text set in the standard fonts (#1119).
@@ -74,6 +75,19 @@ pub struct SvgRecorder {
     /// order holds; `document` writes it after the body, so a page that
     /// ends in text is whole before the run closes.
     run: Option<(TextRun, String, String, String)>,
+    /// Prefix of every def id: empty on the page, unique per capture of a
+    /// pattern's tile (#1038), whose defs end up beside the page's.
+    prefix: String,
+    /// Recording an uncoloured pattern's tile (#1038): every colour is
+    /// `currentColor`, which the `<pattern>` sets per use.
+    uncolored: bool,
+    /// Pattern defs on this page (#1038), by tile identity and, for an
+    /// uncoloured tile, colour; the `Rc` keeps the address from being
+    /// reused while the entry exists, as in `clip_ids`.
+    pattern_ids: HashMap<(usize, Option<String>), (Rc<PatternTile>, usize)>,
+    /// Tiles whose content group is already in this page's defs.
+    tile_groups: HashMap<usize, Rc<PatternTile>>,
+    next_pattern: usize,
 }
 
 pub(crate) type Chain = Option<Rc<ClipNode>>;
@@ -111,7 +125,119 @@ impl SvgRecorder {
             pages: Vec::new(),
             transparent: false,
             run: None,
+            prefix: String::new(),
+            uncolored: false,
+            pattern_ids: HashMap::new(),
+            tile_groups: HashMap::new(),
+            next_pattern: 0,
         }
+    }
+
+    /// A recorder for a pattern's tile (#1038): its def ids start with
+    /// `prefix`, and an uncoloured tile is written in `currentColor`.
+    pub(crate) fn capture(width: u32, height: u32, prefix: String, uncolored: bool) -> Self {
+        let mut rec = Self::new(width, height);
+        rec.prefix = prefix;
+        rec.uncolored = uncolored;
+        rec
+    }
+
+    /// The captured tile: its defs and its body.
+    pub(crate) fn into_tile(mut self) -> SvgTile {
+        self.flush_text();
+        SvgTile {
+            defs: self.defs,
+            body: self.body,
+        }
+    }
+
+    /// The paint attribute value for `ink`: a colour, or a reference to the
+    /// pattern def, written into this page's defs on first use.
+    fn ink_attr(&mut self, ink: &Ink) -> String {
+        match ink {
+            Ink::Rgb(_) if self.uncolored => "currentColor".to_string(),
+            Ink::Rgb(rgb) => Self::color(*rgb),
+            Ink::Pattern(tile, rgb) => self.pattern_ref(tile, *rgb),
+        }
+    }
+
+    /// `url(#…)` of `tile`'s `<pattern>` (in `rgb`, if uncoloured).
+    ///
+    /// Each `<pattern>` is one cell of the lattice, `XStep` x `YStep` at the
+    /// pattern-space origin (no `x`/`y`: viewers disagree on whether those
+    /// move the content with the cell), holding the tile's content (the captured elements
+    /// under the capture-to-pattern matrix, clipped to the `/BBox`) at every
+    /// whole step that reaches the cell, so a BBox bigger than the step
+    /// wraps as the raster's period does. The captured defs and the BBox
+    /// clip go in the page's defs once per tile. Its
+    /// `patternTransform` is the tile's adjusted pattern matrix, the one
+    /// the raster paints with. An uncoloured tile's content is in
+    /// `currentColor`, set by a `color` on the cell's group.
+    fn pattern_ref(&mut self, tile: &Rc<PatternTile>, rgb: (f32, f32, f32)) -> String {
+        let Some(st) = &tile.svg else {
+            return "none".to_string();
+        };
+        let tkey = Rc::as_ptr(tile) as usize;
+        let colour = tile.uncolored.then(|| Self::color(rgb));
+        let key = (tkey, colour.clone());
+        if let Some((_, id)) = self.pattern_ids.get(&key) {
+            return format!("url(#{}p{id})", self.prefix);
+        }
+        let prefix = self.prefix.clone();
+        let tid = tile.id;
+        let [bx0, by0, bx1, by1] = tile.spec.bbox.map(|v| v as f32);
+        if !self.tile_groups.contains_key(&tkey) {
+            self.tile_groups.insert(tkey, tile.clone());
+            let _ = write!(
+                self.defs,
+                "{}<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
+                 <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
+                st.defs,
+                fmt_precise(bx0),
+                fmt_precise(by0),
+                fmt_precise(bx1 - bx0),
+                fmt_precise(by1 - by0),
+            );
+        }
+        let id = self.next_pattern;
+        self.next_pattern += 1;
+        let (ax, ay) = (tile.spec.xstep.abs() as f32, tile.spec.ystep.abs() as f32);
+        // The content is written out at each step rather than `<use>`d:
+        // resvg drops `<use>` copies shifted out of the cell's own box.
+        let inv = svg_matrix(tile.geom.capture.invert().unwrap_or_default());
+        let mut uses = String::new();
+        for j in cell_steps(by0, by1, ay) {
+            for i in cell_steps(bx0, bx1, ax) {
+                uses.push_str("<g");
+                if i != 0 || j != 0 {
+                    let _ = write!(
+                        uses,
+                        " transform=\"translate({} {})\"",
+                        fmt_precise(i as f32 * ax),
+                        fmt_precise(j as f32 * ay)
+                    );
+                }
+                let _ = write!(
+                    uses,
+                    "><g clip-path=\"url(#{prefix}pb{tid})\"><g transform=\"{inv}\">{}</g></g></g>",
+                    st.body
+                );
+            }
+        }
+        let content = match &colour {
+            Some(c) => format!("<g color=\"{c}\">{uses}</g>"),
+            None => uses,
+        };
+        let _ = write!(
+            self.defs,
+            "<pattern id=\"{prefix}p{id}\" patternUnits=\"userSpaceOnUse\" \
+             width=\"{}\" height=\"{}\" patternTransform=\"{}\">{content}</pattern>",
+            fmt_precise(ax),
+            fmt_precise(ay),
+            svg_matrix(tile.geom.matrix),
+        );
+        self.pattern_ids.insert(key, (tile.clone(), id));
+        format!("url(#{prefix}p{id})")
     }
 
     /// One glyph as text (#1119): continue the open run, or close it and
@@ -249,10 +375,11 @@ impl SvgRecorder {
                     self.clip_ids.insert(key, (n.clone(), id));
                     let _ = write!(
                         self.defs,
-                        "<clipPath id=\"c{id}\" clipPathUnits=\"userSpaceOnUse\">\
+                        "<clipPath id=\"{prefix}c{id}\" clipPathUnits=\"userSpaceOnUse\">\
                          <path d=\"{}\" clip-rule=\"{}\"/></clipPath>",
                         n.path.to_svg_data(),
                         Self::rule_attr(n.rule),
+                        prefix = self.prefix,
                     );
                     id
                 }
@@ -265,7 +392,11 @@ impl SvgRecorder {
             // i == 0 is the outermost emitted group, the one that
             // composites into the page.
             let style = if i == 0 { blend_style } else { "" };
-            let _ = write!(open, "<g clip-path=\"url(#c{id})\"{style}>");
+            let _ = write!(
+                open,
+                "<g clip-path=\"url(#{}c{id})\"{style}>",
+                self.prefix
+            );
         }
         let leftover = if ids.is_empty() { blend_style } else { "" };
         (open, "</g>".repeat(ids.len()), leftover.to_string())
@@ -303,16 +434,16 @@ impl SvgRecorder {
         &mut self,
         d: &str,
         rule: FillRule,
-        rgb: (f32, f32, f32),
+        ink: &Ink,
         comp: Composite,
         chain: &Chain,
     ) {
         self.flush_text();
+        let paint = self.ink_attr(ink);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"{}\" fill-rule=\"{}\"{}{leftover}/>{close}",
-            Self::color(rgb),
+            "{open}<path d=\"{d}\" fill=\"{paint}\" fill-rule=\"{}\"{}{leftover}/>{close}",
             Self::rule_attr(rule),
             Self::opacity_attr(comp, false),
         );
@@ -323,7 +454,7 @@ impl SvgRecorder {
         &mut self,
         d: &str,
         pen: Option<(tiny_skia::Transform, usize)>,
-        rgb: (f32, f32, f32),
+        ink: &Ink,
         width: f32,
         cap: tiny_skia::LineCap,
         join: tiny_skia::LineJoin,
@@ -333,6 +464,7 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
+        let paint = self.ink_attr(ink);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let cap = match cap {
             tiny_skia::LineCap::Round => "round",
@@ -376,9 +508,8 @@ impl SvgRecorder {
         }
         let _ = write!(
             self.body,
-            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" \
+            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{paint}\" stroke-width=\"{}\" \
              stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{close}",
-            Self::color(rgb),
             num(width),
             fmt_f32(miter_limit),
             Self::opacity_attr(comp, true),
@@ -488,7 +619,7 @@ impl SvgRecorder {
             ShKind::Axial { x0, y0, x1, y1 } => {
                 let _ = write!(
                     self.defs,
-                    "<linearGradient id=\"g{id}\" gradientUnits=\"userSpaceOnUse\" \
+                    "<linearGradient id=\"{prefix}g{id}\" gradientUnits=\"userSpaceOnUse\" \
                      x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" spreadMethod=\"pad\" \
                      gradientTransform=\"{matrix}\">{}</linearGradient>",
                     fmt_precise(x0),
@@ -496,6 +627,7 @@ impl SvgRecorder {
                     fmt_precise(x1),
                     fmt_precise(y1),
                     stop_tags(stops),
+                    prefix = self.prefix,
                 );
             }
             ShKind::Radial {
@@ -576,19 +708,21 @@ impl SvgRecorder {
                 }
                 let _ = write!(
                     self.defs,
-                    "<radialGradient id=\"g{id}\" gradientUnits=\"userSpaceOnUse\" \
+                    "<radialGradient id=\"{prefix}g{id}\" gradientUnits=\"userSpaceOnUse\" \
                      cx=\"{}\" cy=\"{}\" r=\"{}\"{extra} spreadMethod=\"pad\" \
                      gradientTransform=\"{matrix}\">{tags}</radialGradient>",
                     fmt_precise(outer_x),
                     fmt_precise(outer_y),
                     fmt_precise(outer_r),
+                    prefix = self.prefix,
                 );
             }
         }
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
         let _ = write!(
             self.body,
-            "{open}<path d=\"{region_d}\" fill=\"url(#g{id})\"{}{leftover}/>{close}",
+            "{open}<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>{close}",
+            self.prefix,
             Self::opacity_attr(comp, false),
         );
     }
@@ -608,6 +742,8 @@ impl SvgRecorder {
         self.body.clear();
         self.defs.clear();
         self.clip_ids.clear();
+        self.pattern_ids.clear();
+        self.tile_groups.clear();
     }
 
     fn document(&self) -> String {
@@ -655,6 +791,28 @@ impl SvgRecorder {
         }
         pages
     }
+}
+
+/// `matrix(a b c d e f)` at full precision.
+fn svg_matrix(t: tiny_skia::Transform) -> String {
+    format!(
+        "matrix({} {} {} {} {} {})",
+        fmt_precise(t.sx),
+        fmt_precise(t.ky),
+        fmt_precise(t.kx),
+        fmt_precise(t.sy),
+        fmt_precise(t.tx),
+        fmt_precise(t.ty),
+    )
+}
+
+/// The whole steps `k` (in units of `step`) at which `[lo, hi]` shifted by
+/// `k * step` overlaps the cell `[0, step)`. At most 64 of them.
+fn cell_steps(lo: f32, hi: f32, step: f32) -> std::ops::RangeInclusive<i64> {
+    let (lo, hi, step) = (f64::from(lo), f64::from(hi), f64::from(step));
+    let first = (-hi / step).floor() as i64 + 1;
+    let last = (1.0 - lo / step).ceil() as i64 - 1;
+    first..=last.min(first + 63)
 }
 
 fn fmt_f32(v: f32) -> String {
