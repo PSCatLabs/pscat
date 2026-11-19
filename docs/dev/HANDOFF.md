@@ -1815,6 +1815,11 @@ renders eight examples in both and compares block-downsampled output).
   `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
   only if it reads state that survives the abort and can name the cause
   (`notes/1110-lint-notes-in-a-failed-render.md`).
+  `[shadowed-operator]` (#1052, #1109, `notes/1109-shadowed-operator-line-and-systemdict.md`)
+  reads the finished `userdict`/`systemdict`; `Interp::trace_operator_shadows` (on
+  under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
+  line of each binding, nothing else. A name bound in a closed local dictionary stays
+  unreported on purpose (the notes have the corpus data).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

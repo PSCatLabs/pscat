@@ -252,6 +252,54 @@ fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
     assert!(ok && stderr.contains("lint: clean"), "{stderr}");
 }
 
+/// #1109: the finding says where the binding was made, catches a `store`
+/// that replaced the operator in systemdict, and still leaves a variable
+/// kept in a local dictionary alone.
+#[test]
+fn lint_says_the_line_of_a_redefined_operator() {
+    let body = "% header\n\n/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke\nshowpage\n";
+    let (_ok, _out, stderr) = run(&["--lint", "-"], body);
+    assert!(
+        stderr.contains(
+            "[shadowed-operator] /sub was redefined as a string when the program reached line 3, replacing the operator sub:"
+        ),
+        "{stderr}"
+    );
+    // The run failed (`5 3 sub` on a string); the kept finding above carries its line.
+    assert!(stderr.contains("[run-error]"), "{stderr}");
+    // A def made by a procedure names the line that ran it.
+    let (_ok, _out, stderr) = run(&["--lint", "-e", "/f {\n /ln 1 def\n} def\n\nf"], "");
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 5,"),
+        "{stderr}"
+    );
+    // `store` replaces the operator itself when nothing else defines the name.
+    let (_ok, _out, stderr) = run(&["--lint", "-e", "\n/sub 5 store"], "");
+    assert!(
+        stderr.contains(
+            "/sub was redefined as an integer in systemdict when the program reached line 2, replacing the operator sub"
+        ),
+        "{stderr}"
+    );
+    // A local dictionary that ended is a variable, not a shadow.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-e", "4 dict begin /stop 3 def end"], "");
+    assert!(ok && stderr.contains("lint: clean"), "{stderr}");
+    // A `run` file is named with its line.
+    let lib = tmp("shadow-lib.ps");
+    std::fs::write(&lib, "% lib\n\n/sub 7 def\n").expect("write lib");
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("shadow-lib.ps)"), "{stderr}");
+}
+
 #[test]
 fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
     let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");

@@ -128,6 +128,7 @@ fn store(it: &mut Interp) -> Result<(), PsError> {
         Some(d) => d,
         None => it.current_dict(),
     };
+    it.note_store_shadow(&key, &value, &d);
     it.journal_dict(&d);
     d.borrow_mut().put_obj(&key, value)?;
     Ok(())

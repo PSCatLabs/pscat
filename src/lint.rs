@@ -375,29 +375,116 @@ impl LintAllows {
 /// stays readable.
 const SHADOWED_SHOWN: usize = 10;
 
-/// A name bound in `userdict` to a plain value while a built-in operator of
-/// that name exists in `systemdict` (issue #1052): `/sub (subtitle) def`
-/// makes every later `sub` push a string, and the failure surfaces far from
-/// the cause, often as an error that never mentions the name.
+/// Where a shadowing binding was made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum ShadowScope {
+    /// `userdict`: the program's own global names (the usual `def`).
+    User,
+    /// `systemdict` itself, where `store` finds an operator's name.
+    System,
+}
+
+/// The bindings of an operator's name to a plain value that the interpreter
+/// saw as they happened (issue #1109), when tracing is on. Keyed by name and
+/// scope, so a loop that redefines the name a million times holds one entry.
+/// It supplies what the finished run cannot: the line the binding was made on.
 ///
-/// A heuristic over the finished run's `userdict`, so it is deliberately
-/// narrow, to keep false positives low:
+/// Only `userdict` and `systemdict` are traced. A name bound in a local
+/// dictionary (`begin ... end`) is the deliberate way to keep a variable named
+/// like an operator out of the program's own names, and the issue's corpus
+/// check showed it is used that way (`gallery/ring_of_type.ps` keeps a loop
+/// bound as `/stop`), so it is not reported (notes/1109).
+#[derive(Default)]
+pub(crate) struct ShadowTrace {
+    /// Per name and scope: where the program had reached when the binding
+    /// was made, as `when the program reached line N` (` (file)` for a
+    /// `run` file), `None` when the scanner's line is unknown.
+    sites: std::collections::HashMap<(u32, ShadowScope), Option<String>>,
+}
+
+impl ShadowTrace {
+    /// Record `name` bound to `value` in `scope` while `builtin` is the
+    /// operator it would replace, or forget it when the new binding is no
+    /// longer a shadow (a procedure wrapping the operator). A repeat keeps
+    /// the line the shadow began on.
+    pub(crate) fn note(
+        &mut self,
+        name: &crate::name::PsName,
+        builtin: &Object,
+        value: &Object,
+        scope: ShadowScope,
+        location: impl FnOnce() -> Option<String>,
+    ) {
+        let key = (name.id(), scope);
+        match shadow_kind(builtin, value) {
+            Some(_) => {
+                self.sites.entry(key).or_insert_with(location);
+            }
+            // A later `/sub { ... } def` ends the shadow, except in
+            // `systemdict`, where the operator it replaced is already gone.
+            None if scope != ShadowScope::System => {
+                self.sites.remove(&key);
+            }
+            None => {}
+        }
+    }
+
+    fn location(&self, name: &str, scope: ShadowScope) -> Option<String> {
+        let id = crate::name::intern(name).id();
+        self.sites.get(&(id, scope)).cloned().flatten()
+    }
+}
+
+/// The word for the value's type when binding it over `builtin` is a
+/// shadow, `None` when it is not: a procedure (wrapping an operator is the
+/// deliberate way to redefine one) or the operator bound to its own name.
+pub(crate) fn shadow_kind(builtin: &Object, value: &Object) -> Option<&'static str> {
+    let Value::Operator(op) = &builtin.value else {
+        return None;
+    };
+    match &value.value {
+        Value::Array(_) if value.executable => return None,
+        Value::Operator(bound) if bound.name == op.name => return None,
+        _ => {}
+    }
+    let kind = value.type_name();
+    Some(kind.strip_suffix("type").unwrap_or(kind))
+}
+
+/// One shadow to report.
+struct Shadow {
+    name: String,
+    scope: ShadowScope,
+    kind: &'static str,
+    location: Option<String>,
+}
+
+/// A name bound to a plain value while a built-in operator of that name
+/// exists (issue #1052): `/sub (subtitle) def` makes every later `sub` push
+/// a string, and the failure surfaces far from the cause, often as an error
+/// that never mentions the name.
+///
+/// A heuristic over the finished run, so it is deliberately narrow, to keep
+/// false positives low:
 /// - Only a non-procedure value counts. Wrapping an operator in a procedure
 ///   (`/showpage { ... showpage } def`, a prologue override) is the normal,
 ///   deliberate way to redefine one, and is left alone; so is an operator
 ///   bound to its own name.
-/// - Only `userdict` is read. A name defined inside a `begin ... end` that
-///   has already closed is invisible here (its dictionary is gone), which is
-///   one way to keep a local like `/sub` out of the report.
+/// - `userdict` is read at the end of the run. A name defined inside a
+///   `begin ... end` that has already closed is gone from it, which is one
+///   way to keep a local like `/sub` out of the report (see [`ShadowTrace`]
+///   for why that stays the rule).
+/// - `systemdict` is compared with the operators a fresh interpreter has: a
+///   `store` of an operator's name overwrites the operator there (that is
+///   where `store` finds the name), and `systemdict /sub 5 put` does the same.
 /// - A deliberate redefinition is silenced by a `%lint: allow
 ///   shadowed-operator` comment line anywhere in the program
 ///   ([`scan_lint_allows`]); the callers apply it, since this function
 ///   never sees the source.
-/// - A `store` of an operator's name overwrites the operator in
-///   `systemdict` itself (that is where `store` finds the name), which this
-///   does not see; `def`, the usual way, defines in `userdict`.
-/// - There is no line number: lint runs on the finished interpreter, which
-///   keeps no record of where a `def` was.
+/// - When the interpreter traced the run ([`Interp::trace_operator_shadows`],
+///   which `--lint` turns on), each finding says what line the binding was
+///   made on (the line the scanner had reached, which for a `def` run from
+///   inside a procedure is where that procedure was called from).
 ///
 /// Not gated by `render_checks`: shadowing an operator is a mistake whether
 /// or not a page was meant to be drawn.
@@ -408,7 +495,16 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
     ) else {
         return;
     };
-    let mut shadowed: Vec<(String, &'static str)> = Vec::new();
+    let trace = interp.shadow_trace();
+    let mut shadowed: Vec<Shadow> = Vec::new();
+    let mut push = |name: &str, scope, kind, location: Option<String>| {
+        shadowed.push(Shadow {
+            name: name.to_string(),
+            scope,
+            kind,
+            location,
+        });
+    };
     for (key, value) in user.borrow().pairs() {
         let Value::Name(name) = &key.value else {
             continue;
@@ -416,26 +512,45 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
         let Some(builtin) = system.borrow().get(name) else {
             continue;
         };
-        let Value::Operator(op) = &builtin.value else {
+        let Some(kind) = shadow_kind(&builtin, &value) else {
             continue;
         };
-        match &value.value {
-            Value::Array(_) if value.executable => continue,
-            Value::Operator(bound) if bound.name == op.name => continue,
-            _ => {}
-        }
-        let kind = value.type_name();
-        shadowed.push((name.to_string(), kind.strip_suffix("type").unwrap_or(kind)));
+        push(
+            name,
+            ShadowScope::User,
+            kind,
+            trace.and_then(|t| t.location(name, ShadowScope::User)),
+        );
+    }
+    // Operators that `store` or `put` replaced in `systemdict`.
+    let mut pristine = crate::object::Dict::new();
+    crate::ops::install_all(&mut pristine);
+    for (key, original) in pristine.pairs() {
+        let (Value::Name(name), Value::Operator(_)) = (&key.value, &original.value) else {
+            continue;
+        };
+        let Some(now) = system.borrow().get(name) else {
+            continue;
+        };
+        // `shadow_kind` lets the same operator through, so a different
+        // one stored over it is reported, as in userdict (Codex round 1
+        // on #1323: `/sub /add load store` was skipped).
+        let Some(kind) = shadow_kind(&original, &now) else {
+            continue;
+        };
+        push(
+            name,
+            ShadowScope::System,
+            kind,
+            trace.and_then(|t| t.location(name, ShadowScope::System)),
+        );
     }
     // `pairs` order depends on the interner, so sort for stable output.
-    shadowed.sort();
-    for (name, kind) in shadowed.iter().take(SHADOWED_SHOWN) {
+    shadowed.sort_by(|a, b| (&a.name, a.scope).cmp(&(&b.name, b.scope)));
+    for s in shadowed.iter().take(SHADOWED_SHOWN) {
         findings.push(LintFinding {
             check: "shadowed-operator",
-            message: format!(
-                "/{name} was redefined as {} {kind}, replacing the operator {name}: every later `{name}` pushes that value instead of running the operator (rename it, or keep it in a local dictionary with begin ... end)",
-                article(kind)
-            ),
+            message: shadow_message(s),
         });
     }
     if shadowed.len() > SHADOWED_SHOWN {
@@ -446,6 +561,28 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
                 shadowed.len() - SHADOWED_SHOWN
             ),
         });
+    }
+}
+
+fn shadow_message(s: &Shadow) -> String {
+    let Shadow {
+        name,
+        scope,
+        kind,
+        location,
+    } = s;
+    let article = article(kind);
+    let at = location
+        .as_deref()
+        .map(|l| format!(" {l}"))
+        .unwrap_or_default();
+    match scope {
+        ShadowScope::User => format!(
+            "/{name} was redefined as {article} {kind}{at}, replacing the operator {name}: every later `{name}` pushes that value instead of running the operator (rename it, or keep it in a local dictionary with begin ... end)"
+        ),
+        ShadowScope::System => format!(
+            "/{name} was redefined as {article} {kind} in systemdict{at}, replacing the operator {name} for the whole program: every later `{name}` pushes that value instead of running the operator (rename it; `store` and `put` change systemdict itself, `def` defines in userdict)"
+        ),
     }
 }
 
@@ -911,8 +1048,132 @@ mod tests {
 
     #[test]
     fn a_local_dictionary_that_has_ended_is_the_opt_out() {
-        let it = run("4 dict begin /sub (hello) def /dict 3 def end /x 5 3 sub def showpage");
+        let src = "4 dict begin /sub (hello) def /dict 3 def end /x 5 3 sub def showpage";
+        assert!(shadow_messages(&run(src)).is_empty());
+        // Tracing sees the `def`s, and still leaves a local variable alone.
+        assert!(shadow_messages(&traced(src)).is_empty());
+        let open = "4 dict begin /stop 3 def";
+        assert!(shadow_messages(&traced(open)).is_empty());
+    }
+
+    fn traced(src: &str) -> Interp {
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_operator_shadows();
+        let _ = it.run_str(src);
+        it
+    }
+
+    #[test]
+    fn a_fresh_interpreter_has_no_shadows() {
+        assert!(shadow_messages(&run("")).is_empty());
+        assert!(shadow_messages(&traced("")).is_empty());
+    }
+
+    #[test]
+    fn a_traced_run_names_the_line_and_an_untraced_one_does_not() {
+        let src = "% header\n\n/sub (hello) def\nshowpage";
+        let found = shadow_messages(&traced(src));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with(
+                "/sub was redefined as a string when the program reached line 3, replacing the operator sub: "
+            ),
+            "{found:?}"
+        );
+        // The same finding without a trace is the message from before the line was known.
+        let found = shadow_messages(&run(src));
+        assert!(
+            found[0].starts_with("/sub was redefined as a string, replacing the operator sub: "),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_def_inside_a_procedure_names_the_line_that_ran_it() {
+        let found = shadow_messages(&traced("/f {\n /sub 1 def\n} def\n\nf"));
+        assert!(
+            found[0].contains("as an integer when the program reached line 5, replacing"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_repeated_def_keeps_the_first_line_and_a_loop_keeps_one_entry() {
+        let found = shadow_messages(&traced("/ln 1 def\n/ln 2 def\n"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains(" when the program reached line 1,"),
+            "{found:?}"
+        );
+        let it = traced("0 1 5000 { /ln exch def } for");
+        assert_eq!(shadow_messages(&it).len(), 1);
+        assert_eq!(it.shadow_trace().expect("tracing").sites.len(), 1);
+    }
+
+    #[test]
+    fn a_def_into_userdict_or_systemdict_made_current_still_names_its_line() {
+        let found = shadow_messages(&traced("userdict begin\n/sub 1 def\nend"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains("when the program reached line 2, replacing"),
+            "{found:?}"
+        );
+        let found = shadow_messages(&traced("systemdict begin\n/sub 1 def\nend"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with(
+                "/sub was redefined as an integer in systemdict when the program reached line 2,"
+            ),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_procedure_defined_later_ends_the_shadow() {
+        let it = traced("/sub 1 def\n/sub { neg add } def");
         assert!(shadow_messages(&it).is_empty());
+    }
+
+    #[test]
+    fn store_and_put_into_systemdict_replace_the_operator() {
+        // `store` finds the name in systemdict when no other dictionary defines it.
+        let found = shadow_messages(&traced("\n/sub 5 store"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with("/sub was redefined as an integer in systemdict when the program reached line 2, replacing the operator sub for the whole program"),
+            "{found:?}"
+        );
+        // Without a trace the end state still shows it (no line), `put` included.
+        let found = shadow_messages(&run("/sub 5 store systemdict /dict (x) put"));
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            found[0].starts_with("/dict was redefined as a string in systemdict"),
+            "{found:?}"
+        );
+        assert!(
+            found[1].starts_with("/sub was redefined as an integer in systemdict"),
+            "{found:?}"
+        );
+        // A store into a name userdict already defines is a userdef shadow.
+        let found = shadow_messages(&traced("/sub 1 def /sub 2 store"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains("when the program reached line 1, replacing"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn another_operator_stored_into_systemdict_is_flagged() {
+        // Codex round 1 on #1323: `sub` now adds; an operator stored over
+        // itself is still no shadow.
+        let found = shadow_messages(&run("/sub /add load store"));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].starts_with("/sub was redefined as an operator in systemdict"),
+            "{found:?}"
+        );
+        assert!(shadow_messages(&run("/sub /sub load store")).is_empty());
     }
 
     #[test]

@@ -332,6 +332,9 @@ impl Options {
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
         interp.set_max_page_pixels(self.max_pixels);
+        if self.lint {
+            interp.trace_operator_shadows();
+        }
         Ok(interp)
     }
 
