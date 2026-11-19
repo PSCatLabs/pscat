@@ -1,6 +1,6 @@
 <!--
 Only when the owner must act on this PR (it touches a .github/CODEOWNERS path, the reviewer agent
-failed a visible change twice, or a design choice is the owner's), copy the block below to the very
+failed a visible change twice, or a design choice is the owner's), copy the `## Decision` block below to the very
 top of the body, outside this comment, and fill it in. It is the same Decision block the work-issue
 skill writes; the full rules (and why each line is there) are in
 .claude/skills/work-issue/references/perceptual-review.md, "The Decision block". The owner reads it
