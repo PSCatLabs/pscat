@@ -1484,7 +1484,7 @@ mod tests {
         }]
     }
 
-    fn cell(w: u32, h: u32, zoom: u32, mat: Option<[u8; 3]>) -> SheetCell {
+    fn sheet_cell(w: u32, h: u32, zoom: u32, mat: Option<[u8; 3]>) -> SheetCell {
         SheetCell {
             size: (w, h),
             zoom,
@@ -1495,7 +1495,7 @@ mod tests {
 
     #[test]
     fn a_plan_refuses_a_cell_zoomed_past_the_side_limit_before_rendering() {
-        let rows = one_row(vec![cell(600, 10, 16, None)]);
+        let rows = one_row(vec![sheet_cell(600, 10, 16, None)]);
         let opts = SheetOptions {
             sizes: true,
             wrap: None,
@@ -1510,7 +1510,10 @@ mod tests {
 
     #[test]
     fn compose_sheet_zooms_mats_and_frames_each_cell_where_the_layout_says() {
-        let rows = one_row(vec![cell(2, 2, 3, None), cell(2, 2, 1, Some([10, 20, 30]))]);
+        let rows = one_row(vec![
+            sheet_cell(2, 2, 3, None),
+            sheet_cell(2, 2, 1, Some([10, 20, 30])),
+        ]);
         let opts = SheetOptions {
             sizes: true,
             wrap: None,
@@ -1542,7 +1545,7 @@ mod tests {
 
     #[test]
     fn compose_sheet_hands_back_the_renderers_error() {
-        let rows = one_row(vec![cell(4, 4, 1, None)]);
+        let rows = one_row(vec![sheet_cell(4, 4, 1, None)]);
         let plan = SheetPlan::new(&rows, &SheetOptions::default()).unwrap();
         let got = compose_sheet(&plan, |_, _| Err::<Pixmap, _>("no render"));
         assert!(matches!(got, Err(ComposeError::Render("no render"))));
