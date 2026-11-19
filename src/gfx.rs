@@ -2185,6 +2185,31 @@ impl Gfx {
                 return Err(e);
             }
         };
+        let max_memory = self.mem_budget.map(|(_, max)| max);
+        let deep = !runs.is_empty() && crate::deep::Deep::allowed(w, h, max_memory);
+        let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
+        // A `--bands` run keeps only its own rows, so only they get a
+        // shadow: the rest paint on the 8-bit page as before, and the
+        // bands' shadows add up to one page, not one page each.
+        let (b0, b1) = self.band_rows().unwrap_or((0, h));
+        if deep {
+            // The shadow rows this fill will allocate, checked against the
+            // memory cap before anything is painted (Codex round 1, #731):
+            // `allowed` only compares a whole shadow with the cap, not with
+            // the headroom left.
+            let need = self.deep.new_bytes(
+                w,
+                h,
+                self.pending_erase,
+                runs.iter()
+                    .filter(|run| !(run.solid && opaque))
+                    .map(|run| (run.rect.y0.max(b0), run.rect.y1.min(b1))),
+            );
+            if let Err(e) = probe.check_alloc(need) {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        }
         // Only now, so a fill a limit refuses leaves the page as it was: a
         // showpage's pending erase not done, nothing marked painted (Codex,
         // PR #1217: a refused fill after showpage made a blank last page).
@@ -2193,11 +2218,8 @@ impl Gfx {
             let src = self.pattern_source();
             let mut paint = self.paint_from(&src);
             paint.anti_alias = false;
-            let max_memory = self.mem_budget.map(|(_, max)| max);
-            let deep = crate::deep::Deep::allowed(w, h, max_memory);
             let (r, g, b) = self.state.rgb;
             let rgb8 = [to_u8(r), to_u8(g), to_u8(b)];
-            let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
             let src = crate::deep::Source::new(
                 rgb8,
                 self.state.alpha,
@@ -2207,10 +2229,6 @@ impl Gfx {
                 },
             );
             let stride = w as usize;
-            // A `--bands` run keeps only its own rows, so only they get a
-            // shadow: the rest paint on the 8-bit page as before, and the
-            // bands' shadows add up to one page, not one page each.
-            let (b0, b1) = self.band_rows().unwrap_or((0, h));
             let skia_rows = |pixmap: &mut Pixmap, run: &crate::coverage::Run, y0: u32, y1: u32| {
                 let r = run.rect;
                 if let Some(rect) =

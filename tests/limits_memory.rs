@@ -661,4 +661,36 @@ fn memory_growth_is_capped() {
         after < before + 256 * 1024,
         "thread-exit frees are counted: {before} -> {after}"
     );
+
+    // A translucent fill's 16-bit shadow rows (#731) are checked against
+    // the headroom left before the fill paints (Codex round 1 on #1306):
+    // with most of the cap already held, the fill that needs a page of
+    // shadow is refused and the page is left as it was. With the heap
+    // free, the same fill paints.
+    {
+        let cap = 40 * MIB;
+        let fill = |held: usize| {
+            let mut it = Interp::with_page(1000, 1000).expect("page");
+            it.set_limits(Limits::none().with_max_memory(cap))
+                .expect("the allocator is installed");
+            let src = format!(
+                "/held [ 1 1 {held} {{ pop 60000 string }} for ] def \
+                 0 0 0 setrgbcolor 0.5 setalpha 0 0 1000 1000 rectfill"
+            );
+            let r = it.run_str(&src);
+            let report = r.as_ref().err().map(|e| it.error_report(e));
+            let px = it.gfx().pixmap.pixel(500, 500).expect("pixel");
+            (r, report.unwrap_or_default(), px.red())
+        };
+        let (r, _, red) = fill(1);
+        assert_eq!(r, Ok(()), "with headroom the fill runs");
+        assert!(red < 200, "and paints: {red}");
+        // 8 MB of shadow (1000 x 1000 x 8) is a fifth of the cap, so the
+        // shadow is allowed; 600 strings of 60 kB (36 MB held) leave under
+        // 6 MB for it.
+        let (r, report, red) = fill(600);
+        assert_eq!(r, Err(PsError::MemoryExceeded), "{report}");
+        assert!(report.contains("OffendingCommand: rectfill;"), "{report}");
+        assert_eq!(red, 255, "the refused fill left the page white");
+    }
 }

@@ -100,6 +100,43 @@ impl Deep {
         }
     }
 
+    /// The bytes compositing into `rows` (half-open row ranges, which may
+    /// overlap) of a `width` x `height` page would allocate: each row not
+    /// yet allocated, and the row table if the shadow does not fit the page
+    /// yet. `fresh`: count as if the shadow were cleared first (a pending
+    /// showpage erase). For the memory preflight (#731, Codex round 1).
+    pub(crate) fn new_bytes(
+        &self,
+        width: u32,
+        height: u32,
+        fresh: bool,
+        rows: impl Iterator<Item = (u32, u32)>,
+    ) -> usize {
+        let (w, h) = (width as usize, height as usize);
+        let fitted = !fresh && self.width == w && self.rows.len() == h;
+        let mut seen = vec![false; h];
+        let mut count = 0_usize;
+        for (y0, y1) in rows {
+            let (y0, y1) = ((y0 as usize).min(h), (y1 as usize).min(h));
+            for (y, seen) in seen.iter_mut().enumerate().take(y1).skip(y0) {
+                let have = fitted && !self.rows[y].is_empty();
+                if !*seen && !have {
+                    count += 1;
+                }
+                *seen = true;
+            }
+        }
+        let table = if fitted {
+            0
+        } else {
+            h.saturating_mul(std::mem::size_of::<Vec<u16>>())
+        };
+        count
+            .saturating_mul(w)
+            .saturating_mul(4 * std::mem::size_of::<u16>())
+            .saturating_add(table)
+    }
+
     /// Forget everything: the page was erased or replaced.
     pub(crate) fn clear(&mut self) {
         self.width = 0;
