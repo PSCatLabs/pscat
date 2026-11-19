@@ -21,7 +21,7 @@ fn run(src: &str) -> Interp {
     let mut it = interpreter(100, 100);
     it.run_str(src)
         .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
-    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    assert_eq!(it.dict_stack_len(), 3, "dictionary leaked: {src}");
     it
 }
 
@@ -125,7 +125,7 @@ fn the_scope_suppresses_showpage_and_rebalances_after_errors() {
     );
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     // `div` leaves its operands (#1047)
-    assert_eq!(stack, ["1", "0", "true", "2", "/undefinedresult"]);
+    assert_eq!(stack, ["1", "0", "true", "3", "/undefinedresult"]);
     // a program that only leaves dictionaries open
     run("{ 5 dict begin } << >> wp-run-decorated");
 }
@@ -162,7 +162,7 @@ fn an_identity_warp_redraws_an_unmodified_gallery_piece_faithfully() {
     warped
         .run_str("(gallery/woven_labyrinth.ps) {} 3 wp-run")
         .unwrap_or_else(|e| panic!("{}", warped.error_report(&e)));
-    assert_eq!(warped.dict_stack_len(), 2);
+    assert_eq!(warped.dict_stack_len(), 3);
     let (a, b) = (block_means(&plain, 10), block_means(&warped, 10));
     let worst = a
         .iter()
@@ -200,7 +200,7 @@ fn render(src: &str) -> Interp {
     let mut it = interpreter(400, 400);
     it.run_str(&format!("4 4 scale {src}"))
         .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
-    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    assert_eq!(it.dict_stack_len(), 3, "dictionary leaked: {src}");
     it
 }
 
@@ -321,7 +321,7 @@ fn a_decorated_program_can_take_operands_and_leave_results() {
     );
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     assert_eq!(stack.last().map(String::as_str), Some("/undefinedresult"));
-    assert_eq!(&stack[stack.len() - 3..stack.len() - 1], ["true", "2"]);
+    assert_eq!(&stack[stack.len() - 3..stack.len() - 1], ["true", "3"]);
 }
 
 #[test]
@@ -332,7 +332,7 @@ fn a_decorator_that_fails_to_install_still_closes_the_scope() {
     // any PostScript error; what matters is the dictionary depth)
     let it = run("{ {} << /fill { pop 1 } >> wp-run-decorated } stopped countdictstack");
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(&stack[stack.len() - 2..], ["true", "2"], "{stack:?}");
+    assert_eq!(&stack[stack.len() - 2..], ["true", "3"], "{stack:?}");
     // and fill is the real one again afterwards
     assert_eq!(
         numbers("/fill load type /operatortype eq { 1 } { 0 } ifelse"),
@@ -346,18 +346,18 @@ fn decorating_exec_or_stopped_cannot_stop_the_program_or_the_cleanup() {
     // after the decorators were installed, so it picked up the wrappers.
     assert_eq!(
         numbers("{ 42 } << /exec { } >> wp-run-decorated countdictstack"),
-        [42.0, 2.0]
+        [42.0, 3.0]
     );
     assert_eq!(
         numbers("{ 42 } << /stopped { } >> wp-run-decorated countdictstack"),
-        [42.0, 2.0]
+        [42.0, 3.0]
     );
     // an error inside still re-raises, with the scope closed (`div` leaves
     // its operands, #1047)
     let it =
         run("{ { 1 0 div } << /exec { } /stopped { } >> wp-run-decorated } stopped countdictstack");
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
-    assert_eq!(stack, ["1", "0", "true", "2"], "{stack:?}");
+    assert_eq!(stack, ["1", "0", "true", "3"], "{stack:?}");
 }
 
 /// The show-family programs the decorators must draw through the warp
@@ -527,7 +527,7 @@ fn render_marquee(src: &str) -> Interp {
         "4 4 scale 2 srand /Marquee findfont 24 scalefont setfont {src}"
     ))
     .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
-    assert_eq!(it.dict_stack_len(), 2, "dictionary leaked: {src}");
+    assert_eq!(it.dict_stack_len(), 3, "dictionary leaked: {src}");
     it
 }
 

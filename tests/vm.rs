@@ -177,7 +177,7 @@ fn no_invalidrestore_scan_of_the_stacks() {
 fn post_save_dict_on_dict_stack_is_tolerated() {
     // gs: invalidrestore. Here the dict simply stays on the stack.
     let mut it = run("save 3 dict begin restore countdictstack");
-    assert_eq!(top_repr(&mut it), "3");
+    assert_eq!(top_repr(&mut it), "4");
 }
 
 #[test]

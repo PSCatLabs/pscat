@@ -78,7 +78,7 @@ const PROBES: &[(&str, &[&str])] = &[
     ("globaldict /k 7 put globaldict /k get", &["7"]),
     // On the dictionary stack: bare names find its entries, and it counts.
     ("globaldict /gx 5 put gx", &["5"]),
-    ("/Pg { 11 } globaldict begin def end Pg", &["11"]),
+    ("globaldict begin /Pg 11 def end Pg", &["11"]),
     ("countdictstack", &["3"]),
     ("currentdict globaldict eq", &["false"]),
     ("globaldict begin currentdict globaldict eq end", &["true"]),
