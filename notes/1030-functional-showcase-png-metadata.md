@@ -12,8 +12,8 @@ so there is no nondeterminism and no platform effect.
 
 Fix: the three PNGs and their `render-manifest.json` hashes were regenerated.
 The manifest also stopped recording the author's absolute path in the
-`stdout` of the three posters (the script no longer captures the
-`pscat: wrote` line in stdout).
+`stdout` of the three posters (current binaries print the `pscat: wrote` line
+on stderr, so the script's captured stdout no longer contains it).
 
 Not done, deliberately: `MEASUREMENTS.json` still names stale hashes for
 `lib/functional.ps`, `lib/artkit.ps` and `lib/paintkit.ps`. Its timings must be
