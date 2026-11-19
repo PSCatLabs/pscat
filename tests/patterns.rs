@@ -588,3 +588,38 @@ fn a_cell_many_steps_wide_keeps_every_copy_in_svg() {
     let p = out.png.pixel(100, SIZE - 100).expect("pixel");
     assert!(p.blue() > 150 && p.red() < 100, "{p:?}");
 }
+
+/// An uncoloured pattern made while a pattern space is current (here,
+/// after another pattern was selected) still has its marks: gs paints the
+/// second rect blue (Codex round 2 on #1301: the capture inherited the
+/// pattern space and painted nothing).
+const UNCOLOURED_IN_PATTERN_SPACE: &str = "
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+   /PaintProc { pop 0 0 5 10 rectfill } >> matrix makepattern /a exch def
+[/Pattern /DeviceRGB] setcolorspace
+1 0 0 a setcolor 20 20 160 360 rectfill
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+   /PaintProc { pop 0 0 5 10 rectfill } >> matrix makepattern /b exch def
+0 0 1 b setcolor 220 20 160 360 rectfill
+";
+
+#[test]
+fn an_uncoloured_pattern_made_in_a_pattern_space_still_paints() {
+    let out = check_all(
+        "uncoloured in pattern space",
+        UNCOLOURED_IN_PATTERN_SPACE,
+        2,
+        true,
+    );
+    let blue = (220..380)
+        .flat_map(|x| (40..380).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let p = out.png.pixel(x, y).expect("pixel");
+            p.blue() > 200 && p.red() < 60
+        })
+        .count();
+    assert!(
+        blue > 20_000,
+        "the second pattern is missing: {blue} blue pixels"
+    );
+}

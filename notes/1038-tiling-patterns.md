@@ -85,6 +85,11 @@ A capture canvas or period is at most 16384 px a side and 2^26 px
 - Text output modes (`--svg-text`, `--pdf-text`) keep glyph outlines under a
   pattern.
 - `imagemask` under a pattern still paints the solid colour (follow-up).
+- TilingType 2 is adjusted like 1 and 3: its cells are scaled to the
+  whole-pixel step (a 7.3 pt step paints a 3.65 pt mark 3.5 px wide at
+  72 dpi). gs keeps a Type 2 cell undistorted and lets the spacing vary
+  instead (gaps of 3 and 4 px, measured with gs 10.07). Follow-up (Codex
+  round 2 on #1301).
 - An uncoloured `PaintProc`'s images and shadings are dropped; an imagemask in
   one keeps its own colour in SVG.
 

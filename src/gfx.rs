@@ -4008,6 +4008,7 @@ impl Gfx {
             None
         };
         let pdf = self.pdf.as_mut().map(|p| p.begin_capture(spec.uncolored));
+        let uncolored = spec.uncolored;
         let snapshot = self.glyph_enter();
         let page = std::mem::replace(&mut self.pixmap, content);
         let bbox = spec.bbox;
@@ -4031,6 +4032,14 @@ impl Gfx {
         self.state.path = PsPath::default();
         self.state.clip = None;
         self.state.null_device = false;
+        // An uncoloured cell is coverage only, so it paints in solid ink
+        // whatever colour space `makepattern` ran in: a pattern space
+        // inherited here would paint nothing (the null pattern, or a
+        // pattern of another context), as gs does not.
+        if uncolored {
+            self.set_colorspace(ColorSpace::Gray);
+            self.set_rgb(0.0, 0.0, 0.0);
+        }
         let [x0, y0, x1, y1] = bbox;
         self.moveto(x0, y0);
         let clipped = self
