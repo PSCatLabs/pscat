@@ -3086,6 +3086,12 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// partly drawn page is still returned. The CLI's `--lint` follows the same
 /// rule since #947, so this drop is a safety net for the child's output.
 ///
+/// The exception (#1110) is a finding that can *explain* the error, the
+/// ones in `pscat::lint::ERROR_EXPLAINING_CHECKS` (`[shadowed-operator]`: a
+/// program that redefined `ln` and then called it gets an error that never
+/// mentions the name). Those are kept, under `Lint:` as for a clean run,
+/// which the caller puts in its own block after the `PostScript error:` one.
+///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
 /// #847) is not a finding: it is kept, ahead of the findings, only when
 /// there are findings for it to explain, so a clean banded render stays
@@ -3113,7 +3119,12 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
         }
     }
     if errored {
-        findings.clear();
+        findings.retain(|line| {
+            line.strip_prefix(PREFIX)
+                .and_then(|rest| rest.strip_prefix('['))
+                .and_then(|rest| rest.split_once(']'))
+                .is_some_and(|(check, _)| pscat::lint::explains_an_error(check))
+        });
     }
     if !findings.is_empty() {
         findings.splice(0..0, notes);
@@ -4014,6 +4025,25 @@ mod tests {
             l, "pscat: lint: [gsave-imbalance] g",
             "a clean-exit run keeps them"
         );
+    }
+
+    #[test]
+    fn an_errored_run_keeps_only_the_findings_that_can_explain_the_error() {
+        // #1110: a redefined operator is the likely cause of the error, so it
+        // stays (with the note that explains it); the consequences go.
+        let shadow = "pscat: lint: [shadowed-operator] /sub was redefined as a string";
+        let note = "pscat: lint: note: --bands: band 1 of 8 only";
+        let (l, rest) = split_lint_findings(&format!(
+            "%%[ Error: typecheck ]%%\npscat: lint: [run-error] e\n{note}\n\
+             pscat: lint: [blank-page] b\n{shadow}\npscat: lint: [stack-leak] s\n"
+        ));
+        assert_eq!(l, format!("{note}\n{shadow}"));
+        assert_eq!(rest, "%%[ Error: typecheck ]%%");
+        // Without a kept finding the note is dropped, as before.
+        let (l, _) = split_lint_findings(&format!(
+            "pscat: lint: [run-error] e\n{note}\npscat: lint: [blank-page] b\n"
+        ));
+        assert_eq!(l, "");
     }
 
     #[test]

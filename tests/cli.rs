@@ -168,7 +168,13 @@ fn lint_after_an_error_reports_no_consequence_findings() {
                 stderr.contains("pscat: lint: [run-error]"),
                 "{src}: {stderr}"
             );
-            for check in ["blank-page", "gsave-imbalance", "dict-leak", "stack-leak"] {
+            for check in [
+                "blank-page",
+                "gsave-imbalance",
+                "dict-leak",
+                "stack-leak",
+                "shadowed-operator",
+            ] {
                 assert!(
                     !stderr.contains(&format!("[{check}]")),
                     "{flag} {src}: [{check}] is a consequence of the error: {stderr}"
@@ -183,6 +189,34 @@ fn lint_after_an_error_reports_no_consequence_findings() {
     assert!(stderr.contains("[dict-leak]"), "{stderr}");
     let (_ok, _out, stderr) = run(&["--lint", "-"], "showpage");
     assert!(stderr.contains("[blank-page]"), "{stderr}");
+}
+
+/// #1110: a redefined operator can be why the run failed (`5 3 sub` with
+/// `/sub` a string is a `typecheck` that never says `sub`), so `--lint` keeps
+/// that finding after an error, behind the report and the `run-error` line.
+/// The consequences of the abort stay dropped, and the allow comment still
+/// silences it.
+#[test]
+fn lint_after_an_error_keeps_a_redefined_operator_that_may_explain_it() {
+    let body = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke\nshowpage\n";
+    for flag in ["--lint", "--lint-strict"] {
+        let (ok, _out, stderr) = run(&[flag, "-"], body);
+        assert!(!ok, "{flag}: {stderr}");
+        let report = stderr.find("%%[ Error").expect("the error report");
+        let run_error = stderr.find("[run-error]").expect("the run-error line");
+        let shadow = stderr
+            .find("[shadowed-operator] /sub was redefined as a string")
+            .unwrap_or_else(|| panic!("{flag}: the shadow finding is kept: {stderr}"));
+        assert!(report < run_error && run_error < shadow, "{stderr}");
+        assert!(!stderr.contains("blank-page"), "{stderr}");
+        assert!(!stderr.contains("lint: clean"), "{stderr}");
+        assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    }
+    let allowed = format!("%lint: allow shadowed-operator\n{body}");
+    let (ok, _out, stderr) = run(&["--lint", "-"], &allowed);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("[run-error]"), "{stderr}");
+    assert!(!stderr.contains("[shadowed-operator]"), "{stderr}");
 }
 
 #[test]
