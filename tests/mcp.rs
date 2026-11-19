@@ -381,6 +381,7 @@ fn tool_schemas_use_only_the_portable_union_shape() {
         ]),
         "ghosting: a number or a bool"
     );
+    assert_eq!(props["hand"]["type"], "number", "hand: the freehand amount");
     assert!(
         props["ghosting"].get("type").is_none() && props["board"].get("type").is_none(),
         "the unions carry no outer `type`"
@@ -2214,6 +2215,50 @@ fn chalkboard_math_without_a_board_is_transparent() {
     assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "some chalk");
 }
 
+/// `hand` is drychalk's `/Hand` (issue #1111): the same board the library
+/// draws with `chalk.hand`, a different one from the plain board, and a `hand`
+/// of 0 (or none) is the plain board byte for byte.
+#[test]
+fn chalkboard_math_hand_draws_freehand_and_zero_is_the_plain_board() {
+    let root = common::scratch_dir("mcp-chalk-hand");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let mut board = |name: &str, extra: Value| -> Vec<u8> {
+        let mut args = small_board(QUADRATIC);
+        args["out_path"] = json!(name);
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        let result = s.tool("chalkboard_math", args);
+        assert_eq!(result["isError"], false, "{result}");
+        std::fs::read(root.join(name)).unwrap()
+    };
+    let plain = board("plain.png", json!({}));
+    assert_eq!(
+        fnv1a(tiny_skia::Pixmap::decode_png(&plain).unwrap().data()),
+        0x77e56b62ee521faf
+    );
+    assert_eq!(
+        plain,
+        board("zero.png", json!({ "hand": 0 })),
+        "hand 0 is no hand"
+    );
+    let by_hand = board("hand.png", json!({ "hand": 1 }));
+    assert_ne!(plain, by_hand, "the strokes did not move");
+    let viaconfig = board(
+        "config.png",
+        json!({ "config": { "chalk": { "hand": 1 } } }),
+    );
+    assert_eq!(by_hand, viaconfig, "the flat key is chalk.hand");
+    let cfg = pscat::chalk::Config::from_json(
+        r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40},
+            "chalk": {"hand": 1}, "seed": 1}"#,
+    )
+    .unwrap();
+    let lib = pscat::chalk::render(QUADRATIC, &cfg, pscat::chalk::Format::Png).unwrap();
+    assert_eq!(by_hand, lib, "the tool draws exactly what the library does");
+}
+
 /// Every unsupported character or command comes back in one call, each with
 /// its line and column (issue #1080); `code` and `token` stay the first one's.
 #[test]
@@ -2303,6 +2348,8 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
             json!({ "latex": "x", "color": "mauve" }),
             "color must be one of",
         ),
+        (json!({ "latex": "x", "hand": 2 }), "hand must be"),
+        (json!({ "latex": "x", "hand": "wild" }), "hand must be"),
         (json!({ "latex": "x", "board": "chalk" }), "board must be"),
         (json!({ "latex": "x", "board": 3 }), "board must be"),
         (json!({ "latex": "x", "seed": 1.5 }), "seed must be"),

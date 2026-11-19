@@ -1073,3 +1073,71 @@ fn no_board_is_chalk_on_a_transparent_page() {
         assert!(c.red() > 200 && c.green() > 200, "a dark mark: {c:?}");
     }
 }
+
+/// `--hand` is drychalk's `/Hand` (issue #1111): it adds the key to the
+/// generated program only when asked, and what it draws is what the library
+/// draws with `chalk.hand`. Without it the board is the plain board.
+#[test]
+fn hand_flags_set_chalk_hand_and_the_default_board_is_unchanged() {
+    let dir = scratch("hand");
+    let tex = r"\frac{a+b}{c} = \sqrt{x^2 + 1}";
+    let ps = |extra: &[&str]| -> String {
+        let mut args = vec!["chalk", tex, "--print-ps"];
+        args.extend_from_slice(extra);
+        let out = pscat(&dir, &args, None);
+        ok(&out);
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let plain = ps(&[]);
+    assert!(!plain.contains("/Hand"), "the default program changed");
+    assert_eq!(
+        plain,
+        ps(&["--hand-amount", "0"]),
+        "an amount of 0 is no hand"
+    );
+    assert!(ps(&["--hand"]).contains(" /Dust 0.5 /Hand 1 >> dcchalk"));
+    for (flags, amount) in [
+        (vec!["--hand-amount", "0.4"], "0.4"),
+        (vec!["--hand", "--hand-amount", "0.4"], "0.4"),
+        (vec!["--hand-amount", "0.4", "--hand"], "0.4"),
+    ] {
+        let src = ps(&flags);
+        assert!(
+            src.contains(&format!(" /Hand {amount} >> dcchalk")),
+            "{flags:?}: {src}"
+        );
+    }
+    // the flag overrides the config, as every flag does
+    let src = ps(&[
+        "--json",
+        r#"{"chalk": {"hand": 0.9}}"#,
+        "--hand-amount",
+        "0.2",
+    ]);
+    assert!(src.contains(" /Hand 0.2 >>"), "{src}");
+    assert!(ps(&["--json", r#"{"chalk": {"hand": 0.9}}"#]).contains(" /Hand 0.9 >>"));
+    let out = pscat(&dir, &["chalk", tex, "--hand-amount", "1.5"], None);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("chalk.hand"), "{}", stderr(&out));
+
+    // rendered: the flag draws what the library draws, and not the plain board
+    let small = [
+        "--width", "400", "--height", "200", "--dpi", "72", "--size", "40",
+    ];
+    let render = |name: &str, extra: &[&str]| -> Vec<u8> {
+        let mut args = vec!["chalk", tex, "-o", name];
+        args.extend_from_slice(&small);
+        args.extend_from_slice(extra);
+        ok(&pscat(&dir, &args, None));
+        std::fs::read(dir.join(name)).unwrap()
+    };
+    let plain = render("plain.png", &[]);
+    let by_hand = render("hand.png", &["--hand"]);
+    assert_ne!(plain, by_hand, "the strokes did not move");
+    let cfg = Config::from_json(
+        r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40},
+            "chalk": {"hand": 1}}"#,
+    )
+    .unwrap();
+    assert_eq!(by_hand, chalk::render(tex, &cfg, Format::Png).unwrap());
+}

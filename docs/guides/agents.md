@@ -129,7 +129,7 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `&` alignment), a chalkboard PNG back: the `pscat chalk` board (#555), with
   its config keys as optional arguments (`size`, `irregular`, `slope`,
   `jitter`, `align`, `color`, `board` or `false` for a transparent page,
-  `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
+  `ghosting`, `hand` (0..1, freehand strokes), `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
   outside mathkit's subset is a `latex_error` naming it (`code`
   `unsupported_command`, `token` `\aleph`); every unsupported command or

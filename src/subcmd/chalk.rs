@@ -23,6 +23,10 @@ const USAGE: &str = r#"usage: pscat chalk [options] 'LATEX'
       --seed N        seed for the layout, chalk and board (default 1)
       --size PT       writing size in points, before any shrink to fit (default 64)
       --irregular R   0 = a clean, untilted layout; 1 a steady hand (default 1)
+      --hand          draw freehand: strokes drift and overshoot a little, as
+                      chalk in a hand does (drychalk's /Hand; default off)
+      --hand-amount A how freehand, 0..1 (default 1 with --hand); on its own
+                      it turns --hand on
       --color NAME    white | yellow | pink | blue | green | orange (default white)
       --width PT      page width in points (default 800)
       --height PT     page height in points (default 400)
@@ -224,6 +228,22 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--dpi" => {
                 let v = numeric(&arg, args.value(&arg)?)?;
                 o.overrides.push(("layout", "dpi", v));
+            }
+            "--hand" => {
+                // a later --hand-amount wins; --hand never lowers an amount
+                if !o
+                    .overrides
+                    .iter()
+                    .any(|(g, k, _)| (*g, *k) == ("chalk", "hand"))
+                {
+                    o.overrides.push(("chalk", "hand", Value::from(1.0)));
+                }
+            }
+            "--hand-amount" => {
+                let v = numeric(&arg, args.value(&arg)?)?;
+                o.overrides
+                    .retain(|(g, k, _)| (*g, *k) != ("chalk", "hand"));
+                o.overrides.push(("chalk", "hand", v));
             }
             "--color" => {
                 let v = args.value(&arg)?;
