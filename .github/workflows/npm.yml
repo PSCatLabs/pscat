@@ -96,10 +96,17 @@ jobs:
         run: npm test
       - name: wasm pages match the native renderer
         run: cargo test --profile ci --test wasm
-      # --exact and --nocapture: a skipped run (no wasm target) prints its
-      # "skipping" line here instead of passing silently.
+      # The test skips (passes without checking) when the wasm target or node
+      # is missing. Here that must fail: grep for its skip line and fail on it.
       - name: pdfmark PDF is byte-identical from the CLI and wasm
-        run: cargo test --profile ci --test pdf_pdfmark -- --exact wasm_pdfmark_document_matches_the_cli --nocapture
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --profile ci --test pdf_pdfmark -- --exact wasm_pdfmark_document_matches_the_cli --nocapture 2>&1 | tee pdfmark-wasm.log
+          if grep -q 'skipping wasm parity' pdfmark-wasm.log; then
+            echo "::error::the wasm pdfmark parity check was skipped in CI"
+            exit 1
+          fi
       - name: Install the tarball into a fresh project and render
         run: ./scripts/test_npm_tarball.sh pack/pscat-*.tgz
       - name: Size
