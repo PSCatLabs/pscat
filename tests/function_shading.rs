@@ -456,8 +456,10 @@ fn a_sampled_function_drives_an_axial_shading() {
     );
 }
 
-/// The SVG embeds the shading as an image (SVG has no function shading),
-/// which resvg rasterises as the PNG.
+/// The SVG embeds the shading as an image (SVG has no function shading):
+/// the PNG's own layer at device resolution, placed where the PNG painted
+/// it. (resvg is built without raster images here, so the image is checked
+/// by decoding it.) Composited over the page's grey, it is the PNG.
 #[test]
 fn the_svg_embeds_the_png_layer() {
     let src = format!(
@@ -476,29 +478,74 @@ fn the_svg_embeds_the_png_layer() {
         .pop()
         .expect("page");
     assert_eq!(svg.matches("<image ").count(), 1, "{svg}");
-    assert!(svg.contains("data:image/png;base64,"));
-    let options = resvg::usvg::Options {
-        dpi: 72.0,
-        ..Default::default()
+    let image = format!(" {}", svg.split("<image ").nth(1).expect("an image"));
+    let num = |name: &str| -> f32 {
+        image
+            .split(&format!(" {name}=\""))
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("no {name}"))
     };
-    let tree = resvg::usvg::Tree::from_str(&svg, &options).expect("parse SVG");
-    let mut theirs = resvg::tiny_skia::Pixmap::new(SIZE, SIZE).expect("pixmap");
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::identity(),
-        &mut theirs.as_mut(),
-    );
+    let (w, h) = (num("width") as u32, num("height") as u32);
+    let at = svg
+        .split("transform=\"matrix(1 0 0 1 ")
+        .nth(1)
+        .and_then(|r| r.split(')').next())
+        .expect("a translation");
+    let xy: Vec<u32> = at.split(' ').map(|v| v.parse().expect("whole")).collect();
+    let b64 = svg
+        .split("data:image/png;base64,")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .expect("a PNG");
+    let png = base64_decode(b64);
+    let layer = Pixmap::decode_png(&png).expect("a PNG");
+    assert_eq!((layer.width(), layer.height()), (w, h));
     let ours: &Pixmap = &it.gfx().pixmap;
     let mut worst = 0;
-    for (a, b) in ours.data().chunks(4).zip(theirs.data().chunks(4)) {
-        for k in 0..3 {
-            worst = worst.max(a[k].abs_diff(b[k]));
+    let mut opaque = 0;
+    for y in 0..h {
+        for x in 0..w {
+            let l = layer.pixel(x, y).expect("in the layer");
+            let p = ours.pixel(xy[0] + x, xy[1] + y).expect("on the page");
+            // Premultiplied over grey 128.
+            let over = |c: u8| u32::from(c) + 128 * (255 - u32::from(l.alpha())) / 255;
+            let want = [over(l.red()), over(l.green()), over(l.blue())];
+            let got = [p.red(), p.green(), p.blue()];
+            for k in 0..3 {
+                worst = worst.max(want[k].abs_diff(u32::from(got[k])));
+            }
+            opaque += u32::from(l.alpha() == 255);
         }
     }
+    assert!(opaque > 5000, "{opaque} opaque pixels");
     assert!(
-        worst <= 3,
-        "resvg of the SVG differs from the PNG by {worst}"
+        worst <= 2,
+        "the layer over grey differs from the PNG by {worst}"
     );
+}
+
+fn base64_decode(s: &str) -> Vec<u8> {
+    let val = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        _ => 63,
+    };
+    let bytes: Vec<u8> = s.bytes().filter(|&c| c != b'=').map(val).collect();
+    bytes
+        .chunks(4)
+        .flat_map(|q| {
+            let n = q
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, &v)| n | u32::from(v) << (18 - 6 * i));
+            let out = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+            out.into_iter().take(q.len() - 1)
+        })
+        .collect()
 }
 
 /// A step limit stops a large one before it paints anything.
