@@ -94,7 +94,53 @@ pub(crate) struct Sampled {
     bits: u32,
     encode: Vec<(f64, f64)>,
     decode: Vec<(f64, f64)>,
-    data: Vec<u8>,
+    /// Shared: every leg that names the same `/DataSource` string in one
+    /// shading holds the same bytes (`SAMPLE_DATA`).
+    data: std::rc::Rc<[u8]>,
+}
+
+thread_local! {
+    /// The `/DataSource` bytes already read during the shading being
+    /// parsed, by string identity, so a function that references one
+    /// sampled function many times (a stitching function's legs) holds one
+    /// copy, not one per reference (Codex round 2 on #1322: 128 legs over
+    /// one 1 MiB string took 134 MiB past `--max-memory 8`). `Some` only
+    /// while `parse_shading_function` runs: a string's identity is only
+    /// stable while it is alive.
+    static SAMPLE_DATA: std::cell::RefCell<Option<SampleCache>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `SAMPLE_DATA`'s map: a string's identity to its bytes.
+type SampleCache = std::collections::HashMap<(usize, usize, usize), std::rc::Rc<[u8]>>;
+
+/// Clears `SAMPLE_DATA` when the shading parse that set it ends, however
+/// it ends.
+struct SampleDataScope;
+
+impl SampleDataScope {
+    fn enter() -> Self {
+        SAMPLE_DATA.with(|c| *c.borrow_mut() = Some(Default::default()));
+        SampleDataScope
+    }
+}
+
+impl Drop for SampleDataScope {
+    fn drop(&mut self) {
+        SAMPLE_DATA.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+/// `s`'s bytes, shared with an earlier reference to the same string in
+/// the shading being parsed.
+fn sample_bytes(s: &crate::object::PsString) -> std::rc::Rc<[u8]> {
+    SAMPLE_DATA.with(|c| match c.borrow_mut().as_mut() {
+        Some(seen) => seen
+            .entry(s.identity())
+            .or_insert_with(|| std::rc::Rc::from(&*s.borrow_bytes()))
+            .clone(),
+        None => std::rc::Rc::from(&*s.borrow_bytes()),
+    })
 }
 
 impl Sampled {
@@ -885,7 +931,7 @@ fn parse_sampled(d: &Dict) -> Result<Sampled, PsError> {
         None => range.clone(),
     };
     let data = match get(d, "DataSource")?.value {
-        Value::String(s) => s.borrow_bytes().to_vec(),
+        Value::String(s) => sample_bytes(&s),
         _ => return Err(PsError::Rangecheck),
     };
     Ok(Sampled {
@@ -1034,6 +1080,7 @@ fn parse_shading_function(
     cs: CsKind,
     nin: usize,
 ) -> Result<PsFunction, PsError> {
+    let _scope = SampleDataScope::enter();
     let function = match &func_obj.value {
         Value::Array(a) => {
             if a.len() != cs.ncomp() {
@@ -1389,6 +1436,37 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Legs that name one `/DataSource` string share its bytes, and the
+    /// cache is gone once the shading is parsed (Codex round 2 on #1322:
+    /// each reference copied the table, past the memory limit).
+    #[test]
+    fn legs_naming_one_data_source_share_its_bytes() {
+        let mut it = crate::Interp::new();
+        it.run_str(
+            "/S << /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [2] \
+               /BitsPerSample 8 /DataSource <00ff> >> def \
+             << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1] \
+                /Functions [S S] >>",
+        )
+        .expect("builds the function");
+        let obj = it.pop().expect("the function dict");
+        let f = parse_shading_function(&obj, CsKind::Gray, 1).expect("parses");
+        let PsFunction::Stitching { functions, .. } = &f else {
+            panic!("a stitching function");
+        };
+        let [PsFunction::Sampled(a), PsFunction::Sampled(b)] = functions.as_slice() else {
+            panic!("two sampled legs");
+        };
+        assert!(
+            std::rc::Rc::ptr_eq(&a.data, &b.data),
+            "one copy of the bytes"
+        );
+        assert!(
+            SAMPLE_DATA.with(|c| c.borrow().is_none()),
+            "the cache is cleared"
+        );
+    }
 
     #[test]
     fn exponential_linear_ramp_is_exact_at_endpoints() {
