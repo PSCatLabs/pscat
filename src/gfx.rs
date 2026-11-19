@@ -2633,7 +2633,65 @@ impl Gfx {
             }
             None => self.page_rect_path(),
         };
-        let mut prepared = false;
+        let comp = self.composite();
+        if self.paint_shfill(shader, &path, shading.bbox.is_none(), nstops, probe)? {
+            if self.svg.is_some() || self.pdf.is_some() {
+                // The same shading for both vector recorders (#1028,
+                // #1041): rescaled as the raster is, and its degenerate
+                // radial recorded as the raster paints it.
+                let vector = vector_shading(&shading, ctm);
+                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+                if let Some(svg) = &mut self.svg {
+                    // The same device-space path the raster painted with
+                    // (whole page, or the BBox parallelogram) — passing its
+                    // SVG path data through means the exported region
+                    // matches exactly, /BBox included, rather than always
+                    // the whole page bounded only by the clip.
+                    let region_d = path.to_svg_data();
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                        } => svg.shfill(kind, *ctm, stops, *extend, &region_d, comp, &chain),
+                    }
+                }
+                if let Some(pdf) = &mut self.pdf {
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                        } => {
+                            let region = shading.bbox.map(|_| &path);
+                            pdf.shfill(kind, *ctm, stops, *extend, region, comp, &chain);
+                        }
+                    }
+                }
+            }
+            self.dirty = true;
+        }
+        Ok(work)
+    }
+
+    /// Paints `shader` over the device-space `path` (the whole page when
+    /// `whole_page`, else a `/BBox` parallelogram or another region) through
+    /// the clip, with the current alpha and blend, for `shfill` (#20, #1039).
+    /// `nstops` sizes the strips the limits are looked at between. Returns
+    /// whether it painted; the page is begun either way.
+    fn paint_shfill(
+        &mut self,
+        shader: tiny_skia::Shader<'_>,
+        path: &PsPath,
+        whole_page: bool,
+        nstops: usize,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<bool, PsError> {
+        let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
         if let Some(skia_path) = path.to_skia() {
             // A gradient carries its own shader rather than a flat
             // color, so `paint()`'s alpha byte can't reach it —
@@ -2654,7 +2712,6 @@ impl Gfx {
                 force_hq_pipeline: true,
                 ..Default::default()
             };
-            let comp = self.composite();
             let mask = self.clip_mask();
             // Under the limits the page is painted on a copy and kept only
             // once every strip has painted, so a limit leaves the page, the
@@ -2664,7 +2721,6 @@ impl Gfx {
             // half-painted raster beside records of nothing would show.
             let mut scratch = if *probe == crate::limits::LimitProbe::NONE {
                 self.prepare_paint();
-                prepared = true;
                 None
             } else {
                 probe.check_alloc((pw * ph).saturating_mul(4))?;
@@ -2675,7 +2731,7 @@ impl Gfx {
                 Some(copy)
             };
             let target = scratch.as_mut().unwrap_or(&mut self.pixmap);
-            if shading.bbox.is_none() {
+            if whole_page {
                 // The whole page, an integer rectangle with no edge to
                 // anti-alias, so strips of its rows paint the same pixels
                 // as the one fill (which, with nothing to look at, it is). A
@@ -2754,52 +2810,141 @@ impl Gfx {
             }
             if let Some(copy) = scratch {
                 self.prepare_paint();
-                prepared = true;
                 self.pixmap = copy;
             }
-            if self.svg.is_some() || self.pdf.is_some() {
-                // The same shading for both vector recorders (#1028,
-                // #1041): rescaled as the raster is, and its degenerate
-                // radial recorded as the raster paints it.
-                let vector = vector_shading(&shading, ctm);
-                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
-                if let Some(svg) = &mut self.svg {
-                    // The same device-space path the raster painted with
-                    // (whole page, or the BBox parallelogram) — passing its
-                    // SVG path data through means the exported region
-                    // matches exactly, /BBox included, rather than always
-                    // the whole page bounded only by the clip.
-                    let region_d = path.to_svg_data();
-                    match &vector {
-                        VectorShading::Nothing => {}
-                        VectorShading::Shading {
-                            kind,
-                            ctm,
-                            stops,
-                            extend,
-                        } => svg.shfill(kind, *ctm, stops, *extend, &region_d, comp, &chain),
+            return Ok(true);
+        }
+        // Nothing to paint (a degenerate region), but the page is begun.
+        self.prepare_paint();
+        Ok(false)
+    }
+
+    /// `shfill` of a Type 1 (function-based) shading (#1039). The function
+    /// is evaluated at each device pixel's centre, through the inverse of
+    /// `/Matrix` then the CTM, into a layer covering the `/Domain`
+    /// parallelogram (cut by the `/BBox` and the page), whose coverage is
+    /// multiplied in, so its edges are anti-aliased as a fill's are. The
+    /// layer is painted through the clip by `paint_shfill`, as a gradient
+    /// is. SVG embeds the same layer as an image (it has no function
+    /// shading); PDF gets a real `/ShadingType 1` with a sampled function.
+    ///
+    /// Under the limits the layer is built first, the limits looked at
+    /// between rows and its work held against the step limit before, so a
+    /// stopped `shfill` leaves the page as it was. It returns that work.
+    pub(crate) fn shfill_function_limited(
+        &mut self,
+        shading: crate::shading::FunctionShading,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        if self.painting_off() || self.capturing_uncolored() {
+            return Ok(0);
+        }
+        let ctm = self.state.ctm;
+        let c = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+        let m = shading.matrix;
+        // Shading space to device space: /Matrix, then the CTM.
+        let t = [
+            m[0] * c[0] + m[1] * c[2],
+            m[0] * c[1] + m[1] * c[3],
+            m[2] * c[0] + m[3] * c[2],
+            m[2] * c[1] + m[3] * c[3],
+            m[4] * c[0] + m[5] * c[2] + c[4],
+            m[4] * c[1] + m[5] * c[3] + c[5],
+        ];
+        let det = t[0] * t[3] - t[1] * t[2];
+        let [x0, x1, y0, y1] = shading.domain;
+        let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
+        let map = |x: f64, y: f64| (t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]);
+        let domain = [map(x0, y0), map(x1, y0), map(x1, y1), map(x0, y1)];
+        let bbox = shading.bbox.map(|(llx, lly, urx, ury)| {
+            let d = |x, y| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            };
+            [d(llx, lly), d(urx, lly), d(urx, ury), d(llx, ury)]
+        });
+        // The pixels the layer covers: the Domain's box, cut by the
+        // BBox's and the page.
+        let mut b = corners_box(domain);
+        if let Some(q) = bbox {
+            let qb = corners_box(q);
+            b = [
+                b[0].max(qb[0]),
+                b[1].max(qb[1]),
+                b[2].min(qb[2]),
+                b[3].min(qb[3]),
+            ];
+        }
+        let bx0 = b[0].floor().max(0.0);
+        let by0 = b[1].floor().max(0.0);
+        let bx1 = b[2].ceil().min(pw as f64);
+        let by1 = b[3].ceil().min(ph as f64);
+        let fine = det != 0.0 && det.is_finite() && t.iter().all(|v| v.is_finite());
+        if !fine || x0 == x1 || y0 == y1 || !(bx1 > bx0 && by1 > by0) {
+            // Nothing to paint (an empty Domain, or off the page), but the
+            // page is begun, as for a gradient.
+            self.prepare_paint();
+            return Ok(0);
+        }
+        let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
+        // Evaluating the function costs about a 64-stop gradient's walk a
+        // pixel; painting the layer, a two-stop one.
+        let work = shfill_work(bw, bh, 64).saturating_add(shfill_work(bw, bh, 2));
+        probe.check(work / 1024)?;
+        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(6))?;
+        let inv = [t[3] / det, -t[1] / det, -t[2] / det, t[0] / det];
+        let to_shading = |dx: f64, dy: f64| {
+            let (u, v) = (dx - t[4], dy - t[5]);
+            (inv[0] * u + inv[2] * v, inv[1] * u + inv[3] * v)
+        };
+        let local = |q: &[(f64, f64)]| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect();
+        let layer = function_layer(
+            &shading,
+            (bx0, by0, bw, bh),
+            to_shading,
+            local(&domain),
+            bbox.as_ref().map(|q| local(q)),
+            probe,
+        )?;
+        let shader = tiny_skia::Pattern::new(
+            layer.as_ref(),
+            SpreadMode::Pad,
+            tiny_skia::FilterQuality::Nearest,
+            1.0,
+            Transform::from_translate(bx0 as f32, by0 as f32),
+        );
+        let region = Self::rect_path(bx0 as f32, by0 as f32, bx1 as f32, by1 as f32);
+        let comp = self.composite();
+        if self.paint_shfill(shader, &region, false, 2, probe)? {
+            let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+            // An image embedded in an SVG, not a file pscat writes: no
+            // resolution to record (as in `image.rs`).
+            #[allow(clippy::disallowed_methods)]
+            let encoded = self.svg.is_some().then(|| layer.encode_png());
+            if let Some(svg) = &mut self.svg
+                && let Some(Ok(png)) = encoded
+            {
+                let at = [1.0, 0.0, 0.0, 1.0, bx0 as f32, by0 as f32];
+                svg.image(&png, bw, bh, at, true, comp, &chain);
+            }
+            if let Some(pdf) = &mut self.pdf {
+                let ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
+                let bbox_path = bbox.map(|q| {
+                    let mut p = PsPath::default();
+                    let pt = |(x, y): (f64, f64)| DevPoint {
+                        x: x as f32,
+                        y: y as f32,
+                    };
+                    p.move_to(pt(q[0]));
+                    for &corner in &q[1..] {
+                        p.line_to(pt(corner));
                     }
-                }
-                if let Some(pdf) = &mut self.pdf {
-                    match &vector {
-                        VectorShading::Nothing => {}
-                        VectorShading::Shading {
-                            kind,
-                            ctm,
-                            stops,
-                            extend,
-                        } => {
-                            let region = shading.bbox.map(|_| &path);
-                            pdf.shfill(kind, *ctm, stops, *extend, region, comp, &chain);
-                        }
-                    }
-                }
+                    p.close();
+                    p
+                });
+                pdf.shfill_function(&shading, ctm, bbox_path.as_ref(), comp, &chain);
             }
             self.dirty = true;
-        }
-        if !prepared {
-            // Nothing to paint (a degenerate region), but the page is begun.
-            self.prepare_paint();
         }
         Ok(work)
     }
@@ -5121,6 +5266,102 @@ fn two_root_layer(
                 layer.fill_rect(strip, &paint, Transform::identity(), None);
             }
             y = y1;
+        }
+    }
+    Ok(layer)
+}
+
+/// The convex polygon `poly` clipped to the rectangle `(x0, y0, x1, y1)`
+/// (Sutherland-Hodgman, one edge at a time).
+fn clip_polygon(poly: &[(f64, f64)], (x0, y0, x1, y1): (f64, f64, f64, f64)) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = poly.to_vec();
+    // (axis, bound, keep the side >= bound?)
+    for (axis, bound, above) in [(0, x0, true), (0, x1, false), (1, y0, true), (1, y1, false)] {
+        let input = std::mem::take(&mut out);
+        let coord = |p: (f64, f64)| if axis == 0 { p.0 } else { p.1 };
+        let inside = |p: (f64, f64)| {
+            if above {
+                coord(p) >= bound
+            } else {
+                coord(p) <= bound
+            }
+        };
+        for (i, &cur) in input.iter().enumerate() {
+            let prev = input[(i + input.len() - 1) % input.len()];
+            if inside(cur) != inside(prev) {
+                let t = (bound - coord(prev)) / (coord(cur) - coord(prev));
+                out.push((prev.0 + t * (cur.0 - prev.0), prev.1 + t * (cur.1 - prev.1)));
+            }
+            if inside(cur) {
+                out.push(cur);
+            }
+        }
+    }
+    out
+}
+
+/// A Type 1 shading's layer (#1039): `w` x `h` device pixels from
+/// `(x0, y0)`, each the function's colour at its centre (`to_shading` maps
+/// a device point into shading space), multiplied by the coverage of the
+/// Domain parallelogram `domain` and of the `/BBox` one, both given in the
+/// layer's own pixels. Premultiplied, so outside them it is transparent.
+fn function_layer(
+    shading: &crate::shading::FunctionShading,
+    (x0, y0, w, h): (f64, f64, usize, usize),
+    to_shading: impl Fn(f64, f64) -> (f64, f64),
+    domain: Vec<(f64, f64)>,
+    bbox: Option<Vec<(f64, f64)>>,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Pixmap, PsError> {
+    let mut layer = Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    let mut cover = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    // Clipped to the layer (a pixel of margin) in f64 first: tiny-skia's
+    // anti-aliased fill panics or drops a path whose corners lie around
+    // 1e9 device pixels away, which a crafted Matrix, Domain or BBox
+    // reaches (gs paints those). The clipped polygon covers the same pixels.
+    let quad = |q: &[(f64, f64)]| {
+        let q = clip_polygon(q, (-1.0, -1.0, w as f64 + 1.0, h as f64 + 1.0));
+        if q.len() < 3 {
+            return None;
+        }
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(q[0].0 as f32, q[0].1 as f32);
+        for &(x, y) in &q[1..] {
+            pb.line_to(x as f32, y as f32);
+        }
+        pb.close();
+        pb.finish()
+    };
+    if let Some(p) = quad(&domain) {
+        cover.fill_path(&p, FillRule::Winding, true, Transform::identity());
+    }
+    if let Some(q) = bbox {
+        let mut cut = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+        if let Some(p) = quad(&q) {
+            cut.fill_path(&p, FillRule::Winding, true, Transform::identity());
+        }
+        for (c, k) in cover.data_mut().iter_mut().zip(cut.data()) {
+            *c = ((u16::from(*c) * u16::from(*k)) / 255) as u8;
+        }
+    }
+    let rows = shfill_strip_rows(w, 64);
+    let cov = cover.data();
+    let px = layer.data_mut();
+    for y in 0..h {
+        if y % rows == 0 {
+            probe.check(0)?;
+        }
+        let dy = y0 + y as f64 + 0.5;
+        for x in 0..w {
+            let k = y * w + x;
+            let a = cov[k];
+            if a == 0 {
+                continue;
+            }
+            let (u, v) = to_shading(x0 + x as f64 + 0.5, dy);
+            let (r, g, b) = shading.rgb_at(u, v);
+            let pm = |c: f32| ((u16::from(to_u8(c)) * u16::from(a) + 127) / 255) as u8;
+            px[k * 4..k * 4 + 4].copy_from_slice(&[pm(r), pm(g), pm(b), a]);
         }
     }
     Ok(layer)

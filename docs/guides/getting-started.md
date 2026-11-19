@@ -179,10 +179,13 @@ More on the less obvious ones:
   `--no-values` leaves the value out for cells that already say what they are.
   `pscat sheet --help` has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
-  2 and 3, with exponential and stitching functions, so multi-stop ramps
+  2 and 3, with exponential, stitching and sampled functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
   `<linearGradient>`/`<radialGradient>`, and PDF uses real PDF shadings
-  (`sh` with a `/Shading` resource). `/Extend [start end]` says whether each
+  (`sh` with a `/Shading` resource). Function-based shadings (`ShadingType`
+  1: colour from a sampled function of x and y over a `/Domain` rectangle)
+  paint too; SVG has no equivalent, so it embeds them as an image. Mesh
+  shadings (types 4–7) are not supported yet. `/Extend [start end]` says whether each
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.

@@ -28,7 +28,10 @@ fn shfill(it: &mut Interp) -> Result<(), PsError> {
     };
     let spec = crate::shading::parse_shading_dict(&d.borrow())?;
     let probe = it.limit_probe();
-    let work = it.gfx.shfill_limited(spec, &probe)?;
+    let work = match spec {
+        crate::shading::ParsedShading::Gradient(g) => it.gfx.shfill_limited(g, &probe)?,
+        crate::shading::ParsedShading::Function(f) => it.gfx.shfill_function_limited(f, &probe)?,
+    };
     // A step per 1024 units, held against the step limit before the page
     // was painted (#1219), so this only counts them.
     it.charge_probed_steps(work / 1024);
