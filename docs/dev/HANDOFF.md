@@ -728,8 +728,19 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
-  `/Pattern` colour spaces) are not implemented at all, in any output.
+  ShadingType 1 and 4–7 and shading patterns (PatternType 2) are not
+  implemented at all, in any output.
+- Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
+  `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
+  `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the
+  `PaintProc` at once (gs: at first use), through `Frame::Pattern`, into a
+  *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
+  state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
+  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
+  a pattern paints only in the context (page or capture) it was made in;
+  text output modes keep outlines under a pattern; `imagemask` ignores a
+  pattern (paints its solid colour). Anything that reads `gfx.pixmap`
+  mid-run for display should use `Gfx::page_pixmap`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
