@@ -95,3 +95,14 @@ page).
 - gs's quarter-turn scale (the pattern's x axis scaled by the device x
   ratio) is followed for the anchor only; pscat's cell keeps its own
   scale.
+
+## Identity
+
+`scripts/identity_check.sh` with two release binaries (base built from
+`feature/0.7.1` at 6c731811, head from this branch) over every tracked
+`examples/*.ps`, `gallery/*.ps` and `selftest/drivers/*.ps`: 229 of 229
+page renders identical (four `examples/hybrid/compare_*.ps` fail alike
+in both trees and are skipped), the control (the issue's Type 2 cell at
+`[1 0 0 1 0.6 0.6]`) differing. The corpus's only tiling patterns,
+`examples/patterns.ps`, use whole-unit `/BBox`es at the identity matrix,
+where the old and new rules agree.
