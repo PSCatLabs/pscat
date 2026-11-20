@@ -1141,8 +1141,9 @@ mod tests {
         let g = geometry(&sp).unwrap();
         let to_gs = capture_to_gs(&sp, &g, Transform::identity());
         // Pattern space through the capture CTM, then to gs: the pattern
-        // origin lands at its device point less the anchor, gs having
-        // moved the pattern by the corner's rounding (-0.4, +0.4, #1342).
+        // origin lands at its device point less the anchor, after the move
+        // that rounds the corner (-0.4, +0.4, #1342's rule; the nested
+        // sweeps in its note hold that rule to gs's raster).
         let mut p = [tiny_skia::Point::from_xy(0.0, 0.0)];
         g.capture.map_points(&mut p);
         to_gs.map_points(&mut p);

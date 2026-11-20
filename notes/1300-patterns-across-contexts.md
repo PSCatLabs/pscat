@@ -126,13 +126,18 @@ identical, the control (the first picture above) differing.
   `PaintProc` that names a page pattern made after the outer
   `makepattern` is `undefined` in pscat and works in gs. This feature
   makes the difference reachable.
-- ~~At a 127.35 px outer step (outer scale 1.5, `/YStep 84.9`) the inner
-  lattice is a pixel off gs's; sixteen other measured cases match.~~
-  #1342 (`notes/1342-pattern-lattice-phase.md`): gs moves an adjusted
-  outer cell by whole pixels to keep its centre, and its accumulator
-  starts at the corner after that move; pscat now does both. That exact
-  case was not recorded, so it was not re-run; twelve cases built to make
-  gs move the outer cell match, where four were off before.
+- At a 127.35 px outer step (outer scale 1.5, `/YStep 84.9`) the inner
+  lattice is a pixel off gs's; sixteen other measured cases match.
+  Probably the gap #1342 left open (`notes/1342-pattern-lattice-phase.md`):
+  that outer `/BBox` is 58 pt tall on an 84.9 pt step, so gs does not
+  scale it to whole pixels and tiles it at the fractional step, where
+  pscat rounds the step. A reconstruction (`/BBox [-13.1 -21 50 37]`,
+  XStep 63.1, 70 or 84.9) renders the same before and after #1342: the
+  outer cell at the anchor matches gs, the others drift. #1342 did fix
+  the other way the accumulator could be off: gs moves an adjusted outer
+  cell by whole pixels to keep its centre and starts the accumulator at
+  the corner after that move (twelve such cases now match, four were
+  off).
 
 A three-level case (a page pattern inside Q's `PaintProc`, Q made inside
 R's, R on the page with fractional translations) matches gs's raster

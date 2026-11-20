@@ -90,8 +90,17 @@ page).
   `is_simple` false). pscat scales it to a whole-pixel step, so its cells
   drift from gs's across the page (18 of 40 sweep cases off by a pixel
   or more away from the anchor). The anchor cell now matches.
+  This is probably also #1300's 127.35 px nested case: its outer cell
+  is 58 pt tall on an 84.9 pt step; a reconstruction renders the same
+  before and after this change, the anchor cell matching gs.
+- A device `/BBox` within half a pixel of the step but rounding to
+  another whole number (a 7.4 px step, a 7.6 px cell): gs's period is
+  the cell's rounded size, pscat's the step's, so the cells drift from
+  the anchor on. Not measured (the sweep's cells equal their steps).
 - A pattern turned off the device axes keeps pscat's whole-pixel period
   (gs tiles it at its true step).
+- Inside a pattern turned off the device axes the inner period is still
+  resampled twice (#1300's gap), not touched here.
 - gs's quarter-turn scale (the pattern's x axis scaled by the device x
   ratio) is followed for the anchor only; pscat's cell keeps its own
   scale.

@@ -2394,13 +2394,18 @@ fn cells_sit_where_gs_puts_the_bbox_corner() {
          [1.5 0 0 1.5 -140.3 -139.93] makepattern setpattern 0 0 400 400 rectfill"
             .into(),
     ));
-    for (name, src) in &srcs {
-        let ours = render(src).png;
-        let ours = ink_edges(&ours);
-        assert!(ours.len() > 200, "{name}: only {} edges", ours.len());
-        if !common::gs_available() {
-            return;
-        }
+    let ours: Vec<_> = srcs
+        .iter()
+        .map(|(name, src)| {
+            let edges = ink_edges(&render(src).png);
+            assert!(edges.len() > 200, "{name}: only {} edges", edges.len());
+            edges
+        })
+        .collect();
+    if !common::gs_available() {
+        return;
+    }
+    for ((name, src), ours) in srcs.iter().zip(&ours) {
         let gs = ink_edges(&gs_png_aliased(src, &format!("phase_{name}")));
         let off = ours.difference(&gs).count();
         assert_eq!(
