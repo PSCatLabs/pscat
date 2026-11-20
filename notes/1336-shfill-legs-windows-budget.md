@@ -2,7 +2,7 @@
 
 `a_ramp_of_thousands_of_legs_paints_in_bounded_time` (tests/limits.rs) held a
 4095-leg `shfill` at 300 dpi to 2 s of CPU. On Windows the test helper has no
-per-thread CPU clock and falls back to wall time since process start
+per-thread CPU clock and falls back to wall time since its first call
 (`common::thread_cpu_time`), and the runner is several times slower than the
 unix ones (0.25-0.8 s there). A failing run printed tries of 2.000 s, 2.357 s
 and 2.356 s.

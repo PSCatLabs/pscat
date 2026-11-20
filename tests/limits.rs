@@ -1035,15 +1035,16 @@ mod one_operator {
         // (#1219: pixels x (16 + stops / 4), a step per 1024 units), not
         // the clock (#1336). A CPU budget flaked on the Windows runner: with
         // no per-thread CPU clock there (`common::thread_cpu_time` falls
-        // back to wall time), its best of three was 2.000 s, 2.357 s and
-        // 2.356 s against a 2 s budget, on a render that takes 0.25-0.7 s of
-        // CPU on the unix runners. The charge is the same on every machine
+        // back to wall time since its first call), its best of three was
+        // 2.000 s, 2.357 s and 2.356 s against a 2 s budget, on a render
+        // that takes 0.25-0.8 s of CPU on the unix runners. The charge is the same on every machine
         // and profile. Resampled, 4095 legs charge what 511 legs (1022
         // stops, not resampled) do, a ratio of about 1; unresampled they
-        // charge about 7.6x. The bound sits
-        // between, through `scale_budget` so `PSCAT_TEST_BUDGET_SCALE` makes
-        // it bite. A page at 1 pixel per point keeps the two runs cheap: the
-        // ratio does not depend on the page size.
+        // charge about 7.6x. The bound sits between, and goes through
+        // `scale_budget` (a Duration helper, used here for a plain number)
+        // so `PSCAT_TEST_BUDGET_SCALE` makes it bite. A page at 1 pixel per
+        // point keeps the two runs cheap: the ratio does not depend on the
+        // page size.
         const MAX_RATIO: f64 = 1.5;
         let (r, thousands) = on_a_deadline("shfill legs steps", || shfill_steps(4095, 1.0));
         assert_eq!(r, Ok(()));
