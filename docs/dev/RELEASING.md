@@ -499,6 +499,9 @@ npm install ./pscat-0.7.0-rc.1.tgz
 
 From a checkout, `scripts/test_npm_tarball.sh pscat-0.7.0-rc.1.tgz`
 installs it into a fresh project and renders a page, SVG and PDF with it.
+Given `pscat@X.Y.Z` (or a bare `X.Y.Z`) instead of a file, it installs that
+release from the registry and checks its signature (`--attested` also
+checks the provenance); `release-check.yml` does that after `publish`.
 Final releases carry the tarball too, the same file the `npm` stage
 publishes.
 
@@ -580,9 +583,17 @@ no credentials and no environment: it does what an outsider would.
   crates stage also accepts a contents-equal crate from the same commit (see
   [Safe resume](#safe-resume)).
 
+- **npm package** (Linux, macOS and Windows): wait up to 10 minutes for the
+  version to reach the registry, then `npm install pscat@X.Y.Z` into a fresh
+  project and render a page, SVG and PDF through it
+  (`scripts/test_npm_tarball.sh pscat@X.Y.Z`, the script `npm.yml` runs on the
+  packed tarball). `npm audit signatures` must pass, and so must the npm
+  provenance attestation when the check is run with `attested`. Releases before
+  0.7.0 are checked for the part of the API they had.
+
 A failure means a published release does not install. Nothing can be
 unpublished: fix forward with a patch release. For a release candidate it
-runs the archive checks only (the crate is not on crates.io). To re-run the check for any
+runs the archive checks only (the crate is not on crates.io and the package is not on npm). To re-run the check for any
 published version, X.Y.Z or X.Y.Z-rc.N: Actions → release-check → Run workflow (empty version =
 crates.io's newest; tick `attested` only for releases published with
 attestations). A pull request that edits `release-check.yml` runs it against
