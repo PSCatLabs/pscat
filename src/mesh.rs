@@ -227,7 +227,7 @@ fn read_file(
     while layer.borrow().is_filter() {
         while layer.borrow_mut().read_byte()?.is_some() {
             read += 1;
-            if read % READ_CHUNK as u64 == 0 {
+            if read.is_multiple_of(READ_CHUNK as u64) {
                 probe.check(read / 1024)?;
             }
         }
@@ -473,7 +473,7 @@ impl MeshShading {
         let tick = || {
             let n = units.get() + 1;
             units.set(n);
-            if n % DECODE_POLL == 0 {
+            if n.is_multiple_of(DECODE_POLL) {
                 probe.check(n.saturating_mul(DECODE_WORK) / 1024)
             } else {
                 Ok(())
