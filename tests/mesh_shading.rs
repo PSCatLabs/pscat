@@ -675,3 +675,30 @@ fn overlapping_sliver_triangles_stop_at_the_step_limit() {
     let (ok, err) = limited("slivers", src.as_bytes(), ["--max-steps", "0"]);
     assert!(ok, "with no limit: {err}");
 }
+
+/// Work done before an error is charged too (Codex re-check of round 2 on
+/// #1376): a 4 MB string copied before a missing `/BitsPerFlag` raises
+/// `undefined`, and a 4 MB string decoded to its end before a vertex cut
+/// short raises `rangecheck`, each caught in a loop, stop at the step limit.
+#[test]
+fn work_before_an_error_is_charged() {
+    let missing_key = b"/s 4000000 string def
+        /m << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8
+              /BitsPerComponent 8 /Decode [0 1 0 1 0 1 0 1 0 1] /DataSource s >> def
+        1 1 300 { pop { m shfill } stopped pop } for\n";
+    // 4,000,001 bytes: 666,666 whole vertices off the page, then 5 bytes.
+    let cut_short = b"/s 4000001 string def
+        /m << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 8 /BitsPerCoordinate 8
+              /BitsPerComponent 8 /Decode [1000 2000 1000 2000 0 1 0 1 0 1] /DataSource s >> def
+        1 1 300 { pop { m shfill } stopped pop } for\n";
+    for (name, src) in [
+        ("err-key", &missing_key[..]),
+        ("err-decode", &cut_short[..]),
+    ] {
+        let (ok, err) = limited(name, src, ["--max-steps", "400000"]);
+        assert!(
+            !ok && err.contains("limitexceeded (steps)"),
+            "{name}: {err}"
+        );
+    }
+}
