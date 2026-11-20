@@ -1354,6 +1354,50 @@ fn the_wrote_report_is_not_on_stdout() {
     }
 }
 
+/// #1335: `common::collect` waits for a pipe's EOF with no fixed window. The
+/// old helper gave up 2 s after the child exited; here the EOF comes after 3 s
+/// and the drained bytes still arrive. No process timing is involved.
+#[test]
+fn a_pipe_that_reaches_eof_late_is_waited_for_not_timed() {
+    use std::time::{Duration, Instant};
+    let (tx, rx) = std::sync::mpsc::channel();
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        tx.send(b"late".to_vec()).unwrap();
+    });
+    let started = Instant::now();
+    let got = common::collect(&rx, &[], Duration::from_secs(60));
+    assert_eq!(got.as_deref(), Some(&b"late"[..]));
+    assert!(started.elapsed() >= Duration::from_secs(3));
+    sender.join().unwrap();
+}
+
+/// #1335: the one window that is left. A descendant seen alive before the
+/// child exited and still alive 2 s later is the runaway the check exists to
+/// catch (`tests/child_deadline.rs` runs the whole thing); `collect` gives up
+/// on it long before the hang guard.
+#[cfg(unix)]
+#[test]
+fn a_live_descendant_holding_the_pipe_is_given_up_on() {
+    use std::time::{Duration, Instant};
+    let mut sleeper = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn sleep");
+    let (_tx, rx) = std::sync::mpsc::channel::<Vec<u8>>(); // never sends
+    let started = Instant::now();
+    let got = common::collect(&rx, &[sleeper.id()], Duration::from_secs(60));
+    let waited = started.elapsed();
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+    assert_eq!(got, None, "gave up on the live descendant");
+    assert!(waited >= Duration::from_secs(2), "{waited:?}");
+    assert!(waited < Duration::from_secs(30), "{waited:?}");
+}
+
 /// A child whose stdout reader is already gone when it starts (#1294, #1201).
 ///
 /// The read end is closed before `spawn`, so the child's first write finds no
