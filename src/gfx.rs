@@ -3005,14 +3005,13 @@ impl Gfx {
         shading: &crate::mesh::MeshShading,
         probe: &crate::limits::LimitProbe,
     ) -> Result<u64, PsError> {
-        // The bytes a file DataSource took to read, charged on every path
-        // (Codex round 1 on #1376), then the decoding.
+        // Copying the DataSource, decoding and painting the layer are
+        // counted by `mesh` as they are done, and charged on every path,
+        // an error included; what this returns is painting the layer.
         if self.painting_off() || self.capturing_uncolored() {
-            return Ok(shading.source_work);
+            return Ok(0);
         }
-        let (mesh, decoded) = shading.decode(probe)?;
-        let spent = shading.source_work.saturating_add(decoded);
-        probe.check(spent / 1024)?;
+        let mesh = shading.decode(probe)?;
         let ctm = self.state.ctm;
         let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
         let (pw, ph) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
@@ -3039,18 +3038,18 @@ impl Gfx {
             // Nothing to paint, but the page is begun, as for a gradient,
             // and the decoding is charged.
             self.prepare_paint();
-            return Ok(spent);
+            return Ok(0);
         }
         let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
         // Painting the layer onto the page, as a two-stop gradient; the
         // rasterizing is counted, and held against the limit, as it goes.
-        let before = shfill_work(bw, bh, 2).saturating_add(spent);
-        probe.check(before / 1024)?;
+        let before = shfill_work(bw, bh, 2);
+        crate::mesh::check(probe, before)?;
         // The layer, its coverage samples and the owned flags.
         probe.check_alloc(bw.saturating_mul(bh).saturating_mul(8))?;
         let local: Option<Vec<(f64, f64)>> =
             bbox.map(|q| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect());
-        let (layer, rastered) = crate::mesh::mesh_layer(
+        let layer = crate::mesh::mesh_layer(
             shading,
             &mesh,
             &t,
@@ -3059,7 +3058,7 @@ impl Gfx {
             before,
             probe,
         )?;
-        let work = before.saturating_add(rastered);
+        let work = before;
         let shader = tiny_skia::Pattern::new(
             layer.as_ref(),
             SpreadMode::Pad,
@@ -4644,19 +4643,11 @@ impl Gfx {
             ParsedShading::Mesh(m) => m.bbox,
         };
         // A mesh's data (#1378), decoded once under the limits, for its box
-        // here and its PDF stream.
-        // Its file DataSource's reading is charged here, once; the decoding
-        // each time it is done.
-        let mut work = match &shading {
-            ParsedShading::Mesh(m) => m.source_work,
-            _ => 0,
-        };
+        // here and its PDF stream; `mesh` counts the work, as for `shfill`.
+        let mut work = 0;
         let mesh = match &shading {
             ParsedShading::Mesh(m) if !singular && (self.svg.is_some() || self.pdf.is_some()) => {
-                let (mesh, decoded) = m.decode(probe)?;
-                work = work.saturating_add(decoded);
-                probe.check(work / 1024)?;
-                Some(mesh)
+                Some(m.decode(probe)?)
             }
             _ => None,
         };
@@ -6085,14 +6076,14 @@ pub(crate) fn shading_layer(
             // A mesh pattern (#1378): decoded and painted as `shfill` paints
             // it, its work (each triangle and its box) and its coverage
             // buffers held against the limits before it is painted.
-            let (mesh, decoded) = m.decode(probe)?;
+            // The decoding and the painting are counted by `mesh` as they
+            // are done, and charged whatever happens.
+            let mesh = m.decode(probe)?;
             let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
-            let before = shfill_work(wu, hu, 2)
-                .saturating_add(decoded)
-                .saturating_add(base);
-            probe.check(before / 1024)?;
+            let before = shfill_work(wu, hu, 2).saturating_add(base);
+            crate::mesh::check(probe, before)?;
             probe.check_alloc(wu.saturating_mul(hu).saturating_mul(8))?;
-            let (top, rastered) = crate::mesh::mesh_layer(
+            let top = crate::mesh::mesh_layer(
                 m,
                 &mesh,
                 &t,
@@ -6101,7 +6092,7 @@ pub(crate) fn shading_layer(
                 before,
                 probe,
             )?;
-            let work = before.saturating_add(rastered);
+            let work = before;
             layer.draw_pixmap(
                 0,
                 0,

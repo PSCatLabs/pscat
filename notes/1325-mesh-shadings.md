@@ -141,6 +141,15 @@ errors.
   yet on the page, so a hostile mesh stops at the limit and the page is
   untouched. The same loop serves every type.
 
+**Work before an error (Codex re-check of round 2).** All mesh work
+(copying the DataSource, decoding, painting the layer) goes into one
+thread-local counter as it is done (`mesh::spend`), and the limit checks
+include it. The interpreter takes it as steps wherever it takes its decode
+filters' bytes (`sync_decode_budget`, after every slice, error or not). A
+caught error after a large copy or decode is therefore charged, in `shfill`,
+`makepattern` and a pattern's layer alike. Test:
+`work_before_an_error_is_charged`.
+
 **Shading patterns (#1378).** After #1367 merged, a mesh is a shading
 pattern too (`makepattern` PatternType 2 with a mesh `/Shading`):
 
