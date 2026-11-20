@@ -23,9 +23,11 @@ pub fn install(dict: &mut Dict) {
     // `invalidaccess`, and `bind` leaves it alone). Reading is never
     // refused, and every other type passes through unchanged, as every
     // real Type 1 font needs: it says `executeonly`/`noaccess` on its way in.
+    // The one read `noaccess` does refuse is running a string or file as
+    // source (#1321).
     op(dict, "executeonly", access_restrict);
     op(dict, "readonly", access_restrict);
-    op(dict, "noaccess", access_restrict);
+    op(dict, "noaccess", access_noaccess);
     op(dict, "rcheck", access_check);
     op(dict, "wcheck", wcheck);
 }
@@ -106,6 +108,14 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
 fn access_restrict(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     it.push(obj.into_readonly());
+    Ok(())
+}
+
+/// `noaccess`: as above, and a string or file can no longer be executed
+/// (`invalidaccess`, #1321). Reading it is still allowed.
+fn access_noaccess(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    it.push(obj.into_noaccess());
     Ok(())
 }
 

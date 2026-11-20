@@ -1429,6 +1429,7 @@ fn substitute(obj: &Object, ks: &Object, sys: &Dict) -> Object {
                 executable: obj.executable,
                 readonly: obj.readonly,
                 packed: obj.packed,
+                noaccess: obj.noaccess,
             }
         }
         _ => obj.clone(),
