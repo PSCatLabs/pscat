@@ -1,4 +1,4 @@
-//! `shfill` of Gouraud mesh shadings, ShadingType 4 and 5 (#1325): the PNG against
+//! `shfill` of mesh shadings, ShadingType 4 to 7 (#1325): the PNG against
 //! gs 10.07.1's render of the same program (pixels quoted, and the whole
 //! page when gs is installed), the errors gs gives, seams, the limits, and
 //! the SVG's embedded image. The PDF is checked in `tests/pdf.rs`.
@@ -116,6 +116,17 @@ const TRIANGLE: &str = "<< /ShadingType 4 /ColorSpace /DeviceRGB
 const LATTICE: &str = "<< /ShadingType 5 /ColorSpace /DeviceRGB /VerticesPerRow 2
    /DataSource [10 10 1 0 0  90 10 0 1 0  10 90 0 0 1  90 90 1 1 1] >> shfill";
 
+/// The square (10,10)-(90,90) as a Coons patch's twelve boundary points.
+const SQUARE: &str = "10 10  10 36.67  10 63.33  10 90   36.67 90  63.33 90  90 90
+   90 63.33  90 36.67  90 10   63.33 10  36.67 10";
+
+/// Corner colours c00, c03, c33, c30.
+const CORNERS: &str = "1 0 0  0 1 0  0 0 1  1 1 1";
+
+fn coons(points: &str) -> String {
+    format!("<< /ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {points} {CORNERS}] >> shfill")
+}
+
 /// One free-form triangle: the colours of gs 10.07.1's png16m render at 72
 /// dpi, near its vertices and in its middle; outside it the page is untouched.
 #[test]
@@ -158,8 +169,78 @@ fn a_lattice_cell_is_two_triangles() {
     agrees_with_gs(&it, LATTICE, "lattice", 2.0);
 }
 
-/// Packed data: Type 4 and 5 vertices each start on a byte (gs paints the
-/// unaligned packings as garbage or rejects them).
+/// A flat Coons patch's colour is bilinear in (u, v); the tensor patch with
+/// the same thirds as interior points paints the same; a bulging top edge
+/// is followed.
+#[test]
+fn coons_and_tensor_patches_match_gs() {
+    let flat = [
+        ((12, 12), [247, 15, 8]),
+        ((12, 88), [4, 242, 8]),
+        ((88, 88), [4, 9, 250]),
+        ((88, 12), [247, 242, 250]),
+        ((50, 50), [125, 127, 128]),
+        ((30, 70), [62, 158, 65]),
+    ];
+    let body = coons(SQUARE);
+    let it = render(&body);
+    matches_gs(&it, &flat, 12, "coons");
+    agrees_with_gs(&it, &body, "coons", 2.0);
+    let tensor = format!(
+        "<< /ShadingType 7 /ColorSpace /DeviceRGB /DataSource [0 {SQUARE}
+           36.67 36.67  36.67 63.33  63.33 63.33  63.33 36.67 {CORNERS}] >> shfill"
+    );
+    matches_gs(&render(&tensor), &flat, 12, "tensor");
+    let bulge = coons(
+        "10 10  10 36.67  10 63.33  10 90   36.67 99  63.33 99  90 90
+         90 63.33  90 36.67  90 10   63.33 10  36.67 10",
+    );
+    let it = render(&bulge);
+    matches_gs(&it, &[((50, 94), [6, 125, 128])], 12, "bulge");
+    assert_eq!(at(&it, 50, 98), [255; 3], "above the curve");
+    agrees_with_gs(&it, &bulge, "bulge", 2.0);
+}
+
+/// A patch flagged 2 or 3 continues from that edge of the one before, with
+/// its two corner colours (gs's pixels near each corner of the new patch).
+#[test]
+fn continued_patches_match_gs() {
+    let first = "10 50 10 60 10 70 10 80 20 80 30 80 40 80 40 70 40 60 40 50 30 50 20 50 \
+                 0.1 0.4 0.7 1";
+    for (flag, points, pixels) in [
+        (
+            2,
+            "50 50 60 50 70 50 70 60 70 70 70 80 60 80 50 80",
+            [
+                ((42, 78), 177),
+                ((42, 52), 232),
+                ((68, 52), 66),
+                ((68, 78), 126),
+            ],
+        ),
+        (
+            3,
+            "10 40 10 30 10 20 20 20 30 20 40 20 40 30 40 40",
+            [
+                ((38, 48), 237),
+                ((12, 48), 45),
+                ((12, 22), 56),
+                ((38, 22), 133),
+            ],
+        ),
+    ] {
+        let body = format!(
+            "<< /ShadingType 6 /ColorSpace /DeviceGray /DataSource [0 {first} {flag} {points} 0.2 0.5] >> shfill"
+        );
+        let it = render(&body);
+        let gray: Vec<_> = pixels.iter().map(|&(p, g)| (p, [g; 3])).collect();
+        matches_gs(&it, &gray, 12, &format!("flag {flag}"));
+        agrees_with_gs(&it, &body, &format!("flag{flag}"), 2.0);
+    }
+}
+
+/// Packed data: Type 4 and 5 vertices, and Type 6 patches, each start on a
+/// byte (gs paints the unaligned packings as garbage or rejects them).
 #[test]
 fn packed_data_matches_gs() {
     let t4 = "<< /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 2 /BitsPerCoordinate 4
@@ -181,6 +262,22 @@ fn packed_data_matches_gs() {
         ],
         12,
         "type 5",
+    );
+    let t6 = "<< /ShadingType 6 /ColorSpace /DeviceGray /BitsPerFlag 2 /BitsPerCoordinate 4
+        /BitsPerComponent 4 /Decode [0 150 0 150 0 1]
+        /DataSource <044484c5090d1110d0904c487c3c00454585c9cdd1d1917c00> >> shfill";
+    matches_gs(
+        &render(t6),
+        &[
+            ((12, 12), [215; 3]),
+            ((12, 38), [31; 3]),
+            ((38, 38), [230; 3]),
+            ((38, 12), [31; 3]),
+            ((12, 68), [233; 3]),
+            ((38, 68), [12; 3]),
+        ],
+        30,
+        "type 6",
     );
 }
 
@@ -317,6 +414,7 @@ fn what_gs_accepts() {
     // Nothing to paint.
     for body in [
         "<< /ShadingType 4 /ColorSpace /DeviceRGB /DataSource [] >> shfill",
+        "<< /ShadingType 6 /ColorSpace /DeviceRGB /DataSource [] >> shfill",
         // A single row has no cells.
         "<< /ShadingType 5 /ColorSpace /DeviceRGB /VerticesPerRow 4
            /DataSource [10 10 1 0 0  90 10 0 1 0  10 90 0 0 1  90 90 1 1 1] >> shfill",
@@ -371,6 +469,7 @@ fn errors_match_gs() {
     let bits = "/BitsPerFlag 8 /BitsPerCoordinate 8 /BitsPerComponent 8";
     let decode = "/Decode [0 255 0 255 0 1 0 1 0 1]";
     let hex = "<000a0aff0000 005a0a00ff00 00325a0000ff>";
+    let patch = format!("{SQUARE} {CORNERS}");
     let f = "/Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>";
     let cases: Vec<(String, &str)> = vec![
         (t4.into(), "rangecheck"),
@@ -501,6 +600,39 @@ fn errors_match_gs() {
             "/ShadingType 5 /ColorSpace /DeviceRGB /VerticesPerRow 2 /DataSource []".into(),
             "rangecheck",
         ),
+        // Patches: a first patch flagged, a flag over 3, cut short.
+        (
+            format!("/ShadingType 6 /ColorSpace /DeviceRGB /DataSource [1 {patch}]"),
+            "rangecheck",
+        ),
+        (
+            format!("/ShadingType 6 /ColorSpace /DeviceRGB /DataSource [4 {patch}]"),
+            "rangecheck",
+        ),
+        (
+            format!(
+                "/ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {SQUARE} 1 0 0  0 1 0  0 0 1]"
+            ),
+            "rangecheck",
+        ),
+        (
+            format!("/ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {patch} 1 1 1]"),
+            "rangecheck",
+        ),
+        (
+            format!("/ShadingType 7 /ColorSpace /DeviceRGB /DataSource [0 {patch}]"),
+            "rangecheck",
+        ),
+        (
+            format!("/ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {patch}] {f}"),
+            "rangecheck",
+        ),
+        (
+            "/ShadingType 6 /ColorSpace /DeviceRGB /DataSource <00> /BitsPerFlag 8
+             /BitsPerCoordinate 8 /BitsPerComponent 8 /Decode [0 1 0 1 0 1 0 1 0 1]"
+                .into(),
+            "rangecheck",
+        ),
         (
             "/ShadingType 8 /ColorSpace /DeviceRGB /DataSource []".into(),
             "rangecheck",
@@ -570,4 +702,56 @@ Gar:%iqh!:^_\"K(!2PRJ(`<5S!$CD-!W~>
         12,
         "filter chain",
     );
+}
+
+/// A few KB of packed patches, each a page-sized square with 1-bit
+/// coordinates, would tessellate into hundreds of millions of triangles:
+/// the step limit stops it promptly, before tessellating any of them.
+#[test]
+fn a_huge_packed_patch_mesh_is_stopped_promptly() {
+    // Bits, MSB first: a first patch (flag 0, 12 points, 4 colours), then
+    // patches continuing from edge 2 (flag 2, 8 points, 2 colours), each
+    // padded to a byte. Coordinates are 0 or 1, decoded to 0 or 100000.
+    let mut bits = String::new();
+    let pad = |b: &mut String| {
+        while !b.len().is_multiple_of(8) {
+            b.push('0');
+        }
+    };
+    bits.push_str("00");
+    bits.push_str("000001011111111110101000");
+    bits.push_str("0101");
+    pad(&mut bits);
+    for _ in 0..3000 {
+        bits.push_str("10");
+        bits.push_str("1010101111111110");
+        bits.push_str("01");
+        pad(&mut bits);
+    }
+    let hex: String = bits
+        .as_bytes()
+        .chunks(8)
+        .map(|c| {
+            format!(
+                "{:02x}",
+                u8::from_str_radix(std::str::from_utf8(c).expect("ascii"), 2).expect("bits")
+            )
+        })
+        .collect();
+    let src = format!(
+        "<< /ShadingType 6 /ColorSpace /DeviceGray /BitsPerFlag 2 /BitsPerCoordinate 1
+           /BitsPerComponent 1 /Decode [0 100000 0 100000 0 1] /DataSource <{hex}> >> shfill"
+    );
+    let r = common::within_cpu_budget(
+        "huge patch mesh",
+        std::time::Duration::from_secs(2),
+        3,
+        || {
+            let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+            it.set_limits(pscat::Limits::none().with_max_steps(1_000_000))
+                .expect("limits");
+            it.run_str(&src).map(|_| ())
+        },
+    );
+    assert!(r.is_err(), "{r:?}");
 }

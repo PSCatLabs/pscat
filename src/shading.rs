@@ -1419,7 +1419,7 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
     if shading_type == 1 {
         return parse_function_shading(d, cs).map(ParsedShading::Function);
     }
-    if (4..=5).contains(&shading_type) {
+    if (4..=7).contains(&shading_type) {
         return crate::mesh::parse(d, shading_type as u8, cs).map(ParsedShading::Mesh);
     }
     let coords = get_farray(d, "Coords")?;
