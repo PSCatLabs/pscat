@@ -202,7 +202,9 @@ fn put(it: &mut Interp) -> Result<(), PsError> {
                 .ok()
                 .filter(|&i| i < a.len())
                 .map(|i| Target::Array(a.clone(), i)),
-            (Value::Dict(d), Value::Name(n)) => Some(Target::Dict(d.clone(), n.clone())),
+            (Value::Dict(d), Value::Name(n)) if !it.is_systemdict(d) => {
+                Some(Target::Dict(d.clone(), n.clone()))
+            }
             _ => None,
         };
         if let Some(target) = target
@@ -243,6 +245,9 @@ fn put(it: &mut Interp) -> Result<(), PsError> {
             s.put_byte(index_of(&key)?, b)
         }
         Value::Dict(d) => {
+            if it.is_systemdict(d) {
+                return Err(it.refuse_system_write(Some((&key, &value))));
+            }
             it.journal_dict(d);
             d.borrow_mut().put_obj(&key, value)
         }
@@ -351,6 +356,9 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             let Value::Dict(src) = &src_obj.value else {
                 return Err(PsError::Typecheck);
             };
+            if it.is_systemdict(dst) {
+                return Err(it.refuse_system_write(None));
+            }
             it.journal_dict(dst);
             let pairs = src.borrow().pairs();
             {

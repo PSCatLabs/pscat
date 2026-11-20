@@ -253,7 +253,7 @@ fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
 }
 
 /// #1109: the finding says where the binding was made, catches a `store`
-/// that replaced the operator in systemdict, and still leaves a variable
+/// refused by the read-only systemdict (#1337), and still leaves a variable
 /// kept in a local dictionary alone.
 #[test]
 fn lint_says_the_line_of_a_redefined_operator() {
@@ -273,14 +273,17 @@ fn lint_says_the_line_of_a_redefined_operator() {
         stderr.contains("/ln was redefined as an integer when the program reached line 5,"),
         "{stderr}"
     );
-    // `store` replaces the operator itself when nothing else defines the name.
+    // `store` would replace the operator itself when nothing else defines
+    // the name; systemdict is read-only (#1337), so the run fails with
+    // invalidaccess and the finding says what was refused.
     let (_ok, _out, stderr) = run(&["--lint", "-e", "\n/sub 5 store"], "");
     assert!(
         stderr.contains(
-            "/sub was redefined as an integer in systemdict when the program reached line 2, replacing the operator sub"
+            "/sub was stored as an integer into systemdict when the program reached line 2, which would replace the operator sub"
         ),
         "{stderr}"
     );
+    assert!(stderr.contains("invalidaccess"), "{stderr}");
     // A local dictionary that ended is a variable, not a shadow.
     let (ok, _out, stderr) = run(&["--lint-strict", "-e", "4 dict begin /stop 3 def end"], "");
     assert!(ok && stderr.contains("lint: clean"), "{stderr}");

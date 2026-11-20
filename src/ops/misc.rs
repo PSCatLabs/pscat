@@ -120,7 +120,12 @@ fn access_check(it: &mut Interp) -> Result<(), PsError> {
 
 fn wcheck(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    it.push(Object::bool(!obj.is_readonly()));
+    // systemdict is the one dictionary with a write attribute (#1337).
+    let writable = match &obj.value {
+        Value::Dict(d) => !it.is_systemdict(d),
+        _ => !obj.is_readonly(),
+    };
+    it.push(Object::bool(writable));
     Ok(())
 }
 

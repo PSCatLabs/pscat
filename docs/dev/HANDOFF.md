@@ -605,6 +605,13 @@ renders eight examples in both and compares block-downsampled output).
   them), `wcheck` on a name or operator answers true where gs raises
   `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
+- `systemdict` is the one read-only dictionary (#1337), as in gs: `put`,
+  `def` (after `systemdict begin`), `store` of a name it defines, `undef` and
+  `copy` into it raise `invalidaccess`, and `systemdict wcheck` is false.
+  Rust code writes it directly and is not affected; the check is
+  `Interp::is_systemdict`. A refused write of a plain value over an operator
+  is kept for the `[shadowed-operator]` lint. See
+  `notes/1337-systemdict-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
