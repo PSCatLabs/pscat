@@ -2656,7 +2656,22 @@ impl Gfx {
             None => self.page_rect_path(),
         };
         let comp = self.composite();
-        if self.paint_shfill(shader, &path, shading.bbox.is_none(), nstops, probe)? {
+        // The raster paints a copy of the box cut to a guard rectangle around
+        // the page: tiny-skia's anti-aliased fill panics on a path whose
+        // corners lie around 1e9 device pixels away, which a crafted `/BBox`
+        // reaches (gs paints it). The guard is the page grown by its own size
+        // on every side, so a box of ordinary size is never cut, and a cut one
+        // still covers the same pixels. SVG and PDF keep the box as given.
+        let cut = shading
+            .bbox
+            .and_then(|_| Self::bbox_in_guard(&path, pw, ph));
+        if self.paint_shfill(
+            shader,
+            cut.as_ref().unwrap_or(&path),
+            shading.bbox.is_none(),
+            nstops,
+            probe,
+        )? {
             if self.svg.is_some() || self.pdf.is_some() {
                 // The same shading for both vector recorders (#1028,
                 // #1041): rescaled as the raster is, and its degenerate
@@ -2698,6 +2713,47 @@ impl Gfx {
             self.dirty = true;
         }
         Ok(work)
+    }
+
+    /// The `/BBox` parallelogram `path` (four device corners) cut to the page
+    /// grown by its own size on every side, or `path` itself when all its
+    /// corners are inside that (#1324), which is `None`. Empty when the box
+    /// lies wholly beyond it, which `paint_shfill` takes for nothing to paint.
+    fn bbox_in_guard(path: &PsPath, pw: usize, ph: usize) -> Option<PsPath> {
+        let poly: Vec<(f64, f64)> = path
+            .segs
+            .iter()
+            .filter_map(|seg| match *seg {
+                Seg::Move(p) | Seg::Line(p) => Some((f64::from(p.x), f64::from(p.y))),
+                _ => None,
+            })
+            .collect();
+        let (w, h) = (pw as f64, ph as f64);
+        let guard = (-w, -h, 2.0 * w, 2.0 * h);
+        let inside =
+            |p: &(f64, f64)| p.0 >= guard.0 && p.0 <= guard.2 && p.1 >= guard.1 && p.1 <= guard.3;
+        if poly.iter().all(inside) {
+            return None;
+        }
+        let mut cut = PsPath::default();
+        let clipped = clip_polygon(&poly, guard);
+        for (i, &(x, y)) in clipped.iter().enumerate() {
+            let p = DevPoint {
+                x: x as f32,
+                y: y as f32,
+            };
+            if i == 0 {
+                cut.move_to(p);
+            } else {
+                cut.line_to(p);
+            }
+        }
+        if clipped.len() >= 3 {
+            cut.close();
+        } else {
+            cut = PsPath::default();
+        }
+        Some(cut)
     }
 
     /// Paints `shader` over the device-space `path` (the whole page when
