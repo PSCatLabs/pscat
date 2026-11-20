@@ -43,9 +43,20 @@ operands are in the wrong order for `put`.)
 `.ps` files there ran with the base and the head binary with identical exit
 codes, output and PNG bytes.
 
-pscat's systemdict has 29 names gs lacks: `.kernel*`, `.permnoise2`,
-`.sameclip`, `fbm2/3`, `gnoise*`, `vfbm*`, `vnoise*`, `ridged*`, `noiseseed`,
-`kernel*`, `setalpha`/`currentalpha`, `setblendmode`/`currentblendmode`,
-`readreals`, `writereals`. All are operators, so a program that stored over
-one of them got no `invalidaccess` in pscat but also no sensible program does
-that; `/noise2 {...} def` in userdict (artkit) is unaffected.
+No `wcheck` in `lib/`, `examples/` or `gallery/` either.
+
+## The one divergence this adds
+
+pscat's systemdict has 29 names gs's lacks: `.kernel*`, `.permnoise2`,
+`.sameclip`, `fbm2/3`, `gnoise2/2d/3`, `vfbm2/3`, `vnoise2/3`, `ridged2/3`,
+`noiseseed`, `kernelarray(s)`, `kernelcompile`, `kernelimage`, `setalpha`,
+`currentalpha`, `setblendmode`, `currentblendmode`, `readreals`, `writereals`.
+`/fbm2 1 store` binds in userdict in gs (no such name there) and now raises
+`invalidaccess` in pscat; `/fbm2 1 def` in userdict is unaffected, and so is
+any name in artkit/paintkit (they `def`). A program that `store`s over one of
+these names is the only one that behaves differently from gs, and `store`
+over an extension operator's name is the shadowing mistake the lint exists for.
+
+The lint wording for a refused store changed (the `/NAME was redefined as`
+prefix is kept only for the userdict kind). Nothing in `pscat-mcp` or
+`tests/mcp.rs` matches the systemdict wording; they match the userdict one.
