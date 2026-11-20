@@ -586,14 +586,66 @@ fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc:
     rx
 }
 
-/// How long a pipe may stay open after the child has exited. At EOF it
-/// returns at once; a pipe still open this long is held by a descendant that
-/// outlived the child.
-const PIPE_EOF_GRACE: Duration = Duration::from_secs(2);
+/// How long a pipe may stay open, after the child has exited, while a
+/// descendant of the child that was seen alive could be the one holding it.
+/// It is a verdict on a named suspect, not a clock on the machine: with no
+/// such descendant there is no window at all (see `collect`).
+const HELD_BY_DESCENDANT_GRACE: Duration = Duration::from_secs(2);
 
-/// Collect a drained pipe, or `None` if it is still open after the grace.
-fn collect(rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> Option<Vec<u8>> {
-    rx.recv_timeout(PIPE_EOF_GRACE).ok()
+/// Is `pid` a live process? (A pid that cannot be signalled for want of
+/// permission is alive.) Always false where there is no `kill`.
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the pid exists.
+    let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn pid_alive(_pid: u32) -> bool {
+    false
+}
+
+/// Collect a drained pipe once it reaches EOF, or `None` if it is held open
+/// by a descendant that outlived the child (#1335).
+///
+/// When the child has exited, EOF is certain unless some other process still
+/// holds the write end, and then it comes as soon as that process lets go (or
+/// as soon as the drain thread gets a turn, which on a starved machine can be
+/// seconds). So there is no fixed window: the wait ends at EOF. It is cut
+/// short in two cases only. A descendant seen alive before the child exited is
+/// still alive `HELD_BY_DESCENDANT_GRACE` after the child exited: that is the
+/// runaway this check exists for. Or the whole `limit` (the test's hang guard,
+/// as for the child itself) passes. The short polling interval below is not a
+/// deadline; it only decides how soon those two checks run.
+pub fn collect(
+    rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+    suspects: &[u32],
+    limit: Duration,
+) -> Option<Vec<u8>> {
+    use std::sync::mpsc::RecvTimeoutError;
+    let start = Instant::now();
+    let mut suspect_since: Option<Instant> = None;
+    loop {
+        match rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(bytes) => return Some(bytes),
+            // The drain thread ended without sending (it panicked): lost output
+            // is a failure, not an empty pipe.
+            Err(RecvTimeoutError::Disconnected) => return None,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        if start.elapsed() >= limit {
+            return None;
+        }
+        if suspects.iter().any(|&p| pid_alive(p)) {
+            if suspect_since.get_or_insert_with(Instant::now).elapsed() >= HELD_BY_DESCENDANT_GRACE
+            {
+                return None;
+            }
+        } else {
+            suspect_since = None;
+        }
+    }
 }
 
 /// `Child::wait_with_output` with a deadline. `child` must have been spawned
@@ -615,8 +667,15 @@ fn wait_with_deadline_named(child: &mut Child, what: &str, deadline: Duration) -
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
     let (status, descendants) = poll_exit(child, what, deadline);
-    match (collect(&out), collect(&err)) {
-        (Some(stdout), Some(stderr)) => Output {
+    // One budget for both pipes: the hang guard, counted from the exit.
+    let end = Instant::now() + deadline;
+    let left = || end.saturating_duration_since(Instant::now());
+    // `and_then`: stderr is only waited for once stdout came back, so a
+    // runaway costs one suspect window, not one per pipe.
+    match collect(&out, &descendants, left())
+        .and_then(|stdout| Some((stdout, collect(&err, &descendants, left())?)))
+    {
+        Some((stdout, stderr)) => Output {
             status,
             stdout,
             stderr,
@@ -627,8 +686,9 @@ fn wait_with_deadline_named(child: &mut Child, what: &str, deadline: Duration) -
             // with lost output and a runaway left behind.
             kill_pids(&descendants);
             panic!(
-                "a descendant of the child still held its output pipes {PIPE_EOF_GRACE:?} \
-                 after the child exited (killed the ones seen: {descendants:?}): {}",
+                "output pipes still open after the child exited, held by a descendant \
+                 or by nothing that exited in time (descendants seen and killed: \
+                 {descendants:?}): {}",
                 describe(what)
             );
         }
