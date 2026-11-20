@@ -39,10 +39,12 @@ fn ok_stdout(out: &Output) -> String {
 }
 
 /// The two procedures a library needs to load a sibling: `dirname` (the
-/// path up to and including its last `/`, empty if it has none) and `concat`.
+/// path up to and including its last `/` or `\`, empty if it has none) and
+/// `concat`. Both separators, because on Windows a name is as the command
+/// line gave it, backslashes included (#1346).
 const HELPERS: &str = r"
 /dirname { dup length { dup 0 eq { pop pop () exit } if
-    1 sub 2 copy get 47 eq { 1 add 0 exch getinterval exit } if } loop } def
+    1 sub 2 copy get dup 47 eq exch 92 eq or { 1 add 0 exch getinterval exit } if } loop } def
 /concat { /b exch def /a exch def
     a length b length add string dup 0 a putinterval dup a length b putinterval } def
 ";
@@ -178,6 +180,42 @@ fn outside_a_named_file_it_is_undefined() {
     // `stopped` catches it as any undefined.
     let out = ok_stdout(&pscat(&dir, &["-e", "{ currentfilename } stopped ="]));
     assert_eq!(out.trim(), "true");
+}
+
+#[test]
+fn dirname_splits_on_either_separator() {
+    // Needs no file: the helper is plain PostScript, so this runs on every
+    // platform. A Windows path is as the command line gave it (#1346).
+    let dir = common::scratch_dir("cfn-dirname");
+    let prog = format!(
+        "{HELPERS}\n(a\\\\b\\\\c.ps) dirname = (C:\\\\x/y\\\\z.ps) dirname = \
+         (a/b/c.ps) dirname = (c.ps) dirname = () dirname = (dir\\\\) dirname ="
+    );
+    let out = ok_stdout(&pscat(&dir, &["-e", &prog]));
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        ["a\\b\\", "C:\\x/y\\", "a/b/", "", "", "dir\\"]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_library_named_with_backslashes_loads_its_siblings() {
+    // The main program's name is the argument as written, so a Windows
+    // user's `vendor\pkg\main.ps` carries backslashes (#1346).
+    let dir = common::scratch_dir("cfn-backslash");
+    std::fs::create_dir_all(dir.join("vendor/pkg")).unwrap();
+    std::fs::write(
+        dir.join("vendor/pkg/main.ps"),
+        format!(
+            "{HELPERS}\n/pkg-dir currentfilename dirname def\n\
+             pkg-dir (sib.ps) concat run\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("vendor/pkg/sib.ps"), "currentfilename =\n").unwrap();
+    let out = ok_stdout(&pscat(&dir, &["vendor\\pkg\\main.ps"]));
+    assert_eq!(out.trim(), "vendor\\pkg\\sib.ps");
 }
 
 #[test]
