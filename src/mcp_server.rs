@@ -2537,11 +2537,6 @@ const MAX_SHEET_LABEL: usize = 200;
 /// Largest `zoom`, as `pscat sheet --dpi 9x16`.
 const MAX_SHEET_ZOOM: u32 = 16;
 
-/// Row label and caption type sizes in pixels: `pscat sheet`'s own
-/// (`src/subcmd/sheet.rs`), so the two tools draw the same sheet.
-const SHEET_LABEL_PX: u32 = 16;
-const SHEET_CAPTION_PX: u32 = 12;
-
 /// The least time worth giving a cell. Anything positive keeps the child's
 /// own `--max-time` from rounding to zero (which means no limit), and a
 /// `--timeout 1` server still draws a small sheet; under this the call stops
@@ -2621,7 +2616,7 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
 }
 
 fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
-    use pscat::contact_sheet::{self as sheet, CellSize, Layout, RowSize};
+    use pscat::contact_sheet as sheet;
 
     let started = Instant::now();
     let max_pixels = cfg.max_pixels;
@@ -2715,25 +2710,10 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             .with("limit_pixels", json!(max_pixels))
             .with("pixels", json!(pixels))
     };
-    let text = |t: &str, px: u32, bold: bool| {
-        sheet::render_text(t, px, bold).map_err(|e| ToolError::new("internal", e))
-    };
     let mut rendered_pixels = 0u64;
-    let mut headers = Vec::new();
-    let mut captions = Vec::new();
-    let mut row_sizes = Vec::new();
+    let mut rows = Vec::with_capacity(entries.len());
     for e in &entries {
-        let header = if labels {
-            text(&e.label, SHEET_LABEL_PX, true)?
-        } else {
-            None
-        };
-        let dims = |p: Option<&tiny_skia::Pixmap>| p.map_or((0, 0), |p| (p.width(), p.height()));
-        let mut row = RowSize {
-            header: dims(header.as_ref()),
-            cells: Vec::new(),
-        };
-        let mut row_captions = Vec::new();
+        let mut cells = Vec::with_capacity(e.cells.len());
         for &(dpi, zoom) in &e.cells {
             let (w, h) = device_pixels(e.page, dpi);
             let side = u64::from(sheet::MAX_SIDE_PX);
@@ -2768,28 +2748,32 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                     rendered_pixels,
                 ));
             }
-            let caption = if sizes {
-                let note = if zoom > 1 {
-                    format!(" (shown at {zoom}x)")
-                } else {
-                    String::new()
-                };
-                text(&format!("{w}x{h} px{note}"), SHEET_CAPTION_PX, false)?
-            } else {
-                None
-            };
-            row.cells.push(CellSize {
-                image: ((w as u32) * zoom, (h as u32) * zoom),
-                caption: dims(caption.as_ref()),
+            cells.push(sheet::SheetCell {
+                size: (w as u32, h as u32),
+                zoom,
+                mat: None,
+                value: None,
             });
-            row_captions.push(caption);
         }
-        headers.push(header);
-        captions.push(row_captions);
-        row_sizes.push(row);
+        rows.push(sheet::SheetRow {
+            label: labels.then(|| e.label.clone()),
+            column_len: vec![1; cells.len()],
+            cells,
+        });
     }
-    let layout = Layout::new(&row_sizes)
-        .map_err(|m| too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX)))?;
+    // The layout, text and all, is the one `pscat sheet` draws.
+    let plan = sheet::SheetPlan::new(&rows, &sheet::SheetOptions { sizes, wrap: None }).map_err(
+        |err| match err {
+            sheet::PlanError::Text(m) => ToolError::new("internal", m),
+            sheet::PlanError::CellTooLarge { .. } => {
+                ToolError::new("internal", "a cell is over the side limit")
+            }
+            sheet::PlanError::Layout(m) => {
+                too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX))
+            }
+        },
+    )?;
+    let layout = plan.layout();
     let sheet_pixels_total = u64::from(layout.width) * u64::from(layout.height);
     if sheet_pixels_total > max_pixels {
         return Err(too_large(
@@ -2803,9 +2787,6 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         .with("width_px", json!(layout.width))
         .with("height_px", json!(layout.height)));
     }
-    let mut out = layout
-        .new_sheet()
-        .map_err(|m| ToolError::new("internal", m))?;
 
     // Cells stream into the sheet, one frame in memory at a time. Each is
     // rendered by its own child under the interpreter's limits, and every
@@ -2816,97 +2797,87 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     // Stderr of the cells that succeeded (see `warnings_content`).
     let mut cell_stderr = String::new();
     let mut n = 0usize;
-    for (r, e) in entries.iter().enumerate() {
-        if let Some(h) = &headers[r] {
-            let (x, y) = layout.header_xy[r];
-            sheet::blit_at(&mut out, x, y, h);
+    let out = sheet::compose_sheet(&plan, |r, c| {
+        let e = &entries[r];
+        let (dpi, _) = e.cells[c];
+        n += 1;
+        let left = cfg.timeout.saturating_sub(started.elapsed());
+        if left < MIN_CELL_BUDGET {
+            return Err(sheet_timeout(cfg));
         }
-        for (c, &(dpi, zoom)) in e.cells.iter().enumerate() {
-            n += 1;
-            let left = cfg.timeout.saturating_sub(started.elapsed());
-            if left < MIN_CELL_BUDGET {
-                return Err(sheet_timeout(cfg));
-            }
-            let budget = Config {
-                timeout: left,
-                ..cfg.clone()
-            };
-            let png = scratch.path().join(format!("cell-{n}.png"));
-            let mut cmd = Command::new(&bin);
-            budget.interpreter_args(&mut cmd);
-            cmd.arg("--page")
-                .arg(format!("{}x{}", e.page.0, e.page.1))
-                .arg("--dpi")
-                .arg(number_arg(f64::from(dpi)))
-                .arg("--png")
-                .arg(&png)
-                .arg("-");
-            let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
-                Ok(run) => run,
-                Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
-                Err(other) => return Err(other),
-            };
-            // The last page, as `pscat sheet` takes it: a program that shows
-            // several pages contributes its final one.
-            let Some(page) = collect_pages(&png).pop() else {
-                return Err(failed_run(
-                    "render_failed",
-                    format!(
-                        "{} at {dpi} dpi produced no page:\n{}",
-                        e.label,
-                        run.stderr.trim_end()
-                    ),
-                    &run.stderr,
-                ));
-            };
-            if !run.success {
-                let mut why = run.stderr.trim_end().to_string();
-                if why.len() > MAX_CELL_NOTE {
-                    let mut end = MAX_CELL_NOTE;
-                    while !why.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    why.truncate(end);
-                    why.push_str("...");
+        let budget = Config {
+            timeout: left,
+            ..cfg.clone()
+        };
+        let png = scratch.path().join(format!("cell-{n}.png"));
+        let mut cmd = Command::new(&bin);
+        budget.interpreter_args(&mut cmd);
+        cmd.arg("--page")
+            .arg(format!("{}x{}", e.page.0, e.page.1))
+            .arg("--dpi")
+            .arg(number_arg(f64::from(dpi)))
+            .arg("--png")
+            .arg(&png)
+            .arg("-");
+        let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
+            Ok(run) => run,
+            Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
+            Err(other) => return Err(other),
+        };
+        // The last page, as `pscat sheet` takes it: a program that shows
+        // several pages contributes its final one.
+        let Some(page) = collect_pages(&png).pop() else {
+            return Err(failed_run(
+                "render_failed",
+                format!(
+                    "{} at {dpi} dpi produced no page:\n{}",
+                    e.label,
+                    run.stderr.trim_end()
+                ),
+                &run.stderr,
+            ));
+        };
+        if !run.success {
+            let mut why = run.stderr.trim_end().to_string();
+            if why.len() > MAX_CELL_NOTE {
+                let mut end = MAX_CELL_NOTE;
+                while !why.is_char_boundary(end) {
+                    end -= 1;
                 }
-                notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
-            } else {
-                cell_stderr.push_str(&run.stderr);
-                cell_stderr.push('\n');
+                why.truncate(end);
+                why.push_str("...");
             }
-            let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
-            let _ = std::fs::remove_file(&page);
-            let frame = tiny_skia::Pixmap::decode_png(&bytes)
-                .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
-            let want = device_pixels(e.page, dpi);
-            if (u64::from(frame.width()), u64::from(frame.height())) != want {
-                return Err(ToolError::new(
-                    "internal",
-                    format!(
-                        "{} at {dpi} dpi came back {}x{} pixels, not the {}x{} planned",
-                        e.label,
-                        frame.width(),
-                        frame.height(),
-                        want.0,
-                        want.1
-                    ),
-                ));
-            }
-            let frame = if zoom > 1 {
-                sheet::zoom_nearest(&frame, zoom)
-                    .ok_or_else(|| ToolError::new("internal", "cell too large to zoom"))?
-            } else {
-                frame
-            };
-            let (x, y) = layout.image_xy[r][c];
-            sheet::frame(&mut out, x, y, frame.width(), frame.height());
-            sheet::blit_at(&mut out, x, y, &frame);
-            if let Some(cap) = &captions[r][c] {
-                let (cx, cy) = layout.caption_xy[r][c];
-                sheet::blit_at(&mut out, cx, cy, cap);
-            }
+            notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
+        } else {
+            cell_stderr.push_str(&run.stderr);
+            cell_stderr.push('\n');
         }
-    }
+        let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
+        let _ = std::fs::remove_file(&page);
+        let frame = tiny_skia::Pixmap::decode_png(&bytes)
+            .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
+        let want = device_pixels(e.page, dpi);
+        if (u64::from(frame.width()), u64::from(frame.height())) != want {
+            return Err(ToolError::new(
+                "internal",
+                format!(
+                    "{} at {dpi} dpi came back {}x{} pixels, not the {}x{} planned",
+                    e.label,
+                    frame.width(),
+                    frame.height(),
+                    want.0,
+                    want.1
+                ),
+            ));
+        }
+        Ok(frame)
+    })
+    .map_err(|err| match err {
+        sheet::ComposeError::Render(e) => e,
+        sheet::ComposeError::Zoom { .. } => ToolError::new("internal", "cell too large to zoom"),
+        sheet::ComposeError::Mat { .. } => ToolError::new("internal", "cell too large to mat"),
+        sheet::ComposeError::Sheet(m) => ToolError::new("internal", m),
+    })?;
     let sheet_png = scratch.path().join("sheet.png");
     // A sheet mixes cells of any dpi: nominal 72 dpi, as `pscat sheet`.
     pscat::png::save(&out, 1.0, &sheet_png).map_err(|e| format!("write the sheet: {e}"))?;

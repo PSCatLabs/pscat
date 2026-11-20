@@ -467,6 +467,217 @@ pub fn zoom_nearest(src: &Pixmap, k: u32) -> Option<Pixmap> {
     Some(out)
 }
 
+// ---------------------------------------------------------------
+// One composition path (issue #744). `pscat sheet` and the `review_sheet`
+// MCP tool both draw a labelled review sheet; the layout, the labels, the
+// captions, the frames and the zoom live here, once, so the two cannot
+// drift. A caller describes the cells ([`SheetRow`]), makes a
+// [`SheetPlan`] (which sizes everything, text included, before any cell is
+// rendered, so it can refuse an oversized sheet first), and hands
+// [`compose_sheet`] a closure that renders one cell at a time. Rendering
+// stays with the caller: the CLI renders in process, the tool in a limited
+// child process.
+// ---------------------------------------------------------------
+
+/// Row label type size, in pixels.
+pub const LABEL_PX: u32 = 16;
+/// Caption type size, in pixels.
+pub const CAPTION_PX: u32 = 12;
+
+/// One cell of a sheet, as the caller will render it.
+#[derive(Clone, Debug)]
+pub struct SheetCell {
+    /// Pixel size of the frame the caller's renderer will return (before
+    /// zoom and mat).
+    pub size: (u32, u32),
+    /// Whole enlargement with nearest-neighbour sampling; 1 is none.
+    pub zoom: u32,
+    /// Set the (zoomed) frame on a mat of this colour, [`MAT_PAD`] on a side.
+    pub mat: Option<[u8; 3]>,
+    /// Shown first in the caption (a sweep value); `None` or empty shows
+    /// nothing.
+    pub value: Option<String>,
+}
+
+/// One row of a sheet: an optional label and its cells, in `column_len`'s
+/// columns (see [`PackedRow`]).
+#[derive(Clone, Debug)]
+pub struct SheetRow {
+    /// The row label, set in bold above the row; `None` draws none.
+    pub label: Option<String>,
+    pub cells: Vec<SheetCell>,
+    pub column_len: Vec<usize>,
+}
+
+/// What every row of a sheet shares.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SheetOptions {
+    /// Caption each cell with its pixel size (and its zoom, if any).
+    pub sizes: bool,
+    /// The most columns on one line ([`Layout::packed`]).
+    pub wrap: Option<usize>,
+}
+
+/// Why a [`SheetPlan`] could not be made.
+#[derive(Debug)]
+pub enum PlanError {
+    /// A label or caption could not be set.
+    Text(String),
+    /// Cell `cell` of row `row`, after its zoom and mat, would be over
+    /// [`MAX_SIDE_PX`] on a side.
+    CellTooLarge { row: usize, cell: usize },
+    /// The layout refused: no cells, or over [`MAX_SIDE_PX`] on a side.
+    Layout(String),
+}
+
+/// A sheet sized and ready to compose: the geometry and the label and
+/// caption strips, with no cell rendered yet.
+pub struct SheetPlan {
+    layout: Layout,
+    headers: Vec<Option<Pixmap>>,
+    captions: Vec<Vec<Option<Pixmap>>>,
+    /// `(zoom, mat)` of each cell, by row then cell.
+    cells: Vec<Vec<(u32, Option<[u8; 3]>)>>,
+}
+
+/// The size of an image after its zoom and mat, or `None` if a side would
+/// pass [`MAX_SIDE_PX`].
+pub fn cell_image_size(size: (u32, u32), zoom: u32, mat: bool) -> Option<(u32, u32)> {
+    let pad = if mat { 2 * MAT_PAD } else { 0 };
+    let side = |n: u32| {
+        n.checked_mul(zoom)
+            .and_then(|v| v.checked_add(pad))
+            .filter(|&v| v <= MAX_SIDE_PX)
+    };
+    Some((side(size.0)?, side(size.1)?))
+}
+
+fn strip_size(p: Option<&Pixmap>) -> (u32, u32) {
+    p.map_or((0, 0), |p| (p.width(), p.height()))
+}
+
+impl SheetPlan {
+    /// Size `rows`: set every label and caption and lay the sheet out.
+    pub fn new(rows: &[SheetRow], opts: &SheetOptions) -> Result<SheetPlan, PlanError> {
+        let text = |t: &str, px: u32, bold: bool| render_text(t, px, bold).map_err(PlanError::Text);
+        let mut headers = Vec::with_capacity(rows.len());
+        let mut captions = Vec::with_capacity(rows.len());
+        let mut cells = Vec::with_capacity(rows.len());
+        let mut packed = Vec::with_capacity(rows.len());
+        for (r, row) in rows.iter().enumerate() {
+            let header = match &row.label {
+                Some(label) => text(label, LABEL_PX, true)?,
+                None => None,
+            };
+            let mut sizes = Vec::with_capacity(row.cells.len());
+            let mut row_captions = Vec::with_capacity(row.cells.len());
+            let mut row_cells = Vec::with_capacity(row.cells.len());
+            for (c, cell) in row.cells.iter().enumerate() {
+                let (w, h) = cell.size;
+                // The caption: the value if any, then the size.
+                let mut parts = Vec::new();
+                if let Some(v) = cell.value.as_deref().filter(|v| !v.is_empty()) {
+                    parts.push(v.to_string());
+                }
+                if opts.sizes {
+                    let note = if cell.zoom > 1 {
+                        format!(" (shown at {}x)", cell.zoom)
+                    } else {
+                        String::new()
+                    };
+                    parts.push(format!("{w}x{h} px{note}"));
+                }
+                let caption = if parts.is_empty() {
+                    None
+                } else {
+                    text(&parts.join(", "), CAPTION_PX, false)?
+                };
+                let image = cell_image_size(cell.size, cell.zoom, cell.mat.is_some())
+                    .ok_or(PlanError::CellTooLarge { row: r, cell: c })?;
+                sizes.push(CellSize {
+                    image,
+                    caption: strip_size(caption.as_ref()),
+                });
+                row_captions.push(caption);
+                row_cells.push((cell.zoom, cell.mat));
+            }
+            packed.push(PackedRow {
+                header: strip_size(header.as_ref()),
+                cells: sizes,
+                column_len: row.column_len.clone(),
+            });
+            headers.push(header);
+            captions.push(row_captions);
+            cells.push(row_cells);
+        }
+        let layout = Layout::packed(&packed, opts.wrap).map_err(PlanError::Layout)?;
+        Ok(SheetPlan {
+            layout,
+            headers,
+            captions,
+            cells,
+        })
+    }
+
+    /// Where everything goes, and so how big the sheet is.
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+}
+
+/// Why [`compose_sheet`] stopped; `E` is the caller's own render error.
+#[derive(Debug)]
+pub enum ComposeError<E> {
+    /// The caller's renderer failed.
+    Render(E),
+    /// Cell `cell` of row `row` is too large to zoom.
+    Zoom { row: usize, cell: usize },
+    /// Cell `cell` of row `row` is too large to put on its mat.
+    Mat { row: usize, cell: usize },
+    /// The blank sheet could not be allocated.
+    Sheet(String),
+}
+
+/// Compose the sheet `plan` describes. `render(row, cell)` returns that
+/// cell's frame, at the size the plan was given; cells are asked for in
+/// order, one at a time, and each is drawn (zoomed, matted, framed,
+/// captioned) and dropped before the next, so one frame is in memory at a
+/// time.
+pub fn compose_sheet<E>(
+    plan: &SheetPlan,
+    mut render: impl FnMut(usize, usize) -> Result<Pixmap, E>,
+) -> Result<Pixmap, ComposeError<E>> {
+    let layout = &plan.layout;
+    let mut out = layout.new_sheet().map_err(ComposeError::Sheet)?;
+    for (r, row) in plan.cells.iter().enumerate() {
+        if let Some(h) = &plan.headers[r] {
+            let (x, y) = layout.header_xy[r];
+            blit_at(&mut out, x, y, h);
+        }
+        for (c, &(zoom, mat)) in row.iter().enumerate() {
+            let image = render(r, c).map_err(ComposeError::Render)?;
+            let image = if zoom > 1 {
+                zoom_nearest(&image, zoom).ok_or(ComposeError::Zoom { row: r, cell: c })?
+            } else {
+                image
+            };
+            let image = match mat {
+                Some(rgb) => composite_on_mat(&image, rgb, MAT_PAD)
+                    .ok_or(ComposeError::Mat { row: r, cell: c })?,
+                None => image,
+            };
+            let (x, y) = layout.image_xy[r][c];
+            frame(&mut out, x, y, image.width(), image.height());
+            blit_at(&mut out, x, y, &image);
+            if let Some(cap) = &plan.captions[r][c] {
+                let (cx, cy) = layout.caption_xy[r][c];
+                blit_at(&mut out, cx, cy, cap);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// The face a run of a label is set in. Nothing in pscat picked a face
 /// by script before (the Stage 22/23 faces are chosen by name in the
 /// program), so this is the one place that maps a codepoint to a face:
@@ -1263,5 +1474,80 @@ mod tests {
     fn empty_pages_errors() {
         let err = compose(&[], 1, 1, 0).unwrap_err();
         assert!(err.contains("no frames"), "{err}");
+    }
+
+    fn one_row(cells: Vec<SheetCell>) -> Vec<SheetRow> {
+        vec![SheetRow {
+            label: Some("Row".into()),
+            column_len: vec![1; cells.len()],
+            cells,
+        }]
+    }
+
+    fn sheet_cell(w: u32, h: u32, zoom: u32, mat: Option<[u8; 3]>) -> SheetCell {
+        SheetCell {
+            size: (w, h),
+            zoom,
+            mat,
+            value: None,
+        }
+    }
+
+    #[test]
+    fn a_plan_refuses_a_cell_zoomed_past_the_side_limit_before_rendering() {
+        let rows = one_row(vec![sheet_cell(600, 10, 16, None)]);
+        let opts = SheetOptions {
+            sizes: true,
+            wrap: None,
+        };
+        assert!(matches!(
+            SheetPlan::new(&rows, &opts),
+            Err(PlanError::CellTooLarge { row: 0, cell: 0 })
+        ));
+        assert_eq!(cell_image_size((500, 10), 16, false), Some((8000, 160)));
+        assert_eq!(cell_image_size((500, 10), 16, true), None);
+    }
+
+    #[test]
+    fn compose_sheet_zooms_mats_and_frames_each_cell_where_the_layout_says() {
+        let rows = one_row(vec![
+            sheet_cell(2, 2, 3, None),
+            sheet_cell(2, 2, 1, Some([10, 20, 30])),
+        ]);
+        let opts = SheetOptions {
+            sizes: true,
+            wrap: None,
+        };
+        let plan = SheetPlan::new(&rows, &opts).unwrap();
+        let mut asked = Vec::new();
+        let sheet = compose_sheet(&plan, |r, c| -> Result<Pixmap, String> {
+            asked.push((r, c));
+            Ok(solid(2, 2, [200, 0, 0, 255]))
+        })
+        .unwrap();
+        assert_eq!(asked, [(0, 0), (0, 1)]);
+        let l = plan.layout();
+        assert_eq!((sheet.width(), sheet.height()), (l.width, l.height));
+        let px = |(x, y): (u32, u32)| {
+            let i = ((y * sheet.width() + x) * 4) as usize;
+            sheet.data()[i..i + 4].to_vec()
+        };
+        // The zoomed cell is 6x6 of the frame's colour, with a grey hairline.
+        let (x, y) = l.image_xy[0][0];
+        assert_eq!(px((x, y)), [200, 0, 0, 255]);
+        assert_eq!(px((x + 5, y + 5)), [200, 0, 0, 255]);
+        assert_eq!(px((x - 1, y)), [190, 190, 190, 255]);
+        // The matted cell is the frame padded by MAT_PAD of the mat colour.
+        let (x, y) = l.image_xy[0][1];
+        assert_eq!(px((x, y)), [10, 20, 30, 255]);
+        assert_eq!(px((x + MAT_PAD, y + MAT_PAD)), [200, 0, 0, 255]);
+    }
+
+    #[test]
+    fn compose_sheet_hands_back_the_renderers_error() {
+        let rows = one_row(vec![sheet_cell(4, 4, 1, None)]);
+        let plan = SheetPlan::new(&rows, &SheetOptions::default()).unwrap();
+        let got = compose_sheet(&plan, |_, _| Err::<Pixmap, _>("no render"));
+        assert!(matches!(got, Err(ComposeError::Render("no render"))));
     }
 }

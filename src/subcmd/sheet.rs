@@ -8,8 +8,11 @@
 //! its dpis is a cell, drawn at its own pixel size (a 48 px render stays
 //! 48 px beside a 512 px one) and centred in its column. Labels are set
 //! with pscat's own text rendering (`pscat::contact_sheet::render_text`;
-//! the face is picked per character by script), and the geometry is
-//! `pscat::contact_sheet::Layout`.
+//! the face is picked per character by script), and the geometry, labels,
+//! captions, frames and zoom are the shared `pscat::contact_sheet`
+//! composition (`SheetPlan`, `compose_sheet`), which the `review_sheet` MCP
+//! tool draws with too (issue #744). This file only parses the options and
+//! renders each cell.
 //!
 //! Issue #706 adds sweeps (one file over seeds or a parameter, each cell
 //! labelled with its value; the grammars and the value formatting are the
@@ -17,7 +20,9 @@
 //! `format_sweep_value` in `main.rs`, which a child module can call), a
 //! per-cell mat, stacked columns and `--cols` wrapping.
 
-use pscat::contact_sheet::{self as sheet, CellSize, Layout, PackedRow};
+use pscat::contact_sheet::{
+    self as sheet, ComposeError, PlanError, SheetCell, SheetOptions, SheetPlan, SheetRow,
+};
 use pscat::{Interp, Limits};
 use tiny_skia::Pixmap;
 
@@ -103,9 +108,6 @@ Example (twelve seeds of one piece, four to a line):
 const MAX_CELLS: usize = 256;
 /// Largest `--dpi` zoom factor.
 const MAX_ZOOM: u32 = 16;
-/// Row label and caption type sizes, in pixels.
-const LABEL_PX: u32 = 16;
-const CAPTION_PX: u32 = 12;
 
 /// One `--dpi` cell: `DPI[xZOOM][@MAT]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -224,136 +226,99 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     }
 
     // Everything the layout needs is known before any cell renders, so an
-    // oversized sheet fails fast: pixel sizes from a probe interpreter,
-    // text from the label renderer.
-    let text = |t: &str, px: u32, bold: bool| sheet::render_text(t, px, bold).map_err(msg);
-    let mut headers: Vec<Option<Pixmap>> = Vec::new();
-    let mut captions: Vec<Vec<Option<Pixmap>>> = Vec::new();
-    let mut rows: Vec<PackedRow> = Vec::new();
+    // oversized sheet fails fast: pixel sizes from a probe interpreter, text
+    // from the shared composition's label renderer.
+    let mut rows: Vec<SheetRow> = Vec::with_capacity(opts.entries.len());
     for (e, (cells, column_len)) in opts.entries.iter().zip(&plans) {
-        let header = if opts.labels {
-            let label = e.label.clone().unwrap_or_else(|| stem(&e.path));
-            text(&label, LABEL_PX, true)?
-        } else {
-            None
-        };
-        let mut row = PackedRow {
-            header: dims(header.as_ref()),
-            cells: Vec::new(),
+        let mut row = SheetRow {
+            label: opts
+                .labels
+                .then(|| e.label.clone().unwrap_or_else(|| stem(&e.path))),
+            cells: Vec::with_capacity(cells.len()),
             column_len: column_len.clone(),
         };
-        let mut row_captions = Vec::new();
         for planned in cells {
             let CellSpec { dpi: d, zoom, mat } = planned.spec;
-            let (w, h) = probe(e.page, d)?;
-            // The caption: the sweep value if any, then the size.
-            let mut parts = Vec::new();
-            if let (true, Some(v), Some(sweep)) = (opts.values, planned.value, &e.sweep) {
-                let shown = match &e.captions {
+            let size = probe(e.page, d)?;
+            let value = match (opts.values, planned.value, &e.sweep) {
+                (true, Some(v), Some(sweep)) => Some(match &e.captions {
                     Some(names) => names[v].clone(),
                     None => sweep.label(v),
-                };
-                if !shown.is_empty() {
-                    parts.push(shown);
-                }
-            }
-            if opts.sizes {
-                let note = if zoom > 1 {
-                    format!(" (shown at {zoom}x)")
-                } else {
-                    String::new()
-                };
-                parts.push(format!("{w}x{h} px{note}"));
-            }
-            let caption = if parts.is_empty() {
-                None
-            } else {
-                text(&parts.join(", "), CAPTION_PX, false)?
+                }),
+                _ => None,
             };
-            let pad = if mat.is_some() { 2 * sheet::MAT_PAD } else { 0 };
-            let (zw, zh) = (
-                w.checked_mul(zoom).and_then(|v| v.checked_add(pad)),
-                h.checked_mul(zoom).and_then(|v| v.checked_add(pad)),
-            );
-            let image = match (zw, zh) {
-                (Some(zw), Some(zh)) if zw <= sheet::MAX_SIDE_PX && zh <= sheet::MAX_SIDE_PX => {
-                    (zw, zh)
-                }
-                _ => {
-                    return Err(msg(format!(
-                        "{}: a {w}x{h} px cell shown at {zoom}x is over the {}px limit",
-                        e.path,
-                        sheet::MAX_SIDE_PX
-                    )));
-                }
-            };
-            row.cells.push(CellSize {
-                image,
-                caption: dims(caption.as_ref()),
+            row.cells.push(SheetCell {
+                size,
+                zoom,
+                mat,
+                value,
             });
-            row_captions.push(caption);
         }
-        headers.push(header);
-        captions.push(row_captions);
         rows.push(row);
     }
-    let layout = Layout::packed(&rows, opts.cols).map_err(|m| {
-        msg(match opts.cols {
+    let sheet_opts = SheetOptions {
+        sizes: opts.sizes,
+        wrap: opts.cols,
+    };
+    let plan = SheetPlan::new(&rows, &sheet_opts).map_err(|err| match err {
+        PlanError::Text(m) => msg(m),
+        PlanError::CellTooLarge { row, cell } => {
+            let (w, h) = rows[row].cells[cell].size;
+            msg(format!(
+                "{}: a {w}x{h} px cell shown at {}x is over the {}px limit",
+                opts.entries[row].path,
+                rows[row].cells[cell].zoom,
+                sheet::MAX_SIDE_PX
+            ))
+        }
+        PlanError::Layout(m) => msg(match opts.cols {
             None => format!("{m}; or wrap the rows with --cols N, or stack cells with +"),
             Some(_) => m,
-        })
+        }),
     })?;
-    let mut out = layout.new_sheet().map_err(msg)?;
 
     // Cells stream into the sheet, one frame in memory at a time.
     let mut any_failed = false;
-    for (r, (e, (cells, _))) in opts.entries.iter().zip(&plans).enumerate() {
-        if let Some(h) = &headers[r] {
-            let (x, y) = layout.header_xy[r];
-            sheet::blit_at(&mut out, x, y, h);
+    let mut seed_fired = false;
+    let out = sheet::compose_sheet(&plan, |r, c| {
+        let e = &opts.entries[r];
+        let planned = &plans[r].0[c];
+        let (frame, ok, fired) = render_cell(
+            &sources[r],
+            &e.path,
+            e.page,
+            planned.spec.dpi,
+            planned.spec.mat.is_some(),
+            e.sweep.as_ref().zip(planned.value),
+            opts.limits,
+        )?;
+        any_failed |= !ok;
+        if c == 0 {
+            seed_fired = false;
         }
-        let mut seed_fired = false;
-        for (c, planned) in cells.iter().enumerate() {
-            let CellSpec { dpi: d, zoom, mat } = planned.spec;
-            let sweep = e.sweep.as_ref().zip(planned.value);
-            let (frame, ok, fired) = render_cell(
-                &sources[r],
-                &e.path,
-                e.page,
-                d,
-                mat.is_some(),
-                sweep,
-                opts.limits,
-            )?;
-            any_failed |= !ok;
-            seed_fired |= fired;
-            let frame = if zoom > 1 {
-                sheet::zoom_nearest(&frame, zoom)
-                    .ok_or_else(|| msg(format!("{}: cell too large to zoom", e.path)))?
-            } else {
-                frame
-            };
-            let frame = match mat {
-                Some(rgb) => sheet::composite_on_mat(&frame, rgb, sheet::MAT_PAD)
-                    .ok_or_else(|| msg(format!("{}: cell too large to mat", e.path)))?,
-                None => frame,
-            };
-            let (x, y) = layout.image_xy[r][c];
-            sheet::frame(&mut out, x, y, frame.width(), frame.height());
-            sheet::blit_at(&mut out, x, y, &frame);
-            if let Some(cap) = &captions[r][c] {
-                let (cx, cy) = layout.caption_xy[r][c];
-                sheet::blit_at(&mut out, cx, cy, cap);
-            }
-        }
-        if matches!(e.sweep, Some(Sweep::Seed(_))) && !seed_fired {
+        seed_fired |= fired;
+        if c + 1 == plans[r].0.len()
+            && matches!(e.sweep, Some(Sweep::Seed(_)))
+            && !seed_fired
+        {
             eprintln!(
                 "pscat sheet: warning: {} never called srand or sampled noise -- --sweep-seed had no effect, \
                  every cell is identical",
                 e.path
             );
         }
-    }
+        Ok(frame)
+    })
+    .map_err(|err| match err {
+        ComposeError::Render(f) => f,
+        ComposeError::Zoom { row, .. } => {
+            msg(format!("{}: cell too large to zoom", opts.entries[row].path))
+        }
+        ComposeError::Mat { row, .. } => {
+            msg(format!("{}: cell too large to mat", opts.entries[row].path))
+        }
+        ComposeError::Sheet(m) => msg(m),
+    })?;
     // Cells of any dpi share the sheet, so it records no particular
     // resolution: 72 dpi, one pixel to the point.
     pscat::png::save(&out, 1.0, &opts.out)
@@ -364,10 +329,6 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     } else {
         Ok(())
     }
-}
-
-fn dims(p: Option<&Pixmap>) -> (u32, u32) {
-    p.map_or((0, 0), |p| (p.width(), p.height()))
 }
 
 /// The file name without directory or extension: the default row label.
