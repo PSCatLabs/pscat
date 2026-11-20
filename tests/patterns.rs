@@ -2434,3 +2434,157 @@ fn an_error_after_a_coverage_mask_leaves_the_page_without_it() {
     let svg = &it.gfx().svg_pages().expect("svg")[0];
     assert!(!svg.contains("<mask"), "{svg}");
 }
+
+/// A pattern whose cell's top-left quarter is inked, so the left and top
+/// edge of every mark is the device corner of its cell's `/BBox` (#1342).
+fn quarter_pattern(
+    tiling: u8,
+    bbox: [f64; 4],
+    step: (f64, f64),
+    quarter: [f64; 4],
+    m: &str,
+) -> String {
+    let [x0, y0, x1, y1] = bbox;
+    let [qx, qy, qw, qh] = quarter;
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType {tiling} /BBox [{x0} {y0} {x1} {y1}] \
+         /XStep {} /YStep {} /PaintProc {{ pop 0 setgray {qx} {qy} {qw} {qh} rectfill }} >> \
+         [{m}] makepattern setpattern 0 0 {SIZE} {SIZE} rectfill",
+        step.0, step.1
+    )
+}
+
+/// The left and top edges of the inked runs (`true` for a left edge).
+fn ink_edges(pm: &Pixmap) -> std::collections::HashSet<(bool, u32, u32)> {
+    let ink = |x: u32, y: u32| pm.pixel(x, y).is_some_and(|p| p.red() < 128);
+    let mut edges = std::collections::HashSet::new();
+    for y in 1..SIZE {
+        for x in 1..SIZE {
+            if ink(x, y) && !ink(x - 1, y) {
+                edges.insert((true, x, y));
+            }
+            if ink(x, y) && !ink(x, y - 1) {
+                edges.insert((false, x, y));
+            }
+        }
+    }
+    edges
+}
+
+#[test]
+fn cells_sit_where_gs_puts_the_bbox_corner() {
+    // gs 10.07.1 moves a pattern so the device top-left corner of its
+    // /BBox lands on the nearest pixel, and for Types 1 and 3 scaled to a
+    // whole-pixel step keeps the /BBox centre and rounds the scaled corner
+    // again (gsptype1.c). gs paints cells aliased and with any-part-of-
+    // pixel fills, so its marks can be a pixel wider on the far side; the
+    // near edges are on pixel boundaries in both, and every one of ours
+    // must be one of gs's. Rounding the pattern origin instead (the old
+    // rule) puts hundreds of edges a pixel off in each of these.
+    let quarter = |bbox: [f64; 4], top_right: bool| {
+        let [x0, y0, x1, y1] = bbox;
+        let (w, h) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
+        let x = if top_right { x1 - w } else { x0 };
+        [x, y1 - h, w, h]
+    };
+    let cases = [
+        // The issue's Type 2 cell at a translation of 0.4.
+        (
+            "type2",
+            2,
+            [0.0, 0.0, 3.65, 3.65],
+            (7.3, 7.3),
+            false,
+            "1 0 0 1 10.4 10.4",
+        ),
+        // Type 1, cells abutting, y at 0.4.
+        (
+            "type1",
+            1,
+            [0.0, 0.0, 7.3, 7.3],
+            (7.3, 7.3),
+            false,
+            "1 0 0 1 10 10.4",
+        ),
+        // Mirrored in x.
+        (
+            "mirror",
+            3,
+            [5.57, -0.68, 10.08, 7.74],
+            (4.51, 8.42),
+            true,
+            "-1 0 0 1 57.46 3.43",
+        ),
+        // gs moves the scaled cell a whole pixel to keep its centre.
+        (
+            "centre",
+            1,
+            [4.41, 4.19, 11.35, 12.21],
+            (6.94, 8.02),
+            false,
+            "0.8 0 0 0.8 40.08 40.11",
+        ),
+        // Scale 2 with a fractional corner.
+        (
+            "scaled",
+            3,
+            [-2.13, 4.55, 1.0, 13.38],
+            (3.13, 8.83),
+            false,
+            "2 0 0 2 33.84 21.74",
+        ),
+    ];
+    let mut srcs: Vec<(String, String)> = cases
+        .iter()
+        .map(|&(name, tiling, bbox, step, mirrored, m)| {
+            (
+                name.to_string(),
+                quarter_pattern(tiling, bbox, step, quarter(bbox, mirrored), m),
+            )
+        })
+        .collect();
+    // A quarter turn: pattern y runs along device x, x up the page, so the
+    // device top-left is the pattern's (x1, y0) corner.
+    srcs.push((
+        "turned".into(),
+        quarter_pattern(
+            3,
+            [-4.48, 2.1, 2.56, 5.74],
+            (7.04, 3.64),
+            [-0.96, 2.1, 3.52, 1.82],
+            "0 1 1 0 31.38 48.59",
+        ),
+    ));
+    // Nested (#1300): a page pattern inside a 1.5x pattern that gs moves by
+    // a whole pixel to keep its centre (its accumulator starts there).
+    srcs.push((
+        "nested".into(),
+        "/inner << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 50 50] /XStep 50 \
+         /YStep 50 /PaintProc { pop 0 setgray 0 25 25 25 rectfill } >> matrix makepattern def \
+         << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [100 100 184.9 184.9] /XStep 84.9 \
+         /YStep 84.9 /PaintProc { pop inner setpattern 100 100 84.9 84.9 rectfill } >> \
+         [1.5 0 0 1.5 -140.3 -139.93] makepattern setpattern 0 0 400 400 rectfill"
+            .into(),
+    ));
+    let ours: Vec<_> = srcs
+        .iter()
+        .map(|(name, src)| {
+            let edges = ink_edges(&render(src).png);
+            assert!(edges.len() > 200, "{name}: only {} edges", edges.len());
+            edges
+        })
+        .collect();
+    if !common::gs_available() {
+        return;
+    }
+    for ((name, src), ours) in srcs.iter().zip(&ours) {
+        let gs = ink_edges(&gs_png_aliased(src, &format!("phase_{name}")));
+        let off = ours.difference(&gs).count();
+        assert_eq!(
+            off,
+            0,
+            "{name}: {off} of our {} edges are not gs's",
+            ours.len()
+        );
+    }
+}

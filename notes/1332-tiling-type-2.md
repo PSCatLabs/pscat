@@ -92,7 +92,9 @@ keeps the cell undistorted and spreads the spacing instead.
   ours. The SVG's placement in a browser is unverified: Chrome could not be
   driven in this session (the browser tool timed out).
 
-## Observations for #1342 (half-pixel lattice phase), not fixed here
+## Observations for #1342 (half-pixel lattice phase), fixed there
+
+Fixed in #1342 (`notes/1342-pattern-lattice-phase.md`).
 
 - The anchor stays `round(tx), round(ty)` (the shader's translation). gs
   appears to anchor at the rounded device corner of the `/BBox`, not at the
