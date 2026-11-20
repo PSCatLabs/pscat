@@ -1984,6 +1984,12 @@ renders eight examples in both and compares block-downsampled output).
   the MCP server may read), and swaps a re-install in from a staging directory so no stale
   file survives. `tests/lib_pkg.rs` (shadow test included) and the `mcp.rs` test pin it.
   See `notes/1056-currentfilename-and-lib-install.md`.
+- **`pscat lib remove NAME [--force]` (#1345).** Deletes `lib/NAME/` under the install
+  directory (`src/subcmd/lib_pkg.rs`, `remove`). Without `--force` only a directory whose
+  `.pscat-lib` marker is a regular file; a symlink or plain file named NAME is never
+  removed, and NAME is one plain component so nothing outside `lib/` is reachable. The marker
+  is deleted last, so an interrupted run is re-runnable without `--force`. Prints the file
+  count and the absolute path. See `notes/1345-lib-remove.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

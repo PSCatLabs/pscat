@@ -2597,7 +2597,8 @@ fn print_usage() {
     println!(
         "                               data directory, so (lib/NAME/x.ps) run finds it anywhere;"
     );
-    println!("                               pscat lib list shows the installed packages");
+    println!("                               pscat lib list shows the installed packages,");
+    println!("                               pscat lib remove NAME deletes one");
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
     println!();
     println!("Environment (where pscat finds lib/ and fonts; the full search order is in");
