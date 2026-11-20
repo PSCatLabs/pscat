@@ -56,6 +56,13 @@ the child's exit.
 processes: 0 failures. `child_deadline`'s descendant test now rests on
 `pid_alive`, not a clock, and passed every round.
 
+Known limits, from the review: a descendant started after the last `pgrep`
+snapshot (the first is taken at 200 ms) is never a suspect, so a runaway like
+that fails at the hang guard instead of after 2 s; a suspect pid that is a
+zombie or was reused counts as alive; the 2 s is counted from the first poll of
+the stdout wait, a moment after the child exit. A drain thread that ends
+without sending fails the run rather than reading as an empty pipe.
+
 The closed-reader tests already close the read end before spawning (#1294);
 nothing in the three tests named in the issue needed more than the helper.
 `--max-time 0.3` in `subcommand_limits.rs` is the child's own limit under test

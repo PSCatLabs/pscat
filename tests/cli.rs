@@ -1361,11 +1361,13 @@ fn the_wrote_report_is_not_on_stdout() {
 fn a_pipe_that_reaches_eof_late_is_waited_for_not_timed() {
     use std::time::{Duration, Instant};
     let (tx, rx) = std::sync::mpsc::channel();
+    // Taken before the sender starts, so no scheduling delay here can make the
+    // measured wait shorter than the sender's 3 s.
+    let started = Instant::now();
     let sender = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(3));
         tx.send(b"late".to_vec()).unwrap();
     });
-    let started = Instant::now();
     let got = common::collect(&rx, &[], Duration::from_secs(60));
     assert_eq!(got.as_deref(), Some(&b"late"[..]));
     assert!(started.elapsed() >= Duration::from_secs(3));

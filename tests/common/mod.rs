@@ -629,8 +629,9 @@ pub fn collect(
     loop {
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(bytes) => return Some(bytes),
-            // The drain thread always sends before it ends.
-            Err(RecvTimeoutError::Disconnected) => return Some(Vec::new()),
+            // The drain thread ended without sending (it panicked): lost output
+            // is a failure, not an empty pipe.
+            Err(RecvTimeoutError::Disconnected) => return None,
             Err(RecvTimeoutError::Timeout) => {}
         }
         if start.elapsed() >= limit {
@@ -669,11 +670,12 @@ fn wait_with_deadline_named(child: &mut Child, what: &str, deadline: Duration) -
     // One budget for both pipes: the hang guard, counted from the exit.
     let end = Instant::now() + deadline;
     let left = || end.saturating_duration_since(Instant::now());
-    match (
-        collect(&out, &descendants, left()),
-        collect(&err, &descendants, left()),
-    ) {
-        (Some(stdout), Some(stderr)) => Output {
+    // `and_then`: stderr is only waited for once stdout came back, so a
+    // runaway costs one suspect window, not one per pipe.
+    match collect(&out, &descendants, left())
+        .and_then(|stdout| Some((stdout, collect(&err, &descendants, left())?)))
+    {
+        Some((stdout, stderr)) => Output {
             status,
             stdout,
             stderr,
