@@ -154,6 +154,16 @@ PIL composite. A one-call typewriter or chart is not added yet.
   logo sheet is one call:
   `{"entries": [{"source": "<a.ps>", "label": "A: one-line cat"}, ...],
   "width": 384, "height": 384, "dpi": [96, 9, {"dpi": 9, "zoom": 4}]}`.
+  The `pscat sheet` sweeps, mats and wrapping are inputs too (#1339). An
+  entry's `sweep` draws its program once per `{"seed": [1, 2, 3]}` or per
+  `{"param": "Density", "values": [10, 20]}` (lists of numbers, not the CLI's
+  `A:B` ranges), each cell captioned `seed=7` or `Density=20`, or with the
+  words in the entry's `captions` (one per value); `values: false` leaves the
+  value out of the captions. A `dpi` item takes `"mat": "#222"` (also `#rgb`,
+  `white`, `black`: the page drawn transparent, set on that colour, padded 10
+  px), and `cols` at the top level wraps a long row onto further lines. A
+  sweep's cells count toward the 32. Stacked columns (`+`) are CLI-only.
+  Each of these draws the sheet `pscat sheet` writes with the same options.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see

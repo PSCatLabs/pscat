@@ -1277,7 +1277,12 @@ fn tool_list(cfg: &Config) -> Value {
                 sizes in one image. Returns one PNG: for the same programs, pages, dpis and labels, byte for byte what \
                 `pscat sheet` writes. A dpi entry {{\"dpi\": 9, \"zoom\": 4}} draws \
                 the 9 dpi render again enlarged 4x with no smoothing (whole factors 2..16), so a \
-                small icon can be read pixel by pixel. Programs are given inline as `source`, \
+                small icon can be read pixel by pixel, and {{\"dpi\": 9, \"mat\": \"#222\"}} sets \
+                the render on a mat (padded 10 px, drawn on a transparent page) to judge an icon \
+                on dark or light. An entry's `sweep` draws its program once per seed or per value \
+                of a named parameter, each cell captioned with the value or with your own \
+                `captions`, and `cols` wraps a long row onto further lines: twelve seeds of one \
+                piece are one entry. Programs are given inline as `source`, \
                 never as file names. Each cell runs in its own child under the interpreter's \
                 limits; a cell whose program fails is still drawn as far as it got, with the \
                 error text alongside. Labels in Latin (accents included), Korean, Japanese, \
@@ -1306,7 +1311,9 @@ fn tool_list(cfg: &Config) -> Value {
                                 "label": { "type": "string", "maxLength": MAX_SHEET_LABEL, "description": "The row label (default: \"program N\", N counting from 1)" },
                                 "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default: the top-level width)" },
                                 "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default: the top-level height)" },
-                                "dpi": sheet_dpi_schema("The cells of this row: one per item, left to right (default: the top-level dpi)")
+                                "dpi": sheet_dpi_schema("The cells of this row: one per item, left to right (default: the top-level dpi)"),
+                                "sweep": sheet_sweep_schema(),
+                                "captions": { "type": "array", "items": { "type": "string", "maxLength": MAX_SHEET_LABEL }, "description": "With `sweep`: a caption for each value, in order, in place of seed=7 or Density=20 (exactly one per value; an empty string leaves that cell's caption out)" }
                             },
                             "required": ["source"]
                         }
@@ -1316,6 +1323,8 @@ fn tool_list(cfg: &Config) -> Value {
                     "dpi": sheet_dpi_schema("One cell per item, left to right: a dpi (9..1200), or {\"dpi\": 9, \"zoom\": 4} to also draw it enlarged 4x. The default for entries that give no list (default [72])"),
                     "labels": { "type": "boolean", "description": "Draw the row labels (default true)" },
                     "sizes": { "type": "boolean", "description": "Draw the pixel-size caption under each cell (default true)" },
+                    "values": { "type": "boolean", "description": "With sweeps: draw each cell's sweep value (or its caption) in the caption (default true). false when the cells already say what they are; the pixel size stays unless sizes is false too" },
+                    "cols": { "type": "integer", "minimum": 1, "maximum": MAX_SHEET_CELLS, "description": "Wrap a row of more than this many cells onto further lines, the label only above the first; cells line up in columns across the lines. Default: one line per entry" },
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["entries"]
@@ -2546,12 +2555,81 @@ const MIN_CELL_BUDGET: Duration = Duration::from_millis(100);
 /// The longest error text kept per failed cell.
 const MAX_CELL_NOTE: usize = 2000;
 
+/// One requested cell of a dpi list: `96`, `{"dpi": 9, "zoom": 4, "mat": "#222"}`.
+#[derive(Clone, Copy)]
+struct CellReq {
+    dpi: f32,
+    /// 1 is no enlargement.
+    zoom: u32,
+    /// The colour the cell is set on (#1339), as `pscat sheet`'s `DPI@MAT`.
+    mat: Option<[u8; 3]>,
+}
+
+/// What a sweep varies (#1339): the seed, or a named value the program reads.
+/// Only lists of numbers: the flag CLI's `A:B:STEP` range grammar lives in
+/// `main.rs`, which this binary cannot call.
+enum SheetSweep {
+    Seed(Vec<i64>),
+    /// The name and each value as the text the child is given and the caption
+    /// shows.
+    Param(String, Vec<String>),
+}
+
+impl SheetSweep {
+    fn len(&self) -> usize {
+        match self {
+            SheetSweep::Seed(v) => v.len(),
+            SheetSweep::Param(_, v) => v.len(),
+        }
+    }
+
+    /// The caption of value `i` when the caller names none: `seed=7`,
+    /// `Density=20`, as `pscat sheet` does.
+    fn label(&self, i: usize) -> String {
+        match self {
+            SheetSweep::Seed(v) => format!("seed={}", v[i]),
+            SheetSweep::Param(name, v) => format!("{name}={}", v[i]),
+        }
+    }
+
+    /// The flags that make a child render this one value.
+    fn child_args(&self, i: usize, cmd: &mut Command) {
+        match self {
+            SheetSweep::Seed(v) => cmd.arg("--sweep-seed").arg(v[i].to_string()),
+            SheetSweep::Param(name, v) => cmd.arg("--sweep").arg(format!("{name}={}", v[i])),
+        };
+    }
+}
+
+/// One cell to draw: what the dpi list says and which sweep value it takes.
+struct PlannedCell {
+    req: CellReq,
+    value: Option<usize>,
+}
+
 struct SheetEntry<'a> {
     source: &'a str,
     label: String,
     page: (u32, u32),
-    /// `(dpi, zoom)` per cell; zoom 1 is no enlargement.
-    cells: Vec<(f32, u32)>,
+    /// Every cell in order: value by value, then dpi-list order.
+    cells: Vec<PlannedCell>,
+    sweep: Option<SheetSweep>,
+    /// One caption per sweep value in place of [`SheetSweep::label`]; an
+    /// empty one draws none.
+    captions: Option<Vec<String>>,
+}
+
+impl SheetEntry<'_> {
+    /// What the cell says is its sweep value, with the sweep to name it.
+    fn swept(&self, c: usize) -> Option<(&SheetSweep, usize)> {
+        self.sweep.as_ref().zip(self.cells[c].value)
+    }
+
+    /// ", seed=3" after a failure's "at 72 dpi", or nothing without a sweep.
+    fn value_note(&self, c: usize) -> String {
+        self.swept(c)
+            .map_or(String::new(), |(s, i)| format!(", {}", s.label(i)))
+    }
 }
 
 /// The schema of a dpi list, spelled out where it is used rather than as a
@@ -2568,7 +2646,8 @@ fn sheet_dpi_schema(description: &str) -> Value {
                     "type": "object",
                     "properties": {
                         "dpi": { "type": "number", "minimum": 9, "maximum": 1200 },
-                        "zoom": { "type": "integer", "minimum": 2, "maximum": MAX_SHEET_ZOOM }
+                        "zoom": { "type": "integer", "minimum": 2, "maximum": MAX_SHEET_ZOOM },
+                        "mat": { "type": "string", "description": "Set the render on a mat of this colour (#rgb, #rrggbb, white or black), padded 10 px, to judge an icon on dark or light. The page is drawn with a transparent background; an opaque page just gets the frame" }
                     },
                     "required": ["dpi"]
                 }
@@ -2577,8 +2656,22 @@ fn sheet_dpi_schema(description: &str) -> Value {
     })
 }
 
+/// The schema of an entry's `sweep` (a function, so the tool list's one
+/// `json!` stays inside the macro's recursion limit).
+fn sheet_sweep_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Draw this program once per value, every dpi item for each value in turn, each cell captioned with its value (seed=7, Density=20). Give `seed` (a list of whole numbers; each also seeds noise, unless the program calls noiseseed itself) or `param` and `values` (a name and a list of numbers: the program runs with /NAME <value> def already made, as `pscat sheet --sweep`)",
+        "properties": {
+            "seed": { "type": "array", "minItems": 1, "maxItems": MAX_SHEET_CELLS, "items": { "type": "integer" }, "description": "The seeds, one cell per seed; this program's srand calls are overridden" },
+            "param": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "maxLength": MAX_SWEEP_TEXT, "description": "The name the program reads, as in `/Density where { pop Density } { 10 } ifelse`" },
+            "values": { "type": "array", "minItems": 1, "maxItems": MAX_SHEET_CELLS, "items": { "type": "number" }, "description": "The values of `param`, one cell each" }
+        }
+    })
+}
+
 /// A dpi list: `[96, {"dpi": 9, "zoom": 4}]`.
-fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
+fn sheet_cells(key: &str, v: &Value) -> Result<Vec<CellReq>, ToolError> {
     let items = v
         .as_array()
         .filter(|a| !a.is_empty())
@@ -2593,7 +2686,11 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
     items
         .iter()
         .map(|item| match item {
-            Value::Number(_) => Ok((dpi(Some(item))?, 1)),
+            Value::Number(_) => Ok(CellReq {
+                dpi: dpi(Some(item))?,
+                zoom: 1,
+                mat: None,
+            }),
             Value::Object(o) => {
                 let zoom = match o.get("zoom") {
                     None | Some(Value::Null) => 1,
@@ -2606,13 +2703,167 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
                             ))
                         })? as u32,
                 };
-                Ok((dpi(o.get("dpi"))?, zoom))
+                let mat = match o.get("mat") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(m)) => Some(
+                        pscat::contact_sheet::parse_mat(m)
+                            .map_err(|e| ToolError::invalid(format!("{key}: {e}")))?,
+                    ),
+                    Some(m) => {
+                        return Err(ToolError::invalid(format!(
+                            "{key}: mat must be a colour string (#rgb, #rrggbb, white or black), got {m}"
+                        )));
+                    }
+                };
+                Ok(CellReq {
+                    dpi: dpi(o.get("dpi"))?,
+                    zoom,
+                    mat,
+                })
             }
             other => Err(ToolError::invalid(format!(
-                "{key}: a cell is a dpi number or {{\"dpi\", \"zoom\"}}, got {other}"
+                "{key}: a cell is a dpi number or {{\"dpi\", \"zoom\", \"mat\"}}, got {other}"
             ))),
         })
         .collect()
+}
+
+/// Longest name or value text a sweep takes: a caption that is the value
+/// stays a caption.
+const MAX_SWEEP_TEXT: usize = 40;
+
+/// A sweep value as one text for the child's `--sweep NAME=TEXT` and for the
+/// caption: a whole number prints bare (`2.0` is `2`, as the flag CLI's own
+/// `format_sweep_value` prints it), anything else in Rust's shortest
+/// round-trip decimal (never an exponent).
+fn sweep_number_text(key: &str, v: &Value) -> Result<String, ToolError> {
+    let text = match v {
+        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => i.to_string(),
+            (_, Some(u), _) => u.to_string(),
+            (_, _, Some(f)) if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15 => {
+                format!("{}", f as i64)
+            }
+            (_, _, Some(f)) if f.is_finite() => format!("{f}"),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    };
+    if text.is_empty() || text.chars().count() > MAX_SWEEP_TEXT {
+        return Err(ToolError::invalid(format!(
+            "{key}: a value must be a number of at most {MAX_SWEEP_TEXT} characters, got {v}"
+        )));
+    }
+    Ok(text)
+}
+
+/// An entry's `sweep`: `{"seed": [1, 2, 3]}` or
+/// `{"param": "Density", "values": [10, 20, 40]}` (#1339). One cell per value
+/// and per dpi-list item.
+fn parse_sheet_sweep(which: &str, item: &Value) -> Result<Option<SheetSweep>, ToolError> {
+    let key = format!("{which}.sweep");
+    let sweep = match item.get("sweep") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(o)) => o,
+        Some(_) => return Err(ToolError::invalid(format!("{key} must be an object"))),
+    };
+    if let Some(unknown) = sweep
+        .keys()
+        .find(|k| !matches!(k.as_str(), "seed" | "param" | "values"))
+    {
+        return Err(ToolError::invalid(format!(
+            "{key}: unknown key {unknown:?} (seed, or param and values)"
+        )));
+    }
+    let list = |name: &str| -> Result<&Vec<Value>, ToolError> {
+        match sweep.get(name) {
+            Some(Value::Array(a)) if !a.is_empty() && a.len() <= MAX_SHEET_CELLS => Ok(a),
+            _ => Err(ToolError::invalid(format!(
+                "{key}.{name} must be a list of 1 to {MAX_SHEET_CELLS} numbers"
+            ))),
+        }
+    };
+    let has = |name: &str| sweep.get(name).is_some_and(|v| !v.is_null());
+    match (has("seed"), has("param"), has("values")) {
+        (true, false, false) => {
+            let seeds = list("seed")?
+                .iter()
+                .map(|v| {
+                    v.as_i64().ok_or_else(|| {
+                        ToolError::invalid(format!(
+                            "{key}.seed: a seed must be a whole number, got {v}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(SheetSweep::Seed(seeds)))
+        }
+        (false, true, true) => {
+            let name = match sweep.get("param") {
+                Some(Value::String(n))
+                    if n.starts_with(|c: char| c.is_ascii_alphabetic())
+                        && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && n.len() <= MAX_SWEEP_TEXT =>
+                {
+                    n.clone()
+                }
+                other => {
+                    return Err(ToolError::invalid(format!(
+                        "{key}.param must be an identifier (letters, digits and _, starting \
+                         with a letter, at most {MAX_SWEEP_TEXT} characters), got {}",
+                        other.map_or("nothing".to_string(), Value::to_string)
+                    )));
+                }
+            };
+            let values = list("values")?
+                .iter()
+                .map(|v| sweep_number_text(&format!("{key}.values"), v))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(SheetSweep::Param(name, values)))
+        }
+        _ => Err(ToolError::invalid(format!(
+            "{key} takes either seed (a list of whole numbers) or param and values, not both"
+        ))),
+    }
+}
+
+/// An entry's `captions`: one text per sweep value, in place of `seed=7`.
+fn parse_sheet_captions(
+    which: &str,
+    item: &Value,
+    sweep: Option<&SheetSweep>,
+) -> Result<Option<Vec<String>>, ToolError> {
+    let key = format!("{which}.captions");
+    let list = match item.get("captions") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Array(a)) => a,
+        Some(_) => {
+            return Err(ToolError::invalid(format!(
+                "{key} must be a list of strings, one per sweep value"
+            )));
+        }
+    };
+    let Some(sweep) = sweep else {
+        return Err(ToolError::invalid(format!(
+            "{key} needs a sweep for the same entry"
+        )));
+    };
+    if list.len() != sweep.len() {
+        return Err(ToolError::invalid(format!(
+            "{key} has {} entries but the sweep has {} values",
+            list.len(),
+            sweep.len()
+        )));
+    }
+    list.iter()
+        .map(|c| match c {
+            Value::String(t) if t.chars().count() <= MAX_SHEET_LABEL => Ok(t.clone()),
+            _ => Err(ToolError::invalid(format!(
+                "{key}: each caption must be a string of at most {MAX_SHEET_LABEL} characters"
+            ))),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
@@ -2629,11 +2880,17 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         optional_int(args, "height", 1, 8000)?.unwrap_or(792) as u32,
     );
     let default_cells = match args.get("dpi") {
-        None | Some(Value::Null) => vec![(72.0, 1)],
+        None | Some(Value::Null) => vec![CellReq {
+            dpi: 72.0,
+            zoom: 1,
+            mat: None,
+        }],
         Some(v) => sheet_cells("dpi", v)?,
     };
     let labels = optional_bool(args, "labels")?.unwrap_or(true);
     let sizes = optional_bool(args, "sizes")?.unwrap_or(true);
+    let values = optional_bool(args, "values")?.unwrap_or(true);
+    let cols = optional_int(args, "cols", 1, MAX_SHEET_CELLS as i64)?.map(|n| n as usize);
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, "png"))
         .transpose()?;
@@ -2670,15 +2927,28 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             optional_int(item, "width", 1, 8000)?.map_or(default_page.0, |w| w as u32),
             optional_int(item, "height", 1, 8000)?.map_or(default_page.1, |h| h as u32),
         );
-        let cells = match item.get("dpi") {
+        let reqs = match item.get("dpi") {
             None | Some(Value::Null) => default_cells.clone(),
             Some(v) => sheet_cells(&format!("{which}.dpi"), v)?,
         };
+        let sweep = parse_sheet_sweep(&which, item)?;
+        let captions = parse_sheet_captions(&which, item, sweep.as_ref())?;
+        // Value by value, then the dpi list, as `pscat sheet` expands a sweep.
+        let by_value: Vec<Option<usize>> = match &sweep {
+            Some(s) => (0..s.len()).map(Some).collect(),
+            None => vec![None],
+        };
+        let cells = by_value
+            .iter()
+            .flat_map(|&value| reqs.iter().map(move |&req| PlannedCell { req, value }))
+            .collect();
         entries.push(SheetEntry {
             source,
             label,
             page,
             cells,
+            sweep,
+            captions,
         });
     }
     if source_bytes > cfg.max_input {
@@ -2714,13 +2984,21 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut rows = Vec::with_capacity(entries.len());
     for e in &entries {
         let mut cells = Vec::with_capacity(e.cells.len());
-        for &(dpi, zoom) in &e.cells {
+        for (c, planned) in e.cells.iter().enumerate() {
+            let CellReq { dpi, zoom, mat } = planned.req;
             let (w, h) = device_pixels(e.page, dpi);
             let side = u64::from(sheet::MAX_SIDE_PX);
-            if w * u64::from(zoom) > side || h * u64::from(zoom) > side {
+            // A mat pads every side, so it counts toward the side cap (a
+            // cell `plan` would refuse as `CellTooLarge`).
+            let pad = if mat.is_some() {
+                2 * u64::from(sheet::MAT_PAD)
+            } else {
+                0
+            };
+            if w * u64::from(zoom) + pad > side || h * u64::from(zoom) + pad > side {
                 return Err(too_large(
                     format!(
-                        "{}: a {}x{} pt page at {dpi} dpi is {w}x{h} pixels{}; a cell is at most \
+                        "{}: a {}x{} pt page at {dpi} dpi is {w}x{h} pixels{}{}; a cell is at most \
                          {side} pixels on a side",
                         e.label,
                         e.page.0,
@@ -2731,6 +3009,11 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                                 w * u64::from(zoom),
                                 h * u64::from(zoom)
                             )
+                        } else {
+                            String::new()
+                        },
+                        if mat.is_some() {
+                            format!(", plus a {}-pixel mat on each side", sheet::MAT_PAD)
                         } else {
                             String::new()
                         }
@@ -2748,11 +3031,19 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                     rendered_pixels,
                 ));
             }
+            // The caption of a sweep value: the caller's words or `seed=7`.
+            let value = match (values, e.swept(c)) {
+                (true, Some((sweep, v))) => Some(match &e.captions {
+                    Some(names) => names[v].clone(),
+                    None => sweep.label(v),
+                }),
+                _ => None,
+            };
             cells.push(sheet::SheetCell {
                 size: (w as u32, h as u32),
                 zoom,
-                mat: None,
-                value: None,
+                mat,
+                value,
             });
         }
         rows.push(sheet::SheetRow {
@@ -2762,12 +3053,19 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         });
     }
     // The layout, text and all, is the one `pscat sheet` draws.
-    let plan = sheet::SheetPlan::new(&rows, &sheet::SheetOptions { sizes, wrap: None }).map_err(
+    let plan = sheet::SheetPlan::new(&rows, &sheet::SheetOptions { sizes, wrap: cols }).map_err(
         |err| match err {
             sheet::PlanError::Text(m) => ToolError::new("internal", m),
-            sheet::PlanError::CellTooLarge { .. } => {
-                ToolError::new("internal", "a cell is over the side limit")
-            }
+            sheet::PlanError::CellTooLarge { row, cell } => too_large(
+                format!(
+                    "{}: a cell is over {} pixels on a side after its zoom and mat",
+                    entries[row].label,
+                    sheet::MAX_SIDE_PX
+                ),
+                0,
+            )
+            .with("limit_side_px", json!(sheet::MAX_SIDE_PX))
+            .with("cell", json!(cell)),
             sheet::PlanError::Layout(m) => {
                 too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX))
             }
@@ -2799,7 +3097,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut n = 0usize;
     let out = sheet::compose_sheet(&plan, |r, c| {
         let e = &entries[r];
-        let (dpi, _) = e.cells[c];
+        let CellReq { dpi, mat, .. } = e.cells[c].req;
         n += 1;
         let left = cfg.timeout.saturating_sub(started.elapsed());
         if left < MIN_CELL_BUDGET {
@@ -2817,8 +3115,17 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             .arg("--dpi")
             .arg(number_arg(f64::from(dpi)))
             .arg("--png")
-            .arg(&png)
-            .arg("-");
+            .arg(&png);
+        // A matted cell is drawn on a transparent page, as `pscat sheet`
+        // does, and the shared composition sets it on the mat. One sweep
+        // value is a one-frame sweep: the same frame path as the CLI's.
+        if mat.is_some() {
+            cmd.arg("--transparent");
+        }
+        if let Some((sweep, v)) = e.swept(c) {
+            sweep.child_args(v, &mut cmd);
+        }
+        cmd.arg("-");
         let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
             Ok(run) => run,
             Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
@@ -2830,8 +3137,9 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             return Err(failed_run(
                 "render_failed",
                 format!(
-                    "{} at {dpi} dpi produced no page:\n{}",
+                    "{} at {dpi} dpi{} produced no page:\n{}",
                     e.label,
+                    e.value_note(c),
                     run.stderr.trim_end()
                 ),
                 &run.stderr,
@@ -2847,7 +3155,11 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                 why.truncate(end);
                 why.push_str("...");
             }
-            notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
+            notes.push(format!(
+                "{} at {dpi} dpi{} failed:\n{why}",
+                e.label,
+                e.value_note(c)
+            ));
         } else {
             cell_stderr.push_str(&run.stderr);
             cell_stderr.push('\n');
