@@ -1841,3 +1841,180 @@ fn a_shading_pattern_is_coloured_and_reads_back_as_gs() {
         "[/Pattern [/DeviceGray]]"
     );
 }
+
+// --- Codex round 1 on PR #1367 ---------------------------------------------
+
+/// A page-sized axial shading pattern, set as the colour.
+const PAGE_RAMP: &str = "<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+     /Coords [0 0 1000 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> \
+     /Extend [true true] >> >> matrix makepattern setpattern\n";
+
+/// pscat on a 1000 x 1000 page of `src` under `limit` (`--max-steps N` or
+/// `--max-memory MIB`): whether it succeeded, and its stderr. A child
+/// process, as the memory limit counts the whole process's heap.
+fn limited(src: &str, limit: [&str; 2]) -> (bool, String) {
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_limits");
+    let file = dir.join("limited.ps");
+    std::fs::write(&file, src).expect("write source");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--page", "1000x1000", limit[0], limit[1], "--png"])
+        .arg(dir.join("limited.png"))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// A shading pattern's layer under an imagemask or a stroke answers to the
+/// step and memory limits, as under a fill (Codex round 1, P1): it is made
+/// before anything is recorded or painted, its work held against the step
+/// limit and its memory against the cap.
+#[test]
+fn a_shading_layer_under_imagemask_and_stroke_answers_to_the_limits() {
+    let marks = [
+        (
+            "imagemask",
+            "1000 1000 scale 1 1 true [1 0 0 1 0 0] <80> imagemask",
+        ),
+        (
+            "stroke",
+            "600 setlinewidth 0 500 moveto 1000 500 lineto stroke",
+        ),
+        ("rectfill", "0 0 1000 1000 rectfill"),
+    ];
+    for (op, mark) in marks {
+        let src = format!("{PAGE_RAMP}{mark}\n");
+        for (limit, what) in [
+            (["--max-steps", "1000"], "steps"),
+            (["--max-memory", "2"], "memory"),
+        ] {
+            let (ok, err) = limited(&src, limit);
+            assert!(
+                !ok && err.contains(&format!("limitexceeded ({what})"))
+                    && err.contains(&format!("OffendingCommand: {op}")),
+                "{op} under {limit:?}: {err}"
+            );
+        }
+        // And without a limit to meet, it paints.
+        let (ok, err) = limited(&src, ["--max-steps", "0"]);
+        assert!(ok, "{op} with no limit: {err}");
+    }
+}
+
+/// A pattern made on one page and reused on a later page of another height
+/// keeps its device placement in the PDF, as in the PNG and gs (Codex round
+/// 1, P2): the PDF `/Matrix` maps to that page's default space, whose flip
+/// the new height moves.
+#[test]
+fn a_shading_pattern_reused_on_a_taller_page_keeps_its_place_in_pdf() {
+    let src = "<< /PageSize [100 100] >> setpagedevice
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 0 100]
+   /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> >>
+matrix makepattern /p exch def
+p setpattern 0 0 100 100 rectfill showpage
+<< /PageSize [100 200] >> setpagedevice
+p setpattern 0 0 100 200 rectfill
+";
+    // The CLI, which changes the page size as `setpagedevice` asks.
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_pages");
+    let (ps, pdf_path) = (dir.join("pages.ps"), dir.join("pages.pdf"));
+    std::fs::write(&ps, format!("%!PS\n{src}showpage\n")).expect("write ps");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--png")
+        .arg(dir.join("pages.png"))
+        .arg("--pdf")
+        .arg(&pdf_path)
+        .arg(&ps)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let png = Pixmap::decode_png(&std::fs::read(dir.join("pages-002.png")).expect("page 2"))
+        .expect("decode");
+    assert_eq!((png.width(), png.height()), (100, 200));
+    let pdf = std::fs::read(&pdf_path).expect("read pdf");
+    // Our raster: the shading in device rows 0-100 (blue at the top, red at
+    // row 100), nothing below (the shading does not extend).
+    let px = |pm: &Pixmap, y: u32| {
+        let p = pm.pixel(50, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    assert!(
+        px(&png, 5).2 > 200 && px(&png, 95).0 > 200,
+        "{:?}",
+        px(&png, 5)
+    );
+    assert_eq!(px(&png, 150), (255, 255, 255));
+    // hayro's raster of the PDF's second page.
+    let doc = hayro::Pdf::new(std::sync::Arc::new(pdf.clone())).expect("parse PDF");
+    let pages = doc.pages();
+    let pm = hayro::render(
+        &pages[1],
+        &hayro::InterpreterSettings::default(),
+        &hayro::RenderSettings {
+            x_scale: 1.0,
+            y_scale: 1.0,
+            ..Default::default()
+        },
+    );
+    let (w, h) = (u32::from(pm.width()), u32::from(pm.height()));
+    let bytes = pm.take_u8();
+    let mut theirs = Pixmap::new(w, h).expect("pixmap");
+    for (dst, src) in theirs.data_mut().chunks_mut(4).zip(bytes.chunks(4)) {
+        for c in 0..3 {
+            dst[c] = (u16::from(src[c]) + 255 - u16::from(src[3])) as u8;
+        }
+        dst[3] = 255;
+    }
+    for y in [5, 50, 95, 150, 195] {
+        let (a, b) = (px(&png, y), px(&theirs, y));
+        let near = |p: u8, q: u8| p.abs_diff(q) <= 6;
+        assert!(
+            near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2),
+            "row {y}: PNG {a:?}, PDF via hayro {b:?}"
+        );
+    }
+    if common::gs_available() {
+        // gs's run of the program and its raster of our PDF, page 2.
+        let gs = |input: &std::path::Path, out: &std::path::Path| {
+            let status = Command::new("gs")
+                .args([
+                    "-q",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-dSAFER",
+                    "-sDEVICE=png16m",
+                    "-r72",
+                ])
+                .args(["-dFirstPage=2", "-dLastPage=2"])
+                .arg(format!("-o{}", out.display()))
+                .arg(input)
+                .status()
+                .expect("run gs");
+            assert!(status.success(), "gs rejected {}", input.display());
+            Pixmap::decode_png(&std::fs::read(out).expect("read gs png")).expect("decode")
+        };
+        let program = gs(&ps, &dir.join("program.png"));
+        let ours = gs(&pdf_path, &dir.join("ours.png"));
+        for y in [5, 50, 95, 150, 195] {
+            let (a, b, c) = (px(&png, y), px(&program, y), px(&ours, y));
+            let near = |p: (u8, u8, u8), q: (u8, u8, u8)| {
+                p.0.abs_diff(q.0) <= 8 && p.1.abs_diff(q.1) <= 8 && p.2.abs_diff(q.2) <= 8
+            };
+            assert!(
+                near(a, b) && near(c, b),
+                "row {y}: PNG {a:?}, gs program {b:?}, our PDF via gs {c:?}"
+            );
+        }
+    }
+}

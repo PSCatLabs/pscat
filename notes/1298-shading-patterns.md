@@ -62,8 +62,20 @@ own pieces:
 - `function_layer`.
 
 The mark uses the layer as its shader, sampled nearest at a whole-pixel
-offset, under the mark's own coverage, clip, alpha and blend. The work
-counts against the step limit before anything is painted.
+offset, under the mark's own coverage, clip, alpha and blend.
+
+**Limits.** Every mark builds its layer under its own limit probe, before
+anything is recorded or painted, and the operator charges the layer's
+work: a step per 1024 units.
+- **fill** and **stroke**: `Gfx::stroke_limited` is new for this, used by
+  `stroke` and `rectstroke`.
+- **imagemask**: the layer is built over the image's footprint before
+  its SVG and PDF are recorded.
+
+The layer's memory is checked against `--max-memory` before it is
+allocated. So a page-sized layer stops `imagemask` and `stroke` at
+`--max-steps` and `--max-memory`, as it stops `rectfill` (Codex round 1
+on PR #1367).
 
 **SVG.**
 - A gradient with no `/BBox` and no `/Background` is the
@@ -89,6 +101,13 @@ paints only its background becomes a constant axial.
 coordinates (`pattern::context_hop`). The raster layer and the SVG
 `<pattern>` go through the hop, and PDF gets a copy of the dictionary
 under the new `/Matrix`.
+
+**Pages of another height.** A pattern reused on a later page whose height
+differs keeps its device placement, as in the PNG and in gs. The PDF
+`/Matrix` maps to the page's default space, whose flip the height moves,
+so that page gets its own copy of the dictionary. The check compares
+against the `/Matrix` written at `makepattern`, not the context id
+(Codex round 1 on PR #1367).
 
 ## Verification
 

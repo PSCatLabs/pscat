@@ -655,6 +655,9 @@ pub(crate) struct ShadingPattern {
     /// The PDF shading's own space to the context's device space: `matrix`
     /// with the small-geometry rescale (`vector_shading`) folded in.
     pub(crate) pdf_ctm: Transform,
+    /// The `/Matrix` the PDF pattern was written with: `pdf_ctm` into the
+    /// default space of the stream `makepattern` ran in.
+    pub(crate) pdf_matrix: Transform,
 }
 
 /// A shading pattern's SVG form, in its context's device coordinates.

@@ -1092,7 +1092,7 @@ pub(crate) enum ColorSpace {
 
 /// A pattern's raster source (#1038): the pixmap a fill uses as its
 /// shader, the shader's transform, and its sampling.
-type PatternSource = (std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality);
+pub(crate) type PatternSource = (std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality);
 
 /// The current colour in a `/Pattern` space (#1038): the pattern (a
 /// tiling pattern's tile once its `PaintProc` has run, #1341; a shading
@@ -2106,7 +2106,7 @@ impl Gfx {
     /// `[x0, y0, x1, y1]`, cut to the canvas), which must hold every pixel
     /// the mark paints; the second value is that work, which a limited
     /// caller charges.
-    fn pattern_source(
+    pub(crate) fn pattern_source(
         &self,
         region: [i64; 4],
         probe: &crate::limits::LimitProbe,
@@ -2154,15 +2154,16 @@ impl Gfx {
     /// folded in) into a canvas-sized mask, `width` bytes a row, zeroed
     /// inside `rect` and written only there (`x0, y0, x1, y1` in device pixels); the pattern then
     /// fills `rect` through it, as a fill's coverage would, so alpha, blend
-    /// and the shader's placement are a fill's. Does nothing for a solid
-    /// colour. Returns whether `cover` marked any pixel.
+    /// and the shader's placement are a fill's. `src` is the pattern's
+    /// raster source over `rect` (`pattern_source`, made before the image
+    /// recorded or painted anything, under its limits). Does nothing for a
+    /// solid colour. Returns whether `cover` marked any pixel.
     pub(crate) fn fill_pattern_stencil(
         &mut self,
         rect: [u32; 4],
+        src: Option<PatternSource>,
         cover: impl FnOnce(&mut [u8], usize) -> Result<bool, PsError>,
     ) -> Result<bool, PsError> {
-        let region = [rect[0], rect[1], rect[2], rect[3]].map(i64::from);
-        let (src, _) = self.pattern_source(region, &crate::limits::LimitProbe::NONE)?;
         if src.is_none() {
             return Ok(false);
         }
@@ -2256,18 +2257,21 @@ impl Gfx {
                 Some(crate::pattern::Ink::Pattern(tile, rgb, place))
             }
             crate::pattern::PatternRef::Shading(sp) => {
-                let place = if sp.context == self.context() {
-                    None
+                let hop = if sp.context == self.context() {
+                    Transform::identity()
                 } else {
-                    let hop = crate::pattern::context_hop(sp.to_gs, here)?;
-                    Some(crate::pattern::ShadingPlace {
-                        hop,
-                        pdf_matrix: self
-                            .pattern_default_space()
-                            .pre_concat(hop)
-                            .pre_concat(sp.pdf_ctm),
-                    })
+                    crate::pattern::context_hop(sp.to_gs, here)?
                 };
+                // The PDF `/Matrix` maps to the default space of the stream
+                // painting now, which a later page of another height moves
+                // even in the same context: a variant whenever it differs
+                // from the one written at `makepattern`.
+                let pdf_matrix = self
+                    .pattern_default_space()
+                    .pre_concat(hop)
+                    .pre_concat(sp.pdf_ctm);
+                let place = (sp.context != self.context() || pdf_matrix != sp.pdf_matrix)
+                    .then_some(crate::pattern::ShadingPlace { hop, pdf_matrix });
                 Some(crate::pattern::Ink::Shading(sp.clone(), place))
             }
         }
@@ -3093,10 +3097,30 @@ impl Gfx {
     }
 
     pub fn stroke(&mut self) {
+        // No limit to exceed: only a layer that cannot be allocated fails,
+        // and that paints nothing.
+        if self
+            .stroke_limited(&crate::limits::LimitProbe::NONE)
+            .is_err()
+        {
+            self.newpath();
+        }
+    }
+
+    /// [`stroke`](Self::stroke) under the limits: a shading pattern's
+    /// layer (#1298) is made, its work held against the step limit and its
+    /// memory against the cap, before anything is painted or recorded, and
+    /// the work comes back for the operator to charge. A limit leaves the
+    /// path as it was.
+    pub(crate) fn stroke_limited(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
         let Some(ink) = self.ink().filter(|_| !self.painting_off()) else {
             self.newpath();
-            return;
+            return Ok(0);
         };
+        let mut work = 0;
         let dropped = self.stroke_dropped();
         let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
@@ -3120,13 +3144,8 @@ impl Gfx {
                 .map(StrokeDraw::Device),
         };
         if let Some(draw) = drawable {
-            // Not under the limits: `stroke` cannot fail, so a layer it
-            // cannot make paints nothing (and leaves the page unbegun).
-            let none = crate::limits::LimitProbe::NONE;
-            let Ok((src, _)) = self.pattern_source(draw.device_bounds(&stroke), &none) else {
-                self.newpath();
-                return;
-            };
+            let (src, layer_work) = self.pattern_source(draw.device_bounds(&stroke), probe)?;
+            work = layer_work;
             self.prepare_paint();
             let paint = self.paint_from(&src);
             let mask = self.clip_mask();
@@ -3227,6 +3246,7 @@ impl Gfx {
             self.dirty = true;
         }
         self.newpath();
+        Ok(work)
     }
 
     /// The stroker settings the current graphics state implies, plus the
@@ -4561,6 +4581,7 @@ impl Gfx {
         };
         let pdf_ctm = gradient.as_ref().map_or(matrix, |g| g.1);
         let to_default = self.pattern_default_space();
+        let pdf_matrix = to_default.pre_concat(pdf_ctm);
         let pdf = match &mut self.pdf {
             Some(rec) if !singular => {
                 let k = gradient.as_ref().map_or(1.0, |g| f64::from(g.4));
@@ -4571,7 +4592,7 @@ impl Gfx {
                         .map(|(kind, _, stops, extend, _)| (kind, stops.as_slice(), *extend)),
                     bbox.map(|(a, b, c, d)| (a * k, b * k, c * k, d * k)),
                     background,
-                    to_default.pre_concat(pdf_ctm),
+                    pdf_matrix,
                 )
             }
             _ => None,
@@ -4588,6 +4609,7 @@ impl Gfx {
             svg,
             pdf,
             pdf_ctm,
+            pdf_matrix,
         };
         Ok((std::rc::Rc::new(sp), work))
     }

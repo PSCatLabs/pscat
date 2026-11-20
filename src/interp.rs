@@ -2229,6 +2229,8 @@ impl Interp {
             // A Type 3 glyph's end restores its graphics state, which can
             // bring an older page device back (#909).
             let mut stepped_show = false;
+            // A finished image's shading-pattern layer work (#1298).
+            let mut layer_work = 0;
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -2412,11 +2414,17 @@ impl Interp {
                         }
                         match ctx.step(gfx)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
-                            ImageStep::Done => Action::Pop,
+                            ImageStep::Done => {
+                                layer_work = ctx.layer_work.take();
+                                Action::Pop
+                            }
                         }
                     }
                 }
             };
+            if layer_work > 0 {
+                self.charge_probed_steps(layer_work / 1024);
+            }
             if stepped_show {
                 self.after_device_change();
                 self.device_restore_result()?;
