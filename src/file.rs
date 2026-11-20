@@ -590,6 +590,16 @@ impl PsFile {
         self.consumed
     }
 
+    /// The bytes of an in-memory source from `at` on, `None` for a filter
+    /// or an output file. The lint reads the name of the token a scanner is
+    /// running from here (#1338), so nothing is kept per token.
+    pub(crate) fn bytes_from(&self, at: usize) -> Option<&[u8]> {
+        match &self.kind {
+            Kind::Bytes { data, .. } => data.get(at..),
+            Kind::Filter { .. } | Kind::Output(_) => None,
+        }
+    }
+
     /// 1-indexed line of the next unread byte.
     pub fn line(&self) -> usize {
         self.line

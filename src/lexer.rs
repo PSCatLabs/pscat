@@ -221,6 +221,19 @@ impl Lexer {
         self.token_start_pos
     }
 
+    /// The text of the executable name the last-returned token is, for the
+    /// lint (#1338), read back from an in-memory source on demand; `None`
+    /// for any other token or a source that is not in memory.
+    pub(crate) fn token_name(&self) -> Option<String> {
+        let file = self.file.borrow();
+        let rest = file.bytes_from(self.token_start_pos)?;
+        let len = rest.iter().take_while(|&&b| is_regular(b)).count();
+        if len == 0 || len > 256 {
+            return None;
+        }
+        String::from_utf8(rest[..len].to_vec()).ok()
+    }
+
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
         self.file.borrow_mut().peek_byte()
     }

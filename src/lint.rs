@@ -525,6 +525,119 @@ pub(crate) struct ShadowTrace {
     /// was made, as `when the program reached line N` (` (file)` for a
     /// `run` file), `None` when the scanner's line is unknown.
     sites: std::collections::HashMap<(u32, ShadowScope), Option<String>>,
+    /// The source line of every element of the procedure bodies scanned from
+    /// the main program or a `run` file, so a `def` inside a body can say
+    /// where it is written (#1338). Shared with the scanner, which fills it
+    /// as it scans; read only when a shadow is first recorded.
+    pub(crate) bodies: std::rc::Rc<std::cell::RefCell<BodyLines>>,
+}
+
+/// Most elements whose lines are kept. A program scans each procedure once, so
+/// this is only reached by a source file of millions of procedure elements;
+/// past it a `def` falls back to the line that ran it.
+const BODY_LINES_CAP: usize = 4_000_000;
+
+/// Source lines per procedure body, keyed by the address of the body's
+/// storage (see [`PsArray::storage_site`](crate::object::PsArray)). The entry
+/// holds a `Weak` handle, which keeps that address from being given to
+/// another array while the entry exists.
+#[derive(Default)]
+pub(crate) struct BodyLines {
+    bodies: std::collections::HashMap<usize, BodyEntry>,
+    held: usize,
+}
+
+struct BodyEntry {
+    _storage: std::rc::Weak<std::cell::RefCell<Vec<Object>>>,
+    /// One line per element, in scan order.
+    lines: Vec<u32>,
+    /// The `run` file the body was scanned from, `None` for the main program.
+    file: Option<std::rc::Rc<str>>,
+    /// When the body ends in `def` or `store`: the literal names it spells
+    /// before it, kept because the body itself may be gone by the time its
+    /// `def` runs (a branch of `{ ... } if` is freed as it finishes).
+    tail_names: Vec<u32>,
+}
+
+impl BodyLines {
+    /// Keep `lines` (one per element) for the freshly scanned `body`.
+    pub(crate) fn register(
+        &mut self,
+        body: &crate::object::PsArray,
+        lines: Vec<u32>,
+        file: Option<std::rc::Rc<str>>,
+    ) {
+        if lines.len() != body.len() || self.held + lines.len() > BODY_LINES_CAP {
+            return;
+        }
+        self.held += lines.len();
+        let tail_names = body.with_slice(|els| match els.split_last() {
+            Some((last, before)) if is_binding_op(last) => before
+                .iter()
+                .filter_map(|o| match &o.value {
+                    Value::Name(n) if !o.executable => Some(n.id()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        });
+        self.bodies.insert(
+            body.storage_site(0).0,
+            BodyEntry {
+                _storage: body.storage_weak(),
+                lines,
+                file,
+                tail_names,
+            },
+        );
+    }
+
+    /// The body ending in a `def` of `name_id` that sits on the greatest line not
+    /// after `line` in `file`: the literal procedure just before the operator the
+    /// scanner is running (`{ ... } if`), which no frame holds any more (#1338).
+    /// It may be dead by now, which is why the names are kept. `None` when no
+    /// body does, or two different ones sit on that line.
+    pub(crate) fn nearest_before(
+        &self,
+        line: usize,
+        file: Option<&std::rc::Rc<str>>,
+        name_id: u32,
+    ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
+        let mut best: Option<(u32, usize)> = None;
+        let mut tie = false;
+        for (key, entry) in &self.bodies {
+            let Some(&at) = entry.lines.last() else {
+                continue;
+            };
+            if entry.file.as_ref() != file
+                || usize::try_from(at).map_or(true, |a| a > line)
+                || !entry.tail_names.contains(&name_id)
+            {
+                continue;
+            }
+            match best {
+                Some((b, _)) if b > at => {}
+                Some((b, k)) if b == at => tie |= k != *key,
+                _ => {
+                    best = Some((at, *key));
+                    tie = false;
+                }
+            }
+        }
+        best.filter(|_| !tie)
+            .map(|(at, key)| (at, self.bodies[&key].file.clone()))
+    }
+
+    /// The line (and `run` file) element `i` of `body` was written on.
+    pub(crate) fn line_of(
+        &self,
+        body: &crate::object::PsArray,
+        i: usize,
+    ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
+        let (key, at) = body.storage_site(i);
+        let entry = self.bodies.get(&key)?;
+        Some((*entry.lines.get(at)?, entry.file.clone()))
+    }
 }
 
 impl ShadowTrace {
@@ -574,6 +687,30 @@ pub(crate) fn shadow_kind(builtin: &Object, value: &Object) -> Option<&'static s
     }
     let kind = value.type_name();
     Some(kind.strip_suffix("type").unwrap_or(kind))
+}
+
+/// Whether `o` is the `def` or `store` operator, or an executable name that
+/// is spelt that way (#1338).
+pub(crate) fn is_binding_op(o: &Object) -> bool {
+    if !o.executable {
+        return false;
+    }
+    match &o.value {
+        Value::Operator(op) => matches!(op.name, "def" | "store"),
+        Value::Name(n) => matches!(&**n, "def" | "store"),
+        _ => false,
+    }
+}
+
+/// Whether `body` spells the literal name `/name_id` before element `end`.
+pub(crate) fn writes_name(body: &crate::object::PsArray, end: usize, name_id: u32) -> bool {
+    body.with_slice(|els| spells_name(&els[..end.min(els.len())], name_id))
+}
+
+/// Whether the literal name `/name_id` is among `els`.
+pub(crate) fn spells_name(els: &[Object], name_id: u32) -> bool {
+    els.iter()
+        .any(|o| !o.executable && matches!(&o.value, Value::Name(n) if n.id() == name_id))
 }
 
 /// One shadow to report.
@@ -1343,8 +1480,111 @@ mod tests {
     fn a_def_inside_a_procedure_names_the_line_that_ran_it() {
         let found = shadow_messages(&traced("/f {\n /sub 1 def\n} def\n\nf"));
         assert!(
-            found[0].contains("as an integer when the program reached line 5, replacing"),
+            found[0].contains("as an integer when the program reached line 2, replacing"),
             "{found:?}"
+        );
+    }
+
+    /// The line the one `shadowed-operator` finding of `src` names.
+    fn shadow_line(src: &str) -> String {
+        let found = shadow_messages(&traced(src));
+        assert_eq!(found.len(), 1, "{found:?}");
+        let rest = found[0]
+            .split("when the program reached line ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no line in {found:?}"));
+        rest.split([',', ' ']).next().unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn a_def_in_a_loop_body_names_its_own_line() {
+        // The `for` loop ends on line 4; the `def` is on line 2 (#1338).
+        assert_eq!(shadow_line("0 1 3 {\n  /ln exch def\n  1 pop\n} for"), "2");
+        assert_eq!(shadow_line("3 {\n  1 pop\n  /ln 2 def\n} repeat"), "3");
+        assert_eq!(shadow_line("[1 2] {\n  /ln exch def\n} forall"), "2");
+        assert_eq!(shadow_line("{\n  /ln 1 def\n  exit\n} loop"), "2");
+    }
+
+    #[test]
+    fn a_def_that_is_not_the_last_element_of_its_body_names_its_own_line() {
+        assert_eq!(
+            shadow_line("/f {\n  /ln 1 def\n  1 pop\n  2 pop\n} def\n\n\nf"),
+            "2"
+        );
+        // Two shadows in one body: each has its own line, the first is kept per name.
+        let found = shadow_messages(&traced("/f {\n /sub 1 def\n\n /add 2 def\n} def\nf"));
+        assert!(found[0].contains("line 4"), "{found:?}");
+        assert!(found[1].contains("line 2"), "{found:?}");
+    }
+
+    #[test]
+    fn a_def_reached_through_a_chain_of_calls_names_its_own_line() {
+        assert_eq!(
+            shadow_line("/g {\n /div 3 def\n} def\n/h { g } def\n/i { h } def\n\n\ni"),
+            "2"
+        );
+        // From inside another procedure's body, as one of its elements.
+        assert_eq!(
+            shadow_line("/g {\n /div 3 def\n} def\n/h { g 1 pop } def\n\nh"),
+            "2"
+        );
+    }
+
+    #[test]
+    fn a_def_in_a_conditional_branch_names_its_own_line() {
+        assert_eq!(shadow_line("true {\n  /abs 1 def\n} if"), "2");
+        assert_eq!(
+            shadow_line("/f { true {\n  /abs 1 def\n} {\n  /neg 2 pop\n} ifelse } def\nf"),
+            "2"
+        );
+        assert_eq!(shadow_line("{\n /abs 1 def\n} stopped pop"), "2");
+        assert_eq!(
+            shadow_line("/c true def\n\nc {\n  /abs 1 def\n} if\n"),
+            "4"
+        );
+    }
+
+    #[test]
+    fn a_bound_procedure_still_names_the_line_of_its_def() {
+        assert_eq!(shadow_line("/f {\n /ln 1 def\n} bind def\n\nf"), "2");
+    }
+
+    #[test]
+    fn a_nested_procedure_names_the_line_of_its_def() {
+        assert_eq!(
+            shadow_line("/f {\n  1 {\n    /ln 1 def\n  } repeat\n} def\n\n\nf"),
+            "3"
+        );
+    }
+
+    #[test]
+    fn a_def_that_cannot_be_placed_names_the_line_that_ran_it() {
+        // A body taken off the stack, a computed name, and a name defined by a
+        // helper: no body spells `/name` next to a `def`, so the line the scanner
+        // had reached is kept, as before (#1109).
+        assert_eq!(shadow_line("/ln 5\n\n{ def }\n\nexec"), "5");
+        assert_eq!(
+            shadow_line("/set {\n exch def\n} def\n\n3 /ln set"),
+            "5"
+        );
+        // Two branches that both spell the name: not guessed.
+        assert_eq!(
+            shadow_line("/f { true {\n /ln 1 def\n} {\n /ln 2 def\n} ifelse } def\n\n\nf"),
+            "8"
+        );
+        // Called in order, the first one to run is the one reported.
+        assert_eq!(
+            shadow_line("/a { /ln 1 def } def\n/b {\n /ln 2 def } def\n/c { a b } def\n\nc"),
+            "1"
+        );
+    }
+
+    #[test]
+    fn a_top_level_def_after_a_call_still_names_its_own_line() {
+        // An earlier body that spells the same name must not be picked.
+        assert_eq!(
+            shadow_line("/f { /ln { 1 } def } def\nf\n\n/ln 5 def"),
+            "4"
         );
     }
 
