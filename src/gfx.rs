@@ -5541,13 +5541,11 @@ fn gradient_parts(
             let stops = if degenerate_radial(dist, r0, r1) {
                 // tiny-skia paints the first stop inside the circle and
                 // the last outside; give it gs's picture (#1040).
-                match degenerate_radial_inside(shading) {
-                    Some(c) => vec![
-                        GradientStop::new(0.0, c),
-                        GradientStop::new(1.0, Color::TRANSPARENT),
-                    ],
-                    None => return None,
-                }
+                let c = degenerate_radial_inside(shading)?;
+                vec![
+                    GradientStop::new(0.0, c),
+                    GradientStop::new(1.0, Color::TRANSPARENT),
+                ]
             } else {
                 // Circles neither inside the other (a cone): a point can
                 // lie on two of them, and gs paints the larger t that
