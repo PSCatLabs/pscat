@@ -46,9 +46,40 @@ It copies regular files only: dotfiles and symbolic links are skipped with a
 stderr note (a symlink in a plugin's directory could otherwise carry a file
 from outside it into a directory the MCP server may read). More than 2000
 files, 256 MiB, or a file over the resolver's 64 MiB `lib/` cap is refused.
-The new copy is built in `.NAME.new-<pid>` beside the old one and swapped in,
-so a re-install never merges: the message says how many files the old install
-had and names the ones the package no longer holds.
+
+*Copying while the source changes (Codex round 1).* The scan (`collect`) looks
+at a file by path, so a concurrent writer could swap a file for a link, or grow
+it, before the copy. The copy therefore does not reopen the path with
+`fs::copy`: each file is opened once with `O_NOFOLLOW` (Windows: opened with
+`FILE_FLAG_OPEN_REPARSE_POINT`, then refused if the handle carries the reparse
+attribute), `O_NONBLOCK` so a swapped-in FIFO cannot hang the open, checked
+regular on the handle, and read through `take(room + 1)` where `room` is the
+smaller of the per-file cap and what is left of the total cap; reading past
+`room` is an error. Residual: the check that no *directory* on the way was
+swapped for a link (`canonicalize` of the parent must stay under the package)
+runs just before the open, and std has no `openat`, so a swap in between is not
+closed. The Windows branch is written to the documented flags but was not run.
+
+*Scratch directories.* A re-install never merges: the message says how many files
+the old install had and names the ones the package no longer holds. The new copy is built in `.NAME.new-<pid>` and the old
+package is moved into `.NAME.old-<pid>/old`. Both directories are created
+exclusively, so a directory of that name that this run did not make (a hand-made
+one, or one left by a crash that a later process with the same pid trips over)
+is refused with a message, never deleted; the `.pscat-lib` marker protection
+cannot be bypassed through them. Only a directory this run created is removed.
+A stale one still has to be removed by hand (#1344).
+
+*The swap is not atomic.* Replacing a non-empty directory takes two renames
+(old aside, new in), and there is no portable single call for it. Between them
+`lib/NAME` does not exist, so a program that runs `(lib/NAME/main.ps) run` in
+that instant fails to find it; a process killed in that gap leaves the old
+package under `.NAME.old-<pid>/old` and nothing at `lib/NAME` (recoverable by
+renaming it back). What is done: the two renames are back to back, with the new
+copy fully built first, so the window is the time of two `rename` calls; and a
+failure of the second rename puts the old package back (if that fails too the
+error names where the old package is and leaves it alone). Not done: Linux
+`renameat2(RENAME_EXCHANGE)` or macOS `renamex_np(RENAME_SWAP)`, which would
+make the swap atomic on those platforms, are not used.
 
 Deferred: a `--force` for a directory not made by `install`; `lib remove`;
 Windows-style `\` separators in `currentfilename` paths (the PostScript-side

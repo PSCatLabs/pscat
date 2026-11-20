@@ -257,6 +257,160 @@ fn collect_quiet(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> std::io::R
     Ok(())
 }
 
+/// Create a scratch directory that must not already exist. A leftover from an
+/// interrupted run (or one made by hand) is not ours to delete, so it is a
+/// refusal with the way out, never a `remove_dir_all`.
+fn make_scratch(path: &Path) -> Result<(), String> {
+    match fs::create_dir(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+            "{} already exists, and this run did not make it (left by an interrupted \
+             install, or made by hand); move or remove it and run again",
+            path.display()
+        )),
+        Err(e) => Err(format!("cannot create {}: {e}", path.display())),
+    }
+}
+
+/// Open `path` for reading without following a symbolic link in its last
+/// component, and only if what was opened is a regular file. The check is on
+/// the handle, so a file swapped for a link after [`collect`] looked at it is
+/// refused instead of followed.
+fn open_regular(path: &Path) -> std::io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NONBLOCK: a FIFO swapped in cannot hold the open forever.
+        opts.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = opts.open(path)?;
+    let md = file.metadata()?;
+    #[cfg(windows)]
+    let reparse = {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    };
+    #[cfg(not(windows))]
+    let reparse = false;
+    if reparse || !md.is_file() {
+        return Err(std::io::Error::other("is not a regular file any more"));
+    }
+    Ok(file)
+}
+
+/// Copy one source file to `to` (which must not exist), reading from a single
+/// handle opened by [`open_regular`] and never past the byte caps, so a file
+/// that grows after [`collect`] sized it cannot take more than the limits
+/// allow. `spent` is the bytes copied so far in this install.
+fn copy_item(root: &Path, item: &Item, to: &Path, spent: &mut u64) -> std::io::Result<()> {
+    let named = |e: std::io::Error| std::io::Error::other(format!("{}: {e}", item.rel));
+    // An intermediate directory swapped for a link is caught here when it
+    // happened before this call; the window between this check and the open
+    // is not closed (that would take openat, which std does not offer).
+    if let Some(parent) = item.from.parent() {
+        let real = fs::canonicalize(parent).map_err(named)?;
+        if !real.starts_with(root) {
+            return Err(named(std::io::Error::other("is now outside the package")));
+        }
+    }
+    let mut src = open_regular(&item.from).map_err(named)?;
+    let md = src.metadata().map_err(named)?;
+    let room = MAX_FILE_BYTES.min(MAX_TOTAL_BYTES.saturating_sub(*spent));
+    if md.len() > room {
+        return Err(named(std::io::Error::other(format!(
+            "is {} bytes, over the {room} bytes still allowed",
+            md.len()
+        ))));
+    }
+    let mut dst = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(to)?;
+    let n = copy_limited(&mut src, &mut dst, room).map_err(named)?;
+    dst.set_permissions(md.permissions())?;
+    *spent += n;
+    Ok(())
+}
+
+/// Copy at most `room` bytes: reading one byte more than that is an error,
+/// and no more than `room + 1` bytes are ever written.
+fn copy_limited(
+    from: &mut impl std::io::Read,
+    to: &mut impl std::io::Write,
+    room: u64,
+) -> std::io::Result<u64> {
+    use std::io::Read;
+    let n = std::io::copy(&mut from.take(room + 1), to)?;
+    if n > room {
+        return Err(std::io::Error::other(format!(
+            "grew past the {room} bytes still allowed while it was copied"
+        )));
+    }
+    Ok(n)
+}
+
+/// `fs::rename`, as a plain function so `swap_in` can take a stand-in for it.
+fn rename_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::rename(from, to)
+}
+
+/// Put `stage` where `dest` is. With an old package (`had_old`) it is first
+/// renamed into `holder` (a directory made here, exclusively), then `stage` is
+/// renamed to `dest`. Two renames are not atomic: between them `dest` does not
+/// exist, so a program loading `lib/NAME/...` at that instant finds nothing.
+/// The window is two back-to-back renames, and a failure of the second puts
+/// the old package back. If even that fails, the error names where the old
+/// package is, and `holder` is left alone.
+fn swap_in(
+    stage: &Path,
+    dest: &Path,
+    holder: &Path,
+    had_old: bool,
+    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let old = holder.join("old");
+    if had_old {
+        make_scratch(holder)?;
+        if let Err(e) = rename(dest, &old) {
+            let _ = fs::remove_dir(holder);
+            return Err(format!("cannot replace {}: {e}", dest.display()));
+        }
+    }
+    if let Err(e) = rename(stage, dest) {
+        if !had_old {
+            return Err(format!("cannot install {}: {e}", dest.display()));
+        }
+        return match rename(&old, dest) {
+            Ok(()) => {
+                let _ = fs::remove_dir(holder);
+                Err(format!(
+                    "cannot install {}: {e} (the previous install is back in place)",
+                    dest.display()
+                ))
+            }
+            Err(e2) => Err(format!(
+                "cannot install {}: {e}; and the previous install could not be put back \
+                 ({e2}): it is at {}",
+                dest.display(),
+                old.display()
+            )),
+        };
+    }
+    if had_old {
+        let _ = fs::remove_dir_all(holder);
+    }
+    Ok(())
+}
+
 fn install(lib: &Path, dir: &Path, name: Option<&str>, builtins: &[&str]) -> Result<(), Failure> {
     let src =
         fs::canonicalize(dir).map_err(|e| fail(format!("cannot read {}: {e}", dir.display())))?;
@@ -339,18 +493,21 @@ fn install(lib: &Path, dir: &Path, name: Option<&str>, builtins: &[&str]) -> Res
         Err(e) => return Err(fail(format!("cannot read {}: {e}", dest.display()))),
     }
 
-    // Build the new package beside the old one, then swap.
+    // Build the new package beside the old one, then swap. Both scratch
+    // directories are made exclusively, so only a directory this run created
+    // is ever deleted (a hand-made `.NAME.new-<pid>` is refused, not removed).
     let pid = std::process::id();
     let stage = lib.join(format!(".{name}.new-{pid}"));
-    let aside = lib.join(format!(".{name}.old-{pid}"));
-    let _ = fs::remove_dir_all(&stage);
+    let holder = lib.join(format!(".{name}.old-{pid}"));
+    make_scratch(&stage).map_err(fail)?;
+    let mut spent = 0u64;
     let built = (|| -> std::io::Result<()> {
         for i in &items {
             let to = stage.join(&i.rel);
             if let Some(parent) = to.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::copy(&i.from, &to)?;
+            copy_item(&src, i, &to, &mut spent)?;
         }
         fs::write(
             stage.join(MARKER),
@@ -361,22 +518,11 @@ fn install(lib: &Path, dir: &Path, name: Option<&str>, builtins: &[&str]) -> Res
         let _ = fs::remove_dir_all(&stage);
         return Err(fail(format!("cannot copy into {}: {e}", stage.display())));
     }
-    if replaced.is_some() {
-        let _ = fs::remove_dir_all(&aside);
-        if let Err(e) = fs::rename(&dest, &aside) {
-            let _ = fs::remove_dir_all(&stage);
-            return Err(fail(format!("cannot replace {}: {e}", dest.display())));
-        }
-    }
-    if let Err(e) = fs::rename(&stage, &dest) {
-        if replaced.is_some() {
-            let _ = fs::rename(&aside, &dest);
-        }
+    if let Err(e) = swap_in(&stage, &dest, &holder, replaced.is_some(), &rename_path) {
+        // The stage is ours; the holder is removed by `swap_in` unless it
+        // still holds the only copy of the old package.
         let _ = fs::remove_dir_all(&stage);
-        return Err(fail(format!("cannot install {}: {e}", dest.display())));
-    }
-    if replaced.is_some() {
-        let _ = fs::remove_dir_all(&aside);
+        return Err(fail(e));
     }
 
     match replaced {
@@ -525,5 +671,210 @@ mod tests {
                 assert!(check_name(candidate, &real).is_err(), "{candidate}");
             }
         }
+    }
+
+    /// A fresh directory for one test (src tests cannot reach
+    /// `tests/common`; same naming as the other unit tests here).
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pscat-libpkg-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::canonicalize(&dir).unwrap()
+    }
+
+    /// The message of a refused install (`Failure` has no `Debug`).
+    fn failure_text(r: Result<(), Failure>) -> String {
+        match r {
+            Err(Failure::Msg(m)) => m,
+            Err(_) => "not a message failure".into(),
+            Ok(()) => panic!("expected a refusal"),
+        }
+    }
+
+    fn item(from: PathBuf, rel: &str) -> Item {
+        Item {
+            from,
+            rel: rel.to_string(),
+            len: 0,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_a_link_after_the_scan_is_not_followed() {
+        let base = scratch("toctou-link");
+        let root = base.join("pkg");
+        fs::create_dir_all(&root).unwrap();
+        let secret = base.join("secret.txt");
+        fs::write(&secret, "private").unwrap();
+        // collect saw a regular file here; now it is a link to a file outside.
+        let victim = root.join("a.ps");
+        fs::write(&victim, "ok").unwrap();
+        let mut items = Vec::new();
+        collect(&root, 0, "", &mut items).unwrap();
+        assert_eq!(items.len(), 1);
+        fs::remove_file(&victim).unwrap();
+        std::os::unix::fs::symlink(&secret, &victim).unwrap();
+        let to = base.join("out.ps");
+        let e = copy_item(&root, &items[0], &to, &mut 0).expect_err("followed a link");
+        assert!(e.to_string().contains("a.ps"), "{e}");
+        assert!(!to.exists() || fs::read_to_string(&to).unwrap().is_empty());
+        // A directory swapped for a link to a directory outside is refused too.
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("sub/b.ps"), "ok").unwrap();
+        let mut items = Vec::new();
+        collect(&root, 0, "", &mut items).unwrap();
+        let b = items.iter().find(|i| i.rel == "sub/b.ps").unwrap();
+        let outside = base.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("b.ps"), "stolen").unwrap();
+        fs::remove_dir_all(root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("sub")).unwrap();
+        let to = base.join("out2.ps");
+        let e = copy_item(&root, b, &to, &mut 0).expect_err("followed a directory link");
+        assert!(e.to_string().contains("outside"), "{e}");
+        assert!(!to.exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_swapped_in_does_not_hang_or_copy() {
+        let base = scratch("toctou-fifo");
+        let fifo = base.join("f.ps");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let to = base.join("out.ps");
+        assert!(copy_item(&base, &item(fifo, "f.ps"), &to, &mut 0).is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_file_that_grew_is_cut_off_at_the_cap() {
+        let base = scratch("toctou-grow");
+        let from = base.join("a.ps");
+        fs::write(&from, vec![b'x'; 100]).unwrap();
+        let to = base.join("out.ps");
+        // collect sized it small; the total allowance left is 40 bytes.
+        let mut spent = MAX_TOTAL_BYTES - 40;
+        let e = copy_item(&base, &item(from.clone(), "a.ps"), &to, &mut spent)
+            .expect_err("copied past the cap");
+        assert!(e.to_string().contains("a.ps"), "{e}");
+        // The copy never wrote more than the allowance plus the probe byte.
+        assert!(!to.exists() || fs::metadata(&to).unwrap().len() <= 41);
+        // Within the allowance it copies, and counts what it copied.
+        let mut spent = 0;
+        let to2 = base.join("out2.ps");
+        copy_item(&base, &item(from, "a.ps"), &to2, &mut spent).unwrap();
+        assert_eq!(spent, 100);
+        assert_eq!(fs::metadata(&to2).unwrap().len(), 100);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_copy_stops_one_byte_past_its_room() {
+        // A reader that holds more than `room`, as a file that grew after
+        // the scan would: it errors, and never writes more than room + 1.
+        let room = 64u64;
+        let data = vec![b'x'; room as usize + 10];
+        let mut out = Vec::new();
+        let e = copy_limited(&mut std::io::Cursor::new(&data), &mut out, room)
+            .expect_err("copied past the room");
+        assert!(e.to_string().contains("grew past"), "{e}");
+        assert_eq!(out.len() as u64, room + 1);
+        let mut out = Vec::new();
+        let n = copy_limited(&mut std::io::Cursor::new(&data[..64]), &mut out, room).unwrap();
+        assert_eq!((n, out.len()), (64, 64));
+    }
+
+    #[test]
+    fn a_scratch_directory_that_exists_is_refused_and_left_alone() {
+        let base = scratch("scratch-collide");
+        let src = base.join("mypkg");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.ps"), "1").unwrap();
+        let lib = base.join("lib");
+        fs::create_dir_all(&lib).unwrap();
+        let pid = std::process::id();
+        // Hand-made directories with the names this run would use.
+        for leftover in [format!(".mypkg.new-{pid}"), format!(".mypkg.old-{pid}")] {
+            let hand = lib.join(&leftover);
+            fs::create_dir_all(&hand).unwrap();
+            fs::write(hand.join("precious.txt"), "mine").unwrap();
+            // The .old holder is only made when replacing, so install once first.
+            let first = install(&lib, &src, None, &[]);
+            if leftover.contains(".new-") {
+                let e = failure_text(first);
+                assert!(e.contains("already exists"), "{e}");
+                assert!(!lib.join("mypkg").exists());
+            } else {
+                assert!(first.is_ok());
+                let e = failure_text(install(&lib, &src, None, &[]));
+                assert!(e.contains("already exists"), "{e}");
+                // The installed package is untouched by the refused re-install.
+                assert!(lib.join("mypkg/a.ps").is_file());
+            }
+            assert_eq!(
+                fs::read_to_string(hand.join("precious.txt")).unwrap(),
+                "mine",
+                "{leftover} was deleted"
+            );
+            assert!(
+                fs::read_dir(&lib)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .all(|e| !e.file_name().to_string_lossy().contains(".new-")
+                        || e.file_name().to_string_lossy() == leftover),
+                "a stage of this run was left behind"
+            );
+            fs::remove_dir_all(&hand).unwrap();
+            let _ = fs::remove_dir_all(lib.join("mypkg"));
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_failed_second_rename_puts_the_old_package_back() {
+        let base = scratch("swap-fail");
+        let dest = base.join("pkg");
+        let stage = base.join(".pkg.new");
+        let holder = base.join(".pkg.old");
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("old.ps"), "old").unwrap();
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("new.ps"), "new").unwrap();
+        // Fail the rename of the stage into place, pass the others.
+        let from_stage = stage.clone();
+        let failing = move |a: &Path, b: &Path| {
+            if a == from_stage {
+                Err(std::io::Error::other("injected"))
+            } else {
+                fs::rename(a, b)
+            }
+        };
+        let e = swap_in(&stage, &dest, &holder, true, &failing).expect_err("must fail");
+        assert!(e.contains("injected") && e.contains("back in place"), "{e}");
+        assert_eq!(fs::read_to_string(dest.join("old.ps")).unwrap(), "old");
+        assert!(!holder.exists(), "holder not cleaned up");
+        assert!(stage.is_dir(), "swap_in leaves the stage to its caller");
+        // If putting it back fails too, the error says where the old one is.
+        let all_fail = |a: &Path, b: &Path| {
+            if a.ends_with("old") || a == stage {
+                Err(std::io::Error::other("injected"))
+            } else {
+                fs::rename(a, b)
+            }
+        };
+        let e = swap_in(&stage, &dest, &holder, true, &all_fail).expect_err("must fail");
+        assert!(e.contains("could not be put back"), "{e}");
+        assert!(e.contains(holder.to_str().unwrap()), "{e}");
+        // Put the old package back by hand, then success replaces it and
+        // removes the holder.
+        fs::rename(holder.join("old"), &dest).unwrap();
+        fs::remove_dir(&holder).unwrap();
+        swap_in(&stage, &dest, &holder, true, &rename_path).unwrap();
+        assert!(dest.join("new.ps").is_file() && !dest.join("old.ps").exists());
+        assert!(!holder.exists());
+        let _ = fs::remove_dir_all(&base);
     }
 }
