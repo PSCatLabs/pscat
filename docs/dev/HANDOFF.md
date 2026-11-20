@@ -1458,7 +1458,7 @@ renders eight examples in both and compares block-downsampled output).
   Linux `cross-platform` CI jobs set after installing gs. The poppler tests
   (`pdftotext`, `pdftoppm`) use `common::poppler_available(tool)` and
   `PSCAT_REQUIRE_POPPLER=1` the same way (#1206), set only on the Linux job
-  that installs `poppler-utils`.
+  that installs `poppler-utils`; the other jobs skip them.
 
 - **An anisotropic CTM strokes in pen space** (#1196, `Gfx::stroke_space`,
   `notes/1196-anisotropic-stroke-pen.md`). `stroke`, `strokepath` and

@@ -46,7 +46,7 @@ the original vision and staged milestones are history, kept in
   through `common::poppler_available(tool)` the same way: a `ran` or `SKIPPED`
   line on stderr, and `PSCAT_REQUIRE_POPPLER=1` (set on the Linux
   `cross-platform` job, which installs `poppler-utils`) makes a missing tool
-  panic. The macOS and Windows jobs skip them.
+  panic. The macOS, Windows and `crate` jobs skip them.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.
