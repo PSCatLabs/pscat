@@ -1850,7 +1850,7 @@ const PAGE_RAMP: &str = "<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpac
      /Extend [true true] >> >> matrix makepattern setpattern\n";
 
 /// pscat on a 1000 x 1000 page of `src` under `limit` (`--max-steps N` or
-/// `--max-memory MIB`): whether it succeeded, and its stderr. A child
+/// `--max-memory MIB`): whether it succeeded, and its stdout then stderr. A child
 /// process, as the memory limit counts the whole process's heap.
 fn limited(src: &str, limit: [&str; 2]) -> (bool, String) {
     use common::CommandDeadline as _;
@@ -1866,7 +1866,11 @@ fn limited(src: &str, limit: [&str; 2]) -> (bool, String) {
         .expect("spawn pscat");
     (
         out.status.success(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
     )
 }
 
@@ -2017,4 +2021,61 @@ p setpattern 0 0 100 200 rectfill
             );
         }
     }
+}
+
+// --- Codex round 2 on PR #1367 ---------------------------------------------
+
+/// A layer the shading paints nothing into still costs its allocation and
+/// its `/Background`, which paints every pixel: an axis that collapses
+/// with a background, page-sized under an imagemask or a stroke, is held
+/// against the step limit like any other (Codex round 2, P1).
+#[test]
+fn a_background_only_shading_layer_is_charged() {
+    let bg = "<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+              /Coords [0 0 0 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] \
+              /C1 [0 0 1] /N 1 >> /Background [1 0 0] >> >> matrix makepattern setpattern\n";
+    for (op, mark) in [
+        (
+            "imagemask",
+            "1000 1000 scale 1 1 true [1 0 0 1 0 0] <80> imagemask",
+        ),
+        (
+            "stroke",
+            "600 setlinewidth 0 500 moveto 1000 500 lineto stroke",
+        ),
+    ] {
+        let src = format!("{bg}{mark}\n");
+        let (ok, out) = limited(&src, ["--max-steps", "1000"]);
+        assert!(
+            !ok && out.contains("limitexceeded (steps)")
+                && out.contains(&format!("OffendingCommand: {op}")),
+            "{op}: {out}"
+        );
+        let (ok, out) = limited(&src, ["--max-steps", "0"]);
+        assert!(ok, "{op} with no limit: {out}");
+    }
+}
+
+/// An imagemask's layer is held against the steps left when it is made,
+/// not when the image began: steps its data-source procedure spent in
+/// between count (Codex round 2, P2). At this budget the plain image fits
+/// and the one whose procedure loops 20000 times does not, and the limit
+/// stops it at the imagemask, before anything after it runs.
+#[test]
+fn an_imagemask_layer_counts_the_steps_its_data_source_spent() {
+    let image = |source: &str| {
+        format!(
+            "{PAGE_RAMP}1000 1000 scale 1 1 true [1 0 0 1 0 0] {source} imagemask \
+             (AFTER_IMAGE) =\n"
+        )
+    };
+    let (ok, out) = limited(&image("{<80>}"), ["--max-steps", "40000"]);
+    assert!(ok && out.contains("AFTER_IMAGE"), "plain: {out}");
+    let (ok, out) = limited(&image("{20000 {} repeat <80>}"), ["--max-steps", "40000"]);
+    assert!(
+        !ok && !out.contains("AFTER_IMAGE")
+            && out.contains("limitexceeded (steps)")
+            && out.contains("OffendingCommand: imagemask"),
+        "looping source: {out}"
+    );
 }

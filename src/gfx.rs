@@ -5818,11 +5818,18 @@ pub(crate) fn shading_layer(
 ) -> Result<(Pixmap, u64), PsError> {
     use crate::shading::ParsedShading;
     let (wu, hu) = (w as usize, h as usize);
+    // The layer itself, whatever paints into it: allocated, the background
+    // and the BBox mask painted over every pixel, then the mark composites
+    // it. Charged on every path, a shading that paints nothing included,
+    // and held against the step limit before anything is done (Codex round
+    // 2 on PR #1367: a background-only layer ran uncharged).
+    let base = shfill_work(wu, hu, 2);
+    probe.check(base / 1024)?;
     // The layer, the BBox mask, and a two-root or Type 1 layer over it.
     probe.check_alloc(wu.saturating_mul(hu).saturating_mul(9))?;
     let mut layer = Pixmap::new(w, h).ok_or(PsError::Limitcheck)?;
     if matrix.invert().is_none() {
-        return Ok((layer, 0));
+        return Ok((layer, base));
     }
     // Pattern space to the layer's pixels.
     let ctm = Transform::from_translate(-(x0 as f32), -(y0 as f32)).pre_concat(matrix);
@@ -5850,10 +5857,12 @@ pub(crate) fn shading_layer(
     let work = match shading {
         ParsedShading::Gradient(g) => {
             let Some((shader, smaller, nstops)) = gradient_parts(g, ctm, g.extend) else {
-                return Ok((layer, 0));
+                return Ok((layer, base));
             };
             let passes = if smaller.is_some() { 3 } else { 1 };
-            let work = shfill_work(wu, hu, nstops).saturating_mul(passes);
+            let work = shfill_work(wu, hu, nstops)
+                .saturating_mul(passes)
+                .saturating_add(base);
             probe.check(work / 1024)?;
             match smaller {
                 Some(smaller) => {
@@ -5897,9 +5906,11 @@ pub(crate) fn shading_layer(
             let t = function_to_device(f.matrix, ctm);
             let [dx0, dx1, dy0, dy1] = f.domain;
             let Some(inv) = function_inverse(&t).filter(|_| dx0 != dx1 && dy0 != dy1) else {
-                return Ok((layer, 0));
+                return Ok((layer, base));
             };
-            let work = shfill_work(wu, hu, 64).saturating_add(shfill_work(wu, hu, 2));
+            let work = shfill_work(wu, hu, 64)
+                .saturating_add(shfill_work(wu, hu, 2))
+                .saturating_add(base);
             probe.check(work / 1024)?;
             let to_shading = |dx: f64, dy: f64| {
                 let (u, v) = (dx - t[4], dy - t[5]);

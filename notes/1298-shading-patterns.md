@@ -77,6 +77,17 @@ allocated. So a page-sized layer stops `imagemask` and `stroke` at
 `--max-steps` and `--max-memory`, as it stops `rectfill` (Codex round 1
 on PR #1367).
 
+Two later fixes (Codex round 2 on PR #1367):
+- **A layer costs its pixels even when the shading paints nothing.** An
+  axis that collapses, with a `/Background`, fills the whole layer. The
+  allocation, background and mask work is charged on every path,
+  including every early return.
+- **An imagemask checks its layer against the steps left at that
+  moment,** not against the probe taken when the image began. The image
+  frame steps with the limits now in force, so steps its data-source
+  procedure spent count.
+
+
 **SVG.**
 - A gradient with no `/BBox` and no `/Background` is the
   `<linearGradient>`/`<radialGradient>` itself, as `shfill` writes it.

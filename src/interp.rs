@@ -2231,6 +2231,12 @@ impl Interp {
             let mut stepped_show = false;
             // A finished image's shading-pattern layer work (#1298).
             let mut layer_work = 0;
+            // An image frame steps with the limits now in force, not the
+            // ones it began with: its data-source procedure has spent steps
+            // since, which its shading pattern's layer must not spend again
+            // (Codex round 2 on PR #1367).
+            let image_probe =
+                matches!(self.estack.last(), Some(Frame::Image(_))).then(|| self.limit_probe());
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -2411,6 +2417,9 @@ impl Interp {
                             }
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
+                        }
+                        if let Some(probe) = image_probe {
+                            ctx.probe = probe;
                         }
                         match ctx.step(gfx)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
