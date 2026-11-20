@@ -336,6 +336,16 @@ impl Options {
             interp.trace_operator_shadows();
             interp.trace_stack_leaks();
         }
+        // `currentfilename` (#1056) answers with the file as given; `-e`
+        // wins over a file argument, `-` is stdin, which has no name, and an
+        // `--interactive` file is a prelude whose name would otherwise
+        // answer for every line typed after it.
+        if self.eval.is_none()
+            && !self.interactive
+            && let Some(path) = self.file.as_deref().filter(|p| *p != "-")
+        {
+            interp.set_main_file_name(Some(path));
+        }
         Ok(interp)
     }
 
@@ -2581,6 +2591,13 @@ fn print_usage() {
     println!(
         "  pscat sheet a.ps b.ps ...    labelled review sheet: files or sweeps at several sizes, one PNG"
     );
+    println!(
+        "  pscat lib install DIR        copy a library of your own to lib/NAME/ in the per-user"
+    );
+    println!(
+        "                               data directory, so (lib/NAME/x.ps) run finds it anywhere;"
+    );
+    println!("                               pscat lib list shows the installed packages");
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
     println!();
     println!("Environment (where pscat finds lib/ and fonts; the full search order is in");

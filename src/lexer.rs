@@ -195,6 +195,11 @@ impl Lexer {
         self.run_name.as_ref()
     }
 
+    /// Whether this scanner reads the top-level program (`main_program`).
+    pub(crate) fn is_main(&self) -> bool {
+        self.is_main
+    }
+
     /// The handle `currentfile` returns, if this scanner is a file.
     pub(crate) fn file(&self) -> Option<&FileHandle> {
         self.is_file.then_some(&self.file)

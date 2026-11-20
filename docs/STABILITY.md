@@ -45,6 +45,12 @@ Tags are `v<version>`. Font packs ship separately on a calendar-versioned train
   Ghostscript, that is a bug to fix, not a feature to preserve. The deliberate
   gaps are recorded in [`docs/dev/ARCHITECTURE.md`](dev/ARCHITECTURE.md);
   filling one is not a break.
+  **pscat extensions are not part of that language.** Names pscat adds, such
+  as `setalpha`, `kernelimage`, the noise operators and `currentfilename`
+  (`- currentfilename string`: the name the running file was opened with,
+  `undefined` outside a named file), do not exist in Ghostscript. A program
+  meant to run in both guards a use, for example with
+  `systemdict /currentfilename known`.
 - **Command-line flags** listed by `pscat --help` and their documented
   meaning, the exit status (0 on success, non-zero on a PostScript error or a
   failed write), and the output formats (`--png`, `--svg`, `--pdf`). Text on

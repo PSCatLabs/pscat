@@ -541,9 +541,57 @@ same variables.
 finds it from any directory. `$PSCAT_LIB` takes one directory, not a path
 list. The search follows the read roots: with `--read-root` (which `pscat-mcp`
 passes to every render) a `lib/` file is found only inside a read root, the
-per-user data directory and `$PSCAT_HOME` being among the MCP server's. A
-program cannot ask for the name of the file it is running, so a library that
-loads sibling files needs its directory passed in.
+per-user data directory and `$PSCAT_HOME` being among the MCP server's.
+
+`pscat lib install` puts a library there for you:
+
+```
+pscat lib install path/to/sheet_music            # copies it to lib/sheet_music/
+pscat lib install path/to/sheet_music --name sm  # or under a name of your own
+pscat lib list                                   # what is installed, and where
+```
+
+`install` copies the files of DIR (not dotfiles or symbolic links) into
+`lib/NAME/` in the per-user data directory, or in `$PSCAT_HOME` when that is
+set (the same choice `pscat fonts install` makes), and prints where they went.
+`(lib/sheet_music/engrave.ps) run` then works from any directory, with the
+command line and with `pscat mcp`, whose read roots already include both
+places. NAME defaults to DIR's own name and is letters, digits, `-` and `_`.
+Running `install` again replaces the package: the new copy is built beside
+the old one and swapped in, so a file that DIR no longer has is removed
+(the command says which), never merged. It refuses a directory it did not
+create. It also refuses any NAME that matches a library built into pscat
+(`artkit`, `qr`, `fonts`, ...; case does not matter), because a file in the
+per-user `lib/` ranks before the built-in copy and would replace it for
+every program and for the MCP server; no file of a package may land on a
+built-in name either. Nothing about the search order or the read roots
+changes.
+
+**A library that loads its own files.** `currentfilename`
+(`- currentfilename string`) returns the name the running file was opened
+with, exactly as it was given: `lib/sheet_music/main.ps` for a library, the
+path as written to `run`, the file argument as written on the command line.
+It is the file an error report's `Line:` names. With no named file it raises
+`undefined`: under `-e`, on stdin (`-`), in the REPL, and in the program an
+MCP tool call sends. So a library can find the files beside it:
+
+```postscript partial
+% dirname: the path up to and including the last "/" (empty if none).
+/dirname { dup length { dup 0 eq { pop pop () exit } if
+    1 sub 2 copy get 47 eq { 1 add 0 exch getinterval exit } if } loop } def
+/concat { /b exch def /a exch def
+    a length b length add string dup 0 a putinterval dup a length b putinterval } def
+
+% At the top level of the library file, while it is being loaded:
+/mylib-dir currentfilename dirname def
+mylib-dir (engrave.ps) concat run        % lib/mylib/engrave.ps
+```
+
+Read the name while the file loads, as above: a procedure that calls
+`currentfilename` later reports the file running when it is called, which is
+its caller's. `currentfilename` is a pscat extension, not a PostScript
+operator, so Ghostscript has no such name; guard code that must run in both
+with `systemdict /currentfilename known`.
 
 ## Error reports
 

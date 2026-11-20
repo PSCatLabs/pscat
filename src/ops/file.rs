@@ -24,6 +24,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "filter", filter);
     op(dict, "eexec", eexec);
     op(dict, "run", run);
+    op(dict, "currentfilename", currentfilename);
     op(dict, "write", write);
     op(dict, "writestring", writestring);
     op(dict, "writehexstring", writehexstring);
@@ -336,6 +337,21 @@ fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
 fn currentfile(it: &mut Interp) -> Result<(), PsError> {
     let f = it.current_file().unwrap_or_else(PsFile::closed_file);
     it.push(Object::lit(Value::File(f)));
+    Ok(())
+}
+
+/// `currentfilename` (`- currentfilename string`; a pscat extension, issue #1056): the name of
+/// the file being run, exactly as the program or the command line gave it
+/// (`lib/sheet.ps` for a library, the path as written for `run`): the file
+/// an error report's `Line:` names. `undefined` when no named file is
+/// running (`-e`, stdin, the REPL, a program run from a string). A new
+/// string, so the program may modify it.
+fn currentfilename(it: &mut Interp) -> Result<(), PsError> {
+    let Some(name) = it.current_file_name() else {
+        return Err(PsError::Undefined("currentfilename".to_string()));
+    };
+    it.check_alloc(name.len())?;
+    it.push(Object::string(name.as_bytes().to_vec()));
     Ok(())
 }
 

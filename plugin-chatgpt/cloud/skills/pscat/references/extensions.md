@@ -9,6 +9,7 @@ PDF or PNG, not a `.ps`,
 render, see `--bands` in [bands-profile.md](bands-profile.md)." -->
 For a heavy per-pixel noise
 render, see [bands-profile.md](bands-profile.md).
+<!-- cloud: drop "## currentfilename: where a library was loaded from (pscat extension)" -->
 <!-- cloud: drop "## Save and reload a big numeric array: writereals / readreals" -->
 <!-- cloud: drop "## Photo → engraving" -->
 <!-- cloud: drop "## Watch it draw (needs a display)" -->
