@@ -2064,7 +2064,8 @@ impl Gfx {
         // From `ink`, so the raster and the recorders never disagree.
         match self.ink()? {
             crate::pattern::Ink::Pattern(tile, rgb, place) => {
-                Some(tile.raster(rgb, place.as_ref()))
+                let canvas = (self.pixmap.width(), self.pixmap.height());
+                Some(tile.raster(rgb, place.as_ref(), canvas))
             }
             crate::pattern::Ink::Rgb(_) => None,
         }
@@ -4493,12 +4494,19 @@ impl Gfx {
             _ => None,
         };
         let period = crate::pattern::fold(&content, &cap.geom).ok_or(PsError::Limitcheck)?;
+        let cell = match &cap.geom.lattice {
+            Some(lat) => {
+                Some(crate::pattern::orient_cell(&content, lat).ok_or(PsError::Limitcheck)?)
+            }
+            None => None,
+        };
         Ok(std::rc::Rc::new(crate::pattern::PatternTile::new(
             cap.id,
             cap.context,
             cap.spec,
             cap.geom,
             period,
+            cell,
             svg,
             pdf,
             made_in_to_gs,
