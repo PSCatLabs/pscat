@@ -55,8 +55,12 @@ keeps the cell undistorted and spreads the spacing instead.
   headroom and falls back to the period when it does not fit, charges the
   layout's work (pixels written, a step per 1024, added to the fill's
   work) and errors with `StepsExceeded` when that is over the steps left,
-  and looks at the limits between cell copies. Stroke and `imagemask` check
-  no limit of their own, so only the memory cap decides there.
+  and looks at the limits between cell copies. Stroke, `imagemask` and
+  glyph painting (`show` and the family: `Gfx::fill_path_direct` and
+  `paint_glyph` take the show's probe and return their work; `ShowCtx`
+  collects it and the interpreter charges it, the show frame being stepped
+  with the limits now in force as an image frame is) all go through
+  `lay_pattern` under their own probes.
   `tests/pattern_type2_limits.rs` holds one case each.
 - Fallbacks to the period (cells at their true size, step rounded to
   whole pixels, so the PNG drifts from SVG/PDF across the page): a
