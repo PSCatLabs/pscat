@@ -291,6 +291,11 @@ pub struct Object {
     /// A packed array (`packedarray`). Read-only like any other, but `bind`
     /// still enters it and the procedures nested in it, as Ghostscript does.
     pub(crate) packed: bool,
+    /// `noaccess` was applied to this string or file reference (#1321):
+    /// executing it raises `invalidaccess`, as in Ghostscript. Nothing else
+    /// reads it (a read of a `noaccess` string still succeeds, see
+    /// `ops/misc.rs`), and only strings and files carry it.
+    pub(crate) noaccess: bool,
 }
 
 impl Object {
@@ -299,6 +304,7 @@ impl Object {
             value,
             executable: false,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -308,6 +314,7 @@ impl Object {
             value,
             executable: true,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -326,6 +333,18 @@ impl Object {
             Err(PsError::InvalidAccess)
         } else {
             Ok(())
+        }
+    }
+
+    /// This reference as `noaccess` leaves it: write-protected like
+    /// `readonly` if it is an array, and not executable if it is a string
+    /// or file (#1321).
+    pub(crate) fn into_noaccess(mut self) -> Self {
+        if matches!(self.value, Value::String(_) | Value::File(_)) {
+            self.noaccess = true;
+            self
+        } else {
+            self.into_readonly()
         }
     }
 
@@ -381,6 +400,7 @@ impl Object {
             value,
             executable: self.executable,
             readonly: self.readonly,
+            noaccess: self.noaccess,
             packed: self.packed,
         }
     }

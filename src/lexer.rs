@@ -86,6 +86,11 @@ pub struct Lexer {
     /// an executable string, a file read whole) does not, so the interpreter
     /// hands it this handle. `None` outside an interpreter.
     limits: Option<Rc<DecodeBudget>>,
+    /// This scanner runs an executable string or file met by `exec` or in
+    /// an executing procedure. An `exit` inside it leaves the loop around
+    /// it, as in Ghostscript; the main program, a `run` file and an eexec
+    /// stream are source boundaries that stop it (#1321).
+    pub(crate) exit_through: bool,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -120,6 +125,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -135,6 +141,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -151,6 +158,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -161,6 +169,13 @@ impl Lexer {
             run_name: Some(name),
             ..Lexer::from_file(file)
         }
+    }
+
+    /// Mark this scanner as an executable string or file that an `exit`
+    /// inside it can leave (#1321).
+    pub(crate) fn exit_through(mut self) -> Self {
+        self.exit_through = true;
+        self
     }
 
     /// The limits this scanner charges its work to, if any (#1123).

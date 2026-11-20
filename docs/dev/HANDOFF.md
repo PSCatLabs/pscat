@@ -601,8 +601,9 @@ renders eight examples in both and compares block-downsampled output).
   reference, `wcheck` reports it, and `put`, `putinterval`, `astore` and
   `copy` into it raise `invalidaccess`. Not modelled: reading is never refused
   (`rcheck` is always true, `get` on a `noaccess` array works), strings,
-  dictionaries and files have no attribute (those operators are identities on
-  them), `wcheck` on a name or operator answers true where gs raises
+  dictionaries and files have no attribute except one: `noaccess` on a string
+  or file makes executing it `invalidaccess` (#1321, `Object::noaccess`; the
+  other operators are identities on them), `wcheck` on a name or operator answers true where gs raises
   `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
@@ -1918,7 +1919,13 @@ renders eight examples in both and compares block-downsampled output).
   step or time limit stops a long decode inside it; keep that charge when changing `decode`.
   An executable string or file met as an element of a running procedure runs as source, as in gs
   (`ProcStep::Src`, `Interp::proc_source`, #1122, `notes/1122-executable-strings-in-procedures.md`), which
-  is also why `token`'s array runs a sequence's executable strings.
+  is also why `token`'s array runs a sequence's executable strings. #1321 finished the rule:
+  `exit` inside an executable string or file leaves the loop around it (`Lexer::exit_through`;
+  `run`, eexec and the main program stay boundaries), `noaccess` on one makes running it
+  `invalidaccess`, and `//name` met in a scanned stream runs it (`Interp::execute_element`). One
+  deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
+  `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
+  `notes/1321-executable-string-gs-parity.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

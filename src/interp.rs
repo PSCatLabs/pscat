@@ -80,6 +80,7 @@ fn ledger_value(bits: u64, tag: u8) -> Object {
         value,
         executable: tag & TAG_EXEC != 0,
         readonly: false,
+        noaccess: false,
         packed: false,
     }
 }
@@ -2503,15 +2504,18 @@ impl Interp {
         }
     }
 
-    /// Execute one object encountered in a token stream or procedure body.
-    /// Only executable names and operators actually execute here; an
-    /// executable array in this position is *pushed* (that's what makes
-    /// `{...}` a deferred procedure), as is everything literal.
+    /// Execute one object a scanner yielded. Only executable names and
+    /// operators actually execute here; an executable array in this
+    /// position is *pushed* (that's what makes `{...}` a deferred
+    /// procedure), as is everything literal. An executable string or file
+    /// can only get here through `//name`, and runs as source, as it does
+    /// in an executing procedure (#1321).
     #[inline(always)]
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
             (Value::Name(n), true) => self.execute_name(n.id()),
             (Value::Operator(op), true) => self.run_op(op.func, op.name),
+            (Value::String(_) | Value::File(_), true) => self.execute_resolved(obj, NO_NAME),
             _ => {
                 self.push(obj);
                 Ok(())
@@ -2653,16 +2657,27 @@ impl Interp {
                 // An executable string runs as source — the `(...) cvx
                 // exec` idiom found code uses constantly.
                 Value::String(s) => {
+                    // `noaccess` forbids running it (#1321).
+                    if obj.noaccess {
+                        return Err(PsError::InvalidAccess);
+                    }
                     // The scanner works on a copy of the string, so the
                     // copy is asked of the memory cap first (#1209).
                     self.check_alloc(s.len())?;
-                    let lexer = Lexer::new(s.to_vec()).with_limits(self.decode_budget.clone());
+                    let lexer = Lexer::new(s.to_vec())
+                        .with_limits(self.decode_budget.clone())
+                        .exit_through();
                     return self.push_frame(Frame::Scanner(lexer));
                 }
                 // An executable file runs in place, sharing its position
                 // with everything else holding the handle.
                 Value::File(f) => {
-                    let lexer = Lexer::from_file(f.clone()).with_limits(self.decode_budget.clone());
+                    if obj.noaccess {
+                        return Err(PsError::InvalidAccess);
+                    }
+                    let lexer = Lexer::from_file(f.clone())
+                        .with_limits(self.decode_budget.clone())
+                        .exit_through();
                     return self.push_frame(Frame::Scanner(lexer));
                 }
                 Value::Name(n) => {
@@ -3001,6 +3016,13 @@ impl Interp {
     pub(crate) fn exit_loop(&mut self) -> Result<(), PsError> {
         loop {
             match self.estack.last() {
+                // An executable string or file `exit` is inside of is not
+                // a boundary: the loop around it ends (#1321).
+                Some(Frame::Scanner(lexer)) if lexer.exit_through => {
+                    if let Some(frame) = self.estack.pop() {
+                        self.cleanup_unwound_frame(frame);
+                    }
+                }
                 None
                 | Some(
                     Frame::Scanner(_)
