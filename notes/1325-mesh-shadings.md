@@ -7,7 +7,7 @@ a `rangecheck`. Now the two Gouraud triangle meshes paint:
 - Type 5: lattice-form Gouraud triangles.
 
 Types 6 (Coons patches) and 7 (tensor-product patches) are part 2, a
-separate PR, kept apart for size; they still rangecheck here.
+separate PR kept apart for size; see the section at the end.
 
 The code is `src/mesh.rs`. `shading.rs` only dispatches to it
 (`ParsedShading::Mesh`), and `Gfx::shfill_mesh_limited` is the paint path.
@@ -168,7 +168,6 @@ pattern too (`makepattern` PatternType 2 with a mesh `/Shading`):
 
 **Gaps:**
 
-- **Patches.** Types 6 and 7 are part 2 (a separate PR).
 
 - **CMYK in the PDF.** The PDF blends RGB vertex colours, but the raster
   converts CMYK per pixel, so a CMYK mesh's interior differs a little in
@@ -178,3 +177,38 @@ pattern too (`makepattern` PatternType 2 with a mesh `/Shading`):
 - **Left from #1039.** These are not in this change: cubic `/Order 3` for
   sampled functions, a file DataSource for FunctionType 0, and
   FunctionType 4.
+
+## Part 2: patch meshes, ShadingType 6 and 7 (2026-11-20)
+
+Same reader, painter and PDF hook as part 1; settled with gs 10.07.1 the
+same way.
+
+- **Data.** Each patch starts on a byte. Point order is the PLRM's: p00 p01
+  p02 p03 p13 p23 p33 p32 p31 p30 p20 p10, then for Type 7 p11 p12 p22 p21,
+  then the corner colours c00 c03 c33 c30 (`p[i][j]`, i along u).
+  - Flag k (1–3) takes the previous patch's boundary points 3k to 3k+3 as
+    its first edge and its corner colours k and k+1; the patch then gives
+    8 points (12 for Type 7) and 2 colours. Pinned against gs renders for
+    flags 1, 2 and 3.
+  - A Coons patch gets its four interior points from the PDF spec's
+    formula, so both types are tensor patches from then on.
+- **Errors.** A first patch that is flagged, a flag over 3, and a patch cut
+  short are rangechecks. Empty data paints nothing.
+- **Painting.** A patch is tessellated on its surface S(u,v), with steps of
+  at most 2 device pixels and at most 256 a side, into the same triangles
+  as part 1; its colour is bilinear in (u,v). Larger v paints over smaller,
+  then larger u, as the PDF spec orders a folded patch.
+- **Limits.** A patch's work is counted triangle by triangle as
+  `mesh_layer` paints its tessellation, with the same loop and polling as
+  part 1. An estimate from the control points' box was not an upper bound
+  (Codex round 1 on #1377): a tensor patch whose cells all cross the page
+  made about 8.7 million pixel visits against an estimate of 20,000, and
+  now stops at the limit (`a_patch_with_overlapping_cells_stops_at_the_step_limit`).
+  A few KB of packed 1-bit patches that would tessellate into hundreds of
+  millions of triangles stops too (`a_huge_packed_patch_mesh_is_stopped_promptly`).
+  The patch vector is reserved exactly, as the others are.
+- **Limits, from Codex round 1 on #1376.** The patch decoder counts and
+  polls each patch as the triangle decoders do. A patch's corner `t`
+  values join the PDF's unclamped ramp range.
+- **PDF.** Patches are written as a Type 7 mesh (Coons ones already in
+  tensor form), 16 points and 4 colours each.

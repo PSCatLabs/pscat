@@ -1271,8 +1271,9 @@ Q",
     }
 
     /// A mesh `shfill` (#1325): a real mesh shading in DeviceRGB, of the
-    /// decoded `mesh`. Triangles are a Type 4 shading, a lattice a Type 5.
-    /// Coordinates are 32 bits over the mesh's box, colours 16. With a `/Function` each
+    /// decoded `mesh`. Triangles are a Type 4 shading, a lattice a Type 5,
+    /// patches (Coons ones already in tensor form) a Type 7. Coordinates are
+    /// 32 bits over the mesh's box, colours 16. With a `/Function` each
     /// vertex carries its position on the function's ramp and the shading
     /// the ramp's stops as a function, as an axial shading's; without one,
     /// its RGB colour, which a reader interpolates as the raster does for
@@ -1364,6 +1365,20 @@ Q",
                     vertex(&mut w, v);
                 }
                 (5, format!(" /VerticesPerRow {per_row}"))
+            }
+            Mesh::Patches(patches) => {
+                for patch in patches {
+                    w.put(0, 8);
+                    for &(i, j) in crate::mesh::BOUNDARY.iter().chain(&crate::mesh::INTERIOR) {
+                        let (x, y) = patch.p[i][j];
+                        coord(&mut w, x, x0, x1);
+                        coord(&mut w, y, y0, y1);
+                    }
+                    for c in &patch.c {
+                        colour(&mut w, c);
+                    }
+                }
+                (7, " /BitsPerFlag 8".to_string())
             }
         };
         let data = deflate(&[&w.bytes])?;

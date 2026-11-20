@@ -749,12 +749,12 @@ renders eight examples in both and compares block-downsampled output).
   parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
   paint path); SVG embeds that layer as an image; PDF writes a real
   `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
-  linear (gs is cubic) and DataSource must be a string. ShadingType 4 and 5
-  (Gouraud meshes) since #1325 (`src/mesh.rs`, `notes/1325-mesh-shadings.md`):
-  decoded at `shfill`, triangles painted by pixel centre into a layer with
-  4x4-sample coverage (no seams), then the Type 1 paint path; PDF writes a
-  Type 4 or 5 mesh stream in RGB. Types 6 and 7 (patches) are not
-  implemented, in any output.
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
+  (meshes) since #1325 (`src/mesh.rs`, `notes/1325-mesh-shadings.md`):
+  decoded at `shfill`, every shape cut into triangles (patches tessellated
+  on S(u,v)) painted by pixel centre into a layer with 4x4-sample coverage
+  (no seams), then the Type 1 paint path; PDF writes a Type 4, 5 or 7 mesh
+  stream in RGB.
   tiny-skia's anti-aliased fill panics on a path with corners around 1e9
   device pixels away, so a `/BBox` of that size is cut to a guard rectangle
   (the page grown by its own size) before the raster paints it (#1324,

@@ -185,10 +185,10 @@ More on the less obvious ones:
   (`sh` with a `/Shading` resource). Function-based shadings (`ShadingType`
   1: colour from a sampled function of x and y over a `/Domain` rectangle)
   paint too; SVG has no equivalent, so it embeds them as an image. Mesh
-  shadings paint too: Gouraud triangle meshes (types 4 and 5), from an
-  array, string or file `/DataSource`. SVG embeds them as an image, and PDF
-  writes a real mesh shading. Patch meshes (types 6 and 7) are not supported
-  yet. `/Extend [start end]` says whether each
+  shadings paint too: Gouraud triangle meshes (types 4 and 5) and Coons and
+  tensor-product patch meshes (types 6 and 7), from an array, string or file
+  `/DataSource`. SVG embeds them as an image, and PDF writes a real mesh
+  shading. `/Extend [start end]` says whether each
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.

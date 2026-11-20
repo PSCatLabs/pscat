@@ -501,9 +501,13 @@ fn function_based_shfill_keeps_bbox_and_clip() {
 }
 
 /// Mesh shadings (#1325) are real mesh streams: triangles a Type 4, a
-/// lattice a Type 5, in RGB, and gs's render of each PDF is the raster's.
+/// lattice a Type 5, Coons and tensor patches a Type 7, in RGB, and gs's
+/// render of each PDF is the raster's.
 #[test]
 fn mesh_shfills_are_real_pdf_mesh_shadings() {
+    let square = "50 50  50 183  50 317  50 450   183 480  317 480  450 450
+        450 317  450 183  450 50   317 50  183 50";
+    let corners = "1 0 0  0 1 0  0 0 1  1 1 0.5";
     for (src, ty, name) in [
         (
             "<< /ShadingType 4 /ColorSpace /DeviceRGB
@@ -518,6 +522,19 @@ fn mesh_shfills_are_real_pdf_mesh_shadings() {
                 .to_string(),
             5,
             "sh_mesh5",
+        ),
+        (
+            format!("<< /ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {square} {corners}] >> shfill"),
+            7,
+            "sh_mesh6",
+        ),
+        (
+            format!(
+                "30 rotate 100 -150 translate << /ShadingType 7 /ColorSpace /DeviceRGB
+                   /DataSource [0 {square} 150 150  183 300  317 350  300 183 {corners}] >> shfill"
+            ),
+            7,
+            "sh_mesh7",
         ),
     ] {
         let (pdf, canvas) = pdf_and_canvas(src.as_bytes());

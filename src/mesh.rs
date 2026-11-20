@@ -1,15 +1,19 @@
 //! Mesh shadings for `shfill` (#1325, PLRM 4.9.3): `ShadingType` 4
-//! (free-form Gouraud triangles) and 5 (lattice-form Gouraud triangles).
+//! (free-form Gouraud triangles), 5 (lattice-form Gouraud triangles), 6
+//! (Coons patches) and 7 (tensor-product patches).
 //!
 //! `parse` reads and checks the dictionary, and keeps the vertex data as
 //! numbers (an array `/DataSource`) or bytes (a string, or a file read to
-//! its end). `MeshShading::decode` turns that into triangles when
+//! its end). `MeshShading::decode` turns that into triangles or patches when
 //! the shading is painted, under the limits. `mesh_layer` paints them into
 //! a layer the way `shfill`'s Type 1 path paints its function, so the same
 //! paint path, SVG image and PDF hook serve both.
 //!
-//! **Painting.** A pixel takes the colour of the last triangle that holds
-//! its centre (later data paints over earlier). The colour is
+//! **Painting.** Every shape becomes triangles: a patch is tessellated on
+//! its surface S(u,v), finely enough for its device size, with its colour
+//! bilinear in (u,v). A pixel takes the colour of the last triangle that
+//! holds its centre (later data paints over earlier, and a folded patch's
+//! larger v, then larger u, wins, as the PDF spec has it). The colour is
 //! interpolated in the shading's own components, or as `t` through the
 //! `/Function`, never in converted RGB. Coverage is a 4x4 grid of samples
 //! per pixel, OR-ed over all triangles, so shared edges have no seams and
@@ -30,6 +34,12 @@ const MAX_FILE_BYTES: usize = 1 << 28;
 
 /// Coverage samples per pixel side: 4x4, one bit each in a `u16`.
 const SUB: usize = 4;
+
+/// The longest a patch's tessellation step may be, in device pixels.
+const PATCH_STEP: f64 = 2.0;
+
+/// The most steps a patch is cut into along u or v.
+const MAX_PATCH_STEPS: usize = 256;
 
 /// Work units (`shfill`'s, ~16 a plain painted pixel) a pixel inside a
 /// triangle's box costs, and a triangle itself.
@@ -97,12 +107,23 @@ pub(crate) struct Vertex {
     pub(crate) c: [f32; 4],
 }
 
+/// A patch in tensor form (a Coons patch gets its four interior points
+/// from the PDF spec's formula): `p[i][j]`, i along u and j along v, and
+/// the corner colours `c00, c03, c33, c30`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Patch {
+    pub(crate) p: [[(f64, f64); 4]; 4],
+    pub(crate) c: [[f32; 4]; 4],
+}
+
 /// A decoded mesh.
 pub(crate) enum Mesh {
     /// Type 4: triangles, in data order.
     Triangles(Vec<[Vertex; 3]>),
     /// Type 5: rows of `per_row` vertices.
     Lattice { verts: Vec<Vertex>, per_row: usize },
+    /// Types 6 and 7.
+    Patches(Vec<Patch>),
 }
 
 /// Packed vertex data (a string or file `/DataSource`).
@@ -293,7 +314,7 @@ fn read_file(
     Ok(out)
 }
 
-/// `ShadingType` 4 and 5 (#1325), as gs 10.07.1 checks them:
+/// `ShadingType` 4 to 7 (#1325), as gs 10.07.1 checks them:
 /// - `/DataSource` is required (rangecheck), an array of numbers, a string
 ///   or a file; another type is a typecheck, a non-number in the array too.
 /// - A string or file needs `/BitsPerCoordinate` (1, 2, 4, 8, 12, 16, 24 or
@@ -418,7 +439,7 @@ pub(crate) fn parse(
     })
 }
 
-/// Reads vertex data in order. Running out inside a vertex is a
+/// Reads vertex data in order. Running out inside a vertex or patch is a
 /// rangecheck, as in gs.
 struct Reader<'a> {
     src: &'a Source,
@@ -500,7 +521,7 @@ impl Reader<'_> {
         Ok(Vertex { x, y, c })
     }
 
-    /// Packed vertices each start on a byte.
+    /// Packed vertices and patches each start on a byte.
     fn align(&mut self) {
         if matches!(self.src, Source::Packed(_)) {
             self.pos = self.pos.div_ceil(8) * 8;
@@ -508,10 +529,29 @@ impl Reader<'_> {
     }
 }
 
+/// A patch's 12 boundary points in data order, then a tensor patch's four
+/// interior ones.
+pub(crate) const BOUNDARY: [(usize, usize); 12] = [
+    (0, 0),
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (1, 3),
+    (2, 3),
+    (3, 3),
+    (3, 2),
+    (3, 1),
+    (3, 0),
+    (2, 0),
+    (1, 0),
+];
+pub(crate) const INTERIOR: [(usize, usize); 4] = [(1, 1), (1, 2), (2, 2), (2, 1)];
+
 impl MeshShading {
-    /// The data's triangles. A data error is a rangecheck: a vertex,
-    /// triangle or row cut short; a Type 4 flag over 2; a Type 5 lattice
-    /// with no vertices. Memory is held against the
+    /// The data's triangles or patches. A data error is a rangecheck: a
+    /// vertex, triangle, row or patch cut short; a Type 4 flag over 2 or a
+    /// patch flag over 3; a patch flagged to continue with no patch before
+    /// it; a Type 5 lattice with no vertices. Memory is held against the
     /// limit before it is taken.
     ///
     /// The decoding is counted as it goes (`spend`), so it is charged on
@@ -537,14 +577,22 @@ impl MeshShading {
             pos: 0,
             nvals,
         };
-        // The most vertices the data can hold.
+        // The most units (vertices, or patches) the data can hold, from the
+        // smallest one: a continued patch gives 8 or 12 points and two colours.
+        let points = match self.ty {
+            4 | 5 => 1,
+            6 => 8,
+            _ => 12,
+        };
+        let colours = if self.ty >= 6 { 2 } else { 1 };
         let flags = usize::from(self.ty != 5);
         let most = match &self.source {
-            Source::Numbers(n) => n.len() / (flags + 2 + nvals),
+            Source::Numbers(n) => n.len() / (flags + 2 * points + colours * nvals),
             Source::Packed(p) if p.decode.is_none() => return Ok(Mesh::Triangles(Vec::new())),
             Source::Packed(p) => {
-                let bits =
-                    p.flag_bits as usize + 2 * p.coord_bits as usize + nvals * p.comp_bits as usize;
+                let bits = p.flag_bits as usize
+                    + 2 * points * p.coord_bits as usize
+                    + colours * nvals * p.comp_bits as usize;
                 p.data.len() / bits.div_ceil(8)
             }
         };
@@ -581,7 +629,7 @@ impl MeshShading {
                 }
                 Ok(Mesh::Triangles(tris))
             }
-            _ => {
+            5 => {
                 let mut verts: Vec<Vertex> = reserved(most, probe)?;
                 while !r.at_end() {
                     tick()?;
@@ -595,6 +643,50 @@ impl MeshShading {
                     verts,
                     per_row: self.per_row,
                 })
+            }
+            _ => {
+                let mut patches: Vec<Patch> = reserved(most, probe)?;
+                while !r.at_end() {
+                    tick()?;
+                    let flag = r.flag()? as usize;
+                    let prev = patches.last();
+                    if flag > 3 || (flag != 0 && prev.is_none()) {
+                        return Err(PsError::Rangecheck);
+                    }
+                    let mut p = [[(0.0, 0.0); 4]; 4];
+                    let mut c = [[0.0f32; 4]; 4];
+                    // Points and colours given here; with a flag, the
+                    // first edge and two colours are the previous patch's
+                    // edge `flag` (its boundary points 3 flag to 3 flag + 3).
+                    let (first_point, first_colour) = match prev {
+                        Some(q) if flag != 0 => {
+                            for (k, &(i, j)) in BOUNDARY[..4].iter().enumerate() {
+                                let (a, b) = BOUNDARY[(3 * flag + k) % 12];
+                                p[i][j] = q.p[a][b];
+                            }
+                            c[0] = q.c[flag];
+                            c[1] = q.c[(flag + 1) % 4];
+                            (4, 2)
+                        }
+                        _ => (0, 0),
+                    };
+                    for &(i, j) in &BOUNDARY[first_point..] {
+                        p[i][j] = r.point()?;
+                    }
+                    if self.ty == 7 {
+                        for &(i, j) in &INTERIOR {
+                            p[i][j] = r.point()?;
+                        }
+                    } else {
+                        coons_interior(&mut p);
+                    }
+                    for col in &mut c[first_colour..] {
+                        *col = r.colour()?;
+                    }
+                    r.align();
+                    patches.push(Patch { p, c });
+                }
+                Ok(Mesh::Patches(patches))
             }
         }
     }
@@ -611,14 +703,146 @@ fn reserved<T>(most: usize, probe: &crate::limits::LimitProbe) -> Result<Vec<T>,
     Ok(v)
 }
 
+/// A Coons patch's interior control points, which make it the tensor
+/// patch it is (PDF 1.7, 8.7.4.5.7).
+fn coons_interior(p: &mut [[(f64, f64); 4]; 4]) {
+    let f = |a: [(usize, usize); 8], p: &[[(f64, f64); 4]; 4]| {
+        let g = |k: usize| p[a[k].0][a[k].1];
+        let w = [-4.0, 6.0, 6.0, -2.0, -2.0, 3.0, 3.0, -1.0];
+        let mut s = (0.0, 0.0);
+        for (k, &wk) in w.iter().enumerate() {
+            s.0 += wk * g(k).0;
+            s.1 += wk * g(k).1;
+        }
+        (s.0 / 9.0, s.1 / 9.0)
+    };
+    // p11 = (-4 p00 + 6 (p01 + p10) - 2 (p03 + p30) + 3 (p31 + p13) - p33) / 9,
+    // and its three mirror images.
+    p[1][1] = f(
+        [
+            (0, 0),
+            (0, 1),
+            (1, 0),
+            (0, 3),
+            (3, 0),
+            (3, 1),
+            (1, 3),
+            (3, 3),
+        ],
+        p,
+    );
+    p[1][2] = f(
+        [
+            (0, 3),
+            (0, 2),
+            (1, 3),
+            (0, 0),
+            (3, 3),
+            (3, 2),
+            (1, 0),
+            (3, 0),
+        ],
+        p,
+    );
+    p[2][1] = f(
+        [
+            (3, 0),
+            (3, 1),
+            (2, 0),
+            (3, 3),
+            (0, 0),
+            (0, 1),
+            (2, 3),
+            (0, 3),
+        ],
+        p,
+    );
+    p[2][2] = f(
+        [
+            (3, 3),
+            (3, 2),
+            (2, 3),
+            (3, 0),
+            (0, 3),
+            (0, 2),
+            (2, 0),
+            (0, 0),
+        ],
+        p,
+    );
+}
+
+/// The cubic Bernstein weights at `t`.
+fn bernstein(t: f64) -> [f64; 4] {
+    let s = 1.0 - t;
+    [s * s * s, 3.0 * t * s * s, 3.0 * t * t * s, t * t * t]
+}
+
 /// `[a b c d tx ty]` applied to a point.
 fn apply(t: &[f64; 6], (x, y): (f64, f64)) -> (f64, f64) {
     (t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5])
 }
 
+/// A patch in device space, cut into a grid of `nu` x `nv` steps: its
+/// control points under `t` and how finely to tessellate it.
+struct DevicePatch {
+    p: [[(f64, f64); 4]; 4],
+    nu: usize,
+    nv: usize,
+}
+
+fn device_patch(patch: &Patch, t: &[f64; 6]) -> DevicePatch {
+    let mut p = patch.p;
+    for row in &mut p {
+        for pt in row.iter_mut() {
+            *pt = apply(t, *pt);
+        }
+    }
+    let len = |a: (f64, f64), b: (f64, f64)| crate::fmath::hypot(b.0 - a.0, b.1 - a.1);
+    // The longest control polygon along each parameter bounds its curves.
+    let (mut lu, mut lv) = (0.0f64, 0.0f64);
+    for (k, row) in p.iter().enumerate() {
+        lu = lu.max((0..3).map(|i| len(p[i][k], p[i + 1][k])).sum());
+        lv = lv.max(row.windows(2).map(|w| len(w[0], w[1])).sum());
+    }
+    let steps = |l: f64| {
+        if l.is_finite() {
+            ((l / PATCH_STEP).ceil() as usize).clamp(1, MAX_PATCH_STEPS)
+        } else {
+            1
+        }
+    };
+    DevicePatch {
+        p,
+        nu: steps(lu),
+        nv: steps(lv),
+    }
+}
+
+/// The patch surface at `(u, v)`, and its bilinear colour there.
+fn surface(p: &[[(f64, f64); 4]; 4], c: &[[f32; 4]; 4], u: f64, v: f64) -> ((f64, f64), [f32; 4]) {
+    let (bu, bv) = (bernstein(u), bernstein(v));
+    let mut s = (0.0, 0.0);
+    for i in 0..4 {
+        for j in 0..4 {
+            let w = bu[i] * bv[j];
+            s.0 += w * p[i][j].0;
+            s.1 += w * p[i][j].1;
+        }
+    }
+    let (u, v) = (u as f32, v as f32);
+    let w = [(1.0 - u) * (1.0 - v), (1.0 - u) * v, u * v, u * (1.0 - v)];
+    let mut col = [0.0f32; 4];
+    for (k, o) in col.iter_mut().enumerate() {
+        *o = (0..4).map(|q| w[q] * c[q][k]).sum();
+    }
+    (s, col)
+}
+
 impl Mesh {
     /// Every triangle of the mesh in device space (`t`), in paint order,
-    /// to `f`. Stops at `f`'s first error.
+    /// to `f`; patches are tessellated (`device_patch`) on the way. Stops
+    /// at `f`'s first error.
     fn for_each_triangle(
         &self,
         t: &[f64; 6],
@@ -644,6 +868,31 @@ impl Mesh {
                     }
                 }
             }
+            Mesh::Patches(patches) => {
+                for patch in patches {
+                    let dp = device_patch(patch, t);
+                    let at = |i: usize, j: usize| {
+                        surface(
+                            &dp.p,
+                            &patch.c,
+                            i as f64 / dp.nu as f64,
+                            j as f64 / dp.nv as f64,
+                        )
+                    };
+                    // Larger v paints over smaller, then larger u.
+                    let mut below: Vec<_> = (0..=dp.nu).map(|i| at(i, 0)).collect();
+                    for j in 1..=dp.nv {
+                        let above: Vec<_> = (0..=dp.nu).map(|i| at(i, j)).collect();
+                        for i in 1..=dp.nu {
+                            let (a, b) = (below[i - 1], below[i]);
+                            let (c, d) = (above[i - 1], above[i]);
+                            f([a.0, b.0, c.0], [a.1, b.1, c.1])?;
+                            f([b.0, d.0, c.0], [b.1, d.1, c.1])?;
+                        }
+                        below = above;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -653,14 +902,17 @@ impl Mesh {
         match self {
             Mesh::Triangles(tris) => Box::new(tris.iter().flatten().map(|v| &v.c)),
             Mesh::Lattice { verts, .. } => Box::new(verts.iter().map(|v| &v.c)),
+            Mesh::Patches(p) => Box::new(p.iter().flat_map(|q| q.c.iter())),
         }
     }
 
-    /// Every point that bounds the mesh, in shading space.
+    /// Every point that bounds the mesh, in shading space: vertices and
+    /// patch control points (a patch lies inside their hull).
     fn points(&self) -> Box<dyn Iterator<Item = (f64, f64)> + '_> {
         match self {
             Mesh::Triangles(tris) => Box::new(tris.iter().flatten().map(|v| (v.x, v.y))),
             Mesh::Lattice { verts, .. } => Box::new(verts.iter().map(|v| (v.x, v.y))),
+            Mesh::Patches(p) => Box::new(p.iter().flat_map(|q| q.p.iter().flatten().copied())),
         }
     }
 
@@ -692,6 +944,10 @@ struct TriBox {
 
 impl TriBox {
     fn of(p: &[(f64, f64); 3], w: usize, h: usize) -> Option<TriBox> {
+        Self::of_points(p, w, h)
+    }
+
+    fn of_points(p: &[(f64, f64)], w: usize, h: usize) -> Option<TriBox> {
         let lo = |k: fn(&(f64, f64)) -> f64| p.iter().map(k).fold(f64::INFINITY, f64::min);
         let hi = |k: fn(&(f64, f64)) -> f64| p.iter().map(k).fold(f64::NEG_INFINITY, f64::max);
         let (x0, x1) = (lo(|q| q.0), hi(|q| q.0));
@@ -923,6 +1179,25 @@ mod tests {
         parse(&d, ty, CsKind::Rgb, &crate::limits::LimitProbe::NONE).expect("parses")
     }
 
+    #[test]
+    fn coons_interior_of_a_flat_square_is_its_thirds() {
+        let mut p = [[(0.0, 0.0); 4]; 4];
+        for (i, row) in p.iter_mut().enumerate() {
+            for (j, pt) in row.iter_mut().enumerate() {
+                *pt = (i as f64 * 10.0, j as f64 * 10.0);
+            }
+        }
+        let want = p;
+        for &(i, j) in &INTERIOR {
+            p[i][j] = (0.0, 0.0);
+        }
+        coons_interior(&mut p);
+        for &(i, j) in &INTERIOR {
+            assert!((p[i][j].0 - want[i][j].0).abs() < 1e-9, "{i}{j}");
+            assert!((p[i][j].1 - want[i][j].1).abs() < 1e-9, "{i}{j}");
+        }
+    }
+
     /// Packed Type 4 vertices start on a byte (gs: the unaligned packing
     /// paints garbage, the aligned one the triangle).
     #[test]
@@ -943,6 +1218,45 @@ mod tests {
         assert_eq!((t[0][1].x, t[0][1].y), (140.0, 10.0));
         assert_eq!((t[0][2].x, t[0][2].y), (70.0, 140.0));
         assert_eq!(t[0][2].c[..3], [0.0, 0.0, 1.0]);
+    }
+
+    /// A patch flagged 1, 2 or 3 takes the previous patch's edge of that
+    /// number and its two corner colours (pinned against gs renders).
+    #[test]
+    fn continued_patches_share_the_flagged_edge() {
+        let square = "10 50 10 60 10 70 10 80 20 80 30 80 40 80 40 70 40 60 40 50 30 50 20 50 \
+                      0 0 0  0.4 0.4 0.4  0.7 0.7 0.7  1 1 1";
+        for (flag, edge, colours) in [
+            (
+                1,
+                [(10.0, 80.0), (20.0, 80.0), (30.0, 80.0), (40.0, 80.0)],
+                [0.4, 0.7],
+            ),
+            (
+                2,
+                [(40.0, 80.0), (40.0, 70.0), (40.0, 60.0), (40.0, 50.0)],
+                [0.7, 1.0],
+            ),
+            (
+                3,
+                [(40.0, 50.0), (30.0, 50.0), (20.0, 50.0), (10.0, 50.0)],
+                [1.0, 0.0],
+            ),
+        ] {
+            let m = mesh(&format!(
+                "<< /ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {square} \
+                 {flag} 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8  0 0 0  1 1 1] >>"
+            ));
+            let Mesh::Patches(p) = m.decode(&crate::limits::LimitProbe::NONE).expect("decodes")
+            else {
+                panic!("patches");
+            };
+            assert_eq!(p.len(), 2);
+            for (k, &(i, j)) in BOUNDARY[..4].iter().enumerate() {
+                assert_eq!(p[1].p[i][j], edge[k], "flag {flag}, point {k}");
+            }
+            assert_eq!([p[1].c[0][0], p[1].c[1][0]], colours, "flag {flag}");
+        }
     }
 
     #[test]
