@@ -522,10 +522,7 @@ pub struct Interp {
     /// dead entries are dropped as new ones come.
     pub(crate) patterns: std::collections::HashMap<
         usize,
-        (
-            std::rc::Weak<RefCell<Dict>>,
-            Rc<crate::pattern::LazyPattern>,
-        ),
+        (std::rc::Weak<RefCell<Dict>>, crate::pattern::PatternRef),
     >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
@@ -2822,10 +2819,7 @@ impl Interp {
     }
 
     /// The pattern `makepattern` made for `d`, if it made one.
-    pub(crate) fn pattern_lazy(
-        &self,
-        d: &Rc<RefCell<Dict>>,
-    ) -> Option<Rc<crate::pattern::LazyPattern>> {
+    pub(crate) fn pattern_lazy(&self, d: &Rc<RefCell<Dict>>) -> Option<crate::pattern::PatternRef> {
         self.patterns
             .get(&(Rc::as_ptr(d) as usize))
             .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
@@ -2836,7 +2830,7 @@ impl Interp {
     pub(crate) fn remember_pattern(
         &mut self,
         d: &Rc<RefCell<Dict>>,
-        lazy: Rc<crate::pattern::LazyPattern>,
+        lazy: crate::pattern::PatternRef,
     ) {
         // Drop entries whose dictionaries are gone, so a loop of
         // makepatterns keeps only the patterns still reachable. (A weak

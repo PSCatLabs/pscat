@@ -798,8 +798,7 @@ impl ImageCtx {
         };
         // Under a pattern (#1299) the samples are the stencil alone, opaque
         // white where it paints, for a `<mask>` over the patterned footprint.
-        let patterned =
-            self.mask.is_some() && matches!(gfx.ink(), Some(crate::pattern::Ink::Pattern(..)));
+        let patterned = self.mask.is_some() && gfx.ink().is_some_and(|ink| ink.is_pattern());
         let paint_rgb = if patterned {
             (1.0, 1.0, 1.0)
         } else {
@@ -961,7 +960,7 @@ impl ImageCtx {
         let patterned = match self.mask {
             Some(_) => match gfx.ink() {
                 None => return Ok(()),
-                Some(ink) => matches!(ink, crate::pattern::Ink::Pattern(..)),
+                Some(ink) => ink.is_pattern(),
             },
             None => false,
         };
