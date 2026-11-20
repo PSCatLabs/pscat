@@ -28,7 +28,21 @@ procedure is credited to the line of the token that ran it: the closing `} for` 
 whole `{ ... }` is one token), the call site for a procedure (not the `def`). That narrows a 150-line program to one statement. Without the trace (a library caller of `lint::check`) the message is the old one plus
 the bottom item when the stack is deeper than five.
 
+## Bottom-item witness
+
+A token can consume the whole stack and leave another (`0 1 9 { ... } for` takes its three
+operands and leaves what the body leaked), which a depth sampled between tokens sees only as
+growth. Without a fix the first run (the `0 1 9` operands, on line 1) would survive and be
+named. So the trace keeps a witness of the bottom item (kind and scalar value) and, when it
+has changed, forgets the old runs and credits the whole stack to the token that ran. A guess,
+wrong only when the bottom item is replaced by an equal one, and then the old line is still
+the statement that began it. Reading `ostack` at the end of the program goes through the same
+path, so the last token is credited too.
+
 ## Cost
 
-See the PR for the measurement: a plain render pays nothing (one `Option` check per scanned
-token); `--lint` pays one `Vec` length read and a compare per token.
+Release-profile (`--profile ci`) binary, 13.5 million tokens in a flat file
+(`1 2 add pop 3 4 mul pop` repeated 1.5 million times), user CPU, three runs each:
+0.86, 0.88, 0.85 s plain; 0.82, 0.82, 0.82 s with `--lint` (which also runs the
+operator-shadow trace). No measurable cost: the per-token work is one `Option` check and,
+when tracing, one slice-length read, a compare and (at a new line) a small push.
