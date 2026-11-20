@@ -59,12 +59,15 @@ and shading patterns made inside (one with a `/BBox`, one not extended).
 
 ## Limits
 
-The new work is per mark and bounded by it: a mask def or form is made
-once per inner paint and capture (deduplicated), each a few hundred bytes,
-and a coloured copy once per pattern and colour, like the `/Matrix` copies
-#1300 makes. The PDF's pattern streams, forms included, go through the
-writer's budgeted deflate (`deflate_budgeted`, `--max-memory`). Nothing new
-is rasterised, so nothing new is charged against `--max-steps`.
+The new work is per mark and bounded by it. A mask def or form is made
+once per inner paint and capture (deduplicated), a few hundred bytes each.
+A coloured copy is made once per pattern and colour, like the `/Matrix`
+copies #1300 makes, and both kinds of copy now share the pattern's content
+(`PdfPattern::content` is an `Rc<str>`), so recording one costs only its
+dictionary and resource lists. The written PDF still holds one stream per
+copy, each deflated under the writer's budget (`deflate_budgeted`,
+`--max-memory`). Nothing new is rasterised, so nothing new is charged
+against `--max-steps`.
 
 ## Verification
 

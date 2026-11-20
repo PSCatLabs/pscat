@@ -2318,7 +2318,11 @@ fn inner_colours(pm: &Pixmap) -> usize {
     pm.pixels()
         .iter()
         .filter(|p| {
-            let (r, g, b) = (i32::from(p.red()), i32::from(p.green()), i32::from(p.blue()));
+            let (r, g, b) = (
+                i32::from(p.red()),
+                i32::from(p.green()),
+                i32::from(p.blue()),
+            );
             (r > 150 && g < 100 && b < 100) || (g > 120 && r < 100 && b < 100)
         })
         .count()
@@ -2344,13 +2348,19 @@ fn check_uncoloured_outer(name: &str, src: &str, exact: bool) -> Outputs {
         (&hayro, "PDF via hayro"),
     ] {
         let n = inner_colours(pm);
-        assert!(n < 20, "{name}: {n} pixels of an inner colour in the {what}");
+        assert!(
+            n < 20,
+            "{name}: {n} pixels of an inner colour in the {what}"
+        );
     }
     // The PDF writes the outer pattern coloured (gs drops an uncoloured one
     // whose resources hold a soft mask), once per colour, with the inner
     // patterns' coverage as soft masks.
     let text = pdf_text(&out.pdf);
-    assert!(text.contains("/SMask << /Type /Mask /S /Alpha /G "), "{text}");
+    assert!(
+        text.contains("/SMask << /Type /Mask /S /Alpha /G "),
+        "{text}"
+    );
     assert!(text.contains(" gs "), "{text}");
     if common::gs_available() {
         let ps = format!("%!PS\n{src}\nshowpage\n");

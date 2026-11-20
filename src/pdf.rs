@@ -237,7 +237,10 @@ struct PdfPattern {
     /// A shading pattern's shading (#1298): written as a dictionary with
     /// no content stream.
     shading: Option<usize>,
-    content: String,
+    /// Shared by the copies of a pattern under another `/Matrix` (#1300)
+    /// or in another colour (#1340), so a copy costs only its dictionary
+    /// and resource lists while recording.
+    content: Rc<str>,
     images: Vec<usize>,
     gstates: Vec<usize>,
     shadings: Vec<usize>,
@@ -427,7 +430,7 @@ impl PdfRecorder {
             ink: None,
             dict: String::new(),
             shading: None,
-            content: std::mem::replace(&mut self.content, saved.content),
+            content: std::mem::replace(&mut self.content, saved.content).into(),
             images: std::mem::replace(&mut self.current_images, saved.images),
             gstates: std::mem::replace(&mut self.current_gstates, saved.gstates),
             shadings: std::mem::replace(&mut self.current_shadings, saved.shadings),
@@ -472,7 +475,7 @@ impl PdfRecorder {
             num(spec.ystep),
             matrix_text(matrix),
         );
-        pat.content = format!("{} cm\n{}", matrix_text(to_pattern), pat.content);
+        pat.content = format!("{} cm\n{}", matrix_text(to_pattern), pat.content).into();
         self.patterns.push(pat);
         self.patterns.len() - 1
     }
@@ -645,7 +648,7 @@ impl PdfRecorder {
                 self.patterns.push(PdfPattern {
                     dict,
                     shading: None,
-                    content,
+                    content: content.into(),
                     images: Vec::new(),
                     gstates: Vec::new(),
                     shadings: Vec::new(),
@@ -739,7 +742,7 @@ impl PdfRecorder {
                 matrix_text(matrix)
             ),
             shading: Some(sidx),
-            content: String::new(),
+            content: "".into(),
             images: Vec::new(),
             gstates: Vec::new(),
             shadings: Vec::new(),
