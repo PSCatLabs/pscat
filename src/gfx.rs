@@ -3005,10 +3005,14 @@ impl Gfx {
         shading: &crate::mesh::MeshShading,
         probe: &crate::limits::LimitProbe,
     ) -> Result<u64, PsError> {
+        // The bytes a file DataSource took to read, charged on every path
+        // (Codex round 1 on #1376), then the decoding.
         if self.painting_off() || self.capturing_uncolored() {
-            return Ok(0);
+            return Ok(shading.read);
         }
-        let mesh = shading.decode(probe)?;
+        let (mesh, decoded) = shading.decode(probe)?;
+        let spent = shading.read.saturating_add(decoded);
+        probe.check(spent / 1024)?;
         let ctm = self.state.ctm;
         let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
         let (pw, ph) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
@@ -3032,16 +3036,18 @@ impl Gfx {
         let (bx0, by0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
         let (bx1, by1) = (b[2].ceil().min(pw), b[3].ceil().min(ph));
         if !(bx1 > bx0 && by1 > by0) {
-            // Nothing to paint, but the page is begun, as for a gradient.
+            // Nothing to paint, but the page is begun, as for a gradient,
+            // and the decoding is charged.
             self.prepare_paint();
-            return Ok(0);
+            return Ok(spent);
         }
         let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
         let local_t = [t[0], t[1], t[2], t[3], t[4] - bx0, t[5] - by0];
         // Rasterizing, then painting the layer as a two-stop gradient.
         let work = mesh
             .work(&local_t, bw, bh)
-            .saturating_add(shfill_work(bw, bh, 2));
+            .saturating_add(shfill_work(bw, bh, 2))
+            .saturating_add(spent);
         probe.check(work / 1024)?;
         // The layer, its coverage samples and the owned flags.
         probe.check_alloc(bw.saturating_mul(bh).saturating_mul(8))?;
@@ -4640,13 +4646,21 @@ impl Gfx {
         };
         // A mesh's data (#1378), decoded once under the limits, for its box
         // here and its PDF stream.
+        // Its file DataSource's reading is charged here, once; the decoding
+        // each time it is done.
+        let mut work = match &shading {
+            ParsedShading::Mesh(m) => m.read,
+            _ => 0,
+        };
         let mesh = match &shading {
             ParsedShading::Mesh(m) if !singular && (self.svg.is_some() || self.pdf.is_some()) => {
-                Some(m.decode(probe)?)
+                let (mesh, decoded) = m.decode(probe)?;
+                work = work.saturating_add(decoded);
+                probe.check(work / 1024)?;
+                Some(mesh)
             }
             _ => None,
         };
-        let mut work = 0;
         let svg = if self.svg.is_some() && !singular {
             // The layer over the shading's box, cut by the BBox's and the
             // canvas, as `shfill` makes it: a Type 1 Domain's, or a mesh's.
@@ -6072,11 +6086,12 @@ pub(crate) fn shading_layer(
             // A mesh pattern (#1378): decoded and painted as `shfill` paints
             // it, its work (each triangle and its box) and its coverage
             // buffers held against the limits before it is painted.
-            let mesh = m.decode(probe)?;
+            let (mesh, decoded) = m.decode(probe)?;
             let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
             let work = mesh
                 .work(&t, wu, hu)
                 .saturating_add(shfill_work(wu, hu, 2))
+                .saturating_add(decoded)
                 .saturating_add(base);
             probe.check(work / 1024)?;
             probe.check_alloc(wu.saturating_mul(hu).saturating_mul(8))?;

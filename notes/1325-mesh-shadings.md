@@ -98,6 +98,26 @@ errors.
 - `assert_gs_matches` compares gs's raster of each PDF with the canvas.
   The mean block difference is 0.6–1.2.
 
+**Codex round 1 on #1376:**
+
+- **Raw file DataSource and the limits.** A raw file DataSource is now read
+  under the limits. `parse_shading_dict` takes the limit probe. Each 64 KiB
+  chunk's growth of the buffer, and the final copy, are held against
+  `--max-memory` before they are taken. The bytes read are charged as
+  steps (one a KiB) as reading goes, and again by the operator on every
+  path, even when nothing is decoded.
+- **Decoding is charged.** Each vertex costs 64 units, which also covers
+  the bounds scan, and the limits are looked at every 4096 vertices.
+  `shfill` returns this work on every early exit, so a large mesh wholly
+  off the page, shaded in a loop, answers to `--max-steps`. The same holds
+  in `shading_layer` and `makepattern`.
+- **PDF function input.** With a Function, the PDF now writes each vertex's
+  position on the ramp unclamped, over the range the vertices span. The
+  function is then flat outside the ramp (a stitching function whose
+  Domain is that range), so a reader interpolates first and clips after,
+  as the raster does. Before, a vertex with t = -1 was written as 0, and
+  the PDF blended purple where the raster is red.
+
 **Shading patterns (#1378).** After #1367 merged, a mesh is a shading
 pattern too (`makepattern` PatternType 2 with a mesh `/Shading`):
 
@@ -151,5 +171,8 @@ same way.
   runs before the limits are looked at. A few KB of packed 1-bit patches
   that would tessellate into hundreds of millions of triangles is stopped
   by the step limit at once (`a_huge_packed_patch_mesh_is_stopped_promptly`).
+- **Limits, from Codex round 1 on #1376.** The patch decoder counts and
+  polls each patch as the triangle decoders do. A patch's corner `t`
+  values join the PDF's unclamped ramp range.
 - **PDF.** Patches are written as a Type 7 mesh (Coons ones already in
   tensor form), 16 points and 4 colours each.

@@ -497,6 +497,7 @@ fn make_shading_pattern(
     d: &Rc<std::cell::RefCell<Dict>>,
     matrix: tiny_skia::Transform,
 ) -> Result<(), PsError> {
+    let probe = it.limit_probe();
     let (shading, background) = {
         let dict = d.borrow();
         let sh = dict
@@ -507,12 +508,11 @@ fn make_shading_pattern(
         };
         let sd = sd.borrow();
         (
-            crate::shading::parse_shading_dict(&sd)?,
+            crate::shading::parse_shading_dict(&sd, &probe)?,
             crate::shading::parse_background(&sd)?,
         )
     };
     let copy = pattern_copy(d)?;
-    let probe = it.limit_probe();
     let to_device = it.gfx.ctm().pre_concat(matrix);
     let (sp, work) = it
         .gfx

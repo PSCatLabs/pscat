@@ -26,8 +26,8 @@ fn shfill(it: &mut Interp) -> Result<(), PsError> {
     let Value::Dict(d) = &obj.value else {
         return Err(PsError::Typecheck);
     };
-    let spec = crate::shading::parse_shading_dict(&d.borrow())?;
     let probe = it.limit_probe();
+    let spec = crate::shading::parse_shading_dict(&d.borrow(), &probe)?;
     let work = match spec {
         crate::shading::ParsedShading::Gradient(g) => it.gfx.shfill_limited(g, &probe)?,
         crate::shading::ParsedShading::Function(f) => it.gfx.shfill_function_limited(f, &probe)?,
