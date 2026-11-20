@@ -245,7 +245,13 @@ pub(crate) fn fold(content: &Pixmap, g: &Geometry) -> Option<Pixmap> {
 /// The SVG side of a tile: the capture recorder's defs and body, in
 /// capture-canvas coordinates.
 pub(crate) struct SvgTile {
+    /// The defs this capture wrote itself (its clips, gradients and the
+    /// `<pattern>`s of the tiles it paints with).
     pub(crate) defs: String,
+    /// The captured defs of other tiles this capture paints with, by that
+    /// tile's id (#1343): kept apart from `defs` so a recorder that takes
+    /// in both this tile and one of those writes the shared chunk once.
+    pub(crate) imports: Vec<(usize, String)>,
     pub(crate) body: String,
 }
 

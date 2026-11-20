@@ -90,6 +90,11 @@ pub struct SvgRecorder {
     /// Tiles whose content group is already in this page's defs.
     tile_groups: HashMap<usize, Rc<PatternTile>>,
     next_pattern: usize,
+    /// Other tiles' captured defs this page or capture draws on (#1343),
+    /// each once, by the tile id that wrote it. A tile used on the page and
+    /// inside another tile reaches here by two routes; the id keeps it from
+    /// being written twice (duplicate ids are invalid SVG).
+    imported: Vec<(usize, String)>,
 }
 
 pub(crate) type Chain = Option<Rc<ClipNode>>;
@@ -132,6 +137,7 @@ impl SvgRecorder {
             pattern_ids: HashMap::new(),
             tile_groups: HashMap::new(),
             next_pattern: 0,
+            imported: Vec::new(),
         }
     }
 
@@ -149,6 +155,7 @@ impl SvgRecorder {
         self.flush_text();
         SvgTile {
             defs: self.defs,
+            imports: self.imported,
             body: self.body,
         }
     }
@@ -206,11 +213,18 @@ impl SvgRecorder {
         let [bx0, by0, bx1, by1] = tile.spec.bbox.map(|v| v as f32);
         if let std::collections::hash_map::Entry::Vacant(e) = self.tile_groups.entry(tkey) {
             e.insert(tile.clone());
+            // The tile's own captured defs, and those of every tile it
+            // paints with, each once however many routes reach them.
+            let own = (tid, st.defs.clone());
+            for (id, defs) in st.imports.iter().chain([&own]) {
+                if !self.imported.iter().any(|(have, _)| have == id) {
+                    self.imported.push((*id, defs.clone()));
+                }
+            }
             let _ = write!(
                 self.defs,
-                "{}<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
+                "<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
                  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
-                st.defs,
                 fmt_precise(bx0),
                 fmt_precise(by0),
                 fmt_precise(bx1 - bx0),
@@ -841,6 +855,7 @@ impl SvgRecorder {
         self.run = None;
         self.body.clear();
         self.defs.clear();
+        self.imported.clear();
         self.clip_ids.clear();
         self.pattern_ids.clear();
         self.tile_groups.clear();
@@ -868,10 +883,11 @@ impl SvgRecorder {
             },
             w = self.width,
             h = self.height,
-            defs = if self.defs.is_empty() {
+            defs = if self.defs.is_empty() && self.imported.is_empty() {
                 String::new()
             } else {
-                format!("<defs>{}</defs>", self.defs)
+                let imported: String = self.imported.iter().map(|(_, d)| d.as_str()).collect();
+                format!("<defs>{imported}{}</defs>", self.defs)
             },
         )
     }

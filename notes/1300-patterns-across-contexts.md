@@ -110,10 +110,8 @@ identical, the control (the first picture above) differing.
 
 ## Gaps
 
-- In SVG, a page pattern used both on the page and inside a tile writes
-  its captured defs twice (once in the page's defs, once inside the
-  tile's), so those ids repeat. Both copies are identical, so viewers
-  render the same either way.
+- ~~In SVG, a page pattern used both on the page and inside a tile writes
+  its captured defs twice.~~ Fixed in #1343 (`notes/1343-svg-pattern-defs-once.md`).
 - Inside a pattern turned off the device axes, the inner period is
   resampled twice (into the outer tile, then onto the page); gs draws the
   outer cell at a whole-pixel position per copy, pscat at its exact
