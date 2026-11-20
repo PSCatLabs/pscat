@@ -2150,3 +2150,26 @@ fn a_mesh_pattern_layer_answers_to_the_limits() {
         assert!(ok, "{op} with no limit: {err}");
     }
 }
+
+/// A Coons patch as a shading pattern (#1378, #1325 part 2) fills a
+/// rectangle with its `/Background` around it, in all three outputs and gs.
+const SHADED_COONS: &str = "
+<< /PatternType 2 /Shading << /ShadingType 6 /ColorSpace /DeviceRGB /Background [0.9 0.9 0.8]
+   /DataSource [0  60 60  40 160  80 260  60 340   160 370  260 300  340 340
+                360 260  320 160  340 60   260 30  160 90
+                0.95 0.35 0.1  0.1 0.55 0.95  0.95 0.9 0.2  0.45 0.1 0.6] >> >>
+   matrix makepattern setpattern
+20 20 360 360 rectfill
+";
+
+#[test]
+fn a_coons_shading_pattern_agrees_across_outputs_and_with_gs() {
+    let out = check_shading("shaded coons", SHADED_COONS, false, false);
+    assert!(pdf_text(&out.pdf).contains("/ShadingType 7 "));
+    let p = out.png.pixel(25, 25).expect("pixel");
+    assert_eq!(
+        (p.red(), p.green(), p.blue()),
+        (230, 230, 204),
+        "background"
+    );
+}
