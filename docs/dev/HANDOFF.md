@@ -745,6 +745,11 @@ renders eight examples in both and compares block-downsampled output).
   linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
   (meshes) and shading patterns (PatternType 2) are not implemented, in
   any output.
+  tiny-skia's anti-aliased fill panics on a path with corners around 1e9
+  device pixels away, so a `/BBox` of that size is cut to a guard rectangle
+  (the page grown by its own size) before the raster paints it (#1324,
+  `Gfx::bbox_in_guard`; Type 1 clips to its layer, #1039). SVG and PDF
+  keep the box as given.
 - Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
   `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
   `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the

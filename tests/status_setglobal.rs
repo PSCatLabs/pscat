@@ -518,13 +518,6 @@ fn the_confined_cli_answers_the_same() {
 
 // ---- Ghostscript ----
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// A program that prints, for each case, `[ stack ]` or `/errorname`.
 fn harness(cases: &[String]) -> String {
     let mut src = String::from(
@@ -561,7 +554,7 @@ fn run_gs(dir: &Path, program: &str) -> String {
 
 #[test]
 fn setglobal_and_currentglobal_agree_with_ghostscript() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping: gs not installed");
         return;
     }
@@ -594,7 +587,7 @@ fn setglobal_and_currentglobal_agree_with_ghostscript() {
 #[cfg(unix)]
 #[test]
 fn status_agrees_with_ghostscript() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping: gs not installed");
         return;
     }
