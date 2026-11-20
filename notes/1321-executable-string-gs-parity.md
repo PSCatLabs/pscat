@@ -17,8 +17,13 @@ matches; the test runs gs too when it is installed.
    gains a `noaccess` bool (set by the `noaccess` operator on a string or file, copied with the
    reference; it fits the padding beside `readonly` and `packed`), checked in `execute_resolved`'s
    string and file arms and, for the operand left behind, at the top of the `exec` operator.
+   Codex round 1 added the operators that rebuild or restrict a reference: the flag survives `dup`,
+   `exch`, `roll`, `astore`/`get`, `put`/`get` on a dict, `save`/`restore`, `getinterval` and
+   `cvx`/`cvlit` (all probed against gs), `copy` with a `noaccess` string at either end is
+   `invalidaccess` before the length check, as in gs (it had cleared the flag on the result), and
+   `readonly`/`executeonly` on one are `invalidaccess`.
    Nothing else reads it: a `noaccess` string still reads and prints as its text (gs prints
-   `-string-` and refuses `get`/`getinterval`; not modelled, as for arrays since #1189).
+   `-string-` and refuses `get`/`getinterval`/`put`; not modelled, as for arrays since #1189).
    `noaccess` on an executable array still only write-protects it; gs also refuses to run it
    (`{7} noaccess exec` is `invalidaccess`).
 3. **Tail recursion through a string** (`/f [ (f) cvx ] cvx def f`): gs loops forever, pscat stops
