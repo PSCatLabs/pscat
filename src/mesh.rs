@@ -625,7 +625,7 @@ pub(crate) fn mesh_layer(
         }
         None => None,
     };
-    for (k, (&bits, chunk)) in cover.iter().zip(px.chunks_exact_mut(4)).enumerate() {
+    for (k, (&bits, chunk)) in cover.iter().zip(px.as_chunks_mut::<4>().0).enumerate() {
         let mut a = (bits.count_ones() * 255 + 8) / 16;
         if let Some(m) = &cut {
             a = (a * u32::from(m.data()[k]) + 127) / 255;
