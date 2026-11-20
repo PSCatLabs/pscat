@@ -401,11 +401,28 @@ fn flattenpath(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// A marking operator that has to wait for the current pattern's
+/// `PaintProc` (#1341): starts it and returns `true`, and the operator
+/// runs again after, with its operands untouched.
+fn wait_for_pattern(
+    it: &mut Interp,
+    name: &'static str,
+    func: crate::object::OpFn,
+) -> Result<bool, PsError> {
+    it.pattern_gate(crate::object::Operator { name, func })
+}
+
 fn fill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "fill", fill)? {
+        return Ok(());
+    }
     fill_common(it, FillRule::Winding)
 }
 
 fn eofill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "eofill", eofill)? {
+        return Ok(());
+    }
     fill_common(it, FillRule::EvenOdd)
 }
 
@@ -422,6 +439,9 @@ fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
 }
 
 fn stroke(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "stroke", stroke)? {
+        return Ok(());
+    }
     it.gfx.stroke();
     Ok(())
 }
@@ -844,6 +864,9 @@ fn append_rects(it: &mut Interp, rects: &[[f64; 4]]) -> Result<(), PsError> {
 /// `x y w h rectfill` / `numarray rectfill` — paint inside an implicit
 /// gsave: current path and graphics state untouched (gs-pinned).
 fn rectfill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "rectfill", rectfill)? {
+        return Ok(());
+    }
     let rects = pop_rects(it)?;
     it.gfx.gsave();
     it.gfx.newpath();
@@ -865,6 +888,9 @@ fn rectfill(it: &mut Interp) -> Result<(), PsError> {
 /// matrix on top. gs pin: a 6-element array in top position is always
 /// the matrix, never a rect list; any other array is rects.
 fn rectstroke(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "rectstroke", rectstroke)? {
+        return Ok(());
+    }
     let top = it.pop()?;
     let matrix = if matches!(&top.value, Value::Array(a) if a.len() == 6) {
         Some(super::matrix::read_matrix(&top)?)

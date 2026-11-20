@@ -1052,11 +1052,12 @@ pub(crate) enum ColorSpace {
     },
 }
 
-/// The current colour in a `/Pattern` space (#1038): the tile, and the
-/// pattern dictionary `currentcolor` gives back.
+/// The current colour in a `/Pattern` space (#1038): the pattern (its
+/// tile once its `PaintProc` has run, #1341), and the pattern dictionary
+/// `currentcolor` gives back.
 #[derive(Clone)]
 pub(crate) struct PatternColor {
-    pub(crate) tile: std::rc::Rc<crate::pattern::PatternTile>,
+    pub(crate) lazy: std::rc::Rc<crate::pattern::LazyPattern>,
     pub(crate) dict: crate::object::Object,
 }
 
@@ -1270,6 +1271,12 @@ pub struct GraphicsState {
 }
 
 impl GraphicsState {
+    /// The pattern colour, taken out (to free a chain of patterns
+    /// iteratively: `LazyPattern`'s `Drop`).
+    pub(crate) fn take_pattern(&mut self) -> Option<PatternColor> {
+        self.pattern.take()
+    }
+
     /// Move the objects this state keeps alive (the current font's
     /// dictionary, the colour space's operand objects) into `out`, for
     /// `Drop for Dict`'s iterative teardown, which must not let a chain
@@ -2151,7 +2158,10 @@ impl Gfx {
             return Some(crate::pattern::Ink::Rgb(rgb));
         }
         let p = self.state.pattern.as_ref()?;
-        let place = if p.tile.context == self.context() {
+        // A pattern whose `PaintProc` has not run paints nothing: every
+        // marking operator runs it first (`pending_pattern`).
+        let tile = p.lazy.tile()?;
+        let place = if tile.context == self.context() {
             None
         } else {
             let here = self
@@ -2159,12 +2169,12 @@ impl Gfx {
                 .last()
                 .map_or(Transform::identity(), |c| c.to_gs);
             Some(crate::pattern::foreign_placement(
-                &p.tile,
+                &tile,
                 here,
                 self.pattern_default_space(),
             )?)
         };
-        Some(crate::pattern::Ink::Pattern(p.tile.clone(), rgb, place))
+        Some(crate::pattern::Ink::Pattern(tile, rgb, place))
     }
 
     /// The current context's coordinates to the default space of the PDF
@@ -4055,6 +4065,24 @@ impl Gfx {
         self.state.pattern.as_ref()
     }
 
+    /// The current colour's pattern when its `PaintProc` has not run yet
+    /// (#1341): what a marking operator has to run before it paints.
+    pub(crate) fn pending_pattern(
+        &self,
+    ) -> Option<(
+        std::rc::Rc<crate::pattern::LazyPattern>,
+        crate::object::Object,
+    )> {
+        if !matches!(self.state.colorspace, ColorSpace::Pattern { .. }) {
+            return None;
+        }
+        let p = self.state.pattern.as_ref()?;
+        p.lazy
+            .tile()
+            .is_none()
+            .then(|| (p.lazy.clone(), p.dict.clone()))
+    }
+
     pub fn line_cap(&self) -> i64 {
         match self.state.line_cap {
             LineCap::Butt => 0,
@@ -4282,28 +4310,71 @@ impl Gfx {
         Ok(())
     }
 
-    /// Start capturing a tiling pattern's tile (`makepattern`, #1038):
-    /// from here until [`end_pattern`](Self::end_pattern) (or
+    /// `makepattern` (#1038, #1341): the tile's geometry is checked now,
+    /// as gs checks the dictionary, and the pattern kept to run its
+    /// `PaintProc` at first use, in the state and context it was made in.
+    pub(crate) fn make_pattern(
+        &mut self,
+        spec: crate::pattern::TileSpec,
+        proc_: crate::object::Object,
+    ) -> Result<std::rc::Rc<crate::pattern::LazyPattern>, PsError> {
+        let geom = crate::pattern::geometry(&spec)?;
+        crate::pattern::check_fold(&geom)?;
+        self.next_capture += 1;
+        let origin = crate::pattern::Origin {
+            context: self.context(),
+            to_gs: self
+                .captures
+                .last()
+                .map_or(Transform::identity(), |c| c.to_gs),
+            to_default: self.pattern_default_space(),
+        };
+        // The `PaintProc` starts with no path, so none is kept (a large
+        // current path would be copied for every pattern made).
+        let mut made_in = self.state.clone();
+        made_in.path = PsPath::default();
+        Ok(std::rc::Rc::new(crate::pattern::LazyPattern::new(
+            self.next_capture,
+            spec,
+            proc_,
+            origin,
+            Box::new(made_in),
+        )))
+    }
+
+    /// Start capturing a tiling pattern's tile (its first use, #1038,
+    /// #1341): from here until [`end_pattern`](Self::end_pattern) (or
     /// [`abort_pattern`](Self::abort_pattern)) every mark goes to a
     /// tile-sized canvas, a fresh SVG recorder and an empty PDF content
-    /// stream instead of the page. The state is the current one inside a
-    /// `gsave`, as for a Type 3 glyph, with the CTM the tile's capture
-    /// matrix, no path, and the clip the pattern's `/BBox`.
-    pub(crate) fn begin_pattern(&mut self, spec: crate::pattern::TileSpec) -> Result<(), PsError> {
+    /// stream instead of the page. The state is the one `makepattern` had,
+    /// inside a `gsave` as for a Type 3 glyph, with the CTM the tile's
+    /// capture matrix, no path, and the clip the pattern's `/BBox`.
+    pub(crate) fn begin_pattern(
+        &mut self,
+        lazy: &crate::pattern::LazyPattern,
+    ) -> Result<(), PsError> {
+        let spec = lazy.spec.clone();
+        let origin = lazy.origin;
         let geom = crate::pattern::geometry(&spec)?;
         crate::pattern::check_fold(&geom)?;
         let (cw, ch) = geom.content;
         let (pw, ph) = geom.period;
+        if self.captures.len() >= crate::pattern::MAX_CAPTURE_DEPTH {
+            return Err(PsError::ExecStackOverflow);
+        }
+        let open: u64 = self
+            .captures
+            .iter()
+            .map(|c| crate::pattern::tile_pixels(&c.geom))
+            .sum();
+        if open + crate::pattern::tile_pixels(&geom) > crate::pattern::MAX_NESTED_PIXELS {
+            return Err(PsError::Limitcheck);
+        }
         self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
         let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
-        let context = self.context();
-        let parent_to_gs = self
-            .captures
-            .last()
-            .map_or(Transform::identity(), |c| c.to_gs);
-        let to_gs = crate::pattern::capture_to_gs(&spec, &geom, parent_to_gs);
-        self.next_capture += 1;
-        let id = self.next_capture;
+        let to_gs = crate::pattern::capture_to_gs(&spec, &geom, origin.to_gs);
+        let id = lazy.id;
+        let context = origin.context;
         let svg = if self.svg.is_some() {
             let rec = crate::svg::SvgRecorder::capture(cw, ch, format!("t{id}_"), spec.uncolored);
             self.svg.replace(Box::new(rec))
@@ -4331,7 +4402,17 @@ impl Gfx {
             coverage: self.coverage.take(),
             snapshot,
             to_gs,
+            origin,
         });
+        // The state `makepattern` had, not this use's (gs). The device and
+        // the `clipsave` stack belong to the page being painted: a state
+        // of another device would resize the canvas under the capture at
+        // the first `grestore`.
+        if let Some(mut made) = lazy.run_state() {
+            made.device = self.state.device.clone();
+            made.clip_stack = Vec::new();
+            self.state = *made;
+        }
         self.state.ctm = geom.capture;
         self.state.path = PsPath::default();
         self.state.clip = None;
@@ -4400,11 +4481,8 @@ impl Gfx {
         let svg = svg.map(|rec| rec.into_tile());
         // PDF's pattern matrix maps to the default space of the stream that
         // paints with it, here the one `makepattern` ran in.
-        let to_default = self.pattern_default_space();
-        let made_in_to_gs = self
-            .captures
-            .last()
-            .map_or(Transform::identity(), |c| c.to_gs);
+        let to_default = cap.origin.to_default;
+        let made_in_to_gs = cap.origin.to_gs;
         let pdf = match (cap.pdf.take(), &mut self.pdf) {
             (Some(saved), Some(rec)) => Some(rec.end_capture(
                 saved,

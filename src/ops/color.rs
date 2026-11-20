@@ -215,7 +215,7 @@ fn currentcolor(it: &mut Interp) -> Result<(), PsError> {
             None => vec![Object::lit(Value::Null)],
             Some(p) => {
                 let mut out = Vec::new();
-                if p.tile.uncolored
+                if p.lazy.spec.uncolored
                     && let Some(base) = base
                 {
                     out = base_components(it, base);
@@ -314,13 +314,13 @@ fn base_components(it: &Interp, base: &ColorSpace) -> Vec<Object> {
 /// The pattern dictionary on top of the stack and its tile (#1038):
 /// `typecheck` for a non-dictionary, `undefined` for a dictionary
 /// `makepattern` did not return (gs).
-fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::PatternTile>), PsError> {
+fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::LazyPattern>), PsError> {
     let top = it.ostack.last().ok_or(PsError::StackUnderflow)?;
     let Value::Dict(d) = &top.value else {
         return Err(PsError::Typecheck);
     };
     let tile = it
-        .pattern_tile(d)
+        .pattern_lazy(d)
         .ok_or_else(|| PsError::Undefined("Implementation".to_string()))?;
     Ok((top.clone(), tile))
 }
@@ -333,7 +333,7 @@ fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::PatternTile>),
 fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), PsError> {
     let (dict, tile) = top_pattern(it)?;
     let n = match base {
-        Some(base) if tile.uncolored => base.ncomp() as usize,
+        Some(base) if tile.spec.uncolored => base.ncomp() as usize,
         _ => 0,
     };
     let len = it.ostack.len();
@@ -351,7 +351,8 @@ fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), P
         4 => it.gfx.set_cmyk(comps[0], comps[1], comps[2], comps[3]),
         _ => {}
     }
-    it.gfx.set_pattern(crate::gfx::PatternColor { tile, dict });
+    it.gfx
+        .set_pattern(crate::gfx::PatternColor { lazy: tile, dict });
     Ok(())
 }
 
@@ -379,8 +380,9 @@ fn setpattern(it: &mut Interp) -> Result<(), PsError> {
 
 /// `dict matrix makepattern pattern` (#1038): PatternType 1 (tiling).
 /// The pattern matrix is `matrix` times the CTM; the dictionary returned
-/// is a copy of `dict` with an `/Implementation` entry, as in gs, and the
-/// `PaintProc` runs now, on it, to make the tile (`crate::pattern`).
+/// is a copy of `dict` with an `/Implementation` entry, as in gs. The
+/// `PaintProc` runs at the pattern's first use, as in gs (`crate::pattern`,
+/// #1341).
 /// Errors as gs gives them: a missing key is `undefined`, a value of the
 /// wrong type `typecheck`, out of range (including an empty or inverted
 /// `/BBox` and a zero step) `rangecheck`. PatternType 2 (shading
@@ -456,8 +458,12 @@ fn makepattern(it: &mut Interp) -> Result<(), PsError> {
         copy.put_obj(&k, v)?;
     }
     copy.put("Implementation".into(), Object::array(Vec::new()));
-    let pattern = Object::lit(Value::Dict(Rc::new(std::cell::RefCell::new(copy))));
-    it.gfx.begin_pattern(spec)?;
+    let copy = Rc::new(std::cell::RefCell::new(copy));
+    // The geometry is checked now; the `PaintProc` runs at first use
+    // (#1341, `crate::pattern`).
+    let lazy = it.gfx.make_pattern(spec, proc)?;
+    it.remember_pattern(&copy, lazy);
     it.ostack.truncate(len - 2);
-    it.begin_pattern_proc(pattern, &proc)
+    it.push(Object::lit(Value::Dict(copy)));
+    Ok(())
 }

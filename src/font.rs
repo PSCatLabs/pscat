@@ -2108,6 +2108,12 @@ impl ShowCtx {
         }
     }
 
+    /// Whether this show paints glyphs, as `show` does (not `charpath`
+    /// or `stringwidth`): the colour must be ready before it steps.
+    pub(crate) fn paints(&self) -> bool {
+        matches!(self.mode, ShowMode::Paint)
+    }
+
     pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ShowStep, PsError> {
         // A BuildChar just finished: seal the glyph context and advance.
         if let Some(p) = self.pending.take() {
