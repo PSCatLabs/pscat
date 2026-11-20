@@ -211,11 +211,21 @@ pub struct PdfRecorder {
     uncolored: bool,
 }
 
+/// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
+type GradientRef<'a> = (
+    &'a crate::svg::ShKind,
+    &'a [(f32, f32, f32, f32)],
+    [bool; 2],
+);
+
 /// A `/PatternType 1` pattern stream (#1038): the dictionary's own keys,
 /// its content, and the resources the content uses.
 #[derive(Clone)]
 struct PdfPattern {
     dict: String,
+    /// A shading pattern's shading (#1298): written as a dictionary with
+    /// no content stream.
+    shading: Option<usize>,
     content: String,
     images: Vec<usize>,
     gstates: Vec<usize>,
@@ -379,6 +389,7 @@ impl PdfRecorder {
         self.uncolored = saved.uncolored;
         PdfPattern {
             dict: String::new(),
+            shading: None,
             content: std::mem::replace(&mut self.content, saved.content),
             images: std::mem::replace(&mut self.current_images, saved.images),
             gstates: std::mem::replace(&mut self.current_gstates, saved.gstates),
@@ -494,7 +505,102 @@ impl PdfRecorder {
                     format!("/Pattern {cs} /P{idx} {scn} ")
                 }
             }
+            Ink::Shading(sp, place) => {
+                let Some(idx) = sp.pdf else {
+                    return String::new();
+                };
+                let idx = match place {
+                    Some(p) => self.pattern_variant(idx, p.pdf_matrix),
+                    None => idx,
+                };
+                if !self.current_patterns.contains(&idx) {
+                    self.current_patterns.push(idx);
+                }
+                if stroking {
+                    format!("/Pattern CS /P{idx} SCN ")
+                } else {
+                    format!("/Pattern cs /P{idx} scn ")
+                }
+            }
         }
+    }
+
+    /// A shading pattern with no PDF form paints nothing (#1298): its
+    /// shading paints nothing and it has no `/Background`, as the raster
+    /// paints it.
+    fn paints_nothing(ink: &Ink) -> bool {
+        matches!(ink, Ink::Shading(sp, _) if sp.pdf.is_none())
+    }
+
+    /// A shading pattern (#1298): a `/PatternType 2` pattern dictionary on
+    /// a shading written as `shfill` writes one, plus the pattern's
+    /// `/BBox` (in the shading's space) and `/Background`, which only a
+    /// shading pattern paints. `gradient` is the axial or radial shading
+    /// as `vector_shading` gives it (`None` for one that paints nothing,
+    /// which then paints only its background, everywhere: a constant
+    /// axial). `matrix` maps the shading's space to the default space of
+    /// the stream that paints with it. `None` when nothing is painted.
+    pub(crate) fn shading_pattern(
+        &mut self,
+        shading: &crate::shading::ParsedShading,
+        gradient: Option<GradientRef<'_>>,
+        bbox: Option<(f64, f64, f64, f64)>,
+        background: Option<(f32, f32, f32)>,
+        matrix: tiny_skia::Transform,
+    ) -> Option<usize> {
+        let m = [
+            matrix.sx, matrix.ky, matrix.kx, matrix.sy, matrix.tx, matrix.ty,
+        ];
+        if !m.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let (mut body, fidx) = match (shading, gradient) {
+            (crate::shading::ParsedShading::Function(f), _) => self.function_body(f)?,
+            (_, Some((kind, stops, extend))) => self.gradient_body(kind, stops, extend)?,
+            (_, None) => {
+                let (r, g, b) = background?;
+                let kind = crate::svg::ShKind::Axial {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 1.0,
+                    y1: 0.0,
+                };
+                self.gradient_body(&kind, &[(0.0, r, g, b), (1.0, r, g, b)], [true, true])?
+            }
+        };
+        if let Some((llx, lly, urx, ury)) = bbox {
+            let b = [llx, lly, urx, ury].map(|v| v as f32);
+            if !b.iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            let _ = write!(
+                body,
+                " /BBox [{} {} {} {}]",
+                p(b[0]),
+                p(b[1]),
+                p(b[2]),
+                p(b[3])
+            );
+        }
+        if let Some((r, g, b)) = background {
+            let _ = write!(body, " /Background [{} {} {}]", f(r), f(g), f(b));
+        }
+        let sidx = self.intern_shading(body, fidx);
+        self.patterns.push(PdfPattern {
+            dict: format!(
+                "/Type /Pattern /PatternType 2 /Matrix [{}]",
+                matrix_text(matrix)
+            ),
+            shading: Some(sidx),
+            content: String::new(),
+            images: Vec::new(),
+            gstates: Vec::new(),
+            shadings: Vec::new(),
+            fonts: Vec::new(),
+            patterns: Vec::new(),
+            pattern_cs: false,
+        });
+        Some(self.patterns.len() - 1)
     }
 
     /// `/DOCINFO` (#1032): set document-info entries. `Producer` is
@@ -892,6 +998,9 @@ impl PdfRecorder {
         comp: Composite,
         chain: &Chain,
     ) {
+        if Self::paints_nothing(ink) {
+            return;
+        }
         self.enter_clip(chain);
         let gs = self.gs_ref(comp);
         let colour = self.ink_ops(ink, false);
@@ -921,6 +1030,9 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
+        if Self::paints_nothing(ink) {
+            return;
+        }
         self.enter_clip(chain);
         let gs = self.gs_ref(comp);
         let colour = self.ink_ops(ink, true);
@@ -999,7 +1111,24 @@ Q",
     ) {
         // A non-finite number has no PDF spelling; writing `inf` would make
         // the whole file invalid. Every caller keeps these finite, so this
-        // is a last guard, not a path content takes.
+        // (and `gradient_body`'s) is a last guard, not a path content takes.
+        if !ctm.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        if let Some((body, fidx)) = self.gradient_body(kind, stops, extend) {
+            self.paint_shading(body, fidx, ctm, region, comp, chain);
+        }
+    }
+
+    /// An axial or radial shading's dictionary entries, as `shfill` writes
+    /// them (#1028), and its function's index. `None` for geometry with
+    /// no PDF spelling.
+    fn gradient_body(
+        &mut self,
+        kind: &crate::svg::ShKind,
+        stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
+    ) -> Option<(String, usize)> {
         let geometry = match *kind {
             crate::svg::ShKind::Axial { x0, y0, x1, y1 } => vec![x0, y0, x1, y1],
             crate::svg::ShKind::Radial {
@@ -1011,8 +1140,8 @@ Q",
                 r1,
             } => vec![x0, y0, r0, x1, y1, r1],
         };
-        if !geometry.iter().chain(ctm.iter()).all(|v| v.is_finite()) {
-            return;
+        if !geometry.iter().all(|v| v.is_finite()) {
+            return None;
         }
         let stops_key: Vec<[u32; 4]> = stops
             .iter()
@@ -1053,7 +1182,7 @@ Q",
                 p(r1)
             ),
         };
-        self.paint_shading(body, fidx, ctm, region, comp, chain);
+        Some((body, fidx))
     }
 
     /// A Type 1 (function-based) `shfill` (#1039): a `/ShadingType 1` with
@@ -1069,17 +1198,30 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
+        if !ctm.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        if let Some((body, fidx)) = self.function_body(shading) {
+            self.paint_shading(body, fidx, ctm, region, comp, chain);
+        }
+    }
+
+    /// A Type 1 shading's dictionary entries and its sampled function's
+    /// index, as `shfill_function` writes them (#1039). `None` for numbers
+    /// with no PDF spelling.
+    fn function_body(
+        &mut self,
+        shading: &crate::shading::FunctionShading,
+    ) -> Option<(String, usize)> {
         let num = |v: f64| p(v as f32);
         let [x0, x1, y0, y1] = shading.domain;
         let m = shading.matrix;
-        let all = shading.domain.iter().chain(&m).map(|&v| v as f32);
-        if !all.chain(ctm).all(f32::is_finite) {
-            return;
+        let mut all = shading.domain.iter().chain(&m).map(|&v| v as f32);
+        if !all.all(f32::is_finite) {
+            return None;
         }
         let ([gx, gy], [(ex0, ex1), (ey0, ey1)], samples) = shading.pdf_samples();
-        let Some(data) = deflate(&[&samples]) else {
-            return;
-        };
+        let data = deflate(&[&samples])?;
         let mut func = format!(
             "<< /FunctionType 0 /Domain [{} {} {} {}] /Range [0 1 0 1 0 1] \
              /Size [{gx} {gy}] /Encode [{} {} {} {}] /BitsPerSample 8 \
@@ -1106,7 +1248,22 @@ Q",
             num(y1),
             m.map(num).join(" ")
         );
-        self.paint_shading(body, fidx, ctm, region, comp, chain);
+        Some((body, fidx))
+    }
+
+    /// The index of the shading `body` (its function at `fidx`), stored
+    /// once.
+    fn intern_shading(&mut self, body: String, fidx: usize) -> usize {
+        let key = (body, fidx);
+        match self.shading_ids.get(&key) {
+            Some(&i) => i,
+            None => {
+                let i = self.shadings.len();
+                self.shadings.push(key.clone());
+                self.shading_ids.insert(key, i);
+                i
+            }
+        }
     }
 
     /// Interns the shading `body` (its function at `fidx`) and paints it
@@ -1120,16 +1277,7 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
-        let key = (body, fidx);
-        let sidx = match self.shading_ids.get(&key) {
-            Some(&i) => i,
-            None => {
-                let i = self.shadings.len();
-                self.shadings.push(key.clone());
-                self.shading_ids.insert(key, i);
-                i
-            }
-        };
+        let sidx = self.intern_shading(body, fidx);
         if self.current_shading_set.insert(sidx) {
             self.current_shadings.push(sidx);
         }
@@ -1179,6 +1327,9 @@ Q",
         };
         // An uncoloured pattern's content may hold no colour image (#1038).
         if self.uncolored && !matches!(data, ImageData::Mask { .. }) {
+            return;
+        }
+        if matches!(data, ImageData::Mask { .. }) && Self::paints_nothing(ink) {
             return;
         }
         // A soft mask is its own image entry (never in a page's XObject
@@ -1556,6 +1707,18 @@ Q",
             }
         }
         for (i, pat) in self.patterns.iter().enumerate() {
+            if let Some(sidx) = pat.shading {
+                debug_assert_eq!(out.objects() + 1, bases.pattern + i);
+                out.begin_obj();
+                let _ = write!(
+                    out,
+                    "<< {} /Shading {} 0 R >>",
+                    pat.dict,
+                    bases.shading + sidx
+                );
+                out.end_obj()?;
+                continue;
+            }
             let parts = resource_parts(
                 self,
                 &bases,

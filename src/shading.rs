@@ -589,6 +589,7 @@ pub(crate) enum ShadingKind {
 
 /// A parsed, ready-to-paint shading: geometry plus a pre-sampled color
 /// ramp (`(position 0..1, r, g, b)`, all already resolved to RGB).
+#[derive(Clone)]
 pub(crate) struct Shading {
     pub(crate) kind: ShadingKind,
     pub(crate) stops: Vec<(f32, f32, f32, f32)>,
@@ -1109,6 +1110,7 @@ fn parse_shading_function(
 
 /// What `shfill` paints: a gradient (types 2 and 3) or a function-based
 /// shading (type 1, #1039).
+#[derive(Clone)]
 pub(crate) enum ParsedShading {
     Gradient(Shading),
     Function(FunctionShading),
@@ -1117,6 +1119,7 @@ pub(crate) enum ParsedShading {
 /// A `ShadingType` 1 shading (#1039): colour is a two-input function of a
 /// point `(x, y)` of its own space, which `/Matrix` maps into user space,
 /// painted only over the `/Domain` rectangle (and `/BBox`, if given).
+#[derive(Clone)]
 pub(crate) struct FunctionShading {
     cs: CsKind,
     function: PsFunction,
@@ -1369,6 +1372,25 @@ fn parse_bbox(d: &Dict) -> Result<Option<(f64, f64, f64, f64)>, PsError> {
             _ => Err(PsError::Rangecheck),
         },
     }
+}
+
+/// A shading's `/Background`, as RGB (#1298). `shfill` ignores it; a
+/// shading pattern paints it wherever the shading itself does not reach
+/// (inside the `/BBox`). As gs 10.07.1 reads it: a value that is not an
+/// array is ignored, an array of the wrong length is `rangecheck`, a
+/// non-number in it `typecheck`, and a component out of range is clamped.
+pub(crate) fn parse_background(d: &Dict) -> Result<Option<(f32, f32, f32)>, PsError> {
+    let cs = parse_colorspace(&get_required(d, "ColorSpace")?)?;
+    match d.get("Background") {
+        Some(o) if matches!(o.value, Value::Array(_)) => {}
+        _ => return Ok(None),
+    }
+    let c = get_farray(d, "Background")?;
+    if c.len() != cs.ncomp() {
+        return Err(PsError::Rangecheck);
+    }
+    let (r, g, b) = cs.to_rgb(&c);
+    Ok(Some((r as f32, g as f32, b as f32)))
 }
 
 pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {

@@ -215,7 +215,7 @@ fn currentcolor(it: &mut Interp) -> Result<(), PsError> {
             None => vec![Object::lit(Value::Null)],
             Some(p) => {
                 let mut out = Vec::new();
-                if p.lazy.spec.uncolored
+                if p.pattern.uncolored()
                     && let Some(base) = base
                 {
                     out = base_components(it, base);
@@ -314,7 +314,7 @@ fn base_components(it: &Interp, base: &ColorSpace) -> Vec<Object> {
 /// The pattern dictionary on top of the stack and its tile (#1038):
 /// `typecheck` for a non-dictionary, `undefined` for a dictionary
 /// `makepattern` did not return (gs).
-fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::LazyPattern>), PsError> {
+fn top_pattern(it: &Interp) -> Result<(Object, crate::pattern::PatternRef), PsError> {
     let top = it.ostack.last().ok_or(PsError::StackUnderflow)?;
     let Value::Dict(d) = &top.value else {
         return Err(PsError::Typecheck);
@@ -333,7 +333,7 @@ fn top_pattern(it: &Interp) -> Result<(Object, Rc<crate::pattern::LazyPattern>),
 fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), PsError> {
     let (dict, tile) = top_pattern(it)?;
     let n = match base {
-        Some(base) if tile.spec.uncolored => base.ncomp() as usize,
+        Some(base) if tile.uncolored() => base.ncomp() as usize,
         _ => 0,
     };
     let len = it.ostack.len();
@@ -351,8 +351,10 @@ fn set_pattern_color(it: &mut Interp, base: Option<&ColorSpace>) -> Result<(), P
         4 => it.gfx.set_cmyk(comps[0], comps[1], comps[2], comps[3]),
         _ => {}
     }
-    it.gfx
-        .set_pattern(crate::gfx::PatternColor { lazy: tile, dict });
+    it.gfx.set_pattern(crate::gfx::PatternColor {
+        pattern: tile,
+        dict,
+    });
     Ok(())
 }
 
@@ -378,15 +380,15 @@ fn setpattern(it: &mut Interp) -> Result<(), PsError> {
     setcolor(it)
 }
 
-/// `dict matrix makepattern pattern` (#1038): PatternType 1 (tiling).
-/// The pattern matrix is `matrix` times the CTM; the dictionary returned
-/// is a copy of `dict` with an `/Implementation` entry, as in gs. The
-/// `PaintProc` runs at the pattern's first use, as in gs (`crate::pattern`,
-/// #1341).
+/// `dict matrix makepattern pattern` (#1038, #1298): PatternType 1
+/// (tiling) or 2 (shading). The pattern matrix is `matrix` times the CTM;
+/// the dictionary returned is a copy of `dict` with an `/Implementation`
+/// entry, as in gs. A tiling pattern's `PaintProc` runs at the pattern's
+/// first use, as in gs (`crate::pattern`, #1341).
 /// Errors as gs gives them: a missing key is `undefined`, a value of the
 /// wrong type `typecheck`, out of range (including an empty or inverted
-/// `/BBox` and a zero step) `rangecheck`. PatternType 2 (shading
-/// patterns) is not implemented yet: `rangecheck`.
+/// `/BBox` and a zero step) `rangecheck`. gs takes a real PatternType with
+/// a whole value (`2.0`).
 fn makepattern(it: &mut Interp) -> Result<(), PsError> {
     let len = it.ostack.len();
     if len < 2 {
@@ -397,6 +399,18 @@ fn makepattern(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let d = d.clone();
+    let pattern_type = match d.borrow().get("PatternType").map(|o| o.value) {
+        None => return Err(PsError::Undefined("PatternType".to_string())),
+        Some(Value::Integer(n)) => n as f64,
+        Some(Value::Real(r)) => r,
+        Some(_) => return Err(PsError::Typecheck),
+    };
+    if pattern_type == 2.0 {
+        return make_shading_pattern(it, &d, matrix);
+    }
+    if pattern_type != 1.0 {
+        return Err(PsError::Rangecheck);
+    }
     let (spec, proc) = {
         let dict = d.borrow();
         let get = |key: &str| {
@@ -408,9 +422,6 @@ fn makepattern(it: &mut Interp) -> Result<(), PsError> {
             _ => Err(PsError::Typecheck),
         };
         let num = |o: &Object| o.num().map(|n| n.to_f64()).ok_or(PsError::Typecheck);
-        if int("PatternType")? != 1 {
-            return Err(PsError::Rangecheck);
-        }
         let paint_type = int("PaintType")?;
         let tiling_type = int("TilingType")?;
         if !(1..=2).contains(&paint_type) || !(1..=3).contains(&tiling_type) {
@@ -453,16 +464,62 @@ fn makepattern(it: &mut Interp) -> Result<(), PsError> {
     if matrix.invert().is_none() {
         return Err(PsError::Typecheck);
     }
+    let copy = pattern_copy(&d)?;
+    // The geometry is checked now; the `PaintProc` runs at first use
+    // (#1341, `crate::pattern`).
+    let lazy = it.gfx.make_pattern(spec, proc)?;
+    it.remember_pattern(&copy, crate::pattern::PatternRef::Tile(lazy));
+    it.ostack.truncate(len - 2);
+    it.push(Object::lit(Value::Dict(copy)));
+    Ok(())
+}
+
+/// The dictionary `makepattern` returns: a copy of `d` with an
+/// `/Implementation` entry, as in gs.
+fn pattern_copy(d: &Rc<std::cell::RefCell<Dict>>) -> Result<Rc<std::cell::RefCell<Dict>>, PsError> {
     let mut copy = Dict::new();
     for (k, v) in d.borrow().pairs() {
         copy.put_obj(&k, v)?;
     }
     copy.put("Implementation".into(), Object::array(Vec::new()));
-    let copy = Rc::new(std::cell::RefCell::new(copy));
-    // The geometry is checked now; the `PaintProc` runs at first use
-    // (#1341, `crate::pattern`).
-    let lazy = it.gfx.make_pattern(spec, proc)?;
-    it.remember_pattern(&copy, lazy);
+    Ok(Rc::new(std::cell::RefCell::new(copy)))
+}
+
+/// `makepattern` of a PatternType 2 dictionary (#1298): its `/Shading`
+/// is read as `shfill` reads one, with the same errors, plus its
+/// `/Background`; a missing `/Shading` is `undefined`, one that is not a
+/// dictionary `typecheck` (gs 10.07.1). `/ExtGState` is not read (gs takes
+/// any value for it, and pscat has no ExtGState). A singular matrix is
+/// taken, as gs takes it, and paints nothing. Nothing runs: a shading
+/// pattern has no `PaintProc`.
+fn make_shading_pattern(
+    it: &mut Interp,
+    d: &Rc<std::cell::RefCell<Dict>>,
+    matrix: tiny_skia::Transform,
+) -> Result<(), PsError> {
+    let (shading, background) = {
+        let dict = d.borrow();
+        let sh = dict
+            .get("Shading")
+            .ok_or_else(|| PsError::Undefined("Shading".to_string()))?;
+        let Value::Dict(sd) = &sh.value else {
+            return Err(PsError::Typecheck);
+        };
+        let sd = sd.borrow();
+        (
+            crate::shading::parse_shading_dict(&sd)?,
+            crate::shading::parse_background(&sd)?,
+        )
+    };
+    let copy = pattern_copy(d)?;
+    let probe = it.limit_probe();
+    let to_device = it.gfx.ctm().pre_concat(matrix);
+    let (sp, work) = it
+        .gfx
+        .make_shading_pattern(shading, background, to_device, &probe)?;
+    it.charge_probed_steps(work / 1024);
+    it.remember_pattern(&copy, crate::pattern::PatternRef::Shading(sp));
+    let len = it.ostack.len();
     it.ostack.truncate(len - 2);
     it.push(Object::lit(Value::Dict(copy)));
     Ok(())

@@ -528,10 +528,7 @@ pub struct Interp {
     /// dead entries are dropped as new ones come.
     pub(crate) patterns: std::collections::HashMap<
         usize,
-        (
-            std::rc::Weak<RefCell<Dict>>,
-            Rc<crate::pattern::LazyPattern>,
-        ),
+        (std::rc::Weak<RefCell<Dict>>, crate::pattern::PatternRef),
     >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
@@ -2249,6 +2246,14 @@ impl Interp {
             // A Type 3 glyph's end restores its graphics state, which can
             // bring an older page device back (#909).
             let mut stepped_show = false;
+            // A finished image's shading-pattern layer work (#1298).
+            let mut layer_work = 0;
+            // An image frame steps with the limits now in force, not the
+            // ones it began with: its data-source procedure has spent steps
+            // since, which its shading pattern's layer must not spend again
+            // (Codex round 2 on PR #1367).
+            let image_probe =
+                matches!(self.estack.last(), Some(Frame::Image(_))).then(|| self.limit_probe());
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -2432,13 +2437,22 @@ impl Interp {
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
                         }
+                        if let Some(probe) = image_probe {
+                            ctx.probe = probe;
+                        }
                         match ctx.step(gfx)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
-                            ImageStep::Done => Action::Pop,
+                            ImageStep::Done => {
+                                layer_work = ctx.layer_work.take();
+                                Action::Pop
+                            }
                         }
                     }
                 }
             };
+            if layer_work > 0 {
+                self.charge_probed_steps(layer_work / 1024);
+            }
             if stepped_show {
                 self.after_device_change();
                 self.device_restore_result()?;
@@ -2841,10 +2855,7 @@ impl Interp {
     }
 
     /// The pattern `makepattern` made for `d`, if it made one.
-    pub(crate) fn pattern_lazy(
-        &self,
-        d: &Rc<RefCell<Dict>>,
-    ) -> Option<Rc<crate::pattern::LazyPattern>> {
+    pub(crate) fn pattern_lazy(&self, d: &Rc<RefCell<Dict>>) -> Option<crate::pattern::PatternRef> {
         self.patterns
             .get(&(Rc::as_ptr(d) as usize))
             .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
@@ -2855,7 +2866,7 @@ impl Interp {
     pub(crate) fn remember_pattern(
         &mut self,
         d: &Rc<RefCell<Dict>>,
-        lazy: Rc<crate::pattern::LazyPattern>,
+        lazy: crate::pattern::PatternRef,
     ) {
         // Drop entries whose dictionaries are gone, so a loop of
         // makepatterns keeps only the patterns still reachable. (A weak
