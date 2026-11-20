@@ -46,10 +46,12 @@ fn an_extreme_bbox_paints_what_a_page_sized_one_does() {
 
 #[test]
 fn an_extreme_bbox_under_a_rotated_ctm_does_not_panic() {
-    // The corners are rotated into a diamond that still covers the page.
+    // The reference box stays inside the guard rectangle (so is not cut) and
+    // still covers the page: rotated about the page centre its corners reach
+    // 141 px from it and its edges stay 100 px away, past the page's 85.
     for kind in [2, 3] {
         let setup = "60 60 translate 30 rotate -60 -60 translate";
-        let want = pixels(setup, kind, "[-1000 -1000 1000 1000]");
+        let want = pixels(setup, kind, "[-40 -40 160 160]");
         let got = pixels(setup, kind, "[-1e10 -1e10 1e10 1e10]");
         assert_eq!(got, want, "type {kind}");
     }
