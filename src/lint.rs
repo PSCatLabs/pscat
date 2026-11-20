@@ -446,9 +446,7 @@ impl StackTrace {
         file: Option<&std::rc::Rc<str>>,
     ) {
         let depth = ostack.len();
-        if self.depth > 0
-            && depth > 0
-            && self.bottom.is_some_and(|w| w != Witness::of(&ostack[0]))
+        if self.depth > 0 && depth > 0 && self.bottom.is_some_and(|w| w != Witness::of(&ostack[0]))
         {
             // The old bottom item was consumed along the way.
             self.runs.clear();
@@ -1238,17 +1236,26 @@ mod tests {
     fn a_leak_on_the_last_line_is_credited_to_the_last_token() {
         // No token follows it, so no later sample sees the growth.
         let m = leak_message("1 2 add pop\n\n9");
-        assert!(m.contains("the oldest, 9, was left when the program reached line 3"), "{m}");
+        assert!(
+            m.contains("the oldest, 9, was left when the program reached line 3"),
+            "{m}"
+        );
     }
 
     #[test]
     fn the_first_leak_wins_over_later_ones_and_balanced_work_between_is_ignored() {
         let m = leak_message("5\n1 2 add pop\n6\n[ 1 2 ] pop\n7");
         assert!(m.contains("3 item(s)"), "{m}");
-        assert!(m.contains("the oldest, 5, was left when the program reached line 1"), "{m}");
+        assert!(
+            m.contains("the oldest, 5, was left when the program reached line 1"),
+            "{m}"
+        );
         // A cleared stack forgets the old origin; the next leak is a new one.
         let m = leak_message("5\nclear\n\n6");
-        assert!(m.contains("the oldest, 6, was left when the program reached line 4"), "{m}");
+        assert!(
+            m.contains("the oldest, 6, was left when the program reached line 4"),
+            "{m}"
+        );
     }
 
     #[test]
@@ -1256,7 +1263,10 @@ mod tests {
         let src = "0 1 9 {\n  /gq exch\n  pop\n  /gq 1\n} for\nshowpage";
         let m = leak_message(src);
         assert!(m.contains("30 item(s)"), "{m}");
-        assert!(m.contains("was left when the program reached line 5"), "{m}");
+        assert!(
+            m.contains("was left when the program reached line 5"),
+            "{m}"
+        );
     }
 
     #[test]
@@ -1264,7 +1274,10 @@ mod tests {
         let src = "/leak {\n  1 2\n  3\n} def\n1 2 add pop\nleak\nshowpage";
         let m = leak_message(src);
         assert!(m.contains("3 item(s)"), "{m}");
-        assert!(m.contains("was left when the program reached line 6"), "{m}");
+        assert!(
+            m.contains("was left when the program reached line 6"),
+            "{m}"
+        );
     }
 
     #[test]
@@ -1272,7 +1285,10 @@ mod tests {
         // The issue's shape: five numbers where a `curveto` belonged.
         let src = "newpath -20 -10 moveto -20 118 lineto\n  20 124 60 118 110 100 curveto\n  250 24 270 10 300 -10 closepath\n0 setgray";
         let m = leak_message(src);
-        assert!(m.contains("the oldest, 250, was left when the program reached line 3"), "{m}");
+        assert!(
+            m.contains("the oldest, 250, was left when the program reached line 3"),
+            "{m}"
+        );
     }
 
     #[test]
@@ -1280,10 +1296,16 @@ mod tests {
         let dir = std::env::temp_dir();
         let lib = dir.join(format!("pscat-1081-leak-{}.ps", std::process::id()));
         std::fs::write(&lib, "% lib\n\n42\n").expect("write");
-        let src = format!("1 2 add pop\n({}) run\n", lib.to_str().unwrap().replace('\\', "/"));
+        let src = format!(
+            "1 2 add pop\n({}) run\n",
+            lib.to_str().unwrap().replace('\\', "/")
+        );
         let m = leak_message(&src);
         let _ = std::fs::remove_file(&lib);
-        assert!(m.contains("the oldest, 42, was left when the program reached line 3 ("), "{m}");
+        assert!(
+            m.contains("the oldest, 42, was left when the program reached line 3 ("),
+            "{m}"
+        );
     }
 
     #[test]
@@ -1294,7 +1316,10 @@ mod tests {
             .find(|f| f.check == "stack-leak")
             .expect("leak")
             .message;
-        assert!(m.contains("(top 5 of 7 shown, topmost first); the oldest is (first)"), "{m}");
+        assert!(
+            m.contains("(top 5 of 7 shown, topmost first); the oldest is (first)"),
+            "{m}"
+        );
     }
 
     #[test]
