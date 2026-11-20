@@ -69,9 +69,10 @@ against gs's (0 when the phase is right).
 | Types 1/3, cell not within half a pixel of the step (40): cell 0's corner | 17 of 37 off | 0 of 37 |
 
 The last row checks only the corner of the cell at the anchor, because
-of the gap below. The PDF of each picture, read by gs, places as the
-program does: our matrix already has the corner on a pixel and a whole
-step, so gs's adjustment leaves it there.
+of the gap below. Our PDF, read by gs, places the cells as gs's run of
+the program does (six of the cases, Types 1, 2 and 3, a mirror and a
+quarter turn: every edge the same): our matrix already has the corner on
+a pixel and a whole step, so gs's adjustment leaves it there.
 
 `tests/patterns.rs::cells_sit_where_gs_puts_the_bbox_corner` holds seven
 of these (Type 2 at 0.4, Type 1 at y 0.4, a mirror, the centre shift, a
