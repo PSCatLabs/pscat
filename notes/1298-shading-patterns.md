@@ -158,5 +158,7 @@ only in gs's aliased edges.
 - **Mesh shadings.** Types 4–7 are not implemented, so neither are their
   patterns.
 - **Uncoloured `PaintProc`.** A shading pattern used inside an uncoloured
-  `PaintProc` paints its coverage in the raster and in SVG
-  (`currentColor`), as gs does.
+  `PaintProc` paints its coverage (where it paints, not the whole shape)
+  in all three outputs since #1340
+  (`notes/1340-uncoloured-paintproc-coverage.md`); before, SVG and PDF
+  filled the whole shape.
