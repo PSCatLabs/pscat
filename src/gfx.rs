@@ -2064,28 +2064,28 @@ impl Gfx {
         // From `ink`, so the raster and the recorders never disagree.
         match self.ink()? {
             crate::pattern::Ink::Pattern(tile, rgb, place) => {
-                Some(tile.raster(rgb, place.as_ref(), self.lattice_canvas(&tile)))
+                let canvas = (self.pixmap.width(), self.pixmap.height());
+                Some(tile.raster(rgb, place.as_ref(), canvas))
             }
             crate::pattern::Ink::Rgb(_) => None,
         }
     }
 
-    /// The canvas size a fractional TilingType 2 tile's cells are laid out
-    /// over (#1332), unless the layout (a canvas-sized pixmap and a row of
-    /// cells, about twice the canvas) would not fit `--max-memory`: the
-    /// tile then paints from its period instead, as it does for a canvas
-    /// too large to lay out.
-    fn lattice_canvas(&self, tile: &crate::pattern::PatternTile) -> Option<(u32, u32)> {
-        tile.geom.lattice.as_ref()?;
-        let (w, h) = (self.pixmap.width(), self.pixmap.height());
-        if let Some((base, max)) = self.mem_budget {
-            let grown = crate::memtrack::live_bytes().saturating_sub(base);
-            let need = (w as usize).saturating_mul(h as usize).saturating_mul(8);
-            if grown.saturating_add(need) > max {
-                return None;
-            }
+    /// Lay out the cells of a fractional TilingType 2 pattern over the
+    /// canvas before it paints (#1332), adding the layout's work to `work`.
+    /// Does nothing for any other colour. A layout that would not fit the
+    /// limits' headroom is not made and the pattern paints from its
+    /// period; a limit reached while laying out is the error.
+    fn lay_pattern(
+        &self,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        if let Some(crate::pattern::Ink::Pattern(tile, rgb, None)) = self.ink() {
+            let canvas = (self.pixmap.width(), self.pixmap.height());
+            tile.lay(rgb, canvas, probe, work)?;
         }
-        Some((w, h))
+        Ok(())
     }
 
     /// Paint the current pattern through a stencil (`imagemask`, #1299):
@@ -2100,6 +2100,11 @@ impl Gfx {
         rect: [u32; 4],
         cover: impl FnOnce(&mut [u8], usize) -> Result<bool, PsError>,
     ) -> Result<bool, PsError> {
+        // The stencil's own loop checks no limit, so only the memory cap
+        // decides whether the layout is made; a layout it cannot make
+        // paints from the period.
+        let mem = crate::limits::LimitProbe::memory_only(self.mem_budget);
+        let _ = self.lay_pattern(&mem, &mut 0);
         let src = self.pattern_source();
         if src.is_none() {
             return Ok(false);
@@ -2294,6 +2299,11 @@ impl Gfx {
             }
         };
         let max_memory = self.mem_budget.map(|(_, max)| max);
+        let mut work = work;
+        if let Err(e) = self.lay_pattern(probe, &mut work) {
+            self.coverage = Some(cov);
+            return Err(e);
+        }
         // The shadow composites a flat colour, so a pattern fill (#1038)
         // and a pattern's capture canvas paint through tiny-skia instead.
         let pattern = self.pattern_source();
@@ -3189,6 +3199,9 @@ impl Gfx {
         };
         if let Some(draw) = drawable {
             self.prepare_paint();
+            // A stroke checks no limit; only the memory cap decides.
+            let mem = crate::limits::LimitProbe::memory_only(self.mem_budget);
+            let _ = self.lay_pattern(&mem, &mut 0);
             let src = self.pattern_source();
             let paint = self.paint_from(&src);
             let mask = self.clip_mask();

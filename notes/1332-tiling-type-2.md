@@ -45,6 +45,19 @@ keeps the cell undistorted and spreads the spacing instead.
   computed from the pattern's origin for every `i`, never by adding steps,
   so the lattice does not depend on where the canvas starts (not tested
   with a banded render).
+- Limits (Codex round 1 on #1372): `PatternTile::lay` runs before a fill
+  paints (`Gfx::lay_pattern`, from `fill_coverage_limited`, `stroke` and the
+  stencil path; `pattern_source` and `raster` only read the cache). It
+  returns a matching cached layout before checking anything, drops a
+  layout for another canvas or colour before asking for room for a new one
+  (one is held at a time), checks the real peak (canvas + row of cells +,
+  for an uncoloured pattern, the recoloured cell) against the heap
+  headroom and falls back to the period when it does not fit, charges the
+  layout's work (pixels written, a step per 1024, added to the fill's
+  work) and errors with `StepsExceeded` when that is over the steps left,
+  and looks at the limits between cell copies. Stroke and `imagemask` check
+  no limit of their own, so only the memory cap decides there.
+  `tests/pattern_type2_limits.rs` holds one case each.
 - Fallbacks to the period (cells at their true size, step rounded to
   whole pixels, so the PNG drifts from SVG/PDF across the page): a
   canvas over `MAX_LATTICE_PIXELS` (2^24), a layout that would not fit

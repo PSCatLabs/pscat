@@ -377,25 +377,47 @@ fn lattice_positions(origin: i32, step: f64, size: u32, len: u32) -> Vec<i32> {
     at
 }
 
+/// What laying `cell` out over a `w` x `h` canvas takes: the peak bytes
+/// held (the canvas, a row of cells, and for an uncoloured pattern the
+/// recoloured cell) and the work in pixels written, for the limits.
+fn lay_out_cost(cell: (u32, u32), lat: &Lattice, w: u32, h: u32, recolored: bool) -> (usize, u64) {
+    let (cw, ch) = (u64::from(cell.0), u64::from(cell.1));
+    let nx = lattice_positions(lat.origin.0, lat.step.0, cell.0, w).len() as u64;
+    let ny = lattice_positions(lat.origin.1, lat.step.1, cell.1, h).len() as u64;
+    let (w, h) = (u64::from(w), u64::from(h));
+    let bytes = 4 * (w * h + w * ch + if recolored { cw * ch } else { 0 });
+    (bytes as usize, nx * cw * ch + ny * w * ch)
+}
+
 /// `cell` repeated on the lattice over a `w` x `h` canvas (same device
 /// coordinates as the shader's): one row of cells is laid out first, then
 /// that row at every row position, so the work follows the canvas's area.
-pub(crate) fn lay_out(cell: &Pixmap, lat: &Lattice, w: u32, h: u32) -> Option<Pixmap> {
-    if u64::from(w) * u64::from(h) > MAX_LATTICE_PIXELS {
-        return None;
-    }
+/// The limits are looked at between copies.
+pub(crate) fn lay_out(
+    cell: &Pixmap,
+    lat: &Lattice,
+    w: u32,
+    h: u32,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Option<Pixmap>, PsError> {
     let xs = lattice_positions(lat.origin.0, lat.step.0, cell.width(), w);
     let ys = lattice_positions(lat.origin.1, lat.step.1, cell.height(), h);
     let paint = PixmapPaint::default();
-    let mut row = Pixmap::new(w, cell.height())?;
+    let Some(mut row) = Pixmap::new(w, cell.height()) else {
+        return Ok(None);
+    };
     for &x in &xs {
+        probe.check(0)?;
         row.draw_pixmap(x, 0, cell.as_ref(), &paint, Transform::identity(), None);
     }
-    let mut out = Pixmap::new(w, h)?;
+    let Some(mut out) = Pixmap::new(w, h) else {
+        return Ok(None);
+    };
     for &y in &ys {
+        probe.check(0)?;
         out.draw_pixmap(0, y, row.as_ref(), &paint, Transform::identity(), None);
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// The SVG side of a tile: the capture recorder's defs and body, in
@@ -574,19 +596,19 @@ impl PatternTile {
 
     /// The raster shader's source: the period (recoloured to `rgb` for an
     /// uncoloured pattern), its transform, and the sampling. A fractional
-    /// TilingType 2 tile paints from its cells laid out over the
-    /// `canvas` instead (#1332); `None` there paints from the period (the
-    /// layout would not fit `--max-memory`). `place`, for a pattern of
-    /// another context, gives the transform and sampling instead.
+    /// TilingType 2 tile paints from its cells laid out over the `canvas`
+    /// instead (#1332) when [`lay`](Self::lay) has made that layout, and
+    /// from the period when it has not (a layout a limit or the size
+    /// refused). `place`, for a pattern of another context, gives the
+    /// transform and sampling instead.
     pub(crate) fn raster(
         &self,
         rgb: (f32, f32, f32),
         place: Option<&Placement>,
-        canvas: Option<(u32, u32)>,
+        canvas: (u32, u32),
     ) -> (Rc<Pixmap>, Transform, FilterQuality) {
         if place.is_none()
-            && let Some(canvas) = canvas
-            && let Some(pm) = self.lattice_over(rgb, canvas)
+            && let Some(pm) = self.laid_over(rgb, canvas)
         {
             return (pm, Transform::identity(), FilterQuality::Nearest);
         }
@@ -614,34 +636,73 @@ impl PatternTile {
 }
 
 impl PatternTile {
-    /// The cells of a fractional TilingType 2 tile on a `canvas`, or
-    /// `None` for any other tile and for a canvas too big to lay out.
-    fn lattice_over(&self, rgb: (f32, f32, f32), canvas: (u32, u32)) -> Option<Rc<Pixmap>> {
-        let (cell, lat) = (self.cell.as_ref()?, self.geom.lattice.as_ref()?);
-        let key = if self.uncolored {
+    fn laid_key(&self, rgb: (f32, f32, f32), canvas: (u32, u32)) -> (u32, u32, [u8; 3]) {
+        let c = if self.uncolored {
             [to_u8(rgb.0), to_u8(rgb.1), to_u8(rgb.2)]
         } else {
             [0; 3]
         };
-        let key = (canvas.0, canvas.1, key);
-        if let Some((k, pm)) = &*self.laid.borrow()
-            && *k == key
-        {
-            return Some(pm.clone());
+        (canvas.0, canvas.1, c)
+    }
+
+    /// The layout [`lay`](Self::lay) made for this canvas (and colour).
+    fn laid_over(&self, rgb: (f32, f32, f32), canvas: (u32, u32)) -> Option<Rc<Pixmap>> {
+        let key = self.laid_key(rgb, canvas);
+        match &*self.laid.borrow() {
+            Some((k, pm)) if *k == key => Some(pm.clone()),
+            _ => None,
         }
-        let pm = if self.uncolored {
-            lay_out(
-                &recolor(cell, [key.2[0], key.2[1], key.2[2]]),
-                lat,
-                canvas.0,
-                canvas.1,
-            )?
-        } else {
-            lay_out(cell, lat, canvas.0, canvas.1)?
+    }
+
+    /// Lay a fractional TilingType 2 tile's cells out over `canvas` for the
+    /// raster to paint from (#1332), unless that is already done, the tile
+    /// has no lattice, or the layout is too big (past
+    /// [`MAX_LATTICE_PIXELS`], or the heap headroom the limits leave: then
+    /// the tile paints from its period). Its work, in pixels, is added to
+    /// `work` for the operator to charge, and a limit (steps, time or
+    /// memory while laying out) is an error. A matching layout is reused
+    /// before anything is checked; a layout for another canvas or colour is
+    /// dropped first, so only one is ever held.
+    pub(crate) fn lay(
+        &self,
+        rgb: (f32, f32, f32),
+        canvas: (u32, u32),
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        let (Some(cell), Some(lat)) = (self.cell.as_ref(), self.geom.lattice.as_ref()) else {
+            return Ok(());
         };
-        let pm = Rc::new(pm);
-        *self.laid.borrow_mut() = Some((key, pm.clone()));
-        Some(pm)
+        let key = self.laid_key(rgb, canvas);
+        if self.laid_over(rgb, canvas).is_some() {
+            return Ok(());
+        }
+        *self.laid.borrow_mut() = None;
+        if u64::from(canvas.0) * u64::from(canvas.1) > MAX_LATTICE_PIXELS {
+            return Ok(());
+        }
+        let (bytes, cost) = lay_out_cost(
+            (cell.width(), cell.height()),
+            lat,
+            canvas.0,
+            canvas.1,
+            self.uncolored,
+        );
+        if probe.check_alloc(bytes).is_err() {
+            return Ok(());
+        }
+        probe.check(cost / 1024)?;
+        let laid = if self.uncolored {
+            let tinted = recolor(cell, [key.2[0], key.2[1], key.2[2]]);
+            lay_out(&tinted, lat, canvas.0, canvas.1, probe)?
+        } else {
+            lay_out(cell, lat, canvas.0, canvas.1, probe)?
+        };
+        if let Some(pm) = laid {
+            *self.laid.borrow_mut() = Some((key, Rc::new(pm)));
+            *work = work.saturating_add(cost);
+        }
+        Ok(())
     }
 }
 
