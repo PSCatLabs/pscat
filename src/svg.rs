@@ -217,7 +217,7 @@ impl SvgRecorder {
             None => {
                 // Masks share the gradients' counter: the letter keeps ids
                 // apart.
-                let id = format!("{}c{}", self.prefix, self.next_grad);
+                let id = format!("{}k{}", self.prefix, self.next_grad);
                 self.next_grad += 1;
                 let (w, h) = (self.width, self.height);
                 let _ = write!(

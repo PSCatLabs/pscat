@@ -2262,3 +2262,165 @@ fn a_coons_shading_pattern_agrees_across_outputs_and_with_gs() {
         "background"
     );
 }
+
+// --- a pattern painted inside an uncoloured PaintProc (#1340) --------------
+
+/// An uncoloured pattern whose PaintProc paints with other patterns: a page
+/// pattern of red and white stripes (fill, a stroke, a pen-space stroke) and
+/// a green one made there. gs's raster takes each inner pattern's coverage,
+/// whatever its colours, and paints it in the outer pattern's colour: the
+/// white stripes count, and nothing red or green shows.
+const UNCOLOURED_OUTER: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+   /PaintProc { pop 0.9 0 0 setrgbcolor 0 0 3 10 rectfill
+                1 1 1 setrgbcolor 5 0 2 10 rectfill } >> matrix makepattern /stripes exch def
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 90 90] /XStep 100 /YStep 100
+   /PaintProc { pop stripes setpattern 0 0 40 40 rectfill
+                8 setlinewidth 50 10 moveto 85 45 lineto stroke
+                gsave 1 0.4 scale 6 setlinewidth 10 200 moveto 40 200 lineto stroke grestore
+                << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 6 6] /XStep 6 /YStep 6
+                   /PaintProc { pop 0 0.7 0 setrgbcolor 0 0 3 3 rectfill } >> matrix makepattern
+                setpattern 50 50 35 35 rectfill
+                0 setgray 45 0 5 5 rectfill } >> matrix makepattern /outer exch def
+1 1 0.6 setrgbcolor 0 0 400 400 rectfill
+[/Pattern /DeviceRGB] setcolorspace
+0.1 0.2 0.8 outer setcolor 10 10 380 180 rectfill
+0.5 0 0.5 outer setcolor 10 210 380 180 rectfill
+";
+
+/// The same through an offset outer pattern, with an uncoloured page
+/// pattern (in red) and two shading patterns made inside: one cut to its
+/// `/BBox`, one not extended past its axis. gs's raster takes a shading
+/// pattern's coverage too: where it paints, not the whole shape. The
+/// offset is whole points, so the inner lattice's anchor (#1342) is not
+/// what is measured here.
+const UNCOLOURED_OUTER_MORE: &str = "
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 9 9] /XStep 9 /YStep 9
+   /PaintProc { pop 1 1 6 6 rectfill } >> matrix makepattern /dots exch def
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 80 80] /XStep 90 /YStep 90
+   /PaintProc { pop
+     [/Pattern /DeviceRGB] setcolorspace 1 0 0 dots setcolor 0 0 40 40 rectfill
+     << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [45 0 75 0]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 1 0] /N 1 >>
+          /BBox [45 0 60 40] >> >>
+     matrix makepattern setpattern 40 0 40 40 rectfill
+     << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [10 0 30 0]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 1 0] /N 1 >> >> >>
+     matrix makepattern setpattern 0 45 80 35 rectfill } >> [1 0 0 1 4 7] makepattern
+/outer exch def
+1 1 0.6 setrgbcolor 0 0 400 400 rectfill
+[/Pattern /DeviceRGB] setcolorspace 0.1 0.2 0.8 outer setcolor 0 0 400 400 rectfill
+";
+
+/// Pixels where red or green dominates: an inner pattern's own colours
+/// showing through, which gs's raster never does here.
+fn inner_colours(pm: &Pixmap) -> usize {
+    pm.pixels()
+        .iter()
+        .filter(|p| {
+            let (r, g, b) = (i32::from(p.red()), i32::from(p.green()), i32::from(p.blue()));
+            (r > 150 && g < 100 && b < 100) || (g > 120 && r < 100 && b < 100)
+        })
+        .count()
+}
+
+/// Every output of an uncoloured pattern painting other patterns' coverage
+/// against our PNG and, when `exact`, our PDF against gs's run of the
+/// program (`check_all`): the chain that ties the PNG to gs, whose own
+/// raster paints pattern cells aliased (#1038). Not `exact`: gs's PDF and
+/// PostScript interpreters put the edges of a cell's small whole-point rects
+/// a pixel apart (as for #1300's pictures, `check_outputs`).
+fn check_uncoloured_outer(name: &str, src: &str, exact: bool) -> Outputs {
+    let out = if exact {
+        check_all(name, src, 1, true)
+    } else {
+        check_outputs(name, src, 1, true)
+    };
+    let svg = resvg_png(&out.svg);
+    let hayro = hayro_png(&out.pdf);
+    for (pm, what) in [
+        (&out.png, "PNG"),
+        (&svg, "SVG via resvg"),
+        (&hayro, "PDF via hayro"),
+    ] {
+        let n = inner_colours(pm);
+        assert!(n < 20, "{name}: {n} pixels of an inner colour in the {what}");
+    }
+    // The PDF writes the outer pattern coloured (gs drops an uncoloured one
+    // whose resources hold a soft mask), once per colour, with the inner
+    // patterns' coverage as soft masks.
+    let text = pdf_text(&out.pdf);
+    assert!(text.contains("/SMask << /Type /Mask /S /Alpha /G "), "{text}");
+    assert!(text.contains(" gs "), "{text}");
+    if common::gs_available() {
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        let gs = gs_png(ps.as_bytes(), "ps", name);
+        assert!(inner_colours(&gs) < 20, "{name}: gs shows an inner colour");
+        let pdf = gs_png(&out.pdf, "pdf", name);
+        assert!(
+            inner_colours(&pdf) < 20,
+            "{name}: our PDF via gs shows an inner colour"
+        );
+    }
+    out
+}
+
+#[test]
+fn an_uncoloured_paintproc_paints_a_patterns_coverage_in_every_output() {
+    let out = check_uncoloured_outer("uncoloured outer", UNCOLOURED_OUTER, true);
+    let text = pdf_text(&out.pdf);
+    // Two colours of the outer pattern, each a coloured copy.
+    assert!(text.contains("0.1 0.2 0.8 rg 0.1 0.2 0.8 RG"), "{text}");
+    assert!(text.contains("0.5 0 0.5 rg 0.5 0 0.5 RG"), "{text}");
+    // The white stripes paint: the cell's 40 pt square holds 5 pt of
+    // every 10 in the outer colour, not 3.
+    let blue = (10..40)
+        .filter(|&x| {
+            let p = out.png.pixel(x, 370).expect("pixel");
+            p.blue() > 150 && p.red() < 100
+        })
+        .count();
+    assert_eq!(blue, 15, "stripes 3 and 2 px wide in every 10");
+}
+
+#[test]
+fn an_uncoloured_paintproc_paints_shading_and_uncoloured_coverage_alike() {
+    check_uncoloured_outer("uncoloured outer more", UNCOLOURED_OUTER_MORE, false);
+}
+
+#[test]
+fn an_uncoloured_paintproc_with_no_pattern_keeps_its_paint_type() {
+    let out = render(UNCOLOURED);
+    let text = pdf_text(&out.pdf);
+    assert!(text.contains("/PaintType 2 "), "{text}");
+    assert!(!text.contains("/SMask"), "{text}");
+    assert!(!out.svg.contains("mask-type"), "{}", out.svg);
+}
+
+#[test]
+fn an_error_after_a_coverage_mask_leaves_the_page_without_it() {
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.gfx_mut().enable_svg();
+    it.gfx_mut().enable_pdf();
+    let src = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 4 4] /XStep 4 /YStep 4 \
+                  /PaintProc { pop 0 0 2 2 rectfill } >> matrix makepattern /inner exch def \
+               << /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 \
+                  /PaintProc { pop inner setpattern 0 0 5 5 rectfill nosuchname } >> \
+               matrix makepattern /outer exch def \
+               [/Pattern /DeviceRGB] setcolorspace 1 0 0 outer setcolor \
+               { 0 0 5 5 rectfill } stopped pop clear \
+               1 0 0 setrgbcolor 0 20 20 20 rectfill";
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    // The page names no mask and no pattern. (Objects made while the
+    // PaintProc ran, the inner pattern's copy and the mask's form, stay in
+    // the file unreferenced, as an inner pattern's copy did before.)
+    let pdf = pdf_text(&it.gfx().pdf_document().expect("pdf"));
+    assert!(!pdf.contains("/SMask"), "{pdf}");
+    assert!(
+        pdf.contains("/Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R >>"),
+        "{pdf}"
+    );
+    let svg = &it.gfx().svg_pages().expect("svg")[0];
+    assert!(!svg.contains("<mask"), "{svg}");
+}
