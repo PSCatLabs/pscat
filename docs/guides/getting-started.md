@@ -185,7 +185,10 @@ More on the less obvious ones:
   (`sh` with a `/Shading` resource). Function-based shadings (`ShadingType`
   1: colour from a sampled function of x and y over a `/Domain` rectangle)
   paint too; SVG has no equivalent, so it embeds them as an image. Mesh
-  shadings (types 4–7) are not supported yet. `/Extend [start end]` says whether each
+  shadings paint too: Gouraud triangle meshes (types 4 and 5), from an
+  array, string or file `/DataSource`. SVG embeds them as an image, and PDF
+  writes a real mesh shading. Patch meshes (types 6 and 7) are not supported
+  yet. `/Extend [start end]` says whether each
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.
@@ -201,8 +204,8 @@ More on the less obvious ones:
   gradient that fills text, strokes or any path, fixed where `makepattern`
   made it, with the shading's `/Background` painted where the gradient does
   not reach. SVG gets the gradient (or a `<pattern>` around it) and PDF a
-  real `/PatternType 2` pattern. `examples/shading_patterns.ps` is the
-  specimen sheet.
+  real `/PatternType 2` pattern. Mesh shadings work as patterns too.
+  `examples/shading_patterns.ps` is the specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh

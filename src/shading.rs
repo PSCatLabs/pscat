@@ -247,7 +247,7 @@ impl Sampled {
 }
 
 impl PsFunction {
-    fn ncomp(&self) -> usize {
+    pub(crate) fn ncomp(&self) -> usize {
         match self {
             PsFunction::Exponential { c0, .. } => c0.len(),
             PsFunction::Stitching { functions, .. } => {
@@ -264,6 +264,22 @@ impl PsFunction {
             PsFunction::Exponential { .. } | PsFunction::Stitching { .. } => 1,
             PsFunction::Sampled(s) => s.size.len(),
             PsFunction::Components(parts) => parts.first().map_or(0, PsFunction::nin),
+        }
+    }
+
+    /// A one-input function's `/Domain` (#1325: what a mesh shading's
+    /// colour ramp is sampled over); an array of functions spans theirs.
+    pub(crate) fn domain1(&self) -> (f64, f64) {
+        match self {
+            PsFunction::Exponential { domain, .. } | PsFunction::Stitching { domain, .. } => {
+                (domain.0.min(domain.1), domain.0.max(domain.1))
+            }
+            PsFunction::Sampled(s) => s.domain[0],
+            PsFunction::Components(parts) => parts
+                .iter()
+                .map(PsFunction::domain1)
+                .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+                .unwrap_or((0.0, 1.0)),
         }
     }
 
@@ -528,14 +544,14 @@ fn stitch_index(x: f64, domain: (f64, f64), bounds: &[f64]) -> (usize, f64, f64)
 }
 
 #[derive(Clone, Copy)]
-enum CsKind {
+pub(crate) enum CsKind {
     Gray,
     Rgb,
     Cmyk,
 }
 
 impl CsKind {
-    fn ncomp(self) -> usize {
+    pub(crate) fn ncomp(self) -> usize {
         match self {
             CsKind::Gray => 1,
             CsKind::Rgb => 3,
@@ -552,7 +568,7 @@ impl CsKind {
     /// (reachable from an Exponential function's C0/C1 or an N that
     /// extrapolates past them) changes the *other* channels' results
     /// too, not just its own.
-    fn to_rgb(self, c: &[f64]) -> (f64, f64, f64) {
+    pub(crate) fn to_rgb(self, c: &[f64]) -> (f64, f64, f64) {
         let clamp = |v: f64| v.clamp(0.0, 1.0);
         match self {
             CsKind::Gray => (clamp(c[0]), clamp(c[0]), clamp(c[0])),
@@ -687,7 +703,7 @@ fn get_int(d: &Dict, key: &str) -> Result<i64, PsError> {
     }
 }
 
-fn get_farray(d: &Dict, key: &str) -> Result<Vec<f64>, PsError> {
+pub(crate) fn get_farray(d: &Dict, key: &str) -> Result<Vec<f64>, PsError> {
     let Value::Array(a) = get(d, key)?.value else {
         return Err(PsError::Typecheck);
     };
@@ -958,7 +974,7 @@ fn parse_colorspace(obj: &crate::object::Object) -> Result<CsKind, PsError> {
     }
 }
 
-fn build_stops(
+pub(crate) fn build_stops(
     cs: CsKind,
     function: &PsFunction,
     range: Option<&[(f64, f64)]>,
@@ -1014,7 +1030,7 @@ fn build_stops(
 /// min1 max1 ...]`, one pair per output component. Optional per spec;
 /// clips each evaluated component *after* the fact (`build_stops`),
 /// independent of `/Domain` (which clips the *input*).
-fn parse_function_range(
+pub(crate) fn parse_function_range(
     func_obj: &crate::object::Object,
     ncomp: usize,
 ) -> Result<Option<Vec<(f64, f64)>>, PsError> {
@@ -1076,7 +1092,7 @@ fn get_required(d: &Dict, key: &str) -> Result<crate::object::Object, PsError> {
 /// shading type, and an array of the wrong length is a rangecheck). Every
 /// one must take `nin` inputs (rangecheck otherwise, as gs reports a
 /// one-input function on a Type 1 shading).
-fn parse_shading_function(
+pub(crate) fn parse_shading_function(
     func_obj: &crate::object::Object,
     cs: CsKind,
     nin: usize,
@@ -1108,12 +1124,13 @@ fn parse_shading_function(
     Ok(function)
 }
 
-/// What `shfill` paints: a gradient (types 2 and 3) or a function-based
-/// shading (type 1, #1039).
+/// What `shfill` paints: a gradient (types 2 and 3), a function-based
+/// shading (type 1, #1039) or a mesh (types 4 to 7, #1325).
 #[derive(Clone)]
 pub(crate) enum ParsedShading {
     Gradient(Shading),
     Function(FunctionShading),
+    Mesh(crate::mesh::MeshShading),
 }
 
 /// A `ShadingType` 1 shading (#1039): colour is a two-input function of a
@@ -1364,7 +1381,7 @@ fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsErr
 }
 
 /// Optional `/BBox [llx lly urx ury]`, in the shading's user space.
-fn parse_bbox(d: &Dict) -> Result<Option<(f64, f64, f64, f64)>, PsError> {
+pub(crate) fn parse_bbox(d: &Dict) -> Result<Option<(f64, f64, f64, f64)>, PsError> {
     match d.get("BBox") {
         None => Ok(None),
         Some(_) => match get_farray(d, "BBox")?.as_slice() {
@@ -1401,6 +1418,9 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
     let cs = parse_colorspace(&get_required(d, "ColorSpace")?)?;
     if shading_type == 1 {
         return parse_function_shading(d, cs).map(ParsedShading::Function);
+    }
+    if (4..=5).contains(&shading_type) {
+        return crate::mesh::parse(d, shading_type as u8, cs).map(ParsedShading::Mesh);
     }
     let coords = get_farray(d, "Coords")?;
     let func_obj = get_required(d, "Function")?;

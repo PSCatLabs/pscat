@@ -2991,6 +2991,113 @@ impl Gfx {
         Ok(work)
     }
 
+    /// `shfill` of a mesh shading, types 4 to 7 (#1325). The mesh is
+    /// decoded, painted into a layer over its device box (cut by the
+    /// `/BBox`'s and the page) by `mesh::mesh_layer`, and the layer painted
+    /// through the clip by `paint_shfill`, as a Type 1 shading's is. SVG
+    /// embeds the layer as an image; PDF gets a real mesh shading.
+    ///
+    /// Under the limits the layer is built first, its work held against the
+    /// step limit before, so a stopped `shfill` leaves the page as it was.
+    /// It returns that work.
+    pub(crate) fn shfill_mesh_limited(
+        &mut self,
+        shading: &crate::mesh::MeshShading,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        if self.painting_off() || self.capturing_uncolored() {
+            return Ok(0);
+        }
+        let mesh = shading.decode(probe)?;
+        let ctm = self.state.ctm;
+        let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+        let (pw, ph) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
+        let bbox = shading.bbox.map(|(llx, lly, urx, ury)| {
+            let d = |x, y| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            };
+            [d(llx, lly), d(urx, lly), d(urx, ury), d(llx, ury)]
+        });
+        let mut b = mesh.device_box(&t).unwrap_or([0.0; 4]);
+        if let Some(q) = bbox {
+            let qb = corners_box(q);
+            b = [
+                b[0].max(qb[0]),
+                b[1].max(qb[1]),
+                b[2].min(qb[2]),
+                b[3].min(qb[3]),
+            ];
+        }
+        let (bx0, by0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
+        let (bx1, by1) = (b[2].ceil().min(pw), b[3].ceil().min(ph));
+        if !(bx1 > bx0 && by1 > by0) {
+            // Nothing to paint, but the page is begun, as for a gradient.
+            self.prepare_paint();
+            return Ok(0);
+        }
+        let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
+        let local_t = [t[0], t[1], t[2], t[3], t[4] - bx0, t[5] - by0];
+        // Rasterizing, then painting the layer as a two-stop gradient.
+        let work = mesh
+            .work(&local_t, bw, bh)
+            .saturating_add(shfill_work(bw, bh, 2));
+        probe.check(work / 1024)?;
+        // The layer, its coverage samples and the owned flags.
+        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(8))?;
+        let local: Option<Vec<(f64, f64)>> =
+            bbox.map(|q| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect());
+        let layer = crate::mesh::mesh_layer(
+            shading,
+            &mesh,
+            &t,
+            (bx0, by0, bw, bh),
+            local.as_deref(),
+            probe,
+        )?;
+        let shader = tiny_skia::Pattern::new(
+            layer.as_ref(),
+            SpreadMode::Pad,
+            tiny_skia::FilterQuality::Nearest,
+            1.0,
+            Transform::from_translate(bx0 as f32, by0 as f32),
+        );
+        let region = Self::rect_path(bx0 as f32, by0 as f32, bx1 as f32, by1 as f32);
+        let comp = self.composite();
+        if self.paint_shfill(shader, &region, false, 2, probe)? {
+            let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+            // An image embedded in an SVG, not a file pscat writes: no
+            // resolution to record (as in `image.rs`).
+            #[allow(clippy::disallowed_methods)]
+            let encoded = self.svg.is_some().then(|| layer.encode_png());
+            if let Some(svg) = &mut self.svg
+                && let Some(Ok(png)) = encoded
+            {
+                let at = [1.0, 0.0, 0.0, 1.0, bx0 as f32, by0 as f32];
+                svg.image(&png, bw, bh, at, true, comp, &chain);
+            }
+            if let Some(pdf) = &mut self.pdf {
+                let ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
+                let bbox_path = bbox.map(|q| {
+                    let mut p = PsPath::default();
+                    let pt = |(x, y): (f64, f64)| DevPoint {
+                        x: x as f32,
+                        y: y as f32,
+                    };
+                    p.move_to(pt(q[0]));
+                    for &corner in &q[1..] {
+                        p.line_to(pt(corner));
+                    }
+                    p.close();
+                    p
+                });
+                pdf.shfill_mesh(shading, &mesh, ctm, bbox_path.as_ref(), comp, &chain);
+            }
+            self.dirty = true;
+        }
+        Ok(work)
+    }
+
     /// Whether the region a `shfill` can paint reaches past each end of
     /// `shading` (#1040), conservatively: a `true` may be wrong, a `false`
     /// never is. The region is bounded, in device space, by the page, the
@@ -4518,26 +4625,47 @@ impl Gfx {
                 )),
                 VectorShading::Nothing => None,
             },
-            ParsedShading::Function(_) => None,
+            ParsedShading::Function(_) | ParsedShading::Mesh(_) => None,
         };
         // Where the raster paints no shading (an axis that collapses in
         // f32, as in gs), neither do the vector forms.
         let gradient = gradient.filter(|_| match &shading {
             ParsedShading::Gradient(g) => gradient_parts(g, matrix, g.extend).is_some(),
-            ParsedShading::Function(_) => true,
+            ParsedShading::Function(_) | ParsedShading::Mesh(_) => true,
         });
         let bbox = match &shading {
             ParsedShading::Gradient(g) => g.bbox,
             ParsedShading::Function(f) => f.bbox,
+            ParsedShading::Mesh(m) => m.bbox,
+        };
+        // A mesh's data (#1378), decoded once under the limits, for its box
+        // here and its PDF stream.
+        let mesh = match &shading {
+            ParsedShading::Mesh(m) if !singular && (self.svg.is_some() || self.pdf.is_some()) => {
+                Some(m.decode(probe)?)
+            }
+            _ => None,
         };
         let mut work = 0;
         let svg = if self.svg.is_some() && !singular {
-            let image = match &shading {
-                ParsedShading::Function(f) => {
-                    // The layer over the Domain's box, cut by the BBox's
-                    // and the canvas, as `shfill` makes it.
+            // The layer over the shading's box, cut by the BBox's and the
+            // canvas, as `shfill` makes it: a Type 1 Domain's, or a mesh's.
+            let shape = match (&shading, &mesh) {
+                (ParsedShading::Function(f), _) => {
                     let t = function_to_device(f.matrix, matrix);
-                    let mut b = corners_box(function_domain_quad(&t, f.domain));
+                    Some(corners_box(function_domain_quad(&t, f.domain)))
+                }
+                (ParsedShading::Mesh(_), Some(mesh)) => {
+                    let t = [
+                        matrix.sx, matrix.ky, matrix.kx, matrix.sy, matrix.tx, matrix.ty,
+                    ]
+                    .map(f64::from);
+                    Some(mesh.device_box(&t).unwrap_or([0.0; 4]))
+                }
+                _ => None,
+            };
+            let image = match shape {
+                Some(mut b) => {
                     if let Some(q) = bbox.map(|q| bbox_quad(matrix, q)) {
                         let qb = corners_box(q);
                         b = [
@@ -4566,7 +4694,7 @@ impl Gfx {
                         None
                     }
                 }
-                ParsedShading::Gradient(_) => None,
+                None => None,
             };
             Some(crate::pattern::SvgShading {
                 gradient: gradient
@@ -4593,6 +4721,7 @@ impl Gfx {
                     bbox.map(|(a, b, c, d)| (a * k, b * k, c * k, d * k)),
                     background,
                     pdf_matrix,
+                    mesh.as_ref(),
                 )
             }
             _ => None,
@@ -5718,7 +5847,10 @@ fn two_root_layer(
 
 /// The convex polygon `poly` clipped to the rectangle `(x0, y0, x1, y1)`
 /// (Sutherland-Hodgman, one edge at a time).
-fn clip_polygon(poly: &[(f64, f64)], (x0, y0, x1, y1): (f64, f64, f64, f64)) -> Vec<(f64, f64)> {
+pub(crate) fn clip_polygon(
+    poly: &[(f64, f64)],
+    (x0, y0, x1, y1): (f64, f64, f64, f64),
+) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = poly.to_vec();
     // (axis, bound, keep the side >= bound?)
     for (axis, bound, above) in [(0, x0, true), (0, x1, false), (1, y0, true), (1, y1, false)] {
@@ -5836,6 +5968,7 @@ pub(crate) fn shading_layer(
     let bbox = match shading {
         ParsedShading::Gradient(g) => g.bbox,
         ParsedShading::Function(f) => f.bbox,
+        ParsedShading::Mesh(m) => m.bbox,
     }
     .map(|b| bbox_quad(ctm, b));
     let mask = match &bbox {
@@ -5923,6 +6056,36 @@ pub(crate) fn shading_layer(
                 to_shading,
                 domain.to_vec(),
                 bbox.map(|q| q.to_vec()),
+                probe,
+            )?;
+            layer.draw_pixmap(
+                0,
+                0,
+                top.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+            work
+        }
+        ParsedShading::Mesh(m) => {
+            // A mesh pattern (#1378): decoded and painted as `shfill` paints
+            // it, its work (each triangle and its box) and its coverage
+            // buffers held against the limits before it is painted.
+            let mesh = m.decode(probe)?;
+            let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+            let work = mesh
+                .work(&t, wu, hu)
+                .saturating_add(shfill_work(wu, hu, 2))
+                .saturating_add(base);
+            probe.check(work / 1024)?;
+            probe.check_alloc(wu.saturating_mul(hu).saturating_mul(8))?;
+            let top = crate::mesh::mesh_layer(
+                m,
+                &mesh,
+                &t,
+                (0.0, 0.0, wu, hu),
+                bbox.as_ref().map(|q| &q[..]),
                 probe,
             )?;
             layer.draw_pixmap(

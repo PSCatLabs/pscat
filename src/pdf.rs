@@ -153,12 +153,11 @@ pub struct PdfRecorder {
     /// The function index each stop list (as bits) already produced, so a
     /// repeated ramp skips building and merging its function text.
     stops_ids: HashMap<Vec<[u32; 4]>, usize>,
-    /// Shading dicts: the body (minus `/Function`) and the index of its
-    /// function in `functions`, deduped; pages reference them by index,
-    /// like `images`. Empty for a program that never calls `shfill`, so
-    /// such documents are byte-identical to what came before.
-    shadings: Vec<(String, usize)>,
-    shading_ids: HashMap<(String, usize), usize>,
+    /// Shading objects (`ShadingObj`), deduped; pages reference them by
+    /// index, like `images`. Empty for a program that never calls
+    /// `shfill`, so such documents are byte-identical to what came before.
+    shadings: Vec<ShadingObj>,
+    shading_ids: HashMap<ShadingObj, usize>,
     /// Which shadings each finished page references.
     page_shadings: Vec<Vec<usize>>,
     current_shadings: Vec<usize>,
@@ -539,7 +538,8 @@ impl PdfRecorder {
     /// as `vector_shading` gives it (`None` for one that paints nothing,
     /// which then paints only its background, everywhere: a constant
     /// axial). `matrix` maps the shading's space to the default space of
-    /// the stream that paints with it. `None` when nothing is painted.
+    /// the stream that paints with it. `mesh` is a mesh shading's decoded
+    /// data (#1378). `None` when nothing is painted.
     pub(crate) fn shading_pattern(
         &mut self,
         shading: &crate::shading::ParsedShading,
@@ -547,6 +547,7 @@ impl PdfRecorder {
         bbox: Option<(f64, f64, f64, f64)>,
         background: Option<(f32, f32, f32)>,
         matrix: tiny_skia::Transform,
+        mesh: Option<&crate::mesh::Mesh>,
     ) -> Option<usize> {
         let m = [
             matrix.sx, matrix.ky, matrix.kx, matrix.sy, matrix.tx, matrix.ty,
@@ -554,9 +555,13 @@ impl PdfRecorder {
         if !m.iter().all(|v| v.is_finite()) {
             return None;
         }
-        let (mut body, fidx) = match (shading, gradient) {
-            (crate::shading::ParsedShading::Function(f), _) => self.function_body(f)?,
-            (_, Some((kind, stops, extend))) => self.gradient_body(kind, stops, extend)?,
+        let dict = |(b, f): (String, usize)| (b, Some(f), Vec::new());
+        let (mut body, fidx, stream) = match (shading, gradient) {
+            (crate::shading::ParsedShading::Function(f), _) => dict(self.function_body(f)?),
+            // A mesh pattern (#1378): the stream `shfill` writes, decoded by
+            // the caller under the limits.
+            (crate::shading::ParsedShading::Mesh(m), _) => self.mesh_obj(m, mesh?)?,
+            (_, Some((kind, stops, extend))) => dict(self.gradient_body(kind, stops, extend)?),
             (_, None) => {
                 let (r, g, b) = background?;
                 let kind = crate::svg::ShKind::Axial {
@@ -565,7 +570,7 @@ impl PdfRecorder {
                     x1: 1.0,
                     y1: 0.0,
                 };
-                self.gradient_body(&kind, &[(0.0, r, g, b), (1.0, r, g, b)], [true, true])?
+                dict(self.gradient_body(&kind, &[(0.0, r, g, b), (1.0, r, g, b)], [true, true])?)
             }
         };
         if let Some((llx, lly, urx, ury)) = bbox {
@@ -585,7 +590,7 @@ impl PdfRecorder {
         if let Some((r, g, b)) = background {
             let _ = write!(body, " /Background [{} {} {}]", f(r), f(g), f(b));
         }
-        let sidx = self.intern_shading(body, fidx);
+        let sidx = self.intern_shading((body, fidx, stream));
         self.patterns.push(PdfPattern {
             dict: format!(
                 "/Type /Pattern /PatternType 2 /Matrix [{}]",
@@ -1253,8 +1258,7 @@ Q",
 
     /// The index of the shading `body` (its function at `fidx`), stored
     /// once.
-    fn intern_shading(&mut self, body: String, fidx: usize) -> usize {
-        let key = (body, fidx);
+    fn intern_shading(&mut self, key: ShadingObj) -> usize {
         match self.shading_ids.get(&key) {
             Some(&i) => i,
             None => {
@@ -1264,6 +1268,106 @@ Q",
                 i
             }
         }
+    }
+
+    /// A mesh `shfill` (#1325): a real mesh shading in DeviceRGB, of the
+    /// decoded `mesh`. Triangles are a Type 4 shading, a lattice a Type 5.
+    /// Coordinates are 32 bits over the mesh's box, colours 16. With a `/Function` each
+    /// vertex carries its position on the function's ramp and the shading
+    /// the ramp's stops as a function, as an axial shading's; without one,
+    /// its RGB colour, which a reader interpolates as the raster does for
+    /// Gray and RGB (CMYK's conversion is not linear: there the PDF blends
+    /// the vertex colours in RGB). `ctm` and `region` are as for `shfill`.
+    pub(crate) fn shfill_mesh(
+        &mut self,
+        shading: &crate::mesh::MeshShading,
+        mesh: &crate::mesh::Mesh,
+        ctm: [f32; 6],
+        region: Option<&crate::gfx::PsPath>,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        if !ctm.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        if let Some(key) = self.mesh_obj(shading, mesh) {
+            self.paint_shading_obj(key, ctm, region, comp, chain);
+        }
+    }
+
+    /// A mesh shading's object (#1325), for `shfill_mesh` and a shading
+    /// pattern: its body, its function if it has one, and its stream.
+    /// `None` when the mesh has no finite point.
+    fn mesh_obj(
+        &mut self,
+        shading: &crate::mesh::MeshShading,
+        mesh: &crate::mesh::Mesh,
+    ) -> Option<ShadingObj> {
+        use crate::mesh::{Mesh, Vertex};
+        let [x0, y0, mut x1, mut y1] = mesh.device_box(&[1.0, 0.0, 0.0, 1.0, 0.0, 0.0])?;
+        if x1 <= x0 {
+            x1 = x0 + 1.0;
+        }
+        if y1 <= y0 {
+            y1 = y0 + 1.0;
+        }
+        let mut w = BitWriter::default();
+        let coord = |w: &mut BitWriter, v: f64, lo: f64, hi: f64| {
+            let u = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+            w.put((u * f64::from(u32::MAX)).round() as u64, 32);
+        };
+        let colour = |w: &mut BitWriter, c: &[f32; 4]| {
+            let q = |v: f32| (f64::from(v.clamp(0.0, 1.0)) * 65535.0).round() as u64;
+            match &shading.ramp {
+                Some(r) => w.put(q(r.pos(c[0])), 16),
+                None => {
+                    let (r, g, b) = shading.rgb(c);
+                    for v in [r, g, b] {
+                        w.put(q(v), 16);
+                    }
+                }
+            }
+        };
+        let vertex = |w: &mut BitWriter, v: &Vertex| {
+            coord(w, v.x, x0, x1);
+            coord(w, v.y, y0, y1);
+            colour(w, &v.c);
+        };
+        let (ty, extra) = match mesh {
+            Mesh::Triangles(tris) => {
+                for v in tris.iter().flatten() {
+                    w.put(0, 8);
+                    vertex(&mut w, v);
+                }
+                (4, " /BitsPerFlag 8".to_string())
+            }
+            Mesh::Lattice { verts, per_row } => {
+                for v in verts {
+                    vertex(&mut w, v);
+                }
+                (5, format!(" /VerticesPerRow {per_row}"))
+            }
+        };
+        let data = deflate(&[&w.bytes])?;
+        let num = |v: f64| p(v as f32);
+        let values = if shading.ramp.is_some() {
+            "0 1"
+        } else {
+            "0 1 0 1 0 1"
+        };
+        let body = format!(
+            "/ShadingType {ty} /ColorSpace /DeviceRGB /BitsPerCoordinate 32 \
+             /BitsPerComponent 16{extra} /Decode [{} {} {} {} {values}]",
+            num(x0),
+            num(x1),
+            num(y0),
+            num(y1)
+        );
+        let fidx = shading.ramp.as_ref().map(|r| {
+            let func = stops_function(&r.stops).into_bytes();
+            intern(&mut self.functions, &mut self.function_ids, func)
+        });
+        Some((body, fidx, data))
     }
 
     /// Interns the shading `body` (its function at `fidx`) and paints it
@@ -1277,7 +1381,21 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
-        let sidx = self.intern_shading(body, fidx);
+        self.paint_shading_obj((body, Some(fidx), Vec::new()), ctm, region, comp, chain);
+    }
+
+    /// Interns the shading object `key` and paints it with `sh` under
+    /// `ctm`, clipped to `region` (#1325: a mesh is a stream, with or
+    /// without a function).
+    fn paint_shading_obj(
+        &mut self,
+        key: ShadingObj,
+        ctm: [f32; 6],
+        region: Option<&crate::gfx::PsPath>,
+        comp: Composite,
+        chain: &Chain,
+    ) {
+        let sidx = self.intern_shading(key);
         if self.current_shading_set.insert(sidx) {
             self.current_shadings.push(sidx);
         }
@@ -1677,9 +1795,23 @@ Q",
             out.bytes(func);
             out.end_obj()?;
         }
-        for (body, fidx) in &self.shadings {
+        for (body, fidx, stream) in &self.shadings {
             out.begin_obj();
-            let _ = write!(out, "<< {body} /Function {} 0 R >>", function_base + fidx);
+            let func = match fidx {
+                Some(i) => format!(" /Function {} 0 R", function_base + i),
+                None => String::new(),
+            };
+            if stream.is_empty() {
+                let _ = write!(out, "<< {body}{func} >>");
+            } else {
+                let _ = write!(
+                    out,
+                    "<< {body}{func} /Filter /FlateDecode /Length {} >>\nstream\n",
+                    stream.len()
+                );
+                out.bytes(stream);
+                out.bytes(b"\nendstream");
+            }
             out.end_obj()?;
         }
         for obj in &self.named {
@@ -2135,6 +2267,32 @@ fn matrix_text(t: tiny_skia::Transform) -> String {
 pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     deflate_budgeted(parts, LimitProbe::NONE).ok()
 }
+
+/// Big-endian bits, packed as a mesh shading's data stream (#1325).
+#[derive(Default)]
+struct BitWriter {
+    bytes: Vec<u8>,
+    acc: u64,
+    n: u32,
+}
+
+impl BitWriter {
+    /// The low `bits` (at most 32) of `v`.
+    fn put(&mut self, v: u64, bits: u32) {
+        self.acc = self.acc << bits | (v & ((1u64 << bits) - 1));
+        self.n += bits;
+        while self.n >= 8 {
+            self.n -= 8;
+            self.bytes.push((self.acc >> self.n) as u8);
+        }
+        self.acc &= (1u64 << self.n) - 1;
+    }
+}
+
+/// A shading object: its dictionary body (minus `/Function`), the index of
+/// its function in `functions` if it has one, and a mesh shading's data
+/// (#1325), deflated; empty for a shading that is a dictionary.
+type ShadingObj = (String, Option<usize>, Vec<u8>);
 
 /// Index of `body` in `list` (looked up through `ids`), appending it if new.
 fn intern(list: &mut Vec<Vec<u8>>, ids: &mut HashMap<Vec<u8>, usize>, body: Vec<u8>) -> usize {
