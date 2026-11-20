@@ -55,7 +55,12 @@ worked in gs (the gap `notes/1300-patterns-across-contexts.md` lists).
 gs's run of the program), the makepattern-time state, the operand stack in
 and after, a failing `PaintProc` running again, every marking operator in
 a table, `kshow`, `nulldevice`, and a chain of 30000 unused patterns. The
-fifteen earlier pictures are unchanged (PNG bytes and all three outputs).
+earlier pictures are unchanged in PNG (128 of 128 pages of the artkit corpus and
+`examples/patterns.ps`, base and head binaries) and in SVG; thirteen of the
+test programs rendered with both binaries differ in PDF bytes in three
+cases only: a pattern made inside another's `PaintProc` is numbered in the
+order it is first used, and a pattern that is made and never painted
+(`MASKED_DOTS`, `MASKED_HATCH`) is no longer written.
 
 ## Differences from gs and gaps
 
@@ -63,9 +68,15 @@ fifteen earlier pictures are unchanged (PNG bytes and all three outputs).
   pattern that is never painted writes nothing, so SVG and PDF bytes can
   differ from before for a program that makes a pattern it does not use or
   uses patterns in another order than it made them. PNG is unchanged.
-- An error in a `PaintProc` now surfaces at the first mark, with that
-  operator as the offending command (gs does the same); `--max-memory`
-  and a tile too large for memory too (the geometry limits still refuse at
-  `makepattern`).
+- An error in a `PaintProc` now surfaces at the first mark, not at
+  `makepattern`: `$error /command` is the failing operator inside it
+  (`div` in gs and here). `--max-memory` and a tile too large for memory do
+  too (the geometry limits still refuse at `makepattern`).
+- A pattern whose `PaintProc` uses the pattern itself, possible now that
+  the name can be defined by then, recurses in gs until
+  `execstackoverflow` (550 levels). Here the open captures are capped at 64
+  levels (`execstackoverflow`) and at 2^27 pixels of canvas and period in
+  all (`limitcheck`), so a large cell stops after a few levels, not after
+  gigabytes (the first uncapped run took 2.7 GB and 6 s).
 - A `PaintProc` that redefines names the program relies on changes what
   later code sees at first use rather than at `makepattern`, as in gs.

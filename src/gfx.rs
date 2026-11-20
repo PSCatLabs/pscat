@@ -4273,12 +4273,16 @@ impl Gfx {
                 .map_or(Transform::identity(), |c| c.to_gs),
             to_default: self.pattern_default_space(),
         };
+        // The `PaintProc` starts with no path, so none is kept (a large
+        // current path would be copied for every pattern made).
+        let mut made_in = self.state.clone();
+        made_in.path = PsPath::default();
         Ok(std::rc::Rc::new(crate::pattern::LazyPattern::new(
             self.next_capture,
             spec,
             proc_,
             origin,
-            Box::new(self.state.clone()),
+            Box::new(made_in),
         )))
     }
 
@@ -4299,6 +4303,17 @@ impl Gfx {
         crate::pattern::check_fold(&geom)?;
         let (cw, ch) = geom.content;
         let (pw, ph) = geom.period;
+        if self.captures.len() >= crate::pattern::MAX_CAPTURE_DEPTH {
+            return Err(PsError::ExecStackOverflow);
+        }
+        let open: u64 = self
+            .captures
+            .iter()
+            .map(|c| crate::pattern::tile_pixels(&c.geom))
+            .sum();
+        if open + crate::pattern::tile_pixels(&geom) > crate::pattern::MAX_NESTED_PIXELS {
+            return Err(PsError::Limitcheck);
+        }
         self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
         let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
         let to_gs = crate::pattern::capture_to_gs(&spec, &geom, origin.to_gs);

@@ -1233,7 +1233,7 @@ fn a_paintproc_that_fails_runs_again_at_the_next_use() {
 
 /// Every operator that paints with the current colour, each as a snippet
 /// on a 50 pt page with the pattern `pp` current.
-const MARKING: [(&str, &str); 12] = [
+const MARKING: [(&str, &str); 18] = [
     ("fill", "0 0 moveto 40 0 lineto 40 40 lineto closepath fill"),
     (
         "eofill",
@@ -1261,6 +1261,34 @@ const MARKING: [(&str, &str); 12] = [
     (
         "xshow",
         "/Helvetica findfont 40 scalefont setfont 5 5 moveto (H) [30] xshow",
+    ),
+    (
+        "yshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto (H) [0] yshow",
+    ),
+    (
+        "xyshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto (H) [30 0] xyshow",
+    ),
+    (
+        "awidthshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto 0 0 32 1 0 (H) awidthshow",
+    ),
+    (
+        "glyphshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto /H glyphshow",
+    ),
+    (
+        "show inside a cshow proc",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto \
+         { pop pop 5 5 moveto (H) show } (H) cshow",
+    ),
+    (
+        "a Type 3 glyph painting in the current colour",
+        "/T3 << /FontType 3 /FontMatrix [0.04 0 0 0.04 0 0] /FontBBox [0 0 25 25] \
+         /Encoding 256 {/A} repeat 256 array astore \
+         /BuildChar { pop pop 25 0 setcharwidth 0 0 25 25 rectfill } >> definefont pop \
+         /T3 findfont 40 scalefont setfont 5 5 moveto (A) show",
     ),
     (
         "imagemask",
@@ -1292,6 +1320,34 @@ fn a_kshow_proc_that_sets_a_pattern_runs_its_paintproc_before_the_next_glyph() {
          n 1 eq {{ }} {{ stop }} ifelse"
     ));
     assert!(inked(&it) > 0);
+}
+
+#[test]
+fn a_pattern_that_names_itself_stops_short_of_the_memory() {
+    // gs 10.07.1 recurses too, to `execstackoverflow` (550 deep). Here the
+    // nested canvases are capped (`limitcheck`), so a large cell stops after
+    // a few levels, and a small one at the capture depth.
+    for (bbox, want) in [("3000", "limitcheck"), ("10", "execstackoverflow")] {
+        let got = eval(&format!(
+            "/n 0 def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {bbox} {bbox}] \
+                /XStep {bbox} /YStep {bbox} /PaintProc {{ pop /n n 1 add def \
+                /Pattern setcolorspace pp setcolor 0 0 5 5 rectfill }} >> \
+             matrix makepattern /pp exch def /Pattern setcolorspace pp setcolor \
+             {{ 0 0 40 40 rectfill }} stopped {{ $error /errorname get }} if"
+        ));
+        assert!(got.ends_with(&format!("/{want}")), "{bbox}: {got}");
+        // And the page is usable afterwards.
+        assert_eq!(
+            eval(&format!(
+                "/n 0 def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {bbox} {bbox}] \
+                    /XStep {bbox} /YStep {bbox} /PaintProc {{ pop /Pattern setcolorspace pp setcolor \
+                    0 0 5 5 rectfill }} >> matrix makepattern /pp exch def \
+                 /Pattern setcolorspace pp setcolor {{ 0 0 40 40 rectfill }} stopped pop clear \
+                 0 setgray 0 0 10 10 rectfill 1"
+            )),
+            "1"
+        );
+    }
 }
 
 #[test]

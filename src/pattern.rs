@@ -64,6 +64,22 @@ pub(crate) const MAX_TILE_SIDE: u32 = 16384;
 /// Most pixels in a tile's capture canvas or period (256 MiB of RGBA).
 pub(crate) const MAX_TILE_PIXELS: u64 = 1 << 26;
 
+/// Most captures open at once (a `PaintProc` using a pattern whose own
+/// `PaintProc` uses a pattern ...): a pattern that names itself, which the
+/// late first run makes possible, recurses until here, as it does in gs
+/// until the exec stack gives out (`execstackoverflow`).
+pub(crate) const MAX_CAPTURE_DEPTH: usize = 64;
+
+/// Most pixels, canvases and periods together, in the captures open at
+/// once, so a self-naming pattern with a large cell stops after a few
+/// levels instead of after gigabytes (`limitcheck`).
+pub(crate) const MAX_NESTED_PIXELS: u64 = 2 * MAX_TILE_PIXELS;
+
+/// The pixels a tile's capture canvas and period take.
+pub(crate) fn tile_pixels(g: &Geometry) -> u64 {
+    u64::from(g.content.0) * u64::from(g.content.1) + u64::from(g.period.0) * u64::from(g.period.1)
+}
+
 /// Most copies of the capture canvas folded into the period: a cell
 /// thousands of steps wide is refused, not drawn thousands of times over.
 pub(crate) const MAX_FOLD_COPIES: u64 = 1 << 16;
