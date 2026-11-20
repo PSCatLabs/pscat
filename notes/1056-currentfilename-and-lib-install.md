@@ -68,3 +68,19 @@ one, or one left by a crash that a later process with the same pid trips over)
 is refused with a message, never deleted; the `.pscat-lib` marker protection
 cannot be bypassed through them. Only a directory this run created is removed.
 A stale one is swept at the start of an install (#1344, `notes/1344-lib-install-stale-stage.md`).
+
+*The swap is not atomic.* Replacing a non-empty directory takes two renames
+(old aside, new in), and there is no portable single call for it. Between them
+`lib/NAME` does not exist, so a program that runs `(lib/NAME/main.ps) run` in
+that instant fails to find it; a process killed in that gap leaves the old
+package under `.NAME.old-<pid>/old` and nothing at `lib/NAME` (recoverable by
+renaming it back). What is done: the two renames are back to back, with the new
+copy fully built first, so the window is the time of two `rename` calls; and a
+failure of the second rename puts the old package back (if that fails too the
+error names where the old package is and leaves it alone). Not done: Linux
+`renameat2(RENAME_EXCHANGE)` or macOS `renamex_np(RENAME_SWAP)`, which would
+make the swap atomic on those platforms, are not used.
+
+Deferred: a `--force` for a directory not made by `install`; `lib remove`;
+Windows-style `\` separators in `currentfilename` paths (the PostScript-side
+`dirname` splits on `/`).
