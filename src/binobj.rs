@@ -313,6 +313,7 @@ impl Reader<'_> {
             value,
             executable: exec,
             readonly: false,
+            noaccess: false,
             packed: false,
         })
     }

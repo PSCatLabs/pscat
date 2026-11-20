@@ -66,6 +66,19 @@ impl PsArray {
         self.len == 0
     }
 
+    /// Where element `i` lives, for the lint's table of source lines
+    /// (#1338): the address of the shared storage (a loop body's clones and
+    /// a `getinterval` view all share it) and the element's index in it.
+    pub(crate) fn storage_site(&self, i: usize) -> (usize, usize) {
+        (Rc::as_ptr(&self.data) as usize, self.off + i)
+    }
+
+    /// A weak handle on the storage: held by that table so the address in
+    /// its key is never reused while the entry exists.
+    pub(crate) fn storage_weak(&self) -> std::rc::Weak<RefCell<Vec<Object>>> {
+        Rc::downgrade(&self.data)
+    }
+
     #[inline]
     pub fn get(&self, i: usize) -> Option<Object> {
         if i < self.len {
@@ -291,6 +304,11 @@ pub struct Object {
     /// A packed array (`packedarray`). Read-only like any other, but `bind`
     /// still enters it and the procedures nested in it, as Ghostscript does.
     pub(crate) packed: bool,
+    /// `noaccess` was applied to this string or file reference (#1321):
+    /// executing it raises `invalidaccess`, as in Ghostscript. Nothing else
+    /// reads it (a read of a `noaccess` string still succeeds, see
+    /// `ops/misc.rs`), and only strings and files carry it.
+    pub(crate) noaccess: bool,
 }
 
 impl Object {
@@ -299,6 +317,7 @@ impl Object {
             value,
             executable: false,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -308,6 +327,7 @@ impl Object {
             value,
             executable: true,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -326,6 +346,18 @@ impl Object {
             Err(PsError::InvalidAccess)
         } else {
             Ok(())
+        }
+    }
+
+    /// This reference as `noaccess` leaves it: write-protected like
+    /// `readonly` if it is an array, and not executable if it is a string
+    /// or file (#1321).
+    pub(crate) fn into_noaccess(mut self) -> Self {
+        if matches!(self.value, Value::String(_) | Value::File(_)) {
+            self.noaccess = true;
+            self
+        } else {
+            self.into_readonly()
         }
     }
 
@@ -381,6 +413,7 @@ impl Object {
             value,
             executable: self.executable,
             readonly: self.readonly,
+            noaccess: self.noaccess,
             packed: self.packed,
         }
     }

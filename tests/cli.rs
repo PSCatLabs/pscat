@@ -253,7 +253,7 @@ fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
 }
 
 /// #1109: the finding says where the binding was made, catches a `store`
-/// that replaced the operator in systemdict, and still leaves a variable
+/// refused by the read-only systemdict (#1337), and still leaves a variable
 /// kept in a local dictionary alone.
 #[test]
 fn lint_says_the_line_of_a_redefined_operator() {
@@ -267,20 +267,37 @@ fn lint_says_the_line_of_a_redefined_operator() {
     );
     // The run failed (`5 3 sub` on a string); the kept finding above carries its line.
     assert!(stderr.contains("[run-error]"), "{stderr}");
-    // A def made by a procedure names the line that ran it.
+    // A def made by a procedure names its own line, not the one that ran it (#1338).
     let (_ok, _out, stderr) = run(&["--lint", "-e", "/f {\n /ln 1 def\n} def\n\nf"], "");
     assert!(
-        stderr.contains("/ln was redefined as an integer when the program reached line 5,"),
+        stderr.contains("/ln was redefined as an integer when the program reached line 2,"),
         "{stderr}"
     );
-    // `store` replaces the operator itself when nothing else defines the name.
+    // A body that never ran is not the def: an `exec` of a procedure off the
+    // stack names the line that ran it (#1338).
+    let (_ok, _out, stderr) = run(
+        &[
+            "--lint",
+            "-e",
+            "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec",
+        ],
+        "",
+    );
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 3,"),
+        "{stderr}"
+    );
+    // `store` would replace the operator itself when nothing else defines
+    // the name; systemdict is read-only (#1337), so the run fails with
+    // invalidaccess and the finding says what was refused.
     let (_ok, _out, stderr) = run(&["--lint", "-e", "\n/sub 5 store"], "");
     assert!(
         stderr.contains(
-            "/sub was redefined as an integer in systemdict when the program reached line 2, replacing the operator sub"
+            "/sub was stored as an integer into systemdict when the program reached line 2, which would replace the operator sub"
         ),
         "{stderr}"
     );
+    assert!(stderr.contains("invalidaccess"), "{stderr}");
     // A local dictionary that ended is a variable, not a shadow.
     let (ok, _out, stderr) = run(&["--lint-strict", "-e", "4 dict begin /stop 3 def end"], "");
     assert!(ok && stderr.contains("lint: clean"), "{stderr}");
@@ -298,6 +315,50 @@ fn lint_says_the_line_of_a_redefined_operator() {
         "{stderr}"
     );
     assert!(stderr.contains("shadow-lib.ps)"), "{stderr}");
+    // A def inside a procedure of a `run` file names its own line in that file (#1338).
+    let lib = tmp("shadow-lib-proc.ps");
+    std::fs::write(&lib, "% lib\n/f {\n  /sub 7 def\n} def\n\n\n\nf\n").expect("write lib");
+    let main = format!(
+        "1 2 add pop\n\n\n\n\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("shadow-lib-proc.ps)"), "{stderr}");
+}
+
+/// #1081: `[stack-leak]` names the line that left the oldest item, so a
+/// missing `def` in a loop is found without rereading the program.
+#[test]
+fn lint_names_the_line_a_stack_leak_started_on() {
+    let src = "0 1 9 {\n  /gq exch pop\n} for\nshowpage\n";
+    let (ok, _out, stderr) = run(&["--lint", "-"], src);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains("[stack-leak] 10 item(s) left on the operand stack at the end of the program: /gq /gq /gq /gq /gq (top 5 of 10 shown, topmost first); the oldest, /gq, was left when the program reached line 3"),
+        "{stderr}"
+    );
+}
+
+/// #1081: a leak made by a `run` file names the file and its line.
+#[test]
+fn lint_names_the_run_file_a_stack_leak_came_from() {
+    let lib = tmp("leak-lib.ps");
+    std::fs::write(&lib, "% lib\n\n42\n").expect("write lib");
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("the oldest, 42, was left when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("leak-lib.ps)"), "{stderr}");
 }
 
 #[test]
@@ -1321,6 +1382,52 @@ fn the_wrote_report_is_not_on_stdout() {
         assert_eq!(stdout, "x", "{flag}: program output only");
         assert!(stderr.contains("pscat: wrote"), "{flag}: {stderr}");
     }
+}
+
+/// #1335: `common::collect` waits for a pipe's EOF with no fixed window. The
+/// old helper gave up 2 s after the child exited; here the EOF comes after 3 s
+/// and the drained bytes still arrive. No process timing is involved.
+#[test]
+fn a_pipe_that_reaches_eof_late_is_waited_for_not_timed() {
+    use std::time::{Duration, Instant};
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Taken before the sender starts, so no scheduling delay here can make the
+    // measured wait shorter than the sender's 3 s.
+    let started = Instant::now();
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        tx.send(b"late".to_vec()).unwrap();
+    });
+    let got = common::collect(&rx, &[], Duration::from_secs(60));
+    assert_eq!(got.as_deref(), Some(&b"late"[..]));
+    assert!(started.elapsed() >= Duration::from_secs(3));
+    sender.join().unwrap();
+}
+
+/// #1335: the one window that is left. A descendant seen alive before the
+/// child exited and still alive 2 s later is the runaway the check exists to
+/// catch (`tests/child_deadline.rs` runs the whole thing); `collect` gives up
+/// on it long before the hang guard.
+#[cfg(unix)]
+#[test]
+fn a_live_descendant_holding_the_pipe_is_given_up_on() {
+    use std::time::{Duration, Instant};
+    let mut sleeper = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn sleep");
+    let (_tx, rx) = std::sync::mpsc::channel::<Vec<u8>>(); // never sends
+    let started = Instant::now();
+    let got = common::collect(&rx, &[sleeper.id()], Duration::from_secs(60));
+    let waited = started.elapsed();
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+    assert_eq!(got, None, "gave up on the live descendant");
+    assert!(waited >= Duration::from_secs(2), "{waited:?}");
+    assert!(waited < Duration::from_secs(30), "{waited:?}");
 }
 
 /// A child whose stdout reader is already gone when it starts (#1294, #1201).

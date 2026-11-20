@@ -210,6 +210,7 @@ pub mod read_roots;
 pub mod repl;
 // Reads library files off disk to run their `%%SelfTest` blocks —
 // a developer/CI tool, not something the wasm playground can host.
+pub(crate) mod mesh;
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
 pub mod selftest;

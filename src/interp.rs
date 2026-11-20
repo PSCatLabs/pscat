@@ -49,7 +49,7 @@ const NO_NAME: u32 = u32::MAX;
 /// cannot forge the report's `; ` field separator or its ` ]%%` end
 /// (`pscat-mcp` splits on both, #745), and CR/LF escaped so the report
 /// stays one line (consumers read the first stderr line).
-fn report_name(name: &str) -> String {
+pub(crate) fn report_name(name: &str) -> String {
     cap_text(name, ERROR_NAME_LIMIT)
         .replace(';', "%3B")
         .replace(']', "%5D")
@@ -80,6 +80,7 @@ fn ledger_value(bits: u64, tag: u8) -> Object {
         value,
         executable: tag & TAG_EXEC != 0,
         readonly: false,
+        noaccess: false,
         packed: false,
     }
 }
@@ -201,11 +202,12 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
-    /// A pattern's `PaintProc` running for `makepattern` (#1038), the
-    /// pattern dictionary it will return held here. Reached, the tile is
-    /// made and the dictionary pushed; unwound, the capture is dropped and
-    /// the page put back (`Gfx::abort_pattern`).
-    Pattern(Box<Object>),
+    /// A pattern's `PaintProc` running at the pattern's first use (#1038,
+    /// #1341). Reached, the tile is made and the operands the marking
+    /// operator had put back; unwound, the capture is dropped and the page
+    /// put back (`Gfx::abort_pattern`), leaving the pattern to run again at
+    /// its next use.
+    Pattern(Box<PatternRun>),
     /// `--profile` (issue #737): planted under the body of a procedure
     /// called through a name. Reached, or unwound, it closes that call in
     /// the profiler. Only exists while profiling.
@@ -253,6 +255,21 @@ pub(crate) enum PostOp {
     /// color space itself stays Separation).
     SeparationColor { alt_ncomp: u32 },
 }
+
+/// A `PaintProc` running at a pattern's first use (#1341).
+pub(crate) struct PatternRun {
+    lazy: Rc<crate::pattern::LazyPattern>,
+    /// The operand stack's depth under the operands `saved` holds.
+    keep: usize,
+    /// The top operands as the marking operator left them (it has not
+    /// popped any): gs gives the `PaintProc` the dictionary above them,
+    /// and the operator finds them as it left them.
+    saved: Vec<Object>,
+}
+
+/// How many operands under the dictionary a `PaintProc` leaves alone: the
+/// most any marking operator takes (`awidthshow`, `imagemask`).
+const PATTERN_KEEP: usize = 8;
 
 /// One `pathforall` element, coordinates already in user space.
 pub(crate) enum PathForallEl {
@@ -448,6 +465,17 @@ pub struct Interp {
     /// by [`Interp::set_main_file_name`]; `None` for `-e`, stdin and
     /// library users.
     main_file_name: Option<Rc<str>>,
+    /// The operand-stack depth at each source token, when
+    /// [`Interp::trace_stack_leaks`] turned it on (issue #1081), so
+    /// `[stack-leak]` can name the line that left the oldest item. `None`
+    /// otherwise, which costs `sync_scan_line` one branch.
+    stack_trace: Option<Box<crate::lint::StackTrace>>,
+    /// Operator names a program tried to overwrite in the read-only
+    /// systemdict (issue #1337), with the type of value it tried to store:
+    /// the `[shadowed-operator]` lint reports them, since the store itself
+    /// no longer leaves a mark on systemdict. Filled only on the refusal
+    /// path, and bounded by the number of operators.
+    refused_system_stores: std::collections::HashMap<u32, (crate::name::PsName, &'static str)>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `step_n` before it unwinds the execution
@@ -506,10 +534,7 @@ pub struct Interp {
     /// dead entries are dropped as new ones come.
     pub(crate) patterns: std::collections::HashMap<
         usize,
-        (
-            std::rc::Weak<RefCell<Dict>>,
-            Rc<crate::pattern::PatternTile>,
-        ),
+        (std::rc::Weak<RefCell<Dict>>, crate::pattern::PatternRef),
     >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
@@ -788,6 +813,8 @@ impl Interp {
             last_file: None,
             shadow_trace: None,
             main_file_name: None,
+            stack_trace: None,
+            refused_system_stores: Default::default(),
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
@@ -887,6 +914,7 @@ impl Interp {
         self.slice_budget = self.slice_left;
         self.run_clock = crate::clock::Clock::start();
         self.decode_budget.reset(self.limit_probe());
+        crate::mesh::reset_pending();
         self.refresh_frame_probes();
         Ok(())
     }
@@ -1184,10 +1212,13 @@ impl Interp {
     /// limits as they stand now. Called wherever the limits are read; only
     /// under limits, so the clock reads it makes cost nothing otherwise.
     fn sync_decode_budget(&mut self) {
+        // Mesh shading work (#1325) is counted the same way, so it is
+        // charged whether the operator that did it succeeded or failed.
+        let mesh = crate::mesh::take_pending_steps();
         if self.limits.is_none() {
             return;
         }
-        let steps = self.decode_budget.take_steps();
+        let steps = self.decode_budget.take_steps().saturating_add(mesh);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
     }
@@ -1220,6 +1251,10 @@ impl Interp {
         self.last_name = None;
         self.last_line = None;
         self.last_file = None;
+        // The new program's lines start again from 1 (#1338).
+        if let Some(t) = &self.shadow_trace {
+            t.bodies.borrow_mut().clear();
+        }
         self.error_chain.clear();
         if !self.limits.is_none() {
             self.steps_used = 0;
@@ -1227,7 +1262,14 @@ impl Interp {
             self.slice_budget = self.slice_left;
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
+            crate::mesh::reset_pending();
             self.refresh_frame_probes();
+        }
+        // What the last program tried to store into systemdict belongs to
+        // that program; this one must not be linted for it (#1337).
+        self.refused_system_stores.clear();
+        if let Some(trace) = self.shadow_trace.as_mut() {
+            trace.forget_system();
         }
         self.estack.push(Frame::Scanner(
             Lexer::main_program(src.to_vec()).with_limits(self.decode_budget.clone()),
@@ -2040,6 +2082,11 @@ impl Interp {
     /// line either way — it just hasn't been popped yet, since the
     /// error propagated before any `Action` was applied).
     fn sync_scan_line(&mut self) {
+        if self.stack_trace.is_some()
+            && matches!(self.estack.last(), Some(Frame::Scanner(l)) if l.line().is_some())
+        {
+            self.note_stack_depth();
+        }
         if let Some(Frame::Scanner(lexer)) = self.estack.last()
             && let Some(line) = lexer.line()
         {
@@ -2063,6 +2110,10 @@ impl Interp {
     /// `run` returns inside a procedure (`/f { (lib.ps) run 1 0 div } def`)
     /// would name the finished file, since no token is scanned between.
     fn restore_scan_location(&mut self) {
+        // The file's last token is still `last_line`: credit what it left.
+        if self.stack_trace.is_some() {
+            self.note_stack_depth();
+        }
         for frame in self.estack.iter().rev() {
             if let Frame::Scanner(lexer) = frame
                 && let Some(line) = lexer.line()
@@ -2193,6 +2244,9 @@ impl Interp {
             ProfExit,
             /// A pattern's `PaintProc` returned (#1038).
             PatternDone,
+            /// A marking glyph step found a current pattern whose
+            /// `PaintProc` has not run (#1341): run it, then step again.
+            RunPattern(Rc<crate::pattern::LazyPattern>, Object),
         }
         // Iterations of an empty body yield nothing, so they run here, in a
         // row, inside one step. After `EMPTY_RUN` of them the call returns
@@ -2204,6 +2258,17 @@ impl Interp {
             // A Type 3 glyph's end restores its graphics state, which can
             // bring an older page device back (#909).
             let mut stepped_show = false;
+            // A finished image's shading-pattern layer work (#1298).
+            let mut layer_work = 0;
+            // An image frame steps with the limits now in force, not the
+            // ones it began with: its data-source procedure has spent steps
+            // since, which its shading pattern's layer must not spend again
+            // (Codex round 2 on PR #1367).
+            let image_probe =
+                matches!(self.estack.last(), Some(Frame::Image(_))).then(|| self.limit_probe());
+            let show_probe = (!self.limits.is_none()
+                && matches!(self.estack.last(), Some(Frame::Show(_))))
+            .then(|| self.limit_probe());
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -2214,6 +2279,7 @@ impl Interp {
                     gfx,
                     ostack,
                     object_format,
+                    shadow_trace,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
@@ -2234,7 +2300,8 @@ impl Interp {
                             return Err(PsError::Syntax("'}' with no matching '{'".to_string()));
                         }
                         Some(Token::LBrace) => {
-                            Action::Yield(Item::Obj(scan_procedure(lexer, 0, dstack)?))
+                            let lines = shadow_trace.as_deref().map(|t| &t.bodies);
+                            Action::Yield(Item::Obj(scan_procedure(lexer, 0, dstack, lines)?))
                         }
                         Some(Token::ImmediateName(n)) => {
                             Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
@@ -2320,17 +2387,34 @@ impl Interp {
                     Frame::ProfReturn => Action::ProfExit,
                     Frame::Pattern(_) => Action::PatternDone,
                     Frame::Show(ctx) => {
-                        stepped_show = true;
-                        let step = ctx.step(gfx)?;
-                        match step {
-                            ShowStep::Pop => Action::Pop,
-                            ShowStep::PopPushWidth(wx, wy) => {
-                                Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                        // A glyph to paint in a pattern whose `PaintProc`
+                        // has not run: run it, and this step again after.
+                        if ctx.paints()
+                            && let Some((lazy, dict)) = gfx.pending_pattern()
+                        {
+                            Action::RunPattern(lazy, dict)
+                        } else {
+                            stepped_show = true;
+                            // With the limits now in force, as an image
+                            // frame steps (#1332): a glyph's pattern layout
+                            // is held against the steps left, and the work
+                            // is charged below.
+                            if let Some(probe) = show_probe {
+                                ctx.set_limit_probe(probe);
                             }
-                            ShowStep::Exec { operands, target } => {
-                                Action::ExecWith(operands, target)
+                            let step = ctx.step(gfx);
+                            layer_work = ctx.take_work();
+                            let step = step?;
+                            match step {
+                                ShowStep::Pop => Action::Pop,
+                                ShowStep::PopPushWidth(wx, wy) => {
+                                    Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                                }
+                                ShowStep::Exec { operands, target } => {
+                                    Action::ExecWith(operands, target)
+                                }
+                                ShowStep::Again => Action::Nothing,
                             }
-                            ShowStep::Again => Action::Nothing,
                         }
                     }
                     Frame::PostOp(op) => {
@@ -2377,13 +2461,22 @@ impl Interp {
                             let s = ostack.pop().ok_or(PsError::StackUnderflow)?;
                             ctx.supply(s)?;
                         }
+                        if let Some(probe) = image_probe {
+                            ctx.probe = probe;
+                        }
                         match ctx.step(gfx)? {
                             ImageStep::Exec(p) => Action::ExecWith(Vec::new(), p),
-                            ImageStep::Done => Action::Pop,
+                            ImageStep::Done => {
+                                layer_work = ctx.layer_work.take();
+                                Action::Pop
+                            }
                         }
                     }
                 }
             };
+            if layer_work > 0 {
+                self.charge_probed_steps(layer_work / 1024);
+            }
             if stepped_show {
                 self.after_device_change();
                 self.device_restore_result()?;
@@ -2487,23 +2580,29 @@ impl Interp {
                     self.prof_exit();
                 }
                 Action::PatternDone => {
-                    if let Some(Frame::Pattern(dict)) = self.estack.pop() {
-                        self.finish_pattern(*dict)?;
+                    if let Some(Frame::Pattern(run)) = self.estack.pop() {
+                        self.finish_pattern(*run)?;
                     }
+                }
+                Action::RunPattern(lazy, dict) => {
+                    self.realize_pattern(lazy, dict, None)?;
                 }
             }
         }
     }
 
-    /// Execute one object encountered in a token stream or procedure body.
-    /// Only executable names and operators actually execute here; an
-    /// executable array in this position is *pushed* (that's what makes
-    /// `{...}` a deferred procedure), as is everything literal.
+    /// Execute one object a scanner yielded. Only executable names and
+    /// operators actually execute here; an executable array in this
+    /// position is *pushed* (that's what makes `{...}` a deferred
+    /// procedure), as is everything literal. An executable string or file
+    /// can only get here through `//name`, and runs as source, as it does
+    /// in an executing procedure (#1321).
     #[inline(always)]
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
             (Value::Name(n), true) => self.execute_name(n.id()),
             (Value::Operator(op), true) => self.run_op(op.func, op.name),
+            (Value::String(_) | Value::File(_), true) => self.execute_resolved(obj, NO_NAME),
             _ => {
                 self.push(obj);
                 Ok(())
@@ -2645,16 +2744,27 @@ impl Interp {
                 // An executable string runs as source — the `(...) cvx
                 // exec` idiom found code uses constantly.
                 Value::String(s) => {
+                    // `noaccess` forbids running it (#1321).
+                    if obj.noaccess {
+                        return Err(PsError::InvalidAccess);
+                    }
                     // The scanner works on a copy of the string, so the
                     // copy is asked of the memory cap first (#1209).
                     self.check_alloc(s.len())?;
-                    let lexer = Lexer::new(s.to_vec()).with_limits(self.decode_budget.clone());
+                    let lexer = Lexer::new(s.to_vec())
+                        .with_limits(self.decode_budget.clone())
+                        .exit_through();
                     return self.push_frame(Frame::Scanner(lexer));
                 }
                 // An executable file runs in place, sharing its position
                 // with everything else holding the handle.
                 Value::File(f) => {
-                    let lexer = Lexer::from_file(f.clone()).with_limits(self.decode_budget.clone());
+                    if obj.noaccess {
+                        return Err(PsError::InvalidAccess);
+                    }
+                    let lexer = Lexer::from_file(f.clone())
+                        .with_limits(self.decode_budget.clone())
+                        .exit_through();
                     return self.push_frame(Frame::Scanner(lexer));
                 }
                 Value::Name(n) => {
@@ -2707,52 +2817,88 @@ impl Interp {
         Ok(())
     }
 
-    /// `makepattern` (#1038): with the tile's capture begun, run the
-    /// pattern's `PaintProc` on `dict` (the pattern dictionary it returns),
-    /// finishing in [`finish_pattern`](Self::finish_pattern).
-    pub(crate) fn begin_pattern_proc(
-        &mut self,
-        dict: Object,
-        proc: &Object,
-    ) -> Result<(), PsError> {
-        let Value::Array(body) = &proc.value else {
-            return Err(PsError::Typecheck);
+    /// A marking operator's gate (#1341): when the current colour is a
+    /// pattern whose `PaintProc` has not run, start it and arrange for the
+    /// operator `op` to run again once the tile is made, returning `true`:
+    /// the operator returns at once, having changed nothing. `false`:
+    /// nothing to run, carry on. gs does the same at the first mark.
+    pub(crate) fn pattern_gate(&mut self, op: crate::object::Operator) -> Result<bool, PsError> {
+        let Some((lazy, dict)) = self.gfx.pending_pattern() else {
+            return Ok(false);
         };
-        if let Err(e) = self.push_frame(Frame::Pattern(Box::new(dict.clone()))) {
-            self.gfx.abort_pattern();
-            return Err(e);
-        }
-        self.push(dict);
-        self.push_proc_frame(body.clone())
+        self.realize_pattern(lazy, dict, Some(op))?;
+        Ok(true)
     }
 
-    /// The `PaintProc` returned: make the tile, remember it by the
-    /// dictionary, and push the dictionary.
-    fn finish_pattern(&mut self, dict: Object) -> Result<(), PsError> {
-        let tile = self.gfx.end_pattern()?;
-        let Value::Dict(d) = &dict.value else {
+    /// Run `lazy`'s `PaintProc` now, with `dict` on the operand stack
+    /// above whatever is there. `retry` is run again after it.
+    pub(crate) fn realize_pattern(
+        &mut self,
+        lazy: Rc<crate::pattern::LazyPattern>,
+        dict: Object,
+        retry: Option<crate::object::Operator>,
+    ) -> Result<(), PsError> {
+        let Value::Array(body) = &lazy.proc_.value else {
             return Err(PsError::Typecheck);
         };
+        let body = body.clone();
+        let len = self.ostack.len();
+        let take = len.min(PATTERN_KEEP);
+        let saved = self.ostack[len - take..].to_vec();
+        self.gfx.begin_pattern(&lazy)?;
+        let frames = [
+            retry.map(|op| Frame::Proc {
+                body: PsArray::from_vec(vec![Object::exec(Value::Operator(op))]),
+                pc: 0,
+            }),
+            Some(Frame::Pattern(Box::new(PatternRun {
+                lazy,
+                keep: len - take,
+                saved,
+            }))),
+        ];
+        for frame in frames.into_iter().flatten() {
+            if let Err(e) = self.push_frame(frame) {
+                // The retry frame, if pushed, is left for the unwind below.
+                self.gfx.abort_pattern();
+                return Err(e);
+            }
+        }
+        self.push(dict);
+        self.push_proc_frame(body)
+    }
+
+    /// The `PaintProc` returned: make the tile, remember it with the
+    /// pattern, and put the operator's operands back as they were.
+    fn finish_pattern(&mut self, run: PatternRun) -> Result<(), PsError> {
+        let tile = self.gfx.end_pattern()?;
+        run.lazy.set_tile(tile);
+        self.ostack.truncate(run.keep);
+        self.ostack.extend(run.saved);
+        Ok(())
+    }
+
+    /// The pattern `makepattern` made for `d`, if it made one.
+    pub(crate) fn pattern_lazy(&self, d: &Rc<RefCell<Dict>>) -> Option<crate::pattern::PatternRef> {
+        self.patterns
+            .get(&(Rc::as_ptr(d) as usize))
+            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
+            .map(|(_, lazy)| lazy.clone())
+    }
+
+    /// Remember `lazy` as the pattern of dictionary `d` (`makepattern`).
+    pub(crate) fn remember_pattern(
+        &mut self,
+        d: &Rc<RefCell<Dict>>,
+        lazy: crate::pattern::PatternRef,
+    ) {
         // Drop entries whose dictionaries are gone, so a loop of
-        // makepatterns keeps only the tiles still reachable. (A weak
+        // makepatterns keeps only the patterns still reachable. (A weak
         // reference keeps its allocation, so a live entry's address is
         // never another dictionary's.)
         self.patterns.retain(|_, (weak, _)| weak.strong_count() > 0);
         self.patterns
-            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), tile));
-        self.push(dict);
-        Ok(())
-    }
-
-    /// The tile `makepattern` made for `d`, if it made one.
-    pub(crate) fn pattern_tile(
-        &self,
-        d: &Rc<RefCell<Dict>>,
-    ) -> Option<Rc<crate::pattern::PatternTile>> {
-        self.patterns
-            .get(&(Rc::as_ptr(d) as usize))
-            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
-            .map(|(_, tile)| tile.clone())
+            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), lazy));
     }
 
     /// Park `post` as a continuation, put `operands` on the operand
@@ -2848,7 +2994,7 @@ impl Interp {
             Some(Token::RBrace) => {
                 return Err(PsError::Syntax("'}' with no matching '{'".to_string()));
             }
-            Some(Token::LBrace) => scan_procedure(lexer, 0, &self.dstack)?,
+            Some(Token::LBrace) => scan_procedure(lexer, 0, &self.dstack, None)?,
             Some(Token::ImmediateName(n)) => resolve_immediate(&n, &self.dstack)?,
             Some(Token::BinarySeq(bytes)) => Object::procedure(self.decode_sequence(&bytes)?),
             Some(tok) => token_to_object(tok),
@@ -3018,6 +3164,13 @@ impl Interp {
     pub(crate) fn exit_loop(&mut self) -> Result<(), PsError> {
         loop {
             match self.estack.last() {
+                // An executable string or file `exit` is inside of is not
+                // a boundary: the loop around it ends (#1321).
+                Some(Frame::Scanner(lexer)) if lexer.exit_through => {
+                    if let Some(frame) = self.estack.pop() {
+                        self.cleanup_unwound_frame(frame);
+                    }
+                }
                 None
                 | Some(
                     Frame::Scanner(_)
@@ -3163,8 +3316,90 @@ impl Interp {
         self.shadow_trace.get_or_insert_with(Default::default);
     }
 
+    /// Have every scanned source token note the operand-stack depth, for
+    /// the line `[stack-leak]` reports (issue #1081). Off by default;
+    /// `--lint` turns it on.
+    #[doc(hidden)]
+    pub fn trace_stack_leaks(&mut self) {
+        self.stack_trace.get_or_insert_with(Default::default);
+    }
+
+    pub(crate) fn stack_trace(&self) -> Option<&crate::lint::StackTrace> {
+        self.stack_trace.as_deref()
+    }
+
+    /// The line (and `run` file) of the last source token scanned: what ran
+    /// most recently, so the end-of-program stack is attributed to it.
+    pub(crate) fn last_scan_location(&self) -> (Option<usize>, Option<&Rc<str>>) {
+        (self.last_line, self.last_file.as_ref())
+    }
+
+    /// Record the depth the previous token left, at the next token's
+    /// boundary: `last_line` is still the previous token's, and the
+    /// scanner has not been advanced past this token yet. The stack here
+    /// is the result of everything before it, loops and calls included,
+    /// since their frames sit above the scanner and are gone by now.
+    #[inline(never)]
+    fn note_stack_depth(&mut self) {
+        if let Some(trace) = self.stack_trace.as_mut() {
+            trace.note(&self.ostack, self.last_line, self.last_file.as_ref());
+        }
+    }
+
     pub(crate) fn shadow_trace(&self) -> Option<&crate::lint::ShadowTrace> {
         self.shadow_trace.as_deref()
+    }
+
+    /// The operators a program tried to replace in systemdict and was
+    /// refused (issue #1337): name and the type of the value, name order.
+    pub(crate) fn refused_system_stores(&self) -> Vec<(String, &'static str)> {
+        let mut found: Vec<_> = self
+            .refused_system_stores
+            .values()
+            .map(|(n, k)| (n.to_string(), *k))
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Is `dict` the permanent systemdict? A program's writes to it are
+    /// refused: Ghostscript's is read-only once initialisation ends
+    /// (`systemdict /x 1 put` is `invalidaccess` there; issue #1337).
+    #[inline]
+    pub(crate) fn is_systemdict(&self, dict: &Rc<RefCell<Dict>>) -> bool {
+        self.dstack.first().is_some_and(|s| Rc::ptr_eq(s, dict))
+    }
+
+    /// Is systemdict the dictionary a `def` would write to right now (a
+    /// program did `systemdict begin`)? One length compare on the usual
+    /// path, where only the permanent dictionaries are open.
+    #[inline]
+    pub(crate) fn def_targets_systemdict(&self) -> bool {
+        self.dstack.len() > PERMANENT_DICTS
+            && self
+                .dstack
+                .last()
+                .zip(self.dstack.first())
+                .is_some_and(|(top, sys)| Rc::ptr_eq(top, sys))
+    }
+
+    /// The error for a refused write into systemdict. `binding` is the
+    /// key and value being written, when there is one: if it would have
+    /// replaced an operator with a plain value, it is kept for the lint.
+    #[inline(never)]
+    pub(crate) fn refuse_system_write(&mut self, binding: Option<(&Object, &Object)>) -> PsError {
+        if let Some((key, value)) = binding
+            && let Value::Name(name) = &key.value
+            && let Some(builtin) = self.dstack.first().and_then(|d| d.borrow().get(name))
+            && let Some(kind) = crate::lint::shadow_kind(&builtin, value)
+        {
+            self.refused_system_stores
+                .insert(name.id(), (name.clone(), kind));
+            if self.shadow_trace.is_some() {
+                self.note_shadow(name, value, crate::lint::ShadowScope::System);
+            }
+        }
+        PsError::InvalidAccess
     }
 
     /// The traced scope of `dict`: `userdict` or `systemdict` (see
@@ -3215,23 +3450,217 @@ impl Interp {
         }) else {
             return;
         };
-        // Copies taken first: the trace is borrowed mutably below. The text
-        // is built only for a binding the trace has not seen yet. It names
-        // the line the scanner was on, which is the `def`'s own line unless
-        // a procedure ran it (then the line that called the procedure): a
-        // procedure's last element runs after its frame is gone, so the two
-        // cases cannot be told apart here and the wording claims no more.
-        let line = self.last_line;
-        let file = self.last_file.clone();
-        let location = move || {
-            let file = file
-                .as_deref()
-                .map(|f| format!(" ({})", report_name(f)))
-                .unwrap_or_default();
-            Some(format!("when the program reached line {}{file}", line?))
+        // The trace is lent out of `self` for the call so the location, looked
+        // for only when this adds an entry (a loop redefining the name a million
+        // times pays for it once), can read the interpreter.
+        let Some(mut trace) = self.shadow_trace.take() else {
+            return;
         };
-        if let Some(trace) = self.shadow_trace.as_mut() {
-            trace.note(name, &builtin, value, scope, location);
+        let bodies = Rc::clone(&trace.bodies);
+        trace.note(name, &builtin, value, scope, || {
+            self.shadow_location(name.id(), &bodies.borrow())
+        });
+        self.shadow_trace = Some(trace);
+    }
+
+    /// `when the program reached line N` for the binding being made now: the
+    /// line of the `def` (or `store`) itself when it can be found
+    /// ([`running_def_site`](Self::running_def_site)), otherwise the line the
+    /// scanner had reached, which is the line that ran it when a procedure
+    /// did (#1109, #1338). The words stay true either way.
+    fn shadow_location(&self, name_id: u32, bodies: &crate::lint::BodyLines) -> Option<String> {
+        let (line, file) = match self.running_def_site(name_id, bodies) {
+            Some((line, file)) => (usize::try_from(line).ok()?, file),
+            None => (self.last_line?, self.last_file.clone()),
+        };
+        let file = file
+            .as_deref()
+            .map(|f| format!(" ({})", report_name(f)))
+            .unwrap_or_default();
+        Some(format!("when the program reached line {line}{file}"))
+    }
+
+    /// The source line of the `def` or `store` that is binding `name_id`, from
+    /// the table the scanner kept (#1338). The interpreter tags no object
+    /// with a position, so the running element is found from what the
+    /// execution stack still holds, which costs nothing while the program
+    /// runs. A procedure frame whose last element runs is gone before it
+    /// does, so the frame's *callers* say which body it was:
+    ///
+    /// - top of the stack is a procedure frame: its element before `pc` is the
+    ///   `def`, or the call that is running the body that ends in one;
+    /// - a `for`, `repeat`, `loop` or `forall` frame: its body;
+    /// - a scanner (the main program or a `run` file): the name of the token
+    ///   it is running.
+    ///
+    /// See [`def_leaves`](Self::def_leaves) for how a call leads to a `def`.
+    /// The answer is given only when exactly one `def` is found, and only one
+    /// that spells `/name` earlier in its body: a computed name, an `exec` of a
+    /// procedure off the stack and the like get `None`, and the caller keeps the
+    /// line that ran it.
+    #[inline(never)]
+    fn running_def_site(
+        &self,
+        name_id: u32,
+        bodies: &crate::lint::BodyLines,
+    ) -> Option<(u32, Option<Rc<str>>)> {
+        let frame = self
+            .estack
+            .iter()
+            .rev()
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))?;
+        let mut leaves: Vec<(PsArray, usize)> = Vec::new();
+        match frame {
+            Frame::Proc { body, pc } if *pc > 0 => {
+                self.def_leaves(body, *pc - 1, name_id, 0, &mut leaves);
+            }
+            Frame::Repeat { body, .. }
+            | Frame::Loop { body }
+            | Frame::For { body, .. }
+            | Frame::Forall { body, .. } => self.body_leaves(body, name_id, 0, &mut leaves),
+            Frame::Scanner(lexer) => {
+                let token = lexer.token_name()?;
+                let id = crate::name::intern(&token).id();
+                match self.load_id(id) {
+                    Some(Object {
+                        value: Value::Array(body),
+                        executable: true,
+                        ..
+                    }) => self.body_leaves(&body, name_id, 0, &mut leaves),
+                    // `{ ... /name 1 def } if` in the program itself: the
+                    // branch is gone, but it is the body written right before
+                    // this token. Only a body found there is tied to this
+                    // run; `/f load exec` and the like are not (#1338).
+                    Some(Object {
+                        value: Value::Operator(op),
+                        ..
+                    }) if matches!(
+                        op.name,
+                        "if" | "ifelse" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall"
+                    ) =>
+                    {
+                        let count = if op.name == "ifelse" { 2 } else { 1 };
+                        return bodies.before_token(
+                            lexer.run_name(),
+                            lexer.token_start(),
+                            count,
+                            name_id,
+                            &|from, to| lexer.blank_between(from, to),
+                            &|id| self.runs_nothing(id),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        let (first, rest) = leaves.split_first()?;
+        let (key, at) = first.0.storage_site(first.1);
+        if rest.iter().any(|(b, i)| b.storage_site(*i) != (key, at)) {
+            return None;
+        }
+        bodies.line_of(&first.0, first.1)
+    }
+
+    /// The `def`s (or `store`s) element `idx` of `body` can be running, added to `out`:
+    /// the element itself when it is one; the last element of the procedure it
+    /// calls when it is a name bound to a procedure; the procedures just before it
+    /// when it is an operator that runs one (`if`, `ifelse`, `exec`, `stopped`,
+    /// `for`, ...). Only `def`s in a body that spells `/name_id` count, which is
+    /// what keeps the guess about an operator's procedures from being a guess about
+    /// a stranger's.
+    fn def_leaves(
+        &self,
+        body: &PsArray,
+        idx: usize,
+        name_id: u32,
+        depth: usize,
+        out: &mut Vec<(PsArray, usize)>,
+    ) {
+        let Some(el) = body.get(idx) else { return };
+        if !el.executable || depth > 6 {
+            return;
+        }
+        if crate::lint::is_binding_op(&el) {
+            if crate::lint::writes_name(body, idx, name_id) {
+                out.push((body.clone(), idx));
+            }
+            return;
+        }
+        // What the element runs. An executable procedure literal is only
+        // pushed, so it runs nothing (#1338).
+        let called = match &el.value {
+            Value::Name(n) => self.load_id(n.id()),
+            Value::Operator(_) => Some(el.clone()),
+            _ => None,
+        };
+        match called {
+            Some(Object {
+                value: Value::Array(next),
+                executable: true,
+                ..
+            }) => self.body_leaves(&next, name_id, depth + 1, out),
+            // An operator that runs the procedure literal(s) written right
+            // before it, which are its operands. Any other body there (one a
+            // name or an `exch` hands over) is not tied to this call.
+            Some(Object {
+                value: Value::Operator(op),
+                ..
+            }) => {
+                let operands = match op.name {
+                    "if" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall" => 1,
+                    "ifelse" => 2,
+                    _ => return,
+                };
+                let literals: Vec<PsArray> = (1..=operands)
+                    .filter_map(|back| idx.checked_sub(back).and_then(|i| body.get(i)))
+                    .filter_map(|lit| match (&lit.value, lit.executable) {
+                        (Value::Array(branch), true) => Some(branch.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if literals.len() == operands {
+                    for branch in &literals {
+                        self.body_leaves(branch, name_id, depth + 1, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the executable name `id` is an operator that runs no
+    /// procedure, file or font code of the program's own: the last element of a
+    /// branch that therefore cannot have made a `def` (#1338).
+    fn runs_nothing(&self, id: u32) -> bool {
+        matches!(
+            self.load_id(id),
+            Some(Object {
+                value: Value::Operator(op),
+                ..
+            }) if !matches!(
+                op.name,
+                "if" | "ifelse" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall"
+                    | "pathforall" | "cshow" | "kshow" | "filenameforall" | "resourceforall"
+                    | "runandhold" | "image" | "imagemask" | "colorimage" | "run" | "eexec"
+                    | "execform" | "show" | "ashow" | "widthshow" | "awidthshow" | "xshow"
+                    | "yshow" | "xyshow" | "glyphshow" | "stringwidth" | "charpath"
+                    | "showpage" | "copypage" | "setpattern" | "def" | "store"
+            )
+        )
+    }
+
+    /// [`def_leaves`](Self::def_leaves) for the last element of `body`, the one
+    /// that runs after the body's frame has gone.
+    fn body_leaves(
+        &self,
+        body: &PsArray,
+        name_id: u32,
+        depth: usize,
+        out: &mut Vec<(PsArray, usize)>,
+    ) {
+        if let Some(last) = body.len().checked_sub(1) {
+            self.def_leaves(body, last, name_id, depth, out);
         }
     }
 
@@ -3242,6 +3671,9 @@ impl Interp {
     /// names, null is a typecheck).
     #[inline(never)]
     pub(crate) fn define_key(&mut self, key: &Object, obj: Object) -> Result<(), PsError> {
+        if self.def_targets_systemdict() {
+            return Err(self.refuse_system_write(Some((key, &obj))));
+        }
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_obj(key, obj)?;
@@ -4133,15 +4565,29 @@ fn decode_sequence(
 
 /// Collect tokens up to the matching `}` into a procedure object. Called
 /// with the opening `{` already consumed.
+///
+/// `lines` is the lint's table of source lines (#1338), given only when
+/// `--lint` traces the run: each body scanned from the main program or a
+/// `run` file then has the line of every element recorded in it.
 fn scan_procedure(
     lexer: &mut Lexer,
     depth: usize,
     dicts: &[Rc<RefCell<Dict>>],
+    lines: Option<&Rc<RefCell<crate::lint::BodyLines>>>,
 ) -> Result<Object, PsError> {
     if depth >= PROC_NESTING_LIMIT {
         return Err(PsError::Limitcheck);
     }
     let mut items = Vec::new();
+    // Where the `{` that opened this body starts, for the lint's table.
+    let opened_at = lexer.token_start();
+    // One line per element, only for a source whose lines are known.
+    let mut at: Option<Vec<u32>> = lines.and(lexer.line()).map(|_| Vec::new());
+    let line = |lexer: &Lexer| {
+        lexer
+            .line()
+            .map_or(0, |l| u32::try_from(l).unwrap_or(u32::MAX))
+    };
     loop {
         match lexer.next_token()? {
             None => {
@@ -4150,7 +4596,15 @@ fn scan_procedure(
                 ));
             }
             Some(Token::RBrace) => break,
-            Some(Token::LBrace) => items.push(scan_procedure(lexer, depth + 1, dicts)?),
+            Some(Token::LBrace) => {
+                // The line the nested body opens on, read before it is scanned.
+                let opened = line(lexer);
+                items.push(scan_procedure(lexer, depth + 1, dicts, lines)?);
+                if let Some(at) = at.as_mut() {
+                    at.push(opened);
+                }
+                continue;
+            }
             Some(Token::ImmediateName(n)) => items.push(resolve_immediate(&n, dicts)?),
             Some(Token::BinarySeq(bytes)) => {
                 items.push(Object::procedure(decode_sequence(
@@ -4161,8 +4615,17 @@ fn scan_procedure(
             }
             Some(tok) => items.push(token_to_object(tok)),
         }
+        if let Some(at) = at.as_mut() {
+            at.push(line(lexer));
+        }
     }
-    Ok(Object::procedure(items))
+    let body = Object::procedure(items);
+    if let (Some(table), Some(at), Value::Array(arr)) = (lines, at, &body.value) {
+        table
+            .borrow_mut()
+            .register(arr, at, lexer.run_name().cloned(), (opened_at, lexer.pos()));
+    }
+    Ok(body)
 }
 
 // #1188's helpers, kept after everything else: the interpreter's hot loop

@@ -26,7 +26,7 @@ use std::rc::Rc;
 use tiny_skia::FillRule;
 
 use crate::gfx::{BlendMode, ClipNode, Composite};
-use crate::pattern::{Ink, PatternTile, SvgTile};
+use crate::pattern::{Ink, PatternTile, ShadingPattern, SvgTile};
 use crate::textrun::{GlyphText, Placement, TextRun};
 
 /// How SVG output writes text set in the standard fonts (#1119).
@@ -90,7 +90,21 @@ pub struct SvgRecorder {
     /// Tiles whose content group is already in this page's defs.
     tile_groups: HashMap<usize, Rc<PatternTile>>,
     next_pattern: usize,
+    /// Other tiles' captured defs this page or capture draws on (#1343),
+    /// each once, by the tile id that wrote it. A tile used on the page and
+    /// inside another tile reaches here by two routes; the id keeps it from
+    /// being written twice (duplicate ids are invalid SVG).
+    imported: Vec<(usize, String)>,
+    /// Shading pattern paints on this page (#1298), by pattern identity,
+    /// placement and pen; the `Rc` keeps the address from being reused.
+    shading_ids: HashMap<ShadingKey, (Rc<ShadingPattern>, String)>,
+    /// Coverage masks in an uncoloured tile (#1340), by the paint they
+    /// take the alpha of: the mask's id.
+    coverage_ids: HashMap<String, String>,
 }
+
+/// A shading pattern's address, its placement's bits and a pen's.
+type ShadingKey = (usize, Option<[u32; 6]>, Option<[u32; 6]>);
 
 pub(crate) type Chain = Option<Rc<ClipNode>>;
 
@@ -132,6 +146,9 @@ impl SvgRecorder {
             pattern_ids: HashMap::new(),
             tile_groups: HashMap::new(),
             next_pattern: 0,
+            imported: Vec::new(),
+            shading_ids: HashMap::new(),
+            coverage_ids: HashMap::new(),
         }
     }
 
@@ -149,6 +166,7 @@ impl SvgRecorder {
         self.flush_text();
         SvgTile {
             defs: self.defs,
+            imports: self.imported,
             body: self.body,
         }
     }
@@ -161,8 +179,192 @@ impl SvgRecorder {
         match ink {
             Ink::Rgb(_) if self.uncolored => "currentColor".to_string(),
             Ink::Rgb(rgb) => Self::color(*rgb),
-            Ink::Pattern(tile, rgb) => self.pattern_ref(tile, *rgb, pen),
+            // Coverage only, in an uncoloured tile (#1038): the mark is
+            // seen through `coverage_mask`.
+            Ink::Pattern(..) | Ink::Shading(..) if self.uncolored => "currentColor".to_string(),
+            Ink::Pattern(tile, rgb, place) => {
+                self.pattern_ref(tile, *rgb, place.as_ref().map(|p| p.matrix), pen)
+            }
+            Ink::Shading(sp, place) => self.shading_ref(sp, place.as_ref().map(|p| p.hop), pen),
         }
+    }
+
+    /// A mark painted with a pattern in an uncoloured tile (#1340) paints
+    /// that pattern's coverage in the tile's colour, as gs's raster does:
+    /// the element is drawn in `currentColor` inside a group seen through
+    /// this alpha mask, a rect over the canvas painted with the pattern.
+    /// The group carries no `transform`, so the mask is in this recorder's
+    /// coordinates even for a pen-space stroke. Returns the group's opening
+    /// tag, or `None` when `ink` is not a pattern or the tile is coloured.
+    fn coverage_mask(&mut self, ink: &Ink, attrs: &str) -> Option<String> {
+        if !self.uncolored {
+            return None;
+        }
+        // Only the alpha counts, so an uncoloured pattern is named in black
+        // and one mask serves every colour.
+        let paint = match ink {
+            Ink::Rgb(_) => return None,
+            Ink::Pattern(tile, _, place) => self.pattern_ref(
+                tile,
+                (0.0, 0.0, 0.0),
+                place.as_ref().map(|p| p.matrix),
+                None,
+            ),
+            Ink::Shading(sp, place) => self.shading_ref(sp, place.as_ref().map(|p| p.hop), None),
+        };
+        let id = match self.coverage_ids.get(&paint) {
+            Some(id) => id.clone(),
+            None => {
+                // Masks share the gradients' counter: the letter keeps ids
+                // apart.
+                let id = format!("{}k{}", self.prefix, self.next_grad);
+                self.next_grad += 1;
+                let (w, h) = (self.width, self.height);
+                let _ = write!(
+                    self.defs,
+                    "<mask id=\"{id}\" mask-type=\"alpha\" maskUnits=\"userSpaceOnUse\" \
+                     x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\">\
+                     <rect width=\"{w}\" height=\"{h}\" fill=\"{paint}\"/></mask>"
+                );
+                self.coverage_ids.insert(paint, id.clone());
+                id
+            }
+        };
+        Some(format!("<g mask=\"url(#{id})\"{attrs}>"))
+    }
+
+    /// The paint for shading pattern `sp` (#1298), its defs written into
+    /// this page's on first use. `hop` maps its context's coordinates to
+    /// this recorder's (a pattern made in another context, #1300), and
+    /// `pen` is a pen-space stroke's linear map, as for `pattern_ref`.
+    ///
+    /// A gradient with no `/BBox` and no `/Background` is the gradient
+    /// itself, its `gradientTransform` the pattern's matrix. Anything else
+    /// (a Type 1 shading, which SVG has no gradient for, a `/BBox`, a
+    /// `/Background`) is a `<pattern>` one canvas in size, in device
+    /// space, holding what `shfill` writes: the background, the gradient
+    /// or the Type 1 layer as an image, cut to the `/BBox`. The canvas is
+    /// all a mark here can show, so the cell never repeats where it is
+    /// seen.
+    fn shading_ref(
+        &mut self,
+        sp: &Rc<ShadingPattern>,
+        hop: Option<tiny_skia::Transform>,
+        pen: Option<tiny_skia::Transform>,
+    ) -> String {
+        let Some(form) = &sp.svg else {
+            return "none".to_string();
+        };
+        let bits = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f32::to_bits);
+        let key = (
+            Rc::as_ptr(sp) as usize,
+            hop.map(bits),
+            pen.map(|l| {
+                bits(tiny_skia::Transform::from_row(
+                    l.sx, l.ky, l.kx, l.sy, 0.0, 0.0,
+                ))
+            }),
+        );
+        if let Some((_, paint)) = self.shading_ids.get(&key) {
+            return paint.clone();
+        }
+        let hop_t = hop.unwrap_or_default();
+        let pen_inv = pen.and_then(|l| l.invert());
+        let to_here = pen_inv.unwrap_or_default().pre_concat(hop_t);
+        let as_row = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty];
+        let prefix = self.prefix.clone();
+        let paint = match (&form.gradient, &form.image) {
+            (Some((kind, ctm, stops, extend)), _)
+                if form.bbox.is_none() && form.background.is_none() =>
+            {
+                match self.gradient_def(kind, as_row(to_here.pre_concat(*ctm)), stops, *extend) {
+                    Some(id) => format!("url(#{prefix}g{id})"),
+                    None => "none".to_string(),
+                }
+            }
+            (None, None) if form.background.is_none() => "none".to_string(),
+            _ => {
+                // The canvas, in the shading's context's coordinates.
+                let (w, h) = (self.width as f32, self.height as f32);
+                let mut corners = [
+                    tiny_skia::Point::from_xy(0.0, 0.0),
+                    tiny_skia::Point::from_xy(w, 0.0),
+                    tiny_skia::Point::from_xy(w, h),
+                    tiny_skia::Point::from_xy(0.0, h),
+                ];
+                if let Some(inv) = hop_t.invert() {
+                    inv.map_points(&mut corners);
+                }
+                let poly = |pts: &[(f32, f32)]| {
+                    let mut d = String::new();
+                    for (i, (x, y)) in pts.iter().enumerate() {
+                        let _ = write!(
+                            d,
+                            "{}{} {}",
+                            if i == 0 { "M" } else { " L" },
+                            fmt_precise(*x),
+                            fmt_precise(*y)
+                        );
+                    }
+                    d.push_str(" Z");
+                    d
+                };
+                let region = poly(&corners.map(|p| (p.x, p.y)));
+                let n = self.next_pattern;
+                self.next_pattern += 1;
+                let mut content = String::new();
+                if let Some(rgb) = form.background {
+                    let _ = write!(
+                        content,
+                        "<path d=\"{region}\" fill=\"{}\"/>",
+                        Self::color(rgb)
+                    );
+                }
+                if let Some((kind, ctm, stops, extend)) = &form.gradient
+                    && let Some(id) = self.gradient_def(kind, as_row(*ctm), stops, *extend)
+                {
+                    let _ = write!(
+                        content,
+                        "<path d=\"{region}\" fill=\"url(#{prefix}g{id})\"/>"
+                    );
+                }
+                if let Some((png, iw, ih, x, y)) = &form.image {
+                    let _ = write!(
+                        content,
+                        "<image width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" \
+                         transform=\"translate({x} {y})\" \
+                         xlink:href=\"data:image/png;base64,{}\"/>",
+                        base64(png)
+                    );
+                }
+                if let Some(q) = &form.bbox {
+                    let _ = write!(
+                        self.defs,
+                        "<clipPath id=\"{prefix}sb{n}\" clipPathUnits=\"userSpaceOnUse\">\
+                         <path d=\"{}\"/></clipPath>",
+                        poly(q)
+                    );
+                    content = format!("<g clip-path=\"url(#{prefix}sb{n})\">{content}</g>");
+                }
+                if hop.is_some() {
+                    content = format!("<g transform=\"{}\">{content}</g>", svg_matrix(hop_t));
+                }
+                let transform = match pen_inv {
+                    Some(inv) => format!(" patternTransform=\"{}\"", svg_matrix(inv)),
+                    None => String::new(),
+                };
+                let _ = write!(
+                    self.defs,
+                    "<pattern id=\"{prefix}s{n}\" patternUnits=\"userSpaceOnUse\" \
+                     width=\"{}\" height=\"{}\"{transform}>{content}</pattern>",
+                    fmt_precise(w),
+                    fmt_precise(h),
+                );
+                format!("url(#{prefix}s{n})")
+            }
+        };
+        self.shading_ids.insert(key, (sp.clone(), paint.clone()));
+        paint
     }
 
     /// `url(#…)` of `tile`'s `<pattern>` (in `rgb`, if uncoloured).
@@ -180,10 +382,13 @@ impl SvgRecorder {
     /// drawn in pen space under `pen` (its element `transform`), the
     /// `patternTransform` is `pen`'s inverse times that matrix, so the
     /// pattern lands where it does on the page, as in the raster.
+    /// `place` stands in for the tile's matrix when it was made in another
+    /// context (#1300): its matrix in this recorder's coordinates.
     fn pattern_ref(
         &mut self,
         tile: &Rc<PatternTile>,
         rgb: (f32, f32, f32),
+        place: Option<tiny_skia::Transform>,
         pen: Option<tiny_skia::Transform>,
     ) -> String {
         let Some(st) = &tile.svg else {
@@ -201,11 +406,18 @@ impl SvgRecorder {
         let [bx0, by0, bx1, by1] = tile.spec.bbox.map(|v| v as f32);
         if let std::collections::hash_map::Entry::Vacant(e) = self.tile_groups.entry(tkey) {
             e.insert(tile.clone());
+            // The tile's own captured defs, and those of every tile it
+            // paints with, each once however many routes reach them.
+            let own = (tid, st.defs.clone());
+            for (id, defs) in st.imports.iter().chain([&own]) {
+                if !self.imported.iter().any(|(have, _)| have == id) {
+                    self.imported.push((*id, defs.clone()));
+                }
+            }
             let _ = write!(
                 self.defs,
-                "{}<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
+                "<clipPath id=\"{prefix}pb{tid}\" clipPathUnits=\"userSpaceOnUse\">\
                  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
-                st.defs,
                 fmt_precise(bx0),
                 fmt_precise(by0),
                 fmt_precise(bx1 - bx0),
@@ -215,9 +427,10 @@ impl SvgRecorder {
         let id = self.next_pattern;
         self.next_pattern += 1;
         let (ax, ay) = (tile.spec.xstep.abs() as f32, tile.spec.ystep.abs() as f32);
+        let matrix = place.unwrap_or(tile.geom.matrix);
         let placement = match pen.and_then(|l| l.invert()) {
-            Some(inv) => inv.pre_concat(tile.geom.matrix),
-            None => tile.geom.matrix,
+            Some(inv) => inv.pre_concat(matrix),
+            None => matrix,
         };
         // The content is written out at each step rather than `<use>`d:
         // resvg drops `<use>` copies shifted out of the cell's own box.
@@ -455,12 +668,24 @@ impl SvgRecorder {
         self.flush_text();
         let paint = self.ink_attr(ink, None);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"{paint}\" fill-rule=\"{}\"{}{leftover}/>{close}",
+            "{open}{mask}<path d=\"{d}\" fill=\"{paint}\" fill-rule=\"{}\"{}{leftover}/>{unmask}{close}",
             Self::rule_attr(rule),
             Self::opacity_attr(comp, false),
         );
+    }
+
+    /// The coverage-mask group around a mark (`coverage_mask`, #1340): its
+    /// opening and closing tags, and the attributes left for the element.
+    /// The clip or blend attributes `leftover` would put on the element go
+    /// on the group, which shares the element's device space.
+    fn masked(&mut self, ink: &Ink, leftover: String) -> (String, &'static str, String) {
+        match self.coverage_mask(ink, &leftover) {
+            Some(open) => (open, "</g>", String::new()),
+            None => (String::new(), "", leftover),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -523,10 +748,11 @@ impl SvgRecorder {
                 num(phase)
             );
         }
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{paint}\" stroke-width=\"{}\" \
-             stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{close}",
+            "{open}{mask}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{paint}\" stroke-width=\"{}\" \
+             stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{unmask}{close}",
             num(width),
             fmt_f32(miter_limit),
             Self::opacity_attr(comp, true),
@@ -633,9 +859,10 @@ impl SvgRecorder {
         d.push('Z');
         let paint = self.ink_attr(ink, None);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"{paint}\" mask=\"url(#{prefix}m{id})\"{}{leftover}/>{close}",
+            "{open}{mask}<path d=\"{d}\" fill=\"{paint}\" mask=\"url(#{prefix}m{id})\"{}{leftover}/>{unmask}{close}",
             Self::opacity_attr(comp, false),
         );
     }
@@ -668,6 +895,27 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
+        let Some(id) = self.gradient_def(kind, ctm, stops, extend) else {
+            return;
+        };
+        let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let _ = write!(
+            self.body,
+            "{open}<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>{close}",
+            self.prefix,
+            Self::opacity_attr(comp, false),
+        );
+    }
+
+    /// `shfill`'s gradient def (#20), its id number (`{prefix}g{id}`), or
+    /// `None` when its numbers have no SVG spelling (nothing is written).
+    fn gradient_def(
+        &mut self,
+        kind: &ShKind,
+        ctm: [f32; 6],
+        stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
+    ) -> Option<usize> {
         // Lengthening the gradient past an end (`extended_for_svg`) can
         // overflow f32 for geometry near f32::MAX, and `inf` is no SVG
         // number. Then it is done at an eighth of the size, the transform
@@ -682,7 +930,7 @@ impl SvgRecorder {
             }
         }
         if !sh_finite(&extended.0) || !ctm.iter().all(|v| v.is_finite()) {
-            return;
+            return None;
         }
         let (kind, stops) = &extended;
         let id = self.next_grad;
@@ -812,13 +1060,7 @@ impl SvgRecorder {
                 );
             }
         }
-        let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
-        let _ = write!(
-            self.body,
-            "{open}<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>{close}",
-            self.prefix,
-            Self::opacity_attr(comp, false),
-        );
+        Some(id)
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -835,9 +1077,12 @@ impl SvgRecorder {
         self.run = None;
         self.body.clear();
         self.defs.clear();
+        self.imported.clear();
         self.clip_ids.clear();
         self.pattern_ids.clear();
         self.tile_groups.clear();
+        self.shading_ids.clear();
+        self.coverage_ids.clear();
     }
 
     fn document(&self) -> String {
@@ -862,10 +1107,11 @@ impl SvgRecorder {
             },
             w = self.width,
             h = self.height,
-            defs = if self.defs.is_empty() {
+            defs = if self.defs.is_empty() && self.imported.is_empty() {
                 String::new()
             } else {
-                format!("<defs>{}</defs>", self.defs)
+                let imported: String = self.imported.iter().map(|(_, d)| d.as_str()).collect();
+                format!("<defs>{imported}{}</defs>", self.defs)
             },
         )
     }

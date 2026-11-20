@@ -27,9 +27,12 @@ NPM="$ROOT/npm"
 # almost all of it the embedded Liberation fonts (4.2 MB) and lib/ (2.6 MB).
 # #757 compiled in the rest of the standard 35 (TeX Gyre and URW, 3.4 MB of
 # CFF fonts): tarball ~5.3 MB, unpacked ~11.4 MB.
+# #1325 (mesh shadings, all four types) grew the wasm by code alone, not by
+# anything embedded, and took the unpacked size about 21 KB past 13 MiB.
+# The unpacked cap is now 13.5 MiB.
 # A breach means something new got embedded; decide on purpose, then raise it.
 MAX_TARBALL=$((6 * 1024 * 1024))
-MAX_UNPACKED=$((13 * 1024 * 1024))
+MAX_UNPACKED=$((27 * 512 * 1024))
 
 NOTICES=""
 NO_NOTICES=0

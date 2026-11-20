@@ -334,6 +334,7 @@ impl Options {
         interp.set_max_page_pixels(self.max_pixels);
         if self.lint {
             interp.trace_operator_shadows();
+            interp.trace_stack_leaks();
         }
         // `currentfilename` (#1056) answers with the file as given; `-e`
         // wins over a file argument, `-` is stdin, which has no name, and an

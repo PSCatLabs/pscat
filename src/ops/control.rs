@@ -89,6 +89,11 @@ fn ifelse(it: &mut Interp) -> Result<(), PsError> {
 pub(crate) fn exec(it: &mut Interp) -> Result<(), PsError> {
     // Nothing can fail before the object runs: no ledger (#1047).
     if let Some(o) = it.operand_stack().last() {
+        // Refused before it moves to the execution stack, so it stays on
+        // the operand stack as in Ghostscript (#1321).
+        if o.executable && o.noaccess {
+            return Err(PsError::InvalidAccess);
+        }
         it.exec_room(o)?;
     }
     let obj = it.pop_settled().ok_or(PsError::StackUnderflow)?;

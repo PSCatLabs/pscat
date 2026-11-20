@@ -39,7 +39,9 @@ exact layer). [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/d
    `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill's
    `references/sheets.md`). A seed
    sweep with `seed=7` under each cell, wrapped at a width you choose:
-   `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`.
+   `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`;
+   over MCP, `review_sheet` takes the same as `sweep: {"seed": [1, 2, 3]}`
+   on an entry and `cols: 4`.
 4. Optional, if Ghostscript is installed: `gs` is the behavioural
    oracle, but it cannot find `lib/` on its own (pscat's copy is inside
    the binary), so this check needs a pscat checkout:

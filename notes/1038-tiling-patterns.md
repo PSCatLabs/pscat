@@ -79,17 +79,16 @@ A capture canvas or period is at most 16384 px a side and 2^26 px
 
 ## Gaps (documented, not silent misplacement)
 
-- A pattern paints only in the context it was made in: one made on the page
-  and used inside another pattern's `PaintProc`, or made inside one and used
-  after it, paints nothing.
+- A pattern used in a context other than the one it was made in: done in
+  #1300 (`notes/1300-patterns-across-contexts.md`).
 - Text output modes (`--svg-text`, `--pdf-text`) keep glyph outlines under a
   pattern.
 - `imagemask` under a pattern: done in #1299 (`notes/1299-imagemask-pattern.md`).
-- TilingType 2 is adjusted like 1 and 3: its cells are scaled to the
-  whole-pixel step (a 7.3 pt step paints a 3.65 pt mark 3.5 px wide at
-  72 dpi). gs keeps a Type 2 cell undistorted and lets the spacing vary
-  instead (gaps of 3 and 4 px, measured with gs 10.07). Follow-up (Codex
-  round 2 on #1301).
+- TilingType 2: done in #1332 (`notes/1332-tiling-type-2.md`): the cell keeps
+  its size and the spacing varies, as in gs. Still adjusted like 1 and 3:
+  a Type 2 pattern turned off the device axes; in the PNG, a Type 2 pattern
+  used in another context or on a canvas over 2^24 px keeps true-size cells
+  on a rounded step.
 - An uncoloured `PaintProc`'s images and shadings are dropped; an imagemask in
   one keeps its own colour in SVG.
 

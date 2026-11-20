@@ -601,10 +601,18 @@ renders eight examples in both and compares block-downsampled output).
   reference, `wcheck` reports it, and `put`, `putinterval`, `astore` and
   `copy` into it raise `invalidaccess`. Not modelled: reading is never refused
   (`rcheck` is always true, `get` on a `noaccess` array works), strings,
-  dictionaries and files have no attribute (those operators are identities on
-  them), `wcheck` on a name or operator answers true where gs raises
+  dictionaries and files have no attribute except one: `noaccess` on a string
+  or file makes executing it `invalidaccess` (#1321, `Object::noaccess`; the
+  other operators are identities on them), `wcheck` on a name or operator answers true where gs raises
   `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
+- `systemdict` is the one read-only dictionary (#1337), as in gs: `put`,
+  `def` (after `systemdict begin`), `store` of a name it defines, `undef` and
+  `copy` into it raise `invalidaccess`, and `systemdict wcheck` is false.
+  Rust code writes it directly and is not affected; the check is
+  `Interp::is_systemdict`. A refused write of a plain value over an operator
+  is kept for the `[shadowed-operator]` lint. See
+  `notes/1337-systemdict-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
@@ -735,20 +743,62 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (PatternType 2) are not
-  implemented at all, in any output.
+  ShadingType 1 (function-based) and FunctionType 0 (sampled) since #1039
+  (`notes/1039-function-based-shading.md`): the raster evaluates the
+  function at each device pixel into a layer cut by the Domain
+  parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
+  paint path); SVG embeds that layer as an image; PDF writes a real
+  `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
+  (meshes) since #1325 (`src/mesh.rs`, `notes/1325-mesh-shadings.md`):
+  decoded at `shfill`, every shape cut into triangles (patches tessellated
+  on S(u,v)) painted by pixel centre into a layer with 4x4-sample coverage
+  (no seams), then the Type 1 paint path; PDF writes a Type 4, 5 or 7 mesh
+  stream in RGB.
+  tiny-skia's anti-aliased fill panics on a path with corners around 1e9
+  device pixels away, so a `/BBox` of that size is cut to a guard rectangle
+  (the page grown by its own size) before the raster paints it (#1324,
+  `Gfx::bbox_in_guard`; Type 1 clips to its layer, #1039). SVG and PDF
+  keep the box as given.
 - Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
   `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
   `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the
   `PaintProc` at once (gs: at first use), through `Frame::Pattern`, into a
   *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
   state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
-  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
-  a pattern paints only in the context (page or capture) it was made in;
+  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree
+  (TilingType 2 is the exception, #1332: the cell keeps its true size and
+  the PNG lays cells at `floor(i * step)` per axis, `pattern::Lattice`;
+  SVG/PDF get the unadjusted matrix);
+  a pattern used in a context (page or capture) other than the one it was
+  made in is placed as gs places it, its device matrix read in gs's
+  pattern-accumulator coordinates (#1300, `Capture::to_gs`,
+  `pattern::foreign_placement`; PDF writes a copy of the pattern stream
+  under the new `/Matrix`);
+  a mark painted with a pattern (of either kind) inside an *uncoloured*
+  pattern's `PaintProc` paints that pattern's coverage, as gs's raster
+  does (#1340, `notes/1340-uncoloured-paintproc-coverage.md`): SVG draws it
+  in `currentColor` through an alpha `<mask>`, and PDF through an `/SMask`
+  ExtGState whose form fills the `/BBox` with the inner pattern; gs drops an
+  uncoloured pattern whose resources hold a soft mask, so such an outer
+  pattern is written PaintType 1 in each colour it is used in
+  (`PdfRecorder::colored_variant`);
   text output modes keep outlines under a pattern. `imagemask` paints the
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
   mid-run for display should use `Gfx::page_pixmap`.
+- Shading patterns (#1298, `pattern::ShadingPattern`,
+  `notes/1298-shading-patterns.md`): `makepattern` PatternType 2 holds the
+  parsed shading, `/Background` and its device matrix; nothing runs. The
+  raster paints the shading per mark into a layer over the mark's pixels
+  (`gfx::shading_layer`, built from the same pieces as `shfill`:
+  `gradient_parts`, `two_root_layer`, `function_layer`, and
+  `mesh::mesh_layer` for a mesh, #1378), which
+  `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
+  the gradient itself, or a canvas-sized `<pattern>` with the background,
+  `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the
+  shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
+  the registry and `PatternColor` as `pattern::PatternRef`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
@@ -1444,7 +1494,10 @@ renders eight examples in both and compares block-downsampled output).
   `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe
   `gs` ad hoc: the helper prints an uncapturable `SKIPPED` line when gs is
   missing and panics under `PSCAT_REQUIRE_GS=1`, which the macOS `test` and
-  Linux `cross-platform` CI jobs set after installing gs.
+  Linux `cross-platform` CI jobs set after installing gs. The poppler tests
+  (`pdftotext`, `pdftoppm`) use `common::poppler_available(tool)` and
+  `PSCAT_REQUIRE_POPPLER=1` the same way (#1206), set only on the Linux job
+  that installs `poppler-utils`; the other jobs skip them.
 
 - **An anisotropic CTM strokes in pen space** (#1196, `Gfx::stroke_space`,
   `notes/1196-anisotropic-stroke-pen.md`). `stroke`, `strokepath` and
@@ -1827,6 +1880,10 @@ renders eight examples in both and compares block-downsampled output).
   under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
   line of each binding, nothing else. A name bound in a closed local dictionary stays
   unreported on purpose (the notes have the corpus data).
+  `[stack-leak]` (#1081, `notes/1081-stack-leak-location.md`) names the line that left the
+  oldest leftover item: `Interp::trace_stack_leaks` (on under `--lint`) samples the operand
+  depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
+  per item) and credits growth to the previous token's line.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
@@ -1898,7 +1955,13 @@ renders eight examples in both and compares block-downsampled output).
   step or time limit stops a long decode inside it; keep that charge when changing `decode`.
   An executable string or file met as an element of a running procedure runs as source, as in gs
   (`ProcStep::Src`, `Interp::proc_source`, #1122, `notes/1122-executable-strings-in-procedures.md`), which
-  is also why `token`'s array runs a sequence's executable strings.
+  is also why `token`'s array runs a sequence's executable strings. #1321 finished the rule:
+  `exit` inside an executable string or file leaves the loop around it (`Lexer::exit_through`;
+  `run`, eexec and the main program stay boundaries), `noaccess` on one makes running it
+  `invalidaccess`, and `//name` met in a scanned stream runs it (`Interp::execute_element`). One
+  deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
+  `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
+  `notes/1321-executable-string-gs-parity.md`.
 - **`currentfilename` and `pscat lib install` (#1056).** `currentfilename` (a pscat
   extension, `- currentfilename string`) answers with the name of the file the error
   report's `Line:` would name: the innermost `run` file's `Lexer::run_name`, else the main
@@ -1937,9 +2000,10 @@ renders eight examples in both and compares block-downsampled output).
   byte-identical to before. See `notes/706-sheet-sweeps-mat-cols.md`.
   #1000 added `--captions LIST` (readable words for a sweep's values; next file only, one per
   value, checked in `push`) and `--no-values` (no sweep value in the caption); the failure
-  message still names the value (`Sweep::label`). `review_sheet` has no sweeps, so it has
-  nothing to mirror. The five hybrid comparison sheets use `--no-values`: their panels
-  already carry (a), (b), (c). See `notes/1000-sheet-sweep-captions.md`.
+  message still names the value (`Sweep::label`). #1339 gave `review_sheet` the same
+  options (`sweep`, `captions`, `values`, `mat`, `cols`; see
+  `notes/1339-review-sheet-sweeps.md`). The five hybrid comparison sheets use
+  `--no-values`: their panels already carry (a), (b), (c). See `notes/1000-sheet-sweep-captions.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
@@ -2002,13 +2066,16 @@ renders eight examples in both and compares block-downsampled output).
   per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
-  with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
-  `zoom_nearest`). It repeats `src/subcmd/sheet.rs`'s composition loop and its
-  two type sizes (`SHEET_LABEL_PX`, `SHEET_CAPTION_PX`), so a change to the CLI
-  sheet's look must change both; `tests/mcp.rs`
-  `review_sheet_is_byte_identical_to_pscat_sheet` fails when they drift. The
-  fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
-  composer in the library (see `notes/708-mcp-review-sheet.md`).
+  with `pscat::contact_sheet::{SheetPlan, compose_sheet}`, the one composition
+  path (#744) that `pscat sheet` draws with too: layout, labels, captions,
+  frames, zoom, mats and the two type sizes (`LABEL_PX`, `CAPTION_PX`) live there
+  once. Each caller describes its cells (`SheetRow`/`SheetCell`), makes a plan
+  (which sizes the text and the layout before any cell renders, so the caller can
+  refuse an oversized sheet), and gives `compose_sheet` a closure that renders one
+  cell; only the rendering (in process for the CLI, a limited child for the tool)
+  and the caller's own size caps and error wording stay separate.
+  `tests/mcp.rs` `review_sheet_is_byte_identical_to_pscat_sheet` still pins the
+  two together (see `notes/708-mcp-review-sheet.md`, `notes/744-shared-contact-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz, functional-postscript; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`

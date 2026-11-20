@@ -17,8 +17,14 @@
 # --locked` on Linux and macOS. With `attested`, `gh attestation verify` the
 # archives (#635).
 #
+# The npm package (#668): `npm install pscat@X.Y.Z` into a fresh project on
+# Linux, macOS and Windows, then render a page, SVG and PDF with it
+# (scripts/test_npm_tarball.sh, the script that checks the packed tarball in
+# npm.yml). `npm audit signatures` must pass; with `attested` the npm
+# provenance attestation must verify too.
+#
 # A release candidate X.Y.Z-rc.N (#854) is a GitHub pre-release only, so for
-# one the archive checks run and the crate checks are skipped.
+# one the archive checks run and the crate and npm checks are skipped.
 #
 # It publishes nothing and reads no secrets, so it runs outside the `release`
 # environment with read-only permissions (scripts/check_workflows.py).
@@ -63,6 +69,7 @@ jobs:
       check_version: ${{ steps.v.outputs.check_version }}
       attested: ${{ steps.v.outputs.attested }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+      npm: ${{ steps.v.outputs.npm }}
     steps:
       - name: Which version?
         id: v
@@ -86,8 +93,10 @@ jobs:
           # `pscat --version` exists from 0.6.1 on (#637); 0.6.0 is checked by
           # running a program instead.
           CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 1)).lower())' "$V")
-          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; } >> "$GITHUB_OUTPUT"
-          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE)" >> "$GITHUB_STEP_SUMMARY"
+          # The npm package exists from 0.6.2 on (#566), and a candidate is not on npm.
+          NPM=$(python3 -c 'import sys; print(str(sys.argv[2] != "true" and tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 2)).lower())' "$V" "$PRE")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; } >> "$GITHUB_OUTPUT"
+          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE, npm: $NPM)" >> "$GITHUB_STEP_SUMMARY"
 
   install-archive:
     needs: install-version
@@ -259,3 +268,72 @@ jobs:
           else
             echo "::warning::crates.io's pscat-$VERSION.crate is not byte-identical to the attested one (see RELEASING.md)"
           fi
+
+  install-npm:
+    needs: install-version
+    # A release candidate is not on npm, and 0.6.1 and earlier predate the package.
+    if: needs.install-version.outputs.npm == 'true'
+    name: install-npm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Only the check script comes from the repository; the package under
+      # test comes from the registry. On a release the workflow runs at the
+      # release tag, so the script is the one that release shipped with.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # .gitattributes too: it keeps the script's line endings LF on Windows.
+          sparse-checkout: |
+            scripts/test_npm_tarball.sh
+            .gitattributes
+          sparse-checkout-cone-mode: false
+      # The consumer floor (npm/package.json engines).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Wait for the registry
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+        run: |
+          # Right after `publish` the registry can answer a moment late.
+          for i in $(seq 1 20); do
+            GOT=$(npm view "pscat@$VERSION" version 2>/dev/null || true)
+            if [ "$GOT" = "$VERSION" ]; then
+              echo "pscat@$VERSION is on npm"
+              exit 0
+            fi
+            echo "not on npm yet ($i/20)"
+            sleep 30
+          done
+          echo "::error::pscat@$VERSION is not on the npm registry after 10 minutes"
+          exit 1
+      - name: npm install pscat into a fresh project and render
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
+        run: |
+          set -euo pipefail
+          unset PSCAT_HOME PSCAT_ROOT PSCAT_LIB
+          # (An empty array under `set -u` is an error in macOS's bash 3.2.)
+          FLAG=--no-attested
+          if [ "$ATTESTED" = true ]; then FLAG=--attested; fi
+          # Up to 3 tries: right after `publish` the tarball, the signing keys and
+          # the attestation can reach a registry edge a little apart. The script
+          # installs into a fresh directory each time, so a retry is harmless.
+          OK=false
+          for i in 1 2 3; do
+            if ./scripts/test_npm_tarball.sh "pscat@$VERSION" "$FLAG"; then OK=true; break; fi
+            echo "attempt $i of 3 failed"
+            if [ "$i" -lt 3 ]; then sleep 30; fi
+          done
+          [ "$OK" = true ] || { echo "::error::npm $RUNNER_OS: pscat@$VERSION does not install or run"; exit 1; }
+          echo "- npm on $RUNNER_OS: npm install pscat@$VERSION ok, signature$([ "$ATTESTED" = true ] && echo ' and provenance') verified, renders" >> "$GITHUB_STEP_SUMMARY"

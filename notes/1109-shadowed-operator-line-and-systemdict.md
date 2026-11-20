@@ -26,8 +26,8 @@ a procedure or loop body it is the line that ran it (a `for` loop reports its cl
 `} for`; `gallery/hundred_lines.ps` says 261 for a `def` on 254). A procedure's last
 element runs after the procedure's frame is gone, so the two cases cannot be told apart
 at that point, and the wording ("when the program reached") claims no more than is true in
-both. Pointing at the `def` inside a body would need a source position on each scanned
-procedure element: a follow-up.
+both. Pointing at the `def` inside a body is #1338 (`notes/1338-lint-def-own-line.md`), which
+finds it lazily: the claim above now holds for the line only when that lookup fails.
 
 Cost: a plain render pays nothing. A `--lint` run (and so every `pscat-mcp` render, which
 passes `--lint`) pays one systemdict probe per `def` into userdict or systemdict, plus a

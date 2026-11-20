@@ -108,7 +108,7 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `bands`, `svg_text` and `gpu_preview` options (see "Banded renders" and
   "GPU preview" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
+  (a blank page, an unbalanced `gsave`, stuff left on the stack with the line the oldest item was left on: `[stack-leak]`, a built-in
   operator name such as `/sub` redefined as a plain value, with the line it was redefined on: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page, and no `Lint:` block for the findings that describe
@@ -154,6 +154,16 @@ PIL composite. A one-call typewriter or chart is not added yet.
   logo sheet is one call:
   `{"entries": [{"source": "<a.ps>", "label": "A: one-line cat"}, ...],
   "width": 384, "height": 384, "dpi": [96, 9, {"dpi": 9, "zoom": 4}]}`.
+  The `pscat sheet` sweeps, mats and wrapping are inputs too (#1339). An
+  entry's `sweep` draws its program once per `{"seed": [1, 2, 3]}` or per
+  `{"param": "Density", "values": [10, 20]}` (lists of numbers, not the CLI's
+  `A:B` ranges), each cell captioned `seed=7` or `Density=20`, or with the
+  words in the entry's `captions` (one per value); `values: false` leaves the
+  value out of the captions. A `dpi` item takes `"mat": "#222"` (also `#rgb`,
+  `white`, `black`: the page drawn transparent, set on that colour, padded 10
+  px), and `cols` at the top level wraps a long row onto further lines. A
+  sweep's cells count toward the 32. Stacked columns (`+`) are CLI-only.
+  Each of these draws the sheet `pscat sheet` writes with the same options.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
@@ -290,8 +300,10 @@ text, before it is drawn. All are in `SECURITY.md`.
 `review_sheet` has caps too, checked before any program runs
 (`output_too_large`): 32 cells (`limit_cells`), the cells at most
 `--max-pixels` in all and the sheet at most `--max-pixels` and 8000 a side
-(`limit_pixels`), a label at most 200 characters, and the sources together at
-most `--max-input-bytes`. The cells share the one `--timeout`. Also in
+(`limit_pixels`), a label or a caption at most 200 characters, and the sources
+together at most `--max-input-bytes`. A sweep's values count toward the 32
+cells, at most 32 values of at most 40 characters, `param` an identifier and
+`captions` one per value; a mat's 10 px pad counts toward the 8000 side. The cells share the one `--timeout`. Also in
 `SECURITY.md`.
 
 The three interpreter limits (steps, time, memory) are on by default for

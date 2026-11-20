@@ -1619,6 +1619,16 @@
    "playground": true
   },
   {
+   "id": "shading_patterns",
+   "group": "classic",
+   "title": "Shading patterns",
+   "alt": "A specimen sheet of shading patterns: gradient-filled text, a radial sun on a background cut to its box, circles from a colour table, and a gradient stroke and heart",
+   "blurb": "makepattern with PatternType 2: a gradient as the current colour, filling text, strokes, any path and an imagemask.",
+   "source": "examples/shading_patterns.ps",
+   "page": "612x792",
+   "playground": true
+  },
+  {
    "id": "type3_ransom",
    "group": "type3",
    "title": "Ransom note",

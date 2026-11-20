@@ -1,0 +1,13 @@
+## patterns: a pattern paints in another context, placed as gs places it (PR #1330, issue #1300, 2026-11-19)
+
+- **What changed / what to look at:** a page pattern used inside another pattern's `PaintProc`, and a pattern made inside one and used on the page, now paint (before: nothing) in PNG, SVG and PDF, aligned as gs aligns them. Patterns used in their own context are byte-identical.
+- **Perceptual check:** "the inner pattern shows inside the outer tiles, aligned as gs aligns it."
+- **Reviewer:** PASS, round 1 (https://github.com/PSCatLabs/pscat/pull/1330#issuecomment-7021529158). polish: pscat's anti-aliased stripe ends look softer than gs's aliased ones.
+
+| before | after | gs |
+|---|---|---|
+| ![before](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-scaled-pattern-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-scaled-pattern-after.png?raw=true) | ![gs](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-scaled-pattern-gs.png?raw=true) |
+| ![before](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-turned-pattern-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-turned-pattern-after.png?raw=true) | ![gs](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/page-stripes-in-turned-pattern-gs.png?raw=true) |
+| ![before](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/made-inside-used-on-page-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/made-inside-used-on-page-after.png?raw=true) | ![gs](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/made-inside-used-on-page-gs.png?raw=true) |
+
+Zoom of one scaled cell, pscat left, gs right: ![zoom](https://github.com/PSCatLabs/pscat/blob/f175c14a997fad21efa4d52cc0a0e97a5debc93b/docs/dev/review-log/pending/1300-patterns-across-contexts/scaled-cell-zoom-pscat-left-gs-right.png?raw=true)
