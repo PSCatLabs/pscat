@@ -558,6 +558,14 @@ impl ShadowTrace {
         let id = crate::name::intern(name).id();
         self.sites.get(&(id, scope)).cloned().flatten()
     }
+
+    /// Forget the `systemdict` sites: a new program starts with none of
+    /// the last one's refused stores (the `userdict` ones stay, as the
+    /// bindings themselves do).
+    pub(crate) fn forget_system(&mut self) {
+        self.sites
+            .retain(|(_, scope), _| *scope != ShadowScope::System);
+    }
 }
 
 /// The word for the value's type when binding it over `builtin` is a
@@ -1366,6 +1374,24 @@ mod tests {
             ),
             "{found:?}"
         );
+    }
+
+    #[test]
+    fn a_refused_store_is_forgotten_when_the_next_program_begins() {
+        for traced_run in [false, true] {
+            let mut it = Interp::with_page(50, 50).expect("page");
+            if traced_run {
+                it.trace_operator_shadows();
+            }
+            it.run_str("{ /add 1 store } stopped pop clear").unwrap();
+            assert_eq!(shadow_messages(&it).len(), 1, "traced: {traced_run}");
+            it.run_str("1 2 add pop").unwrap();
+            assert!(shadow_messages(&it).is_empty(), "traced: {traced_run}");
+            assert!(it.refused_system_stores().is_empty());
+            if traced_run {
+                assert!(it.shadow_trace().expect("tracing").sites.is_empty());
+            }
+        }
     }
 
     #[test]

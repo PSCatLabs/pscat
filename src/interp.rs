@@ -1252,6 +1252,12 @@ impl Interp {
             self.decode_budget.reset(self.limit_probe());
             self.refresh_frame_probes();
         }
+        // What the last program tried to store into systemdict belongs to
+        // that program; this one must not be linted for it (#1337).
+        self.refused_system_stores.clear();
+        if let Some(trace) = self.shadow_trace.as_mut() {
+            trace.forget_system();
+        }
         self.estack.push(Frame::Scanner(
             Lexer::main_program(src.to_vec()).with_limits(self.decode_budget.clone()),
         ));
