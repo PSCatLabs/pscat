@@ -12,7 +12,7 @@ Now:
   (`shfill_work`, #1219: a function of the stops the raster is given), as a
   ratio: 4095 legs against 511 legs (1022 stops, never resampled). Resampled
   to 1024 stops the ratio is 1.00 (128,779 vs 128,306 steps on a 1 pt/pixel
-  page); with `MAX_RASTER_STOPS` lifted it is 7.61. The bound is 2, through
+  page); with `MAX_RASTER_STOPS` lifted it is 7.61. The bound is 1.5, through
   `scale_budget`. No clock, so it holds on every platform and profile.
 - The 2 s CPU budget stays as `a_ramp_of_thousands_of_legs_takes_bounded_cpu`,
   `#[cfg(unix)]` only, where `thread_cpu_time` is real CPU time. It covers what

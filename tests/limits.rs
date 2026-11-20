@@ -1044,7 +1044,7 @@ mod one_operator {
         // between, through `scale_budget` so `PSCAT_TEST_BUDGET_SCALE` makes
         // it bite. A page at 1 pixel per point keeps the two runs cheap: the
         // ratio does not depend on the page size.
-        const MAX_RATIO: f64 = 2.0;
+        const MAX_RATIO: f64 = 1.5;
         let (r, thousands) = on_a_deadline("shfill legs steps", || shfill_steps(4095, 1.0));
         assert_eq!(r, Ok(()));
         let (r, ordinary) = on_a_deadline("shfill 511 legs steps", || shfill_steps(511, 1.0));
