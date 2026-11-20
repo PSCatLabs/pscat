@@ -2259,6 +2259,9 @@ impl Interp {
             // (Codex round 2 on PR #1367).
             let image_probe =
                 matches!(self.estack.last(), Some(Frame::Image(_))).then(|| self.limit_probe());
+            let show_probe = (!self.limits.is_none()
+                && matches!(self.estack.last(), Some(Frame::Show(_))))
+            .then(|| self.limit_probe());
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -2385,7 +2388,16 @@ impl Interp {
                             Action::RunPattern(lazy, dict)
                         } else {
                             stepped_show = true;
-                            let step = ctx.step(gfx)?;
+                            // With the limits now in force, as an image
+                            // frame steps (#1332): a glyph's pattern layout
+                            // is held against the steps left, and the work
+                            // is charged below.
+                            if let Some(probe) = show_probe {
+                                ctx.set_limit_probe(probe);
+                            }
+                            let step = ctx.step(gfx);
+                            layer_work = ctx.take_work();
+                            let step = step?;
                             match step {
                                 ShowStep::Pop => Action::Pop,
                                 ShowStep::PopPushWidth(wx, wy) => {

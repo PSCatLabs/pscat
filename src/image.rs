@@ -1023,9 +1023,15 @@ impl ImageCtx {
         let rect = [px0, py0, px1.max(px0), py1.max(py0)].map(|v| v as u32);
         let src = if patterned {
             let region = rect.map(i64::from);
+            let mut lay_work = 0;
+            gfx.lay_pattern(probe, &mut lay_work)?;
             let (src, work) = gfx.pattern_source(region, probe)?;
-            self.layer_work
-                .set(self.layer_work.get().saturating_add(work));
+            self.layer_work.set(
+                self.layer_work
+                    .get()
+                    .saturating_add(work)
+                    .saturating_add(lay_work),
+            );
             src
         } else {
             None

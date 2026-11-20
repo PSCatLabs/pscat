@@ -766,7 +766,10 @@ renders eight examples in both and compares block-downsampled output).
   `PaintProc` at once (gs: at first use), through `Frame::Pattern`, into a
   *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
   state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
-  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree;
+  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree
+  (TilingType 2 is the exception, #1332: the cell keeps its true size and
+  the PNG lays cells at `floor(i * step)` per axis, `pattern::Lattice`;
+  SVG/PDF get the unadjusted matrix);
   a pattern used in a context (page or capture) other than the one it was
   made in is placed as gs places it, its device matrix read in gs's
   pattern-accumulator coordinates (#1300, `Capture::to_gs`,
