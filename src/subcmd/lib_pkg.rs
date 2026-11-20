@@ -26,7 +26,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use super::{Args, Failure};
 
@@ -43,7 +43,8 @@ install  copy DIR's files into lib/NAME/ in the per-user data directory (or in
          lib did not create. Dotfiles and symlinks in DIR are not copied.
 list     the installed packages and where they are, and any `.NAME.new-PID`
          directory an interrupted install left behind (the next install
-         removes one whose process is gone, or that is over a day old)
+         removes one whose process is gone; one whose pid is running is
+         left, and named so you can remove it by hand)
 
 A library that loads files beside itself can ask where it was loaded from:
 currentfilename returns the name it was run by, e.g. lib/NAME/x.ps.";
@@ -58,8 +59,9 @@ const MARKER: &str = ".pscat-lib";
 /// made by hand under the same name.
 const STAGE_MARKER: &str = ".pscat-lib-stage";
 
-/// A stage older than this is stale even if its pid is running again (pids are
-/// reused), and is the only test on a platform where a pid cannot be probed.
+/// Where a pid cannot be probed (not Unix) a stage is stale once it is older
+/// than this. On Unix only the pid decides: a live process may be a stalled or
+/// suspended install, and deleting its stage would break it.
 const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// More than this many files, or this many bytes in all, is not a library;
@@ -583,6 +585,11 @@ fn install(lib: &Path, dir: &Path, name: Option<&str>, builtins: &[&str]) -> Res
 struct Stage {
     path: PathBuf,
     pid: u32,
+    /// Nothing is running it: its pid is gone (Unix), or it is over a day old
+    /// where a pid cannot be probed. A stage that is not stale belongs to a
+    /// running process (an install in progress, or a reused pid), is never
+    /// deleted, and is listed so it can be removed by hand.
+    stale: bool,
     /// This command made it: it holds [`STAGE_MARKER`] or [`MARKER`], or nothing at all (killed
     /// between creating it and writing the marker). Only such a stage is
     /// deleted; anything else is reported and left for its owner.
@@ -599,33 +606,52 @@ fn stage_pid(file_name: &str) -> Option<u32> {
     pid.parse().ok()
 }
 
-/// Whether a process with this pid exists. Unix: `kill(pid, 0)`; a pid that is
-/// not a valid process id (0 and negative ones mean "a group" to `kill`) is
-/// not running. Elsewhere there is no probe, so the answer is "maybe", and
-/// only the age test applies.
+/// Whether a process with this pid exists: `kill(pid, 0)`. A pid that is not a
+/// valid process id (0 and negative ones mean "a group" to `kill`) is not
+/// running.
+#[cfg(unix)]
 fn pid_running(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 only checks that the process exists.
+    let r = unsafe { libc::kill(pid, 0) };
+    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Nothing is running the stage. Unix: its pid is not running, and its age is
+/// no part of it (a live pid may be a suspended install). Elsewhere there is no
+/// probe, so a stage is stale once it is older than `max_age`.
+#[cfg_attr(unix, allow(unused_variables))]
+fn is_stale(pid: u32, meta: &fs::Metadata, max_age: Duration) -> bool {
     #[cfg(unix)]
     {
-        let Ok(pid) = libc::pid_t::try_from(pid) else {
-            return false;
-        };
-        if pid <= 0 {
-            return false;
-        }
-        // SAFETY: signal 0 only checks that the process exists.
-        let r = unsafe { libc::kill(pid, 0) };
-        r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        !pid_running(pid)
     }
     #[cfg(not(unix))]
     {
-        let _ = pid;
-        true
+        meta.modified()
+            .ok()
+            .map(|m| {
+                std::time::SystemTime::now()
+                    .duration_since(m)
+                    .unwrap_or_default()
+            })
+            .is_some_and(|age| age >= max_age)
     }
 }
 
-/// The stages in `lib/` that no running install owns: their pid is not
-/// running (and is not this process), or they are older than `max_age`.
-fn stale_stages(lib: &Path, max_age: Duration) -> Vec<Stage> {
+/// A regular file, not a link to one: a marker that a link could stand in for
+/// would let a hand-made directory be classed as ours and deleted.
+fn is_real_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+}
+
+/// Every `.NAME.new-<pid>` directory in `lib/`, stale or not.
+fn stages(lib: &Path, max_age: Duration) -> Vec<Stage> {
     let Ok(rd) = fs::read_dir(lib) else {
         return Vec::new();
     };
@@ -642,18 +668,16 @@ fn stale_stages(lib: &Path, max_age: Duration) -> Vec<Stage> {
         if !meta.is_dir() {
             continue;
         }
-        let old = meta
-            .modified()
-            .ok()
-            .map(|m| SystemTime::now().duration_since(m).unwrap_or_default())
-            .is_some_and(|age| age >= max_age);
-        if pid_running(pid) && !old {
-            continue;
-        }
-        let ours = path.join(STAGE_MARKER).is_file()
-            || path.join(MARKER).is_file()
+        let stale = is_stale(pid, &meta, max_age);
+        let ours = is_real_file(&path.join(STAGE_MARKER))
+            || is_real_file(&path.join(MARKER))
             || fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none());
-        out.push(Stage { path, pid, ours });
+        out.push(Stage {
+            path,
+            pid,
+            stale,
+            ours,
+        });
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
@@ -662,8 +686,8 @@ fn stale_stages(lib: &Path, max_age: Duration) -> Vec<Stage> {
 /// Delete the stale stages this command made, and say so. A stage it did not
 /// make is left alone (and `pscat lib list` names it).
 fn sweep_stale(lib: &Path, max_age: Duration) {
-    for s in stale_stages(lib, max_age) {
-        if s.ours && fs::remove_dir_all(&s.path).is_ok() {
+    for s in stages(lib, max_age) {
+        if s.stale && s.ours && fs::remove_dir_all(&s.path).is_ok() {
             println!(
                 "removed {} (left by an install that was interrupted; pid {})",
                 s.path.display(),
@@ -689,7 +713,7 @@ fn list(lib: &Path) -> Result<(), Failure> {
         Err(_) => Vec::new(),
     };
     names.sort();
-    let stale = stale_stages(lib, STALE_AFTER);
+    let stale = stages(lib, STALE_AFTER);
     if names.is_empty() {
         println!("no packages installed (pscat lib install DIR)");
     }
@@ -714,16 +738,15 @@ fn list(lib: &Path) -> Result<(), Failure> {
         );
     }
     for s in stale {
-        println!(
-            "left by an interrupted install (pid {}): {}; {}",
-            s.pid,
-            s.path.display(),
-            if s.ours {
-                "the next pscat lib install removes it"
-            } else {
-                "pscat did not make it, so remove it by hand"
+        let what = match (s.stale, s.ours) {
+            (true, true) => "left by an interrupted install; the next pscat lib install removes it",
+            (true, false) => "not made by pscat lib install, so remove it by hand",
+            (false, _) => {
+                "belongs to a running process (an install in progress, or a reused pid); \
+                 if no install is running, remove it by hand"
             }
-        );
+        };
+        println!("{} (pid {}): {what}", s.path.display(), s.pid);
     }
     Ok(())
 }
@@ -1072,21 +1095,54 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn an_old_stage_is_stale_even_if_its_pid_is_running() {
-        let base = scratch("sweep-age");
+    fn a_stage_whose_pid_is_running_is_never_swept_however_old() {
+        let base = scratch("sweep-live");
         let lib = base.join("lib");
         fs::create_dir_all(&lib).unwrap();
-        // Another running process's pid: the parent (pid 1 is always up on unix).
+        // pid 1 is always up on unix: a stalled install, or a reused pid.
         let d = dead_stage(&lib, "p", 1);
-        assert!(
-            stale_stages(&lib, STALE_AFTER).is_empty(),
-            "fresh + running"
-        );
-        let stale = stale_stages(&lib, Duration::ZERO);
-        assert_eq!(stale.len(), 1);
-        assert!(stale[0].ours);
+        // A zero max age makes every stage "old"; on unix the pid alone decides.
         sweep_stale(&lib, Duration::ZERO);
-        assert!(!d.exists());
+        assert!(
+            d.join("half.ps").is_file(),
+            "a running pid's stage was swept"
+        );
+        let all = stages(&lib, Duration::ZERO);
+        assert_eq!(all.len(), 1);
+        assert!(!all[0].stale && all[0].ours);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_marker_that_is_a_link_does_not_make_a_stage_ours() {
+        let base = scratch("sweep-link-marker");
+        let lib = base.join("lib");
+        fs::create_dir_all(&lib).unwrap();
+        let outside = base.join("some-file");
+        fs::write(&outside, "x").unwrap();
+        for (i, marker) in [STAGE_MARKER, MARKER].into_iter().enumerate() {
+            let d = lib.join(format!(".mine{i}.new-{DEAD_PID}"));
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("precious.txt"), "mine").unwrap();
+            std::os::unix::fs::symlink(&outside, d.join(marker)).unwrap();
+        }
+        let all = stages(&lib, STALE_AFTER);
+        assert_eq!(all.len(), 2);
+        assert!(
+            all.iter().all(|s| s.stale && !s.ours),
+            "link counted as marker"
+        );
+        sweep_stale(&lib, STALE_AFTER);
+        for i in 0..2 {
+            let d = lib.join(format!(".mine{i}.new-{DEAD_PID}"));
+            assert!(
+                d.join("precious.txt").is_file(),
+                "{} was swept",
+                d.display()
+            );
+        }
+        assert!(outside.is_file());
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -1094,7 +1150,7 @@ mod tests {
     fn a_stage_that_is_a_file_is_not_a_stage() {
         let base = scratch("sweep-file");
         fs::write(base.join(format!(".f.new-{DEAD_PID}")), "x").unwrap();
-        assert!(stale_stages(&base, STALE_AFTER).is_empty());
+        assert!(stages(&base, STALE_AFTER).is_empty());
         let _ = fs::remove_dir_all(&base);
     }
 }

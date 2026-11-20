@@ -495,3 +495,44 @@ fn a_stage_left_by_a_killed_install_is_listed_and_then_swept() {
     assert!(!listed.contains("interrupted"), "{listed}");
     assert!(home.join("lib/mypkg/main.ps").is_file());
 }
+
+/// A marker that is a symlink proves nothing (#1344): such a directory is not
+/// swept, and `list` says to remove it by hand. A stage whose pid is running is
+/// not swept either, whatever its age.
+#[cfg(unix)]
+#[test]
+fn a_linked_marker_or_a_running_pid_keeps_the_stage_and_list_says_so() {
+    let base = common::scratch_dir("lib-stale-stage-kept");
+    let home = base.join("home");
+    let pkg = make_package(&base.join("src"), "mypkg");
+    let lib = home.join("lib");
+    let outside = base.join("some-file");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(&outside, "x").unwrap();
+    let linked = lib.join(".mine.new-2000000000");
+    std::fs::create_dir_all(&linked).unwrap();
+    std::fs::write(linked.join("precious.txt"), "mine").unwrap();
+    std::os::unix::fs::symlink(&outside, linked.join(".pscat-lib-stage")).unwrap();
+    // pid 1 is always running.
+    let running = lib.join(".other.new-1");
+    std::fs::create_dir_all(&running).unwrap();
+    std::fs::write(running.join(".pscat-lib-stage"), "pid 1\n").unwrap();
+
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(listed.contains("so remove it by hand"), "{listed}");
+    assert!(listed.contains("belongs to a running process"), "{listed}");
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", pkg.to_str().unwrap()],
+    ));
+    assert!(
+        linked.join("precious.txt").is_file(),
+        "linked-marker dir swept"
+    );
+    assert!(
+        running.join(".pscat-lib-stage").is_file(),
+        "running pid's stage swept"
+    );
+    assert!(outside.is_file());
+}
