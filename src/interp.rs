@@ -3403,14 +3403,26 @@ impl Interp {
                         ..
                     }) => self.body_leaves(&body, name_id, 0, &mut leaves),
                     // `{ ... /name 1 def } if` in the program itself: the
-                    // branch is gone, but it was scanned just before this
-                    // token, so it is the closest one that ends this way.
+                    // branch is gone, but it is the body written right before
+                    // this token. Only a body found there is tied to this
+                    // run; `/f load exec` and the like are not (#1338).
                     Some(Object {
                         value: Value::Operator(op),
                         ..
-                    }) if !matches!(op.name, "def" | "store") => {
-                        let line = self.last_line?;
-                        return bodies.nearest_before(line, self.last_file.as_ref(), name_id);
+                    }) if matches!(
+                        op.name,
+                        "if" | "ifelse" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall"
+                    ) =>
+                    {
+                        let count = if op.name == "ifelse" { 2 } else { 1 };
+                        return bodies.before_token(
+                            lexer.run_name(),
+                            lexer.token_start(),
+                            count,
+                            name_id,
+                            &|from, to| lexer.blank_between(from, to),
+                            &|id| self.runs_nothing(id),
+                        );
                     }
                     _ => {}
                 }
@@ -3450,9 +3462,12 @@ impl Interp {
             }
             return;
         }
+        // What the element runs. An executable procedure literal is only
+        // pushed, so it runs nothing (#1338).
         let called = match &el.value {
             Value::Name(n) => self.load_id(n.id()),
-            _ => Some(el.clone()),
+            Value::Operator(_) => Some(el.clone()),
+            _ => None,
         };
         match called {
             Some(Object {
@@ -3460,20 +3475,54 @@ impl Interp {
                 executable: true,
                 ..
             }) => self.body_leaves(&next, name_id, depth + 1, out),
+            // An operator that runs the procedure literal(s) written right
+            // before it, which are its operands. Any other body there (one a
+            // name or an `exch` hands over) is not tied to this call.
             Some(Object {
-                value: Value::Operator(_),
+                value: Value::Operator(op),
                 ..
             }) => {
-                for back in 1..=2 {
-                    if let Some(lit) = idx.checked_sub(back).and_then(|i| body.get(i))
-                        && let (Value::Array(branch), true) = (&lit.value, lit.executable)
-                    {
+                let operands = match op.name {
+                    "if" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall" => 1,
+                    "ifelse" => 2,
+                    _ => return,
+                };
+                let literals: Vec<PsArray> = (1..=operands)
+                    .filter_map(|back| idx.checked_sub(back).and_then(|i| body.get(i)))
+                    .filter_map(|lit| match (&lit.value, lit.executable) {
+                        (Value::Array(branch), true) => Some(branch.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if literals.len() == operands {
+                    for branch in &literals {
                         self.body_leaves(branch, name_id, depth + 1, out);
                     }
                 }
             }
             _ => {}
         }
+    }
+
+    /// Whether the executable name `id` is an operator that runs no
+    /// procedure, file or font code of the program's own: the last element of a
+    /// branch that therefore cannot have made a `def` (#1338).
+    fn runs_nothing(&self, id: u32) -> bool {
+        matches!(
+            self.load_id(id),
+            Some(Object {
+                value: Value::Operator(op),
+                ..
+            }) if !matches!(
+                op.name,
+                "if" | "ifelse" | "exec" | "stopped" | "loop" | "repeat" | "for" | "forall"
+                    | "pathforall" | "cshow" | "kshow" | "filenameforall" | "resourceforall"
+                    | "runandhold" | "image" | "imagemask" | "colorimage" | "run" | "eexec"
+                    | "execform" | "show" | "ashow" | "widthshow" | "awidthshow" | "xshow"
+                    | "yshow" | "xyshow" | "glyphshow" | "stringwidth" | "charpath"
+                    | "showpage" | "copypage" | "setpattern" | "def" | "store"
+            )
+        )
     }
 
     /// [`def_leaves`](Self::def_leaves) for the last element of `body`, the one
@@ -4402,6 +4451,8 @@ fn scan_procedure(
         return Err(PsError::Limitcheck);
     }
     let mut items = Vec::new();
+    // Where the `{` that opened this body starts, for the lint's table.
+    let opened_at = lexer.token_start();
     // One line per element, only for a source whose lines are known.
     let mut at: Option<Vec<u32>> = lines.and(lexer.line()).map(|_| Vec::new());
     let line = |lexer: &Lexer| {
@@ -4444,7 +4495,7 @@ fn scan_procedure(
     if let (Some(table), Some(at), Value::Array(arr)) = (lines, at, &body.value) {
         table
             .borrow_mut()
-            .register(arr, at, lexer.run_name().cloned());
+            .register(arr, at, lexer.run_name().cloned(), (opened_at, lexer.pos()));
     }
     Ok(body)
 }

@@ -234,6 +234,29 @@ impl Lexer {
         String::from_utf8(rest[..len].to_vec()).ok()
     }
 
+    /// Whether the source between byte offsets `from` and `to` is only white
+    /// space and comments (#1338); `false` for a source not in memory.
+    pub(crate) fn blank_between(&self, from: usize, to: usize) -> bool {
+        let file = self.file.borrow();
+        let Some(rest) = file.bytes_from(from) else {
+            return false;
+        };
+        let Some(gap) = rest.get(..to.saturating_sub(from)) else {
+            return false;
+        };
+        let mut comment = false;
+        for &b in gap {
+            if comment {
+                comment = b != b'\n' && b != b'\r';
+            } else if b == b'%' {
+                comment = true;
+            } else if !is_whitespace(b) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
         self.file.borrow_mut().peek_byte()
     }

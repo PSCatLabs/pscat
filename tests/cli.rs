@@ -273,6 +273,20 @@ fn lint_says_the_line_of_a_redefined_operator() {
         stderr.contains("/ln was redefined as an integer when the program reached line 2,"),
         "{stderr}"
     );
+    // A body that never ran is not the def: an `exec` of a procedure off the
+    // stack names the line that ran it (#1338).
+    let (_ok, _out, stderr) = run(
+        &[
+            "--lint",
+            "-e",
+            "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec",
+        ],
+        "",
+    );
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 3,"),
+        "{stderr}"
+    );
     // `store` replaces the operator itself when nothing else defines the name.
     let (_ok, _out, stderr) = run(&["--lint", "-e", "\n/sub 5 store"], "");
     assert!(

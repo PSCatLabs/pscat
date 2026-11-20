@@ -28,13 +28,20 @@ Two pieces, both off the hot path.
      (`Lexer::token_name`), resolved to a procedure.
    From an element, `def_leaves` follows a name to the procedure it is bound to and its last element (to depth 6), and
    an operator (`if`, `ifelse`, `exec`, `stopped`, ...) to the procedure literals just before it.
-   Under a scanner token that is an operator, `{ ... /x 1 def } if` in the program text, the branch is on no frame
-   and no element; `BodyLines::nearest_before` picks the body scanned just before the token whose last
-   element is a `def` of that name. That body is already freed, so the table keeps, per body, the literal names it
-   spells when it ends in `def`/`store`.
+   Under a scanner token that is `if`, `ifelse`, `exec`, `stopped`, `loop`, `repeat`, `for` or `forall`,
+   `{ ... /x 1 def } if` in the program text, the branch is on no frame and no element, and is already freed.
+   `BodyLines::before_token` finds it by position: the table keeps, per body, the byte span it was scanned from
+   and how it ends (a `def`/`store` and the literal names it spells, a call to a name, anything else), and the
+   body (two for `ifelse`) is the one whose closing `}` has only white space and comments between it and the
+   token. A body that merely spells the name earlier in the file is not enough (review of #1365): it must be the
+   operand the operator takes.
 
 A `def` counts only if its body spells `/name` before it, and the answer is used only when exactly one `def`
-is found. Otherwise (`/set { exch def } def` called as `3 /ln set`, an `exec` of a procedure built at run time, two
+is found and it is tied to the running call: a body on the execution stack, an element that calls it, or (above)
+the operand written right before the scanner's operator. For `ifelse` the other branch must end in a literal, a
+`def` of other names, or an operator that runs nothing (`runs_nothing`); a call to a procedure there means a guess.
+In a body, `if`/`exec`/`stopped`/loops count only a procedure literal written right before them, `ifelse` only
+two, and a literal that is merely pushed runs nothing. Otherwise (`/set { exch def } def` called as `3 /ln set`, an `exec` of a procedure built at run time, two
 branches that both define the name) the line is the one that ran it, as before. For `/set`, that is the more
 useful line anyway.
 

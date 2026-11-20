@@ -553,10 +553,23 @@ struct BodyEntry {
     lines: Vec<u32>,
     /// The `run` file the body was scanned from, `None` for the main program.
     file: Option<std::rc::Rc<str>>,
-    /// When the body ends in `def` or `store`: the literal names it spells
-    /// before it, kept because the body itself may be gone by the time its
-    /// `def` runs (a branch of `{ ... } if` is freed as it finishes).
-    tail_names: Vec<u32>,
+    /// Byte offsets in that source of the body's `{` and of the end of its
+    /// `}`, so the body that sits right before a token can be found.
+    span: (usize, usize),
+    /// How the body ends, kept because the body itself may be gone by the
+    /// time its `def` runs (a branch of `{ ... } if` is freed as it finishes).
+    tail: Tail,
+}
+
+/// How a procedure body ends (#1338).
+#[derive(Clone, PartialEq, Eq)]
+enum Tail {
+    /// In `def` or `store`; the literal names the body spells before it.
+    Def(Vec<u32>),
+    /// In a call to this name.
+    Call(u32),
+    /// In anything else (a literal, or nothing).
+    Other,
 }
 
 impl BodyLines {
@@ -566,6 +579,7 @@ impl BodyLines {
         body: &crate::object::PsArray,
         lines: Vec<u32>,
         file: Option<std::rc::Rc<str>>,
+        span: (usize, usize),
     ) {
         if lines.len() != body.len() || self.held + lines.len() + 1 > BODY_LINES_CAP {
             return;
@@ -573,15 +587,21 @@ impl BodyLines {
         // Each body costs a map slot and a `Weak` too: count it, so a million
         // empty bodies are bounded as well.
         self.held += lines.len() + 1;
-        let tail_names = body.with_slice(|els| match els.split_last() {
-            Some((last, before)) if is_binding_op(last) => before
-                .iter()
-                .filter_map(|o| match &o.value {
-                    Value::Name(n) if !o.executable => Some(n.id()),
-                    _ => None,
-                })
-                .collect(),
-            _ => Vec::new(),
+        let tail = body.with_slice(|els| match els.split_last() {
+            Some((last, before)) if is_binding_op(last) => Tail::Def(
+                before
+                    .iter()
+                    .filter_map(|o| match &o.value {
+                        Value::Name(n) if !o.executable => Some(n.id()),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            Some((last, _)) => match &last.value {
+                Value::Name(n) if last.executable => Tail::Call(n.id()),
+                _ => Tail::Other,
+            },
+            None => Tail::Other,
         });
         self.bodies.insert(
             body.storage_site(0).0,
@@ -589,41 +609,62 @@ impl BodyLines {
                 _storage: body.storage_weak(),
                 lines,
                 file,
-                tail_names,
+                span,
+                tail,
             },
         );
     }
 
-    /// The one body ending in a `def` of `name_id` that sits on or before `line`
-    /// in `file`: the literal procedure just before the operator the scanner is
-    /// running (`{ ... } if`), which no frame holds any more (#1338). It may be
-    /// dead by now, which is why the names are kept. `None` when no body does,
-    /// or when more than one could be the one that ran.
-    pub(crate) fn nearest_before(
+    /// The line of the `def` of `name_id` that ends the literal body (or, for
+    /// `ifelse`, the one of the `count` bodies) written right before the token
+    /// the scanner is running at `token_at`: `{ ... } if` in the program text,
+    /// whose branch no frame holds any more (#1338). The bodies are found by
+    /// position, `blank(from, to)` telling that only white space and comments
+    /// lie between them and the token, so the bodies are the operands the
+    /// operator takes and not some other body spelling the same name.
+    ///
+    /// Answers only when exactly one of them ends in a `def` of the name and
+    /// each of the others cannot have run one: it ends in a literal, or in a
+    /// `def` of other names, or in a call that `inert` says is an operator
+    /// that runs nothing. Otherwise `None`, and the caller keeps the line that
+    /// ran it.
+    pub(crate) fn before_token(
         &self,
-        line: usize,
         file: Option<&std::rc::Rc<str>>,
+        token_at: usize,
+        count: usize,
         name_id: u32,
+        blank: &dyn Fn(usize, usize) -> bool,
+        inert: &dyn Fn(u32) -> bool,
     ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
-        let mut found: Option<(u32, usize)> = None;
-        for (key, entry) in &self.bodies {
-            let Some(&at) = entry.lines.last() else {
-                continue;
-            };
-            if entry.file.as_ref() != file
-                || usize::try_from(at).map_or(true, |a| a > line)
-                || !entry.tail_names.contains(&name_id)
+        let mut found: Option<(u32, Option<std::rc::Rc<str>>)> = None;
+        let mut before = token_at;
+        for _ in 0..count {
+            // The body whose `}` ends just before `before`. Two entries can
+            // share an end only when one file was scanned twice: the same body.
+            let mut same = self.bodies.values().filter(|e| {
+                e.file.as_ref() == file && e.span.1 <= before && blank(e.span.1, before)
+            });
+            let entry = same.next()?;
+            if same.any(|e| e.span != entry.span || e.tail != entry.tail || e.lines != entry.lines)
             {
-                continue;
-            }
-            // A second body that could be it means a guess, and the first
-            // line seen for a name is the one kept: say nothing.
-            if found.is_some() {
                 return None;
             }
-            found = Some((at, *key));
+            match &entry.tail {
+                Tail::Def(names) if names.contains(&name_id) => {
+                    // Two bodies that both define it: not a guess to make.
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some((*entry.lines.last()?, entry.file.clone()));
+                }
+                Tail::Def(_) | Tail::Other => {}
+                Tail::Call(id) if inert(*id) => {}
+                Tail::Call(_) => return None,
+            }
+            before = entry.span.0;
         }
-        found.map(|(at, key)| (at, self.bodies[&key].file.clone()))
+        found
     }
 
     /// Forget every body: a new program's lines start again from 1.
@@ -1584,6 +1625,62 @@ mod tests {
         assert_eq!(
             shadow_line("/f { /ln 1 def } def\nfalse {\n  /ln 2 def\n} {\n  f\n} ifelse"),
             "6"
+        );
+    }
+
+    #[test]
+    fn a_body_that_did_not_run_is_not_picked_for_an_indirect_def() {
+        // `unused` never ran: the def is `setter`'s, run by an `exec` of a
+        // procedure off the stack, so the line is the caller's (#1338).
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec"
+            ),
+            "3"
+        );
+        // The same inside a procedure and through `store`, which finds `ln` in systemdict.
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 store } def\n/setter { exch store } def\n3 /ln /setter load exec"
+            ),
+            "3"
+        );
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 store } def\n/w {\n 3 /ln /setter load exec } def\n/setter { exch store } def\n\nw"
+            ),
+            "6"
+        );
+        // A body written elsewhere, run by `exec` of something else.
+        assert_eq!(
+            shadow_line(
+                "/ln { 1 } def\n/g { /ln 1 def } def\n\n/setter { exch def } def\n\n3 /ln /setter load exec"
+            ),
+            "6"
+        );
+        // A literal body written right before the operator still names its own line.
+        assert_eq!(shadow_line("/x 1 def\n{\n /ln 1 def\n} exec"), "3");
+        assert_eq!(
+            shadow_line("/unused { /ln 1 def } def\ntrue {\n /ln 2 def\n} { 1 pop } ifelse"),
+            "3"
+        );
+    }
+
+    #[test]
+    fn a_def_that_cannot_be_placed_in_a_procedure_names_the_line_that_ran_it() {
+        // An `exec` or `ifelse` in a body whose operand is not a literal body.
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 def } def\n/w {\n 3 /ln /setter load exec } def\n/setter { exch def } def\nw"
+            ),
+            "5"
+        );
+        // A procedure literal that is merely pushed runs nothing.
+        assert_eq!(
+            shadow_line(
+                "/w {\n 3 /ln /setter load { /ln 1 def } pop exec } def\n/setter { exch def } def\nw"
+            ),
+            "4"
         );
     }
 
