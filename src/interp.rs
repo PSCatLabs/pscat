@@ -49,7 +49,7 @@ const NO_NAME: u32 = u32::MAX;
 /// cannot forge the report's `; ` field separator or its ` ]%%` end
 /// (`pscat-mcp` splits on both, #745), and CR/LF escaped so the report
 /// stays one line (consumers read the first stderr line).
-fn report_name(name: &str) -> String {
+pub(crate) fn report_name(name: &str) -> String {
     cap_text(name, ERROR_NAME_LIMIT)
         .replace(';', "%3B")
         .replace(']', "%5D")
@@ -442,6 +442,11 @@ pub struct Interp {
     /// [`Interp::trace_operator_shadows`] turned tracing on (issue #1109);
     /// `None` otherwise, which costs `def` one branch.
     shadow_trace: Option<Box<crate::lint::ShadowTrace>>,
+    /// The operand-stack depth at each source token, when
+    /// [`Interp::trace_stack_leaks`] turned it on (issue #1081), so
+    /// `[stack-leak]` can name the line that left the oldest item. `None`
+    /// otherwise, which costs `sync_scan_line` one branch.
+    stack_trace: Option<Box<crate::lint::StackTrace>>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `step_n` before it unwinds the execution
@@ -781,6 +786,7 @@ impl Interp {
             last_line: None,
             last_file: None,
             shadow_trace: None,
+            stack_trace: None,
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
@@ -2033,6 +2039,11 @@ impl Interp {
     /// line either way — it just hasn't been popped yet, since the
     /// error propagated before any `Action` was applied).
     fn sync_scan_line(&mut self) {
+        if self.stack_trace.is_some()
+            && matches!(self.estack.last(), Some(Frame::Scanner(l)) if l.line().is_some())
+        {
+            self.note_stack_depth();
+        }
         if let Some(Frame::Scanner(lexer)) = self.estack.last()
             && let Some(line) = lexer.line()
         {
@@ -2056,6 +2067,10 @@ impl Interp {
     /// `run` returns inside a procedure (`/f { (lib.ps) run 1 0 div } def`)
     /// would name the finished file, since no token is scanned between.
     fn restore_scan_location(&mut self) {
+        // The file's last token is still `last_line`: credit what it left.
+        if self.stack_trace.is_some() {
+            self.note_stack_depth();
+        }
         for frame in self.estack.iter().rev() {
             if let Frame::Scanner(lexer) = frame
                 && let Some(line) = lexer.line()
@@ -3129,6 +3144,36 @@ impl Interp {
     #[doc(hidden)]
     pub fn trace_operator_shadows(&mut self) {
         self.shadow_trace.get_or_insert_with(Default::default);
+    }
+
+    /// Have every scanned source token note the operand-stack depth, for
+    /// the line `[stack-leak]` reports (issue #1081). Off by default;
+    /// `--lint` turns it on.
+    #[doc(hidden)]
+    pub fn trace_stack_leaks(&mut self) {
+        self.stack_trace.get_or_insert_with(Default::default);
+    }
+
+    pub(crate) fn stack_trace(&self) -> Option<&crate::lint::StackTrace> {
+        self.stack_trace.as_deref()
+    }
+
+    /// The line (and `run` file) of the last source token scanned: what ran
+    /// most recently, so the end-of-program stack is attributed to it.
+    pub(crate) fn last_scan_location(&self) -> (Option<usize>, Option<&Rc<str>>) {
+        (self.last_line, self.last_file.as_ref())
+    }
+
+    /// Record the depth the previous token left, at the next token's
+    /// boundary: `last_line` is still the previous token's, and the
+    /// scanner has not been advanced past this token yet. The stack here
+    /// is the result of everything before it, loops and calls included,
+    /// since their frames sit above the scanner and are gone by now.
+    #[inline(never)]
+    fn note_stack_depth(&mut self) {
+        if let Some(trace) = self.stack_trace.as_mut() {
+            trace.note(&self.ostack, self.last_line, self.last_file.as_ref());
+        }
     }
 
     pub(crate) fn shadow_trace(&self) -> Option<&crate::lint::ShadowTrace> {

@@ -334,6 +334,7 @@ impl Options {
         interp.set_max_page_pixels(self.max_pixels);
         if self.lint {
             interp.trace_operator_shadows();
+            interp.trace_stack_leaks();
         }
         Ok(interp)
     }

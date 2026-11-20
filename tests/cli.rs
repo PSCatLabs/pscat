@@ -300,6 +300,19 @@ fn lint_says_the_line_of_a_redefined_operator() {
     assert!(stderr.contains("shadow-lib.ps)"), "{stderr}");
 }
 
+/// #1081: `[stack-leak]` names the line that left the oldest item, so a
+/// missing `def` in a loop is found without rereading the program.
+#[test]
+fn lint_names_the_line_a_stack_leak_started_on() {
+    let src = "0 1 9 {\n  /gq exch pop\n} for\nshowpage\n";
+    let (ok, _out, stderr) = run(&["--lint", "-"], src);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains("[stack-leak] 10 item(s) left on the operand stack at the end of the program: /gq /gq /gq /gq /gq (top 5 of 10 shown, topmost first); the oldest, /gq, was left when the program reached line 3"),
+        "{stderr}"
+    );
+}
+
 #[test]
 fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
     let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");

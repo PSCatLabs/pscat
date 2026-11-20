@@ -1838,6 +1838,10 @@ renders eight examples in both and compares block-downsampled output).
   under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
   line of each binding, nothing else. A name bound in a closed local dictionary stays
   unreported on purpose (the notes have the corpus data).
+  `[stack-leak]` (#1081, `notes/1081-stack-leak-location.md`) names the line that left the
+  oldest leftover item: `Interp::trace_stack_leaks` (on under `--lint`) samples the operand
+  depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
+  per item) and credits growth to the previous token's line.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
