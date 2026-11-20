@@ -126,11 +126,13 @@ identical, the control (the first picture above) differing.
   `PaintProc` that names a page pattern made after the outer
   `makepattern` is `undefined` in pscat and works in gs. This feature
   makes the difference reachable.
-- At a 127.35 px outer step (outer scale 1.5, `/YStep 84.9`) the inner
-  lattice is a pixel off gs's; sixteen other measured cases match.
-  Single-context patterns at half-pixel steps can already differ in
-  phase from gs (gs moves cells so the `/BBox` corner lands on a pixel,
-  pscat rounds the pattern origin).
+- ~~At a 127.35 px outer step (outer scale 1.5, `/YStep 84.9`) the inner
+  lattice is a pixel off gs's; sixteen other measured cases match.~~
+  #1342 (`notes/1342-pattern-lattice-phase.md`): gs moves an adjusted
+  outer cell by whole pixels to keep its centre, and its accumulator
+  starts at the corner after that move; pscat now does both. That exact
+  case was not recorded, so it was not re-run; twelve cases built to make
+  gs move the outer cell match, where four were off before.
 
 A three-level case (a page pattern inside Q's `PaintProc`, Q made inside
 R's, R on the page with fractional translations) matches gs's raster
