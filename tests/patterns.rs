@@ -82,6 +82,10 @@ fn gs_png(input: &[u8], ext: &str, name: &str) -> Pixmap {
 }
 
 fn gs_png_at(input: &[u8], ext: &str, name: &str, k: u32) -> Pixmap {
+    gs_png_with(input, ext, name, k, &[])
+}
+
+fn gs_png_with(input: &[u8], ext: &str, name: &str, k: u32, extra: &[&str]) -> Pixmap {
     let dir = common::scratch_dir("pscat_patterns");
     let src = dir.join(format!("{name}.{ext}"));
     let out = dir.join(format!("{name}.{ext}.png"));
@@ -98,6 +102,7 @@ fn gs_png_at(input: &[u8], ext: &str, name: &str, k: u32) -> Pixmap {
             &format!("-g{}x{}", SIZE * k, SIZE * k),
             &format!("-r{}", 72 * k),
         ])
+        .args(extra)
         .arg(format!("-o{}", out.display()))
         .arg(&src)
         .status()
@@ -276,7 +281,7 @@ fn assert_real_pattern(pdf: &[u8], paint_type: u8) {
         text.contains(&format!("/PatternType 1 /PaintType {paint_type} ")),
         "{text}"
     );
-    assert!(text.contains("/Pattern << /P0 "), "page resource: {text}");
+    assert!(text.contains("/Pattern << /P"), "page resource: {text}");
     assert!(text.contains(" scn "), "no pattern fill: {text}");
     assert!(
         !text.contains("/Subtype /Image"),
@@ -588,6 +593,243 @@ setpattern 20 20 360 360 rectfill
 #[test]
 fn a_pattern_inside_a_paintproc_places_alike_in_all_outputs() {
     check_all("nested", NESTED, 1, true);
+}
+
+// --- patterns used across contexts (#1300) --------------------------------
+
+/// A page pattern used inside another pattern's PaintProc, as well as on
+/// the page. gs applies a pattern's device matrix unchanged in its
+/// pattern accumulator, whose origin is the cell's `/BBox` top-left
+/// corner in device space, rounded: so the stripes keep their device size
+/// (the outer pattern's 1.5 scale does not reach them) and start at that
+/// corner in each cell. A step of 7 (it does not divide the 400 px page)
+/// and a fractional corner and translation, so a wrong anchor cannot pass
+/// by chance. The content's edges are whole pixels, where gs (which paints
+/// pattern cells aliased) and pscat agree pixel for pixel.
+const ACROSS: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 7 7] /XStep 7 /YStep 7
+   /PaintProc { pop 0.9 0.1 0.1 setrgbcolor 0 0 2 7 rectfill
+                0 0.6 0 setrgbcolor 0 0 7 2 rectfill } >> matrix makepattern /stripes exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [-3.3 -2.6 70.4 61.3] /XStep 90 /YStep 86
+   /PaintProc { pop 0.1 0.1 0.7 setrgbcolor -3.3 -2.6 80 70 rectfill
+                stripes setpattern 0 0 70 61 rectfill }
+>> [1.5 0 0 1.5 4.3 7.6] makepattern /outer exch def
+outer setpattern 0 0 400 300 rectfill
+stripes setpattern 0 300 400 100 rectfill
+";
+
+/// An uncoloured page pattern inside another pattern's PaintProc: the
+/// PDF selects it through `/PCS` in the outer pattern's stream.
+const ACROSS_UNCOLOURED: &str = "
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 11 11] /XStep 11 /YStep 11
+   /PaintProc { pop 2 2 5 5 rectfill } >> matrix makepattern /dots exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [-3.3 -2.6 70.4 61.3] /XStep 90 /YStep 86
+   /PaintProc { pop 0.1 0.1 0.7 setrgbcolor -3.3 -2.6 80 70 rectfill
+                [/Pattern /DeviceRGB] setcolorspace 1 0.8 0 dots setcolor 0 0 70 61 rectfill }
+>> [1.5 0 0 1.5 4.3 7.6] makepattern /outer exch def
+outer setpattern 0 0 400 400 rectfill
+";
+
+/// The same page pattern inside a pattern turned 30 degrees: gs's
+/// accumulator is device-aligned, so the stripes stay upright on the page
+/// inside the turned cells.
+const ACROSS_TURNED: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 12 12] /XStep 12 /YStep 12
+   /PaintProc { pop 0.9 0.1 0.1 setrgbcolor 0 0 3 12 rectfill
+                0 0.6 0 setrgbcolor 0 0 12 2 rectfill } >> matrix makepattern /stripes exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 60 60] /XStep 100 /YStep 100
+   /PaintProc { pop 0.1 0.1 0.7 setrgbcolor 0 0 60 60 rectfill
+                stripes setpattern 6 6 48 48 rectfill }
+>> [0.866 0.5 -0.5 0.866 60 10] makepattern /outer exch def
+outer setpattern 0 0 400 400 rectfill
+";
+
+/// gs's raster of `ps` at 72 dpi with no anti-aliasing, the way gs
+/// paints pattern cells anyway.
+fn gs_png_aliased(ps: &str, name: &str) -> Pixmap {
+    let dir = common::scratch_dir("pscat_patterns");
+    let src = dir.join(format!("{name}.aliased.ps"));
+    let out = dir.join(format!("{name}.aliased.png"));
+    std::fs::write(&src, format!("%!PS\n{ps}\nshowpage\n")).expect("write input");
+    let status = Command::new("gs")
+        .args(["-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m"])
+        .arg(format!("-g{SIZE}x{SIZE}"))
+        .arg("-r72")
+        .arg(format!("-o{}", out.display()))
+        .arg(&src)
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected {name}");
+    let data = std::fs::read(&out).expect("read gs png");
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&out);
+    Pixmap::decode_png(&data).expect("decode png")
+}
+
+/// The share of pixels where `a` and `b` differ by more than half the
+/// range in some channel: a misplaced stripe, not an anti-aliased edge.
+fn strong_mismatch(a: &Pixmap, b: &Pixmap) -> f64 {
+    let bad = a
+        .data()
+        .chunks(4)
+        .zip(b.data().chunks(4))
+        .filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > 128))
+        .count();
+    bad as f64 / f64::from(SIZE * SIZE)
+}
+
+/// Every output of a picture whose PDF gs reads with different edge rules
+/// than the program (gs's PDF interpreter paints a pattern cell's
+/// whole-pixel rect edges a pixel heavier, with or without nesting, so the
+/// pictures' 0.5 bound against gs's run does not apply): resvg's SVG,
+/// hayro's PDF, and gs's PDF at 8x against our PNG.
+fn check_outputs(name: &str, src: &str, paint_type: u8, hayro: bool) -> Outputs {
+    let out = render(src);
+    assert_real_pattern(&out.pdf, paint_type);
+    assert_close(
+        &format!("{name}: SVG via resvg"),
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    if hayro {
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
+    }
+    if common::gs_available() {
+        assert_close(
+            &format!("{name}: our PDF via gs at 8x"),
+            &out.png,
+            &gs_png_at(&out.pdf, "pdf", name, 8),
+            3.0,
+        );
+    }
+    out
+}
+
+#[test]
+fn a_page_pattern_paints_inside_another_patterns_paintproc() {
+    // hayro paints a pattern inside a pattern stream resampled (blurred,
+    // with the same placement), so it sits this one out.
+    let out = check_outputs("across", ACROSS, 1, false);
+    // The inner stripes are there: red inside the outer cells.
+    let red = (0..400)
+        .flat_map(|x| (100..400).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let p = out.png.pixel(x, y).expect("pixel");
+            p.red() > 200 && p.green() < 60 && p.blue() < 60
+        })
+        .count();
+    assert!(
+        red > 5_000,
+        "the inner pattern is missing: {red} red pixels"
+    );
+    // A copy of the stripes' pattern stream under its own `/Matrix`.
+    let text = pdf_text(&out.pdf);
+    assert!(
+        text.matches("/BBox [0 0 7 7]").count() >= 2,
+        "no second stripes pattern for the outer stream: {text}"
+    );
+    if common::gs_available() {
+        // The placement itself, pixel for pixel against gs's run of the
+        // program: only the outer cells' fractional edges (anti-aliased
+        // here, aliased in gs) may differ.
+        let gs = gs_png_aliased(ACROSS, "across");
+        let bad = strong_mismatch(&out.png, &gs);
+        eprintln!("across: strong mismatch against gs {bad:.4}");
+        assert!(bad < 0.005, "across: {bad:.4} of the pixels differ from gs");
+        // A stripe a pixel off would fail it: shifting ours by one row
+        // does.
+        let mut shifted = out.png.clone();
+        let w = SIZE as usize * 4;
+        let src = out.png.data()[..w * (SIZE as usize - 1)].to_vec();
+        shifted.data_mut()[w..].copy_from_slice(&src);
+        assert!(strong_mismatch(&shifted, &gs) > 0.05);
+    }
+}
+
+#[test]
+fn an_uncoloured_page_pattern_paints_inside_another_patterns_paintproc() {
+    let out = check_outputs("across uncoloured", ACROSS_UNCOLOURED, 1, false);
+    let text = pdf_text(&out.pdf);
+    assert!(text.contains("/PaintType 2 "), "{text}");
+    assert!(text.contains("/PCS cs 1 0.8 0 /P"), "{text}");
+}
+
+#[test]
+fn a_page_pattern_stays_upright_inside_a_turned_pattern() {
+    check_all("across turned", ACROSS_TURNED, 1, true);
+}
+
+/// A pattern made inside another's PaintProc and used after it, on the
+/// page: gs places it by the matrix it got in the accumulator, read as
+/// page device coordinates (scaled 1.5 with the outer pattern, anchored at
+/// the outer origin less the accumulator's). gs 10.07.1 crashes running
+/// this with its default pattern cache ("Unrecoverable error");
+/// `-dMaxPatternBitmap=1` paints it, and that is the reference.
+const MADE_INSIDE: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [-3.3 -2 63 57.3] /XStep 400 /YStep 400
+   /PaintProc { pop 0.1 0.1 0.7 setrgbcolor -3.3 -2 80 70 rectfill
+     << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+        /PaintProc { pop 0.9 0.1 0.1 setrgbcolor 0 0 3 10 rectfill
+                     0 0.6 0 setrgbcolor 0 0 10 2 rectfill } >> [1 0 0 1 2 1] makepattern
+     userdict /inner 3 -1 roll put }
+>> [1.5 0 0 1.5 4.3 7.6] makepattern /outer exch def
+outer setpattern 0 0 30 30 rectfill
+inner setpattern 50 50 300 300 rectfill
+";
+
+#[test]
+fn a_pattern_made_inside_a_paintproc_paints_on_the_page() {
+    let out = render(MADE_INSIDE);
+    assert_close(
+        "made inside: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    assert_close(
+        "made inside: PDF via hayro",
+        &out.png,
+        &hayro_png(&out.pdf),
+        3.0,
+    );
+    let red = (50..350)
+        .flat_map(|x| (50..350).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let p = out.png.pixel(x, SIZE - 1 - y).expect("pixel");
+            p.red() > 200 && p.green() < 60
+        })
+        .count();
+    assert!(
+        red > 10_000,
+        "the inner pattern is missing: {red} red pixels"
+    );
+    if common::gs_available() {
+        assert_close(
+            "made inside: our PDF via gs at 8x",
+            &out.png,
+            &gs_png_at(&out.pdf, "pdf", "made_inside", 8),
+            3.0,
+        );
+        let ps = format!("%!PS\n{MADE_INSIDE}\nshowpage\n");
+        assert_close(
+            "made inside: our PDF via gs against the program in gs",
+            &gs_png_with(
+                ps.as_bytes(),
+                "ps",
+                "made_inside",
+                1,
+                &["-dMaxPatternBitmap=1"],
+            ),
+            &gs_png(&out.pdf, "pdf", "made_inside"),
+            0.5,
+        );
+    }
 }
 
 #[test]

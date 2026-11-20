@@ -28,11 +28,19 @@
 //! on every cell. A pattern turned off the device axes is resampled
 //! (bilinear) from its period.
 //!
-//! **Contexts.** A pattern is made in a context: the page, or the
+//! **Contexts** (#1300). A pattern is made in a context: the page, or the
 //! capture of another pattern's `PaintProc`. Its matrix maps to that
-//! context's device space, so it paints only there: a page pattern used
-//! inside a `PaintProc`, or one made in a `PaintProc` and used after it,
-//! paints nothing (a documented gap; nesting patterns is rare).
+//! context's device space. gs keeps that device matrix and applies it
+//! unchanged in whatever device paints with the pattern: inside a
+//! `PaintProc` that is the pattern accumulator, a device-aligned bitmap
+//! whose origin is the top-left pixel of the cell's `/BBox` in device
+//! space. So a page pattern inside a `PaintProc` keeps its device scale
+//! (the outer pattern's scale does not reach it) and its lattice starts
+//! at that corner; one made inside a `PaintProc` and used on the page is
+//! placed by its accumulator matrix read as page device coordinates.
+//! Each context records [`Capture::to_gs`], its coordinates to gs's
+//! device coordinates for it, and a pattern used in another context is
+//! placed through the two ([`foreign_placement`]).
 //!
 //! **Uncoloured patterns** (PaintType 2) paint their tile's coverage in
 //! the colour `setpattern` gives with the pattern: the raster recolours
@@ -258,9 +266,114 @@ pub(crate) struct PatternTile {
     pub(crate) svg: Option<SvgTile>,
     /// The PDF recorder's pattern index, when PDF was being recorded.
     pub(crate) pdf: Option<usize>,
+    /// Its context's coordinates to gs's device coordinates for that
+    /// context (identity on the page), for use in another context.
+    pub(crate) to_gs: Transform,
+}
+
+/// Where a pattern made in another context paints (#1300): its matrix in
+/// the painting context's coordinates, the raster shader, and the PDF
+/// `/Matrix` into the painting stream's default space.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Placement {
+    /// Pattern space to the painting context's coordinates.
+    pub(crate) matrix: Transform,
+    /// The period pixmap's shader transform.
+    pub(crate) shader: Transform,
+    pub(crate) quality: FilterQuality,
+    /// Pattern space to the default space of the stream that paints.
+    pub(crate) pdf_matrix: Transform,
+}
+
+/// `t` with its translation rounded, when it maps pixels to pixels (a
+/// signed permutation with a near-whole translation), so it samples
+/// nearest; `None` otherwise.
+fn pixel_exact(t: Transform) -> Option<Transform> {
+    let unit = |v: f32| v.abs() < 1e-4 || (v.abs() - 1.0).abs() < 1e-4;
+    let whole = |v: f32| (v - v.round()).abs() < 1e-3;
+    let along = t.ky.abs() < 1e-4 && t.kx.abs() < 1e-4 && t.sx.abs() > 0.5 && t.sy.abs() > 0.5;
+    let across = t.sx.abs() < 1e-4 && t.sy.abs() < 1e-4 && t.ky.abs() > 0.5 && t.kx.abs() > 0.5;
+    let ok = [t.sx, t.ky, t.kx, t.sy].iter().all(|&v| unit(v))
+        && (along || across)
+        && whole(t.tx)
+        && whole(t.ty);
+    ok.then(|| {
+        Transform::from_row(
+            t.sx.round(),
+            t.ky.round(),
+            t.kx.round(),
+            t.sy.round(),
+            t.tx.round(),
+            t.ty.round(),
+        )
+    })
+}
+
+/// The placement of `tile` painted in a context whose coordinates map to
+/// gs's device coordinates by `here_to_gs`, with `to_default` its
+/// coordinates to the painting stream's default space (PDF). `None` when
+/// `here_to_gs` is singular.
+pub(crate) fn foreign_placement(
+    tile: &PatternTile,
+    here_to_gs: Transform,
+    to_default: Transform,
+) -> Option<Placement> {
+    // The tile's context to the painting one, through gs's device space.
+    let hop = here_to_gs.invert()?.pre_concat(tile.to_gs);
+    let matrix = hop.pre_concat(tile.geom.matrix);
+    let shader = hop.pre_concat(tile.geom.shader);
+    let (shader, quality) = match pixel_exact(shader) {
+        Some(t) => (t, FilterQuality::Nearest),
+        None => (shader, FilterQuality::Bilinear),
+    };
+    Some(Placement {
+        matrix,
+        shader,
+        quality,
+        pdf_matrix: to_default.pre_concat(matrix),
+    })
+}
+
+/// gs's device coordinates for a capture of `geom` made in a context
+/// whose coordinates map to gs's by `parent_to_gs`: the capture canvas to
+/// the parent's coordinates (through the tile's shader), to gs's, less
+/// the accumulator's origin: the top-left corner of the `/BBox` in gs's
+/// device space under the pattern's own matrix (before the whole-pixel
+/// adjustment), rounded to the nearest pixel (measured against gs 10.07.1
+/// with fractional corners and translations on both sides of a half
+/// pixel).
+pub(crate) fn capture_to_gs(
+    spec: &TileSpec,
+    geom: &Geometry,
+    parent_to_gs: Transform,
+) -> Transform {
+    let to_gs = parent_to_gs.pre_concat(spec.matrix);
+    let [x0, y0, x1, y1] = spec.bbox.map(|v| v as f32);
+    let mut pts = [
+        tiny_skia::Point::from_xy(x0, y0),
+        tiny_skia::Point::from_xy(x1, y0),
+        tiny_skia::Point::from_xy(x0, y1),
+        tiny_skia::Point::from_xy(x1, y1),
+    ];
+    to_gs.map_points(&mut pts);
+    let min = |f: fn(&tiny_skia::Point) -> f32| pts.iter().map(f).fold(f32::INFINITY, f32::min);
+    let (dx, dy) = ((min(|p| p.x) + 0.5).floor(), (min(|p| p.y) + 0.5).floor());
+    let (dx, dy) = if dx.is_finite() && dy.is_finite() {
+        (dx, dy)
+    } else {
+        (0.0, 0.0)
+    };
+    Transform::from_translate(-dx, -dy)
+        .pre_concat(parent_to_gs)
+        .pre_concat(geom.shader)
+        .pre_concat(Transform::from_translate(
+            geom.origin.0 as f32,
+            geom.origin.1 as f32,
+        ))
 }
 
 impl PatternTile {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: usize,
         context: usize,
@@ -269,6 +382,7 @@ impl PatternTile {
         period: Pixmap,
         svg: Option<SvgTile>,
         pdf: Option<usize>,
+        to_gs: Transform,
     ) -> Self {
         PatternTile {
             id,
@@ -280,16 +394,23 @@ impl PatternTile {
             recolored: RefCell::new(None),
             svg,
             pdf,
+            to_gs,
         }
     }
 
     /// The raster shader's source: the period (recoloured to `rgb` for an
     /// uncoloured pattern), its transform, and the sampling.
-    pub(crate) fn raster(&self, rgb: (f32, f32, f32)) -> (Rc<Pixmap>, Transform, FilterQuality) {
-        let quality = if self.geom.exact {
-            FilterQuality::Nearest
-        } else {
-            FilterQuality::Bilinear
+    /// `place`, for a pattern of another context, gives the transform and
+    /// sampling instead.
+    pub(crate) fn raster(
+        &self,
+        rgb: (f32, f32, f32),
+        place: Option<&Placement>,
+    ) -> (Rc<Pixmap>, Transform, FilterQuality) {
+        let (shader, quality) = match place {
+            Some(p) => (p.shader, p.quality),
+            None if self.geom.exact => (self.geom.shader, FilterQuality::Nearest),
+            None => (self.geom.shader, FilterQuality::Bilinear),
         };
         let pm = if self.uncolored {
             let key = [to_u8(rgb.0), to_u8(rgb.1), to_u8(rgb.2)];
@@ -305,7 +426,7 @@ impl PatternTile {
         } else {
             self.period.clone()
         };
-        (pm, self.geom.shader, quality)
+        (pm, shader, quality)
     }
 }
 
@@ -346,6 +467,9 @@ pub(crate) struct Capture {
     pub(crate) suppress_paint: u32,
     pub(crate) coverage: Option<tiny_skia::Mask>,
     pub(crate) snapshot: (usize, Box<crate::gfx::GraphicsState>),
+    /// The capture canvas to gs's device coordinates for it, its pattern
+    /// accumulator's (#1300; [`capture_to_gs`]).
+    pub(crate) to_gs: Transform,
 }
 
 /// What a fill or stroke paints with, as the SVG and PDF recorders take
@@ -353,8 +477,9 @@ pub(crate) struct Capture {
 #[derive(Clone)]
 pub(crate) enum Ink {
     Rgb((f32, f32, f32)),
-    /// A tiling pattern, and the colour an uncoloured one paints in.
-    Pattern(Rc<PatternTile>, (f32, f32, f32)),
+    /// A tiling pattern, the colour an uncoloured one paints in, and,
+    /// for a pattern made in another context, where it paints (#1300).
+    Pattern(Rc<PatternTile>, (f32, f32, f32), Option<Placement>),
 }
 
 #[cfg(test)]
@@ -408,6 +533,40 @@ mod tests {
         let g = geometry(&spec(m, [0.0, 0.0, 10.0, 10.0], 10.0, 10.0)).unwrap();
         assert!(!g.exact);
         assert_eq!(g.period, (10, 10));
+    }
+
+    #[test]
+    fn a_capture_maps_to_gs_from_its_rounded_bbox_corner() {
+        // Outer pattern at scale 2, translated (4, 7), on a 205 px page
+        // (y flipped); /BBox corner x = -13.3 -> -22.6 in device, y top
+        // 27.2 -> 198 - 54.4 = 143.6. gs anchors at (-23, 144).
+        let m = Transform::from_row(2.0, 0.0, 0.0, -2.0, 4.0, 198.0);
+        let sp = spec(m, [-13.3, -21.0, 30.0, 27.2], 400.0, 400.0);
+        let g = geometry(&sp).unwrap();
+        let to_gs = capture_to_gs(&sp, &g, Transform::identity());
+        // Pattern space through the capture CTM, then to gs: the pattern
+        // origin lands at its device point less the anchor.
+        let mut p = [tiny_skia::Point::from_xy(0.0, 0.0)];
+        g.capture.map_points(&mut p);
+        to_gs.map_points(&mut p);
+        assert!(
+            (p[0].x - 27.0).abs() < 1e-3 && (p[0].y - 54.0).abs() < 1e-3,
+            "{p:?}"
+        );
+    }
+
+    #[test]
+    fn only_pixel_to_pixel_maps_sample_nearest() {
+        let flip = Transform::from_row(1.0, 0.0, 0.0, -1.0, 3.0002, 7.0);
+        assert_eq!(
+            pixel_exact(flip),
+            Some(Transform::from_row(1.0, 0.0, 0.0, -1.0, 3.0, 7.0))
+        );
+        let swap = Transform::from_row(0.0, 1.0, -1.0, 0.0, 2.0, 5.0);
+        assert!(pixel_exact(swap).is_some());
+        assert!(pixel_exact(Transform::from_row(1.0, 0.0, 0.0, 1.0, 0.5, 0.0)).is_none());
+        assert!(pixel_exact(Transform::from_scale(1.5, 1.0)).is_none());
+        assert!(pixel_exact(Transform::from_row(0.866, 0.5, -0.5, 0.866, 0.0, 0.0)).is_none());
     }
 
     #[test]

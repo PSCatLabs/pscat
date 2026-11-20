@@ -79,9 +79,8 @@ A capture canvas or period is at most 16384 px a side and 2^26 px
 
 ## Gaps (documented, not silent misplacement)
 
-- A pattern paints only in the context it was made in: one made on the page
-  and used inside another pattern's `PaintProc`, or made inside one and used
-  after it, paints nothing.
+- A pattern used in a context other than the one it was made in: done in
+  #1300 (`notes/1300-patterns-across-contexts.md`).
 - Text output modes (`--svg-text`, `--pdf-text`) keep glyph outlines under a
   pattern.
 - `imagemask` under a pattern: done in #1299 (`notes/1299-imagemask-pattern.md`).

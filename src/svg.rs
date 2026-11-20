@@ -161,7 +161,9 @@ impl SvgRecorder {
         match ink {
             Ink::Rgb(_) if self.uncolored => "currentColor".to_string(),
             Ink::Rgb(rgb) => Self::color(*rgb),
-            Ink::Pattern(tile, rgb) => self.pattern_ref(tile, *rgb, pen),
+            Ink::Pattern(tile, rgb, place) => {
+                self.pattern_ref(tile, *rgb, place.as_ref().map(|p| p.matrix), pen)
+            }
         }
     }
 
@@ -180,10 +182,13 @@ impl SvgRecorder {
     /// drawn in pen space under `pen` (its element `transform`), the
     /// `patternTransform` is `pen`'s inverse times that matrix, so the
     /// pattern lands where it does on the page, as in the raster.
+    /// `place` stands in for the tile's matrix when it was made in another
+    /// context (#1300): its matrix in this recorder's coordinates.
     fn pattern_ref(
         &mut self,
         tile: &Rc<PatternTile>,
         rgb: (f32, f32, f32),
+        place: Option<tiny_skia::Transform>,
         pen: Option<tiny_skia::Transform>,
     ) -> String {
         let Some(st) = &tile.svg else {
@@ -215,9 +220,10 @@ impl SvgRecorder {
         let id = self.next_pattern;
         self.next_pattern += 1;
         let (ax, ay) = (tile.spec.xstep.abs() as f32, tile.spec.ystep.abs() as f32);
+        let matrix = place.unwrap_or(tile.geom.matrix);
         let placement = match pen.and_then(|l| l.invert()) {
-            Some(inv) => inv.pre_concat(tile.geom.matrix),
-            None => tile.geom.matrix,
+            Some(inv) => inv.pre_concat(matrix),
+            None => matrix,
         };
         // The content is written out at each step rather than `<use>`d:
         // resvg drops `<use>` copies shifted out of the cell's own box.
