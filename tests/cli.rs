@@ -267,10 +267,24 @@ fn lint_says_the_line_of_a_redefined_operator() {
     );
     // The run failed (`5 3 sub` on a string); the kept finding above carries its line.
     assert!(stderr.contains("[run-error]"), "{stderr}");
-    // A def made by a procedure names the line that ran it.
+    // A def made by a procedure names its own line, not the one that ran it (#1338).
     let (_ok, _out, stderr) = run(&["--lint", "-e", "/f {\n /ln 1 def\n} def\n\nf"], "");
     assert!(
-        stderr.contains("/ln was redefined as an integer when the program reached line 5,"),
+        stderr.contains("/ln was redefined as an integer when the program reached line 2,"),
+        "{stderr}"
+    );
+    // A body that never ran is not the def: an `exec` of a procedure off the
+    // stack names the line that ran it (#1338).
+    let (_ok, _out, stderr) = run(
+        &[
+            "--lint",
+            "-e",
+            "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec",
+        ],
+        "",
+    );
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 3,"),
         "{stderr}"
     );
     // `store` would replace the operator itself when nothing else defines
@@ -301,6 +315,19 @@ fn lint_says_the_line_of_a_redefined_operator() {
         "{stderr}"
     );
     assert!(stderr.contains("shadow-lib.ps)"), "{stderr}");
+    // A def inside a procedure of a `run` file names its own line in that file (#1338).
+    let lib = tmp("shadow-lib-proc.ps");
+    std::fs::write(&lib, "% lib\n/f {\n  /sub 7 def\n} def\n\n\n\nf\n").expect("write lib");
+    let main = format!(
+        "1 2 add pop\n\n\n\n\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("shadow-lib-proc.ps)"), "{stderr}");
 }
 
 /// #1081: `[stack-leak]` names the line that left the oldest item, so a

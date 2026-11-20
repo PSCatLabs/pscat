@@ -221,6 +221,42 @@ impl Lexer {
         self.token_start_pos
     }
 
+    /// The text of the executable name the last-returned token is, for the
+    /// lint (#1338), read back from an in-memory source on demand; `None`
+    /// for any other token or a source that is not in memory.
+    pub(crate) fn token_name(&self) -> Option<String> {
+        let file = self.file.borrow();
+        let rest = file.bytes_from(self.token_start_pos)?;
+        let len = rest.iter().take_while(|&&b| is_regular(b)).count();
+        if len == 0 || len > 256 {
+            return None;
+        }
+        String::from_utf8(rest[..len].to_vec()).ok()
+    }
+
+    /// Whether the source between byte offsets `from` and `to` is only white
+    /// space and comments (#1338); `false` for a source not in memory.
+    pub(crate) fn blank_between(&self, from: usize, to: usize) -> bool {
+        let file = self.file.borrow();
+        let Some(rest) = file.bytes_from(from) else {
+            return false;
+        };
+        let Some(gap) = rest.get(..to.saturating_sub(from)) else {
+            return false;
+        };
+        let mut comment = false;
+        for &b in gap {
+            if comment {
+                comment = b != b'\n' && b != b'\r';
+            } else if b == b'%' {
+                comment = true;
+            } else if !is_whitespace(b) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn peek(&mut self) -> Result<Option<u8>, PsError> {
         self.file.borrow_mut().peek_byte()
     }
