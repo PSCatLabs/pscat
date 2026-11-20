@@ -2114,7 +2114,8 @@ impl Gfx {
         // From `ink`, so the raster and the recorders never disagree.
         match self.ink() {
             Some(crate::pattern::Ink::Pattern(tile, rgb, place)) => {
-                Ok((Some(tile.raster(rgb, place.as_ref())), 0))
+                let canvas = (self.pixmap.width(), self.pixmap.height());
+                Ok((Some(tile.raster(rgb, place.as_ref(), canvas)), 0))
             }
             Some(crate::pattern::Ink::Shading(sp, place)) => {
                 let matrix = match place {
@@ -2147,6 +2148,23 @@ impl Gfx {
             }
             Some(crate::pattern::Ink::Rgb(_)) | None => Ok((None, 0)),
         }
+    }
+
+    /// Lay out the cells of a fractional TilingType 2 pattern over the
+    /// canvas before it paints (#1332), adding the layout's work to `work`.
+    /// Does nothing for any other colour. A layout that would not fit the
+    /// limits' headroom is not made and the pattern paints from its
+    /// period; a limit reached while laying out is the error.
+    pub(crate) fn lay_pattern(
+        &self,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        if let Some(crate::pattern::Ink::Pattern(tile, rgb, None)) = self.ink() {
+            let canvas = (self.pixmap.width(), self.pixmap.height());
+            tile.lay(rgb, canvas, probe, work)?;
+        }
+        Ok(())
     }
 
     /// Paint the current pattern through a stencil (`imagemask`, #1299):
@@ -2338,14 +2356,11 @@ impl Gfx {
     /// rectangle per run of [`crate::coverage::runs`]: the mask already
     /// holds the edge coverage, and colour, alpha and blend still go
     /// through tiny-skia's pipeline as before.
-    fn fill_coverage(&mut self, path: &tiny_skia::Path, rule: FillRule) {
-        // No limit to exceed, so it cannot fail.
-        let _ = self.fill_coverage_limited(path, rule, &crate::limits::LimitProbe::NONE);
-    }
-
-    /// [`fill_coverage`](Self::fill_coverage) under the limits (#1188), and
-    /// the rasteriser's work (`coverage::rasterize_limited`). A limit stops
-    /// it before anything is painted.
+    ///
+    /// Under the limits (#1188), with the rasteriser's work
+    /// (`coverage::rasterize_limited`) and a fractional TilingType 2
+    /// pattern's layout work returned. A limit stops it before anything is
+    /// painted.
     fn fill_coverage_limited(
         &mut self,
         path: &tiny_skia::Path,
@@ -2376,6 +2391,11 @@ impl Gfx {
             }
         };
         let max_memory = self.mem_budget.map(|(_, max)| max);
+        let mut work = work;
+        if let Err(e) = self.lay_pattern(probe, &mut work) {
+            self.coverage = Some(cov);
+            return Err(e);
+        }
         // The shadow composites a flat colour, so a pattern fill (#1038)
         // and a pattern's capture canvas paint through tiny-skia instead.
         // A shading pattern's layer (#1298) covers the runs.
@@ -3144,8 +3164,12 @@ impl Gfx {
                 .map(StrokeDraw::Device),
         };
         if let Some(draw) = drawable {
+            // The layout of a fractional TilingType 2 pattern (#1332) comes
+            // before the raster source reads it; its work is charged too.
+            let mut lay_work = 0;
+            self.lay_pattern(probe, &mut lay_work)?;
             let (src, layer_work) = self.pattern_source(draw.device_bounds(&stroke), probe)?;
-            work = layer_work;
+            work = layer_work.saturating_add(lay_work);
             self.prepare_paint();
             let paint = self.paint_from(&src);
             let mask = self.clip_mask();
@@ -4158,16 +4182,26 @@ impl Gfx {
     /// Fill a free-standing path (a glyph outline) with the current
     /// paint and clip, leaving the current path alone. TrueType outlines
     /// are wound for nonzero filling.
-    pub(crate) fn fill_path_direct(&mut self, path: &PsPath) {
+    ///
+    /// Under the limits (#1332): `probe` is looked at, and the work (the
+    /// rasteriser's, and the layout of a fractional TilingType 2 pattern's
+    /// cells) is added to `work` for the operator to charge. A limit stops
+    /// the glyph before anything is painted or recorded.
+    pub(crate) fn fill_path_direct(
+        &mut self,
+        path: &PsPath,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
         if self.painting_off() {
-            return;
+            return Ok(());
         }
         let Some(ink) = self.ink() else {
-            return;
+            return Ok(());
         };
         if let Some(p) = path.to_skia() {
-            self.prepare_paint();
-            self.fill_coverage(&p, FillRule::Winding);
+            *work =
+                work.saturating_add(self.fill_coverage_limited(&p, FillRule::Winding, probe)?);
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = path.to_svg_data();
@@ -4184,6 +4218,7 @@ impl Gfx {
             }
             self.dirty = true;
         }
+        Ok(())
     }
 
     /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that a
@@ -4192,14 +4227,20 @@ impl Gfx {
     /// get the character or the outline; the raster always gets the
     /// outline. `path` may be empty (a space), which paints nothing but
     /// still places a character in the text.
-    pub(crate) fn paint_glyph(&mut self, path: &PsPath, text: Option<&crate::textrun::GlyphText>) {
+    pub(crate) fn paint_glyph(
+        &mut self,
+        path: &PsPath,
+        text: Option<&crate::textrun::GlyphText>,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
         let svg_text = text.filter(|g| self.svg_text_wanted() && crate::textrun::svg_eligible(g));
         let pdf_text = text.filter(|g| self.pdf_text_wanted() && crate::textrun::pdf_eligible(g));
         if svg_text.is_none() && pdf_text.is_none() {
             if !path.is_empty() {
-                self.fill_path_direct(path);
+                self.fill_path_direct(path, probe, work)?;
             }
-            return;
+            return Ok(());
         }
         // Text is written in a colour (`svg_text_wanted`/`pdf_text_wanted`
         // turn it off under a pattern), so this ink is always one.
@@ -4209,11 +4250,12 @@ impl Gfx {
             // A blank glyph opening a page would otherwise land on the old
             // page's SVG body, which the erase is about to clear, or start
             // a page that has no art. It draws nothing, so drop it.
-            return;
+            return Ok(());
         }
         if let Some(p) = &skia {
-            self.prepare_paint();
-            self.fill_coverage(p, FillRule::Winding);
+            // Text is written in a colour, so no pattern layout is made;
+            // the rasteriser's own work is still held against the limits.
+            *work = work.saturating_add(self.fill_coverage_limited(p, FillRule::Winding, probe)?);
         }
         let comp = self.composite();
         let rgb = self.state.rgb;
@@ -4242,6 +4284,7 @@ impl Gfx {
         if skia.is_some() {
             self.dirty = true;
         }
+        Ok(())
     }
 
     /// Splice a glyph outline into the current path (`charpath`).
@@ -4472,12 +4515,19 @@ impl Gfx {
             _ => None,
         };
         let period = crate::pattern::fold(&content, &cap.geom).ok_or(PsError::Limitcheck)?;
+        let cell = match &cap.geom.lattice {
+            Some(lat) => {
+                Some(crate::pattern::orient_cell(&content, lat).ok_or(PsError::Limitcheck)?)
+            }
+            None => None,
+        };
         Ok(std::rc::Rc::new(crate::pattern::PatternTile::new(
             cap.id,
             cap.context,
             cap.spec,
             cap.geom,
             period,
+            cell,
             svg,
             pdf,
             made_in_to_gs,

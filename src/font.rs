@@ -1488,6 +1488,38 @@ fn paint_resolved_glyph(
     text: Option<(i64, char)>,
     missing: GlyphId,
 ) -> (f64, f64) {
+    // No limit to exceed, so it cannot fail.
+    paint_resolved_glyph_limited(
+        gfx,
+        face,
+        fm,
+        gid,
+        mode,
+        pen,
+        text,
+        missing,
+        &crate::limits::LimitProbe::NONE,
+        &mut 0,
+    )
+    .unwrap_or((0.0, 0.0))
+}
+
+/// [`paint_resolved_glyph`] under the limits (#1332): `probe` is looked at
+/// as the glyph is painted and its work (the rasteriser's and a pattern
+/// layout's) is added to `work`, for the show to charge.
+#[allow(clippy::too_many_arguments)]
+fn paint_resolved_glyph_limited(
+    gfx: &mut Gfx,
+    face: &Face,
+    fm: [f64; 6],
+    gid: Option<GlyphId>,
+    mode: &ShowMode,
+    pen: DevPoint,
+    text: Option<(i64, char)>,
+    missing: GlyphId,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
+) -> Result<(f64, f64), PsError> {
     let k = 1000.0 / f64::from(face.units_per_em());
     // Glyph-space → user-space linear part (FontMatrix over 1000-unit
     // glyph space, with the em normalization folded in).
@@ -1526,10 +1558,10 @@ fn paint_resolved_glyph(
             // Spaces included: an empty outline still places a character,
             // which is what keeps the words apart when the text is copied.
             // `paint_glyph` decides per recorder whether it takes the text.
-            gfx.paint_glyph(&sink.path, Some(&g));
+            gfx.paint_glyph(&sink.path, Some(&g), probe, work)?;
         } else if !sink.path.is_empty() {
             match mode {
-                ShowMode::Paint => gfx.fill_path_direct(&sink.path),
+                ShowMode::Paint => gfx.fill_path_direct(&sink.path, probe, work)?,
                 ShowMode::Charpath => gfx.append_path(&sink.path),
                 ShowMode::Width => unreachable!("checked above"),
             }
@@ -1545,7 +1577,7 @@ fn paint_resolved_glyph(
             .or_else(|| advance_of(face, missing))
             .unwrap_or(0),
     );
-    (g[0] * w, g[1] * w)
+    Ok((g[0] * w, g[1] * w))
 }
 
 /// The text form of a glyph (#1119, #1193). Whether a recorder takes it
@@ -1639,6 +1671,8 @@ fn outline_glyph(
     name: &str,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let gid = resolve_glyph(face, name);
@@ -1651,9 +1685,9 @@ fn outline_glyph(
     } else {
         GlyphId(0)
     };
-    Ok(paint_resolved_glyph(
-        gfx, face, fs.matrix, gid, mode, pen, text, missing,
-    ))
+    paint_resolved_glyph_limited(
+        gfx, face, fs.matrix, gid, mode, pen, text, missing, probe, work,
+    )
 }
 
 /// One glyph on a Unicode-mode catalog face (see `CatalogEncoding`):
@@ -1667,13 +1701,15 @@ fn unicode_glyph(
     code: u32,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let ch = char::from_u32(code);
     let gid = ch.and_then(|c| glyph_for_char(face, c));
     // Never a standard face, so SVG keeps the outlines; PDF text takes the
     // character for its `/ToUnicode` map (Hangul, kana, kanji, Thai).
-    Ok(paint_resolved_glyph(
+    paint_resolved_glyph_limited(
         gfx,
         face,
         fs.matrix,
@@ -1682,7 +1718,9 @@ fn unicode_glyph(
         pen,
         ch.map(|c| (fs.fid, c)),
         GlyphId(0),
-    ))
+        probe,
+        work,
+    )
 }
 
 /// One Type 1 glyph: decrypt the charstring, interpret it (hints
@@ -1708,6 +1746,7 @@ fn type1_glyph(
     mode: &ShowMode,
     pen: DevPoint,
     probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let (charstrings, len_iv, subr_array) = {
         let d = fs.dict.borrow();
@@ -1829,7 +1868,7 @@ fn type1_glyph(
         }
         if !path.is_empty() {
             match mode {
-                ShowMode::Paint => gfx.fill_path_direct(&path),
+                ShowMode::Paint => gfx.fill_path_direct(&path, probe, work)?,
                 ShowMode::Charpath => gfx.append_path(&path),
                 ShowMode::Width => unreachable!("checked above"),
             }
@@ -2011,6 +2050,9 @@ pub(crate) struct ShowCtx {
     /// The limits when the show began, for a Type 1 glyph's decryption
     /// (#1188); looked at with no steps.
     probe: crate::limits::LimitProbe,
+    /// Work the glyphs painted since the interpreter last took it (the
+    /// rasteriser's and a pattern layout's, #1332), to charge as steps.
+    work: u64,
 }
 
 impl ShowCtx {
@@ -2035,7 +2077,13 @@ impl ShowCtx {
             displace: None,
             cshow: None,
             probe: crate::limits::LimitProbe::NONE,
+            work: 0,
         }
+    }
+
+    /// The glyph work done since the last call.
+    pub(crate) fn take_work(&mut self) -> u64 {
+        std::mem::take(&mut self.work)
     }
 
     pub(crate) fn set_limit_probe(&mut self, probe: crate::limits::LimitProbe) {
@@ -2164,11 +2212,35 @@ impl ShowCtx {
         let code = if glyph.is_some() { 0 } else { code };
         if fs.fid >= 0 {
             let adv = match &glyph {
-                Some(name) => outline_glyph(gfx, &fs, name, &self.mode, self.pen)?,
-                None if unicode => unicode_glyph(gfx, &fs, code, &self.mode, self.pen)?,
+                Some(name) => outline_glyph(
+                    gfx,
+                    &fs,
+                    name,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?,
+                None if unicode => unicode_glyph(
+                    gfx,
+                    &fs,
+                    code,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?,
                 None => {
                     let name = encoding_name(&fs, code as u8);
-                    outline_glyph(gfx, &fs, &name, &self.mode, self.pen)?
+                    outline_glyph(
+                        gfx,
+                        &fs,
+                        &name,
+                        &self.mode,
+                        self.pen,
+                        &self.probe,
+                        &mut self.work,
+                    )?
                 }
             };
             self.finish_glyph(gfx, code, adv)
@@ -2190,7 +2262,15 @@ impl ShowCtx {
                     Some(name) => name,
                     None => encoding_name(&fs, code as u8),
                 };
-                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen, &self.probe)?;
+                let adv = type1_glyph(
+                    gfx,
+                    &fs,
+                    &name,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?;
                 self.finish_glyph(gfx, code, adv)
             }
         }

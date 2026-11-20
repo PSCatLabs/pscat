@@ -396,6 +396,95 @@ fn fractional_steps_wide_cells_strokes_and_text_agree_across_outputs() {
     check_all("mixed", MIXED, 1, false);
 }
 
+/// TilingType 2 (no distortion, #1332): a 3 pt cell keeps its 3 px size
+/// on steps that are no whole pixels (7.3 x 9.7), and the spacing varies
+/// instead. The cell's edges are whole pixels, so gs (which paints
+/// pattern cells aliased) and pscat agree pixel for pixel, and the y flip
+/// (a negative device step, `floor` of it) is checked beside x.
+const TYPE2: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 2
+   /BBox [0 0 3 3] /XStep 7.3 /YStep 9.7
+   /PaintProc { pop 0.1 0.2 0.7 setrgbcolor 0 0 3 3 rectfill } >> [1 0 0 1 13 21] makepattern /t2 exch def
+t2 setpattern
+10 10 380 380 rectfill
+<< /PatternType 1 /PaintType 2 /TilingType 2
+   /BBox [0 0 2 2] /XStep 5.6 /YStep 4.45
+   /PaintProc { pop 0 0 2 2 rectfill } >> matrix makepattern /t2u exch def
+[/Pattern /DeviceRGB] setcolorspace 0.8 0.1 0.1 t2u setcolor
+100 100 100 100 rectfill
+";
+
+#[test]
+fn type_2_cells_keep_their_size_and_the_spacing_varies() {
+    let out = render(TYPE2);
+    assert_real_pattern(&out.pdf, 1);
+    // The SVG carries the true step (the unadjusted matrix). Its raster is
+    // not held against ours here: resvg's differs by 5.3 block-mean, as if
+    // it rounded a `<pattern>` tile to whole pixels (7.3 -> 7), and hayro's
+    // PDF raster by 5.4 likewise.
+    assert!(
+        out.svg.contains("width=\"7.3\" height=\"9.7\""),
+        "{}",
+        out.svg
+    );
+    if common::gs_available() {
+        // gs rasterises our PDF with the spacing and cell size the PDF
+        // means, and that is its raster of the program.
+        assert_close(
+            "type2: our PDF via gs at 8x",
+            &out.png,
+            &gs_png_at(&out.pdf, "pdf", "type2", 8),
+            3.0,
+        );
+        let ps = format!("%!PS\n{TYPE2}\nshowpage\n");
+        assert_close(
+            "type2: our PDF via gs against the program in gs",
+            &gs_png(ps.as_bytes(), "ps", "type2"),
+            &gs_png(&out.pdf, "pdf", "type2"),
+            0.5,
+        );
+        // And our raster is gs's raster of the program, cell for cell.
+        let gs = gs_png_aliased(TYPE2, "type2");
+        let bad = strong_mismatch(&out.png, &gs);
+        assert!(bad < 0.0005, "pixels differing from gs: {bad}");
+    }
+    let ink = |x: u32, y: u32| {
+        let p = out.png.pixel(x, y).expect("pixel");
+        p.blue() > 150 && p.red() < 100
+    };
+    let starts = |at: &dyn Fn(u32) -> bool, from: u32, to: u32| -> Vec<i32> {
+        (from..to)
+            .filter(|&v| at(v) && !at(v - 1))
+            .map(|v| v as i32)
+            .collect()
+    };
+    // Across a row of cells (the lowest row: device rows 376-378 for the
+    // origin at user y 21): cell i starts at 13 + floor(i * 7.3).
+    let xs = starts(&|x| ink(x, 377), 14, 120);
+    let want_x: Vec<i32> = (1..)
+        .map(|i| 13 + (f64::from(i) * 7.3 + 1e-6).floor() as i32)
+        .take_while(|&x| x < 120)
+        .collect();
+    assert_eq!(xs, want_x, "x starts");
+    // Down a column of cells (x 13-15): the step is -9.7 in device y, so
+    // cell j's top is 376 + floor(-9.7 j).
+    let ys = starts(&|y| ink(14, y), 11, 380);
+    let mut want_y: Vec<i32> = (0..)
+        .map(|j| 376 + (f64::from(j) * -9.7 + 1e-6).floor() as i32)
+        .take_while(|&y| y > 10)
+        .collect();
+    want_y.reverse();
+    assert_eq!(ys, want_y, "y starts");
+    // True size: three whole pixels, no partial ones at the edge.
+    assert!(ink(13, 377) && ink(15, 377) && !ink(16, 377));
+    assert_real_pattern_tiling_type(&out.pdf, 2);
+}
+
+fn assert_real_pattern_tiling_type(pdf: &[u8], tiling: u8) {
+    let text = pdf_text(pdf);
+    assert!(text.contains(&format!("/TilingType {tiling} ")), "{text}");
+}
+
 #[test]
 fn pattern_free_programs_write_no_pattern() {
     let out = render("0 0 1 setrgbcolor 10 10 100 100 rectfill");
