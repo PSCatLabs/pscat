@@ -453,7 +453,7 @@ fn parse_dpis(list: &str) -> Result<Vec<Vec<CellSpec>>, String> {
 
 fn parse_cell(item: &str) -> Result<CellSpec, String> {
     let (spec, mat) = match item.split_once('@') {
-        Some((spec, mat)) => (spec, Some(parse_mat(mat)?)),
+        Some((spec, mat)) => (spec, Some(sheet::parse_mat(mat)?)),
         None => (item, None),
     };
     let (d, zoom) = match spec.split_once('x') {
@@ -474,28 +474,6 @@ fn parse_cell(item: &str) -> Result<CellSpec, String> {
         zoom,
         mat,
     })
-}
-
-/// A mat colour: `#rgb` or `#rrggbb` (the `#` optional, so a shell that
-/// treats it as a pattern character is not a problem), `white` or `black`.
-fn parse_mat(s: &str) -> Result<[u8; 3], String> {
-    match s {
-        "white" => return Ok([255, 255, 255]),
-        "black" => return Ok([0, 0, 0]),
-        _ => {}
-    }
-    let hex = s.strip_prefix('#').unwrap_or(s);
-    let bad = || format!("invalid mat colour: {s:?} (expected #rgb, #rrggbb, white or black)");
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(bad());
-    }
-    let digit = |i: usize| u8::from_str_radix(&hex[i..i + 1], 16).map_err(|_| bad());
-    let pair = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| bad());
-    match hex.len() {
-        3 => Ok([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
-        6 => Ok([pair(0)?, pair(2)?, pair(4)?]),
-        _ => Err(bad()),
-    }
 }
 
 /// `--sweep NAME=SPEC`: the name is spliced into a `/NAME v def`, so it
@@ -699,11 +677,11 @@ mod tests {
 
     #[test]
     fn mat_colours_are_hex_or_named() {
-        assert_eq!(parse_mat("#fff"), Ok([255, 255, 255]));
-        assert_eq!(parse_mat("1a2B3c"), Ok([0x1a, 0x2b, 0x3c]));
-        assert_eq!(parse_mat("black"), Ok([0, 0, 0]));
+        assert_eq!(sheet::parse_mat("#fff"), Ok([255, 255, 255]));
+        assert_eq!(sheet::parse_mat("1a2B3c"), Ok([0x1a, 0x2b, 0x3c]));
+        assert_eq!(sheet::parse_mat("black"), Ok([0, 0, 0]));
         for bad in ["", "#", "red", "#12", "#12345", "#ggg"] {
-            assert!(parse_mat(bad).is_err(), "{bad:?} must be refused");
+            assert!(sheet::parse_mat(bad).is_err(), "{bad:?} must be refused");
         }
     }
 

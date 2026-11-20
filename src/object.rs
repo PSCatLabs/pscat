@@ -66,6 +66,19 @@ impl PsArray {
         self.len == 0
     }
 
+    /// Where element `i` lives, for the lint's table of source lines
+    /// (#1338): the address of the shared storage (a loop body's clones and
+    /// a `getinterval` view all share it) and the element's index in it.
+    pub(crate) fn storage_site(&self, i: usize) -> (usize, usize) {
+        (Rc::as_ptr(&self.data) as usize, self.off + i)
+    }
+
+    /// A weak handle on the storage: held by that table so the address in
+    /// its key is never reused while the entry exists.
+    pub(crate) fn storage_weak(&self) -> std::rc::Weak<RefCell<Vec<Object>>> {
+        Rc::downgrade(&self.data)
+    }
+
     #[inline]
     pub fn get(&self, i: usize) -> Option<Object> {
         if i < self.len {

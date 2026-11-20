@@ -81,3 +81,27 @@ give none. The sheet comes back as one PNG, the same bytes the CLI writes;
 `labels: false` and `sizes: false` drop the text. A failing program is drawn as
 far as it got, with its error beside the image. At most 32 cells and 40 million
 pixels; each cell runs under the server's interpreter limits.
+
+The sweeps, mats and wrapping of `pscat sheet` are inputs too (a server older
+than this lists no `sweep`, `mat`, `cols` or `values` in the tool's schema):
+
+- `sweep` on an entry draws that program once per value, every `dpi` item for
+  each value: `{"seed": [1, 2, 3]}` (each seed also seeds noise, as above) or
+  `{"param": "Density", "values": [10, 20, 40]}` (the program starts with
+  `/Density 20 def` made, so it reads it with `/Density where { pop Density }
+  { 10 } ifelse`). Only lists of numbers, not the CLI's `1:12` ranges. Each cell
+  is captioned `seed=7` or `Density=20`.
+- `captions` on an entry gives each sweep value words of its own, in order and
+  one per value (`["(a) image model", "(b) pscat"]`; an empty string leaves
+  that cell's caption out). `values: false` at the top level leaves the value
+  out of the captions, for cells that already say what they are.
+- `mat` in a `dpi` item (`{"dpi": 9, "mat": "#222"}`; `#rgb`, `#rrggbb`,
+  `white` or `black`) draws the page transparent and sets it on that colour,
+  padded 10 px.
+- `cols` at the top level wraps a row of more than that many cells onto further
+  lines, the label only above the first.
+
+Twelve seeds, four to a line, is one call:
+`{"entries": [{"source": "<piece.ps>", "width": 640, "height": 640, "dpi": [36],
+"sweep": {"seed": [1,2,3,4,5,6,7,8,9,10,11,12]}}], "cols": 4}`. Stacked columns
+(`+`) are not available over MCP yet.

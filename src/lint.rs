@@ -525,6 +525,164 @@ pub(crate) struct ShadowTrace {
     /// was made, as `when the program reached line N` (` (file)` for a
     /// `run` file), `None` when the scanner's line is unknown.
     sites: std::collections::HashMap<(u32, ShadowScope), Option<String>>,
+    /// The source line of every element of the procedure bodies scanned from
+    /// the main program or a `run` file, so a `def` inside a body can say
+    /// where it is written (#1338). Shared with the scanner, which fills it
+    /// as it scans; read only when a shadow is first recorded.
+    pub(crate) bodies: std::rc::Rc<std::cell::RefCell<BodyLines>>,
+}
+
+/// Most elements whose lines are kept. A program scans each procedure once, so
+/// this is only reached by a source file of millions of procedure elements;
+/// past it a `def` falls back to the line that ran it.
+const BODY_LINES_CAP: usize = 4_000_000;
+
+/// Source lines per procedure body, keyed by the address of the body's
+/// storage (see [`PsArray::storage_site`](crate::object::PsArray)). The entry
+/// holds a `Weak` handle, which keeps that address from being given to
+/// another array while the entry exists.
+#[derive(Default)]
+pub(crate) struct BodyLines {
+    bodies: std::collections::HashMap<usize, BodyEntry>,
+    held: usize,
+}
+
+struct BodyEntry {
+    _storage: std::rc::Weak<std::cell::RefCell<Vec<Object>>>,
+    /// One line per element, in scan order.
+    lines: Vec<u32>,
+    /// The `run` file the body was scanned from, `None` for the main program.
+    file: Option<std::rc::Rc<str>>,
+    /// Byte offsets in that source of the body's `{` and of the end of its
+    /// `}`, so the body that sits right before a token can be found.
+    span: (usize, usize),
+    /// How the body ends, kept because the body itself may be gone by the
+    /// time its `def` runs (a branch of `{ ... } if` is freed as it finishes).
+    tail: Tail,
+}
+
+/// How a procedure body ends (#1338).
+#[derive(Clone, PartialEq, Eq)]
+enum Tail {
+    /// In `def` or `store`; the literal names the body spells before it.
+    Def(Vec<u32>),
+    /// In a call to this name.
+    Call(u32),
+    /// In anything else (a literal, or nothing).
+    Other,
+}
+
+impl BodyLines {
+    /// Keep `lines` (one per element) for the freshly scanned `body`.
+    pub(crate) fn register(
+        &mut self,
+        body: &crate::object::PsArray,
+        lines: Vec<u32>,
+        file: Option<std::rc::Rc<str>>,
+        span: (usize, usize),
+    ) {
+        if lines.len() != body.len() || self.held + lines.len() + 1 > BODY_LINES_CAP {
+            return;
+        }
+        // Each body costs a map slot and a `Weak` too: count it, so a million
+        // empty bodies are bounded as well.
+        self.held += lines.len() + 1;
+        let tail = body.with_slice(|els| match els.split_last() {
+            Some((last, before)) if is_binding_op(last) => Tail::Def(
+                before
+                    .iter()
+                    .filter_map(|o| match &o.value {
+                        Value::Name(n) if !o.executable => Some(n.id()),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            Some((last, _)) => match &last.value {
+                Value::Name(n) if last.executable => Tail::Call(n.id()),
+                _ => Tail::Other,
+            },
+            None => Tail::Other,
+        });
+        self.bodies.insert(
+            body.storage_site(0).0,
+            BodyEntry {
+                _storage: body.storage_weak(),
+                lines,
+                file,
+                span,
+                tail,
+            },
+        );
+    }
+
+    /// The line of the `def` of `name_id` that ends the literal body (or, for
+    /// `ifelse`, the one of the `count` bodies) written right before the token
+    /// the scanner is running at `token_at`: `{ ... } if` in the program text,
+    /// whose branch no frame holds any more (#1338). The bodies are found by
+    /// position, `blank(from, to)` telling that only white space and comments
+    /// lie between them and the token, so the bodies are the operands the
+    /// operator takes and not some other body spelling the same name.
+    ///
+    /// Answers only when exactly one of them ends in a `def` of the name and
+    /// each of the others cannot have run one: it ends in a literal, or in a
+    /// `def` of other names, or in a call that `inert` says is an operator
+    /// that runs nothing. Otherwise `None`, and the caller keeps the line that
+    /// ran it.
+    pub(crate) fn before_token(
+        &self,
+        file: Option<&std::rc::Rc<str>>,
+        token_at: usize,
+        count: usize,
+        name_id: u32,
+        blank: &dyn Fn(usize, usize) -> bool,
+        inert: &dyn Fn(u32) -> bool,
+    ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
+        let mut found: Option<(u32, Option<std::rc::Rc<str>>)> = None;
+        let mut before = token_at;
+        for _ in 0..count {
+            // The body whose `}` ends just before `before`. Two entries can
+            // share an end only when one file was scanned twice: the same body.
+            let mut same = self.bodies.values().filter(|e| {
+                e.file.as_ref() == file && e.span.1 <= before && blank(e.span.1, before)
+            });
+            let entry = same.next()?;
+            if same.any(|e| e.span != entry.span || e.tail != entry.tail || e.lines != entry.lines)
+            {
+                return None;
+            }
+            match &entry.tail {
+                Tail::Def(names) if names.contains(&name_id) => {
+                    // Two bodies that both define it: not a guess to make.
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some((*entry.lines.last()?, entry.file.clone()));
+                }
+                Tail::Def(_) | Tail::Other => {}
+                Tail::Call(id) if inert(*id) => {}
+                Tail::Call(_) => return None,
+            }
+            before = entry.span.0;
+        }
+        found
+    }
+
+    /// Forget every body: a new program's lines start again from 1.
+    pub(crate) fn clear(&mut self) {
+        self.bodies.clear();
+        self.held = 0;
+    }
+
+    /// The line (and `run` file) element `i` of `body` was written on.
+    pub(crate) fn line_of(
+        &self,
+        body: &crate::object::PsArray,
+        i: usize,
+    ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
+        let (key, at) = body.storage_site(i);
+        let entry = self.bodies.get(&key)?;
+        Some((*entry.lines.get(at)?, entry.file.clone()))
+    }
 }
 
 impl ShadowTrace {
@@ -558,6 +716,14 @@ impl ShadowTrace {
         let id = crate::name::intern(name).id();
         self.sites.get(&(id, scope)).cloned().flatten()
     }
+
+    /// Forget the `systemdict` sites: a new program starts with none of
+    /// the last one's refused stores (the `userdict` ones stay, as the
+    /// bindings themselves do).
+    pub(crate) fn forget_system(&mut self) {
+        self.sites
+            .retain(|(_, scope), _| *scope != ShadowScope::System);
+    }
 }
 
 /// The word for the value's type when binding it over `builtin` is a
@@ -574,6 +740,30 @@ pub(crate) fn shadow_kind(builtin: &Object, value: &Object) -> Option<&'static s
     }
     let kind = value.type_name();
     Some(kind.strip_suffix("type").unwrap_or(kind))
+}
+
+/// Whether `o` is the `def` or `store` operator, or an executable name that
+/// is spelt that way (#1338).
+pub(crate) fn is_binding_op(o: &Object) -> bool {
+    if !o.executable {
+        return false;
+    }
+    match &o.value {
+        Value::Operator(op) => matches!(op.name, "def" | "store"),
+        Value::Name(n) => matches!(&**n, "def" | "store"),
+        _ => false,
+    }
+}
+
+/// Whether `body` spells the literal name `/name_id` before element `end`.
+pub(crate) fn writes_name(body: &crate::object::PsArray, end: usize, name_id: u32) -> bool {
+    body.with_slice(|els| spells_name(&els[..end.min(els.len())], name_id))
+}
+
+/// Whether the literal name `/name_id` is among `els`.
+pub(crate) fn spells_name(els: &[Object], name_id: u32) -> bool {
+    els.iter()
+        .any(|o| !o.executable && matches!(&o.value, Value::Name(n) if n.id() == name_id))
 }
 
 /// One shadow to report.
@@ -599,9 +789,11 @@ struct Shadow {
 ///   `begin ... end` that has already closed is gone from it, which is one
 ///   way to keep a local like `/sub` out of the report (see [`ShadowTrace`]
 ///   for why that stays the rule).
-/// - `systemdict` is compared with the operators a fresh interpreter has: a
-///   `store` of an operator's name overwrites the operator there (that is
-///   where `store` finds the name), and `systemdict /sub 5 put` does the same.
+/// - `systemdict` is read-only (issue #1337), so a `store` of an operator's
+///   name (that is where `store` finds it), `systemdict /sub 5 put` or a
+///   `def` after `systemdict begin` raises `invalidaccess` and leaves the
+///   dictionary alone; the interpreter keeps what was refused and this
+///   reports it, for a program that caught the error with `stopped`.
 /// - A deliberate redefinition is silenced by a `%lint: allow
 ///   shadowed-operator` comment line anywhere in the program
 ///   ([`scan_lint_allows`]); the callers apply it, since this function
@@ -647,28 +839,12 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
             trace.and_then(|t| t.location(name, ShadowScope::User)),
         );
     }
-    // Operators that `store` or `put` replaced in `systemdict`.
-    let mut pristine = crate::object::Dict::new();
-    crate::ops::install_all(&mut pristine);
-    for (key, original) in pristine.pairs() {
-        let (Value::Name(name), Value::Operator(_)) = (&key.value, &original.value) else {
-            continue;
-        };
-        let Some(now) = system.borrow().get(name) else {
-            continue;
-        };
-        // `shadow_kind` lets the same operator through, so a different
-        // one stored over it is reported, as in userdict (Codex round 1
-        // on #1323: `/sub /add load store` was skipped).
-        let Some(kind) = shadow_kind(&original, &now) else {
-            continue;
-        };
-        push(
-            name,
-            ShadowScope::System,
-            kind,
-            trace.and_then(|t| t.location(name, ShadowScope::System)),
-        );
+    // Operators a `store` or `put` tried to replace in `systemdict`: it is
+    // read-only (issue #1337), so the program got `invalidaccess` and the
+    // dictionary itself shows nothing; the interpreter kept the attempt.
+    for (name, kind) in interp.refused_system_stores() {
+        let location = trace.and_then(|t| t.location(&name, ShadowScope::System));
+        push(&name, ShadowScope::System, kind, location);
     }
     // `pairs` order depends on the interner, so sort for stable output.
     shadowed.sort_by(|a, b| (&a.name, a.scope).cmp(&(&b.name, b.scope)));
@@ -706,7 +882,7 @@ fn shadow_message(s: &Shadow) -> String {
             "/{name} was redefined as {article} {kind}{at}, replacing the operator {name}: every later `{name}` pushes that value instead of running the operator (rename it, or keep it in a local dictionary with begin ... end)"
         ),
         ShadowScope::System => format!(
-            "/{name} was redefined as {article} {kind} in systemdict{at}, replacing the operator {name} for the whole program: every later `{name}` pushes that value instead of running the operator (rename it; `store` and `put` change systemdict itself, `def` defines in userdict)"
+            "/{name} was stored as {article} {kind} into systemdict{at}, which would replace the operator {name} for the whole program; systemdict is read-only (Ghostscript raises invalidaccess, and so does pscat) -- rename it, or use def, which defines in userdict"
         ),
     }
 }
@@ -1343,9 +1519,169 @@ mod tests {
     fn a_def_inside_a_procedure_names_the_line_that_ran_it() {
         let found = shadow_messages(&traced("/f {\n /sub 1 def\n} def\n\nf"));
         assert!(
-            found[0].contains("as an integer when the program reached line 5, replacing"),
+            found[0].contains("as an integer when the program reached line 2, replacing"),
             "{found:?}"
         );
+    }
+
+    /// The line the one `shadowed-operator` finding of `src` names.
+    fn shadow_line(src: &str) -> String {
+        let found = shadow_messages(&traced(src));
+        assert_eq!(found.len(), 1, "{found:?}");
+        let rest = found[0]
+            .split("when the program reached line ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no line in {found:?}"));
+        rest.split([',', ' ']).next().unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn a_def_in_a_loop_body_names_its_own_line() {
+        // The `for` loop ends on line 4; the `def` is on line 2 (#1338).
+        assert_eq!(shadow_line("0 1 3 {\n  /ln exch def\n  1 pop\n} for"), "2");
+        assert_eq!(shadow_line("3 {\n  1 pop\n  /ln 2 def\n} repeat"), "3");
+        assert_eq!(shadow_line("[1 2] {\n  /ln exch def\n} forall"), "2");
+        assert_eq!(shadow_line("{\n  /ln 1 def\n  exit\n} loop"), "2");
+    }
+
+    #[test]
+    fn a_def_that_is_not_the_last_element_of_its_body_names_its_own_line() {
+        assert_eq!(
+            shadow_line("/f {\n  /ln 1 def\n  1 pop\n  2 pop\n} def\n\n\nf"),
+            "2"
+        );
+        // Two shadows in one body: each has its own line, the first is kept per name.
+        let found = shadow_messages(&traced("/f {\n /sub 1 def\n\n /add 2 def\n} def\nf"));
+        assert!(found[0].contains("line 4"), "{found:?}");
+        assert!(found[1].contains("line 2"), "{found:?}");
+    }
+
+    #[test]
+    fn a_def_reached_through_a_chain_of_calls_names_its_own_line() {
+        assert_eq!(
+            shadow_line("/g {\n /div 3 def\n} def\n/h { g } def\n/i { h } def\n\n\ni"),
+            "2"
+        );
+        // From inside another procedure's body, as one of its elements.
+        assert_eq!(
+            shadow_line("/g {\n /div 3 def\n} def\n/h { g 1 pop } def\n\nh"),
+            "2"
+        );
+    }
+
+    #[test]
+    fn a_def_in_a_conditional_branch_names_its_own_line() {
+        assert_eq!(shadow_line("true {\n  /abs 1 def\n} if"), "2");
+        assert_eq!(
+            shadow_line("/f { true {\n  /abs 1 def\n} {\n  /neg 2 pop\n} ifelse } def\nf"),
+            "2"
+        );
+        assert_eq!(shadow_line("{\n /abs 1 def\n} stopped pop"), "2");
+        assert_eq!(shadow_line("/c true def\n\nc {\n  /abs 1 def\n} if\n"), "4");
+    }
+
+    #[test]
+    fn a_bound_procedure_still_names_the_line_of_its_def() {
+        assert_eq!(shadow_line("/f {\n /ln 1 def\n} bind def\n\nf"), "2");
+    }
+
+    #[test]
+    fn a_nested_procedure_names_the_line_of_its_def() {
+        assert_eq!(
+            shadow_line("/f {\n  1 {\n    /ln 1 def\n  } repeat\n} def\n\n\nf"),
+            "3"
+        );
+    }
+
+    #[test]
+    fn a_def_that_cannot_be_placed_names_the_line_that_ran_it() {
+        // A body taken off the stack, a computed name, and a name defined by a
+        // helper: no body spells `/name` next to a `def`, so the line the scanner
+        // had reached is kept, as before (#1109).
+        assert_eq!(shadow_line("/ln 5\n\n{ def }\n\nexec"), "5");
+        assert_eq!(shadow_line("/set {\n exch def\n} def\n\n3 /ln set"), "5");
+        // Two branches that both spell the name: not guessed.
+        assert_eq!(
+            shadow_line("/f { true {\n /ln 1 def\n} {\n /ln 2 def\n} ifelse } def\n\n\nf"),
+            "8"
+        );
+        // Called in order, the first one to run is the one reported.
+        assert_eq!(
+            shadow_line("/a { /ln 1 def } def\n/b {\n /ln 2 def } def\n/c { a b } def\n\nc"),
+            "1"
+        );
+    }
+
+    #[test]
+    fn a_guess_between_two_bodies_is_not_made() {
+        // The `def` on line 1 runs through `f`; the scanner is at `ifelse`, and the
+        // branch on line 3 never ran. Two bodies could be it: the line that ran it.
+        assert_eq!(
+            shadow_line("/f { /ln 1 def } def\nfalse {\n  /ln 2 def\n} {\n  f\n} ifelse"),
+            "6"
+        );
+    }
+
+    #[test]
+    fn a_body_that_did_not_run_is_not_picked_for_an_indirect_def() {
+        // `unused` never ran: the def is `setter`'s, run by an `exec` of a
+        // procedure off the stack, so the line is the caller's (#1338).
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec"
+            ),
+            "3"
+        );
+        // The same inside a procedure and through `store`, which finds `ln` in systemdict.
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 store } def\n/setter { exch store } def\n3 /ln /setter load exec"
+            ),
+            "3"
+        );
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 store } def\n/w {\n 3 /ln /setter load exec } def\n/setter { exch store } def\n\nw"
+            ),
+            "6"
+        );
+        // A body written elsewhere, run by `exec` of something else.
+        assert_eq!(
+            shadow_line(
+                "/ln { 1 } def\n/g { /ln 1 def } def\n\n/setter { exch def } def\n\n3 /ln /setter load exec"
+            ),
+            "6"
+        );
+        // A literal body written right before the operator still names its own line.
+        assert_eq!(shadow_line("/x 1 def\n{\n /ln 1 def\n} exec"), "3");
+        assert_eq!(
+            shadow_line("/unused { /ln 1 def } def\ntrue {\n /ln 2 def\n} { 1 pop } ifelse"),
+            "3"
+        );
+    }
+
+    #[test]
+    fn a_def_that_cannot_be_placed_in_a_procedure_names_the_line_that_ran_it() {
+        // An `exec` or `ifelse` in a body whose operand is not a literal body.
+        assert_eq!(
+            shadow_line(
+                "/unused { /ln 1 def } def\n/w {\n 3 /ln /setter load exec } def\n/setter { exch def } def\nw"
+            ),
+            "5"
+        );
+        // A procedure literal that is merely pushed runs nothing.
+        assert_eq!(
+            shadow_line(
+                "/w {\n 3 /ln /setter load { /ln 1 def } pop exec } def\n/setter { exch def } def\nw"
+            ),
+            "4"
+        );
+    }
+
+    #[test]
+    fn a_top_level_def_after_a_call_still_names_its_own_line() {
+        // An earlier body that spells the same name must not be picked.
+        assert_eq!(shadow_line("/f { /ln { 1 } def } def\nf\n\n/ln 5 def"), "4");
     }
 
     #[test]
@@ -1369,14 +1705,35 @@ mod tests {
             found[0].contains("when the program reached line 2, replacing"),
             "{found:?}"
         );
-        let found = shadow_messages(&traced("systemdict begin\n/sub 1 def\nend"));
+        // systemdict is read-only (#1337): the def is refused, and noted.
+        let found = shadow_messages(&traced(
+            "{ systemdict begin\n/sub 1 def } stopped\ncleardictstack",
+        ));
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(
             found[0].starts_with(
-                "/sub was redefined as an integer in systemdict when the program reached line 2,"
+                "/sub was stored as an integer into systemdict when the program reached line 2,"
             ),
             "{found:?}"
         );
+    }
+
+    #[test]
+    fn a_refused_store_is_forgotten_when_the_next_program_begins() {
+        for traced_run in [false, true] {
+            let mut it = Interp::with_page(50, 50).expect("page");
+            if traced_run {
+                it.trace_operator_shadows();
+            }
+            it.run_str("{ /add 1 store } stopped pop clear").unwrap();
+            assert_eq!(shadow_messages(&it).len(), 1, "traced: {traced_run}");
+            it.run_str("1 2 add pop").unwrap();
+            assert!(shadow_messages(&it).is_empty(), "traced: {traced_run}");
+            assert!(it.refused_system_stores().is_empty());
+            if traced_run {
+                assert!(it.shadow_trace().expect("tracing").sites.is_empty());
+            }
+        }
     }
 
     #[test]
@@ -1386,23 +1743,25 @@ mod tests {
     }
 
     #[test]
-    fn store_and_put_into_systemdict_replace_the_operator() {
+    fn store_and_put_into_systemdict_are_refused_and_reported() {
         // `store` finds the name in systemdict when no other dictionary defines it.
-        let found = shadow_messages(&traced("\n/sub 5 store"));
+        let found = shadow_messages(&traced("\n{ /sub 5 store } stopped pop"));
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(
-            found[0].starts_with("/sub was redefined as an integer in systemdict when the program reached line 2, replacing the operator sub for the whole program"),
+            found[0].starts_with("/sub was stored as an integer into systemdict when the program reached line 2, which would replace the operator sub for the whole program; systemdict is read-only"),
             "{found:?}"
         );
-        // Without a trace the end state still shows it (no line), `put` included.
-        let found = shadow_messages(&run("/sub 5 store systemdict /dict (x) put"));
+        // Without a trace the refusal still shows (no line), `put` included.
+        let found = shadow_messages(&run(
+            "{ /sub 5 store } stopped pop { systemdict /dict (x) put } stopped pop",
+        ));
         assert_eq!(found.len(), 2, "{found:?}");
         assert!(
-            found[0].starts_with("/dict was redefined as a string in systemdict"),
+            found[0].starts_with("/dict was stored as a string into systemdict"),
             "{found:?}"
         );
         assert!(
-            found[1].starts_with("/sub was redefined as an integer in systemdict"),
+            found[1].starts_with("/sub was stored as an integer into systemdict"),
             "{found:?}"
         );
         // A store into a name userdict already defines is a userdef shadow.
@@ -1418,13 +1777,13 @@ mod tests {
     fn another_operator_stored_into_systemdict_is_flagged() {
         // Codex round 1 on #1323: `sub` now adds; an operator stored over
         // itself is still no shadow.
-        let found = shadow_messages(&run("/sub /add load store"));
+        let found = shadow_messages(&run("{ /sub /add load store } stopped pop"));
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(
-            found[0].starts_with("/sub was redefined as an operator in systemdict"),
+            found[0].starts_with("/sub was stored as an operator into systemdict"),
             "{found:?}"
         );
-        assert!(shadow_messages(&run("/sub /sub load store")).is_empty());
+        assert!(shadow_messages(&run("{ /sub /sub load store } stopped pop")).is_empty());
     }
 
     #[test]
