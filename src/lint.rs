@@ -375,6 +375,131 @@ impl LintAllows {
 /// stays readable.
 const SHADOWED_SHOWN: usize = 10;
 
+/// Where the operand stack grew, as the interpreter saw it token by token
+/// (issue #1081), so `[stack-leak]` can say where the oldest leftover item
+/// came from. The stack is sampled at each source token's boundary, where it
+/// holds the result of every earlier token (a loop or a call has finished),
+/// and growth is credited to the previous token's line.
+///
+/// Kept as runs, not one entry per item: `start` is the depth at which a run
+/// of items begins, and a run is dropped when the depth falls back to it, so
+/// `clear`, `aload` of 10 000 items or a loop that pushes a million values
+/// cost a handful of entries.
+#[derive(Default, Clone)]
+pub(crate) struct StackTrace {
+    /// The depth at the last sample.
+    depth: usize,
+    runs: Vec<StackRun>,
+    /// What the bottom item was when the first run began. A token that
+    /// consumes the whole stack and leaves another (`0 1 9 { ... } for`
+    /// takes its three operands and may leave thirty values) is seen only
+    /// as growth, since the depth is sampled between tokens; a changed
+    /// bottom item says the old runs are gone. A guess: a bottom item that
+    /// is replaced by an equal one keeps the old line, which is still the
+    /// statement that started it.
+    bottom: Option<Witness>,
+}
+
+/// Enough of an object to notice it was replaced: its kind and, for a
+/// scalar, its value. Composites compare by kind alone.
+#[derive(Clone, Copy, PartialEq)]
+enum Witness {
+    Int(i64),
+    Real(u64),
+    Bool(bool),
+    Name(u32),
+    Kind(&'static str),
+}
+
+impl Witness {
+    fn of(o: &Object) -> Witness {
+        match &o.value {
+            Value::Integer(i) => Witness::Int(*i),
+            Value::Real(r) => Witness::Real(r.to_bits()),
+            Value::Boolean(b) => Witness::Bool(*b),
+            Value::Name(n) => Witness::Name(n.id()),
+            _ => Witness::Kind(o.type_name()),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct StackRun {
+    start: usize,
+    at: Origin,
+}
+
+/// A source line and, for a `run` file, the file.
+#[derive(Clone, PartialEq)]
+struct Origin {
+    line: Option<usize>,
+    file: Option<std::rc::Rc<str>>,
+}
+
+impl StackTrace {
+    /// The stack is now `ostack`; the token that ran since the last sample
+    /// was on `line` of `file`.
+    pub(crate) fn note(
+        &mut self,
+        ostack: &[Object],
+        line: Option<usize>,
+        file: Option<&std::rc::Rc<str>>,
+    ) {
+        let depth = ostack.len();
+        if self.depth > 0 && depth > 0 && self.bottom.is_some_and(|w| w != Witness::of(&ostack[0]))
+        {
+            // The old bottom item was consumed along the way.
+            self.runs.clear();
+            self.depth = 0;
+        }
+        if depth > self.depth {
+            let at = Origin {
+                line,
+                file: file.cloned(),
+            };
+            // A run that continues on the same line stays one entry.
+            if self.runs.last().is_none_or(|r| r.at != at) {
+                if self.depth == 0 {
+                    self.bottom = Some(Witness::of(&ostack[0]));
+                }
+                self.runs.push(StackRun {
+                    start: self.depth,
+                    at,
+                });
+            }
+        } else {
+            while self.runs.last().is_some_and(|r| r.start >= depth) {
+                self.runs.pop();
+            }
+        }
+        self.depth = depth;
+    }
+
+    #[cfg(test)]
+    fn run_count(&self) -> usize {
+        self.runs.len()
+    }
+
+    /// Where the oldest item on the finished `ostack` came from, as
+    /// `line N` (` (file)` for a `run` file). The last token ran after the
+    /// last sample, so it is noted first. `None` when no line is known.
+    fn oldest(
+        &self,
+        ostack: &[Object],
+        last: (Option<usize>, Option<&std::rc::Rc<str>>),
+    ) -> Option<String> {
+        let mut done = self.clone();
+        done.note(ostack, last.0, last.1);
+        let at = &done.runs.first()?.at;
+        let file = at
+            .file
+            .as_deref()
+            .map(|f| format!(" ({})", crate::interp::report_name(f)))
+            .unwrap_or_default();
+        Some(format!("line {}{file}", at.line?))
+    }
+}
+
 /// Where a shadowing binding was made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum ShadowScope {
@@ -620,10 +745,24 @@ fn check_stack_leaks(interp: &Interp, render_checks: bool, findings: &mut Vec<Li
             } else {
                 " (topmost first)".to_string()
             };
+            // The oldest item is the first one leaked: everything above it
+            // may be a consequence (a missing `def` shifts every later
+            // operand). The line is known only when the run traced it.
+            let from = interp
+                .stack_trace()
+                .and_then(|t| t.oldest(ostack, interp.last_scan_location()));
+            let oldest = match (&from, ostack.len() > SHOWN) {
+                (Some(at), _) => format!(
+                    "; the oldest, {}, was left when the program reached {at}",
+                    preview(&ostack[0])
+                ),
+                (None, true) => format!("; the oldest is {}", preview(&ostack[0])),
+                (None, false) => String::new(),
+            };
             findings.push(LintFinding {
                 check: "stack-leak",
                 message: format!(
-                    "{} item(s) left on the operand stack at the end of the program: {}{more}",
+                    "{} item(s) left on the operand stack at the end of the program: {}{more}{oldest}",
                     ostack.len(),
                     top.join(" ")
                 ),
@@ -1061,6 +1200,118 @@ mod tests {
         it.trace_operator_shadows();
         let _ = it.run_str(src);
         it
+    }
+
+    fn leak_message(src: &str) -> String {
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        let _ = it.run_str(src);
+        check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .map(|f| f.message)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_leak_names_the_line_that_left_the_oldest_item() {
+        let m = leak_message("1 2 add pop\n7 8\n3 4 add pop");
+        assert!(
+            m.contains("2 item(s) left on the operand stack at the end of the program: 8 7 (topmost first); the oldest, 7, was left when the program reached line 2"),
+            "{m}"
+        );
+        // The message before the line was known is a prefix of the new one.
+        let untraced = check(&run("1 2 add pop\n7 8"), true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert_eq!(
+            untraced,
+            "2 item(s) left on the operand stack at the end of the program: 8 7 (topmost first)"
+        );
+    }
+
+    #[test]
+    fn a_leak_on_the_last_line_is_credited_to_the_last_token() {
+        // No token follows it, so no later sample sees the growth.
+        let m = leak_message("1 2 add pop\n\n9");
+        assert!(
+            m.contains("the oldest, 9, was left when the program reached line 3"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn the_first_leak_wins_over_later_ones_and_balanced_work_between_is_ignored() {
+        let m = leak_message("5\n1 2 add pop\n6\n[ 1 2 ] pop\n7");
+        assert!(m.contains("3 item(s)"), "{m}");
+        assert!(
+            m.contains("the oldest, 5, was left when the program reached line 1"),
+            "{m}"
+        );
+        // A cleared stack forgets the old origin; the next leak is a new one.
+        let m = leak_message("5\nclear\n\n6");
+        assert!(
+            m.contains("the oldest, 6, was left when the program reached line 4"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leak_in_a_loop_points_at_the_loop_not_its_body() {
+        let src = "0 1 9 {\n  /gq exch\n  pop\n  /gq 1\n} for\nshowpage";
+        let m = leak_message(src);
+        assert!(m.contains("30 item(s)"), "{m}");
+        assert!(
+            m.contains("was left when the program reached line 5"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leaky_call_is_credited_to_the_call_not_the_definition() {
+        let src = "/leak {\n  1 2\n  3\n} def\n1 2 add pop\nleak\nshowpage";
+        let m = leak_message(src);
+        assert!(m.contains("3 item(s)"), "{m}");
+        assert!(
+            m.contains("was left when the program reached line 6"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_missing_curveto_is_found() {
+        // The issue's shape: five numbers where a `curveto` belonged.
+        let src = "newpath -20 -10 moveto -20 118 lineto\n  20 124 60 118 110 100 curveto\n  250 24 270 10 300 -10 closepath\n0 setgray";
+        let m = leak_message(src);
+        assert!(
+            m.contains("the oldest, 250, was left when the program reached line 3"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_long_stack_shows_its_bottom_item_even_without_the_trace() {
+        let it = run("(first) 1 2 3 4 5 6");
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("(top 5 of 7 shown, topmost first); the oldest is (first)"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_big_aload_keeps_the_trace_small() {
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        let _ = it.run_str("10000 array aload pop\n0 1 5000 { pop 1 2 3 } for\nclear 1");
+        let t = it.stack_trace().expect("trace");
+        assert!(t.run_count() < 10, "{}", t.run_count());
     }
 
     #[test]
