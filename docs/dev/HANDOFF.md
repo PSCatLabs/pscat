@@ -1987,9 +1987,10 @@ renders eight examples in both and compares block-downsampled output).
 - **`pscat lib remove NAME [--force]` (#1345).** Deletes `lib/NAME/` under the install
   directory (`src/subcmd/lib_pkg.rs`, `remove`). Without `--force` only a directory whose
   `.pscat-lib` marker is a regular file; a symlink or plain file named NAME is never
-  removed, and NAME is one plain component so nothing outside `lib/` is reachable. The marker
-  is deleted last, so an interrupted run is re-runnable without `--force`. Prints the file
-  count and the absolute path. See `notes/1345-lib-remove.md`.
+  removed, and NAME is one plain component so nothing outside `lib/` is reachable. One
+  `fs::remove_dir_all(lib/NAME)` (never a hand-written walk: a `read_dir` of the path would
+  follow a link swapped in after the check); a killed run may leave a partial directory,
+  which `--force` finishes. Prints the file count and the absolute path. See `notes/1345-lib-remove.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

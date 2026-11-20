@@ -651,31 +651,6 @@ fn count_all(dir: &Path, skip: &Path) -> std::io::Result<usize> {
     Ok(n)
 }
 
-/// Delete everything under `dir` but the marker, then the marker, then `dir`.
-/// Removing the marker last keeps an interrupted removal re-runnable without
-/// `--force`: until the last step the directory is still one `install` made.
-/// (`remove_dir_all` does not follow a symbolic link, at the top or below,
-/// and has been safe against a swap during the walk since Rust 1.58.1.)
-fn remove_tree(dir: &Path, marker: &Path) -> std::io::Result<()> {
-    for e in fs::read_dir(dir)? {
-        let e = e?;
-        let path = e.path();
-        let is_dir = e.file_type()?.is_dir();
-        if path == marker && !is_dir {
-            continue;
-        }
-        if is_dir {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-    if fs::symlink_metadata(marker).is_ok() {
-        fs::remove_file(marker)?;
-    }
-    fs::remove_dir(dir)
-}
-
 /// `pscat lib remove NAME [--force]`: delete `lib/NAME/` from the install
 /// directory. Only a directory `install` made (one holding a `.pscat-lib`
 /// marker that is a regular file) goes without `--force`; a symbolic link or a
@@ -721,7 +696,12 @@ fn remove(lib: &Path, name: &str, force: bool) -> Result<(), Failure> {
     }
     let files = count_all(&dest, &marker)
         .map_err(|e| fail(format!("cannot read {}: {e}", dest.display())))?;
-    remove_tree(&dest, &marker)
+    // `remove_dir_all` does not follow a symbolic link, at the top or below, and
+    // (Rust 1.58.1 and later) is safe against a swap during its walk, so a
+    // `lib/NAME` swapped for a link after the check above is unlinked, not entered.
+    // Killed half way it can leave a partial directory; `remove` then says it was
+    // not made by install, and `--force` finishes the job.
+    fs::remove_dir_all(&dest)
         .map_err(|e| fail(format!("cannot remove {}: {e}", dest.display())))?;
     println!(
         "removed lib/{name}: {files} file{} from {}",

@@ -20,17 +20,19 @@ entry, hidden ones and links included, but not the marker; for an installed pack
 the number `lib list` shows. The absolute path is the receipt: `--force` deletes whatever
 the install directory holds under that name, and `$PSCAT_HOME` can point anywhere.
 
-**Interruption.** The contents go first, the `.pscat-lib` marker last, then the empty
-directory, so a removal that is killed half way leaves a directory that is still marked and
-can be removed again without `--force`. The directory does not vanish in one step (a
-program that loads `lib/NAME/x.ps` while it runs may find some files missing); it is not
-renamed aside first, to keep this clear of the scratch-directory handling of #1344.
+**Interruption.** The whole directory goes in one `fs::remove_dir_all(lib/NAME)`, so a
+program that loads `lib/NAME/x.ps` while it runs may find some files missing, and a removal
+that is killed half way can leave a partial directory (possibly without its marker). Run
+`pscat lib remove NAME --force` to finish it. It is not renamed aside first, to keep this
+clear of the scratch-directory handling of #1344.
 
-**Why `remove_dir_all` is safe against a swap.** It does not follow a symbolic link, at the
-top or below, and since the CVE-2022-21658 fix (Rust 1.58.1) it walks with directory handles,
-so a directory swapped for a link during the walk is unlinked, not entered. The top-level
-check (`symlink_metadata`) and the removal are two calls, but a link swapped in between is
-unlinked rather than followed.
+**Why `remove_dir_all` is safe against a swap.** It is called on `lib/NAME` itself. It does
+not follow a symbolic link, at the top or below, and since the CVE-2022-21658 fix (Rust
+1.58.1) it walks with directory handles, so a directory swapped for a link during the walk
+is unlinked, not entered. The `symlink_metadata` check and the removal are two calls, but a
+link swapped in between is unlinked rather than followed. (The walk is deliberately not
+written by hand: a `read_dir` of the path would follow such a link.) `count_all`, which
+only reads, may follow a swap; that affects the number printed, nothing else.
 
 **Known residual.** `install` copies each source file's permissions, so a read-only file
 inside a package may make removal fail on Windows (a read-only attribute blocks delete

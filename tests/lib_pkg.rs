@@ -498,7 +498,7 @@ fn remove_deletes_an_installed_package_and_says_how_many_files_went() {
         "{said}"
     );
     assert!(
-        said.contains(home.join("lib/alpha").to_str().unwrap()),
+        said.contains(home.join("lib").join("alpha").to_str().unwrap()),
         "{said}"
     );
     assert!(!home.join("lib/alpha").exists());

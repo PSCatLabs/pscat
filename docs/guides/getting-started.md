@@ -573,7 +573,8 @@ went and from where. It removes only a directory `install` made (one holding
 the `.pscat-lib` marker); a directory you made by hand under `lib/` is refused,
 and `--force` deletes it anyway (`pscat lib list` marks those "not made by pscat
 lib install"). A file or a symbolic link named NAME is never removed. If it is
-interrupted, run it again.
+interrupted and leaves part of a directory, `pscat lib remove NAME --force`
+finishes the job.
 
 **A library that loads its own files.** `currentfilename`
 (`- currentfilename string`) returns the name the running file was opened
