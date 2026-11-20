@@ -155,6 +155,30 @@ fn a_noaccess_executable_string_raises_invalidaccess() {
         ("(7) cvx readonly exec", "7\n"),
         // Only the reference that was restricted.
         ("(7) cvx noaccess pop (8) cvx exec", "8\n"),
+        // The reference keeps it through the stack and container operators.
+        (
+            "(7) cvx noaccess 1 array astore 0 get exec",
+            "/invalidaccess\n1\n",
+        ),
+        (
+            "/d 1 dict def d /k (7) cvx noaccess put d /k get exec",
+            "/invalidaccess\n1\n",
+        ),
+        (
+            "save (7) cvx noaccess exch restore exec",
+            "/invalidaccess\n1\n",
+        ),
+        ("(77) cvx noaccess cvlit cvx exec", "/invalidaccess\n1\n"),
+        // `copy` reads and writes: gs refuses either end, before it checks
+        // the length, and leaves both operands.
+        ("(7) (x) cvx noaccess copy exec", "/invalidaccess\n2\n"),
+        ("(x) cvx noaccess (7) copy exec", "/invalidaccess\n2\n"),
+        ("(abc) cvx noaccess (7) copy", "/invalidaccess\n2\n"),
+        ("(7) (abcdef) cvx noaccess copy", "/invalidaccess\n2\n"),
+        // Restricting it further is refused; `noaccess` again is not.
+        ("(7) cvx noaccess readonly 1", "/invalidaccess\n1\n"),
+        ("(7) cvx noaccess executeonly 1", "/invalidaccess\n1\n"),
+        ("(7) cvx noaccess noaccess 1 exch pop", "1\n"),
     ]
     .into_iter()
     .map(|(p, w)| (stopped(p), w))

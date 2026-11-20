@@ -338,6 +338,11 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             let Value::String(src) = &src_obj.value else {
                 return Err(PsError::Typecheck);
             };
+            // A `noaccess` string is neither read nor written, as in gs, and
+            // the check comes before the length one (#1321).
+            if top.noaccess || src_obj.noaccess {
+                return Err(PsError::InvalidAccess);
+            }
             let bytes = src.to_vec();
             dst.write_at(0, &bytes)?;
             it.push(Object {
