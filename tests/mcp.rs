@@ -397,6 +397,15 @@ fn tool_schemas_use_only_the_portable_union_shape() {
         .map(|b| b["type"].as_str().unwrap())
         .collect();
     assert_eq!(kinds, ["number", "object"]);
+    // #1339: the object form takes a mat, entries a sweep and captions, the
+    // call a column count and the value switch.
+    assert!(item["anyOf"][1]["properties"]["mat"]["type"] == "string");
+    let entry = &sheet["inputSchema"]["properties"]["entries"]["items"]["properties"];
+    assert!(entry["sweep"]["properties"]["seed"]["items"]["type"] == "integer");
+    assert!(entry["sweep"]["properties"]["values"]["items"]["type"] == "number");
+    assert!(entry["captions"]["items"]["type"] == "string");
+    let top = &sheet["inputSchema"]["properties"];
+    assert!(top["cols"]["type"] == "integer" && top["values"]["type"] == "boolean");
 
     // The description must not claim `&` aligns every multi-row input
     // (#699: gather rows are centred).
@@ -2941,6 +2950,330 @@ fn review_sheet_labels_cannot_inject_postscript() {
         );
         assert_eq!(sheet_png(&result), cli, "{label:?}");
     }
+    s.ping_ok();
+}
+
+// --- review_sheet: mats, sweeps, captions and cols (#1339) ---------------------
+
+/// A seeded program: red or blue by the first `rand`, with a soft edge so
+/// the cell is not just two flat colours.
+const SEEDED: &str = "1 srand rand 2 mod 0 eq { 1 0 0 } { 0 0 1 } ifelse setrgbcolor \
+    rand 30 mod 15 add 30 20 0 360 arc fill";
+
+/// A parameter program: a bar `W` points wide, 1 when no sweep sets it.
+const BAR: &str = "/W where { pop } { /W 1 def } ifelse 0.9 0.3 0.1 setrgbcolor 5 5 W 40 rectfill";
+
+/// A matted cell, a zoomed one and a small one are the CLI's sheet to the
+/// byte: the child draws on a transparent page, the shared composition sets
+/// it on the mat. `mark` has antialiased edges (partly transparent pixels),
+/// the case a PNG hand-off could change by a level.
+#[test]
+fn review_sheet_mats_are_byte_identical_to_pscat_sheet() {
+    let a = mark("0.8 0.2 0.1");
+    let (cli, ok) = cli_sheet(
+        "mcp-sheet-mat-cli",
+        &[("a.ps", &a)],
+        &[&[
+            "--page",
+            "120x120",
+            "--label",
+            "a",
+            "--dpi",
+            "96,9@#222,9x4@white,40@abc",
+        ]],
+    );
+    assert!(ok);
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({
+            "entries": [{
+                "source": a, "label": "a", "width": 120, "height": 120,
+                "dpi": [96, { "dpi": 9, "mat": "#222" }, { "dpi": 9, "zoom": 4, "mat": "white" },
+                        { "dpi": 40, "mat": "abc" }]
+            }]
+        }),
+    );
+    assert_eq!(
+        sheet_png(&result),
+        cli,
+        "the matted sheet differs from the CLI's"
+    );
+    s.ping_ok();
+}
+
+/// A seed sweep, a parameter sweep with its values spelled as the CLI
+/// spells them (`10`, `0.5`, `2.0` is `2`), readable captions, no values and
+/// `cols` are each the CLI's sheet to the byte, and the sweep cells differ.
+#[test]
+fn review_sheet_sweeps_captions_and_cols_are_byte_identical_to_pscat_sheet() {
+    let page = ["--page", "60x50"];
+    let mut s = Server::start();
+    initialized(&mut s);
+    let noise = "0 1 9 { /i exch def 0 1 9 { /j exch def i 0.37 mul j 0.37 mul 3 0.5 2 fbm2 \
+         0.5 add setgray i 5 mul j 5 mul 5 5 rectfill } for } for";
+    // (tag, source, CLI flags, tool arguments)
+    let cases: Vec<(&str, String, Vec<&str>, Value)> = vec![
+        (
+            "seeds",
+            SEEDED.to_string(),
+            vec!["--dpi", "72,20", "--sweep-seed", "1,2,3"],
+            json!({ "sweep": { "seed": [1, 2, 3] }, "dpi": [72, 20] }),
+        ),
+        (
+            "noise-seeds",
+            noise.to_string(),
+            vec!["--sweep-seed", "1,2,1"],
+            json!({ "sweep": { "seed": [1, 2, 1] } }),
+        ),
+        (
+            "param",
+            BAR.to_string(),
+            // 2.0 is `2`, 0.50 is `0.5` and -3 stays: the caption and the
+            // defined value are the CLI's own text.
+            vec!["--sweep", "W=10,0.50,2.0,-3"],
+            json!({ "sweep": { "param": "W", "values": [10, 0.5, 2.0, -3] } }),
+        ),
+        (
+            "captions",
+            BAR.to_string(),
+            vec!["--sweep", "W=10,20,30", "--captions", "(a) one,,(c) three"],
+            json!({ "sweep": { "param": "W", "values": [10, 20, 30] },
+                    "captions": ["(a) one", "", "(c) three"] }),
+        ),
+        (
+            "no-values",
+            BAR.to_string(),
+            vec!["--no-values", "--sweep", "W=10,20"],
+            json!({ "sweep": { "param": "W", "values": [10, 20] }, "values": false }),
+        ),
+        (
+            "cols",
+            BAR.to_string(),
+            vec!["--cols", "2", "--dpi", "72,36", "--sweep", "W=10,20,30"],
+            json!({ "sweep": { "param": "W", "values": [10, 20, 30] }, "dpi": [72, 36], "cols": 2 }),
+        ),
+        (
+            "mat-sweep",
+            BAR.to_string(),
+            vec!["--dpi", "72@#222", "--sweep", "W=10,20"],
+            json!({ "sweep": { "param": "W", "values": [10, 20] },
+                    "dpi": [{ "dpi": 72, "mat": "#222" }] }),
+        ),
+    ];
+    for (tag, source, flags, extra) in cases {
+        let dir = common::scratch_dir(&format!("mcp-sheet-sweep-{tag}"));
+        std::fs::write(dir.join("p.ps"), &source).unwrap();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+        cmd.current_dir(&dir).arg("sheet").args(["-o", "cli.png"]);
+        cmd.args(page).args(&flags).args(["--label", "row", "p.ps"]);
+        let out = cmd.output_deadline().expect("pscat sheet");
+        assert!(
+            out.status.success(),
+            "{tag}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let cli = std::fs::read(dir.join("cli.png")).unwrap();
+
+        let mut entry = json!({ "source": source, "label": "row", "width": 60, "height": 50 });
+        let mut args = json!({});
+        for (k, v) in extra.as_object().unwrap() {
+            // The sweep and its captions belong to the entry, the rest to the call.
+            let target = if k == "sweep" || k == "captions" || k == "dpi" {
+                &mut entry
+            } else {
+                &mut args
+            };
+            target[k.as_str()] = v.clone();
+        }
+        args["entries"] = json!([entry]);
+        let result = s.tool("review_sheet", args);
+        assert_eq!(
+            sheet_png(&result),
+            cli,
+            "{tag}: the tool's sheet differs from pscat sheet's"
+        );
+    }
+    s.ping_ok();
+}
+
+/// A sweep cell is the same render as a one-frame sweep of the CLI: the
+/// seeds change the picture, and the same seed twice is the same cell.
+#[test]
+fn review_sheet_seed_cells_differ_by_seed_and_repeat_by_seed() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": SEEDED, "width": 60, "height": 60,
+                "sweep": { "seed": [1, 2, 3, 1] } }],
+            "labels": false, "sizes": false, "values": false }),
+    );
+    let sheet = tiny_skia::Pixmap::decode_png(&sheet_png(&result)).unwrap();
+    // Four 60 px cells, 1 px border, 14 px gap, 12 px margin, no text.
+    let cell = |k: u32| -> Vec<u8> {
+        let x0 = 12 + 1 + k * (62 + 14);
+        (13..73)
+            .flat_map(|y| (x0..x0 + 60).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let i = ((y * sheet.width() + x) * 4) as usize;
+                sheet.data()[i..i + 4].to_vec()
+            })
+            .collect()
+    };
+    assert_eq!(cell(0), cell(3), "the same seed, the same cell");
+    assert!(
+        cell(0) != cell(1) || cell(1) != cell(2),
+        "different seeds must give different cells"
+    );
+    s.ping_ok();
+}
+
+/// A sweep cell runs in the same sandbox as any other: a read outside the
+/// roots fails the same way, and the failure names the sweep value.
+#[test]
+fn review_sheet_sweep_cells_are_sandboxed_and_failures_name_the_value() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let read = "(/etc/hosts) (r) file closefile";
+    let plain = s.tool("review_sheet", json!({ "entries": [{ "source": read }] }));
+    let swept = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": read, "sweep": { "seed": [7] } }] }),
+    );
+    let err = |r: &Value| texts(r).join("\n");
+    // The error a read outside the roots gives (invalidfileaccess where the
+    // file exists, undefinedfilename where it does not, as on Windows): the
+    // sweep cell's is the plain cell's.
+    let name = |r: &Value| {
+        let t = err(r);
+        let tail = t.split("Error: ").nth(1).unwrap_or_default();
+        tail.split(';').next().unwrap_or_default().to_string()
+    };
+    assert!(
+        ["invalidfileaccess", "undefinedfilename"].contains(&name(&plain).as_str()),
+        "{plain}"
+    );
+    assert_eq!(name(&swept), name(&plain), "{swept}");
+    assert!(err(&swept).contains("seed=7"), "{swept}");
+    let swept = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "nosuchoperator",
+                "sweep": { "param": "Density", "values": [20] } }] }),
+    );
+    assert!(err(&swept).contains("Density=20"), "{swept}");
+    // No `pscat: sweep:` progress line from the child reaches the content.
+    assert!(!err(&swept).contains("sweep: 1/1"), "{swept}");
+    s.ping_ok();
+}
+
+/// The new inputs are checked before anything runs.
+#[test]
+fn review_sheet_sweep_and_mat_arguments_are_structured_errors() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let src = |extra: Value| {
+        let mut e = json!({ "source": "0 setgray", "width": 20, "height": 20 });
+        for (k, v) in extra.as_object().unwrap() {
+            e[k.as_str()] = v.clone();
+        }
+        json!({ "entries": [e] })
+    };
+    for (args, says) in [
+        (src(json!({ "sweep": 7 })), "sweep must be an object"),
+        (src(json!({ "sweep": {} })), "either seed"),
+        (
+            src(json!({ "sweep": { "seed": [1], "param": "A", "values": [1] } })),
+            "either seed",
+        ),
+        (src(json!({ "sweep": { "param": "A" } })), "either seed"),
+        (
+            src(json!({ "sweep": { "seed": [] } })),
+            "seed must be a list",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1.5] } })),
+            "a seed must be a whole number",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1], "extra": 1 } })),
+            "unknown key",
+        ),
+        (
+            src(json!({ "sweep": { "param": "--evil", "values": [1] } })),
+            "param must be an identifier",
+        ),
+        (
+            src(json!({ "sweep": { "param": "a def (x", "values": [1] } })),
+            "param must be an identifier",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": ["1"] } })),
+            "a value must be a number",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": [1e300] } })),
+            "at most 40 characters",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": vec![1; 33] } })),
+            "list of 1 to 32 numbers",
+        ),
+        (
+            src(json!({ "captions": ["a"] })),
+            "needs a sweep for the same entry",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1, 2] }, "captions": ["a"] })),
+            "1 entries but the sweep has 2 values",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1] }, "captions": [7] })),
+            "each caption must be a string",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1] }, "captions": ["x".repeat(201)] })),
+            "at most 200 characters",
+        ),
+        (
+            src(json!({ "dpi": [{ "dpi": 9, "mat": "red" }] })),
+            "invalid mat colour",
+        ),
+        (
+            src(json!({ "dpi": [{ "dpi": 9, "mat": 3 }] })),
+            "mat must be a colour string",
+        ),
+        (
+            json!({ "entries": [{ "source": "" }], "cols": 0 }),
+            "cols must be a whole number from 1 to 32",
+        ),
+        (
+            json!({ "entries": [{ "source": "" }], "values": "no" }),
+            "values must be true or false",
+        ),
+    ] {
+        let result = s.tool("review_sheet", args.clone());
+        assert_eq!(error_kind(&result), "invalid_argument", "{args}: {result}");
+        assert!(texts(&result)[0].contains(says), "{args}: {result}");
+    }
+    // A sweep multiplies the cells: 2 dpi items x 17 values is over 32.
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "", "dpi": [72, 36],
+                "sweep": { "param": "A", "values": (0..17).collect::<Vec<_>>() } }] }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["cells"], 34);
+    // A mat counts toward the 8000 px side: 7990 px is fine bare, not matted.
+    let wide = |dpi: Value| json!({ "entries": [{ "source": "", "width": 7990, "height": 10, "dpi": [dpi] }] });
+    let result = s.tool("review_sheet", wide(json!({ "dpi": 72, "mat": "#222" })));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert!(texts(&result)[0].contains("mat"), "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        40_000_000
+    );
     s.ping_ok();
 }
 

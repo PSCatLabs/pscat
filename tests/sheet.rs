@@ -674,6 +674,31 @@ fn bad_input_is_refused_with_a_message() {
     assert!(!Path::new(out).exists(), "nothing is written on a refusal");
 }
 
+/// Issue #1339: the mat colour parser is shared with the `review_sheet`
+/// tool (`pscat::contact_sheet::parse_mat`). The CLI's wording for a bad
+/// colour is unchanged by the move, and the shared parser takes what
+/// `DPI@MAT` takes.
+#[test]
+fn the_shared_mat_parser_keeps_the_cli_wording_and_grammar() {
+    let d = dir();
+    let a = write(&d, "a.ps", RED);
+    let out = d.join("never-mat.png");
+    for bad in ["red", "#12", "#gggggg", "#1234567", ""] {
+        let spec = format!("72@{bad}");
+        let (ok, _, stderr) = sheet(&["-o", out.to_str().unwrap(), "--dpi", &spec, &a]);
+        assert!(!ok, "{spec}");
+        let want = format!("invalid mat colour: {bad:?} (expected #rgb, #rrggbb, white or black)");
+        assert!(stderr.contains(&want), "{spec}: {stderr}");
+        assert_eq!(pscat::contact_sheet::parse_mat(bad), Err(want));
+    }
+    let parse = pscat::contact_sheet::parse_mat;
+    assert_eq!(parse("#222"), Ok([0x22, 0x22, 0x22]));
+    assert_eq!(parse("222222"), Ok([0x22, 0x22, 0x22]));
+    assert_eq!(parse("white"), Ok([255, 255, 255]));
+    assert_eq!(parse("black"), Ok([0, 0, 0]));
+    assert!(!out.exists());
+}
+
 #[test]
 fn help_prints_usage_and_succeeds() {
     let (ok, stdout, _) = sheet(&["--help"]);

@@ -412,6 +412,29 @@ pub fn composite_on_mat(frame: &Pixmap, rgb: [u8; 3], pad: u32) -> Option<Pixmap
     Some(out)
 }
 
+/// A mat colour: `#rgb` or `#rrggbb` (the `#` optional, so a shell that
+/// treats it as a pattern character is not a problem), `white` or `black`.
+/// Shared by `pscat sheet`'s `DPI@MAT` and the `review_sheet` tool's `mat` (#1339).
+pub fn parse_mat(s: &str) -> Result<[u8; 3], String> {
+    match s {
+        "white" => return Ok([255, 255, 255]),
+        "black" => return Ok([0, 0, 0]),
+        _ => {}
+    }
+    let hex = s.strip_prefix('#').unwrap_or(s);
+    let bad = || format!("invalid mat colour: {s:?} (expected #rgb, #rrggbb, white or black)");
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let digit = |i: usize| u8::from_str_radix(&hex[i..i + 1], 16).map_err(|_| bad());
+    let pair = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| bad());
+    match hex.len() {
+        3 => Ok([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
+        6 => Ok([pair(0)?, pair(2)?, pair(4)?]),
+        _ => Err(bad()),
+    }
+}
+
 /// Copy `src` onto `sheet` with its top-left at `(x, y)`, clipped to the
 /// sheet. A straight byte copy, as [`blit_cell`] is: pages and the text
 /// strips from [`render_text`] are opaque.
