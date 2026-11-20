@@ -33,8 +33,12 @@ pub fn install(dict: &mut Dict) {
 /// takes the out-of-line general path in `Interp::define_key` so it adds no
 /// work to the hot one (#323).
 fn def(it: &mut Interp) -> Result<(), PsError> {
+    // `systemdict begin ... def` writes to a read-only dictionary (#1337):
+    // the slow path pops through the ledger and raises invalidaccess.
+    let to_system = it.def_targets_systemdict();
     // `/name value def` cannot fail: its operands skip the ledger (#1047).
-    if let [.., key, _] = it.ostack.as_slice()
+    if !to_system
+        && let [.., key, _] = it.ostack.as_slice()
         && matches!(key.value, Value::Name(_))
         && let (Some(value), Some(key)) = (it.pop_settled(), it.pop_settled())
         && let Value::Name(n) = &key.value
@@ -44,6 +48,9 @@ fn def(it: &mut Interp) -> Result<(), PsError> {
     }
     let value = it.pop()?;
     let key = it.pop()?;
+    if to_system {
+        return Err(it.refuse_system_write(Some((&key, &value))));
+    }
     if let Value::Name(n) = &key.value {
         it.define_name(n, value);
         return Ok(());
@@ -129,6 +136,9 @@ fn store(it: &mut Interp) -> Result<(), PsError> {
         None => it.current_dict(),
     };
     it.note_store_shadow(&key, &value, &d);
+    if it.is_systemdict(&d) {
+        return Err(it.refuse_system_write(Some((&key, &value))));
+    }
     it.journal_dict(&d);
     d.borrow_mut().put_obj(&key, value)?;
     Ok(())
@@ -137,6 +147,9 @@ fn store(it: &mut Interp) -> Result<(), PsError> {
 fn undef(it: &mut Interp) -> Result<(), PsError> {
     let key = it.pop()?;
     let d = pop_dict_operand(it)?;
+    if it.is_systemdict(&d) {
+        return Err(it.refuse_system_write(None));
+    }
     it.journal_dict(&d);
     d.borrow_mut().undef(&key)
 }

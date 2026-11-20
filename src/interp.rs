@@ -464,6 +464,12 @@ pub struct Interp {
     /// `[stack-leak]` can name the line that left the oldest item. `None`
     /// otherwise, which costs `sync_scan_line` one branch.
     stack_trace: Option<Box<crate::lint::StackTrace>>,
+    /// Operator names a program tried to overwrite in the read-only
+    /// systemdict (issue #1337), with the type of value it tried to store:
+    /// the `[shadowed-operator]` lint reports them, since the store itself
+    /// no longer leaves a mark on systemdict. Filled only on the refusal
+    /// path, and bounded by the number of operators.
+    refused_system_stores: std::collections::HashMap<u32, (crate::name::PsName, &'static str)>,
     /// The `run` frames open when the last uncaught error left the machine
     /// (issue #1043), innermost first: `(file, line)`, `None` for the
     /// main program. Taken in `step_n` before it unwinds the execution
@@ -804,6 +810,7 @@ impl Interp {
             last_file: None,
             shadow_trace: None,
             stack_trace: None,
+            refused_system_stores: Default::default(),
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
             font_warnings: String::new(),
@@ -3271,6 +3278,58 @@ impl Interp {
         self.shadow_trace.as_deref()
     }
 
+    /// The operators a program tried to replace in systemdict and was
+    /// refused (issue #1337): name and the type of the value, name order.
+    pub(crate) fn refused_system_stores(&self) -> Vec<(String, &'static str)> {
+        let mut found: Vec<_> = self
+            .refused_system_stores
+            .values()
+            .map(|(n, k)| (n.to_string(), *k))
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Is `dict` the permanent systemdict? A program's writes to it are
+    /// refused: Ghostscript's is read-only once initialisation ends
+    /// (`systemdict /x 1 put` is `invalidaccess` there; issue #1337).
+    #[inline]
+    pub(crate) fn is_systemdict(&self, dict: &Rc<RefCell<Dict>>) -> bool {
+        self.dstack.first().is_some_and(|s| Rc::ptr_eq(s, dict))
+    }
+
+    /// Is systemdict the dictionary a `def` would write to right now (a
+    /// program did `systemdict begin`)? One length compare on the usual
+    /// path, where only the permanent dictionaries are open.
+    #[inline]
+    pub(crate) fn def_targets_systemdict(&self) -> bool {
+        self.dstack.len() > PERMANENT_DICTS
+            && self
+                .dstack
+                .last()
+                .zip(self.dstack.first())
+                .is_some_and(|(top, sys)| Rc::ptr_eq(top, sys))
+    }
+
+    /// The error for a refused write into systemdict. `binding` is the
+    /// key and value being written, when there is one: if it would have
+    /// replaced an operator with a plain value, it is kept for the lint.
+    #[inline(never)]
+    pub(crate) fn refuse_system_write(&mut self, binding: Option<(&Object, &Object)>) -> PsError {
+        if let Some((key, value)) = binding
+            && let Value::Name(name) = &key.value
+            && let Some(builtin) = self.dstack.first().and_then(|d| d.borrow().get(name))
+            && let Some(kind) = crate::lint::shadow_kind(&builtin, value)
+        {
+            self.refused_system_stores
+                .insert(name.id(), (name.clone(), kind));
+            if self.shadow_trace.is_some() {
+                self.note_shadow(name, value, crate::lint::ShadowScope::System);
+            }
+        }
+        PsError::InvalidAccess
+    }
+
     /// The traced scope of `dict`: `userdict` or `systemdict` (see
     /// [`crate::lint::ShadowTrace`]), however it got to be on top of the
     /// dictionary stack (`userdict begin` puts it there twice).
@@ -3346,6 +3405,9 @@ impl Interp {
     /// names, null is a typecheck).
     #[inline(never)]
     pub(crate) fn define_key(&mut self, key: &Object, obj: Object) -> Result<(), PsError> {
+        if self.def_targets_systemdict() {
+            return Err(self.refuse_system_write(Some((key, &obj))));
+        }
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_obj(key, obj)?;
