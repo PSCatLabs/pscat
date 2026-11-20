@@ -500,6 +500,54 @@ fn function_based_shfill_keeps_bbox_and_clip() {
     assert_gs_matches(&pdf, &canvas, "sh_function_bbox");
 }
 
+/// Mesh shadings (#1325) are real mesh streams: triangles a Type 4, a
+/// lattice a Type 5, in RGB, and gs's render of each PDF is the raster's.
+#[test]
+fn mesh_shfills_are_real_pdf_mesh_shadings() {
+    for (src, ty, name) in [
+        (
+            "<< /ShadingType 4 /ColorSpace /DeviceRGB
+                /DataSource [0 50 50 1 0 0  0 450 50 0 1 0  0 250 450 0 0 1  1 450 450 1 1 1] >> shfill"
+                .to_string(),
+            4,
+            "sh_mesh4",
+        ),
+        (
+            "<< /ShadingType 5 /ColorSpace /DeviceGray /VerticesPerRow 3
+                /DataSource [50 50 0  250 80 0.5  450 50 1  50 450 1  250 420 0.5  450 450 0] >> shfill"
+                .to_string(),
+            5,
+            "sh_mesh5",
+        ),
+    ] {
+        let (pdf, canvas) = pdf_and_canvas(src.as_bytes());
+        assert_real_shading(&pdf, ty);
+        let text = pdf_text(&pdf);
+        assert!(text.contains("/BitsPerCoordinate 32 /BitsPerComponent 16"), "{text}");
+        assert_gs_matches(&pdf, &canvas, name);
+    }
+}
+
+/// A mesh with a `/Function` carries `t` per vertex and the function's
+/// ramp as a PDF function; under a `/BBox` the PDF clips as the raster cuts.
+#[test]
+fn mesh_shfill_keeps_its_function_and_bbox() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill
+       << /ShadingType 4 /ColorSpace /DeviceRGB /BBox [0 0 300 300]
+          /DataSource [0 50 50 0  0 450 50 1  0 250 450 0.5]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 2 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ShadingType 4 "), "{text}");
+    assert!(
+        text.contains("/Decode [50 450 50 450 0 1] /Function "),
+        "{text}"
+    );
+    assert_q_balanced(&pdf);
+    assert!(page_content(&pdf).contains(" W n "), "the BBox clip");
+    assert_gs_matches(&pdf, &canvas, "sh_mesh_function");
+}
+
 /// Two coincident circles of one radius: gs paints a disk of the first
 /// colour if the start extends, nothing outside (#1040), and so does the
 /// raster; written as is, CoreGraphics would paint nothing. The PDF records
@@ -1133,4 +1181,24 @@ fn function_shading_with_a_zero_width_domain_is_not_exported() {
         "a distinct pair is kept"
     );
     assert!(page_content(&pdf).contains(" cm /Sh0 sh\n"));
+}
+
+/// A mesh whose vertex `t` lies outside the Function's Domain (Codex round
+/// 1 on #1376): the raster interpolates `t`, then clips it, so near the
+/// first vertex (t = -1) it is the ramp's first colour. The PDF carries the
+/// unclamped positions and a function that clips after, so gs's render of
+/// it matches.
+#[test]
+fn a_mesh_function_clips_after_interpolating_in_pdf_too() {
+    let src = b"<< /ShadingType 4 /ColorSpace /DeviceRGB
+          /DataSource [0 10 10 -1  0 490 10 1  0 250 490 1]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/Decode [10 490 10 490 -1 1]"), "{text}");
+    assert!(text.contains("/FunctionType 3 /Domain [-1 1]"), "{text}");
+    // Near the first vertex the raster is red, as gs paints the program.
+    let px = canvas.pixel(40, SIZE - 1 - 30).expect("pixel");
+    assert!(px.red() > 200 && px.blue() < 40, "{px:?}");
+    assert_gs_matches(&pdf, &canvas, "sh_mesh_clip_after");
 }

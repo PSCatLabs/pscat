@@ -749,8 +749,12 @@ renders eight examples in both and compares block-downsampled output).
   parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
   paint path); SVG embeds that layer as an image; PDF writes a real
   `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
-  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
-  (meshes) are not implemented, in any output.
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4 and 5
+  (Gouraud meshes) since #1325 (`src/mesh.rs`, `notes/1325-mesh-shadings.md`):
+  decoded at `shfill`, triangles painted by pixel centre into a layer with
+  4x4-sample coverage (no seams), then the Type 1 paint path; PDF writes a
+  Type 4 or 5 mesh stream in RGB. Types 6 and 7 (patches) are not
+  implemented, in any output.
   tiny-skia's anti-aliased fill panics on a path with corners around 1e9
   device pixels away, so a `/BBox` of that size is cut to a guard rectangle
   (the page grown by its own size) before the raster paints it (#1324,
@@ -780,7 +784,8 @@ renders eight examples in both and compares block-downsampled output).
   parsed shading, `/Background` and its device matrix; nothing runs. The
   raster paints the shading per mark into a layer over the mark's pixels
   (`gfx::shading_layer`, built from the same pieces as `shfill`:
-  `gradient_parts`, `two_root_layer`, `function_layer`), which
+  `gradient_parts`, `two_root_layer`, `function_layer`, and
+  `mesh::mesh_layer` for a mesh, #1378), which
   `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
   the gradient itself, or a canvas-sized `<pattern>` with the background,
   `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the

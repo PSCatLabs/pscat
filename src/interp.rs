@@ -907,6 +907,7 @@ impl Interp {
         self.slice_budget = self.slice_left;
         self.run_clock = crate::clock::Clock::start();
         self.decode_budget.reset(self.limit_probe());
+        crate::mesh::reset_pending();
         self.refresh_frame_probes();
         Ok(())
     }
@@ -1204,10 +1205,13 @@ impl Interp {
     /// limits as they stand now. Called wherever the limits are read; only
     /// under limits, so the clock reads it makes cost nothing otherwise.
     fn sync_decode_budget(&mut self) {
+        // Mesh shading work (#1325) is counted the same way, so it is
+        // charged whether the operator that did it succeeded or failed.
+        let mesh = crate::mesh::take_pending_steps();
         if self.limits.is_none() {
             return;
         }
-        let steps = self.decode_budget.take_steps();
+        let steps = self.decode_budget.take_steps().saturating_add(mesh);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
     }
@@ -1251,6 +1255,7 @@ impl Interp {
             self.slice_budget = self.slice_left;
             self.run_clock = crate::clock::Clock::start();
             self.decode_budget.reset(self.limit_probe());
+            crate::mesh::reset_pending();
             self.refresh_frame_probes();
         }
         // What the last program tried to store into systemdict belongs to

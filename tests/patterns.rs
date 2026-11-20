@@ -2168,3 +2168,74 @@ fn an_imagemask_layer_counts_the_steps_its_data_source_spent() {
         "looping source: {out}"
     );
 }
+
+/// Mesh shadings as shading patterns (#1378): a Type 4 fan fills text and
+/// a stroke, and a Type 5 lattice with a `/Background` and a `/BBox` fills
+/// a rectangle. The raster is the layer `shfill` paints, the SVG embeds it
+/// and the PDF writes the mesh stream as the pattern's shading; all three
+/// and gs agree.
+const SHADED_MESH: &str = "
+<< /PatternType 2 /Shading << /ShadingType 4 /ColorSpace /DeviceRGB
+   /DataSource [0 200 200 1 1 1  0 20 20 0.9 0.1 0.1  0 380 20 0.1 0.2 0.9
+                2 380 380 0.1 0.8 0.2  2 20 380 0.9 0.8 0.1  2 20 20 0.9 0.1 0.1] >> >>
+   matrix makepattern setpattern
+/Helvetica-Bold findfont 100 scalefont setfont 20 230 moveto (Mesh) show
+12 setlinewidth 30 150 moveto 370 150 lineto stroke
+<< /PatternType 2 /Shading << /ShadingType 5 /ColorSpace /DeviceRGB /VerticesPerRow 3
+   /DataSource [40 20 1 0 0  200 30 0 1 0  360 20 0 0 1  40 120 0 0 1  200 110 1 1 0  360 120 1 0 0]
+   /Background [0.2 0.7 0.3] /BBox [60 10 340 100] >> >> matrix makepattern setpattern
+20 0 360 130 rectfill
+";
+
+#[test]
+fn mesh_shading_patterns_agree_across_outputs_and_with_gs() {
+    let out = check_shading("shaded mesh", SHADED_MESH, true, false);
+    let pdf = pdf_text(&out.pdf);
+    assert!(pdf.contains("/ShadingType 4 "), "{pdf}");
+    assert!(pdf.contains("/ShadingType 5 "), "{pdf}");
+    assert!(pdf.contains("/Background [0.2 0.7 0.3]"), "{pdf}");
+    let px = |x: u32, y: u32| {
+        let p = out.png.pixel(x, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    // The lattice's background inside its BBox, above its mesh; nothing
+    // outside the BBox.
+    assert_eq!(px(70, SIZE - 1 - 125), (255, 255, 255));
+    assert_ne!(px(200, SIZE - 1 - 60), (255, 255, 255));
+    assert_eq!(px(30, SIZE - 1 - 60), (255, 255, 255));
+}
+
+/// A mesh pattern's layer answers to the step and memory limits under
+/// every mark, as a gradient's does.
+#[test]
+fn a_mesh_pattern_layer_answers_to_the_limits() {
+    let mesh = "<< /PatternType 2 /Shading << /ShadingType 4 /ColorSpace /DeviceRGB \
+         /DataSource [0 -100 -100 1 0 0  0 1100 -100 0 1 0  0 500 1100 0 0 1] >> >> \
+         matrix makepattern setpattern\n";
+    for (op, mark) in [
+        (
+            "imagemask",
+            "1000 1000 scale 1 1 true [1 0 0 1 0 0] <80> imagemask",
+        ),
+        (
+            "stroke",
+            "600 setlinewidth 0 500 moveto 1000 500 lineto stroke",
+        ),
+        ("rectfill", "0 0 1000 1000 rectfill"),
+    ] {
+        let src = format!("{mesh}{mark}\n");
+        for (limit, what) in [
+            (["--max-steps", "1000"], "steps"),
+            (["--max-memory", "2"], "memory"),
+        ] {
+            let (ok, err) = limited(&src, limit);
+            assert!(
+                !ok && err.contains(&format!("limitexceeded ({what})"))
+                    && err.contains(&format!("OffendingCommand: {op}")),
+                "{op} under {limit:?}: {err}"
+            );
+        }
+        let (ok, err) = limited(&src, ["--max-steps", "0"]);
+        assert!(ok, "{op} with no limit: {err}");
+    }
+}
