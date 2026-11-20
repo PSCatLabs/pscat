@@ -56,6 +56,9 @@ retired (user seconds, three runs each, are within noise; instructions are the r
 
 A plain render adds one `Option` check per scanned `{` (a procedure literal), nothing per token, per executed element, in
 `proc_step` or in `def`. (The flat file is 2% fewer instructions at head: code layout, not a change in that path.)
+Also under `--lint`: 200k one-line `/pN { 1 2 add pop } def` procedures cost 2 751M against 2 551M (+1000 instructions per scanned
+body), and the lib-heavy `gallery/alpine_lake.ps` 467 102M against 466 833M (+0.06%). Linting lib/, gallery/ and examples/ (173 files)
+gives the same single finding before and after: `gallery/hundred_lines.ps`, `/ln`, line 261 -> 254.
 `--lint` pays a `Vec<u32>` per scanned procedure body (4 bytes per element, 4M elements at most) and one hash insert.
 
 ## Not done

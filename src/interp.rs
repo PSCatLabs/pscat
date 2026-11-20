@@ -3468,7 +3468,7 @@ impl Interp {
                     if let Some(lit) = idx.checked_sub(back).and_then(|i| body.get(i))
                         && let (Value::Array(branch), true) = (&lit.value, lit.executable)
                     {
-                        self.body_leaves(&branch, name_id, depth + 1, out);
+                        self.body_leaves(branch, name_id, depth + 1, out);
                     }
                 }
             }
