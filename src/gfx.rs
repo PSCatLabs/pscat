@@ -2064,11 +2064,28 @@ impl Gfx {
         // From `ink`, so the raster and the recorders never disagree.
         match self.ink()? {
             crate::pattern::Ink::Pattern(tile, rgb, place) => {
-                let canvas = (self.pixmap.width(), self.pixmap.height());
-                Some(tile.raster(rgb, place.as_ref(), canvas))
+                Some(tile.raster(rgb, place.as_ref(), self.lattice_canvas(&tile)))
             }
             crate::pattern::Ink::Rgb(_) => None,
         }
+    }
+
+    /// The canvas size a fractional TilingType 2 tile's cells are laid out
+    /// over (#1332), unless the layout (a canvas-sized pixmap and a row of
+    /// cells, about twice the canvas) would not fit `--max-memory`: the
+    /// tile then paints from its period instead, as it does for a canvas
+    /// too large to lay out.
+    fn lattice_canvas(&self, tile: &crate::pattern::PatternTile) -> Option<(u32, u32)> {
+        tile.geom.lattice.as_ref()?;
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if let Some((base, max)) = self.mem_budget {
+            let grown = crate::memtrack::live_bytes().saturating_sub(base);
+            let need = (w as usize).saturating_mul(h as usize).saturating_mul(8);
+            if grown.saturating_add(need) > max {
+                return None;
+            }
+        }
+        Some((w, h))
     }
 
     /// Paint the current pattern through a stencil (`imagemask`, #1299):

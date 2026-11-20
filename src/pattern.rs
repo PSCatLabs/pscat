@@ -575,15 +575,17 @@ impl PatternTile {
     /// The raster shader's source: the period (recoloured to `rgb` for an
     /// uncoloured pattern), its transform, and the sampling. A fractional
     /// TilingType 2 tile paints from its cells laid out over the
-    /// `canvas` instead (#1332). `place`, for a pattern of another
-    /// context, gives the transform and sampling instead.
+    /// `canvas` instead (#1332); `None` there paints from the period (the
+    /// layout would not fit `--max-memory`). `place`, for a pattern of
+    /// another context, gives the transform and sampling instead.
     pub(crate) fn raster(
         &self,
         rgb: (f32, f32, f32),
         place: Option<&Placement>,
-        canvas: (u32, u32),
+        canvas: Option<(u32, u32)>,
     ) -> (Rc<Pixmap>, Transform, FilterQuality) {
         if place.is_none()
+            && let Some(canvas) = canvas
             && let Some(pm) = self.lattice_over(rgb, canvas)
         {
             return (pm, Transform::identity(), FilterQuality::Nearest);
@@ -905,9 +907,14 @@ mod tests {
         let xs = lattice_positions(0, 7.3, 4, 80);
         assert_eq!(&xs[..11], &[0, 7, 14, 21, 29, 36, 43, 51, 58, 65, 73]);
         // A negative step floors toward minus infinity: 0 -8 -15 -22 -30
-        // (listed left to right).
+        // (the first five from the origin back).
         assert_eq!(
-            lattice_positions(100, -7.3, 4, 101)[..5],
+            lattice_positions(100, -7.3, 4, 101)
+                .iter()
+                .rev()
+                .take(5)
+                .copied()
+                .collect::<Vec<_>>(),
             [100, 92, 85, 78, 70]
         );
         // A cell that starts left of the canvas and still reaches it.

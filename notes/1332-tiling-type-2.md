@@ -43,10 +43,14 @@ keeps the cell undistorted and spreads the spacing instead.
   canvas-sized, identity-transformed `Repeat` shader source. It is cached
   by canvas size (and colour, for an uncoloured pattern). Positions are
   computed from the pattern's origin for every `i`, never by adding steps,
-  so a band or a bigger page puts the same cell in the same pixel.
+  so the lattice does not depend on where the canvas starts (not tested
+  with a banded render).
 - Fallbacks to the period (cells at their true size, step rounded to
   whole pixels, so the PNG drifts from SVG/PDF across the page): a
-  canvas over `MAX_LATTICE_PIXELS` (2^24), and a pattern used in another
+  canvas over `MAX_LATTICE_PIXELS` (2^24), a layout that would not fit
+  `--max-memory` (`Gfx::lattice_canvas`, a read-only check: two canvases'
+  worth of RGBA beyond what is live; the lattice is built lazily per
+  tile, cached, and freed with it), steps under 1 px, and a pattern used in another
   context than it was made in (#1300's `foreign_placement`).
   A pattern turned off the device axes keeps the adjusted whole-pixel
   matrix in all three outputs, as before (gs's behaviour there was not
@@ -62,9 +66,14 @@ keeps the cell undistorted and spreads the spacing instead.
 - A sweep of 44 random and chosen cases (steps 2.2-15 in both axes, cells
   from 1 to 1.4 steps, matrices identity, translated, x mirrored, y flipped,
   turned 90 degrees, 180 degrees, scaled 2): 0 pixels differ from gs.
-- resvg and hayro round a `<pattern>` tile to whole pixels (7.3 -> 7), so
-  their rasters of a Type 2 SVG or PDF drift and are not held against ours
-  here. Chrome and gs place it exactly.
+- The SVG and PDF are checked by their markup (`width="7.3" height="9.7"`
+  on the `<pattern>`, `/TilingType 2` and the true-scale `/Matrix` in the
+  PDF) and, for the PDF, by gs. resvg's raster of the SVG and hayro's of
+  the PDF drift from ours by 5.3 and 5.4 block-mean on the test picture,
+  as if they rounded a pattern tile to whole pixels (7.3 -> 7; inferred
+  from that one number, not measured further), so they are not held against
+  ours. The SVG's placement in a browser is unverified: Chrome could not be
+  driven in this session (the browser tool timed out).
 
 ## Observations for #1342 (half-pixel lattice phase), not fixed here
 
