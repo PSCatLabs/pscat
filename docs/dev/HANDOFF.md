@@ -1984,6 +1984,8 @@ renders eight examples in both and compares block-downsampled output).
   the MCP server may read), and swaps a re-install in from a staging directory so no stale
   file survives. `tests/lib_pkg.rs` (shadow test included) and the `mcp.rs` test pin it.
   See `notes/1056-currentfilename-and-lib-install.md`.
+  `currentfilename` keeps the name as given, backslashes included on Windows; the documented
+  `dirname` helper splits on `/` and `\` (#1346, `notes/1346-currentfilename-windows-separators.md`).
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
