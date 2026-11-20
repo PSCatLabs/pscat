@@ -567,10 +567,12 @@ impl BodyLines {
         lines: Vec<u32>,
         file: Option<std::rc::Rc<str>>,
     ) {
-        if lines.len() != body.len() || self.held + lines.len() > BODY_LINES_CAP {
+        if lines.len() != body.len() || self.held + lines.len() + 1 > BODY_LINES_CAP {
             return;
         }
-        self.held += lines.len();
+        // Each body costs a map slot and a `Weak` too: count it, so a million
+        // empty bodies are bounded as well.
+        self.held += lines.len() + 1;
         let tail_names = body.with_slice(|els| match els.split_last() {
             Some((last, before)) if is_binding_op(last) => before
                 .iter()
@@ -592,19 +594,18 @@ impl BodyLines {
         );
     }
 
-    /// The body ending in a `def` of `name_id` that sits on the greatest line not
-    /// after `line` in `file`: the literal procedure just before the operator the
-    /// scanner is running (`{ ... } if`), which no frame holds any more (#1338).
-    /// It may be dead by now, which is why the names are kept. `None` when no
-    /// body does, or two different ones sit on that line.
+    /// The one body ending in a `def` of `name_id` that sits on or before `line`
+    /// in `file`: the literal procedure just before the operator the scanner is
+    /// running (`{ ... } if`), which no frame holds any more (#1338). It may be
+    /// dead by now, which is why the names are kept. `None` when no body does,
+    /// or when more than one could be the one that ran.
     pub(crate) fn nearest_before(
         &self,
         line: usize,
         file: Option<&std::rc::Rc<str>>,
         name_id: u32,
     ) -> Option<(u32, Option<std::rc::Rc<str>>)> {
-        let mut best: Option<(u32, usize)> = None;
-        let mut tie = false;
+        let mut found: Option<(u32, usize)> = None;
         for (key, entry) in &self.bodies {
             let Some(&at) = entry.lines.last() else {
                 continue;
@@ -615,17 +616,20 @@ impl BodyLines {
             {
                 continue;
             }
-            match best {
-                Some((b, _)) if b > at => {}
-                Some((b, k)) if b == at => tie |= k != *key,
-                _ => {
-                    best = Some((at, *key));
-                    tie = false;
-                }
+            // A second body that could be it means a guess, and the first
+            // line seen for a name is the one kept: say nothing.
+            if found.is_some() {
+                return None;
             }
+            found = Some((at, *key));
         }
-        best.filter(|_| !tie)
-            .map(|(at, key)| (at, self.bodies[&key].file.clone()))
+        found.map(|(at, key)| (at, self.bodies[&key].file.clone()))
+    }
+
+    /// Forget every body: a new program's lines start again from 1.
+    pub(crate) fn clear(&mut self) {
+        self.bodies.clear();
+        self.held = 0;
     }
 
     /// The line (and `run` file) element `i` of `body` was written on.
@@ -1538,10 +1542,7 @@ mod tests {
             "2"
         );
         assert_eq!(shadow_line("{\n /abs 1 def\n} stopped pop"), "2");
-        assert_eq!(
-            shadow_line("/c true def\n\nc {\n  /abs 1 def\n} if\n"),
-            "4"
-        );
+        assert_eq!(shadow_line("/c true def\n\nc {\n  /abs 1 def\n} if\n"), "4");
     }
 
     #[test]
@@ -1563,10 +1564,7 @@ mod tests {
         // helper: no body spells `/name` next to a `def`, so the line the scanner
         // had reached is kept, as before (#1109).
         assert_eq!(shadow_line("/ln 5\n\n{ def }\n\nexec"), "5");
-        assert_eq!(
-            shadow_line("/set {\n exch def\n} def\n\n3 /ln set"),
-            "5"
-        );
+        assert_eq!(shadow_line("/set {\n exch def\n} def\n\n3 /ln set"), "5");
         // Two branches that both spell the name: not guessed.
         assert_eq!(
             shadow_line("/f { true {\n /ln 1 def\n} {\n /ln 2 def\n} ifelse } def\n\n\nf"),
@@ -1580,12 +1578,19 @@ mod tests {
     }
 
     #[test]
+    fn a_guess_between_two_bodies_is_not_made() {
+        // The `def` on line 1 runs through `f`; the scanner is at `ifelse`, and the
+        // branch on line 3 never ran. Two bodies could be it: the line that ran it.
+        assert_eq!(
+            shadow_line("/f { /ln 1 def } def\nfalse {\n  /ln 2 def\n} {\n  f\n} ifelse"),
+            "6"
+        );
+    }
+
+    #[test]
     fn a_top_level_def_after_a_call_still_names_its_own_line() {
         // An earlier body that spells the same name must not be picked.
-        assert_eq!(
-            shadow_line("/f { /ln { 1 } def } def\nf\n\n/ln 5 def"),
-            "4"
-        );
+        assert_eq!(shadow_line("/f { /ln { 1 } def } def\nf\n\n/ln 5 def"), "4");
     }
 
     #[test]

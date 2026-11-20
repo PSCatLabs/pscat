@@ -1236,6 +1236,10 @@ impl Interp {
         self.last_name = None;
         self.last_line = None;
         self.last_file = None;
+        // The new program's lines start again from 1 (#1338).
+        if let Some(t) = &self.shadow_trace {
+            t.bodies.borrow_mut().clear();
+        }
         self.error_chain.clear();
         if !self.limits.is_none() {
             self.steps_used = 0;
@@ -4400,7 +4404,11 @@ fn scan_procedure(
     let mut items = Vec::new();
     // One line per element, only for a source whose lines are known.
     let mut at: Option<Vec<u32>> = lines.and(lexer.line()).map(|_| Vec::new());
-    let line = |lexer: &Lexer| lexer.line().map_or(0, |l| u32::try_from(l).unwrap_or(u32::MAX));
+    let line = |lexer: &Lexer| {
+        lexer
+            .line()
+            .map_or(0, |l| u32::try_from(l).unwrap_or(u32::MAX))
+    };
     loop {
         match lexer.next_token()? {
             None => {
