@@ -1410,7 +1410,11 @@ pub(crate) fn parse_background(d: &Dict) -> Result<Option<(f32, f32, f32)>, PsEr
     Ok(Some((r as f32, g as f32, b as f32)))
 }
 
-pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
+/// `probe` bounds what parsing reads and copies: a mesh's data (#1325).
+pub(crate) fn parse_shading_dict(
+    d: &Dict,
+    probe: &crate::limits::LimitProbe,
+) -> Result<ParsedShading, PsError> {
     let shading_type = match get_required(d, "ShadingType")?.value {
         Value::Integer(n) => n,
         _ => return Err(PsError::Typecheck),
@@ -1420,7 +1424,7 @@ pub(crate) fn parse_shading_dict(d: &Dict) -> Result<ParsedShading, PsError> {
         return parse_function_shading(d, cs).map(ParsedShading::Function);
     }
     if (4..=5).contains(&shading_type) {
-        return crate::mesh::parse(d, shading_type as u8, cs).map(ParsedShading::Mesh);
+        return crate::mesh::parse(d, shading_type as u8, cs, probe).map(ParsedShading::Mesh);
     }
     let coords = get_farray(d, "Coords")?;
     let func_obj = get_required(d, "Function")?;

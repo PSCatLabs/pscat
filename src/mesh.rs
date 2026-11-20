@@ -36,6 +36,11 @@ const SUB: usize = 4;
 const PIXEL_WORK: u64 = 32;
 const TRIANGLE_WORK: u64 = 64;
 
+/// Work units decoding a vertex or patch costs, the bounds scan over it
+/// included, and how many are decoded between looks at the limits.
+const DECODE_WORK: u64 = 64;
+const DECODE_POLL: u64 = 4096;
+
 /// A vertex: its point in shading (user) space and its colour values,
 /// `n` components or, with a `/Function`, one `t`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,6 +88,9 @@ pub(crate) struct MeshShading {
     per_row: usize,
     source: Source,
     pub(crate) bbox: Option<(f64, f64, f64, f64)>,
+    /// Bytes read from a file `/DataSource` while parsing, which the
+    /// operator that parsed it charges, one step a KiB.
+    pub(crate) read: u64,
 }
 
 /// A mesh's `/Function` as RGB stops over `domain`, positions 0 to 1.
@@ -121,6 +129,18 @@ impl MeshShading {
 
 impl Ramp {
     /// The ramp's position for `t`, 0 to 1 over the Domain.
+    /// `t`'s position over the Domain, not clamped: what the PDF stream
+    /// carries, so a reader interpolates before its function clips, as the
+    /// raster does (Codex round 1 on #1376).
+    pub(crate) fn unclamped(&self, t: f32) -> f64 {
+        let (d0, d1) = self.domain;
+        if d1 > d0 {
+            (f64::from(t) - d0) / (d1 - d0)
+        } else {
+            0.0
+        }
+    }
+
     pub(crate) fn pos(&self, t: f32) -> f32 {
         let (d0, d1) = self.domain;
         if d1 > d0 {
@@ -165,21 +185,37 @@ fn bits_key(d: &Dict, key: &str, allowed: &[u32]) -> Result<u32, PsError> {
     }
 }
 
+/// Bytes read from a file `/DataSource` per poll of the limits.
+const READ_CHUNK: usize = 1 << 16;
+
 /// A file's bytes to its end (EOF, or a filter's EOD), at most
-/// `MAX_FILE_BYTES`. A filter chain is then drained layer by layer to each
-/// one's own EOD, as an image's is (`image.rs`), so the program resumes
-/// right after the encoded data (an ASCII85 layer's `~>` is not left
-/// unread under a Flate one).
-fn read_file(f: &crate::file::FileHandle) -> Result<Vec<u8>, PsError> {
+/// `MAX_FILE_BYTES`, and the bytes read from it (the data, and any left in
+/// a filter chain), which `shfill` charges as steps, one a KiB, as a
+/// filter charges what it decodes. A filter chain is then drained layer by
+/// layer to each one's own EOD, as an image's is (`image.rs`), so the
+/// program resumes right after the encoded data (an ASCII85 layer's `~>` is
+/// not left unread under a Flate one).
+///
+/// Under the limits (Codex round 1 on #1376) each chunk's growth of the
+/// buffer is held against the memory limit before it is read, and the
+/// limits are looked at, with the bytes so far charged, between chunks.
+fn read_file(
+    f: &crate::file::FileHandle,
+    probe: &crate::limits::LimitProbe,
+) -> Result<(Vec<u8>, u64), PsError> {
     let mut out = Vec::new();
+    let mut read = 0u64;
     {
         let mut top = f.borrow_mut();
         if !top.is_open() {
-            return Ok(out);
+            return Ok((out, 0));
         }
         loop {
-            let want = 1 << 16;
-            if top.read_into(&mut out, want)? < want {
+            probe.check_alloc(out.len().saturating_add(READ_CHUNK))?;
+            let got = top.read_into(&mut out, READ_CHUNK)?;
+            read += got as u64;
+            probe.check(read / 1024)?;
+            if got < READ_CHUNK {
                 break;
             }
             if out.len() > MAX_FILE_BYTES {
@@ -189,13 +225,18 @@ fn read_file(f: &crate::file::FileHandle) -> Result<Vec<u8>, PsError> {
     }
     let mut layer = f.clone();
     while layer.borrow().is_filter() {
-        while layer.borrow_mut().read_byte()?.is_some() {}
+        while layer.borrow_mut().read_byte()?.is_some() {
+            read += 1;
+            if read % READ_CHUNK as u64 == 0 {
+                probe.check(read / 1024)?;
+            }
+        }
         let Some(next) = layer.borrow().filter_source() else {
             break;
         };
         layer = next;
     }
-    Ok(out)
+    Ok((out, read))
 }
 
 /// `ShadingType` 4 and 5 (#1325), as gs 10.07.1 checks them:
@@ -211,7 +252,15 @@ fn read_file(f: &crate::file::FileHandle) -> Result<Vec<u8>, PsError> {
 ///   (rangecheck; `2.0` is taken).
 /// - `/Function` is optional, takes one input and gives the colour space's
 ///   components (rangecheck otherwise).
-pub(crate) fn parse(d: &Dict, ty: u8, cs: CsKind) -> Result<MeshShading, PsError> {
+///
+/// The data is copied (an array's numbers, a string's or a file's bytes)
+/// under the memory limit, checked before each copy is taken.
+pub(crate) fn parse(
+    d: &Dict,
+    ty: u8,
+    cs: CsKind,
+    probe: &crate::limits::LimitProbe,
+) -> Result<MeshShading, PsError> {
     let ramp = match d.get("Function") {
         None => None,
         Some(func_obj) => {
@@ -240,6 +289,7 @@ pub(crate) fn parse(d: &Dict, ty: u8, cs: CsKind) -> Result<MeshShading, PsError
     let src = d.get("DataSource").ok_or(PsError::Rangecheck)?;
     let bytes = match &src.value {
         Value::Array(a) => {
+            probe.check_alloc(a.len().saturating_mul(std::mem::size_of::<f64>()))?;
             let nums = (0..a.len())
                 .map(|i| match a.get(i).map(|o| o.value) {
                     Some(Value::Integer(n)) => Ok(n as f64),
@@ -255,12 +305,23 @@ pub(crate) fn parse(d: &Dict, ty: u8, cs: CsKind) -> Result<MeshShading, PsError
                 per_row,
                 source: Source::Numbers(nums),
                 bbox: crate::shading::parse_bbox(d)?,
+                read: 0,
             });
         }
-        Value::String(s) => Rc::from(&*s.borrow_bytes()),
-        Value::File(f) => Rc::from(read_file(f)?),
+        Value::String(s) => {
+            let b = s.borrow_bytes();
+            probe.check_alloc(b.len())?;
+            (Rc::from(&*b), 0)
+        }
+        Value::File(f) => {
+            let (v, read) = read_file(f, probe)?;
+            // `Rc::from` copies the buffer.
+            probe.check_alloc(v.len())?;
+            (Rc::from(v), read)
+        }
         _ => return Err(PsError::Typecheck),
     };
+    let (bytes, read) = bytes;
     let flag_bits = if ty == 5 {
         0
     } else {
@@ -291,6 +352,7 @@ pub(crate) fn parse(d: &Dict, ty: u8, cs: CsKind) -> Result<MeshShading, PsError
             decode,
         }),
         bbox: crate::shading::parse_bbox(d)?,
+        read,
     })
 }
 
@@ -389,7 +451,34 @@ impl MeshShading {
     /// triangle or row cut short; a Type 4 flag over 2; a Type 5 lattice
     /// with no vertices. Memory is held against the
     /// limit before it is taken.
-    pub(crate) fn decode(&self, probe: &crate::limits::LimitProbe) -> Result<Mesh, PsError> {
+    ///
+    /// Returns the mesh and the work decoding it took, which the caller
+    /// charges on every path, painting or not (Codex round 1 on #1376: an
+    /// off-page mesh cost nothing). The work covers the later bounds scan,
+    /// which is as long as the decoding, and the limits are looked at as it
+    /// goes.
+    pub(crate) fn decode(&self, probe: &crate::limits::LimitProbe) -> Result<(Mesh, u64), PsError> {
+        let units = std::cell::Cell::new(0u64);
+        let mesh = self.decode_counted(probe, &units)?;
+        Ok((mesh, units.get().saturating_mul(DECODE_WORK)))
+    }
+
+    fn decode_counted(
+        &self,
+        probe: &crate::limits::LimitProbe,
+        units: &std::cell::Cell<u64>,
+    ) -> Result<Mesh, PsError> {
+        // One unit a vertex (or patch) read, the limits looked at every
+        // `DECODE_POLL` of them.
+        let tick = || {
+            let n = units.get() + 1;
+            units.set(n);
+            if n % DECODE_POLL == 0 {
+                probe.check(n.saturating_mul(DECODE_WORK) / 1024)
+            } else {
+                Ok(())
+            }
+        };
         let nvals = self.nvals();
         let mut r = Reader {
             src: &self.source,
@@ -412,6 +501,7 @@ impl MeshShading {
                 probe.check_alloc(most.saturating_mul(std::mem::size_of::<[Vertex; 3]>()))?;
                 let mut tris: Vec<[Vertex; 3]> = Vec::new();
                 while !r.at_end() {
+                    tick()?;
                     let flag = r.flag()?;
                     let v = r.vertex()?;
                     r.align();
@@ -444,6 +534,7 @@ impl MeshShading {
                 probe.check_alloc(most.saturating_mul(std::mem::size_of::<Vertex>()))?;
                 let mut verts = Vec::new();
                 while !r.at_end() {
+                    tick()?;
                     verts.push(r.vertex()?);
                     r.align();
                 }
@@ -494,6 +585,14 @@ impl Mesh {
             }
         }
         Ok(())
+    }
+
+    /// Every colour value the mesh carries, its vertices' (or corners').
+    pub(crate) fn colours(&self) -> Box<dyn Iterator<Item = &[f32; 4]> + '_> {
+        match self {
+            Mesh::Triangles(tris) => Box::new(tris.iter().flatten().map(|v| &v.c)),
+            Mesh::Lattice { verts, .. } => Box::new(verts.iter().map(|v| &v.c)),
+        }
     }
 
     /// Every point that bounds the mesh, in shading space.
@@ -767,7 +866,7 @@ mod tests {
             Some(Value::Integer(n)) => n as u8,
             _ => panic!("a type"),
         };
-        parse(&d, ty, CsKind::Rgb).expect("parses")
+        parse(&d, ty, CsKind::Rgb, &crate::limits::LimitProbe::NONE).expect("parses")
     }
 
     /// Packed Type 4 vertices start on a byte (gs: the unaligned packing
@@ -781,7 +880,10 @@ mod tests {
              /BitsPerCoordinate 4 /BitsPerComponent 4 \
              /Decode [0 150 0 150 0 1 0 1 0 1] /DataSource <047c003843c01f803c> >>",
         );
-        let Mesh::Triangles(t) = m.decode(&crate::limits::LimitProbe::NONE).expect("decodes")
+        let Mesh::Triangles(t) = m
+            .decode(&crate::limits::LimitProbe::NONE)
+            .expect("decodes")
+            .0
         else {
             panic!("triangles");
         };

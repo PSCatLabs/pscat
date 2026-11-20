@@ -571,3 +571,64 @@ Gar:%iqh!:^_\"K(!2PRJ(`<5S!$CD-!W~>
         "filter chain",
     );
 }
+
+/// pscat on `src` (written to a file, so `currentfile` reads it) under
+/// `limit`: whether it succeeded, and its stderr.
+fn limited(name: &str, src: &[u8], limit: [&str; 2]) -> (bool, String) {
+    let dir = common::scratch_dir("pscat_mesh_limits");
+    let file = dir.join(format!("{name}.ps"));
+    std::fs::write(&file, src).expect("write source");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--page", "100x100", limit[0], limit[1], "--png"])
+        .arg(dir.join(format!("{name}.png")))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// A raw `currentfile` DataSource of 8 MB (Codex round 1 on #1376): its
+/// reading is held against the memory limit before each chunk and charged
+/// as steps as it goes, whether or not anything is decoded (no `/Decode`).
+#[test]
+fn a_big_raw_file_data_source_answers_to_the_limits() {
+    let mut src = b"<< /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 8 /BitsPerCoordinate 8
+        /BitsPerComponent 8 /DataSource currentfile >> shfill\n"
+        .to_vec();
+    src.extend(std::iter::repeat_n(b'A', 8 << 20));
+    for (limit, what) in [
+        (["--max-memory", "2"], "memory"),
+        (["--max-steps", "2000"], "steps"),
+    ] {
+        let (ok, err) = limited("raw", &src, limit);
+        assert!(
+            !ok && err.contains(&format!("limitexceeded ({what})")),
+            "{limit:?}: {err}"
+        );
+    }
+    let (ok, err) = limited("raw", &src, ["--max-steps", "0"]);
+    assert!(ok, "with no limit: {err}");
+}
+
+/// A large packed mesh wholly off the page, shaded again and again (Codex
+/// round 1 on #1376): each `shfill` is charged its decoding, so the step
+/// limit stops the loop.
+#[test]
+fn an_off_page_mesh_is_charged_its_decoding() {
+    let src = b"/s 300006 string def
+        /m << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 8 /BitsPerCoordinate 8
+              /BitsPerComponent 8 /Decode [10000 20000 10000 20000 0 1 0 1 0 1]
+              /DataSource s >> def
+        1 1 200 { pop m shfill } for\n";
+    let (ok, err) = limited("offpage", src, ["--max-steps", "100000"]);
+    assert!(
+        !ok && err.contains("limitexceeded (steps)") && err.contains("OffendingCommand: shfill"),
+        "{err}"
+    );
+    let (ok, err) = limited("offpage", src, ["--max-steps", "0"]);
+    assert!(ok, "with no limit: {err}");
+}

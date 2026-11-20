@@ -1182,3 +1182,23 @@ fn function_shading_with_a_zero_width_domain_is_not_exported() {
     );
     assert!(page_content(&pdf).contains(" cm /Sh0 sh\n"));
 }
+
+/// A mesh whose vertex `t` lies outside the Function's Domain (Codex round
+/// 1 on #1376): the raster interpolates `t`, then clips it, so near the
+/// first vertex (t = -1) it is the ramp's first colour. The PDF carries the
+/// unclamped positions and a function that clips after, so gs's render of
+/// it matches.
+#[test]
+fn a_mesh_function_clips_after_interpolating_in_pdf_too() {
+    let src = b"<< /ShadingType 4 /ColorSpace /DeviceRGB
+          /DataSource [0 10 10 -1  0 490 10 1  0 250 490 1]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/Decode [10 490 10 490 -1 1]"), "{text}");
+    assert!(text.contains("/FunctionType 3 /Domain [-1 1]"), "{text}");
+    // Near the first vertex the raster is red, as gs paints the program.
+    let px = canvas.pixel(40, SIZE - 1 - 30).expect("pixel");
+    assert!(px.red() > 200 && px.blue() < 40, "{px:?}");
+    assert_gs_matches(&pdf, &canvas, "sh_mesh_clip_after");
+}

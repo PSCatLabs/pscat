@@ -1311,6 +1311,21 @@ Q",
         if y1 <= y0 {
             y1 = y0 + 1.0;
         }
+        // With a Function, each vertex's position on the ramp, unclamped,
+        // over the range they span (0 to 1 at least): the reader then
+        // interpolates first and the function clips after, as the raster
+        // does. Positions are 0 to 1 over the ramp's Domain.
+        let span = shading.ramp.as_ref().map(|r| {
+            mesh.colours()
+                .map(|c| r.unclamped(c[0]))
+                .filter(|u| u.is_finite())
+                .fold((0.0f64, 1.0f64), |(lo, hi), u| (lo.min(u), hi.max(u)))
+        });
+        if let Some((lo, hi)) = span
+            && !((lo as f32).is_finite() && (hi as f32).is_finite())
+        {
+            return None;
+        }
         let mut w = BitWriter::default();
         let coord = |w: &mut BitWriter, v: f64, lo: f64, hi: f64| {
             let u = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
@@ -1318,9 +1333,12 @@ Q",
         };
         let colour = |w: &mut BitWriter, c: &[f32; 4]| {
             let q = |v: f32| (f64::from(v.clamp(0.0, 1.0)) * 65535.0).round() as u64;
-            match &shading.ramp {
-                Some(r) => w.put(q(r.pos(c[0])), 16),
-                None => {
+            match (&shading.ramp, span) {
+                (Some(r), Some((lo, hi))) => {
+                    let u = ((r.unclamped(c[0]) - lo) / (hi - lo)).clamp(0.0, 1.0);
+                    w.put((u * 65535.0).round() as u64, 16);
+                }
+                _ => {
                     let (r, g, b) = shading.rgb(c);
                     for v in [r, g, b] {
                         w.put(q(v), 16);
@@ -1350,10 +1368,9 @@ Q",
         };
         let data = deflate(&[&w.bytes])?;
         let num = |v: f64| p(v as f32);
-        let values = if shading.ramp.is_some() {
-            "0 1"
-        } else {
-            "0 1 0 1 0 1"
+        let values = match span {
+            Some((lo, hi)) => format!("{} {}", num(lo), num(hi)),
+            None => "0 1 0 1 0 1".to_string(),
         };
         let body = format!(
             "/ShadingType {ty} /ColorSpace /DeviceRGB /BitsPerCoordinate 32 \
@@ -1363,10 +1380,13 @@ Q",
             num(y0),
             num(y1)
         );
-        let fidx = shading.ramp.as_ref().map(|r| {
-            let func = stops_function(&r.stops).into_bytes();
-            intern(&mut self.functions, &mut self.function_ids, func)
-        });
+        let fidx = match (&shading.ramp, span) {
+            (Some(r), Some((lo, hi))) => {
+                let func = clamped_ramp(&r.stops, lo, hi).into_bytes();
+                Some(intern(&mut self.functions, &mut self.function_ids, func))
+            }
+            _ => None,
+        };
         Some((body, fidx, data))
     }
 
@@ -2266,6 +2286,43 @@ fn matrix_text(t: tiny_skia::Transform) -> String {
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
 pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     deflate_budgeted(parts, LimitProbe::NONE).ok()
+}
+
+/// The ramp `stops` (positions 0 to 1) as a function over `[lo, hi]` (`lo`
+/// at most 0, `hi` at least 1), flat in its first colour below 0 and in its
+/// last above 1: a mesh's function, which then clips its input as the
+/// raster does, after interpolation (#1325).
+fn clamped_ramp(stops: &[(f32, f32, f32, f32)], lo: f64, hi: f64) -> String {
+    let ramp = stops_function(stops);
+    let (Some(first), Some(last)) = (stops.first(), stops.last()) else {
+        return ramp;
+    };
+    let flat = |s: &(f32, f32, f32, f32)| {
+        let c = format!("{} {} {}", f(s.1), f(s.2), f(s.3));
+        format!("<< /FunctionType 2 /Domain [0 1] /C0 [{c}] /C1 [{c}] /N 1 >>")
+    };
+    let (mut legs, mut bounds) = (Vec::new(), Vec::new());
+    if lo < 0.0 {
+        legs.push(flat(first));
+        bounds.push("0");
+    }
+    legs.push(ramp);
+    if hi > 1.0 {
+        bounds.push("1");
+        legs.push(flat(last));
+    }
+    if legs.len() == 1 {
+        return legs.remove(0);
+    }
+    let num = |v: f64| p(v as f32);
+    format!(
+        "<< /FunctionType 3 /Domain [{} {}] /Functions [{}] /Bounds [{}] /Encode [{}] >>",
+        num(lo),
+        num(hi),
+        legs.join(" "),
+        bounds.join(" "),
+        vec!["0 1"; legs.len()].join(" ")
+    )
 }
 
 /// Big-endian bits, packed as a mesh shading's data stream (#1325).
