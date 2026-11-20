@@ -993,27 +993,90 @@ mod one_operator {
         assert_eq!(out, "operatortype\n");
     }
 
+    /// The definitions of a stitching-function ramp of `n` legs (2 stops each).
+    fn ramp_setup_of_legs(n: u32) -> String {
+        format!(
+            "/n {n} def \
+            /fns [ 0 1 n 1 sub {{ 2 mod 0 eq \
+              {{ << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> }} \
+              {{ << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> }} ifelse }} for ] def \
+            /bounds [ 1 1 n 1 sub {{ n div }} for ] def \
+            /encode [ 0 1 n 1 sub {{ pop 0 1 }} for ] def"
+        )
+    }
+
+    /// One `shfill` of the ramp across the page.
+    const RAMP_SHFILL: &str = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 612 0] \
+        /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+        /Bounds bounds /Encode encode >> >> shfill";
+
+    /// A fresh letter page at `scale` (300 dpi is 300/72), the ramp of `n`
+    /// legs set up and then painted under limits: the run's result and the
+    /// steps the `shfill` alone used (a `run_str` counts its own).
+    fn shfill_steps(n: u32, scale: f32) -> (Result<(), PsError>, u64) {
+        let mut it = Interp::with_page_scaled(612, 792, scale).expect("page");
+        it.set_limits(untrusted(Duration::from_secs(30)))
+            .expect("limits without memory always apply");
+        if let Err(e) = it.run_str(&ramp_setup_of_legs(n)) {
+            return (Err(e), 0);
+        }
+        // Each `run_str` under limits counts its steps afresh.
+        let r = it.run_str(RAMP_SHFILL);
+        (r, it.steps_used())
+    }
+
     #[test]
     fn a_ramp_of_thousands_of_legs_paints_in_bounded_time() {
         // 4095 legs are 8190 stops, and tiny-skia's gradient walks every
         // stop at every pixel (#1188: 5 s in one `shfill` at 300 dpi). The
         // raster gets the ramp resampled to 1024 stops.
-        let src = "/n 4095 def \
-            /fns [ 0 1 n 1 sub { 2 mod 0 eq \
-              { << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> } \
-              { << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> } ifelse } for ] def \
-            /bounds [ 1 1 n 1 sub { n div } for ] def \
-            /encode [ 0 1 n 1 sub { pop 0 1 } for ] def \
-            << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 612 0] \
-               /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
-               /Bounds bounds /Encode encode >> >> shfill";
+        //
+        // The check is the work the `shfill` charges against the step limit
+        // (#1219: pixels x (16 + stops / 4), a step per 1024 units), not
+        // the clock (#1336). A CPU budget flaked on the Windows runner: with
+        // no per-thread CPU clock there (`common::thread_cpu_time` falls
+        // back to wall time since its first call), its best of three was
+        // 2.000 s, 2.357 s and 2.356 s against a 2 s budget, on a render
+        // that takes 0.25-0.8 s of CPU on the unix runners. The charge is the same on every machine
+        // and profile. Resampled, 4095 legs charge what 511 legs (1022
+        // stops, not resampled) do, a ratio of about 1; unresampled they
+        // charge about 7.6x. The bound sits between, and goes through
+        // `scale_budget` (a Duration helper, used here for a plain number)
+        // so `PSCAT_TEST_BUDGET_SCALE` makes it bite. A page at 1 pixel per
+        // point keeps the two runs cheap: the ratio does not depend on the
+        // page size.
+        const MAX_RATIO: f64 = 1.5;
+        let (r, thousands) = on_a_deadline("shfill legs steps", || shfill_steps(4095, 1.0));
+        assert_eq!(r, Ok(()));
+        let (r, ordinary) = on_a_deadline("shfill 511 legs steps", || shfill_steps(511, 1.0));
+        assert_eq!(r, Ok(()));
+        let ratio = thousands as f64 / ordinary as f64;
+        eprintln!(
+            "shfill legs: 4095 legs {thousands} steps, 511 legs {ordinary} steps, ratio {ratio:.2}"
+        );
+        assert!(
+            ratio < common::scale_budget(Duration::from_secs_f64(MAX_RATIO)).as_secs_f64(),
+            "4095 legs charged {ratio:.2}x the steps of 511 legs ({thousands} vs {ordinary}); \
+             resampled to 1024 stops they should charge about the same"
+        );
+    }
+
+    /// The charge above is computed from the stops the raster is given; this
+    /// is the real cost, on the runners whose clock is CPU time. Windows
+    /// times wall-clock (`common::thread_cpu_time`), where parallel test
+    /// threads and a slow runner made 2 s a coin flip (#1336), so it is not
+    /// asserted there.
+    #[cfg(unix)]
+    #[test]
+    fn a_ramp_of_thousands_of_legs_takes_bounded_cpu() {
         let r = on_a_deadline("shfill legs", move || {
             common::within_cpu_budget("shfill legs", Duration::from_secs(2), 3, || {
                 // Letter at 300 dpi.
                 let mut it = Interp::with_page_scaled(612, 792, 300.0 / 72.0).expect("page");
                 it.set_limits(untrusted(Duration::from_secs(30)))
                     .expect("limits without memory always apply");
-                it.run_str(src)
+                it.run_str(&ramp_setup_of_legs(4095))?;
+                it.run_str(RAMP_SHFILL)
             })
         });
         assert_eq!(r, Ok(()));
