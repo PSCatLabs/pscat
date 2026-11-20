@@ -832,6 +832,133 @@ fn a_pattern_made_inside_a_paintproc_paints_on_the_page() {
     }
 }
 
+// --- one def, one id (#1343) ------------------------------------------------
+
+/// A page pattern whose capture writes a def of its own (its `rectclip`).
+/// `rectclip` only reaches the SVG as a `<clipPath>` when the capture has one
+/// to write, so each program below clips the inner stripes.
+const CLIPPED_STRIPES: &str = "
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 7 7] /XStep 7 /YStep 7
+   /PaintProc { pop gsave 0 0 5 7 rectclip 0.9 0.1 0.1 setrgbcolor 0 0 7 7 rectfill grestore
+                0 0.6 0 setrgbcolor 0 0 7 2 rectfill } >> matrix makepattern /stripes exch def
+";
+
+/// A pattern whose `PaintProc` paints with `stripes` (and clips itself).
+fn outer_using_stripes(name: &str, matrix: &str) -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 70 61] /XStep 90 /YStep 86
+            /PaintProc {{ pop 0.1 0.1 0.7 setrgbcolor 0 0 70 61 rectfill
+              gsave 5 5 50 50 rectclip stripes setpattern 0 0 70 61 rectfill grestore }}
+         >> {matrix} makepattern /{name} exch def\n"
+    )
+}
+
+/// Every `id="..."` of an SVG document is unique, and every `url(#...)` names
+/// one that is defined: a def written twice repeats an id (invalid SVG), and
+/// one dropped leaves a reference resvg draws as nothing.
+fn assert_ids_unique_and_resolved(what: &str, svg: &str) {
+    let mut ids = Vec::new();
+    let mut rest = svg;
+    while let Some(i) = rest.find(" id=\"") {
+        rest = &rest[i + 5..];
+        let end = rest.find('"').expect("closing quote");
+        ids.push(&rest[..end]);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for id in &ids {
+        assert!(
+            seen.insert(*id),
+            "{what}: id {id:?} is written twice:\n{svg}"
+        );
+    }
+    let mut rest = svg;
+    while let Some(i) = rest.find("url(#") {
+        rest = &rest[i + 5..];
+        let end = rest.find(')').expect("closing paren");
+        assert!(
+            seen.contains(&rest[..end]),
+            "{what}: {:?} is not defined",
+            &rest[..end]
+        );
+    }
+}
+
+/// Run `body` after `CLIPPED_STRIPES` and check the SVG's ids and that the
+/// stripes' clip is written once.
+fn check_unique_defs(what: &str, body: &str) -> Outputs {
+    let out = render(&format!("{CLIPPED_STRIPES}{body}"));
+    assert!(out.svg.contains("<clipPath"), "{what}: no clip written");
+    assert_ids_unique_and_resolved(what, &out.svg);
+    out
+}
+
+#[test]
+fn a_page_pattern_used_on_the_page_and_in_a_tile_writes_its_defs_once() {
+    let outer = outer_using_stripes("outer", "[1.5 0 0 1.5 4.3 7.6]");
+    // On the page first, then inside the tile.
+    check_unique_defs(
+        "page then tile",
+        &format!(
+            "stripes setpattern 0 300 400 100 rectfill {outer}
+             outer setpattern 0 0 400 300 rectfill"
+        ),
+    );
+    // Inside the tile first, then on the page.
+    check_unique_defs(
+        "tile then page",
+        &format!(
+            "{outer} outer setpattern 0 0 400 300 rectfill
+             stripes setpattern 0 300 400 100 rectfill"
+        ),
+    );
+}
+
+#[test]
+fn two_tiles_that_share_a_page_pattern_write_its_defs_once() {
+    // The stripes are never painted on the page itself.
+    let a = outer_using_stripes("a", "[1 0 0 1 4.3 7.6]");
+    let b = outer_using_stripes("b", "[0.866 0.5 -0.5 0.866 60 10]");
+    check_unique_defs(
+        "siblings",
+        &format!("{a} {b} a setpattern 0 0 200 400 rectfill b setpattern 200 0 200 400 rectfill"),
+    );
+}
+
+#[test]
+fn nested_contexts_write_each_def_once() {
+    // stripes inside Q's PaintProc, Q made inside R's, R on the page, and
+    // stripes on the page too.
+    let out = check_unique_defs(
+        "three levels",
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 90 90] /XStep 400 /YStep 400
+            /PaintProc { pop 0.1 0.1 0.7 setrgbcolor 0 0 90 90 rectfill
+              << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 30 30] /XStep 30 /YStep 30
+                 /PaintProc { pop 0.9 0.9 0.2 setrgbcolor 0 0 30 30 rectfill
+                   gsave 3 3 20 20 rectclip stripes setpattern 0 0 30 30 rectfill grestore }
+              >> [1 0 0 1 1.5 2.5] makepattern setpattern 10 10 70 70 rectfill }
+         >> [1.5 0 0 1.5 4.3 7.6] makepattern setpattern 0 0 300 300 rectfill
+         stripes setpattern 0 300 400 100 rectfill",
+    );
+    // The stripes' clip, the tile Q's and R's own: three `rectclip`s.
+    assert!(out.svg.matches("<clipPath").count() >= 3);
+}
+
+#[test]
+fn a_pattern_made_inside_a_tile_writes_its_defs_once() {
+    check_unique_defs(
+        "made inside",
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [-3.3 -2 63 57.3] /XStep 400 /YStep 400
+            /PaintProc { pop 0.1 0.1 0.7 setrgbcolor -3.3 -2 80 70 rectfill
+              << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+                 /PaintProc { pop gsave 0 0 3 10 rectclip 0.9 0.1 0.1 setrgbcolor 0 0 10 10 rectfill
+                              grestore 0 0.6 0 setrgbcolor 0 0 10 2 rectfill } >> [1 0 0 1 2 1] makepattern
+              userdict /inner 3 -1 roll put }
+         >> [1.5 0 0 1.5 4.3 7.6] makepattern /outer exch def
+         outer setpattern 0 0 30 30 rectfill
+         inner setpattern 50 50 300 300 rectfill",
+    );
+}
+
 #[test]
 fn sethsbcolor_leaves_a_pattern_space_for_devicergb_as_in_gs() {
     assert_eq!(
