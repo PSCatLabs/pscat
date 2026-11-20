@@ -750,8 +750,7 @@ renders eight examples in both and compares block-downsampled output).
   paint path); SVG embeds that layer as an image; PDF writes a real
   `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
   linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
-  (meshes) and shading patterns (PatternType 2) are not implemented, in
-  any output.
+  (meshes) are not implemented, in any output.
   tiny-skia's anti-aliased fill panics on a path with corners around 1e9
   device pixels away, so a `/BBox` of that size is cut to a guard rectangle
   (the page grown by its own size) before the raster paints it (#1324,
@@ -773,6 +772,17 @@ renders eight examples in both and compares block-downsampled output).
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
   mid-run for display should use `Gfx::page_pixmap`.
+- Shading patterns (#1298, `pattern::ShadingPattern`,
+  `notes/1298-shading-patterns.md`): `makepattern` PatternType 2 holds the
+  parsed shading, `/Background` and its device matrix; nothing runs. The
+  raster paints the shading per mark into a layer over the mark's pixels
+  (`gfx::shading_layer`, built from the same pieces as `shfill`:
+  `gradient_parts`, `two_root_layer`, `function_layer`), which
+  `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
+  the gradient itself, or a canvas-sized `<pattern>` with the background,
+  `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the
+  shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
+  the registry and `PatternColor` as `pattern::PatternRef`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an

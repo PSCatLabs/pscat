@@ -1496,3 +1496,586 @@ fn a_long_chain_of_unused_patterns_frees_without_recursing() {
     ));
     drop(it);
 }
+
+// --- shading patterns (#1298) -----------------------------------------------
+
+/// A two-colour ramp, red to blue.
+const RAMP: &str =
+    "/ramp << /FunctionType 2 /Domain [0 1] /C0 [0.9 0.1 0.1] /C1 [0.1 0.2 0.9] /N 1 >> def\n";
+
+/// The issue's picture: text filled with an axial shading pattern. The
+/// pattern is made under a translation and used under a scale, so a
+/// pattern that follows the CTM at use, not at `makepattern`, shows.
+const SHADED_TEXT: &str = "
+gsave 0 40 translate
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [20 0 380 0]
+   /Function ramp /Extend [true true] >> >> matrix makepattern /grad exch def
+grestore
+grad setpattern
+/Helvetica-Bold findfont 110 scalefont setfont 20 170 moveto (Shade) show
+gsave 2 2 scale 10 20 190 30 rectfill grestore
+";
+
+/// A radial pattern with a `/Background` and no `/Extend`, a Type 1
+/// (function-based) pattern cut by its `/BBox`, a stroke, and a shading
+/// whose axis collapses (it paints only its background, as in gs).
+const SHADED_MIX: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [100 300 10 100 300 80]
+   /Function ramp /Background [1 0.85 0.2] >> >> matrix makepattern setpattern
+20 220 160 160 rectfill
+<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [140 0 0 140 230 230]
+   /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [2 2] /BitsPerSample 8
+                /DataSource <ff0000 00ff00 0000ff ffffff> >> /BBox [240 240 360 360] >> >>
+matrix makepattern setpattern
+220 220 160 160 rectfill
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 0 200]
+   /Function ramp /Extend [true true] >> >> [1 0 0 1 0 20] makepattern setpattern
+14 setlinewidth 1 setlinecap 30 40 moveto 120 180 lineto 180 40 lineto stroke
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [300 0 300 0]
+   /Function ramp /Background [0.3 0.7 0.3] >> >> matrix makepattern setpattern
+220 20 160 160 rectfill
+";
+
+/// Every output of a shading-pattern picture against our PNG, and gs's
+/// run of the program against gs's raster of our PDF. The PDF holds a
+/// real `/PatternType 2` pattern and no image. With `text`, gs's run of
+/// the program draws gs's own Helvetica (its glyphs are not pscat's), so
+/// it is held only against our PNG, at the looser bound.
+fn check_shading(name: &str, src: &str, text: bool, hayro: bool) -> Outputs {
+    let src = format!("{RAMP}{src}");
+    let out = render(&src);
+    let pdf = pdf_text(&out.pdf);
+    assert!(pdf.contains("/PatternType 2 "), "{pdf}");
+    assert!(pdf.contains("/Pattern cs /P"), "no pattern fill: {pdf}");
+    assert!(
+        !pdf.contains("/Subtype /Image"),
+        "a raster stands in: {pdf}"
+    );
+    assert_close(
+        &format!("{name}: SVG via resvg"),
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    if hayro {
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
+    }
+    if common::gs_available() {
+        assert_close(
+            &format!("{name}: our PDF via gs"),
+            &out.png,
+            &gs_png(&out.pdf, "pdf", name),
+            3.0,
+        );
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        let program = gs_png(ps.as_bytes(), "ps", name);
+        assert_close(
+            &format!("{name}: the program in gs"),
+            &out.png,
+            &program,
+            3.0,
+        );
+        if text {
+            return out;
+        }
+        assert_close(
+            &format!("{name}: our PDF via gs against the program in gs"),
+            &program,
+            &gs_png(&out.pdf, "pdf", name),
+            0.5,
+        );
+    }
+    out
+}
+
+#[test]
+fn a_shading_pattern_fills_text_in_all_three_outputs() {
+    let out = check_shading("shaded text", SHADED_TEXT, true, true);
+    // The SVG paints with the gradient itself.
+    assert!(out.svg.contains("<linearGradient "), "{}", out.svg);
+    assert!(out.svg.contains("fill=\"url(#g"), "{}", out.svg);
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    // The ramp runs across the page as made, not under the later scale:
+    // the bar's left end is red, its right end blue.
+    let (l, r) = (px(30, 340), px(370, 340));
+    assert!(l.red() > 180 && l.blue() < 60, "left {l:?}");
+    assert!(r.blue() > 180 && r.red() < 60, "right {r:?}");
+}
+
+#[test]
+fn radial_function_background_bbox_and_stroke_patterns_agree_with_gs() {
+    let out = check_shading("shaded mix", SHADED_MIX, false, true);
+    let px = |x: u32, y: u32| {
+        let p = out.png.pixel(x, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    // The radial's background outside its circles and inside the first.
+    assert_eq!(px(10, 10), (255, 255, 255));
+    assert_eq!(px(25, 25), (255, 217, 51));
+    assert_eq!(px(25, 175), (255, 217, 51));
+    assert_eq!(px(100, 100), (255, 217, 51));
+    // The Type 1 pattern only inside its BBox.
+    assert_eq!(px(225, 175), (255, 255, 255));
+    assert_ne!(px(300, 100), (255, 255, 255));
+    // The collapsed axis paints its background.
+    assert_eq!(px(300, 300), (77, 179, 77));
+}
+
+/// Strokes in pen space (an anisotropic CTM, #1196) with a plain axial
+/// pattern (SVG: the gradient, placed through the pen's inverse) and with
+/// one that has a background (SVG: a `<pattern>`), a radial cut to its
+/// `/BBox`, and a Type 1 pattern whose background shows outside its
+/// Domain, inside its `/BBox` (gs paints it there).
+const SHADED_PEN: &str = "
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 0 200]
+   /Function ramp /Extend [true true] >> >> matrix makepattern /plain exch def
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [40 0 160 0]
+   /Function ramp /Background [0.2 0.7 0.3] >> >> matrix makepattern /backed exch def
+gsave 1 3 scale plain setpattern 6 setlinewidth 30 10 moveto 90 60 lineto stroke
+backed setpattern 110 10 moveto 180 60 lineto stroke grestore
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [300 100 10 300 100 70]
+   /Function ramp /Extend [true false] /BBox [215 25 385 175] >> >> matrix makepattern setpattern
+210 20 180 160 rectfill
+<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [100 0 0 100 250 250]
+   /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [2 2] /BitsPerSample 8
+                /DataSource <ff0000 00ff00 0000ff ffffff> >>
+   /Background [0.2 0.7 0.3] /BBox [220 220 380 380] >> >> matrix makepattern setpattern
+210 210 180 180 rectfill
+";
+
+#[test]
+fn pen_space_strokes_and_a_type1_background_agree_with_gs() {
+    let out = check_shading("shaded pen", SHADED_PEN, false, true);
+    let px = |x: u32, y: u32| {
+        let p = out.png.pixel(x, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    // The Type 1 background outside the Domain, inside the BBox; nothing
+    // outside the BBox.
+    assert_eq!(px(230, 170), (51, 179, 77));
+    assert_eq!(px(215, 170), (255, 255, 255));
+    // The plain stroke takes the gradient itself in SVG, through the pen.
+    assert!(out.svg.contains("<linearGradient "), "{}", out.svg);
+}
+
+/// A radial whose circles are not nested and whose end does not extend,
+/// cut to a `/BBox`: the raster paints a point's smaller root where its
+/// larger one is past the end (`two_root_layer`), as gs and PDF do. SVG
+/// cannot ask for the smaller root (the gap `shfill` has too), so only the
+/// raster and the PDF are held against gs.
+const SHADED_TWO_ROOTS: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [160 200 20 260 200 60]
+   /Function ramp /Extend [true false] /BBox [60 60 340 340] >> >> matrix makepattern setpattern
+20 20 360 360 rectfill
+";
+
+#[test]
+fn a_radial_pattern_paints_its_smaller_root_as_gs_does() {
+    let src = format!("{RAMP}{SHADED_TWO_ROOTS}");
+    let out = render(&src);
+    assert!(pdf_text(&out.pdf).contains("/PatternType 2 "));
+    if common::gs_available() {
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        let program = gs_png(ps.as_bytes(), "ps", "two roots");
+        assert_close("two roots: the program in gs", &out.png, &program, 3.0);
+        assert_close(
+            "two roots: our PDF via gs",
+            &out.png,
+            &gs_png(&out.pdf, "pdf", "two roots"),
+            3.0,
+        );
+    }
+}
+
+#[test]
+fn setalpha_reaches_a_shading_pattern() {
+    // `setalpha` is pscat's, so gs runs only our PDF (its `ca`); hayro
+    // ignores `ca` on a shading pattern and sits this one out.
+    let src = format!(
+        "{RAMP}0 0.5 0 setrgbcolor 100 0 200 400 rectfill \
+         << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+         /Coords [20 0 380 0] /Function ramp /Extend [true true] >> >> matrix makepattern \
+         setpattern 0.5 setalpha 20 100 360 200 rectfill"
+    );
+    let out = render(&src);
+    let p = out.png.pixel(200, 200).expect("pixel");
+    assert!(p.green() > 40 && p.green() < 200, "not translucent: {p:?}");
+    assert_close(
+        "alpha shading: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    if common::gs_available() {
+        assert_close(
+            "alpha shading: our PDF via gs",
+            &out.png,
+            &gs_png(&out.pdf, "pdf", "alpha shading"),
+            3.0,
+        );
+    }
+}
+
+#[test]
+fn an_imagemask_paints_a_shading_pattern() {
+    let src = format!(
+        "{RAMP}<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+         /Coords [20 0 380 0] /Function ramp /Background [0 0.6 0] >> >> matrix makepattern setpattern \
+         gsave 20 20 translate 170 170 scale stencil grestore \
+         gsave 300 210 translate 30 rotate 120 120 scale stencil grestore"
+    );
+    check_masked("masked shading", &src, "/Pattern cs /P0 scn", true);
+}
+
+/// A page shading pattern inside a tiling pattern's PaintProc keeps its
+/// device placement, as gs places it in its pattern accumulator (#1300).
+const SHADED_ACROSS: &str = "
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 60 0]
+   /Function ramp /Extend [true true] >> >> matrix makepattern /grad exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 80 80] /XStep 100 /YStep 100
+   /PaintProc { pop grad setpattern 10 10 60 60 rectfill }
+>> [1 0 0 1 10 10] makepattern setpattern
+0 0 400 400 rectfill
+";
+
+#[test]
+fn a_page_shading_pattern_paints_inside_a_paintproc_as_gs_places_it() {
+    let src = format!("{RAMP}{SHADED_ACROSS}");
+    let out = check_outputs("shaded across", &src, 1, false);
+    if common::gs_available() {
+        let ps = format!("%!PS\n{src}\nshowpage\n");
+        assert_close(
+            "shaded across: the program in gs",
+            &out.png,
+            &gs_png(ps.as_bytes(), "ps", "shaded across"),
+            3.0,
+        );
+    }
+}
+
+const SHADING: &str = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] \
+                       /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
+
+#[test]
+fn shading_makepattern_errors_are_the_ones_gs_gives() {
+    // gs 10.07.1, each `{ dict matrix makepattern } stopped`.
+    let cases = [
+        ("<< /PatternType 2 >>".to_string(), "undefined"),
+        ("<< /PatternType 2 /Shading 5 >>".to_string(), "typecheck"),
+        (
+            "<< /PatternType 2 /Shading << /ShadingType 9 /ColorSpace /DeviceRGB >> >>".to_string(),
+            "rangecheck",
+        ),
+        (
+            format!("<< /PatternType 2 /Shading {SHADING} dup /Coords [0 0 1] put >>"),
+            "rangecheck",
+        ),
+        (
+            format!("<< /PatternType 2 /Shading {SHADING} dup /Function undef >>"),
+            "undefined",
+        ),
+        (
+            format!("<< /PatternType 2 /Shading {SHADING} dup /Background [0 1] put >>"),
+            "rangecheck",
+        ),
+        (
+            format!("<< /PatternType 2 /Shading {SHADING} dup /Background [(a) 1 0] put >>"),
+            "typecheck",
+        ),
+        (
+            format!("<< /PatternType 2.5 /Shading {SHADING} >>"),
+            "rangecheck",
+        ),
+    ];
+    for (dict, want) in cases {
+        let got = eval(&format!(
+            "{dict} matrix {{ makepattern }} stopped {{ $error /errorname get }} if"
+        ));
+        assert!(got.ends_with(&format!("/{want}")), "{dict}: {got}");
+    }
+    // Taken by gs: a real PatternType, any /ExtGState, a /Background that
+    // is not an array or out of range, a singular matrix.
+    for dict in [
+        format!("<< /PatternType 2.0 /Shading {SHADING} >>"),
+        DICT.replace("/PatternType 1", "/PatternType 1.0"),
+        format!("<< /PatternType 2 /Shading {SHADING} /ExtGState 5 >>"),
+        format!("<< /PatternType 2 /Shading {SHADING} dup /Background 5 put >>"),
+        format!("<< /PatternType 2 /Shading {SHADING} dup /Background [0 2 0] put >>"),
+    ] {
+        assert_eq!(
+            eval(&format!("{dict} matrix makepattern /Implementation known")),
+            "true",
+            "{dict}"
+        );
+    }
+    assert_eq!(
+        eval(&format!(
+            "<< /PatternType 2 /Shading {SHADING} >> [0 0 0 0 0 0] makepattern \
+             dup setpattern 0 0 50 50 rectfill /Implementation known"
+        )),
+        "true"
+    );
+}
+
+#[test]
+fn a_shading_pattern_is_coloured_and_reads_back_as_gs() {
+    // A shading pattern takes no components: they stay on the stack.
+    assert_eq!(
+        eval(&format!(
+            "<< /PatternType 2 /Shading {SHADING} >> matrix makepattern /p exch def \
+             [/Pattern /DeviceRGB] setcolorspace 0.1 0.2 0.3 p setcolor \
+             count currentcolor p eq"
+        )),
+        "0.1 0.2 0.3 3 true"
+    );
+    assert_eq!(
+        eval(&format!(
+            "<< /PatternType 2 /Shading {SHADING} >> matrix makepattern setpattern \
+             currentcolorspace"
+        )),
+        "[/Pattern [/DeviceGray]]"
+    );
+}
+
+// --- Codex round 1 on PR #1367 ---------------------------------------------
+
+/// A page-sized axial shading pattern, set as the colour.
+const PAGE_RAMP: &str = "<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+     /Coords [0 0 1000 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> \
+     /Extend [true true] >> >> matrix makepattern setpattern\n";
+
+/// pscat on a 1000 x 1000 page of `src` under `limit` (`--max-steps N` or
+/// `--max-memory MIB`): whether it succeeded, and its stdout then stderr. A child
+/// process, as the memory limit counts the whole process's heap.
+fn limited(src: &str, limit: [&str; 2]) -> (bool, String) {
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_limits");
+    let file = dir.join("limited.ps");
+    std::fs::write(&file, src).expect("write source");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--page", "1000x1000", limit[0], limit[1], "--png"])
+        .arg(dir.join("limited.png"))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    (
+        out.status.success(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    )
+}
+
+/// A shading pattern's layer under an imagemask or a stroke answers to the
+/// step and memory limits, as under a fill (Codex round 1, P1): it is made
+/// before anything is recorded or painted, its work held against the step
+/// limit and its memory against the cap.
+#[test]
+fn a_shading_layer_under_imagemask_and_stroke_answers_to_the_limits() {
+    let marks = [
+        (
+            "imagemask",
+            "1000 1000 scale 1 1 true [1 0 0 1 0 0] <80> imagemask",
+        ),
+        (
+            "stroke",
+            "600 setlinewidth 0 500 moveto 1000 500 lineto stroke",
+        ),
+        ("rectfill", "0 0 1000 1000 rectfill"),
+    ];
+    for (op, mark) in marks {
+        let src = format!("{PAGE_RAMP}{mark}\n");
+        for (limit, what) in [
+            (["--max-steps", "1000"], "steps"),
+            (["--max-memory", "2"], "memory"),
+        ] {
+            let (ok, err) = limited(&src, limit);
+            assert!(
+                !ok && err.contains(&format!("limitexceeded ({what})"))
+                    && err.contains(&format!("OffendingCommand: {op}")),
+                "{op} under {limit:?}: {err}"
+            );
+        }
+        // And without a limit to meet, it paints.
+        let (ok, err) = limited(&src, ["--max-steps", "0"]);
+        assert!(ok, "{op} with no limit: {err}");
+    }
+}
+
+/// A pattern made on one page and reused on a later page of another height
+/// keeps its device placement in the PDF, as in the PNG and gs (Codex round
+/// 1, P2): the PDF `/Matrix` maps to that page's default space, whose flip
+/// the new height moves.
+#[test]
+fn a_shading_pattern_reused_on_a_taller_page_keeps_its_place_in_pdf() {
+    let src = "<< /PageSize [100 100] >> setpagedevice
+<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 0 100]
+   /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> >>
+matrix makepattern /p exch def
+p setpattern 0 0 100 100 rectfill showpage
+<< /PageSize [100 200] >> setpagedevice
+p setpattern 0 0 100 200 rectfill
+";
+    // The CLI, which changes the page size as `setpagedevice` asks.
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_pages");
+    let (ps, pdf_path) = (dir.join("pages.ps"), dir.join("pages.pdf"));
+    std::fs::write(&ps, format!("%!PS\n{src}showpage\n")).expect("write ps");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--png")
+        .arg(dir.join("pages.png"))
+        .arg("--pdf")
+        .arg(&pdf_path)
+        .arg(&ps)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let png = Pixmap::decode_png(&std::fs::read(dir.join("pages-002.png")).expect("page 2"))
+        .expect("decode");
+    assert_eq!((png.width(), png.height()), (100, 200));
+    let pdf = std::fs::read(&pdf_path).expect("read pdf");
+    // Our raster: the shading in device rows 0-100 (blue at the top, red at
+    // row 100), nothing below (the shading does not extend).
+    let px = |pm: &Pixmap, y: u32| {
+        let p = pm.pixel(50, y).expect("pixel");
+        (p.red(), p.green(), p.blue())
+    };
+    assert!(
+        px(&png, 5).2 > 200 && px(&png, 95).0 > 200,
+        "{:?}",
+        px(&png, 5)
+    );
+    assert_eq!(px(&png, 150), (255, 255, 255));
+    // hayro's raster of the PDF's second page.
+    let doc = hayro::Pdf::new(std::sync::Arc::new(pdf.clone())).expect("parse PDF");
+    let pages = doc.pages();
+    let pm = hayro::render(
+        &pages[1],
+        &hayro::InterpreterSettings::default(),
+        &hayro::RenderSettings {
+            x_scale: 1.0,
+            y_scale: 1.0,
+            ..Default::default()
+        },
+    );
+    let (w, h) = (u32::from(pm.width()), u32::from(pm.height()));
+    let bytes = pm.take_u8();
+    let mut theirs = Pixmap::new(w, h).expect("pixmap");
+    for (dst, src) in theirs.data_mut().chunks_mut(4).zip(bytes.chunks(4)) {
+        for c in 0..3 {
+            dst[c] = (u16::from(src[c]) + 255 - u16::from(src[3])) as u8;
+        }
+        dst[3] = 255;
+    }
+    for y in [5, 50, 95, 150, 195] {
+        let (a, b) = (px(&png, y), px(&theirs, y));
+        let near = |p: u8, q: u8| p.abs_diff(q) <= 6;
+        assert!(
+            near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2),
+            "row {y}: PNG {a:?}, PDF via hayro {b:?}"
+        );
+    }
+    if common::gs_available() {
+        // gs's run of the program and its raster of our PDF, page 2.
+        let gs = |input: &std::path::Path, out: &std::path::Path| {
+            let status = Command::new("gs")
+                .args([
+                    "-q",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-dSAFER",
+                    "-sDEVICE=png16m",
+                    "-r72",
+                ])
+                .args(["-dFirstPage=2", "-dLastPage=2"])
+                .arg(format!("-o{}", out.display()))
+                .arg(input)
+                .status()
+                .expect("run gs");
+            assert!(status.success(), "gs rejected {}", input.display());
+            Pixmap::decode_png(&std::fs::read(out).expect("read gs png")).expect("decode")
+        };
+        let program = gs(&ps, &dir.join("program.png"));
+        let ours = gs(&pdf_path, &dir.join("ours.png"));
+        for y in [5, 50, 95, 150, 195] {
+            let (a, b, c) = (px(&png, y), px(&program, y), px(&ours, y));
+            let near = |p: (u8, u8, u8), q: (u8, u8, u8)| {
+                p.0.abs_diff(q.0) <= 8 && p.1.abs_diff(q.1) <= 8 && p.2.abs_diff(q.2) <= 8
+            };
+            assert!(
+                near(a, b) && near(c, b),
+                "row {y}: PNG {a:?}, gs program {b:?}, our PDF via gs {c:?}"
+            );
+        }
+    }
+}
+
+// --- Codex round 2 on PR #1367 ---------------------------------------------
+
+/// A layer the shading paints nothing into still costs its allocation and
+/// its `/Background`, which paints every pixel: an axis that collapses
+/// with a background, page-sized under an imagemask or a stroke, is held
+/// against the step limit like any other (Codex round 2, P1).
+#[test]
+fn a_background_only_shading_layer_is_charged() {
+    let bg = "<< /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB \
+              /Coords [0 0 0 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] \
+              /C1 [0 0 1] /N 1 >> /Background [1 0 0] >> >> matrix makepattern setpattern\n";
+    for (op, mark) in [
+        (
+            "imagemask",
+            "1000 1000 scale 1 1 true [1 0 0 1 0 0] <80> imagemask",
+        ),
+        (
+            "stroke",
+            "600 setlinewidth 0 500 moveto 1000 500 lineto stroke",
+        ),
+    ] {
+        let src = format!("{bg}{mark}\n");
+        let (ok, out) = limited(&src, ["--max-steps", "1000"]);
+        assert!(
+            !ok && out.contains("limitexceeded (steps)")
+                && out.contains(&format!("OffendingCommand: {op}")),
+            "{op}: {out}"
+        );
+        let (ok, out) = limited(&src, ["--max-steps", "0"]);
+        assert!(ok, "{op} with no limit: {out}");
+    }
+}
+
+/// An imagemask's layer is held against the steps left when it is made,
+/// not when the image began: steps its data-source procedure spent in
+/// between count (Codex round 2, P2). At this budget the plain image fits
+/// and the one whose procedure loops 20000 times does not, and the limit
+/// stops it at the imagemask, before anything after it runs.
+#[test]
+fn an_imagemask_layer_counts_the_steps_its_data_source_spent() {
+    let image = |source: &str| {
+        format!(
+            "{PAGE_RAMP}1000 1000 scale 1 1 true [1 0 0 1 0 0] {source} imagemask \
+             (AFTER_IMAGE) =\n"
+        )
+    };
+    let (ok, out) = limited(&image("{<80>}"), ["--max-steps", "40000"]);
+    assert!(ok && out.contains("AFTER_IMAGE"), "plain: {out}");
+    let (ok, out) = limited(&image("{20000 {} repeat <80>}"), ["--max-steps", "40000"]);
+    assert!(
+        !ok && !out.contains("AFTER_IMAGE")
+            && out.contains("limitexceeded (steps)")
+            && out.contains("OffendingCommand: imagemask"),
+        "looping source: {out}"
+    );
+}

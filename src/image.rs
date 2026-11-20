@@ -145,6 +145,10 @@ pub(crate) struct ImageCtx {
     pub(crate) op_name: Option<u32>,
     /// The limits when the image began, for the recorders (#1188).
     pub(crate) probe: crate::limits::LimitProbe,
+    /// The work a shading pattern's layer took (#1298), held against the
+    /// step limit when it was made, for the interpreter to charge once the
+    /// image is done.
+    pub(crate) layer_work: std::cell::Cell<u64>,
 }
 
 impl ImageCtx {
@@ -180,6 +184,7 @@ impl ImageCtx {
             eod: false,
             op_name: None,
             probe: crate::limits::LimitProbe::NONE,
+            layer_work: std::cell::Cell::new(0),
         }
     }
 
@@ -798,8 +803,7 @@ impl ImageCtx {
         };
         // Under a pattern (#1299) the samples are the stencil alone, opaque
         // white where it paints, for a `<mask>` over the patterned footprint.
-        let patterned =
-            self.mask.is_some() && matches!(gfx.ink(), Some(crate::pattern::Ink::Pattern(..)));
+        let patterned = self.mask.is_some() && gfx.ink().is_some_and(|ink| ink.is_pattern());
         let paint_rgb = if patterned {
             (1.0, 1.0, 1.0)
         } else {
@@ -961,17 +965,10 @@ impl ImageCtx {
         let patterned = match self.mask {
             Some(_) => match gfx.ink() {
                 None => return Ok(()),
-                Some(ink) => matches!(ink, crate::pattern::Ink::Pattern(..)),
+                Some(ink) => ink.is_pattern(),
             },
             None => false,
         };
-        gfx.prepare_paint();
-        if gfx.svg_wanted() {
-            self.record_svg(gfx, ctm, probe)?;
-        }
-        if gfx.pdf_wanted() {
-            self.record_pdf(gfx, ctm, probe)?;
-        }
         // The image's footprint in user space is ImageMatrix⁻¹ of the
         // source rectangle [0,w]×[0,h] (PLRM 4.10.3): the unit square
         // only for the usual `w h scale` + `[w 0 0 ±h …]` idiom. That
@@ -1019,6 +1016,27 @@ impl ImageCtx {
             py0 = py0.max(i64::from(top));
             py1 = py1.min(i64::from(bottom));
         }
+        // A pattern's raster source over the footprint, made before anything
+        // is recorded or painted, under the image's limits: a shading
+        // pattern's layer (#1298) can be page-sized, and a limit must stop
+        // the image whole, as it stops `fill`.
+        let rect = [px0, py0, px1.max(px0), py1.max(py0)].map(|v| v as u32);
+        let src = if patterned {
+            let region = rect.map(i64::from);
+            let (src, work) = gfx.pattern_source(region, probe)?;
+            self.layer_work
+                .set(self.layer_work.get().saturating_add(work));
+            src
+        } else {
+            None
+        };
+        gfx.prepare_paint();
+        if gfx.svg_wanted() {
+            self.record_svg(gfx, ctm, probe)?;
+        }
+        if gfx.pdf_wanted() {
+            self.record_pdf(gfx, ctm, probe)?;
+        }
 
         // `/Interpolate true` on a colour image (#730): which axes are
         // magnified, i.e. get bilinear sampling. None keeps nearest.
@@ -1035,8 +1053,7 @@ impl ImageCtx {
         .filter(|&(mx, my)| mx || my);
         let smooth = magnified.filter(|_| self.interpolate && self.mask.is_none());
         if patterned {
-            let rect = [px0, py0, px1.max(px0), py1.max(py0)].map(|v| v as u32);
-            return self.rasterize_patterned(gfx, inv, unit, rect);
+            return self.rasterize_patterned(gfx, inv, unit, rect, src);
         }
         let paint_rgb = gfx.rgb();
         let comp = gfx.composite();
@@ -1138,11 +1155,12 @@ impl ImageCtx {
         inv: tiny_skia::Transform,
         unit: bool,
         rect: [u32; 4],
+        src: Option<crate::gfx::PatternSource>,
     ) -> Result<(), PsError> {
         let paint_ones = self.mask.unwrap_or(true);
         let clip = gfx.clip_mask_data();
         let [px0, py0, px1, py1] = rect;
-        let painted = gfx.fill_pattern_stencil(rect, |cov, width| {
+        let painted = gfx.fill_pattern_stencil(rect, src, |cov, width| {
             let mut marked = false;
             for py in py0..py1 {
                 for px in px0..px1 {

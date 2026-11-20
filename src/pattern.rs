@@ -344,7 +344,7 @@ pub(crate) fn foreign_placement(
     to_default: Transform,
 ) -> Option<Placement> {
     // The tile's context to the painting one, through gs's device space.
-    let hop = here_to_gs.invert()?.pre_concat(tile.to_gs);
+    let hop = context_hop(tile.to_gs, here_to_gs)?;
     let matrix = hop.pre_concat(tile.geom.matrix);
     let shader = hop.pre_concat(tile.geom.shader);
     let (shader, quality) = match pixel_exact(shader) {
@@ -578,7 +578,8 @@ impl Drop for LazyPattern {
             self.state.get_mut().take().into_iter().collect();
         while let Some(mut st) = work.pop() {
             if let Some(p) = st.take_pattern()
-                && let Ok(mut inner) = Rc::try_unwrap(p.lazy)
+                && let PatternRef::Tile(lazy) = p.pattern
+                && let Ok(mut inner) = Rc::try_unwrap(lazy)
             {
                 work.extend(inner.state.get_mut().take());
             }
@@ -594,6 +595,108 @@ pub(crate) enum Ink {
     /// A tiling pattern, the colour an uncoloured one paints in, and,
     /// for a pattern made in another context, where it paints (#1300).
     Pattern(Rc<PatternTile>, (f32, f32, f32), Option<Placement>),
+    /// A shading pattern (#1298) and, for one made in another context,
+    /// where it paints.
+    Shading(Rc<ShadingPattern>, Option<ShadingPlace>),
+}
+
+impl Ink {
+    /// A pattern of either kind: what an imagemask paints through a
+    /// stencil rather than in a colour (#1299).
+    pub(crate) fn is_pattern(&self) -> bool {
+        !matches!(self, Ink::Rgb(_))
+    }
+}
+
+/// A pattern `makepattern` made, as the registry and the graphics state
+/// hold it: a tiling pattern (#1038) or a shading pattern (#1298).
+#[derive(Clone)]
+pub(crate) enum PatternRef {
+    Tile(Rc<LazyPattern>),
+    Shading(Rc<ShadingPattern>),
+}
+
+impl PatternRef {
+    /// PaintType 2. A shading pattern is always coloured.
+    pub(crate) fn uncolored(&self) -> bool {
+        match self {
+            PatternRef::Tile(t) => t.spec.uncolored,
+            PatternRef::Shading(_) => false,
+        }
+    }
+}
+
+/// A shading pattern (#1298): `makepattern`'s PatternType 2. Its shading
+/// is painted in pattern space, which `matrix` (the dictionary's matrix
+/// times the CTM at `makepattern`) maps to the device, wherever a fill,
+/// stroke, show or imagemask paints with it; `/Background` is painted
+/// where the shading does not reach, inside its `/BBox`. Nothing is run
+/// and nothing is captured, so it holds the shading itself:
+///
+/// - **PNG**: [`crate::gfx::shading_layer`] paints the shading into a layer
+///   over the pixels each mark covers, which the mark uses as its shader.
+/// - **SVG**: the gradient itself, or a `<pattern>` holding what `shfill`
+///   would write ([`SvgShading`]).
+/// - **PDF**: a `/PatternType 2` pattern on the shading.
+pub(crate) struct ShadingPattern {
+    /// The context it was made in (`PatternTile::context`).
+    pub(crate) context: usize,
+    pub(crate) shading: crate::shading::ParsedShading,
+    pub(crate) background: Option<(f32, f32, f32)>,
+    /// Pattern space to the context's device space.
+    pub(crate) matrix: Transform,
+    /// The context's coordinates to gs's device coordinates (#1300).
+    pub(crate) to_gs: Transform,
+    /// Present when SVG was being recorded at `makepattern`.
+    pub(crate) svg: Option<SvgShading>,
+    /// The PDF recorder's pattern index, when PDF was being recorded and
+    /// the shading paints anything.
+    pub(crate) pdf: Option<usize>,
+    /// The PDF shading's own space to the context's device space: `matrix`
+    /// with the small-geometry rescale (`vector_shading`) folded in.
+    pub(crate) pdf_ctm: Transform,
+    /// The `/Matrix` the PDF pattern was written with: `pdf_ctm` into the
+    /// default space of the stream `makepattern` ran in.
+    pub(crate) pdf_matrix: Transform,
+}
+
+/// A shading pattern's SVG form, in its context's device coordinates.
+pub(crate) struct SvgShading {
+    /// A gradient (types 2 and 3): geometry, shading space to device, the
+    /// stops and `/Extend`; `None` for a Type 1 shading and for one that
+    /// paints nothing.
+    pub(crate) gradient: Option<SvgGradient>,
+    /// A Type 1 shading's layer: PNG, size, and its top-left pixel.
+    pub(crate) image: Option<(Vec<u8>, u32, u32, i32, i32)>,
+    /// The `/BBox` corners in device space.
+    pub(crate) bbox: Option<[(f32, f32); 4]>,
+    pub(crate) background: Option<(f32, f32, f32)>,
+}
+
+/// An axial or radial shading as SVG writes it: geometry, its own space to
+/// device, the stops and `/Extend`.
+pub(crate) type SvgGradient = (
+    crate::svg::ShKind,
+    Transform,
+    Vec<(f32, f32, f32, f32)>,
+    [bool; 2],
+);
+
+/// Where a shading pattern made in another context paints (#1300's rule).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ShadingPlace {
+    /// Its context's coordinates to the painting context's.
+    pub(crate) hop: Transform,
+    /// The PDF `/Matrix`: the shading's space to the default space of the
+    /// stream that paints.
+    pub(crate) pdf_matrix: Transform,
+}
+
+/// The map from the coordinates of a context whose own map to gs's device
+/// coordinates is `there_to_gs` to those of one whose map is `here_to_gs`
+/// (#1300). `None` when `here_to_gs` is singular.
+pub(crate) fn context_hop(there_to_gs: Transform, here_to_gs: Transform) -> Option<Transform> {
+    Some(here_to_gs.invert()?.pre_concat(there_to_gs))
 }
 
 #[cfg(test)]

@@ -196,8 +196,13 @@ More on the less obvious ones:
   them, and the tiles are seamless. A pattern can paint with another
   pattern inside its `PaintProc` (a hatch inside a motif) and lands where
   Ghostscript puts it. SVG output gets a real `<pattern>` and PDF a real
-  `/Pattern` resource. Shading patterns (PatternType 2) are not supported
-  yet; use `clip` and `shfill`. `examples/patterns.ps` is the specimen sheet.
+  `/Pattern` resource. `examples/patterns.ps` is the specimen sheet.
+  Shading patterns (PatternType 2) make a shading the current colour: a
+  gradient that fills text, strokes or any path, fixed where `makepattern`
+  made it, with the shading's `/Background` painted where the gradient does
+  not reach. SVG gets the gradient (or a `<pattern>` around it) and PDF a
+  real `/PatternType 2` pattern. `examples/shading_patterns.ps` is the
+  specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh

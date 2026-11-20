@@ -442,7 +442,11 @@ fn stroke(it: &mut Interp) -> Result<(), PsError> {
     if wait_for_pattern(it, "stroke", stroke)? {
         return Ok(());
     }
-    it.gfx.stroke();
+    // Under the limits for a shading pattern's layer (#1298), whose work is
+    // held against the step limit before anything is painted.
+    let probe = it.limit_probe();
+    let work = it.gfx.stroke_limited(&probe)?;
+    it.charge_probed_steps(work / 1024);
     Ok(())
 }
 
@@ -908,7 +912,14 @@ fn rectstroke(it: &mut Interp) -> Result<(), PsError> {
         if let Some(m) = matrix {
             it.gfx.concat_ctm(m);
         }
-        it.gfx.stroke();
+        let probe = it.limit_probe();
+        match it.gfx.stroke_limited(&probe) {
+            Ok(work) => it.charge_probed_steps(work / 1024),
+            Err(e) => {
+                it.gfx.grestore();
+                return Err(e);
+            }
+        }
     }
     it.gfx.grestore();
     built
