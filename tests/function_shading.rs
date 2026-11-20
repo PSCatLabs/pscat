@@ -652,3 +652,75 @@ fn a_stitching_component_keeps_its_hard_edge() {
     near(at(&it, 99.0, 100.0), [0.0; 3], 2.0, "left of the edge");
     near(at(&it, 101.0, 100.0), [255.0; 3], 2.0, "right of the edge");
 }
+
+/// A Type 1 shading at a large base, its `/Domain` pair `[b b+w]` scaled by
+/// `/Matrix` to 100 units: `x` puts the pair on the first input, else the
+/// second. The function's own Domain is the same, so it is accepted.
+fn large_base(width: &str, on_x: bool) -> String {
+    let (dom, matrix) = if on_x {
+        (
+            format!("[1000000 {width} 0 1]"),
+            format!(
+                "[{} 0 0 100 {} 50]",
+                100.0 / width_delta(width),
+                -1e6 * 100.0 / width_delta(width)
+            ),
+        )
+    } else {
+        (
+            format!("[0 1 1000000 {width}]"),
+            format!(
+                "[100 0 0 {} 50 {}]",
+                100.0 / width_delta(width),
+                -1e6 * 100.0 / width_delta(width)
+            ),
+        )
+    };
+    format!(
+        "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain {dom} /Matrix {matrix}
+            /Function << /FunctionType 0 /Domain {dom} /Range [0 1 0 1 0 1] /Size [2 2]
+              /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill"
+    )
+}
+
+fn width_delta(end: &str) -> f64 {
+    end.parse::<f64>().expect("number") - 1e6
+}
+
+/// A Domain pair that differs in f64 but is equal as f32 is zero-width to
+/// gs (which reads it as f32): it paints nothing, on either axis, rather
+/// than the strip the f64 pair covers (#1333). gs 10.07.1 paints nothing
+/// for `/Domain [1000000 1000000.001 0 1]` and the same on y, with no
+/// error; with `[1000000 1000000.125 0 1]` (distinct in f32) it paints.
+#[test]
+fn a_domain_equal_in_f32_paints_nothing() {
+    for on_x in [true, false] {
+        let it = render(&large_base("1000000.001", on_x));
+        assert_eq!(at(&it, 60.0, 55.0), [0, 0, 0], "on_x {on_x}");
+    }
+}
+
+/// The control: a pair distinct in f32 still paints its strip.
+#[test]
+fn a_domain_distinct_in_f32_still_paints() {
+    let it = render(&large_base("1000000.125", true));
+    assert_ne!(at(&it, 60.0, 55.0), [0, 0, 0]);
+    let it = render(&large_base("1000000.125", false));
+    assert_ne!(at(&it, 60.0, 55.0), [0, 0, 0]);
+}
+
+/// And the SVG, which embeds the raster's layer, writes no image for it.
+#[test]
+fn a_domain_equal_in_f32_writes_no_svg_image() {
+    let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+    it.gfx_mut().enable_svg();
+    it.run_str(&large_base("1000000.001", true))
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    let svg = it
+        .gfx()
+        .svg_pages()
+        .expect("recording")
+        .pop()
+        .expect("page");
+    assert_eq!(svg.matches("<image ").count(), 0, "{svg}");
+}

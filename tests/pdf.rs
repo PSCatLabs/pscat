@@ -1085,3 +1085,52 @@ fn clip_groups_survive_copypage_showpage_and_erasepage() {
     // it (finish() emits that as a trailing page).
     assert!(text.contains("/Count 4"), "unexpected page count");
 }
+
+/// A Type 1 shading whose `/Domain` pair differs in f64 but is equal as f32
+/// is zero-width to gs, which paints nothing for it, so the PNG and the PDF
+/// paint nothing too, not a PDF with an empty Domain (#1333). An exactly
+/// zero-width Domain already did. A pair distinct in f32 is still written.
+#[test]
+fn function_shading_with_a_zero_width_domain_is_not_exported() {
+    let shading = |dom: &str, matrix: &str| {
+        format!(
+            "0.9 setgray 0 0 500 500 rectfill
+             << /ShadingType 1 /ColorSpace /DeviceRGB /Domain {dom} /Matrix {matrix}
+                /Function << /FunctionType 0 /Domain {dom} /Range [0 1 0 1 0 1] /Size [2 2]
+                  /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill"
+        )
+    };
+    for (name, dom, matrix) in [
+        (
+            "sh_f32_x",
+            "[1000000 1000000.001 0 1]",
+            "[100000 0 0 100 -99999999950 50]",
+        ),
+        (
+            "sh_f32_y",
+            "[0 1 1000000 1000000.001]",
+            "[100 0 0 100000 50 -99999999950]",
+        ),
+        ("sh_exact_zero", "[0 0 0 1]", "[100 0 0 100 50 50]"),
+    ] {
+        let (pdf, canvas) = pdf_and_canvas(shading(dom, matrix).as_bytes());
+        assert!(!pdf_text(&pdf).contains("/ShadingType"), "{name}");
+        assert!(!page_content(&pdf).contains(" sh\n"), "{name}");
+        assert_q_balanced(&pdf);
+        let c = canvas.pixel(60, 444).expect("pixel");
+        assert_eq!(
+            (c.red(), c.green()),
+            (230, 230),
+            "{name}: the PNG paints nothing"
+        );
+        assert_gs_matches(&pdf, &canvas, name);
+    }
+    let (pdf, _) = pdf_and_canvas(
+        shading("[1000000 1000000.125 0 1]", "[800 0 0 100 -800000000 50]").as_bytes(),
+    );
+    assert!(
+        pdf_text(&pdf).contains("/ShadingType 1 "),
+        "a distinct pair is kept"
+    );
+    assert!(page_content(&pdf).contains(" cm /Sh0 sh\n"));
+}
