@@ -625,7 +625,8 @@ fn pid_running(pid: u32) -> bool {
 /// Nothing is running the stage. Unix: its pid is not running, and its age is
 /// no part of it (a live pid may be a suspended install). Elsewhere there is no
 /// probe, so a stage is stale once it is older than `max_age`.
-#[cfg_attr(unix, allow(unused_variables))]
+// Unix reads only `pid`; elsewhere only `meta` and `max_age`.
+#[allow(unused_variables)]
 fn is_stale(pid: u32, meta: &fs::Metadata, max_age: Duration) -> bool {
     #[cfg(unix)]
     {
