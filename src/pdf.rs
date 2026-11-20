@@ -1071,11 +1071,6 @@ Q",
     ) {
         let num = |v: f64| p(v as f32);
         let [x0, x1, y0, y1] = shading.domain;
-        if x0 == x1 || y0 == y1 {
-            // A zero-width Domain paints nothing, as in the raster (#1333);
-            // a reader would be handed an empty rectangle.
-            return;
-        }
         let m = shading.matrix;
         let all = shading.domain.iter().chain(&m).map(|&v| v as f32);
         if !all.chain(ctm).all(f32::is_finite) {

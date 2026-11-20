@@ -1089,7 +1089,7 @@ fn clip_groups_survive_copypage_showpage_and_erasepage() {
 /// A Type 1 shading whose `/Domain` pair differs in f64 but is equal as f32
 /// is zero-width to gs, which paints nothing for it, so the PNG and the PDF
 /// paint nothing too, not a PDF with an empty Domain (#1333). An exactly
-/// zero-width Domain is the same. A pair distinct in f32 is still written.
+/// zero-width Domain already did. A pair distinct in f32 is still written.
 #[test]
 fn function_shading_with_a_zero_width_domain_is_not_exported() {
     let shading = |dom: &str, matrix: &str| {

@@ -21,11 +21,10 @@ radial shadings already follow when an axis collapses in f32 (#1041).
 
 **The fix.** `parse_function_shading` makes such a pair exactly zero-width
 (`x1 = x0`, after the check that the Domain lies in the function's own, so
-that still sees the numbers as written). The raster already paints nothing
-for an exactly zero-width Domain, and the SVG embeds the raster's layer, so
-both agree with gs. `Pdf::shfill_function` returns early for a zero-width
-pair, so the PDF carries no shading for it (an exactly zero-width Domain used
-to be written as an empty shading too).
+that still sees the numbers as written). `shfill_function_limited` already
+returns before painting or recording for an exactly zero-width Domain, so the
+PNG, the SVG (which embeds the raster's layer) and the PDF all carry nothing,
+as gs paints nothing. No change in `src/pdf.rs` was needed.
 
 **Not done.** A pair that stays distinct in f32 still loses precision in the
 PDF: its Domain and Matrix are written as f32, the raster uses f64. The
