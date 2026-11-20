@@ -42,6 +42,11 @@ the original vision and staged milestones are history, kept in
   `PSCAT_GS_LOG=<file>` records `ran`/`skipped` per test; CI counts it in the
   job summary. Windows has no `gs` on PATH (it is `gswin64c`), so those tests
   skip there.
+- The poppler tests (`pdftotext`, `pdftoppm`, in `tests/pdf_text.rs`) go
+  through `common::poppler_available(tool)` the same way: a `ran` or `SKIPPED`
+  line on stderr, and `PSCAT_REQUIRE_POPPLER=1` (set on the Linux
+  `cross-platform` job, which installs `poppler-utils`) makes a missing tool
+  panic. The macOS, Windows and `crate` jobs skip them.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.

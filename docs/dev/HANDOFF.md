@@ -1494,7 +1494,10 @@ renders eight examples in both and compares block-downsampled output).
   `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe
   `gs` ad hoc: the helper prints an uncapturable `SKIPPED` line when gs is
   missing and panics under `PSCAT_REQUIRE_GS=1`, which the macOS `test` and
-  Linux `cross-platform` CI jobs set after installing gs.
+  Linux `cross-platform` CI jobs set after installing gs. The poppler tests
+  (`pdftotext`, `pdftoppm`) use `common::poppler_available(tool)` and
+  `PSCAT_REQUIRE_POPPLER=1` the same way (#1206), set only on the Linux job
+  that installs `poppler-utils`; the other jobs skip them.
 
 - **An anisotropic CTM strokes in pen space** (#1196, `Gfx::stroke_space`,
   `notes/1196-anisotropic-stroke-pen.md`). `stroke`, `strokepath` and
