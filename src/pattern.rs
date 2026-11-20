@@ -22,7 +22,12 @@
 //! **Whole-pixel steps.** The period is a whole number of device pixels
 //! in each direction: the pattern matrix is adjusted so the step lengths
 //! round to whole pixels (TilingType 1 and 3 allow a cell to be
-//! distorted by up to a pixel for exactly this; gs adjusts the same way).
+//! distorted by up to a pixel for exactly this; gs adjusts the same way
+//! when the device `/BBox` is within half a pixel of the step, and leaves
+//! the step fractional otherwise, which pscat does not follow). The cells
+//! sit where gs puts them: from the device top-left corner of the
+//! `/BBox` rounded to a pixel, not from the rounded origin
+//! (`gs_translation`, #1342).
 //! When the pattern's axes lie along the device's, the shader then maps
 //! the period pixmap one pixel to one pixel, at a whole-pixel offset,
 //! sampled nearest: no resampling, so no seams and no blur. The adjusted
@@ -108,8 +113,9 @@ pub(crate) struct TileSpec {
 ///
 /// Three spaces: pattern space; R, pattern space scaled by
 /// `diag(pw/|XStep|, ph/|YStep|)` so a step is a whole `pw` x `ph`
-/// pixels; and device space. The capture canvas is R shifted by
-/// `origin`.
+/// pixels, then shifted by under a pixel so the device corner gs puts the
+/// `/BBox` at is a whole pixel (#1342); and device space. The capture
+/// canvas is R shifted by `origin`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Geometry {
     /// Pattern space to the capture canvas: the CTM `PaintProc` runs at.
@@ -141,8 +147,8 @@ pub(crate) struct Geometry {
 pub(crate) struct Lattice {
     /// Device step along x and along y, signed, in pixels.
     pub(crate) step: (f64, f64),
-    /// Device position of cell 0's top-left pixel (the anchor, rounded
-    /// to a pixel, plus the cell's offset from it).
+    /// Device position of cell 0's top-left pixel (the pixel gs puts the
+    /// `/BBox` corner on).
     pub(crate) origin: (i32, i32),
     /// The capture canvas to the device-oriented cell (a signed
     /// permutation of pixels).
@@ -167,6 +173,78 @@ fn checked_area(w: u32, h: u32) -> Result<(), PsError> {
         return Err(PsError::Limitcheck);
     }
     Ok(())
+}
+
+/// The device x and y ranges `[lo, hi]` of the box `[x0, y0, x1, y1]`
+/// under the linear map `[a, b, c, d]` (tiny-skia's `sx ky kx sy`).
+fn device_span([a, b, c, d]: [f64; 4], [x0, y0, x1, y1]: [f64; 4]) -> [(f64, f64); 2] {
+    let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)];
+    let span = |f: &dyn Fn(f64, f64) -> f64| {
+        corners
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(x, y)| {
+                let v = f(x, y);
+                (lo.min(v), hi.max(v))
+            })
+    };
+    [span(&|x, y| a * x + c * y), span(&|x, y| b * x + d * y)]
+}
+
+/// gs's `round`: half up, as at its pattern accumulator's origin
+/// (`capture_to_gs`).
+fn gs_round(v: f64) -> f64 {
+    (v + 0.5).floor()
+}
+
+/// gs's whole-pixel cell size along a device axis, from the device range
+/// of the `/BBox` (`floor(bbw + 0.5)`, at least 1).
+fn gs_size((u0, u1): (f64, f64)) -> f64 {
+    gs_round(u1 - u0).max(1.0)
+}
+
+/// The factor gs scales a pattern axis by to make a device step of
+/// `step` the whole `size`: exactly for a step of 2 px or less, else to
+/// `fixed_1` (1/256 px) short of it.
+fn gs_scale(size: f64, step: f64) -> f64 {
+    if step <= 2.0 {
+        size / step
+    } else {
+        (size - 1.0 / 256.0) / step
+    }
+}
+
+/// The device translation, along one device axis, of an axis-aligned (or
+/// quarter-turned) pattern whose cell is placed as gs 10.07.1 places it
+/// (#1342; `gsptype1.c`, `gs_pattern1_make_pattern`). gs first moves the
+/// pattern so the device top-left corner of its `/BBox` (under the
+/// unadjusted matrix) lands on the nearest pixel. For TilingType 1 and 3
+/// whose device `/BBox` is within half a pixel of the step on both axes,
+/// it then scales the cell to a whole-pixel step, moves it by the whole
+/// pixels that keep the `/BBox` centre where it was (`floor(o * (size -
+/// step) + 0.5)`, `o` the centre in steps; not for a step of 2 px or
+/// less), and puts the scaled `/BBox` corner on a pixel again. The cells
+/// sit at that corner plus whole steps.
+///
+/// `t` is the translation, `span` the device range of the `/BBox` under
+/// the unadjusted matrix (relative to `t`), `step` the device step length,
+/// `scaled` the factor gs scaled this device axis's extent by (`None` when
+/// it does not adjust), and `lo` the low edge of pscat's own cell relative
+/// to its translation. The result puts pscat's cell edge on gs's corner.
+fn gs_translation(t: f64, span: (f64, f64), step: f64, scaled: Option<f64>, lo: f64) -> f64 {
+    let (u0, u1) = span;
+    // adjust_bbox_to_pixel_origin under the unadjusted matrix.
+    let t1 = t + (gs_round(t + u0) - (t + u0));
+    let Some(scale) = scaled else {
+        return gs_round(t1 + u0) - lo;
+    };
+    let t2 = if step <= 2.0 {
+        t1
+    } else {
+        let o = (u0 + u1) / 2.0 / step;
+        t1 - gs_round(o * (gs_size(span) - step))
+    };
+    // fix_bbox_after_matrix_adjustment: the scaled corner on a pixel.
+    gs_round(t2 + u0 * scale) - lo
 }
 
 /// The tile's geometry, or the error `makepattern` gives: `rangecheck`
@@ -210,15 +288,49 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
     } else {
         (f64::from(pw) / ax, f64::from(ph) / ay)
     };
-    let (shader, exact) = if along {
-        (
-            [sign(sx_), 0.0, 0.0, sign(sy_), tx.round(), ty.round()],
-            true,
-        )
+    let [bx0, by0, bx1, by1] = spec.bbox;
+    let (rx0, rx1, ry0, ry1) = (bx0 * rsx, bx1 * rsx, by0 * rsy, by1 * rsy);
+    if ![rx0, rx1, ry0, ry1].iter().all(|v| v.is_finite()) {
+        return Err(PsError::Rangecheck);
+    }
+    let lin = if along {
+        Some([sign(sx_), 0.0, 0.0, sign(sy_)])
     } else if across {
-        ([0.0, sign(ky), sign(kx), 0.0, tx.round(), ty.round()], true)
+        Some([0.0, sign(ky), sign(kx), 0.0])
     } else {
-        ([sx_ / rsx, ky / rsx, kx / rsy, sy_ / rsy, tx, ty], false)
+        None
+    };
+    // `shift`: R is shifted by it (in R units) before the capture canvas's
+    // pixel grid is laid over it, so the canvas pixels are device pixels.
+    let (shader, exact, shift) = match lin {
+        Some([a, b, c, d]) => {
+            // Where gs puts the cell (#1342), split into a whole-pixel
+            // shader translation and a sub-pixel shift of R.
+            let [ux, uy] = device_span([sx_, ky, kx, sy_], spec.bbox);
+            let [px, py] = device_span([a, b, c, d], [rx0, ry0, rx1, ry1]);
+            // Device step lengths along x and y.
+            let (dsx, dsy) = if along { (lx, ly) } else { (ly, lx) };
+            let near = |step: f64, (u0, u1): (f64, f64)| (step - (u1 - u0)).abs() < 0.5;
+            let gs_adjusts = spec.tiling_type != 2 && near(dsx, ux) && near(dsy, uy);
+            // gs scales the pattern's x axis by the device x factor and its
+            // y axis by the device y one, so a quarter-turned pattern's
+            // device x extent gets the device y factor.
+            let (fx, fy) = (gs_scale(gs_size(ux), dsx), gs_scale(gs_size(uy), dsy));
+            let (fx, fy) = if along { (fx, fy) } else { (fy, fx) };
+            let cx = gs_translation(tx, ux, dsx, gs_adjusts.then_some(fx), px.0);
+            let cy = gs_translation(ty, uy, dsy, gs_adjusts.then_some(fy), py.0);
+            let (stx, sty) = (cx.round(), cy.round());
+            // R shift g with lin * g = (cx - stx, cy - sty); lin is its own
+            // inverse's transpose (a signed permutation).
+            let (ex, ey) = (cx - stx, cy - sty);
+            let g = (a * ex + b * ey, c * ex + d * ey);
+            ([a, b, c, d, stx, sty], true, g)
+        }
+        None => (
+            [sx_ / rsx, ky / rsx, kx / rsy, sy_ / rsy, tx, ty],
+            false,
+            (0.0, 0.0),
+        ),
     };
     let shader_t = Transform::from_row(
         shader[0] as f32,
@@ -228,20 +340,26 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
         shader[4] as f32,
         shader[5] as f32,
     );
-    // Pattern space to device: R's scale, then the shader.
+    // Pattern space to device: R's scale and shift, then the shader.
     let matrix = Transform::from_row(
         (shader[0] * rsx) as f32,
         (shader[1] * rsx) as f32,
         (shader[2] * rsy) as f32,
         (shader[3] * rsy) as f32,
-        shader[4] as f32,
-        shader[5] as f32,
+        (shader[4] + shader[0] * shift.0 + shader[2] * shift.1) as f32,
+        (shader[5] + shader[1] * shift.0 + shader[3] * shift.1) as f32,
     );
-    let [bx0, by0, bx1, by1] = spec.bbox;
-    let (rx0, rx1, ry0, ry1) = (bx0 * rsx, bx1 * rsx, by0 * rsy, by1 * rsy);
-    if ![rx0, rx1, ry0, ry1].iter().all(|v| v.is_finite()) {
-        return Err(PsError::Rangecheck);
-    }
+    // The /BBox in shifted R. A corner gs puts on a pixel is a whole number
+    // here up to rounding noise, which must not add an empty pixel row.
+    let snap = |v: f64| {
+        if (v - v.round()).abs() < 1e-6 {
+            v.round()
+        } else {
+            v
+        }
+    };
+    let (rx0, rx1) = (snap(rx0 + shift.0), snap(rx1 + shift.0));
+    let (ry0, ry1) = (snap(ry0 + shift.1), snap(ry1 + shift.1));
     let (ix0, iy0) = (rx0.floor(), ry0.floor());
     let cw = checked_side(rx1.ceil() - ix0)?;
     let ch = checked_side(ry1.ceil() - iy0)?;
@@ -249,7 +367,14 @@ pub(crate) fn geometry(spec: &TileSpec) -> Result<Geometry, PsError> {
     if ix0.abs() > 1e9 || iy0.abs() > 1e9 {
         return Err(PsError::Limitcheck);
     }
-    let capture = Transform::from_row(rsx as f32, 0.0, 0.0, rsy as f32, -ix0 as f32, -iy0 as f32);
+    let capture = Transform::from_row(
+        rsx as f32,
+        0.0,
+        0.0,
+        rsy as f32,
+        (shift.0 - ix0) as f32,
+        (shift.1 - iy0) as f32,
+    );
     let lattice = undistorted.then(|| {
         // Pixel (u, v) of the capture canvas is R pixel (ix0 + u, iy0 + v),
         // which the shader's signed permutation takes to the device.
@@ -540,7 +665,7 @@ pub(crate) fn capture_to_gs(
     geom: &Geometry,
     parent_to_gs: Transform,
 ) -> Transform {
-    let to_gs = parent_to_gs.pre_concat(spec.matrix);
+    let to_gs = parent_to_gs.pre_concat(if geom.exact { geom.matrix } else { spec.matrix });
     let [x0, y0, x1, y1] = spec.bbox.map(|v| v as f32);
     let mut pts = [
         tiny_skia::Point::from_xy(x0, y0),
@@ -984,9 +1109,12 @@ mod tests {
         let g = geometry(&spec(m, [0.0, 0.0, 7.3, 7.3], 7.3, 7.3)).unwrap();
         assert_eq!(g.period, (7, 7));
         assert!(g.exact);
+        // gs puts the /BBox top (500.6 - 7.3 = 493.3) on row 493, so the
+        // pattern origin sits at row 500, not at round(500.6) = 501 (gs
+        // 10.07.1, this matrix on a 520 pt page: cell tops 486 493 500).
         assert_eq!(
             (g.shader.sx, g.shader.sy, g.shader.tx, g.shader.ty),
-            (1.0, -1.0, 10.0, 501.0)
+            (1.0, -1.0, 10.0, 500.0)
         );
         // The adjusted matrix takes a step to exactly 7 px.
         let mut p = [tiny_skia::Point::from_xy(7.3, 0.0)];
@@ -1013,12 +1141,14 @@ mod tests {
         let g = geometry(&sp).unwrap();
         let to_gs = capture_to_gs(&sp, &g, Transform::identity());
         // Pattern space through the capture CTM, then to gs: the pattern
-        // origin lands at its device point less the anchor.
+        // origin lands at its device point less the anchor, after the move
+        // that rounds the corner (-0.4, +0.4, #1342's rule; the nested
+        // sweeps in its note hold that rule to gs's raster).
         let mut p = [tiny_skia::Point::from_xy(0.0, 0.0)];
         g.capture.map_points(&mut p);
         to_gs.map_points(&mut p);
         assert!(
-            (p[0].x - 27.0).abs() < 1e-3 && (p[0].y - 54.0).abs() < 1e-3,
+            (p[0].x - 26.6).abs() < 1e-3 && (p[0].y - 54.4).abs() < 1e-3,
             "{p:?}"
         );
     }

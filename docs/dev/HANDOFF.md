@@ -769,7 +769,11 @@ renders eight examples in both and compares block-downsampled output).
   whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree
   (TilingType 2 is the exception, #1332: the cell keeps its true size and
   the PNG lays cells at `floor(i * step)` per axis, `pattern::Lattice`;
-  SVG/PDF get the unadjusted matrix);
+  SVG/PDF get the unadjusted matrix); cells are placed from the device
+  top-left corner of the `/BBox` rounded to a pixel, with gs's
+  centre-keeping whole-pixel move for an adjusted Type 1/3 cell, not from
+  the rounded origin (#1342, `pattern::gs_translation`,
+  `notes/1342-pattern-lattice-phase.md`);
   a pattern used in a context (page or capture) other than the one it was
   made in is placed as gs places it, its device matrix read in gs's
   pattern-accumulator coordinates (#1300, `Capture::to_gs`,
