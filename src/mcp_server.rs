@@ -1290,8 +1290,8 @@ fn tool_list(cfg: &Config) -> Value {
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
                 an existing .png), which is why this tool is not marked read-only. {preview} Limits: \
                 {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
-                side, and the cells rendered at most {max_pixels} pixels in all; labels at \
-                most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
+                side, and the cells rendered at most {max_pixels} pixels in all; labels and \
+                captions at most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
                 all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
                 The inline image is capped at {} bytes: past that, lower the dpi list or use \
                 out_path. {READS_BRIEF}",

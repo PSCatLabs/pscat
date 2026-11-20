@@ -300,8 +300,10 @@ text, before it is drawn. All are in `SECURITY.md`.
 `review_sheet` has caps too, checked before any program runs
 (`output_too_large`): 32 cells (`limit_cells`), the cells at most
 `--max-pixels` in all and the sheet at most `--max-pixels` and 8000 a side
-(`limit_pixels`), a label at most 200 characters, and the sources together at
-most `--max-input-bytes`. The cells share the one `--timeout`. Also in
+(`limit_pixels`), a label or a caption at most 200 characters, and the sources
+together at most `--max-input-bytes`. A sweep's values count toward the 32
+cells, at most 32 values of at most 40 characters, `param` an identifier and
+`captions` one per value; a mat's 10 px pad counts toward the 8000 side. The cells share the one `--timeout`. Also in
 `SECURITY.md`.
 
 The three interpreter limits (steps, time, memory) are on by default for
