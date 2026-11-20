@@ -1128,5 +1128,9 @@ fn function_shading_with_a_zero_width_domain_is_not_exported() {
     let (pdf, _) = pdf_and_canvas(
         shading("[1000000 1000000.125 0 1]", "[800 0 0 100 -800000000 50]").as_bytes(),
     );
-    assert_real_shading(&pdf, 1);
+    assert!(
+        pdf_text(&pdf).contains("/ShadingType 1 "),
+        "a distinct pair is kept"
+    );
+    assert!(page_content(&pdf).contains(" cm /Sh0 sh\n"));
 }
