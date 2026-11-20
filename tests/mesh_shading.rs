@@ -816,3 +816,90 @@ fn an_off_page_mesh_is_charged_its_decoding() {
     let (ok, err) = limited("offpage", src, ["--max-steps", "0"]);
     assert!(ok, "with no limit: {err}");
 }
+
+/// Copying the DataSource is charged on every path (Codex round 2 on
+/// #1376): a 4 MB string with no `/Decode` (nothing decoded, nothing
+/// painted) and an array under `nulldevice` (painting suppressed), each
+/// shaded in a loop, stop at the step limit.
+#[test]
+fn copying_the_data_source_is_charged_on_every_path() {
+    let string = b"/s 4000000 string def
+        /m << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 8 /BitsPerCoordinate 8
+              /BitsPerComponent 8 /DataSource s >> def
+        1 1 300 { pop m shfill } for\n";
+    let array = b"/a [ 20000 { 0 } repeat ] def
+        /m << /ShadingType 4 /ColorSpace /DeviceRGB /DataSource a >> def
+        nulldevice 1 1 5000 { pop m shfill } for\n";
+    for (name, src) in [("copy-string", &string[..]), ("copy-array", &array[..])] {
+        let (ok, err) = limited(name, src, ["--max-steps", "400000"]);
+        assert!(
+            !ok && err.contains("limitexceeded (steps)")
+                && err.contains("OffendingCommand: shfill"),
+            "{name}: {err}"
+        );
+    }
+}
+
+/// Painting is counted as it goes, each triangle's box before it is
+/// painted (Codex round 2 on #1376): two thousand thin slivers, each
+/// spanning the page, stop at the step limit.
+#[test]
+fn overlapping_sliver_triangles_stop_at_the_step_limit() {
+    // Flag, x, y and RGB, a byte each, Decode 0..100: (0,0), (100,100),
+    // (1,0), all red.
+    let tri = "000000ff0000 00ffffff0000 000300ff0000";
+    let src = format!(
+        "<< /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerFlag 8 /BitsPerCoordinate 8
+           /BitsPerComponent 8 /Decode [0 100 0 100 0 1 0 1 0 1]
+           /DataSource <{}> >> shfill\n",
+        tri.repeat(2000)
+    );
+    let (ok, err) = limited("slivers", src.as_bytes(), ["--max-steps", "50000"]);
+    assert!(!ok && err.contains("limitexceeded (steps)"), "{err}");
+    let (ok, err) = limited("slivers", src.as_bytes(), ["--max-steps", "0"]);
+    assert!(ok, "with no limit: {err}");
+}
+
+/// A tensor patch whose tessellation's triangles overlap many times over
+/// (Codex round 1 on #1377: p[i][j] = (1e6 (i - j), 1e6 (i - j) + 10 (i + j))
+/// reaches 256 x 256 cells whose boxes all cross a 100 x 100 page, about
+/// 8.7 million pixel visits) stops at the step limit as it paints, not
+/// after: the work is counted per triangle, not estimated from the patch.
+#[test]
+fn a_patch_with_overlapping_cells_stops_at_the_step_limit() {
+    let p = |i: i32, j: i32| {
+        format!(
+            "{} {}",
+            1_000_000 * (i - j),
+            1_000_000 * (i - j) + 10 * (i + j)
+        )
+    };
+    let order = [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+        (3, 2),
+        (3, 1),
+        (3, 0),
+        (2, 0),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 2),
+        (2, 1),
+    ];
+    let points: Vec<String> = order.iter().map(|&(i, j)| p(i, j)).collect();
+    let src = format!(
+        "<< /ShadingType 7 /ColorSpace /DeviceGray /DataSource [0 {} 0 0.3 0.6 1] >> shfill\n",
+        points.join(" ")
+    );
+    let (ok, err) = limited("overlap-patch", src.as_bytes(), ["--max-steps", "50000"]);
+    assert!(
+        !ok && err.contains("limitexceeded (steps)") && err.contains("OffendingCommand: shfill"),
+        "{err}"
+    );
+}

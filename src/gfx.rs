@@ -3008,10 +3008,10 @@ impl Gfx {
         // The bytes a file DataSource took to read, charged on every path
         // (Codex round 1 on #1376), then the decoding.
         if self.painting_off() || self.capturing_uncolored() {
-            return Ok(shading.read);
+            return Ok(shading.source_work);
         }
         let (mesh, decoded) = shading.decode(probe)?;
-        let spent = shading.read.saturating_add(decoded);
+        let spent = shading.source_work.saturating_add(decoded);
         probe.check(spent / 1024)?;
         let ctm = self.state.ctm;
         let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
@@ -3042,25 +3042,24 @@ impl Gfx {
             return Ok(spent);
         }
         let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
-        let local_t = [t[0], t[1], t[2], t[3], t[4] - bx0, t[5] - by0];
-        // Rasterizing, then painting the layer as a two-stop gradient.
-        let work = mesh
-            .work(&local_t, bw, bh)
-            .saturating_add(shfill_work(bw, bh, 2))
-            .saturating_add(spent);
-        probe.check(work / 1024)?;
+        // Painting the layer onto the page, as a two-stop gradient; the
+        // rasterizing is counted, and held against the limit, as it goes.
+        let before = shfill_work(bw, bh, 2).saturating_add(spent);
+        probe.check(before / 1024)?;
         // The layer, its coverage samples and the owned flags.
         probe.check_alloc(bw.saturating_mul(bh).saturating_mul(8))?;
         let local: Option<Vec<(f64, f64)>> =
             bbox.map(|q| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect());
-        let layer = crate::mesh::mesh_layer(
+        let (layer, rastered) = crate::mesh::mesh_layer(
             shading,
             &mesh,
             &t,
             (bx0, by0, bw, bh),
             local.as_deref(),
+            before,
             probe,
         )?;
+        let work = before.saturating_add(rastered);
         let shader = tiny_skia::Pattern::new(
             layer.as_ref(),
             SpreadMode::Pad,
@@ -4649,7 +4648,7 @@ impl Gfx {
         // Its file DataSource's reading is charged here, once; the decoding
         // each time it is done.
         let mut work = match &shading {
-            ParsedShading::Mesh(m) => m.read,
+            ParsedShading::Mesh(m) => m.source_work,
             _ => 0,
         };
         let mesh = match &shading {
@@ -6088,21 +6087,21 @@ pub(crate) fn shading_layer(
             // buffers held against the limits before it is painted.
             let (mesh, decoded) = m.decode(probe)?;
             let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
-            let work = mesh
-                .work(&t, wu, hu)
-                .saturating_add(shfill_work(wu, hu, 2))
+            let before = shfill_work(wu, hu, 2)
                 .saturating_add(decoded)
                 .saturating_add(base);
-            probe.check(work / 1024)?;
+            probe.check(before / 1024)?;
             probe.check_alloc(wu.saturating_mul(hu).saturating_mul(8))?;
-            let top = crate::mesh::mesh_layer(
+            let (top, rastered) = crate::mesh::mesh_layer(
                 m,
                 &mesh,
                 &t,
                 (0.0, 0.0, wu, hu),
                 bbox.as_ref().map(|q| &q[..]),
+                before,
                 probe,
             )?;
+            let work = before.saturating_add(rastered);
             layer.draw_pixmap(
                 0,
                 0,

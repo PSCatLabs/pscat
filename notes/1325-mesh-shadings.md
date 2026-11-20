@@ -118,6 +118,29 @@ errors.
   as the raster does. Before, a vertex with t = -1 was written as 0, and
   the PDF blended purple where the raster is red.
 
+**Codex round 2 on #1376 (limit accounting on hostile input, by class):**
+
+- **Copying the DataSource.** Every copy is charged on every path, as
+  `MeshShading::source_work`, one step a KiB:
+  - a string's bytes;
+  - a file's bytes, read and then copied;
+  - an array's numbers, converted at 8 units each.
+
+  Each copy is checked against the step and memory limits before it is
+  taken. So a 4 MB string with no `/Decode`, or an array under
+  `nulldevice`, shaded in a loop, stops at `--max-steps`.
+- **Vector growth.** Each decode vector is reserved once with
+  `try_reserve_exact`, at the most the data can hold, after the memory
+  check, so pushing never doubles past the allowance. The file buffer
+  grows geometrically, but each real growth is checked first. The layer's
+  buffers are allocated once, at their checked size.
+- **Painting work.** Work is counted as it is done, not estimated up front.
+  `mesh_layer` adds each triangle's work, its box inside the layer, before
+  painting it. It holds the running total, plus the work the caller has
+  already done, against the step limit every 1 Mi units. The layer is not
+  yet on the page, so a hostile mesh stops at the limit and the page is
+  untouched. The same loop serves every type.
+
 **Shading patterns (#1378).** After #1367 merged, a mesh is a shading
 pattern too (`makepattern` PatternType 2 with a mesh `/Shading`):
 
@@ -166,11 +189,15 @@ same way.
   at most 2 device pixels and at most 256 a side, into the same triangles
   as part 1; its colour is bilinear in (u,v). Larger v paints over smaller,
   then larger u, as the PDF spec orders a folded patch.
-- **Limits.** A patch's work is estimated from its tessellation's size and
-  its control points' box, without tessellating it, because that estimate
-  runs before the limits are looked at. A few KB of packed 1-bit patches
-  that would tessellate into hundreds of millions of triangles is stopped
-  by the step limit at once (`a_huge_packed_patch_mesh_is_stopped_promptly`).
+- **Limits.** A patch's work is counted triangle by triangle as
+  `mesh_layer` paints its tessellation, with the same loop and polling as
+  part 1. An estimate from the control points' box was not an upper bound
+  (Codex round 1 on #1377): a tensor patch whose cells all cross the page
+  made about 8.7 million pixel visits against an estimate of 20,000, and
+  now stops at the limit (`a_patch_with_overlapping_cells_stops_at_the_step_limit`).
+  A few KB of packed 1-bit patches that would tessellate into hundreds of
+  millions of triangles stops too (`a_huge_packed_patch_mesh_is_stopped_promptly`).
+  The patch vector is reserved exactly, as the others are.
 - **Limits, from Codex round 1 on #1376.** The patch decoder counts and
   polls each patch as the triangle decoders do. A patch's corner `t`
   values join the PDF's unclamped ramp range.

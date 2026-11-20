@@ -49,7 +49,13 @@ const TRIANGLE_WORK: u64 = 64;
 /// Work units decoding a vertex or patch costs, the bounds scan over it
 /// included, and how many are decoded between looks at the limits.
 const DECODE_WORK: u64 = 64;
+
+/// Work units converting one number of an array `/DataSource` costs.
+const ARRAY_NUMBER_WORK: u64 = 8;
 const DECODE_POLL: u64 = 4096;
+
+/// Work units painted into a mesh layer between looks at the limits.
+const LAYER_POLL: u64 = 1 << 20;
 
 /// A vertex: its point in shading (user) space and its colour values,
 /// `n` components or, with a `/Function`, one `t`.
@@ -109,9 +115,11 @@ pub(crate) struct MeshShading {
     per_row: usize,
     source: Source,
     pub(crate) bbox: Option<(f64, f64, f64, f64)>,
-    /// Bytes read from a file `/DataSource` while parsing, which the
-    /// operator that parsed it charges, one step a KiB.
-    pub(crate) read: u64,
+    /// The work parsing took to copy the `/DataSource` (a byte a unit:
+    /// a string's or a file's bytes, read and copied; an array's numbers,
+    /// converted), which the operator that parsed it charges on every path,
+    /// one step a KiB (Codex rounds 1 and 2 on #1376).
+    pub(crate) source_work: u64,
 }
 
 /// A mesh's `/Function` as RGB stops over `domain`, positions 0 to 1.
@@ -232,7 +240,15 @@ fn read_file(
             return Ok((out, 0));
         }
         loop {
-            probe.check_alloc(out.len().saturating_add(READ_CHUNK))?;
+            // Room for the next chunk, grown geometrically but each real
+            // growth (the old buffer is live while it is copied) held
+            // against the memory limit first (Codex round 2 on #1376).
+            if out.capacity() - out.len() < READ_CHUNK {
+                let want = (out.capacity() * 2).max(out.len() + READ_CHUNK);
+                probe.check_alloc(want)?;
+                out.try_reserve_exact(want - out.len())
+                    .map_err(|_| PsError::Limitcheck)?;
+            }
             let got = top.read_into(&mut out, READ_CHUNK)?;
             read += got as u64;
             probe.check(read / 1024)?;
@@ -310,15 +326,22 @@ pub(crate) fn parse(
     let src = d.get("DataSource").ok_or(PsError::Rangecheck)?;
     let bytes = match &src.value {
         Value::Array(a) => {
+            // The conversion is charged up front and its vector allocated
+            // once, at its size, after the memory check.
+            let work = (a.len() as u64).saturating_mul(ARRAY_NUMBER_WORK);
+            probe.check(work / 1024)?;
             probe.check_alloc(a.len().saturating_mul(std::mem::size_of::<f64>()))?;
-            let nums = (0..a.len())
-                .map(|i| match a.get(i).map(|o| o.value) {
-                    Some(Value::Integer(n)) => Ok(n as f64),
-                    Some(Value::Real(r)) if r.is_finite() => Ok(r),
-                    Some(Value::Real(_)) => Err(PsError::Rangecheck),
-                    _ => Err(PsError::Typecheck),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut nums = Vec::new();
+            nums.try_reserve_exact(a.len())
+                .map_err(|_| PsError::Limitcheck)?;
+            for i in 0..a.len() {
+                nums.push(match a.get(i).map(|o| o.value) {
+                    Some(Value::Integer(n)) => n as f64,
+                    Some(Value::Real(r)) if r.is_finite() => r,
+                    Some(Value::Real(_)) => return Err(PsError::Rangecheck),
+                    _ => return Err(PsError::Typecheck),
+                });
+            }
             return Ok(MeshShading {
                 ty,
                 cs,
@@ -326,23 +349,26 @@ pub(crate) fn parse(
                 per_row,
                 source: Source::Numbers(nums),
                 bbox: crate::shading::parse_bbox(d)?,
-                read: 0,
+                source_work: work,
             });
         }
         Value::String(s) => {
             let b = s.borrow_bytes();
+            probe.check((b.len() as u64) / 1024)?;
             probe.check_alloc(b.len())?;
-            (Rc::from(&*b), 0)
+            (Rc::from(&*b), b.len() as u64)
         }
         Value::File(f) => {
             let (v, read) = read_file(f, probe)?;
             // `Rc::from` copies the buffer.
+            let work = read.saturating_add(v.len() as u64);
+            probe.check(work / 1024)?;
             probe.check_alloc(v.len())?;
-            (Rc::from(v), read)
+            (Rc::from(v), work)
         }
         _ => return Err(PsError::Typecheck),
     };
-    let (bytes, read) = bytes;
+    let (bytes, source_work) = bytes;
     let flag_bits = if ty == 5 {
         0
     } else {
@@ -373,7 +399,7 @@ pub(crate) fn parse(
             decode,
         }),
         bbox: crate::shading::parse_bbox(d)?,
-        read,
+        source_work,
     })
 }
 
@@ -546,8 +572,7 @@ impl MeshShading {
         };
         match self.ty {
             4 => {
-                probe.check_alloc(most.saturating_mul(std::mem::size_of::<[Vertex; 3]>()))?;
-                let mut tris: Vec<[Vertex; 3]> = Vec::new();
+                let mut tris: Vec<[Vertex; 3]> = reserved(most, probe)?;
                 while !r.at_end() {
                     tick()?;
                     let flag = r.flag()?;
@@ -579,14 +604,13 @@ impl MeshShading {
                 Ok(Mesh::Triangles(tris))
             }
             5 => {
-                probe.check_alloc(most.saturating_mul(std::mem::size_of::<Vertex>()))?;
-                let mut verts = Vec::new();
+                let mut verts: Vec<Vertex> = reserved(most, probe)?;
                 while !r.at_end() {
                     tick()?;
                     verts.push(r.vertex()?);
                     r.align();
                 }
-                if verts.is_empty() || verts.len() % self.per_row != 0 {
+                if verts.is_empty() || !verts.len().is_multiple_of(self.per_row) {
                     return Err(PsError::Rangecheck);
                 }
                 Ok(Mesh::Lattice {
@@ -595,8 +619,7 @@ impl MeshShading {
                 })
             }
             _ => {
-                probe.check_alloc(most.saturating_mul(std::mem::size_of::<Patch>()))?;
-                let mut patches: Vec<Patch> = Vec::new();
+                let mut patches: Vec<Patch> = reserved(most, probe)?;
                 while !r.at_end() {
                     tick()?;
                     let flag = r.flag()? as usize;
@@ -641,6 +664,17 @@ impl MeshShading {
             }
         }
     }
+}
+
+/// An empty vector with room for exactly `most` elements, the most the data
+/// can hold, taken once after the memory check: pushing no more than that
+/// never grows it, so no doubling can pass the allowance unchecked (Codex
+/// round 2 on #1376).
+fn reserved<T>(most: usize, probe: &crate::limits::LimitProbe) -> Result<Vec<T>, PsError> {
+    probe.check_alloc(most.saturating_mul(std::mem::size_of::<T>()))?;
+    let mut v = Vec::new();
+    v.try_reserve_exact(most).map_err(|_| PsError::Limitcheck)?;
+    Ok(v)
 }
 
 /// A Coons patch's interior control points, which make it the tensor
@@ -872,37 +906,6 @@ impl Mesh {
         }
         b
     }
-
-    /// The work painting the mesh into a `w` x `h` layer costs: each
-    /// triangle, and each pixel of its box inside the layer. A patch is
-    /// estimated from its tessellation's size and its control points' box
-    /// (twice over, as its triangles' boxes overlap), without tessellating
-    /// it: this runs before the limits are looked at.
-    pub(crate) fn work(&self, t: &[f64; 6], w: usize, h: usize) -> u64 {
-        let mut work = 0u64;
-        let mut add = |tris: u64, px: u64| {
-            work = work
-                .saturating_add(tris.saturating_mul(TRIANGLE_WORK))
-                .saturating_add(px.saturating_mul(PIXEL_WORK));
-        };
-        match self {
-            Mesh::Patches(patches) => {
-                for patch in patches {
-                    let dp = device_patch(patch, t);
-                    let pts: Vec<(f64, f64)> = dp.p.iter().flatten().copied().collect();
-                    let px = TriBox::of_points(&pts, w, h).map_or(0, |b| b.area());
-                    add(2 * (dp.nu * dp.nv) as u64, px.saturating_mul(2));
-                }
-            }
-            _ => {
-                let _ = self.for_each_triangle(t, |p, _| {
-                    add(1, TriBox::of(&p, w, h).map_or(0, |b| b.area()));
-                    Ok(())
-                });
-            }
-        }
-        work
-    }
 }
 
 /// A triangle's pixel box, clipped to the layer.
@@ -946,31 +949,43 @@ impl TriBox {
 /// `(x0, y0)`, `t` mapping shading space to the device (#1325).
 /// Premultiplied; transparent outside the mesh and outside `bbox` (the
 /// `/BBox` in the layer's own pixels), which is anti-aliased as a fill.
+///
+/// Returns the layer and the work painting it took: each triangle, and
+/// each pixel of its box inside the layer. That work is counted as it is
+/// done, a triangle's before it is painted, and held against the step
+/// limit together with `before` (the work the caller has already done)
+/// every `LAYER_POLL` units, so a hostile mesh (a patch whose tessellation's
+/// boxes overlap many times over, Codex round 2 on #1376/#1377) stops at
+/// the limit, before the page is touched, not after.
 pub(crate) fn mesh_layer(
     shading: &MeshShading,
     mesh: &Mesh,
     t: &[f64; 6],
     (x0, y0, w, h): (f64, f64, usize, usize),
     bbox: Option<&[(f64, f64)]>,
+    before: u64,
     probe: &crate::limits::LimitProbe,
-) -> Result<tiny_skia::Pixmap, PsError> {
+) -> Result<(tiny_skia::Pixmap, u64), PsError> {
     let mut layer = tiny_skia::Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
     let mut cover = vec![0u16; w * h];
     let mut owned = vec![false; w * h];
     // Shading space to the layer's pixels.
     let t = [t[0], t[1], t[2], t[3], t[4] - x0, t[5] - y0];
     let px = layer.data_mut();
-    let mut since_check = 0u64;
+    let (mut done, mut checked) = (0u64, 0u64);
     mesh.for_each_triangle(&t, |p, c| {
-        since_check += TRIANGLE_WORK;
-        if since_check > 1 << 22 {
-            since_check = 0;
-            probe.check(0)?;
+        let pixels = TriBox::of(&p, w, h).map_or(0, |b| b.area());
+        done = done
+            .saturating_add(TRIANGLE_WORK)
+            .saturating_add(pixels.saturating_mul(PIXEL_WORK));
+        if done - checked >= LAYER_POLL {
+            checked = done;
+            probe.check(before.saturating_add(done) / 1024)?;
         }
-        let painted = raster_triangle(shading, p, c, w, h, px, &mut cover, &mut owned);
-        since_check = since_check.saturating_add(painted.saturating_mul(PIXEL_WORK));
+        raster_triangle(shading, p, c, w, h, px, &mut cover, &mut owned);
         Ok(())
     })?;
+    probe.check(before.saturating_add(done) / 1024)?;
     let cut = match bbox {
         Some(q) => {
             let mut m = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
@@ -1005,13 +1020,13 @@ pub(crate) fn mesh_layer(
         }
         chunk[3] = a as u8;
     }
-    Ok(layer)
+    Ok((layer, done))
 }
 
 /// One triangle into the layer: its coverage samples OR-ed into `cover`,
 /// and its colour into every pixel whose centre it holds (`owned` from
 /// then on) or, at an edge, into a pixel no triangle's centre holds yet,
-/// from the nearest point of the triangle. Returns the pixels it looked at.
+/// from the nearest point of the triangle.
 #[allow(clippy::too_many_arguments)]
 fn raster_triangle(
     shading: &MeshShading,
@@ -1022,7 +1037,7 @@ fn raster_triangle(
     px: &mut [u8],
     cover: &mut [u16],
     owned: &mut [bool],
-) -> u64 {
+) {
     // Edge k runs from p[k] to p[k + 1]; E_k(x, y) = A x + B y + C is
     // positive on the inside once the triangle is turned the right way.
     let edge = |p: &[(f64, f64); 3], k: usize| {
@@ -1038,10 +1053,10 @@ fn raster_triangle(
         area = -area;
     }
     if !(area > 1e-12 && area.is_finite()) {
-        return 0;
+        return;
     }
     let Some(b) = TriBox::of(&p, w, h) else {
-        return 0;
+        return;
     };
     let e = [edge(&p, 0), edge(&p, 1), edge(&p, 2)];
     for y in b.y0..b.y1 {
@@ -1118,7 +1133,6 @@ fn raster_triangle(
             px[k * 4..k * 4 + 3].copy_from_slice(&[to8(r), to8(g), to8(bl)]);
         }
     }
-    b.area()
 }
 
 #[cfg(test)]
@@ -1241,5 +1255,39 @@ mod tests {
         assert_eq!(r.at(1.0).0, 1.0);
         assert_eq!(r.at(-3.0).0, 0.0);
         assert_eq!(r.at(9.0).0, 1.0);
+    }
+
+    /// Decoding takes the vectors' room once, exactly the most the data can
+    /// hold, so pushing never doubles past what the memory check allowed
+    /// (Codex round 2 on #1376: 8,194 lattice vertices took room for
+    /// 16,384).
+    #[test]
+    fn decoding_reserves_exactly_what_the_data_can_hold() {
+        let m = mesh(
+            "<< /ShadingType 5 /ColorSpace /DeviceRGB /VerticesPerRow 2 \
+             /DataSource [ 8194 { 0 0 0 0 0 } repeat ] >>",
+        );
+        let Mesh::Lattice { verts, .. } = m
+            .decode(&crate::limits::LimitProbe::NONE)
+            .expect("decodes")
+            .0
+        else {
+            panic!("a lattice");
+        };
+        assert_eq!(verts.len(), 8194);
+        assert_eq!(verts.capacity(), 8194);
+        let m = mesh(
+            "<< /ShadingType 4 /ColorSpace /DeviceRGB \
+             /DataSource [ 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 4097 { 2 0 0 0 0 0 } repeat ] >>",
+        );
+        let Mesh::Triangles(t) = m
+            .decode(&crate::limits::LimitProbe::NONE)
+            .expect("decodes")
+            .0
+        else {
+            panic!("triangles");
+        };
+        assert_eq!(t.len(), 4098);
+        assert_eq!(t.capacity(), 4100, "one a vertex at most, never doubled");
     }
 }
