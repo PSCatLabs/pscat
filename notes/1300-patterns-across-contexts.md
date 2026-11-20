@@ -116,12 +116,11 @@ identical, the control (the first picture above) differing.
   resampled twice (into the outer tile, then onto the page); gs draws the
   outer cell at a whole-pixel position per copy, pscat at its exact
   lattice position.
-- A pattern painted inside an *uncoloured* pattern's `PaintProc` (from
+- ~~A pattern painted inside an *uncoloured* pattern's `PaintProc` (from
   the page or made there): the raster takes its coverage, as gs does,
   but the PDF stream of an uncoloured pattern takes no colour, so it
-  fills solid there, and SVG writes the inner pattern's own colours.
-  This already happened before this change for a pattern made in that
-  `PaintProc` itself; a follow-up.
+  fills solid there, and SVG writes the inner pattern's own colours.~~
+  Fixed in #1340 (`notes/1340-uncoloured-paintproc-coverage.md`).
 - pscat runs a `PaintProc` at `makepattern`, gs at first use, so a
   `PaintProc` that names a page pattern made after the outer
   `makepattern` is `undefined` in pscat and works in gs. This feature

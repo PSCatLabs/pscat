@@ -98,6 +98,9 @@ pub struct SvgRecorder {
     /// Shading pattern paints on this page (#1298), by pattern identity,
     /// placement and pen; the `Rc` keeps the address from being reused.
     shading_ids: HashMap<ShadingKey, (Rc<ShadingPattern>, String)>,
+    /// Coverage masks in an uncoloured tile (#1340), by the paint they
+    /// take the alpha of: the mask's id.
+    coverage_ids: HashMap<String, String>,
 }
 
 /// A shading pattern's address, its placement's bits and a pen's.
@@ -145,6 +148,7 @@ impl SvgRecorder {
             next_pattern: 0,
             imported: Vec::new(),
             shading_ids: HashMap::new(),
+            coverage_ids: HashMap::new(),
         }
     }
 
@@ -175,13 +179,58 @@ impl SvgRecorder {
         match ink {
             Ink::Rgb(_) if self.uncolored => "currentColor".to_string(),
             Ink::Rgb(rgb) => Self::color(*rgb),
+            // Coverage only, in an uncoloured tile (#1038): the mark is
+            // seen through `coverage_mask`.
+            Ink::Pattern(..) | Ink::Shading(..) if self.uncolored => "currentColor".to_string(),
             Ink::Pattern(tile, rgb, place) => {
                 self.pattern_ref(tile, *rgb, place.as_ref().map(|p| p.matrix), pen)
             }
-            // Coverage only, in an uncoloured tile (#1038).
-            Ink::Shading(..) if self.uncolored => "currentColor".to_string(),
             Ink::Shading(sp, place) => self.shading_ref(sp, place.as_ref().map(|p| p.hop), pen),
         }
+    }
+
+    /// A mark painted with a pattern in an uncoloured tile (#1340) paints
+    /// that pattern's coverage in the tile's colour, as gs's raster does:
+    /// the element is drawn in `currentColor` inside a group seen through
+    /// this alpha mask, a rect over the canvas painted with the pattern.
+    /// The group carries no `transform`, so the mask is in this recorder's
+    /// coordinates even for a pen-space stroke. Returns the group's opening
+    /// tag, or `None` when `ink` is not a pattern or the tile is coloured.
+    fn coverage_mask(&mut self, ink: &Ink, attrs: &str) -> Option<String> {
+        if !self.uncolored {
+            return None;
+        }
+        // Only the alpha counts, so an uncoloured pattern is named in black
+        // and one mask serves every colour.
+        let paint = match ink {
+            Ink::Rgb(_) => return None,
+            Ink::Pattern(tile, _, place) => self.pattern_ref(
+                tile,
+                (0.0, 0.0, 0.0),
+                place.as_ref().map(|p| p.matrix),
+                None,
+            ),
+            Ink::Shading(sp, place) => self.shading_ref(sp, place.as_ref().map(|p| p.hop), None),
+        };
+        let id = match self.coverage_ids.get(&paint) {
+            Some(id) => id.clone(),
+            None => {
+                // Masks share the gradients' counter: the letter keeps ids
+                // apart.
+                let id = format!("{}k{}", self.prefix, self.next_grad);
+                self.next_grad += 1;
+                let (w, h) = (self.width, self.height);
+                let _ = write!(
+                    self.defs,
+                    "<mask id=\"{id}\" mask-type=\"alpha\" maskUnits=\"userSpaceOnUse\" \
+                     x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\">\
+                     <rect width=\"{w}\" height=\"{h}\" fill=\"{paint}\"/></mask>"
+                );
+                self.coverage_ids.insert(paint, id.clone());
+                id
+            }
+        };
+        Some(format!("<g mask=\"url(#{id})\"{attrs}>"))
     }
 
     /// The paint for shading pattern `sp` (#1298), its defs written into
@@ -619,12 +668,24 @@ impl SvgRecorder {
         self.flush_text();
         let paint = self.ink_attr(ink, None);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"{paint}\" fill-rule=\"{}\"{}{leftover}/>{close}",
+            "{open}{mask}<path d=\"{d}\" fill=\"{paint}\" fill-rule=\"{}\"{}{leftover}/>{unmask}{close}",
             Self::rule_attr(rule),
             Self::opacity_attr(comp, false),
         );
+    }
+
+    /// The coverage-mask group around a mark (`coverage_mask`, #1340): its
+    /// opening and closing tags, and the attributes left for the element.
+    /// The clip or blend attributes `leftover` would put on the element go
+    /// on the group, which shares the element's device space.
+    fn masked(&mut self, ink: &Ink, leftover: String) -> (String, &'static str, String) {
+        match self.coverage_mask(ink, &leftover) {
+            Some(open) => (open, "</g>", String::new()),
+            None => (String::new(), "", leftover),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -687,10 +748,11 @@ impl SvgRecorder {
                 num(phase)
             );
         }
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{paint}\" stroke-width=\"{}\" \
-             stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{close}",
+            "{open}{mask}<path{transform} d=\"{d}\" fill=\"none\" stroke=\"{paint}\" stroke-width=\"{}\" \
+             stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\"{extra}{}{leftover}/>{unmask}{close}",
             num(width),
             fmt_f32(miter_limit),
             Self::opacity_attr(comp, true),
@@ -797,9 +859,10 @@ impl SvgRecorder {
         d.push('Z');
         let paint = self.ink_attr(ink, None);
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
+        let (mask, unmask, leftover) = self.masked(ink, leftover);
         let _ = write!(
             self.body,
-            "{open}<path d=\"{d}\" fill=\"{paint}\" mask=\"url(#{prefix}m{id})\"{}{leftover}/>{close}",
+            "{open}{mask}<path d=\"{d}\" fill=\"{paint}\" mask=\"url(#{prefix}m{id})\"{}{leftover}/>{unmask}{close}",
             Self::opacity_attr(comp, false),
         );
     }
@@ -1019,6 +1082,7 @@ impl SvgRecorder {
         self.pattern_ids.clear();
         self.tile_groups.clear();
         self.shading_ids.clear();
+        self.coverage_ids.clear();
     }
 
     fn document(&self) -> String {

@@ -775,6 +775,14 @@ renders eight examples in both and compares block-downsampled output).
   pattern-accumulator coordinates (#1300, `Capture::to_gs`,
   `pattern::foreign_placement`; PDF writes a copy of the pattern stream
   under the new `/Matrix`);
+  a mark painted with a pattern (of either kind) inside an *uncoloured*
+  pattern's `PaintProc` paints that pattern's coverage, as gs's raster
+  does (#1340, `notes/1340-uncoloured-paintproc-coverage.md`): SVG draws it
+  in `currentColor` through an alpha `<mask>`, and PDF through an `/SMask`
+  ExtGState whose form fills the `/BBox` with the inner pattern; gs drops an
+  uncoloured pattern whose resources hold a soft mask, so such an outer
+  pattern is written PaintType 1 in each colour it is used in
+  (`PdfRecorder::colored_variant`);
   text output modes keep outlines under a pattern. `imagemask` paints the
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
