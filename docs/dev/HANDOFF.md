@@ -1986,6 +1986,9 @@ renders eight examples in both and compares block-downsampled output).
   See `notes/1056-currentfilename-and-lib-install.md`.
   `currentfilename` keeps the name as given, backslashes included on Windows; the documented
   `dirname` helper splits on `/` and `\` (#1346, `notes/1346-currentfilename-windows-separators.md`).
+  A killed install's `.NAME.new-<pid>` stage is swept by the next install and named by
+  `lib list` (#1344, `notes/1344-lib-install-stale-stage.md`); only a stage whose process is
+  gone and that carries a pscat marker (a real file, not a link) is deleted.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

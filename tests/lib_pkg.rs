@@ -455,3 +455,43 @@ fn help_lists_the_subcommand() {
     let o = pscat(&base.join("home"), &base, &["--help"]);
     assert!(out(&o).contains("pscat lib install DIR"), "{}", out(&o));
 }
+
+/// A crash between building the stage and the swap leaves `.NAME.new-<pid>`
+/// (#1344): `list` names it, and the next install removes it.
+#[cfg(unix)]
+#[test]
+fn a_stage_left_by_a_killed_install_is_listed_and_then_swept() {
+    let base = common::scratch_dir("lib-stale-stage");
+    let home = base.join("home");
+    let pkg = make_package(&base.join("src"), "mypkg");
+    // A pid that is valid but not running.
+    let stale = home.join("lib/.mypkg.new-2000000000");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join(".pscat-lib-stage"), "pid 2000000000\n").unwrap();
+    std::fs::write(stale.join("main.ps"), "half").unwrap();
+
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(
+        listed.contains("left by an interrupted install"),
+        "{listed}"
+    );
+    assert!(
+        listed.contains("the next pscat lib install removes it"),
+        "{listed}"
+    );
+    assert!(stale.is_dir(), "list must not delete anything");
+
+    let text = ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", pkg.to_str().unwrap()],
+    ));
+    assert!(
+        text.contains("removed") && text.contains(".mypkg.new-2000000000"),
+        "{text}"
+    );
+    assert!(!stale.exists());
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(!listed.contains("interrupted"), "{listed}");
+    assert!(home.join("lib/mypkg/main.ps").is_file());
+}
