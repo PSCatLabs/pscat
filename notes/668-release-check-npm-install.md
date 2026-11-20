@@ -16,7 +16,7 @@
   signature) and, with `--attested`, requires the verified provenance
   attestation: `npm audit signatures` exits 0 for a package with no
   attestation, so the script reads its report.
-- A published release before 0.7.0 (0.6.2, 0.6.3: what the pull-request run
+- A published release before 0.7.0 (0.6.3 is what the pull-request run
   of the workflow installs, crates.io's newest) has no SVG/PDF output, no
   `pscat/node.js` export and no `pscat.global.js`, and its `index.d.ts` has no
   SVG/PDF, so for those the script skips that part. A tarball is always
@@ -26,4 +26,7 @@
 - `.gitattributes` pins the script to LF so a Windows checkout can run it.
 
 Not done: the 0.6.2 registry package has no provenance (published by hand),
-so `--attested` fails for it by design.
+so `--attested` fails for it by design (provenance starts at 0.6.3). The
+attestation's signer identity is not pinned to `release.yml` as it is for the
+archives: `npm audit signatures` only says it verifies. The script retries up
+to 3 times in the workflow, 30 s apart, for registry lag after `publish`.

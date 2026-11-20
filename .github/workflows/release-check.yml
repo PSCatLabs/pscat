@@ -326,6 +326,14 @@ jobs:
           # (An empty array under `set -u` is an error in macOS's bash 3.2.)
           FLAG=--no-attested
           if [ "$ATTESTED" = true ]; then FLAG=--attested; fi
-          ./scripts/test_npm_tarball.sh "pscat@$VERSION" "$FLAG" ||
-            { echo "::error::npm $RUNNER_OS: pscat@$VERSION does not install or run"; exit 1; }
+          # Up to 3 tries: right after `publish` the tarball, the signing keys and
+          # the attestation can reach a registry edge a little apart. The script
+          # installs into a fresh directory each time, so a retry is harmless.
+          OK=false
+          for i in 1 2 3; do
+            if ./scripts/test_npm_tarball.sh "pscat@$VERSION" "$FLAG"; then OK=true; break; fi
+            echo "attempt $i of 3 failed"
+            if [ "$i" -lt 3 ]; then sleep 30; fi
+          done
+          [ "$OK" = true ] || { echo "::error::npm $RUNNER_OS: pscat@$VERSION does not install or run"; exit 1; }
           echo "- npm on $RUNNER_OS: npm install pscat@$VERSION ok, signature$([ "$ATTESTED" = true ] && echo ' and provenance') verified, renders" >> "$GITHUB_STEP_SUMMARY"

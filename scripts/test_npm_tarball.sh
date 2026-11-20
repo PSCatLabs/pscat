@@ -5,7 +5,7 @@
 #
 #   ./scripts/build_npm.sh --pack DIR
 #   ./scripts/test_npm_tarball.sh DIR/pscat-X.Y.Z.tgz [--no-types]
-#   ./scripts/test_npm_tarball.sh pscat@X.Y.Z [--no-types] [--attested]
+#   ./scripts/test_npm_tarball.sh pscat@X.Y.Z [--no-types] [--attested | --no-attested]
 #
 # An argument that is not a file is an npm spec, `pscat@X.Y.Z` or a bare
 # X.Y.Z. For one, the installed version must be the one asked for and
@@ -45,6 +45,8 @@ if [[ -f "$ARG" ]]; then
   EXPECT=""
   [[ $ATTESTED -eq 0 ]] || { echo "--attested needs an npm spec: a tarball has no registry attestation" >&2; exit 2; }
 else
+  # A path that is not a file (a mistyped name, a glob that matched nothing) is not an npm spec.
+  [[ "$ARG" != *.tgz && "$ARG" != */* ]] || { echo "test_npm_tarball.sh: no such file: $ARG" >&2; exit 2; }
   SOURCE="the registry"
   SPEC="$ARG"
   [[ "$SPEC" == pscat@* ]] || SPEC="pscat@$SPEC"

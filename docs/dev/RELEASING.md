@@ -596,7 +596,7 @@ unpublished: fix forward with a patch release. For a release candidate it
 runs the archive checks only (the crate is not on crates.io and the package is not on npm). To re-run the check for any
 published version, X.Y.Z or X.Y.Z-rc.N: Actions → release-check → Run workflow (empty version =
 crates.io's newest; tick `attested` only for releases published with
-attestations). A pull request that edits `release-check.yml` runs it against
+attestations, and for npm only 0.6.3 and later have provenance). A pull request that edits `release-check.yml` runs it against
 crates.io's newest version. Versions before 0.6.1 have no `--version`, so the
 check runs a program instead.
 
