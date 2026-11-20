@@ -4,7 +4,9 @@
 //! look like the outlines: gs (and poppler, when installed) rasterize the
 //! text PDF and compare it with pscat's canvas and with the outline PDF.
 //! `pdftotext` (poppler) reads the text back. The tests that need gs,
-//! pdftotext or pdftoppm skip without them, with a `SKIPPED` line.
+//! pdftotext or pdftoppm skip without them, with a `SKIPPED` line;
+//! `PSCAT_REQUIRE_GS` / `PSCAT_REQUIRE_POPPLER` (set in CI) turn a skip into
+//! a failure (`common::gs_available`, `common::poppler_available`).
 
 use std::process::Command;
 
@@ -310,25 +312,9 @@ fn the_cli_flag_needs_pdf_and_writes_fonts() {
 // External readers
 // ---------------------------------------------------------------------
 
-/// Whether a poppler tool runs; the skip is announced like gs's.
-fn tool_available(tool: &str) -> bool {
-    let ok = Command::new(tool)
-        .arg("-v")
-        .output_deadline()
-        .is_ok_and(|o| o.status.success());
-    if !ok {
-        let thread = std::thread::current();
-        eprintln!(
-            "SKIPPED ({tool} not installed): {}",
-            thread.name().unwrap_or("(unnamed test)")
-        );
-    }
-    ok
-}
-
 #[test]
 fn pdftotext_extracts_latin_hangul_and_symbols() {
-    if !tool_available("pdftotext") {
+    if !common::poppler_available("pdftotext") {
         return;
     }
     let dir = common::scratch_dir("pscat-pdf-text-extract");
@@ -522,7 +508,7 @@ fn gs_renders_the_text_pdf_like_the_outlines() {
 
 #[test]
 fn pdftoppm_renders_the_text_pdf_like_the_outlines() {
-    if !tool_available("pdftoppm") {
+    if !common::poppler_available("pdftoppm") {
         return;
     }
     assert_renders_like_outlines("pdftoppm");

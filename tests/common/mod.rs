@@ -148,6 +148,60 @@ pub fn gs_available() -> bool {
 }
 
 // ---------------------------------------------------------------------
+// poppler (issue #1206)
+//
+// `pdftotext` and `pdftoppm` read pscat's PDFs back in tests/pdf_text.rs. They
+// skipped silently in CI, as gs once did, so the same rule applies:
+//   - the tool runs: true, after a `ran` line on stderr.
+//   - missing, `PSCAT_REQUIRE_POPPLER` unset: false, after a `SKIPPED` line.
+//   - missing, `PSCAT_REQUIRE_POPPLER` set (the Linux `cross-platform` CI job
+//     installs poppler-utils): panic, so a lost install fails the job.
+// Both lines go straight to stderr, not through `eprintln!`, so libtest's
+// capture cannot swallow them: a CI log shows which poppler tests ran.
+// ---------------------------------------------------------------------
+
+/// What a test does about a poppler tool, as a pure decision (as
+/// `gs_decision`): `Ok(true)` run the check, `Ok(false)` skip, `Err` the
+/// requirement is on and the tool is missing.
+pub fn poppler_decision(have_tool: bool, require: bool) -> Result<bool, &'static str> {
+    match (have_tool, require) {
+        (true, _) => Ok(true),
+        (false, false) => Ok(false),
+        (false, true) => Err(
+            "PSCAT_REQUIRE_POPPLER is set but the poppler tool is not runnable; this test \
+             would have been skipped. Install poppler-utils on this runner, or unset \
+             PSCAT_REQUIRE_POPPLER.",
+        ),
+    }
+}
+
+/// True when the poppler `tool` (`pdftotext`, `pdftoppm`) runs; the one skip
+/// rule for poppler tests (see the section comment above).
+pub fn poppler_available(tool: &str) -> bool {
+    use std::io::Write as _;
+    let have = std::process::Command::new(tool)
+        .arg("-v")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let require =
+        std::env::var_os("PSCAT_REQUIRE_POPPLER").is_some_and(|v| !v.is_empty() && v != "0");
+    let thread = std::thread::current();
+    let test = thread.name().unwrap_or("(unnamed test)");
+    match poppler_decision(have, require) {
+        Ok(true) => {
+            let _ = writeln!(std::io::stderr(), "ran ({tool} found): {test}");
+            true
+        }
+        Ok(false) => {
+            let _ = writeln!(std::io::stderr(), "SKIPPED ({tool} not installed): {test}");
+            false
+        }
+        Err(why) => panic!("{test}: {why} (tool: {tool})"),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Scratch paths (issue #487)
 //
 // Agents run `cargo test` in several worktrees at once, and the tests
