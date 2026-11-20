@@ -3143,8 +3143,19 @@ fn review_sheet_sweep_cells_are_sandboxed_and_failures_name_the_value() {
         json!({ "entries": [{ "source": read, "sweep": { "seed": [7] } }] }),
     );
     let err = |r: &Value| texts(r).join("\n");
-    assert!(err(&plain).contains("invalidfileaccess"), "{plain}");
-    assert!(err(&swept).contains("invalidfileaccess"), "{swept}");
+    // The error a read outside the roots gives (invalidfileaccess where the
+    // file exists, undefinedfilename where it does not, as on Windows): the
+    // sweep cell's is the plain cell's.
+    let name = |r: &Value| {
+        let t = err(r);
+        let tail = t.split("Error: ").nth(1).unwrap_or_default();
+        tail.split(';').next().unwrap_or_default().to_string()
+    };
+    assert!(
+        ["invalidfileaccess", "undefinedfilename"].contains(&name(&plain).as_str()),
+        "{plain}"
+    );
+    assert_eq!(name(&swept), name(&plain), "{swept}");
     assert!(err(&swept).contains("seed=7"), "{swept}");
     let swept = s.tool(
         "review_sheet",
