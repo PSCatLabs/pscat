@@ -517,8 +517,8 @@ fn an_error_in_the_paintproc_leaves_the_page_as_it_was() {
     let src = "1 0 0 setrgbcolor 0 0 20 20 rectfill \
                << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
                   /XStep 10 /YStep 10 /PaintProc { pop 0 0 5 5 rectfill nosuchname } >> \
-               matrix { makepattern } stopped pop clear \
-               currentrgbcolor 0 20 20 20 rectfill";
+               matrix makepattern setpattern { 0 0 5 5 rectfill } stopped pop clear \
+               1 0 0 setrgbcolor 0 20 20 20 rectfill";
     it.run_source(src.as_bytes())
         .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
     let pm = &it.gfx().pixmap;
@@ -548,7 +548,7 @@ fn a_limit_inside_the_paintproc_leaves_every_output_on_the_page() {
     let src = "1 0 0 setrgbcolor 0 0 30 30 rectfill \
                << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
                   /XStep 10 /YStep 10 /PaintProc { pop 0 0 5 5 rectfill { } loop } >> \
-               matrix makepattern";
+               matrix makepattern setpattern 0 0 5 5 rectfill";
     assert!(
         it.run_source(src.as_bytes()).is_err(),
         "the step limit stops it"
@@ -1099,4 +1099,217 @@ fn fills_after_a_patterned_imagemask_paint_as_without_it() {
     ));
     let alone = render(circle);
     assert!(after.png.data() == alone.png.data(), "stale coverage");
+}
+
+// --- the PaintProc runs at the pattern's first use (#1341) ------------------
+
+/// A coloured pattern `pp` whose PaintProc counts its runs in `n`.
+const COUNTED: &str = "/n 0 def \
+    << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 \
+       /PaintProc { pop /n n 1 add def 0 0 5 5 rectfill } >> matrix makepattern /pp exch def ";
+
+/// A page of `src`, for pixel and `n` checks.
+fn run_page(src: &str) -> Interp {
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    it
+}
+
+fn inked(it: &Interp) -> usize {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .filter(|p| p.red() < 128)
+        .count()
+}
+
+#[test]
+fn the_paintproc_runs_once_at_the_first_paint() {
+    // gs 10.07.1: not at makepattern, setcolorspace or setcolor; once at the
+    // first fill, not again for a second fill or a gsave level, and not at
+    // all for a pattern that is set and never painted.
+    let got = eval(&format!(
+        "{COUNTED} n /Pattern setcolorspace pp setcolor n \
+         0 0 40 40 rectfill n 0 0 40 40 rectfill \
+         gsave pp setcolor 0 0 10 10 rectfill grestore n \
+         {COUNTED} /pp2 pp def n"
+    ));
+    assert_eq!(got, "0 0 1 1 0", "{got}");
+    // A pattern made and never set runs nothing, whatever else is painted.
+    assert_eq!(
+        eval(&format!("{COUNTED} 0 setgray 0 0 40 40 rectfill n")),
+        "0"
+    );
+}
+
+#[test]
+fn a_paintproc_may_name_a_pattern_made_after_its_own() {
+    // The case that was `undefined`: the outer PaintProc names `late`,
+    // which does not exist until after the outer makepattern.
+    let outer = |inner_first: bool| {
+        let stripes = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 7 7] \
+             /XStep 7 /YStep 7 /PaintProc { pop 0.9 0.1 0.1 setrgbcolor 0 0 2 7 rectfill \
+             0 0.6 0 setrgbcolor 0 0 7 2 rectfill } >> matrix makepattern /late exch def\n";
+        let big = "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [-3.3 -2.6 70.4 61.3] \
+             /XStep 90 /YStep 86 /PaintProc { pop 0.1 0.1 0.7 setrgbcolor -3.3 -2.6 80 70 rectfill \
+             late setpattern 0 0 70 61 rectfill } >> [1.5 0 0 1.5 4.3 7.6] makepattern /outer exch def\n";
+        let page = "outer setpattern 0 0 400 300 rectfill late setpattern 0 300 400 100 rectfill";
+        if inner_first {
+            format!("{stripes}{big}{page}")
+        } else {
+            format!("{big}{stripes}{page}")
+        }
+    };
+    let early = render(&outer(true));
+    let late = render(&outer(false));
+    assert!(
+        early.png.data() == late.png.data(),
+        "the order the patterns are made in changes the page"
+    );
+    assert!(
+        late.png
+            .pixels()
+            .iter()
+            .any(|p| p.red() > 200 && p.green() < 60),
+        "the inner stripes are missing"
+    );
+    if common::gs_available() {
+        let bad = strong_mismatch(&late.png, &gs_png_aliased(&outer(false), "late"));
+        assert!(bad < 0.005, "late: {bad:.4} of the pixels differ from gs");
+    }
+}
+
+#[test]
+fn the_paintproc_starts_from_the_state_makepattern_had() {
+    // gs 10.07.1: the line width and colour at makepattern (3, red), not at
+    // the first use (7, green).
+    let got = eval(
+        "/lw 0 def /col [0 0 0] def \
+         << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 \
+            /PaintProc { pop /lw currentlinewidth def /col [currentrgbcolor] def } >> \
+         1 0 0 setrgbcolor 3 setlinewidth matrix makepattern /pp exch def \
+         0 1 0 setrgbcolor 7 setlinewidth /Pattern setcolorspace pp setcolor \
+         0 0 40 40 rectfill lw cvi col 0 get cvi col 1 get cvi currentlinewidth cvi",
+    );
+    assert_eq!(got, "3 1 0 7", "{got}");
+}
+
+#[test]
+fn the_paintproc_sees_the_operands_and_the_operator_still_does() {
+    // gs: 7 8 under rectfill's four operands and the dictionary (7 deep);
+    // after the fill the stack is as it was.
+    let got = eval(
+        "/seen 0 def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+            /XStep 10 /YStep 10 /PaintProc { count /seen exch def pop 0 0 5 5 rectfill } >> \
+         matrix makepattern /pp exch def /Pattern setcolorspace pp setcolor \
+         7 8 0 0 40 40 rectfill seen",
+    );
+    assert_eq!(got, "7 8 7", "{got}");
+    // A PaintProc that eats operands does not take the operator's with it.
+    let got = eval(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+            /XStep 10 /YStep 10 /PaintProc { clear } >> \
+         matrix makepattern /pp exch def /Pattern setcolorspace pp setcolor \
+         7 8 0 0 40 40 rectfill",
+    );
+    assert_eq!(got, "7 8", "{got}");
+}
+
+#[test]
+fn a_paintproc_that_fails_runs_again_at_the_next_use() {
+    // gs 10.07.1: the failed first fill leaves the pattern unmade, and the
+    // next fill runs the PaintProc a second time.
+    let it = run_page(
+        "/n 0 def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+            /XStep 10 /YStep 10 /PaintProc { pop /n n 1 add def n 1 eq { 1 0 div } if \
+            0 0 5 5 rectfill } >> matrix makepattern setpattern \
+         { 0 0 50 50 rectfill } stopped clear n 1 ne { stop } if \
+         0 0 50 50 rectfill n 2 ne { stop } if",
+    );
+    assert!(inked(&it) > 0, "the second run painted nothing");
+}
+
+/// Every operator that paints with the current colour, each as a snippet
+/// on a 50 pt page with the pattern `pp` current.
+const MARKING: [(&str, &str); 12] = [
+    ("fill", "0 0 moveto 40 0 lineto 40 40 lineto closepath fill"),
+    (
+        "eofill",
+        "0 0 moveto 40 0 lineto 40 40 lineto closepath eofill",
+    ),
+    ("stroke", "6 setlinewidth 0 20 moveto 40 20 lineto stroke"),
+    ("rectfill", "0 0 40 40 rectfill"),
+    ("rectstroke", "6 setlinewidth 3 3 40 40 rectstroke"),
+    (
+        "show",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto (H) show",
+    ),
+    (
+        "ashow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto 1 0 (H) ashow",
+    ),
+    (
+        "widthshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto 0 0 32 0 0 (H) widthshow",
+    ),
+    (
+        "kshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto { pop pop } (H) kshow",
+    ),
+    (
+        "xshow",
+        "/Helvetica findfont 40 scalefont setfont 5 5 moveto (H) [30] xshow",
+    ),
+    (
+        "imagemask",
+        "gsave 40 40 scale 8 8 true [8 0 0 8 0 0] <ffffffffffffffff> imagemask grestore",
+    ),
+    (
+        "imagemask with a dictionary",
+        "gsave 40 40 scale << /ImageType 1 /Width 8 /Height 8 /ImageMatrix [8 0 0 8 0 0] \
+         /BitsPerComponent 1 /Decode [1 0] /ImageMask true \
+         /DataSource <ffffffffffffffff> >> imagemask grestore",
+    ),
+];
+
+#[test]
+fn every_marking_operator_runs_the_paintproc_first() {
+    for (name, snippet) in MARKING {
+        let it = run_page(&format!(
+            "{COUNTED} /Pattern setcolorspace pp setcolor {snippet} n 1 eq {{ }} {{ stop }} ifelse"
+        ));
+        assert!(inked(&it) > 0, "{name}: nothing painted");
+    }
+}
+
+#[test]
+fn a_kshow_proc_that_sets_a_pattern_runs_its_paintproc_before_the_next_glyph() {
+    let it = run_page(&format!(
+        "{COUNTED} /Helvetica findfont 20 scalefont setfont 0 setgray 2 10 moveto \
+         {{ pop pop /Pattern setcolorspace pp setcolor }} (HH) kshow \
+         n 1 eq {{ }} {{ stop }} ifelse"
+    ));
+    assert!(inked(&it) > 0);
+}
+
+#[test]
+fn a_nulldevice_fill_runs_it_too_as_gs_does() {
+    assert_eq!(
+        eval(&format!(
+            "{COUNTED} /Pattern setcolorspace pp setcolor gsave nulldevice 0 0 40 40 rectfill grestore n"
+        )),
+        "1"
+    );
+}
+
+#[test]
+fn a_long_chain_of_unused_patterns_frees_without_recursing() {
+    // Each pattern is made with the last as its colour, and none is ever
+    // painted, so each holds the one before through its saved state.
+    let it = run_page(&format!(
+        "{DICT} /d exch def 30000 {{ d matrix makepattern setpattern }} repeat"
+    ));
+    drop(it);
 }

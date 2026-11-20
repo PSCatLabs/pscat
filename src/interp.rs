@@ -201,11 +201,12 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
-    /// A pattern's `PaintProc` running for `makepattern` (#1038), the
-    /// pattern dictionary it will return held here. Reached, the tile is
-    /// made and the dictionary pushed; unwound, the capture is dropped and
-    /// the page put back (`Gfx::abort_pattern`).
-    Pattern(Box<Object>),
+    /// A pattern's `PaintProc` running at the pattern's first use (#1038,
+    /// #1341). Reached, the tile is made and the operands the marking
+    /// operator had put back; unwound, the capture is dropped and the page
+    /// put back (`Gfx::abort_pattern`), leaving the pattern to run again at
+    /// its next use.
+    Pattern(Box<PatternRun>),
     /// `--profile` (issue #737): planted under the body of a procedure
     /// called through a name. Reached, or unwound, it closes that call in
     /// the profiler. Only exists while profiling.
@@ -253,6 +254,21 @@ pub(crate) enum PostOp {
     /// color space itself stays Separation).
     SeparationColor { alt_ncomp: u32 },
 }
+
+/// A `PaintProc` running at a pattern's first use (#1341).
+pub(crate) struct PatternRun {
+    lazy: Rc<crate::pattern::LazyPattern>,
+    /// The operand stack's depth under the operands `saved` holds.
+    keep: usize,
+    /// The top operands as the marking operator left them (it has not
+    /// popped any): gs gives the `PaintProc` the dictionary above them,
+    /// and the operator finds them as it left them.
+    saved: Vec<Object>,
+}
+
+/// How many operands under the dictionary a `PaintProc` leaves alone: the
+/// most any marking operator takes (`awidthshow`, `imagemask`).
+const PATTERN_KEEP: usize = 8;
 
 /// One `pathforall` element, coordinates already in user space.
 pub(crate) enum PathForallEl {
@@ -502,7 +518,7 @@ pub struct Interp {
         usize,
         (
             std::rc::Weak<RefCell<Dict>>,
-            Rc<crate::pattern::PatternTile>,
+            Rc<crate::pattern::LazyPattern>,
         ),
     >,
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
@@ -2186,6 +2202,9 @@ impl Interp {
             ProfExit,
             /// A pattern's `PaintProc` returned (#1038).
             PatternDone,
+            /// A marking glyph step found a current pattern whose
+            /// `PaintProc` has not run (#1341): run it, then step again.
+            RunPattern(Rc<crate::pattern::LazyPattern>, Object),
         }
         // Iterations of an empty body yield nothing, so they run here, in a
         // row, inside one step. After `EMPTY_RUN` of them the call returns
@@ -2313,17 +2332,25 @@ impl Interp {
                     Frame::ProfReturn => Action::ProfExit,
                     Frame::Pattern(_) => Action::PatternDone,
                     Frame::Show(ctx) => {
-                        stepped_show = true;
-                        let step = ctx.step(gfx)?;
-                        match step {
-                            ShowStep::Pop => Action::Pop,
-                            ShowStep::PopPushWidth(wx, wy) => {
-                                Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                        // A glyph to paint in a pattern whose `PaintProc`
+                        // has not run: run it, and this step again after.
+                        if ctx.paints()
+                            && let Some((lazy, dict)) = gfx.pending_pattern()
+                        {
+                            Action::RunPattern(lazy, dict)
+                        } else {
+                            stepped_show = true;
+                            let step = ctx.step(gfx)?;
+                            match step {
+                                ShowStep::Pop => Action::Pop,
+                                ShowStep::PopPushWidth(wx, wy) => {
+                                    Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                                }
+                                ShowStep::Exec { operands, target } => {
+                                    Action::ExecWith(operands, target)
+                                }
+                                ShowStep::Again => Action::Nothing,
                             }
-                            ShowStep::Exec { operands, target } => {
-                                Action::ExecWith(operands, target)
-                            }
-                            ShowStep::Again => Action::Nothing,
                         }
                     }
                     Frame::PostOp(op) => {
@@ -2480,9 +2507,12 @@ impl Interp {
                     self.prof_exit();
                 }
                 Action::PatternDone => {
-                    if let Some(Frame::Pattern(dict)) = self.estack.pop() {
-                        self.finish_pattern(*dict)?;
+                    if let Some(Frame::Pattern(run)) = self.estack.pop() {
+                        self.finish_pattern(*run)?;
                     }
+                }
+                Action::RunPattern(lazy, dict) => {
+                    self.realize_pattern(lazy, dict, None)?;
                 }
             }
         }
@@ -2700,52 +2730,91 @@ impl Interp {
         Ok(())
     }
 
-    /// `makepattern` (#1038): with the tile's capture begun, run the
-    /// pattern's `PaintProc` on `dict` (the pattern dictionary it returns),
-    /// finishing in [`finish_pattern`](Self::finish_pattern).
-    pub(crate) fn begin_pattern_proc(
-        &mut self,
-        dict: Object,
-        proc: &Object,
-    ) -> Result<(), PsError> {
-        let Value::Array(body) = &proc.value else {
-            return Err(PsError::Typecheck);
+    /// A marking operator's gate (#1341): when the current colour is a
+    /// pattern whose `PaintProc` has not run, start it and arrange for the
+    /// operator `op` to run again once the tile is made, returning `true`:
+    /// the operator returns at once, having changed nothing. `false`:
+    /// nothing to run, carry on. gs does the same at the first mark.
+    pub(crate) fn pattern_gate(&mut self, op: crate::object::Operator) -> Result<bool, PsError> {
+        let Some((lazy, dict)) = self.gfx.pending_pattern() else {
+            return Ok(false);
         };
-        if let Err(e) = self.push_frame(Frame::Pattern(Box::new(dict.clone()))) {
-            self.gfx.abort_pattern();
-            return Err(e);
-        }
-        self.push(dict);
-        self.push_proc_frame(body.clone())
+        self.realize_pattern(lazy, dict, Some(op))?;
+        Ok(true)
     }
 
-    /// The `PaintProc` returned: make the tile, remember it by the
-    /// dictionary, and push the dictionary.
-    fn finish_pattern(&mut self, dict: Object) -> Result<(), PsError> {
-        let tile = self.gfx.end_pattern()?;
-        let Value::Dict(d) = &dict.value else {
+    /// Run `lazy`'s `PaintProc` now, with `dict` on the operand stack
+    /// above whatever is there. `retry` is run again after it.
+    pub(crate) fn realize_pattern(
+        &mut self,
+        lazy: Rc<crate::pattern::LazyPattern>,
+        dict: Object,
+        retry: Option<crate::object::Operator>,
+    ) -> Result<(), PsError> {
+        let Value::Array(body) = &lazy.proc_.value else {
             return Err(PsError::Typecheck);
         };
+        let body = body.clone();
+        let len = self.ostack.len();
+        let take = len.min(PATTERN_KEEP);
+        let saved = self.ostack[len - take..].to_vec();
+        self.gfx.begin_pattern(&lazy)?;
+        let frames = [
+            retry.map(|op| Frame::Proc {
+                body: PsArray::from_vec(vec![Object::exec(Value::Operator(op))]),
+                pc: 0,
+            }),
+            Some(Frame::Pattern(Box::new(PatternRun {
+                lazy,
+                keep: len - take,
+                saved,
+            }))),
+        ];
+        for frame in frames.into_iter().flatten() {
+            if let Err(e) = self.push_frame(frame) {
+                // The retry frame, if pushed, is left for the unwind below.
+                self.gfx.abort_pattern();
+                return Err(e);
+            }
+        }
+        self.push(dict);
+        self.push_proc_frame(body)
+    }
+
+    /// The `PaintProc` returned: make the tile, remember it with the
+    /// pattern, and put the operator's operands back as they were.
+    fn finish_pattern(&mut self, run: PatternRun) -> Result<(), PsError> {
+        let tile = self.gfx.end_pattern()?;
+        run.lazy.set_tile(tile);
+        self.ostack.truncate(run.keep);
+        self.ostack.extend(run.saved);
+        Ok(())
+    }
+
+    /// The pattern `makepattern` made for `d`, if it made one.
+    pub(crate) fn pattern_lazy(
+        &self,
+        d: &Rc<RefCell<Dict>>,
+    ) -> Option<Rc<crate::pattern::LazyPattern>> {
+        self.patterns
+            .get(&(Rc::as_ptr(d) as usize))
+            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
+            .map(|(_, lazy)| lazy.clone())
+    }
+
+    /// Remember `lazy` as the pattern of dictionary `d` (`makepattern`).
+    pub(crate) fn remember_pattern(
+        &mut self,
+        d: &Rc<RefCell<Dict>>,
+        lazy: Rc<crate::pattern::LazyPattern>,
+    ) {
         // Drop entries whose dictionaries are gone, so a loop of
-        // makepatterns keeps only the tiles still reachable. (A weak
+        // makepatterns keeps only the patterns still reachable. (A weak
         // reference keeps its allocation, so a live entry's address is
         // never another dictionary's.)
         self.patterns.retain(|_, (weak, _)| weak.strong_count() > 0);
         self.patterns
-            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), tile));
-        self.push(dict);
-        Ok(())
-    }
-
-    /// The tile `makepattern` made for `d`, if it made one.
-    pub(crate) fn pattern_tile(
-        &self,
-        d: &Rc<RefCell<Dict>>,
-    ) -> Option<Rc<crate::pattern::PatternTile>> {
-        self.patterns
-            .get(&(Rc::as_ptr(d) as usize))
-            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(d) && weak.strong_count() > 0)
-            .map(|(_, tile)| tile.clone())
+            .insert(Rc::as_ptr(d) as usize, (Rc::downgrade(d), lazy));
     }
 
     /// Park `post` as a continuation, put `operands` on the operand

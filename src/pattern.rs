@@ -1,12 +1,15 @@
 //! Tiling patterns (#1038): `makepattern`'s PatternType 1, painted by
 //! `fill`, `stroke` and the show family in all three outputs.
 //!
-//! `makepattern` runs the pattern's `PaintProc` once, at once (PLRM 4.9
-//! lets an implementation call it whenever it likes and cache the
-//! result; gs calls it at first use). While it runs, [`Gfx`] paints into
-//! a *capture*: a tile-sized canvas instead of the page, a fresh SVG
-//! recorder, and an empty PDF content stream, all at the same CTM. What
-//! the three hold afterwards is the tile in each output:
+//! `makepattern` checks the dictionary and keeps the pattern as a
+//! [`LazyPattern`]; the `PaintProc` runs once, at the pattern's first use,
+//! when a marking operator meets it as the current colour (PLRM 4.9 lets an
+//! implementation call it whenever it likes and cache the result; gs does
+//! this, #1341). While it runs, [`Gfx`] paints into a *capture*: a
+//! tile-sized canvas instead of the page, a fresh SVG recorder, and an
+//! empty PDF content stream, all at the CTM `makepattern` had, with the
+//! graphics state it had. What the three hold afterwards is the tile in
+//! each output:
 //!
 //! - **PNG**: the capture canvas is folded into one period of the
 //!   lattice (copies of it at every whole step, so a cell larger than
@@ -470,6 +473,95 @@ pub(crate) struct Capture {
     /// The capture canvas to gs's device coordinates for it, its pattern
     /// accumulator's (#1300; [`capture_to_gs`]).
     pub(crate) to_gs: Transform,
+    /// Where `makepattern` ran: the tile belongs to that context, not to
+    /// the one it is first used in (#1341).
+    pub(crate) origin: Origin,
+}
+
+/// The context a pattern was made in (#1341), recorded at `makepattern`
+/// because the `PaintProc` runs later, possibly in another context (the
+/// page's pattern first used inside a `PaintProc`, or the other way
+/// round).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Origin {
+    /// The capture it was made in, 0 for the page.
+    pub(crate) context: usize,
+    /// That context's coordinates to gs's device coordinates for it.
+    pub(crate) to_gs: Transform,
+    /// That context's coordinates to the default space of the PDF stream
+    /// painting there.
+    pub(crate) to_default: Transform,
+}
+
+/// A pattern `makepattern` made, whose `PaintProc` has run or has not yet
+/// (#1341). One per pattern dictionary, shared by every copy of the
+/// graphics state that holds it as its colour, so the `PaintProc` runs
+/// once however many times, and in however many `gsave` levels, it is
+/// used. A `PaintProc` that fails leaves it unrun, so the next use runs
+/// it again (gs does the same).
+pub(crate) struct LazyPattern {
+    /// Reserved at `makepattern`, so the SVG names of a tile do not depend
+    /// on when it is first used.
+    pub(crate) id: usize,
+    pub(crate) spec: TileSpec,
+    pub(crate) proc_: crate::object::Object,
+    pub(crate) origin: Origin,
+    /// The graphics state `makepattern` ran in, which the `PaintProc`
+    /// starts from (gs: its line width and colour, not the state at first
+    /// use). Dropped once the tile is made.
+    state: RefCell<Option<Box<crate::gfx::GraphicsState>>>,
+    tile: RefCell<Option<Rc<PatternTile>>>,
+}
+
+impl LazyPattern {
+    pub(crate) fn new(
+        id: usize,
+        spec: TileSpec,
+        proc_: crate::object::Object,
+        origin: Origin,
+        state: Box<crate::gfx::GraphicsState>,
+    ) -> Self {
+        LazyPattern {
+            id,
+            spec,
+            proc_,
+            origin,
+            state: RefCell::new(Some(state)),
+            tile: RefCell::new(None),
+        }
+    }
+
+    /// The tile, once the `PaintProc` has run.
+    pub(crate) fn tile(&self) -> Option<Rc<PatternTile>> {
+        self.tile.borrow().clone()
+    }
+
+    pub(crate) fn set_tile(&self, tile: Rc<PatternTile>) {
+        *self.tile.borrow_mut() = Some(tile);
+        *self.state.borrow_mut() = None;
+    }
+
+    /// A copy of the state to run the `PaintProc` from.
+    pub(crate) fn run_state(&self) -> Option<Box<crate::gfx::GraphicsState>> {
+        self.state.borrow().clone()
+    }
+}
+
+impl Drop for LazyPattern {
+    /// Patterns made one after another, each with the last as its current
+    /// colour, hold each other through their saved states: free the chain
+    /// in a loop, not by recursion.
+    fn drop(&mut self) {
+        let mut work: Vec<Box<crate::gfx::GraphicsState>> =
+            self.state.get_mut().take().into_iter().collect();
+        while let Some(mut st) = work.pop() {
+            if let Some(p) = st.take_pattern()
+                && let Ok(mut inner) = Rc::try_unwrap(p.lazy)
+            {
+                work.extend(inner.state.get_mut().take());
+            }
+        }
+    }
 }
 
 /// What a fill or stroke paints with, as the SVG and PDF recorders take

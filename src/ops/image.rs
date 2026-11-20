@@ -122,6 +122,12 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
 /// Paints the current color where the (1-bit) sample matches polarity —
 /// true ≡ Decode [1 0] ≡ paint the 1s (pinned against gs).
 fn imagemask(it: &mut Interp) -> Result<(), PsError> {
+    if it.pattern_gate(crate::object::Operator {
+        name: "imagemask",
+        func: imagemask,
+    })? {
+        return Ok(());
+    }
     let top = it.pop()?;
     if let Value::Dict(d) = &top.value {
         return dict_image(it, d.clone(), 1, Some(true));
