@@ -120,7 +120,8 @@ assert.ok(import.meta.resolve('pscat/pscat.wasm').endsWith('/node_modules/pscat/
 // The Node entry by its subpath (added in #1150, checked since #1163): CJS and ESM resolution both reach it, and it imports.
 if (!legacy) {
   const cjs = createRequire(import.meta.url);
-  assert.ok(cjs.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
+  // require.resolve gives a native path (backslashes on Windows); import.meta.resolve a file: URL.
+  assert.ok(cjs.resolve('pscat/node.js').replaceAll('\\', '/').endsWith('/node_modules/pscat/node.js'));
   assert.ok(import.meta.resolve('pscat/node.js').endsWith('/node_modules/pscat/node.js'));
   const nodeEntry = await import('pscat/node.js');
   assert.equal(typeof nodeEntry.createRenderer, 'function');

@@ -291,7 +291,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/test_npm_tarball.sh
+          # .gitattributes too: it keeps the script's line endings LF on Windows.
+          sparse-checkout: |
+            scripts/test_npm_tarball.sh
+            .gitattributes
           sparse-checkout-cone-mode: false
       # The consumer floor (npm/package.json engines).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
