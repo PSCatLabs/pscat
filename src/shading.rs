@@ -1319,6 +1319,17 @@ fn parse_function_shading(d: &Dict, cs: CsKind) -> Result<FunctionShading, PsErr
     if !all_inside {
         return Err(PsError::Rangecheck);
     }
+    // gs reads the Domain as f32, so a pair that differs only below f32
+    // precision is a zero-width one there, and paints nothing (#1333). It
+    // is made exactly zero-width here, so the raster, the SVG and the PDF
+    // agree with it (the PDF would otherwise write an empty Domain).
+    let collapse = |lo: f64, hi: f64| if lo as f32 == hi as f32 { lo } else { hi };
+    let domain = [
+        domain[0],
+        collapse(domain[0], domain[1]),
+        domain[2],
+        collapse(domain[2], domain[3]),
+    ];
     let leaf_of = |f: &PsFunction| match f {
         PsFunction::Sampled(s) => Some(Leaf {
             domain: [s.domain[0], s.domain[1]],

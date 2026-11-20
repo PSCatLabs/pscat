@@ -33,7 +33,8 @@ one-output functions.
   - `/Order 3`.
   - Stray `/Coords`, `/Extend` and `/Background` keys. `shfill` ignores
     Background.
-  - A zero-area Domain, which paints nothing.
+  - A zero-area Domain, which paints nothing. So does a pair equal in f32
+    (`notes/1333-shading-domain-equal-in-f32.md`).
 - Errors, as gs reports them:
   - No `/Function`: `undefined`.
   - A one-input function on Type 1: `rangecheck`.
