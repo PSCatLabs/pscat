@@ -4514,7 +4514,10 @@ impl Gfx {
         } else {
             None
         };
-        let pdf = self.pdf.as_mut().map(|p| p.begin_capture(spec.uncolored));
+        let pdf = self
+            .pdf
+            .as_mut()
+            .map(|p| p.begin_capture(spec.uncolored, geom.capture, spec.bbox));
         let uncolored = spec.uncolored;
         let snapshot = self.glyph_enter();
         let page = std::mem::replace(&mut self.pixmap, content);

@@ -208,6 +208,18 @@ pub struct PdfRecorder {
     /// colour operators, and no colour images or shadings, which an
     /// uncoloured pattern may not hold.
     uncolored: bool,
+    /// The coverage masks (`/SM<i> gs`, #1340) the stream being recorded
+    /// uses, by the index of their form in `patterns`.
+    current_smasks: Vec<usize>,
+    /// While a pattern is captured: the capture matrix (pattern space to
+    /// the canvas coordinates its marks are written in) and its `/BBox`,
+    /// which frame a coverage mask's form.
+    capture_frame: Option<(tiny_skia::Transform, [f64; 4])>,
+    /// Coverage mask forms, by dictionary and content, made once each.
+    smask_forms: HashMap<String, usize>,
+    /// Copies of a masked uncoloured pattern in another colour (#1340), by
+    /// index and the colour's bits.
+    colored_variants: HashMap<(usize, [u32; 3]), usize>,
 }
 
 /// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
@@ -232,6 +244,14 @@ struct PdfPattern {
     fonts: Vec<usize>,
     patterns: Vec<usize>,
     pattern_cs: bool,
+    /// Coverage masks the content sets (#1340), by form index.
+    smasks: Vec<usize>,
+    /// An uncoloured pattern whose content holds a coverage mask (#1340),
+    /// written as a coloured pattern in this colour: gs drops a whole
+    /// uncoloured pattern whose resources hold a soft mask, and paints a
+    /// coloured one with it. Its content sets no colour, so every mark
+    /// takes the one set at its start.
+    ink: Option<(f32, f32, f32)>,
 }
 
 /// The page state a pattern capture swapped out of the recorder
@@ -247,6 +267,8 @@ pub(crate) struct PdfCapture {
     patterns: Vec<usize>,
     pattern_cs: bool,
     uncolored: bool,
+    smasks: Vec<usize>,
+    frame: Option<(tiny_skia::Transform, [f64; 4])>,
 }
 
 /// A PDF object built by `pdfmark` (#1032): the interpreter converts the
@@ -356,15 +378,28 @@ impl PdfRecorder {
             page_pattern_cs: Vec::new(),
             current_pattern_cs: false,
             uncolored: false,
+            current_smasks: Vec::new(),
+            capture_frame: None,
+            smask_forms: HashMap::new(),
+            colored_variants: HashMap::new(),
         }
     }
 
     /// Start recording a pattern's content stream (#1038): the page's
     /// stream and resource lists are set aside, and marks go to an empty
-    /// stream until [`end_capture`](Self::end_capture).
-    pub(crate) fn begin_capture(&mut self, uncolored: bool) -> PdfCapture {
+    /// stream until [`end_capture`](Self::end_capture). `capture` maps
+    /// pattern space to the canvas coordinates the marks are written in,
+    /// and `bbox` is the pattern's `/BBox`.
+    pub(crate) fn begin_capture(
+        &mut self,
+        uncolored: bool,
+        capture: tiny_skia::Transform,
+        bbox: [f64; 4],
+    ) -> PdfCapture {
         self.flush_text();
         PdfCapture {
+            smasks: std::mem::take(&mut self.current_smasks),
+            frame: self.capture_frame.replace((capture, bbox)),
             content: std::mem::take(&mut self.content),
             open_clip: self.open_clip.take(),
             images: std::mem::take(&mut self.current_images),
@@ -386,7 +421,10 @@ impl PdfRecorder {
         self.current_shading_set = saved.shading_set;
         self.open_clip = saved.open_clip;
         self.uncolored = saved.uncolored;
+        self.capture_frame = saved.frame;
         PdfPattern {
+            smasks: std::mem::replace(&mut self.current_smasks, saved.smasks),
+            ink: None,
             dict: String::new(),
             shading: None,
             content: std::mem::replace(&mut self.content, saved.content),
@@ -414,10 +452,17 @@ impl PdfRecorder {
         let mut pat = self.restore_capture(saved);
         let num = |v: f64| p(v as f32);
         let [x0, y0, x1, y1] = spec.bbox;
+        // An uncoloured pattern that paints another pattern's coverage
+        // (#1340) is written coloured, in black here and in each colour it
+        // is used in (`colored_variant`).
+        let masked = spec.uncolored && !pat.smasks.is_empty();
+        if masked {
+            pat.ink = Some((0.0, 0.0, 0.0));
+        }
         pat.dict = format!(
             "/Type /Pattern /PatternType 1 /PaintType {} /TilingType {} /BBox [{} {} {} {}] \
              /XStep {} /YStep {} /Matrix [{}]",
-            if spec.uncolored { 2 } else { 1 },
+            if spec.uncolored && !masked { 2 } else { 1 },
             spec.tiling_type,
             num(x0),
             num(y0),
@@ -461,67 +506,164 @@ impl PdfRecorder {
         let _ = self.restore_capture(saved);
     }
 
+    /// Masked uncoloured pattern `idx` (#1340) in `rgb`: the same content
+    /// and resources, the colour set at its start, made once per colour.
+    fn colored_variant(&mut self, idx: usize, rgb: (f32, f32, f32)) -> usize {
+        if self.patterns[idx].ink == Some(rgb) {
+            return idx;
+        }
+        let bits = [rgb.0, rgb.1, rgb.2].map(f32::to_bits);
+        if let Some(&v) = self.colored_variants.get(&(idx, bits)) {
+            return v;
+        }
+        let mut pat = self.patterns[idx].clone();
+        pat.ink = Some(rgb);
+        self.patterns.push(pat);
+        let v = self.patterns.len() - 1;
+        self.colored_variants.insert((idx, bits), v);
+        v
+    }
+
     /// The colour-setting operators for `ink`, fill (`rg`, `cs`/`scn`) or
-    /// stroke (`RG`, `CS`/`SCN`), with a trailing space; empty in an
-    /// uncoloured pattern's content, which takes no colour.
+    /// stroke (`RG`, `CS`/`SCN`), with a trailing space. In an uncoloured
+    /// pattern's content, which takes no colour, a pattern's coverage
+    /// mask instead (`coverage_mask`), and nothing for a colour.
     fn ink_ops(&mut self, ink: &Ink, stroking: bool) -> String {
         if self.uncolored {
-            return String::new();
+            return self.coverage_mask(ink);
         }
-        match ink {
-            Ink::Rgb(rgb) => format!(
+        if let Ink::Rgb(rgb) = ink {
+            return format!(
                 "{} {} {} {} ",
                 f(rgb.0),
                 f(rgb.1),
                 f(rgb.2),
                 if stroking { "RG" } else { "rg" }
-            ),
+            );
+        }
+        let Some((ops, idx, pcs)) = self.paint_ref(ink, stroking) else {
+            return String::new();
+        };
+        if !self.current_patterns.contains(&idx) {
+            self.current_patterns.push(idx);
+        }
+        self.current_pattern_cs |= pcs;
+        ops
+    }
+
+    /// The operators that select pattern `ink` (not a colour), the index of
+    /// the pattern they name, and whether they name the `/PCS` colour
+    /// space. `None` for a pattern with no PDF form.
+    fn paint_ref(&mut self, ink: &Ink, stroking: bool) -> Option<(String, usize, bool)> {
+        let (cs, scn) = if stroking {
+            ("CS", "SCN")
+        } else {
+            ("cs", "scn")
+        };
+        match ink {
+            Ink::Rgb(_) => None,
             Ink::Pattern(tile, rgb, place) => {
-                let Some(idx) = tile.pdf else {
-                    return String::new();
-                };
+                let idx = tile.pdf?;
                 let idx = match place {
                     Some(p) => self.pattern_variant(idx, p.pdf_matrix),
                     None => idx,
                 };
-                if !self.current_patterns.contains(&idx) {
-                    self.current_patterns.push(idx);
-                }
-                let (cs, scn) = if stroking {
-                    ("CS", "SCN")
+                if self.patterns[idx].ink.is_some() {
+                    let idx = self.colored_variant(idx, *rgb);
+                    Some((format!("/Pattern {cs} /P{idx} {scn} "), idx, false))
+                } else if tile.uncolored {
+                    Some((
+                        format!(
+                            "/PCS {cs} {} {} {} /P{idx} {scn} ",
+                            f(rgb.0),
+                            f(rgb.1),
+                            f(rgb.2)
+                        ),
+                        idx,
+                        true,
+                    ))
                 } else {
-                    ("cs", "scn")
-                };
-                if tile.uncolored {
-                    self.current_pattern_cs = true;
-                    format!(
-                        "/PCS {cs} {} {} {} /P{idx} {scn} ",
-                        f(rgb.0),
-                        f(rgb.1),
-                        f(rgb.2)
-                    )
-                } else {
-                    format!("/Pattern {cs} /P{idx} {scn} ")
+                    Some((format!("/Pattern {cs} /P{idx} {scn} "), idx, false))
                 }
             }
             Ink::Shading(sp, place) => {
-                let Some(idx) = sp.pdf else {
-                    return String::new();
-                };
+                let idx = sp.pdf?;
                 let idx = match place {
                     Some(p) => self.pattern_variant(idx, p.pdf_matrix),
                     None => idx,
                 };
-                if !self.current_patterns.contains(&idx) {
-                    self.current_patterns.push(idx);
-                }
-                if stroking {
-                    format!("/Pattern CS /P{idx} SCN ")
-                } else {
-                    format!("/Pattern cs /P{idx} scn ")
-                }
+                Some((format!("/Pattern {cs} /P{idx} {scn} "), idx, false))
             }
         }
+    }
+
+    /// A mark painted with a pattern inside an uncoloured pattern's
+    /// `PaintProc` (#1340) paints that pattern's coverage, as gs's raster
+    /// does: wherever the pattern paints, whatever its colours. The mark
+    /// keeps the stream's own colour and is seen through a soft mask (`/SM<i>
+    /// gs`), the alpha of a form that fills the `/BBox` with the pattern.
+    /// The form's `/Matrix` is the capture matrix, undoing the stream's
+    /// opening `cm`, so the form's space is the pattern's own space: the
+    /// space the inner pattern's `/Matrix` maps to, whether a reader takes a
+    /// pattern in a form to the form's space or to the stream's. Empty for
+    /// a colour, and outside a capture.
+    fn coverage_mask(&mut self, ink: &Ink) -> String {
+        let Some((frame, [x0, y0, x1, y1])) = self.capture_frame else {
+            return String::new();
+        };
+        // Only the alpha counts: an uncoloured inner pattern is named in
+        // black, so one form serves every colour.
+        let ink = match ink {
+            Ink::Rgb(_) => return String::new(),
+            Ink::Pattern(tile, _, place) => Ink::Pattern(tile.clone(), (0.0, 0.0, 0.0), *place),
+            Ink::Shading(..) => ink.clone(),
+        };
+        let Some((ops, idx, pcs)) = self.paint_ref(&ink, false) else {
+            return String::new();
+        };
+        let num = |v: f64| p(v as f32);
+        let dict = format!(
+            "/Type /XObject /Subtype /Form /BBox [{} {} {} {}] /Matrix [{}] \
+             /Group << /Type /Group /S /Transparency /CS /DeviceGray >>",
+            num(x0),
+            num(y0),
+            num(x1),
+            num(y1),
+            matrix_text(frame),
+        );
+        let content = format!(
+            "{ops}{} {} {} {} re f\n",
+            num(x0),
+            num(y0),
+            num(x1 - x0),
+            num(y1 - y0)
+        );
+        let key = format!("{dict}\n{content}");
+        let form = match self.smask_forms.get(&key) {
+            Some(&i) => i,
+            None => {
+                self.patterns.push(PdfPattern {
+                    dict,
+                    shading: None,
+                    content,
+                    images: Vec::new(),
+                    gstates: Vec::new(),
+                    shadings: Vec::new(),
+                    fonts: Vec::new(),
+                    patterns: vec![idx],
+                    pattern_cs: pcs,
+                    smasks: Vec::new(),
+                    ink: None,
+                });
+                let i = self.patterns.len() - 1;
+                self.smask_forms.insert(key, i);
+                i
+            }
+        };
+        if !self.current_smasks.contains(&form) {
+            self.current_smasks.push(form);
+        }
+        format!("/SM{form} gs ")
     }
 
     /// A shading pattern with no PDF form paints nothing (#1298): its
@@ -604,6 +746,8 @@ impl PdfRecorder {
             fonts: Vec::new(),
             patterns: Vec::new(),
             pattern_cs: false,
+            smasks: Vec::new(),
+            ink: None,
         });
         Some(self.patterns.len() - 1)
     }
@@ -1081,9 +1225,16 @@ Q",
             ),
             None => (String::new(), path_ops(path, false)),
         };
+        // A coverage mask (#1340) is placed by the CTM at its `gs`, so it
+        // goes before the pen's `cm`; a colour may go either side.
+        let (mask, colour) = if self.uncolored {
+            (colour, String::new())
+        } else {
+            (String::new(), colour)
+        };
         let _ = writeln!(
             self.content,
-            "q {gs}{pen_cm}{colour}{} w {cap} J {join} j {} M {dash}{} S
+            "q {gs}{mask}{pen_cm}{colour}{} w {cap} J {join} j {} M {dash}{} S
 Q",
             num(width),
             f(miter_limit),
@@ -1771,6 +1922,7 @@ Q",
                 page.fonts,
                 page.patterns,
                 page.pattern_cs,
+                &[],
             );
             let resources = if parts.is_empty() {
                 String::new()
@@ -1895,8 +2047,17 @@ Q",
                 &pat.fonts,
                 &pat.patterns,
                 pat.pattern_cs,
+                &pat.smasks,
             );
-            let z = match deflate_budgeted(&[pat.content.as_bytes()], out.probe) {
+            // A masked uncoloured pattern's colour (#1340), before its `cm`.
+            let lead = match pat.ink {
+                Some((r, g, b)) => {
+                    let (r, g, b) = (f(r), f(g), f(b));
+                    format!("{r} {g} {b} rg {r} {g} {b} RG\n")
+                }
+                None => String::new(),
+            };
+            let z = match deflate_budgeted(&[lead.as_bytes(), pat.content.as_bytes()], out.probe) {
                 Ok(z) => z,
                 Err(e) => return out.fail(e),
             };
@@ -2010,6 +2171,7 @@ fn resource_parts(
     fonts: &[usize],
     patterns: &[usize],
     pattern_cs: bool,
+    smasks: &[usize],
 ) -> String {
     let xobjects: Vec<String> = images
         .iter()
@@ -2020,9 +2182,16 @@ fn resource_parts(
     // handful of numbers each, and keeping them out of the
     // numbered-object list means the kids/image_base
     // positional math above needs no adjustment at all.
+    // A coverage mask (#1340) names its form, a pattern-numbered object.
     let extgstates: Vec<String> = gstates
         .iter()
         .map(|&idx| format!("/GS{idx} << {} >>", rec.gstates[idx]))
+        .chain(smasks.iter().map(|&idx| {
+            format!(
+                "/SM{idx} << /Type /ExtGState /SMask << /Type /Mask /S /Alpha /G {} 0 R >> >>",
+                b.pattern + idx
+            )
+        }))
         .collect();
     let mut parts = String::new();
     if !xobjects.is_empty() {
