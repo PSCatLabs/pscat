@@ -1292,23 +1292,6 @@ mod tests {
     }
 
     #[test]
-    fn a_run_file_leak_carries_the_file_name() {
-        let dir = std::env::temp_dir();
-        let lib = dir.join(format!("pscat-1081-leak-{}.ps", std::process::id()));
-        std::fs::write(&lib, "% lib\n\n42\n").expect("write");
-        let src = format!(
-            "1 2 add pop\n({}) run\n",
-            lib.to_str().unwrap().replace('\\', "/")
-        );
-        let m = leak_message(&src);
-        let _ = std::fs::remove_file(&lib);
-        assert!(
-            m.contains("the oldest, 42, was left when the program reached line 3 ("),
-            "{m}"
-        );
-    }
-
-    #[test]
     fn a_long_stack_shows_its_bottom_item_even_without_the_trace() {
         let it = run("(first) 1 2 3 4 5 6");
         let m = check(&it, true)

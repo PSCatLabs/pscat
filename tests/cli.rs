@@ -313,6 +313,24 @@ fn lint_names_the_line_a_stack_leak_started_on() {
     );
 }
 
+/// #1081: a leak made by a `run` file names the file and its line.
+#[test]
+fn lint_names_the_run_file_a_stack_leak_came_from() {
+    let lib = tmp("leak-lib.ps");
+    std::fs::write(&lib, "% lib\n\n42\n").expect("write lib");
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("the oldest, 42, was left when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("leak-lib.ps)"), "{stderr}");
+}
+
 #[test]
 fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
     let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");

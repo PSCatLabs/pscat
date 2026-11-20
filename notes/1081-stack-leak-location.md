@@ -34,15 +34,20 @@ A token can consume the whole stack and leave another (`0 1 9 { ... } for` takes
 operands and leaves what the body leaked), which a depth sampled between tokens sees only as
 growth. Without a fix the first run (the `0 1 9` operands, on line 1) would survive and be
 named. So the trace keeps a witness of the bottom item (kind and scalar value) and, when it
-has changed, forgets the old runs and credits the whole stack to the token that ran. A guess,
-wrong only when the bottom item is replaced by an equal one, and then the old line is still
-the statement that began it. Reading `ostack` at the end of the program goes through the same
+has changed, forgets the old runs and credits the whole stack to the token that ran. A guess. It is wrong
+when the bottom item is replaced by an equal scalar (the old line is then still the statement
+that began it), and for a composite (array, string, dict) it compares the kind only, so one
+replaced by another of its kind within a single token keeps the old line. A bottom item
+updated in place (an accumulator: `0` on line 1, `1 add` on later lines) is credited to the
+last token that changed it. Reading `ostack` at the end of the program goes through the same
 path, so the last token is credited too.
 
 ## Cost
 
-Release-profile (`--profile ci`) binary, 13.5 million tokens in a flat file
-(`1 2 add pop 3 4 mul pop` repeated 1.5 million times), user CPU, three runs each:
-0.86, 0.88, 0.85 s plain; 0.82, 0.82, 0.82 s with `--lint` (which also runs the
-operator-shadow trace). No measurable cost: the per-token work is one `Option` check and,
-when tracing, one slice-length read, a compare and (at a new line) a small push.
+Head `--profile ci` binary, 13.5 million tokens in a flat file (`1 2 add pop 3 4 mul pop`
+repeated 1.5 million times), user CPU, three runs each: 0.86, 0.88, 0.85 s plain; 0.82,
+0.82, 0.82 s with `--lint` (which also runs the operator-shadow trace). So `--lint` adds no
+measurable cost to a token-heavy run. That compares head with head: a plain render now also
+pays one `Option` check per scanned token (`sync_scan_line`), which was not timed against a
+base binary. With tracing on, the per-token work is a slice-length read, a compare and, at a
+new line, a small push.
