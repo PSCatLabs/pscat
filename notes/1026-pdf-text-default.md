@@ -93,9 +93,11 @@ difference over 10 px blocks (the measure `tests/pdf_text.rs` uses, with a
 limit of 3.0): dataviz_paper 0.18, pdf_document 0.20, postcard 0.08,
 pscat_card 0.13, hortus 0.21, specimen 0.50, fugitive_pigments 0.64,
 font_catalog 0.82. The dense 11 pt Times page is 3.39 at 72 dpi, 1.99 at
-150 dpi and 0.85 at 300 dpi. That difference is poppler's own antialiasing
-of small text against a filled path; side by side at 300 dpi the two are
-the same. `tests/pdf_text.rs` holds the gs and pdftoppm comparisons on its
+150 dpi and 0.85 at 300 dpi. It is the outline PDF that strays. Against
+pscat's own canvas, the text PDF scores 0.55 in pdftoppm and the outline PDF
+3.13; in gs (72 dpi, AlphaBits 4) they score 1.41 and 10.27. Each reader
+antialiases many small filled paths heavier than its own text. Side by side
+at 300 dpi the two are the same. `tests/pdf_text.rs` holds the gs and pdftoppm comparisons on its
 sample pages.
 
 **Not done here.** SVG with an embedded `@font-face` subset (`--svg-text`
