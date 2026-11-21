@@ -536,3 +536,224 @@ fn a_linked_marker_or_a_running_pid_keeps_the_stage_and_list_says_so() {
     );
     assert!(outside.is_file());
 }
+
+#[test]
+fn help_mentions_lib_remove() {
+    let base = common::scratch_dir("lib-remove-help");
+    let home = base.join("home");
+    let o = pscat(&home, &base, &["--help"]);
+    assert!(out(&o).contains("pscat lib remove NAME"), "{}", out(&o));
+    let o = pscat(&home, &base, &["lib", "--help"]);
+    assert!(
+        out(&o).contains("pscat lib remove NAME [--force]"),
+        "{}",
+        out(&o)
+    );
+    let o = pscat(&home, &base, &["lib", "remove", "--help"]);
+    assert!(
+        o.status.success() && out(&o).contains("remove   delete"),
+        "{}",
+        out(&o)
+    );
+}
+
+#[test]
+fn remove_deletes_an_installed_package_and_says_how_many_files_went() {
+    let base = common::scratch_dir("lib-remove");
+    let home = base.join("home");
+    let a = make_package(&base.join("src"), "alpha");
+    let b = make_package(&base.join("src"), "beta");
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", a.to_str().unwrap()],
+    ));
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", b.to_str().unwrap()],
+    ));
+    let said = ok(pscat(&home, &base, &["lib", "remove", "alpha"]));
+    assert!(
+        said.starts_with("removed lib/alpha: 3 files from "),
+        "{said}"
+    );
+    assert!(
+        said.contains(home.join("lib").join("alpha").to_str().unwrap()),
+        "{said}"
+    );
+    assert!(!home.join("lib/alpha").exists());
+    // The other package is untouched, and the program no longer loads alpha.
+    assert!(home.join("lib/beta/main.ps").is_file());
+    let list = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(
+        list.contains("lib/beta:") && !list.contains("lib/alpha"),
+        "{list}"
+    );
+    let ran = pscat(
+        &home,
+        &base,
+        &["--headless", "-e", "(lib/alpha/main.ps) run"],
+    );
+    assert!(!ran.status.success());
+    let ran = pscat(
+        &home,
+        &base,
+        &["--headless", "-e", "(lib/beta/main.ps) run"],
+    );
+    assert_eq!(lines(&ok(ran)), main_lines("beta"));
+    // The source is not touched, and the name can be installed again.
+    assert!(a.join("main.ps").is_file());
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", a.to_str().unwrap()],
+    ));
+    let ran = pscat(
+        &home,
+        &base,
+        &["--headless", "-e", "(lib/alpha/main.ps) run"],
+    );
+    assert_eq!(lines(&ok(ran)), main_lines("alpha"));
+    // One file is "1 file".
+    let one = base.join("src/one");
+    std::fs::create_dir_all(&one).unwrap();
+    std::fs::write(one.join("x.ps"), "").unwrap();
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", one.to_str().unwrap()],
+    ));
+    let said = ok(pscat(&home, &base, &["lib", "remove", "one"]));
+    assert!(said.starts_with("removed lib/one: 1 file from "), "{said}");
+}
+
+#[test]
+fn remove_refuses_a_directory_that_install_did_not_make_unless_forced() {
+    let base = common::scratch_dir("lib-remove-force");
+    let home = base.join("home");
+    let mine = home.join("lib/mine");
+    std::fs::create_dir_all(mine.join("deep")).unwrap();
+    std::fs::write(mine.join("x.ps"), "").unwrap();
+    std::fs::write(mine.join("deep/y.ps"), "").unwrap();
+    std::fs::write(mine.join(".dot"), "").unwrap();
+    let o = pscat(&home, &base, &["lib", "remove", "mine"]);
+    assert!(!o.status.success());
+    assert!(err(&o).contains("--force"), "{}", err(&o));
+    assert!(mine.join("x.ps").is_file() && mine.join("deep/y.ps").is_file());
+    // --force may come before or after the name; hidden files are counted.
+    let said = ok(pscat(&home, &base, &["lib", "remove", "--force", "mine"]));
+    assert!(
+        said.starts_with("removed lib/mine: 3 files from "),
+        "{said}"
+    );
+    assert!(!mine.exists());
+    // An empty hand-made directory too.
+    std::fs::create_dir_all(home.join("lib/bare")).unwrap();
+    let said = ok(pscat(&home, &base, &["lib", "remove", "bare", "--force"]));
+    assert!(
+        said.starts_with("removed lib/bare: 0 files from "),
+        "{said}"
+    );
+    assert!(!home.join("lib/bare").exists());
+}
+
+#[test]
+fn remove_refuses_what_it_cannot_name_or_find() {
+    let base = common::scratch_dir("lib-remove-bad");
+    let home = base.join("home");
+    // No install directory yet: nothing is created, nothing is installed.
+    let o = pscat(&home, &base, &["lib", "remove", "ghost"]);
+    assert!(!o.status.success());
+    assert!(err(&o).contains("not installed"), "{}", err(&o));
+    assert!(!home.join("lib").exists());
+    // A file and a sibling of lib/ survive every attempt to name them.
+    std::fs::create_dir_all(home.join("lib")).unwrap();
+    std::fs::write(home.join("lib/plain"), "x").unwrap();
+    std::fs::write(home.join("precious.txt"), "x").unwrap();
+    for name in [
+        "..",
+        ".",
+        "../precious.txt",
+        "a/b",
+        ".hidden",
+        "",
+        "sheet.music",
+    ] {
+        for force in [false, true] {
+            let mut args = vec!["lib", "remove", name];
+            if force {
+                args.push("--force");
+            }
+            let o = pscat(&home, &base, &args);
+            assert!(!o.status.success(), "{name:?} {force}");
+        }
+    }
+    let o = pscat(&home, &base, &["lib", "remove", "plain", "--force"]);
+    assert!(!o.status.success());
+    assert!(err(&o).contains("not a directory"), "{}", err(&o));
+    assert!(home.join("lib/plain").is_file() && home.join("precious.txt").is_file());
+    // Usage errors.
+    for args in [
+        &["lib", "remove"][..],
+        &["lib", "remove", "a", "b"],
+        &["lib", "remove", "a", "--bogus"],
+        &["lib", "remove", "--force"],
+    ] {
+        let o = pscat(&home, &base, args);
+        assert!(!o.status.success(), "{args:?}");
+        assert!(
+            err(&o).contains("usage: pscat lib"),
+            "{args:?}: {}",
+            err(&o)
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_does_not_follow_a_symbolic_link() {
+    let base = common::scratch_dir("lib-remove-link");
+    let home = base.join("home");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("keep.ps"), "x").unwrap();
+    std::fs::create_dir_all(home.join("lib")).unwrap();
+    // lib/NAME is a link to a directory (even one that looks installed).
+    std::fs::write(
+        outside.join(".pscat-lib"),
+        "installed by pscat lib install from x\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, home.join("lib/linked")).unwrap();
+    for force in [false, true] {
+        let mut args = vec!["lib", "remove", "linked"];
+        if force {
+            args.push("--force");
+        }
+        let o = pscat(&home, &base, &args);
+        assert!(!o.status.success(), "{force}");
+        assert!(err(&o).contains("not a directory"), "{}", err(&o));
+    }
+    assert!(outside.join("keep.ps").is_file());
+    // A link inside a package goes, its target does not, and is not counted
+    // as a file of the package's own beyond the link itself.
+    let pkg = make_package(&base.join("src"), "pkg");
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", pkg.to_str().unwrap()],
+    ));
+    std::os::unix::fs::symlink(&outside, home.join("lib/pkg/out")).unwrap();
+    let said = ok(pscat(&home, &base, &["lib", "remove", "pkg"]));
+    assert!(said.starts_with("removed lib/pkg: 4 files from "), "{said}");
+    assert!(!home.join("lib/pkg").exists());
+    assert!(outside.join("keep.ps").is_file());
+    // A marker that is a link does not make a directory "ours".
+    std::fs::create_dir_all(home.join("lib/fake")).unwrap();
+    std::os::unix::fs::symlink(outside.join(".pscat-lib"), home.join("lib/fake/.pscat-lib"))
+        .unwrap();
+    let o = pscat(&home, &base, &["lib", "remove", "fake"]);
+    assert!(!o.status.success());
+    assert!(home.join("lib/fake").is_dir());
+}

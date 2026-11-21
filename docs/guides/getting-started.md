@@ -549,6 +549,7 @@ per-user data directory and `$PSCAT_HOME` being among the MCP server's.
 pscat lib install path/to/sheet_music            # copies it to lib/sheet_music/
 pscat lib install path/to/sheet_music --name sm  # or under a name of your own
 pscat lib list                                   # what is installed, and where
+pscat lib remove sheet_music                     # uninstall it again
 ```
 
 `install` copies the files of DIR (not dotfiles or symbolic links) into
@@ -566,6 +567,14 @@ per-user `lib/` ranks before the built-in copy and would replace it for
 every program and for the MCP server; no file of a package may land on a
 built-in name either. Nothing about the search order or the read roots
 changes.
+
+`pscat lib remove NAME` deletes `lib/NAME/` again and prints how many files
+went and from where. It removes only a directory `install` made (one holding
+the `.pscat-lib` marker); a directory you made by hand under `lib/` is refused,
+and `--force` deletes it anyway (`pscat lib list` marks those "not made by pscat
+lib install"). A file or a symbolic link named NAME is never removed. If it is
+interrupted and leaves part of a directory, `pscat lib remove NAME --force`
+finishes the job.
 
 **A library that loads its own files.** `currentfilename`
 (`- currentfilename string`) returns the name the running file was opened

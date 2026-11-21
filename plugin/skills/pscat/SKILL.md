@@ -238,7 +238,9 @@ another directory needs the server's `--allow-read` (see
 copies DIR's files to `lib/NAME/` in the per-user data directory (in
 `$PSCAT_HOME` if that is set; the command prints where), and
 `(lib/NAME/x.ps) run` then works from any directory, in the CLI and over MCP.
-`pscat lib list` shows what is installed. Running it again replaces the package
+`pscat lib list` shows what is installed, `pscat lib remove NAME` uninstalls a
+package (a directory the command did not make needs `--force`). Running install
+again replaces the package
 (files DIR no longer has are removed). NAME may not match a built-in library
 (`artkit`, `qr`, ...), so an install cannot shadow one. `currentfilename`
 (`- currentfilename string`, a pscat extension: not in Ghostscript, probe with

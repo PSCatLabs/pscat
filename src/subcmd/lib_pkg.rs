@@ -32,6 +32,7 @@ use super::{Args, Failure};
 
 const USAGE: &str = "usage: pscat lib install DIR [--name NAME]
        pscat lib list
+       pscat lib remove NAME [--force]
 
 install  copy DIR's files into lib/NAME/ in the per-user data directory (or in
          $PSCAT_HOME, if set; `pscat fonts list` shows which), so that
@@ -45,6 +46,9 @@ list     the installed packages and where they are, and any `.NAME.new-PID`
          directory an interrupted install left behind (the next install
          removes one whose process is gone; one whose pid is running is
          left, and named so you can remove it by hand)
+remove   delete lib/NAME/, a package that install put there, and say how many
+         files went. Refused: a directory that pscat lib did not create (see
+         `pscat lib list`), unless --force; a name that is not a directory.
 
 A library that loads files beside itself can ask where it was loaded from:
 currentfilename returns the name it was run by, e.g. lib/NAME/x.ps.";
@@ -113,6 +117,30 @@ pub(crate) fn run(mut args: Args) -> Result<(), Failure> {
             };
             let builtins: Vec<&str> = pscat::paths::embedded_names().collect();
             install(&lib_dir()?, Path::new(&dir), name.as_deref(), &builtins)
+        }
+        "remove" => {
+            let mut name: Option<String> = None;
+            let mut force = false;
+            while let Some(a) = args.next() {
+                match a.as_str() {
+                    "-h" | "--help" => {
+                        println!("{USAGE}");
+                        return Ok(());
+                    }
+                    "--force" => force = true,
+                    s if s.starts_with("--") => {
+                        return Err(Failure::Usage(format!("unknown option {s}"), USAGE));
+                    }
+                    _ if name.is_none() => name = Some(a),
+                    _ => {
+                        return Err(Failure::Usage(format!("unexpected argument {a}"), USAGE));
+                    }
+                }
+            }
+            let Some(name) = name else {
+                return Err(Failure::Usage("remove needs NAME".into(), USAGE));
+            };
+            remove(&lib_dir()?, &name, force)
         }
         other => Err(Failure::Usage(format!("unknown command {other:?}"), USAGE)),
     }
@@ -749,6 +777,85 @@ fn list(lib: &Path) -> Result<(), Failure> {
         };
         println!("{} (pid {}): {what}", s.path.display(), s.pid);
     }
+    Ok(())
+}
+
+/// How many files, symbolic links and the like (everything that is not a
+/// directory) are below `dir`, hidden ones included and links not followed,
+/// not counting `skip` (the marker). What `remove` reports as gone.
+fn count_all(dir: &Path, skip: &Path) -> std::io::Result<usize> {
+    let mut n = 0;
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in fs::read_dir(&d)? {
+            let e = e?;
+            if e.file_type()?.is_dir() {
+                todo.push(e.path());
+            } else if e.path() != skip {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
+}
+
+/// `pscat lib remove NAME [--force]`: delete `lib/NAME/` from the install
+/// directory. Only a directory `install` made (one holding a `.pscat-lib`
+/// marker that is a regular file) goes without `--force`; a symbolic link or a
+/// plain file named NAME is never removed, `--force` or not. NAME is one plain
+/// component, so nothing outside `lib/` can be named.
+fn remove(lib: &Path, name: &str, force: bool) -> Result<(), Failure> {
+    let plain = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if !plain {
+        return Err(fail(format!(
+            "{name:?} is not a package name: use letters, digits, - and _ (at most 64); \
+             `pscat lib list` shows what is installed"
+        )));
+    }
+    let dest = lib.join(name);
+    let meta = match fs::symlink_metadata(&dest) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(fail(format!(
+                "lib/{name} is not installed (looked in {}); `pscat lib list` shows what is",
+                lib.display()
+            )));
+        }
+        Err(e) => return Err(fail(format!("cannot read {}: {e}", dest.display()))),
+    };
+    if !meta.is_dir() {
+        return Err(fail(format!(
+            "{} is not a directory (a file or a symbolic link); remove it by hand",
+            dest.display()
+        )));
+    }
+    let marker = dest.join(MARKER);
+    let ours = fs::symlink_metadata(&marker).is_ok_and(|m| m.is_file());
+    if !ours && !force {
+        return Err(fail(format!(
+            "{} was not made by pscat lib install, so it is not removed; \
+             pass --force to delete it anyway",
+            dest.display()
+        )));
+    }
+    let files = count_all(&dest, &marker)
+        .map_err(|e| fail(format!("cannot read {}: {e}", dest.display())))?;
+    // `remove_dir_all` does not follow a symbolic link, at the top or below, and
+    // (Rust 1.58.1 and later) is safe against a swap during its walk, so a
+    // `lib/NAME` swapped for a link after the check above is unlinked, not entered.
+    // Killed half way it can leave a partial directory; `remove` then says it was
+    // not made by install, and `--force` finishes the job.
+    fs::remove_dir_all(&dest)
+        .map_err(|e| fail(format!("cannot remove {}: {e}", dest.display())))?;
+    println!(
+        "removed lib/{name}: {files} file{} from {}",
+        plural(files),
+        dest.display()
+    );
     Ok(())
 }
 
