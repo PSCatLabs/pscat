@@ -585,8 +585,8 @@ showpage
 /// raw ABI and the npm Renderer, for a Latin, a Hangul (the face given to
 /// `addFont`) and a Symbol/Dingbats page (#1205): the default, which is
 /// text (#1026: `pscat --pdf`, `{ pdf: true }`, and the no-op `--pdf-text`
-/// / `pdfText: true`), and the outline opt-out (`--text-as-paths`, ABI bit
-/// 16 through `record.pdfText: false`, npm `pdfText: false`), which really
+/// / `pdfText: true`), and the outline opt-out (`--text-as-paths`, ABI flag
+/// value 16 through `record.pdfText: false`, npm `pdfText: false`), which really
 /// is a different, fontless file.
 #[test]
 fn wasm_pdf_text_matches_the_cli() {
@@ -653,7 +653,7 @@ for (const name of ['latin', 'hangul', 'symbols']) {{
   r.render(src, {{ width: 612, height: 792, pdf: true, pdfText: false }});
   out(`npm-paths-${{name}}.pdf`, r.pdf());
 }}
-// The raw flags: bit 8 (text) is accepted and changes nothing, bit 16 is
+// The raw flag values: 8 (text) is accepted and changes nothing, 16 is
 // the outline opt-out, the two together and either without PDF are refused.
 const enc = new TextEncoder().encode('showpage');
 const begin = (flags) => {{

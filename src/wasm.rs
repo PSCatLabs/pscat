@@ -56,8 +56,8 @@
 //!   standard-font text as SVG `<text>` (`pscat --svg-text`, #1119).
 //!   The PDF writes text in embedded fonts, like the CLI (#1026); bit 4,
 //!   with bit 1, draws every glyph as its outline (`pscat
-//!   --text-as-paths`), and bit 3 (text, #1205) is accepted and changes
-//!   nothing. -1 also for an unknown flag bit, bit 2 without bit 0, bit 3
+//!   --text-as-paths`; value 16), and bit 3 (value 8, text, #1205) is
+//!   accepted and changes nothing. -1 also for an unknown flag bit, bit 2 without bit 0, bit 3
 //!   or 4 without bit 1, or bits 3 and 4 together;
 //! - `ps_svg_count()` — SVG pages so far (0 when not recording);
 //! - `ps_page_count()` — pages the document holds now, whatever is

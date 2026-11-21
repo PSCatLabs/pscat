@@ -1020,44 +1020,34 @@ impl PdfRecorder {
     /// placement (a collapsed font matrix) paints nothing in the raster
     /// either, so it is dropped and counts as taken.
     ///
-    /// `Ok(Some(bytes))`: taken, with `bytes` of new charstring built for
-    /// it (0 for a glyph seen before), which the caller charges as work
-    /// (#1026). Before a new charstring is built, the memory limit is asked
-    /// for its working buffer, and a refusal leaves the recorder as it was.
+    /// `Some(bytes)`: taken, with `bytes` of new charstring built for it
+    /// (0 for a glyph seen before), which the caller charges as work
+    /// (#1026). The caller asks the memory limit first when
+    /// [`would_build`](Self::would_build) says a charstring is coming.
     pub(crate) fn glyph(
         &mut self,
         g: &GlyphText,
         rgb: (f32, f32, f32),
         comp: Composite,
         chain: &Chain,
-        probe: &LimitProbe,
-    ) -> Result<Option<usize>, crate::PsError> {
+    ) -> Option<usize> {
         let Some(p) = Placement::of(g) else {
-            return Ok(Some(0));
+            return Some(0);
         };
-        let Some(face) = crate::font::pdf_face(g.fid) else {
-            return Ok(None);
-        };
+        let face = crate::font::pdf_face(g.fid)?;
         let known = self.font_ids.get(&g.fid).copied();
-        if known.is_none_or(|i| self.fonts[i].1.would_build(g.gid, g.ch)) {
-            probe.check_alloc(crate::pdf_font::CHARSTRING_BUDGET)?;
-        }
         // A font joins the document with its first embeddable glyph, so a
         // face whose every glyph is refused writes no font objects.
         let (font, cid, built) = match known {
             Some(i) => {
                 let used = &mut self.fonts[i].1;
                 let fresh = used.would_build(g.gid, g.ch);
-                match used.cid(face, g.gid, g.ch, g.advance) {
-                    Some(cid) => (i, cid, if fresh { used.charstring_len(g.gid) } else { 0 }),
-                    None => return Ok(None),
-                }
+                let cid = used.cid(face, g.gid, g.ch, g.advance)?;
+                (i, cid, if fresh { used.charstring_len(g.gid) } else { 0 })
             }
             None => {
                 let mut used = UsedGlyphs::new(face);
-                let Some(cid) = used.cid(face, g.gid, g.ch, g.advance) else {
-                    return Ok(None);
-                };
+                let cid = used.cid(face, g.gid, g.ch, g.advance)?;
                 let built = used.charstring_len(g.gid);
                 let i = self.fonts.len();
                 self.fonts.push((g.fid, used));
@@ -1071,7 +1061,7 @@ impl PdfRecorder {
             run.text.push(g, &p);
             run.widths.push(g.advance);
             run.cids.push(cid);
-            return Ok(Some(built));
+            return Some(built);
         }
         self.flush_text();
         let gs = self.gs_ref(comp);
@@ -1089,7 +1079,18 @@ impl PdfRecorder {
             widths: vec![g.advance],
             cids: vec![cid],
         });
-        Ok(Some(built))
+        Some(built)
+    }
+
+    /// Whether [`glyph`](Self::glyph) would build a new charstring for `g`
+    /// (its face has no font here yet, or the font has not seen the glyph):
+    /// `Gfx::paint_glyph` then asks the memory limit for
+    /// [`CHARSTRING_BUDGET`](crate::pdf_font::CHARSTRING_BUDGET) before it
+    /// paints anything (#1026).
+    pub(crate) fn would_build(&self, g: &GlyphText) -> bool {
+        self.font_ids
+            .get(&g.fid)
+            .is_none_or(|&i| self.fonts[i].1.would_build(g.gid, g.ch))
     }
 
     /// Write the open text run into the content.

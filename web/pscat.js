@@ -55,7 +55,8 @@ export class Pscat {
    * text as selectable, searchable PDF text in embedded subset fonts, as
    * `pscat --pdf` does; `record.pdfText: false` (with `record.pdf`) draws
    * every glyph as its outline instead, as `pscat --text-as-paths` does
-   * (flag bit 16; bit 8, text, is the default and is never needed). Throws
+   * (flag value 16, bit 4; value 8, bit 3, text, is the default and is
+   * never needed). Throws
    * on unusable page sizes.
    */
   begin(source, width = 612, height = 792, scale = 1, record = {}) {

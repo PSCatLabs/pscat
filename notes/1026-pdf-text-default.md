@@ -21,10 +21,11 @@ owner approved.
   working. Giving both is a usage error ("contradict each other"); a pair
   of flags that cancel each other has no obvious winner. `--help` says all
   of this.
-- wasm `ps_begin_vector` flags: bit 8 (text, #1205) is accepted and is a
-  no-op. The new bit 16 is the outline opt-out. Bits 8 and 16 together are
-  refused, and so is either one without bit 2 (PDF). `web/pscat.js` sends
-  bit 16 for `record.pdfText === false` and never sends bit 8. In npm,
+- wasm `ps_begin_vector` flags (by value): 8 (bit 3, text, #1205) is
+  accepted and is a no-op. The new 16 (bit 4) is the outline opt-out.
+  8 and 16 together are refused, and so is either one without 2 (PDF).
+  `web/pscat.js` sends 16 for `record.pdfText === false` and never sends
+  8. In npm,
   `pdfText` defaults to true, and `pdfText: false` (with `pdf`) gives
   outlines. `pdfText: true` without `pdf` is still a TypeError, and
   `pdfText: false` without `pdf` asks for nothing and is accepted.
@@ -63,7 +64,7 @@ adds:
 the CLI, the raw ABI and npm, byte for byte, on Latin, Hangul (an `addFont`
 face) and Symbol/Dingbats pages. It checks the default (`--pdf`,
 `{ pdf: true }`), the no-op aliases (`--pdf-text`, `pdfText: true`) and
-the opt-out (`--text-as-paths`, bit 16, `pdfText: false`). It also checks
+the opt-out (`--text-as-paths`, flag value 16, `pdfText: false`). It also checks
 the flag combinations the ABI refuses.
 
 **Size and time** (release build, macOS, one run each; `--text-as-paths`
