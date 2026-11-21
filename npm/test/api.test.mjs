@@ -162,15 +162,6 @@ test('pdf: text in embedded fonts by default, pdfText: false draws outlines', as
   // Without pdf, pdfText: false asks for nothing and is accepted.
   r.render(doc, { pdfText: false });
 });
-  const text = latin1(r.pdf());
-  assert.match(text, /\/Subtype \/Type0/);
-  assert.match(text, /\/ToUnicode/);
-  r.render(doc, page);
-  assert.doesNotMatch(latin1(r.pdf()), /\/Type0|\/ToUnicode/);
-  assert.throws(() => r.render(doc, { pdfText: true }), /pdfText needs pdf: true/);
-  assert.throws(() => r.render(doc, { svg: true, pdfText: true }), /pdfText needs pdf: true/);
-  assert.throws(() => r.render(doc, { pdf: true, pdfText: 1 }), TypeError);
-});
 
 test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async () => {
   // Byte equality with `pscat --svg`/`--pdf` is checked in tests/wasm.rs.
