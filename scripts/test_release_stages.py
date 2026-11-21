@@ -51,10 +51,16 @@ def make_crate(path, commit=COMMIT, extra=b"", mtime=0, generated=b"", orig=True
             tar.addfile(info, io.BytesIO(data))
 
 
-def make_npm_tarball(path, name="pscat-wasm", version=VERSION, extra=b""):
-    """A minimal npm tarball: package/package.json (+ `extra` in a file)."""
+GLOBAL_JS = b"var pscat = {};\n"
+
+
+def make_npm_tarball(path, name="pscat-wasm", version=VERSION, extra=b"", global_js=GLOBAL_JS):
+    """A minimal npm tarball: package/package.json, package/pscat.global.js
+    (unless `global_js` is None) and `extra` in another file."""
     files = {"package/package.json": json.dumps({"name": name, "version": version}).encode(),
              "package/index.js": b"export {};\n" + extra}
+    if global_js is not None:
+        files["package/pscat.global.js"] = global_js
     with tarfile.open(path, "w:gz") as tar:
         for n, data in sorted(files.items()):
             info = tarfile.TarInfo(n)
@@ -457,13 +463,49 @@ class Channels(Base):
                        capture_output=True, text=True, check=True)
         m = rs.load_manifest(self.dist)
         name = os.path.basename(self._tarball())
-        self.assertEqual([a["name"] for a in m["assets"]][-1], name, "after the archives")
+        self.assertEqual([a["name"] for a in m["assets"]][-2:], [name, "pscat.global.js"], "after the archives")
         self.assertTrue(os.path.isfile(os.path.join(self.dist, name)))
         with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
             self.assertIn(f"{rs.sha256_file(self._tarball())}  {name}\n", f.read())
         # Run again over a dist that already holds the copy: listed once.
         rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball()), self.dist)
-        self.assertEqual([a["name"] for a in rs.load_manifest(self.dist)["assets"]].count(name), 1)
+        again = [a["name"] for a in rs.load_manifest(self.dist)["assets"]]
+        self.assertEqual((again.count(name), again.count("pscat.global.js")), (1, 1))
+
+    def test_the_release_carries_pscat_global_js_from_the_npm_tarball(self):
+        """#1108: the classic script is an asset of its own, byte for byte what the
+        npm tarball holds, listed in the manifest and SHA256SUMS, uploaded by `draft`."""
+        self._attach()
+        names = [a["name"] for a in self.m["assets"]]
+        self.assertEqual(rs.global_asset(self.m), "pscat.global.js")
+        self.assertEqual(names[-2:], [os.path.basename(self._tarball()), "pscat.global.js"], "after the tarball")
+        with open(os.path.join(self.dist, "pscat.global.js"), "rb") as f:
+            self.assertEqual(f.read(), GLOBAL_JS)
+        with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
+            self.assertIn(f"{rs.sha256_file(os.path.join(self.dist, 'pscat.global.js'))}  pscat.global.js\n", f.read())
+        self.assertIn("pscat.global.js", rs.release_files(self.m))
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["draft"], r["publish"]), (rs.EXIT_OK, "published", "published"))
+        rel = self.fake.releases(TAG)[0]
+        asset = next(a for a in rel["assets"] if a["name"] == "pscat.global.js")
+        self.assertEqual(self.fake.asset_sha256(asset), rs.sha256_bytes(GLOBAL_JS))
+        notes = rs.changelog_notes(VERSION, self.repo, "pscat-wasm-9.8.7.tgz", "pscat.global.js")
+        self.assertIn(f"https://github.com/PSCatLabs/pscat/releases/download/{TAG}/pscat.global.js", notes)
+        self.assertNotIn("pscat.global.js", rs.changelog_notes(VERSION, self.repo, "pscat-wasm-9.8.7.tgz"))
+
+    def test_npm_tarball_without_pscat_global_js_stops_the_manifest(self):
+        self._npm(tarball=False)
+        make_npm_tarball(self._tarball(), global_js=None)
+        with self.assertRaises(SystemExit) as cm:
+            rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball())
+        self.assertIn("pscat.global.js", str(cm.exception))
+        make_npm_tarball(self._tarball(), global_js=b"")  # an empty file is no build either
+        with self.assertRaises(SystemExit):
+            rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball())
+
+    def test_no_npm_channel_no_pscat_global_js(self):
+        self.assertIsNone(rs.global_asset(self.m))
+        self.assertFalse(os.path.exists(os.path.join(self.dist, "pscat.global.js")))
 
     def test_npm_tarball_name(self):
         self.assertEqual(rs.npm_tarball_name("pscat", "0.6.2"), "pscat-0.6.2.tgz")

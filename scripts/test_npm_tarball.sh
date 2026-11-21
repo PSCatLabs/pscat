@@ -21,8 +21,10 @@
 # `pscat/node.js` resolves (CJS and ESM) and imports (#1163); `pscat/pscat.wasm` and
 # `pscat/package.json` resolve; `pscat/pscat.global.js` (#1025) parses as a classic script and
 # renders through the `pscat` global it defines. Unless --no-types,
-# a TypeScript consumer type-checks against index.d.ts (needs the network
-# once, for the pinned typescript).
+# a TypeScript consumer type-checks against index.d.ts, and one using the
+# script's global against `pscat/global` (global.d.ts, #1108; a registry
+# release that predates the file skips that part). The network is needed
+# once, for the pinned typescript.
 set -euo pipefail
 TYPES=1
 ATTESTED=0
@@ -153,6 +155,24 @@ cat > tsconfig.json <<'EOF'
 { "compilerOptions": { "module": "nodenext", "target": "es2022", "lib": ["es2022", "dom"],
   "strict": true, "noEmit": true, "skipLibCheck": false, "types": [] }, "files": ["consumer.ts"] }
 EOF
+# The global the classic script defines (#1108), declared by `pscat/global`. A tarball must have
+# it; a registry release from before the file existed (0.7.0 and earlier) is not held to it.
+GLOBAL_TYPES=0
+if [[ "$SOURCE" == "the tarball" || -f node_modules/pscat/global.d.ts ]]; then
+  GLOBAL_TYPES=1
+  node -e 'const t = require("./tsconfig.json"); t.files.push("global-consumer.ts"); require("fs").writeFileSync("tsconfig.json", JSON.stringify(t))'
+  cat > global-consumer.ts <<'EOF2'
+/// <reference types="pscat/global" />
+import type { RenderResult, Renderer } from 'pscat';
+
+const made: Promise<Renderer> = pscat.createRenderer({ wasm: new Uint8Array(0) });
+const page = async (): Promise<RenderResult> => (await made).render('0 0 10 10 rectfill', { width: 20, height: 20 });
+const isPostScriptError = (e: unknown): e is InstanceType<typeof pscat.PostScriptError> => e instanceof pscat.PostScriptError;
+void page; void isPostScriptError;
+// @ts-expect-error the global holds exactly what the script defines
+void pscat.nosuchmember;
+EOF2
+fi
 cat > consumer.ts <<'EOF'
 import { createRenderer, PostScriptError, type RenderResult, type Renderer } from 'pscat';
 
@@ -184,4 +204,4 @@ r.render('', { width: '100' });
 void data; void more;
 EOF
 npx tsc -p .
-echo "types: index.d.ts checks with $TYPESCRIPT"
+echo "types: index.d.ts$([[ $GLOBAL_TYPES -eq 1 ]] && echo ' and global.d.ts') check with $TYPESCRIPT"

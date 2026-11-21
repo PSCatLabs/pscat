@@ -105,3 +105,17 @@ test('a page opened from file:// says why the default fetch failed and what to p
     globalThis.fetch = saved;
   }
 });
+
+// The TypeScript declaration of that global (#1108): global.d.ts is shipped, reachable as `pscat/global`
+// and from the script's own subpath, and declares exactly the members the script defines.
+test('global.d.ts is packed, exported, and declares exactly what the script defines', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(pkg.files.includes('global.d.ts'), 'a file missing from "files" is not in the tarball');
+  assert.equal(pkg.exports['./global'].types, './global.d.ts');
+  assert.equal(pkg.exports['./pscat.global.js'].types, './global.d.ts');
+  assert.equal(pkg.exports['./pscat.global.js'].default, './pscat.global.js');
+  const dts = await readFile(new URL('../global.d.ts', import.meta.url), 'utf8');
+  assert.match(dts, /declare global\s*\{[^}]*var pscat\b/s);
+  const declared = [...dts.matchAll(/^\s+(\w+): typeof \w+;$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(declared, Object.keys(load('https://example.com/pscat.global.js')).sort());
+});
