@@ -5,11 +5,12 @@ ChatGPT on the web cannot start a local MCP server, so the pscat plugin's
 page covers connecting ChatGPT to the hosted `pscat-mcp`, what you see, and
 the one open question: how the server proves who is calling.
 
-Status (November 2026): the hosted server is in staging and protected by a
-static bearer token. **ChatGPT cannot send a static bearer token**, so it
-cannot connect to that server as it stands. The owner has to pick between
-OAuth on the server and a no-authentication variant first (the decision is on
-issue #1240). Everything else below is ready.
+Status (November 2026): the staging server is protected by a static bearer
+token, and **ChatGPT cannot send a static bearer token**, so it cannot connect
+to staging. Releases from 0.7.1 on carry a plugin ZIP built against the
+**production** server with authentication `none`, which ChatGPT can use (the
+auth choice is on pscat-mcp#136; the earlier decision is on issue #1240).
+Whether ChatGPT accepts the ZIP upload itself is still unverified (#1089).
 
 ## What ChatGPT accepts
 
@@ -23,7 +24,38 @@ Checked against OpenAI's documentation on 2026-11-16
 | Authentication ChatGPT's form offers | **OAuth**, **No authentication**, **OAuth or no authentication**. |
 | A static bearer token or API key | The manifest schema accepts `{"type": "api_key", "headerScheme": "bearer"}`, but OpenAI's docs say ChatGPT has no connection flow or token input for it and "cannot present custom API keys". |
 
-## Connect (the documented private route)
+## Three ways to connect
+
+1. **Download the plugin ZIP from the release page (the primary path).**
+   Every release, release candidates included, carries
+   `pscat-cloud-chatgpt-plugin-<version>.zip`: the `--remote` build below,
+   made by the release workflow against the **production** pscat-mcp server
+   (#1253). Its authentication setting is `none`, because ChatGPT connectors
+   accept only no authentication or OAuth (pscat-mcp#136). Releases from
+   0.7.1 on have it; earlier ones do not.
+
+   ```sh
+   V=0.7.1    # the release you want, for example 0.7.1-rc.1 for a candidate
+   gh release download "v$V" -R PSCatLabs/pscat \
+       -p "pscat-cloud-chatgpt-plugin-$V.zip" -p SHA256SUMS
+   shasum -a 256 -c SHA256SUMS --ignore-missing        # sha256sum on Linux
+   unzip -p "pscat-cloud-chatgpt-plugin-$V.zip" mcp.json   # the URL it connects to
+   ```
+
+   Without `gh`, use the same two files from
+   `https://github.com/PSCatLabs/pscat/releases/download/v<version>/`. The
+   `mcp.json` URL must be an `https` address that is not a `*.run.app`
+   address (that is the staging service); if it is, do not upload the ZIP.
+   Then upload the ZIP as a plugin in ChatGPT (see the caveat under
+   [The plugin ZIP, remote build](#the-plugin-zip-remote-build): the upload
+   flow is unverified).
+2. **Build the ZIP yourself (the fallback)**, when you want a different
+   server URL or your release has no ZIP: [The plugin ZIP, remote
+   build](#the-plugin-zip-remote-build) below.
+3. **Skip the ZIP** and paste the server URL into ChatGPT's **Add custom MCP
+   server**: the next section.
+
+## Connect without a ZIP (the documented private route)
 
 Use ChatGPT on the web. Workspace permissions and security restrictions
 apply to custom MCP servers, and OpenAI marks the feature as elevated risk:
@@ -35,8 +67,9 @@ connect only a server you trust.
    refuses a second plugin of the same name). Description: "Render PostScript to PNG, SVG and PDF."
 3. Under **Connection**, enter the **Server URL**, with the `/mcp` path:
    `https://<your-pscat-mcp-host>/mcp`. The staging host is a Cloud Run
-   `run.app` address and production will differ, so take it from the
-   server's owner. Never paste a token into the URL.
+   `run.app` address and production differs: read the production URL from
+   the `mcp.json` of the release ZIP (route 1), or ask the server's owner.
+   Never paste a token into the URL.
 4. Authentication: choose the method the server was set up for, **No
    authentication** or **OAuth** (the owner's decision; a bearer-protected
    server will fail here).
@@ -89,6 +122,11 @@ lacks, tell it to use only the seven tools above.
 
 ## The plugin ZIP, remote build
 
+The release workflow runs this build for you (route 1 above), with
+`--production` and the URL from its `PSCAT_MCP_PROD_URL` repository variable
+(`docs/dev/RELEASING.md`). Run it yourself for another URL or an older
+release.
+
 `scripts/build_chatgpt_plugin.py --remote` builds the plugin ZIP that
 `plugin/README.md` describes, with its local `mcp.json` replaced by one entry
 for the hosted server, the plugin renamed **`pscat-cloud`**, and the local
@@ -115,6 +153,9 @@ python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
   credentials, query string or fragment. The URL is an argument and is never
   committed. No token goes in the ZIP, and no `headers` entry either (OpenAI's
   public submission rejects nonempty server headers).
+- `--production` is the release workflow's switch: it refuses an empty, non-https,
+  `run.app` (staging) or placeholder URL, so a release can never ship a ZIP that
+  points at staging.
 - It cannot be combined with `--skills-only`.
 - What differs from the local ZIP: `plugin.json` has `name` `pscat-cloud`,
   display name "pscat cloud", short description "Hosted PostScript renderer"

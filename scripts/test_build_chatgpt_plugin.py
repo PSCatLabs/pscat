@@ -249,6 +249,30 @@ class Remote(Fixture):
         first = self.build(remote=URL, remote_auth="none").read_bytes()
         self.assertEqual(first, self.build(remote=URL, remote_auth="none").read_bytes())
 
+    def test_production_refuses_staging_unset_and_placeholder_urls(self):
+        """#1253: the release builds with --production from PSCAT_MCP_PROD_URL."""
+        for bad in (None, "", "   ", "http://mcp.pscat.dev/mcp", "mcp.pscat.dev/mcp",
+                    "https://pscat-mcp-145279231681.us-central1.run.app/mcp",
+                    "https://PSCAT-MCP.RUN.APP/mcp", "https://mcp.pscat.dev/run.app/mcp",
+                    "https://mcp.pscat.dev", "https://mcp.pscat.dev/mcp?token=x",
+                    "https://u:p@mcp.pscat.dev/mcp", "https://localhost/mcp", "https://10.0.0.1/mcp",
+                    "https://pscat-mcp.example.com/mcp", "https://x.invalid/mcp", "https://<host>/mcp"):
+            with self.assertRaises(SystemExit, msg=repr(bad)):
+                b.check_production_url(bad)
+        self.assertEqual(b.check_production_url("https://MCP.pscat.dev/mcp"), "https://mcp.pscat.dev/mcp")
+        # The message names the variable, so the owner knows what to set.
+        with self.assertRaisesRegex(SystemExit, "PSCAT_MCP_PROD_URL"):
+            b.check_production_url("")
+        self.assertFalse((self.out / "pscat-cloud-chatgpt-plugin-1.2.3.zip").exists())
+        for bad in ("", URL):  # URL is a *.run.app address
+            with self.assertRaises(SystemExit):
+                self.build(remote=bad, remote_auth="none", production=True)
+        self.assertFalse(list(self.out.glob("*.zip")) if self.out.exists() else [], "no ZIP on a refusal")
+        path = self.build(remote="https://mcp.pscat.dev/mcp", remote_auth="none", production=True)
+        self.assertEqual(self.mcp(path)["mcpServers"]["pscat-cloud"]["url"], "https://mcp.pscat.dev/mcp")
+        with self.assertRaisesRegex(SystemExit, "--production needs --remote"):
+            self.build(production=True)
+
     def test_bad_urls(self):
         for bad, why in [
             ("http://h.example/mcp", "https"),
