@@ -72,6 +72,7 @@ npm can lag the plugin's CLI (a release candidate is on GitHub, not npm): compar
 pscat --png out.png file.ps            # headless render to PNG
 pscat --svg out.svg file.ps            # vector SVG (one file per page)
 pscat --pdf out.pdf file.ps            # multi-page PDF
+pscat --text-as-paths --pdf out.pdf f.ps  # PDF text as glyph outlines (default: selectable text, embedded fonts)
 pscat --page 500x500 --png out.png f.ps  # canvas in points (default 612x792)
 pscat --dpi 300 --png out.png f.ps     # print resolution (default 72)
 pscat --halftone --png out.png f.ps    # screen like a mono laser printer

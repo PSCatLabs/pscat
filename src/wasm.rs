@@ -54,7 +54,11 @@
 //!   With PDF on, the source's `%%Title:`/`%%For:` become the PDF's
 //!   `/Info`, as the CLI does for a file. Bit 2, with bit 0, writes
 //!   standard-font text as SVG `<text>` (`pscat --svg-text`, #1119).
-//!   -1 also for an unknown flag bit, or bit 2 without bit 0;
+//!   The PDF writes text in embedded fonts, like the CLI (#1026); bit 4,
+//!   with bit 1, draws every glyph as its outline (`pscat
+//!   --text-as-paths`; value 16), and bit 3 (value 8, text, #1205) is
+//!   accepted and changes nothing. -1 also for an unknown flag bit, bit 2 without bit 0, bit 3
+//!   or 4 without bit 1, or bits 3 and 4 together;
 //! - `ps_svg_count()` — SVG pages so far (0 when not recording);
 //! - `ps_page_count()` — pages the document holds now, whatever is
 //!   recorded: those `showpage`/`copypage` emitted plus the live page when
@@ -95,7 +99,11 @@ thread_local! {
 const RECORD_SVG: u32 = 1;
 const RECORD_PDF: u32 = 2;
 const SVG_TEXT: u32 = 4;
+/// PDF text in embedded fonts (#1205). The default since #1026, so the bit
+/// changes nothing; it is still accepted, as `pscat --pdf-text` is.
 const PDF_TEXT: u32 = 8;
+/// Every PDF glyph as its outline, `pscat --text-as-paths` (#1026).
+const PDF_PATHS: u32 = 16;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_alloc(len: usize) -> *mut u8 {
@@ -159,9 +167,10 @@ pub unsafe extern "C" fn ps_begin_vector(
     scale: f32,
     flags: u32,
 ) -> i32 {
-    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT | PDF_TEXT) != 0
+    if flags & !(RECORD_SVG | RECORD_PDF | SVG_TEXT | PDF_TEXT | PDF_PATHS) != 0
         || (flags & SVG_TEXT != 0 && flags & RECORD_SVG == 0)
-        || (flags & PDF_TEXT != 0 && flags & RECORD_PDF == 0)
+        || (flags & (PDF_TEXT | PDF_PATHS) != 0 && flags & RECORD_PDF == 0)
+        || flags & (PDF_TEXT | PDF_PATHS) == PDF_TEXT | PDF_PATHS
         || !(scale.is_finite() && scale > 0.0)
     {
         return -1;
@@ -179,8 +188,8 @@ pub unsafe extern "C" fn ps_begin_vector(
         it.enable_svg();
     }
     if flags & RECORD_PDF != 0 {
-        if flags & PDF_TEXT != 0 {
-            it.set_pdf_text(crate::PdfText::Text);
+        if flags & PDF_PATHS != 0 {
+            it.set_pdf_text(crate::PdfText::Paths);
         }
         it.enable_pdf();
         let (title, author) = crate::pdf::scan_document_info(&source);

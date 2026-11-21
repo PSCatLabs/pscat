@@ -107,7 +107,8 @@ function pageOf(options = {}) {
       svg: options.svg === true,
       pdf: options.pdf === true,
       svgText: options.svgText === true,
-      pdfText: options.pdfText === true,
+      // PDF text is the default (#1026); only an explicit false asks for outlines.
+      pdfText: options.pdfText !== false,
     },
   };
 }

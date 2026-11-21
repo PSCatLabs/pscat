@@ -19,8 +19,8 @@
 //!   (none is in the dependency tree).
 //!
 //! A glyph shared by two characters (NotoSansJP draws U+2012 and U+2013
-//! with one glyph) gets a second CID beyond the face's glyph range, with a
-//! copy of the charstring, so `/ToUnicode` can give each its own character.
+//! with one glyph) gets a second CID beyond the face's glyph range, sharing
+//! the charstring, so `/ToUnicode` can give each its own character.
 //!
 //! Every call into ttf-parser here runs under `guard::catch`, as the show
 //! engine's own lookups do: a hostile font can trip an overflow assertion
@@ -39,17 +39,22 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
+use std::io;
+use std::rc::Rc;
 
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
 use crate::guard::catch;
+use crate::limits::LimitProbe;
 
 /// One CID of an embedded font: the character it stands for, its advance
 /// in 1/1000 em and the Type 2 charstring of the glyph it draws.
 pub(crate) struct CidGlyph {
     pub(crate) ch: char,
     pub(crate) advance: f64,
-    pub(crate) charstring: Vec<u8>,
+    /// Shared with the glyph's other CIDs, so a second character costs no
+    /// copy while the program runs.
+    pub(crate) charstring: Rc<[u8]>,
 }
 
 /// The glyphs one embedded font holds, by CID. A glyph's first character
@@ -82,10 +87,26 @@ impl UsedGlyphs {
         }
     }
 
+    /// Whether [`cid`](Self::cid) for `gid` would build a new charstring
+    /// (the glyph has not been seen, nor refused): the caller checks the
+    /// memory limit for [`CHARSTRING_BUDGET`] first (#1026).
+    pub(crate) fn would_build(&self, gid: u16, ch: char) -> bool {
+        !self.pairs.contains_key(&(gid, ch))
+            && !self.cids.contains_key(&gid)
+            && !self.refused.contains(&gid)
+            && gid != 0
+            && u32::from(gid) < self.glyph_count
+    }
+
+    /// Bytes of `gid`'s charstring, once [`cid`](Self::cid) has built it.
+    pub(crate) fn charstring_len(&self, gid: u16) -> usize {
+        self.cids.get(&gid).map_or(0, |g| g.charstring.len())
+    }
+
     /// The CID that draws `gid` and stands for `ch`, building its
     /// charstring the first time the glyph is seen. `None` keeps the
     /// glyph's outline: it cannot be embedded, or the font is out of CIDs.
-    pub(crate) fn cid(&mut self, face: &Face, gid: u16, ch: char, advance: f64) -> Option<u16> {
+    pub(crate) fn cid(&mut self, gid: u16, ch: char, advance: f64, built: Built) -> Option<u16> {
         if let Some(&cid) = self.pairs.get(&(gid, ch)) {
             return Some(cid);
         }
@@ -105,14 +126,16 @@ impl UsedGlyphs {
             Some(first) => {
                 let cid = u16::try_from(self.next_extra).ok()?;
                 self.next_extra += 1;
-                (cid, first.charstring.clone())
+                (cid, Rc::clone(&first.charstring))
             }
-            None => match charstring(face, gid) {
-                Some(cs) => (gid, cs),
-                None => {
+            None => match built {
+                Built::Charstring(cs) => (gid, Rc::from(cs)),
+                Built::Refused => {
                     self.refused.insert(gid);
                     return None;
                 }
+                // Not walked at show: never walked here (#1026).
+                Built::No => return None,
             },
         };
         self.cids.insert(
@@ -197,8 +220,10 @@ fn fs_type_allows(fs_type: u16) -> bool {
 // ---------------------------------------------------------------------
 
 /// Builds one Type 2 charstring from an outline, in 1/65536 units of the
-/// 1000-unit em.
-struct Charstring {
+/// 1000-unit em. The show engine feeds it from the same `outline_glyph`
+/// walk that draws the glyph (#1026), so a glyph's outline is walked once,
+/// at `show`, under the limits; nothing here walks an outline itself.
+pub(crate) struct Charstring {
     out: Vec<u8>,
     /// Source units → 1000-unit em.
     scale: f64,
@@ -332,10 +357,41 @@ impl OutlineBuilder for Charstring {
     fn close(&mut self) {}
 }
 
+/// What building one charstring may hold at its peak: the whole Type 2
+/// budget is reserved up front (`Charstring::new`).
+pub(crate) const CHARSTRING_BUDGET: usize = MAX_CHARSTRING;
+
 /// The Type 2 limit on one charstring.
 const MAX_CHARSTRING: usize = 65_535;
 
+/// What the show engine built for one glyph's embedded charstring
+/// (#1026): nothing (the font already holds the glyph, or PDF text is not
+/// asking), the charstring, or a refusal (the outline cannot be written
+/// exactly within the Type 2 limits: the glyph keeps its outline).
+pub(crate) enum Built {
+    No,
+    Charstring(Vec<u8>),
+    Refused,
+}
+
 impl Charstring {
+    /// A builder for `face`'s units, holding its whole 64 KiB budget: the
+    /// caller asks the memory limit for [`CHARSTRING_BUDGET`] first.
+    pub(crate) fn for_face(face: &Face) -> Self {
+        Charstring::new(face.units_per_em())
+    }
+
+    /// The result once the outline walk is over. `drawn` is what
+    /// `outline_glyph` returned: `false` for an empty glyph and for one the
+    /// parser gave up on halfway, which become a bare `endchar`.
+    pub(crate) fn built(self, drawn: bool) -> Built {
+        let cs = if drawn { self } else { Charstring::new(1000) };
+        match cs.finish() {
+            Some(v) => Built::Charstring(v),
+            None => Built::Refused,
+        }
+    }
+
     fn new(units_per_em: u16) -> Self {
         Charstring {
             // The whole budget at once: appends never reallocate, so the
@@ -360,10 +416,12 @@ impl Charstring {
     }
 }
 
-/// The charstring for `gid`, `None` when it cannot be embedded exactly.
+/// The charstring for `gid`, `None` when it cannot be embedded exactly
+/// (tests only: the recorder takes what the show engine built).
 /// No width operand: PDF takes advances from the CIDFont's `/W`, which
 /// overrides the font program's. An empty glyph (a space) is a bare
 /// `endchar`.
+#[cfg(test)]
 fn charstring(face: &Face, gid: u16) -> Option<Vec<u8>> {
     let mut cs = Charstring::new(face.units_per_em());
     // `outline_glyph` is `None` for an empty glyph and for one the parser
@@ -639,15 +697,19 @@ fn widths(cids: &BTreeMap<u16, CidGlyph>) -> String {
 }
 
 /// A stream object, Flate-compressed like the page contents.
-fn stream(dict: &str, data: &[u8]) -> Vec<u8> {
-    let (body, filter) = match crate::pdf::deflate(&[data]) {
-        Some(z) => (z, " /Filter /FlateDecode"),
-        None => (data.to_vec(), ""),
-    };
-    let mut out = format!("<< {dict}/Length {}{filter} >>\nstream\n", body.len()).into_bytes();
+fn stream(dict: &str, data: &[u8], probe: LimitProbe) -> io::Result<Vec<u8>> {
+    let body = crate::pdf::deflate_limited(&[data], probe)?;
+    probe
+        .check_alloc(body.len() + dict.len() + 64)
+        .map_err(|_| crate::pdf::memory_refused())?;
+    let mut out = format!(
+        "<< {dict}/Length {} /Filter /FlateDecode >>\nstream\n",
+        body.len()
+    )
+    .into_bytes();
     out.extend_from_slice(&body);
     out.extend_from_slice(b"\nendstream");
-    out
+    Ok(out)
 }
 
 /// Objects written per embedded font: Type 0 font, CIDFont, descriptor,
@@ -680,15 +742,24 @@ fn metrics(face: &Face) -> Option<Metrics> {
 
 /// The five objects of document font `font_index`, numbered from `first`.
 /// The glyphs come from `used` (their charstrings were built as they were
-/// shown); `face` only gives the descriptor's metrics and `.notdef`, and
+/// shown); `face` only gives the descriptor's metrics (no outline), and
 /// is `None` only if the face vanished, which the registry never does.
+///
+/// Under `--max-memory` (`probe`, #1026) the font program, which copies
+/// every charstring twice on its way into the CFF, and the deflated
+/// streams ask the cap before they are built; a refusal is the writer's
+/// memory error.
 pub(crate) fn font_objects(
     face: Option<&Face>,
     ps_name: &str,
     font_index: usize,
     used: &UsedGlyphs,
     first: usize,
-) -> [Vec<u8>; OBJECTS_PER_FONT] {
+    probe: LimitProbe,
+) -> io::Result<[Vec<u8>; OBJECTS_PER_FONT]> {
+    let refused = |_| crate::pdf::memory_refused();
+    let glyph_bytes: usize = used.cids.values().map(|g| g.charstring.len() + 16).sum();
+    probe.check_alloc(2 * glyph_bytes).map_err(refused)?;
     let cids: Vec<u16> = used.cids.keys().copied().collect();
     let base = format!("{}+{}", subset_tag(font_index, &cids), name_token(ps_name));
     let (cidfont, descriptor, program, cmap) = (first + 1, first + 2, first + 3, first + 4);
@@ -707,15 +778,15 @@ pub(crate) fn font_objects(
     let (bbox, ascent, descent, cap, italic, flags) = face
         .and_then(metrics)
         .unwrap_or(([0; 4], 0.0, 0.0, 0.0, 0.0, 4));
-    // `.notdef` is never shown (glyph 0 keeps its outline), so an empty
-    // one is as good as the face's when the face cannot give it.
-    let notdef = face
-        .and_then(|f| charstring(f, 0))
-        .unwrap_or_else(|| vec![14]);
+    // `.notdef` is never shown as text (glyph 0 keeps its outline in the
+    // content stream), so it is always the empty charstring. Its outline is
+    // never walked while writing: a hostile face's `.notdef` can be a
+    // composite tree that expands to a billion outlines (#1026, Codex).
+    let notdef = vec![14];
     let glyphs: Vec<(u16, &[u8])> = used
         .cids
         .iter()
-        .map(|(&cid, g)| (cid, g.charstring.as_slice()))
+        .map(|(&cid, g)| (cid, &*g.charstring))
         .collect();
     let cff = cid_cff(&base, bbox, notdef, &glyphs);
     let descriptor_obj = format!(
@@ -731,20 +802,30 @@ pub(crate) fn font_objects(
         num(cap, 0),
     )
     .into_bytes();
-    let program_obj = stream("/Subtype /CIDFontType0C ", &cff);
-    let cmap_obj = stream("", to_unicode(&used.cids).as_bytes());
-    [type0_obj, cid_obj, descriptor_obj, program_obj, cmap_obj]
+    let program_obj = stream("/Subtype /CIDFontType0C ", &cff, probe)?;
+    drop(cff);
+    // About 20 bytes a CID, in blocks of at most 100.
+    probe
+        .check_alloc(32 * used.cids.len() + 256)
+        .map_err(refused)?;
+    let cmap_obj = stream("", to_unicode(&used.cids).as_bytes(), probe)?;
+    Ok([type0_obj, cid_obj, descriptor_obj, program_obj, cmap_obj])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// What the show engine would have built for `gid`.
+    fn built(face: &Face, gid: u16) -> Built {
+        charstring(face, gid).map_or(Built::Refused, Built::Charstring)
+    }
+
     fn glyph(ch: char, advance: f64) -> CidGlyph {
         CidGlyph {
             ch,
             advance,
-            charstring: vec![14],
+            charstring: Rc::from(vec![14u8]),
         }
     }
 
@@ -824,16 +905,47 @@ mod tests {
             .expect("bundled face");
         let n = face.number_of_glyphs();
         let mut used = UsedGlyphs::new(&face);
-        assert_eq!(used.cid(&face, 36, 'A', 667.0), Some(36));
-        assert_eq!(used.cid(&face, n, 'x', 500.0), None);
-        assert_eq!(used.cid(&face, u16::MAX, 'y', 500.0), None);
+        assert_eq!(used.cid(36, 'A', 667.0, built(&face, 36)), Some(36));
+        assert_eq!(used.cid(n, 'x', 500.0, built(&face, n)), None);
+        assert_eq!(used.cid(u16::MAX, 'y', 500.0, built(&face, u16::MAX)), None);
         // The second character of glyph 36 takes CID n, untouched by the
         // refused ids, and glyph 36's first character keeps CID 36.
-        assert_eq!(used.cid(&face, 36, 'B', 667.0), Some(n));
-        assert_eq!(used.cid(&face, n, 'z', 500.0), None);
+        assert_eq!(used.cid(36, 'B', 667.0, built(&face, 36)), Some(n));
+        assert_eq!(used.cid(n, 'z', 500.0, built(&face, n)), None);
         assert_eq!(used.cids[&n].ch, 'B');
         assert_eq!(used.cids[&36].ch, 'A');
         assert_eq!(used.cids.len(), 2);
+    }
+
+    /// The font objects ask the writer's memory cap before the font
+    /// program and the streams are built (#1026); with room they are the
+    /// same bytes as with no cap.
+    #[test]
+    fn font_objects_ask_the_memory_cap() {
+        let face = Face::parse(include_bytes!("../fonts/LiberationSans-Regular.ttf"), 0)
+            .expect("bundled face");
+        let mut used = UsedGlyphs::new(&face);
+        for (gid, ch) in [(36, 'A'), (37, 'B'), (38, 'C')] {
+            assert!(used.would_build(gid, ch));
+            used.cid(gid, ch, 667.0, built(&face, gid))
+                .expect("embeddable");
+            assert!(!used.would_build(gid, ch));
+            assert!(used.charstring_len(gid) > 1);
+        }
+        // A second character on glyph 36 shares its charstring.
+        assert!(!used.would_build(36, 'Z'));
+        let n = used
+            .cid(36, 'Z', 667.0, built(&face, 36))
+            .expect("extra cid");
+        assert!(Rc::ptr_eq(
+            &used.cids[&36].charstring,
+            &used.cids[&n].charstring
+        ));
+        let objs = |probe| font_objects(Some(&face), "LiberationSans", 0, &used, 10, probe);
+        let free = objs(LimitProbe::NONE).expect("no cap");
+        let roomy = objs(LimitProbe::memory_only(Some((0, usize::MAX / 2)))).expect("room");
+        assert_eq!(free, roomy);
+        assert!(objs(LimitProbe::memory_only(Some((usize::MAX / 2, 0)))).is_err());
     }
 
     #[test]

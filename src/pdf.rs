@@ -79,9 +79,9 @@ use crate::textrun::{GlyphText, Placement, TextRun};
 /// `pscat --pdf-text`. Only PDF output reads it: PNG and SVG are unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PdfText {
-    /// Every glyph is its outline, a filled path: no fonts in the file. The
-    /// default, and the only form before #1193.
-    #[default]
+    /// Every glyph is its outline, a filled path: no fonts in the file
+    /// (`pscat --text-as-paths`). The only form before #1193, and the
+    /// default until #1026.
     Paths,
     /// Glyphs of TrueType and OpenType faces whose licence bits allow
     /// embedding (the bundled Liberation, TeX Gyre, URW and Noto faces, the
@@ -89,6 +89,8 @@ pub enum PdfText {
     /// face, with a `/ToUnicode` map: selectable, searchable and
     /// extractable, drawn from the same outlines. Type 1 and Type 3 fonts,
     /// `charpath`, and glyphs with no Unicode name keep their outlines.
+    /// The default since #1026.
+    #[default]
     Text,
 }
 
@@ -1012,40 +1014,47 @@ impl PdfRecorder {
     }
 
     /// One glyph as text (#1193): continue the open run, or write it and
-    /// open a new one. `false` when the glyph cannot be embedded (its
+    /// open a new one. `Ok(None)` when the glyph cannot be embedded (its
     /// outline does not fit a Type 2 charstring, or the parser panics on
     /// it): the caller then records its outline instead. A glyph with no
     /// placement (a collapsed font matrix) paints nothing in the raster
     /// either, so it is dropped and counts as taken.
+    ///
+    /// `Some(bytes)`: taken, with `bytes` of new charstring stored for it
+    /// (0 for a glyph seen before), which the caller charges as work
+    /// (#1026). `built` is the charstring the show engine made from its
+    /// own outline walk when [`would_build`](Self::would_build) said one
+    /// was needed; the recorder never walks an outline itself.
     pub(crate) fn glyph(
         &mut self,
         g: &GlyphText,
+        built: crate::pdf_font::Built,
         rgb: (f32, f32, f32),
         comp: Composite,
         chain: &Chain,
-    ) -> bool {
+    ) -> Option<usize> {
         let Some(p) = Placement::of(g) else {
-            return true;
+            return Some(0);
         };
-        let Some(face) = crate::font::pdf_face(g.fid) else {
-            return false;
-        };
+        let face = crate::font::pdf_face(g.fid)?;
+        let known = self.font_ids.get(&g.fid).copied();
         // A font joins the document with its first embeddable glyph, so a
         // face whose every glyph is refused writes no font objects.
-        let (font, cid) = match self.font_ids.get(&g.fid) {
-            Some(&i) => match self.fonts[i].1.cid(face, g.gid, g.ch, g.advance) {
-                Some(cid) => (i, cid),
-                None => return false,
-            },
+        let (font, cid, built) = match known {
+            Some(i) => {
+                let used = &mut self.fonts[i].1;
+                let fresh = used.would_build(g.gid, g.ch);
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
+                (i, cid, if fresh { used.charstring_len(g.gid) } else { 0 })
+            }
             None => {
                 let mut used = UsedGlyphs::new(face);
-                let Some(cid) = used.cid(face, g.gid, g.ch, g.advance) else {
-                    return false;
-                };
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
+                let built = used.charstring_len(g.gid);
                 let i = self.fonts.len();
                 self.fonts.push((g.fid, used));
                 self.font_ids.insert(g.fid, i);
-                (i, cid)
+                (i, cid, built)
             }
         };
         if let Some(run) = &mut self.run
@@ -1054,7 +1063,7 @@ impl PdfRecorder {
             run.text.push(g, &p);
             run.widths.push(g.advance);
             run.cids.push(cid);
-            return true;
+            return Some(built);
         }
         self.flush_text();
         let gs = self.gs_ref(comp);
@@ -1072,7 +1081,19 @@ impl PdfRecorder {
             widths: vec![g.advance],
             cids: vec![cid],
         });
-        true
+        Some(built)
+    }
+
+    /// Whether [`glyph`](Self::glyph) needs a new charstring for glyph
+    /// `gid` of face `fid` shown as `ch` (the face has no font here yet, or
+    /// the font has not seen the glyph). The show engine then asks the
+    /// memory limit for
+    /// [`CHARSTRING_BUDGET`](crate::pdf_font::CHARSTRING_BUDGET) and
+    /// builds it from the walk that draws the glyph (#1026).
+    pub(crate) fn would_build(&self, fid: i64, gid: u16, ch: char) -> bool {
+        self.font_ids
+            .get(&fid)
+            .is_none_or(|&i| self.fonts[i].1.would_build(gid, ch))
     }
 
     /// Write the open text run into the content.
@@ -2015,13 +2036,17 @@ Q",
             // glyphs were built as they were shown.
             let first = font_base + i * OBJECTS_PER_FONT;
             debug_assert_eq!(first, out.objects() + 1);
-            let objs = crate::pdf_font::font_objects(
+            let objs = match crate::pdf_font::font_objects(
                 face.as_ref().map(|(f, _)| *f),
                 face.as_ref().map_or("Font", |(_, n)| n.as_str()),
                 i,
                 used,
                 first,
-            );
+                out.probe,
+            ) {
+                Ok(objs) => objs,
+                Err(e) => return out.fail(e),
+            };
             for obj in &objs {
                 out.begin_obj();
                 out.bytes(obj);
@@ -2259,7 +2284,7 @@ impl std::fmt::Display for MemoryLimit {
 
 impl std::error::Error for MemoryLimit {}
 
-fn memory_refused() -> io::Error {
+pub(crate) fn memory_refused() -> io::Error {
     io::Error::new(io::ErrorKind::OutOfMemory, MemoryLimit)
 }
 
@@ -2473,6 +2498,12 @@ fn matrix_text(t: tiny_skia::Transform) -> String {
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
 pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     deflate_budgeted(parts, LimitProbe::NONE).ok()
+}
+
+/// [`deflate`] under the writer's memory cap (`probe`): the font streams
+/// (#1026).
+pub(crate) fn deflate_limited(parts: &[&[u8]], probe: LimitProbe) -> io::Result<Vec<u8>> {
+    deflate_budgeted(parts, probe)
 }
 
 /// The ramp `stops` (positions 0 to 1) as a function over `[lo, hi]` (`lo`
