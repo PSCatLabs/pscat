@@ -472,12 +472,15 @@ jobs:
       # published artifact always has one.
       # `gh attestation verify FILE --repo PSCatLabs/pscat` checks it
       # (RELEASING.md). A re-run attests the same digests again: harmless.
+      # #1108: dist/pscat.global.js is the classic script `manifest --npm-from`
+      # unpacked from the npm tarball into dist/ (a release asset of its own).
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
             dist/*.tgz
+            dist/pscat.global.js
             release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on

@@ -110,7 +110,7 @@ base35 = {
 } | {f"fonts/base35/URW-symbols/{n}" for n in ("LICENSE.md", "LICENSE.OFL", "PROVENANCE.md")}
 expected = {
     "package.json", "README.md", "index.js", "node.js", "renderer.js", "core.js", "index.d.ts",
-    "pscat.global.js", "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",
+    "global.d.ts", "pscat.global.js", "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",
     "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_LICENSES.html", "licenses/assets.json",
 } | base35
 got = {f["path"] for f in info["files"]}
