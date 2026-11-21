@@ -207,9 +207,9 @@ is 11 MB (5.4 MB gzipped, 7.2 MB as base64 of that), more than the whole
 package, so a self-contained page embeds it itself
 (`createRenderer({ wasm })` takes the bytes).
 
-**Without npm: the release asset.** Every GitHub release carries the same
-file, byte for byte, at a URL pinned to its tag, listed in the release's
-`SHA256SUMS` (release candidates too):
+**Without npm: the release asset.** From 0.7.1 on, every GitHub release carries
+the same file, byte for byte, at a URL pinned to its tag, listed in the
+release's `SHA256SUMS` (release candidates too):
 
 ```html
 <script src="https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat.global.js"></script>
@@ -220,8 +220,8 @@ for release assets, so the default fetch of `pscat.wasm` from beside the script
 fails. Host the module yourself (`package/pscat.wasm` in the release's
 `pscat-X.Y.Z.tgz`: `tar -xzf pscat-X.Y.Z.tgz package/pscat.wasm`) and pass its
 URL: `pscat.createRenderer({ wasm: '/pscat.wasm' })`. In TypeScript,
-`/// <reference types="pscat/global" />` (or `"types": ["pscat/global"]`) types
-the `pscat` global (the package's `global.d.ts`).
+`/// <reference types="pscat/global" />` types the `pscat` global (the
+package's `global.d.ts`).
 
 The package's README ([`npm/README.md`](../../npm/README.md)) has the
 full API. To build and test it from a checkout:

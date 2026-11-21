@@ -629,7 +629,7 @@ def changelog_notes(version, root=ROOT, npm_tarball=None, global_script=None):
     return (
         f"{body}Each archive carries the licences (LICENSE-MIT, LICENSE-APACHE, LICENSE-OFL), "
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
-        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}; "
+        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}{' and of the script' if global_script else ''}; "
         f"{MANIFEST_NAME} records the commit they were built from. Install guide: "
         "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )

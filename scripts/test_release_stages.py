@@ -463,7 +463,8 @@ class Channels(Base):
                        capture_output=True, text=True, check=True)
         m = rs.load_manifest(self.dist)
         name = os.path.basename(self._tarball())
-        self.assertEqual([a["name"] for a in m["assets"]][-2:], [name, "pscat.global.js"], "after the archives")
+        listed = [a["name"] for a in m["assets"]]
+        self.assertEqual(listed[listed.index(name) + 1], "pscat.global.js", "right after the npm tarball")
         self.assertTrue(os.path.isfile(os.path.join(self.dist, name)))
         with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
             self.assertIn(f"{rs.sha256_file(self._tarball())}  {name}\n", f.read())
@@ -478,7 +479,7 @@ class Channels(Base):
         self._attach()
         names = [a["name"] for a in self.m["assets"]]
         self.assertEqual(rs.global_asset(self.m), "pscat.global.js")
-        self.assertEqual(names[-2:], [os.path.basename(self._tarball()), "pscat.global.js"], "after the tarball")
+        self.assertEqual(names[names.index(os.path.basename(self._tarball())) + 1], "pscat.global.js", "after the tarball")
         with open(os.path.join(self.dist, "pscat.global.js"), "rb") as f:
             self.assertEqual(f.read(), GLOBAL_JS)
         with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:

@@ -5,8 +5,7 @@
 //
 //   /// <reference types="pscat/global" />
 //
-// or `"types": ["pscat/global"]` in tsconfig.json; `import 'pscat'` alone does
-// not declare a global. The other types (RenderResult, RendererOptions, ...)
+// `import 'pscat'` alone does not declare a global. The other types (RenderResult, RendererOptions, ...)
 // are index.d.ts's: `import type { RenderResult } from 'pscat'`.
 import type { createRenderer, PostScriptError, Renderer } from './index.js';
 
