@@ -60,6 +60,42 @@ adds:
   Unit test: `font_objects_ask_the_memory_cap`. With room, the bytes are
   the same as with no cap.
 
+**No outline walk while writing (Codex review of #1398, round 1).** The
+writer used to outline `.notdef` (glyph 0) for the font program, after the
+program ended and outside every limit. A face whose `.notdef` is 30 levels
+of composites, each drawing the next twice, makes that walk about a billion
+outlines long. The 65,535-byte charstring cap stops the buffer from growing
+but cannot stop `ttf-parser`'s traversal, and `guard::catch` only catches
+panics. Before the default flip this needed `--pdf-text`; after it, every
+`--pdf` run was exposed.
+- `.notdef` is now always the empty charstring. Glyph 0 is never written
+  as text: `pdf_eligible` and `UsedGlyphs::cid` refuse it. When a face maps
+  a character to it, the glyph is drawn as its outline in the content
+  stream, from the same walk that draws the raster.
+- No charstring is built at write time at all. The show engine
+  (`paint_resolved_glyph_limited`) feeds one `outline_glyph` walk to both
+  the device path and, when the PDF font does not hold the glyph yet
+  (`Gfx::pdf_would_build`), a `pdf_font::Charstring` (`font::Tee`). The
+  memory ask comes before that walk, and the per-KiB step charge after
+  it. A glyph's outline is walked once, at `show`, under the limits. Before
+  this, `UsedGlyphs::cid` walked it a second time.
+- The PDF writer reads only table data from a face: `head` bbox, metrics,
+  `OS/2` fsType, the name. `font_objects` no longer calls `outline_glyph`.
+- Tests:
+  - `font::tests::a_notdef_composite_bomb_is_never_walked_writing_the_pdf`
+    crafts the 30-level face. With the old `.notdef` line it took 37 s and
+    failed; now it finishes at once.
+  - `a_shown_notdef_keeps_its_outline_in_the_pdf`: a `cmap` that maps
+    U+4E00 to glyph 0. The raster and SVG draw it, and the default PDF is
+    the outline PDF byte for byte.
+  - `a_refused_pdf_glyph_paints_nothing`: the memory ask before the walk.
+- Every embedded font program changed by the empty `.notdef`, so text PDF
+  bytes differ from the first push of #1398. Pixels do not change, because
+  `.notdef` is never shown as text. CLI and wasm bytes still match.
+- Left as it was: a hostile glyph that is *shown* is still walked once,
+  unmetered inside the walk, by the raster. That cost was there before
+  #1026 and does not depend on PDF output.
+
 **Determinism.** `tests/wasm.rs` `wasm_pdf_text_matches_the_cli` compares
 the CLI, the raw ABI and npm, byte for byte, on Latin, Hangul (an `addFont`
 face) and Symbol/Dingbats pages. It checks the default (`--pdf`,

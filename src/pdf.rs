@@ -1020,13 +1020,15 @@ impl PdfRecorder {
     /// placement (a collapsed font matrix) paints nothing in the raster
     /// either, so it is dropped and counts as taken.
     ///
-    /// `Some(bytes)`: taken, with `bytes` of new charstring built for it
+    /// `Some(bytes)`: taken, with `bytes` of new charstring stored for it
     /// (0 for a glyph seen before), which the caller charges as work
-    /// (#1026). The caller asks the memory limit first when
-    /// [`would_build`](Self::would_build) says a charstring is coming.
+    /// (#1026). `built` is the charstring the show engine made from its
+    /// own outline walk when [`would_build`](Self::would_build) said one
+    /// was needed; the recorder never walks an outline itself.
     pub(crate) fn glyph(
         &mut self,
         g: &GlyphText,
+        built: crate::pdf_font::Built,
         rgb: (f32, f32, f32),
         comp: Composite,
         chain: &Chain,
@@ -1042,12 +1044,12 @@ impl PdfRecorder {
             Some(i) => {
                 let used = &mut self.fonts[i].1;
                 let fresh = used.would_build(g.gid, g.ch);
-                let cid = used.cid(face, g.gid, g.ch, g.advance)?;
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
                 (i, cid, if fresh { used.charstring_len(g.gid) } else { 0 })
             }
             None => {
                 let mut used = UsedGlyphs::new(face);
-                let cid = used.cid(face, g.gid, g.ch, g.advance)?;
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
                 let built = used.charstring_len(g.gid);
                 let i = self.fonts.len();
                 self.fonts.push((g.fid, used));
@@ -1082,15 +1084,16 @@ impl PdfRecorder {
         Some(built)
     }
 
-    /// Whether [`glyph`](Self::glyph) would build a new charstring for `g`
-    /// (its face has no font here yet, or the font has not seen the glyph):
-    /// `Gfx::paint_glyph` then asks the memory limit for
-    /// [`CHARSTRING_BUDGET`](crate::pdf_font::CHARSTRING_BUDGET) before it
-    /// paints anything (#1026).
-    pub(crate) fn would_build(&self, g: &GlyphText) -> bool {
+    /// Whether [`glyph`](Self::glyph) needs a new charstring for glyph
+    /// `gid` of face `fid` shown as `ch` (the face has no font here yet, or
+    /// the font has not seen the glyph). The show engine then asks the
+    /// memory limit for
+    /// [`CHARSTRING_BUDGET`](crate::pdf_font::CHARSTRING_BUDGET) and
+    /// builds it from the walk that draws the glyph (#1026).
+    pub(crate) fn would_build(&self, fid: i64, gid: u16, ch: char) -> bool {
         self.font_ids
-            .get(&g.fid)
-            .is_none_or(|&i| self.fonts[i].1.would_build(g.gid, g.ch))
+            .get(&fid)
+            .is_none_or(|&i| self.fonts[i].1.would_build(gid, ch))
     }
 
     /// Write the open text run into the content.

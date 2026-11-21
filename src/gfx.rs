@@ -3963,6 +3963,18 @@ impl Gfx {
         self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted() && self.text_ink()
     }
 
+    /// Whether the PDF recorder needs a new embedded charstring for `g`
+    /// (#1026): PDF text is on, `g` is eligible, and its font has not seen
+    /// the glyph. The show engine then builds one from its outline walk.
+    pub(crate) fn pdf_would_build(&self, g: &crate::textrun::GlyphText) -> bool {
+        self.pdf_text_wanted()
+            && crate::textrun::pdf_eligible(g)
+            && self
+                .pdf
+                .as_ref()
+                .is_some_and(|p| p.would_build(g.fid, g.gid, g.ch))
+    }
+
     pub(crate) fn pdf_wanted(&self) -> bool {
         self.pdf.is_some() && !self.painting_off()
     }
@@ -4338,10 +4350,15 @@ impl Gfx {
     /// get the character or the outline; the raster always gets the
     /// outline. `path` may be empty (a space), which paints nothing but
     /// still places a character in the text.
+    ///
+    /// `built` is the embedded charstring the show engine made for a glyph
+    /// the PDF font did not hold yet ([`pdf_would_build`](Self::pdf_would_build)),
+    /// from the same outline walk as `path` (#1026).
     pub(crate) fn paint_glyph(
         &mut self,
         path: &PsPath,
         text: Option<&crate::textrun::GlyphText>,
+        built: crate::pdf_font::Built,
         probe: &crate::limits::LimitProbe,
         work: &mut u64,
     ) -> Result<(), PsError> {
@@ -4352,14 +4369,6 @@ impl Gfx {
                 self.fill_path_direct(path, probe, work)?;
             }
             return Ok(());
-        }
-        // A new embedded glyph needs its charstring buffer: ask the memory
-        // limit before anything is painted, so a refusal leaves the raster
-        // and every recorder as they were (#1026).
-        if let (Some(g), Some(pdf)) = (pdf_text, &self.pdf)
-            && pdf.would_build(g)
-        {
-            probe.check_alloc(crate::pdf_font::CHARSTRING_BUDGET)?;
         }
         // Text is written in a colour (`svg_text_wanted`/`pdf_text_wanted`
         // turn it off under a pattern), so this ink is always one.
@@ -4394,7 +4403,7 @@ impl Gfx {
                 // glyph's charstring is charged as work, a step per KiB or
                 // part of one (#1026): whole KiB, so the show's per-glyph
                 // rounding down never drops it.
-                Some(g) => match pdf.glyph(g, rgb, comp, &chain) {
+                Some(g) => match pdf.glyph(g, built, rgb, comp, &chain) {
                     Some(built) => {
                         let kib = built.div_ceil(1024) as u64;
                         *work = work.saturating_add(kib.saturating_mul(1024));
@@ -6489,48 +6498,6 @@ mod tests {
         gfx.pixmap
             .save_png("docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png")
             .expect("save prototype png");
-    }
-
-    /// A new PDF text glyph that the memory limit refuses (#1026) fails
-    /// before anything is painted: the raster, `dirty` and the PDF's fonts
-    /// stay as they were. With room, the same call paints and registers it.
-    #[test]
-    fn a_refused_pdf_glyph_paints_nothing() {
-        let mut gfx = Gfx::new(20, 20).expect("pixmap");
-        gfx.enable_pdf();
-        assert!(gfx.pdf_text_wanted(), "text is the default");
-        let mut path = PsPath::default();
-        for (x, y) in [(2.0, 2.0), (18.0, 2.0), (18.0, 18.0), (2.0, 18.0)] {
-            if path.current().is_none() {
-                path.move_to(DevPoint { x, y });
-            } else {
-                path.line_to(DevPoint { x, y });
-            }
-        }
-        path.close();
-        // Glyph 36 of the first built-in face (LiberationSans), 'A'.
-        let g = crate::textrun::GlyphText {
-            ch: 'A',
-            gid: 36,
-            fid: 0,
-            em: [16.0, 0.0, 0.0, 16.0, 2.0, 18.0],
-            advance: 667.0,
-            embeddable: true,
-        };
-        let before = gfx.pixmap.data().to_vec();
-        let full = crate::limits::LimitProbe::memory_only(Some((usize::MAX / 2, 0)));
-        let mut work = 0;
-        let r = gfx.paint_glyph(&path, Some(&g), &full, &mut work);
-        assert!(matches!(r, Err(PsError::MemoryExceeded)), "{r:?}");
-        assert_eq!(gfx.pixmap.data(), &before[..], "nothing painted");
-        assert!(!gfx.dirty);
-        assert_eq!(work, 0);
-        assert!(gfx.pdf.as_ref().expect("pdf on").would_build(&g));
-        gfx.paint_glyph(&path, Some(&g), &crate::limits::LimitProbe::NONE, &mut work)
-            .expect("room");
-        assert!(gfx.dirty);
-        assert!(!gfx.pdf.as_ref().expect("pdf on").would_build(&g));
-        assert!(work >= 1024, "the charstring is charged: {work}");
     }
 
     /// Paint one full-page rect and read back the pixel it produced.
