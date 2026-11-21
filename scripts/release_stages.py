@@ -5,7 +5,8 @@
     python3 scripts/release_stages.py bump-manifests 0.6.0
     python3 scripts/release_stages.py version-info 0.7.0-rc.1
     python3 scripts/release_stages.py manifest --tag v0.6.0 --commit SHA \\
-        --dist dist --crate target/package/pscat-0.6.0.crate [--npm-from release-inputs]
+        --dist dist --crate target/package/pscat-0.6.0.crate [--npm-from release-inputs] \\
+        [--chatgpt-plugin-from release-inputs]
     python3 scripts/release_stages.py run --dist dist --crate FILE \\
         --stage draft --stage crates --stage npm --stage publish --stage plugin \\
         --stage registry [--plan] [--fake DIR] [--report-dir DIR]
@@ -30,7 +31,7 @@ Stages, in release order:
 
 - `draft`: a draft GitHub Release for the tag holding the archives, the
   npm tarball when the npm channel is on (#1006; release candidates too),
-  SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
+  the hosted ChatGPT plugin ZIP (#1253), SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
   without one is known to be incomplete).
 - `crates`: `cargo publish` to crates.io.
 - `npm`: `npm publish` of the tarball scripts/build_npm.sh packed beside the
@@ -79,6 +80,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CRATE = "pscat"
@@ -86,6 +88,9 @@ MANIFEST_SCHEMA = 1
 MANIFEST_NAME = "release-manifest.json"
 SUMS_NAME = "SHA256SUMS"
 ARCHIVE_EXTS = (".tar.gz", ".zip")
+# The hosted ChatGPT plugin, an extra release asset beside the archives (#1253).
+# It ends in .zip but is no binary archive: archives_in leaves it out.
+CHATGPT_PLUGIN_PREFIX = "pscat-cloud-chatgpt-plugin-"
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 # The one pre-release form a release may carry: a release candidate (#854).
 VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$")
@@ -387,7 +392,8 @@ def bump_manifests_json_only(root, version):
 
 
 def archives_in(dist):
-    names = sorted(n for n in os.listdir(dist) if n.endswith(ARCHIVE_EXTS))
+    names = sorted(n for n in os.listdir(dist)
+                   if n.endswith(ARCHIVE_EXTS) and not n.startswith(CHATGPT_PLUGIN_PREFIX))
     if not names:
         raise SystemExit(f"no release archives (*.tar.gz, *.zip) in {dist}")
     return names
@@ -498,11 +504,61 @@ def npm_asset(manifest):
     return names[0] if names else None
 
 
-def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
+def chatgpt_plugin_name(version):
+    return f"{CHATGPT_PLUGIN_PREFIX}{version}.zip"
+
+
+def chatgpt_plugin_asset(manifest):
+    """The name of the hosted ChatGPT plugin ZIP a release carries as an
+    asset, or None (releases before #1253)."""
+    names = [a["name"] for a in manifest["assets"] if a["name"].startswith(CHATGPT_PLUGIN_PREFIX)]
+    return names[0] if names else None
+
+
+def check_chatgpt_plugin(path, version):
+    """The ZIP is the hosted plugin of this version, and its mcp.json names a
+    public https server that is not the staging service (`*.run.app`). The
+    release workflow checks the URL before building; this is the second look
+    at the file that is about to be published (#1253)."""
+    name = os.path.basename(path)
+    if name != chatgpt_plugin_name(version):
+        raise SystemExit(f"{name} is not {chatgpt_plugin_name(version)}")
+    try:
+        with zipfile.ZipFile(path) as z:
+            plugin = json.loads(z.read("plugin.json"))
+            mcp = json.loads(z.read("mcp.json"))
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as e:
+        raise SystemExit(f"{name} is not a plugin ZIP with plugin.json and mcp.json ({e})")
+    if plugin.get("version") != version or plugin.get("name") != "pscat-cloud":
+        raise SystemExit(f"{name}: plugin.json is {plugin.get('name')!r} {plugin.get('version')!r}, "
+                         f"expected 'pscat-cloud' {version!r}")
+    servers = mcp.get("mcpServers")
+    if not isinstance(servers, dict) or len(servers) != 1:
+        raise SystemExit(f"{name}: mcp.json must declare exactly one server")
+    url = next(iter(servers.values())).get("url", "")
+    if not isinstance(url, str) or not url.startswith("https://") or "run.app" in url.lower():
+        raise SystemExit(f"{name}: mcp.json points at {url!r}; the release needs the production "
+                         "https URL, never a *.run.app staging address")
+
+
+def find_chatgpt_plugin(src_dir, version):
+    """The hosted ChatGPT plugin ZIP the release workflow built into `src_dir`
+    for this release (#1253). Missing, or not this release's, is an error, so
+    a release cannot quietly ship without it."""
+    path = os.path.join(src_dir, chatgpt_plugin_name(version))
+    if not os.path.isfile(path):
+        raise SystemExit(f"no hosted ChatGPT plugin ZIP {path}; the assemble job builds it "
+                         "(scripts/build_chatgpt_plugin.py --remote ... --production)")
+    check_chatgpt_plugin(path, version)
+    return path
+
+
+def build_manifest(tag, commit, dist, crate_path, npm_tarball=None, chatgpt_plugin=None):
     """The manifest of the archives in `dist` and the .crate. With
     `npm_tarball`, that file is copied into `dist` and listed after the
     archives, so it is uploaded to the GitHub Release (release candidates
-    included) and recorded in SHA256SUMS (#1006)."""
+    included) and recorded in SHA256SUMS (#1006). `chatgpt_plugin` (#1253)
+    is attached the same way, after the npm tarball."""
     version = tag[1:] if tag.startswith("v") else tag
     if not VERSION_RE.match(version) or tag != f"v{version}":
         raise SystemExit(f"{tag} is not vX.Y.Z or vX.Y.Z-rc.N")
@@ -521,6 +577,13 @@ def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
         p = os.path.join(dist, name)
         if os.path.abspath(npm_tarball) != os.path.abspath(p):
             shutil.copyfile(npm_tarball, p)
+        assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
+    if chatgpt_plugin:
+        check_chatgpt_plugin(chatgpt_plugin, version)
+        name = os.path.basename(chatgpt_plugin)
+        p = os.path.join(dist, name)
+        if os.path.abspath(chatgpt_plugin) != os.path.abspath(p):
+            shutil.copyfile(chatgpt_plugin, p)
         assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
     content, sha1 = crate_identity(crate_path)
     if sha1 != commit:
@@ -566,7 +629,7 @@ def release_files(manifest):
     return [a["name"] for a in manifest["assets"]] + [SUMS_NAME, MANIFEST_NAME]
 
 
-def changelog_notes(version, root=ROOT, npm_tarball=None):
+def changelog_notes(version, root=ROOT, npm_tarball=None, chatgpt_plugin=None):
     path = os.path.join(root, "CHANGELOG.md")
     body = ""
     if is_prerelease(version):
@@ -588,10 +651,15 @@ def changelog_notes(version, root=ROOT, npm_tarball=None):
         npm = (f"{npm_tarball} is the npm package (WebAssembly, for the browser and Node); {where}. "
                f"Install it from this release with `npm install https://github.com/PSCatLabs/pscat/releases/"
                f"download/v{version}/{npm_tarball}`. ")
+    plugin = ""
+    if chatgpt_plugin:
+        plugin = (f"{chatgpt_plugin} is the pscat-cloud plugin for ChatGPT, connected to the hosted pscat-mcp "
+                  "server. Upload it as a plugin; docs/guides/chatgpt-hosted.md has the steps. ")
     return (
         f"{body}Each archive carries the licences (LICENSE-MIT, LICENSE-APACHE, LICENSE-OFL), "
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
-        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}; "
+        f"{npm}{plugin}{SUMS_NAME} has the SHA-256 of every archive"
+        f"{' and of the npm package' if npm_tarball else ''}{' and the ChatGPT plugin' if chatgpt_plugin else ''}; "
         f"{MANIFEST_NAME} records the commit they were built from. Install guide: "
         "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )
@@ -1177,7 +1245,8 @@ def stage_draft(ctx):
         if ctx.plan:
             return "would create", f"a draft release {ctx.m['tag']} with {len(release_files(ctx.m))} assets"
         rid = ctx.github.create_draft(ctx.m["tag"], f"pscat {ctx.m['version']}",
-                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m)),
+                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m),
+                                                      chatgpt_plugin_asset(ctx.m)),
                                       prerelease=ctx.prerelease)
         for name in release_files(ctx.m):
             ctx.github.upload(rid, os.path.join(ctx.dist, name), name)
@@ -1689,6 +1758,9 @@ def main(argv=None):
     mf.add_argument("--npm-from", metavar="DIR",
                     help="also attach the npm tarball verify packed into DIR (required there when "
                          "npm/package.json exists; ignored when it does not)")
+    mf.add_argument("--chatgpt-plugin-from", metavar="DIR",
+                    help="also attach the hosted ChatGPT plugin ZIP the assemble job built into DIR "
+                         "(pscat-cloud-chatgpt-plugin-<version>.zip, #1253); it must be there")
     mf.add_argument("--repo-root", default=ROOT)
 
     for name in ("run", "rehearse"):
@@ -1729,7 +1801,10 @@ def main(argv=None):
         tarball = None
         if args.npm_from:
             tarball = find_npm_tarball(args.repo_root, args.npm_from, args.tag.removeprefix("v"))
-        m = build_manifest(args.tag, args.commit, args.dist, args.crate, tarball)
+        plugin = None
+        if args.chatgpt_plugin_from:
+            plugin = find_chatgpt_plugin(args.chatgpt_plugin_from, args.tag.removeprefix("v"))
+        m = build_manifest(args.tag, args.commit, args.dist, args.crate, tarball, plugin)
         write_manifest(m, args.dist)
         print(json.dumps(m, indent=2))
         return EXIT_OK

@@ -23,6 +23,11 @@
 # npm.yml). `npm audit signatures` must pass; with `attested` the npm
 # provenance attestation must verify too.
 #
+# The hosted ChatGPT plugin ZIP (#1253, releases from 0.7.1 on): download
+# pscat-cloud-chatgpt-plugin-X.Y.Z.zip, check it against SHA256SUMS (and the
+# attestation), and check that its mcp.json is a public https URL, not the
+# staging *.run.app service.
+#
 # A release candidate X.Y.Z-rc.N (#854) is a GitHub pre-release only, so for
 # one the archive checks run and the crate and npm checks are skipped.
 #
@@ -70,6 +75,7 @@ jobs:
       attested: ${{ steps.v.outputs.attested }}
       prerelease: ${{ steps.v.outputs.prerelease }}
       npm: ${{ steps.v.outputs.npm }}
+      chatgpt_plugin: ${{ steps.v.outputs.chatgpt_plugin }}
     steps:
       - name: Which version?
         id: v
@@ -95,7 +101,9 @@ jobs:
           CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 1)).lower())' "$V")
           # The npm package exists from 0.6.2 on (#566), and a candidate is not on npm.
           NPM=$(python3 -c 'import sys; print(str(sys.argv[2] != "true" and tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 2)).lower())' "$V" "$PRE")
-          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; } >> "$GITHUB_OUTPUT"
+          # The hosted ChatGPT plugin ZIP is a release asset from 0.7.1 on (#1253), candidates included.
+          PLUGIN=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 7, 1)).lower())' "$V")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; echo "chatgpt_plugin=$PLUGIN"; } >> "$GITHUB_OUTPUT"
           echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE, npm: $NPM)" >> "$GITHUB_STEP_SUMMARY"
 
   install-archive:
@@ -186,6 +194,53 @@ jobs:
             "$P" --png f.png f.ps || fail "a font-pack face did not render after pscat fonts install"
           fi
           echo "- archive $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), runs, renders$([ "$FONTS" = true ] && echo ', font packs install')" >> "$GITHUB_STEP_SUMMARY"
+
+  # The hosted ChatGPT plugin ZIP (#1253): the same download URL the guide gives.
+  install-chatgpt-plugin:
+    needs: install-version
+    if: needs.install-version.outputs.chatgpt_plugin == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download, verify and read the plugin ZIP
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::ChatGPT plugin: $*"; exit 1; }
+          NAME="pscat-cloud-chatgpt-plugin-$VERSION.zip"
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          W="$RUNNER_TEMP/chatgpt-plugin"
+          rm -rf "$W" && mkdir -p "$W" && cd "$W"
+          curl -fsSL --retry 5 --retry-all-errors -o "$NAME" "$BASE/$NAME" || fail "cannot download $BASE/$NAME"
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$BASE/SHA256SUMS" || fail "cannot download SHA256SUMS"
+          grep -E "^[0-9a-f]{64}  $NAME\$" SHA256SUMS > mine.sum || fail "$NAME is not listed in SHA256SUMS"
+          sha256sum -c mine.sum || fail "$NAME does not match SHA256SUMS"
+          if [ "$ATTESTED" = true ]; then
+            gh attestation verify "$NAME" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" ||
+              fail "no valid provenance attestation for $NAME"
+          fi
+          python3 - "$NAME" "$VERSION" <<'PY' || fail "the ZIP is not the production hosted plugin"
+          import json, sys, zipfile
+          name, version = sys.argv[1:3]
+          with zipfile.ZipFile(name) as z:
+              plugin = json.loads(z.read("plugin.json"))
+              mcp = json.loads(z.read("mcp.json"))
+          assert plugin["name"] == "pscat-cloud" and plugin["version"] == version, plugin
+          (server,) = mcp["mcpServers"].values()
+          url = server["url"]
+          assert url.startswith("https://") and "run.app" not in url.lower(), f"mcp.json points at {url}"
+          print("mcp.json url:", url)
+          PY
+          echo "- ChatGPT plugin $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), mcp.json is a production https URL" >> "$GITHUB_STEP_SUMMARY"
 
   install-crate:
     needs: install-version

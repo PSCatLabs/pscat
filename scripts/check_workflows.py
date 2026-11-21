@@ -181,12 +181,41 @@ def check_text(name, text):
     return errors
 
 
+# What release.yml must keep doing for the hosted ChatGPT plugin ZIP (#1253).
+RELEASE_ASSET_RULES = (
+    (r"vars\.PSCAT_MCP_PROD_URL", "does not read the repository variable vars.PSCAT_MCP_PROD_URL"),
+    (r"(?m)^\s*CHECK=--production$",
+     "does not default the ChatGPT plugin build to the --production URL check (CHECK=--production)"),
+    (r"build_chatgpt_plugin\.py[^\n]*(\\\n[^\n]*)*\$CHECK",
+     "does not pass the --production check ($CHECK) to build_chatgpt_plugin.py"),
+    (r"release_stages\.py manifest[^\n]*(\\\n[^\n]*)*--chatgpt-plugin-from",
+     "does not pass --chatgpt-plugin-from to `release_stages.py manifest`, so the ChatGPT plugin ZIP "
+     "would not be a release asset"),
+)
+
+
+def check_release_assets(name, text):
+    """release.yml's wiring for the ChatGPT plugin ZIP asset, and no URL baked in."""
+    errors = []
+    body = "\n".join(strip_comment(x) for x in text.splitlines())
+    for pattern, problem in RELEASE_ASSET_RULES:
+        if not re.search(pattern, body):
+            errors.append(f"{name}: {problem}")
+    if re.search(r"run\.app", body):
+        errors.append(f"{name}: names a run.app (staging) address; the plugin URL comes from "
+                      "vars.PSCAT_MCP_PROD_URL only")
+    return errors
+
+
 def main(argv):
     files = argv or sorted(glob.glob(os.path.join(ROOT, ".github", "workflows", "*.yml")))
     errors = []
     for path in files:
         with open(path, encoding="utf-8") as f:
-            errors += check_text(os.path.relpath(path, ROOT), f.read())
+            text = f.read()
+        errors += check_text(os.path.relpath(path, ROOT), text)
+        if os.path.basename(path) == "release.yml":
+            errors += check_release_assets(os.path.relpath(path, ROOT), text)
     for e in errors:
         print(e, file=sys.stderr)
     if errors:

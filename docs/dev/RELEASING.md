@@ -47,8 +47,8 @@ run first:
 |---|---|---|
 | `verify` | Checks that the tag matches `Cargo.toml` and is on `main`. Checks that `PINNED_INDEX` is set and that its `font-index.json` hashes to the pinned SHA-256. Runs the quality gate, the MCP Inspector check, the licence checks, `scripts/check_package.sh` (crate acceptance), the release-script tests, and `cargo semver-checks` against crates.io once pscat is published. Generates the `cargo-about` notices and packages the `.crate` from the clean commit, then builds and packs the npm package (`scripts/build_npm.sh --pack release-inputs`). | read |
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
-| `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest), over the archives and the npm tarball `verify` packed, which it copies in beside them (#1006; an error if `npm/package.json` exists and the tarball does not). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
-| `draft` | Creates a **draft** GitHub Release with the archives, the npm tarball `pscat-X.Y.Z.tgz`, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
+| `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest), over the archives and the npm tarball `verify` packed, which it copies in beside them (#1006; an error if `npm/package.json` exists and the tarball does not). Before that it builds the hosted ChatGPT plugin ZIP `pscat-cloud-chatgpt-plugin-X.Y.Z.zip` against the production pscat-mcp URL in the repository variable `PSCAT_MCP_PROD_URL` ([below](#the-hosted-chatgpt-plugin-zip-pscat_mcp_prod_url)) and lists it too (#1253). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
+| `draft` | Creates a **draft** GitHub Release with the archives, the npm tarball `pscat-X.Y.Z.tgz`, the ChatGPT plugin ZIP, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
 | `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. For a release candidate it runs only the GitHub pre-release and the plugin check ([Release candidates](#release-candidates)). It signs build-provenance attestations for every archive, the npm tarball and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
 | `post-publish-check` | Calls `.github/workflows/release-check.yml`: installs the release from the public channels on Linux, macOS and Windows and fails if it does not install or run (below). | `contents: read`, `attestations: read` |
 
@@ -384,7 +384,7 @@ GitHub **pre-release**:
 | `Cargo.toml` and manifests | `X.Y.Z` | `X.Y.Z-rc.N` |
 | `CHANGELOG.md` | new section | unchanged |
 | Gates in `verify` (pin, quality gate, MCP Inspector, licences, crate acceptance, semver) | run | run, the same |
-| Five archives, the npm tarball, `SHA256SUMS`, `release-manifest.json` | GitHub Release | GitHub **pre-release** |
+| Five archives, the npm tarball, the ChatGPT plugin ZIP, `SHA256SUMS`, `release-manifest.json` | GitHub Release | GitHub **pre-release** |
 | Provenance attestations | yes | yes |
 | `release` environment approval | yes | yes |
 | crates.io, npm, MCP Registry | published | **never** |
@@ -452,7 +452,8 @@ pre-releases are refused.
    lists `draft`, `publish` and `plugin` only.
 5. When `draft` is done, the Releases page shows a draft marked
    **Pre-release** with five archives, the npm tarball
-   `pscat-0.7.0-rc.1.tgz`, `SHA256SUMS` and `release-manifest.json`. Approve the `release` environment.
+   `pscat-0.7.0-rc.1.tgz`, the ChatGPT plugin ZIP
+   `pscat-cloud-chatgpt-plugin-0.7.0-rc.1.zip`, `SHA256SUMS` and `release-manifest.json`. Approve the `release` environment.
 6. A good result:
    - <https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.1> is public,
      with the **Pre-release** badge. The notes start "Release candidate for
@@ -514,6 +515,41 @@ covers everything since the last stable release, because `cliff.toml`'s
 afterwards, like every release (see
 [Yanking and deprecating](#yanking-and-deprecating)).
 
+### The hosted ChatGPT plugin ZIP (`PSCAT_MCP_PROD_URL`)
+
+Each release (release candidates too, #1253) carries
+`pscat-cloud-chatgpt-plugin-X.Y.Z.zip`, the remote build of the ChatGPT plugin
+(`scripts/build_chatgpt_plugin.py --remote URL --remote-auth none`; how to use
+it is [`docs/guides/chatgpt-hosted.md`](../guides/chatgpt-hosted.md)). Its
+`mcp.json` points at the **production** pscat-mcp server, and the URL is read
+from a repository variable, never committed:
+
+```sh
+gh variable set PSCAT_MCP_PROD_URL --body 'https://<production-host>/mcp' --repo PSCatLabs/pscat
+gh variable list --repo PSCatLabs/pscat      # check it
+```
+
+- **Value:** the public `https` endpoint of the production server, with its
+  `/mcp` path, no credentials, query string or fragment. The staging server is
+  a Cloud Run `*.run.app` address and is never a valid value.
+- **Fails closed.** In a real release `assemble` stops before any ZIP exists
+  when the variable is unset or empty, is not `https`, contains `run.app`, or
+  names a placeholder host (`example.com`, `.invalid`, ...). The step prints
+  the URL it used and writes it to the run summary; `release_stages.py
+  manifest` then checks the finished ZIP's `mcp.json` once more.
+- **Auth is `none`** today (`--remote-auth none`): ChatGPT's connection form
+  takes only no authentication or OAuth (pscat-mcp#136). Changing it is a
+  one-word edit in the workflow step, once the server supports OAuth.
+- **A resumed release uses the value the draft was built with.** The ZIP is
+  reproducible, so a re-run with the same URL matches the draft. If you change
+  the variable after a draft exists, `draft` halts on the differing asset:
+  delete the draft by hand (it is the owner's call) and re-run.
+- The ZIP is attested with the archives (`dist/*.zip`), and `release-check`
+  downloads it, checks it against `SHA256SUMS` and the attestation, and checks
+  its `mcp.json` for a non-staging `https` URL (versions from 0.7.1 on).
+- Not shipped yet: the local-server plugin ZIP (it needs its own design; the
+  guide says to build it from the repository).
+
 ### Release checklist
 
 The same list is in the `release` issue template (`.github/ISSUE_TEMPLATE/release.yml`).
@@ -522,6 +558,10 @@ Before tagging:
 
 - [ ] The first `fonts-*` release is published, and `src/fontpacks/pinned.rs`
       pins the index this release ships with.
+- [ ] The repository variable `PSCAT_MCP_PROD_URL` is set to the production
+      pscat-mcp endpoint, `https://<host>/mcp` (`gh variable list --repo
+      PSCatLabs/pscat`), never a `*.run.app` address; `assemble` fails a real
+      release without it, release candidates included (#1253).
 - [ ] CI is green on the release PR, including `semver` (does the version
       number fit the API change?).
 - [ ] The MCP safety tests (`tests/mcp.rs`) and the `mcp` workflow's
@@ -556,7 +596,8 @@ Before tagging:
 After publishing:
 
 - [ ] The GitHub Release is public with five archives, the npm tarball
-      `pscat-X.Y.Z.tgz`, `SHA256SUMS` and `release-manifest.json`. crates.io shows the version, and docs.rs built
+      `pscat-X.Y.Z.tgz`, the ChatGPT plugin ZIP
+      `pscat-cloud-chatgpt-plugin-X.Y.Z.zip`, `SHA256SUMS` and `release-manifest.json`. crates.io shows the version, and docs.rs built
       it.
 - [ ] The `post-publish-check` job (below) is green.
 - [ ] **Outsider install smoke test** (below) passes.
@@ -688,8 +729,10 @@ and `release-manifest.json` record the same digests unsigned.
 - **A pull request** that touches the pipeline (`release.yml`,
   `scripts/release*.{sh,py}`, `package_release.sh`, `cliff.toml`,
   `about.*`, `Cargo.toml`, `Cargo.lock`) runs `verify`, `binaries` and
-  `assemble`. That is all five archives, the npm tarball, the manifest, the rehearsal and the
-  read-only plan. Nothing is published.
+  `assemble`. That is all five archives, the npm tarball, the ChatGPT plugin ZIP, the manifest, the
+  rehearsal and the read-only plan. Nothing is published. Without `PSCAT_MCP_PROD_URL` a dry run
+  warns and builds the ZIP against the placeholder host `pscat-mcp.example.com`; the ZIP never
+  reaches a release (`draft` needs a real run).
 - **A manual dry run:** Actions → release → Run workflow, choosing the
   branch to rehearse under "Use workflow from". It is always a dry run. A
   real release starts only from a pushed tag. There is no `ref` input (it was

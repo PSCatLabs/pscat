@@ -25,6 +25,7 @@ body:
       label: Before tagging
       options:
         - label: The fonts-* release is published and src/fontpacks/pinned.rs pins it (#616)
+        - label: "The repository variable PSCAT_MCP_PROD_URL is the production pscat-mcp https://<host>/mcp, not a run.app address (#1253)"
         - label: "`scripts/release.sh X.Y.Z` opened the release PR; CI is green, including `semver`"
         - label: The MCP safety tests (tests/mcp.rs) and the mcp workflow's Inspector check pass
         - label: README's install section lists only the channels this release ships
@@ -39,7 +40,7 @@ body:
       label: Publishing
       options:
         - label: "Tag pushed: `git tag -a vX.Y.Z -m \"pscat X.Y.Z\" && git push origin vX.Y.Z`"
-        - label: The draft GitHub Release looks right (five archives, the npm tarball, SHA256SUMS, release-manifest.json, notes)
+        - label: The draft GitHub Release looks right (five archives, the npm tarball, the ChatGPT plugin ZIP, SHA256SUMS, release-manifest.json, notes)
         - label: "First release only: crates.io bootstrap publish from the tag, trusted publisher configured (RELEASING.md, step 6)"
         - label: The release environment approved; the publish job's report says every stage published or skipped
   - type: checkboxes
