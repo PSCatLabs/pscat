@@ -104,8 +104,9 @@ PIL composite. A one-call typewriter or chart is not added yet.
 ## The MCP server
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
-  or a PDF written to `out_path`), with page size, `dpi`, `halftone`,
-  `bands`, `svg_text` and `gpu_preview` options (see "Banded renders" and
+  or a PDF written to `out_path`, whose text is selectable, searchable
+  text in embedded fonts, as `pscat --pdf` writes it), with page size,
+  `dpi`, `halftone`, `bands`, `svg_text` and `gpu_preview` options (see "Banded renders" and
   "GPU preview" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack with the line the oldest item was left on: `[stack-leak]`, a built-in

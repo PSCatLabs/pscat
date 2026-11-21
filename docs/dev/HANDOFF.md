@@ -1030,7 +1030,8 @@ renders eight examples in both and compares block-downsampled output).
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two. Glyphs have a second seam since #1119:
    `Gfx::paint_glyph` takes the glyph as text (`src/textrun.rs`,
-   renderer-neutral) when `--svg-text` or `--pdf-text` is on, and each
+   renderer-neutral) when `--svg-text` is on or PDF text is (the
+   default since #1026; `--text-as-paths` turns it off), and each
    recorder decides on its own whether it takes the glyph as text
    (`textrun::svg_eligible`, `pdf_eligible`). SVG writes `<text>` runs
    for the standard faces (`notes/1119-svg-text.md`); PDF writes `TJ`
@@ -1039,8 +1040,9 @@ renders eight examples in both and compares block-downsampled output).
    pinned instance), for any face whose `fsType` allows it
    (`notes/1193-pdf-text.md`; Symbol and Dingbats glyph names get their
    text character from tables in `encodings.rs` that only PDF text reads,
-   `notes/1026-pdf-text-symbol-dingbats.md`; the wasm flag bit 8 / npm
-   `pdfText`, #1205, needs `pdf` as `svgText` needs `svg`, and
+   `notes/1026-pdf-text-symbol-dingbats.md`; text is the default since
+   #1026, `notes/1026-pdf-text-default.md`: wasm flag bit 16 / npm
+   `pdfText: false` is the outline opt-out, bit 8 a no-op, and
    `tests/wasm.rs` holds the
    CLI-vs-wasm byte check). The PDF's open text run is written at the
    top of `enter_clip`, so a new PDF hook that goes through `enter_clip`
