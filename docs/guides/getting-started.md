@@ -585,9 +585,9 @@ It is the file an error report's `Line:` names. With no named file it raises
 MCP tool call sends. So a library can find the files beside it:
 
 ```postscript partial
-% dirname: the path up to and including the last "/" (empty if none).
+% dirname: the path up to and including the last "/" or "\" (empty if none).
 /dirname { dup length { dup 0 eq { pop pop () exit } if
-    1 sub 2 copy get 47 eq { 1 add 0 exch getinterval exit } if } loop } def
+    1 sub 2 copy get dup 47 eq exch 92 eq or { 1 add 0 exch getinterval exit } if } loop } def
 /concat { /b exch def /a exch def
     a length b length add string dup 0 a putinterval dup a length b putinterval } def
 
@@ -596,7 +596,9 @@ MCP tool call sends. So a library can find the files beside it:
 mylib-dir (engrave.ps) concat run        % lib/mylib/engrave.ps
 ```
 
-Read the name while the file loads, as above: a procedure that calls
+The name is exactly as it was given, so on Windows it may hold backslashes
+(`vendor\pkg\main.ps`); `dirname` above splits on both separators. Read the
+name while the file loads, as above: a procedure that calls
 `currentfilename` later reports the file running when it is called, which is
 its caller's. `currentfilename` is a pscat extension, not a PostScript
 operator, so Ghostscript has no such name; guard code that must run in both

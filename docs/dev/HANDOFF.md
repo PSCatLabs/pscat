@@ -1984,6 +1984,11 @@ renders eight examples in both and compares block-downsampled output).
   the MCP server may read), and swaps a re-install in from a staging directory so no stale
   file survives. `tests/lib_pkg.rs` (shadow test included) and the `mcp.rs` test pin it.
   See `notes/1056-currentfilename-and-lib-install.md`.
+  `currentfilename` keeps the name as given, backslashes included on Windows; the documented
+  `dirname` helper splits on `/` and `\` (#1346, `notes/1346-currentfilename-windows-separators.md`).
+  A killed install's `.NAME.new-<pid>` stage is swept by the next install and named by
+  `lib list` (#1344, `notes/1344-lib-install-stale-stage.md`); only a stage whose process is
+  gone and that carries a pscat marker (a real file, not a link) is deleted.
 - **`pscat lib remove NAME [--force]` (#1345).** Deletes `lib/NAME/` under the install
   directory (`src/subcmd/lib_pkg.rs`, `remove`). Without `--force` only a directory whose
   `.pscat-lib` marker is a regular file; a symlink or plain file named NAME is never

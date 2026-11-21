@@ -40,3 +40,14 @@ there); the error names the path. A re-install's cleanup of the old copy has the
 
 Does not touch a stale `.NAME.new-<pid>` / `.NAME.old-<pid>` scratch directory: `remove`
 looks at `lib/NAME` only. Sweeping those is #1344.
+
+## Residuals
+
+**Accepted race on the path to `lib/NAME` (Codex review of PR #1395).** Between the marker
+check and `fs::remove_dir_all(lib/NAME)`, someone who can rename `lib/` aside and put a
+symlink in its place could redirect the delete, and a checked directory swapped for an
+unmarked one would be deleted without `--force`. `remove_dir_all` guards links met inside its
+walk, not the components of the path it is given, and std has no handle-bound recursive
+delete (no `openat`/`unlinkat` walk). Accepted and not fixed: exploiting it takes write access
+to the user's own library directory (or its parent), the same trust boundary as the library
+itself, since that person could already plant any file `(lib/NAME/x.ps) run` would load.

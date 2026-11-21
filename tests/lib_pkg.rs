@@ -456,6 +456,87 @@ fn help_lists_the_subcommand() {
     assert!(out(&o).contains("pscat lib install DIR"), "{}", out(&o));
 }
 
+/// A crash between building the stage and the swap leaves `.NAME.new-<pid>`
+/// (#1344): `list` names it, and the next install removes it.
+#[cfg(unix)]
+#[test]
+fn a_stage_left_by_a_killed_install_is_listed_and_then_swept() {
+    let base = common::scratch_dir("lib-stale-stage");
+    let home = base.join("home");
+    let pkg = make_package(&base.join("src"), "mypkg");
+    // A pid that is valid but not running.
+    let stale = home.join("lib/.mypkg.new-2000000000");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join(".pscat-lib-stage"), "pid 2000000000\n").unwrap();
+    std::fs::write(stale.join("main.ps"), "half").unwrap();
+
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(
+        listed.contains("left by an interrupted install"),
+        "{listed}"
+    );
+    assert!(
+        listed.contains("the next pscat lib install removes it"),
+        "{listed}"
+    );
+    assert!(stale.is_dir(), "list must not delete anything");
+
+    let text = ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", pkg.to_str().unwrap()],
+    ));
+    assert!(
+        text.contains("removed") && text.contains(".mypkg.new-2000000000"),
+        "{text}"
+    );
+    assert!(!stale.exists());
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(!listed.contains("interrupted"), "{listed}");
+    assert!(home.join("lib/mypkg/main.ps").is_file());
+}
+
+/// A marker that is a symlink proves nothing (#1344): such a directory is not
+/// swept, and `list` says to remove it by hand. A stage whose pid is running is
+/// not swept either, whatever its age.
+#[cfg(unix)]
+#[test]
+fn a_linked_marker_or_a_running_pid_keeps_the_stage_and_list_says_so() {
+    let base = common::scratch_dir("lib-stale-stage-kept");
+    let home = base.join("home");
+    let pkg = make_package(&base.join("src"), "mypkg");
+    let lib = home.join("lib");
+    let outside = base.join("some-file");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(&outside, "x").unwrap();
+    let linked = lib.join(".mine.new-2000000000");
+    std::fs::create_dir_all(&linked).unwrap();
+    std::fs::write(linked.join("precious.txt"), "mine").unwrap();
+    std::os::unix::fs::symlink(&outside, linked.join(".pscat-lib-stage")).unwrap();
+    // pid 1 is always running.
+    let running = lib.join(".other.new-1");
+    std::fs::create_dir_all(&running).unwrap();
+    std::fs::write(running.join(".pscat-lib-stage"), "pid 1\n").unwrap();
+
+    let listed = ok(pscat(&home, &base, &["lib", "list"]));
+    assert!(listed.contains("so remove it by hand"), "{listed}");
+    assert!(listed.contains("belongs to a running process"), "{listed}");
+    ok(pscat(
+        &home,
+        &base,
+        &["lib", "install", pkg.to_str().unwrap()],
+    ));
+    assert!(
+        linked.join("precious.txt").is_file(),
+        "linked-marker dir swept"
+    );
+    assert!(
+        running.join(".pscat-lib-stage").is_file(),
+        "running pid's stage swept"
+    );
+    assert!(outside.is_file());
+}
+
 #[test]
 fn help_mentions_lib_remove() {
     let base = common::scratch_dir("lib-remove-help");

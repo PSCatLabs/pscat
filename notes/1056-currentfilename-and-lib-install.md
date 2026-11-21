@@ -67,7 +67,7 @@ exclusively, so a directory of that name that this run did not make (a hand-made
 one, or one left by a crash that a later process with the same pid trips over)
 is refused with a message, never deleted; the `.pscat-lib` marker protection
 cannot be bypassed through them. Only a directory this run created is removed.
-A stale one still has to be removed by hand (#1344).
+A stale one is swept at the start of an install (#1344, `notes/1344-lib-install-stale-stage.md`).
 
 *The swap is not atomic.* Replacing a non-empty directory takes two renames
 (old aside, new in), and there is no portable single call for it. Between them
