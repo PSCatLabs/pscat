@@ -145,6 +145,10 @@ pub(crate) struct ImageCtx {
     pub(crate) op_name: Option<u32>,
     /// The limits when the image began, for the recorders (#1188).
     pub(crate) probe: crate::limits::LimitProbe,
+    /// The work a shading pattern's layer took (#1298), held against the
+    /// step limit when it was made, for the interpreter to charge once the
+    /// image is done.
+    pub(crate) layer_work: std::cell::Cell<u64>,
 }
 
 impl ImageCtx {
@@ -180,6 +184,7 @@ impl ImageCtx {
             eod: false,
             op_name: None,
             probe: crate::limits::LimitProbe::NONE,
+            layer_work: std::cell::Cell::new(0),
         }
     }
 
@@ -796,7 +801,14 @@ impl ImageCtx {
         else {
             return Ok(());
         };
-        let paint_rgb = gfx.rgb();
+        // Under a pattern (#1299) the samples are the stencil alone, opaque
+        // white where it paints, for a `<mask>` over the patterned footprint.
+        let patterned = self.mask.is_some() && gfx.ink().is_some_and(|ink| ink.is_pattern());
+        let paint_rgb = if patterned {
+            (1.0, 1.0, 1.0)
+        } else {
+            gfx.rgb()
+        };
         for iy in 0..self.height {
             probe.check(0)?;
             for ix in 0..self.width {
@@ -833,13 +845,18 @@ impl ImageCtx {
         #[allow(clippy::disallowed_methods)]
         let encoded = pm.encode_png();
         if let Ok(png) = encoded {
-            gfx.svg_image(
-                &png,
-                self.width,
-                self.height,
-                [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty],
-                self.interpolate && self.mask.is_none(),
-            );
+            let t = [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty];
+            if patterned {
+                gfx.svg_stencil(&png, self.width, self.height, t);
+            } else {
+                gfx.svg_image(
+                    &png,
+                    self.width,
+                    self.height,
+                    t,
+                    self.interpolate && self.mask.is_none(),
+                );
+            }
         }
         Ok(())
     }
@@ -941,13 +958,17 @@ impl ImageCtx {
         let Some(inv) = ctm.invert() else {
             return Ok(()); // singular CTM: the image has no area
         };
-        gfx.prepare_paint();
-        if gfx.svg_wanted() {
-            self.record_svg(gfx, ctm, probe)?;
-        }
-        if gfx.pdf_wanted() {
-            self.record_pdf(gfx, ctm, probe)?;
-        }
+        // An imagemask paints the current colour, a pattern included
+        // (#1299). With no pattern to paint (the null pattern a pattern
+        // space starts with) it paints and records nothing, as a fill does. Other images paint their own
+        // samples whatever the colour.
+        let patterned = match self.mask {
+            Some(_) => match gfx.ink() {
+                None => return Ok(()),
+                Some(ink) => ink.is_pattern(),
+            },
+            None => false,
+        };
         // The image's footprint in user space is ImageMatrix⁻¹ of the
         // source rectangle [0,w]×[0,h] (PLRM 4.10.3): the unit square
         // only for the usual `w h scale` + `[w 0 0 ±h …]` idiom. That
@@ -995,6 +1016,33 @@ impl ImageCtx {
             py0 = py0.max(i64::from(top));
             py1 = py1.min(i64::from(bottom));
         }
+        // A pattern's raster source over the footprint, made before anything
+        // is recorded or painted, under the image's limits: a shading
+        // pattern's layer (#1298) can be page-sized, and a limit must stop
+        // the image whole, as it stops `fill`.
+        let rect = [px0, py0, px1.max(px0), py1.max(py0)].map(|v| v as u32);
+        let src = if patterned {
+            let region = rect.map(i64::from);
+            let mut lay_work = 0;
+            gfx.lay_pattern(probe, &mut lay_work)?;
+            let (src, work) = gfx.pattern_source(region, probe)?;
+            self.layer_work.set(
+                self.layer_work
+                    .get()
+                    .saturating_add(work)
+                    .saturating_add(lay_work),
+            );
+            src
+        } else {
+            None
+        };
+        gfx.prepare_paint();
+        if gfx.svg_wanted() {
+            self.record_svg(gfx, ctm, probe)?;
+        }
+        if gfx.pdf_wanted() {
+            self.record_pdf(gfx, ctm, probe)?;
+        }
 
         // `/Interpolate true` on a colour image (#730): which axes are
         // magnified, i.e. get bilinear sampling. None keeps nearest.
@@ -1010,6 +1058,9 @@ impl ImageCtx {
         .map(|i| self.magnified(i.post_concat(ctm)))
         .filter(|&(mx, my)| mx || my);
         let smooth = magnified.filter(|_| self.interpolate && self.mask.is_none());
+        if patterned {
+            return self.rasterize_patterned(gfx, inv, unit, rect, src);
+        }
         let paint_rgb = gfx.rgb();
         let comp = gfx.composite();
         let mask_data = gfx.clip_mask_data();
@@ -1090,6 +1141,57 @@ impl ImageCtx {
                 painted = true;
             }
         }
+        if painted {
+            gfx.dirty = true;
+        }
+        Ok(())
+    }
+
+    /// [`rasterize`](Self::rasterize) for an imagemask painted with a
+    /// pattern (#1299): the stencil's device coverage, sampled exactly as
+    /// the solid-colour loop samples it and with the clip folded in, goes
+    /// to [`Gfx::fill_pattern_stencil`], which fills `rect` (device
+    /// pixels, already cut to the page and the band) with the pattern
+    /// through it, as a fill paints its coverage. Like the solid-colour
+    /// loop it checks no limit: the SVG and PDF recorders have already
+    /// taken the stencil, and stopping here would leave the PNG without it.
+    fn rasterize_patterned(
+        &self,
+        gfx: &mut Gfx,
+        inv: tiny_skia::Transform,
+        unit: bool,
+        rect: [u32; 4],
+        src: Option<crate::gfx::PatternSource>,
+    ) -> Result<(), PsError> {
+        let paint_ones = self.mask.unwrap_or(true);
+        let clip = gfx.clip_mask_data();
+        let [px0, py0, px1, py1] = rect;
+        let painted = gfx.fill_pattern_stencil(rect, src, |cov, width| {
+            let mut marked = false;
+            for py in py0..py1 {
+                for px in px0..px1 {
+                    let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                    let ux = inv.sx * cx + inv.kx * cy + inv.tx;
+                    let uy = inv.ky * cx + inv.sy * cy + inv.ty;
+                    if unit && (!(0.0..1.0).contains(&ux) || !(0.0..1.0).contains(&uy)) {
+                        continue;
+                    }
+                    let Some((ix, iy)) = self.cell_at(f64::from(ux), f64::from(uy)) else {
+                        continue;
+                    };
+                    if (self.sample(ix, iy, 0) != 0) != paint_ones {
+                        continue;
+                    }
+                    let at = py as usize * width + px as usize;
+                    let c = clip.as_ref().map_or(255, |m| m.data()[at]);
+                    if c != 0 {
+                        cov[at] = c;
+                        marked = true;
+                    }
+                }
+            }
+            Ok(marked)
+        })?;
         if painted {
             gfx.dirty = true;
         }

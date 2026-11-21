@@ -88,7 +88,7 @@ radius-checksum=622
 ## Outputs
 
 [assets/](assets/) contains `ultraviolet.png`, `sunprint.png`, `blue-hour.png`,
-`imperative.png` (default control), `ground.png`, `primitives.png`, `detail.png`
+`ground.png`, `primitives.png`, `detail.png`
 plus the eight typography/AOP images documented in
 [WASM-STUDIO.md](WASM-STUDIO.md), and [render-manifest.json](assets/render-manifest.json) with sizes and SHA-256
 hashes. Full posters are 720×960, vocabulary 720×300, detail 480×480.
@@ -100,8 +100,10 @@ The ground is always Ultraviolet, and the UI says so when selected.
 
 ## Comparison and modification
 
-The imperative control shares drawing helpers to isolate orchestration; it
-manages output slots, selection count, checksum, trace and count explicitly.
+The imperative control shares drawing helpers to isolate orchestration. It
+renders the same pixels as the functional driver, so only one image is kept
+(`ultraviolet.png`); `poster_variations_match_the_imperative_control` compares
+the two full pixel buffers for all three colourways. It manages output slots, selection count, checksum, trace and count explicitly.
 It can reuse the same helpers and produce equally good artwork. The drivers
 have 18 vs 24 non-comment/nonblank lines, excluding shared helpers and the new
 libraries. This small count is descriptive, not evidence of general maintainability.

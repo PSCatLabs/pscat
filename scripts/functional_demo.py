@@ -58,7 +58,6 @@ def render(pscat):
         ("primitives", "720x300", "(examples/functional/primitives.ps) run"),
         ("detail", "480x480", "(examples/functional/detail.ps) run"),
         ("ground", "720x960", "/Layer 1 def (examples/functional/poster.ps) run"),
-        ("imperative", "720x960", "(examples/functional/imperative.ps) run"),
         *STUDY_RENDERS,
     ]:
         dest = ASSETS / f"{name}.png"

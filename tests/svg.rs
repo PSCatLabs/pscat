@@ -226,9 +226,21 @@ fn sh_gradient_local_coordinates_keep_full_precision() {
          /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >> shfill",
     );
     let svg = &pages[0];
+    // Since #1041 an axis under a unit is rescaled to one, the transform
+    // shrunk to match (as the raster and PDF do), so x2 times the
+    // transform's scale must still span the 40 device units.
+    let num = |key: &str| -> f32 {
+        let rest = svg.split(key).nth(1).expect(key);
+        rest.split(['"', ' '])
+            .next()
+            .unwrap()
+            .parse()
+            .expect("number")
+    };
+    let span = num(" x2=\"") * num("gradientTransform=\"matrix(");
     assert!(
-        svg.contains("x1=\"0\"") && svg.contains("x2=\"0.0004\""),
-        "expected full-precision gradient-local coordinates: {svg}"
+        svg.contains("x1=\"0\"") && (span - 40.0).abs() < 1e-3,
+        "expected the full gradient-local span: {svg}"
     );
 }
 

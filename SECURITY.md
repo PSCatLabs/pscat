@@ -626,11 +626,12 @@ without the limits above:
 
 The scanner, the whole interpreter, the font loaders, the decode filters and
 the image operators are fuzzed with
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`). Seven targets:
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`). Eight targets:
 
 | Target | What it feeds |
 |---|---|
 | `lexer` | the scanner, token by token |
+| `check_syntax` | the public `pscat::syntax::check_syntax` on raw bytes (the lexer's seeds): it must return `Ok` or `Err`, never panic |
 | `interp` | the whole interpreter, under tight limits |
 | `truetype` | a font file (TrueType, OpenType/CFF, a `.ttc` collection, a variable font) through the loader `findfont` and `addFont` use, then a sample of glyph outlines and widths |
 | `type1_charstring` | one decrypted Type 1 charstring plus its subroutines and `seac` components |
@@ -863,9 +864,13 @@ an installed build (October 2026, #568).
     `height_px`) and 8000 a side (`limit_side_px`): the sheet is 4 bytes a
     pixel in the server, allocated before `--max-memory` counts, as for
     `chalkboard_math`;
-  - the sources together at most `--max-input-bytes`, and a label at most 200
-    characters (the label text is drawn in the server process, so its length
-    is bounded). The inline image is capped by `--max-image-bytes`; ask for a
+  - the sources together at most `--max-input-bytes`, and a label or a
+    caption (#1339) at most 200 characters (the text is drawn in the server
+    process, so its length is bounded). A sweep (#1339) multiplies the cells:
+    its values count toward the 32, at most 32 values a list, each at most 40
+    characters, a parameter name an identifier (it reaches the child as one
+    argument, never as program text), and `captions` exactly one per value. A
+    matted cell counts its 10 px pad toward the 8000 side; The inline image is capped by `--max-image-bytes`; ask for a
     big sheet with `out_path`, which follows the rules above (`.png` only).
 - **Calls run side by side, and can be cancelled** (#622). Each tool call
   but the job tools runs on its own thread, at most 4 at once (more are

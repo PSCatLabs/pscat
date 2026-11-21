@@ -42,6 +42,11 @@ the original vision and staged milestones are history, kept in
   `PSCAT_GS_LOG=<file>` records `ran`/`skipped` per test; CI counts it in the
   job summary. Windows has no `gs` on PATH (it is `gswin64c`), so those tests
   skip there.
+- The poppler tests (`pdftotext`, `pdftoppm`, in `tests/pdf_text.rs`) go
+  through `common::poppler_available(tool)` the same way: a `ran` or `SKIPPED`
+  line on stderr, and `PSCAT_REQUIRE_POPPLER=1` (set on the Linux
+  `cross-platform` job, which installs `poppler-utils`) makes a missing tool
+  panic. The macOS, Windows and `crate` jobs skip them.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.
@@ -119,6 +124,17 @@ predates it.
   default is 60 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
   child and its descendants and fails the test with the command in the message.
   `tests/child_deadline.rs` proves it and scans for raw calls.
+  **A test never waits on one pipe while the child waits on another**
+  (`notes/1118-pipe-timing-tests.md`). A macOS pipe holds 16-64 KB, but only
+  512 bytes once the system is out of pipe memory, and then a test that writes
+  all its input before reading the output, or reads stderr only after the
+  child exits, deadlocks against the child. Read the child's output on a
+  thread while writing (the MCP `Server` does), and never poll `try_wait`
+  with a piped stream left unread. Check the machine with: a non-blocking
+  write loop to `os.pipe()` in Python, which prints the capacity.
+  **A test that wants a closed stdout closes the reader before it spawns**
+  (`spawn_with_closed_stdout` in `tests/cli.rs`, `notes/1294-closed-stdout-tests.md`):
+  dropping the read end after `spawn` races a child that writes first.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a

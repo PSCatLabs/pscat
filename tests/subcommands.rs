@@ -347,6 +347,15 @@ fn typewrite_refuses_an_output_name_it_cannot_pick_a_format_for() {
     // Held open: wait() would close it, and a read-first order would then see
     // EOF and fail with another message. A hang is cut off after 10 s.
     let stdin = child.stdin.take();
+    // Read stderr while waiting, not after: a child whose message outgrows a
+    // full pipe (512 bytes when the system is out of pipe memory, #1118)
+    // would block in its write and never exit.
+    let mut stderr = child.stderr.take().unwrap();
+    let reader = std::thread::spawn(move || {
+        let mut err = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr, &mut err);
+        err
+    });
     let start = std::time::Instant::now();
     let status = loop {
         if let Some(s) = child.try_wait().unwrap() {
@@ -359,8 +368,7 @@ fn typewrite_refuses_an_output_name_it_cannot_pick_a_format_for() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
     assert_eq!(status.code(), Some(1));
-    let mut err = String::new();
-    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+    let err = reader.join().unwrap();
     assert!(
         err.contains("--out must end in .png, .svg, or .pdf"),
         "{err}"

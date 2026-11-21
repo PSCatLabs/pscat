@@ -60,7 +60,7 @@ repository variable `RELEASE_ENABLED` is `true`. Everything else is a **dry
 run** that stops after `assemble`:
 
 - a pull request that touches the pipeline;
-- a manual "Run workflow", with an optional `ref` input.
+- a manual "Run workflow" on the branch you pick (there is no `ref` input).
 
 The `publish` job writes a release report (ref, commit, checksums, and each
 stage's result) to the job summary and to the `release-report-<attempt>`
@@ -499,6 +499,9 @@ npm install ./pscat-0.7.0-rc.1.tgz
 
 From a checkout, `scripts/test_npm_tarball.sh pscat-0.7.0-rc.1.tgz`
 installs it into a fresh project and renders a page, SVG and PDF with it.
+Given `pscat@X.Y.Z` (or a bare `X.Y.Z`) instead of a file, it installs that
+release from the registry and checks its signature (`--attested` also
+checks the provenance); `release-check.yml` does that after `publish`.
 Final releases carry the tarball too, the same file the `npm` stage
 publishes.
 
@@ -580,12 +583,20 @@ no credentials and no environment: it does what an outsider would.
   crates stage also accepts a contents-equal crate from the same commit (see
   [Safe resume](#safe-resume)).
 
+- **npm package** (Linux, macOS and Windows): wait up to 10 minutes for the
+  version to reach the registry, then `npm install pscat@X.Y.Z` into a fresh
+  project and render a page, SVG and PDF through it
+  (`scripts/test_npm_tarball.sh pscat@X.Y.Z`, the script `npm.yml` runs on the
+  packed tarball). `npm audit signatures` must pass, and so must the npm
+  provenance attestation when the check is run with `attested`. Releases before
+  0.7.0 are checked for the part of the API they had.
+
 A failure means a published release does not install. Nothing can be
 unpublished: fix forward with a patch release. For a release candidate it
-runs the archive checks only (the crate is not on crates.io). To re-run the check for any
+runs the archive checks only (the crate is not on crates.io and the package is not on npm). To re-run the check for any
 published version, X.Y.Z or X.Y.Z-rc.N: Actions → release-check → Run workflow (empty version =
 crates.io's newest; tick `attested` only for releases published with
-attestations). A pull request that edits `release-check.yml` runs it against
+attestations, and for npm only 0.6.3 and later have provenance). A pull request that edits `release-check.yml` runs it against
 crates.io's newest version. Versions before 0.6.1 have no `--version`, so the
 check runs a program instead.
 
@@ -679,15 +690,17 @@ and `release-manifest.json` record the same digests unsigned.
   `about.*`, `Cargo.toml`, `Cargo.lock`) runs `verify`, `binaries` and
   `assemble`. That is all five archives, the npm tarball, the manifest, the rehearsal and the
   read-only plan. Nothing is published.
-- **A manual dry run:** Actions → release → Run workflow, with an optional
-  branch, tag or commit as `ref`. It is always a dry run. A real release
-  starts only from a pushed tag. To rehearse a **release candidate**, point
-  `ref` at a scratch commit made with
-  `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (push that
-  as a branch, never a tag). Its rehearsal runs the rc scenarios below.
-  The workflow file comes from the default branch but the scripts from
-  `ref`, so a `ref` older than the workflow's script options (`version-info`,
-  #854; `manifest --npm-from`, #1006) fails in `verify` or `assemble`.
+- **A manual dry run:** Actions → release → Run workflow, choosing the
+  branch to rehearse under "Use workflow from". It is always a dry run. A
+  real release starts only from a pushed tag. There is no `ref` input (it was
+  removed in #669: a ref named by the dispatcher is an untrusted checkout to
+  CodeQL's cache-poisoning rule). To rehearse a **release candidate**, push a
+  scratch branch whose commit was made with
+  `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (a branch,
+  never a tag) and run the workflow on it. Its rehearsal runs the rc
+  scenarios below. The workflow file and the scripts now both come from that
+  branch, so the rehearsal exercises the workflow as it will be merged. To
+  rehearse a bare commit, push a branch at it.
 - **The rehearsal** (`python3 scripts/release_stages.py rehearse --dist DIR
   --crate FILE`) runs these scenarios against fresh fake registries with the
   real artifacts:

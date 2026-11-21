@@ -1050,7 +1050,7 @@
     /sgpath where { pop } { dcleader-needs-strokeglyphs } ifelse
     /dcRsz dcRO /Size 36 1e-6 1e6 /dcleader-size-must-be-positive dcoptnum def
     /dcRpitch dcRO /Pitch dcRsz 0.4 mul 1e-6 1e6 /dcleader-pitch-must-be-positive dcoptnum def
-    /dcRgap dcRO /Gap dcRsz 0.3 mul 0 1e6 /dcleader-gap-must-not-be-negative dcoptnum def
+    /dcRgap dcRO /Gap dcRsz 0.5 mul 0 1e6 /dcleader-gap-must-not-be-negative dcoptnum def
     /dcRlead dcRO /Leader 0 dict dcget def
     /dcRlead load type /dicttype ne { dcleader-leader-must-be-a-dict } if
     % the texts' options: the row's, less its own keys
@@ -1069,10 +1069,12 @@
     /dcRb dcRx2 dcRwr sub dcRgap sub dcRpitch div floor def
     dcRb dcRa sub 20000 gt { dcleader-too-many-dots } if
     dcRa dcRb le {
-        % thinner and fainter than the lettering, then the caller's /Leader
+        % thinner than the lettering but a little brighter, so the dots hold
+        % over a smudge's lighter dust (#1112; real signs press leader dots
+        % about as bright as the letters), then the caller's /Leader
         /dcRd dcRt [ /Size /Slant /Jitter /Strict /Corners ] dcwithout def
-        dcRd /Width dcRd /Width dcRsz dcTextW mul dcget dup dcisnum { 0.8 mul } if put
-        dcRd /Strength dcRd /Strength 0.55 dcget dup dcisnum { 0.8 mul } if put
+        dcRd /Width dcRd /Width dcRsz dcTextW mul dcget dup dcisnum { 0.85 mul } if put
+        dcRd /Strength dcRd /Strength 0.55 dcget dup dcisnum { 0.15 add 1 dcmin } if put
         dcRseed { dcRd /Seed dcRO /Seed get 211 dcseedplus put } if
         dcRlead { dcRd 3 1 roll put } forall
         /dcRdy dcRy dcRd /Width get dcisnum { dcRd /Width get 0.75 mul } { 0 } ifelse add def
@@ -1105,13 +1107,31 @@
 %   count 0 eq (and the operand stack is left empty) mustbe
 %%EndSelfTest
 %
+%%SelfTest: dcleader-keeps-its-dots-clear-of-the-lettering
+%   << /Surface /slate >> dksurface
+%   (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+%   % #1112: the first and last dots sit at least /Gap (0.5 of /Size by default)
+%   % from the measured text (the pitch is 0.4 of /Size)
+%   gsave (Croissant) (2.40) 110 610 370 << /Size 20 >> dcleader grestore
+%   dcscratch /dcRa get dcscratch /dcRb get
+%   2 copy le (the row has dots) mustbe
+%   8 mul 610 (2.40) << /Size 20 >> sgwidth sub 10 sub le (the last dot clears the price by the gap) mustbe
+%   8 mul 110 (Croissant) << /Size 20 >> sgwidth add 10 add ge (the first dot clears the word by the gap) mustbe
+%   gsave (Croissant) (2.40) 110 610 370 << /Size 20 /Gap 3 /Pitch 5 >> dcleader grestore
+%   dcscratch /dcRa get 5 mul 110 (Croissant) << /Size 20 >> sgwidth add 3 add 2 copy ge (a given /Gap and /Pitch are honoured) mustbe
+%   5 add lt (and the first dot is within a pitch of the gap) mustbe
+%   % the dots' strength is the lettering's plus 0.15, capped at 1, never out of range
+%   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Strength 0.95 >> dcleader grestore } (a strong /Strength) mustpass
+%   { gsave (Tea) (2.50) 10 190 20 << /Size 14 /Strength 1 >> dcleader grestore } (/Strength 1) mustpass
+%%EndSelfTest
+%
 % @kind: Procedure
-% @summary: A row of a chalk menu, price list or table of contents: the left string starts at x1, the right one ends at x2, both on baseline y, and a dotted leader of pressed chalk dots fills the gap between them, thinner and fainter than the lettering. The dots sit on whole multiples of /Pitch, so rows with the same pitch line their dots up. Other keys go to both strings as for dctext (and to the dots, under /Leader's). Needs lib/handscript.ps and lib/strokeglyphs.ps; takes no rand draws from the caller's stream.
+% @summary: A row of a chalk menu, price list or table of contents: the left string starts at x1, the right one ends at x2, both on baseline y, and a dotted leader of pressed chalk dots fills the gap between them, thinner than the lettering and a little brighter, so they stay visible over a smudge. The dots sit on whole multiples of /Pitch, so rows with the same pitch line their dots up. Other keys go to both strings as for dctext (and to the dots, under /Leader's). Needs lib/handscript.ps and lib/strokeglyphs.ps; takes no rand draws from the caller's stream.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run 40 40 520 300 << /Surface /slate >> dcboard /white dcchalkcolor (Espresso) (2.80) 80 520 200 << /Size 24 >> dcleader
 % @param: /Size [points] The lettering's em size, as for dctext (default 36)
 % @param: /Pitch [points] Distance between leader dots (default 0.4 of /Size)
-% @param: /Gap [points] Clear space between each string and the nearest dot (default 0.3 of /Size)
-% @param: /Leader [dict] dcchalk options for the dots, over their defaults: 0.8 of the lettering's /Width and /Strength (default none)
+% @param: /Gap [points] Clear space between each string and the nearest dot (default 0.5 of /Size)
+% @param: /Leader [dict] dcchalk options for the dots, over their defaults: 0.85 of the lettering's /Width, and its /Strength plus 0.15 (at most 1) (default none)
 /dcleader {
     dcscratch begin
     { dcleaderbody } stopped

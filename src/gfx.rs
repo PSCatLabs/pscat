@@ -92,6 +92,44 @@ enum StrokeDraw {
     Hairlines(Vec<(Stroke, tiny_skia::Path)>),
 }
 
+impl StrokeDraw {
+    /// Device pixels `[x0, y0, x1, y1]` holding everything this stroke
+    /// paints with `stroke`, for a shading pattern's layer (#1298): the
+    /// path's box grown by the furthest a join or cap reaches past it (a
+    /// miter at most `miter_limit` half-widths, a square cap under one and
+    /// a half), plus a pixel of anti-aliasing.
+    fn device_bounds(&self, stroke: &Stroke) -> [i64; 4] {
+        let grow = |b: tiny_skia::Rect, by: f32| {
+            [
+                (b.left() - by).floor() as i64,
+                (b.top() - by).floor() as i64,
+                (b.right() + by).ceil() as i64,
+                (b.bottom() + by).ceil() as i64,
+            ]
+        };
+        let reach = |s: &Stroke| s.width * 0.5 * s.miter_limit.max(1.5) + 2.0;
+        match self {
+            StrokeDraw::Device(path) => grow(path.bounds(), reach(stroke)),
+            StrokeDraw::PenOutline(outline, l) => match outline.clone().transform(*l) {
+                Some(device) => grow(device.bounds(), 2.0),
+                None => [0, 0, 0, 0],
+            },
+            StrokeDraw::Hairlines(groups) => groups.iter().fold(
+                [i64::MAX, i64::MAX, i64::MIN, i64::MIN],
+                |b, (thin, path)| {
+                    let g = grow(path.bounds(), reach(thin));
+                    [
+                        b[0].min(g[0]),
+                        b[1].min(g[1]),
+                        b[2].max(g[2]),
+                        b[3].max(g[3]),
+                    ]
+                },
+            ),
+        }
+    }
+}
+
 impl PenSpace {
     /// Whether tiny-skia would draw a pen of diameter `width` under L as
     /// a hairline: both mapped axis vectors at most a pixel by its own
@@ -1042,6 +1080,27 @@ pub(crate) enum ColorSpace {
         tint_proc: crate::object::Object,
         src: crate::object::Object,
     },
+    /// `/Pattern` (#1038): the colour is a pattern from `makepattern`.
+    /// `base` is the underlying space an uncoloured pattern's colour
+    /// components are in (`[/Pattern /DeviceRGB]`), `None` for plain
+    /// `/Pattern`.
+    Pattern {
+        base: Option<Box<ColorSpace>>,
+        src: crate::object::Object,
+    },
+}
+
+/// A pattern's raster source (#1038): the pixmap a fill uses as its
+/// shader, the shader's transform, and its sampling.
+pub(crate) type PatternSource = (std::rc::Rc<Pixmap>, Transform, tiny_skia::FilterQuality);
+
+/// The current colour in a `/Pattern` space (#1038): the pattern (a
+/// tiling pattern's tile once its `PaintProc` has run, #1341; a shading
+/// pattern, #1298), and the pattern dictionary `currentcolor` gives back.
+#[derive(Clone)]
+pub(crate) struct PatternColor {
+    pub(crate) pattern: crate::pattern::PatternRef,
+    pub(crate) dict: crate::object::Object,
 }
 
 pub(crate) struct IndexedTable {
@@ -1090,6 +1149,9 @@ impl ColorSpace {
             ColorSpace::Gray | ColorSpace::Indexed { .. } | ColorSpace::Separation { .. } => 1,
             ColorSpace::Rgb => 3,
             ColorSpace::Cmyk => 4,
+            // Never image data (the image operators refuse a pattern
+            // space); one, so nothing sizes a buffer by zero.
+            ColorSpace::Pattern { .. } => 1,
         }
     }
 }
@@ -1244,9 +1306,19 @@ pub struct GraphicsState {
     /// whose device is not the current one reinstalls it
     /// ([`Gfx::sync_device`]).
     device: std::rc::Rc<PageDevice>,
+    /// The pattern `setpattern`/`setcolor` set in a `/Pattern` space
+    /// (#1038); `None` there is the initial null pattern, which paints
+    /// nothing. Always `None` outside a pattern space.
+    pattern: Option<PatternColor>,
 }
 
 impl GraphicsState {
+    /// The pattern colour, taken out (to free a chain of patterns
+    /// iteratively: `LazyPattern`'s `Drop`).
+    pub(crate) fn take_pattern(&mut self) -> Option<PatternColor> {
+        self.pattern.take()
+    }
+
     /// Move the objects this state keeps alive (the current font's
     /// dictionary, the colour space's operand objects) into `out`, for
     /// `Drop for Dict`'s iterative teardown, which must not let a chain
@@ -1256,13 +1328,27 @@ impl GraphicsState {
         if let Some(font) = self.font.take() {
             out.push(Object::lit(Value::Dict(font.dict)));
         }
-        match std::mem::replace(&mut self.colorspace, ColorSpace::Gray) {
-            ColorSpace::Indexed { src, .. } => out.push(src),
-            ColorSpace::Separation { tint_proc, src, .. } => {
-                out.push(tint_proc);
-                out.push(src);
+        if let Some(p) = self.pattern.take() {
+            out.push(p.dict);
+        }
+        let mut cs = std::mem::replace(&mut self.colorspace, ColorSpace::Gray);
+        loop {
+            match cs {
+                ColorSpace::Indexed { src, .. } => out.push(src),
+                ColorSpace::Separation { tint_proc, src, .. } => {
+                    out.push(tint_proc);
+                    out.push(src);
+                }
+                ColorSpace::Pattern { base, src } => {
+                    out.push(src);
+                    if let Some(base) = base {
+                        cs = *base;
+                        continue;
+                    }
+                }
+                ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
             }
-            ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
+            break;
         }
     }
 }
@@ -1367,6 +1453,10 @@ pub struct Gfx {
     /// reused across fills; only the filled path's pixel bounds are
     /// written (and read) each time.
     coverage: Option<tiny_skia::Mask>,
+    /// The 16-bit shadow of the page that fills and glyphs composite in
+    /// (#731): a stack of faint layers reaches the colour the arithmetic
+    /// gives rather than stalling at 8 bits. See [`crate::deep`].
+    deep: crate::deep::Deep,
     /// `pscat --bands` (#736): this run is band `index` of `count`, so its
     /// page is composited from [`band_rows_of`] of the page's height (which
     /// `setpagedevice` can change, #909). Work that only touches other rows
@@ -1374,6 +1464,11 @@ pub struct Gfx {
     /// PostScript clip: `clippath` and every other operator still see the
     /// full page.
     band: Option<(u32, u32)>,
+    /// Pattern `PaintProc`s running now (#1038), innermost last: each
+    /// holds what its capture swapped out of the page.
+    captures: Vec<crate::pattern::Capture>,
+    /// Ids for captures and the tiles they make; 0 is the page.
+    next_capture: usize,
 }
 
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
@@ -1517,10 +1612,13 @@ impl Gfx {
             svg: None,
             svg_text: crate::svg::SvgText::Paths,
             pdf: None,
-            pdf_text: crate::pdf::PdfText::Paths,
+            pdf_text: crate::pdf::PdfText::default(),
             suppress_paint: 0,
             coverage: None,
+            deep: crate::deep::Deep::default(),
             band: None,
+            captures: Vec::new(),
+            next_capture: 0,
         })
     }
 
@@ -1700,6 +1798,10 @@ impl Gfx {
         &mut self,
         device: std::rc::Rc<PageDevice>,
     ) -> Result<(), PsError> {
+        if !self.captures.is_empty() {
+            // `setpagedevice` in a pattern's PaintProc (#1038).
+            return Err(PsError::InvalidAccess);
+        }
         let (w, h) = device.px;
         if (w, h) != (self.pixmap.width(), self.pixmap.height()) {
             if let Some((base, max)) = self.mem_budget {
@@ -1720,6 +1822,7 @@ impl Gfx {
             }
         }
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
@@ -1995,6 +2098,218 @@ impl Gfx {
         paint
     }
 
+    /// The raster source of the current colour when it is a pattern
+    /// (#1038): the period, its shader transform and sampling. `None`
+    /// for a solid colour (and for the null pattern, which
+    /// [`ink`](Self::ink) keeps from painting at all). A shading pattern
+    /// (#1298) is painted into a layer over `region` (device pixels
+    /// `[x0, y0, x1, y1]`, cut to the canvas), which must hold every pixel
+    /// the mark paints; the second value is that work, which a limited
+    /// caller charges.
+    pub(crate) fn pattern_source(
+        &self,
+        region: [i64; 4],
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(Option<PatternSource>, u64), PsError> {
+        // From `ink`, so the raster and the recorders never disagree.
+        match self.ink() {
+            Some(crate::pattern::Ink::Pattern(tile, rgb, place)) => {
+                let canvas = (self.pixmap.width(), self.pixmap.height());
+                Ok((Some(tile.raster(rgb, place.as_ref(), canvas)), 0))
+            }
+            Some(crate::pattern::Ink::Shading(sp, place)) => {
+                let matrix = match place {
+                    Some(p) => p.hop.pre_concat(sp.matrix),
+                    None => sp.matrix,
+                };
+                let (w, h) = (
+                    i64::from(self.pixmap.width()),
+                    i64::from(self.pixmap.height()),
+                );
+                let x0 = region[0].clamp(0, w);
+                let y0 = region[1].clamp(0, h);
+                let x1 = region[2].clamp(x0, w);
+                let y1 = region[3].clamp(y0, h);
+                let rect = (
+                    x0 as i32,
+                    y0 as i32,
+                    (x1 - x0).max(1) as u32,
+                    (y1 - y0).max(1) as u32,
+                );
+                let (layer, work) = shading_layer(&sp.shading, sp.background, matrix, rect, probe)?;
+                Ok((
+                    Some((
+                        std::rc::Rc::new(layer),
+                        Transform::from_translate(x0 as f32, y0 as f32),
+                        tiny_skia::FilterQuality::Nearest,
+                    )),
+                    work,
+                ))
+            }
+            Some(crate::pattern::Ink::Rgb(_)) | None => Ok((None, 0)),
+        }
+    }
+
+    /// Lay out the cells of a fractional TilingType 2 pattern over the
+    /// canvas before it paints (#1332), adding the layout's work to `work`.
+    /// Does nothing for any other colour. A layout that would not fit the
+    /// limits' headroom is not made and the pattern paints from its
+    /// period; a limit reached while laying out is the error.
+    pub(crate) fn lay_pattern(
+        &self,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        if let Some(crate::pattern::Ink::Pattern(tile, rgb, None)) = self.ink() {
+            let canvas = (self.pixmap.width(), self.pixmap.height());
+            tile.lay(rgb, canvas, probe, work)?;
+        }
+        Ok(())
+    }
+
+    /// Paint the current pattern through a stencil (`imagemask`, #1299):
+    /// `cover` writes each device pixel's coverage (0-255, the clip already
+    /// folded in) into a canvas-sized mask, `width` bytes a row, zeroed
+    /// inside `rect` and written only there (`x0, y0, x1, y1` in device pixels); the pattern then
+    /// fills `rect` through it, as a fill's coverage would, so alpha, blend
+    /// and the shader's placement are a fill's. `src` is the pattern's
+    /// raster source over `rect` (`pattern_source`, made before the image
+    /// recorded or painted anything, under its limits). Does nothing for a
+    /// solid colour. Returns whether `cover` marked any pixel.
+    pub(crate) fn fill_pattern_stencil(
+        &mut self,
+        rect: [u32; 4],
+        src: Option<PatternSource>,
+        cover: impl FnOnce(&mut [u8], usize) -> Result<bool, PsError>,
+    ) -> Result<bool, PsError> {
+        if src.is_none() {
+            return Ok(false);
+        }
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        let mut cov = match self.coverage.take() {
+            Some(m) if m.width() == w && m.height() == h => m,
+            _ => match tiny_skia::Mask::new(w, h) {
+                Some(m) => m,
+                None => return Ok(false),
+            },
+        };
+        // Only `rect` is read back below, so only its rows are cleared; the
+        // fills that share this mask read only the bytes they write.
+        {
+            let (x0, x1) = (rect[0].min(w) as usize, rect[2].min(w) as usize);
+            let data = cov.data_mut();
+            for y in rect[1].min(h)..rect[3].min(h) {
+                let row = y as usize * w as usize;
+                data[row + x0..row + x1.max(x0)].fill(0);
+            }
+        }
+        let marked = match cover(cov.data_mut(), w as usize) {
+            Ok(m) => m,
+            Err(e) => {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        };
+        if marked
+            && let Some(r) = tiny_skia::Rect::from_ltrb(
+                rect[0] as f32,
+                rect[1] as f32,
+                rect[2] as f32,
+                rect[3] as f32,
+            )
+        {
+            let mut paint = self.paint_from(&src);
+            paint.anti_alias = false;
+            self.pixmap
+                .fill_rect(r, &paint, Transform::identity(), Some(&cov));
+        }
+        self.coverage = Some(cov);
+        Ok(marked)
+    }
+
+    /// [`paint`](Self::paint), with the pattern `src` as its shader when
+    /// there is one. The shader takes the alpha the colour would have.
+    fn paint_from<'a>(&self, src: &'a Option<PatternSource>) -> Paint<'a> {
+        let mut paint: Paint<'a> = self.paint();
+        if let Some((pm, t, quality)) = src {
+            paint.shader = tiny_skia::Pattern::new(
+                pm.as_ref().as_ref(),
+                SpreadMode::Repeat,
+                *quality,
+                self.state.alpha,
+                *t,
+            );
+        }
+        paint
+    }
+
+    /// What a mark paints with, for the recorders: the colour, or the
+    /// pattern (#1038). `None` paints nothing: the null pattern a
+    /// pattern space starts with. A pattern made in another context (the
+    /// page's used in a `PaintProc`, or the other way round) carries
+    /// where it paints here, as gs places it (#1300, `crate::pattern`).
+    pub(crate) fn ink(&self) -> Option<crate::pattern::Ink> {
+        let rgb = self.state.rgb;
+        if !matches!(self.state.colorspace, ColorSpace::Pattern { .. }) {
+            return Some(crate::pattern::Ink::Rgb(rgb));
+        }
+        let p = self.state.pattern.as_ref()?;
+        let here = self
+            .captures
+            .last()
+            .map_or(Transform::identity(), |c| c.to_gs);
+        match &p.pattern {
+            crate::pattern::PatternRef::Tile(lazy) => {
+                // A pattern whose `PaintProc` has not run paints nothing:
+                // every marking operator runs it first (`pending_pattern`).
+                let tile = lazy.tile()?;
+                let place = if tile.context == self.context() {
+                    None
+                } else {
+                    Some(crate::pattern::foreign_placement(
+                        &tile,
+                        here,
+                        self.pattern_default_space(),
+                    )?)
+                };
+                Some(crate::pattern::Ink::Pattern(tile, rgb, place))
+            }
+            crate::pattern::PatternRef::Shading(sp) => {
+                let hop = if sp.context == self.context() {
+                    Transform::identity()
+                } else {
+                    crate::pattern::context_hop(sp.to_gs, here)?
+                };
+                // The PDF `/Matrix` maps to the default space of the stream
+                // painting now, which a later page of another height moves
+                // even in the same context: a variant whenever it differs
+                // from the one written at `makepattern`.
+                let pdf_matrix = self
+                    .pattern_default_space()
+                    .pre_concat(hop)
+                    .pre_concat(sp.pdf_ctm);
+                let place = (sp.context != self.context() || pdf_matrix != sp.pdf_matrix)
+                    .then_some(crate::pattern::ShadingPlace { hop, pdf_matrix });
+                Some(crate::pattern::Ink::Shading(sp.clone(), place))
+            }
+        }
+    }
+
+    /// The current context's coordinates to the default space of the PDF
+    /// stream painting there (#1038): the page's (y up, `1 0 0 -1 0 H`
+    /// from device), or the capturing pattern's space.
+    fn pattern_default_space(&self) -> Transform {
+        match self.captures.last() {
+            Some(outer) => outer.geom.capture.invert().unwrap_or_default(),
+            None => Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, self.pixmap.height() as f32),
+        }
+    }
+
+    /// The capture now painting (#1038), 0 for the page.
+    pub(crate) fn context(&self) -> usize {
+        self.captures.last().map_or(0, |c| c.id)
+    }
+
     /// The current alpha/blend as the exporters want it.
     pub(crate) fn composite(&self) -> Composite {
         Composite {
@@ -2021,6 +2336,7 @@ impl Gfx {
         if self.pending_erase {
             self.pending_erase = false;
             self.pixmap.fill(self.background);
+            self.deep.clear();
             if let Some(svg) = &mut self.svg {
                 svg.erase();
             }
@@ -2040,14 +2356,11 @@ impl Gfx {
     /// rectangle per run of [`crate::coverage::runs`]: the mask already
     /// holds the edge coverage, and colour, alpha and blend still go
     /// through tiny-skia's pipeline as before.
-    fn fill_coverage(&mut self, path: &tiny_skia::Path, rule: FillRule) {
-        // No limit to exceed, so it cannot fail.
-        let _ = self.fill_coverage_limited(path, rule, &crate::limits::LimitProbe::NONE);
-    }
-
-    /// [`fill_coverage`](Self::fill_coverage) under the limits (#1188), and
-    /// the rasteriser's work (`coverage::rasterize_limited`). A limit stops
-    /// it before anything is painted.
+    ///
+    /// Under the limits (#1188), with the rasteriser's work
+    /// (`coverage::rasterize_limited`) and a fractional TilingType 2
+    /// pattern's layout work returned. A limit stops it before anything is
+    /// painted.
     fn fill_coverage_limited(
         &mut self,
         path: &tiny_skia::Path,
@@ -2077,23 +2390,121 @@ impl Gfx {
                 return Err(e);
             }
         };
+        let max_memory = self.mem_budget.map(|(_, max)| max);
+        let mut work = work;
+        if let Err(e) = self.lay_pattern(probe, &mut work) {
+            self.coverage = Some(cov);
+            return Err(e);
+        }
+        // The shadow composites a flat colour, so a pattern fill (#1038)
+        // and a pattern's capture canvas paint through tiny-skia instead.
+        // A shading pattern's layer (#1298) covers the runs.
+        let region = runs
+            .iter()
+            .fold([i64::MAX, i64::MAX, i64::MIN, i64::MIN], |b, run| {
+                let r = run.rect;
+                [
+                    b[0].min(i64::from(r.x0)),
+                    b[1].min(i64::from(r.y0)),
+                    b[2].max(i64::from(r.x1)),
+                    b[3].max(i64::from(r.y1)),
+                ]
+            });
+        let (pattern, layer_work) = match self.pattern_source(region, probe) {
+            Ok(p) => p,
+            Err(e) => {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        };
+        let work = work.saturating_add(layer_work);
+        let deep = !runs.is_empty()
+            && pattern.is_none()
+            && self.captures.is_empty()
+            && crate::deep::Deep::allowed(w, h, max_memory);
+        let opaque = self.state.alpha >= 1.0 && self.state.blend == BlendMode::Normal;
+        // A `--bands` run keeps only its own rows, so only they get a
+        // shadow: the rest paint on the 8-bit page as before, and the
+        // bands' shadows add up to one page, not one page each.
+        let (b0, b1) = self.band_rows().unwrap_or((0, h));
+        if deep {
+            // The shadow rows this fill will allocate, checked against the
+            // memory cap before anything is painted (Codex round 1, #731):
+            // `allowed` only compares a whole shadow with the cap, not with
+            // the headroom left.
+            let need = self.deep.new_bytes(
+                w,
+                h,
+                self.pending_erase,
+                runs.iter()
+                    .filter(|run| !(run.solid && opaque))
+                    .map(|run| (run.rect.y0.max(b0), run.rect.y1.min(b1))),
+            );
+            if let Err(e) = probe.check_alloc(need) {
+                self.coverage = Some(cov);
+                return Err(e);
+            }
+        }
         // Only now, so a fill a limit refuses leaves the page as it was: a
         // showpage's pending erase not done, nothing marked painted (Codex,
         // PR #1217: a refused fill after showpage made a blank last page).
         self.prepare_paint();
         if !runs.is_empty() {
-            let mut paint = self.paint();
+            let mut paint = self.paint_from(&pattern);
             paint.anti_alias = false;
-            // Fully covered runs go through tiny-skia without the mask (its
-            // opaque fast path), so a page-sized fill costs what it did.
-            for run in runs {
+            let (r, g, b) = self.state.rgb;
+            let rgb8 = [to_u8(r), to_u8(g), to_u8(b)];
+            let src = crate::deep::Source::new(
+                rgb8,
+                self.state.alpha,
+                match self.state.blend {
+                    BlendMode::Normal => crate::deep::Blend::Normal,
+                    BlendMode::Multiply => crate::deep::Blend::Multiply,
+                },
+            );
+            let stride = w as usize;
+            let skia_rows = |pixmap: &mut Pixmap, run: &crate::coverage::Run, y0: u32, y1: u32| {
                 let r = run.rect;
                 if let Some(rect) =
-                    tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
+                    tiny_skia::Rect::from_ltrb(r.x0 as f32, y0 as f32, r.x1 as f32, y1 as f32)
                 {
                     let mask = if run.solid { None } else { Some(&cov) };
-                    self.pixmap
-                        .fill_rect(rect, &paint, Transform::identity(), mask);
+                    pixmap.fill_rect(rect, &paint, Transform::identity(), mask);
+                }
+            };
+            for run in &runs {
+                let r = run.rect;
+                let (x0, x1) = (r.x0 as usize, r.x1 as usize);
+                // Fully covered opaque runs go through tiny-skia without the
+                // mask (its memset fast path), so a page-sized fill costs
+                // what it did; the shadow only notes the new colour.
+                if !deep || (run.solid && opaque) {
+                    skia_rows(&mut self.pixmap, run, r.y0, r.y1);
+                    if deep {
+                        let color = tiny_skia::PremultipliedColorU8::from_rgba(
+                            rgb8[0], rgb8[1], rgb8[2], 255,
+                        )
+                        .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+                        for y in r.y0.max(b0) as usize..r.y1.min(b1) as usize {
+                            self.deep.note_opaque(&self.pixmap, y, x0, x1, color);
+                        }
+                    }
+                    continue;
+                }
+                let (d0, d1) = (r.y0.max(b0), r.y1.min(b1).max(r.y0.max(b0)));
+                if r.y0 < d0 {
+                    skia_rows(&mut self.pixmap, run, r.y0, d0.min(r.y1));
+                }
+                if d1 < r.y1 {
+                    skia_rows(&mut self.pixmap, run, d1.max(r.y0), r.y1);
+                }
+                for y in d0 as usize..d1 as usize {
+                    let mask = if run.solid {
+                        None
+                    } else {
+                        Some(&cov.data()[y * stride + x0..y * stride + x1])
+                    };
+                    self.deep.composite(&mut self.pixmap, y, x0, x1, mask, &src);
                 }
             }
         }
@@ -2116,24 +2527,23 @@ impl Gfx {
     ) -> Result<u64, PsError> {
         let mut work = 0;
         if !self.painting_off()
+            && let Some(ink) = self.ink()
             && let Some(path) = self.state.path.to_skia()
         {
             work = self.fill_coverage_limited(&path, rule, probe)?;
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = self.state.path.to_svg_data();
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(svg) = &mut self.svg {
-                    svg.fill(&d, rule, rgb, comp, &chain);
+                    svg.fill(&d, rule, &ink, comp, &chain);
                 }
             }
             {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let Gfx { pdf, state, .. } = self;
                 if let Some(pdf) = pdf {
-                    pdf.fill(&state.path, rule, rgb, comp, &chain);
+                    pdf.fill(&state.path, rule, &ink, comp, &chain);
                 }
             }
             self.dirty = true;
@@ -2176,7 +2586,7 @@ impl Gfx {
         shading: crate::shading::Shading,
         probe: &crate::limits::LimitProbe,
     ) -> Result<u64, PsError> {
-        if self.painting_off() {
+        if self.painting_off() || self.capturing_uncolored() {
             return Ok(0);
         }
         // An end that does not extend, but whose far side the painted
@@ -2188,157 +2598,8 @@ impl Gfx {
             shading.extend[0] || !reached[0],
             shading.extend[1] || !reached[1],
         ];
-        // The raster's ramp with each end that does not extend closed by a
-        // transparent stop at the same position (#1040). The stops always
-        // run from 0 to 1, and with a zero-width step tiny-skia's gradient
-        // takes the general (unclamped) stage: below 0 its first stop, from
-        // 1 on its last, so past that end nothing is painted. Added after
-        // `raster_stops`, whose resampling would blur the step.
-        let ramp = extend_ramp(&shading.raster_stops(), extend);
-        let nstops = ramp.len();
-        // Coincident axial endpoints (Coords [x y x y]) are a no-op in
-        // gs — nothing painted, even with Extend true. tiny-skia
-        // 0.12's LinearGradient::new in Pad mode does *not* return
-        // None for this, though: re-reading its source (a Codex
-        // review's prompt to actually check, not the earlier read of
-        // its doc comment that this file's design already rested on)
-        // shows the degenerate-length branch returns
-        // Some(SolidColor(last stop)) for Pad specifically — so
-        // without this check the whole clip would have silently
-        // filled with C1 instead of staying untouched. Checked before
-        // construction rather than relying on the return value.
-        //
-        // Exact equality, not a small-but-nonzero epsilon: an earlier
-        // draft used `< 1e-6` in *user* space, but that's scale-blind
-        // — under a large CTM (`1e8 1e8 scale`), two Coords 1e-7 apart
-        // (well under the threshold) still span 10 device units, a
-        // visible near-hard transition this would have wrongly
-        // skipped (a Codex review caught this). The one case actually
-        // confirmed against gs is literal coincidence, which exact
-        // equality catches precisely and is scale-invariant by
-        // construction (equal points stay equal under any linear
-        // transform); anything short of that renders as an ordinary,
-        // if very sharp, gradient — exactly what gs would do too.
-        if let crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } = shading.kind
-            && x0 == x1
-            && y0 == y1
-        {
-            return Ok(0);
-        }
         let ctm = self.state.ctm;
-        // A safety margin comfortably above tiny-skia's own internal
-        // degenerate-length threshold (DEGENERATE_THRESHOLD =
-        // 1/32768 ≈ 3e-5, checked against these *raw*, untransformed
-        // points): if this shape's own characteristic length (axis
-        // length for axial; the larger of the two radii or the
-        // center-to-center distance for radial) is under `SAFE_LEN` in
-        // raw user-space units, rescale the geometry *and* the
-        // transform together so tiny-skia never sees a spuriously
-        // short length — a pure reparametrization (the composed
-        // mapping stays mathematically identical: `ctm.pre_scale(1/k,
-        // 1/k)` undoes the `*k` on the points exactly), not an
-        // approximation. Needed because raw user-space coordinates can
-        // be any scale — found content sometimes authors geometry in
-        // tiny units under a matching large CTM magnification — and
-        // tiny-skia's fixed threshold has no way to know a "short" raw
-        // length still spans real device pixels once the CTM is
-        // applied. Confirmed concretely by a Codex review with
-        // `/Coords [0 0 1e-7 0]` under `1e8 1e8 scale` (a visible
-        // 10-device-pixel gradient, wrongly flattened to solid C1
-        // without this).
-        const SAFE_LEN: f32 = 1.0;
-        // The gradient of the smaller root, for a radial whose larger root
-        // can fall past an end that does not extend (`two_root_layer`).
-        let mut smaller_root = None;
-        let shader = match shading.kind {
-            crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
-                let len = fmath::hypotf(x1 - x0, y1 - y0);
-                let k = if len > 0.0 && len < SAFE_LEN {
-                    SAFE_LEN / len
-                } else {
-                    1.0
-                };
-                LinearGradient::new(
-                    Point::from_xy(x0 * k, y0 * k),
-                    Point::from_xy(x1 * k, y1 * k),
-                    gradient_stops(&ramp),
-                    SpreadMode::Pad,
-                    ctm.pre_scale(1.0 / k, 1.0 / k),
-                )
-            }
-            crate::shading::ShadingKind::Radial {
-                x0,
-                y0,
-                r0,
-                x1,
-                y1,
-                r1,
-            } => {
-                let (x0, y0, r0, x1, y1, r1) = (
-                    x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
-                );
-                let char_len = r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0));
-                let k = if char_len > 0.0 && char_len < SAFE_LEN {
-                    SAFE_LEN / char_len
-                } else {
-                    1.0
-                };
-                let (p0, p1) = (
-                    Point::from_xy(x0 * k, y0 * k),
-                    Point::from_xy(x1 * k, y1 * k),
-                );
-                let (r0, r1) = (r0 * k, r1 * k);
-                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
-                let dist = fmath::hypotf(p1.x - p0.x, p1.y - p0.y);
-                let stops = if degenerate_radial(dist, r0, r1) {
-                    // tiny-skia paints the first stop inside the circle and
-                    // the last outside; give it gs's picture (#1040).
-                    match degenerate_radial_inside(&shading) {
-                        Some(c) => vec![
-                            GradientStop::new(0.0, c),
-                            GradientStop::new(1.0, Color::TRANSPARENT),
-                        ],
-                        None => return Ok(0),
-                    }
-                } else {
-                    // Circles neither inside the other (a cone): a point can
-                    // lie on two of them, and gs paints the larger t that
-                    // is in range. tiny-skia finds only the larger root, so
-                    // where that one is past an end that does not extend,
-                    // the smaller one is painted from a second gradient,
-                    // the same circles run backwards.
-                    if !extend[1] && dist > (r1 - r0).abs() {
-                        let reversed: Vec<(f32, Color)> =
-                            ramp.iter().rev().map(|&(t, c)| (1.0 - t, c)).collect();
-                        smaller_root = RadialGradient::new(
-                            p1,
-                            r1,
-                            p0,
-                            r0,
-                            gradient_stops(&reversed),
-                            SpreadMode::Pad,
-                            m,
-                        );
-                    }
-                    gradient_stops(&ramp)
-                };
-                RadialGradient::new(p0, r0, p1, r1, stops, SpreadMode::Pad, m)
-            }
-        };
-        // Degenerate geometry that genuinely has no shader (e.g. both
-        // radii ~0) — tiny-skia returns None; treat as a no-op rather
-        // than an error, consistent with how other geometric
-        // degeneracies in this file (e.g. a singular CTM at
-        // device_to_user) fail soft rather than raising. A coincident-
-        // center, equal-*positive*-radius radial does *not* fall here:
-        // tiny-skia paints it as its first stop inside the circle and its
-        // last outside, and the stops handed to it above make that gs's
-        // disk (`degenerate_radial_inside`, #1040).
-        // Unlike `fill`/`stroke`, `shfill` never touches the current
-        // path — it paints the clip region, per the PLRM — so both the
-        // degenerate no-op below and the normal case leave it alone.
-        let Some(shader) = shader else {
+        let Some((shader, smaller_root, nstops)) = gradient_parts(&shading, ctm, extend) else {
             return Ok(0);
         };
         // Every pixel the page has costs the gradient a walk of its stops
@@ -2387,7 +2648,123 @@ impl Gfx {
             }
             None => self.page_rect_path(),
         };
-        let mut prepared = false;
+        let comp = self.composite();
+        // The raster paints a copy of the box cut to a guard rectangle around
+        // the page: tiny-skia's anti-aliased fill panics on a path whose
+        // corners lie around 1e9 device pixels away, which a crafted `/BBox`
+        // reaches (gs paints it). The guard is the page grown by its own size
+        // on every side, so a box of ordinary size is never cut, and a cut one
+        // still covers the same pixels. SVG and PDF keep the box as given.
+        let cut = shading
+            .bbox
+            .and_then(|_| Self::bbox_in_guard(&path, pw, ph));
+        if self.paint_shfill(
+            shader,
+            cut.as_ref().unwrap_or(&path),
+            shading.bbox.is_none(),
+            nstops,
+            probe,
+        )? {
+            if self.svg.is_some() || self.pdf.is_some() {
+                // The same shading for both vector recorders (#1028,
+                // #1041): rescaled as the raster is, and its degenerate
+                // radial recorded as the raster paints it.
+                let vector = vector_shading(&shading, ctm);
+                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+                if let Some(svg) = &mut self.svg {
+                    // The same device-space path the raster painted with
+                    // (whole page, or the BBox parallelogram) — passing its
+                    // SVG path data through means the exported region
+                    // matches exactly, /BBox included, rather than always
+                    // the whole page bounded only by the clip.
+                    let region_d = path.to_svg_data();
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                            ..
+                        } => svg.shfill(kind, *ctm, stops, *extend, &region_d, comp, &chain),
+                    }
+                }
+                if let Some(pdf) = &mut self.pdf {
+                    match &vector {
+                        VectorShading::Nothing => {}
+                        VectorShading::Shading {
+                            kind,
+                            ctm,
+                            stops,
+                            extend,
+                            ..
+                        } => {
+                            let region = shading.bbox.map(|_| &path);
+                            pdf.shfill(kind, *ctm, stops, *extend, region, comp, &chain);
+                        }
+                    }
+                }
+            }
+            self.dirty = true;
+        }
+        Ok(work)
+    }
+
+    /// The `/BBox` parallelogram `path` (four device corners) cut to the page
+    /// grown by its own size on every side, or `path` itself when all its
+    /// corners are inside that (#1324), which is `None`. Empty when the box
+    /// lies wholly beyond it, which `paint_shfill` takes for nothing to paint.
+    fn bbox_in_guard(path: &PsPath, pw: usize, ph: usize) -> Option<PsPath> {
+        let poly: Vec<(f64, f64)> = path
+            .segs
+            .iter()
+            .filter_map(|seg| match *seg {
+                Seg::Move(p) | Seg::Line(p) => Some((f64::from(p.x), f64::from(p.y))),
+                _ => None,
+            })
+            .collect();
+        let (w, h) = (pw as f64, ph as f64);
+        let guard = (-w, -h, 2.0 * w, 2.0 * h);
+        let inside =
+            |p: &(f64, f64)| p.0 >= guard.0 && p.0 <= guard.2 && p.1 >= guard.1 && p.1 <= guard.3;
+        if poly.iter().all(inside) {
+            return None;
+        }
+        let mut cut = PsPath::default();
+        let clipped = clip_polygon(&poly, guard);
+        for (i, &(x, y)) in clipped.iter().enumerate() {
+            let p = DevPoint {
+                x: x as f32,
+                y: y as f32,
+            };
+            if i == 0 {
+                cut.move_to(p);
+            } else {
+                cut.line_to(p);
+            }
+        }
+        if clipped.len() >= 3 {
+            cut.close();
+        } else {
+            cut = PsPath::default();
+        }
+        Some(cut)
+    }
+
+    /// Paints `shader` over the device-space `path` (the whole page when
+    /// `whole_page`, else a `/BBox` parallelogram or another region) through
+    /// the clip, with the current alpha and blend, for `shfill` (#20, #1039).
+    /// `nstops` sizes the strips the limits are looked at between. Returns
+    /// whether it painted; the page is begun either way.
+    fn paint_shfill(
+        &mut self,
+        shader: tiny_skia::Shader<'_>,
+        path: &PsPath,
+        whole_page: bool,
+        nstops: usize,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<bool, PsError> {
+        let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
         if let Some(skia_path) = path.to_skia() {
             // A gradient carries its own shader rather than a flat
             // color, so `paint()`'s alpha byte can't reach it —
@@ -2408,7 +2785,6 @@ impl Gfx {
                 force_hq_pipeline: true,
                 ..Default::default()
             };
-            let comp = self.composite();
             let mask = self.clip_mask();
             // Under the limits the page is painted on a copy and kept only
             // once every strip has painted, so a limit leaves the page, the
@@ -2418,7 +2794,6 @@ impl Gfx {
             // half-painted raster beside records of nothing would show.
             let mut scratch = if *probe == crate::limits::LimitProbe::NONE {
                 self.prepare_paint();
-                prepared = true;
                 None
             } else {
                 probe.check_alloc((pw * ph).saturating_mul(4))?;
@@ -2429,7 +2804,7 @@ impl Gfx {
                 Some(copy)
             };
             let target = scratch.as_mut().unwrap_or(&mut self.pixmap);
-            if shading.bbox.is_none() {
+            if whole_page {
                 // The whole page, an integer rectangle with no edge to
                 // anti-alias, so strips of its rows paint the same pixels
                 // as the one fill (which, with nothing to look at, it is). A
@@ -2508,137 +2883,241 @@ impl Gfx {
             }
             if let Some(copy) = scratch {
                 self.prepare_paint();
-                prepared = true;
                 self.pixmap = copy;
             }
-            if self.svg.is_some() {
-                let svg_kind = sh_kind(shading.kind, 1.0);
-                let svg_ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
-                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
-                // The same device-space path the raster painted with
-                // (whole page, or the BBox parallelogram) — passing its
-                // SVG path data through means the exported region
-                // matches exactly, /BBox included, rather than always
-                // the whole page bounded only by the clip.
-                let region_d = path.to_svg_data();
-                if let Some(svg) = &mut self.svg {
-                    svg.shfill(
-                        &svg_kind,
-                        svg_ctm,
-                        &shading.stops,
-                        shading.extend,
-                        &region_d,
-                        comp,
-                        &chain,
-                    );
-                }
+            return Ok(true);
+        }
+        // Nothing to paint (a degenerate region), but the page is begun.
+        self.prepare_paint();
+        Ok(false)
+    }
+
+    /// `shfill` of a Type 1 (function-based) shading (#1039). The function
+    /// is evaluated at each device pixel's centre, through the inverse of
+    /// `/Matrix` then the CTM, into a layer covering the `/Domain`
+    /// parallelogram (cut by the `/BBox` and the page), whose coverage is
+    /// multiplied in, so its edges are anti-aliased as a fill's are. The
+    /// layer is painted through the clip by `paint_shfill`, as a gradient
+    /// is. SVG embeds the same layer as an image (it has no function
+    /// shading); PDF gets a real `/ShadingType 1` with a sampled function.
+    ///
+    /// Under the limits the layer is built first, the limits looked at
+    /// between rows and its work held against the step limit before, so a
+    /// stopped `shfill` leaves the page as it was. It returns that work.
+    pub(crate) fn shfill_function_limited(
+        &mut self,
+        shading: crate::shading::FunctionShading,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        if self.painting_off() || self.capturing_uncolored() {
+            return Ok(0);
+        }
+        let ctm = self.state.ctm;
+        // Shading space to device space: /Matrix, then the CTM.
+        let t = function_to_device(shading.matrix, ctm);
+        let [x0, x1, y0, y1] = shading.domain;
+        let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
+        let domain = function_domain_quad(&t, shading.domain);
+        let bbox = shading.bbox.map(|(llx, lly, urx, ury)| {
+            let d = |x, y| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            };
+            [d(llx, lly), d(urx, lly), d(urx, ury), d(llx, ury)]
+        });
+        // The pixels the layer covers: the Domain's box, cut by the
+        // BBox's and the page.
+        let mut b = corners_box(domain);
+        if let Some(q) = bbox {
+            let qb = corners_box(q);
+            b = [
+                b[0].max(qb[0]),
+                b[1].max(qb[1]),
+                b[2].min(qb[2]),
+                b[3].min(qb[3]),
+            ];
+        }
+        let bx0 = b[0].floor().max(0.0);
+        let by0 = b[1].floor().max(0.0);
+        let bx1 = b[2].ceil().min(pw as f64);
+        let by1 = b[3].ceil().min(ph as f64);
+        let inv = function_inverse(&t);
+        if inv.is_none() || x0 == x1 || y0 == y1 || !(bx1 > bx0 && by1 > by0) {
+            // Nothing to paint (an empty Domain, or off the page), but the
+            // page is begun, as for a gradient.
+            self.prepare_paint();
+            return Ok(0);
+        }
+        let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
+        // Evaluating the function costs about a 64-stop gradient's walk a
+        // pixel; painting the layer, a two-stop one.
+        let work = shfill_work(bw, bh, 64).saturating_add(shfill_work(bw, bh, 2));
+        probe.check(work / 1024)?;
+        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(6))?;
+        let inv = inv.unwrap_or_default();
+        let to_shading = |dx: f64, dy: f64| {
+            let (u, v) = (dx - t[4], dy - t[5]);
+            (inv[0] * u + inv[2] * v, inv[1] * u + inv[3] * v)
+        };
+        let local = |q: &[(f64, f64)]| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect();
+        let layer = function_layer(
+            &shading,
+            (bx0, by0, bw, bh),
+            to_shading,
+            local(&domain),
+            bbox.as_ref().map(|q| local(q)),
+            probe,
+        )?;
+        let shader = tiny_skia::Pattern::new(
+            layer.as_ref(),
+            SpreadMode::Pad,
+            tiny_skia::FilterQuality::Nearest,
+            1.0,
+            Transform::from_translate(bx0 as f32, by0 as f32),
+        );
+        let region = Self::rect_path(bx0 as f32, by0 as f32, bx1 as f32, by1 as f32);
+        let comp = self.composite();
+        if self.paint_shfill(shader, &region, false, 2, probe)? {
+            let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+            // An image embedded in an SVG, not a file pscat writes: no
+            // resolution to record (as in `image.rs`).
+            #[allow(clippy::disallowed_methods)]
+            let encoded = self.svg.is_some().then(|| layer.encode_png());
+            if let Some(svg) = &mut self.svg
+                && let Some(Ok(png)) = encoded
+            {
+                let at = [1.0, 0.0, 0.0, 1.0, bx0 as f32, by0 as f32];
+                svg.image(&png, bw, bh, at, true, comp, &chain);
             }
-            if self.pdf.is_some() {
-                // A real PDF shading (#1028): the same stops under the
-                // same CTM. Geometry whose characteristic length is under
-                // SAFE_LEN is rescaled, with the inverse folded into the
-                // `cm`, exactly as for the raster above: the composed map
-                // is unchanged, and the numbers the PDF carries stay in a
-                // range every reader holds precisely.
-                // The same k as the raster's (same f32 arithmetic), so the
-                // degenerate test below sees the numbers tiny-skia saw.
-                let char_len = match shading.kind {
-                    crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
-                        let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
-                        fmath::hypotf(x1 - x0, y1 - y0)
-                    }
-                    crate::shading::ShadingKind::Radial {
-                        x0,
-                        y0,
-                        r0,
-                        x1,
-                        y1,
-                        r1,
-                    } => {
-                        let (x0, y0, r0, x1, y1, r1) = (
-                            x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
-                        );
-                        r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
-                    }
-                };
-                let k = if char_len > 0.0 && char_len < SAFE_LEN {
-                    SAFE_LEN / char_len
-                } else {
-                    1.0
-                };
-                let mut kind = sh_kind(shading.kind, k);
-                // Two (nearly) coincident circles of (nearly) one radius:
-                // tiny-skia's degenerate case, decided with its own
-                // tolerance on the rescaled numbers. The raster paints gs's
-                // picture of it (#1040): a disk of one colour, or nothing
-                // (and then never gets here). A PDF reader paints those
-                // circles as nothing (CoreGraphics), so record the disk: a
-                // radial from the centre out to the radius, one colour,
-                // extending neither end (Codex reviews of #1028).
-                let fallback;
-                let mut stops: &[(f32, f32, f32, f32)] = &shading.stops;
-                let mut extend = shading.extend;
-                let mut nothing = false;
-                if let crate::svg::ShKind::Radial {
-                    x0,
-                    y0,
-                    r0,
-                    x1,
-                    y1,
-                    r1,
-                } = kind
-                    && degenerate_radial(fmath::hypotf(x1 - x0, y1 - y0), r0, r1)
-                {
-                    let c = degenerate_radial_inside(&shading);
-                    nothing = c.is_none();
-                    let c = c.unwrap_or(Color::TRANSPARENT);
-                    kind = crate::svg::ShKind::Radial {
-                        x0,
-                        y0,
-                        r0: 0.0,
-                        x1: x0,
-                        y1: y0,
-                        r1,
+            if let Some(pdf) = &mut self.pdf {
+                let ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
+                let bbox_path = bbox.map(|q| {
+                    let mut p = PsPath::default();
+                    let pt = |(x, y): (f64, f64)| DevPoint {
+                        x: x as f32,
+                        y: y as f32,
                     };
-                    let (r, g, b) = (c.red(), c.green(), c.blue());
-                    fallback = [(0.0, r, g, b), (1.0, r, g, b)];
-                    stops = &fallback;
-                    extend = [false, false];
-                }
-                let m = ctm.pre_scale(1.0 / k, 1.0 / k);
-                let pdf_ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
-                let chain = self.state.clip.as_ref().map(|c| c.node.clone());
-                let region = shading.bbox.map(|_| &path);
-                // An axis that tiny-skia finds degenerate (its tolerance, on
-                // the same f32 numbers: distinct f64 Coords can collapse)
-                // paints the last stop, solid, over the region: the end
-                // colour if the end extends, else nothing (its closing stop
-                // is transparent). A PDF reader paints such a shading as
-                // nothing. Record that solid fill instead (a Codex review of
-                // #1028).
-                let solid = match kind {
-                    crate::svg::ShKind::Axial { x0, y0, x1, y1 }
-                        if fmath::hypotf(x1 - x0, y1 - y0) <= DEGENERATE =>
-                    {
-                        Some(stops.last().filter(|_| extend[1]).map(|l| (l.1, l.2, l.3)))
+                    p.move_to(pt(q[0]));
+                    for &corner in &q[1..] {
+                        p.line_to(pt(corner));
                     }
-                    _ if nothing => Some(None),
-                    _ => None,
-                };
-                let Gfx { pdf, .. } = self;
-                if let Some(pdf) = pdf {
-                    match solid {
-                        Some(Some(rgb)) => pdf.fill(&path, FillRule::Winding, rgb, comp, &chain),
-                        Some(None) => {}
-                        None => pdf.shfill(&kind, pdf_ctm, stops, extend, region, comp, &chain),
-                    }
-                }
+                    p.close();
+                    p
+                });
+                pdf.shfill_function(&shading, ctm, bbox_path.as_ref(), comp, &chain);
             }
             self.dirty = true;
         }
-        if !prepared {
-            // Nothing to paint (a degenerate region), but the page is begun.
+        Ok(work)
+    }
+
+    /// `shfill` of a mesh shading, types 4 to 7 (#1325). The mesh is
+    /// decoded, painted into a layer over its device box (cut by the
+    /// `/BBox`'s and the page) by `mesh::mesh_layer`, and the layer painted
+    /// through the clip by `paint_shfill`, as a Type 1 shading's is. SVG
+    /// embeds the layer as an image; PDF gets a real mesh shading.
+    ///
+    /// Under the limits the layer is built first, its work held against the
+    /// step limit before, so a stopped `shfill` leaves the page as it was.
+    /// It returns that work.
+    pub(crate) fn shfill_mesh_limited(
+        &mut self,
+        shading: &crate::mesh::MeshShading,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        // Copying the DataSource, decoding and painting the layer are
+        // counted by `mesh` as they are done, and charged on every path,
+        // an error included; what this returns is painting the layer.
+        if self.painting_off() || self.capturing_uncolored() {
+            return Ok(0);
+        }
+        let mesh = shading.decode(probe)?;
+        let ctm = self.state.ctm;
+        let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+        let (pw, ph) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
+        let bbox = shading.bbox.map(|(llx, lly, urx, ury)| {
+            let d = |x, y| {
+                let p = self.user_to_device(x, y);
+                (f64::from(p.x), f64::from(p.y))
+            };
+            [d(llx, lly), d(urx, lly), d(urx, ury), d(llx, ury)]
+        });
+        let mut b = mesh.device_box(&t).unwrap_or([0.0; 4]);
+        if let Some(q) = bbox {
+            let qb = corners_box(q);
+            b = [
+                b[0].max(qb[0]),
+                b[1].max(qb[1]),
+                b[2].min(qb[2]),
+                b[3].min(qb[3]),
+            ];
+        }
+        let (bx0, by0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
+        let (bx1, by1) = (b[2].ceil().min(pw), b[3].ceil().min(ph));
+        if !(bx1 > bx0 && by1 > by0) {
+            // Nothing to paint, but the page is begun, as for a gradient,
+            // and the decoding is charged.
             self.prepare_paint();
+            return Ok(0);
+        }
+        let (bw, bh) = ((bx1 - bx0) as usize, (by1 - by0) as usize);
+        // Painting the layer onto the page, as a two-stop gradient; the
+        // rasterizing is counted, and held against the limit, as it goes.
+        let before = shfill_work(bw, bh, 2);
+        crate::mesh::check(probe, before)?;
+        // The layer, its coverage samples and the owned flags.
+        probe.check_alloc(bw.saturating_mul(bh).saturating_mul(8))?;
+        let local: Option<Vec<(f64, f64)>> =
+            bbox.map(|q| q.iter().map(|&(x, y)| (x - bx0, y - by0)).collect());
+        let layer = crate::mesh::mesh_layer(
+            shading,
+            &mesh,
+            &t,
+            (bx0, by0, bw, bh),
+            local.as_deref(),
+            before,
+            probe,
+        )?;
+        let work = before;
+        let shader = tiny_skia::Pattern::new(
+            layer.as_ref(),
+            SpreadMode::Pad,
+            tiny_skia::FilterQuality::Nearest,
+            1.0,
+            Transform::from_translate(bx0 as f32, by0 as f32),
+        );
+        let region = Self::rect_path(bx0 as f32, by0 as f32, bx1 as f32, by1 as f32);
+        let comp = self.composite();
+        if self.paint_shfill(shader, &region, false, 2, probe)? {
+            let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+            // An image embedded in an SVG, not a file pscat writes: no
+            // resolution to record (as in `image.rs`).
+            #[allow(clippy::disallowed_methods)]
+            let encoded = self.svg.is_some().then(|| layer.encode_png());
+            if let Some(svg) = &mut self.svg
+                && let Some(Ok(png)) = encoded
+            {
+                let at = [1.0, 0.0, 0.0, 1.0, bx0 as f32, by0 as f32];
+                svg.image(&png, bw, bh, at, true, comp, &chain);
+            }
+            if let Some(pdf) = &mut self.pdf {
+                let ctm = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty];
+                let bbox_path = bbox.map(|q| {
+                    let mut p = PsPath::default();
+                    let pt = |(x, y): (f64, f64)| DevPoint {
+                        x: x as f32,
+                        y: y as f32,
+                    };
+                    p.move_to(pt(q[0]));
+                    for &corner in &q[1..] {
+                        p.line_to(pt(corner));
+                    }
+                    p.close();
+                    p
+                });
+                pdf.shfill_mesh(shading, &mesh, ctm, bbox_path.as_ref(), comp, &chain);
+            }
+            self.dirty = true;
         }
         Ok(work)
     }
@@ -2749,10 +3228,30 @@ impl Gfx {
     }
 
     pub fn stroke(&mut self) {
-        if self.painting_off() {
+        // No limit to exceed: only a layer that cannot be allocated fails,
+        // and that paints nothing.
+        if self
+            .stroke_limited(&crate::limits::LimitProbe::NONE)
+            .is_err()
+        {
             self.newpath();
-            return;
         }
+    }
+
+    /// [`stroke`](Self::stroke) under the limits: a shading pattern's
+    /// layer (#1298) is made, its work held against the step limit and its
+    /// memory against the cap, before anything is painted or recorded, and
+    /// the work comes back for the operator to charge. A limit leaves the
+    /// path as it was.
+    pub(crate) fn stroke_limited(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        let Some(ink) = self.ink().filter(|_| !self.painting_off()) else {
+            self.newpath();
+            return Ok(0);
+        };
+        let mut work = 0;
         let dropped = self.stroke_dropped();
         let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
@@ -2776,8 +3275,14 @@ impl Gfx {
                 .map(StrokeDraw::Device),
         };
         if let Some(draw) = drawable {
+            // The layout of a fractional TilingType 2 pattern (#1332) comes
+            // before the raster source reads it; its work is charged too.
+            let mut lay_work = 0;
+            self.lay_pattern(probe, &mut lay_work)?;
+            let (src, layer_work) = self.pattern_source(draw.device_bounds(&stroke), probe)?;
+            work = layer_work.saturating_add(lay_work);
             self.prepare_paint();
-            let paint = self.paint();
+            let paint = self.paint_from(&src);
             let mask = self.clip_mask();
             match &draw {
                 StrokeDraw::Device(path) => self.pixmap.stroke_path(
@@ -2787,9 +3292,21 @@ impl Gfx {
                     Transform::identity(),
                     mask.as_deref(),
                 ),
+                // Mapped to device space here rather than by `fill_path`'s
+                // transform, which would also move a pattern shader off the
+                // device-space placement `makepattern` gave it. tiny-skia
+                // maps the path the same way itself, so a colour stroke is
+                // unchanged.
                 StrokeDraw::PenOutline(outline, l) => {
-                    self.pixmap
-                        .fill_path(outline, &paint, FillRule::Winding, *l, mask.as_deref())
+                    if let Some(device) = outline.clone().transform(*l) {
+                        self.pixmap.fill_path(
+                            &device,
+                            &paint,
+                            FillRule::Winding,
+                            Transform::identity(),
+                            mask.as_deref(),
+                        )
+                    }
                 }
                 StrokeDraw::Hairlines(groups) => {
                     for (thin, path) in groups {
@@ -2822,14 +3339,13 @@ impl Gfx {
                     Some(pen) => pen.path.to_svg_data_with(3 + pen.extra_decimals()),
                     None => dropped.as_ref().unwrap_or(&self.state.path).to_svg_data(),
                 };
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let pen_map = pen.as_ref().map(|p| (p.to_device, p.extra_decimals()));
                 if let Some(svg) = &mut self.svg {
                     svg.stroke(
                         &d,
                         pen_map,
-                        rgb,
+                        &ink,
                         w,
                         cap,
                         join,
@@ -2841,7 +3357,6 @@ impl Gfx {
                 }
             }
             if self.pdf.is_some() {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 let Gfx { pdf, state, .. } = self;
                 if let Some(pdf) = pdf {
@@ -2852,7 +3367,7 @@ impl Gfx {
                     pdf.stroke(
                         path,
                         pen_map,
-                        rgb,
+                        &ink,
                         w,
                         cap,
                         join,
@@ -2866,6 +3381,7 @@ impl Gfx {
             self.dirty = true;
         }
         self.newpath();
+        Ok(work)
     }
 
     /// The stroker settings the current graphics state implies, plus the
@@ -3229,18 +3745,20 @@ impl Gfx {
     pub fn set_transparent_background(&mut self) {
         self.background = tiny_skia::Color::TRANSPARENT;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.set_transparent(true);
         }
     }
 
     pub fn erase(&mut self) {
-        if self.painting_off() {
+        if self.painting_off() || !self.captures.is_empty() {
             return;
         }
         self.pending_erase = false;
         self.painted_since_page = true;
         self.pixmap.fill(self.background);
+        self.deep.clear();
         if let Some(svg) = &mut self.svg {
             svg.erase();
         }
@@ -3256,8 +3774,10 @@ impl Gfx {
     /// The graphics-state reset (initgraphics, pinned against gs) is
     /// the operator's job.
     pub fn showpage(&mut self) {
-        if self.state.null_device {
-            return; // the null device emits no page (#739)
+        // The null device emits no page (#739); nor does a pattern's
+        // PaintProc, which paints a tile, not a page (#1038).
+        if self.state.null_device || !self.captures.is_empty() {
+            return;
         }
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
@@ -3274,7 +3794,7 @@ impl Gfx {
 
     /// `copypage` (Level 1): emit the page but keep canvas and state.
     pub fn copypage(&mut self) {
-        if self.state.null_device {
+        if self.state.null_device || !self.captures.is_empty() {
             return;
         }
         self.completed.push(self.pixmap.clone());
@@ -3349,7 +3869,14 @@ impl Gfx {
 
     /// Whether a glyph shown now should reach the SVG recorder as text.
     pub(crate) fn svg_text_wanted(&self) -> bool {
-        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted()
+        self.svg_text == crate::svg::SvgText::Text && self.svg_wanted() && self.text_ink()
+    }
+
+    /// Text output writes glyphs in a solid colour: not under a pattern,
+    /// nor while a pattern's tile is being captured (#1038), where glyphs
+    /// keep their outlines.
+    fn text_ink(&self) -> bool {
+        self.captures.is_empty() && !matches!(self.state.colorspace, ColorSpace::Pattern { .. })
     }
 
     /// Turn on PDF recording (`--pdf`).
@@ -3433,7 +3960,19 @@ impl Gfx {
 
     /// Whether a glyph shown now may reach the PDF recorder as text.
     pub(crate) fn pdf_text_wanted(&self) -> bool {
-        self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted()
+        self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted() && self.text_ink()
+    }
+
+    /// Whether the PDF recorder needs a new embedded charstring for `g`
+    /// (#1026): PDF text is on, `g` is eligible, and its font has not seen
+    /// the glyph. The show engine then builds one from its outline walk.
+    pub(crate) fn pdf_would_build(&self, g: &crate::textrun::GlyphText) -> bool {
+        self.pdf_text_wanted()
+            && crate::textrun::pdf_eligible(g)
+            && self
+                .pdf
+                .as_ref()
+                .is_some_and(|p| p.would_build(g.fid, g.gid, g.ch))
     }
 
     pub(crate) fn pdf_wanted(&self) -> bool {
@@ -3448,11 +3987,30 @@ impl Gfx {
         t: [f32; 6],
         interpolate: bool,
     ) {
-        let fill = self.state.rgb;
+        // A stencil paints the current colour, a pattern included (#1299);
+        // a colour image's own samples need no colour.
+        let ink = match (&data, self.ink()) {
+            (crate::pdf::ImageData::Mask { .. }, Some(ink)) => ink,
+            _ => crate::pattern::Ink::Rgb(self.state.rgb),
+        };
         let comp = self.composite();
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(pdf) = &mut self.pdf {
-            pdf.image(w, h, data, t, fill, interpolate, comp, &chain);
+            pdf.image(w, h, data, t, &ink, interpolate, comp, &chain);
+        }
+    }
+
+    /// An imagemask painted with a pattern, for SVG (#1299): `png` is the
+    /// stencil, opaque white where it paints, under the device transform
+    /// `t` (source pixels to device space).
+    pub(crate) fn svg_stencil(&mut self, png: &[u8], w: usize, h: usize, t: [f32; 6]) {
+        let Some(ink) = self.ink() else {
+            return;
+        };
+        let comp = self.composite();
+        let chain = self.state.clip.as_ref().map(|c| c.node.clone());
+        if let Some(svg) = &mut self.svg {
+            svg.stencil(png, w, h, t, &ink, comp, &chain);
         }
     }
 
@@ -3528,6 +4086,7 @@ impl Gfx {
             clip_stack: Vec::new(),
             null_device: false,
             device,
+            pattern: None,
         }
     }
 
@@ -3612,8 +4171,42 @@ impl Gfx {
         self.state.cmyk = Some(cmyk);
     }
 
+    /// Set the colour space. Any space, a pattern space included, starts
+    /// with no pattern: in a pattern space that is the null pattern.
     pub(crate) fn set_colorspace(&mut self, cs: ColorSpace) {
         self.state.colorspace = cs;
+        self.state.pattern = None;
+    }
+
+    /// The pattern a `/Pattern` space's `setcolor` chose (#1038).
+    pub(crate) fn set_pattern(&mut self, p: PatternColor) {
+        self.state.pattern = Some(p);
+    }
+
+    /// The pattern of the current colour, if it is one.
+    pub(crate) fn pattern(&self) -> Option<&PatternColor> {
+        self.state.pattern.as_ref()
+    }
+
+    /// The current colour's pattern when its `PaintProc` has not run yet
+    /// (#1341): what a marking operator has to run before it paints.
+    pub(crate) fn pending_pattern(
+        &self,
+    ) -> Option<(
+        std::rc::Rc<crate::pattern::LazyPattern>,
+        crate::object::Object,
+    )> {
+        if !matches!(self.state.colorspace, ColorSpace::Pattern { .. }) {
+            return None;
+        }
+        let p = self.state.pattern.as_ref()?;
+        // A shading pattern (#1298) has no `PaintProc`.
+        let crate::pattern::PatternRef::Tile(lazy) = &p.pattern else {
+            return None;
+        };
+        lazy.tile()
+            .is_none()
+            .then(|| (lazy.clone(), p.dict.clone()))
     }
 
     pub fn line_cap(&self) -> i64 {
@@ -3712,31 +4305,43 @@ impl Gfx {
     /// Fill a free-standing path (a glyph outline) with the current
     /// paint and clip, leaving the current path alone. TrueType outlines
     /// are wound for nonzero filling.
-    pub(crate) fn fill_path_direct(&mut self, path: &PsPath) {
+    ///
+    /// Under the limits (#1332): `probe` is looked at, and the work (the
+    /// rasteriser's, and the layout of a fractional TilingType 2 pattern's
+    /// cells) is added to `work` for the operator to charge. A limit stops
+    /// the glyph before anything is painted or recorded.
+    pub(crate) fn fill_path_direct(
+        &mut self,
+        path: &PsPath,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
         if self.painting_off() {
-            return;
+            return Ok(());
         }
+        let Some(ink) = self.ink() else {
+            return Ok(());
+        };
         if let Some(p) = path.to_skia() {
-            self.prepare_paint();
-            self.fill_coverage(&p, FillRule::Winding);
+            *work =
+                work.saturating_add(self.fill_coverage_limited(&p, FillRule::Winding, probe)?);
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = path.to_svg_data();
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(svg) = &mut self.svg {
-                    svg.fill(&d, FillRule::Winding, rgb, comp, &chain);
+                    svg.fill(&d, FillRule::Winding, &ink, comp, &chain);
                 }
             }
             if self.pdf.is_some() {
-                let rgb = self.state.rgb;
                 let chain = self.state.clip.as_ref().map(|c| c.node.clone());
                 if let Some(pdf) = &mut self.pdf {
-                    pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                    pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
                 }
             }
             self.dirty = true;
         }
+        Ok(())
     }
 
     /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that a
@@ -3745,25 +4350,40 @@ impl Gfx {
     /// get the character or the outline; the raster always gets the
     /// outline. `path` may be empty (a space), which paints nothing but
     /// still places a character in the text.
-    pub(crate) fn paint_glyph(&mut self, path: &PsPath, text: Option<&crate::textrun::GlyphText>) {
+    ///
+    /// `built` is the embedded charstring the show engine made for a glyph
+    /// the PDF font did not hold yet ([`pdf_would_build`](Self::pdf_would_build)),
+    /// from the same outline walk as `path` (#1026).
+    pub(crate) fn paint_glyph(
+        &mut self,
+        path: &PsPath,
+        text: Option<&crate::textrun::GlyphText>,
+        built: crate::pdf_font::Built,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
         let svg_text = text.filter(|g| self.svg_text_wanted() && crate::textrun::svg_eligible(g));
         let pdf_text = text.filter(|g| self.pdf_text_wanted() && crate::textrun::pdf_eligible(g));
         if svg_text.is_none() && pdf_text.is_none() {
             if !path.is_empty() {
-                self.fill_path_direct(path);
+                self.fill_path_direct(path, probe, work)?;
             }
-            return;
+            return Ok(());
         }
+        // Text is written in a colour (`svg_text_wanted`/`pdf_text_wanted`
+        // turn it off under a pattern), so this ink is always one.
+        let ink = crate::pattern::Ink::Rgb(self.state.rgb);
         let skia = path.to_skia();
         if skia.is_none() && self.pending_erase {
             // A blank glyph opening a page would otherwise land on the old
             // page's SVG body, which the erase is about to clear, or start
             // a page that has no art. It draws nothing, so drop it.
-            return;
+            return Ok(());
         }
         if let Some(p) = &skia {
-            self.prepare_paint();
-            self.fill_coverage(p, FillRule::Winding);
+            // Text is written in a colour, so no pattern layout is made;
+            // the rasteriser's own work is still held against the limits.
+            *work = work.saturating_add(self.fill_coverage_limited(p, FillRule::Winding, probe)?);
         }
         let comp = self.composite();
         let rgb = self.state.rgb;
@@ -3772,26 +4392,35 @@ impl Gfx {
             match svg_text {
                 Some(g) => svg.glyph(g, rgb, comp, &chain),
                 None if skia.is_some() => {
-                    svg.fill(&path.to_svg_data(), FillRule::Winding, rgb, comp, &chain)
+                    svg.fill(&path.to_svg_data(), FillRule::Winding, &ink, comp, &chain)
                 }
                 None => {}
             }
         }
         if let Some(pdf) = &mut self.pdf {
             match pdf_text {
-                // A glyph the font writer refuses keeps its outline.
-                Some(g) => {
-                    if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
-                        pdf.fill(path, FillRule::Winding, rgb, comp, &chain);
+                // A glyph the font writer refuses keeps its outline. A new
+                // glyph's charstring is charged as work, a step per KiB or
+                // part of one (#1026): whole KiB, so the show's per-glyph
+                // rounding down never drops it.
+                Some(g) => match pdf.glyph(g, built, rgb, comp, &chain) {
+                    Some(built) => {
+                        let kib = built.div_ceil(1024) as u64;
+                        *work = work.saturating_add(kib.saturating_mul(1024));
                     }
-                }
-                None if skia.is_some() => pdf.fill(path, FillRule::Winding, rgb, comp, &chain),
+                    None if skia.is_some() => {
+                        pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
+                    }
+                    None => {}
+                },
+                None if skia.is_some() => pdf.fill(path, FillRule::Winding, &ink, comp, &chain),
                 None => {}
             }
         }
         if skia.is_some() {
             self.dirty = true;
         }
+        Ok(())
     }
 
     /// Splice a glyph outline into the current path (`charpath`).
@@ -3823,6 +4452,398 @@ impl Gfx {
         self.saved.truncate(depth);
         self.state = *state;
         self.sync_device();
+    }
+
+    // --- patterns (#1038) -------------------------------------------------
+
+    /// Refuse `bytes` more than `--max-memory` leaves room for.
+    fn budget_allows(&mut self, bytes: usize) -> Result<(), PsError> {
+        if let Some((base, max)) = self.mem_budget {
+            let grown = crate::memtrack::live_bytes().saturating_sub(base);
+            if grown.saturating_add(bytes) > max {
+                self.mem_refused = true;
+                return Err(PsError::MemoryExceeded);
+            }
+        }
+        Ok(())
+    }
+
+    /// `makepattern` (#1038, #1341): the tile's geometry is checked now,
+    /// as gs checks the dictionary, and the pattern kept to run its
+    /// `PaintProc` at first use, in the state and context it was made in.
+    pub(crate) fn make_pattern(
+        &mut self,
+        spec: crate::pattern::TileSpec,
+        proc_: crate::object::Object,
+    ) -> Result<std::rc::Rc<crate::pattern::LazyPattern>, PsError> {
+        let geom = crate::pattern::geometry(&spec)?;
+        crate::pattern::check_fold(&geom)?;
+        self.next_capture += 1;
+        let origin = crate::pattern::Origin {
+            context: self.context(),
+            to_gs: self
+                .captures
+                .last()
+                .map_or(Transform::identity(), |c| c.to_gs),
+            to_default: self.pattern_default_space(),
+        };
+        // The `PaintProc` starts with no path, so none is kept (a large
+        // current path would be copied for every pattern made).
+        let mut made_in = self.state.clone();
+        made_in.path = PsPath::default();
+        Ok(std::rc::Rc::new(crate::pattern::LazyPattern::new(
+            self.next_capture,
+            spec,
+            proc_,
+            origin,
+            Box::new(made_in),
+        )))
+    }
+
+    /// Start capturing a tiling pattern's tile (its first use, #1038,
+    /// #1341): from here until [`end_pattern`](Self::end_pattern) (or
+    /// [`abort_pattern`](Self::abort_pattern)) every mark goes to a
+    /// tile-sized canvas, a fresh SVG recorder and an empty PDF content
+    /// stream instead of the page. The state is the one `makepattern` had,
+    /// inside a `gsave` as for a Type 3 glyph, with the CTM the tile's
+    /// capture matrix, no path, and the clip the pattern's `/BBox`.
+    pub(crate) fn begin_pattern(
+        &mut self,
+        lazy: &crate::pattern::LazyPattern,
+    ) -> Result<(), PsError> {
+        let spec = lazy.spec.clone();
+        let origin = lazy.origin;
+        let geom = crate::pattern::geometry(&spec)?;
+        crate::pattern::check_fold(&geom)?;
+        let (cw, ch) = geom.content;
+        let (pw, ph) = geom.period;
+        if self.captures.len() >= crate::pattern::MAX_CAPTURE_DEPTH {
+            return Err(PsError::ExecStackOverflow);
+        }
+        let open: u64 = self
+            .captures
+            .iter()
+            .map(|c| crate::pattern::tile_pixels(&c.geom))
+            .sum();
+        if open + crate::pattern::tile_pixels(&geom) > crate::pattern::MAX_NESTED_PIXELS {
+            return Err(PsError::Limitcheck);
+        }
+        self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
+        let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
+        let to_gs = crate::pattern::capture_to_gs(&spec, &geom, origin.to_gs);
+        let id = lazy.id;
+        let context = origin.context;
+        let svg = if self.svg.is_some() {
+            let rec = crate::svg::SvgRecorder::capture(cw, ch, format!("t{id}_"), spec.uncolored);
+            self.svg.replace(Box::new(rec))
+        } else {
+            None
+        };
+        let pdf = self
+            .pdf
+            .as_mut()
+            .map(|p| p.begin_capture(spec.uncolored, geom.capture, spec.bbox));
+        let uncolored = spec.uncolored;
+        let snapshot = self.glyph_enter();
+        let page = std::mem::replace(&mut self.pixmap, content);
+        let bbox = spec.bbox;
+        self.captures.push(crate::pattern::Capture {
+            id,
+            context,
+            spec,
+            geom,
+            page,
+            svg,
+            pdf,
+            pending_erase: std::mem::take(&mut self.pending_erase),
+            painted_since_page: std::mem::take(&mut self.painted_since_page),
+            dirty: self.dirty,
+            band: self.band.take(),
+            suppress_paint: std::mem::take(&mut self.suppress_paint),
+            coverage: self.coverage.take(),
+            snapshot,
+            to_gs,
+            origin,
+        });
+        // The state `makepattern` had, not this use's (gs). The device and
+        // the `clipsave` stack belong to the page being painted: a state
+        // of another device would resize the canvas under the capture at
+        // the first `grestore`.
+        if let Some(mut made) = lazy.run_state() {
+            made.device = self.state.device.clone();
+            made.clip_stack = Vec::new();
+            self.state = *made;
+        }
+        self.state.ctm = geom.capture;
+        self.state.path = PsPath::default();
+        self.state.clip = None;
+        self.state.null_device = false;
+        // An uncoloured cell is coverage only, so it paints in solid ink
+        // whatever colour space `makepattern` ran in: a pattern space
+        // inherited here would paint nothing (the null pattern, or a
+        // pattern of another context), as gs does not.
+        if uncolored {
+            self.set_colorspace(ColorSpace::Gray);
+            self.set_rgb(0.0, 0.0, 0.0);
+        }
+        let [x0, y0, x1, y1] = bbox;
+        self.moveto(x0, y0);
+        let clipped = self
+            .lineto(x1, y0)
+            .and_then(|()| self.lineto(x1, y1))
+            .and_then(|()| self.lineto(x0, y1))
+            .and_then(|()| {
+                self.closepath();
+                self.clip(FillRule::Winding)
+            });
+        self.newpath();
+        if let Err(e) = clipped {
+            self.abort_pattern();
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Put back what the innermost capture swapped out; its canvas, SVG
+    /// recorder and PDF state come back to the caller.
+    fn leave_capture(
+        &mut self,
+    ) -> (
+        crate::pattern::Capture,
+        Pixmap,
+        Option<Box<crate::svg::SvgRecorder>>,
+    ) {
+        let mut cap = self.captures.pop().expect("a pattern capture is open");
+        let content = std::mem::replace(
+            &mut self.pixmap,
+            std::mem::replace(&mut cap.page, Pixmap::new(1, 1).expect("1x1")),
+        );
+        let svg = match cap.svg.take() {
+            Some(page) => self.svg.replace(page),
+            None => None,
+        };
+        self.pending_erase = cap.pending_erase;
+        self.painted_since_page = cap.painted_since_page;
+        self.dirty = cap.dirty;
+        self.band = cap.band;
+        self.suppress_paint = cap.suppress_paint;
+        self.coverage = cap.coverage.take();
+        let (depth, state) =
+            std::mem::replace(&mut cap.snapshot, (0, Box::new(self.state.clone())));
+        self.restore_glyph_snapshot(depth, state);
+        (cap, content, svg)
+    }
+
+    /// The `PaintProc` returned: make the tile from what it painted.
+    pub(crate) fn end_pattern(
+        &mut self,
+    ) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
+        let (mut cap, content, svg) = self.leave_capture();
+        let svg = svg.map(|rec| rec.into_tile());
+        // PDF's pattern matrix maps to the default space of the stream that
+        // paints with it, here the one `makepattern` ran in.
+        let to_default = cap.origin.to_default;
+        let made_in_to_gs = cap.origin.to_gs;
+        let pdf = match (cap.pdf.take(), &mut self.pdf) {
+            (Some(saved), Some(rec)) => Some(rec.end_capture(
+                saved,
+                &cap.spec,
+                to_default.pre_concat(cap.geom.matrix),
+                cap.geom.capture.invert().unwrap_or_default(),
+            )),
+            _ => None,
+        };
+        let period = crate::pattern::fold(&content, &cap.geom).ok_or(PsError::Limitcheck)?;
+        let cell = match &cap.geom.lattice {
+            Some(lat) => {
+                Some(crate::pattern::orient_cell(&content, lat).ok_or(PsError::Limitcheck)?)
+            }
+            None => None,
+        };
+        Ok(std::rc::Rc::new(crate::pattern::PatternTile::new(
+            cap.id,
+            cap.context,
+            cap.spec,
+            cap.geom,
+            period,
+            cell,
+            svg,
+            pdf,
+            made_in_to_gs,
+        )))
+    }
+
+    /// `makepattern` of a shading pattern (#1298), made in the current
+    /// context: `matrix` maps pattern space to its device space. Its SVG
+    /// form when SVG is being recorded (a Type 1 shading's layer over the
+    /// canvas, painted now) and its PDF pattern when PDF is. Returns the
+    /// pattern and the work the SVG layer took, held against the step
+    /// limit before it was painted.
+    pub(crate) fn make_shading_pattern(
+        &mut self,
+        shading: crate::shading::ParsedShading,
+        background: Option<(f32, f32, f32)>,
+        matrix: Transform,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(std::rc::Rc<crate::pattern::ShadingPattern>, u64), PsError> {
+        use crate::shading::ParsedShading;
+        let singular = matrix.invert().is_none();
+        // The axial or radial shading as `shfill` records it, under this
+        // matrix: geometry, its own space to device, stops, Extend, rescale.
+        let gradient = match &shading {
+            ParsedShading::Gradient(g) => match vector_shading(g, matrix) {
+                VectorShading::Shading {
+                    kind,
+                    ctm,
+                    stops,
+                    extend,
+                    k,
+                } => Some((
+                    kind,
+                    Transform::from_row(ctm[0], ctm[1], ctm[2], ctm[3], ctm[4], ctm[5]),
+                    stops.into_owned(),
+                    extend,
+                    k,
+                )),
+                VectorShading::Nothing => None,
+            },
+            ParsedShading::Function(_) | ParsedShading::Mesh(_) => None,
+        };
+        // Where the raster paints no shading (an axis that collapses in
+        // f32, as in gs), neither do the vector forms.
+        let gradient = gradient.filter(|_| match &shading {
+            ParsedShading::Gradient(g) => gradient_parts(g, matrix, g.extend).is_some(),
+            ParsedShading::Function(_) | ParsedShading::Mesh(_) => true,
+        });
+        let bbox = match &shading {
+            ParsedShading::Gradient(g) => g.bbox,
+            ParsedShading::Function(f) => f.bbox,
+            ParsedShading::Mesh(m) => m.bbox,
+        };
+        // A mesh's data (#1378), decoded once under the limits, for its box
+        // here and its PDF stream; `mesh` counts the work, as for `shfill`.
+        let mut work = 0;
+        let mesh = match &shading {
+            ParsedShading::Mesh(m) if !singular && (self.svg.is_some() || self.pdf.is_some()) => {
+                Some(m.decode(probe)?)
+            }
+            _ => None,
+        };
+        let svg = if self.svg.is_some() && !singular {
+            // The layer over the shading's box, cut by the BBox's and the
+            // canvas, as `shfill` makes it: a Type 1 Domain's, or a mesh's.
+            let shape = match (&shading, &mesh) {
+                (ParsedShading::Function(f), _) => {
+                    let t = function_to_device(f.matrix, matrix);
+                    Some(corners_box(function_domain_quad(&t, f.domain)))
+                }
+                (ParsedShading::Mesh(_), Some(mesh)) => {
+                    let t = [
+                        matrix.sx, matrix.ky, matrix.kx, matrix.sy, matrix.tx, matrix.ty,
+                    ]
+                    .map(f64::from);
+                    Some(mesh.device_box(&t).unwrap_or([0.0; 4]))
+                }
+                _ => None,
+            };
+            let image = match shape {
+                Some(mut b) => {
+                    if let Some(q) = bbox.map(|q| bbox_quad(matrix, q)) {
+                        let qb = corners_box(q);
+                        b = [
+                            b[0].max(qb[0]),
+                            b[1].max(qb[1]),
+                            b[2].min(qb[2]),
+                            b[3].min(qb[3]),
+                        ];
+                    }
+                    let (pw, ph) = (
+                        f64::from(self.pixmap.width()),
+                        f64::from(self.pixmap.height()),
+                    );
+                    let (x0, y0) = (b[0].floor().max(0.0), b[1].floor().max(0.0));
+                    let (x1, y1) = (b[2].ceil().min(pw), b[3].ceil().min(ph));
+                    if x1 > x0 && y1 > y0 {
+                        let rect = (x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32);
+                        let (layer, w) = shading_layer(&shading, None, matrix, rect, probe)?;
+                        work += w;
+                        // An image embedded in an SVG, not a file pscat
+                        // writes: no resolution to record (as in `image.rs`).
+                        #[allow(clippy::disallowed_methods)]
+                        let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
+                        Some((png, rect.2, rect.3, rect.0, rect.1))
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            };
+            Some(crate::pattern::SvgShading {
+                gradient: gradient
+                    .as_ref()
+                    .map(|(kind, ctm, stops, extend, _)| (*kind, *ctm, stops.clone(), *extend)),
+                image,
+                bbox: bbox.map(|q| bbox_quad(matrix, q).map(|(x, y)| (x as f32, y as f32))),
+                background,
+            })
+        } else {
+            None
+        };
+        let pdf_ctm = gradient.as_ref().map_or(matrix, |g| g.1);
+        let to_default = self.pattern_default_space();
+        let pdf_matrix = to_default.pre_concat(pdf_ctm);
+        let pdf = match &mut self.pdf {
+            Some(rec) if !singular => {
+                let k = gradient.as_ref().map_or(1.0, |g| f64::from(g.4));
+                rec.shading_pattern(
+                    &shading,
+                    gradient
+                        .as_ref()
+                        .map(|(kind, _, stops, extend, _)| (kind, stops.as_slice(), *extend)),
+                    bbox.map(|(a, b, c, d)| (a * k, b * k, c * k, d * k)),
+                    background,
+                    pdf_matrix,
+                    mesh.as_ref(),
+                )
+            }
+            _ => None,
+        };
+        let sp = crate::pattern::ShadingPattern {
+            context: self.context(),
+            shading,
+            background,
+            matrix,
+            to_gs: self
+                .captures
+                .last()
+                .map_or(Transform::identity(), |c| c.to_gs),
+            svg,
+            pdf,
+            pdf_ctm,
+            pdf_matrix,
+        };
+        Ok((std::rc::Rc::new(sp), work))
+    }
+
+    /// The `PaintProc` was unwound (an error, `stop`): drop the tile.
+    pub(crate) fn abort_pattern(&mut self) {
+        let (mut cap, _, _) = self.leave_capture();
+        if let (Some(saved), Some(rec)) = (cap.pdf.take(), &mut self.pdf) {
+            rec.abort_capture(saved);
+        }
+    }
+
+    /// Whether an uncoloured pattern's tile is being captured: its
+    /// `PaintProc` paints only coverage, so shadings (which PDF forbids
+    /// there) are dropped.
+    fn capturing_uncolored(&self) -> bool {
+        self.captures.last().is_some_and(|c| c.spec.uncolored)
+    }
+
+    /// The page canvas, even while a pattern's tile is being captured
+    /// into `pixmap` (#1038): what a live view should show.
+    pub fn page_pixmap(&self) -> &Pixmap {
+        self.captures.first().map_or(&self.pixmap, |c| &c.page)
     }
 
     /// True while marking operators must leave page and recorders alone:
@@ -4598,6 +5619,12 @@ impl Gfx {
             ColorSpace::Cmyk => (false, true),
             ColorSpace::Indexed { table, .. } => (table.base_ncomp == 1, true),
             ColorSpace::Separation { alt_ncomp, .. } => (*alt_ncomp == 1, true),
+            // An uncoloured pattern's components in its base space.
+            ColorSpace::Pattern { base, .. } => match base.as_deref() {
+                Some(ColorSpace::Cmyk) => (false, true),
+                Some(ColorSpace::Rgb) => (false, false),
+                _ => (true, false),
+            },
         };
         match self.state.cmyk {
             Some(c) if native_ok => c.map(f64::from),
@@ -4617,6 +5644,179 @@ fn clamp01(v: f64) -> f32 {
 
 fn to_u8(v: f32) -> u8 {
     (v * 255.0).round() as u8
+}
+
+/// The raster's shader for the gradient `shading` under `ctm` (pattern or
+/// user space to device), each end extending as `extend` says (#1040), as
+/// `shfill` and a shading pattern (#1298) paint it: the shader, the
+/// gradient of the smaller root for a radial whose circles are not nested
+/// (`two_root_layer`), and the number of stops. `None` when it paints
+/// nothing (an axis that collapses in f32, a degenerate radial gs leaves
+/// empty, or geometry tiny-skia has no shader for).
+fn gradient_parts(
+    shading: &crate::shading::Shading,
+    ctm: Transform,
+    extend: [bool; 2],
+) -> Option<(
+    tiny_skia::Shader<'static>,
+    Option<tiny_skia::Shader<'static>>,
+    usize,
+)> {
+    // The raster's ramp with each end that does not extend closed by a
+    // transparent stop at the same position (#1040). The stops always
+    // run from 0 to 1, and with a zero-width step tiny-skia's gradient
+    // takes the general (unclamped) stage: below 0 its first stop, from
+    // 1 on its last, so past that end nothing is painted. Added after
+    // `raster_stops`, whose resampling would blur the step.
+    let ramp = extend_ramp(&shading.raster_stops(), extend);
+    let nstops = ramp.len();
+    // Coincident axial endpoints (Coords [x y x y]) are a no-op in
+    // gs — nothing painted, even with Extend true. tiny-skia
+    // 0.12's LinearGradient::new in Pad mode does *not* return
+    // None for this, though: re-reading its source (a Codex
+    // review's prompt to actually check, not the earlier read of
+    // its doc comment that this file's design already rested on)
+    // shows the degenerate-length branch returns
+    // Some(SolidColor(last stop)) for Pad specifically — so
+    // without this check the whole clip would have silently
+    // filled with C1 instead of staying untouched. Checked before
+    // construction rather than relying on the return value.
+    //
+    // Exact equality, not a small-but-nonzero epsilon: an earlier
+    // draft used `< 1e-6` in *user* space, but that's scale-blind
+    // — under a large CTM (`1e8 1e8 scale`), two Coords 1e-7 apart
+    // (well under the threshold) still span 10 device units, a
+    // visible near-hard transition this would have wrongly
+    // skipped (a Codex review caught this). The one case actually
+    // confirmed against gs is literal coincidence, which exact
+    // equality catches precisely and is scale-invariant by
+    // construction (equal points stay equal under any linear
+    // transform); anything short of that renders as an ordinary,
+    // if very sharp, gradient — exactly what gs would do too.
+    //
+    // Coincidence is decided on the f32 Coords tiny-skia is given
+    // (#1041): `[250 0 250.000001 0]` is one point there, and gs 10.07.1
+    // paints nothing for it, or for `[1000 0 1000.00001 0]`, under every
+    // `/Extend`. pscat used to paint tiny-skia's solid last stop (and the
+    // PDF recorded it, #1028), which only gs's picture of the f64-equal
+    // case ruled out. `[0 0 1e-7 0]` stays a gradient: distinct in f32.
+    if let crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } = shading.kind
+        && x0 as f32 == x1 as f32
+        && y0 as f32 == y1 as f32
+    {
+        return None;
+    }
+    // A safety margin comfortably above tiny-skia's own internal
+    // degenerate-length threshold (DEGENERATE_THRESHOLD =
+    // 1/32768 ≈ 3e-5, checked against these *raw*, untransformed
+    // points): if this shape's own characteristic length (axis
+    // length for axial; the larger of the two radii or the
+    // center-to-center distance for radial) is under `SAFE_LEN` in
+    // raw user-space units, rescale the geometry *and* the
+    // transform together so tiny-skia never sees a spuriously
+    // short length — a pure reparametrization (the composed
+    // mapping stays mathematically identical: `ctm.pre_scale(1/k,
+    // 1/k)` undoes the `*k` on the points exactly), not an
+    // approximation. Needed because raw user-space coordinates can
+    // be any scale — found content sometimes authors geometry in
+    // tiny units under a matching large CTM magnification — and
+    // tiny-skia's fixed threshold has no way to know a "short" raw
+    // length still spans real device pixels once the CTM is
+    // applied. Confirmed concretely by a Codex review with
+    // `/Coords [0 0 1e-7 0]` under `1e8 1e8 scale` (a visible
+    // 10-device-pixel gradient, wrongly flattened to solid C1
+    // without this).
+    const SAFE_LEN: f32 = SHFILL_SAFE_LEN;
+    // The gradient of the smaller root, for a radial whose larger root
+    // can fall past an end that does not extend (`two_root_layer`).
+    let mut smaller_root = None;
+    let shader = match shading.kind {
+        crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
+            let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+            let len = fmath::hypotf(x1 - x0, y1 - y0);
+            let k = if len > 0.0 && len < SAFE_LEN {
+                SAFE_LEN / len
+            } else {
+                1.0
+            };
+            LinearGradient::new(
+                Point::from_xy(x0 * k, y0 * k),
+                Point::from_xy(x1 * k, y1 * k),
+                gradient_stops(&ramp),
+                SpreadMode::Pad,
+                ctm.pre_scale(1.0 / k, 1.0 / k),
+            )
+        }
+        crate::shading::ShadingKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => {
+            let (x0, y0, r0, x1, y1, r1) = (
+                x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
+            );
+            let char_len = r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0));
+            let k = if char_len > 0.0 && char_len < SAFE_LEN {
+                SAFE_LEN / char_len
+            } else {
+                1.0
+            };
+            let (p0, p1) = (
+                Point::from_xy(x0 * k, y0 * k),
+                Point::from_xy(x1 * k, y1 * k),
+            );
+            let (r0, r1) = (r0 * k, r1 * k);
+            let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+            let dist = fmath::hypotf(p1.x - p0.x, p1.y - p0.y);
+            let stops = if degenerate_radial(dist, r0, r1) {
+                // tiny-skia paints the first stop inside the circle and
+                // the last outside; give it gs's picture (#1040).
+                let c = degenerate_radial_inside(shading)?;
+                vec![
+                    GradientStop::new(0.0, c),
+                    GradientStop::new(1.0, Color::TRANSPARENT),
+                ]
+            } else {
+                // Circles neither inside the other (a cone): a point can
+                // lie on two of them, and gs paints the larger t that
+                // is in range. tiny-skia finds only the larger root, so
+                // where that one is past an end that does not extend,
+                // the smaller one is painted from a second gradient,
+                // the same circles run backwards.
+                if !extend[1] && dist > (r1 - r0).abs() {
+                    let reversed: Vec<(f32, Color)> =
+                        ramp.iter().rev().map(|&(t, c)| (1.0 - t, c)).collect();
+                    smaller_root = RadialGradient::new(
+                        p1,
+                        r1,
+                        p0,
+                        r0,
+                        gradient_stops(&reversed),
+                        SpreadMode::Pad,
+                        m,
+                    );
+                }
+                gradient_stops(&ramp)
+            };
+            RadialGradient::new(p0, r0, p1, r1, stops, SpreadMode::Pad, m)
+        }
+    };
+    // Degenerate geometry that genuinely has no shader (e.g. both
+    // radii ~0) — tiny-skia returns None; treat as a no-op rather
+    // than an error, consistent with how other geometric
+    // degeneracies in this file (e.g. a singular CTM at
+    // device_to_user) fail soft rather than raising. A coincident-
+    // center, equal-*positive*-radius radial does *not* fall here:
+    // tiny-skia paints it as its first stop inside the circle and its
+    // last outside, and the stops handed to it above make that gs's
+    // disk (`degenerate_radial_inside`, #1040).
+    // Unlike `fill`/`stroke`, `shfill` never touches the current
+    // path — it paints the clip region, per the PLRM — so both the
+    // degenerate no-op below and the normal case leave it alone.
+    Some((shader?, smaller_root, nstops))
 }
 
 /// A shading's raster ramp as tiny-skia colours, with a transparent stop
@@ -4727,8 +5927,424 @@ fn two_root_layer(
     Ok(layer)
 }
 
+/// The convex polygon `poly` clipped to the rectangle `(x0, y0, x1, y1)`
+/// (Sutherland-Hodgman, one edge at a time).
+pub(crate) fn clip_polygon(
+    poly: &[(f64, f64)],
+    (x0, y0, x1, y1): (f64, f64, f64, f64),
+) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = poly.to_vec();
+    // (axis, bound, keep the side >= bound?)
+    for (axis, bound, above) in [(0, x0, true), (0, x1, false), (1, y0, true), (1, y1, false)] {
+        let input = std::mem::take(&mut out);
+        let coord = |p: (f64, f64)| if axis == 0 { p.0 } else { p.1 };
+        let inside = |p: (f64, f64)| {
+            if above {
+                coord(p) >= bound
+            } else {
+                coord(p) <= bound
+            }
+        };
+        for (i, &cur) in input.iter().enumerate() {
+            let prev = input[(i + input.len() - 1) % input.len()];
+            if inside(cur) != inside(prev) {
+                let t = (bound - coord(prev)) / (coord(cur) - coord(prev));
+                out.push((prev.0 + t * (cur.0 - prev.0), prev.1 + t * (cur.1 - prev.1)));
+            }
+            if inside(cur) {
+                out.push(cur);
+            }
+        }
+    }
+    out
+}
+
+/// The convex polygon `q` as a path, for a `w` x `h` layer's mask. It is
+/// clipped to the layer (a pixel of margin) in f64 first: tiny-skia's
+/// anti-aliased fill panics or drops a path whose corners lie around 1e9
+/// device pixels away, which a crafted Matrix, Domain or BBox reaches (gs
+/// paints those). The clipped polygon covers the same pixels.
+fn quad_path(q: &[(f64, f64)], w: usize, h: usize) -> Option<tiny_skia::Path> {
+    let q = clip_polygon(q, (-1.0, -1.0, w as f64 + 1.0, h as f64 + 1.0));
+    if q.len() < 3 {
+        return None;
+    }
+    let mut pb = tiny_skia::PathBuilder::new();
+    pb.move_to(q[0].0 as f32, q[0].1 as f32);
+    for &(x, y) in &q[1..] {
+        pb.line_to(x as f32, y as f32);
+    }
+    pb.close();
+    pb.finish()
+}
+
+/// A Type 1 shading's space to device space (#1039): its `/Matrix`, then
+/// `ctm`, as `[a b c d tx ty]` in f64.
+fn function_to_device(m: [f64; 6], ctm: Transform) -> [f64; 6] {
+    let c = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+    [
+        m[0] * c[0] + m[1] * c[2],
+        m[0] * c[1] + m[1] * c[3],
+        m[2] * c[0] + m[3] * c[2],
+        m[2] * c[1] + m[3] * c[3],
+        m[4] * c[0] + m[5] * c[2] + c[4],
+        m[4] * c[1] + m[5] * c[3] + c[5],
+    ]
+}
+
+/// `t`'s inverse linear part and whether `t` is usable: finite with a
+/// nonzero determinant.
+fn function_inverse(t: &[f64; 6]) -> Option<[f64; 4]> {
+    let det = t[0] * t[3] - t[1] * t[2];
+    let fine = det != 0.0 && det.is_finite() && t.iter().all(|v| v.is_finite());
+    fine.then(|| [t[3] / det, -t[1] / det, -t[2] / det, t[0] / det])
+}
+
+/// The four corners of the Domain `[x0 x1 y0 y1]` under `t`.
+fn function_domain_quad(t: &[f64; 6], [x0, x1, y0, y1]: [f64; 4]) -> [(f64, f64); 4] {
+    let map = |x: f64, y: f64| (t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]);
+    [map(x0, y0), map(x1, y0), map(x1, y1), map(x0, y1)]
+}
+
+/// The `/BBox` `(llx, lly, urx, ury)` corners under `t` (pattern or user
+/// space to device), in f64.
+fn bbox_quad(t: Transform, (llx, lly, urx, ury): (f64, f64, f64, f64)) -> [(f64, f64); 4] {
+    let [a, b, c, d, e, f] = [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f64::from);
+    let map = |x: f64, y: f64| (a * x + c * y + e, b * x + d * y + f);
+    [map(llx, lly), map(urx, lly), map(urx, ury), map(llx, ury)]
+}
+
+/// A shading pattern's raster (#1298): `shading` painted in pattern space,
+/// which `matrix` maps to the device, into a transparent `w` x `h` layer
+/// whose top-left is device pixel `(x0, y0)`. `background` is painted
+/// first and the shading over it, both inside the `/BBox`; the ends extend
+/// as `/Extend` says. The shading is what `shfill` paints with the CTM at
+/// `matrix` and no clip, from the same pieces (`gradient_parts`,
+/// `two_root_layer`, `function_layer`). A matrix that is not invertible
+/// paints nothing. Returns the layer and its work, in `shfill`'s units,
+/// held against the step limit before anything is painted.
+pub(crate) fn shading_layer(
+    shading: &crate::shading::ParsedShading,
+    background: Option<(f32, f32, f32)>,
+    matrix: Transform,
+    (x0, y0, w, h): (i32, i32, u32, u32),
+    probe: &crate::limits::LimitProbe,
+) -> Result<(Pixmap, u64), PsError> {
+    use crate::shading::ParsedShading;
+    let (wu, hu) = (w as usize, h as usize);
+    // The layer itself, whatever paints into it: allocated, the background
+    // and the BBox mask painted over every pixel, then the mark composites
+    // it. Charged on every path, a shading that paints nothing included,
+    // and held against the step limit before anything is done (Codex round
+    // 2 on PR #1367: a background-only layer ran uncharged).
+    let base = shfill_work(wu, hu, 2);
+    probe.check(base / 1024)?;
+    // The layer, the BBox mask, and a two-root or Type 1 layer over it.
+    probe.check_alloc(wu.saturating_mul(hu).saturating_mul(9))?;
+    let mut layer = Pixmap::new(w, h).ok_or(PsError::Limitcheck)?;
+    if matrix.invert().is_none() {
+        return Ok((layer, base));
+    }
+    // Pattern space to the layer's pixels.
+    let ctm = Transform::from_translate(-(x0 as f32), -(y0 as f32)).pre_concat(matrix);
+    let bbox = match shading {
+        ParsedShading::Gradient(g) => g.bbox,
+        ParsedShading::Function(f) => f.bbox,
+        ParsedShading::Mesh(m) => m.bbox,
+    }
+    .map(|b| bbox_quad(ctm, b));
+    let mask = match &bbox {
+        Some(q) => {
+            let mut m = tiny_skia::Mask::new(w, h).ok_or(PsError::Limitcheck)?;
+            if let Some(p) = quad_path(q, wu, hu) {
+                m.fill_path(&p, FillRule::Winding, true, Transform::identity());
+            }
+            Some(m)
+        }
+        None => None,
+    };
+    let whole = tiny_skia::Rect::from_xywh(0.0, 0.0, w as f32, h as f32);
+    if let (Some((r, g, b)), Some(rect)) = (background, whole) {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(to_u8(r), to_u8(g), to_u8(b), 255);
+        layer.fill_rect(rect, &paint, Transform::identity(), mask.as_ref());
+    }
+    let work = match shading {
+        ParsedShading::Gradient(g) => {
+            let Some((shader, smaller, nstops)) = gradient_parts(g, ctm, g.extend) else {
+                return Ok((layer, base));
+            };
+            let passes = if smaller.is_some() { 3 } else { 1 };
+            let work = shfill_work(wu, hu, nstops)
+                .saturating_mul(passes)
+                .saturating_add(base);
+            probe.check(work / 1024)?;
+            match smaller {
+                Some(smaller) => {
+                    let top = two_root_layer(smaller, shader, wu, hu, nstops, probe)?;
+                    layer.draw_pixmap(
+                        0,
+                        0,
+                        top.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+                None => {
+                    let paint = Paint {
+                        shader,
+                        force_hq_pipeline: true,
+                        ..Default::default()
+                    };
+                    let rows = if *probe == crate::limits::LimitProbe::NONE {
+                        hu
+                    } else {
+                        shfill_strip_rows(wu, nstops)
+                    };
+                    let mut y = 0;
+                    while y < hu {
+                        let y1 = (y + rows).min(hu);
+                        probe.check(0)?;
+                        if let Some(strip) =
+                            tiny_skia::Rect::from_ltrb(0.0, y as f32, w as f32, y1 as f32)
+                        {
+                            layer.fill_rect(strip, &paint, Transform::identity(), mask.as_ref());
+                        }
+                        y = y1;
+                    }
+                }
+            }
+            work
+        }
+        ParsedShading::Function(f) => {
+            let t = function_to_device(f.matrix, ctm);
+            let [dx0, dx1, dy0, dy1] = f.domain;
+            let Some(inv) = function_inverse(&t).filter(|_| dx0 != dx1 && dy0 != dy1) else {
+                return Ok((layer, base));
+            };
+            let work = shfill_work(wu, hu, 64)
+                .saturating_add(shfill_work(wu, hu, 2))
+                .saturating_add(base);
+            probe.check(work / 1024)?;
+            let to_shading = |dx: f64, dy: f64| {
+                let (u, v) = (dx - t[4], dy - t[5]);
+                (inv[0] * u + inv[2] * v, inv[1] * u + inv[3] * v)
+            };
+            let domain = function_domain_quad(&t, f.domain);
+            let top = function_layer(
+                f,
+                (0.0, 0.0, wu, hu),
+                to_shading,
+                domain.to_vec(),
+                bbox.map(|q| q.to_vec()),
+                probe,
+            )?;
+            layer.draw_pixmap(
+                0,
+                0,
+                top.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+            work
+        }
+        ParsedShading::Mesh(m) => {
+            // A mesh pattern (#1378): decoded and painted as `shfill` paints
+            // it, its work (each triangle and its box) and its coverage
+            // buffers held against the limits before it is painted.
+            // The decoding and the painting are counted by `mesh` as they
+            // are done, and charged whatever happens.
+            let mesh = m.decode(probe)?;
+            let t = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+            let before = shfill_work(wu, hu, 2).saturating_add(base);
+            crate::mesh::check(probe, before)?;
+            probe.check_alloc(wu.saturating_mul(hu).saturating_mul(8))?;
+            let top = crate::mesh::mesh_layer(
+                m,
+                &mesh,
+                &t,
+                (0.0, 0.0, wu, hu),
+                bbox.as_ref().map(|q| &q[..]),
+                before,
+                probe,
+            )?;
+            let work = before;
+            layer.draw_pixmap(
+                0,
+                0,
+                top.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+            work
+        }
+    };
+    Ok((layer, work))
+}
+
+/// A Type 1 shading's layer (#1039): `w` x `h` device pixels from
+/// `(x0, y0)`, each the function's colour at its centre (`to_shading` maps
+/// a device point into shading space), multiplied by the coverage of the
+/// Domain parallelogram `domain` and of the `/BBox` one, both given in the
+/// layer's own pixels. Premultiplied, so outside them it is transparent.
+fn function_layer(
+    shading: &crate::shading::FunctionShading,
+    (x0, y0, w, h): (f64, f64, usize, usize),
+    to_shading: impl Fn(f64, f64) -> (f64, f64),
+    domain: Vec<(f64, f64)>,
+    bbox: Option<Vec<(f64, f64)>>,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Pixmap, PsError> {
+    let mut layer = Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    let mut cover = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+    let quad = |q: &[(f64, f64)]| quad_path(q, w, h);
+    if let Some(p) = quad(&domain) {
+        cover.fill_path(&p, FillRule::Winding, true, Transform::identity());
+    }
+    if let Some(q) = bbox {
+        let mut cut = tiny_skia::Mask::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+        if let Some(p) = quad(&q) {
+            cut.fill_path(&p, FillRule::Winding, true, Transform::identity());
+        }
+        for (c, k) in cover.data_mut().iter_mut().zip(cut.data()) {
+            *c = ((u16::from(*c) * u16::from(*k)) / 255) as u8;
+        }
+    }
+    let rows = shfill_strip_rows(w, 64);
+    let cov = cover.data();
+    let px = layer.data_mut();
+    for y in 0..h {
+        if y % rows == 0 {
+            probe.check(0)?;
+        }
+        let dy = y0 + y as f64 + 0.5;
+        for x in 0..w {
+            let k = y * w + x;
+            let a = cov[k];
+            if a == 0 {
+                continue;
+            }
+            let (u, v) = to_shading(x0 + x as f64 + 0.5, dy);
+            let (r, g, b) = shading.rgb_at(u, v);
+            let pm = |c: f32| ((u16::from(to_u8(c)) * u16::from(a) + 127) / 255) as u8;
+            px[k * 4..k * 4 + 4].copy_from_slice(&[pm(r), pm(g), pm(b), a]);
+        }
+    }
+    Ok(layer)
+}
+
+/// The characteristic length under which `shfill` rescales a shading's
+/// geometry before tiny-skia sees it (`Gfx::shfill_limited`).
+const SHFILL_SAFE_LEN: f32 = 1.0;
+
+/// What the SVG and PDF recorders write for one `shfill`
+/// (`vector_shading`).
+enum VectorShading<'a> {
+    /// Nothing painted.
+    Nothing,
+    /// A real gradient: geometry under `SHFILL_SAFE_LEN` rescaled, with the
+    /// inverse folded into `ctm`.
+    Shading {
+        kind: crate::svg::ShKind,
+        ctm: [f32; 6],
+        stops: std::borrow::Cow<'a, [(f32, f32, f32, f32)]>,
+        extend: [bool; 2],
+        /// The rescale: `kind` is the shading's geometry times this.
+        k: f32,
+    },
+}
+
+/// The shading as the vector recorders write it, so a reader paints what
+/// the raster painted (#1028 for PDF, #1041 for SVG).
+///
+/// Geometry whose characteristic length is under `SHFILL_SAFE_LEN` is
+/// rescaled, with the inverse folded into the transform, exactly as for the
+/// raster: the composed map is unchanged, and the numbers stay in a range
+/// every reader holds precisely. resvg, for one, has tiny-skia's 2^-15
+/// tolerance, and would flatten `/Coords [0 0 1e-7 0]` under `1e8 scale`.
+/// The same k as the raster's (same f32 arithmetic), so the degenerate
+/// tests below see the numbers tiny-skia saw.
+///
+/// Two (nearly) coincident circles of (nearly) one radius are tiny-skia's
+/// degenerate case, and the raster paints gs's picture of it (#1040): a
+/// disk of one colour, or nothing. Readers paint those circles otherwise
+/// (CoreGraphics nothing, an SVG renderer the last colour everywhere), so
+/// the disk is recorded: a radial from the centre out to the radius, one
+/// colour, extending neither end (Codex reviews of #1028).
+///
+/// An axis that collapses in f32 never gets here: like gs, the raster
+/// paints nothing for it (#1041).
+fn vector_shading(shading: &crate::shading::Shading, ctm: Transform) -> VectorShading<'_> {
+    use crate::shading::ShadingKind as K;
+    let char_len = match shading.kind {
+        K::Axial { x0, y0, x1, y1 } => {
+            let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+            fmath::hypotf(x1 - x0, y1 - y0)
+        }
+        K::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => {
+            let (x0, y0, r0, x1, y1, r1) = (
+                x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
+            );
+            r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0))
+        }
+    };
+    let k = if char_len > 0.0 && char_len < SHFILL_SAFE_LEN {
+        SHFILL_SAFE_LEN / char_len
+    } else {
+        1.0
+    };
+    let m = ctm.pre_scale(1.0 / k, 1.0 / k);
+    let ctm = [m.sx, m.ky, m.kx, m.sy, m.tx, m.ty];
+    match sh_kind(shading.kind, k) {
+        crate::svg::ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } if degenerate_radial(fmath::hypotf(x1 - x0, y1 - y0), r0, r1) => {
+            let Some(c) = degenerate_radial_inside(shading) else {
+                return VectorShading::Nothing;
+            };
+            let (r, g, b) = (c.red(), c.green(), c.blue());
+            VectorShading::Shading {
+                kind: crate::svg::ShKind::Radial {
+                    x0,
+                    y0,
+                    r0: 0.0,
+                    x1: x0,
+                    y1: y0,
+                    r1,
+                },
+                ctm,
+                stops: std::borrow::Cow::Owned(vec![(0.0, r, g, b), (1.0, r, g, b)]),
+                extend: [false, false],
+                k,
+            }
+        }
+        kind => VectorShading::Shading {
+            kind,
+            ctm,
+            stops: std::borrow::Cow::Borrowed(&shading.stops),
+            extend: shading.extend,
+            k,
+        },
+    }
+}
+
 /// `shfill` geometry for the vector recorders, its lengths multiplied by
-/// `k` (1 for SVG; the SAFE_LEN rescale for PDF, `Gfx::shfill`).
+/// `k` (the SAFE_LEN rescale, `vector_shading`).
 fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
     use crate::shading::ShadingKind as K;
     match kind {
@@ -4977,55 +6593,134 @@ mod tests {
         );
     }
 
-    /// Issue #731 part 1: stacked faint `setalpha` fills must lose no more
-    /// than 8-bit storage forces. The reference is that 8-bit model: alpha
-    /// quantised to 1/255 (the byte tiny-skia receives) and each blend
-    /// rounded once to the nearest level. tiny-skia's lowp pipeline rounded
-    /// worse (`div255` as `(v+255)>>8`): white at 0.01 x 200 stalled at 192
-    /// where the model reaches 213. A second column composites through the
-    /// coverage mask (a half-covered pixel column), the path every
-    /// anti-aliased edge and glyph takes since #692.
+    /// White over black, `layers` fills of a 4x2 canvas at `alpha`: columns
+    /// 0-1 fully covered, column 2 half covered.
+    fn stack_white(gfx: &mut Gfx, alpha: f32, layers: u32) {
+        stack_rect(gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = alpha;
+        for _ in 0..layers {
+            stack_rect(gfx, 2.5);
+        }
+    }
+
+    fn stack_rect(gfx: &mut Gfx, w: f64) {
+        gfx.newpath();
+        gfx.moveto(0.0, 0.0);
+        gfx.lineto(w, 0.0).expect("lineto");
+        gfx.lineto(w, 2.0).expect("lineto");
+        gfx.lineto(0.0, 2.0).expect("lineto");
+        gfx.closepath();
+        gfx.fill(FillRule::Winding);
+    }
+
+    /// `255 (1 - (1 - a c)^n)`: what `layers` blends of white at `alpha`
+    /// and coverage `c` over black come to with no rounding.
+    fn float_stack(alpha: f32, coverage: f32, layers: u32) -> u8 {
+        let a = f64::from(alpha * coverage);
+        (255.0 * (1.0 - (1.0 - a).powi(layers as i32))).round() as u8
+    }
+
+    /// Issue #731: stacked faint `setalpha` fills reach the colour the
+    /// arithmetic gives. The issue's rows: on the 8-bit page alone 0.002 x
+    /// 1000 stalled at 128 and 0.01 x 200 at 213; the 16-bit shadow
+    /// (`crate::deep`) brings them to 221. The half-covered column goes
+    /// through the coverage mask, the path every anti-aliased edge and glyph
+    /// takes since #692.
     #[test]
-    fn stacked_low_alpha_matches_the_8bit_model() {
-        let model = |alpha: f32, coverage: f32, layers: u32| -> u8 {
-            let a = f32::from(to_u8(alpha)) / 255.0 * coverage;
-            let mut v = 0.0_f32;
-            for _ in 0..layers {
-                v = (v + (255.0 - v) * a).round();
-            }
-            v as u8
-        };
-        let rect = |gfx: &mut Gfx, w: f64| {
-            gfx.newpath();
-            gfx.moveto(0.0, 0.0);
-            gfx.lineto(w, 0.0).expect("lineto");
-            gfx.lineto(w, 2.0).expect("lineto");
-            gfx.lineto(0.0, 2.0).expect("lineto");
-            gfx.closepath();
-            gfx.fill(FillRule::Winding);
-        };
+    fn stacked_low_alpha_reaches_the_float_value() {
         for (alpha, layers) in [(0.01_f32, 200_u32), (0.05, 40), (0.002, 1000)] {
             let mut gfx = Gfx::new(4, 2).expect("pixmap");
             gfx.set_rgb(0.0, 0.0, 0.0);
-            rect(&mut gfx, 4.0);
-            gfx.set_rgb(1.0, 1.0, 1.0);
-            gfx.state_mut().alpha = alpha;
-            for _ in 0..layers {
-                // Columns 0-1 fully covered, column 2 half covered.
-                rect(&mut gfx, 2.5);
-            }
+            stack_white(&mut gfx, alpha, layers);
             let full = gfx.pixmap.pixel(0, 0).expect("pixel").red();
             let half = gfx.pixmap.pixel(2, 0).expect("pixel").red();
-            let (want_full, want_half) = (model(alpha, 1.0, layers), model(alpha, 0.5, layers));
+            let (want_full, want_half) = (
+                float_stack(alpha, 1.0, layers),
+                float_stack(alpha, 0.5, layers),
+            );
             assert!(
                 full.abs_diff(want_full) <= 1,
-                "alpha {alpha} x {layers}, full coverage: {full}, 8-bit model {want_full}"
+                "alpha {alpha} x {layers}, full coverage: {full}, float {want_full}"
             );
             assert!(
                 half.abs_diff(want_half) <= 2,
-                "alpha {alpha} x {layers}, half coverage: {half}, 8-bit model {want_half}"
+                "alpha {alpha} x {layers}, half coverage: {half}, float {want_half}"
             );
         }
+    }
+
+    /// An opaque shape thinner than a pixel composites by its coverage, so a
+    /// stack of them climbs like a stack of faint fills: 200 rectangles
+    /// 0.01 px wide reach the float value too.
+    #[test]
+    fn stacked_sub_pixel_shapes_reach_the_float_value() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 0.05);
+        }
+        let got = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        // Coverage 0.05 is the byte 13 (0.051) in the mask.
+        let want = float_stack(13.0 / 255.0, 1.0, 200);
+        assert!(
+            got.abs_diff(want) <= 1,
+            "sub-pixel stack: {got}, float {want}"
+        );
+    }
+
+    /// A NaN alpha (`setalpha` keeps it; PostScript can make one) paints
+    /// nothing, as its alpha byte of 0 did before the 16-bit shadow, rather
+    /// than a NaN blend cutting a transparent hole.
+    #[test]
+    fn a_nan_alpha_paints_nothing() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(1.0, 0.0, 0.0);
+        stack_rect(&mut gfx, 4.0);
+        gfx.set_rgb(0.0, 0.0, 1.0);
+        gfx.state_mut().alpha = f32::NAN;
+        stack_rect(&mut gfx, 2.5);
+        for x in 0..4 {
+            let p = gfx.pixmap.pixel(x, 0).expect("pixel");
+            assert_eq!((p.red(), p.blue(), p.alpha()), (255, 0, 255), "pixel {x}");
+        }
+    }
+
+    /// The shadow follows the page: a stroke (which writes the 8-bit page
+    /// only) and a new page each start the stack again from what the page
+    /// shows, not from the shadow's old value.
+    #[test]
+    fn the_shadow_follows_strokes_and_new_pages() {
+        let mut gfx = Gfx::new(4, 2).expect("pixmap");
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        stack_white(&mut gfx, 0.002, 1000);
+        // A black opaque stroke over the stack.
+        gfx.state_mut().alpha = 1.0;
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().line_width = 10.0;
+        gfx.newpath();
+        gfx.moveto(-5.0, 1.0);
+        gfx.lineto(10.0, 1.0).expect("lineto");
+        gfx.stroke();
+        assert_eq!(gfx.pixmap.pixel(0, 0).expect("pixel").red(), 0);
+        gfx.set_rgb(1.0, 1.0, 1.0);
+        gfx.state_mut().alpha = 0.002;
+        for _ in 0..1000 {
+            stack_rect(&mut gfx, 2.5);
+        }
+        let again = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(again.abs_diff(221) <= 1, "after the stroke: {again}");
+        // Page 2 starts white and stacks black from there.
+        gfx.showpage();
+        gfx.set_rgb(0.0, 0.0, 0.0);
+        gfx.state_mut().alpha = 0.01;
+        for _ in 0..200 {
+            stack_rect(&mut gfx, 4.0);
+        }
+        let page2 = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+        assert!(page2.abs_diff(255 - 221) <= 1, "page 2: {page2}");
     }
 
     #[test]

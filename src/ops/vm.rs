@@ -15,6 +15,7 @@
 use crate::error::PsError;
 use crate::interp::Interp;
 use crate::object::{Dict, Object, Value};
+use std::rc::Rc;
 
 /// The VM allocation mode and what `save` recorded of it (issue #1146).
 ///
@@ -43,6 +44,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "vmstatus", vmstatus);
     op(dict, "currentglobal", currentglobal);
     op(dict, "setglobal", setglobal);
+    op(dict, "gcheck", gcheck);
 }
 
 fn save(it: &mut Interp) -> Result<(), PsError> {
@@ -88,6 +90,27 @@ fn setglobal(it: &mut Interp) -> Result<(), PsError> {
         _ => return Err(PsError::Typecheck),
     };
     it.vm_mode.global = flag;
+    Ok(())
+}
+
+/// `any gcheck bool`: is the object in global VM, or simple (always true).
+///
+/// pscat has one VM, so a composite is not allocated anywhere in particular
+/// and `setglobal` does not change that. The model: the composites that
+/// stand in for global VM are `globaldict` and `systemdict` (true), every
+/// other string, array, dictionary and gstate is local (false), whatever
+/// `currentglobal` said when it was made. Ghostscript would answer `true`
+/// for one made while the mode was global; that is the one place this
+/// differs (`tests/gcheck_globaldict.rs`). Simple objects, names, operators,
+/// files and `save` objects are `true`, as in gs.
+fn gcheck(it: &mut Interp) -> Result<(), PsError> {
+    let o = it.pop()?;
+    let global = match &o.value {
+        Value::String(_) | Value::Array(_) | Value::GState(_) => false,
+        Value::Dict(d) => Rc::ptr_eq(d, &it.globaldict) || Rc::ptr_eq(d, &it.systemdict()),
+        _ => true,
+    };
+    it.push(Object::bool(global));
     Ok(())
 }
 

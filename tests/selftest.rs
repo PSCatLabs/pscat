@@ -398,7 +398,7 @@ fn a_proc_that_shadows_the_harnesss_own_names_cannot_defeat_the_cleanup() {
          %   /undefinedname\n\
          %   (a proc shadowing every harness name it can) mustguard\n\
          %   count 0 eq (the debris was cleaned up anyway) mustbe\n\
-         %   countdictstack 2 eq (the dictionary was closed anyway) mustbe\n\
+         %   countdictstack 3 eq (the dictionary was closed anyway) mustbe\n\
          %%EndSelfTest\n",
     )
     .expect("write");
@@ -548,7 +548,7 @@ fn a_proc_that_pushes_its_own_mark_does_not_confuse_the_cleanup() {
          %   { 99 mark 1 2 undefinedname } /undefinedname (probe) mustguard\n\
          %   count 0 eq (the cleanup still drained the stack) mustbe\n\
          %   { 1 mark 2 3 undefinedname } /undefinedname (again) mustguard\n\
-         %   countdictstack 2 eq (and never touched the dict stack) mustbe\n\
+         %   countdictstack 3 eq (and never touched the dict stack) mustbe\n\
          %%EndSelfTest\n",
     )
     .expect("write");

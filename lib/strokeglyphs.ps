@@ -371,6 +371,26 @@
   % math axis, so \text{a*b} reads as an asterisk and not a binary operator.
   /asterisk [320 [160 690 160 480] [69 638 251 532] [69 532 251 638]]
 
+  % --- the escaped literals \$ \% \& \# \_ (issue #1160). TeX's control
+  % symbols for the five characters it reserves. They are reached by name
+  % from mathkit's \X escapes (in math and in \text), not through `sgcmap`,
+  % so a bare $ % & # _ in text stays a missing glyph, as it is an error in
+  % TeX. Digit height, ordinary class; the underscore hangs below the baseline.
+  /dollar [500 [390 600 330 680 220 690 120 630 110 530 190 440 300 400
+                390 340 400 220 330 100 220 60 110 90 60 160]
+               [250 780 250 -70]]
+  /percent [640 [530 700 110 0]
+                [150 700 80 660 70 585 110 520 180 510 230 550 235 630
+                 190 695 150 700]
+                [490 190 420 150 410 75 450 10 520 0 570 40 575 120
+                 530 185 490 190]]
+  /ampersand [600 [540 20 300 330 260 380 190 500 190 610 250 690 330 660
+                   350 560 300 470 170 330 70 210 70 110 130 30 240 10
+                   340 50 440 160 500 280]]
+  /numbersign [560 [230 700 150 -10] [420 700 340 -10]
+                   [60 240 520 240] [90 450 550 450]]
+  /underscore [500 [10 -80 490 -80]]
+
   % --- letters for physics and calculus. The hbar is handscript's h with
   % a short slanted bar through the stem; the script ell is one stroke
   % with a loop at the top.
@@ -1761,6 +1781,23 @@
 %   (the variant theta is not the plain theta) mustbe
 %   /epsilon << /Size 1000 >> sgmetrics /Advance get 420 eq
 %   (the plain epsilon keeps its advance) mustbe
+%%EndSelfTest
+%
+%%SelfTest: escaped-literal-glyphs
+%   % issue #1160: the glyphs of TeX's \$ \% \& \# \_ exist and are reached by
+%   % name, not by ASCII: a bare $ % & # _ in text is still a missing glyph
+%   [ /dollar /percent /ampersand /numbersign /underscore ] true exch {
+%     << /Size 1000 >> sgmetrics /Advance get 0 gt and
+%   } forall
+%   (each escaped-literal glyph has an advance) mustbe
+%   /underscore << /Size 1000 >> sgmetrics /BBox get 1 get 0 lt
+%   (the underscore hangs below the baseline) mustbe
+%   /dollar << /Size 1000 >> sgmetrics /BBox get dup 1 get 0 lt exch 3 get 700 gt and
+%   (the dollar bar passes both the baseline and the cap height) mustbe
+%   { (a_b) << /Size 1000 >> sgwidth pop } /sg-missing-glyph:_
+%   (a bare underscore in text is still missing) mustguard
+%   newpath [ /dollar /percent /ampersand /numbersign /underscore ] 0 0
+%   << /Jitter 0 >> sgpath newpath
 %%EndSelfTest
 %
 %%SelfTest: ascii-star-is-the-text-asterisk

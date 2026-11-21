@@ -1,7 +1,7 @@
 # The pscat MCP server in full
 
 Read this when the pscat MCP tools are connected and you need a job, a limit,
-`bands`, `gpu_preview`, or the registration command. Back to [SKILL.md](../SKILL.md).
+`bands`, `svg_text`, `gpu_preview`, or the registration command. Back to [SKILL.md](../SKILL.md).
 
 `pscat-mcp` (installed beside `pscat`) serves ten tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
@@ -13,6 +13,24 @@ chalkboard PNG; same file), `review_sheet` (the review sheet in
 [sheets.md](sheets.md), from inline programs: byte for byte what
 `pscat sheet` writes) and `describe_art_capabilities`, plus render jobs for
 anything slow.
+
+## Asking `describe_art_capabilities` for less
+
+With no arguments it returns every entry in full, over 300,000 characters, and a
+client may truncate that. Ask for the part you need:
+
+- `{"kind": "procedure", "brief": true}` (or `"source": "paintkit"`) lists names
+  with one-line descriptions, a few tens of kilobytes at most;
+- `{"names": ["pkwash", "pkpaper"]}` returns those entries in full, with every
+  parameter, its unit and default, and the `load` line; names no entry has come
+  back in `unmatched_names`;
+- `kind` is one of `font`, `type3_face`, `palette`, `template`, `procedure`,
+  `operator`, `dial`; `names` takes at most 256 names; `source` is a library file (`paintkit` or `lib/paintkit.ps`)
+  or `systemdict` for native operators.
+
+A narrowed answer adds `matched` and `total` and keeps the whole catalog's
+`catalog_signature`. The same filters work on the command line, after
+`--capabilities`: `--name`, `--kind`, `--source`, `--brief`.
 
 ## Time limits and render jobs
 
@@ -32,6 +50,15 @@ Both render tools take **`bands`** (1 to the server's `--max-bands`, default 4):
 [bands-profile.md](bands-profile.md)). PNG only; the `Lint:` block covers band 0 and the
 stitched page, and a job's `pages_done` stays 0 until it ends. The step and time limits
 apply to each band; the call's or job's wall-clock limit to the whole render.
+
+## SVG text
+
+Both render tools take **`svg_text: true`** (`pscat --svg-text`) with `format: "svg"`: text set in
+Helvetica, Times or Courier (and their variants) is written as selectable, searchable SVG `<text>`
+instead of one outline per glyph, a much smaller file (three short lines: about 52 KB as outlines).
+Other fonts stay outlines, and the text then looks as the viewer's own font does, not pscat's.
+Without it the SVG is unchanged. It is ignored for `png` and `pdf` (not an error); a non-boolean is
+`invalid_argument`.
 
 ## GPU preview
 

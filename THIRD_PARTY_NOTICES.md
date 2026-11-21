@@ -124,6 +124,15 @@ were checked against documented sources:
 Both tables are factual lists of glyph names, and no copyright is claimed in
 them.
 
+Beside them, `SYMBOL_NAMES` and `DINGBAT_NAMES` (#1026) give each Symbol and
+Dingbats glyph name its Unicode value, for the text `--pdf-text` lets a reader
+extract. They are taken from the Unicode Consortium's `symbol.txt` and
+`zdingbat.txt` (`Public/MAPPINGS/VENDORS/ADOBE/`, table version 1.0, 2011),
+without their Corporate Use entries. Unicode, Inc. grants "the right to freely
+use the information supplied in this file in the creation of products
+supporting the Unicode Standard"; the tables are that information (a name and
+a code point per glyph), not a copy of the files.
+
 ## Standard 35 faces (compiled in)
 
 Since #757 the rest of the PostScript standard 35 is compiled into pscat

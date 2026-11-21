@@ -58,7 +58,8 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
         word-wrapped and auto-sized; same seed, same page. A set of hand-drawn styles for notes, cards and art, not for imitating a specific person's handwriting</td></tr>
     <tr><td><code>review_sheet</code></td>
         <td>entries (each: source, optional label, width, height, dpi list);
-        optional width, height, dpi, labels, sizes, out_path</td>
+        optional width, height, dpi, labels, sizes, values, cols, out_path;
+        an entry may also take sweep and captions, a dpi item a mat</td>
         <td>one PNG: each program a row, each dpi a cell at its true pixel
         size, labelled; the same bytes as <code>pscat sheet</code>. A
         failing program is drawn as far as it got, with its error beside the

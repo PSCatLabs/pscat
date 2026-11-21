@@ -39,7 +39,9 @@ exact layer). [When to use pscat](https://github.com/PSCatLabs/pscat/blob/main/d
    `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill's
    `references/sheets.md`). A seed
    sweep with `seed=7` under each cell, wrapped at a width you choose:
-   `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`.
+   `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`;
+   over MCP, `review_sheet` takes the same as `sweep: {"seed": [1, 2, 3]}`
+   on an entry and `cols: 4`.
 4. Optional, if Ghostscript is installed: `gs` is the behavioural
    oracle, but it cannot find `lib/` on its own (pscat's copy is inside
    the binary), so this check needs a pscat checkout:
@@ -50,6 +52,12 @@ This file is a hand-written tour and can drift. `pscat --capabilities`
 of every font, Type 3 face, palette, template and major procedure this
 build has, with each paintkit parameter's unit; prefer it over guessing a
 name from prose.
+
+The whole inventory is over 300,000 characters, which an MCP client may cut
+short. Narrow it: `describe_art_capabilities` with `kind`, `source` or `names`,
+and `brief: true` for names and one-line descriptions (CLI:
+`pscat --capabilities --name pkwash`, `--kind palette`, `--source paintkit`,
+`--brief`). `names: ["pkwash"]` returns that entry's full parameter table.
 
 ## The toolkit (`(lib/artkit.ps) run`)
 

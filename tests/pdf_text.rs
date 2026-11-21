@@ -1,14 +1,16 @@
-//! `--pdf-text` (#1193): `show` text as PDF text objects in embedded subset
-//! fonts, so a reader can select, search and extract it. Off by default, and
-//! then the PDF is the outline PDF it always was. On, the text must still
-//! look like the outlines: gs (and poppler, when installed) rasterize the
+//! PDF text (#1193): `show` text as PDF text objects in embedded subset
+//! fonts, so a reader can select, search and extract it. The default since
+//! #1026; `PdfText::Paths` (`--text-as-paths`) is the outline PDF pscat
+//! wrote before. The text must still look like the outlines: gs (and poppler, when installed) rasterize the
 //! text PDF and compare it with pscat's canvas and with the outline PDF.
 //! `pdftotext` (poppler) reads the text back. The tests that need gs,
-//! pdftotext or pdftoppm skip without them, with a `SKIPPED` line.
+//! pdftotext or pdftoppm skip without them, with a `SKIPPED` line;
+//! `PSCAT_REQUIRE_GS` / `PSCAT_REQUIRE_POPPLER` (set in CI) turn a skip into
+//! a failure (`common::gs_available`, `common::poppler_available`).
 
 use std::process::Command;
 
-use pscat::{Interp, PdfText};
+use pscat::{Interp, Limits, PdfText};
 use tiny_skia::Pixmap;
 
 mod common;
@@ -75,18 +77,35 @@ gsave /Multiply setblendmode 1 0.6 0 setrgbcolor /Helvetica findfont 40 scalefon
   60 110 moveto (Blend) show grestore
 ";
 
+/// Symbol and ZapfDingbats (#1026): Greek letters, maths operators and
+/// dingbats, whose glyph names (`alpha`, `summation`, `a20`) the general
+/// glyph-name table does not know. `\140` is Symbol's `radicalex`, a
+/// Corporate Use glyph with no Unicode value, which keeps its outline.
+const SYMBOLS: &str = "
+/Times-Roman findfont 24 scalefont setfont 30 450 moveto (Sum: ) show
+/Symbol findfont 24 scalefont setfont (abg \\345 \\243 \\245 pqW m \\140) show
+/Symbol findfont 40 scalefont setfont 30 380 moveto (\\362 \\326 \\245) show
+/ZapfDingbats findfont 30 scalefont setfont 30 300 moveto (3456 nlu) show
+0 0 0.8 setrgbcolor /ZapfDingbats findfont 60 scalefont setfont 30 200 moveto (H\\250) show
+";
+
+/// The default is text (#1026), the same bytes as asking for it; paths
+/// write no fonts and no text objects.
 #[test]
-fn the_default_pdf_has_no_fonts_and_equals_explicit_paths() {
+fn the_default_pdf_is_text_and_paths_have_no_fonts() {
     for file in ["examples/postcard.ps", "examples/specimen.ps"] {
         let src = std::fs::read(file).expect("example");
         let (default, _) = render(None, &src);
+        let (text, _) = render(Some(PdfText::Text), &src);
+        assert_eq!(default, text, "{file}");
+        assert!(content(&default).contains(" BT "), "{file}");
         let (paths, _) = render(Some(PdfText::Paths), &src);
-        assert_eq!(default, paths, "{file}");
-        assert!(!content(&default).contains("/Font"), "{file}");
-        assert!(!content(&default).contains(" BT "), "{file}");
+        assert!(!content(&paths).contains("/Font"), "{file}");
+        assert!(!content(&paths).contains(" BT "), "{file}");
     }
-    let (default, _) = render(None, SAMPLE.as_bytes());
-    assert!(!content(&default).contains(" Tf "));
+    assert_eq!(PdfText::default(), PdfText::Text);
+    let (paths, _) = render(Some(PdfText::Paths), SAMPLE.as_bytes());
+    assert!(!content(&paths).contains(" Tf "));
 }
 
 #[test]
@@ -191,6 +210,48 @@ fn ineligible_glyphs_keep_their_outlines() {
     assert!(doc.contains(" f\nQ"), "the outlines are fills: {doc}");
 }
 
+/// Symbol and Dingbats glyphs are text with their Unicode characters in
+/// `/ToUnicode` (#1026); a Corporate Use glyph keeps its outline.
+#[test]
+fn symbol_and_dingbats_glyphs_are_text() {
+    let pdf = text_pdf(SYMBOLS);
+    let doc = content(&pdf);
+    for utf16 in [
+        "03B1", "03B2", "03B3", "2211", "2264", "221E", "03C0", "03A9", "03BC",
+    ] {
+        cid_of(&doc, utf16);
+    }
+    for utf16 in ["2713", "2714", "25CF", "25A0", "2605", "2663"] {
+        cid_of(&doc, utf16);
+    }
+    assert!(doc.contains("+StandardSymbolsPS /Encoding"), "{doc}");
+    assert!(doc.contains("+D050000L /Encoding"), "{doc}");
+    // `radicalex` is the one outline on the page.
+    assert_eq!(doc.matches(" f\nQ").count(), 1, "{doc}");
+}
+
+/// The Symbol names are read only in the Symbol face: a copy of Times
+/// re-encoded with `/alpha` (which Liberation Serif draws) keeps that
+/// glyph's outline, as it did before #1026, and gives no text for it.
+#[test]
+fn symbol_names_outside_the_symbol_face_are_not_text() {
+    let pdf = text_pdf(
+        "/Times-Roman findfont dup length dict begin
+           { 1 index /FID ne { def } { pop pop } ifelse } forall
+           /Encoding StandardEncoding 256 array copy dup 65 /alpha put def
+         currentdict end /Times-Alpha exch definefont 30 scalefont setfont
+         20 100 moveto (xAx) show",
+    );
+    let doc = content(&pdf);
+    assert!(!doc.contains("> <03B1>"), "{doc}");
+    assert_eq!(
+        doc.matches(" f\nQ").count(),
+        1,
+        "alpha is an outline: {doc}"
+    );
+    cid_of(&doc, "0078");
+}
+
 #[test]
 fn pages_list_only_the_fonts_they_use() {
     let pdf = text_pdf(
@@ -219,62 +280,97 @@ fn mid_run_reads_show_the_text_so_far_and_the_run_continues() {
     assert!(late.contains("Tm [<0044004500460047>] TJ"), "{late}");
 }
 
+/// `pscat --pdf` writes text by default (#1026); `--pdf-text` is accepted
+/// and changes nothing; `--text-as-paths` writes the outline PDF; each
+/// needs `--pdf`, and the two contradict each other.
 #[test]
-fn the_cli_flag_needs_pdf_and_writes_fonts() {
+fn the_cli_writes_text_by_default_and_text_as_paths_opts_out() {
     let dir = common::scratch_dir("pscat-pdf-text-cli");
-    let out = dir.join("t.pdf");
-    let run = Command::new(env!("CARGO_BIN_EXE_pscat"))
-        .args([
-            "--pdf-text",
-            "-e",
-            "/Helvetica findfont 12 scalefont setfont 9 9 moveto (x) show",
-        ])
-        .output_deadline()
-        .expect("run pscat");
-    assert!(!run.status.success());
-    assert!(String::from_utf8_lossy(&run.stderr).contains("--pdf-text needs --pdf"));
-    let run = Command::new(env!("CARGO_BIN_EXE_pscat"))
-        .args(["--page", "100x50", "--pdf"])
-        .arg(&out)
-        .args([
-            "--pdf-text",
-            "-e",
-            "/Helvetica findfont 12 scalefont setfont 9 9 moveto (x) show",
-        ])
-        .output_deadline()
-        .expect("run pscat");
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stderr)
+    const SHOW: &str = "/Helvetica findfont 12 scalefont setfont 9 9 moveto (x) show";
+    let pscat = |flags: &[&str], out: Option<&std::path::Path>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+        cmd.args(["--page", "100x50"]);
+        if let Some(out) = out {
+            cmd.arg("--pdf").arg(out);
+        }
+        cmd.args(flags).args(["-e", SHOW]);
+        cmd.output_deadline().expect("run pscat")
+    };
+    for flag in ["--pdf-text", "--text-as-paths"] {
+        let run = pscat(&[flag], None);
+        assert!(!run.status.success(), "{flag} without --pdf");
+        assert!(
+            String::from_utf8_lossy(&run.stderr).contains(&format!("{flag} needs --pdf")),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+    let both = pscat(
+        &["--pdf-text", "--text-as-paths"],
+        Some(&dir.join("both.pdf")),
     );
-    let pdf = std::fs::read(&out).expect("pdf written");
-    assert!(content(&pdf).contains("/Subtype /CIDFontType0C "));
+    assert!(!both.status.success());
+    assert!(String::from_utf8_lossy(&both.stderr).contains("contradict"));
+    assert!(!dir.join("both.pdf").exists());
+    let mut docs = Vec::new();
+    for (name, flags) in [
+        ("default", &[][..]),
+        ("alias", &["--pdf-text"][..]),
+        ("paths", &["--text-as-paths"][..]),
+    ] {
+        let out = dir.join(format!("{name}.pdf"));
+        let run = pscat(flags, Some(&out));
+        assert!(
+            run.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        docs.push(std::fs::read(&out).expect("pdf written"));
+    }
+    assert!(content(&docs[0]).contains("/Subtype /CIDFontType0C "));
+    assert_eq!(docs[0], docs[1], "--pdf-text changes nothing");
+    assert!(!content(&docs[2]).contains("/Font"));
+    assert!(!content(&docs[2]).contains(" BT "));
+}
+
+/// Building a glyph's embedded charstring is work the step limit sees
+/// (#1026): at least a step for each new glyph, nothing for a glyph the
+/// font already holds, and nothing in the outline PDF.
+#[test]
+fn new_embedded_glyphs_are_charged_as_steps() {
+    let steps = |mode: PdfText, src: &str| {
+        let mut it = Interp::with_page(200, 100).expect("page");
+        it.set_pdf_text(mode);
+        it.enable_pdf();
+        it.set_limits(Limits::default().with_max_steps(10_000_000))
+            .expect("limits");
+        it.run_source(src.as_bytes())
+            .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+        it.steps_used()
+    };
+    let font = "/Helvetica findfont 10 scalefont setfont 5 50 moveto ";
+    let once = format!("{font}(abcdefghijklmnopqrstuvwxyz) show");
+    let twice = format!("{once} 5 30 moveto (abcdefghijklmnopqrstuvwxyz) show");
+    let paths = steps(PdfText::Paths, &once);
+    let text = steps(PdfText::Text, &once);
+    assert!(text >= paths + 26, "26 new glyphs: {text} vs {paths}");
+    // The second line's glyphs are known: they cost what outlines cost.
+    let paths2 = steps(PdfText::Paths, &twice);
+    let text2 = steps(PdfText::Text, &twice);
+    assert_eq!(
+        text2 - text,
+        paths2 - paths,
+        "known glyphs are not charged again"
+    );
 }
 
 // ---------------------------------------------------------------------
 // External readers
 // ---------------------------------------------------------------------
 
-/// Whether a poppler tool runs; the skip is announced like gs's.
-fn tool_available(tool: &str) -> bool {
-    let ok = Command::new(tool)
-        .arg("-v")
-        .output_deadline()
-        .is_ok_and(|o| o.status.success());
-    if !ok {
-        let thread = std::thread::current();
-        eprintln!(
-            "SKIPPED ({tool} not installed): {}",
-            thread.name().unwrap_or("(unnamed test)")
-        );
-    }
-    ok
-}
-
 #[test]
-fn pdftotext_extracts_latin_and_hangul() {
-    if !tool_available("pdftotext") {
+fn pdftotext_extracts_latin_hangul_and_symbols() {
+    if !common::poppler_available("pdftotext") {
         return;
     }
     let dir = common::scratch_dir("pscat-pdf-text-extract");
@@ -324,13 +420,27 @@ fn pdftotext_extracts_latin_and_hangul() {
     ] {
         assert!(text.contains(want), "{want:?} not in {text}");
     }
+    // pdftotext's layout spaces the wide maths glyphs out; compare the
+    // characters.
+    let symbols: String = extract(&text_pdf(SYMBOLS))
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    for want in [
+        "Sum:\u{3b1}\u{3b2}\u{3b3}\u{2211}\u{2264}\u{221e}\u{3c0}\u{3b8}\u{3a9}\u{3bc}",
+        "\u{222b}\u{221a}\u{221e}",
+        "\u{2713}\u{2714}\u{2715}\u{2716}\u{25a0}\u{25cf}\u{25c6}",
+        "\u{2605}\u{2663}",
+    ] {
+        assert!(symbols.contains(want), "{want:?} not in {symbols}");
+    }
     // ashow/kshow spacing reads as letters, not lost glyphs.
     let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(squeezed.contains("Spacedout"), "{text}");
     assert!(squeezed.contains("kernedbykshow"), "{text}");
     // The outline PDF has no text at all.
     assert!(
-        extract(&render(None, SAMPLE.as_bytes()).0)
+        extract(&render(Some(PdfText::Paths), SAMPLE.as_bytes()).0)
             .trim()
             .is_empty()
     );
@@ -422,19 +532,26 @@ fn rasterize(tool: &str, pdf: &[u8], name: &str) -> Pixmap {
 /// the same tool's raster of the outline PDF. 3.0 is the mean block
 /// difference `tests/pdf.rs` allows its PDF round trips.
 fn assert_renders_like_outlines(tool: &str) {
-    let (outline_pdf, canvas) = render(None, SAMPLE.as_bytes());
-    let (text, canvas2) = render(Some(PdfText::Text), SAMPLE.as_bytes());
-    assert_eq!(canvas.data(), canvas2.data(), "the raster never changes");
-    let theirs_text = rasterize(tool, &text, &format!("{tool}-text"));
-    let theirs_outline = rasterize(tool, &outline_pdf, &format!("{tool}-outline"));
-    let vs_canvas = mean_block_diff(&canvas, &theirs_text);
-    let vs_outline = mean_block_diff(&theirs_outline, &theirs_text);
-    eprintln!("{tool}: text PDF vs canvas {vs_canvas:.3}, vs outline PDF {vs_outline:.3}");
-    assert!(vs_canvas < 3.0, "{tool}: text PDF vs canvas {vs_canvas:.2}");
-    assert!(
-        vs_outline < 3.0,
-        "{tool}: text PDF vs outline PDF {vs_outline:.2}"
-    );
+    for (name, src) in [("sample", SAMPLE), ("symbols", SYMBOLS)] {
+        let (outline_pdf, canvas) = render(Some(PdfText::Paths), src.as_bytes());
+        let (text, canvas2) = render(Some(PdfText::Text), src.as_bytes());
+        assert_eq!(canvas.data(), canvas2.data(), "the raster never changes");
+        let theirs_text = rasterize(tool, &text, &format!("{tool}-{name}-text"));
+        let theirs_outline = rasterize(tool, &outline_pdf, &format!("{tool}-{name}-outline"));
+        let vs_canvas = mean_block_diff(&canvas, &theirs_text);
+        let vs_outline = mean_block_diff(&theirs_outline, &theirs_text);
+        eprintln!(
+            "{tool} {name}: text PDF vs canvas {vs_canvas:.3}, vs outline PDF {vs_outline:.3}"
+        );
+        assert!(
+            vs_canvas < 3.0,
+            "{tool} {name}: text PDF vs canvas {vs_canvas:.2}"
+        );
+        assert!(
+            vs_outline < 3.0,
+            "{tool} {name}: text PDF vs outline PDF {vs_outline:.2}"
+        );
+    }
 }
 
 #[test]
@@ -447,7 +564,7 @@ fn gs_renders_the_text_pdf_like_the_outlines() {
 
 #[test]
 fn pdftoppm_renders_the_text_pdf_like_the_outlines() {
-    if !tool_available("pdftoppm") {
+    if !common::poppler_available("pdftoppm") {
         return;
     }
     assert_renders_like_outlines("pdftoppm");

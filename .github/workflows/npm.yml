@@ -2,7 +2,9 @@
 # (scripts/build_npm.sh, the same wasm build as the site's playground), run
 # its API tests, compare the wasm pages with the native renderer's
 # (tests/wasm.rs, which the `test` job skips for want of the wasm target),
-# then install the packed tarball into a fresh project and render with it.
+# check that a PDF with pdfmark is byte-identical from the CLI and wasm
+# (tests/pdf_pdfmark.rs, #1104), then install the packed tarball into a
+# fresh project and render with it.
 # build_npm.sh --pack also checks the tarball's file list and size budget.
 #
 # Not in `required_status_checks` (SDLC.md): it starts only when a pull
@@ -27,6 +29,7 @@ on:
       - "scripts/test_npm_tarball.sh"
       - "scripts/release_stages.py"
       - "tests/wasm.rs"
+      - "tests/pdf_pdfmark.rs"
       - "LICENSE-*"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/assets.json"
@@ -49,6 +52,7 @@ on:
       - "scripts/test_npm_tarball.sh"
       - "scripts/release_stages.py"
       - "tests/wasm.rs"
+      - "tests/pdf_pdfmark.rs"
       - "LICENSE-*"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/assets.json"
@@ -92,8 +96,25 @@ jobs:
         run: npm test
       - name: wasm pages match the native renderer
         run: cargo test --profile ci --test wasm
+      # The test skips (passes without checking) when the wasm target or node
+      # is missing. Here that must fail: grep for its skip line and fail on it.
+      - name: pdfmark PDF is byte-identical from the CLI and wasm
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --profile ci --test pdf_pdfmark -- --exact wasm_pdfmark_document_matches_the_cli --nocapture 2>&1 | tee pdfmark-wasm.log
+          if grep -q 'skipping wasm parity' pdfmark-wasm.log; then
+            echo "::error::the wasm pdfmark parity check was skipped in CI"
+            exit 1
+          fi
       - name: Install the tarball into a fresh project and render
         run: ./scripts/test_npm_tarball.sh pack/pscat-*.tgz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-tarball
+          path: pack/pscat-*.tgz
+          if-no-files-found: error
+          retention-days: 1
       - name: Size
         run: |
           {
@@ -102,3 +123,38 @@ jobs:
             ls -l pack/*.tgz npm/pscat.wasm
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The same tarball, installed and rendered with on the other platforms users
+  # run Node on (#1348). Linux is covered by the `package` job above.
+  install-tarball:
+    needs: package
+    name: install-tarball (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Only the check script comes from the repository; the package is the
+      # tarball built above.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # .gitattributes too: it keeps the script's line endings LF on Windows.
+          sparse-checkout: |
+            scripts/test_npm_tarball.sh
+            .gitattributes
+          sparse-checkout-cone-mode: false
+      # The consumer floor (package.json engines).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-tarball
+          path: pack
+      - name: Install the tarball into a fresh project and render
+        run: ./scripts/test_npm_tarball.sh pack/pscat-*.tgz

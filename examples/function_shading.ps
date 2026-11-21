@@ -1,0 +1,56 @@
+%!PS-Adobe-3.0
+%%Title: Function-based shading: a ShadingType 1 specimen
+%%BoundingBox: 0 0 600 400
+%%EndComments
+
+% Specimen for issue #1039: `shfill` with ShadingType 1 (colour from a
+% function of x and y) and a FunctionType 0 (sampled) function. The
+% 32 x 32 table is computed below into a string, then interpolated over
+% the shading's /Domain. Left: the Domain square filled straight. Right:
+% the same shading under a rotated /Matrix, cut by a /BBox and clipped to
+% an ellipse. It reads no files, so it also runs in Ghostscript:
+%
+%   pscat --page 600x400 examples/function_shading.ps
+%   gs -sDEVICE=png16m -g600x400 -o out.png examples/function_shading.ps
+
+/N 32 def
+/table N N mul 3 mul string def
+/level { 0.42 mul 0.55 add 255 mul round cvi } def   % -1..1 -> 33..247
+0 1 N 1 sub {
+  /j exch def
+  0 1 N 1 sub {
+    /i exch def
+    /u i N 1 sub div def
+    /v j N 1 sub div def
+    /k j N mul i add 3 mul def
+    table k       u 250 mul v 60 mul add 30 sub sin level put
+    table k 1 add v 220 mul u 140 mul sub 200 add sin level put
+    table k 2 add u v sub 300 mul cos 0.8 mul level put
+  } for
+} for
+
+/field << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1]
+          /Size [N N] /BitsPerSample 8 /DataSource table >> def
+
+0.96 0.95 0.92 setrgbcolor 0 0 600 400 rectfill
+
+/Helvetica-Bold findfont 18 scalefont setfont
+0.15 0.15 0.18 setrgbcolor
+40 360 moveto (ShadingType 1: colour as a function of x and y) show
+/Helvetica findfont 11 scalefont setfont
+40 342 moveto (a 32 x 32 sampled table, interpolated over the Domain; right: rotated, BBox-cut, clipped) show
+
+% --- left: the Domain square, straight -----------------------------------
+<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [0 1 0 1]
+   /Matrix [260 0 0 260 40 50] /Function field >> shfill
+0 setgray 0.75 setlinewidth 40 50 260 260 rectstroke
+
+% --- right: rotated Matrix, a BBox, an elliptical clip -------------------
+gsave
+  450 180 translate
+  matrix currentmatrix 1 0.8 scale newpath 0 0 135 0 360 arc closepath setmatrix clip
+  << /ShadingType 1 /ColorSpace /DeviceRGB /Domain [0 1 0 1]
+     /Matrix [220 110 -110 220 -60 -180] /BBox [-140 -140 120 140]
+     /Function field >> shfill
+grestore
+showpage

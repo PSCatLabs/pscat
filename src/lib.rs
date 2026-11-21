@@ -162,6 +162,7 @@ pub(crate) mod clock;
 #[doc(hidden)]
 pub mod contact_sheet;
 pub(crate) mod coverage;
+pub(crate) mod deep;
 #[doc(hidden)]
 pub mod encodings;
 #[doc(hidden)]
@@ -195,6 +196,7 @@ pub mod object;
 pub mod ops;
 #[doc(hidden)]
 pub mod paths;
+pub(crate) mod pattern;
 #[doc(hidden)]
 pub mod pdf;
 pub(crate) mod pdf_font;
@@ -208,6 +210,7 @@ pub mod read_roots;
 pub mod repl;
 // Reads library files off disk to run their `%%SelfTest` blocks —
 // a developer/CI tool, not something the wasm playground can host.
+pub(crate) mod mesh;
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
 pub mod selftest;

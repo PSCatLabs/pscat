@@ -1,8 +1,9 @@
 ## Functional PostScript libraries: lib/functional.ps and lib/aspect.ps (PR #923, 2026-11-04)
 
 Codex built this as a user-directed experiment on one feature branch
-(2026-10-27/28), outside the usual issue-and-slice flow; the design and
-progress record is `docs/functional-postscript/` (DESIGN.md, PROGRESS.md).
+(2026-10-27/28), outside the usual issue-and-slice flow; the design
+record is `docs/functional-postscript/` (DESIGN-DECISIONS.md; the agent work
+log and review brief were removed in #1169 and live in the git history).
 An independent review merged it for 0.7.0.
 
 What shipped:

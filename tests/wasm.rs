@@ -235,6 +235,67 @@ for (const [w, h, scale, src, out] of [{jobs}]) {{
     }
 }
 
+/// The wasm `pageCount()` is the library's `Interp::page_count` (#1162):
+/// an empty program, one showpage, a trailing unshown page and two pages.
+#[test]
+fn wasm_page_count_matches_the_library() {
+    if !wasm_ready() {
+        return;
+    }
+    let root = root();
+    let dir = common::scratch_dir("pscat-wasm-pagecount");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let programs: [&str; 5] = [
+        "",
+        "showpage",
+        "showpage 0 0 5 5 rectfill",
+        "0 0 5 5 rectfill showpage 0 0 5 5 rectfill showpage",
+        "0 0 5 5 rectfill showpage showpage",
+    ];
+    let driver = format!(
+        r#"
+import {{ readFileSync }} from 'node:fs';
+import {{ Pscat }} from 'file://{lib}';
+const ps = await Pscat.instantiate(readFileSync('{wasm}'));
+const counts = [];
+for (const src of {programs:?}) {{
+  if (ps.run(src, 20, 20, 1) !== 0) {{ console.error(src + ': ' + ps.error); process.exit(1); }}
+  counts.push(ps.pageCount());
+}}
+console.log(counts.join(','));
+"#,
+        lib = root.join("web/pscat.js").display(),
+        wasm = root.join("web/pscat.wasm").display(),
+    );
+    let script = dir.join("pagecount.mjs");
+    std::fs::write(&script, driver).expect("write driver");
+    let out = Command::new("node")
+        .arg(&script)
+        .output()
+        .expect("run node");
+    assert!(
+        out.status.success(),
+        "node driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let wasm: Vec<usize> = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .split(',')
+        .map(|n| n.parse().expect("a count"))
+        .collect();
+    let native: Vec<usize> = programs
+        .iter()
+        .map(|src| {
+            let mut it = pscat::Interp::with_page(20, 20).expect("page");
+            it.run_str(src)
+                .unwrap_or_else(|e| panic!("native {src:?}: {e}"));
+            it.page_count()
+        })
+        .collect();
+    assert_eq!(wasm, native, "wasm and library page counts differ");
+    assert_eq!(native, [1, 1, 2, 2, 2]);
+}
+
 /// A two-page document for the vector tests (#1003): text in two built-in
 /// faces, an arc, strokes under rotation (trig, where native and wasm libm
 /// could round apart), a curve, and the DSC comments the CLI turns into
@@ -405,6 +466,15 @@ const TEXT_DOC: &str = "%!PS
 showpage
 ";
 
+/// Symbol and ZapfDingbats text (#1026): Greek, maths and dingbats become
+/// text in `--pdf-text`, with `/ToUnicode` from the Symbol and Dingbats
+/// tables.
+const SYMBOL_DOC: &str = "%!PS
+/Symbol findfont 24 scalefont setfont 72 700 moveto (a + b \\345 g \\243 \\245 pqW) show
+/ZapfDingbats findfont 24 scalefont setfont 72 650 moveto (3456 nlu) show
+showpage
+";
+
 /// `--svg-text` SVG from the wasm build equals the CLI's byte for byte,
 /// through the raw ABI (`record.svgText`) and the npm Renderer
 /// (`svgText: true`), at 72 and 144 dpi; and the flag really changes the
@@ -511,10 +581,13 @@ const HANGUL_DOC: &str = "%!PS
 showpage
 ";
 
-/// `--pdf-text` PDF from the wasm build equals the CLI's byte for byte,
-/// through the raw ABI (`record.pdfText`) and the npm Renderer
-/// (`pdfText: true`), for a Latin page and a Hangul page (the face given to
-/// `addFont`); and the flag really changes the output (#1205).
+/// The PDF from the wasm build equals the CLI's byte for byte, through the
+/// raw ABI and the npm Renderer, for a Latin, a Hangul (the face given to
+/// `addFont`) and a Symbol/Dingbats page (#1205): the default, which is
+/// text (#1026: `pscat --pdf`, `{ pdf: true }`, and the no-op `--pdf-text`
+/// / `pdfText: true`), and the outline opt-out (`--text-as-paths`, ABI flag
+/// value 16 through `record.pdfText: false`, npm `pdfText: false`), which really
+/// is a different, fontless file.
 #[test]
 fn wasm_pdf_text_matches_the_cli() {
     if !wasm_ready() {
@@ -523,21 +596,33 @@ fn wasm_pdf_text_matches_the_cli() {
     let root = root();
     let dir = common::scratch_dir("pscat-wasm-pdf-text");
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let pages = [("latin", TEXT_DOC), ("hangul", HANGUL_DOC)];
+    let pages = [
+        ("latin", TEXT_DOC),
+        ("hangul", HANGUL_DOC),
+        ("symbols", SYMBOL_DOC),
+    ];
     for (name, src) in pages {
         std::fs::write(dir.join(format!("{name}.ps")), src).expect("write doc");
-        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
-            .current_dir(root)
-            .args(["--page", "612x792", "--pdf-text", "--pdf"])
-            .arg(dir.join(format!("native-{name}.pdf")))
-            .arg(dir.join(format!("{name}.ps")))
-            .output_deadline()
-            .expect("run pscat");
-        assert!(
-            out.status.success(),
-            "pscat --pdf-text failed on {name}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        for (kind, flags) in [
+            ("native", &[][..]),
+            ("native-alias", &["--pdf-text"][..]),
+            ("native-paths", &["--text-as-paths"][..]),
+        ] {
+            let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+                .current_dir(root)
+                .args(["--page", "612x792"])
+                .args(flags)
+                .arg("--pdf")
+                .arg(dir.join(format!("{kind}-{name}.pdf")))
+                .arg(dir.join(format!("{name}.ps")))
+                .output_deadline()
+                .expect("run pscat");
+            assert!(
+                out.status.success(),
+                "pscat {flags:?} --pdf failed on {name}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     }
     let npm = dir.join("npm");
     std::fs::create_dir_all(&npm).expect("npm dir");
@@ -555,15 +640,33 @@ const ps = await Pscat.instantiate(bytes);
 ps.addFont('NotoSansKR-Regular', kr);
 const r = await instantiate(await WebAssembly.compile(bytes));
 r.addFont('NotoSansKR-Regular', kr);
-for (const name of ['latin', 'hangul']) {{
+for (const name of ['latin', 'hangul', 'symbols']) {{
   const src = readFileSync(`{dir}/${{name}}.ps`);
-  if (ps.run(src, 612, 792, 1, {{ pdf: true, pdfText: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
-  out(`abi-${{name}}.pdf`, ps.pdf());
   if (ps.run(src, 612, 792, 1, {{ pdf: true }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
-  out(`abi-outlines-${{name}}.pdf`, ps.pdf());
-  r.render(src, {{ width: 612, height: 792, pdf: true, pdfText: true }});
+  out(`abi-${{name}}.pdf`, ps.pdf());
+  if (ps.run(src, 612, 792, 1, {{ pdf: true, pdfText: false }}) !== 0) {{ console.error(ps.error); process.exit(1); }}
+  out(`abi-paths-${{name}}.pdf`, ps.pdf());
+  r.render(src, {{ width: 612, height: 792, pdf: true }});
   out(`npm-${{name}}.pdf`, r.pdf());
+  r.render(src, {{ width: 612, height: 792, pdf: true, pdfText: true }});
+  out(`npm-alias-${{name}}.pdf`, r.pdf());
+  r.render(src, {{ width: 612, height: 792, pdf: true, pdfText: false }});
+  out(`npm-paths-${{name}}.pdf`, r.pdf());
 }}
+// The raw flag values: 8 (text) is accepted and changes nothing, 16 is
+// the outline opt-out, the two together and either without PDF are refused.
+const enc = new TextEncoder().encode('showpage');
+const begin = (flags) => {{
+  const p = ps.ex.ps_alloc(enc.length);
+  new Uint8Array(ps.ex.memory.buffer, p, enc.length).set(enc);
+  const rc = ps.ex.ps_begin_vector(p, enc.length, 10, 10, 1, flags);
+  ps.ex.ps_dealloc(p, enc.length);
+  return rc;
+}};
+for (const [flags, want] of [[2 | 8, 0], [2 | 16, 0], [2 | 8 | 16, -1], [16, -1], [8, -1], [1 | 16, -1], [32 | 2, -1]]) {{
+  if (begin(flags) !== want) {{ console.error(`ps_begin_vector flags ${{flags}} gave not ${{want}}`); process.exit(1); }}
+}}
+r.render('showpage', {{ pdfText: false }});
 try {{ r.render('showpage', {{ pdfText: true }}); console.error('pdfText without pdf was accepted'); process.exit(1); }}
 catch (e) {{ if (!(e instanceof TypeError)) throw e; }}
 try {{ r.render('showpage', {{ svg: true, pdfText: true }}); console.error('pdfText with only svg was accepted'); process.exit(1); }}
@@ -594,6 +697,10 @@ console.log('PDF_TEXT_OK');
     };
     for (name, _) in pages {
         let native = read(format!("native-{name}.pdf"));
+        assert!(
+            read(format!("native-alias-{name}.pdf")) == native,
+            "--pdf-text changed the PDF ({name})"
+        );
         // The CLI really wrote text objects (so a face that fell back the
         // same way on both sides cannot pass for parity)...
         let doc = common::pdf_text(&native);
@@ -607,18 +714,40 @@ console.log('PDF_TEXT_OK');
                 "the CLI did not embed NotoSansKR for the Hangul page: {doc}"
             );
         }
-        // ...and the wasm build wrote the same bytes.
-        for file in [format!("abi-{name}.pdf"), format!("npm-{name}.pdf")] {
+        if name == "symbols" {
             assert!(
-                read(file.clone()) == native,
-                "{file} differs from pscat --pdf-text"
+                doc.contains("> <03B1>") && doc.contains("> <2713>"),
+                "the CLI wrote no Symbol or Dingbats text: {doc}"
             );
         }
-        // Without pdfText the PDF is the outline PDF: no text objects.
+        // ...and the wasm build wrote the same bytes.
+        for file in [
+            format!("abi-{name}.pdf"),
+            format!("npm-{name}.pdf"),
+            format!("npm-alias-{name}.pdf"),
+        ] {
+            assert!(
+                read(file.clone()) == native,
+                "{file} differs from pscat --pdf"
+            );
+        }
+        // The opt-out is the outline PDF, the same on every side, and no
+        // text objects or fonts in it.
+        let paths = read(format!("native-paths-{name}.pdf"));
+        let doc = common::pdf_text(&paths);
         assert!(
-            !common::pdf_text(&read(format!("abi-outlines-{name}.pdf"))).contains(" BT "),
-            "a run without pdfText wrote text objects ({name})"
+            !doc.contains(" BT ") && !doc.contains("/Font"),
+            "--text-as-paths wrote text ({name})"
         );
+        for file in [
+            format!("abi-paths-{name}.pdf"),
+            format!("npm-paths-{name}.pdf"),
+        ] {
+            assert!(
+                read(file.clone()) == paths,
+                "{file} differs from pscat --pdf --text-as-paths"
+            );
+        }
     }
 }
 

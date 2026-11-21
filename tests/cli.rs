@@ -168,7 +168,13 @@ fn lint_after_an_error_reports_no_consequence_findings() {
                 stderr.contains("pscat: lint: [run-error]"),
                 "{src}: {stderr}"
             );
-            for check in ["blank-page", "gsave-imbalance", "dict-leak", "stack-leak"] {
+            for check in [
+                "blank-page",
+                "gsave-imbalance",
+                "dict-leak",
+                "stack-leak",
+                "shadowed-operator",
+            ] {
                 assert!(
                     !stderr.contains(&format!("[{check}]")),
                     "{flag} {src}: [{check}] is a consequence of the error: {stderr}"
@@ -183,6 +189,34 @@ fn lint_after_an_error_reports_no_consequence_findings() {
     assert!(stderr.contains("[dict-leak]"), "{stderr}");
     let (_ok, _out, stderr) = run(&["--lint", "-"], "showpage");
     assert!(stderr.contains("[blank-page]"), "{stderr}");
+}
+
+/// #1110: a redefined operator can be why the run failed (`5 3 sub` with
+/// `/sub` a string is a `typecheck` that never says `sub`), so `--lint` keeps
+/// that finding after an error, behind the report and the `run-error` line.
+/// The consequences of the abort stay dropped, and the allow comment still
+/// silences it.
+#[test]
+fn lint_after_an_error_keeps_a_redefined_operator_that_may_explain_it() {
+    let body = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke\nshowpage\n";
+    for flag in ["--lint", "--lint-strict"] {
+        let (ok, _out, stderr) = run(&[flag, "-"], body);
+        assert!(!ok, "{flag}: {stderr}");
+        let report = stderr.find("%%[ Error").expect("the error report");
+        let run_error = stderr.find("[run-error]").expect("the run-error line");
+        let shadow = stderr
+            .find("[shadowed-operator] /sub was redefined as a string")
+            .unwrap_or_else(|| panic!("{flag}: the shadow finding is kept: {stderr}"));
+        assert!(report < run_error && run_error < shadow, "{stderr}");
+        assert!(!stderr.contains("blank-page"), "{stderr}");
+        assert!(!stderr.contains("lint: clean"), "{stderr}");
+        assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    }
+    let allowed = format!("%lint: allow shadowed-operator\n{body}");
+    let (ok, _out, stderr) = run(&["--lint", "-"], &allowed);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("[run-error]"), "{stderr}");
+    assert!(!stderr.contains("[shadowed-operator]"), "{stderr}");
 }
 
 #[test]
@@ -216,6 +250,115 @@ fn lint_flags_a_redefined_operator_and_the_allow_comment_silences_it() {
         "",
     );
     assert!(ok && stderr.contains("lint: clean"), "{stderr}");
+}
+
+/// #1109: the finding says where the binding was made, catches a `store`
+/// refused by the read-only systemdict (#1337), and still leaves a variable
+/// kept in a local dictionary alone.
+#[test]
+fn lint_says_the_line_of_a_redefined_operator() {
+    let body = "% header\n\n/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke\nshowpage\n";
+    let (_ok, _out, stderr) = run(&["--lint", "-"], body);
+    assert!(
+        stderr.contains(
+            "[shadowed-operator] /sub was redefined as a string when the program reached line 3, replacing the operator sub:"
+        ),
+        "{stderr}"
+    );
+    // The run failed (`5 3 sub` on a string); the kept finding above carries its line.
+    assert!(stderr.contains("[run-error]"), "{stderr}");
+    // A def made by a procedure names its own line, not the one that ran it (#1338).
+    let (_ok, _out, stderr) = run(&["--lint", "-e", "/f {\n /ln 1 def\n} def\n\nf"], "");
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 2,"),
+        "{stderr}"
+    );
+    // A body that never ran is not the def: an `exec` of a procedure off the
+    // stack names the line that ran it (#1338).
+    let (_ok, _out, stderr) = run(
+        &[
+            "--lint",
+            "-e",
+            "/unused { /ln 1 def } def\n/setter { exch def } def\n3 /ln /setter load exec",
+        ],
+        "",
+    );
+    assert!(
+        stderr.contains("/ln was redefined as an integer when the program reached line 3,"),
+        "{stderr}"
+    );
+    // `store` would replace the operator itself when nothing else defines
+    // the name; systemdict is read-only (#1337), so the run fails with
+    // invalidaccess and the finding says what was refused.
+    let (_ok, _out, stderr) = run(&["--lint", "-e", "\n/sub 5 store"], "");
+    assert!(
+        stderr.contains(
+            "/sub was stored as an integer into systemdict when the program reached line 2, which would replace the operator sub"
+        ),
+        "{stderr}"
+    );
+    assert!(stderr.contains("invalidaccess"), "{stderr}");
+    // A local dictionary that ended is a variable, not a shadow.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-e", "4 dict begin /stop 3 def end"], "");
+    assert!(ok && stderr.contains("lint: clean"), "{stderr}");
+    // A `run` file is named with its line.
+    let lib = tmp("shadow-lib.ps");
+    std::fs::write(&lib, "% lib\n\n/sub 7 def\n").expect("write lib");
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("shadow-lib.ps)"), "{stderr}");
+    // A def inside a procedure of a `run` file names its own line in that file (#1338).
+    let lib = tmp("shadow-lib-proc.ps");
+    std::fs::write(&lib, "% lib\n/f {\n  /sub 7 def\n} def\n\n\n\nf\n").expect("write lib");
+    let main = format!(
+        "1 2 add pop\n\n\n\n\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("/sub was redefined as an integer when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("shadow-lib-proc.ps)"), "{stderr}");
+}
+
+/// #1081: `[stack-leak]` names the line that left the oldest item, so a
+/// missing `def` in a loop is found without rereading the program.
+#[test]
+fn lint_names_the_line_a_stack_leak_started_on() {
+    let src = "0 1 9 {\n  /gq exch pop\n} for\nshowpage\n";
+    let (ok, _out, stderr) = run(&["--lint", "-"], src);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains("[stack-leak] 10 item(s) left on the operand stack at the end of the program: /gq /gq /gq /gq /gq (top 5 of 10 shown, topmost first); the oldest, /gq, was left when the program reached line 3"),
+        "{stderr}"
+    );
+}
+
+/// #1081: a leak made by a `run` file names the file and its line.
+#[test]
+fn lint_names_the_run_file_a_stack_leak_came_from() {
+    let lib = tmp("leak-lib.ps");
+    std::fs::write(&lib, "% lib\n\n42\n").expect("write lib");
+    // Forward slashes: a backslash in a PostScript string is an escape.
+    let main = format!(
+        "1 2 add pop\n({}) run\n",
+        lib.to_str().unwrap().replace('\\', "/")
+    );
+    let (_ok, _out, stderr) = run(&["--lint", "-"], &main);
+    assert!(
+        stderr.contains("the oldest, 42, was left when the program reached line 3 ("),
+        "{stderr}"
+    );
+    assert!(stderr.contains("leak-lib.ps)"), "{stderr}");
 }
 
 #[test]
@@ -1241,25 +1384,82 @@ fn the_wrote_report_is_not_on_stdout() {
     }
 }
 
+/// #1335: `common::collect` waits for a pipe's EOF with no fixed window. The
+/// old helper gave up 2 s after the child exited; here the EOF comes after 3 s
+/// and the drained bytes still arrive. No process timing is involved.
+#[test]
+fn a_pipe_that_reaches_eof_late_is_waited_for_not_timed() {
+    use std::time::{Duration, Instant};
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Taken before the sender starts, so no scheduling delay here can make the
+    // measured wait shorter than the sender's 3 s.
+    let started = Instant::now();
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        tx.send(b"late".to_vec()).unwrap();
+    });
+    let got = common::collect(&rx, &[], Duration::from_secs(60));
+    assert_eq!(got.as_deref(), Some(&b"late"[..]));
+    assert!(started.elapsed() >= Duration::from_secs(3));
+    sender.join().unwrap();
+}
+
+/// #1335: the one window that is left. A descendant seen alive before the
+/// child exited and still alive 2 s later is the runaway the check exists to
+/// catch (`tests/child_deadline.rs` runs the whole thing); `collect` gives up
+/// on it long before the hang guard.
+#[cfg(unix)]
+#[test]
+fn a_live_descendant_holding_the_pipe_is_given_up_on() {
+    use std::time::{Duration, Instant};
+    let mut sleeper = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn sleep");
+    let (_tx, rx) = std::sync::mpsc::channel::<Vec<u8>>(); // never sends
+    let started = Instant::now();
+    let got = common::collect(&rx, &[sleeper.id()], Duration::from_secs(60));
+    let waited = started.elapsed();
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+    assert_eq!(got, None, "gave up on the live descendant");
+    assert!(waited >= Duration::from_secs(2), "{waited:?}");
+    assert!(waited < Duration::from_secs(30), "{waited:?}");
+}
+
+/// A child whose stdout reader is already gone when it starts (#1294, #1201).
+///
+/// The read end is closed before `spawn`, so the child's first write finds no
+/// reader and fails with `EPIPE`, whatever the pipe's size and however fast the
+/// child runs. Dropping the read end after `spawn` raced the child instead: a
+/// child that wrote its output into the pipe's buffer first got no `EPIPE`. A
+/// REPL then waited on its open stdin until the deadline killed it (seen on
+/// Linux CI), and a short `--capabilities` exited 0 rather than 141 (seen with
+/// a delay injected between `spawn` and the drop).
+/// `child.stdout` is `None`, and stderr is piped for `common::wait_output`.
+#[cfg(unix)]
+fn spawn_with_closed_stdout(args: &[&str], stdin: Stdio) -> std::process::Child {
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    Command::new(BIN)
+        .args(args)
+        .stdin(stdin)
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat")
+}
+
 /// #1059: a reader that goes away (`| head`) is not a crash. The CLI's own
 /// stdout writes end quietly, and so does a program's `print`: no Rust panic,
 /// no `ioerror` report, a non-zero status, and the page still written.
 #[cfg(unix)]
 #[test]
 fn a_closed_stdout_ends_quietly() {
-    // Far more than a pipe holds, so the write cannot all land before the
-    // test closes its end.
-    let spawn = |args: &[&str]| {
-        let mut child = Command::new(BIN)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn pscat");
-        drop(child.stdout.take());
-        common::wait_output(child)
-    };
+    let spawn = |args: &[&str]| common::wait_output(spawn_with_closed_stdout(args, Stdio::null()));
     let out = spawn(&["--capabilities"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("panicked"), "{stderr}");
@@ -1320,22 +1520,11 @@ fn a_closed_stdout_ends_quietly() {
 /// #1059: a REPL whose stdout reader has gone stops at once, flushing as it
 /// leaves, instead of waiting on a stdin that stays open.
 ///
-/// The reader is gone before the child starts. Dropping it after `spawn`
-/// raced the child (seen on Linux CI, on main too): a child that wrote its
-/// banner and first prompt into the pipe's buffer before the test closed the
-/// read end got no `EPIPE`, and then waited on the open stdin until the
-/// deadline killed it.
+/// The reader is gone before the child starts (`spawn_with_closed_stdout`).
 #[cfg(unix)]
 #[test]
 fn a_repl_stops_when_its_stdout_reader_goes() {
-    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
-    drop(reader);
-    let mut child = Command::new(BIN)
-        .stdin(Stdio::piped())
-        .stdout(writer)
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn pscat");
+    let mut child = spawn_with_closed_stdout(&[], Stdio::piped());
     // Held open until the child has exited: it must not need the EOF.
     let stdin = child.stdin.take();
     let out = common::wait_output(child);
@@ -1345,24 +1534,81 @@ fn a_repl_stops_when_its_stdout_reader_goes() {
     assert_eq!(out.status.code(), Some(141), "{stderr}");
 }
 
+/// #1117: `pscat fonts list | head` is as quiet as the rest of the CLI: no
+/// panic, the SIGPIPE status. The reader is gone before the child starts, so
+/// the failed write is certain rather than a race.
+#[cfg(unix)]
+#[test]
+fn fonts_list_stops_quietly_when_its_stdout_reader_goes() {
+    let home = common::scratch_dir("pscat-cli-fonts-epipe");
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["fonts", "list"])
+        .env("PSCAT_HOME", &home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "the SIGPIPE status");
+}
+
+/// #1117: a sweep whose stdout reader has gone reports no `ioerror` for the
+/// frame that met it, as a plain render reports none, and still writes every
+/// frame's PNG.
+#[cfg(unix)]
+#[test]
+fn a_sweep_stops_quietly_when_its_stdout_reader_goes() {
+    let dir = common::scratch_dir("pscat-cli-sweep-epipe");
+    let png = dir.join("f.png");
+    let prog = dir.join("p.ps");
+    std::fs::write(&prog, "0 0 10 10 rectfill 1 1 200000 { = } for\n").unwrap();
+    let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    drop(reader);
+    let child = Command::new(BIN)
+        .args(["--page", "20x20", "--sweep", "X=1,2,3", "--png"])
+        .arg(&png)
+        .arg(&prog)
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pscat");
+    let out = common::wait_output(child);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("ioerror"), "{stderr}");
+    assert!(!stderr.contains("failed"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+    for n in 1..=3 {
+        let f = dir.join(format!("f-{n:03}.png"));
+        assert!(f.exists(), "{}: the frame is still written", f.display());
+    }
+}
+
 /// An `ioerror` the program raises later is still reported after it caught
 /// the one from a closed stdout: only the error that came from the failed
 /// write is silenced.
 #[cfg(unix)]
 #[test]
 fn only_the_error_from_the_closed_stdout_is_silenced() {
-    let mut child = Command::new(BIN)
-        .args([
+    let child = spawn_with_closed_stdout(
+        &[
             "--headless",
             "-e",
             "{ 1 1 200000 { = } for } stopped pop (%stdout) (w) file read",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn pscat");
-    drop(child.stdout.take());
+        ],
+        Stdio::null(),
+    );
     let out = common::wait_output(child);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("ioerror"), "the read's own error: {stderr}");

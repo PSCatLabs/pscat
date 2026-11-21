@@ -151,6 +151,7 @@ so check `describe_art_capabilities` before relying on a face.
 `describe_art_capabilities` returns the machine-readable inventory of what this
 build has (fonts, palettes, templates, procedures, native operators); prefer it
 over guessing a name from prose, this file included.
+<!-- cloud: drop "The whole inventory is over 300,000 characters" -->
 <!-- cloud: replace "## Where `(lib/...) run` finds a file" -->
 ## Where `(lib/...) run` finds a file
 

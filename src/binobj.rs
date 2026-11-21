@@ -55,10 +55,21 @@
 //! shares one array between many parents cannot multiply the input: it
 //! runs out of that budget (`syntaxerror`) long before memory does.
 //! Nesting beyond [`MAX_NESTING`] is `limitcheck`.
+//!
+//! Limits (#1123). A sequence of [`MAX_BYTES`] can decode to 8 million
+//! objects, which takes up to a second (names are interned), so the reader
+//! charges the interpreter's [`DecodeBudget`] as it goes: 8 bytes a slot and
+//! a byte a character, the way a decode filter does. The budget looks at the
+//! clock and the heap every 64 KiB and at the step cap every KiB, so
+//! `--max-time` and `--max-steps` stop a long decode inside it instead of
+//! after it. Cancellation needs nothing here: a render is cancelled by
+//! killing its process (`run_child` in `mcp_server.rs`), and there is no
+//! in-process interrupt flag.
 
 use std::collections::VecDeque;
 
 use crate::error::PsError;
+use crate::limits::DecodeBudget;
 use crate::object::{Object, PsArray, Value};
 
 /// Deepest nesting of arrays in a sequence, both written and read.
@@ -183,12 +194,16 @@ struct Reader<'a> {
     /// writer lays every string's characters out once, so the total can
     /// never legitimately exceed the body.
     chars_left: usize,
+    /// The limits to charge the work against (#1123); `None` charges nothing.
+    limits: Option<&'a DecodeBudget>,
 }
 
 /// Decode a whole sequence (header included) into its top-level objects.
-/// `immediate` resolves an immediately evaluated name.
+/// `immediate` resolves an immediately evaluated name. `budget` is charged
+/// for the work, so a time, step or memory limit stops a long decode.
 pub fn decode(
     bytes: &[u8],
+    budget: Option<&DecodeBudget>,
     immediate: &mut dyn FnMut(&str) -> Result<Object, PsError>,
 ) -> Result<Vec<Object>, PsError> {
     if bytes.len() < SHORT_HEADER {
@@ -205,6 +220,7 @@ pub fn decode(
         body,
         budget: body.len() / 8,
         chars_left: body.len(),
+        limits: budget,
     };
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
@@ -214,8 +230,18 @@ pub fn decode(
 }
 
 impl Reader<'_> {
+    /// Charge `n` bytes of work to the budget, if there is one (#1123).
+    #[inline]
+    fn charge(&self, n: usize) -> Result<(), PsError> {
+        match self.limits {
+            Some(b) => b.charge(n),
+            None => Ok(()),
+        }
+    }
+
     /// Characters at `off` (relative to the body), `len` of them.
     fn chars(&mut self, off: usize, len: usize) -> Result<&[u8], PsError> {
+        self.charge(len)?;
         self.chars_left = self
             .chars_left
             .checked_sub(len)
@@ -247,6 +273,7 @@ impl Reader<'_> {
             return Err(syntax("objects overlap or repeat"));
         }
         self.budget -= 1;
+        self.charge(8)?;
         let slot = at
             .checked_add(8)
             .and_then(|end| self.body.get(at..end))
@@ -286,6 +313,7 @@ impl Reader<'_> {
             value,
             executable: exec,
             readonly: false,
+            noaccess: false,
             packed: false,
         })
     }
@@ -467,7 +495,7 @@ mod tests {
     }
 
     fn dec(b: &[u8]) -> Vec<Object> {
-        decode(b, &mut |_| Err(PsError::Undefined("imm".into()))).unwrap()
+        decode(b, None, &mut |_| Err(PsError::Undefined("imm".into()))).unwrap()
     }
 
     #[test]
@@ -531,7 +559,10 @@ mod tests {
             vec![0x80],
         ];
         for c in cases {
-            assert!(decode(&c, &mut |_| Ok(Object::int(0))).is_err(), "{c:02x?}");
+            assert!(
+                decode(&c, None, &mut |_| Ok(Object::int(0))).is_err(),
+                "{c:02x?}"
+            );
         }
     }
 
@@ -539,7 +570,7 @@ mod tests {
     fn cycles_and_sharing_cannot_multiply_the_input() {
         // An array whose single element is itself (offset 0 is its slot).
         let b = [0x80, 1, 0, 12, 9, 0, 0, 1, 0, 0, 0, 0];
-        assert!(decode(&b, &mut |_| Ok(Object::int(0))).is_err());
+        assert!(decode(&b, None, &mut |_| Ok(Object::int(0))).is_err());
         // Two elements that both point at one array of two integers
         // (offset 24). The body holds 5 slots, and decoding would take 7.
         let mut b = vec![0x80, 1, 0, 44];
@@ -552,7 +583,7 @@ mod tests {
         ] {
             b.extend_from_slice(&slot);
         }
-        let err = decode(&b, &mut |_| Ok(Object::int(0))).unwrap_err();
+        let err = decode(&b, None, &mut |_| Ok(Object::int(0))).unwrap_err();
         assert!(err.to_string().contains("overlap"), "{err}");
     }
 
@@ -591,7 +622,7 @@ mod tests {
                 bytes.extend_from_slice(&(total as u16).to_le_bytes());
             }
             bytes.extend_from_slice(&body);
-            let _ = decode(&bytes, &mut |_| Ok(Object::int(0)));
+            let _ = decode(&bytes, None, &mut |_| Ok(Object::int(0)));
         }
     }
 
@@ -618,5 +649,67 @@ mod tests {
             )))),
             PsError::Typecheck
         );
+    }
+
+    /// A long-header sequence of `arrays` top-level arrays that all point at
+    /// one block of 65535 integers, padded to `total` bytes: `arrays` *
+    /// 65535 objects from a few hundred bytes of slots (#1123).
+    fn many_objects(arrays: usize, total: usize) -> Vec<u8> {
+        let block = 65_535usize;
+        let block_at = arrays * 8;
+        let mut v = vec![0x80, 0];
+        v.extend_from_slice(&(arrays as u16).to_be_bytes());
+        v.extend_from_slice(&(total as u32).to_be_bytes());
+        for _ in 0..arrays {
+            v.extend_from_slice(&[9, 0, 0xff, 0xff]);
+            v.extend_from_slice(&(block_at as u32).to_be_bytes());
+        }
+        for i in 0..block {
+            v.extend_from_slice(&[1, 0, 0, 0]);
+            v.extend_from_slice(&(i as u32).to_be_bytes());
+        }
+        v.resize(total, 0);
+        v
+    }
+
+    fn probed(probe: crate::limits::LimitProbe) -> DecodeBudget {
+        let b = DecodeBudget::default();
+        b.reset(probe);
+        b
+    }
+
+    #[test]
+    fn a_long_decode_stops_on_the_step_cap_and_the_clock() {
+        let seq = many_objects(8, 5 << 20);
+        let none = crate::limits::LimitProbe::NONE;
+        let imm = |_: &str| Ok(Object::int(0));
+        // The fixture is sound: unlimited, it decodes to 8 arrays of 65535.
+        let all = decode(&seq, Some(&probed(none)), &mut |n| imm(n)).unwrap();
+        assert_eq!(all.len(), 8);
+        // 8 bytes a slot, a step a KiB: 524288 slots are 4096 steps.
+        let few = crate::limits::LimitProbe {
+            steps_left: Some(100),
+            ..none
+        };
+        assert_eq!(
+            decode(&seq, Some(&probed(few)), &mut |n| imm(n)).unwrap_err(),
+            PsError::StepsExceeded
+        );
+        let plenty = crate::limits::LimitProbe {
+            steps_left: Some(1_000_000),
+            ..none
+        };
+        assert!(decode(&seq, Some(&probed(plenty)), &mut |n| imm(n)).is_ok());
+        // A deadline already past is noticed inside the decode (every 64 KiB).
+        let late = crate::limits::LimitProbe {
+            deadline_ns: Some(0),
+            ..none
+        };
+        assert_eq!(
+            decode(&seq, Some(&probed(late)), &mut |n| imm(n)).unwrap_err(),
+            PsError::TimeExceeded
+        );
+        // No budget, no charge.
+        assert_eq!(decode(&seq, None, &mut |n| imm(n)).unwrap().len(), 8);
     }
 }

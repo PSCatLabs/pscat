@@ -1,4 +1,5 @@
-//! The shared Ghostscript skip rule (issue #985): `common::gs_decision`.
+//! The shared skip rules for Ghostscript (issue #985, `common::gs_decision`) and
+//! poppler (issue #1206, `common::poppler_decision`).
 
 mod common;
 
@@ -37,4 +38,21 @@ fn log_keys_keep_same_named_tests_in_different_suites_apart() {
         "my-suite::t"
     );
     assert_eq!(common::gs_log_key(None, "t"), "(unknown suite)::t");
+}
+
+#[test]
+fn poppler_present_runs_the_check_whether_or_not_it_is_required() {
+    assert_eq!(common::poppler_decision(true, false), Ok(true));
+    assert_eq!(common::poppler_decision(true, true), Ok(true));
+}
+
+#[test]
+fn poppler_missing_skips_when_not_required() {
+    assert_eq!(common::poppler_decision(false, false), Ok(false));
+}
+
+#[test]
+fn poppler_missing_is_an_error_when_required() {
+    let why = common::poppler_decision(false, true).expect_err("required poppler must not skip");
+    assert!(why.contains("PSCAT_REQUIRE_POPPLER"), "{why}");
 }

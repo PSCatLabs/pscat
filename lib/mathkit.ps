@@ -46,6 +46,9 @@
 %   \vec \hat \bar \dot \ddot \tilde \overline \underline \boxed
 %   \text{...} \mathrm{...}
 %   \, \: \; \! \  \quad \qquad ~  spacing; plain spaces are ignored
+%   \$ \% \& \# \_ \{ \}       escaped literals: the character itself, as in TeX
+%                                 (in \text{} too). A bare _ & # in \text{} is refused,
+%                                 as in TeX
 %   Greek \alpha ... \Omega, and Unicode Greek and math symbols
 %   typed directly (α ∞ ≤ ∂ ∇ ∑ ...).
 %   \equiv \sim \simeq \subseteq \supset \supseteq \mapsto \perp
@@ -830,15 +833,23 @@
       dup 123 eq { pop /braceleft /open mksymatom /none } {
         dup 125 eq { pop /braceright /close mksymatom /none } {
           dup 124 eq { pop /dblbar /ord mksymatom /none } {
-            % the whole character, so a multi-byte one is one problem
-            dup 128 ge { /mkpos mkpos 1 sub mkset mkutf8str } { 1 string dup 0 4 -1 roll put } ifelse
-            (mk-unsupported-command:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover /none
+            mkescsym 1 index known { mkescsym exch get /ord mksymatom /none } {
+              % the whole character, so a multi-byte one is one problem
+              dup 128 ge { /mkpos mkpos 1 sub mkset mkutf8str } { 1 string dup 0 4 -1 roll put } ifelse
+              (mk-unsupported-command:\\) exch dup length 1 add mkpos exch sub mkpos mkrecover /none
+            } ifelse
           } ifelse
         } ifelse
       } ifelse
     } ifelse
   } ifelse
 } bind def
+
+% TeX's escaped literals \$ \% \& \# \_ -> the glyph each draws (issue #1160).
+% Reached only by the backslash, in math and in \text: a bare one is the
+% delimiter, comment, alignment or subscript mark it is in TeX, or an error.
+% @internal
+/mkescsym << 36 /dollar 37 /percent 38 /ampersand 35 /numbersign 95 /underscore >> def
 
 % string -> term   a control word
 % @internal
@@ -1055,8 +1066,10 @@
   mkadv mkpos dup /mkrawstart exch mkset 1
   {
     mkpeek dup 0 lt { pop mk-missing-closing-brace } if
-    dup 123 eq { pop 1 add } { 125 eq { 1 sub } if } ifelse
-    dup 0 eq { pop exit } if
+    dup 92 eq { pop mkadv mkpeek 0 lt { mk-missing-closing-brace } if } {
+      dup 123 eq { pop 1 add } { 125 eq { 1 sub } if } ifelse
+      dup 0 eq { pop exit } if
+    } ifelse
     mkadv
   } loop
   mksrc exch dup mkpos exch sub getinterval
@@ -1103,6 +1116,10 @@
 % @internal
 /mktxcmd {
   /mktxj mkti 1 add mkset
+  % \$ \% \& \# \_ \{ \}: the character itself, as in TeX text (issue #1160)
+  mktxj mkts length lt { mktxesc mkts mktxj get known } { false } ifelse {
+    mktxesc mkts mktxj get get /mkti mkti 2 add def
+  } {
   mktxj mkts length lt {
     mkts mktxj get dup mkisletter {
       pop {
@@ -1119,7 +1136,13 @@
   (mk-unsupported-command:\\) mkts mkti 1 add mktxj mkti 1 add sub getinterval
   mkrawstart mkti add mkrawstart mktxj add mkrecover
   /mkti mktxj def
+  } ifelse
 } bind def
+
+% The control symbols \text sets as their character -> glyph (issue #1160)
+% @internal
+/mktxesc << 36 /dollar 37 /percent 38 /ampersand 35 /numbersign 95 /underscore
+            123 /braceleft 125 /braceright >> def
 
 % (cmd) -> -   \limits and \nolimits change the operator before them, or
 % the brace: \overbrace{...}\nolimits^{label} sets its label beside it
@@ -2673,7 +2696,7 @@
 %   (a letter as a delimiter) mustguard
 %   { (x_{max}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:max
 %   (the letters of an operator name) mustguard
-%   { (x_{\\text{max}} + \\$) 0 0 << >> mkpath } /mk-unsupported-command:\$ (\$) mustguard
+%   { (x_{\\text{max}} + \\@) 0 0 << >> mkpath } /mk-unsupported-command:\@ (\@) mustguard
 %   { (\\mathbb{x}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
 %   (a lowercase letter in blackboard bold) mustguard
 %   { (\\mathcal{2}) 0 0 << >> mkpath } /mk-mathcal-takes-capital-letters:2
@@ -2920,6 +2943,39 @@
 %   pathbbox pop pop exch pop
 %   gt (a text star sits higher than the math star) mustbe
 %   newpath
+%%EndSelfTest
+%
+%%SelfTest: escaped-literals
+%   % issue #1160: \\$ \\% \\& \\# \\_ are TeX's control symbols for the five
+%   % characters it reserves: each is the character, an ordinary atom, in
+%   % math and in \\text, \\mathrm and \\operatorname. So are \\{ and \\} in text.
+%   /mkt-w { << /Size 100 /Irregular 0 >> mkmetrics /Width get } def
+%   [ (\\$) (\\%) (\\&) (\\#) (\\_) ] true exch {
+%     /mkt-s exch def
+%     mkt-s mkt-w 0 gt and
+%     (x) mkt-s mkcat mkt-w (x) mkt-w gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%     newpath (\\text{) mkt-s mkcat (}) mkcat 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%     newpath (\\mathrm{) mkt-s mkcat (}) mkcat 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%     newpath (\\operatorname{) mkt-s mkcat (}) mkcat 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (each escaped literal lays out and draws, in math and in text) mustbe
+%   % ordinary atoms: no relation or binary-operator space around them
+%   (R\\&D) mkt-w (RD) mkt-w gt (an ampersand is an atom, not an alignment mark) mustbe
+%   (50\\%) mkt-w (50) mkt-w gt (a percent sign has a width) mustbe
+%   % the underscore hangs below the baseline
+%   newpath (\\_) 0 0 << /Size 100 /Irregular 0 >> mkpath
+%   pathbbox pop pop exch pop 0 lt (the underscore is under the baseline) mustbe
+%   newpath
+%   % a bare _ & # in \\text is still what TeX makes of it: an error
+%   { (\\text{a_b}) mkt-w pop } /mk-unsupported-character:_ (a bare _ in text) mustguard
+%   { (\\text{R&D}) mkt-w pop } /mk-unsupported-character:& (a bare & in text) mustguard
+%   { (\\text{#1}) mkt-w pop } /mk-unsupported-character:# (a bare # in text) mustguard
+%   % \\{ \\} in text, and an escaped brace does not end the argument
+%   (\\text{a\\{b\\}c}) mkt-w 0 gt (braces in text) mustbe
+%   (\\text{\\}}) mkt-w 0 gt (a lone escaped closing brace) mustbe
+%   (\\text{\\{}) mkt-w 0 gt (a lone escaped opening brace) mustbe
+%   { (\\text{ab\\}) mkt-w pop } /mk-missing-closing-brace (a trailing backslash) mustguard
 %%EndSelfTest
 %
 %%SelfTest: delimiters-typed-as-unicode

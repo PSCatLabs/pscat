@@ -141,7 +141,11 @@ and does not have to match pscat's version of one.
   error back into a TeX error with `driver.explain(interp.captured_stdout(),
   &err)` (call `interp.capture_stdout()` before the run): it carries every
   unsupported command or character in the formula, each with its place.
-  `chalkboard::explain(&err)` alone names only the first, with no place. A
+  `chalkboard::explain(&err)` alone names only the first, with no place. The
+  check pass reports on the program's standard output, so to show what the
+  program printed to a user, give `chalkboard::user_output(printed)` the same
+  bytes: it returns them without the check lines (`CKPROBLEM...`), byte for
+  byte otherwise. A
   `ChalkError` has a stable `code()`, the `token()` a TeX error named, and
   `message()`, which names a bad config key by its path
   (`layout.width must be ...`).

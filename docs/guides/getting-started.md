@@ -121,20 +121,27 @@ More on the less obvious ones:
   font packs, Type 3 and Type 1 fonts from a program) and `charpath` text
   stay outlines. PNG and PDF output are not affected
   (`notes/1119-svg-text.md`).
-- **PDF text (`--pdf-text`).** By default a PDF draws every glyph as its
-  outline too, so its text cannot be selected, searched or extracted
-  (`pdftotext` finds nothing). With `--pdf-text`, `show` text becomes real
-  PDF text in an embedded subset of the font pscat drew it with: the
-  standard 35, the font catalog and font packs, Korean, Japanese and Thai
-  included. It looks the same as the outlines (the glyphs are the same
-  shapes at the same positions, `ashow`/`kshow`/`xyshow` spacing
-  included), copies and searches as text, and a text page is far smaller
-  (a page of Times went from 741 KB to 8 KB). Type 1 and Type 3 fonts
-  from a program, `charpath` text, Symbol and Dingbats glyphs, and fonts
-  whose licence bits forbid embedding stay outlines. PNG and SVG output
-  are not affected (`notes/1193-pdf-text.md`). The browser build and npm
-  package have it too: `{ pdf: true, pdfText: true }`, the same bytes as the
-  command line (`notes/1205-pdf-text-wasm.md`).
+- **PDF text, and `--text-as-paths`.** A PDF writes `show` text as real
+  PDF text in an embedded subset of the font pscat drew it with, so it can
+  be selected, searched, copied and read by a screen reader (`pdftotext`
+  extracts it). That covers the standard 35, the font catalog and font
+  packs, Korean, Japanese and Thai included. It looks the same as outlines
+  would (the glyphs are the same shapes at the same positions,
+  `ashow`/`kshow`/`xyshow` spacing included), and a text page is far
+  smaller (a page of Times is 8 KB as text, 741 KB as outlines). Symbol's
+  Greek letters and maths signs and ZapfDingbats' dingbats extract as their
+  Unicode characters (`notes/1026-pdf-text-symbol-dingbats.md`). Type 1 and
+  Type 3 fonts from a program, `charpath` text, the few Symbol and Dingbats
+  glyphs with no Unicode value (bracket, brace and radical pieces, arrow
+  extenders, the ornamental brackets), and fonts whose licence bits forbid
+  embedding stay outlines. `--text-as-paths` draws every glyph as its
+  outline instead, with no fonts in the file, as pscat did before 0.7.1.
+  `--pdf-text`, which turned text on before it was the default, is still
+  accepted and changes nothing. PNG and SVG output are not affected
+  (`notes/1193-pdf-text.md`, `notes/1026-pdf-text-default.md`). The
+  browser build and npm package do the same: `{ pdf: true }` writes text,
+  `{ pdf: true, pdfText: false }` outlines, the same bytes as the command
+  line (`notes/1205-pdf-text-wasm.md`).
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
@@ -171,15 +178,38 @@ More on the less obvious ones:
   (`'96,9+9@#222'`: a 96 dpi cell, then the 9 dpi render over its dark-mat
   copy), so small cells stop taking a wide column each. `--cols N` wraps a long
   row onto more lines, for sweeps and sheets that would pass 8000 px. Quote a
-  `--dpi` list that has `#` or `+`. `pscat sheet --help` has the rest.
+  `--dpi` list that has `#` or `+`. A sweep's captions can be words instead of
+  `seed=7` (#1000): `--captions '(a) before,(b) after'` gives one per value, and
+  `--no-values` leaves the value out for cells that already say what they are.
+  `pscat sheet --help` has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
-  2 and 3, with exponential and stitching functions, so multi-stop ramps
+  2 and 3, with exponential, stitching and sampled functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
   `<linearGradient>`/`<radialGradient>`, and PDF uses real PDF shadings
-  (`sh` with a `/Shading` resource). `/Extend [start end]` says whether each
+  (`sh` with a `/Shading` resource). Function-based shadings (`ShadingType`
+  1: colour from a sampled function of x and y over a `/Domain` rectangle)
+  paint too; SVG has no equivalent, so it embeds them as an image. Mesh
+  shadings paint too: Gouraud triangle meshes (types 4 and 5) and Coons and
+  tensor-product patch meshes (types 6 and 7), from an array, string or file
+  `/DataSource`. SVG embeds them as an image, and PDF writes a real mesh
+  shading. `/Extend [start end]` says whether each
   end paints on past its point or circle; without the key neither does, as in
   Ghostscript. [artkit](artkit.md) has helpers that build the shading
   dictionaries for you; `examples/gradients.ps` is the specimen sheet.
+- **Patterns.** `makepattern` and `setpattern` paint with tiling patterns
+  (PatternType 1): hatching, dots, tiled motifs, coloured or uncoloured
+  (`[/Pattern /DeviceRGB] setcolorspace r g b pattern setcolor` paints one
+  pattern in any colour). `fill`, `stroke`, text and `imagemask` all take
+  them, and the tiles are seamless. A pattern can paint with another
+  pattern inside its `PaintProc` (a hatch inside a motif) and lands where
+  Ghostscript puts it. SVG output gets a real `<pattern>` and PDF a real
+  `/Pattern` resource. `examples/patterns.ps` is the specimen sheet.
+  Shading patterns (PatternType 2) make a shading the current colour: a
+  gradient that fills text, strokes or any path, fixed where `makepattern`
+  made it, with the shading's `/Background` painted where the gradient does
+  not reach. SVG gets the gradient (or a `<pattern>` around it) and PDF a
+  real `/PatternType 2` pattern. Mesh shadings work as patterns too.
+  `examples/shading_patterns.ps` is the specimen sheet.
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh
@@ -515,9 +545,68 @@ same variables.
 finds it from any directory. `$PSCAT_LIB` takes one directory, not a path
 list. The search follows the read roots: with `--read-root` (which `pscat-mcp`
 passes to every render) a `lib/` file is found only inside a read root, the
-per-user data directory and `$PSCAT_HOME` being among the MCP server's. A
-program cannot ask for the name of the file it is running, so a library that
-loads sibling files needs its directory passed in.
+per-user data directory and `$PSCAT_HOME` being among the MCP server's.
+
+`pscat lib install` puts a library there for you:
+
+```
+pscat lib install path/to/sheet_music            # copies it to lib/sheet_music/
+pscat lib install path/to/sheet_music --name sm  # or under a name of your own
+pscat lib list                                   # what is installed, and where
+pscat lib remove sheet_music                     # uninstall it again
+```
+
+`install` copies the files of DIR (not dotfiles or symbolic links) into
+`lib/NAME/` in the per-user data directory, or in `$PSCAT_HOME` when that is
+set (the same choice `pscat fonts install` makes), and prints where they went.
+`(lib/sheet_music/engrave.ps) run` then works from any directory, with the
+command line and with `pscat mcp`, whose read roots already include both
+places. NAME defaults to DIR's own name and is letters, digits, `-` and `_`.
+Running `install` again replaces the package: the new copy is built beside
+the old one and swapped in, so a file that DIR no longer has is removed
+(the command says which), never merged. It refuses a directory it did not
+create. It also refuses any NAME that matches a library built into pscat
+(`artkit`, `qr`, `fonts`, ...; case does not matter), because a file in the
+per-user `lib/` ranks before the built-in copy and would replace it for
+every program and for the MCP server; no file of a package may land on a
+built-in name either. Nothing about the search order or the read roots
+changes.
+
+`pscat lib remove NAME` deletes `lib/NAME/` again and prints how many files
+went and from where. It removes only a directory `install` made (one holding
+the `.pscat-lib` marker); a directory you made by hand under `lib/` is refused,
+and `--force` deletes it anyway (`pscat lib list` marks those "not made by pscat
+lib install"). A file or a symbolic link named NAME is never removed. If it is
+interrupted and leaves part of a directory, `pscat lib remove NAME --force`
+finishes the job.
+
+**A library that loads its own files.** `currentfilename`
+(`- currentfilename string`) returns the name the running file was opened
+with, exactly as it was given: `lib/sheet_music/main.ps` for a library, the
+path as written to `run`, the file argument as written on the command line.
+It is the file an error report's `Line:` names. With no named file it raises
+`undefined`: under `-e`, on stdin (`-`), in the REPL, and in the program an
+MCP tool call sends. So a library can find the files beside it:
+
+```postscript partial
+% dirname: the path up to and including the last "/" or "\" (empty if none).
+/dirname { dup length { dup 0 eq { pop pop () exit } if
+    1 sub 2 copy get dup 47 eq exch 92 eq or { 1 add 0 exch getinterval exit } if } loop } def
+/concat { /b exch def /a exch def
+    a length b length add string dup 0 a putinterval dup a length b putinterval } def
+
+% At the top level of the library file, while it is being loaded:
+/mylib-dir currentfilename dirname def
+mylib-dir (engrave.ps) concat run        % lib/mylib/engrave.ps
+```
+
+The name is exactly as it was given, so on Windows it may hold backslashes
+(`vendor\pkg\main.ps`); `dirname` above splits on both separators. Read the
+name while the file loads, as above: a procedure that calls
+`currentfilename` later reports the file running when it is called, which is
+its caller's. `currentfilename` is a pscat extension, not a PostScript
+operator, so Ghostscript has no such name; guard code that must run in both
+with `systemdict /currentfilename known`.
 
 ## Error reports
 

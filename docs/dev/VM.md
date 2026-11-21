@@ -142,6 +142,12 @@ level) rather than in `SaveRecord`. `restore` follows gs, not the PLRM's
 global now AND was global at every save the restore discarded. `vmstatus`
 and `gsave`/`grestore` are unaffected.
 
+`globaldict` and `gcheck` (#1159): `globaldict` is a dictionary between systemdict
+and userdict on the dictionary stack that `restore` never rolls back (`journal_dict` skips it, as
+gs keeps it whichever mode the `save` was made in). `gcheck` is true for
+simple objects, `systemdict` and `globaldict`, false for every other
+composite; gs also says true for a composite made while the mode was global.
+
 ## Deliberate deviations (all safe under Rc)
 
 - **No invalidrestore stack scan.** gs errors when the operand/dict/

@@ -124,7 +124,8 @@ Which tool to pick:
   to flattening against white and overlaps stop mixing, so verify real
   alpha output with `pscat --pdf`, not `gs file.ps`. `pkwash` multiplies
   each layer's `/Alpha` by the caller's `setalpha`, so
-  `gsave 0.6 setalpha ... pkwash grestore` fades a wash. `pkpaper` is a
+  `gsave 0.6 setalpha ... pkwash grestore` fades a wash, and `pkpaper`
+  does the same for its ground and grain. `pkpaper` is a
   watercolor ground only; for paper, canvas or print surfaces in
   general use `lib/surfacekit.ps`.
 

@@ -130,9 +130,10 @@ newpath 40 60 moveto 300 80 lineto
   `/Strength`) goes to `dcchalk`. `/Width` defaults to 0.048 × `/Size`.
 - **`dcleader`** (`(left) (right) x1 x2 y opts`) is a menu, price-list or
   contents row. The left string starts at x1 and the right one ends at
-  x2, with a dotted leader of chalk dots between them. The dots are
-  thinner and fainter than the lettering, and `/Leader << ... >>` styles
-  them. They sit on whole multiples of `/Pitch`, so stacked rows line
+  x2, with a dotted leader of chalk dots between them, clear of both
+  strings by `/Gap` (half the size by default). The dots are thinner than
+  the lettering and a little brighter, so they stay visible over a
+  smudge, and `/Leader << ... >>` styles them. They sit on whole multiples of `/Pitch`, so stacked rows line
   their dots up, as typeset leaders do.
 
 A sign's wood frame, nails and doodles are part of the piece itself, so
@@ -245,6 +246,8 @@ skeletons with TeX's box model. The subset covers:
   `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
+- the escaped literals `\$ \% \& \# \_ \{ \}`, each the character itself as in
+  TeX (inside `\text{}` too; a bare `_ # &` there is refused, as in TeX);
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
@@ -358,7 +361,7 @@ pscat chalk: 4 problems in the LaTeX (line:column):
 (`pscat chalk --help` lists the supported subset)
 ```
 
-`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; accent
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|`` and the literals above; accent
 commands (`\"o`) and quotes inside it are not drawn, and a letter the board
 hand lacks is reported (`pscat chalk --help` says so).
 
@@ -371,7 +374,7 @@ the generated program instead of rendering it.
 
 The config is JSON. Every key is optional and an unknown key is an error;
 flags (`--seed`, `--size`, `--irregular`, `--color`, `--width`,
-`--height`, `--dpi`, `--no-board`) override it, and `--json '{...}'` takes it
+`--height`, `--dpi`, `--no-board`, `--hand`, `--hand-amount`) override it, and `--json '{...}'` takes it
 inline.
 
 ```json
@@ -379,7 +382,7 @@ inline.
   "layout": {"size": 64, "irregular": 1, "align": "center", "margin": 40,
              "width": 800, "height": 400, "dpi": 144},
   "chalk":  {"color": "white", "strength": 0.55, "pressure": 0.68,
-             "tilt": 0, "dust": 0.5},
+             "tilt": 0, "dust": 0.5, "hand": 0},
   "board":  {"tone": "slate", "haze": 0.4, "ghosting": 0.4,
              "swipes": 6, "wipes": 2, "smudges": 3, "ledge": 18},
   "seed": 1
@@ -401,6 +404,7 @@ inline.
 | `chalk.pressure` | 0.68 (0.34 with no board) | drychalk's `/Touch`: how much of the tooth catches |
 | `chalk.tilt` | 0 | degrees; toward 90 the stick lies on its side |
 | `chalk.dust` | 0.5 | loose dust beside each stroke |
+| `chalk.hand` | 0 | drychalk's `/Hand`, 0..1: how freehand the strokes are. 0 follows every stroke exactly; toward 1 a long stroke (a fraction bar, a radical's roof, a bracket, an integral) drifts to either side and runs a little past its ends. Lettering moves little, because the drift fades in over the first 44 stroke widths. `pscat chalk --hand` sets 1, `--hand-amount A` any amount; `chalkboard_math` takes `hand`. Not the top-level `hand` below |
 | `chalk.width` | 0.048 × size | stroke width in points |
 | `board.tone` | `slate` | `slate`, `greenboard`, or `[r, g, b]` |
 | `board.haze` | 0.4 | the dust film, 0 (freshly washed) to 1 |
@@ -409,7 +413,7 @@ inline.
 | `board.ledge` | 18 | the dusty band along the bottom, in points |
 | `board` | | `false` for chalk alone on a transparent page |
 | `seed` | 1 | the layout, chalk and board all follow it |
-| `hand` | `strokeglyphs` | reserved: the only hand there is |
+| `hand` | `strokeglyphs` | reserved: the lettering face, the only one there is (the freehand amount is `chalk.hand`) |
 
 The generator is `pscat::chalk` (`src/chalk.rs`), plain Rust with no file or
 environment access, so other front ends share it: `chalk::render(latex,

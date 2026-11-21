@@ -789,7 +789,16 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             _ => ShowMode::Width,
         };
         let pen = DevPoint { x: 8.0, y: 40.0 };
-        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen, None);
+        paint_resolved_glyph(
+            gfx,
+            face,
+            fm,
+            Some(GlyphId(g)),
+            &mode,
+            pen,
+            None,
+            GlyphId(0),
+        );
     }
     // Names the encodings resolve, and code points through the cmap.
     for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
@@ -802,6 +811,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             &ShowMode::Charpath,
             DevPoint { x: 8.0, y: 40.0 },
             None,
+            GlyphId(0),
         );
     }
     for c in [
@@ -823,6 +833,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
                 &ShowMode::Paint,
                 DevPoint { x: 8.0, y: 40.0 },
                 None,
+                GlyphId(0),
             );
         }
     }
@@ -843,6 +854,28 @@ pub(crate) fn is_unicode_font(fid: i64) -> bool {
         .unwrap()
         .get(idx - BUILTINS.len())
         .is_some_and(|c| matches!(c.encoding, CatalogEncoding::Unicode))
+}
+
+/// The character a Symbol or ZapfDingbats glyph name (`alpha`,
+/// `summation`, `a12` ...) stands for, when the face is the Symbol or
+/// Dingbats catalog face and PDF text is being written (#1026). It comes
+/// before `name_to_char`, which reads `mu` as the Latin-1 micro sign: in
+/// Symbol it is the Greek letter. Only the text a PDF reader extracts
+/// uses it: SVG text never takes these faces (`textrun::standard_face`),
+/// and the glyph itself is still found by its name in the face. Asked
+/// only with `--pdf-text` on, so other output does not pay for the
+/// catalog lock per glyph.
+fn symbolic_text_char(gfx: &Gfx, fid: i64, name: &str) -> Option<char> {
+    if !gfx.pdf_text_wanted() {
+        return None;
+    }
+    let idx = usize::try_from(fid).ok()?.checked_sub(BUILTINS.len())?;
+    let encoding = CATALOG.read().ok()?.get(idx)?.encoding;
+    match encoding {
+        CatalogEncoding::Symbol => encodings::symbol_name_to_char(name),
+        CatalogEncoding::Dingbats => encodings::dingbat_name_to_char(name),
+        CatalogEncoding::Standard | CatalogEncoding::Unicode => None,
+    }
 }
 
 /// Whether a Type 3 font dict opted into Unicode-mode `BuildChar` — the
@@ -1377,6 +1410,40 @@ impl ttf_parser::OutlineBuilder for PathSink {
     }
 }
 
+/// One outline walk feeding the device path and an embedded charstring
+/// (#1026).
+struct Tee<'a> {
+    sink: &'a mut PathSink,
+    cs: &'a mut crate::pdf_font::Charstring,
+}
+
+impl ttf_parser::OutlineBuilder for Tee<'_> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.sink.move_to(x, y);
+        self.cs.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.sink.line_to(x, y);
+        self.cs.line_to(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.sink.quad_to(x1, y1, x, y);
+        self.cs.quad_to(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.sink.curve_to(x1, y1, x2, y2, x, y);
+        self.cs.curve_to(x1, y1, x2, y2, x, y);
+    }
+
+    fn close(&mut self) {
+        self.sink.close();
+        self.cs.close();
+    }
+}
+
 /// Glyph name → glyph id: the face's own name table first (Liberation
 /// carries full `post` names), then the Adobe-glyph-name → Unicode →
 /// `cmap` fallback.
@@ -1441,6 +1508,10 @@ fn encoding_name(fs: &FontState, byte: u8) -> crate::name::PsName {
 /// was reached through a name that has one; with SVG text output on
 /// (#1119) a glyph of a standard face is recorded as that character
 /// instead of its outline (`crate::textrun`).
+///
+/// `missing` is the glyph whose advance a missing glyph (`gid` is `None`)
+/// takes: `.notdef` (glyph 0) for most faces, see [`missing_glyph`].
+#[allow(clippy::too_many_arguments)]
 fn paint_resolved_glyph(
     gfx: &mut Gfx,
     face: &Face,
@@ -1449,7 +1520,40 @@ fn paint_resolved_glyph(
     mode: &ShowMode,
     pen: DevPoint,
     text: Option<(i64, char)>,
+    missing: GlyphId,
 ) -> (f64, f64) {
+    // No limit to exceed, so it cannot fail.
+    paint_resolved_glyph_limited(
+        gfx,
+        face,
+        fm,
+        gid,
+        mode,
+        pen,
+        text,
+        missing,
+        &crate::limits::LimitProbe::NONE,
+        &mut 0,
+    )
+    .unwrap_or((0.0, 0.0))
+}
+
+/// [`paint_resolved_glyph`] under the limits (#1332): `probe` is looked at
+/// as the glyph is painted and its work (the rasteriser's and a pattern
+/// layout's) is added to `work`, for the show to charge.
+#[allow(clippy::too_many_arguments)]
+fn paint_resolved_glyph_limited(
+    gfx: &mut Gfx,
+    face: &Face,
+    fm: [f64; 6],
+    gid: Option<GlyphId>,
+    mode: &ShowMode,
+    pen: DevPoint,
+    text: Option<(i64, char)>,
+    missing: GlyphId,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
+) -> Result<(f64, f64), PsError> {
     let k = 1000.0 / f64::from(face.units_per_em());
     // Glyph-space → user-space linear part (FontMatrix over 1000-unit
     // glyph space, with the em normalization folded in).
@@ -1476,7 +1580,6 @@ fn paint_resolved_glyph(
             m,
             cur: (0.0, 0.0),
         };
-        face.outline_glyph(gid, &mut sink);
         let as_text = match (mode, text) {
             (ShowMode::Paint, Some((fid, ch))) => {
                 let pdf = gfx.pdf_text_wanted();
@@ -1484,14 +1587,39 @@ fn paint_resolved_glyph(
             }
             _ => None,
         };
+        // A glyph the PDF font does not hold yet gets its embedded
+        // charstring from this same outline walk, so the outline is walked
+        // once, here, under the limits; the PDF writer never walks one
+        // (#1026). The builder holds its whole 64 KiB budget, so the
+        // memory limit is asked first, before anything is painted.
+        let mut cs = match &as_text {
+            Some(g) if gfx.pdf_would_build(g) => {
+                probe.check_alloc(crate::pdf_font::CHARSTRING_BUDGET)?;
+                Some(crate::pdf_font::Charstring::for_face(face))
+            }
+            _ => None,
+        };
+        let drawn = match cs.as_mut() {
+            Some(cs) => face
+                .outline_glyph(
+                    gid,
+                    &mut Tee {
+                        sink: &mut sink,
+                        cs,
+                    },
+                )
+                .is_some(),
+            None => face.outline_glyph(gid, &mut sink).is_some(),
+        };
+        let built = cs.map_or(crate::pdf_font::Built::No, |cs| cs.built(drawn));
         if let Some(g) = as_text {
             // Spaces included: an empty outline still places a character,
             // which is what keeps the words apart when the text is copied.
             // `paint_glyph` decides per recorder whether it takes the text.
-            gfx.paint_glyph(&sink.path, Some(&g));
+            gfx.paint_glyph(&sink.path, Some(&g), built, probe, work)?;
         } else if !sink.path.is_empty() {
             match mode {
-                ShowMode::Paint => gfx.fill_path_direct(&sink.path),
+                ShowMode::Paint => gfx.fill_path_direct(&sink.path, probe, work)?,
                 ShowMode::Charpath => gfx.append_path(&sink.path),
                 ShowMode::Width => unreachable!("checked above"),
             }
@@ -1499,14 +1627,15 @@ fn paint_resolved_glyph(
     }
 
     // Missing glyphs still advance — by .notdef's width, like a real
-    // interpreter showing an unencoded character. Width is in raw glyph
-    // units; `g` already carries the em normalization.
+    // interpreter showing an unencoded character (`missing` says whose
+    // width stands for it). Width is in raw glyph units; `g` already
+    // carries the em normalization.
     let w = f64::from(
         gid.and_then(|g| advance_of(face, g))
-            .or_else(|| advance_of(face, GlyphId(0)))
+            .or_else(|| advance_of(face, missing))
             .unwrap_or(0),
     );
-    (g[0] * w, g[1] * w)
+    Ok((g[0] * w, g[1] * w))
 }
 
 /// The text form of a glyph (#1119, #1193). Whether a recorder takes it
@@ -1569,6 +1698,29 @@ pub(crate) fn embed_face(fid: i64) -> Option<(&'static Face<'static>, String)> {
     Some((face, name))
 }
 
+/// The glyph whose advance a missing glyph takes on face `fid` (#1115).
+/// Ghostscript's URW faces give `.notdef` the width of a space (278 for
+/// Helvetica, 250 for Times, 600 for Courier, 250 for Palatino, ...), where
+/// the faces that stand in for them have a wider `.notdef` box (Liberation
+/// 750 and 778, TeX Gyre 500 and 280). So a missing glyph on one of the
+/// standard 35 (`BUILTINS` and [`EMBEDDED`]) takes the `space` advance
+/// instead. Every other face (user and pack fonts) keeps its own `.notdef`.
+fn missing_glyph(face: &Face, fid: i64) -> GlyphId {
+    let standard = match usize::try_from(fid) {
+        Ok(i) if i < BUILTINS.len() => true,
+        Ok(i) => CATALOG
+            .read()
+            .unwrap()
+            .get(i - BUILTINS.len())
+            .is_some_and(|c| EMBEDDED.iter().any(|(k, _)| k.eq_ignore_ascii_case(&c.key))),
+        Err(_) => false,
+    };
+    standard
+        .then(|| resolve_glyph(face, "space"))
+        .flatten()
+        .unwrap_or(GlyphId(0))
+}
+
 /// One outline-font glyph by name: the Encoding name of a shown byte
 /// (live dict read), or `glyphshow`'s operand → glyph id.
 fn outline_glyph(
@@ -1577,13 +1729,23 @@ fn outline_glyph(
     name: &str,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let gid = resolve_glyph(face, name);
-    let text = encodings::name_to_char(name).map(|c| (fs.fid, c));
-    Ok(paint_resolved_glyph(
-        gfx, face, fs.matrix, gid, mode, pen, text,
-    ))
+    let text = symbolic_text_char(gfx, fs.fid, name)
+        .or_else(|| encodings::name_to_char(name))
+        .map(|c| (fs.fid, c));
+    // Only a missing glyph needs it: skip the name lookup per shown glyph.
+    let missing = if gid.is_none() {
+        missing_glyph(face, fs.fid)
+    } else {
+        GlyphId(0)
+    };
+    paint_resolved_glyph_limited(
+        gfx, face, fs.matrix, gid, mode, pen, text, missing, probe, work,
+    )
 }
 
 /// One glyph on a Unicode-mode catalog face (see `CatalogEncoding`):
@@ -1597,13 +1759,15 @@ fn unicode_glyph(
     code: u32,
     mode: &ShowMode,
     pen: DevPoint,
+    probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
     let ch = char::from_u32(code);
     let gid = ch.and_then(|c| glyph_for_char(face, c));
     // Never a standard face, so SVG keeps the outlines; PDF text takes the
     // character for its `/ToUnicode` map (Hangul, kana, kanji, Thai).
-    Ok(paint_resolved_glyph(
+    paint_resolved_glyph_limited(
         gfx,
         face,
         fs.matrix,
@@ -1611,7 +1775,10 @@ fn unicode_glyph(
         mode,
         pen,
         ch.map(|c| (fs.fid, c)),
-    ))
+        GlyphId(0),
+        probe,
+        work,
+    )
 }
 
 /// One Type 1 glyph: decrypt the charstring, interpret it (hints
@@ -1637,6 +1804,7 @@ fn type1_glyph(
     mode: &ShowMode,
     pen: DevPoint,
     probe: &crate::limits::LimitProbe,
+    work: &mut u64,
 ) -> Result<(f64, f64), PsError> {
     let (charstrings, len_iv, subr_array) = {
         let d = fs.dict.borrow();
@@ -1758,7 +1926,7 @@ fn type1_glyph(
         }
         if !path.is_empty() {
             match mode {
-                ShowMode::Paint => gfx.fill_path_direct(&path),
+                ShowMode::Paint => gfx.fill_path_direct(&path, probe, work)?,
                 ShowMode::Charpath => gfx.append_path(&path),
                 ShowMode::Width => unreachable!("checked above"),
             }
@@ -1940,6 +2108,9 @@ pub(crate) struct ShowCtx {
     /// The limits when the show began, for a Type 1 glyph's decryption
     /// (#1188); looked at with no steps.
     probe: crate::limits::LimitProbe,
+    /// Work the glyphs painted since the interpreter last took it (the
+    /// rasteriser's and a pattern layout's, #1332), to charge as steps.
+    work: u64,
 }
 
 impl ShowCtx {
@@ -1964,7 +2135,13 @@ impl ShowCtx {
             displace: None,
             cshow: None,
             probe: crate::limits::LimitProbe::NONE,
+            work: 0,
         }
+    }
+
+    /// The glyph work done since the last call.
+    pub(crate) fn take_work(&mut self) -> u64 {
+        std::mem::take(&mut self.work)
     }
 
     pub(crate) fn set_limit_probe(&mut self, probe: crate::limits::LimitProbe) {
@@ -2037,6 +2214,12 @@ impl ShowCtx {
         }
     }
 
+    /// Whether this show paints glyphs, as `show` does (not `charpath`
+    /// or `stringwidth`): the colour must be ready before it steps.
+    pub(crate) fn paints(&self) -> bool {
+        matches!(self.mode, ShowMode::Paint)
+    }
+
     pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ShowStep, PsError> {
         // A BuildChar just finished: seal the glyph context and advance.
         if let Some(p) = self.pending.take() {
@@ -2087,11 +2270,35 @@ impl ShowCtx {
         let code = if glyph.is_some() { 0 } else { code };
         if fs.fid >= 0 {
             let adv = match &glyph {
-                Some(name) => outline_glyph(gfx, &fs, name, &self.mode, self.pen)?,
-                None if unicode => unicode_glyph(gfx, &fs, code, &self.mode, self.pen)?,
+                Some(name) => outline_glyph(
+                    gfx,
+                    &fs,
+                    name,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?,
+                None if unicode => unicode_glyph(
+                    gfx,
+                    &fs,
+                    code,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?,
                 None => {
                     let name = encoding_name(&fs, code as u8);
-                    outline_glyph(gfx, &fs, &name, &self.mode, self.pen)?
+                    outline_glyph(
+                        gfx,
+                        &fs,
+                        &name,
+                        &self.mode,
+                        self.pen,
+                        &self.probe,
+                        &mut self.work,
+                    )?
                 }
             };
             self.finish_glyph(gfx, code, adv)
@@ -2113,7 +2320,15 @@ impl ShowCtx {
                     Some(name) => name,
                     None => encoding_name(&fs, code as u8),
                 };
-                let adv = type1_glyph(gfx, &fs, &name, &self.mode, self.pen, &self.probe)?;
+                let adv = type1_glyph(
+                    gfx,
+                    &fs,
+                    &name,
+                    &self.mode,
+                    self.pen,
+                    &self.probe,
+                    &mut self.work,
+                )?;
                 self.finish_glyph(gfx, code, adv)
             }
         }
@@ -2472,6 +2687,259 @@ mod tests {
             bytes[rec + 11],
         ];
         u32::from_be_bytes(at) as usize
+    }
+
+    /// `bytes` with table `tag` replaced by `data`, appended at the end
+    /// (offset and length updated; checksums are not read).
+    fn replace_table(mut bytes: Vec<u8>, tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        while !bytes.len().is_multiple_of(4) {
+            bytes.push(0);
+        }
+        let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+        let rec = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&r| &bytes[r..r + 4] == tag)
+            .expect("table");
+        let at = u32::try_from(bytes.len()).expect("small");
+        let len = u32::try_from(data.len()).expect("small");
+        bytes[rec + 8..rec + 12].copy_from_slice(&at.to_be_bytes());
+        bytes[rec + 12..rec + 16].copy_from_slice(&len.to_be_bytes());
+        bytes.extend_from_slice(data);
+        bytes
+    }
+
+    /// One closed simple TrueType contour through `pts` (font units).
+    fn simple_glyph(pts: &[(i16, i16)]) -> Vec<u8> {
+        let mut g = Vec::new();
+        g.extend_from_slice(&1i16.to_be_bytes()); // one contour
+        for v in [0i16, 0, 600, 700] {
+            g.extend_from_slice(&v.to_be_bytes()); // bbox
+        }
+        let last = u16::try_from(pts.len() - 1).expect("few");
+        g.extend_from_slice(&last.to_be_bytes());
+        g.extend_from_slice(&0u16.to_be_bytes()); // no instructions
+        g.extend(std::iter::repeat_n(1u8, pts.len())); // on-curve, i16 deltas
+        let (mut x, mut y) = (0i16, 0i16);
+        for &(px, _) in pts {
+            g.extend_from_slice(&(px - x).to_be_bytes());
+            x = px;
+        }
+        for &(_, py) in pts {
+            g.extend_from_slice(&(py - y).to_be_bytes());
+            y = py;
+        }
+        while !g.len().is_multiple_of(4) {
+            g.push(0);
+        }
+        g
+    }
+
+    /// A composite glyph drawing glyph `child` twice.
+    fn twice(child: u16) -> Vec<u8> {
+        let mut g = Vec::new();
+        g.extend_from_slice(&(-1i16).to_be_bytes());
+        for v in [0i16, 0, 600, 700] {
+            g.extend_from_slice(&v.to_be_bytes());
+        }
+        // ARG_1_AND_2_ARE_WORDS | ARGS_ARE_XY_VALUES, MORE_COMPONENTS on the first.
+        for flags in [0x0023u16, 0x0003] {
+            g.extend_from_slice(&flags.to_be_bytes());
+            g.extend_from_slice(&child.to_be_bytes());
+            g.extend_from_slice(&0i16.to_be_bytes());
+            g.extend_from_slice(&0i16.to_be_bytes());
+        }
+        g
+    }
+
+    /// LiberationSans with a new `glyf`: `.notdef` (glyph 0) is a chain of
+    /// `depth` composites, each drawing the next twice (2^depth triangles
+    /// in all), and `A` (glyph 36) is a plain square. Glyph `depth` is the
+    /// triangle; every other glyph is empty.
+    fn notdef_bomb(depth: u16) -> Vec<u8> {
+        let bytes = BUILTINS[0].data.to_vec();
+        let n = usize::from(Face::parse(&bytes, 0).expect("face").number_of_glyphs());
+        let mut glyf = Vec::new();
+        let mut loca = Vec::new();
+        for gid in 0..n {
+            loca.extend_from_slice(&u32::try_from(glyf.len()).expect("small").to_be_bytes());
+            let gid16 = u16::try_from(gid).expect("u16");
+            if gid16 < depth {
+                glyf.extend(twice(gid16 + 1));
+            } else if gid16 == depth {
+                glyf.extend(simple_glyph(&[(0, 0), (500, 0), (250, 600)]));
+            } else if gid == 36 {
+                glyf.extend(simple_glyph(&[(0, 0), (600, 0), (600, 700), (0, 700)]));
+            }
+        }
+        loca.extend_from_slice(&u32::try_from(glyf.len()).expect("small").to_be_bytes());
+        let mut bytes = replace_table(bytes, b"glyf", &glyf);
+        bytes = replace_table(bytes, b"loca", &loca);
+        let head = table_offset(&bytes, b"head");
+        bytes[head + 50..head + 52].copy_from_slice(&1i16.to_be_bytes()); // long loca
+        bytes
+    }
+
+    /// Codex review of #1398: `.notdef` used to be outlined while the PDF
+    /// was written, outside every limit, and a face can make that walk a
+    /// billion outlines long. Now nothing walks an outline at write time:
+    /// a face whose `.notdef` is 30 levels of doubled composites writes its
+    /// default (text) PDF at once, with `A` embedded and an empty `.notdef`.
+    #[test]
+    fn a_notdef_composite_bomb_is_never_walked_writing_the_pdf() {
+        // The crafted structure is real: each level doubles the outline.
+        let points = |depth: u16| {
+            let bytes = notdef_bomb(depth);
+            let face = Face::parse(&bytes, 0).expect("parses");
+            let mut sink = PathSink {
+                path: PsPath::default(),
+                m: GlyphTransform {
+                    a: 1.0,
+                    b: 0.0,
+                    c: 0.0,
+                    d: 1.0,
+                    tx: 0.0,
+                    ty: 0.0,
+                },
+                cur: (0.0, 0.0),
+            };
+            assert!(face.outline_glyph(GlyphId(0), &mut sink).is_some());
+            sink.path.points().len()
+        };
+        assert_eq!(points(5), 2 * points(4));
+        assert_eq!(points(4), 16 * points(0));
+
+        register_font_bytes("PscatNotdefBomb-Regular", notdef_bomb(30)).expect("registers");
+        let t = std::time::Instant::now();
+        let mut it = crate::Interp::with_page(200, 100).expect("page");
+        it.enable_pdf(); // the default: text
+        // `A` is text; the unmapped `B` (no glyph) draws nothing, as before.
+        it.run_str("/PscatNotdefBomb-Regular findfont 20 scalefont setfont 10 50 moveto (AB) show")
+            .expect("runs");
+        let pdf = it.pdf_document().expect("pdf");
+        assert!(t.elapsed().as_secs() < 10, "took {:?}", t.elapsed());
+        let doc = String::from_utf8_lossy(&pdf);
+        assert!(doc.contains("/Subtype /Type0 "), "A is embedded text");
+        assert!(doc.trim_end().ends_with("%%EOF"));
+    }
+
+    /// A `cmap` with one format 4 subtable: `A` → glyph 36, U+4E00 →
+    /// glyph 0 (`.notdef`), as a hostile or careless face may map it.
+    fn cmap_to_notdef() -> Vec<u8> {
+        let segs: [(u16, u16); 3] = [
+            (0x41, 36u16.wrapping_sub(0x41)),
+            (0x4E00, 0u16.wrapping_sub(0x4E00)),
+            (0xFFFF, 1),
+        ];
+        let mut sub = Vec::new();
+        let words = |v: &mut Vec<u8>, xs: &[u16]| {
+            xs.iter()
+                .for_each(|x| v.extend_from_slice(&x.to_be_bytes()))
+        };
+        words(&mut sub, &[4, 0, 0, 6, 4, 1, 2]); // format, length (below), language, segCountX2, ...
+        words(&mut sub, &segs.map(|s| s.0)); // endCode
+        words(&mut sub, &[0]);
+        words(&mut sub, &segs.map(|s| s.0)); // startCode
+        words(&mut sub, &segs.map(|s| s.1)); // idDelta
+        words(&mut sub, &[0, 0, 0]); // idRangeOffset
+        let len = u16::try_from(sub.len()).expect("small");
+        sub[2..4].copy_from_slice(&len.to_be_bytes());
+        let mut cmap = Vec::new();
+        words(&mut cmap, &[0, 1, 3, 1, 0, 12]); // version, one record: 3/1 at 12
+        cmap.extend(sub);
+        cmap
+    }
+
+    /// Glyph 0 shown on purpose (a `cmap` that maps a character to it)
+    /// still draws: in the raster, and in the PDF as its outline in the
+    /// content stream, walked once at `show` like any glyph. It is never
+    /// text, so the default PDF is the outline PDF byte for byte (#1026,
+    /// Codex review of #1398).
+    #[test]
+    fn a_shown_notdef_keeps_its_outline_in_the_pdf() {
+        let bytes = replace_table(notdef_bomb(0), b"cmap", &cmap_to_notdef());
+        register_font_bytes("PscatShownNotdef-Regular", bytes).expect("registers");
+        let src = "/PscatShownNotdef-Regular findfont 40 scalefont setfont 10 30 moveto /uni4E00 glyphshow";
+        let run = |mode: crate::PdfText, svg: bool| {
+            let mut it = crate::Interp::with_page(100, 100).expect("page");
+            it.set_pdf_text(mode);
+            it.enable_pdf();
+            if svg {
+                it.enable_svg();
+            }
+            it.run_str(src).expect("runs");
+            let pdf = it.pdf_document().expect("pdf");
+            let inked = it.gfx().pixmap.pixels().iter().any(|p| p.red() < 128);
+            let svg = svg.then(|| it.svg_pages().expect("svg on").concat());
+            (pdf, inked, svg)
+        };
+        let (text, inked, svg) = run(crate::PdfText::Text, true);
+        let (paths, inked_paths, _) = run(crate::PdfText::Paths, false);
+        assert!(inked && inked_paths, "the raster draws glyph 0");
+        assert_eq!(text, paths, "glyph 0 is its outline in the default PDF");
+        let doc = String::from_utf8_lossy(&text);
+        assert!(!doc.contains("/Subtype /Type0 "), "no font for glyph 0");
+        assert!(svg.expect("svg").contains("<path"), "the SVG draws it");
+    }
+
+    /// A glyph the PDF font does not hold yet needs a 64 KiB charstring
+    /// buffer, built from the walk that draws it (#1026). The memory limit
+    /// is asked before that walk: a refusal paints nothing and registers
+    /// nothing; with room the glyph is drawn, embedded and charged.
+    #[test]
+    fn a_refused_pdf_glyph_paints_nothing() {
+        let face = face_for(0).expect("first built-in face");
+        let gid = glyph_for_char(face, 'A').expect("A");
+        let mut gfx = Gfx::new(40, 40).expect("pixmap");
+        gfx.enable_pdf();
+        let paint = |gfx: &mut Gfx, probe: &crate::limits::LimitProbe, work: &mut u64| {
+            paint_resolved_glyph_limited(
+                gfx,
+                face,
+                [0.03, 0.0, 0.0, 0.03, 0.0, 0.0],
+                Some(gid),
+                &ShowMode::Paint,
+                DevPoint { x: 4.0, y: 36.0 },
+                Some((0, 'A')),
+                GlyphId(0),
+                probe,
+                work,
+            )
+        };
+        let probe_g = || {
+            glyph_text(
+                0,
+                'A',
+                gid,
+                &GlyphTransform {
+                    a: 1.0,
+                    b: 0.0,
+                    c: 0.0,
+                    d: 1.0,
+                    tx: 0.0,
+                    ty: 0.0,
+                },
+                face,
+                true,
+            )
+        };
+        let before = gfx.pixmap.data().to_vec();
+        let full = crate::limits::LimitProbe::memory_only(Some((usize::MAX / 2, 0)));
+        let mut work = 0;
+        let r = paint(&mut gfx, &full, &mut work);
+        assert!(matches!(r, Err(PsError::MemoryExceeded)), "{r:?}");
+        assert_eq!(gfx.pixmap.data(), &before[..], "nothing painted");
+        assert!(!gfx.dirty);
+        assert!(gfx.pdf_would_build(&probe_g()), "nothing registered");
+        let mut work = 0;
+        paint(&mut gfx, &crate::limits::LimitProbe::NONE, &mut work).expect("room");
+        assert!(gfx.dirty);
+        assert!(!gfx.pdf_would_build(&probe_g()));
+        let mut again = 0;
+        paint(&mut gfx, &crate::limits::LimitProbe::NONE, &mut again).expect("again");
+        assert!(
+            work >= again + 1024,
+            "the new charstring is charged: {work} vs {again}"
+        );
     }
 
     /// Run `src` with PDF text output on; the document as lossy text (font
