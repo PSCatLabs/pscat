@@ -1612,7 +1612,7 @@ impl Gfx {
             svg: None,
             svg_text: crate::svg::SvgText::Paths,
             pdf: None,
-            pdf_text: crate::pdf::PdfText::Paths,
+            pdf_text: crate::pdf::PdfText::default(),
             suppress_paint: 0,
             coverage: None,
             deep: crate::deep::Deep::default(),
@@ -4382,12 +4382,20 @@ impl Gfx {
         }
         if let Some(pdf) = &mut self.pdf {
             match pdf_text {
-                // A glyph the font writer refuses keeps its outline.
-                Some(g) => {
-                    if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
+                // A glyph the font writer refuses keeps its outline. A new
+                // glyph's charstring is charged as work, a step per KiB or
+                // part of one (#1026): whole KiB, so the show's per-glyph
+                // rounding down never drops it.
+                Some(g) => match pdf.glyph(g, rgb, comp, &chain, probe)? {
+                    Some(built) => {
+                        let kib = built.div_ceil(1024) as u64;
+                        *work = work.saturating_add(kib.saturating_mul(1024));
+                    }
+                    None if skia.is_some() => {
                         pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
                     }
-                }
+                    None => {}
+                },
                 None if skia.is_some() => pdf.fill(path, FillRule::Winding, &ink, comp, &chain),
                 None => {}
             }

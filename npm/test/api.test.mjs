@@ -141,13 +141,27 @@ test('svgText: standard-font text as selectable <text>, opt-in, needs svg', asyn
   assert.throws(() => r.render(doc, { svg: true, svgText: 1 }), TypeError);
 });
 
-test('pdfText: standard-font text as PDF text objects in embedded fonts, opt-in, needs pdf', async () => {
-  // Byte equality with `pscat --pdf --pdf-text` is checked in tests/wasm.rs.
+test('pdf: text in embedded fonts by default, pdfText: false draws outlines', async () => {
+  // Byte equality with `pscat --pdf` and `--text-as-paths` is checked in tests/wasm.rs.
   const r = await createRenderer();
   const doc = '/Helvetica findfont 12 scalefont setfont 10 40 moveto (Hi) show showpage';
   const page = { width: 100, height: 80, pdf: true };
   const latin1 = (b) => Buffer.from(b).toString('latin1');
+  r.render(doc, page);
+  const text = latin1(r.pdf());
+  assert.match(text, /\/Subtype \/Type0/);
+  assert.match(text, /\/ToUnicode/);
+  // pdfText: true is the default, so it changes nothing.
   r.render(doc, { ...page, pdfText: true });
+  assert.equal(latin1(r.pdf()), text);
+  r.render(doc, { ...page, pdfText: false });
+  assert.doesNotMatch(latin1(r.pdf()), /\/Type0|\/ToUnicode/);
+  assert.throws(() => r.render(doc, { pdfText: true }), /pdfText needs pdf: true/);
+  assert.throws(() => r.render(doc, { svg: true, pdfText: true }), /pdfText needs pdf: true/);
+  assert.throws(() => r.render(doc, { pdf: true, pdfText: 1 }), TypeError);
+  // Without pdf, pdfText: false asks for nothing and is accepted.
+  r.render(doc, { pdfText: false });
+});
   const text = latin1(r.pdf());
   assert.match(text, /\/Subtype \/Type0/);
   assert.match(text, /\/ToUnicode/);

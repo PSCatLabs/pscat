@@ -121,23 +121,27 @@ More on the less obvious ones:
   font packs, Type 3 and Type 1 fonts from a program) and `charpath` text
   stay outlines. PNG and PDF output are not affected
   (`notes/1119-svg-text.md`).
-- **PDF text (`--pdf-text`).** By default a PDF draws every glyph as its
-  outline too, so its text cannot be selected, searched or extracted
-  (`pdftotext` finds nothing). With `--pdf-text`, `show` text becomes real
-  PDF text in an embedded subset of the font pscat drew it with: the
-  standard 35, the font catalog and font packs, Korean, Japanese and Thai
-  included. It looks the same as the outlines (the glyphs are the same
-  shapes at the same positions, `ashow`/`kshow`/`xyshow` spacing
-  included), copies and searches as text, and a text page is far smaller
-  (a page of Times went from 741 KB to 8 KB). Symbol's Greek letters and
-  maths signs and ZapfDingbats' dingbats extract as their Unicode
-  characters (`notes/1026-pdf-text-symbol-dingbats.md`). Type 1 and Type 3
-  fonts from a program, `charpath` text, the few Symbol and Dingbats glyphs
-  with no Unicode value (bracket, brace and radical pieces, arrow
-  extenders, the ornamental brackets), and fonts whose licence bits forbid embedding stay outlines. PNG and SVG output
-  are not affected (`notes/1193-pdf-text.md`). The browser build and npm
-  package have it too: `{ pdf: true, pdfText: true }`, the same bytes as the
-  command line (`notes/1205-pdf-text-wasm.md`).
+- **PDF text, and `--text-as-paths`.** A PDF writes `show` text as real
+  PDF text in an embedded subset of the font pscat drew it with, so it can
+  be selected, searched, copied and read by a screen reader (`pdftotext`
+  extracts it). That covers the standard 35, the font catalog and font
+  packs, Korean, Japanese and Thai included. It looks the same as outlines
+  would (the glyphs are the same shapes at the same positions,
+  `ashow`/`kshow`/`xyshow` spacing included), and a text page is far
+  smaller (a page of Times is 8 KB as text, 741 KB as outlines). Symbol's
+  Greek letters and maths signs and ZapfDingbats' dingbats extract as their
+  Unicode characters (`notes/1026-pdf-text-symbol-dingbats.md`). Type 1 and
+  Type 3 fonts from a program, `charpath` text, the few Symbol and Dingbats
+  glyphs with no Unicode value (bracket, brace and radical pieces, arrow
+  extenders, the ornamental brackets), and fonts whose licence bits forbid
+  embedding stay outlines. `--text-as-paths` draws every glyph as its
+  outline instead, with no fonts in the file, as pscat did before 0.7.1.
+  `--pdf-text`, which turned text on before it was the default, is still
+  accepted and changes nothing. PNG and SVG output are not affected
+  (`notes/1193-pdf-text.md`, `notes/1026-pdf-text-default.md`). The
+  browser build and npm package do the same: `{ pdf: true }` writes text,
+  `{ pdf: true, pdfText: false }` outlines, the same bytes as the command
+  line (`notes/1205-pdf-text-wasm.md`).
 - **Seed sweeps.** `--sweep-seed` renders a file once per value instead of
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
