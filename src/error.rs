@@ -94,6 +94,12 @@ pub enum PsError {
     /// Uncatchable, like [`StepsExceeded`](Self::StepsExceeded).
     #[error("limitexceeded: memory")]
     MemoryExceeded,
+    /// The host stopped the program through the flag it gave
+    /// [`Interp::set_interrupt`](crate::Interp::set_interrupt) (`interrupt`,
+    /// the PLRM's name for an external request to stop). Uncatchable, like a
+    /// limit error.
+    #[error("interrupt")]
+    Interrupted,
 }
 
 impl PsError {
@@ -147,6 +153,7 @@ impl PsError {
             PsError::StepsExceeded | PsError::TimeExceeded | PsError::MemoryExceeded => {
                 "limitexceeded"
             }
+            PsError::Interrupted => "interrupt",
         }
     }
 
@@ -183,8 +190,8 @@ impl PsError {
             "invalidrestore" => PsError::InvalidRestore,
             "undefinedresource" => PsError::UndefinedResource,
             "configurationerror" => PsError::ConfigurationError,
-            // Not here: `limitexceeded` is never caught, so `$error` never
-            // holds it and there is nothing to rebuild.
+            // Not here: `limitexceeded` and `interrupt` are never caught,
+            // so `$error` never holds them and there is nothing to rebuild.
             _ => return None,
         })
     }
@@ -225,6 +232,9 @@ mod tests {
             PsError::StepsExceeded => PsError::StepsExceeded,
             PsError::TimeExceeded => PsError::TimeExceeded,
             PsError::MemoryExceeded => PsError::MemoryExceeded,
+            // Like the limit errors, never caught, so never in `$error`
+            // and not in the round trip below.
+            PsError::Interrupted => PsError::Interrupted,
         }
     }
 

@@ -391,6 +391,13 @@ struct SaveRecord {
 /// Not `Send`: see the [crate docs](crate#threads).
 pub struct Interp {
     pub(crate) ostack: Vec<Object>,
+    /// The closures behind the operators a host registered
+    /// ([`Interp::register_operator`], `src/host.rs`), by slot, and the
+    /// name each slot was registered under.
+    pub(crate) host_ops: Vec<crate::host::HostOp>,
+    pub(crate) host_op_names: Vec<&'static str>,
+    /// The host's stop flag ([`Interp::set_interrupt`]).
+    pub(crate) interrupt: Option<Arc<std::sync::atomic::AtomicBool>>,
     dstack: Vec<Rc<RefCell<Dict>>>,
     estack: Vec<Frame>,
     /// Mutation journal + live save records. Empty save stack = no
@@ -792,6 +799,9 @@ impl Interp {
         );
         Some(Interp {
             ostack: Vec::new(),
+            host_ops: Vec::new(),
+            host_op_names: Vec::new(),
+            interrupt: None,
             dstack: vec![system, globaldict.clone(), user],
             estack: Vec::new(),
             journal: Vec::new(),
@@ -883,7 +893,16 @@ impl Interp {
         } else {
             4096
         };
-        while self.step_n(slice)? {}
+        while self.step_n(slice)? {
+            // The host's stop flag ([`Interp::set_interrupt`]): looked at
+            // between slices, and uncatchable like a limit, since the
+            // program is unwound from outside the machine.
+            if self.interrupted() {
+                self.snapshot_error_chain();
+                self.unwind_all();
+                return Err(PsError::Interrupted);
+            }
+        }
         Ok(())
     }
 
@@ -2171,6 +2190,21 @@ impl Interp {
             out.push_str(&links.join(" <- "));
         }
         out
+    }
+
+    /// The line and `run` file an error is attributed to, as
+    /// [`error_report`](Self::error_report) picks them: the innermost open
+    /// source when the error left the machine, else the sticky location.
+    pub(crate) fn error_line_and_file(&self) -> (Option<usize>, Option<String>) {
+        match self.error_chain.first() {
+            Some((file, line)) => (Some(*line), file.as_ref().map(|f| report_name(f))),
+            None => (
+                self.last_line,
+                self.last_line
+                    .and(self.last_file.as_ref())
+                    .map(|f| report_name(f)),
+            ),
+        }
     }
 
     /// LaserWriter-style error report, e.g.

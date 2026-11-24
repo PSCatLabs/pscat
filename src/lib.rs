@@ -100,6 +100,37 @@
 //! # Ok::<(), pscat::PsError>(())
 //! ```
 //!
+//! # Extending the interpreter from a host application
+//!
+//! The [`host`] module is for an application that does more than run a
+//! program and read its pages: [`Interp::register_operator`] adds operators
+//! backed by Rust closures, [`host::Value`] moves data across the operand
+//! stack, [`Interp::current_path`] and [`Interp::set_current_path`] expose
+//! the current path, [`Interp::swap_canvas`] exchanges the raster a program
+//! paints on, [`Interp::error_details`] reports an error as data, and
+//! [`Interp::set_interrupt`] stops a running program from another thread.
+//! Together with `save`/`restore` they let one interpreter render many
+//! frames of a program as a pure function of host state:
+//!
+//! ```
+//! use std::{cell::Cell, rc::Rc};
+//! let clock = Rc::new(Cell::new(0.0));
+//! let mut interp = pscat::Interp::with_page(64, 64).expect("valid page size");
+//! let c = clock.clone();
+//! interp.register_operator("now", move |i| { i.push_real(c.get()); Ok(()) })?;
+//! interp.run_str("/scene { 32 32 translate now 90 mul rotate -20 -5 40 10 rectfill } def
+//!                 /checkpoint save def")?;
+//! let mut frames = Vec::new();
+//! for k in 0..4 {
+//!     clock.set(f64::from(k) / 4.0);
+//!     // Roll the VM back, start a clean page, draw the frame.
+//!     interp.run_str("checkpoint restore /checkpoint save def erasepage initgraphics scene")?;
+//!     frames.push(interp.canvas_premultiplied_rgba8().to_vec());
+//! }
+//! assert_ne!(frames[0], frames[1]);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! # Threads
 //!
 //! An [`Interp`] is neither `Send` nor `Sync`: PostScript objects share
@@ -121,7 +152,7 @@
 //! # Supported API and stability
 //!
 //! The supported API is what this documentation shows: [`Interp`], [`Page`],
-//! [`PsError`], [`Limits`], [`syntax::check_syntax`], and the [`sheet`],
+//! [`PsError`], [`Limits`], [`syntax::check_syntax`], and the [`host`], [`sheet`],
 //! [`chalkboard`], [`handwriting`] and [`catalog`] modules. The crate has
 //! other public modules that the `pscat` and `pscat-mcp` binaries, the
 //! browser build and the test suite use; they are hidden from the documentation and can change in any
@@ -135,6 +166,7 @@ pub mod catalog;
 pub mod chalkboard;
 pub mod error;
 pub mod handwriting;
+pub mod host;
 pub mod interp;
 pub(crate) mod kernel;
 pub use kernel::{GPU_CHUNK_PIXELS, GPU_LOOP_CAP, set_gpu_preview};

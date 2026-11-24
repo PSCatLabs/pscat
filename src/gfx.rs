@@ -3751,6 +3751,22 @@ impl Gfx {
         }
     }
 
+    /// Exchange the page raster for `pixmap`, which the caller has checked
+    /// is the same size ([`Interp::swap_canvas`](crate::Interp::swap_canvas)).
+    /// The 16-bit shadow described the old raster, so it is dropped; the
+    /// new raster counts as painted, since nothing here knows what it holds.
+    pub(crate) fn swap_pixmap(&mut self, pixmap: Pixmap) -> Pixmap {
+        debug_assert_eq!(
+            (pixmap.width(), pixmap.height()),
+            (self.pixmap.width(), self.pixmap.height())
+        );
+        self.deep.clear();
+        self.pending_erase = false;
+        self.painted_since_page = true;
+        self.dirty = true;
+        std::mem::replace(&mut self.pixmap, pixmap)
+    }
+
     pub fn erase(&mut self) {
         if self.painting_off() || !self.captures.is_empty() {
             return;

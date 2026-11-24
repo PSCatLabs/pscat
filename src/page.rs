@@ -59,6 +59,65 @@ impl Page {
         out
     }
 
+    /// The pixels as premultiplied RGBA, borrowed: the page's own storage,
+    /// row by row from the top-left, `width * height * 4` bytes, each colour
+    /// channel already multiplied by the pixel's alpha. No copy is made,
+    /// which is what a host that reads many pages (video frames) wants; for
+    /// an opaque page the bytes equal [`rgba8`](Self::rgba8)'s.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::with_page(4, 4).expect("valid page size");
+    /// interp.run_str("0 0 1 setrgbcolor 0 0 4 4 rectfill")?;
+    /// let page = interp.into_last_page();
+    /// assert_eq!(&page.premultiplied_rgba8()[..4], &[0, 0, 255, 255]);
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn premultiplied_rgba8(&self) -> &[u8] {
+        self.pixmap.data()
+    }
+
+    /// The premultiplied pixels ([`premultiplied_rgba8`](Self::premultiplied_rgba8)),
+    /// writable, for a host that composites or filters a page in place.
+    /// Every pixel must stay premultiplied (no colour channel above its
+    /// alpha); the page's encoders assume it.
+    pub fn premultiplied_rgba8_mut(&mut self) -> &mut [u8] {
+        self.pixmap.data_mut()
+    }
+
+    /// A page from premultiplied RGBA pixels, `width * height * 4` bytes
+    /// laid out as [`premultiplied_rgba8`](Self::premultiplied_rgba8)
+    /// returns them, at 72 dpi. `None` if the size is 0 or over 8000 pixels
+    /// on a side, or `data` is not exactly that long.
+    ///
+    /// ```
+    /// let page = pscat::Page::from_premultiplied_rgba8(1, 2, vec![255, 0, 0, 255, 0, 0, 0, 0])
+    ///     .expect("valid size");
+    /// assert_eq!(page.rgba8(), [255, 0, 0, 255, 0, 0, 0, 0]);
+    /// assert!(pscat::Page::from_premultiplied_rgba8(1, 2, vec![0; 4]).is_none());
+    /// ```
+    pub fn from_premultiplied_rgba8(width: u32, height: u32, data: Vec<u8>) -> Option<Page> {
+        if width > MAX_SIDE_PX || height > MAX_SIDE_PX {
+            return None;
+        }
+        let size = tiny_skia::IntSize::from_wh(width, height)?;
+        tiny_skia::Pixmap::from_vec(data, size).map(|pixmap| Page::new(pixmap, 1.0))
+    }
+
+    /// A fully transparent page of `width`x`height` pixels at 72 dpi: an
+    /// empty layer for [`Interp::swap_canvas`](crate::Interp::swap_canvas).
+    /// `None` for a side of 0 or over 8000 pixels.
+    ///
+    /// ```
+    /// let page = pscat::Page::transparent(3, 2).expect("valid size");
+    /// assert!(page.premultiplied_rgba8().iter().all(|b| *b == 0));
+    /// ```
+    pub fn transparent(width: u32, height: u32) -> Option<Page> {
+        if width > MAX_SIDE_PX || height > MAX_SIDE_PX {
+            return None;
+        }
+        tiny_skia::Pixmap::new(width, height).map(|pixmap| Page::new(pixmap, 1.0))
+    }
+
     /// The page encoded as a PNG file, byte for byte what `pscat --png`
     /// writes for the same page (without `--halftone`). The file records
     /// the page's resolution in a `pHYs` chunk, so a 300 dpi page prints at
@@ -189,6 +248,67 @@ impl crate::Interp {
     pub fn set_pdf_info_from_dsc(&mut self, source: &[u8]) {
         let (title, author) = crate::pdf::scan_document_info(source);
         self.gfx_mut().set_pdf_info(title, author);
+    }
+
+    /// The size of the canvas, the raster the program is painting on, in
+    /// device pixels: the page size times the scale.
+    pub fn canvas_size(&self) -> (u32, u32) {
+        let pixmap = self.gfx().page_pixmap();
+        (pixmap.width(), pixmap.height())
+    }
+
+    /// The canvas's pixels as it stands, borrowed, in the layout of
+    /// [`Page::premultiplied_rgba8`]. This is the page in progress, whether
+    /// or not the program has run `showpage`; a host that renders frame
+    /// after frame on one interpreter reads each frame here without copying
+    /// a [`Page`] out.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::with_page(2, 2).expect("valid page size");
+    /// interp.run_str("0 1 0 setrgbcolor 0 0 2 2 rectfill")?;
+    /// assert_eq!(interp.canvas_size(), (2, 2));
+    /// assert_eq!(&interp.canvas_premultiplied_rgba8()[..4], &[0, 255, 0, 255]);
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn canvas_premultiplied_rgba8(&self) -> &[u8] {
+        self.gfx().page_pixmap().data()
+    }
+
+    /// Exchange the canvas for `page`: the program paints on `page` from now
+    /// on, and the canvas as it stood comes back. The graphics state (the
+    /// transformation, the clip, the colour) is untouched, so what is drawn
+    /// next lands where it would have. A host uses this to paint part of a
+    /// picture on a separate layer (swap in a [`Page::transparent`], run
+    /// the drawing, swap back, then composite the layer itself), to keep a
+    /// picture across runs, or to start each frame from a prepared
+    /// background.
+    ///
+    /// `page` must be the canvas's size in pixels
+    /// ([`canvas_size`](Self::canvas_size)); one that is not is handed back
+    /// as the error. The returned page carries the interpreter's resolution.
+    /// Not for use inside a pattern's `PaintProc` or while SVG or PDF output
+    /// is being recorded: those record drawing operations, not this raster.
+    ///
+    /// ```
+    /// use pscat::{Interp, Page};
+    /// let mut interp = Interp::with_page(2, 2).expect("valid page size");
+    /// interp.run_str("1 0 0 setrgbcolor 0 0 2 2 rectfill")?;
+    /// let layer = Page::transparent(2, 2).expect("valid size");
+    /// let background = interp.swap_canvas(layer).expect("same size");
+    /// interp.run_str("0 0 1 setrgbcolor 0 0 1 2 rectfill")?; // left half, on the layer
+    /// let layer = interp.swap_canvas(background).expect("same size");
+    /// assert_eq!(layer.rgba8()[..8], [0, 0, 255, 255, 0, 0, 0, 0]);
+    /// assert_eq!(&interp.canvas_premultiplied_rgba8()[..4], &[255, 0, 0, 255]);
+    /// assert!(interp.swap_canvas(Page::transparent(3, 3).expect("valid size")).is_err());
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn swap_canvas(&mut self, page: Page) -> Result<Page, Page> {
+        if (page.width(), page.height()) != self.canvas_size() {
+            return Err(page);
+        }
+        let scale = self.gfx().scale();
+        let old = self.gfx_mut().swap_pixmap(page.pixmap);
+        Ok(Page::new(old, scale))
     }
 
     /// How many pages [`pages`](crate::Interp::pages) would return, without
