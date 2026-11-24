@@ -1165,7 +1165,10 @@ fn a_line_or_cross_screen_fades_smoothly_to_nothing() {
             .collect();
         assert_eq!(ink[0], 0.0, "{screen}: tone 0 must draw nothing");
         for w in ink.windows(2) {
-            assert!(w[0] < w[1], "{screen}: coverage must rise with tone: {ink:?}");
+            assert!(
+                w[0] < w[1],
+                "{screen}: coverage must rise with tone: {ink:?}"
+            );
         }
         // Almost blank at a tone of 0.001 (it was ~9x the proportional share).
         assert!(ink[2] < 0.002, "{screen}: tone 0.001 drew {}", ink[2]);
@@ -1254,7 +1257,10 @@ fn a_faint_screen_under_a_stretched_ctm_still_draws_and_fades() {
             );
             ink.push(mean_ink(&it));
         }
-        assert!(ink[0] > 0.0 && ink[0] < ink[1] && ink[1] < ink[2], "{pre}: {ink:?}");
+        assert!(
+            ink[0] > 0.0 && ink[0] < ink[1] && ink[1] < ink[2],
+            "{pre}: {ink:?}"
+        );
     }
 }
 
