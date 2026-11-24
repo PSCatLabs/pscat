@@ -2,9 +2,9 @@
 
 Built on `feature/psanim-library-api`, branched from `feature/0.7.1` at
 `72a2c4e`, as the PSCat half of psanim (an animation engine in its own
-repository that uses pscat as a library, never the CLI). No issue number yet:
-the branch is offered for review as one change, and this fragment is its
-write-up. Rename the file to `<issue>-psanim-library-api.md` when it has one.
+repository that uses pscat as a library, never the CLI). Issue #1403.
+The branch is offered for review as one change, and this fragment is its
+write-up.
 
 ### What was built
 
