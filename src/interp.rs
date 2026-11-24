@@ -163,6 +163,19 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
 /// never go below them, and `countdictstack` is 3 at the start, as in gs.
 pub(crate) const PERMANENT_DICTS: usize = 3;
 
+/// A procedure frame popped as it issued its last element (a tail call),
+/// with what identifies the moment: the execution stack's depth after the
+/// pop and, when the frame under it is a procedure, that procedure's `pc`.
+/// While the last element runs, both still hold. Once anything else runs
+/// they do not: a frame pushed or popped changes the depth, a step of the
+/// procedure underneath advances its `pc`, and a loop frame underneath
+/// pushes its next body or pops itself.
+struct TailCall {
+    body: PsArray,
+    depth: usize,
+    parent_pc: usize,
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -398,6 +411,15 @@ pub struct Interp {
     pub(crate) host_op_names: Vec<&'static str>,
     /// The host's stop flag ([`Interp::set_interrupt`]).
     pub(crate) interrupt: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The procedures that were running when the last uncaught error left
+    /// the machine, innermost first ([`Interp::error_details`]).
+    pub(crate) error_trace: Vec<crate::host::TraceFrame>,
+    /// The procedure whose frame was most recently popped as it issued its
+    /// last element, for the backtrace: without it the commonest error
+    /// site, the last operator of a procedure, would have no frame. Kept by
+    /// moving the body here where it used to be dropped, so the step loop
+    /// does the same work it did. See [`TailCall`].
+    tail: Option<TailCall>,
     dstack: Vec<Rc<RefCell<Dict>>>,
     estack: Vec<Frame>,
     /// Mutation journal + live save records. Empty save stack = no
@@ -802,6 +824,8 @@ impl Interp {
             host_ops: Vec::new(),
             host_op_names: Vec::new(),
             interrupt: None,
+            error_trace: Vec::new(),
+            tail: None,
             dstack: vec![system, globaldict.clone(), user],
             estack: Vec::new(),
             journal: Vec::new(),
@@ -898,7 +922,7 @@ impl Interp {
             // between slices, and uncatchable like a limit, since the
             // program is unwound from outside the machine.
             if self.interrupted() {
-                self.snapshot_error_chain();
+                self.snapshot_error_chain(&PsError::Interrupted);
                 self.unwind_all();
                 return Err(PsError::Interrupted);
             }
@@ -1275,6 +1299,7 @@ impl Interp {
             t.bodies.borrow_mut().clear();
         }
         self.error_chain.clear();
+        self.error_trace.clear();
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
@@ -1310,7 +1335,7 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
-                    self.snapshot_error_chain();
+                    self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
                 }
@@ -1332,8 +1357,8 @@ impl Interp {
             // Every uncaught error, limits included, passes here with the
             // execution stack still whole: the one place to record the
             // open `run` frames before they are dropped (#1043).
-            if result.is_err() {
-                self.snapshot_error_chain();
+            if let Err(e) = &result {
+                self.snapshot_error_chain(e);
             }
             self.unwind_all();
         }
@@ -1804,10 +1829,20 @@ impl Interp {
             return ProcStep::Other;
         };
         if *pc >= body.len() {
-            // Known to be this `Proc` frame: drop just its body, not
-            // through the general frame drop glue.
+            // Known to be this `Proc` frame: take just its body, not
+            // through the general frame drop glue. It is kept for the
+            // backtrace in place of the one kept before, which is dropped
+            // here instead: the same work as dropping this one.
             if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
-                drop(body);
+                let parent_pc = match self.estack.last() {
+                    Some(Frame::Proc { pc, .. }) => *pc,
+                    _ => usize::MAX,
+                };
+                self.tail = Some(TailCall {
+                    body,
+                    depth: self.estack.len(),
+                    parent_pc,
+                });
             }
         }
         step
@@ -1832,6 +1867,9 @@ impl Interp {
             && let Some(Frame::Proc { body, .. }) = self.estack.pop()
         {
             drop(body);
+            // A frame left without `proc_step` recording it: the record
+            // of an earlier one must not outlive its parent (`TailCall`).
+            self.tail = None;
         }
         self.execute_resolved(obj, NO_NAME)
     }
@@ -1870,6 +1908,7 @@ impl Interp {
             // Known to be this `Proc` frame: drop just its body.
             if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
                 drop(body);
+                self.tail = None;
             }
         }
         Ok(())
@@ -1934,6 +1973,7 @@ impl Interp {
         *pc = i + n;
         if tail {
             self.estack.pop();
+            self.tail = None;
         }
         if via != NO_NAME {
             self.last_name = Some(via);
@@ -2147,7 +2187,8 @@ impl Interp {
     /// Record the open `run` frames for `error_report` (issue #1043).
     /// Called by `step_n` only for an error nothing caught, before it
     /// unwinds, so a `stopped` loop used as control flow pays nothing.
-    fn snapshot_error_chain(&mut self) {
+    fn snapshot_error_chain(&mut self, err: &PsError) {
+        self.snapshot_error_trace(err);
         self.error_chain.clear();
         for frame in self.estack.iter().rev() {
             if let Frame::Scanner(lexer) = frame
@@ -2156,6 +2197,103 @@ impl Interp {
                 self.error_chain.push((lexer.run_name().cloned(), line));
             }
         }
+    }
+
+    /// Record the procedures on the execution stack for
+    /// [`Interp::error_details`]: for each, the name it is defined under
+    /// (when a dictionary on the dictionary stack holds this very array),
+    /// which of its elements was running, and that element with a few of
+    /// its neighbours. Runs only for an error nothing caught, with the
+    /// stack still whole, so it costs a working program nothing.
+    fn snapshot_error_trace(&mut self, err: &PsError) {
+        use crate::host::{MAX_TRACE_FRAMES, TraceFrame};
+        // Elements shown before and after the one that was running.
+        const BEFORE: usize = 5;
+        const AFTER: usize = 3;
+        let limits = crate::object::DumpLimits {
+            max_depth: 1,
+            max_elements: 3,
+            max_string: 24,
+            max_bytes: 40,
+        };
+        let name_of = |body: &PsArray| -> Option<String> {
+            // Innermost dictionary first; systemdict holds no procedures.
+            self.dstack.iter().skip(1).rev().find_map(|d| {
+                let d = d.try_borrow().ok()?;
+                d.pairs().into_iter().find_map(|(k, v)| match &v.value {
+                    Value::Array(a) if v.executable && a.same_object(body) => Some(k.text()),
+                    _ => None,
+                })
+            })
+        };
+        // The procedure whose last element is the one running, if the
+        // record of it is still current (see `TailCall`). Under a scanner
+        // the depth alone cannot tell (program text runs at one depth), so
+        // there the last element must also be the offending command.
+        let tail = self.tail.as_ref().filter(|t| {
+            t.depth == self.estack.len()
+                && match self.estack.last() {
+                    Some(Frame::Proc { pc, .. }) => *pc == t.parent_pc,
+                    Some(Frame::Scanner(_)) | None => {
+                        let last = t.body.len().saturating_sub(1);
+                        let runs = |o: &Object| match &o.value {
+                            Value::Name(_) if o.executable => Some(o.text()),
+                            Value::Operator(op) if o.executable => Some(op.name.to_string()),
+                            _ => None,
+                        };
+                        let command = match err {
+                            PsError::Undefined(name) => Some(name.clone()),
+                            _ => self.last_executed_name(),
+                        };
+                        command.is_some() && t.body.peek(last, runs).flatten() == command
+                    }
+                    Some(_) => true,
+                }
+        });
+        let live = self.estack.iter().rev().filter_map(|f| match f {
+            // `pc` is the element to run next: the one running is before it.
+            Frame::Proc { body, pc } => Some((body, pc.saturating_sub(1))),
+            _ => None,
+        });
+        let mut trace = Vec::new();
+        for (body, at) in tail
+            .map(|t| (&t.body, t.body.len().saturating_sub(1)))
+            .into_iter()
+            .chain(live)
+        {
+            if trace.len() == MAX_TRACE_FRAMES {
+                break;
+            }
+            let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
+            let mut excerpt = String::new();
+            if from > 0 {
+                excerpt.push_str("... ");
+            }
+            for k in from..to {
+                let text = body
+                    .peek(k, |o| o.repr_bounded(&limits))
+                    .unwrap_or_default();
+                if k == at {
+                    excerpt.push_str(">>> ");
+                    excerpt.push_str(&text);
+                    excerpt.push_str(" <<<");
+                } else {
+                    excerpt.push_str(&text);
+                }
+                if k + 1 < to {
+                    excerpt.push(' ');
+                }
+            }
+            if to < body.len() {
+                excerpt.push_str(" ...");
+            }
+            trace.push(TraceFrame {
+                procedure: name_of(body),
+                element: at,
+                excerpt,
+            });
+        }
+        self.error_trace = trace;
     }
 
     /// `N`, `N (file)` or `N (file); Run chain: file:N <- outer:M <- line K`
@@ -3171,6 +3309,8 @@ impl Interp {
     /// context existed; with none, the whole program is aborted, which is
     /// what the PLRM's outermost job-server `stopped` would do.
     pub(crate) fn do_stop(&mut self) -> bool {
+        // Frames leave here unrecorded (`TailCall`).
+        self.tail = None;
         let mut left_run_file = false;
         while let Some(frame) = self.estack.pop() {
             if matches!(frame, Frame::StopMark) {
@@ -3196,6 +3336,8 @@ impl Interp {
     /// progress (a BuildChar/kshow proc can't `exit` the show) — per the
     /// PLRM's `invalidexit`.
     pub(crate) fn exit_loop(&mut self) -> Result<(), PsError> {
+        // Frames leave here unrecorded (`TailCall`).
+        self.tail = None;
         loop {
             match self.estack.last() {
                 // An executable string or file `exit` is inside of is not

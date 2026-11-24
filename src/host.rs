@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has four
+//! a server that gives programs a few operators of its own. It has five
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -19,6 +19,9 @@
 //! - **The current path.** [`Interp::current_path`] reads it in user space as
 //!   [`PathSegment`]s and [`Interp::set_current_path`] replaces it, so a host
 //!   operator can measure, resample or rewrite a path the program built.
+//! - **Errors as data.** [`Interp::error_details`] gives an error's name,
+//!   offending command and line as fields, with a backtrace of the
+//!   procedures that were running.
 //! - **Interruption.** [`Interp::set_interrupt`] gives the interpreter a flag
 //!   another thread can raise to stop a running program with
 //!   [`PsError::Interrupted`].
@@ -321,6 +324,40 @@ pub struct ErrorDetails {
     pub limit: Option<crate::Limit>,
     /// A syntax error's detail message.
     pub detail: Option<String>,
+    /// The procedures that were running, innermost first: where in the
+    /// program's own code the error happened. Empty for an error at the top
+    /// level of the program text, which `line` locates. At most
+    /// [`MAX_TRACE_FRAMES`] frames, the innermost ones.
+    pub backtrace: Vec<TraceFrame>,
+}
+
+/// The most frames [`ErrorDetails::backtrace`] holds.
+pub const MAX_TRACE_FRAMES: usize = 16;
+
+/// One procedure that was running when an error happened.
+///
+/// The interpreter does not record which line of the source a procedure's
+/// body came from, so a frame locates the error in the procedure itself:
+/// the element that was running, shown among its neighbours.
+///
+/// A procedure is on the execution stack only until it issues its last
+/// element (that is what makes tail calls free), so a procedure whose
+/// *last* element made the failing call is not in the trace: the frames
+/// are the procedures that still had something left to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TraceFrame {
+    /// The name the procedure is defined under in a dictionary on the
+    /// dictionary stack; `None` for a procedure with no name of its own (a
+    /// loop body, a procedure passed as an operand).
+    pub procedure: Option<String>,
+    /// The index, in the procedure's body, of the element that was running.
+    pub element: usize,
+    /// That element between `>>>` and `<<<`, with up to five elements
+    /// before it and three after, as `==` would print them (long values
+    /// shortened): `0 0 moveto >>> show <<< grestore`. A leading or
+    /// trailing `...` means the body goes on.
+    pub excerpt: String,
 }
 
 /// Names leaked for [`Operator::name`], which is `&'static str`. Each
@@ -732,6 +769,22 @@ impl Interp {
     /// assert_eq!((d.name, d.command.as_deref(), d.line), ("typecheck", Some("add"), Some(2)));
     /// # Ok::<(), pscat::PsError>(())
     /// ```
+    ///
+    /// For an error inside a procedure, [`ErrorDetails::backtrace`] says
+    /// which procedures were running and where in each:
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::new();
+    /// interp.run_str("/label { 10 20 moveto show } def
+    ///                 /page  { gsave 42 label grestore } def")?;
+    /// let err = interp.run_str("page").unwrap_err();
+    /// let trace = interp.error_details(&err).backtrace;
+    /// assert_eq!(trace[0].procedure.as_deref(), Some("label"));
+    /// assert_eq!(trace[0].excerpt, "10 20 moveto >>> show <<<");
+    /// assert_eq!(trace[1].procedure.as_deref(), Some("page"));
+    /// assert_eq!(trace[1].excerpt, "gsave 42 >>> label <<< grestore");
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
     pub fn error_details(&self, err: &PsError) -> ErrorDetails {
         let command = match err {
             PsError::Undefined(name) => Some(name.clone()),
@@ -748,6 +801,7 @@ impl Interp {
                 PsError::Syntax(detail) => Some(detail.clone()),
                 _ => None,
             },
+            backtrace: self.error_trace.clone(),
         }
     }
 

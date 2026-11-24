@@ -463,6 +463,173 @@ fn error_details_fields() {
     );
 }
 
+#[test]
+fn backtrace_names_procedures_and_marks_the_element() {
+    let mut interp = Interp::new();
+    interp
+        .run_str(
+            "/inner { 1 2 add pop (text) 5 mul pop } def
+             /middle { 3 { inner } repeat } def
+             /outer { gsave middle grestore } def",
+        )
+        .unwrap();
+    let err = interp.run_str("outer").unwrap_err();
+    let d = interp.error_details(&err);
+    assert_eq!(d.command.as_deref(), Some("mul"));
+    let t = &d.backtrace;
+    let names: Vec<Option<&str>> = t.iter().map(|f| f.procedure.as_deref()).collect();
+    // Innermost first. `middle` and its `repeat` body are not there: each
+    // had issued its last element, a call, and a procedure's frame is
+    // dropped at that point (tail calls take no execution stack).
+    assert_eq!(names, [Some("inner"), Some("outer")]);
+    assert_eq!(t[0].element, 6);
+    assert_eq!(t[0].excerpt, "... 2 add pop (text) 5 >>> mul <<< pop");
+    assert_eq!(t[1].excerpt, "gsave >>> middle <<< grestore");
+
+    // A loop body that goes on after the call is a frame with no name.
+    interp.clear_operands();
+    interp
+        .run_str("/looper { 2 { inner 0 pop } repeat 0 pop } def")
+        .unwrap();
+    let err = interp.run_str("looper").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    let names: Vec<Option<&str>> = t.iter().map(|f| f.procedure.as_deref()).collect();
+    assert_eq!(names, [Some("inner"), None, Some("looper")]);
+    assert_eq!(t[1].excerpt, ">>> inner <<< 0 pop");
+    assert_eq!(t[2].excerpt, "2 {inner 0 pop} >>> repeat <<< 0 pop");
+    interp.clear_operands();
+
+    // An error at the top level of the text has no procedure frames...
+    let err = interp.run_str("1 (x) add").unwrap_err();
+    assert!(interp.error_details(&err).backtrace.is_empty());
+    // ...and a successful run leaves none behind for a later, unrelated report.
+    let err = interp.run_str("outer").unwrap_err();
+    assert_eq!(interp.error_details(&err).backtrace.len(), 2);
+    interp.clear_operands();
+    interp.run_str("1 1 add pop").unwrap();
+    assert!(
+        interp
+            .error_details(&PsError::Typecheck)
+            .backtrace
+            .is_empty()
+    );
+}
+
+#[test]
+fn backtrace_is_bounded_and_survives_limits_and_caught_errors() {
+    let mut interp = Interp::new();
+    // Deep recursion: only the innermost frames are kept.
+    interp
+        .run_str("/down { dup 0 gt { 1 sub down 0 pop } { (x) 1 add pop } ifelse 0 pop } def")
+        .unwrap();
+    let err = interp.run_str("40 down").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t.len(), pscat::host::MAX_TRACE_FRAMES);
+    assert!(t[0].excerpt.contains(">>> add <<<"), "{}", t[0].excerpt);
+    assert_eq!(t[1].procedure.as_deref(), Some("down"));
+    interp.clear_operands();
+
+    // An error a program catches leaves no trace: nothing was uncaught.
+    interp.run_str("{ (x) 1 add } stopped pop").unwrap();
+    assert!(
+        interp
+            .error_details(&PsError::Typecheck)
+            .backtrace
+            .is_empty()
+    );
+    interp.clear_operands();
+
+    // A limit error has one too: where the program was when the budget ran out.
+    interp
+        .run_str("/spin { { 1 pop } loop 0 pop } def")
+        .unwrap();
+    interp
+        .set_limits(Limits::none().with_max_steps(1_000))
+        .unwrap();
+    let err = interp.run_str("spin").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert!(
+        t.iter().any(|f| f.procedure.as_deref() == Some("spin")),
+        "{t:?}"
+    );
+
+    // Long values in an excerpt are shortened, so a frame stays one line.
+    interp.set_limits(Limits::none()).unwrap();
+    interp
+        .run_str(
+            "/big { (0123456789012345678901234567890123456789) [1 2 3 4 5 6 7 8 9] nosuch } def",
+        )
+        .unwrap();
+    let err = interp.run_str("big").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert!(t[0].excerpt.len() < 140, "{}", t[0].excerpt);
+    assert!(t[0].excerpt.ends_with(">>> nosuch <<<"));
+}
+
+/// The commonest place for an error is the last operator of a procedure,
+/// whose frame is already popped when it runs. The trace still shows it.
+#[test]
+fn backtrace_includes_a_procedure_failing_at_its_last_element() {
+    let mut interp = Interp::new();
+    interp
+        .run_str(
+            "/label { 10 20 moveto show } def
+             /page  { gsave 42 label grestore } def
+             /fine  { 1 2 add pop } def",
+        )
+        .unwrap();
+    let err = interp.run_str("page").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t.len(), 2, "{t:?}");
+    assert_eq!(t[0].procedure.as_deref(), Some("label"));
+    assert_eq!(t[0].excerpt, "10 20 moveto >>> show <<<");
+    assert_eq!(t[1].excerpt, "gsave 42 >>> label <<< grestore");
+    interp.clear_operands();
+
+    // Called straight from program text.
+    let err = interp.run_str("7 label").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].procedure.as_deref(), Some("label"));
+    interp.clear_operands();
+
+    // A procedure that returned is not blamed for a later error at the
+    // same depth: in program text...
+    let err = interp.run_str("fine (a) (b) add").unwrap_err();
+    assert!(interp.error_details(&err).backtrace.is_empty());
+    interp.clear_operands();
+    // ...in its caller...
+    interp
+        .run_str("/caller { fine (a) (b) add pop } def")
+        .unwrap();
+    let err = interp.run_str("caller").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t.len(), 1, "{t:?}");
+    assert_eq!(t[0].excerpt, "fine (a) (b) >>> add <<< pop");
+    interp.clear_operands();
+    // ...or in a later iteration of a loop that called it.
+    interp
+        .run_str("/n 0 def /loopy { 3 { /n n 1 add def n 2 eq { (a) 1 add } { fine } ifelse } repeat } def")
+        .unwrap();
+    let err = interp.run_str("loopy").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert!(
+        t.iter().all(|f| f.procedure.as_deref() != Some("fine")),
+        "{t:?}"
+    );
+    assert!(t[0].excerpt.contains(">>> add <<<"), "{t:?}");
+    interp.clear_operands();
+
+    // A loop body failing at its last element, under a `for`.
+    interp
+        .run_str("/sweep { 0 1 3 { (s) add } for 0 pop } def")
+        .unwrap();
+    let err = interp.run_str("sweep").unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t[0].excerpt, "(s) >>> add <<<");
+    assert_eq!(t[1].procedure.as_deref(), Some("sweep"));
+}
+
 /// The whole pattern together, as an animation engine uses it: set a
 /// program up once, checkpoint the VM with `save`, then render any frame in
 /// any order as a pure function of a host clock.
