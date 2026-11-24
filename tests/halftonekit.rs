@@ -1117,3 +1117,179 @@ fn ghostscript_accepts_packed_tone_callbacks() {
         .expect("run gs");
     assert!(status.success(), "gs rejected packed /Tone callbacks");
 }
+
+// ---- faint tones (issue #1408) ----------------------------------------
+//
+// Coverage is measured as mean ink, (255 - red) / 255 over the page, not
+// by counting dark pixels: a rule thinner than a device pixel draws as a
+// faint hairline whose pixels never get dark, so a "red < 128" count reads
+// zero both before and after the fix and would pass on the broken library.
+
+/// Mean ink over the whole page, 0 (blank) to 1 (solid black).
+fn mean_ink(it: &Interp) -> f64 {
+    let px = it.gfx().pixmap.pixels();
+    let sum: u64 = px.iter().map(|p| u64::from(255 - p.red())).sum();
+    sum as f64 / (255.0 * px.len() as f64)
+}
+
+/// Mean ink of one black `halftone` call over a `side` x `side` clip,
+/// drawn under `pre` (e.g. `2 2 scale`) with the library's thinnest-rule
+/// limit optionally overridden.
+fn faint_ink(screen: &str, tone: f64, pre: &str, side: u32, thresh: Option<f64>) -> f64 {
+    let mut it = with_lib(side, side);
+    if let Some(t) = thresh {
+        run(&mut it, &format!("/hfthresh {t} def"));
+    }
+    let clip = f64::from(side) / if pre.is_empty() { 1.0 } else { 2.0 };
+    run(
+        &mut it,
+        &format!(
+            "0 setgray {pre} newpath 0 0 moveto {clip} 0 lineto {clip} {clip} lineto \
+             0 {clip} lineto closepath clip \
+             << /Screen /{screen} /Frequency 9 /Tone {tone} >> halftone"
+        ),
+    );
+    mean_ink(&it)
+}
+
+#[test]
+fn a_line_or_cross_screen_fades_smoothly_to_nothing() {
+    // The repro of #1408: at /Tone 0.001 the screen used to draw every
+    // hairline at the stroker's 0.1 px floor, about 0.9% ink on a line
+    // screen where 0.07% is the proportional answer.
+    let tones = [0.0, 0.0005, 0.001, 0.003, 0.01, 0.03, 0.1, 0.5];
+    for screen in ["line", "cross"] {
+        let ink: Vec<f64> = tones
+            .iter()
+            .map(|&t| faint_ink(screen, t, "", 240, None))
+            .collect();
+        assert_eq!(ink[0], 0.0, "{screen}: tone 0 must draw nothing");
+        for w in ink.windows(2) {
+            assert!(w[0] < w[1], "{screen}: coverage must rise with tone: {ink:?}");
+        }
+        // Almost blank at a tone of 0.001 (it was ~9x the proportional share).
+        assert!(ink[2] < 0.002, "{screen}: tone 0.001 drew {}", ink[2]);
+        // Roughly proportional: ink/tone stays within a factor of 2 of the
+        // value at tone 0.1 all the way down (the cross runs high from its
+        // two crossing arms, the line from its caps; a plateau would blow
+        // the ratio up by 10x or more).
+        let ref_ratio = ink[6] / tones[6];
+        for (&t, &i) in tones.iter().zip(&ink).skip(1).take(5) {
+            let ratio = i / t;
+            assert!(
+                (0.5..=2.0).contains(&(ratio / ref_ratio)),
+                "{screen}: ink/tone at {t} is {ratio}, tone 0.1's is {ref_ratio}"
+            );
+        }
+    }
+}
+
+#[test]
+fn coverage_never_drops_across_the_thin_rule_switch() {
+    // At 72 dpi and the default /MaxWidth the rule reaches 0.1 px at tone
+    // 0.0125 (2x: 0.00625). Either side of that the mark changes from a
+    // shortened dash to a full rule; a drop there would be a smaller copy of
+    // the pop this issue is about. Slope may change, coverage may not fall.
+    for screen in ["line", "cross"] {
+        for (pre, side, lo) in [("", 240, 0.0100), ("2 2 scale", 240, 0.0050)] {
+            let ink: Vec<f64> = (0..13)
+                .map(|k| faint_ink(screen, lo + 0.0005 * f64::from(k), pre, side, None))
+                .collect();
+            for w in ink.windows(2) {
+                assert!(
+                    w[0] <= w[1],
+                    "{screen} {pre:?}: coverage fell across the switch: {ink:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn above_the_thin_rule_limit_nothing_changes() {
+    // A tone whose rule is 0.1 px or wider draws exactly what it always did:
+    // disabling the adaptation (limit 0) gives the same pixels. Together with
+    // `scripts/identity_check.sh` over every file that loads the library this
+    // is the byte-identical-at-ordinary-tones guarantee.
+    for screen in ["line", "cross"] {
+        for tone in [0.02, 0.1, 0.5, 1.0] {
+            let a = faint_ink(screen, tone, "", 120, None);
+            let b = faint_ink(screen, tone, "", 120, Some(0.0));
+            assert_eq!(a, b, "{screen} at tone {tone} changed");
+        }
+    }
+    // And with the adaptation disabled the old plateau is back, which is what
+    // the tests above would catch.
+    let plateau = faint_ink("line", 0.001, "", 240, Some(0.0));
+    assert!(plateau > 0.005, "legacy plateau expected, got {plateau}");
+}
+
+#[test]
+fn the_dot_screen_still_fades_on_its_own() {
+    let ink: Vec<f64> = [0.0, 0.0005, 0.001, 0.01, 0.1]
+        .iter()
+        .map(|&t| faint_ink("dot", t, "", 240, None))
+        .collect();
+    assert_eq!(ink[0], 0.0);
+    for w in ink.windows(2) {
+        assert!(w[0] < w[1], "dot coverage must rise with tone: {ink:?}");
+    }
+}
+
+#[test]
+fn a_faint_screen_under_a_stretched_ctm_still_draws_and_fades() {
+    // `hfpixel` measures across each rule under the CTM, so a stretched or
+    // rotated page must neither divide by zero nor leave the plateau.
+    for pre in ["3 1 scale", "30 rotate 2 2 scale"] {
+        let mut ink = vec![];
+        for tone in [0.0005, 0.002, 0.01] {
+            let mut it = with_lib(240, 240);
+            run(
+                &mut it,
+                &format!(
+                    "0 setgray {pre} newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 \
+                     lineto closepath clip << /BBox [-200 -200 200 200] /Screen /cross \
+                     /Frequency 9 /Tone {tone} >> halftone"
+                ),
+            );
+            ink.push(mean_ink(&it));
+        }
+        assert!(ink[0] > 0.0 && ink[0] < ink[1] && ink[1] < ink[2], "{pre}: {ink:?}");
+    }
+}
+
+#[test]
+fn ghostscript_accepts_faint_line_and_cross_tones() {
+    // The faint-tone path (#1408) uses `dtransform`, `setlinecap` and a
+    // butt-capped dash only: core operators, so a faint screen must run
+    // under real Ghostscript too (inlined, so no file access is needed).
+    if !common::gs_available() {
+        return;
+    }
+    let lib = std::fs::read_to_string("lib/halftonekit.ps").expect("library present");
+    let driver = "0 setgray \
+        newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath clip \
+        << /Screen /line /Frequency 9 /Tone 0.001 >> halftone \
+        << /Screen /cross /Frequency 9 /Tone 0.0005 >> halftone \
+        << /Screen /cross /Frequency 9 /Tone 0 >> halftone \
+        2 2 scale << /Screen /line /Frequency 9 /Tone 0.003 >> halftone \
+        showpage";
+    let dir = common::scratch_dir("pscat-halftone-faint");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let combined = dir.join("halftone_faint_gs.ps");
+    std::fs::write(&combined, format!("{lib}\n{driver}\n")).expect("write");
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g120x120",
+            "-r72",
+            "-o/dev/null",
+        ])
+        .arg(&combined)
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected a faint-tone screen");
+}
