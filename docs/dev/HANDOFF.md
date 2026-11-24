@@ -2425,6 +2425,12 @@ renders eight examples in both and compares block-downsampled output).
   fail. The `pscat` CLI's single-run path calls the hidden
   `Interp::leave_dicts_to_process_exit` so exit does not walk the graph
   (80 ms on a 600k-entry program); the sweep and spool loops do not.
+- A `Drop` reached from `Drop for Interp` must not use a thread-local with
+  `.with()` (#1404): a library user's `Interp` held in its own `thread_local!`
+  is dropped at thread exit, after any of this crate's thread-locals may be
+  destroyed, and a panic there aborts the process. `PsArray`/`Dict` teardown's
+  placeholder store goes through `object::empty_store` (`try_with`, with a
+  fresh store as fallback). Test: `tests/interp_thread_local_drop.rs`.
 - A deep dict chain frees iteratively: `impl Drop for Dict` (`object.rs`,
   next to `PsArray`'s) moves nested uniquely held dicts and arrays to a
   worklist, so a 100000-level chain neither overflows the stack at `Interp`
