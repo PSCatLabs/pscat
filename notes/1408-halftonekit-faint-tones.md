@@ -36,17 +36,19 @@ render byte-identical. The price is a gentle slope change at the switch
 
 **Why shorten, not fade alpha.** `setalpha` is a pscat extension and
 halftonekit is documented to run under Ghostscript; `dtransform`,
-`setlinecap` and a butt-capped stroke are core. Pinned by
-`ghostscript_accepts_faint_line_and_cross_tones`.
+`setlinecap` and a butt-capped stroke are core, so the same marks are
+drawn there (pinned by `ghostscript_accepts_faint_line_and_cross_tones`,
+which shows gs runs them; how gs rasterizes a sub-pixel rule is its own).
 
 **Evidence.** `scripts/identity_check.sh --loader lib/halftonekit.ps`: only
 `gallery/out_of_register.ps` differs (471 of 2.6M pixels at 144 dpi, max 19
-levels; its ridge feet fade to 0). Flooring that callback below the switch
-tone makes the two libraries render identically, so the difference is only
-the faint region. `gallery/renders/*.png` are not regenerated here.
+levels; its ridge feet fade to 0). Flooring that callback to 0 below tone
+0.0063 (the switch at the gallery's 144 dpi) makes the two libraries render
+identically, so the difference is only the faint region. `gallery/renders/*.png` are not regenerated here.
 
 **Known limits (follow-ups).** `hfthresh` mirrors the renderer's floor; if
-`src/gfx.rs` changes it, change both. Under a strongly non-uniform CTM the
+`src/gfx.rs` changes it, change both (if the floor rises,
+`a_line_or_cross_screen_fades_smoothly_to_nothing` fails on its ratio check). Under a strongly non-uniform CTM the
 pen floor uses the pen's largest stretch while `hfpixel` measures across the
 rule, so a small residual plateau can remain. PDF/SVG viewers enforce their
 own minimum line width, so faint tones can still look too dark there.

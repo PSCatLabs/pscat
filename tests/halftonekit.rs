@@ -1136,6 +1136,11 @@ fn mean_ink(it: &Interp) -> f64 {
 /// drawn under `pre` (e.g. `2 2 scale`) with the library's thinnest-rule
 /// limit optionally overridden.
 fn faint_ink(screen: &str, tone: f64, pre: &str, side: u32, thresh: Option<f64>) -> f64 {
+    mean_ink(&faint_page(screen, tone, pre, side, thresh))
+}
+
+/// The page itself, for pixel-for-pixel comparisons.
+fn faint_page(screen: &str, tone: f64, pre: &str, side: u32, thresh: Option<f64>) -> Interp {
     let mut it = with_lib(side, side);
     if let Some(t) = thresh {
         run(&mut it, &format!("/hfthresh {t} def"));
@@ -1149,7 +1154,7 @@ fn faint_ink(screen: &str, tone: f64, pre: &str, side: u32, thresh: Option<f64>)
              << /Screen /{screen} /Frequency 9 /Tone {tone} >> halftone"
         ),
     );
-    mean_ink(&it)
+    it
 }
 
 #[test]
@@ -1211,15 +1216,22 @@ fn coverage_never_drops_across_the_thin_rule_switch() {
 #[test]
 fn above_the_thin_rule_limit_nothing_changes() {
     // A tone whose rule is 0.1 px or wider draws exactly what it always did:
-    // disabling the adaptation (limit 0) gives the same pixels. Together with
-    // `scripts/identity_check.sh` over every file that loads the library this
-    // is the byte-identical-at-ordinary-tones guarantee.
+    // disabling the adaptation (limit 0) gives the same pixels, byte for
+    // byte. Together with `scripts/identity_check.sh` over every file that
+    // loads the library this is the byte-identical-at-ordinary-tones
+    // guarantee. The dot screen never reads the limit, so it is identical
+    // at every tone, faint ones included.
     for screen in ["line", "cross"] {
         for tone in [0.02, 0.1, 0.5, 1.0] {
-            let a = faint_ink(screen, tone, "", 120, None);
-            let b = faint_ink(screen, tone, "", 120, Some(0.0));
-            assert_eq!(a, b, "{screen} at tone {tone} changed");
+            let a = pixbuf(&faint_page(screen, tone, "", 120, None));
+            let b = pixbuf(&faint_page(screen, tone, "", 120, Some(0.0)));
+            assert!(a == b, "{screen} at tone {tone} changed");
         }
+    }
+    for tone in [0.0005, 0.001, 0.01, 0.1, 1.0] {
+        let a = pixbuf(&faint_page("dot", tone, "", 120, None));
+        let b = pixbuf(&faint_page("dot", tone, "", 120, Some(0.0)));
+        assert!(a == b, "dot at tone {tone} changed");
     }
     // And with the adaptation disabled the old plateau is back, which is what
     // the tests above would catch.

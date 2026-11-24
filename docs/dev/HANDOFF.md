@@ -1474,6 +1474,11 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **halftonekit's faint-tone limit mirrors a renderer floor (#1408).** `hfthresh` (0.1 device px) in
+  `lib/halftonekit.ps` is the stroker's minimum width (`device_line_width` / `stroke_params` in
+  `src/gfx.rs`). A line/cross rule thinner than it is shortened, not thinned, so a tone fading to 0
+  fades. Raise or lower the stroker floor and `hfthresh` must follow (a raised floor fails the fade test).
+
 - **A failed operator's operands come back through the operand ledger**
   (#1047, `notes/1047-operand-ledger.md`). `Interp::run_op` wraps every
   operator dispatch: `pop`, `pop_num` and `pop_int` record the caller's
