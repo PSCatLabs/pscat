@@ -1311,3 +1311,20 @@ fn ghostscript_accepts_faint_line_and_cross_tones() {
         .expect("run gs");
     assert!(status.success(), "gs rejected a faint-tone screen");
 }
+
+#[test]
+fn a_singular_ctm_does_not_break_the_faint_path() {
+    // `hfpixel` answers 0 when the CTM maps a rule's normal to nothing, and
+    // the caller then keeps the old drawing path: no division by zero.
+    for pre in ["1 0 scale", "0 0 scale"] {
+        let mut it = with_lib(100, 100);
+        run(
+            &mut it,
+            &format!(
+                "0 setgray {pre} newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 \
+                 lineto closepath clip << /BBox [0 0 100 100] /Screen /cross \
+                 /Frequency 9 /Tone 0.001 >> halftone"
+            ),
+        );
+    }
+}

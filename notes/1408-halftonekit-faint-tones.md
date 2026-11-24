@@ -46,7 +46,10 @@ levels; its ridge feet fade to 0). Flooring that callback to 0 below tone
 0.0063 (the switch at the gallery's 144 dpi) makes the two libraries render
 identically, so the difference is only the faint region. `gallery/renders/*.png` are not regenerated here.
 
-**Known limits (follow-ups).** `hfthresh` mirrors the renderer's floor; if
+**Known limits (follow-ups).** An explicit `/MaxWidth` under 0.1 device pixel
+turns even tone 1 into a dash field (same ink, no longer a continuous hairline).
+Ghostscript enforces its own ~1 px minimum line width, so a faint screen
+there does not track tone; only pscat does.  `hfthresh` mirrors the renderer's floor; if
 `src/gfx.rs` changes it, change both (if the floor rises,
 `a_line_or_cross_screen_fades_smoothly_to_nothing` fails on its ratio check). Under a strongly non-uniform CTM the
 pen floor uses the pen's largest stretch while `hfpixel` measures across the

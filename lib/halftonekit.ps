@@ -198,9 +198,13 @@
 % tracking tone all the way down, the dash width and so the look of a
 % rule never changes at or above the limit (byte-identical there), and
 % only core operators (`dtransform`, `setlinecap`) are used, so the
-% same marks are drawn under Ghostscript (how it rasterizes a sub-pixel
-% rule is its own business); an alpha fade (`setalpha`) would not run
-% there at all. At the default /MaxWidth and 72 dpi the switch is at
+% same marks are drawn under Ghostscript, though gs enforces its own
+% minimum line width of about a pixel, so a faint screen there does not
+% track tone the way it does in pscat; an alpha fade (`setalpha`) would
+% not run there at all. The limit is about the rule's width, not the
+% tone: an explicit /MaxWidth under 0.1 device pixel makes even a tone
+% of 1 a dash field (same total ink as before, no longer a continuous
+% hairline). At the default /MaxWidth and 72 dpi the switch is at
 % tone 0.0125; at 2x it is at 0.00625. A tone of exactly 0 still draws
 % nothing. The dot screen needs none of this: a dot's radius really
 % does go to nothing.
