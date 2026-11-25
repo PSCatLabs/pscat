@@ -411,7 +411,12 @@ fn every_documented_parameter_changes_the_render() {
             "% @summary: Draws the current path in charcoal",
             LINE,
             "/Seed 2",
-            &[("Medium", "/Medium /compressed"), ("Grade", "/Grade 0.1")],
+            &[
+                ("Medium", "/Medium /compressed"),
+                ("Grade", "/Grade 0.1"),
+                ("From", "/From 0.3"),
+                ("To", "/To 0.7"),
+            ],
         ),
         (
             "dhhatch",
@@ -649,5 +654,146 @@ fn ghostscript_agrees_on_a_hatched_region() {
     assert!(
         other > same * 2.0,
         "another seed is as close ({other:.2}): the check is too weak"
+    );
+}
+
+// Issue #1418: dhstroke takes drykit's /From and /To.
+
+fn part(opts: &str) -> Interp {
+    render(
+        200,
+        60,
+        2.0,
+        &format!("newpath 10 30 moveto 70 55 140 5 190 30 curveto << /Seed 2 {opts} >> dhstroke"),
+    )
+}
+
+fn diffs(a: &[u8], b: &[u8], x1: usize) -> u8 {
+    (0..a.len() / 4)
+        .filter(|i| i % 400 < x1)
+        .map(|i| (0..4).map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c])).max().unwrap())
+        .max()
+        .unwrap()
+}
+
+/// The part keys are the whole stroke's when left out or whole, and a
+/// growing `/From 0 /To t` keeps the part already drawn: the medium's
+/// flicked lift (`/Pressure`) and its lanes' dropouts belong to the whole
+/// stroke, so the lift appears only when the stroke is finished.
+#[test]
+fn a_growing_charcoal_stroke_keeps_what_it_has_drawn() {
+    for opts in [
+        "",
+        "/Medium /compressed",
+        "/Medium /pencil",
+        "/Medium /vine /Grade 0.9",
+    ] {
+        let whole = data(&part(opts));
+        assert_eq!(whole, data(&part(&format!("{opts} /From 0 /To 1"))));
+        let tos: Vec<f64> = (0..=14).map(|i| 0.3 + 0.05 * f64::from(i)).collect();
+        let frames: Vec<Vec<u8>> = tos
+            .iter()
+            .map(|t| data(&part(&format!("{opts} /From 0 /To {t}"))))
+            .collect();
+        // drykit thins the catch by a run's mean stop spacing, which moves
+        // with the end of a growing stroke: now and then (measured: one
+        // frame of 14) the streaks along the whole stroke turn a little
+        let mut moved = 0;
+        for k in 0..tos.len() - 1 {
+            let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as usize;
+            let worst = diffs(&frames[k], &frames[k + 1], behind);
+            assert!(
+                worst <= 110,
+                "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
+                k + 1
+            );
+            if worst > 24 {
+                moved += 1;
+            }
+        }
+        assert!(moved <= 3, "`{opts}`: {moved} of 14 frames redrew their texture");
+        assert_eq!(frames[14], whole, "`{opts}` at t = 1");
+        // two halves on one canvas make the whole, up to the seam
+        let halves = render(
+            200,
+            60,
+            2.0,
+            &format!(
+                "newpath 10 30 moveto 70 55 140 5 190 30 curveto << /Seed 2 {opts} /To 0.5 >> dhstroke \
+                 newpath 10 30 moveto 70 55 140 5 190 30 curveto << /Seed 2 {opts} /From 0.5 >> dhstroke"
+            ),
+        );
+        let worst = diffs(&whole, &data(&halves), 400);
+        assert!(worst <= 110, "`{opts}` halves differ by up to {worst}");
+    }
+}
+
+/// dhstroke's own errors for the keys come from drykit, and the other
+/// charcoal procedures that pass their keys on apply the part to each
+/// stroke they draw.
+#[test]
+fn charcoal_parts_are_checked_and_pass_through() {
+    for (keys, err) in [
+        ("/From -0.1", "dkstroke-from-must-be-0-to-1"),
+        ("/To 1.5", "dkstroke-to-must-be-0-to-1"),
+        ("/From 0.6 /To 0.4", "dkstroke-from-must-not-exceed-to"),
+    ] {
+        let mut it = Interp::with_page_scaled(100, 60, 1.0).expect("page");
+        for path in LIBS {
+            it.run_source(&std::fs::read(path).expect("lib")).expect("load");
+        }
+        let src = format!(
+            "<< /Surface /drawing >> dksurface newpath 10 10 moveto 90 40 lineto << {keys} >> dhstroke"
+        );
+        let e = it.run_str(&src).expect_err("a bad part must raise");
+        assert!(
+            it.error_report(&e).contains(err),
+            "`{keys}`: {}",
+            it.error_report(&e)
+        );
+    }
+    // a smudge, a lift and a sketch draw the part of their path
+    let whole = |body: &str| data(&render(100, 60, 2.0, body));
+    for body in [
+        "newpath 10 20 moveto 90 34 lineto << /Width 6 /Value 0.8 /Touch 0.9 %K >> dhsmudge",
+        "newpath 10 20 moveto 90 34 lineto << %K >> dhsketch",
+    ] {
+        assert_ne!(
+            whole(&body.replace("%K", "/To 0.5")),
+            whole(&body.replace("%K", "")),
+            "{body}: /To 0.5 changed nothing"
+        );
+    }
+}
+
+/// A part keeps the whole stroke's profile: a stroke drawn `/To 0.8` is
+/// still at full width where its end is, while a shorter path of the same
+/// length has its own flicked lift there and is thin.
+#[test]
+fn a_part_has_the_whole_strokes_width_not_a_shorter_strokes_lift() {
+    let height_at = |it: &Interp, x: usize| {
+        let l = lumas(it);
+        (0..120).filter(|&y| l[y * 400 + x] < 150.0).count()
+    };
+    let draw = |path: &str| {
+        render(
+            200,
+            60,
+            2.0,
+            &format!("newpath {path} << /Medium /compressed /Seed 2 /Width 6 >> dhstroke"),
+        )
+    };
+    let part = render(
+        200,
+        60,
+        2.0,
+        "newpath 10 30 moveto 190 30 lineto << /Medium /compressed /Seed 2 /Width 6 /To 0.8 >> dhstroke",
+    );
+    let shorter = draw("10 30 moveto 154 30 lineto");
+    // device column 296 = 4 points behind the end at x = 154
+    let (a, b) = (height_at(&part, 296), height_at(&shorter, 296));
+    assert!(
+        a as f64 > 1.3 * b as f64,
+        "the part is {a} rows tall, a shorter stroke {b}"
     );
 }

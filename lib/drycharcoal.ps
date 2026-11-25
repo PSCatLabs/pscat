@@ -229,6 +229,8 @@
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 60 moveto 200 90 lineto << /Medium /compressed >> dhstroke
 % @param: /Medium [name] /vine, /compressed or /pencil (default /vine)
 % @param: /Grade [0..1] Hard (0) to soft (1): softer is wider, darker and fills more of the tooth (default 0.5 for vine and pencil, 0.8 for compressed)
+% @param: /From [0..1] Draws only the part of each stroke from this fraction of its length (dkstroke's key, errors included): the medium's tail, lanes, dropouts, texture and fallout there are the whole stroke's, so /From 0 /To t for a growing t grows the stroke without changing what is already drawn (default 0)
+% @param: /To [0..1] Draws only the part of each stroke up to this fraction of its length; must not be less than /From. 1 draws to the end, with the flicked lift (default 1)
 /dhstroke {
     dup type /dicttype ne { pop dhstroke-options-must-be-a-dict } if
     /dhso exch def
