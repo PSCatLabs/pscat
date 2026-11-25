@@ -48,6 +48,8 @@ budget (`dkbudget` 150000 and 800000 give the same pixels) and the catch's thinn
 verified to take effect by a probe that empties it, gives byte-identical output). #1409 saw the same with dcchalk (whose cut is different), so it is probably in drykit's drawing
 of a longer run, but that is not shown. Not chased further.
 
+**Area limit.** `dkcatch-area-exceeds-safety-limit` is checked on the cut runs, so a growing stroke that the whole would refuse is accepted for the frames before the one that exceeds the limit.
+
 **Proposed follow-ups.** (1) Find why a longer run re-textures the whole of its drawn part (not chunking, not thinning), and make a prefix stable. (2) Move `dcchalk` onto drykit's
 `/From /To` (drops `dcpiece`, the touch remap and the lane-seed mixing; changes its partial output).
 (3) Cap-less interior ends for sub-width incremental pieces (as in #1409).

@@ -2036,8 +2036,10 @@ fn fallout_follows_the_pen() {
     let line = "newpath 10 30 moveto 190 30 lineto";
     let opts = "/Seed 3 /Fallout 6 /Width 2";
     let half = piece(line, &format!("{opts} /To 0.5"));
-    // the pen is at x = 100: nothing is drawn past it, even a particle
-    let ahead = col_diffs(&data(&half), &bare, 220, PW * 2);
+    // the pen is at x = 100 (device 200); its cap and halo reach about 3 points,
+    // so from device 208 nothing is drawn, even a particle of the chunk the pen
+    // is in (x 90 to 110)
+    let ahead = col_diffs(&data(&half), &bare, 208, PW * 2);
     assert!(
         ahead.iter().all(|&v| v == 0),
         "something was drawn ahead of the pen"
@@ -2152,9 +2154,17 @@ fn a_part_inside_a_batch_is_a_stroke_like_any_other() {
             ),
         )
     });
+    let msg = match mixed {
+        Ok(_) => panic!("a second colour was accepted after an empty part in a batch"),
+        Err(e) => e
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default(),
+    };
     assert!(
-        mixed.is_err(),
-        "a second colour was accepted after an empty part in a batch"
+        msg.contains("dkbatch-mixes-pigments"),
+        "the second colour raised something else: {msg}"
     );
 }
 
