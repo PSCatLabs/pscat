@@ -165,14 +165,18 @@ pub(crate) const PERMANENT_DICTS: usize = 3;
 
 /// A procedure frame popped as it issued its last element (a tail call),
 /// with what identifies the moment: the execution stack's depth after the
-/// pop and, when the frame under it is a procedure, that procedure's `pc`.
-/// While the last element runs, both still hold. Once anything else runs
-/// they do not: a frame pushed or popped changes the depth, a step of the
-/// procedure underneath advances its `pc`, and a loop frame underneath
-/// pushes its next body or pops itself.
+/// pop and, when the frame under it is a procedure, that procedure's `pc`,
+/// or when it is a scanner, where the token it last read starts. While the
+/// last element runs, both still hold. Once anything else runs they do
+/// not: a frame pushed or popped changes the depth, a step of the
+/// procedure underneath advances its `pc`, a scanner underneath reads the
+/// next token, and a loop frame underneath pushes its next body or pops
+/// itself.
 struct TailCall {
     body: PsArray,
     depth: usize,
+    /// The procedure underneath's `pc`, or the scanner underneath's token
+    /// offset; `usize::MAX` under anything else.
     parent_pc: usize,
 }
 
@@ -1853,6 +1857,7 @@ impl Interp {
             if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
                 let parent_pc = match self.estack.last() {
                     Some(Frame::Proc { pc, .. }) => *pc,
+                    Some(Frame::Scanner(lexer)) => lexer.token_start(),
                     _ => usize::MAX,
                 };
                 self.tail = Some(TailCall {
@@ -2252,6 +2257,10 @@ impl Interp {
             t.depth == self.estack.len()
                 && match self.estack.last() {
                     Some(Frame::Proc { pc, .. }) => *pc == t.parent_pc,
+                    // Program text runs at one depth: the scanner must not
+                    // have read a token since (`fine pop`, where the later
+                    // `pop` fails, is not `fine`'s last `pop`).
+                    Some(Frame::Scanner(lexer)) if lexer.token_start() != t.parent_pc => false,
                     Some(Frame::Scanner(_)) | None => {
                         let last = t.body.len().saturating_sub(1);
                         let runs = |o: &Object| match &o.value {

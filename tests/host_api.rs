@@ -775,3 +775,22 @@ fn clear_operands_still_empties_the_stack_between_frames() {
         }
     }
 }
+
+/// Finding 8: a procedure that returned is not blamed for an error at the
+/// top level of the text that happens to be its last operator.
+#[test]
+fn backtrace_does_not_blame_a_returned_procedure_with_the_same_last_operator() {
+    let mut interp = Interp::new();
+    interp.run_str("/fine { 1 pop } def").unwrap();
+    let err = interp.run_str("fine pop").unwrap_err();
+    assert_eq!(err, PsError::StackUnderflow);
+    let t = interp.error_details(&err).backtrace;
+    assert!(t.is_empty(), "{t:?}");
+    // The procedure itself failing there is still in the trace.
+    let err = interp
+        .run_str("/bad { 1 0 pop pop pop } def bad")
+        .unwrap_err();
+    let t = interp.error_details(&err).backtrace;
+    assert_eq!(t.len(), 1, "{t:?}");
+    assert_eq!(t[0].procedure.as_deref(), Some("bad"));
+}
