@@ -1129,6 +1129,12 @@ impl Dict {
         self.names.values()
     }
 
+    /// The name-keyed entries as (interned id, value), in the order
+    /// [`pairs`](Self::pairs) gives them, without copying any.
+    pub(crate) fn name_entries(&self) -> impl Iterator<Item = (u32, &Object)> {
+        self.names.iter().map(|(k, v)| (*k, v))
+    }
+
     /// Snapshot of (key, value) pairs for `forall`/`copy`. Name keys come
     /// back as literal name objects. The PLRM leaves the order
     /// unspecified, but it is stable from run to run: name keys first, in

@@ -163,6 +163,44 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
 /// never go below them, and `countdictstack` is 3 at the start, as in gs.
 pub(crate) const PERMANENT_DICTS: usize = 3;
 
+/// The most bytes of a procedure's name a backtrace frame keeps
+/// ([`crate::host::TraceFrame::procedure`]).
+const TRACE_NAME_BYTES: usize = 256;
+
+/// `name`, cut to [`TRACE_NAME_BYTES`] at a character boundary with `...`
+/// after it: a backtrace is made after the limits stop looking, so it must
+/// not copy a name of any size the program chose.
+fn shorten_name(name: &str) -> String {
+    if name.len() <= TRACE_NAME_BYTES {
+        return name.to_string();
+    }
+    let mut cut = TRACE_NAME_BYTES;
+    while !name.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = String::with_capacity(cut + 3);
+    out.push_str(&name[..cut]);
+    out.push_str("...");
+    out
+}
+
+/// A procedure frame popped as it issued its last element (a tail call),
+/// with what identifies the moment: the execution stack's depth after the
+/// pop and, when the frame under it is a procedure, that procedure's `pc`,
+/// or when it is a scanner, where the token it last read starts. While the
+/// last element runs, both still hold. Once anything else runs they do
+/// not: a frame pushed or popped changes the depth, a step of the
+/// procedure underneath advances its `pc`, a scanner underneath reads the
+/// next token, and a loop frame underneath pushes its next body or pops
+/// itself.
+struct TailCall {
+    body: PsArray,
+    depth: usize,
+    /// The procedure underneath's `pc`, or the scanner underneath's token
+    /// offset; `usize::MAX` under anything else.
+    parent_pc: usize,
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -391,6 +429,31 @@ struct SaveRecord {
 /// Not `Send`: see the [crate docs](crate#threads).
 pub struct Interp {
     pub(crate) ostack: Vec<Object>,
+    /// The closures behind the operators a host registered
+    /// ([`Interp::register_operator`], `src/host.rs`), by slot, and the
+    /// name each slot was registered under.
+    pub(crate) host_ops: Vec<crate::host::HostOp>,
+    pub(crate) host_op_names: Vec<&'static str>,
+    /// This interpreter's identity among those in the process, which a
+    /// [`host::Opaque`](crate::host::Opaque) carries so that one cannot be
+    /// pushed into another interpreter (whose host operator slots, save
+    /// levels and so on are not its own).
+    pub(crate) host_id: u64,
+    /// Steps of host-side copies that could not borrow the interpreter
+    /// mutably ([`Interp::lookup`]), charged at the next look at the limits
+    /// (`sync_decode_budget`).
+    pub(crate) host_steps_pending: std::cell::Cell<u64>,
+    /// The host's stop flag ([`Interp::set_interrupt`]).
+    pub(crate) interrupt: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The procedures that were running when the last uncaught error left
+    /// the machine, innermost first ([`Interp::error_details`]).
+    pub(crate) error_trace: Vec<crate::host::TraceFrame>,
+    /// The procedure whose frame was most recently popped as it issued its
+    /// last element, for the backtrace: without it the commonest error
+    /// site, the last operator of a procedure, would have no frame. Kept by
+    /// moving the body here where it used to be dropped, so the step loop
+    /// does the same work it did. See [`TailCall`].
+    tail: Option<TailCall>,
     dstack: Vec<Rc<RefCell<Dict>>>,
     estack: Vec<Frame>,
     /// Mutation journal + live save records. Empty save stack = no
@@ -633,7 +696,7 @@ pub struct Interp {
     /// `op_low` and push them back: the stack is as it was before the
     /// operator ran, as in Ghostscript. Zero outside an operator, so a pop
     /// there records nothing.
-    op_low: usize,
+    pub(crate) op_low: usize,
     /// How many values the ledger holds.
     op_saved: usize,
     /// The first [`LEDGER_SLOTS`] values, as `op_tags` says: a number's
@@ -792,6 +855,13 @@ impl Interp {
         );
         Some(Interp {
             ostack: Vec::new(),
+            host_ops: Vec::new(),
+            host_op_names: Vec::new(),
+            host_id: crate::host::next_interp_id(),
+            host_steps_pending: std::cell::Cell::new(0),
+            interrupt: None,
+            error_trace: Vec::new(),
+            tail: None,
             dstack: vec![system, globaldict.clone(), user],
             estack: Vec::new(),
             journal: Vec::new(),
@@ -883,8 +953,35 @@ impl Interp {
         } else {
             4096
         };
-        while self.step_n(slice)? {}
+        // The host's stop flag ([`Interp::set_interrupt`]) is looked at
+        // before every slice, the first included, so a raised flag stops a
+        // program short enough to finish in one slice before it starts; and
+        // once more after the last, so a flag raised while it ran is
+        // reported, not lost. Uncatchable like a limit, since the program
+        // is unwound from outside the machine. One load per slice.
+        loop {
+            if self.interrupted() {
+                return Err(self.interrupt_run());
+            }
+            if !self.step_n(slice)? {
+                break;
+            }
+        }
+        if self.interrupted() {
+            return Err(self.interrupt_run());
+        }
         Ok(())
+    }
+
+    /// Stop the program for the host's flag: record where it was, unwind.
+    #[cold]
+    #[inline(never)]
+    fn interrupt_run(&mut self) -> PsError {
+        self.snapshot_error_chain(&PsError::Interrupted);
+        // As for a time limit: the groups the program left open are dropped,
+        // not composited, so the host's stop is prompt.
+        self.unwind_interrupted();
+        PsError::Interrupted
     }
 
     /// Put [`Limits`] on the programs this interpreter runs from now on.
@@ -1215,6 +1312,7 @@ impl Interp {
         // Mesh shading work (#1325) is counted the same way, so it is
         // charged whether the operator that did it succeeded or failed.
         let mesh = crate::mesh::take_pending_steps();
+        let host = self.host_steps_pending.take();
         // So is the work of transparency groups that ended with no operator
         // to charge it (#1406).
         let groups = self.gfx.take_group_work();
@@ -1225,6 +1323,7 @@ impl Interp {
             .decode_budget
             .take_steps()
             .saturating_add(mesh)
+            .saturating_add(host)
             .saturating_add(groups);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
@@ -1265,6 +1364,8 @@ impl Interp {
             t.bodies.borrow_mut().clear();
         }
         self.error_chain.clear();
+        self.error_trace.clear();
+        self.host_steps_pending.set(0);
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
@@ -1300,7 +1401,7 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
-                    self.snapshot_error_chain();
+                    self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
                 }
@@ -1328,10 +1429,14 @@ impl Interp {
             // Every uncaught error, limits included, passes here with the
             // execution stack still whole: the one place to record the
             // open `run` frames before they are dropped (#1043).
-            if result.is_err() {
-                self.snapshot_error_chain();
+            if let Err(e) = &result {
+                self.snapshot_error_chain(e);
             }
-            self.unwind_all();
+            if matches!(result, Err(PsError::Interrupted)) {
+                self.unwind_interrupted();
+            } else {
+                self.unwind_all();
+            }
         }
         result
     }
@@ -1381,7 +1486,8 @@ impl Interp {
         match result {
             Err(e) => {
                 // An ordinary error past the cap is the cap's: see above.
-                Err(if e.limit().is_none() && self.steps_over_cap() {
+                // An interrupt stays itself: the host asked for it.
+                Err(if !e.is_uncatchable() && self.steps_over_cap() {
                     PsError::StepsExceeded
                 } else {
                     e
@@ -1516,6 +1622,65 @@ impl Interp {
         self.check_time_and_memory()
     }
 
+    /// The look a host's own work takes ([`Interp::check_limits`]): the
+    /// host's interrupt flag always, and while a program runs (from inside
+    /// a host operator), `steps` more steps charged and the limits read as
+    /// a slice's end reads them. Outside a run the limits are left alone:
+    /// the clock and step count belong to the run that ended.
+    pub(crate) fn host_poll(&mut self, steps: u64) -> Result<(), PsError> {
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if self.estack.is_empty() {
+            return Ok(());
+        }
+        self.poll_limits(steps)
+    }
+
+    /// Whether a program is running: the host is inside an operator, not
+    /// between runs.
+    pub(crate) fn running(&self) -> bool {
+        !self.estack.is_empty()
+    }
+
+    /// Charge `steps` of a host-side copy to the running program, as
+    /// [`host_poll`](Self::host_poll) does; nothing between runs, when the
+    /// host is reading results.
+    pub(crate) fn charge_host_steps(&mut self, steps: u64) -> Result<(), PsError> {
+        if self.estack.is_empty() || steps == 0 {
+            return Ok(());
+        }
+        self.host_poll(steps)
+    }
+
+    /// [`host_poll`](Self::host_poll) for work that cannot borrow the
+    /// interpreter mutably (copying a value out, `src/host.rs`): the same
+    /// looks, with `steps` counted as if charged but not charged. Outside
+    /// a run only the memory cap is read, with `will_alloc` bytes about to
+    /// be taken.
+    pub(crate) fn host_look(&self, steps: u64, will_alloc: usize) -> Result<(), PsError> {
+        if self.estack.is_empty() {
+            return self.check_alloc(will_alloc);
+        }
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if self.limits.is_none() {
+            return Ok(());
+        }
+        if let Some(max) = self.limits.max_steps
+            && self
+                .steps_so_far()
+                .saturating_add(self.host_steps_pending.get())
+                .saturating_add(steps)
+                > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        self.check_alloc(will_alloc)?;
+        self.check_time_and_memory()
+    }
+
     /// Refuse an allocation of `bytes` that would pass the memory cap,
     /// before making it. For the operators that can ask for megabytes in
     /// one step (`array`, `string`); everything else is caught by the
@@ -1579,6 +1744,16 @@ impl Interp {
             }
             _ => {}
         }
+    }
+
+    /// [`unwind_all`](Self::unwind_all) for a program the host stopped
+    /// (its interrupt flag, or a host operator's `Interrupted`): the groups
+    /// it left open are dropped, not composited, as for a time limit, so
+    /// the stop is prompt.
+    fn unwind_interrupted(&mut self) {
+        let probe = self.gfx.expire_group_probe();
+        self.unwind_all();
+        self.gfx.set_group_probe(probe);
     }
 
     /// Abort the program: drop every frame (see `cleanup_unwound_frame`
@@ -1803,10 +1978,21 @@ impl Interp {
             return ProcStep::Other;
         };
         if *pc >= body.len() {
-            // Known to be this `Proc` frame: drop just its body, not
-            // through the general frame drop glue.
+            // Known to be this `Proc` frame: take just its body, not
+            // through the general frame drop glue. It is kept for the
+            // backtrace in place of the one kept before, which is dropped
+            // here instead: the same work as dropping this one.
             if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
-                drop(body);
+                let parent_pc = match self.estack.last() {
+                    Some(Frame::Proc { pc, .. }) => *pc,
+                    Some(Frame::Scanner(lexer)) => lexer.token_start(),
+                    _ => usize::MAX,
+                };
+                self.tail = Some(TailCall {
+                    body,
+                    depth: self.estack.len(),
+                    parent_pc,
+                });
             }
         }
         step
@@ -1831,6 +2017,9 @@ impl Interp {
             && let Some(Frame::Proc { body, .. }) = self.estack.pop()
         {
             drop(body);
+            // A frame left without `proc_step` recording it: the record
+            // of an earlier one must not outlive its parent (`TailCall`).
+            self.tail = None;
         }
         self.execute_resolved(obj, NO_NAME)
     }
@@ -1869,6 +2058,7 @@ impl Interp {
             // Known to be this `Proc` frame: drop just its body.
             if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
                 drop(body);
+                self.tail = None;
             }
         }
         Ok(())
@@ -1933,6 +2123,7 @@ impl Interp {
         *pc = i + n;
         if tail {
             self.estack.pop();
+            self.tail = None;
         }
         if via != NO_NAME {
             self.last_name = Some(via);
@@ -1959,8 +2150,9 @@ impl Interp {
         self.blame_image();
         let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
-        // runaway program swallow it and carry on (issue #604).
-        if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
+        // runaway program swallow it and carry on (issue #604). Nor is an
+        // interrupt, which a host operator can return as well as the flag.
+        if e.is_uncatchable() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
             return Err(e);
         }
         self.record_error(&e, command);
@@ -2146,7 +2338,8 @@ impl Interp {
     /// Record the open `run` frames for `error_report` (issue #1043).
     /// Called by `step_n` only for an error nothing caught, before it
     /// unwinds, so a `stopped` loop used as control flow pays nothing.
-    fn snapshot_error_chain(&mut self) {
+    fn snapshot_error_chain(&mut self, err: &PsError) {
+        self.snapshot_error_trace(err);
         self.error_chain.clear();
         for frame in self.estack.iter().rev() {
             if let Frame::Scanner(lexer) = frame
@@ -2155,6 +2348,135 @@ impl Interp {
                 self.error_chain.push((lexer.run_name().cloned(), line));
             }
         }
+    }
+
+    /// Record the procedures on the execution stack for
+    /// [`Interp::error_details`]: for each, the name it is defined under
+    /// (when a dictionary on the dictionary stack holds this very array),
+    /// which of its elements was running, and that element with a few of
+    /// its neighbours. Runs only for an error nothing caught, with the
+    /// stack still whole, so it costs a working program nothing.
+    ///
+    /// It runs for every uncaught error, a limit error included, after the
+    /// limits have stopped looking, so its work is bounded by constants and
+    /// not by the program: at most `MAX_TRACE_FRAMES` frames of bounded
+    /// excerpts, and one pass over at most `NAME_SCAN` name entries of the
+    /// dictionary stack for all the frames' names together, copying none.
+    fn snapshot_error_trace(&mut self, err: &PsError) {
+        use crate::host::{MAX_TRACE_FRAMES, TraceFrame};
+        // Dictionary entries looked at for the frames' names, all frames
+        // together. A procedure defined past them is reported unnamed.
+        const NAME_SCAN: usize = 1 << 16;
+        // Elements shown before and after the one that was running.
+        const BEFORE: usize = 5;
+        const AFTER: usize = 3;
+        let limits = crate::object::DumpLimits {
+            max_depth: 1,
+            max_elements: 3,
+            max_string: 24,
+            max_bytes: 40,
+        };
+        // The procedure whose last element is the one running, if the
+        // record of it is still current (see `TailCall`). Under a scanner
+        // the depth alone cannot tell (program text runs at one depth), so
+        // there the scanner must not have moved on, and the last element
+        // must also be the offending command.
+        let tail = self.tail.as_ref().filter(|t| {
+            t.depth == self.estack.len()
+                && match self.estack.last() {
+                    Some(Frame::Proc { pc, .. }) => *pc == t.parent_pc,
+                    // Program text runs at one depth: the scanner must not
+                    // have read a token since (`fine pop`, where the later
+                    // `pop` fails, is not `fine`'s last `pop`).
+                    Some(Frame::Scanner(lexer)) if lexer.token_start() != t.parent_pc => false,
+                    Some(Frame::Scanner(_)) | None => {
+                        let last = t.body.len().saturating_sub(1);
+                        let runs = |o: &Object| match &o.value {
+                            Value::Name(_) if o.executable => Some(o.text()),
+                            Value::Operator(op) if o.executable => Some(op.name.to_string()),
+                            _ => None,
+                        };
+                        let command = match err {
+                            PsError::Undefined(name) => Some(name.clone()),
+                            _ => self.last_executed_name(),
+                        };
+                        command.is_some() && t.body.peek(last, runs).flatten() == command
+                    }
+                    Some(_) => true,
+                }
+        });
+        let live = self.estack.iter().rev().filter_map(|f| match f {
+            // `pc` is the element to run next: the one running is before it.
+            Frame::Proc { body, pc } => Some((body, pc.saturating_sub(1))),
+            _ => None,
+        });
+        let mut trace = Vec::new();
+        let mut bodies: Vec<&PsArray> = Vec::new();
+        for (body, at) in tail
+            .map(|t| (&t.body, t.body.len().saturating_sub(1)))
+            .into_iter()
+            .chain(live)
+        {
+            if trace.len() == MAX_TRACE_FRAMES {
+                break;
+            }
+            let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
+            let mut excerpt = String::new();
+            if from > 0 {
+                excerpt.push_str("... ");
+            }
+            for k in from..to {
+                let text = body
+                    .peek(k, |o| o.repr_bounded(&limits))
+                    .unwrap_or_default();
+                if k == at {
+                    excerpt.push_str(">>> ");
+                    excerpt.push_str(&text);
+                    excerpt.push_str(" <<<");
+                } else {
+                    excerpt.push_str(&text);
+                }
+                if k + 1 < to {
+                    excerpt.push(' ');
+                }
+            }
+            if to < body.len() {
+                excerpt.push_str(" ...");
+            }
+            trace.push(TraceFrame {
+                procedure: None,
+                element: at,
+                excerpt,
+            });
+            bodies.push(body);
+        }
+        // Names: the dictionary stack innermost first (systemdict holds no
+        // procedures), each dictionary in `forall` order, the first entry
+        // holding a frame's very array naming it; as a search per frame
+        // would, in one pass. Only name keys: a procedure under a string
+        // key is left unnamed.
+        let mut unnamed = trace.len();
+        let mut budget = NAME_SCAN;
+        'dicts: for d in self.dstack.iter().skip(1).rev() {
+            let Ok(d) = d.try_borrow() else { continue };
+            for (id, v) in d.name_entries() {
+                if unnamed == 0 || budget == 0 {
+                    break 'dicts;
+                }
+                budget -= 1;
+                let Value::Array(a) = &v.value else { continue };
+                if !v.executable {
+                    continue;
+                }
+                for (frame, body) in trace.iter_mut().zip(&bodies) {
+                    if frame.procedure.is_none() && a.same_object(body) {
+                        frame.procedure = Some(shorten_name(&crate::name::resolve(id)));
+                        unnamed -= 1;
+                    }
+                }
+            }
+        }
+        self.error_trace = trace;
     }
 
     /// `N`, `N (file)` or `N (file); Run chain: file:N <- outer:M <- line K`
@@ -2189,6 +2511,21 @@ impl Interp {
             out.push_str(&links.join(" <- "));
         }
         out
+    }
+
+    /// The line and `run` file an error is attributed to, as
+    /// [`error_report`](Self::error_report) picks them: the innermost open
+    /// source when the error left the machine, else the sticky location.
+    pub(crate) fn error_line_and_file(&self) -> (Option<usize>, Option<String>) {
+        match self.error_chain.first() {
+            Some((file, line)) => (Some(*line), file.as_ref().map(|f| report_name(f))),
+            None => (
+                self.last_line,
+                self.last_line
+                    .and(self.last_file.as_ref())
+                    .map(|f| report_name(f)),
+            ),
+        }
     }
 
     /// LaserWriter-style error report, e.g.
@@ -3155,6 +3492,8 @@ impl Interp {
     /// context existed; with none, the whole program is aborted, which is
     /// what the PLRM's outermost job-server `stopped` would do.
     pub(crate) fn do_stop(&mut self) -> bool {
+        // Frames leave here unrecorded (`TailCall`).
+        self.tail = None;
         let mut left_run_file = false;
         while let Some(frame) = self.estack.pop() {
             if matches!(frame, Frame::StopMark) {
@@ -3180,6 +3519,8 @@ impl Interp {
     /// progress (a BuildChar/kshow proc can't `exit` the show) — per the
     /// PLRM's `invalidexit`.
     pub(crate) fn exit_loop(&mut self) -> Result<(), PsError> {
+        // Frames leave here unrecorded (`TailCall`).
+        self.tail = None;
         loop {
             match self.estack.last() {
                 // An executable string or file `exit` is inside of is not
@@ -4410,7 +4751,10 @@ impl Interp {
             .map(|pixmap| crate::Page::new(pixmap, self.gfx.scale()))
             .collect();
         if pages.is_empty() || self.gfx.has_trailing_art() {
-            pages.push(crate::Page::new(self.gfx.pixmap.clone(), self.gfx.scale()));
+            pages.push(crate::Page::new(
+                self.gfx.page_pixmap().clone(),
+                self.gfx.scale(),
+            ));
         }
         pages
     }
@@ -4929,6 +5273,17 @@ mod tests {
         it.pop()?;
         it.push(Object::int(-2));
         Err(PsError::Rangecheck)
+    }
+
+    #[test]
+    fn shorten_name_cuts_at_a_character_boundary() {
+        assert_eq!(shorten_name("short"), "short");
+        let exact = "a".repeat(TRACE_NAME_BYTES);
+        assert_eq!(shorten_name(&exact), exact);
+        // 255 ASCII bytes then a two-byte character straddling the cut.
+        let long = format!("{}é tail", "a".repeat(TRACE_NAME_BYTES - 1));
+        let cut = shorten_name(&long);
+        assert_eq!(cut, format!("{}...", "a".repeat(TRACE_NAME_BYTES - 1)));
     }
 
     /// The operand ledger (#1047) puts back operands past its fixed slots
