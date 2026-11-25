@@ -7,8 +7,12 @@
 //! process, so each case runs in a child process: the parent test sees a
 //! failed exit status instead of the test binary dying.
 
+mod common;
+
 use std::cell::RefCell;
 use std::process::Command;
+
+use common::CommandDeadline as _;
 
 const ENV: &str = "PSCAT_TLS_DROP_CASE";
 
@@ -61,25 +65,30 @@ fn child(case: &str) {
     .expect("thread ends without a panic");
 }
 
+/// Run `case` in a child copy of this test binary and require that it ran
+/// exactly the one test and that test passed. A filter that matched nothing
+/// would exit 0 having run nothing, so the output is checked too.
 fn check(case: &str) {
     if std::env::var(ENV).as_deref() == Ok(case) {
         child(case);
         return;
     }
+    let test = format!("drop_in_thread_local_{}", case.replace('-', "_"));
     let out = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            &format!("drop_in_thread_local_{case}"),
-            "--nocapture",
-        ])
+        .args(["--exact", &test, "--nocapture", "--test-threads=1"])
         .env(ENV, case)
-        .output()
+        .output_within(std::time::Duration::from_secs(60))
         .expect("re-run the test binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),
-        "case {case}: child {:?}\n{}",
-        out.status,
-        String::from_utf8_lossy(&out.stderr)
+        "case {case}: child {:?}\n{stdout}\n{stderr}",
+        out.status
+    );
+    assert!(
+        stdout.contains("running 1 test") && stdout.contains("1 passed"),
+        "case {case}: the child did not run exactly its test ({test}):\n{stdout}\n{stderr}"
     );
 }
 
