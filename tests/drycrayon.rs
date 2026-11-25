@@ -704,7 +704,11 @@ fn the_whole_range_is_the_default() {
         "newpath 100 30 moveto 100 30 lineto",
     ];
     for path in shapes {
-        for opts in ["", "/Pass 2 /Worn 0.9", "/Touch { 0.3 mul 0.5 add } /Wear 1"] {
+        for opts in [
+            "",
+            "/Pass 2 /Worn 0.9",
+            "/Touch { 0.3 mul 0.5 add } /Wear 1",
+        ] {
             let plain = data(&piece(path, opts));
             for keys in ["/From 0", "/To 1", "/From 0 /To 1"] {
                 assert_eq!(

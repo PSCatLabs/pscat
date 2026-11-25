@@ -1868,7 +1868,12 @@ const PH: u32 = 60;
 /// A `PW` x `PH` greenboard at 2x with `path` stroked with `opts` (and a
 /// fixed /Width 3).
 fn piece(path: &str, opts: &str) -> Interp {
-    board(PW, PH, 2.0, &format!("{path} << /Width 3 {opts} >> dkstroke"))
+    board(
+        PW,
+        PH,
+        2.0,
+        &format!("{path} << /Width 3 {opts} >> dkstroke"),
+    )
 }
 
 /// Per pixel, the largest channel difference between two renders over the

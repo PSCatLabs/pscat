@@ -671,7 +671,12 @@ fn part(opts: &str) -> Interp {
 fn diffs(a: &[u8], b: &[u8], x1: usize) -> u8 {
     (0..a.len() / 4)
         .filter(|i| i % 400 < x1)
-        .map(|i| (0..4).map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c])).max().unwrap())
+        .map(|i| {
+            (0..4)
+                .map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c]))
+                .max()
+                .unwrap()
+        })
         .max()
         .unwrap()
 }
@@ -711,7 +716,10 @@ fn a_growing_charcoal_stroke_keeps_what_it_has_drawn() {
                 moved += 1;
             }
         }
-        assert!(moved <= 3, "`{opts}`: {moved} of 14 frames redrew their texture");
+        assert!(
+            moved <= 3,
+            "`{opts}`: {moved} of 14 frames redrew their texture"
+        );
         assert_eq!(frames[14], whole, "`{opts}` at t = 1");
         // two halves on one canvas make the whole, up to the seam
         let halves = render(
@@ -740,7 +748,8 @@ fn charcoal_parts_are_checked_and_pass_through() {
     ] {
         let mut it = Interp::with_page_scaled(100, 60, 1.0).expect("page");
         for path in LIBS {
-            it.run_source(&std::fs::read(path).expect("lib")).expect("load");
+            it.run_source(&std::fs::read(path).expect("lib"))
+                .expect("load");
         }
         let src = format!(
             "<< /Surface /drawing >> dksurface newpath 10 10 moveto 90 40 lineto << {keys} >> dhstroke"
