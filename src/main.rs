@@ -1145,14 +1145,16 @@ const BACKTRACE_SHOWN: usize = 8;
 fn print_error(interp: &Interp, e: &PsError) {
     eprintln!("{}", interp.error_report(e));
     let trace = interp.error_details(e).backtrace;
+    // A name a program made can hold a line break: one frame stays one line.
+    let one_line = |s: &str| s.replace('\n', "%0A").replace('\r', "%0D");
     for frame in trace.iter().take(BACKTRACE_SHOWN) {
-        let name = frame.procedure.as_deref().unwrap_or("a procedure");
+        let name = one_line(frame.procedure.as_deref().unwrap_or("a procedure"));
         let at = match (frame.line, frame.file.as_deref()) {
             (Some(line), Some(file)) => format!(", line {line} ({file})"),
             (Some(line), None) => format!(", line {line}"),
             (None, _) => String::new(),
         };
-        eprintln!("  in {name}{at}: {}", frame.excerpt);
+        eprintln!("  in {name}{at}: {}", one_line(&frame.excerpt));
     }
     if trace.len() > BACKTRACE_SHOWN {
         eprintln!("  ... and {} more", trace.len() - BACKTRACE_SHOWN);

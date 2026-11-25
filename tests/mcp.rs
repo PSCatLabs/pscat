@@ -617,6 +617,28 @@ fn eval_reports_prints_and_structured_errors() {
     assert_eq!(err["line"], 2);
 }
 
+/// An error two procedures deep (#1405): the structured fields are still those
+/// of the report line, and the frames and the operand stack both come out in
+/// the text, in that order.
+#[test]
+fn eval_error_inside_procedures_keeps_fields_and_adds_frames() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let src = "/inner {\n  7 8\n  bogus\n  pop\n} def\n/outer {\n  inner\n  1 pop\n} def\nouter";
+    let result = s.tool("eval_postscript", json!({ "source": src }));
+    assert_eq!(error_kind(&result), "postscript_error");
+    let text = &texts(&result)[0];
+    let report = text.find("%%[ Error: undefined").expect("report line");
+    let inner = text.find("  in inner, line 3: ").expect("inner frame");
+    let outer = text.find("  in outer, line 7: ").expect("outer frame");
+    let stack = text.find("Operand stack (2):").expect("operand stack");
+    assert!(report < inner && inner < outer && outer < stack, "{text}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["ps_error"], "undefined");
+    assert_eq!(err["offending_command"], "bogus");
+    assert_eq!(err["line"], 10);
+}
+
 #[test]
 fn handwrite_returns_a_note() {
     let mut s = Server::start();

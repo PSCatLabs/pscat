@@ -19,9 +19,9 @@
 //!
 //! The entry holds a `Weak` handle on the storage, which keeps the address
 //! from being given to another array while the entry exists. A body that has
-//! been freed leaves an entry that is swept (see [`MAX_HELD`], `sweep`) when
-//! the table has doubled, so a program that reads a file again and again
-//! does not grow it.
+//! been freed leaves an entry that is swept (`sweep`) when the table has
+//! quadrupled (at least [`SWEEP_FLOOR`] entries), so a program that reads a
+//! file again and again does not grow it.
 //!
 //! ## What a position means
 //!
@@ -187,6 +187,8 @@ struct Table {
     held: usize,
     /// The size at which the next sweep runs.
     sweep_at: usize,
+    /// The size at which running out of names may sweep again.
+    names_at: usize,
 }
 
 impl Table {
@@ -287,15 +289,28 @@ impl BodyLines {
             &mut self.anon
         };
         if table.entries.len() >= table.sweep_at.max(SWEEP_FLOOR) {
-            work = table.sweep().saturating_mul(SWEEP_CHARGE);
-            if named {
-                self.collect_sources();
-            }
+            work = self.sweep(named);
         }
         let source_id = if named {
             match self.source_id(name, is_run) {
                 Some(id) => id,
-                None => return Ok(work),
+                None => {
+                    // Out of names, which only a sweep gives back (a body's
+                    // death frees its file's name when no other body of the
+                    // file lives). A host that names many small programs
+                    // reaches the cap long before a sweep is due. Once per
+                    // doubling of the table, so a full table of living names
+                    // costs a pass for each doubling and not for each body.
+                    if self.named.entries.len() < self.named.names_at {
+                        return Ok(work);
+                    }
+                    work += self.sweep(true);
+                    self.named.names_at = self.named.entries.len() * 2 + MAX_SOURCES;
+                    match self.source_id(name, is_run) {
+                        Some(id) => id,
+                        None => return Ok(work),
+                    }
+                }
             }
         } else {
             NO_SOURCE
@@ -347,6 +362,18 @@ impl BodyLines {
             },
         );
         Ok(work)
+    }
+
+    /// Sweep one table, and `named`'s names with it. Returns the work, as
+    /// [`BodyLines::register`] does: each entry the sweep looks at, and twice
+    /// more for the passes that renumber the names.
+    fn sweep(&mut self, named: bool) -> usize {
+        if !named {
+            return self.anon.sweep().saturating_mul(SWEEP_CHARGE);
+        }
+        let visited = self.named.sweep();
+        self.collect_sources();
+        visited.saturating_mul(SWEEP_CHARGE * 3)
     }
 
     /// The index of `source` in the table of names, adding it; `None` when
@@ -550,4 +577,90 @@ fn body_tail(body: &PsArray) -> Tail {
         },
         None => Tail::Other,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-element body and the lines of it (`line` for its element).
+    fn body(line: u32) -> (Object, Lines) {
+        let mut lines = Lines::default();
+        lines.push(line);
+        (Object::procedure(vec![Object::int(1)]), lines)
+    }
+
+    fn array(o: &Object) -> &PsArray {
+        match &o.value {
+            Value::Array(a) => a,
+            _ => unreachable!("a procedure"),
+        }
+    }
+
+    fn register(t: &mut BodyLines, name: Option<&Rc<str>>, o: &Object, l: Lines) -> usize {
+        t.register(array(o), l, name, true, None, &|_| Ok(()))
+            .expect("no limit")
+    }
+
+    /// A sweep's visits are returned as work for the scanner to charge, so a
+    /// step limit sees them (#1405).
+    #[test]
+    fn a_sweep_reports_the_entries_it_visited() {
+        let mut t = BodyLines::default();
+        let name: Rc<str> = Rc::from("a.ps");
+        let mut alive = Vec::new();
+        for i in 0..SWEEP_FLOOR {
+            let (o, l) = body(1 + i as u32);
+            assert_eq!(register(&mut t, Some(&name), &o, l), 0, "no sweep yet");
+            alive.push(o);
+        }
+        let (o, l) = body(1);
+        assert_eq!(
+            register(&mut t, Some(&name), &o, l),
+            SWEEP_FLOOR * SWEEP_CHARGE * 3
+        );
+        // Everything was alive: all kept, and the next sweep is further off.
+        assert_eq!(t.len(), SWEEP_FLOOR + 1);
+        let (o2, l2) = body(2);
+        assert_eq!(register(&mut t, Some(&name), &o2, l2), 0);
+    }
+
+    /// A host that names many small programs passes the cap on names long
+    /// before a sweep is due: names whose bodies are gone are given back
+    /// when the cap is reached, so later programs still get lines.
+    #[test]
+    fn names_of_dead_programs_are_given_back_at_the_cap() {
+        let mut t = BodyLines::default();
+        for i in 0..(3 * MAX_SOURCES) {
+            let name: Rc<str> = Rc::from(format!("scene-{i}.ps"));
+            let (o, l) = body(5);
+            register(&mut t, Some(&name), &o, l);
+            let pos = t.position(array(&o), 0).expect("has a line");
+            assert_eq!((pos.line, pos.file.as_deref()), (5, Some(&*name)), "{i}");
+            // The body dies at the end of the iteration, before the next
+            // program is read.
+        }
+        assert!(t.source_count() <= MAX_SOURCES);
+    }
+
+    /// When every name is live the cap holds, and a full table of live names
+    /// does not sweep for every body.
+    #[test]
+    fn live_names_past_the_cap_get_no_line_and_cost_one_pass_per_doubling() {
+        let mut t = BodyLines::default();
+        let mut alive = Vec::new();
+        let mut passes = 0;
+        for i in 0..(MAX_SOURCES + 200) {
+            let name: Rc<str> = Rc::from(format!("f{i}.ps"));
+            let (o, l) = body(1);
+            if register(&mut t, Some(&name), &o, l) > 0 {
+                passes += 1;
+            }
+            alive.push((name, o));
+        }
+        assert_eq!(t.source_count(), MAX_SOURCES);
+        assert!(t.position(array(&alive[0].1), 0).is_some());
+        assert!(t.position(array(&alive[MAX_SOURCES + 10].1), 0).is_none());
+        assert_eq!(passes, 1, "one sweep when the cap was first reached");
+    }
 }

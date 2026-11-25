@@ -381,8 +381,9 @@ into a procedure with `put` keeps the line of the token it replaced.
 The table that holds this costs about 43 bytes per procedure plus 8 for each
 further line it spans, nothing while the program runs, and under 2% of the time
 to load the artkit and paintkit libraries (`notes/1405-source-positions.md` has
-the figures). An entry is swept once its procedure is freed, and the unnamed
-main program's go when the next program begins.
+the figures). An entry of a freed procedure is dropped at the next sweep (when the
+table has quadrupled, or a program runs out of names), and the unnamed main
+program's go when the next program begins.
 
 **Stopping a program.** `set_interrupt` takes an `Arc<AtomicBool>`; raising it
 from another thread makes `run_str` return `PsError::Interrupted` at its next
