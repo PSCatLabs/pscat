@@ -837,3 +837,69 @@ fn backtrace_cost_does_not_grow_with_dictionary_size() {
         "four errors took {t_errors:?}, defining the entries {t_build:?}"
     );
 }
+
+/// Finding 3: a long-running host operator charges its work with
+/// `check_limits` and sees the step cap, the clock and the flag as it goes.
+#[test]
+fn a_long_host_operator_charges_its_work_and_sees_the_flag() {
+    let mut interp = Interp::new();
+    interp
+        .register_operator("spin", |i| {
+            let n = i.pop_int()?;
+            for _ in 0..n {
+                i.check_limits(1)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    // No limits and no flag: it runs to the end.
+    interp.run_str("100000 spin").unwrap();
+
+    // The step cap: refused, uncatchable, and the operand given back.
+    interp
+        .set_limits(Limits::none().with_max_steps(10_000))
+        .unwrap();
+    let err = interp
+        .run_str("{ 1000000000000 spin } stopped")
+        .unwrap_err();
+    assert_eq!(err, PsError::StepsExceeded);
+    assert_eq!(interp.error_details(&err).command.as_deref(), Some("spin"));
+    assert_eq!(interp.pop_int().unwrap(), 1_000_000_000_000);
+    // A short one fits, and the steps it charged are counted.
+    interp.run_str("5000 spin").unwrap();
+    assert!(interp.steps_used() >= 5000, "{}", interp.steps_used());
+
+    // The clock.
+    interp
+        .set_limits(Limits::none().with_max_time(std::time::Duration::from_millis(50)))
+        .unwrap();
+    let err = interp.run_str("1000000000000 spin").unwrap_err();
+    assert_eq!(err, PsError::TimeExceeded);
+    interp.clear_operands();
+
+    // The flag alone, raised from another thread while the operator runs.
+    interp.set_limits(Limits::none()).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    interp.set_interrupt(Some(stop.clone()));
+    let raiser = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            stop.store(true, Ordering::Relaxed);
+        })
+    };
+    let err = interp
+        .run_str("{ 1000000000000 spin } stopped")
+        .unwrap_err();
+    raiser.join().unwrap();
+    assert_eq!(err, PsError::Interrupted);
+    interp.clear_operands();
+
+    // From the host between runs: only the flag is looked at.
+    assert_eq!(interp.check_limits(0).unwrap_err(), PsError::Interrupted);
+    stop.store(false, Ordering::Relaxed);
+    interp
+        .set_limits(Limits::none().with_max_steps(10))
+        .unwrap();
+    interp.check_limits(1_000_000).unwrap();
+}

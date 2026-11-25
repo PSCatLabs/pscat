@@ -830,7 +830,8 @@ impl Interp {
     /// flag away.
     ///
     /// Like the step limit, the flag is looked at between objects, so one
-    /// long-running operator finishes first. A host that drives the machine
+    /// long-running operator finishes first unless it calls
+    /// [`check_limits`](Self::check_limits) as it goes. A host that drives the machine
     /// itself with [`step_n`](Self::step_n) reads its own flag between
     /// slices; this one is not consulted there.
     ///
@@ -851,6 +852,48 @@ impl Interp {
     /// ```
     pub fn set_interrupt(&mut self, flag: Option<Arc<AtomicBool>>) {
         self.interrupt = flag;
+    }
+
+    /// For a host operator that does a lot of work in one call: count
+    /// `steps` steps of it against the step cap, and look at the time and
+    /// memory caps and the interrupt flag, as the interpreter does between
+    /// objects. The interpreter looks only between objects, so an operator
+    /// whose work grows with its operands (a loop whose count comes from
+    /// the program, a large copy) should call this as it goes, every few
+    /// thousand items, and return its error with `?`.
+    ///
+    /// The error is [`PsError::Interrupted`] for a raised flag, else the
+    /// limit's (`StepsExceeded`, `TimeExceeded`, `MemoryExceeded`); like
+    /// those, the program cannot catch it with `stopped`. A step is about
+    /// what one cheap operator costs (the interpreter counts a KiB read as
+    /// one), so charge in proportion to the work.
+    ///
+    /// It costs a branch and a load when no limits are set and no flag is
+    /// raised. Called from the host between runs, it looks only at the
+    /// flag and charges nothing: the limits belong to a running program.
+    ///
+    /// ```
+    /// use pscat::{Interp, Limits, PsError};
+    /// let mut interp = Interp::new();
+    /// // `n spin`: n units of host work, charged as it goes.
+    /// interp.register_operator("spin", |i| {
+    ///     let n = i.pop_int()?;
+    ///     for k in 0..n {
+    ///         // ... one unit of work ...
+    ///         if k % 1000 == 999 {
+    ///             i.check_limits(1000)?;
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// })?;
+    /// interp.set_limits(Limits::none().with_max_steps(100_000))?;
+    /// interp.run_str("10000 spin")?;
+    /// let err = interp.run_str("{ 1000000000000 spin } stopped").unwrap_err();
+    /// assert_eq!(err, PsError::StepsExceeded);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn check_limits(&mut self, steps: u64) -> Result<(), PsError> {
+        self.host_poll(steps)
     }
 
     /// Whether the host's interrupt flag is raised.

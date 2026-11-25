@@ -1566,6 +1566,21 @@ impl Interp {
         self.check_time_and_memory()
     }
 
+    /// The look a host's own work takes ([`Interp::check_limits`]): the
+    /// host's interrupt flag always, and while a program runs (from inside
+    /// a host operator), `steps` more steps charged and the limits read as
+    /// a slice's end reads them. Outside a run the limits are left alone:
+    /// the clock and step count belong to the run that ended.
+    pub(crate) fn host_poll(&mut self, steps: u64) -> Result<(), PsError> {
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if self.estack.is_empty() {
+            return Ok(());
+        }
+        self.poll_limits(steps)
+    }
+
     /// Refuse an allocation of `bytes` that would pass the memory cap,
     /// before making it. For the operators that can ask for megabytes in
     /// one step (`array`, `string`); everything else is caught by the
