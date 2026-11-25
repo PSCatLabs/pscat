@@ -238,7 +238,7 @@ that `/Spread` and `/Load` keep their one shared meaning.
   `systemdict`.** Since #754 the catalog lists the operators pscat adds
   beyond the PLRM, as hand-written `ENTRIES` rows with `kind: "operator"`:
   the noise operators (#734), `setalpha`/`currentalpha`/`setblendmode`/
-  `currentblendmode` (#47), `.sameclip` (#488) and `writereals`/
+  `currentblendmode` (#47), `begingroup`/`endgroup` (#1406), `.sameclip` (#488) and `writereals`/
   `readreals` (#735, #773). Not listed: PLRM Level 1/2/3 operators (the catalog
   has no PLRM coverage; `renamefile`, `deletefile` and `filenameforall`
   from #740 are PLRM Level 2), Ghostscript-compatibility `min`/`max`/

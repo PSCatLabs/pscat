@@ -288,6 +288,7 @@ Each line says when to open which reference file in `references/`.
 - **A slow render** (`--profile`, `--bands`):
   [references/bands-profile.md](references/bands-profile.md).
 - **pscat-only operators and small tools**: `setalpha` / `setblendmode`,
+  `begingroup` / `endgroup` (fade a whole drawing as one),
   native noise (`gnoise2`, `fbm2`, ...), `writereals` / `readreals` for big
   arrays, `pscat photo-etch` (photo to engraving), the live window (`pscat
   file.ps`, `-i`, `--spool`), the `--capabilities` inventory:

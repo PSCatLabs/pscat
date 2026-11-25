@@ -222,6 +222,10 @@ pub struct PdfRecorder {
     /// Copies of a masked uncoloured pattern in another colour (#1340), by
     /// index and the colour's bits.
     colored_variants: HashMap<(usize, [u32; 3]), usize>,
+    /// What each open transparency group (#1406) set aside of the stream
+    /// below it, innermost last.
+    /// with the length of the `cm` its own stream starts with.
+    groups: Vec<(PdfCapture, usize)>,
 }
 
 /// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
@@ -257,6 +261,9 @@ struct PdfPattern {
     /// coloured one with it. Its content sets no colour, so every mark
     /// takes the one set at its start.
     ink: Option<(f32, f32, f32)>,
+    /// A transparency group's form XObject (#1406), named `/X<i>` in an
+    /// `/XObject` resource dictionary rather than `/P<i>` in `/Pattern`.
+    group: bool,
 }
 
 /// The page state a pattern capture swapped out of the recorder
@@ -387,6 +394,7 @@ impl PdfRecorder {
             capture_frame: None,
             smask_forms: HashMap::new(),
             colored_variants: HashMap::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -430,6 +438,7 @@ impl PdfRecorder {
         PdfPattern {
             smasks: std::mem::replace(&mut self.current_smasks, saved.smasks),
             ink: None,
+            group: false,
             dict: String::new(),
             shading: None,
             content: std::mem::replace(&mut self.content, saved.content).into(),
@@ -503,6 +512,107 @@ impl PdfRecorder {
         let v = self.patterns.len() - 1;
         self.pattern_variants.insert((idx, bits), v);
         v
+    }
+
+    /// A transparency group opens (#1406): the stream and its resource
+    /// lists are set aside, as for a pattern capture, and marks go to an
+    /// empty stream in the same coordinates until [`end_group`](Self::end_group).
+    ///
+    /// The new stream starts with `to_default` as a `cm` (see
+    /// [`end_group`](Self::end_group)), written now so that closing the
+    /// group copies its content only once.
+    pub(crate) fn begin_group(&mut self, to_default: tiny_skia::Transform) {
+        self.flush_text();
+        self.close_clip();
+        let saved = PdfCapture {
+            smasks: std::mem::take(&mut self.current_smasks),
+            frame: self.capture_frame,
+            content: std::mem::take(&mut self.content),
+            open_clip: None,
+            images: std::mem::take(&mut self.current_images),
+            gstates: std::mem::take(&mut self.current_gstates),
+            shadings: std::mem::take(&mut self.current_shadings),
+            shading_set: std::mem::take(&mut self.current_shading_set),
+            fonts: std::mem::take(&mut self.current_fonts),
+            patterns: std::mem::take(&mut self.current_patterns),
+            pattern_cs: std::mem::take(&mut self.current_pattern_cs),
+            uncolored: self.uncolored,
+        };
+        let _ = writeln!(self.content, "{} cm", matrix_text(to_default));
+        self.groups.push((saved, self.content.len()));
+    }
+
+    /// The group closes: what it recorded becomes a form XObject with an
+    /// isolated transparency group (`/I true`, as the raster's layer starts
+    /// transparent), painted in the stream below with the group's alpha and
+    /// blend. An empty group writes nothing.
+    ///
+    /// The form's space is the stream's *default* space, not the canvas
+    /// coordinates the marks are written in: `to_default` maps the canvas
+    /// (`width` x `height`) to it (the page's y-up points, or a pattern
+    /// capture's pattern space), the form's content starts with it as a
+    /// `cm`, and the `Do` undoes it first. A pattern's `/Matrix` maps to the
+    /// default space of the stream that paints with it, which inside a form
+    /// is the form's space (PDF 32000-1, 8.7.2): so a pattern painted in a
+    /// group is placed exactly as on the page.
+    ///
+    /// Storing the content copies it once (into the form's shared `str`),
+    /// asked of `probe`'s memory cap first: a refusal drops the group's
+    /// marks from the PDF and is `MemoryExceeded`, the stream below intact.
+    pub(crate) fn end_group(
+        &mut self,
+        comp: Composite,
+        to_default: tiny_skia::Transform,
+        width: u32,
+        height: u32,
+        probe: &LimitProbe,
+    ) -> Result<(), crate::PsError> {
+        let Some((saved, prefix)) = self.groups.pop() else {
+            return Ok(());
+        };
+        self.flush_text();
+        self.close_clip();
+        let empty = self.content.len() <= prefix;
+        let refused = probe.check_alloc(self.content.len());
+        let back = to_default.invert();
+        if empty || refused.is_err() || back.is_none() {
+            // Nothing to keep: drop it before the copy, not after.
+            self.content = String::new();
+        }
+        let form = self.restore_capture(saved);
+        refused?;
+        let (mut form, Some(back)) = (form, back) else {
+            return Ok(());
+        };
+        if empty {
+            return Ok(());
+        }
+        let mut corners = [
+            tiny_skia::Point::from_xy(0.0, 0.0),
+            tiny_skia::Point::from_xy(width as f32, 0.0),
+            tiny_skia::Point::from_xy(0.0, height as f32),
+            tiny_skia::Point::from_xy(width as f32, height as f32),
+        ];
+        to_default.map_points(&mut corners);
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for c in corners {
+            (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+        }
+        form.group = true;
+        form.dict = format!(
+            "/Type /XObject /Subtype /Form /BBox [{} {} {} {}] \
+             /Group << /Type /Group /S /Transparency /I true /CS /DeviceRGB >>",
+            p(x0),
+            p(y0),
+            p(x1),
+            p(y1),
+        );
+        self.patterns.push(form);
+        let idx = self.patterns.len() - 1;
+        self.current_patterns.push(idx);
+        let gs = self.gs_ref(comp);
+        let _ = writeln!(self.content, "q {} cm {gs}/X{idx} Do Q", matrix_text(back));
+        Ok(())
     }
 
     /// The pattern's `PaintProc` was unwound: put the page state back and
@@ -659,6 +769,7 @@ impl PdfRecorder {
                     pattern_cs: pcs,
                     smasks: Vec::new(),
                     ink: None,
+                    group: false,
                 });
                 let i = self.patterns.len() - 1;
                 self.smask_forms.insert(key, i);
@@ -753,6 +864,7 @@ impl PdfRecorder {
             pattern_cs: false,
             smasks: Vec::new(),
             ink: None,
+            group: false,
         });
         Some(self.patterns.len() - 1)
     }
@@ -1762,6 +1874,7 @@ Q",
         self.current_shading_set.clear();
         self.current_patterns.clear();
         self.current_pattern_cs = false;
+        self.groups.clear();
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -2204,6 +2317,14 @@ fn resource_parts(
     let xobjects: Vec<String> = images
         .iter()
         .map(|&idx| format!("/Im{idx} {} 0 R", b.image + idx))
+        // Transparency groups' forms (#1406) are XObjects too: one
+        // `/XObject` dictionary holds both.
+        .chain(
+            patterns
+                .iter()
+                .filter(|&&idx| rec.patterns[idx].group)
+                .map(|&idx| format!("/X{idx} {} 0 R", b.pattern + idx)),
+        )
         .collect();
     // ExtGStates are written inline in the page's own
     // /Resources rather than as indirect objects: they're a
@@ -2242,11 +2363,12 @@ fn resource_parts(
             .collect();
         let _ = write!(parts, " /Font << {} >>", list.join(" "));
     }
-    if !patterns.is_empty() {
-        let list: Vec<String> = patterns
-            .iter()
-            .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
-            .collect();
+    let list: Vec<String> = patterns
+        .iter()
+        .filter(|&&idx| !rec.patterns[idx].group)
+        .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
+        .collect();
+    if !list.is_empty() {
         let _ = write!(parts, " /Pattern << {} >>", list.join(" "));
     }
     if pattern_cs {
