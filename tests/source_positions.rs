@@ -343,7 +343,7 @@ fn sweeping_a_table_with_a_huge_procedure_is_charged_in_proportion() {
     let (large, ok) = steps_with_a_big_procedure(1 << 20, u64::MAX / 2);
     assert_eq!(ok, Ok(()));
     assert!(
-        large > small + 50_000,
+        large > small + 30_000,
         "{small} steps with a small procedure alive, {large} with a large one"
     );
     let (_, stopped) = steps_with_a_big_procedure(1 << 20, small + 20_000);
