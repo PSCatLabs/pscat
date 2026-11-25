@@ -29,7 +29,8 @@
 //!   and `getinterval` keep the storage, so they keep the lines. `copy`,
 //!   `astore`, `array`, `aload` and every procedure made at run time have new
 //!   storage and no lines. An element written into a scanned body with `put`
-//!   keeps the line of the token it replaced.
+//!   keeps the line of the token it replaced; `copy`, `astore` and
+//!   `putinterval` into one drop its entry ([`BodyLines::forget`]).
 //! - Only the main program and `run` files have lines
 //!   ([`Lexer::line`](crate::lexer::Lexer)): an executable string, an `eexec`
 //!   stream or a file object run directly does not, as in the error report.
@@ -52,15 +53,29 @@ use crate::{PsError, Value};
 /// scans each procedure once, so this is reached only by a source file with
 /// millions of procedure elements; past it a body gets no lines (an error
 /// falls back to the line that ran it).
+#[cfg(not(test))]
 const MAX_HELD: usize = 1 << 22;
+/// Small under test, so the cap can be reached without a gigabyte of source.
+#[cfg(test)]
+const MAX_HELD: usize = 1 << 16;
 
 /// A table smaller than this is not swept: dead entries cost a few dozen
 /// bytes each.
 const SWEEP_FLOOR: usize = 1 << 14;
 
-/// What one visited entry of a sweep is charged, in the bytes the decode
-/// budget turns into steps (a step per KiB): a step per 16 entries.
+/// What one bucket of a sweep's pass over a table is charged, in the bytes
+/// the decode budget turns into steps (a step per KiB): a step per 16.
 const SWEEP_CHARGE: usize = 64;
+
+/// What each line run a sweep copies is charged: its 8 bytes read and the 8
+/// written.
+const RUN_CHARGE: usize = 16;
+
+/// Registrations refused (past the cap on records or on names) before one
+/// may sweep: the table was too full to take them, and only a sweep can say
+/// whether bodies died. The bar is a sixteenth of the table if that is more,
+/// so the sweeps' charge is a bounded share of the work of the scans refused.
+const MIN_REFUSALS: usize = 64;
 
 /// The line of each element of a body being scanned, built as the scanner
 /// goes: runs of equal lines, in element order.
@@ -187,8 +202,8 @@ struct Table {
     held: usize,
     /// The size at which the next sweep runs.
     sweep_at: usize,
-    /// The size at which running out of names may sweep again.
-    names_at: usize,
+    /// Registrations refused since the last sweep (see [`MIN_REFUSALS`]).
+    refused: usize,
 }
 
 impl Table {
@@ -214,10 +229,22 @@ impl Table {
         self.runs_of(e).last().map_or(e.first, |r| r.1)
     }
 
-    /// Drop the entries whose body is gone, and the runs with them; returns
-    /// how many entries it looked at.
-    fn sweep(&mut self) -> usize {
-        let visited = self.entries.len();
+    /// What a sweep of this table does, in bytes for the decode budget: a
+    /// pass over every bucket, and a copy of every run held.
+    fn sweep_cost(&self) -> usize {
+        self.entries
+            .capacity()
+            .saturating_mul(SWEEP_CHARGE)
+            .saturating_add(self.runs.len().saturating_mul(RUN_CHARGE))
+    }
+
+    /// Whether enough registrations were refused to try a sweep.
+    fn refusals_due(&self) -> bool {
+        self.refused >= MIN_REFUSALS.max((self.entries.len() + self.runs.len()) / 16)
+    }
+
+    /// Drop the entries whose body is gone, and the runs with them.
+    fn sweep(&mut self) {
         self.entries.retain(|_, e| e._storage.strong_count() > 0);
         let mut runs = Vec::with_capacity(self.held.saturating_sub(self.entries.len()));
         for e in self.entries.values_mut() {
@@ -235,7 +262,7 @@ impl Table {
         self.lint.retain(|k, _| entries.contains_key(k));
         self.held = self.entries.len() + self.runs.len();
         self.sweep_at = (self.entries.len() * 4).max(SWEEP_FLOOR);
-        visited
+        self.refused = 0;
     }
 }
 
@@ -263,10 +290,12 @@ impl BodyLines {
     ///
     /// `span` is given only for the lint, which keeps what it needs besides
     /// the lines. `check_alloc` is asked before the table takes memory it
-    /// cannot do without (the hash map doubling is the one large step), so a
-    /// memory cap stops the scan instead of being passed. Returns the work
-    /// done beyond the scan, in the bytes the decode budget counts, for the
-    /// caller to charge.
+    /// cannot do without (the hash map doubling, a sweep's compaction), so a
+    /// memory cap stops the scan instead of being passed. `charge` is given
+    /// the bytes of work a sweep is about to do, before it does them, to
+    /// count against the step and time limits; an error from either leaves
+    /// the table as it was.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn register(
         &mut self,
         body: &PsArray,
@@ -275,21 +304,38 @@ impl BodyLines {
         is_run: bool,
         span: Option<(usize, usize)>,
         check_alloc: &dyn Fn(usize) -> Result<(), PsError>,
-    ) -> Result<usize, PsError> {
+        charge: &dyn Fn(usize) -> Result<(), PsError>,
+    ) -> Result<(), PsError> {
         // An empty body has no element to ask about, except to the lint,
         // which counts the bodies written before a token.
         if lines.len() != body.len() || (span.is_none() && body.is_empty()) {
-            return Ok(0);
+            return Ok(());
         }
-        let mut work = 0;
         let named = name.is_some();
-        let table = if named {
-            &mut self.named
-        } else {
-            &mut self.anon
-        };
+        let table = if named { &self.named } else { &self.anon };
         if table.entries.len() >= table.sweep_at.max(SWEEP_FLOOR) {
-            work = self.sweep(named);
+            self.sweep(named, check_alloc, charge)?;
+        }
+        // Past the cap on records the body is refused, and only a sweep gives
+        // the room of dead bodies back: with the table full the entry count
+        // never reaches the sweep's trigger, so refusals bring it on.
+        let cost = 1 + lines.rest.len();
+        let table = if named { &self.named } else { &self.anon };
+        if table.held + cost > MAX_HELD {
+            let table = if named {
+                &mut self.named
+            } else {
+                &mut self.anon
+            };
+            table.refused += 1;
+            if !table.refusals_due() {
+                return Ok(());
+            }
+            self.sweep(named, check_alloc, charge)?;
+            let table = if named { &self.named } else { &self.anon };
+            if table.held + cost > MAX_HELD {
+                return Ok(());
+            }
         }
         let source_id = if named {
             match self.source_id(name, is_run) {
@@ -297,18 +343,15 @@ impl BodyLines {
                 None => {
                     // Out of names, which only a sweep gives back (a body's
                     // death frees its file's name when no other body of the
-                    // file lives). A host that names many small programs
-                    // reaches the cap long before a sweep is due. Once per
-                    // doubling of the table, so a full table of living names
-                    // costs a pass for each doubling and not for each body.
-                    if self.named.entries.len() < self.named.names_at {
-                        return Ok(work);
+                    // file lives). Refusals bring the sweep on, as above.
+                    self.named.refused += 1;
+                    if !self.named.refusals_due() {
+                        return Ok(());
                     }
-                    work += self.sweep(true);
-                    self.named.names_at = self.named.entries.len() * 2 + MAX_SOURCES;
+                    self.sweep(true, check_alloc, charge)?;
                     match self.source_id(name, is_run) {
                         Some(id) => id,
-                        None => return Ok(work),
+                        None => return Ok(()),
                     }
                 }
             }
@@ -320,10 +363,6 @@ impl BodyLines {
         } else {
             &mut self.anon
         };
-        let cost = 1 + lines.rest.len();
-        if table.held + cost > MAX_HELD {
-            return Ok(work);
-        }
         // The table's two growing buffers double, and each doubling is asked
         // of the cap first; the lint's records are too few to ask about.
         let entry_bytes = std::mem::size_of::<(usize, BodyEntry)>() + 1;
@@ -361,19 +400,47 @@ impl BodyLines {
                 runs_len,
             },
         );
-        Ok(work)
+        Ok(())
     }
 
-    /// Sweep one table, and `named`'s names with it. Returns the work, as
-    /// [`BodyLines::register`] does: each entry the sweep looks at, and twice
-    /// more for the passes that renumber the names.
-    fn sweep(&mut self, named: bool) -> usize {
-        if !named {
-            return self.anon.sweep().saturating_mul(SWEEP_CHARGE);
+    /// Forget where `body`'s elements were written: it was written into
+    /// (`copy`, `astore`, `putinterval`), so the lines say nothing about what
+    /// it holds now. Cheap when no table is held, which is the commonest case.
+    pub(crate) fn forget(&mut self, body: &PsArray) {
+        if self.anon.entries.is_empty() && self.named.entries.is_empty() {
+            return;
         }
-        let visited = self.named.sweep();
-        self.collect_sources();
-        visited.saturating_mul(SWEEP_CHARGE * 3)
+        let key = body.storage_site(0).0;
+        for t in [&mut self.anon, &mut self.named] {
+            t.entries.remove(&key);
+            t.lint.remove(&key);
+        }
+    }
+
+    /// Sweep one table, and `named`'s names with it. The work is charged
+    /// first, and the compaction asked of the memory cap, so a limit stops
+    /// the program before the sweep rather than after it.
+    fn sweep(
+        &mut self,
+        named: bool,
+        check_alloc: &dyn Fn(usize) -> Result<(), PsError>,
+        charge: &dyn Fn(usize) -> Result<(), PsError>,
+    ) -> Result<(), PsError> {
+        let table = if named { &self.named } else { &self.anon };
+        let mut work = table.sweep_cost();
+        if named {
+            // The two passes that renumber the names.
+            work = work.saturating_add(table.entries.len().saturating_mul(SWEEP_CHARGE * 2));
+        }
+        check_alloc(table.runs.len() * std::mem::size_of::<(u32, u32)>())?;
+        charge(work)?;
+        if named {
+            self.named.sweep();
+            self.collect_sources();
+        } else {
+            self.anon.sweep();
+        }
+        Ok(())
     }
 
     /// The index of `source` in the table of names, adding it; `None` when
@@ -582,12 +649,20 @@ fn body_tail(body: &PsArray) -> Tail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
-    /// A one-element body and the lines of it (`line` for its element).
-    fn body(line: u32) -> (Object, Lines) {
+    /// A body of `n` elements, element `i` on line `first + i * step`.
+    fn body(n: usize, first: u32, step: u32) -> (Object, Lines) {
         let mut lines = Lines::default();
-        lines.push(line);
-        (Object::procedure(vec![Object::int(1)]), lines)
+        for i in 0..n {
+            lines.push(first + i as u32 * step);
+        }
+        let items = (0..n).map(|i| Object::int(i as i64)).collect();
+        (Object::procedure(items), lines)
+    }
+
+    fn one(line: u32) -> (Object, Lines) {
+        body(1, line, 0)
     }
 
     fn array(o: &Object) -> &PsArray {
@@ -597,70 +672,148 @@ mod tests {
         }
     }
 
+    /// Register `o` as scanned from `name`, returning the bytes of work the
+    /// table asked the limits to count for it.
     fn register(t: &mut BodyLines, name: Option<&Rc<str>>, o: &Object, l: Lines) -> usize {
-        t.register(array(o), l, name, true, None, &|_| Ok(()))
-            .expect("no limit")
+        let charged = Cell::new(0);
+        t.register(array(o), l, name, true, None, &|_| Ok(()), &|n| {
+            charged.set(charged.get() + n);
+            Ok(())
+        })
+        .expect("no limit");
+        charged.get()
     }
 
-    /// A sweep's visits are returned as work for the scanner to charge, so a
-    /// step limit sees them (#1405).
+    fn has_line(t: &BodyLines, o: &Object) -> bool {
+        t.position(array(o), 0).is_some()
+    }
+
+    /// A sweep charges what it does: the line runs it copies as well as the
+    /// entries it looks at, before it does them (Codex, PR #1429).
     #[test]
-    fn a_sweep_reports_the_entries_it_visited() {
+    fn a_sweep_is_charged_for_the_runs_it_copies() {
+        let name: Rc<str> = Rc::from("a.ps");
+        let charged = |big: usize| {
+            let mut t = BodyLines::default();
+            let (keep, l) = body(big, 1, 1);
+            register(&mut t, Some(&name), &keep, l);
+            let mut total = 0;
+            let mut sweeps = 0;
+            for _ in 0..(5 * SWEEP_FLOOR) {
+                let (o, l) = one(1);
+                let work = register(&mut t, Some(&name), &o, l);
+                if work > 0 {
+                    sweeps += 1;
+                }
+                total += work;
+            }
+            assert!(sweeps >= 4, "{sweeps} sweeps");
+            (total, sweeps, keep)
+        };
+        let (small, sweeps, _a) = charged(10);
+        let (large, sweeps_large, _b) = charged(30_000);
+        assert_eq!(sweeps, sweeps_large);
+        // Each sweep copies 30,000 runs.
+        assert!(
+            large - small >= sweeps * 29_000 * RUN_CHARGE,
+            "{small} bytes charged with a small body alive, {large} with a large one"
+        );
+    }
+
+    /// A limit stops the sweep before it runs: the charge comes first and
+    /// its error leaves the table as it was.
+    #[test]
+    fn a_limit_stops_a_sweep_before_it_runs() {
         let mut t = BodyLines::default();
         let name: Rc<str> = Rc::from("a.ps");
         let mut alive = Vec::new();
-        for i in 0..SWEEP_FLOOR {
-            let (o, l) = body(1 + i as u32);
-            assert_eq!(register(&mut t, Some(&name), &o, l), 0, "no sweep yet");
+        for _ in 0..SWEEP_FLOOR {
+            let (o, l) = one(1);
+            register(&mut t, Some(&name), &o, l);
             alive.push(o);
         }
-        let (o, l) = body(1);
-        assert_eq!(
-            register(&mut t, Some(&name), &o, l),
-            SWEEP_FLOOR * SWEEP_CHARGE * 3
-        );
-        // Everything was alive: all kept, and the next sweep is further off.
-        assert_eq!(t.len(), SWEEP_FLOOR + 1);
-        let (o2, l2) = body(2);
-        assert_eq!(register(&mut t, Some(&name), &o2, l2), 0);
+        let (o, l) = one(2);
+        let err = t.register(array(&o), l, Some(&name), true, None, &|_| Ok(()), &|_| {
+            Err(PsError::StepsExceeded)
+        });
+        assert_eq!(err, Err(PsError::StepsExceeded));
+        assert_eq!(t.len(), SWEEP_FLOOR);
     }
 
-    /// A host that names many small programs passes the cap on names long
-    /// before a sweep is due: names whose bodies are gone are given back
-    /// when the cap is reached, so later programs still get lines.
+    /// With the record cap reached only a sweep gives room back, and the
+    /// refusals themselves bring it on: the entry count never would.
     #[test]
-    fn names_of_dead_programs_are_given_back_at_the_cap() {
+    fn a_full_table_gives_the_room_of_a_freed_body_back() {
         let mut t = BodyLines::default();
-        for i in 0..(3 * MAX_SOURCES) {
-            let name: Rc<str> = Rc::from(format!("scene-{i}.ps"));
-            let (o, l) = body(5);
+        let name: Rc<str> = Rc::from("a.ps");
+        let (big, l) = body(MAX_HELD - 3, 1, 1);
+        register(&mut t, Some(&name), &big, l);
+        let mut alive = Vec::new();
+        for _ in 0..4 {
+            let (o, l) = one(7);
             register(&mut t, Some(&name), &o, l);
-            let pos = t.position(array(&o), 0).expect("has a line");
-            assert_eq!((pos.line, pos.file.as_deref()), (5, Some(&*name)), "{i}");
-            // The body dies at the end of the iteration, before the next
-            // program is read.
+            alive.push(o);
         }
+        // The cap is reached: the last of them was refused.
+        assert!(has_line(&t, &alive[0]) && !has_line(&t, &alive[3]));
+        drop(big);
+        let mut later = Vec::new();
+        for _ in 0..(MAX_HELD / 8) {
+            let (o, l) = one(9);
+            register(&mut t, Some(&name), &o, l);
+            later.push(o);
+        }
+        assert!(
+            has_line(&t, later.last().expect("some")),
+            "positions are given again once the big body is freed"
+        );
+        assert!(has_line(&t, &alive[0]));
+    }
+
+    /// Names whose bodies are gone are given back, though every later
+    /// registration of a fresh name is refused until a sweep says so.
+    #[test]
+    fn names_of_freed_files_come_back_after_refusals() {
+        let mut t = BodyLines::default();
+        let mut files = Vec::new();
+        for i in 0..MAX_SOURCES {
+            let name: Rc<str> = Rc::from(format!("f{i}.ps"));
+            let (o, l) = one(1);
+            register(&mut t, Some(&name), &o, l);
+            files.push((name, o));
+        }
+        let name: Rc<str> = Rc::from("f-extra.ps");
+        let (extra, l) = one(1);
+        register(&mut t, Some(&name), &extra, l);
+        assert!(!has_line(&t, &extra), "a 257th live file is refused");
+        drop(files);
+        let mut fresh = Vec::new();
+        for i in 0..(3 * MIN_REFUSALS) {
+            let name: Rc<str> = Rc::from(format!("g{i}.ps"));
+            let (o, l) = one(1);
+            register(&mut t, Some(&name), &o, l);
+            fresh.push(o);
+        }
+        assert!(has_line(&t, fresh.last().expect("some")));
         assert!(t.source_count() <= MAX_SOURCES);
     }
 
-    /// When every name is live the cap holds, and a full table of live names
-    /// does not sweep for every body.
+    /// A host that names many small programs passes the cap on names long
+    /// before a sweep is due; later programs still get lines.
     #[test]
-    fn live_names_past_the_cap_get_no_line_and_cost_one_pass_per_doubling() {
+    fn names_of_dead_programs_are_given_back_at_the_cap() {
         let mut t = BodyLines::default();
-        let mut alive = Vec::new();
-        let mut passes = 0;
-        for i in 0..(MAX_SOURCES + 200) {
-            let name: Rc<str> = Rc::from(format!("f{i}.ps"));
-            let (o, l) = body(1);
-            if register(&mut t, Some(&name), &o, l) > 0 {
-                passes += 1;
+        let mut missed = 0;
+        for i in 0..(3 * MAX_SOURCES) {
+            let name: Rc<str> = Rc::from(format!("scene-{i}.ps"));
+            let (o, l) = one(5);
+            register(&mut t, Some(&name), &o, l);
+            if !has_line(&t, &o) {
+                missed += 1;
             }
-            alive.push((name, o));
+            // The body dies at the end of the iteration.
         }
-        assert_eq!(t.source_count(), MAX_SOURCES);
-        assert!(t.position(array(&alive[0].1), 0).is_some());
-        assert!(t.position(array(&alive[MAX_SOURCES + 10].1), 0).is_none());
-        assert_eq!(passes, 1, "one sweep when the cap was first reached");
+        assert!(missed <= 2 * MIN_REFUSALS, "{missed} programs had no lines");
+        assert!(t.source_count() <= MAX_SOURCES);
     }
 }

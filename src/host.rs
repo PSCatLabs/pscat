@@ -488,7 +488,8 @@ pub struct TraceFrame {
     /// an earlier program that had no name (see `file`), or the interpreter
     /// holds too many procedures to keep every position. `bind`, `cvx`,
     /// `cvlit` and `getinterval` keep the line; an element changed with `put`
-    /// keeps the line of the token it replaced. Unlike
+    /// keeps the line of the token it replaced; a procedure written into with
+    /// `copy`, `astore` or `putinterval` has none. Unlike
     /// [`ErrorDetails::line`], which is where execution was, this is where
     /// the procedure is *written*.
     pub line: Option<usize>,

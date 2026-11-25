@@ -95,6 +95,16 @@ reads (`mcp_server.rs` and the npm `PostScriptError` read the bracketed line).
 
 - `put` into a scanned body keeps the slot's old line (the cheap, honest
   answer: the slot was written there); no lookup was added to `put`.
+  `copy`, `astore` and `putinterval` into one drop its whole entry (a
+  lookup in the cold bulk operators; the runs stay until the next sweep),
+  since many slots changed at once (Codex round 1, PR #1429).
+- Refusals count toward a sweep (Codex round 1): a table at its cap on
+  records or names admits nothing, so the entry count never reaches the
+  sweep's trigger. A refused registration counts, and a sweep runs once the
+  refusals reach a sixteenth of the table (at least 64), so its charge is a
+  bounded share of the scans refused. A sweep charges a bucket pass plus
+  every run it copies, before it runs, and asks the memory cap for the
+  compaction.
 - The table is always on. An opt-out for a host that wants the memory back
   would be one `bool` checked where `scan_procedure` is entered; it was not
   asked for.

@@ -287,3 +287,65 @@ fn the_cli_lists_each_procedure_after_an_unchanged_report_line() {
         "  in petal, line 5 (art.ps): 0 pop >>> deep <<< 1 pop"
     );
 }
+
+#[test]
+fn copy_astore_and_putinterval_into_a_scanned_procedure_drop_its_lines() {
+    // The destination's slots hold other elements now: no line is better than
+    // the old one (Codex, PR #1429).
+    let def = "/f {\n  1\n  0\n  nothing\n} def\n";
+    for (what, write) in [
+        ("copy", "[ 1 0 /div load ] /f load copy pop\n"),
+        ("astore", "1 0 /div load /f load astore pop\n"),
+        ("putinterval", "/f load 0 [ 1 0 /div load ] putinterval\n"),
+    ] {
+        let mut interp = Interp::new();
+        let t = trace_of(&mut interp, &format!("{def}{write}f"));
+        assert_eq!(at(&t[0]), (Some("f"), None, None), "{what}: {t:?}");
+        // The excerpt shows what the body holds now.
+        assert!(t[0].excerpt.contains(">>> --div-- <<<"), "{what}: {t:?}");
+    }
+    // A write into another array leaves the procedure's lines alone.
+    let mut interp = Interp::new();
+    let t = trace_of(
+        &mut interp,
+        &format!("{def}[ 1 2 3 ] 3 array copy pop\n/f load 2 /div load put\nf"),
+    );
+    assert_eq!(at(&t[0]), (Some("f"), Some(4), None));
+}
+
+/// The steps a program that keeps one procedure of `lines` lines alive and
+/// scans many small ones takes, and the result of running it.
+fn steps_with_a_big_procedure(lines: usize, max_steps: u64) -> (u64, Result<(), pscat::PsError>) {
+    let mut src = String::from("/big {\n");
+    for _ in 0..lines {
+        src.push_str("1\n");
+    }
+    src.push_str("} def\n");
+    // Each small body is freed at once, so the table sweeps every 16384.
+    for _ in 0..100_000 {
+        src.push_str("{ 1 } pop\n");
+    }
+    let mut interp = Interp::new();
+    interp
+        .set_limits(pscat::Limits::none().with_max_steps(max_steps))
+        .expect("limits");
+    let result = interp.run_str(&src);
+    (interp.steps_used(), result)
+}
+
+#[test]
+fn sweeping_a_table_with_a_huge_procedure_is_charged_in_proportion() {
+    // `big` has a line run per element. Every sweep copies them all, so the
+    // run with a million of them takes tens of thousands of steps more than
+    // the run with ten, and a limit between the two stops it.
+    let (small, ok) = steps_with_a_big_procedure(10, u64::MAX / 2);
+    assert_eq!(ok, Ok(()));
+    let (large, ok) = steps_with_a_big_procedure(1 << 20, u64::MAX / 2);
+    assert_eq!(ok, Ok(()));
+    assert!(
+        large > small + 50_000,
+        "{small} steps with a small procedure alive, {large} with a large one"
+    );
+    let (_, stopped) = steps_with_a_big_procedure(1 << 20, small + 20_000);
+    assert_eq!(stopped, Err(pscat::PsError::StepsExceeded));
+}

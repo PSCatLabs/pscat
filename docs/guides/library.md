@@ -376,7 +376,8 @@ time (`array`, `copy`, `astore`), read from an executable string, `token` or
 `eexec`, or beyond the table's cap of a few million entries; the frame still
 has its name and excerpt. `bind`, `cvx`, `cvlit` and `getinterval` keep the
 line (they change the procedure in place or look at it); an element written
-into a procedure with `put` keeps the line of the token it replaced.
+into a procedure with `put` keeps the line of the token it replaced, and one
+written into with `copy`, `astore` or `putinterval` has none.
 
 The table that holds this costs about 43 bytes per procedure plus 8 for each
 further line it spans, nothing while the program runs, and under 2% of the time

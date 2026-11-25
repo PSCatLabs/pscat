@@ -3696,6 +3696,12 @@ impl Interp {
         }
     }
 
+    /// `body` was written into (`copy`, `astore`, `putinterval`): the lines
+    /// kept for it (#1405) no longer say where its elements were written.
+    pub(crate) fn forget_positions(&self, body: &PsArray) {
+        self.source_lines.borrow_mut().forget(body);
+    }
+
     /// Have `def` and `store` note every binding of an operator's name to a
     /// plain value, with the line the scanner was on, for the
     /// `[shadowed-operator]` lint (issue #1109): it reports that line, and
@@ -5033,15 +5039,15 @@ fn scan_procedure(
         let run = lexer.run_name();
         let name = run.or(p.main_name.as_ref());
         let span = p.lint.then(|| (opened_at, lexer.pos()));
-        let work = p
-            .table
-            .borrow_mut()
-            .register(arr, at, name, run.is_some(), span, &|bytes| {
-                lexer.check_alloc(bytes)
-            })?;
-        if work > 0 {
-            lexer.charge_work(work)?;
-        }
+        p.table.borrow_mut().register(
+            arr,
+            at,
+            name,
+            run.is_some(),
+            span,
+            &|bytes| lexer.check_alloc(bytes),
+            &|bytes| lexer.charge_work(bytes),
+        )?;
     }
     Ok(body)
 }
