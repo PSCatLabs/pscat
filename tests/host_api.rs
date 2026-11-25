@@ -668,3 +668,55 @@ fn frames_on_one_interpreter_are_time_addressable() {
     // `restore` rolled the scene's own mutation back each time.
     assert_eq!(interp.lookup("count").and_then(|v| v.as_i64()), Some(1));
 }
+
+// ---- PR #1410 review, round 1 -------------------------------------------
+
+/// Finding 5: `Interrupted` from a host operator is as uncatchable as the
+/// flag itself.
+#[test]
+fn interrupted_from_a_host_operator_is_uncatchable() {
+    let mut interp = Interp::new();
+    interp
+        .register_operator("cancel", |_| Err(PsError::Interrupted))
+        .unwrap();
+    let err = interp.run_str("{ cancel } stopped pop 42").unwrap_err();
+    assert_eq!(err, PsError::Interrupted);
+    assert_eq!(interp.error_details(&err).name, "interrupt");
+    assert_eq!(interp.operand_count(), 0, "42 was never pushed");
+    // Under a step cap, the interrupt is reported as itself.
+    interp
+        .set_limits(Limits::none().with_max_steps(1_000_000))
+        .unwrap();
+    assert_eq!(
+        interp.run_str("{ cancel } stopped").unwrap_err(),
+        PsError::Interrupted
+    );
+}
+
+/// Finding 4: a raised flag stops a run that is short enough to finish in
+/// one slice, before anything executes; and a flag raised during the last
+/// slice is reported, not lost.
+#[test]
+fn a_raised_flag_stops_even_a_short_run() {
+    let stop = Arc::new(AtomicBool::new(true));
+    let mut interp = Interp::new();
+    interp.set_interrupt(Some(stop.clone()));
+    assert_eq!(interp.run_str("1 2 add").unwrap_err(), PsError::Interrupted);
+    assert_eq!(interp.operand_count(), 0, "nothing ran");
+    stop.store(false, Ordering::Relaxed);
+    let s = stop.clone();
+    interp
+        .register_operator("raise", move |_| {
+            s.store(true, Ordering::Relaxed);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        interp.run_str("raise 1 2 add").unwrap_err(),
+        PsError::Interrupted
+    );
+    stop.store(false, Ordering::Relaxed);
+    interp.clear_operands();
+    interp.run_str("1 2 add").unwrap();
+    assert_eq!(interp.pop_int().unwrap(), 3);
+}

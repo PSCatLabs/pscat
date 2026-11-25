@@ -917,17 +917,33 @@ impl Interp {
         } else {
             4096
         };
-        while self.step_n(slice)? {
-            // The host's stop flag ([`Interp::set_interrupt`]): looked at
-            // between slices, and uncatchable like a limit, since the
-            // program is unwound from outside the machine.
+        // The host's stop flag ([`Interp::set_interrupt`]) is looked at
+        // before every slice, the first included, so a raised flag stops a
+        // program short enough to finish in one slice before it starts; and
+        // once more after the last, so a flag raised while it ran is
+        // reported, not lost. Uncatchable like a limit, since the program
+        // is unwound from outside the machine. One load per slice.
+        loop {
             if self.interrupted() {
-                self.snapshot_error_chain(&PsError::Interrupted);
-                self.unwind_all();
-                return Err(PsError::Interrupted);
+                return Err(self.interrupt_run());
+            }
+            if !self.step_n(slice)? {
+                break;
             }
         }
+        if self.interrupted() {
+            return Err(self.interrupt_run());
+        }
         Ok(())
+    }
+
+    /// Stop the program for the host's flag: record where it was, unwind.
+    #[cold]
+    #[inline(never)]
+    fn interrupt_run(&mut self) -> PsError {
+        self.snapshot_error_chain(&PsError::Interrupted);
+        self.unwind_all();
+        PsError::Interrupted
     }
 
     /// Put [`Limits`] on the programs this interpreter runs from now on.
@@ -1410,7 +1426,8 @@ impl Interp {
         match result {
             Err(e) => {
                 // An ordinary error past the cap is the cap's: see above.
-                Err(if e.limit().is_none() && self.steps_over_cap() {
+                // An interrupt stays itself: the host asked for it.
+                Err(if !e.is_uncatchable() && self.steps_over_cap() {
                     PsError::StepsExceeded
                 } else {
                     e
@@ -2000,8 +2017,9 @@ impl Interp {
         self.blame_image();
         let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
-        // runaway program swallow it and carry on (issue #604).
-        if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
+        // runaway program swallow it and carry on (issue #604). Nor is an
+        // interrupt, which a host operator can return as well as the flag.
+        if e.is_uncatchable() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
             return Err(e);
         }
         self.record_error(&e, command);

@@ -808,10 +808,14 @@ impl Interp {
     /// Give the interpreter a flag that stops a running program. While the
     /// flag is `true`, [`run_str`](Self::run_str) and
     /// [`run_source`](Self::run_source) return [`PsError::Interrupted`] at
-    /// the next look, which is every few thousand steps; the program cannot
-    /// catch it with `stopped`. The host owns the flag: it stays raised
-    /// until the host lowers it, so every later run stops too. `None` takes
-    /// the flag away.
+    /// the next look: before the program starts, every few thousand steps,
+    /// and once more when it ends, so a run during which the flag was up
+    /// fails however short it is (a program that finished keeps its page
+    /// and operand stack, as after any error). The program cannot catch it
+    /// with `stopped`, nor an `Interrupted` a host operator returns. The
+    /// host owns the flag: it stays raised until the host lowers it, so
+    /// every later run stops too, before it runs anything. `None` takes the
+    /// flag away.
     ///
     /// Like the step limit, the flag is looked at between objects, so one
     /// long-running operator finishes first. A host that drives the machine

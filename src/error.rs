@@ -126,6 +126,14 @@ impl PsError {
         }
     }
 
+    /// Whether `stopped` must let this error through: a limit error, or
+    /// [`Interrupted`](Self::Interrupted) however it arose (the flag, or a
+    /// host operator returning it). Either stops the program from outside
+    /// it, so catching one would let a program carry on past its stop.
+    pub(crate) fn is_uncatchable(&self) -> bool {
+        self.limit().is_some() || matches!(self, PsError::Interrupted)
+    }
+
     /// The bare PLRM error name, without any payload detail — what a real
     /// interpreter would report as the error's name.
     pub fn name(&self) -> &'static str {
