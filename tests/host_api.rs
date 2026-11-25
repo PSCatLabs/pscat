@@ -1099,3 +1099,92 @@ fn interpreters_on_separate_threads_keep_their_operators_and_flags() {
         }
     }
 }
+
+// ---- PR #1410 review, round 2 -------------------------------------------
+
+/// Round 2, finding 1: a dictionary key that is not a name or a string is
+/// spelled within a fixed bound, and a string key is counted like a string
+/// value, so a key cannot take the copy past its bounds either.
+#[test]
+fn a_dictionary_key_is_copied_within_the_bounds() {
+    let mut interp = Interp::new();
+    with_extract(&mut interp);
+    interp
+        .run_str("/a 2 array def a 0 a put a 1 a put /d 1 dict def d a 0 put")
+        .unwrap();
+    interp.run_str("d extract").unwrap();
+    let Some(Value::Dict(entries)) = interp.lookup("d") else {
+        panic!("d is a dictionary");
+    };
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].0.len() <= 300, "{} bytes", entries[0].0.len());
+    assert!(entries[0].0.starts_with('['), "{}", entries[0].0);
+
+    // Keys of every ordinary kind still come through as their text.
+    interp
+        .run_str("/k 4 dict def k /name 1 put k (str) 2 put k 3 3 put k true 4 put k")
+        .unwrap();
+    let k = interp.pop_value().unwrap();
+    for (key, n) in [("name", 1), ("str", 2), ("3", 3), ("true", 4)] {
+        assert_eq!(k.get(key).and_then(Value::as_i64), Some(n), "{key}");
+    }
+
+    // A string key counts by its size: three of the largest strings
+    // (16 MiB, 2^19 nodes each) are past the node cap, so it is refused.
+    interp
+        .run_str(
+            "/big 3 dict def 1 1 3 { big exch 16777216 string dup 0 4 -1 roll put 0 put } for big",
+        )
+        .unwrap();
+    assert_eq!(interp.pop_value().unwrap_err(), PsError::Limitcheck);
+    assert_eq!(interp.operand_count(), 1);
+}
+
+/// Round 2, finding 2: a procedure's name in a backtrace is shortened, so
+/// a huge name is not copied whole while an error is reported.
+#[test]
+fn a_long_procedure_name_is_shortened_in_the_backtrace() {
+    let mut interp = Interp::new();
+    interp
+        .run_str("/n 1048576 string cvn def n { (x) 1 add 0 pop } def")
+        .unwrap();
+    let err = interp.run_str("n load exec").unwrap_err();
+    assert_eq!(err, PsError::Typecheck);
+    let t = interp.error_details(&err).backtrace;
+    let name = t[0].procedure.as_deref().expect("named");
+    assert!(name.len() <= 260, "{} bytes", name.len());
+    assert!(name.ends_with("..."), "{name:?}");
+}
+
+/// Round 2, finding 4: `lookup` copies are charged to the running program
+/// like `pop_value` copies, so many of them cannot slip under the step cap.
+#[test]
+fn lookup_copies_are_charged_to_the_step_cap() {
+    let mut interp = Interp::new();
+    interp
+        .register_operator("peek", |i| {
+            for _ in 0..300 {
+                i.lookup("w");
+            }
+            Ok(())
+        })
+        .unwrap();
+    interp.run_str("/w 100000 array def").unwrap();
+    interp
+        .set_limits(Limits::none().with_max_steps(200))
+        .unwrap();
+    assert_eq!(interp.run_str("peek").unwrap_err(), PsError::StepsExceeded);
+    // One copy, well under the cap, is fine; and between runs a copy is free.
+    interp
+        .set_limits(Limits::none().with_max_steps(10_000))
+        .unwrap();
+    interp.run_str("/v [1 2 3] def").unwrap();
+    interp
+        .register_operator("one", |i| {
+            assert!(i.lookup("v").is_some());
+            Ok(())
+        })
+        .unwrap();
+    interp.run_str("one").unwrap();
+    assert!(matches!(interp.lookup("w"), Some(Value::Array(_))));
+}

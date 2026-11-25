@@ -82,6 +82,15 @@ pub const MAX_VALUE_DEPTH: usize = 32;
 /// from `pop_value`, and comes back whole as [`Value::Other`] from `lookup`.
 pub const MAX_VALUE_NODES: usize = 1 << 20;
 
+/// How a dictionary key that is not a name or a string is spelled in a
+/// [`Value::Dict`]: as `==` would, shortened past these bounds.
+const KEY_LIMITS: crate::object::DumpLimits = crate::object::DumpLimits {
+    max_depth: 4,
+    max_elements: 16,
+    max_string: 128,
+    max_bytes: 256,
+};
+
 /// String bytes that count as one node.
 const STRING_BYTES_PER_NODE: usize = 32;
 
@@ -163,7 +172,8 @@ pub enum Value {
     /// A literal array's elements.
     Array(Vec<Value>),
     /// A dictionary's entries. A name or string key is its text; any other
-    /// key is the text `==` would print for it. The order is the
+    /// key is the text `==` would print for it, shortened past a few hundred
+    /// bytes (a long array key ends in `...`). The order is the
     /// interpreter's `forall` order, stable from run to run.
     Dict(Vec<(String, Value)>),
     /// Any other object, kept as it is.
@@ -282,7 +292,10 @@ impl Value {
             Raw::Boolean(b) => Value::Bool(*b),
             Raw::Integer(i) => Value::Int(*i),
             Raw::Real(r) => Value::Real(*r),
-            Raw::Name(_) if !obj.executable => Value::Name(obj.text()),
+            Raw::Name(n) if !obj.executable => {
+                walk.take(n.len() / STRING_BYTES_PER_NODE, n.len())?;
+                Value::Name(obj.text())
+            }
             Raw::String(s) if !obj.executable => {
                 walk.take(s.len() / STRING_BYTES_PER_NODE, s.len())?;
                 Value::String(s.to_vec())
@@ -311,11 +324,10 @@ impl Value {
                 let pairs = d.borrow().pairs();
                 let mut out = Vec::with_capacity(pairs.len());
                 for (k, v) in &pairs {
-                    let key = match &k.value {
-                        Raw::Name(_) | Raw::String(_) => k.text(),
-                        _ => k.repr(),
-                    };
-                    out.push((key, Value::from_object(v, depth + 1, walk)?));
+                    out.push((
+                        Value::key_text(k, walk)?,
+                        Value::from_object(v, depth + 1, walk)?,
+                    ));
                 }
                 Value::Dict(out)
             }
@@ -324,6 +336,22 @@ impl Value {
                 owner: walk.interp.host_id,
             }),
         })
+    }
+
+    /// A dictionary key's text, counted in `walk` like a value: a name or
+    /// string by its length, any other key spelled as `==` would, but
+    /// within [`KEY_LIMITS`] (an array key can hold itself).
+    fn key_text(k: &Object, walk: &mut Walk<'_>) -> Result<String, PsError> {
+        let len = match &k.value {
+            Raw::Name(n) => n.len(),
+            Raw::String(s) => s.len(),
+            _ => {
+                walk.take(KEY_LIMITS.max_bytes / STRING_BYTES_PER_NODE, 0)?;
+                return Ok(k.repr_bounded(&KEY_LIMITS));
+            }
+        };
+        walk.take(len / STRING_BYTES_PER_NODE, len)?;
+        Ok(k.text())
     }
 
     /// The value as an object of the interpreter `owner`; `invalidaccess`
@@ -643,21 +671,33 @@ impl Interp {
     /// left where it was.
     pub fn pop_value(&mut self) -> Result<Value, PsError> {
         let obj = self.ostack.last().cloned().ok_or(PsError::StackUnderflow)?;
-        let (value, steps) = self.value_of(&obj)?;
-        self.charge_host_steps(steps)?;
-        self.pop()?;
-        Ok(value)
+        let (value, steps) = self.value_of(&obj);
+        match value {
+            Ok(value) => {
+                self.charge_host_steps(steps)?;
+                self.pop()?;
+                Ok(value)
+            }
+            Err(e) => {
+                // The work up to the refusal is charged too; the refusal is
+                // what is reported (a step cap it passes is seen next look).
+                let _ = self.charge_host_steps(steps);
+                Err(e)
+            }
+        }
     }
 
-    /// `obj` copied out as a [`Value`], and the steps the copy stands for.
-    fn value_of(&self, obj: &Object) -> Result<(Value, u64), PsError> {
+    /// `obj` copied out as a [`Value`], and the steps the copy stood for,
+    /// whether it finished or was refused part way.
+    fn value_of(&self, obj: &Object) -> (Result<Value, PsError>, u64) {
         let mut walk = Walk {
             interp: self,
             nodes: 0,
         };
-        walk.take(1, 0)?;
-        let value = Value::from_object(obj, 0, &mut walk)?;
-        Ok((value, walk.steps()))
+        let value = walk
+            .take(1, 0)
+            .and_then(|()| Value::from_object(obj, 0, &mut walk));
+        (value, walk.steps())
     }
 
     /// Push a [`Value`] onto the operand stack. An array or dictionary is a
@@ -763,7 +803,11 @@ impl Interp {
     /// The value `name` has on the dictionary stack, as `load` would find
     /// it; `None` if it is not defined. A value [`pop_value`](Self::pop_value)
     /// would refuse (one past [`MAX_VALUE_NODES`], or whose copy a running
-    /// program's limits stop) comes back whole as [`Value::Other`].
+    /// program's limits stop) comes back whole as [`Value::Other`]. From
+    /// inside a host operator the copy counts against the step cap as
+    /// `pop_value`'s does, charged at the program's next look at its limits
+    /// (the next [`check_limits`](Self::check_limits), or the end of the
+    /// slice) rather than at once; between runs it is free.
     ///
     /// ```
     /// let mut interp = pscat::Interp::new();
@@ -773,12 +817,21 @@ impl Interp {
     /// # Ok::<(), pscat::PsError>(())
     /// ```
     pub fn lookup(&self, name: &str) -> Option<Value> {
-        self.load(name).map(|o| match self.value_of(&o) {
-            Ok((value, _)) => value,
-            Err(_) => Value::Other(Opaque {
-                obj: o,
-                owner: self.host_id,
-            }),
+        self.load(name).map(|o| {
+            let (value, steps) = self.value_of(&o);
+            // `&self`: the copy, finished or refused, is charged at the
+            // program's next look at its limits, as `pop_value` charges at
+            // once. Between runs a copy is free.
+            if self.running() {
+                let pending = &self.host_steps_pending;
+                pending.set(pending.get().saturating_add(steps));
+            }
+            value.unwrap_or_else(|_| {
+                Value::Other(Opaque {
+                    obj: o.clone(),
+                    owner: self.host_id,
+                })
+            })
         })
     }
 

@@ -163,6 +163,27 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
 /// never go below them, and `countdictstack` is 3 at the start, as in gs.
 pub(crate) const PERMANENT_DICTS: usize = 3;
 
+/// The most bytes of a procedure's name a backtrace frame keeps
+/// ([`crate::host::TraceFrame::procedure`]).
+const TRACE_NAME_BYTES: usize = 256;
+
+/// `name`, cut to [`TRACE_NAME_BYTES`] at a character boundary with `...`
+/// after it: a backtrace is made after the limits stop looking, so it must
+/// not copy a name of any size the program chose.
+fn shorten_name(name: &str) -> String {
+    if name.len() <= TRACE_NAME_BYTES {
+        return name.to_string();
+    }
+    let mut cut = TRACE_NAME_BYTES;
+    while !name.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = String::with_capacity(cut + 3);
+    out.push_str(&name[..cut]);
+    out.push_str("...");
+    out
+}
+
 /// A procedure frame popped as it issued its last element (a tail call),
 /// with what identifies the moment: the execution stack's depth after the
 /// pop and, when the frame under it is a procedure, that procedure's `pc`,
@@ -418,6 +439,10 @@ pub struct Interp {
     /// pushed into another interpreter (whose host operator slots, save
     /// levels and so on are not its own).
     pub(crate) host_id: u64,
+    /// Steps of host-side copies that could not borrow the interpreter
+    /// mutably ([`Interp::lookup`]), charged at the next look at the limits
+    /// (`sync_decode_budget`).
+    pub(crate) host_steps_pending: std::cell::Cell<u64>,
     /// The host's stop flag ([`Interp::set_interrupt`]).
     pub(crate) interrupt: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// The procedures that were running when the last uncaught error left
@@ -833,6 +858,7 @@ impl Interp {
             host_ops: Vec::new(),
             host_op_names: Vec::new(),
             host_id: crate::host::next_interp_id(),
+            host_steps_pending: std::cell::Cell::new(0),
             interrupt: None,
             error_trace: Vec::new(),
             tail: None,
@@ -1284,10 +1310,15 @@ impl Interp {
         // Mesh shading work (#1325) is counted the same way, so it is
         // charged whether the operator that did it succeeded or failed.
         let mesh = crate::mesh::take_pending_steps();
+        let host = self.host_steps_pending.take();
         if self.limits.is_none() {
             return;
         }
-        let steps = self.decode_budget.take_steps().saturating_add(mesh);
+        let steps = self
+            .decode_budget
+            .take_steps()
+            .saturating_add(mesh)
+            .saturating_add(host);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
     }
@@ -1326,6 +1357,7 @@ impl Interp {
         }
         self.error_chain.clear();
         self.error_trace.clear();
+        self.host_steps_pending.set(0);
         if !self.limits.is_none() {
             self.steps_used = 0;
             self.poll_in = POLL_PERIOD;
@@ -1587,6 +1619,12 @@ impl Interp {
         self.poll_limits(steps)
     }
 
+    /// Whether a program is running: the host is inside an operator, not
+    /// between runs.
+    pub(crate) fn running(&self) -> bool {
+        !self.estack.is_empty()
+    }
+
     /// Charge `steps` of a host-side copy to the running program, as
     /// [`host_poll`](Self::host_poll) does; nothing between runs, when the
     /// host is reading results.
@@ -1613,7 +1651,11 @@ impl Interp {
             return Ok(());
         }
         if let Some(max) = self.limits.max_steps
-            && self.steps_so_far().saturating_add(steps) > max
+            && self
+                .steps_so_far()
+                .saturating_add(self.host_steps_pending.get())
+                .saturating_add(steps)
+                > max
         {
             return Err(PsError::StepsExceeded);
         }
@@ -2397,7 +2439,7 @@ impl Interp {
                 }
                 for (frame, body) in trace.iter_mut().zip(&bodies) {
                     if frame.procedure.is_none() && a.same_object(body) {
-                        frame.procedure = Some(crate::name::resolve(id).to_string());
+                        frame.procedure = Some(shorten_name(&crate::name::resolve(id)));
                         unnamed -= 1;
                     }
                 }
@@ -5192,6 +5234,17 @@ mod tests {
         it.pop()?;
         it.push(Object::int(-2));
         Err(PsError::Rangecheck)
+    }
+
+    #[test]
+    fn shorten_name_cuts_at_a_character_boundary() {
+        assert_eq!(shorten_name("short"), "short");
+        let exact = "a".repeat(TRACE_NAME_BYTES);
+        assert_eq!(shorten_name(&exact), exact);
+        // 255 ASCII bytes then a two-byte character straddling the cut.
+        let long = format!("{}é tail", "a".repeat(TRACE_NAME_BYTES - 1));
+        let cut = shorten_name(&long);
+        assert_eq!(cut, format!("{}...", "a".repeat(TRACE_NAME_BYTES - 1)));
     }
 
     /// The operand ledger (#1047) puts back operands past its fixed slots
