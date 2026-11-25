@@ -700,9 +700,8 @@ fn a_growing_charcoal_stroke_keeps_what_it_has_drawn() {
             .iter()
             .map(|t| data(&part(&format!("{opts} /From 0 /To {t}"))))
             .collect();
-        // drykit thins the catch by a run's mean stop spacing, which moves
-        // with the end of a growing stroke: now and then (measured: one
-        // frame of 14) the streaks along the whole stroke turn a little
+        // now and then (measured: one frame of 14) a few hundred texture
+        // pixels of the drawn part change, as drykit draws a longer run
         let mut moved = 0;
         for k in 0..tos.len() - 1 {
             let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as usize;

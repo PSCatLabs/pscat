@@ -1303,10 +1303,9 @@ renders eight examples in both and compares block-downsampled output).
    code never sees a 4-element stop. Fallout stops carry `t` too and `dkZfallout`'s
    `/Mark` draws only particles whose place in the chunk is in range (all are placed, so
    the random numbers match the whole). Default path (`dkSpart` false) is the old code,
-   identity-checked. Gotcha: `dkZthin` keeps one stop per `2(maxhw+reach)/mean spacing`
-   and the mean moves with a growing stroke's end stop, so about 1 frame in 14 the
-   knuckle orientation (texture) along the WHOLE drawn part shifts (up to ~80 of 255 on
-   charcoal): proposed follow-up, thin by the stroke's pitch. dcchalk still cuts its
+   identity-checked. Gotcha: about 1 frame in 14 a few hundred texture pixels along the WHOLE drawn part change (up to ~80 of 255,
+charcoal); cause not isolated (not the chunk budget, not `dkZthin`: both ruled out, `notes/1418-dry-media-from-to.md`).
+dcchalk still cuts its
    polyline itself (a seam of a few tens of levels, a `/Tilt` piece's dropout chain
    fresh); moving it onto drykit's keys would fix both but change its partial output.
    `dhhatch`/`dhsketch` pass the keys to every stroke they lay (not stripped).

@@ -78,9 +78,9 @@ the stick's contact patch meets raised tooth.
   already drawn alone. Measured: behind the pen's last dozen points,
   frames 5% apart differ by up to about 13 of 255 levels (edge
   anti-aliasing), except now and then (about one frame in 14, charcoal
-  more than crayon or `dkstroke`) where drykit's catch re-thins and the
-  texture along the whole stroke shifts, by up to about 80 levels on a
-  few hundred pixels. Two adjacent pieces drawn on one canvas make the
+  more than crayon or `dkstroke`) where a few hundred texture pixels
+  along the drawn part change, by up to about 80 levels (cause not isolated; dcchalk
+  shows the same). Two adjacent pieces drawn on one canvas make the
   whole to within about 75 levels at the seam, on a few pixels. A caller
   that keeps its canvas can draw `/From prev /To now` each frame, down to
   pieces a few tenths of a width long (each piece ends in a round cap

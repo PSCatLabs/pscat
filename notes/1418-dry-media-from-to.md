@@ -36,19 +36,18 @@ is not a few tens of levels apart because of a re-walked grid.
 
 **Measured** (1x and 2x pages, a 180pt curve, whole-stroke profiles): `/From 0 /To t` frames 5%
 apart agree behind the pen's last 12 points to within 6-13 of 255 (dkstroke, crayon), except about one
-frame in 14 on charcoal where the catch is re-thinned (below): up to 78, a few hundred pixels.
+frame in 14 on charcoal, where texture pixels along the whole drawn part change (below): up to 78, a few hundred pixels.
 Adjacent halves on one canvas: worst 27-78 levels, a handful of pixels over 32 (compressed
 charcoal: 45 of ~1100 inked). Cost (release, start-up included, a zigzag): whole vs a tenth,
 dkstroke 0.24 s vs 0.09 s, dycrayon 0.45 vs 0.08, dhstroke 0.31 vs 0.07. The walk and profile
 are still whole-stroke work; the catch and the ink are the part's.
 
-**Why the occasional shift.** `dkZthin` keeps one stop per `2 (maxhw + reach) / mean stop spacing`
-for the catch, and the mean spacing moves slightly as a growing stroke's last (interpolated)
-stop moves, so now and then `k` steps by one and the knuckle orientation along the whole run
-shifts. Proposed follow-up: derive `k` from the stroke's pitch (changes the default path's
-output, so its own ticket, with an identity expectation), which would also make chalk's seam
-tighter.
+**The occasional shift: cause not isolated.** At one step (`/To` 0.8 to 0.85, compressed charcoal) a few
+hundred pixels change all along the drawn part, by up to 84 of 255. Ruled out by experiment: drykit's chunk
+budget (`dkbudget` 150000 and 800000 give the same pixels) and the catch's thinning (`/dkZthin { } def`,
+verified to take effect by a probe that empties it, gives byte-identical output). #1409 saw the same with dcchalk (whose cut is different), so it is probably in drykit's drawing
+of a longer run, but that is not shown. Not chased further.
 
-**Proposed follow-ups.** (1) Stable thinning in `dkZthin`. (2) Move `dcchalk` onto drykit's
+**Proposed follow-ups.** (1) Find why a longer run re-textures the whole of its drawn part (not chunking, not thinning), and make a prefix stable. (2) Move `dcchalk` onto drykit's
 `/From /To` (drops `dcpiece`, the touch remap and the lane-seed mixing; changes its partial output).
 (3) Cap-less interior ends for sub-width incremental pieces (as in #1409).
