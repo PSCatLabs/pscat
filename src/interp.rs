@@ -1318,6 +1318,11 @@ impl Interp {
             }
             self.unwind_all();
         }
+        // The program is over: transparency groups it left open end, so
+        // their marks reach the page and every output (#1406).
+        if !matches!(result, Ok(true)) || self.quit_requested {
+            self.gfx.end_open_groups();
+        }
         result
     }
 
@@ -3810,7 +3815,11 @@ impl Interp {
     /// `grestoreall`: pop to the innermost save's boundary (keeping the
     /// boundary state available for its restore), or to the bottom.
     pub(crate) fn do_grestoreall(&mut self) {
+        // A transparency group opened since the save stops it (#1406).
+        let save_depth = self.save_stack.last().map(|rec| rec.gfx_depth);
+        let in_group = self.gfx.grestore_all_in_group(save_depth);
         match self.save_stack.last() {
+            _ if in_group => {}
             Some(rec) => {
                 let state = rec.gfx_state.clone();
                 let depth = rec.gfx_depth;

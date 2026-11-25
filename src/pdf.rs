@@ -222,6 +222,9 @@ pub struct PdfRecorder {
     /// Copies of a masked uncoloured pattern in another colour (#1340), by
     /// index and the colour's bits.
     colored_variants: HashMap<(usize, [u32; 3]), usize>,
+    /// What each open transparency group (#1406) set aside of the stream
+    /// below it, innermost last.
+    groups: Vec<PdfCapture>,
 }
 
 /// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
@@ -257,6 +260,9 @@ struct PdfPattern {
     /// coloured one with it. Its content sets no colour, so every mark
     /// takes the one set at its start.
     ink: Option<(f32, f32, f32)>,
+    /// A transparency group's form XObject (#1406), named `/X<i>` in an
+    /// `/XObject` resource dictionary rather than `/P<i>` in `/Pattern`.
+    group: bool,
 }
 
 /// The page state a pattern capture swapped out of the recorder
@@ -387,6 +393,7 @@ impl PdfRecorder {
             capture_frame: None,
             smask_forms: HashMap::new(),
             colored_variants: HashMap::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -430,6 +437,7 @@ impl PdfRecorder {
         PdfPattern {
             smasks: std::mem::replace(&mut self.current_smasks, saved.smasks),
             ink: None,
+            group: false,
             dict: String::new(),
             shading: None,
             content: std::mem::replace(&mut self.content, saved.content).into(),
@@ -503,6 +511,54 @@ impl PdfRecorder {
         let v = self.patterns.len() - 1;
         self.pattern_variants.insert((idx, bits), v);
         v
+    }
+
+    /// A transparency group opens (#1406): the stream and its resource
+    /// lists are set aside, as for a pattern capture, and marks go to an
+    /// empty stream in the same coordinates until [`end_group`](Self::end_group).
+    pub(crate) fn begin_group(&mut self) {
+        self.flush_text();
+        self.close_clip();
+        let saved = PdfCapture {
+            smasks: std::mem::take(&mut self.current_smasks),
+            frame: self.capture_frame,
+            content: std::mem::take(&mut self.content),
+            open_clip: None,
+            images: std::mem::take(&mut self.current_images),
+            gstates: std::mem::take(&mut self.current_gstates),
+            shadings: std::mem::take(&mut self.current_shadings),
+            shading_set: std::mem::take(&mut self.current_shading_set),
+            fonts: std::mem::take(&mut self.current_fonts),
+            patterns: std::mem::take(&mut self.current_patterns),
+            pattern_cs: std::mem::take(&mut self.current_pattern_cs),
+            uncolored: self.uncolored,
+        };
+        self.groups.push(saved);
+    }
+
+    /// The group closes: what it recorded becomes a form XObject with an
+    /// isolated transparency group (`/I true`, as the raster's layer starts
+    /// transparent), `/BBox` the canvas (`width` x `height`, in the stream's
+    /// own coordinates, which the form shares), painted in the stream below
+    /// with the group's alpha and blend. An empty group writes nothing.
+    pub(crate) fn end_group(&mut self, comp: Composite, width: u32, height: u32) {
+        let Some(saved) = self.groups.pop() else {
+            return;
+        };
+        let mut form = self.restore_capture(saved);
+        if form.content.is_empty() {
+            return;
+        }
+        form.group = true;
+        form.dict = format!(
+            "/Type /XObject /Subtype /Form /BBox [0 0 {width} {height}] \
+             /Group << /Type /Group /S /Transparency /I true /CS /DeviceRGB >>"
+        );
+        self.patterns.push(form);
+        let idx = self.patterns.len() - 1;
+        self.current_patterns.push(idx);
+        let gs = self.gs_ref(comp);
+        let _ = writeln!(self.content, "q {gs}/X{idx} Do Q");
     }
 
     /// The pattern's `PaintProc` was unwound: put the page state back and
@@ -659,6 +715,7 @@ impl PdfRecorder {
                     pattern_cs: pcs,
                     smasks: Vec::new(),
                     ink: None,
+                    group: false,
                 });
                 let i = self.patterns.len() - 1;
                 self.smask_forms.insert(key, i);
@@ -753,6 +810,7 @@ impl PdfRecorder {
             pattern_cs: false,
             smasks: Vec::new(),
             ink: None,
+            group: false,
         });
         Some(self.patterns.len() - 1)
     }
@@ -1762,6 +1820,7 @@ Q",
         self.current_shading_set.clear();
         self.current_patterns.clear();
         self.current_pattern_cs = false;
+        self.groups.clear();
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -2204,6 +2263,14 @@ fn resource_parts(
     let xobjects: Vec<String> = images
         .iter()
         .map(|&idx| format!("/Im{idx} {} 0 R", b.image + idx))
+        // Transparency groups' forms (#1406) are XObjects too: one
+        // `/XObject` dictionary holds both.
+        .chain(
+            patterns
+                .iter()
+                .filter(|&&idx| rec.patterns[idx].group)
+                .map(|&idx| format!("/X{idx} {} 0 R", b.pattern + idx)),
+        )
         .collect();
     // ExtGStates are written inline in the page's own
     // /Resources rather than as indirect objects: they're a
@@ -2242,11 +2309,12 @@ fn resource_parts(
             .collect();
         let _ = write!(parts, " /Font << {} >>", list.join(" "));
     }
-    if !patterns.is_empty() {
-        let list: Vec<String> = patterns
-            .iter()
-            .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
-            .collect();
+    let list: Vec<String> = patterns
+        .iter()
+        .filter(|&&idx| !rec.patterns[idx].group)
+        .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
+        .collect();
+    if !list.is_empty() {
         let _ = write!(parts, " /Pattern << {} >>", list.join(" "));
     }
     if pattern_cs {
