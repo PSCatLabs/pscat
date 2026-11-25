@@ -903,3 +903,78 @@ fn a_long_host_operator_charges_its_work_and_sees_the_flag() {
         .unwrap();
     interp.check_limits(1_000_000).unwrap();
 }
+
+/// An operator that converts its operand to a `Value` and drops it.
+fn with_extract(interp: &mut Interp) {
+    interp
+        .register_operator("extract", |i| {
+            i.pop_value()?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// Finding 1: an array that holds itself twice is 2^32 nodes deep to the
+/// depth limit. The copy is bounded by `MAX_VALUE_NODES`, not expanded.
+#[test]
+fn a_doubly_self_containing_array_is_refused_not_expanded() {
+    let mut interp = Interp::new();
+    with_extract(&mut interp);
+    interp
+        .run_str("/a 2 array def a 0 a put a 1 a put")
+        .unwrap();
+    // No limits: the node cap refuses it, and the failed operator's operand
+    // comes back.
+    let err = interp.run_str("a extract").unwrap_err();
+    assert_eq!(err, PsError::Limitcheck);
+    assert_eq!(
+        interp.error_details(&err).command.as_deref(),
+        Some("extract")
+    );
+    assert_eq!(interp.operand_count(), 1);
+    // From the host, outside a run: the same refusal, and the operand stays.
+    assert_eq!(interp.pop_value().unwrap_err(), PsError::Limitcheck);
+    assert_eq!(interp.operand_count(), 1);
+    interp.clear_operands();
+    // `lookup` has no error to give: the value comes back whole, as opaque.
+    assert!(matches!(interp.lookup("a"), Some(Value::Other(_))));
+    // A wide but finite value is still copied in full.
+    interp
+        .run_str("/w 100000 array def 0 1 99999 { w exch dup put } for w")
+        .unwrap();
+    let w = interp.pop_value().unwrap();
+    assert_eq!(w.as_array().map(<[Value]>::len), Some(100_000));
+}
+
+/// Finding 1: the copy's work counts against the step cap and looks at the
+/// host's interrupt flag, like any other long operator.
+#[test]
+fn value_conversion_is_charged_to_the_limits() {
+    let mut interp = Interp::new();
+    with_extract(&mut interp);
+    interp
+        .run_str("/a 2 array def a 0 a put a 1 a put")
+        .unwrap();
+    interp
+        .set_limits(Limits::none().with_max_steps(200))
+        .unwrap();
+    let err = interp.run_str("a extract").unwrap_err();
+    assert_eq!(err, PsError::StepsExceeded);
+    // Uncatchable, like any limit.
+    let err = interp.run_str("{ a extract } stopped pop 42").unwrap_err();
+    assert_eq!(err, PsError::StepsExceeded);
+    interp.clear_operands();
+    interp.set_limits(Limits::none()).unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    interp.set_interrupt(Some(stop.clone()));
+    let s = stop.clone();
+    interp
+        .register_operator("raise", move |_| {
+            s.store(true, Ordering::Relaxed);
+            Ok(())
+        })
+        .unwrap();
+    let err = interp.run_str("a raise extract").unwrap_err();
+    assert_eq!(err, PsError::Interrupted);
+}

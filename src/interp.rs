@@ -1581,6 +1581,40 @@ impl Interp {
         self.poll_limits(steps)
     }
 
+    /// Charge `steps` of a host-side copy to the running program, as
+    /// [`host_poll`](Self::host_poll) does; nothing between runs, when the
+    /// host is reading results.
+    pub(crate) fn charge_host_steps(&mut self, steps: u64) -> Result<(), PsError> {
+        if self.estack.is_empty() || steps == 0 {
+            return Ok(());
+        }
+        self.host_poll(steps)
+    }
+
+    /// [`host_poll`](Self::host_poll) for work that cannot borrow the
+    /// interpreter mutably (copying a value out, `src/host.rs`): the same
+    /// looks, with `steps` counted as if charged but not charged. Outside
+    /// a run only the memory cap is read, with `will_alloc` bytes about to
+    /// be taken.
+    pub(crate) fn host_look(&self, steps: u64, will_alloc: usize) -> Result<(), PsError> {
+        if self.estack.is_empty() {
+            return self.check_alloc(will_alloc);
+        }
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if self.limits.is_none() {
+            return Ok(());
+        }
+        if let Some(max) = self.limits.max_steps
+            && self.steps_so_far().saturating_add(steps) > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        self.check_alloc(will_alloc)?;
+        self.check_time_and_memory()
+    }
+
     /// Refuse an allocation of `bytes` that would pass the memory cap,
     /// before making it. For the operators that can ask for megabytes in
     /// one step (`array`, `string`); everything else is caught by the

@@ -69,8 +69,54 @@ pub const MAX_HOST_OPERATORS: usize = 256;
 
 /// How deep [`Interp::pop_value`] and [`Interp::lookup`] follow nested arrays
 /// and dictionaries before giving the rest back as [`Value::Other`]. A
-/// structure that contains itself stops here too.
+/// structure that contains itself stops here too, and [`MAX_VALUE_NODES`]
+/// bounds how much of it is copied on the way.
 pub const MAX_VALUE_DEPTH: usize = 32;
+
+/// The most a [`Value`] that [`Interp::pop_value`] or [`Interp::lookup`]
+/// copies out may hold, counted in nodes: one for each array element and
+/// dictionary entry, however deep, and one for each 32 bytes of a string.
+/// It bounds the copy of a structure that holds itself more than once,
+/// which within [`MAX_VALUE_DEPTH`] alone could be billions of nodes
+/// (`/a 2 array def a 0 a put a 1 a put`). A larger value is `limitcheck`
+/// from `pop_value`, and comes back whole as [`Value::Other`] from `lookup`.
+pub const MAX_VALUE_NODES: usize = 1 << 20;
+
+/// String bytes that count as one node.
+const STRING_BYTES_PER_NODE: usize = 32;
+
+/// Nodes copied between looks at the limits; also the work one step
+/// stands for.
+const NODES_PER_STEP: usize = 1024;
+
+/// One conversion's running count, held to the interpreter's limits.
+struct Walk<'a> {
+    interp: &'a Interp,
+    nodes: usize,
+}
+
+impl Walk<'_> {
+    /// Count `n` more nodes, about to take `bytes` of heap. Past the cap it
+    /// is `limitcheck`; every [`NODES_PER_STEP`] nodes, and before a large
+    /// allocation, the limits are looked at as a running operator's are
+    /// (outside a run only the memory cap).
+    fn take(&mut self, n: usize, bytes: usize) -> Result<(), PsError> {
+        let before = self.nodes;
+        self.nodes = self.nodes.saturating_add(n);
+        if self.nodes > MAX_VALUE_NODES {
+            return Err(PsError::Limitcheck);
+        }
+        if self.nodes / NODES_PER_STEP != before / NODES_PER_STEP || bytes >= 4096 {
+            self.interp.host_look(self.steps(), bytes)?;
+        }
+        Ok(())
+    }
+
+    /// The steps the copy so far stands for.
+    fn steps(&self) -> u64 {
+        (self.nodes / NODES_PER_STEP) as u64
+    }
+}
 
 /// A host operator's closure. `Rc`, not `Box`: the call clones the handle so
 /// the closure can borrow the interpreter mutably while it runs.
@@ -207,37 +253,55 @@ impl Value {
         }
     }
 
-    fn from_object(obj: &Object, depth: usize) -> Value {
-        match &obj.value {
+    /// `obj` as a `Value`, its whole copy counted in `walk`. The caller
+    /// has counted `obj` itself; a container counts its members before it
+    /// copies them, so nothing is allocated past the cap.
+    fn from_object(obj: &Object, depth: usize, walk: &mut Walk<'_>) -> Result<Value, PsError> {
+        use std::mem::size_of;
+        Ok(match &obj.value {
             Raw::Null => Value::Null,
             Raw::Boolean(b) => Value::Bool(*b),
             Raw::Integer(i) => Value::Int(*i),
             Raw::Real(r) => Value::Real(*r),
             Raw::Name(_) if !obj.executable => Value::Name(obj.text()),
-            Raw::String(s) if !obj.executable => Value::String(s.to_vec()),
-            Raw::Array(a) if !obj.executable && depth < MAX_VALUE_DEPTH => Value::Array(
-                a.snapshot()
-                    .iter()
-                    .map(|o| Value::from_object(o, depth + 1))
-                    .collect(),
-            ),
+            Raw::String(s) if !obj.executable => {
+                walk.take(s.len() / STRING_BYTES_PER_NODE, s.len())?;
+                Value::String(s.to_vec())
+            }
+            Raw::Array(a) if !obj.executable && depth < MAX_VALUE_DEPTH => {
+                let len = a.len();
+                walk.take(
+                    len,
+                    len.saturating_mul(size_of::<Value>() + size_of::<Object>()),
+                )?;
+                let items = a.snapshot();
+                let mut out = Vec::with_capacity(items.len());
+                for o in items.iter() {
+                    out.push(Value::from_object(o, depth + 1, walk)?);
+                }
+                Value::Array(out)
+            }
             Raw::Dict(d) if depth < MAX_VALUE_DEPTH => {
+                let len = d.borrow().len();
+                walk.take(
+                    len,
+                    len.saturating_mul(size_of::<(String, Value)>() + 2 * size_of::<Object>()),
+                )?;
+                // Copied out first: the borrow must end before a member
+                // that is this dictionary is read.
                 let pairs = d.borrow().pairs();
-                Value::Dict(
-                    pairs
-                        .iter()
-                        .map(|(k, v)| {
-                            let key = match &k.value {
-                                Raw::Name(_) | Raw::String(_) => k.text(),
-                                _ => k.repr(),
-                            };
-                            (key, Value::from_object(v, depth + 1))
-                        })
-                        .collect(),
-                )
+                let mut out = Vec::with_capacity(pairs.len());
+                for (k, v) in &pairs {
+                    let key = match &k.value {
+                        Raw::Name(_) | Raw::String(_) => k.text(),
+                        _ => k.repr(),
+                    };
+                    out.push((key, Value::from_object(v, depth + 1, walk)?));
+                }
+                Value::Dict(out)
             }
             _ => Value::Other(Opaque(obj.clone())),
-        }
+        })
     }
 
     fn to_object(&self) -> Object {
@@ -541,9 +605,29 @@ impl Interp {
     /// assert_eq!(config.get("Loop").and_then(Value::as_bool), Some(true));
     /// # Ok::<(), pscat::PsError>(())
     /// ```
+    ///
+    /// The copy is bounded by [`MAX_VALUE_NODES`] (`limitcheck` past it) and,
+    /// from inside a host operator, counted against the running program's
+    /// limits and the interrupt flag like any long operator
+    /// ([`check_limits`](Self::check_limits)). On an error the operand is
+    /// left where it was.
     pub fn pop_value(&mut self) -> Result<Value, PsError> {
-        let obj = self.pop()?;
-        Ok(Value::from_object(&obj, 0))
+        let obj = self.ostack.last().cloned().ok_or(PsError::StackUnderflow)?;
+        let (value, steps) = self.value_of(&obj)?;
+        self.charge_host_steps(steps)?;
+        self.pop()?;
+        Ok(value)
+    }
+
+    /// `obj` copied out as a [`Value`], and the steps the copy stands for.
+    fn value_of(&self, obj: &Object) -> Result<(Value, u64), PsError> {
+        let mut walk = Walk {
+            interp: self,
+            nodes: 0,
+        };
+        walk.take(1, 0)?;
+        let value = Value::from_object(obj, 0, &mut walk)?;
+        Ok((value, walk.steps()))
     }
 
     /// Push a [`Value`] onto the operand stack. An array or dictionary is a
@@ -643,7 +727,9 @@ impl Interp {
     }
 
     /// The value `name` has on the dictionary stack, as `load` would find
-    /// it; `None` if it is not defined.
+    /// it; `None` if it is not defined. A value [`pop_value`](Self::pop_value)
+    /// would refuse (one past [`MAX_VALUE_NODES`], or whose copy a running
+    /// program's limits stop) comes back whole as [`Value::Other`].
     ///
     /// ```
     /// let mut interp = pscat::Interp::new();
@@ -653,7 +739,10 @@ impl Interp {
     /// # Ok::<(), pscat::PsError>(())
     /// ```
     pub fn lookup(&self, name: &str) -> Option<Value> {
-        self.load(name).map(|o| Value::from_object(&o, 0))
+        self.load(name).map(|o| match self.value_of(&o) {
+            Ok((value, _)) => value,
+            Err(_) => Value::Other(Opaque(o)),
+        })
     }
 
     /// Define `name` as `value` in the current dictionary (userdict unless
