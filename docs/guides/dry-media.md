@@ -121,6 +121,31 @@ newpath 40 60 moveto 300 80 lineto
   - `/Corners /separate` cuts a path at its sharp corners, so a box is
     drawn as four strokes. Each one lands and lifts, and with `/Hand` it
     overshoots the corner a little.
+  - `/From` and `/To` (0 to 1, defaults 0 and 1) draw only part of each
+    stroke, measured along its length once `/Hand` and `/Corners` have
+    shaped it. The part is drawn with the pressure, width, texture and
+    dust the whole stroke has there, so `/From 0 /To t` with a growing
+    `t` grows a stroke without changing the part already drawn (its
+    texture and dust stay; behind the pen's last dozen widths nothing
+    moves between frames, except that drykit draws a long stroke in
+    chunks and where a growing stroke crosses one, its edge pixels shift
+    once by up to about 40 of 255 levels). `/To 0.5` plus `/From 0.5`
+    make the whole, to within about 40 of 255 levels at the seam (up to about
+    110 with `/Tilt`, on a few percent of the ink). A caller that
+    keeps its canvas can draw `/From prev /To now` each frame instead;
+    that holds for pieces down to a few tenths of a width, and much
+    shorter pieces overdraw their own round ends and lose texture, so
+    redraw `/From 0 /To t` for those. A long stroke's part
+    costs in proportion to its length, so a board written over time pays
+    for what each frame adds, not the whole stroke. The stroke's landing
+    belongs to the piece that holds `/From 0`, its lift to the one that
+    holds `/To 1`. Each subpath is cut by its own length; a dot belongs
+    to the one piece that holds its middle (with `/Tilt`, only a
+    zero-length stroke is a dot). `dctext` and `dcleader` pass the keys
+    on, so they cut every glyph stroke, not the line. With `/Tilt`, a
+    piece that starts past 0 draws its lanes' chance dropouts afresh, so
+    a few percent of the ink differs clearly from the whole stroke.
+    `dkstroke`, crayon and charcoal do not take the keys yet.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 - **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
