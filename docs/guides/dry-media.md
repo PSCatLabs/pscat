@@ -67,6 +67,36 @@ the stick's contact patch meets raised tooth.
   reaches less per lane). It is refused with
   `dkcatch-area-exceeds-safety-limit` when the stroke is made, before
   anything in its batch is drawn.
+- **`/From` and `/To`** (0 to 1, defaults 0 and 1) on `dkstroke`,
+  `dycrayon` and `dhstroke` draw only part of each subpath, measured along
+  its length, for a stroke that grows over time. The whole subpath is
+  worked out first (its stops, touch levels, widths, lanes and their
+  dropouts, seed, texture and fallout) and then cut, so the part has the
+  profile of its place in the whole stroke: a crayon's landing stays at its
+  start, a charcoal stick's flicked lift comes only with `/To 1`, and
+  `/Wear` is the whole stroke's, and `/From 0 /To t` for a growing `t` leaves what is
+  already drawn alone. Measured: behind the pen's last dozen points,
+  frames 5% apart differ by up to about 13 of 255 levels (edge
+  anti-aliasing), except now and then (about one frame in 14, charcoal
+  more than crayon or `dkstroke`) where a few hundred texture pixels
+  along the drawn part change, by up to about 80 levels (cause not isolated; dcchalk
+  shows the same). Two adjacent pieces drawn on one canvas make the
+  whole to within about 75 levels at the seam, on a few pixels. A caller
+  that keeps its canvas can draw `/From prev /To now` each frame, down to
+  pieces a few tenths of a width long (each piece ends in a round cap
+  that overdraws the last); shorter ones should redraw `/From 0 /To t`.
+  The catch and the ink cost in proportion to the part, though the walk
+  and the profile are worked out for the whole stroke (a tenth of a long
+  zigzag, start-up included: 0.09 s against 0.24 s for `dkstroke`, 0.08
+  against 0.45 for `dycrayon`, 0.07 against 0.31 for `dhstroke`). A dot, or
+  a lane that is on at one stop only, belongs to the one piece that holds
+  its place, `[/From, /To)` with `/To 1` closed. Errors:
+  `dkstroke-from-must-be-0-to-1`, `dkstroke-to-must-be-0-to-1`,
+  `dkstroke-from-must-not-exceed-to` (and `dycrayon-...` the same).
+  Fallout particles are all placed as for the whole stroke and drawn only
+  where their place is within the range, so none falls ahead of the pen.
+  `dcchalk` has the same two keys, cut a different way (it shapes the
+  polyline first, then cuts it), and a seam within a few tens of levels.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
@@ -145,7 +175,8 @@ newpath 40 60 moveto 300 80 lineto
     on, so they cut every glyph stroke, not the line. With `/Tilt`, a
     piece that starts past 0 draws its lanes' chance dropouts afresh, so
     a few percent of the ink differs clearly from the whole stroke.
-    `dkstroke`, crayon and charcoal do not take the keys yet.
+    `dkstroke`, `dycrayon` and `dhstroke` take the same two keys
+    (below).
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 - **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
@@ -190,7 +221,9 @@ newpath 60 90 moveto 300 90 lineto 300 150 lineto 60 150 lineto closepath
 `lib/drycrayon.ps` is wax crayon on paper, and a child's ways of drawing with it,
 built on drykit. `dypaper` sets up the paper (drykit's coarse construction-paper
 tooth on a white ground), `/name dycolor` picks a colour from the crayon box,
-and `dycrayon` draws the current path as wax. The "child's drawing" motions
+and `dycrayon` draws the current path as wax (`/From 0 /To t` draws the first
+part of each stroke, with the whole stroke's pressure and texture, so a child's
+stroke can grow over time). The "child's drawing" motions
 each build a path and paint nothing, so they compose with `dycrayon`:
 `dywobble` (a shaky, overshooting version of a path), `dyscribble`
 (back-and-forth scribble fill over a region), `dyloop` (a circle drawn in one
@@ -207,7 +240,8 @@ and Our House* is a whole picture drawn this way.
 `lib/drycharcoal.ps` is charcoal on drykit, with three media (`/vine`:
 grey and dusty; `/compressed`: dark and dense; `/pencil`: a sharp point) and a
 `/Grade` from 0 (hard) to 1 (soft). Its words are call patterns for
-`dkstroke`: `dhstroke` draws the current path in a medium, `dhhatch` hatches a
+`dkstroke`: `dhstroke` (which takes `/From` and `/To` for a stroke that grows;
+`dhhatch` and `dhsketch` apply them to each stroke they lay) draws the current path in a medium, `dhhatch` hatches a
 region to a value (a number, or a `{x y -> value}` callback), `dhsmudge` is a
 stump's or finger's track, `dhlift` is an eraser's track (kneaded or hard), and
 `dhsketch` lays faint construction lines. It needs hatchkit loaded.

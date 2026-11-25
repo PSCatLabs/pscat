@@ -482,14 +482,16 @@
     << /Width dyKww /Touch dyKrimoff false dyKtouch
        /Bands 16 /Levels 1 /Halo 0 /Streak dyKstreak /Strength dyKstrength
        /Wear dyKwear /Under dyKunder
-       dyKhasseed { /Seed dyKs } if >> dkstroke
+       dyKhasseed { /Seed dyKs } if
+       dyKpart { /From dyKfrom /To dyKto } if >> dkstroke
     dyKP dyKpath
     << /Width dyKww dyKcore0 dyKcore1 dyKcore0 sub dyKworn mul add mul
        /Touch 0 true dyKtouch
        /Bands 16 /Levels 1 /Halo 0
        /Streak dyKstreak /Strength dyKstrength
        /Wear dyKwear /Under dyKunder
-       dyKhasseed { /Seed dyKs 1000003 add } if >> dkstroke
+       dyKhasseed { /Seed dyKs 1000003 add } if
+       dyKpart { /From dyKfrom /To dyKto } if >> dkstroke
 } def
 
 % offset core -> touch-or-procedure   (the subpath's touch for dkstroke)
@@ -577,6 +579,18 @@
 %   { newpath 0 0 moveto 50 0 lineto << /Seed (s) >> dycrayon } /dycrayon-seed-must-be-a-number
 %   (a string /Seed) mustguard
 %
+%   { newpath 0 0 moveto 50 0 lineto << /From -0.1 >> dycrayon } /dycrayon-from-must-be-0-to-1
+%   (/From -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /To 1.5 >> dycrayon } /dycrayon-to-must-be-0-to-1
+%   (/To 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /From 0.6 /To 0.4 >> dycrayon } /dycrayon-from-must-not-exceed-to
+%   (/From past /To) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto 0 9 moveto 50 9 lineto << /From 0.25 /To 0.6 >> dycrayon grestore }
+%   (a piece of two strokes) mustpass
+%
 %   { newpath 0 0 moveto 50 0 lineto << /Seed 2000000000 >> dycrayon }
 %   /dycrayon-seed-must-be-within-integer-range
 %   (a /Seed whose derived seeds would overflow) mustguard
@@ -649,6 +663,8 @@
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, drykit's meaning, 1..4: skipped valleys read as streaks (default 2.2)
 % @param: /Strength [0..1] How strongly the wax reads against the paper, drykit's meaning (default 0.95)
 % @param: /Seed [integer] Seed for the stroke's own randomness (the wander, drykit's tool side); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas)
+% @param: /From [0..1] Draws only the part of each stroke from this fraction of its length: its pressure, width, wear, landing, fade, wander, build-up, texture and chance dropouts there are the whole stroke's, so drawing /From 0 /To t for a growing t grows the stroke without changing what is already drawn (default 0)
+% @param: /To [0..1] Draws only the part of each stroke up to this fraction of its length; must not be less than /From. 1 draws to the end, with the lift. A dot belongs to the piece that holds its middle (default 1)
 /dycrayon {
     dup type /dicttype ne { pop dycrayon-options-must-be-a-dict } if
     /dyKo exch def
@@ -685,6 +701,12 @@
         % subpath k's core is seeded Seed + k + 1000003, which must still fit
         dyKseed abs 1073741824 ge { dycrayon-seed-must-be-within-integer-range } if
     } { /dyKhasseed false def } ifelse
+    % a part of each stroke (#1418): drykit's /From and /To, which cut
+    % the resolved stroke, so the profile above is the whole stroke's
+    /dyKfrom dyKo /From 0 0 1 /dycrayon-from-must-be-0-to-1 dyoptnum def
+    /dyKto dyKo /To 1 0 1 /dycrayon-to-must-be-0-to-1 dyoptnum def
+    dyKfrom dyKto gt { dycrayon-from-must-not-exceed-to } if
+    /dyKpart dyKfrom 0 gt dyKto 1 lt or def
 
     /dyKsubs dyKsubpaths def
     dyKsubs length dyKmaxsubs gt { dycrayon-too-many-subpaths } if

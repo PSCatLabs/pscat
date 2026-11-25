@@ -1294,9 +1294,22 @@ renders eight examples in both and compares block-downsampled output).
    drykit walks a piece's stops from its own start, so a seam is within ~40 levels (tip; up to ~110 and a few % of ink clearly different with /Tilt, where a lane flips on or off),
    not exact, and a /Tilt piece past 0 draws its lanes' dropout chain afresh (the lane seed
    is mixed with From: with the whole lane's seed alone, a lane that starts "off" stayed
-   off in every incremental piece, review finding on #1416). `dkstroke`/`dycrayon`/`dhstroke`
-   do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
-   `notes/1409-drychalk-from-to.md`).
+   off in every incremental piece, review finding on #1416). `notes/1409-drychalk-from-to.md`.
+   #1418: `dkstroke` takes `/From`/`/To` too (and `dycrayon`, `dhstroke` through it).
+   drykit cuts AFTER resolving: `dkSsub` still resolves the whole subpath (stops, touch
+   bands, widths, lanes' chains, seed), and only when `dkSpart` it tags each lane stop
+   with its progress `t` (a 4th number; a dot is 0.5) and `dkFrun` cuts each run in
+   `dkSrecord` (interpolated end stops, plain `[x y hw]` back out), so the downstream
+   code never sees a 4-element stop. Fallout stops carry `t` too and `dkZfallout`'s
+   `/Mark` draws only particles whose place in the chunk is in range (all are placed, so
+   the random numbers match the whole). Default path (`dkSpart` false) is the old code,
+   identity-checked. Gotcha: about 1 frame in 14 a few hundred texture pixels along the WHOLE drawn part change (up to ~80 of 255,
+charcoal); cause not isolated (not the chunk budget, not `dkZthin`: both ruled out, `notes/1418-dry-media-from-to.md`).
+dcchalk still cuts its
+   polyline itself (a seam of a few tens of levels, a `/Tilt` piece's dropout chain
+   fresh); moving it onto drykit's keys would fix both but change its partial output.
+   `dhhatch`/`dhsketch` pass the keys to every stroke they lay (not stripped).
+   `notes/1418-dry-media-from-to.md`.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

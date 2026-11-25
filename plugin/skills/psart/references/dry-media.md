@@ -75,7 +75,9 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   uneven wander), and wax build-up where the stroke turns. `/Touch` is
   drykit's pressure: 0.6 leaves about a third of the paper showing in a
   scribble fill, 0.9 is nearly solid. A later pass over the same area is
-  `/Pass 2`, `3`, ...; a colour over another takes `/Over [r g b of the one
+  `/Pass 2`, `3`, ...; `/From 0 /To t` (0..1) draws only the first part of
+  each stroke with the whole stroke's pressure and texture, so a stroke grows
+  over frames (`dkstroke` and `dhstroke` take it too); a colour over another takes `/Over [r g b of the one
   beneath]`, which lets it show through. `/Worn` 0 is a new point, 1 a
   worn flat (wider). drykit can't read the page back, so passes and
   layering are declared, not detected.
