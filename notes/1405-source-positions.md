@@ -71,11 +71,11 @@ Executable strings, `token`, and `eexec` streams record nothing (the scanner's
 ### Cost (release build, this machine; `/usr/bin/time -l` instructions retired,
 `target` base = `feature/0.8.0` at `4c957b7b`)
 
-| Program | instructions | peak RSS |
-|---|---|---|
-| `lib/artkit.ps` + `lib/paintkit.ps` loaded | +1.5% (149M -> 151M) | +0.1 MB of 14 |
-| 200,000 five-line procedures (16 MB of source, nothing but definitions) | +5.8% | +10% |
-| 300,000 one-line `{ n pop }` definitions (8 MB) | +5.8% | +21% |
+| Program | instructions retired | wall, best of 9 | peak RSS |
+|---|---|---|---|
+| `lib/artkit.ps` + `lib/paintkit.ps` loaded | +1.4% (148.5M -> 150.6M) | 0.009 s, no change | +0.1 MB of 14 (+0.7%) |
+| 200,000 five-line procedures (16 MB of source, nothing but definitions) | +5.4% (5.72G -> 6.03G) | 0.325 -> 0.311 s (noise) | +10% |
+| 300,000 one-line `{ n pop }` definitions (8 MB) | +5.4% (2.84G -> 2.99G) | 0.159 s, no change | +21% |
 
 Live heap per procedure (tracking allocator, 100,000 definitions): one line
 +43 bytes (349 -> 392), five lines +74 bytes (432 -> 506). The last two rows are
@@ -85,8 +85,8 @@ loop changed (the table is behind one pointer in `Interp`).
 
 ### The default path is unchanged
 
-`scripts/identity_check.sh` with the base and head binaries over the artkit
-corpus: see the PR body for the run. The `%%[ Error ... ]%%` line is
+`scripts/identity_check.sh` with the base and head binaries (`--loader
+lib/artkit.ps`) rendered 127 of 127 pages of 96 files identically. The `%%[ Error ... ]%%` line is
 byte-identical; the CLI adds `  in NAME, line N (file): excerpt` lines after it
 for an error inside procedures (eight at most), which no tool in the repo
 reads (`mcp_server.rs` and the npm `PostScriptError` read the bracketed line).
