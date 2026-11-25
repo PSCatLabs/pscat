@@ -978,7 +978,9 @@ impl Interp {
     #[inline(never)]
     fn interrupt_run(&mut self) -> PsError {
         self.snapshot_error_chain(&PsError::Interrupted);
-        self.unwind_all();
+        // As for a time limit: the groups the program left open are dropped,
+        // not composited, so the host's stop is prompt.
+        self.unwind_interrupted();
         PsError::Interrupted
     }
 
@@ -1430,7 +1432,11 @@ impl Interp {
             if let Err(e) = &result {
                 self.snapshot_error_chain(e);
             }
-            self.unwind_all();
+            if matches!(result, Err(PsError::Interrupted)) {
+                self.unwind_interrupted();
+            } else {
+                self.unwind_all();
+            }
         }
         result
     }
@@ -1738,6 +1744,16 @@ impl Interp {
             }
             _ => {}
         }
+    }
+
+    /// [`unwind_all`](Self::unwind_all) for a program the host stopped
+    /// (its interrupt flag, or a host operator's `Interrupted`): the groups
+    /// it left open are dropped, not composited, as for a time limit, so
+    /// the stop is prompt.
+    fn unwind_interrupted(&mut self) {
+        let probe = self.gfx.expire_group_probe();
+        self.unwind_all();
+        self.gfx.set_group_probe(probe);
     }
 
     /// Abort the program: drop every frame (see `cleanup_unwound_frame`
@@ -4735,7 +4751,10 @@ impl Interp {
             .map(|pixmap| crate::Page::new(pixmap, self.gfx.scale()))
             .collect();
         if pages.is_empty() || self.gfx.has_trailing_art() {
-            pages.push(crate::Page::new(self.gfx.pixmap.clone(), self.gfx.scale()));
+            pages.push(crate::Page::new(
+                self.gfx.page_pixmap().clone(),
+                self.gfx.scale(),
+            ));
         }
         pages
     }

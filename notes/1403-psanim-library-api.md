@@ -124,6 +124,32 @@ test that failed on `deca3be` first:
   capacity the program already paid for (and the memory cap allowed), so it is
   left as a known limit.
 
+### Transparency groups (merge with feature/0.7.1, #1406)
+
+#1417 landed first, so the branch was merged with it (`sync_decode_budget`
+charges both the host steps and the group work). While a group is open the
+raster is its layer, so every host-side read or replacement of the canvas was
+audited, and the host sees the page below the layer:
+
+- `canvas_size`, `canvas_premultiplied_rgba8`: already `page_pixmap()`, the
+  bottom page. Unchanged.
+- `Interp::pages`, `page(i)`, `into_last_page`: copied the layer, so a host
+  stepping a program between slices read the group's marks over a transparent
+  page. Now the bottom page.
+- `swap_canvas`: swapped the layer, handing the host a layer as "the canvas" and
+  putting its page in the group's place; inside a pattern's `PaintProc` it
+  swapped a tile for a page-sized raster (a `debug_assert` panic in the `ci`
+  profile). Now it swaps the page below the layer, and is refused (the `Page`
+  returned) inside a `PaintProc`.
+- `set_transparent_background`: filled the layer, leaving the page opaque. Now it
+  resets the page; the layer keeps its marks.
+- Interrupt (flag or a host operator's `Interrupted`): composited the open groups
+  in full, uncharged. Now it drops their layers at once, as a fired time limit
+  does (`unwind_interrupted`). A step limit still composites (its marks stay).
+- Charging: a swap is two pointer exchanges and a page reset a fill, as before;
+  the interrupt path does less work than it did. Page copies by `pages`/`page` are
+  host reads, as before. Tests: `tests/host_api_groups.rs`.
+
 ### Compatibility
 
 Additive. No existing signature or behaviour changes; `PsError` gains a

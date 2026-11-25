@@ -3829,30 +3829,63 @@ impl Gfx {
     /// PNG output carries a real alpha channel and SVG output omits its
     /// white backdrop rect (issue #146: artwork for garments must not
     /// carry a white rectangle). Call before anything is painted; it
-    /// also resets the current canvas.
+    /// also resets the page raster. While a transparency group is open
+    /// (#1406) that is the page below its layer, which keeps what the
+    /// group has painted.
     pub fn set_transparent_background(&mut self) {
         self.background = tiny_skia::Color::TRANSPARENT;
-        self.pixmap.fill(self.background);
-        self.deep.clear();
+        let background = self.background;
+        if let Some((page, deep)) = self.page_slot_mut() {
+            page.fill(background);
+            deep.clear();
+        }
         if let Some(svg) = &mut self.svg {
             svg.set_transparent(true);
         }
     }
 
+    /// The page raster and its 16-bit shadow, for a host that exchanges or
+    /// resets the canvas ([`Interp::swap_canvas`](crate::Interp::swap_canvas)):
+    /// the one [`page_pixmap`](Self::page_pixmap) shows. While a
+    /// transparency group is open (#1406) the raster the program paints
+    /// on is its layer, and the page is the canvas the group swapped out,
+    /// which the group composites onto at `endgroup`. `None` inside a
+    /// pattern's `PaintProc` with no group opened before it: the raster
+    /// is then a tile, and the page is the capture's to give back.
+    fn page_slot_mut(&mut self) -> Option<(&mut Pixmap, &mut crate::deep::Deep)> {
+        let open = self
+            .groups
+            .iter()
+            .position(|g| g.captures == 0 && g.below.is_some());
+        if let Some(i) = open {
+            return self.groups[i].below.as_mut().map(|(p, d)| (p, d));
+        }
+        self.captures
+            .is_empty()
+            .then_some((&mut self.pixmap, &mut self.deep))
+    }
+
     /// Exchange the page raster for `pixmap`, which the caller has checked
-    /// is the same size ([`Interp::swap_canvas`](crate::Interp::swap_canvas)).
+    /// is the page's size ([`Interp::swap_canvas`](crate::Interp::swap_canvas)).
     /// The 16-bit shadow described the old raster, so it is dropped; the
     /// new raster counts as painted, since nothing here knows what it holds.
-    pub(crate) fn swap_pixmap(&mut self, pixmap: Pixmap) -> Pixmap {
-        debug_assert_eq!(
-            (pixmap.width(), pixmap.height()),
-            (self.pixmap.width(), self.pixmap.height())
-        );
-        self.deep.clear();
+    /// With a transparency group open it is the page below the group's
+    /// layer that is exchanged (#1406), so the group still composites
+    /// onto the canvas the host handed over. Handed back as the error
+    /// inside a pattern's `PaintProc`, where there is no page to exchange.
+    pub(crate) fn swap_pixmap(&mut self, pixmap: Pixmap) -> Result<Pixmap, Pixmap> {
+        let Some((page, deep)) = self.page_slot_mut() else {
+            return Err(pixmap);
+        };
+        if (pixmap.width(), pixmap.height()) != (page.width(), page.height()) {
+            return Err(pixmap);
+        }
+        deep.clear();
+        let old = std::mem::replace(page, pixmap);
         self.pending_erase = false;
         self.painted_since_page = true;
         self.dirty = true;
-        std::mem::replace(&mut self.pixmap, pixmap)
+        Ok(old)
     }
 
     pub fn erase(&mut self) {
@@ -5136,6 +5169,28 @@ impl Gfx {
         while self.groups.last().is_some_and(|g| g.captures == 0) {
             self.finish_group_uncharged(true);
         }
+    }
+
+    /// Have the groups that end from now on drop their layers instead of
+    /// compositing them, as when a time limit has fired: the host stopped
+    /// the program (its interrupt flag), so its open groups go at once, not
+    /// painted onto a page nobody will use. Returns the probe to give back
+    /// to [`set_group_probe`](Self::set_group_probe) once the program is
+    /// unwound.
+    pub(crate) fn expire_group_probe(&mut self) -> crate::limits::LimitProbe {
+        std::mem::replace(
+            &mut self.group_probe,
+            crate::limits::LimitProbe {
+                deadline_ns: Some(0),
+                ..crate::limits::LimitProbe::NONE
+            },
+        )
+    }
+
+    /// Whether the raster the program paints on is not the page: a
+    /// transparency group's layer or a pattern's tile is current.
+    pub(crate) fn page_is_displaced(&self) -> bool {
+        !std::ptr::eq(self.page_pixmap(), &self.pixmap)
     }
 
     /// End every group still open (#1406): the program is over. The

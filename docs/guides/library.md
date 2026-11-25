@@ -325,7 +325,18 @@ progress with no copy. `swap_canvas` exchanges the raster the program paints
 on for another `Page` of the same size, leaving the graphics state alone: a
 host paints part of a picture on a `Page::transparent` layer and composites it
 itself (`Page::premultiplied_rgba8_mut`), or keeps a picture from one run to
-the next.
+the next. Inside a pattern's `PaintProc` there is no page to exchange, and the
+`Page` comes back as the error.
+
+**Transparency groups.** While a program has a group open (`begingroup`, between
+slices of `begin_source` and `step_n`, or inside a host operator) its marks go to a
+layer, and what a host reads or exchanges is the page below that layer:
+`canvas_premultiplied_rgba8`, `pages`, `page`, `into_last_page` and
+`swap_canvas` all see the page without the layer's marks, and `swap_canvas` and
+`set_transparent_background` replace the page the group will composite onto. A
+run the host stops with its interrupt flag drops the open groups, as a time
+limit does; a step limit composites what they painted. Either way the next run
+starts on a whole page.
 
 **Errors as data.** `error_details` gives the error's name, offending command,
 line and file as fields, and a backtrace: the procedures that were running,

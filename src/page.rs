@@ -286,8 +286,12 @@ impl crate::Interp {
     /// `page` must be the canvas's size in pixels
     /// ([`canvas_size`](Self::canvas_size)); one that is not is handed back
     /// as the error. The returned page carries the interpreter's resolution.
-    /// Not for use inside a pattern's `PaintProc` or while SVG or PDF output
-    /// is being recorded: those record drawing operations, not this raster.
+    /// Not for use while SVG or PDF output is being recorded: those record
+    /// drawing operations, not this raster. Inside a pattern's `PaintProc`
+    /// there is no page to exchange and `page` is handed back. While a
+    /// transparency group is open (`begingroup`) the canvas is the page
+    /// below the group's layer: the exchange swaps that page, and the
+    /// group still composites onto it at `endgroup`.
     ///
     /// ```
     /// use pscat::{Interp, Page};
@@ -306,9 +310,11 @@ impl crate::Interp {
         if (page.width(), page.height()) != self.canvas_size() {
             return Err(page);
         }
-        let scale = self.gfx().scale();
-        let old = self.gfx_mut().swap_pixmap(page.pixmap);
-        Ok(Page::new(old, scale))
+        let (scale, given) = (self.gfx().scale(), page.scale);
+        match self.gfx_mut().swap_pixmap(page.pixmap) {
+            Ok(old) => Ok(Page::new(old, scale)),
+            Err(back) => Err(Page::new(back, given)),
+        }
     }
 
     /// How many pages [`pages`](crate::Interp::pages) would return, without
@@ -351,7 +357,7 @@ impl crate::Interp {
         let shown = gfx.pages();
         let raster = match shown.get(index) {
             Some(p) => p,
-            None if index == shown.len() && index < self.page_count() => &gfx.pixmap,
+            None if index == shown.len() && index < self.page_count() => gfx.page_pixmap(),
             None => return None,
         };
         Some(Page::new(raster.clone(), gfx.scale()))
@@ -374,6 +380,11 @@ impl crate::Interp {
     pub fn into_last_page(mut self) -> Page {
         let canvas_is_last = self.gfx().pages().is_empty() || self.gfx().has_trailing_art();
         let scale = self.gfx().scale();
+        // A group a slice left open has its layer as the raster: the page is
+        // the canvas below it, copied (the layer is dropped with `self`).
+        if canvas_is_last && self.gfx().page_is_displaced() {
+            return Page::new(self.gfx().page_pixmap().clone(), scale);
+        }
         // A 1x1 raster is always allocatable; it stands in for the canvas
         // until the interpreter is dropped.
         let stand_in = tiny_skia::Pixmap::new(1, 1).expect("a 1x1 pixmap");
