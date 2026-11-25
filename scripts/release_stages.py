@@ -29,7 +29,8 @@ that already finished skip, and the rest run.
 Stages, in release order:
 
 - `draft`: a draft GitHub Release for the tag holding the archives, the
-  npm tarball when the npm channel is on (#1006; release candidates too),
+  npm tarball and the pscat.global.js inside it when the npm channel is on
+  (#1006, #1108; release candidates too),
   SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
   without one is known to be incomplete).
 - `crates`: `cargo publish` to crates.io.
@@ -498,11 +499,41 @@ def npm_asset(manifest):
     return names[0] if names else None
 
 
+# --- the classic-script build as its own release asset (#1108) ---------------
+GLOBAL_SCRIPT = "pscat.global.js"
+
+
+def extract_global_script(npm_tarball, dist):
+    """Write `pscat.global.js` from inside the npm tarball into `dist` and
+    return its name. The very bytes the tarball (and so npm) carries, so a page
+    that loads the release asset runs what `npm install` would give it. A
+    tarball without it is an error: a release cannot quietly ship without it."""
+    try:
+        with tarfile.open(npm_tarball, "r:gz") as tar:
+            f = tar.extractfile(f"package/{GLOBAL_SCRIPT}")
+            data = f.read() if f else b""
+    except (tarfile.TarError, KeyError, OSError, EOFError):
+        data = b""
+    if not data:
+        raise SystemExit(f"{os.path.basename(npm_tarball)} has no package/{GLOBAL_SCRIPT}; "
+                         "scripts/build_npm.sh builds it (#1025)")
+    with open(os.path.join(dist, GLOBAL_SCRIPT), "wb") as out:
+        out.write(data)
+    return GLOBAL_SCRIPT
+
+
+def global_asset(manifest):
+    """GLOBAL_SCRIPT when the release carries it as an asset, else None
+    (releases before #1108, or with the npm channel off)."""
+    return GLOBAL_SCRIPT if any(a["name"] == GLOBAL_SCRIPT for a in manifest["assets"]) else None
+
+
 def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
     """The manifest of the archives in `dist` and the .crate. With
     `npm_tarball`, that file is copied into `dist` and listed after the
     archives, so it is uploaded to the GitHub Release (release candidates
-    included) and recorded in SHA256SUMS (#1006)."""
+    included) and recorded in SHA256SUMS (#1006), and so is the
+    `pscat.global.js` inside it (#1108)."""
     version = tag[1:] if tag.startswith("v") else tag
     if not VERSION_RE.match(version) or tag != f"v{version}":
         raise SystemExit(f"{tag} is not vX.Y.Z or vX.Y.Z-rc.N")
@@ -521,6 +552,10 @@ def build_manifest(tag, commit, dist, crate_path, npm_tarball=None):
         p = os.path.join(dist, name)
         if os.path.abspath(npm_tarball) != os.path.abspath(p):
             shutil.copyfile(npm_tarball, p)
+        assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
+        # #1108: the classic script out of that tarball, listed after it.
+        name = extract_global_script(npm_tarball, dist)
+        p = os.path.join(dist, name)
         assets.append({"name": name, "sha256": sha256_file(p), "size": os.path.getsize(p)})
     content, sha1 = crate_identity(crate_path)
     if sha1 != commit:
@@ -566,7 +601,7 @@ def release_files(manifest):
     return [a["name"] for a in manifest["assets"]] + [SUMS_NAME, MANIFEST_NAME]
 
 
-def changelog_notes(version, root=ROOT, npm_tarball=None):
+def changelog_notes(version, root=ROOT, npm_tarball=None, global_script=None):
     path = os.path.join(root, "CHANGELOG.md")
     body = ""
     if is_prerelease(version):
@@ -588,10 +623,13 @@ def changelog_notes(version, root=ROOT, npm_tarball=None):
         npm = (f"{npm_tarball} is the npm package (WebAssembly, for the browser and Node); {where}. "
                f"Install it from this release with `npm install https://github.com/PSCatLabs/pscat/releases/"
                f"download/v{version}/{npm_tarball}`. ")
+    if global_script:
+        npm += (f"{global_script} is the classic-script build of that package, for a page with no npm: "
+                f"`<script src=\"https://github.com/PSCatLabs/pscat/releases/download/v{version}/{global_script}\">`. ")
     return (
         f"{body}Each archive carries the licences (LICENSE-MIT, LICENSE-APACHE, LICENSE-OFL), "
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
-        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}; "
+        f"{npm}{SUMS_NAME} has the SHA-256 of every archive{' and of the npm package' if npm_tarball else ''}{' and of the script' if global_script else ''}; "
         f"{MANIFEST_NAME} records the commit they were built from. Install guide: "
         "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )
@@ -1177,7 +1215,8 @@ def stage_draft(ctx):
         if ctx.plan:
             return "would create", f"a draft release {ctx.m['tag']} with {len(release_files(ctx.m))} assets"
         rid = ctx.github.create_draft(ctx.m["tag"], f"pscat {ctx.m['version']}",
-                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m)),
+                                      changelog_notes(ctx.m["version"], ctx.root, npm_asset(ctx.m),
+                                                      global_asset(ctx.m)),
                                       prerelease=ctx.prerelease)
         for name in release_files(ctx.m):
             ctx.github.upload(rid, os.path.join(ctx.dist, name), name)

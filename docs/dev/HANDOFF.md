@@ -2863,6 +2863,13 @@ renders eight examples in both and compares block-downsampled output).
   source gains an unknown export or module syntax, so a new export in either
   file needs a line there), and `npm/test/global.test.mjs` loads it as a
   classic script. A new `Renderer` method needs no change.
+  The script is also a release asset (#1108): `release_stages.py manifest
+  --npm-from` unpacks `pscat.global.js` from the npm tarball into `dist/`
+  (the same bytes as npm), `npm/global.d.ts` types the `pscat` global (opt-in:
+  `pscat/global`), and a new member of the global needs a line in that file
+  (`global.test.mjs` compares the two). GitHub serves release assets with no
+  CORS headers: `<script src>` works, `fetch` of the wasm does not
+  (`notes/1108-global-js-release-asset.md`).
   Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
   `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
   DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:

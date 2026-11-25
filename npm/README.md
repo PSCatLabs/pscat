@@ -67,6 +67,20 @@ release is on npm, load the file by name
 (`https://unpkg.com/pscat@X.Y.Z/pscat.global.js`): a bare package URL has no
 `pscat.wasm` beside it.
 
+Without npm, every GitHub release from 0.7.1 on (candidates too) carries the
+same script at a URL pinned to its tag, listed in the release's `SHA256SUMS`:
+
+```html
+<script src="https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat.global.js"></script>
+```
+
+GitHub sends no CORS headers for release assets, so a page cannot fetch the
+module from there: host `pscat.wasm` yourself (it is in the release's
+`pscat-X.Y.Z.tgz`, under `package/`) and pass `createRenderer({ wasm: url })`.
+
+In TypeScript, `/// <reference types="pscat/global" />` declares the `pscat`
+global; `import 'pscat'` alone does not.
+
 ## Watch it draw
 
 ```js
