@@ -522,6 +522,11 @@ pub struct Interp {
     /// [`Interp::trace_operator_shadows`] turned tracing on (issue #1109);
     /// `None` otherwise, which costs `def` one branch.
     shadow_trace: Option<Box<crate::lint::ShadowTrace>>,
+    /// Where the procedure bodies scanned from the main program and `run`
+    /// files were written (#1405): what a backtrace frame's line and file
+    /// are read from, and the lint's def sites. Behind a pointer to keep
+    /// the interpreter's hot fields where they were. See `srcpos.rs`.
+    source_lines: Box<RefCell<crate::srcpos::BodyLines>>,
     /// The file the CLI gave as the main program (issue #1056), for
     /// `currentfilename`. Kept apart from `Lexer::run_name` so that a
     /// main-program line stays a bare number in error reports. Set only
@@ -882,6 +887,7 @@ impl Interp {
             last_line: None,
             last_file: None,
             shadow_trace: None,
+            source_lines: Box::default(),
             main_file_name: None,
             stack_trace: None,
             refused_system_stores: Default::default(),
@@ -1359,10 +1365,12 @@ impl Interp {
         self.last_name = None;
         self.last_line = None;
         self.last_file = None;
-        // The new program's lines start again from 1 (#1338).
-        if let Some(t) = &self.shadow_trace {
-            t.bodies.borrow_mut().clear();
-        }
+        // The new program's lines start again from 1: forget what the last
+        // unnamed one wrote (#1405); the lint matches positions in one text,
+        // so it forgets everything (#1338).
+        self.source_lines
+            .borrow_mut()
+            .begin_program(self.shadow_trace.is_some());
         self.error_chain.clear();
         self.error_trace.clear();
         self.host_steps_pending.set(0);
@@ -2447,6 +2455,8 @@ impl Interp {
                 procedure: None,
                 element: at,
                 excerpt,
+                line: None,
+                file: None,
             });
             bodies.push(body);
         }
@@ -2476,6 +2486,16 @@ impl Interp {
                 }
             }
         }
+        // Where each element was written: one binary search per frame, in a
+        // table the scanner kept (#1405).
+        let lines = self.source_lines.borrow();
+        for (frame, body) in trace.iter_mut().zip(&bodies) {
+            if let Some(p) = lines.position(body, frame.element) {
+                frame.line = Some(p.line as usize);
+                frame.file = p.file.as_deref().map(report_name);
+            }
+        }
+        drop(lines);
         self.error_trace = trace;
     }
 
@@ -2635,6 +2655,8 @@ impl Interp {
                     ostack,
                     object_format,
                     shadow_trace,
+                    source_lines,
+                    main_file_name,
                     ..
                 } = self;
                 let Some(frame) = estack.last_mut() else {
@@ -2655,8 +2677,17 @@ impl Interp {
                             return Err(PsError::Syntax("'}' with no matching '{'".to_string()));
                         }
                         Some(Token::LBrace) => {
-                            let lines = shadow_trace.as_deref().map(|t| &t.bodies);
-                            Action::Yield(Item::Obj(scan_procedure(lexer, 0, dstack, lines)?))
+                            let positions = Positions {
+                                table: source_lines,
+                                main_name: main_file_name,
+                                lint: shadow_trace.is_some(),
+                            };
+                            Action::Yield(Item::Obj(scan_procedure(
+                                lexer,
+                                0,
+                                dstack,
+                                Some(&positions),
+                            )?))
                         }
                         Some(Token::ImmediateName(n)) => {
                             Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
@@ -3815,9 +3846,8 @@ impl Interp {
         let Some(mut trace) = self.shadow_trace.take() else {
             return;
         };
-        let bodies = Rc::clone(&trace.bodies);
         trace.note(name, &builtin, value, scope, || {
-            self.shadow_location(name.id(), &bodies.borrow())
+            self.shadow_location(name.id(), &self.source_lines.borrow())
         });
         self.shadow_trace = Some(trace);
     }
@@ -3827,7 +3857,7 @@ impl Interp {
     /// ([`running_def_site`](Self::running_def_site)), otherwise the line the
     /// scanner had reached, which is the line that ran it when a procedure
     /// did (#1109, #1338). The words stay true either way.
-    fn shadow_location(&self, name_id: u32, bodies: &crate::lint::BodyLines) -> Option<String> {
+    fn shadow_location(&self, name_id: u32, bodies: &crate::srcpos::BodyLines) -> Option<String> {
         let (line, file) = match self.running_def_site(name_id, bodies) {
             Some((line, file)) => (usize::try_from(line).ok()?, file),
             None => (self.last_line?, self.last_file.clone()),
@@ -3861,7 +3891,7 @@ impl Interp {
     fn running_def_site(
         &self,
         name_id: u32,
-        bodies: &crate::lint::BodyLines,
+        bodies: &crate::srcpos::BodyLines,
     ) -> Option<(u32, Option<Rc<str>>)> {
         let frame = self
             .estack
@@ -4929,17 +4959,28 @@ fn decode_sequence(
     crate::binobj::decode(bytes, budget, &mut |n| resolve_immediate(n, dicts))
 }
 
+/// What `scan_procedure` needs to record where the bodies it scans were
+/// written (#1405).
+struct Positions<'a> {
+    table: &'a RefCell<crate::srcpos::BodyLines>,
+    /// The name the host gave the main program, if any
+    /// ([`Interp::set_main_file_name`]).
+    main_name: &'a Option<Rc<str>>,
+    /// The lint traces the run: keep what it needs besides the lines.
+    lint: bool,
+}
+
 /// Collect tokens up to the matching `}` into a procedure object. Called
 /// with the opening `{` already consumed.
 ///
-/// `lines` is the lint's table of source lines (#1338), given only when
-/// `--lint` traces the run: each body scanned from the main program or a
-/// `run` file then has the line of every element recorded in it.
+/// `positions` is the table of source lines (#1405): each body scanned from
+/// the main program or a `run` file has the line of every element recorded
+/// in it. `None` for a body the `token` operator scans, which has none.
 fn scan_procedure(
     lexer: &mut Lexer,
     depth: usize,
     dicts: &[Rc<RefCell<Dict>>],
-    lines: Option<&Rc<RefCell<crate::lint::BodyLines>>>,
+    positions: Option<&Positions>,
 ) -> Result<Object, PsError> {
     if depth >= PROC_NESTING_LIMIT {
         return Err(PsError::Limitcheck);
@@ -4948,7 +4989,9 @@ fn scan_procedure(
     // Where the `{` that opened this body starts, for the lint's table.
     let opened_at = lexer.token_start();
     // One line per element, only for a source whose lines are known.
-    let mut at: Option<Vec<u32>> = lines.and(lexer.line()).map(|_| Vec::new());
+    let mut at: Option<crate::srcpos::Lines> = positions
+        .and(lexer.line())
+        .map(|_| crate::srcpos::Lines::default());
     let line = |lexer: &Lexer| {
         lexer
             .line()
@@ -4965,7 +5008,7 @@ fn scan_procedure(
             Some(Token::LBrace) => {
                 // The line the nested body opens on, read before it is scanned.
                 let opened = line(lexer);
-                items.push(scan_procedure(lexer, depth + 1, dicts, lines)?);
+                items.push(scan_procedure(lexer, depth + 1, dicts, positions)?);
                 if let Some(at) = at.as_mut() {
                     at.push(opened);
                 }
@@ -4986,10 +5029,19 @@ fn scan_procedure(
         }
     }
     let body = Object::procedure(items);
-    if let (Some(table), Some(at), Value::Array(arr)) = (lines, at, &body.value) {
-        table
+    if let (Some(p), Some(at), Value::Array(arr)) = (positions, at, &body.value) {
+        let run = lexer.run_name();
+        let name = run.or(p.main_name.as_ref());
+        let span = p.lint.then(|| (opened_at, lexer.pos()));
+        let work = p
+            .table
             .borrow_mut()
-            .register(arr, at, lexer.run_name().cloned(), (opened_at, lexer.pos()));
+            .register(arr, at, name, run.is_some(), span, &|bytes| {
+                lexer.check_alloc(bytes)
+            })?;
+        if work > 0 {
+            lexer.charge_work(work)?;
+        }
     }
     Ok(body)
 }
@@ -5341,6 +5393,29 @@ mod tests {
         let err = it.run_str("1 1 add pop\n1 0 div\n").unwrap_err();
         let report = it.error_report(&err);
         assert!(report.contains("Line: 2"), "report: {report}");
+    }
+
+    /// A named program run again and again leaves dead bodies behind: their
+    /// entries are swept, so the position table stays as big as what is live
+    /// (#1405), and an unnamed program's are forgotten with it.
+    #[test]
+    fn the_position_table_sweeps_dead_bodies_and_forgets_unnamed_programs() {
+        let mut it = Interp::new();
+        it.set_main_file_name(Some("lib.ps"));
+        let src = "/a { 1 pop } def\n/b {\n 2 pop } def\n".repeat(10);
+        for _ in 0..4000 {
+            it.run_str(&src).expect("runs");
+        }
+        // 80,000 bodies were scanned; a handful are alive.
+        let held = it.source_lines.borrow().len();
+        assert!(held <= (1 << 14) + 40, "{held} entries held");
+        assert_eq!(it.source_lines.borrow().source_count(), 1);
+        // An unnamed program's bodies end with it.
+        it.set_main_file_name(None);
+        it.run_str("/c { 1 pop } def").expect("runs");
+        let with_c = it.source_lines.borrow().len();
+        it.run_str("1 pop").expect("runs");
+        assert_eq!(it.source_lines.borrow().len(), with_c - 1);
     }
 
     #[test]

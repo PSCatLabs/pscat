@@ -348,6 +348,42 @@ label:  10 20 moveto >>> show <<<
 page:   gsave 42 >>> label <<< grestore
 ```
 
+**Where a procedure is written.** Each frame also has `line` and `file`: the
+line of the running element in the text it was written in, so an editor or an
+agent can jump to it. `ErrorDetails::line` is where *execution* was (the line
+that called the procedure); a frame's `line` is where the procedure *is*.
+
+```rust
+let mut interp = pscat::Interp::new();
+interp.set_main_file_name(Some("scene.ps"));
+interp.run_str("/label {\n  10 20 moveto\n  show\n} def")?;
+interp.set_main_file_name(None);
+let err = interp.run_str("1 label").unwrap_err();
+let frame = &interp.error_details(&err).backtrace[0];
+assert_eq!((frame.file.as_deref(), frame.line), (Some("scene.ps"), Some(3)));
+# Ok::<(), pscat::PsError>(())
+```
+
+A `run` file's frames name the file as `run` was given it. The main program's
+frames are named only if the host did so while the procedure was read, with
+`set_main_file_name`, because every `run_str` is a text whose line 1 is its
+own. A host that loads a prelude with one `run_str` and runs frames with
+others therefore names the load, then clears the name: set it before the
+load and reset it with `set_main_file_name(None)` after, since it stays set
+across runs. A procedure read by an earlier *unnamed* program has `line: None`
+(its line 3 is not the next program's line 3), and so does one made at run
+time (`array`, `copy`, `astore`), read from an executable string, `token` or
+`eexec`, or beyond the table's cap of a few million entries; the frame still
+has its name and excerpt. `bind`, `cvx`, `cvlit` and `getinterval` keep the
+line (they change the procedure in place or look at it); an element written
+into a procedure with `put` keeps the line of the token it replaced.
+
+The table that holds this costs about 43 bytes per procedure plus 8 for each
+further line it spans, nothing while the program runs, and under 2% of the time
+to load the artkit and paintkit libraries (`notes/1405-source-positions.md` has
+the figures). An entry is swept once its procedure is freed, and the unnamed
+main program's go when the next program begins.
+
 **Stopping a program.** `set_interrupt` takes an `Arc<AtomicBool>`; raising it
 from another thread makes `run_str` return `PsError::Interrupted` at its next
 look: before the program starts, every few thousand steps, inside any host

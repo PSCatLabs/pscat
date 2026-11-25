@@ -1504,6 +1504,18 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Procedure bodies keep their source lines in a side table (#1405, `src/srcpos.rs`).**
+  `Object` has no room for a position, so the scanner records, per procedure body read from the main
+  program or a `run` file, the first element's line and `(element, line)` runs, keyed by the address of
+  the body's storage (a `Weak` keeps the address from being reused; dead entries are swept when the
+  table quadruples). `TraceFrame::line`/`file` and the lint's def sites (#1338) read it. A `run` file
+  is named by `run`'s argument; the main program only if the host called `set_main_file_name` while it
+  was scanned, otherwise its entries go when the next program begins (its line 3 is not the next
+  program's). Executable strings, `token` and `eexec` record nothing; `copy`, `astore` and run-time
+  arrays have no entry. Do not clear the table per program for named sources: psanim loads its prelude
+  in one `run_str` and errors in later ones. The cost is the bytes in `notes/1405-source-positions.md`;
+  a new walk over the table must charge `register`'s returned work.
+
 - **halftonekit's faint-tone limit mirrors a renderer floor (#1408).** `hfthresh` (0.1 device px) in
   `lib/halftonekit.ps` is the stroker's minimum width (`device_line_width` / `stroke_params` in
   `src/gfx.rs`). A line/cross rule thinner than it is shortened, not thinned, so a tone fading to 0

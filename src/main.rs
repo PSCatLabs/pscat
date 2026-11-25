@@ -1113,7 +1113,7 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
             false
         }
         Err(e) => {
-            eprintln!("{}", interp.error_report(&e));
+            print_error(interp, &e);
             if options.pstack_on_error {
                 print_pstack(interp);
             }
@@ -1126,6 +1126,37 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     // A failed run flushes too: what it wrote before it died is on disk.
     let flushed = flush_outputs_or_report(interp);
     ok && flushed && profiled
+}
+
+/// Frames of a backtrace `print_error` shows.
+const BACKTRACE_SHOWN: usize = 8;
+
+/// The error report, then, for an error inside procedures, one line for each
+/// that was running, innermost first, with where it is written (#1405):
+///
+/// ```text
+/// %%[ Error: typecheck; OffendingCommand: add; Line: 15 ]%%
+///   in inner, line 3 (art.ps): ... 2 add pop (x) 3 >>> add <<< pop
+/// ```
+///
+/// The first line is the report alone, as every tool that reads it expects
+/// (`Line:` is where execution was, the line that called the procedure); the
+/// rest is for a person or an agent who wants to jump to the procedure.
+fn print_error(interp: &Interp, e: &PsError) {
+    eprintln!("{}", interp.error_report(e));
+    let trace = interp.error_details(e).backtrace;
+    for frame in trace.iter().take(BACKTRACE_SHOWN) {
+        let name = frame.procedure.as_deref().unwrap_or("a procedure");
+        let at = match (frame.line, frame.file.as_deref()) {
+            (Some(line), Some(file)) => format!(", line {line} ({file})"),
+            (Some(line), None) => format!(", line {line}"),
+            (None, _) => String::new(),
+        };
+        eprintln!("  in {name}{at}: {}", frame.excerpt);
+    }
+    if trace.len() > BACKTRACE_SHOWN {
+        eprintln!("  ... and {} more", trace.len() - BACKTRACE_SHOWN);
+    }
 }
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
@@ -1700,7 +1731,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 }
                 Err(e) => {
                     eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
-                    eprintln!("{}", interp.error_report(&e));
+                    print_error(&interp, &e);
                     if options.pstack_on_error {
                         print_pstack(&interp);
                     }
@@ -2702,7 +2733,7 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                         note_stdout_closed();
                         return repl_exit(interp);
                     }
-                    eprintln!("{}", interp.error_report(&e));
+                    print_error(interp, &e);
                     if options.pstack_on_error {
                         print_pstack(interp);
                     }
