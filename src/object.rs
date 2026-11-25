@@ -659,6 +659,23 @@ thread_local! {
     static EMPTY_STORE: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(Vec::new()));
 }
 
+/// The placeholder the teardown swaps in. A thread's local destructors run
+/// in no fixed order, so an `Interp` kept in a `thread_local!` of its own
+/// can be dropped after `EMPTY_STORE` is gone, and `with` would then panic
+/// inside a destructor and abort the process (#1404). `try_with` costs the
+/// same as `with` (both check the slot's state) and falls back to a fresh
+/// empty store, as `memtrack::fold_thread` falls back for its own slot. The
+/// fallback has a refcount of 1, so the swapped-out handle's own `drop`
+/// unwraps it and runs `teardown_last` once more over an empty vector; that
+/// next placeholder is again a plain `Rc` that the field's drop glue frees,
+/// so the recursion is one level deep, never a loop.
+#[inline(always)]
+fn empty_store() -> Rc<RefCell<Vec<Object>>> {
+    EMPTY_STORE
+        .try_with(Rc::clone)
+        .unwrap_or_else(|_| Rc::new(RefCell::new(Vec::new())))
+}
+
 /// Deeply nested arrays (10k levels of `[`) would drop recursively — one
 /// Rust stack frame per level — and abort the process. When this view is
 /// the last handle to an array's backing store, tear it down iteratively
@@ -684,7 +701,7 @@ impl Drop for PsArray {
 impl PsArray {
     #[inline(never)]
     fn teardown_last(&mut self) {
-        let data = std::mem::replace(&mut self.data, EMPTY_STORE.with(Rc::clone));
+        let data = std::mem::replace(&mut self.data, empty_store());
         let Ok(cell) = Rc::try_unwrap(data) else {
             return;
         };
@@ -695,7 +712,7 @@ impl PsArray {
             if let Value::Array(mut inner) = obj.value
                 && Rc::strong_count(&inner.data) == 1
             {
-                let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                let d = std::mem::replace(&mut inner.data, empty_store());
                 if let Ok(cell) = Rc::try_unwrap(d) {
                     pending.extend(cell.into_inner());
                 }
@@ -729,7 +746,7 @@ impl Drop for Dict {
                     }
                 }
                 Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
-                    let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                    let d = std::mem::replace(&mut inner.data, empty_store());
                     if let Ok(cell) = Rc::try_unwrap(d) {
                         pending.extend(cell.into_inner().into_iter().filter(is_container));
                     }

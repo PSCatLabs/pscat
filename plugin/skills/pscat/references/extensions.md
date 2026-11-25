@@ -32,6 +32,22 @@ operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 known` in code that must run in both. Also pscat-only: `gstate .sameclip
 bool` (is the clip in force the one the gstate captured).
 
+Fade or blend a whole drawing as one thing (a transparency group; the
+overlaps inside do not darken):
+
+```postscript
+<< /Alpha 0.5 /Blend /Multiply >> begingroup   % both keys optional
+  0 0 1 setrgbcolor 72 72 200 200 rectfill
+  1 0 0 setrgbcolor 150 150 200 200 rectfill
+endgroup
+```
+
+The group composites with `currentalpha` times `/Alpha` and `/Blend` (else
+`currentblendmode`); inside, alpha starts at 1 and `/Normal`. Isolated, so
+`/Multiply` inside does not reach the page. Nests; `endgroup` restores the
+state `begingroup` had. Exported to SVG (`<g opacity>`) and PDF (a group
+XObject). An open group ends at `showpage` or the end of the program.
+
 ## currentfilename: where a library was loaded from (pscat extension)
 
 ```postscript partial

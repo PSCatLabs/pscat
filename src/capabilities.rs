@@ -686,6 +686,24 @@ static ENTRIES: &[Entry] = &[
         BUILTIN
     ),
     entry!(
+        "begingroup",
+        CapabilityKind::Operator,
+        "pscat extension, not PLRM; gs has no usable spelling. Opens a transparency group: marks until endgroup draw as one isolated layer, composited with currentalpha times /Alpha and with /Blend (/Normal or /Multiply, else currentblendmode), so overlaps inside a faded group do not darken. Inside, alpha starts at 1 and Normal. A gsave level that grestore stops at. Exported as a PDF transparency group XObject and an SVG <g opacity>. showpage, copypage, erasepage and the end of the program close open groups.",
+        &[],
+        SYSTEMDICT,
+        "<< /Alpha a /Blend name >> begingroup -",
+        BUILTIN
+    ),
+    entry!(
+        "endgroup",
+        CapabilityKind::Operator,
+        "pscat extension. Closes the innermost transparency group opened by begingroup at this level, composites it, and restores the graphics state begingroup had. Does nothing with none open.",
+        &[],
+        SYSTEMDICT,
+        "- endgroup -",
+        BUILTIN
+    ),
+    entry!(
         ".sameclip",
         CapabilityKind::Operator,
         "pscat extension, not PLRM and absent from Ghostscript. True when the clip in force is the very clip the gstate holds (identity, not geometry). drykit probes for it with where.",

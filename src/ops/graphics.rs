@@ -71,6 +71,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentalpha", currentalpha);
     op(dict, "setblendmode", setblendmode);
     op(dict, "currentblendmode", currentblendmode);
+    // pscat extension (issue #1406): transparency groups.
+    op(dict, "begingroup", begingroup);
+    op(dict, "endgroup", endgroup);
     // pscat extension (issue #488): a clip identity query, dot-named as
     // non-standard; lib/drykit.ps probes it with `where`.
     op(dict, ".sameclip", sameclip);
@@ -670,6 +673,58 @@ fn currentblendmode(it: &mut Interp) -> Result<(), PsError> {
     let name = it.gfx.state().blend.as_ps_name();
     it.push(Object::name(name));
     Ok(())
+}
+
+/// `dict begingroup -` -- open a transparency group (#1406): marks from
+/// here to the matching `endgroup` are drawn as one layer, which then
+/// composites onto the page with `currentalpha` times `/Alpha` and with
+/// `/Blend` (else `currentblendmode`), as a PDF transparency group XObject
+/// does. Inside, alpha starts at 1 and the blend at `/Normal`. A pscat
+/// extension: gs 10.x has `.begintransparencygroup` but no PostScript
+/// program can use it (`unregistered`, and no `.endtransparencygroup`).
+///
+/// `/Alpha` is clamped as `setalpha` clamps; `/Blend` takes the names
+/// `setblendmode` takes, anything else `rangecheck`. Other keys are
+/// ignored. See `notes/1406-transparency-groups.md`.
+fn begingroup(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::Dict(d) = &obj.value else {
+        return Err(PsError::Typecheck);
+    };
+    let (alpha, blend) = {
+        let d = d.borrow();
+        let alpha = match d.get("Alpha").map(|o| o.value) {
+            None => None,
+            Some(Value::Integer(n)) => Some((n as f64).clamp(0.0, 1.0) as f32),
+            Some(Value::Real(r)) => Some(r.clamp(0.0, 1.0) as f32),
+            Some(_) => return Err(PsError::Typecheck),
+        };
+        let blend = match d.get("Blend").map(|o| o.value) {
+            None => None,
+            Some(Value::Name(n)) => {
+                Some(crate::gfx::BlendMode::from_ps_name(&n).ok_or(PsError::Rangecheck)?)
+            }
+            Some(_) => return Err(PsError::Typecheck),
+        };
+        (alpha, blend)
+    };
+    let probe = it.limit_probe();
+    let work = it.gfx.begin_group(alpha, blend, &probe)?;
+    it.charge_probed_steps(work / 1024);
+    Ok(())
+}
+
+/// `- endgroup -` -- close the innermost transparency group opened at this
+/// level (the page, or the running pattern `PaintProc`) and composite it;
+/// the graphics state comes back to the one `begingroup` had. With no group
+/// open there it does nothing, as `grestore` with nothing saved does.
+fn endgroup(it: &mut Interp) -> Result<(), PsError> {
+    // The composite looks at the limits as it goes; the group is closed
+    // whatever it meets, and its work is charged either way.
+    let probe = it.limit_probe();
+    let (work, met) = it.gfx.end_group(&probe);
+    it.charge_probed_steps(work / 1024);
+    met
 }
 
 fn setlinecap(it: &mut Interp) -> Result<(), PsError> {
