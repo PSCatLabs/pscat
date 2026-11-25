@@ -2228,8 +2228,17 @@ impl Interp {
     /// which of its elements was running, and that element with a few of
     /// its neighbours. Runs only for an error nothing caught, with the
     /// stack still whole, so it costs a working program nothing.
+    ///
+    /// It runs for every uncaught error, a limit error included, after the
+    /// limits have stopped looking, so its work is bounded by constants and
+    /// not by the program: at most `MAX_TRACE_FRAMES` frames of bounded
+    /// excerpts, and one pass over at most `NAME_SCAN` name entries of the
+    /// dictionary stack for all the frames' names together, copying none.
     fn snapshot_error_trace(&mut self, err: &PsError) {
         use crate::host::{MAX_TRACE_FRAMES, TraceFrame};
+        // Dictionary entries looked at for the frames' names, all frames
+        // together. A procedure defined past them is reported unnamed.
+        const NAME_SCAN: usize = 1 << 16;
         // Elements shown before and after the one that was running.
         const BEFORE: usize = 5;
         const AFTER: usize = 3;
@@ -2239,20 +2248,11 @@ impl Interp {
             max_string: 24,
             max_bytes: 40,
         };
-        let name_of = |body: &PsArray| -> Option<String> {
-            // Innermost dictionary first; systemdict holds no procedures.
-            self.dstack.iter().skip(1).rev().find_map(|d| {
-                let d = d.try_borrow().ok()?;
-                d.pairs().into_iter().find_map(|(k, v)| match &v.value {
-                    Value::Array(a) if v.executable && a.same_object(body) => Some(k.text()),
-                    _ => None,
-                })
-            })
-        };
         // The procedure whose last element is the one running, if the
         // record of it is still current (see `TailCall`). Under a scanner
         // the depth alone cannot tell (program text runs at one depth), so
-        // there the last element must also be the offending command.
+        // there the scanner must not have moved on, and the last element
+        // must also be the offending command.
         let tail = self.tail.as_ref().filter(|t| {
             t.depth == self.estack.len()
                 && match self.estack.last() {
@@ -2283,6 +2283,7 @@ impl Interp {
             _ => None,
         });
         let mut trace = Vec::new();
+        let mut bodies: Vec<&PsArray> = Vec::new();
         for (body, at) in tail
             .map(|t| (&t.body, t.body.len().saturating_sub(1)))
             .into_iter()
@@ -2315,10 +2316,37 @@ impl Interp {
                 excerpt.push_str(" ...");
             }
             trace.push(TraceFrame {
-                procedure: name_of(body),
+                procedure: None,
                 element: at,
                 excerpt,
             });
+            bodies.push(body);
+        }
+        // Names: the dictionary stack innermost first (systemdict holds no
+        // procedures), each dictionary in `forall` order, the first entry
+        // holding a frame's very array naming it; as a search per frame
+        // would, in one pass. Only name keys: a procedure under a string
+        // key is left unnamed.
+        let mut unnamed = trace.len();
+        let mut budget = NAME_SCAN;
+        'dicts: for d in self.dstack.iter().skip(1).rev() {
+            let Ok(d) = d.try_borrow() else { continue };
+            for (id, v) in d.name_entries() {
+                if unnamed == 0 || budget == 0 {
+                    break 'dicts;
+                }
+                budget -= 1;
+                let Value::Array(a) = &v.value else { continue };
+                if !v.executable {
+                    continue;
+                }
+                for (frame, body) in trace.iter_mut().zip(&bodies) {
+                    if frame.procedure.is_none() && a.same_object(body) {
+                        frame.procedure = Some(crate::name::resolve(id).to_string());
+                        unnamed -= 1;
+                    }
+                }
+            }
         }
         self.error_trace = trace;
     }

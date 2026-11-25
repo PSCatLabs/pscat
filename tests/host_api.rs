@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use pscat::host::{MAX_HOST_OPERATORS, PathSegment, RegisterError, Value};
 use pscat::{Interp, Limits, Page, PsError};
 
+mod common;
+
 fn page(w: u32, h: u32) -> Interp {
     Interp::with_page(w, h).expect("valid page size")
 }
@@ -793,4 +795,45 @@ fn backtrace_does_not_blame_a_returned_procedure_with_the_same_last_operator() {
     let t = interp.error_details(&err).backtrace;
     assert_eq!(t.len(), 1, "{t:?}");
     assert_eq!(t[0].procedure.as_deref(), Some("bad"));
+}
+
+/// Finding 2: a backtrace's names come from one bounded look at the
+/// dictionary stack, so an uncaught error deep in a program with a large
+/// dictionary costs no more than one with a small one.
+#[test]
+fn backtrace_cost_does_not_grow_with_dictionary_size() {
+    use common::thread_cpu_time;
+    // `d`'s branches are procedures with no name: the search for one
+    // looks at every entry the dictionary stack has.
+    const DOWN: &str = "/d { dup 0 gt { 1 sub d 0 pop } { (x) 1 add } ifelse 0 pop } def";
+    fn timed(entries: usize) -> (std::time::Duration, std::time::Duration) {
+        let mut interp = Interp::new();
+        interp.run_str(DOWN).unwrap();
+        let build = format!(
+            "0 1 {} {{ dup 12 string cvs cvn exch def }} for",
+            entries - 1
+        );
+        let t0 = thread_cpu_time();
+        interp.run_str(&build).unwrap();
+        let t_build = thread_cpu_time() - t0;
+        let t0 = thread_cpu_time();
+        for _ in 0..4 {
+            let err = interp.run_str("20 d").unwrap_err();
+            assert_eq!(err, PsError::Typecheck);
+            assert!(!interp.error_details(&err).backtrace.is_empty());
+            interp.clear_operands();
+        }
+        (t_build, thread_cpu_time() - t0)
+    }
+    let (t_build, t_errors) = (0..3)
+        .map(|_| timed(200_000))
+        .min_by_key(|(_, e)| *e)
+        .unwrap();
+    // Unbounded, the four errors copy the 200,000 entries sixteen times
+    // each: several times the cost of defining them. Bounded, they are a
+    // small fraction of it.
+    assert!(
+        t_errors < common::scale_budget(t_build / 4),
+        "four errors took {t_errors:?}, defining the entries {t_build:?}"
+    );
 }
