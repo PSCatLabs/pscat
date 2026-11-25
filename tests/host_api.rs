@@ -198,7 +198,7 @@ fn values_cross_the_stack_both_ways() {
     assert_eq!(proc.type_name(), "arraytype");
 
     // Push the whole thing back and let the program use it, procedure included.
-    interp.push_value(&v);
+    interp.push_value(&v).unwrap();
     interp
         .run_str("dup /a get 1 get 1 get exch /p get exec")
         .unwrap();
@@ -248,11 +248,13 @@ fn a_self_containing_array_stops_at_the_depth_limit() {
 #[test]
 fn lookup_and_define_value() {
     let mut interp = Interp::new();
-    interp.define_value("gain", &Value::Real(0.75));
-    interp.define_value(
-        "config",
-        &Value::Dict(vec![("Mode".into(), Value::Name("fast".into()))]),
-    );
+    interp.define_value("gain", &Value::Real(0.75)).unwrap();
+    interp
+        .define_value(
+            "config",
+            &Value::Dict(vec![("Mode".into(), Value::Name("fast".into()))]),
+        )
+        .unwrap();
     interp
         .run_str("/out gain 2 mul def /mode config /Mode get def")
         .unwrap();
@@ -977,4 +979,120 @@ fn value_conversion_is_charged_to_the_limits() {
         .unwrap();
     let err = interp.run_str("a raise extract").unwrap_err();
     assert_eq!(err, PsError::Interrupted);
+}
+
+/// Finding 7: an opaque value belongs to the interpreter it came from. A
+/// host operator (or a procedure `bind` filled with them, or a save
+/// object) pushed into another interpreter would run that one's operator
+/// slots under this one's names; it is refused, wherever it sits in the
+/// value, and nothing is pushed or defined.
+#[test]
+fn an_opaque_value_is_refused_by_another_interpreter() {
+    let mut a = Interp::new();
+    let mut b = Interp::new();
+    a.register_operator("foo", |i| {
+        i.push_name("from_a_foo");
+        Ok(())
+    })
+    .unwrap();
+    b.register_operator("bar", |i| {
+        i.push_name("from_b_bar");
+        Ok(())
+    })
+    .unwrap();
+    a.run_str("/p { foo } bind def /s save def").unwrap();
+    let foo = a.lookup("foo").unwrap();
+    let p = a.lookup("p").unwrap();
+    let s = a.lookup("s").unwrap();
+    for v in [&foo, &p, &s] {
+        assert!(matches!(v, Value::Other(_)), "{v:?}");
+        assert_eq!(b.push_value(v).unwrap_err(), PsError::InvalidAccess);
+        assert_eq!(b.define_value("x", v).unwrap_err(), PsError::InvalidAccess);
+    }
+    let nested = Value::Array(vec![
+        Value::Int(1),
+        Value::Dict(vec![("f".into(), foo.clone())]),
+    ]);
+    assert_eq!(b.push_value(&nested).unwrap_err(), PsError::InvalidAccess);
+    assert_eq!(b.operand_count(), 0);
+    assert!(b.lookup("x").is_none());
+    // Plain data crosses freely, and the interpreter it came from takes it back.
+    b.push_value(&Value::Array(vec![Value::Int(1), "two".into()]))
+        .unwrap();
+    for v in [&foo, &p] {
+        a.push_value(v).unwrap();
+        a.run_str("exec").unwrap();
+        assert_eq!(a.pop_name().unwrap(), "from_a_foo");
+    }
+    // An opaque value returned by a host operator into its own interpreter.
+    a.register_operator("echo", |i| {
+        let v = i.pop_value()?;
+        i.push_value(&v)
+    })
+    .unwrap();
+    a.run_str("/foo load echo exec").unwrap();
+    assert_eq!(a.pop_name().unwrap(), "from_a_foo");
+}
+
+/// What an animation engine does: one interpreter per render thread, each
+/// with its own host operators and its own interrupt flag. Raising one
+/// thread's flag stops that thread's program only.
+#[test]
+fn interpreters_on_separate_threads_keep_their_operators_and_flags() {
+    let flags: Vec<Arc<AtomicBool>> = (0..4).map(|_| Arc::new(AtomicBool::new(false))).collect();
+    let (ready_tx, ready) = std::sync::mpsc::channel::<()>();
+    let workers: Vec<_> = flags
+        .iter()
+        .enumerate()
+        .map(|(k, flag)| {
+            let flag = flag.clone();
+            let ready_tx = ready_tx.clone();
+            std::thread::spawn(move || {
+                let mut interp = Interp::new();
+                interp.set_interrupt(Some(flag));
+                let id = k as i64;
+                interp
+                    .register_operator("worker", move |i| {
+                        i.push_int(id);
+                        Ok(())
+                    })
+                    .unwrap();
+                interp
+                    .register_operator("spin", |i| {
+                        loop {
+                            i.check_limits(1)?;
+                        }
+                    })
+                    .unwrap();
+                // Values round-trip within the thread's own interpreter.
+                interp.run_str("/w /worker load def").unwrap();
+                let w = interp.lookup("w").unwrap();
+                interp.push_value(&w).unwrap();
+                interp.run_str("exec worker add").unwrap();
+                let sum = interp.pop_int().unwrap();
+                // Thread 0 spins until the main thread raises its flag;
+                // the others finish short runs.
+                let result = if k == 0 {
+                    // Whether the flag is seen before the run or during
+                    // `spin`, the run is interrupted.
+                    ready_tx.send(()).unwrap();
+                    interp.run_str("{ spin } stopped")
+                } else {
+                    interp.run_str("1 2 add pop")
+                };
+                (sum, result)
+            })
+        })
+        .collect();
+    ready.recv().unwrap();
+    flags[0].store(true, Ordering::Relaxed);
+    for (k, w) in workers.into_iter().enumerate() {
+        let (sum, result) = w.join().unwrap();
+        assert_eq!(sum, 2 * k as i64, "thread {k} ran its own operator");
+        if k == 0 {
+            assert_eq!(result.unwrap_err(), PsError::Interrupted);
+        } else {
+            result.unwrap();
+        }
+    }
 }

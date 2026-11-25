@@ -413,6 +413,11 @@ pub struct Interp {
     /// name each slot was registered under.
     pub(crate) host_ops: Vec<crate::host::HostOp>,
     pub(crate) host_op_names: Vec<&'static str>,
+    /// This interpreter's identity among those in the process, which a
+    /// [`host::Opaque`](crate::host::Opaque) carries so that one cannot be
+    /// pushed into another interpreter (whose host operator slots, save
+    /// levels and so on are not its own).
+    pub(crate) host_id: u64,
     /// The host's stop flag ([`Interp::set_interrupt`]).
     pub(crate) interrupt: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// The procedures that were running when the last uncaught error left
@@ -827,6 +832,7 @@ impl Interp {
             ostack: Vec::new(),
             host_ops: Vec::new(),
             host_op_names: Vec::new(),
+            host_id: crate::host::next_interp_id(),
             interrupt: None,
             error_trace: Vec::new(),
             tail: None,

@@ -269,6 +269,26 @@ interp.run_str("hand")?;
 Registering the name of a built-in replaces it, which is how a host takes over
 `showpage` or `realtime`. An interpreter holds up to 256 host operators.
 
+The interpreter looks at its limits (`--max-steps`, `--max-time`,
+`--max-memory`, as `Limits`) and the interrupt flag between objects, so an
+operator that does a lot of work in one call, such as a loop whose count comes
+from the program, should call `check_limits(steps)` as it goes and return its
+error with `?`. It charges the steps and gives the same uncatchable error the
+interpreter would, or `PsError::Interrupted` for a raised flag.
+
+```rust
+interp.register_operator("spin", |i| {
+    let n = i.pop_int()?;
+    for k in 0..n {
+        // ... one unit of work ...
+        if k % 1000 == 999 {
+            i.check_limits(1000)?;
+        }
+    }
+    Ok(())
+})?;
+```
+
 **Values in and out.** `host::Value` is a PostScript object as plain Rust data:
 numbers, booleans, names, strings, arrays, dictionaries. `pop_value` and
 `push_value` move one across the operand stack, `lookup` and `define_value`
@@ -276,6 +296,12 @@ read and write names, and `pop_f64`, `pop_int`, `pop_bool`, `pop_string`,
 `pop_name`, `pop_numbers` and the matching `push_*` cover the common cases. A
 procedure or a save object comes back as an opaque value that can be pushed
 again, so a host can hold a program's `save` and hand it back to `restore`.
+An opaque value belongs to the interpreter it came from: `push_value` and
+`define_value` refuse one from another interpreter with `invalidaccess`, since
+its host operators and save levels are that interpreter's. A copy is bounded:
+past `host::MAX_VALUE_NODES` (about a million elements and entries, however
+deep) `pop_value` is `limitcheck`, and inside an operator the copy counts
+against the program's limits like any other work.
 
 ```rust
 use pscat::host::Value;
@@ -309,7 +335,10 @@ page:   gsave 42 >>> label <<< grestore
 
 **Stopping a program.** `set_interrupt` takes an `Arc<AtomicBool>`; raising it
 from another thread makes `run_str` return `PsError::Interrupted` at its next
-look, every few thousand steps. A program cannot catch it.
+look: before the program starts, every few thousand steps, inside any host
+operator that calls `check_limits`, and when the program ends, so a run during
+which the flag was up fails however short it is. A program cannot catch it,
+nor an `Interrupted` a host operator returns.
 
 **Many pictures from one program.** These compose with PostScript's own
 `save` and `restore` into a frame loop. Run the program's setup once, take a
@@ -326,7 +355,7 @@ let mut interp = pscat::Interp::with_page(64, 64).expect("valid page size");
 interp.run_str("/n 0 def /draw { /n n 1 add def 10 10 44 44 rectfill } def save")?;
 let mut checkpoint: Value = interp.pop_value()?;
 for _ in 0..3 {
-    interp.push_value(&checkpoint);
+    interp.push_value(&checkpoint)?;
     interp.run_str("restore save")?;        // a save object is spent by its restore
     checkpoint = interp.pop_value()?;
     interp.run_str("erasepage initgraphics draw")?;

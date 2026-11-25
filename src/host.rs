@@ -53,7 +53,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use thiserror::Error;
@@ -172,21 +172,40 @@ pub enum Value {
 
 /// An object [`Value`] has no plain-data form for: a procedure, a mark, a
 /// file, a save object, a graphics state or an operator. It can be pushed
-/// back with [`Interp::push_value`].
+/// back with [`Interp::push_value`], into the interpreter it came from.
+///
+/// It belongs to that interpreter. Its host operators are slots of that
+/// interpreter's registrations (a procedure `bind` resolved holds them
+/// too), and a save object is one of its save levels, so in another
+/// interpreter it would run that one's operators under this one's names, or
+/// restore the wrong VM. [`Interp::push_value`] and
+/// [`Interp::define_value`] refuse one from another interpreter with
+/// `invalidaccess`. (An `Opaque` holds an `Rc`, so it cannot leave its
+/// thread: interpreters on separate threads never meet this.)
 #[derive(Clone)]
-pub struct Opaque(Object);
+pub struct Opaque {
+    obj: Object,
+    /// The interpreter it came from ([`Interp`]'s `host_id`).
+    owner: u64,
+}
 
 impl Opaque {
     /// The object's PostScript type name, as the `type` operator gives it
     /// (`arraytype` for a procedure, `filetype`, `marktype`, ...).
     pub fn type_name(&self) -> &'static str {
-        self.0.type_name()
+        self.obj.type_name()
     }
 
     /// Whether the object is a procedure (an executable array).
     pub fn is_procedure(&self) -> bool {
-        self.0.executable && matches!(self.0.value, Raw::Array(_))
+        self.obj.executable && matches!(self.obj.value, Raw::Array(_))
     }
+}
+
+/// A new interpreter's `host_id`: unique in the process, never reused.
+pub(crate) fn next_interp_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl std::fmt::Debug for Opaque {
@@ -300,28 +319,39 @@ impl Value {
                 }
                 Value::Dict(out)
             }
-            _ => Value::Other(Opaque(obj.clone())),
+            _ => Value::Other(Opaque {
+                obj: obj.clone(),
+                owner: walk.interp.host_id,
+            }),
         })
     }
 
-    fn to_object(&self) -> Object {
-        match self {
+    /// The value as an object of the interpreter `owner`; `invalidaccess`
+    /// for an [`Opaque`] anywhere in it that came from another one.
+    fn to_object(&self, owner: u64) -> Result<Object, PsError> {
+        Ok(match self {
             Value::Null => Object::lit(Raw::Null),
             Value::Bool(b) => Object::bool(*b),
             Value::Int(i) => Object::int(*i),
             Value::Real(r) => Object::real(*r),
             Value::Name(n) => Object::name(n),
             Value::String(s) => Object::string(s.clone()),
-            Value::Array(items) => Object::array(items.iter().map(Value::to_object).collect()),
+            Value::Array(items) => Object::array(
+                items
+                    .iter()
+                    .map(|v| v.to_object(owner))
+                    .collect::<Result<_, _>>()?,
+            ),
             Value::Dict(entries) => {
                 let mut d = Dict::new();
                 for (k, v) in entries {
-                    d.put(k.as_str().into(), v.to_object());
+                    d.put(k.as_str().into(), v.to_object(owner)?);
                 }
                 Object::lit(Raw::Dict(Rc::new(std::cell::RefCell::new(d))))
             }
-            Value::Other(o) => o.0.clone(),
-        }
+            Value::Other(o) if o.owner == owner => o.obj.clone(),
+            Value::Other(_) => return Err(PsError::InvalidAccess),
+        })
     }
 }
 
@@ -631,9 +661,13 @@ impl Interp {
     }
 
     /// Push a [`Value`] onto the operand stack. An array or dictionary is a
-    /// new object each time.
-    pub fn push_value(&mut self, value: &Value) {
-        self.ostack.push(value.to_object());
+    /// new object each time. `invalidaccess`, and nothing pushed, if the
+    /// value holds a [`Value::Other`] from another interpreter (see
+    /// [`Opaque`]).
+    pub fn push_value(&mut self, value: &Value) -> Result<(), PsError> {
+        let obj = value.to_object(self.host_id)?;
+        self.ostack.push(obj);
+        Ok(())
     }
 
     /// Push an integer.
@@ -741,23 +775,30 @@ impl Interp {
     pub fn lookup(&self, name: &str) -> Option<Value> {
         self.load(name).map(|o| match self.value_of(&o) {
             Ok((value, _)) => value,
-            Err(_) => Value::Other(Opaque(o)),
+            Err(_) => Value::Other(Opaque {
+                obj: o,
+                owner: self.host_id,
+            }),
         })
     }
 
     /// Define `name` as `value` in the current dictionary (userdict unless
-    /// the program left another one open), as `def` would.
+    /// the program left another one open), as `def` would. `invalidaccess`,
+    /// and nothing defined, if the value holds a [`Value::Other`] from
+    /// another interpreter (see [`Opaque`]).
     ///
     /// ```
     /// use pscat::host::Value;
     /// let mut interp = pscat::Interp::new();
-    /// interp.define_value("palette", &Value::Array(vec![0.1.into(), 0.5.into()]));
+    /// interp.define_value("palette", &Value::Array(vec![0.1.into(), 0.5.into()]))?;
     /// interp.run_str("palette 1 get")?;
     /// assert_eq!(interp.pop_f64()?, 0.5);
     /// # Ok::<(), pscat::PsError>(())
     /// ```
-    pub fn define_value(&mut self, name: &str, value: &Value) {
-        self.define(name, value.to_object());
+    pub fn define_value(&mut self, name: &str, value: &Value) -> Result<(), PsError> {
+        let obj = value.to_object(self.host_id)?;
+        self.define(name, obj);
+        Ok(())
     }
 
     /// The current path in user space, segment by segment, in the order it
