@@ -746,9 +746,13 @@ PNG, `--svg` (`<g opacity="0.5" style="mix-blend-mode:multiply">`) and
 `ExtGState`) all get it, so a faded layered drawing stays vector. A group
 left open ends at `showpage`, `copypage`, `erasepage`, a `restore` past it,
 or the end of the program, with its marks kept; `endgroup` with no group
-open does nothing. `setpagedevice` inside a group is `invalidaccess`. Each
+open does nothing. `setpagedevice` inside a group is `invalidaccess`. A group
+composites in the same 16-bit precision as a translucent fill, so a stack of
+hundreds of faint groups reaches the colour the arithmetic gives. Each
 open group holds a page-sized layer (4 bytes a pixel), counted against
-`--max-memory` and `--max-steps`; at most 64 may be open. Ghostscript cannot
+`--max-memory`, and making and compositing it count against `--max-steps`
+and `--max-time` however the group ends; at most 64 may be open. A run
+stopped by a time limit with a group open drops that group's layer. Ghostscript cannot
 run it from PostScript (its `.begintransparencygroup` is not usable from a
 program), so as with `setalpha` hand on the PDF, which gs renders. Design and
 edge cases: `notes/1406-transparency-groups.md`.

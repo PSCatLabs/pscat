@@ -719,9 +719,12 @@ fn begingroup(it: &mut Interp) -> Result<(), PsError> {
 /// the graphics state comes back to the one `begingroup` had. With no group
 /// open there it does nothing, as `grestore` with nothing saved does.
 fn endgroup(it: &mut Interp) -> Result<(), PsError> {
-    let work = it.gfx.end_group();
+    // The composite looks at the limits as it goes; the group is closed
+    // whatever it meets, and its work is charged either way.
+    let probe = it.limit_probe();
+    let (work, met) = it.gfx.end_group(&probe);
     it.charge_probed_steps(work / 1024);
-    Ok(())
+    met
 }
 
 fn setlinecap(it: &mut Interp) -> Result<(), PsError> {

@@ -99,10 +99,17 @@ stream), and an open group's marks must not be lost:
   any inside it) as it unwinds the graphics state past it; so does the end
   of a Type 3 `BuildChar`/`BuildGlyph` or a pattern `PaintProc` that left
   one open.
-- When the program ends (`step_n` reports done, an uncaught error or a
-  limit stops it, or `quit`) every open group is ended, so its marks reach
-  the page and every output. Consequence: in the REPL a group does not
-  carry from one input line to the next.
+- When the program ends, every open group is ended, so its marks reach the
+  page and every output and the canvas is the page again. A program that
+  is done (or `quit`s) ends them in `step_n` *before* the slice's limits
+  are looked at, so their work is held to them; an aborted program (an
+  uncaught error, or a limit found at the end of a slice or at the start
+  of the next one) ends them in `unwind_all`, after the pattern captures
+  are unwound, on every path (Codex round 1, finding 2). A group closed
+  after a time limit has fired stops compositing at once: the layer is
+  dropped and the page keeps what it had, so the abort stays cheap.
+  Consequence: in the REPL a group does not carry from one input line to
+  the next.
 - `setpagedevice` inside a group is `invalidaccess`, as it is in a
   pattern's `PaintProc`: the layer is the page's size.
 
@@ -116,7 +123,19 @@ with no change, and the clip masks (page-sized) fit it. The 16-bit shadow
 a group still reaches the arithmetic colour. `endgroup` composites the
 layer onto the canvas below with the group's alpha and blend
 (premultiplied source-over or Multiply, tiny-skia's formulas, in f32),
-skipping the pixels the layer left transparent, and puts the canvas back.
+skipping the rows and pixels the layer left transparent, and puts the
+canvas back.
+
+The composite goes through the canvas's 16-bit shadow, as a translucent fill
+does (Codex round 1, finding 4): the source is the layer's own shadow where
+it still agrees with the layer's 8-bit pixel, the destination the canvas's
+shadow, and the result is kept at 16 bits and rounded to the page. So 1000
+groups of `/Alpha 0.001` white over black reach level 161 (1 - 0.999^1000 =
+0.632), the arithmetic and the PDF's colour, where an 8-bit composite adds a
+quarter of a level each time and stays black; and faint marks inside a
+group keep their precision into the page. The composite falls back to 8
+bits where a fill would (inside a pattern capture, or when the shadow is
+off under `--max-memory`, or its new rows would not fit the cap).
 
 Why the full page and not a layer cropped to the clip: clip masks, the
 coverage scratch mask and the shadow are all page-sized and indexed by
@@ -133,8 +152,21 @@ is a possible follow-up if memory or time per group matters.
   At most 64 groups may be open at once (the pattern capture depth), and
   `begingroup` past that is `limitcheck`.
 - Steps and time: making the layer and compositing it are work proportional
-  to its pixels, charged to `--max-steps` a step per 1024 pixels, as `fill`
-  charges its rasteriser.
+  to its pixels (the composite counts every row of the layer it scans,
+  plus the pixels of the rows it blends), charged to `--max-steps` a step
+  per 1024 pixels, as `fill` charges its rasteriser. On every path (Codex
+  round 1, finding 3): `endgroup` charges its own; a group ended by a page
+  boundary, a `restore`, the end of a glyph or `PaintProc`, or the end of
+  the program puts its work in `Gfx::take_group_work`, which the
+  interpreter counts with the decode filters' and the mesh shadings' work
+  when it next looks at its limits. The composite looks at `--max-time`
+  (and the steps, for `endgroup`) every 64 rows and stops at a limit; the
+  group is closed either way, its rows so far composited.
+- PDF memory: closing a group stores its content stream as a form, one
+  copy of it (the form's `cm` is written when the group opens, so nothing
+  is reformatted), asked of `--max-memory` first (Codex round 1, finding
+  1). A refusal drops the group from the PDF, leaves the stream below
+  intact, and stops the run with `limitexceeded (memory)`.
 
 ### `--bands`
 
@@ -147,10 +179,17 @@ away), as the shadow already is.
 `begingroup` sets the page's content stream and resource lists aside (the
 pattern capture's mechanism, without its matrix or colour rules) and
 records into an empty stream. `endgroup` stores what was recorded as a form
-XObject, `/Subtype /Form /BBox [0 0 W H] /Group << /S /Transparency /I true
-/CS /DeviceRGB >>`, in the content's own (device) coordinates, and writes
-`q /GSn gs /Xk Do Q` into the stream below, where `/GSn` is the group's
-`ca`/`CA`/`BM` (omitted when 1 and Normal). An empty group writes nothing.
+XObject, `/Subtype /Form /Group << /S /Transparency /I true /CS /DeviceRGB
+>>`, and writes `q <D⁻¹> cm /GSn gs /Xk Do Q` into the stream below, where
+`/GSn` is the group's `ca`/`CA`/`BM` (omitted when 1 and Normal). The form's
+space is the stream's default space (the page's y-up points, or a pattern
+capture's pattern space): its content starts with `<D> cm`, D mapping the
+canvas's device coordinates there, and its `/BBox` is the canvas in that
+space. A pattern's `/Matrix` maps to the default space of the stream that
+paints with it, which inside a form is the form's (PDF 32000-1, 8.7.2), so a
+pattern painted in a group is placed as on the page; with the form in device
+coordinates gs left such a pattern out (found by the gs round trip). An
+empty group writes nothing.
 
 ### SVG
 

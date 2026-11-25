@@ -521,3 +521,98 @@ fn an_error_inside_a_paintproc_with_groups_open_leaves_the_page() {
         assert!(close(px(pm, 5, 5), [230, 204, 51, 255], 1), "{stop}");
     }
 }
+
+/// Codex round 1, finding 4: a group composites through the 16-bit shadow,
+/// as a translucent fill does, so a stack of faint groups reaches the
+/// colour the arithmetic gives: 1 - 0.999^1000 = 0.632, level 161, where an
+/// 8-bit composite added a quarter of a level and rounded it away (black).
+#[test]
+fn a_stack_of_faint_groups_reaches_the_arithmetic_colour() {
+    let pm = canvas(
+        "0 setgray 0 0 100 100 rectfill
+         1000 { << /Alpha 0.001 >> begingroup 1 setgray 0 0 100 100 rectfill endgroup } repeat",
+    );
+    let c = px(&pm, 50, 50);
+    assert!(close(c, [161, 161, 161, 255], 1), "{c:?}");
+    // The same through per-mark alpha, for comparison: the fill path.
+    let per = canvas(
+        "0 setgray 0 0 100 100 rectfill 0.001 setalpha 1000 { 1 setgray 0 0 100 100 rectfill } repeat",
+    );
+    assert!(close(px(&per, 50, 50), c, 1), "{:?}", px(&per, 50, 50));
+    // Faint marks inside the group keep their precision into the page too.
+    let pm = canvas(
+        "0 setgray 0 0 100 100 rectfill
+         << /Alpha 0.5 >> begingroup 0.002 setalpha 1000 { 1 setgray 0 0 100 100 rectfill } repeat endgroup",
+    );
+    // 0.5 x (1 - 0.998^1000) = 0.432, level 110.
+    assert!(
+        close(px(&pm, 50, 50), [110, 110, 110, 255], 1),
+        "{:?}",
+        px(&pm, 50, 50)
+    );
+}
+
+/// Codex round 1, finding 3: a group that ends with no `endgroup` (the end
+/// of the program, a page boundary) has its composite charged too. On a
+/// 2000 x 2000 page a layer is about 3900 steps to make and as many to
+/// composite: under a 5000-step cap the group's own `endgroup` is refused,
+/// and so must the same group ended by the end of the program or showpage.
+#[test]
+fn a_group_ended_implicitly_is_charged() {
+    for src in [
+        "<< >> begingroup 0 0 10 10 rectfill endgroup",
+        "<< >> begingroup 0 0 10 10 rectfill",
+        "<< >> begingroup 0 0 10 10 rectfill showpage",
+        "save << >> begingroup 0 0 10 10 rectfill restore",
+    ] {
+        let mut it = Interp::with_page(2000, 2000).expect("page");
+        it.set_limits(pscat::Limits::none().with_max_steps(5000))
+            .expect("limits");
+        assert_eq!(
+            it.run_str(src).map_err(|e| e.name()),
+            Err("limitexceeded"),
+            "{src}"
+        );
+    }
+    // One layer alone fits the cap.
+    let mut it = Interp::with_page(2000, 2000).expect("page");
+    it.set_limits(pscat::Limits::none().with_max_steps(5000))
+        .expect("limits");
+    assert!(it.run_str("0 0 10 10 rectfill").is_ok());
+}
+
+/// Codex round 1, finding 2: a limit found when a slice starts aborts the
+/// program with a group open. The canvas must be the page again (not the
+/// group's transparent layer), and the SVG must hold the group closed.
+/// The time limit has passed by then, so the group's composite stops at
+/// once: the page keeps what it had.
+#[test]
+fn a_limit_between_slices_ends_the_open_group() {
+    let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+    it.gfx_mut().enable_svg();
+    it.set_limits(pscat::Limits::none().with_max_time(std::time::Duration::from_millis(300)))
+        .expect("limits");
+    it.begin_source(
+        format!(
+            "{GROUND} << /Alpha 0.5 >> begingroup 0 0 1 setrgbcolor 0 0 50 50 rectfill
+             {{ }} loop"
+        )
+        .as_bytes(),
+    );
+    // Run until the program is inside the loop, within the time limit.
+    for _ in 0..4 {
+        assert_eq!(it.step_n(64), Ok(true));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    assert_eq!(it.step_n(64).map_err(|e| e.name()), Err("limitexceeded"));
+    let pm = &it.gfx().pixmap;
+    assert_eq!((pm.width(), pm.height()), (SIZE, SIZE));
+    assert!(
+        close(px(pm, 75, 75), [230, 204, 51, 255], 1),
+        "{:?}",
+        px(pm, 75, 75)
+    );
+    assert_eq!(px(pm, 25, 25)[3], 255, "the page, not the layer");
+    let svg = it.gfx().svg_pages().expect("svg on").concat();
+    assert!(svg.contains("<g opacity=\"0.5\">"), "{svg}");
+}

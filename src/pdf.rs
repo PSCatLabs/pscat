@@ -224,7 +224,8 @@ pub struct PdfRecorder {
     colored_variants: HashMap<(usize, [u32; 3]), usize>,
     /// What each open transparency group (#1406) set aside of the stream
     /// below it, innermost last.
-    groups: Vec<PdfCapture>,
+    /// with the length of the `cm` its own stream starts with.
+    groups: Vec<(PdfCapture, usize)>,
 }
 
 /// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
@@ -516,7 +517,11 @@ impl PdfRecorder {
     /// A transparency group opens (#1406): the stream and its resource
     /// lists are set aside, as for a pattern capture, and marks go to an
     /// empty stream in the same coordinates until [`end_group`](Self::end_group).
-    pub(crate) fn begin_group(&mut self) {
+    ///
+    /// The new stream starts with `to_default` as a `cm` (see
+    /// [`end_group`](Self::end_group)), written now so that closing the
+    /// group copies its content only once.
+    pub(crate) fn begin_group(&mut self, to_default: tiny_skia::Transform) {
         self.flush_text();
         self.close_clip();
         let saved = PdfCapture {
@@ -533,7 +538,8 @@ impl PdfRecorder {
             pattern_cs: std::mem::take(&mut self.current_pattern_cs),
             uncolored: self.uncolored,
         };
-        self.groups.push(saved);
+        let _ = writeln!(self.content, "{} cm", matrix_text(to_default));
+        self.groups.push((saved, self.content.len()));
     }
 
     /// The group closes: what it recorded becomes a form XObject with an
@@ -549,23 +555,38 @@ impl PdfRecorder {
     /// default space of the stream that paints with it, which inside a form
     /// is the form's space (PDF 32000-1, 8.7.2): so a pattern painted in a
     /// group is placed exactly as on the page.
+    ///
+    /// Storing the content copies it once (into the form's shared `str`),
+    /// asked of `probe`'s memory cap first: a refusal drops the group's
+    /// marks from the PDF and is `MemoryExceeded`, the stream below intact.
     pub(crate) fn end_group(
         &mut self,
         comp: Composite,
         to_default: tiny_skia::Transform,
         width: u32,
         height: u32,
-    ) {
-        let Some(saved) = self.groups.pop() else {
-            return;
+        probe: &LimitProbe,
+    ) -> Result<(), crate::PsError> {
+        let Some((saved, prefix)) = self.groups.pop() else {
+            return Ok(());
         };
-        let mut form = self.restore_capture(saved);
-        if form.content.is_empty() {
-            return;
+        self.flush_text();
+        self.close_clip();
+        let empty = self.content.len() <= prefix;
+        let refused = probe.check_alloc(self.content.len());
+        let back = to_default.invert();
+        if empty || refused.is_err() || back.is_none() {
+            // Nothing to keep: drop it before the copy, not after.
+            self.content = String::new();
         }
-        let Some(back) = to_default.invert() else {
-            return;
+        let form = self.restore_capture(saved);
+        refused?;
+        let (mut form, Some(back)) = (form, back) else {
+            return Ok(());
         };
+        if empty {
+            return Ok(());
+        }
         let mut corners = [
             tiny_skia::Point::from_xy(0.0, 0.0),
             tiny_skia::Point::from_xy(width as f32, 0.0),
@@ -586,12 +607,12 @@ impl PdfRecorder {
             p(x1),
             p(y1),
         );
-        form.content = format!("{} cm\n{}", matrix_text(to_default), form.content).into();
         self.patterns.push(form);
         let idx = self.patterns.len() - 1;
         self.current_patterns.push(idx);
         let gs = self.gs_ref(comp);
         let _ = writeln!(self.content, "q {} cm {gs}/X{idx} Do Q", matrix_text(back));
+        Ok(())
     }
 
     /// The pattern's `PaintProc` was unwound: put the page state back and

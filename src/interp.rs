@@ -1215,10 +1215,17 @@ impl Interp {
         // Mesh shading work (#1325) is counted the same way, so it is
         // charged whether the operator that did it succeeded or failed.
         let mesh = crate::mesh::take_pending_steps();
+        // So is the work of transparency groups that ended with no operator
+        // to charge it (#1406).
+        let groups = self.gfx.take_group_work();
         if self.limits.is_none() {
             return;
         }
-        let steps = self.decode_budget.take_steps().saturating_add(mesh);
+        let steps = self
+            .decode_budget
+            .take_steps()
+            .saturating_add(mesh)
+            .saturating_add(groups);
         self.steps_used = self.steps_used.saturating_add(steps);
         self.decode_budget.set_probe(self.limit_probe());
     }
@@ -1248,6 +1255,8 @@ impl Interp {
         // A canvas the last program could not restore within the memory cap
         // stopped that program; it does not stop this one (#909).
         self.gfx.clear_memory_refused();
+        // Group ends the last program's abort did belong to that program.
+        let _ = self.gfx.take_group_work();
         self.last_name = None;
         self.last_line = None;
         self.last_file = None;
@@ -1306,6 +1315,12 @@ impl Interp {
         } else {
             self.step_n_inner(budget)
         };
+        // A program that is done ends the transparency groups it left open
+        // before the limits are looked at, so their work is held to them
+        // (#1406); an aborted one ends them in `unwind_all`.
+        if matches!(result, Ok(false)) || (result.is_ok() && self.quit_requested) {
+            self.gfx.end_open_groups();
+        }
         if limited {
             result = self.after_slice(result);
         }
@@ -1317,11 +1332,6 @@ impl Interp {
                 self.snapshot_error_chain();
             }
             self.unwind_all();
-        }
-        // The program is over: transparency groups it left open end, so
-        // their marks reach the page and every output (#1406).
-        if !matches!(result, Ok(true)) || self.quit_requested {
-            self.gfx.end_open_groups();
         }
         result
     }
@@ -1577,6 +1587,9 @@ impl Interp {
         while let Some(frame) = self.estack.pop() {
             self.cleanup_unwound_frame(frame);
         }
+        // With the pattern captures unwound, the groups the program left
+        // open end, so the canvas is the page again (#1406).
+        self.gfx.end_open_groups();
     }
 
     /// [`step_n_inner`](Self::step_n_inner) with a clock read around each
@@ -4670,6 +4683,7 @@ impl Interp {
     /// new program's clock) and resume it.
     fn refresh_frame_probes(&mut self) {
         let probe = self.limit_probe();
+        self.gfx.set_group_probe(probe);
         for frame in &mut self.estack {
             match frame {
                 Frame::Show(ctx) => ctx.set_limit_probe(probe),

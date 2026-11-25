@@ -1471,6 +1471,13 @@ pub struct Gfx {
     next_capture: usize,
     /// Transparency groups open now (#1406), innermost last.
     groups: Vec<Group>,
+    /// The time and memory limits for a group that ends with no operator
+    /// to charge it (a page boundary, a `restore`, the end of a program):
+    /// its composite looks at them as it goes. Set by the interpreter.
+    group_probe: crate::limits::LimitProbe,
+    /// The work of those group ends, which the interpreter takes as steps
+    /// when it next looks at its limits ([`take_group_work`](Gfx::take_group_work)).
+    group_work: u64,
 }
 
 /// Most transparency groups open at once (#1406), as for pattern captures.
@@ -1500,24 +1507,13 @@ struct Group {
     recorded: bool,
 }
 
-/// Composite a group's `layer` onto `below` (both premultiplied RGBA of one
-/// size) with `comp`, over rows `y0..y1`, in f32 with tiny-skia's
-/// source-over and Multiply formulas. Pixels the layer left transparent are
-/// skipped. Returns the pixels looked at, the work done.
-fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u32, u32)) -> u64 {
-    // NaN paints nothing, as `setalpha` with NaN does.
-    let g = if comp.alpha.is_nan() {
-        0.0
-    } else {
-        comp.alpha.clamp(0.0, 1.0)
-    };
-    let (w, h) = (below.width() as usize, below.height() as usize);
-    let (y0, y1) = (rows.0 as usize, (rows.1 as usize).min(h));
-    if g <= 0.0 || y0 >= y1 || layer.width() as usize != w || layer.height() as usize != h {
-        return 0;
-    }
-    let src = &layer.data()[y0 * w * 4..y1 * w * 4];
-    let dst = &mut below.data_mut()[y0 * w * 4..y1 * w * 4];
+/// Composite one row of a group's layer (`src`) onto the same row of the
+/// canvas below (`dst`), both premultiplied RGBA, at group alpha `g` (0..1,
+/// above 0), in f32 with tiny-skia's source-over and Multiply formulas,
+/// rounded to 8 bits. Pixels the layer left transparent are skipped. The
+/// path for a canvas without a 16-bit shadow ([`crate::deep::Deep::composite_layer`]
+/// is the other).
+fn composite_row8(dst: &mut [u8], src: &[u8], g: f32, blend: BlendMode) {
     for (s, d) in src
         .as_chunks::<4>()
         .0
@@ -1527,7 +1523,7 @@ fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u
         if s[3] == 0 {
             continue;
         }
-        if g >= 1.0 && s[3] == 255 && comp.blend == BlendMode::Normal {
+        if g >= 1.0 && s[3] == 255 && blend == BlendMode::Normal {
             d.copy_from_slice(s);
             continue;
         }
@@ -1539,7 +1535,7 @@ fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u
         let a8 = (out_a.clamp(0.0, 1.0) * 255.0).round() as u8;
         for (i, out) in d.iter_mut().take(3).enumerate() {
             let (sc, dc) = (sv(i), dv(i));
-            let o = match comp.blend {
+            let o = match blend {
                 BlendMode::Normal => sc + dc * (1.0 - sa),
                 BlendMode::Multiply => sc * (1.0 - da) + dc * (1.0 - sa) + sc * dc,
             };
@@ -1548,8 +1544,10 @@ fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u
         }
         d[3] = a8;
     }
-    ((y1 - y0) * w) as u64
 }
+
+/// Rows of a group's layer composited between looks at the limits (#1406).
+const GROUP_POLL_ROWS: usize = 64;
 
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
 const ARC_POLL: usize = 4096;
@@ -1700,6 +1698,8 @@ impl Gfx {
             captures: Vec::new(),
             next_capture: 0,
             groups: Vec::new(),
+            group_probe: crate::limits::LimitProbe::NONE,
+            group_work: 0,
         })
     }
 
@@ -4578,7 +4578,7 @@ impl Gfx {
             .last()
             .is_some_and(|g| g.depth > depth && g.captures == self.captures.len())
         {
-            self.finish_group(false);
+            self.finish_group_uncharged(false);
         }
         self.saved.truncate(depth);
         self.state = *state;
@@ -4748,7 +4748,7 @@ impl Gfx {
         // canvas is swapped back out (#1406).
         let level = self.captures.len();
         while self.groups.last().is_some_and(|g| g.captures == level) {
-            self.finish_group(false);
+            self.finish_group_uncharged(false);
         }
         let mut cap = self.captures.pop().expect("a pattern capture is open");
         let content = std::mem::replace(
@@ -5046,11 +5046,12 @@ impl Gfx {
         }
         let recorded = live && (self.svg.is_some() || self.pdf.is_some());
         if recorded {
+            let to_default = self.pattern_default_space();
             if let Some(svg) = &mut self.svg {
                 svg.begin_group();
             }
             if let Some(pdf) = &mut self.pdf {
-                pdf.begin_group();
+                pdf.begin_group(to_default);
             }
         }
         self.gsave();
@@ -5070,12 +5071,46 @@ impl Gfx {
     /// `endgroup`: composite the innermost group opened at this level (the
     /// page, or the pattern `PaintProc` running) and come back to the
     /// graphics state `begingroup` had. With none open here it does
-    /// nothing, as `grestore` with nothing saved does. Returns the work.
-    pub(crate) fn end_group(&mut self) -> u64 {
+    /// nothing, as `grestore` with nothing saved does. Returns the work, for
+    /// the operator to charge, and a limit `probe` met while compositing:
+    /// the group is closed either way (what was composited stays).
+    pub(crate) fn end_group(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
         match self.groups.last() {
-            Some(g) if g.captures == self.captures.len() => self.finish_group(true),
-            _ => 0,
+            Some(g) if g.captures == self.captures.len() => self.finish_group(true, probe),
+            _ => (0, Ok(())),
         }
+    }
+
+    /// Close the innermost group where no operator charges the work: it
+    /// goes to [`take_group_work`](Self::take_group_work), and the
+    /// composite looks at the time and memory limits as it goes. A limit
+    /// met here stops the composite (the group still closes); the
+    /// interpreter's next look at its limits raises it.
+    fn finish_group_uncharged(&mut self, restore: bool) {
+        let probe = self.group_probe;
+        let (work, _) = self.finish_group(restore, &probe);
+        self.group_work = self.group_work.saturating_add(work);
+    }
+
+    /// The limits for a group closed with no operator to charge it: time and
+    /// memory only (the steps are taken afterwards, from
+    /// [`take_group_work`](Self::take_group_work)).
+    pub(crate) fn set_group_probe(&mut self, probe: crate::limits::LimitProbe) {
+        self.group_probe = crate::limits::LimitProbe {
+            steps_left: None,
+            ..probe
+        };
+    }
+
+    /// The work of the group closes since the last call, in steps (a step
+    /// per 1024 pixels), for the interpreter to count.
+    pub(crate) fn take_group_work(&mut self) -> u64 {
+        let w = self.group_work / 1024;
+        self.group_work %= 1024;
+        w
     }
 
     /// End every group open at the page's level, innermost first: a page
@@ -5083,20 +5118,23 @@ impl Gfx {
     /// job, so no group's marks are lost (#1406).
     fn end_page_groups(&mut self) {
         while self.groups.last().is_some_and(|g| g.captures == 0) {
-            self.finish_group(true);
+            self.finish_group_uncharged(true);
         }
     }
 
     /// End every group still open (#1406): the program is over. The
-    /// interpreter calls it when a program finishes, fails or quits, so
-    /// every output holds the groups' marks.
+    /// interpreter calls it when a program finishes, fails, quits or is
+    /// stopped by a limit, so the canvas is the page again and every output
+    /// holds the groups' marks. After a time limit has fired the composites
+    /// stop at once and the layers are dropped: the state is whole, and the
+    /// run ends with the marks it had composited.
     pub(crate) fn end_open_groups(&mut self) {
         while self
             .groups
             .last()
             .is_some_and(|g| g.captures == self.captures.len())
         {
-            self.finish_group(true);
+            self.finish_group_uncharged(true);
         }
     }
 
@@ -5104,34 +5142,132 @@ impl Gfx {
     /// layer composites onto the canvas below, which comes back. With
     /// `restore`, the graphics state comes back to the one before
     /// `begingroup`; without, the caller is unwinding the state itself.
-    fn finish_group(&mut self, restore: bool) -> u64 {
+    /// Returns the work and the first limit met (`probe` while compositing,
+    /// or the PDF recorder's memory check); whatever it meets, the group is
+    /// closed and the canvas is the one below.
+    fn finish_group(
+        &mut self,
+        restore: bool,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
         let Some(g) = self.groups.pop() else {
-            return 0;
+            return (0, Ok(()));
         };
+        let mut outcome = Ok(());
         if g.recorded {
             let (w, h) = (self.pixmap.width(), self.pixmap.height());
             let to_default = self.pattern_default_space();
+            let memory = crate::limits::LimitProbe::memory_only(self.mem_budget);
             if let Some(svg) = &mut self.svg {
                 svg.end_group(g.comp);
             }
-            if let Some(pdf) = &mut self.pdf {
-                pdf.end_group(g.comp, to_default, w, h);
+            if let Some(pdf) = &mut self.pdf
+                && let Err(e) = pdf.end_group(g.comp, to_default, w, h, &memory)
+            {
+                // The run stops at the interpreter's next look at its limits.
+                self.mem_refused = true;
+                outcome = Err(e);
             }
         }
         let mut work = 0;
         if let Some((page, deep)) = g.below {
             let layer = std::mem::replace(&mut self.pixmap, page);
-            self.deep = deep;
-            // A `--bands` run keeps only its rows of the page.
-            let rows = self.band_rows().unwrap_or((0, self.pixmap.height()));
-            work = composite_group(&mut self.pixmap, &layer, g.comp, rows);
+            let layer_deep = std::mem::replace(&mut self.deep, deep);
+            let (w, r) = self.composite_layer(&layer, &layer_deep, g.comp, probe);
+            work = w;
+            if outcome.is_ok() {
+                outcome = r;
+            }
             self.dirty = true;
         }
         if restore && self.saved.len() >= g.depth {
             self.saved.truncate(g.depth);
             self.grestore();
         }
-        work
+        (work, outcome)
+    }
+
+    /// Composite a closed group's `layer` (and its 16-bit shadow) onto the
+    /// canvas with `comp`. Only rows the layer painted, and under `--bands`
+    /// only the band's rows. Through the canvas's 16-bit shadow, as a fill
+    /// composites (#731), where the shadow may be used and its new rows fit
+    /// the memory limit; else at 8 bits. Looks at `probe` every
+    /// [`GROUP_POLL_ROWS`] rows, with the work so far as steps, and stops
+    /// at a limit, leaving the rows done composited. Returns the work: the
+    /// pixels scanned and composited.
+    fn composite_layer(
+        &mut self,
+        layer: &Pixmap,
+        layer_deep: &crate::deep::Deep,
+        comp: Composite,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
+        let g = if comp.alpha.is_nan() {
+            0.0
+        } else {
+            comp.alpha.clamp(0.0, 1.0)
+        };
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if g <= 0.0 || (layer.width(), layer.height()) != (w, h) {
+            return (0, Ok(()));
+        }
+        let (y0, y1) = self.band_rows().unwrap_or((0, h));
+        let (y0, y1) = (y0 as usize, (y1 as usize).min(h as usize));
+        let stride = w as usize * 4;
+        // A row the group painted: some pixel not transparent, at 8 bits or
+        // (faint marks) in its shadow.
+        let painted: Vec<usize> = (y0..y1)
+            .filter(|&y| {
+                layer.data()[y * stride..(y + 1) * stride]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[3] != 0)
+                    || layer_deep
+                        .row(layer, y)
+                        .is_some_and(|r| r.as_chunks::<4>().0.iter().any(|p| p[3] != 0))
+            })
+            .collect();
+        let mut work = ((y1.saturating_sub(y0)) * w as usize) as u64;
+        let max_memory = self.mem_budget.map(|(_, max)| max);
+        let deep = self.captures.is_empty()
+            && crate::deep::Deep::allowed(w, h, max_memory)
+            && probe
+                .check_alloc(self.deep.new_bytes(
+                    w,
+                    h,
+                    false,
+                    painted.iter().map(|&y| (y as u32, y as u32 + 1)),
+                ))
+                .is_ok();
+        let multiply = comp.blend == BlendMode::Multiply;
+        for (i, &y) in painted.iter().enumerate() {
+            if i % GROUP_POLL_ROWS == 0
+                && let Err(e) = probe.check(work / 1024)
+            {
+                return (work, Err(e));
+            }
+            let src = &layer.data()[y * stride..(y + 1) * stride];
+            if deep {
+                self.deep.composite_layer(
+                    &mut self.pixmap,
+                    y,
+                    src,
+                    layer_deep.row(layer, y),
+                    g,
+                    multiply,
+                );
+            } else {
+                composite_row8(
+                    &mut self.pixmap.data_mut()[y * stride..(y + 1) * stride],
+                    src,
+                    g,
+                    comp.blend,
+                );
+            }
+            work = work.saturating_add(w as u64);
+        }
+        (work, Ok(()))
     }
 
     /// True while marking operators must leave page and recorders alone:
