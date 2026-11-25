@@ -512,8 +512,20 @@ impl Interp {
     }
 
     /// Empty the operand stack, as `clear` does.
+    ///
+    /// Inside a host operator the caller's operands go the way of any other
+    /// pop: if the operator then fails, they are put back, as the
+    /// registration promises. From the host between runs, and in an
+    /// operator that succeeds, the stack is simply empty afterwards.
     pub fn clear_operands(&mut self) {
-        self.ostack.clear();
+        // Outside an operator (`op_low` is 0) nothing is recorded, so this
+        // is `clear`; inside one, each pop below the operator's own pushes
+        // goes to the operand ledger.
+        if self.op_low == 0 {
+            self.ostack.clear();
+        } else {
+            while self.pop().is_ok() {}
+        }
     }
 
     /// Pop the top operand as a [`Value`]. `stackunderflow` if the stack is

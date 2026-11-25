@@ -662,7 +662,7 @@ pub struct Interp {
     /// `op_low` and push them back: the stack is as it was before the
     /// operator ran, as in Ghostscript. Zero outside an operator, so a pop
     /// there records nothing.
-    op_low: usize,
+    pub(crate) op_low: usize,
     /// How many values the ledger holds.
     op_saved: usize,
     /// The first [`LEDGER_SLOTS`] values, as `op_tags` says: a number's

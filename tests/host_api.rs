@@ -720,3 +720,58 @@ fn a_raised_flag_stops_even_a_short_run() {
     interp.run_str("1 2 add").unwrap();
     assert_eq!(interp.pop_int().unwrap(), 3);
 }
+
+/// Finding 6: `clear_operands` in a failing operator is rolled back with
+/// the rest of its pops.
+#[test]
+fn clear_operands_in_a_failing_operator_is_rolled_back() {
+    let mut interp = Interp::new();
+    interp
+        .register_operator("wipe", |i| {
+            i.push_int(99);
+            i.clear_operands();
+            Err(PsError::Typecheck)
+        })
+        .unwrap();
+    let err = interp.run_str("(keep) 1 2 wipe").unwrap_err();
+    assert_eq!(err, PsError::Typecheck);
+    assert_eq!(interp.operand_count(), 3);
+    assert_eq!(interp.pop_int().unwrap(), 2);
+    assert_eq!(interp.pop_int().unwrap(), 1);
+    assert_eq!(interp.pop_string().unwrap(), b"keep");
+}
+
+/// Finding 6, and what an animation engine relies on: `clear_operands`
+/// still empties the stack, inside an operator that succeeds and from the
+/// host between frames, and each frame of a save/restore loop starts with
+/// an empty stack and a rolled-back VM.
+#[test]
+fn clear_operands_still_empties_the_stack_between_frames() {
+    let mut interp = Interp::new();
+    interp
+        .register_operator("reset", |i| {
+            i.clear_operands();
+            i.push_int(7);
+            Ok(())
+        })
+        .unwrap();
+    interp.run_str("1 2 3 reset").unwrap();
+    assert_eq!(interp.operand_count(), 1);
+    assert_eq!(interp.pop_int().unwrap(), 7);
+
+    interp.run_str("/n 0 def /checkpoint save def").unwrap();
+    for frame in 0..4 {
+        assert_eq!(interp.operand_count(), 0, "frame {frame} starts empty");
+        interp
+            .run_str("checkpoint restore /checkpoint save def /n n 1 add def n 10 20 30")
+            .unwrap();
+        assert_eq!(interp.operand_count(), 4);
+        // The VM was rolled back: `n` is 1 in every frame.
+        assert_eq!(interp.lookup("n").and_then(|v| v.as_i64()), Some(1));
+        if frame % 2 == 0 {
+            interp.clear_operands();
+        } else {
+            interp.run_str("reset pop").unwrap();
+        }
+    }
+}
