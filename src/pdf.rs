@@ -79,9 +79,9 @@ use crate::textrun::{GlyphText, Placement, TextRun};
 /// `pscat --pdf-text`. Only PDF output reads it: PNG and SVG are unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PdfText {
-    /// Every glyph is its outline, a filled path: no fonts in the file. The
-    /// default, and the only form before #1193.
-    #[default]
+    /// Every glyph is its outline, a filled path: no fonts in the file
+    /// (`pscat --text-as-paths`). The only form before #1193, and the
+    /// default until #1026.
     Paths,
     /// Glyphs of TrueType and OpenType faces whose licence bits allow
     /// embedding (the bundled Liberation, TeX Gyre, URW and Noto faces, the
@@ -89,6 +89,8 @@ pub enum PdfText {
     /// face, with a `/ToUnicode` map: selectable, searchable and
     /// extractable, drawn from the same outlines. Type 1 and Type 3 fonts,
     /// `charpath`, and glyphs with no Unicode name keep their outlines.
+    /// The default since #1026.
+    #[default]
     Text,
 }
 
@@ -220,6 +222,10 @@ pub struct PdfRecorder {
     /// Copies of a masked uncoloured pattern in another colour (#1340), by
     /// index and the colour's bits.
     colored_variants: HashMap<(usize, [u32; 3]), usize>,
+    /// What each open transparency group (#1406) set aside of the stream
+    /// below it, innermost last.
+    /// with the length of the `cm` its own stream starts with.
+    groups: Vec<(PdfCapture, usize)>,
 }
 
 /// An axial or radial shading's geometry, stops and `/Extend`, borrowed.
@@ -255,6 +261,9 @@ struct PdfPattern {
     /// coloured one with it. Its content sets no colour, so every mark
     /// takes the one set at its start.
     ink: Option<(f32, f32, f32)>,
+    /// A transparency group's form XObject (#1406), named `/X<i>` in an
+    /// `/XObject` resource dictionary rather than `/P<i>` in `/Pattern`.
+    group: bool,
 }
 
 /// The page state a pattern capture swapped out of the recorder
@@ -385,6 +394,7 @@ impl PdfRecorder {
             capture_frame: None,
             smask_forms: HashMap::new(),
             colored_variants: HashMap::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -428,6 +438,7 @@ impl PdfRecorder {
         PdfPattern {
             smasks: std::mem::replace(&mut self.current_smasks, saved.smasks),
             ink: None,
+            group: false,
             dict: String::new(),
             shading: None,
             content: std::mem::replace(&mut self.content, saved.content).into(),
@@ -501,6 +512,107 @@ impl PdfRecorder {
         let v = self.patterns.len() - 1;
         self.pattern_variants.insert((idx, bits), v);
         v
+    }
+
+    /// A transparency group opens (#1406): the stream and its resource
+    /// lists are set aside, as for a pattern capture, and marks go to an
+    /// empty stream in the same coordinates until [`end_group`](Self::end_group).
+    ///
+    /// The new stream starts with `to_default` as a `cm` (see
+    /// [`end_group`](Self::end_group)), written now so that closing the
+    /// group copies its content only once.
+    pub(crate) fn begin_group(&mut self, to_default: tiny_skia::Transform) {
+        self.flush_text();
+        self.close_clip();
+        let saved = PdfCapture {
+            smasks: std::mem::take(&mut self.current_smasks),
+            frame: self.capture_frame,
+            content: std::mem::take(&mut self.content),
+            open_clip: None,
+            images: std::mem::take(&mut self.current_images),
+            gstates: std::mem::take(&mut self.current_gstates),
+            shadings: std::mem::take(&mut self.current_shadings),
+            shading_set: std::mem::take(&mut self.current_shading_set),
+            fonts: std::mem::take(&mut self.current_fonts),
+            patterns: std::mem::take(&mut self.current_patterns),
+            pattern_cs: std::mem::take(&mut self.current_pattern_cs),
+            uncolored: self.uncolored,
+        };
+        let _ = writeln!(self.content, "{} cm", matrix_text(to_default));
+        self.groups.push((saved, self.content.len()));
+    }
+
+    /// The group closes: what it recorded becomes a form XObject with an
+    /// isolated transparency group (`/I true`, as the raster's layer starts
+    /// transparent), painted in the stream below with the group's alpha and
+    /// blend. An empty group writes nothing.
+    ///
+    /// The form's space is the stream's *default* space, not the canvas
+    /// coordinates the marks are written in: `to_default` maps the canvas
+    /// (`width` x `height`) to it (the page's y-up points, or a pattern
+    /// capture's pattern space), the form's content starts with it as a
+    /// `cm`, and the `Do` undoes it first. A pattern's `/Matrix` maps to the
+    /// default space of the stream that paints with it, which inside a form
+    /// is the form's space (PDF 32000-1, 8.7.2): so a pattern painted in a
+    /// group is placed exactly as on the page.
+    ///
+    /// Storing the content copies it once (into the form's shared `str`),
+    /// asked of `probe`'s memory cap first: a refusal drops the group's
+    /// marks from the PDF and is `MemoryExceeded`, the stream below intact.
+    pub(crate) fn end_group(
+        &mut self,
+        comp: Composite,
+        to_default: tiny_skia::Transform,
+        width: u32,
+        height: u32,
+        probe: &LimitProbe,
+    ) -> Result<(), crate::PsError> {
+        let Some((saved, prefix)) = self.groups.pop() else {
+            return Ok(());
+        };
+        self.flush_text();
+        self.close_clip();
+        let empty = self.content.len() <= prefix;
+        let refused = probe.check_alloc(self.content.len());
+        let back = to_default.invert();
+        if empty || refused.is_err() || back.is_none() {
+            // Nothing to keep: drop it before the copy, not after.
+            self.content = String::new();
+        }
+        let form = self.restore_capture(saved);
+        refused?;
+        let (mut form, Some(back)) = (form, back) else {
+            return Ok(());
+        };
+        if empty {
+            return Ok(());
+        }
+        let mut corners = [
+            tiny_skia::Point::from_xy(0.0, 0.0),
+            tiny_skia::Point::from_xy(width as f32, 0.0),
+            tiny_skia::Point::from_xy(0.0, height as f32),
+            tiny_skia::Point::from_xy(width as f32, height as f32),
+        ];
+        to_default.map_points(&mut corners);
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for c in corners {
+            (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+        }
+        form.group = true;
+        form.dict = format!(
+            "/Type /XObject /Subtype /Form /BBox [{} {} {} {}] \
+             /Group << /Type /Group /S /Transparency /I true /CS /DeviceRGB >>",
+            p(x0),
+            p(y0),
+            p(x1),
+            p(y1),
+        );
+        self.patterns.push(form);
+        let idx = self.patterns.len() - 1;
+        self.current_patterns.push(idx);
+        let gs = self.gs_ref(comp);
+        let _ = writeln!(self.content, "q {} cm {gs}/X{idx} Do Q", matrix_text(back));
+        Ok(())
     }
 
     /// The pattern's `PaintProc` was unwound: put the page state back and
@@ -657,6 +769,7 @@ impl PdfRecorder {
                     pattern_cs: pcs,
                     smasks: Vec::new(),
                     ink: None,
+                    group: false,
                 });
                 let i = self.patterns.len() - 1;
                 self.smask_forms.insert(key, i);
@@ -751,6 +864,7 @@ impl PdfRecorder {
             pattern_cs: false,
             smasks: Vec::new(),
             ink: None,
+            group: false,
         });
         Some(self.patterns.len() - 1)
     }
@@ -1012,40 +1126,47 @@ impl PdfRecorder {
     }
 
     /// One glyph as text (#1193): continue the open run, or write it and
-    /// open a new one. `false` when the glyph cannot be embedded (its
+    /// open a new one. `Ok(None)` when the glyph cannot be embedded (its
     /// outline does not fit a Type 2 charstring, or the parser panics on
     /// it): the caller then records its outline instead. A glyph with no
     /// placement (a collapsed font matrix) paints nothing in the raster
     /// either, so it is dropped and counts as taken.
+    ///
+    /// `Some(bytes)`: taken, with `bytes` of new charstring stored for it
+    /// (0 for a glyph seen before), which the caller charges as work
+    /// (#1026). `built` is the charstring the show engine made from its
+    /// own outline walk when [`would_build`](Self::would_build) said one
+    /// was needed; the recorder never walks an outline itself.
     pub(crate) fn glyph(
         &mut self,
         g: &GlyphText,
+        built: crate::pdf_font::Built,
         rgb: (f32, f32, f32),
         comp: Composite,
         chain: &Chain,
-    ) -> bool {
+    ) -> Option<usize> {
         let Some(p) = Placement::of(g) else {
-            return true;
+            return Some(0);
         };
-        let Some(face) = crate::font::pdf_face(g.fid) else {
-            return false;
-        };
+        let face = crate::font::pdf_face(g.fid)?;
+        let known = self.font_ids.get(&g.fid).copied();
         // A font joins the document with its first embeddable glyph, so a
         // face whose every glyph is refused writes no font objects.
-        let (font, cid) = match self.font_ids.get(&g.fid) {
-            Some(&i) => match self.fonts[i].1.cid(face, g.gid, g.ch, g.advance) {
-                Some(cid) => (i, cid),
-                None => return false,
-            },
+        let (font, cid, built) = match known {
+            Some(i) => {
+                let used = &mut self.fonts[i].1;
+                let fresh = used.would_build(g.gid, g.ch);
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
+                (i, cid, if fresh { used.charstring_len(g.gid) } else { 0 })
+            }
             None => {
                 let mut used = UsedGlyphs::new(face);
-                let Some(cid) = used.cid(face, g.gid, g.ch, g.advance) else {
-                    return false;
-                };
+                let cid = used.cid(g.gid, g.ch, g.advance, built)?;
+                let built = used.charstring_len(g.gid);
                 let i = self.fonts.len();
                 self.fonts.push((g.fid, used));
                 self.font_ids.insert(g.fid, i);
-                (i, cid)
+                (i, cid, built)
             }
         };
         if let Some(run) = &mut self.run
@@ -1054,7 +1175,7 @@ impl PdfRecorder {
             run.text.push(g, &p);
             run.widths.push(g.advance);
             run.cids.push(cid);
-            return true;
+            return Some(built);
         }
         self.flush_text();
         let gs = self.gs_ref(comp);
@@ -1072,7 +1193,19 @@ impl PdfRecorder {
             widths: vec![g.advance],
             cids: vec![cid],
         });
-        true
+        Some(built)
+    }
+
+    /// Whether [`glyph`](Self::glyph) needs a new charstring for glyph
+    /// `gid` of face `fid` shown as `ch` (the face has no font here yet, or
+    /// the font has not seen the glyph). The show engine then asks the
+    /// memory limit for
+    /// [`CHARSTRING_BUDGET`](crate::pdf_font::CHARSTRING_BUDGET) and
+    /// builds it from the walk that draws the glyph (#1026).
+    pub(crate) fn would_build(&self, fid: i64, gid: u16, ch: char) -> bool {
+        self.font_ids
+            .get(&fid)
+            .is_none_or(|&i| self.fonts[i].1.would_build(gid, ch))
     }
 
     /// Write the open text run into the content.
@@ -1741,6 +1874,7 @@ Q",
         self.current_shading_set.clear();
         self.current_patterns.clear();
         self.current_pattern_cs = false;
+        self.groups.clear();
     }
 
     /// The page size from now on (`setpagedevice`, #909); finished pages
@@ -2015,13 +2149,17 @@ Q",
             // glyphs were built as they were shown.
             let first = font_base + i * OBJECTS_PER_FONT;
             debug_assert_eq!(first, out.objects() + 1);
-            let objs = crate::pdf_font::font_objects(
+            let objs = match crate::pdf_font::font_objects(
                 face.as_ref().map(|(f, _)| *f),
                 face.as_ref().map_or("Font", |(_, n)| n.as_str()),
                 i,
                 used,
                 first,
-            );
+                out.probe,
+            ) {
+                Ok(objs) => objs,
+                Err(e) => return out.fail(e),
+            };
             for obj in &objs {
                 out.begin_obj();
                 out.bytes(obj);
@@ -2179,6 +2317,14 @@ fn resource_parts(
     let xobjects: Vec<String> = images
         .iter()
         .map(|&idx| format!("/Im{idx} {} 0 R", b.image + idx))
+        // Transparency groups' forms (#1406) are XObjects too: one
+        // `/XObject` dictionary holds both.
+        .chain(
+            patterns
+                .iter()
+                .filter(|&&idx| rec.patterns[idx].group)
+                .map(|&idx| format!("/X{idx} {} 0 R", b.pattern + idx)),
+        )
         .collect();
     // ExtGStates are written inline in the page's own
     // /Resources rather than as indirect objects: they're a
@@ -2217,11 +2363,12 @@ fn resource_parts(
             .collect();
         let _ = write!(parts, " /Font << {} >>", list.join(" "));
     }
-    if !patterns.is_empty() {
-        let list: Vec<String> = patterns
-            .iter()
-            .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
-            .collect();
+    let list: Vec<String> = patterns
+        .iter()
+        .filter(|&&idx| !rec.patterns[idx].group)
+        .map(|&idx| format!("/P{idx} {} 0 R", b.pattern + idx))
+        .collect();
+    if !list.is_empty() {
         let _ = write!(parts, " /Pattern << {} >>", list.join(" "));
     }
     if pattern_cs {
@@ -2259,7 +2406,7 @@ impl std::fmt::Display for MemoryLimit {
 
 impl std::error::Error for MemoryLimit {}
 
-fn memory_refused() -> io::Error {
+pub(crate) fn memory_refused() -> io::Error {
     io::Error::new(io::ErrorKind::OutOfMemory, MemoryLimit)
 }
 
@@ -2473,6 +2620,12 @@ fn matrix_text(t: tiny_skia::Transform) -> String {
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
 pub(crate) fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     deflate_budgeted(parts, LimitProbe::NONE).ok()
+}
+
+/// [`deflate`] under the writer's memory cap (`probe`): the font streams
+/// (#1026).
+pub(crate) fn deflate_limited(parts: &[&[u8]], probe: LimitProbe) -> io::Result<Vec<u8>> {
+    deflate_budgeted(parts, probe)
 }
 
 /// The ramp `stops` (positions 0 to 1) as a function over `[lo, hi]` (`lo`

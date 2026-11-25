@@ -1469,7 +1469,85 @@ pub struct Gfx {
     captures: Vec<crate::pattern::Capture>,
     /// Ids for captures and the tiles they make; 0 is the page.
     next_capture: usize,
+    /// Transparency groups open now (#1406), innermost last.
+    groups: Vec<Group>,
+    /// The time and memory limits for a group that ends with no operator
+    /// to charge it (a page boundary, a `restore`, the end of a program):
+    /// its composite looks at them as it goes. Set by the interpreter.
+    group_probe: crate::limits::LimitProbe,
+    /// The work of those group ends, which the interpreter takes as steps
+    /// when it next looks at its limits ([`take_group_work`](Gfx::take_group_work)).
+    group_work: u64,
 }
+
+/// Most transparency groups open at once (#1406), as for pattern captures.
+const MAX_GROUP_DEPTH: usize = 64;
+
+/// Most layer pixels the open groups hold together (#1406): 1 GiB of
+/// RGBA, so deep nesting on a large page is refused without `--max-memory`.
+const MAX_GROUP_PIXELS: u64 = 1 << 28;
+
+/// An open transparency group (#1406, `begingroup`): its marks go to a
+/// transparent layer of the canvas's size, composited at `endgroup`.
+struct Group {
+    /// The canvas and 16-bit shadow the layer replaced; `None` for a group
+    /// opened while nothing paints (`nulldevice`, a metrics-only glyph),
+    /// which keeps only its graphics-state level.
+    below: Option<(Pixmap, crate::deep::Deep)>,
+    /// How the layer composites onto the canvas below.
+    comp: Composite,
+    /// The gsave depth the group's content starts at: `grestore` there
+    /// gives back `state` without popping, as at a `save` (#505).
+    depth: usize,
+    state: Box<GraphicsState>,
+    /// The pattern captures open when it began: only `endgroup` at that
+    /// level may close it.
+    captures: usize,
+    /// The SVG and PDF recorders were told about it.
+    recorded: bool,
+}
+
+/// Composite one row of a group's layer (`src`) onto the same row of the
+/// canvas below (`dst`), both premultiplied RGBA, at group alpha `g` (0..1,
+/// above 0), in f32 with tiny-skia's source-over and Multiply formulas,
+/// rounded to 8 bits. Pixels the layer left transparent are skipped. The
+/// path for a canvas without a 16-bit shadow ([`crate::deep::Deep::composite_layer`]
+/// is the other).
+fn composite_row8(dst: &mut [u8], src: &[u8], g: f32, blend: BlendMode) {
+    for (s, d) in src
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(dst.as_chunks_mut::<4>().0)
+    {
+        if s[3] == 0 {
+            continue;
+        }
+        if g >= 1.0 && s[3] == 255 && blend == BlendMode::Normal {
+            d.copy_from_slice(s);
+            continue;
+        }
+        let sv = |i: usize| f32::from(s[i]) / 255.0 * g;
+        let old = [d[0], d[1], d[2], d[3]];
+        let dv = |i: usize| f32::from(old[i]) / 255.0;
+        let (sa, da) = (sv(3), dv(3));
+        let out_a = sa + da * (1.0 - sa);
+        let a8 = (out_a.clamp(0.0, 1.0) * 255.0).round() as u8;
+        for (i, out) in d.iter_mut().take(3).enumerate() {
+            let (sc, dc) = (sv(i), dv(i));
+            let o = match blend {
+                BlendMode::Normal => sc + dc * (1.0 - sa),
+                BlendMode::Multiply => sc * (1.0 - da) + dc * (1.0 - sa) + sc * dc,
+            };
+            // Premultiplied: a channel never above the alpha.
+            *out = ((o.clamp(0.0, 1.0) * 255.0).round() as u8).min(a8);
+        }
+        d[3] = a8;
+    }
+}
+
+/// Rows of a group's layer composited between looks at the limits (#1406).
+const GROUP_POLL_ROWS: usize = 64;
 
 /// Segments `arc`/`arcn` add between looks at the limits (#1176).
 const ARC_POLL: usize = 4096;
@@ -1612,13 +1690,16 @@ impl Gfx {
             svg: None,
             svg_text: crate::svg::SvgText::Paths,
             pdf: None,
-            pdf_text: crate::pdf::PdfText::Paths,
+            pdf_text: crate::pdf::PdfText::default(),
             suppress_paint: 0,
             coverage: None,
             deep: crate::deep::Deep::default(),
             band: None,
             captures: Vec::new(),
             next_capture: 0,
+            groups: Vec::new(),
+            group_probe: crate::limits::LimitProbe::NONE,
+            group_work: 0,
         })
     }
 
@@ -1798,8 +1879,9 @@ impl Gfx {
         &mut self,
         device: std::rc::Rc<PageDevice>,
     ) -> Result<(), PsError> {
-        if !self.captures.is_empty() {
-            // `setpagedevice` in a pattern's PaintProc (#1038).
+        if !self.captures.is_empty() || !self.groups.is_empty() {
+            // `setpagedevice` in a pattern's PaintProc (#1038), or in a
+            // transparency group, whose layer is the page's size (#1406).
             return Err(PsError::InvalidAccess);
         }
         let (w, h) = device.px;
@@ -2333,6 +2415,13 @@ impl Gfx {
     /// Every painting entry point calls this first: consume a pending
     /// showpage erase and note that the new page has art on it.
     pub(crate) fn prepare_paint(&mut self) {
+        self.consume_pending_erase();
+        self.painted_since_page = true;
+    }
+
+    /// Do a pending showpage erase now, without marking the page painted:
+    /// `begingroup` (#1406) does it before swapping the canvas for a layer.
+    fn consume_pending_erase(&mut self) {
         if self.pending_erase {
             self.pending_erase = false;
             self.pixmap.fill(self.background);
@@ -2345,7 +2434,6 @@ impl Gfx {
             }
             self.dirty = true;
         }
-        self.painted_since_page = true;
     }
 
     /// Paint `path` (device space) with the current paint and clip,
@@ -3755,6 +3843,7 @@ impl Gfx {
         if self.painting_off() || !self.captures.is_empty() {
             return;
         }
+        self.end_page_groups();
         self.pending_erase = false;
         self.painted_since_page = true;
         self.pixmap.fill(self.background);
@@ -3779,6 +3868,7 @@ impl Gfx {
         if self.state.null_device || !self.captures.is_empty() {
             return;
         }
+        self.end_page_groups();
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
         if let Some(svg) = &mut self.svg {
@@ -3797,6 +3887,7 @@ impl Gfx {
         if self.state.null_device || !self.captures.is_empty() {
             return;
         }
+        self.end_page_groups();
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
         if let Some(svg) = &mut self.svg {
@@ -3963,6 +4054,18 @@ impl Gfx {
         self.pdf_text == crate::pdf::PdfText::Text && self.pdf_wanted() && self.text_ink()
     }
 
+    /// Whether the PDF recorder needs a new embedded charstring for `g`
+    /// (#1026): PDF text is on, `g` is eligible, and its font has not seen
+    /// the glyph. The show engine then builds one from its outline walk.
+    pub(crate) fn pdf_would_build(&self, g: &crate::textrun::GlyphText) -> bool {
+        self.pdf_text_wanted()
+            && crate::textrun::pdf_eligible(g)
+            && self
+                .pdf
+                .as_ref()
+                .is_some_and(|p| p.would_build(g.fid, g.gid, g.ch))
+    }
+
     pub(crate) fn pdf_wanted(&self) -> bool {
         self.pdf.is_some() && !self.painting_off()
     }
@@ -4115,6 +4218,15 @@ impl Gfx {
     /// `grestore` there ends in a fresh `gsave`), even though the `save`'s
     /// snapshot holds the entries made before it.
     pub(crate) fn grestore_at(&mut self, save_boundary: Option<(usize, &GraphicsState)>) {
+        // An open transparency group is a boundary too (#1406).
+        if let Some(g) = self.group_boundary(save_boundary.map(|b| b.0))
+            && self.saved.len() <= g.depth
+        {
+            self.state = (*g.state).clone();
+            self.state.clip_stack.clear();
+            self.sync_device();
+            return;
+        }
         match save_boundary {
             Some((depth, state)) if self.saved.len() <= depth => {
                 self.state = state.clone();
@@ -4131,6 +4243,28 @@ impl Gfx {
     /// `grestoreall` with no save active: pop everything and come back to
     /// the job's initial state, as gs does (#505), not to the oldest
     /// `gsave`'s copy.
+    /// The innermost transparency group open at this level (#1406), if it
+    /// began after the innermost `save` (at gsave depth `save_depth`): its
+    /// level and starting state, which `grestore` and `grestoreall` stop at.
+    fn group_boundary(&self, save_depth: Option<usize>) -> Option<&Group> {
+        let g = self.groups.last()?;
+        (g.captures == self.captures.len() && save_depth.is_none_or(|d| g.depth > d)).then_some(g)
+    }
+
+    /// `grestoreall` inside a transparency group that began after the
+    /// innermost `save` (#1406): back to the group's starting state, the
+    /// group's level kept. False, doing nothing, outside one.
+    pub(crate) fn grestore_all_in_group(&mut self, save_depth: Option<usize>) -> bool {
+        let Some(g) = self.group_boundary(save_depth) else {
+            return false;
+        };
+        let (depth, state) = (g.depth, (*g.state).clone());
+        self.saved.truncate(depth);
+        self.state = state;
+        self.sync_device();
+        true
+    }
+
     pub(crate) fn grestore_all_bottom(&mut self) {
         self.saved.clear();
         self.state = self.job_initial_state();
@@ -4338,10 +4472,15 @@ impl Gfx {
     /// get the character or the outline; the raster always gets the
     /// outline. `path` may be empty (a space), which paints nothing but
     /// still places a character in the text.
+    ///
+    /// `built` is the embedded charstring the show engine made for a glyph
+    /// the PDF font did not hold yet ([`pdf_would_build`](Self::pdf_would_build)),
+    /// from the same outline walk as `path` (#1026).
     pub(crate) fn paint_glyph(
         &mut self,
         path: &PsPath,
         text: Option<&crate::textrun::GlyphText>,
+        built: crate::pdf_font::Built,
         probe: &crate::limits::LimitProbe,
         work: &mut u64,
     ) -> Result<(), PsError> {
@@ -4382,12 +4521,20 @@ impl Gfx {
         }
         if let Some(pdf) = &mut self.pdf {
             match pdf_text {
-                // A glyph the font writer refuses keeps its outline.
-                Some(g) => {
-                    if !pdf.glyph(g, rgb, comp, &chain) && skia.is_some() {
+                // A glyph the font writer refuses keeps its outline. A new
+                // glyph's charstring is charged as work, a step per KiB or
+                // part of one (#1026): whole KiB, so the show's per-glyph
+                // rounding down never drops it.
+                Some(g) => match pdf.glyph(g, built, rgb, comp, &chain) {
+                    Some(built) => {
+                        let kib = built.div_ceil(1024) as u64;
+                        *work = work.saturating_add(kib.saturating_mul(1024));
+                    }
+                    None if skia.is_some() => {
                         pdf.fill(path, FillRule::Winding, &ink, comp, &chain);
                     }
-                }
+                    None => {}
+                },
                 None if skia.is_some() => pdf.fill(path, FillRule::Winding, &ink, comp, &chain),
                 None => {}
             }
@@ -4424,6 +4571,15 @@ impl Gfx {
     }
 
     pub(crate) fn restore_glyph_snapshot(&mut self, depth: usize, state: Box<GraphicsState>) {
+        // A `restore`, or the end of a glyph, unwinds past a group opened
+        // since: it ends there (#1406), its marks kept.
+        while self
+            .groups
+            .last()
+            .is_some_and(|g| g.depth > depth && g.captures == self.captures.len())
+        {
+            self.finish_group_uncharged(false);
+        }
         self.saved.truncate(depth);
         self.state = *state;
         self.sync_device();
@@ -4588,6 +4744,12 @@ impl Gfx {
         Pixmap,
         Option<Box<crate::svg::SvgRecorder>>,
     ) {
+        // Groups the `PaintProc` left open end on its canvas, before that
+        // canvas is swapped back out (#1406).
+        let level = self.captures.len();
+        while self.groups.last().is_some_and(|g| g.captures == level) {
+            self.finish_group_uncharged(false);
+        }
         let mut cap = self.captures.pop().expect("a pattern capture is open");
         let content = std::mem::replace(
             &mut self.pixmap,
@@ -4817,8 +4979,295 @@ impl Gfx {
 
     /// The page canvas, even while a pattern's tile is being captured
     /// into `pixmap` (#1038): what a live view should show.
+    /// And while a transparency group draws into its layer (#1406): the
+    /// page as it stands below the open groups.
     pub fn page_pixmap(&self) -> &Pixmap {
-        self.captures.first().map_or(&self.pixmap, |c| &c.page)
+        // A group opened at the page's level came before every capture
+        // open now, so the canvas it swapped out is the page.
+        let group = self
+            .groups
+            .iter()
+            .filter(|g| g.captures == 0)
+            .find_map(|g| g.below.as_ref().map(|b| &b.0));
+        group.unwrap_or_else(|| self.captures.first().map_or(&self.pixmap, |c| &c.page))
+    }
+
+    // --- transparency groups (#1406) ----------------------------------------
+
+    /// `begingroup`: from here to [`end_group`](Self::end_group) marks go to
+    /// a transparent layer of the canvas's size, which then composites
+    /// onto the canvas with `currentalpha x alpha` and `blend` (the current
+    /// blend mode when `None`), as a PDF transparency group XObject paints
+    /// with the alpha and blend mode at its `Do`. The group is a `gsave`
+    /// level whose content starts at alpha 1 and Normal, as a PDF group's
+    /// does (PDF 32000-1, 11.6.6). Isolated, not knockout.
+    ///
+    /// The layer is asked of `--max-memory` and its pixels held against the
+    /// step limit (`probe`) before it is made; the work is returned for the
+    /// operator to charge. While nothing paints (`nulldevice`, a
+    /// metrics-only glyph) no layer is made, and the group is only a level.
+    pub(crate) fn begin_group(
+        &mut self,
+        alpha: Option<f32>,
+        blend: Option<BlendMode>,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        if self.groups.len() >= MAX_GROUP_DEPTH {
+            return Err(PsError::Limitcheck);
+        }
+        // A NaN alpha paints nothing, as `setalpha` with NaN does; so it is
+        // 0 for every output.
+        let a = self.state.alpha * alpha.unwrap_or(1.0);
+        let comp = Composite {
+            alpha: if a.is_nan() { 0.0 } else { a.clamp(0.0, 1.0) },
+            blend: blend.unwrap_or(self.state.blend),
+        };
+        let live = !self.painting_off();
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        let pixels = if live { u64::from(w) * u64::from(h) } else { 0 };
+        let mut below = None;
+        if live {
+            let open: u64 = self
+                .groups
+                .iter()
+                .filter_map(|g| g.below.as_ref())
+                .map(|b| u64::from(b.0.width()) * u64::from(b.0.height()))
+                .sum();
+            if open.saturating_add(pixels) > MAX_GROUP_PIXELS {
+                return Err(PsError::Limitcheck);
+            }
+            probe.check(pixels / 1024)?;
+            self.budget_allows(pixels as usize * 4)?;
+            let layer = Pixmap::new(w, h).ok_or(PsError::Limitcheck)?;
+            // The layer goes over the new page, not the shown one.
+            self.consume_pending_erase();
+            let page = std::mem::replace(&mut self.pixmap, layer);
+            below = Some((page, std::mem::take(&mut self.deep)));
+        }
+        let recorded = live && (self.svg.is_some() || self.pdf.is_some());
+        if recorded {
+            let to_default = self.pattern_default_space();
+            if let Some(svg) = &mut self.svg {
+                svg.begin_group();
+            }
+            if let Some(pdf) = &mut self.pdf {
+                pdf.begin_group(to_default);
+            }
+        }
+        self.gsave();
+        self.state.alpha = 1.0;
+        self.state.blend = BlendMode::Normal;
+        self.groups.push(Group {
+            below,
+            comp,
+            depth: self.saved.len(),
+            state: Box::new(self.state.clone()),
+            captures: self.captures.len(),
+            recorded,
+        });
+        Ok(pixels)
+    }
+
+    /// `endgroup`: composite the innermost group opened at this level (the
+    /// page, or the pattern `PaintProc` running) and come back to the
+    /// graphics state `begingroup` had. With none open here it does
+    /// nothing, as `grestore` with nothing saved does. Returns the work, for
+    /// the operator to charge, and a limit `probe` met while compositing:
+    /// the group is closed either way (what was composited stays).
+    pub(crate) fn end_group(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
+        match self.groups.last() {
+            Some(g) if g.captures == self.captures.len() => self.finish_group(true, probe),
+            _ => (0, Ok(())),
+        }
+    }
+
+    /// Close the innermost group where no operator charges the work: it
+    /// goes to [`take_group_work`](Self::take_group_work), and the
+    /// composite looks at the time and memory limits as it goes. A limit
+    /// met here stops the composite (the group still closes); the
+    /// interpreter's next look at its limits raises it.
+    fn finish_group_uncharged(&mut self, restore: bool) {
+        let probe = self.group_probe;
+        let (work, _) = self.finish_group(restore, &probe);
+        self.group_work = self.group_work.saturating_add(work);
+    }
+
+    /// The limits for a group closed with no operator to charge it: time and
+    /// memory only (the steps are taken afterwards, from
+    /// [`take_group_work`](Self::take_group_work)).
+    pub(crate) fn set_group_probe(&mut self, probe: crate::limits::LimitProbe) {
+        self.group_probe = crate::limits::LimitProbe {
+            steps_left: None,
+            ..probe
+        };
+    }
+
+    /// The work of the group closes since the last call, in steps (a step
+    /// per 1024 pixels), for the interpreter to count.
+    pub(crate) fn take_group_work(&mut self) -> u64 {
+        let w = self.group_work / 1024;
+        self.group_work %= 1024;
+        w
+    }
+
+    /// End every group open at the page's level, innermost first: a page
+    /// boundary (`showpage`, `copypage`, `erasepage`) or the end of the
+    /// job, so no group's marks are lost (#1406).
+    fn end_page_groups(&mut self) {
+        while self.groups.last().is_some_and(|g| g.captures == 0) {
+            self.finish_group_uncharged(true);
+        }
+    }
+
+    /// End every group still open (#1406): the program is over. The
+    /// interpreter calls it when a program finishes, fails, quits or is
+    /// stopped by a limit, so the canvas is the page again and every output
+    /// holds the groups' marks. After a time limit has fired the composites
+    /// stop at once and the layers are dropped: the state is whole, and the
+    /// run ends with the marks it had composited.
+    pub(crate) fn end_open_groups(&mut self) {
+        while self
+            .groups
+            .last()
+            .is_some_and(|g| g.captures == self.captures.len())
+        {
+            self.finish_group_uncharged(true);
+        }
+    }
+
+    /// Close the innermost group: the recorders wrap what it recorded, the
+    /// layer composites onto the canvas below, which comes back. With
+    /// `restore`, the graphics state comes back to the one before
+    /// `begingroup`; without, the caller is unwinding the state itself.
+    /// Returns the work and the first limit met (`probe` while compositing,
+    /// or the PDF recorder's memory check); whatever it meets, the group is
+    /// closed and the canvas is the one below.
+    fn finish_group(
+        &mut self,
+        restore: bool,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
+        let Some(g) = self.groups.pop() else {
+            return (0, Ok(()));
+        };
+        let mut outcome = Ok(());
+        if g.recorded {
+            let (w, h) = (self.pixmap.width(), self.pixmap.height());
+            let to_default = self.pattern_default_space();
+            let memory = crate::limits::LimitProbe::memory_only(self.mem_budget);
+            if let Some(svg) = &mut self.svg {
+                svg.end_group(g.comp);
+            }
+            if let Some(pdf) = &mut self.pdf
+                && let Err(e) = pdf.end_group(g.comp, to_default, w, h, &memory)
+            {
+                // The run stops at the interpreter's next look at its limits.
+                self.mem_refused = true;
+                outcome = Err(e);
+            }
+        }
+        let mut work = 0;
+        if let Some((page, deep)) = g.below {
+            let layer = std::mem::replace(&mut self.pixmap, page);
+            let layer_deep = std::mem::replace(&mut self.deep, deep);
+            let (w, r) = self.composite_layer(&layer, &layer_deep, g.comp, probe);
+            work = w;
+            if outcome.is_ok() {
+                outcome = r;
+            }
+            self.dirty = true;
+        }
+        if restore && self.saved.len() >= g.depth {
+            self.saved.truncate(g.depth);
+            self.grestore();
+        }
+        (work, outcome)
+    }
+
+    /// Composite a closed group's `layer` (and its 16-bit shadow) onto the
+    /// canvas with `comp`. Only rows the layer painted, and under `--bands`
+    /// only the band's rows. Through the canvas's 16-bit shadow, as a fill
+    /// composites (#731), where the shadow may be used and its new rows fit
+    /// the memory limit; else at 8 bits. Looks at `probe` every
+    /// [`GROUP_POLL_ROWS`] rows, with the work so far as steps, and stops
+    /// at a limit, leaving the rows done composited. Returns the work: the
+    /// pixels scanned and composited.
+    fn composite_layer(
+        &mut self,
+        layer: &Pixmap,
+        layer_deep: &crate::deep::Deep,
+        comp: Composite,
+        probe: &crate::limits::LimitProbe,
+    ) -> (u64, Result<(), PsError>) {
+        let g = if comp.alpha.is_nan() {
+            0.0
+        } else {
+            comp.alpha.clamp(0.0, 1.0)
+        };
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if g <= 0.0 || (layer.width(), layer.height()) != (w, h) {
+            return (0, Ok(()));
+        }
+        let (y0, y1) = self.band_rows().unwrap_or((0, h));
+        let (y0, y1) = (y0 as usize, (y1 as usize).min(h as usize));
+        let stride = w as usize * 4;
+        // A row the group painted: some pixel not transparent, at 8 bits or
+        // (faint marks) in its shadow.
+        let painted: Vec<usize> = (y0..y1)
+            .filter(|&y| {
+                layer.data()[y * stride..(y + 1) * stride]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[3] != 0)
+                    || layer_deep
+                        .row(layer, y)
+                        .is_some_and(|r| r.as_chunks::<4>().0.iter().any(|p| p[3] != 0))
+            })
+            .collect();
+        let mut work = ((y1.saturating_sub(y0)) * w as usize) as u64;
+        let max_memory = self.mem_budget.map(|(_, max)| max);
+        let deep = self.captures.is_empty()
+            && crate::deep::Deep::allowed(w, h, max_memory)
+            && probe
+                .check_alloc(self.deep.new_bytes(
+                    w,
+                    h,
+                    false,
+                    painted.iter().map(|&y| (y as u32, y as u32 + 1)),
+                ))
+                .is_ok();
+        let multiply = comp.blend == BlendMode::Multiply;
+        for (i, &y) in painted.iter().enumerate() {
+            if i % GROUP_POLL_ROWS == 0
+                && let Err(e) = probe.check(work / 1024)
+            {
+                return (work, Err(e));
+            }
+            let src = &layer.data()[y * stride..(y + 1) * stride];
+            if deep {
+                self.deep.composite_layer(
+                    &mut self.pixmap,
+                    y,
+                    src,
+                    layer_deep.row(layer, y),
+                    g,
+                    multiply,
+                );
+            } else {
+                composite_row8(
+                    &mut self.pixmap.data_mut()[y * stride..(y + 1) * stride],
+                    src,
+                    g,
+                    comp.blend,
+                );
+            }
+            work = work.saturating_add(w as u64);
+        }
+        (work, Ok(()))
     }
 
     /// True while marking operators must leave page and recorders alone:

@@ -201,6 +201,102 @@ impl Deep {
         }
     }
 
+    /// Row `y` of the shadow, if `pixmap`-sized and allocated: what a
+    /// transparency group's layer (#1406) holds at 16 bits.
+    pub(crate) fn row(&self, pixmap: &Pixmap, y: usize) -> Option<&[u16]> {
+        let fits =
+            self.width == pixmap.width() as usize && self.rows.len() == pixmap.height() as usize;
+        self.rows
+            .get(y)
+            .filter(|r| fits && r.len() == self.width * 4)
+            .map(Vec::as_slice)
+    }
+
+    /// Composite row `y` of a transparency group's layer (#1406) into row
+    /// `y` of `pixmap` and this shadow, at group alpha `g`, source-over or
+    /// (`multiply`) Multiply, in f32. The source is the layer's own shadow
+    /// (`layer16`) where it still agrees with the layer's 8-bit pixel, so a
+    /// stack of faint marks inside the group keeps its precision; the
+    /// destination is this shadow where it agrees with the page. Like a
+    /// fill's composite, each result is written at 16 bits and rounded to
+    /// the page, so a stack of faint groups reaches the colour the
+    /// arithmetic gives rather than stalling at 8 bits.
+    pub(crate) fn composite_layer(
+        &mut self,
+        pixmap: &mut Pixmap,
+        y: usize,
+        layer8: &[u8],
+        layer16: Option<&[u16]>,
+        g: f32,
+        multiply: bool,
+    ) {
+        self.fit(pixmap);
+        let w = self.width;
+        if y >= self.rows.len() || layer8.len() != w * 4 {
+            return;
+        }
+        let row = &mut self.rows[y];
+        if row.is_empty() {
+            row.resize(w * 4, 0);
+        }
+        let page = &mut pixmap.data_mut()[y * w * 4..(y + 1) * w * 4];
+        let fresh = |d16: &[u16; 4], p8: &[u8; 4]| {
+            (0..4).all(|c| (i32::from(d16[c]) - i32::from(p8[c]) * 257).abs() <= BUCKET)
+        };
+        let layer16 = layer16.filter(|l| l.len() == w * 4);
+        for (x, (d16, p8)) in row
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(page.as_chunks_mut::<4>().0.iter_mut())
+            .enumerate()
+        {
+            let l8: [u8; 4] = [
+                layer8[x * 4],
+                layer8[x * 4 + 1],
+                layer8[x * 4 + 2],
+                layer8[x * 4 + 3],
+            ];
+            let s: [f32; 4] = match layer16 {
+                Some(l) => {
+                    let l16 = [l[x * 4], l[x * 4 + 1], l[x * 4 + 2], l[x * 4 + 3]];
+                    if fresh(&l16, &l8) {
+                        l16.map(|v| f32::from(v) * FROM_U16 * g)
+                    } else {
+                        l8.map(|v| f32::from(v) * FROM_U8 * g)
+                    }
+                }
+                None => l8.map(|v| f32::from(v) * FROM_U8 * g),
+            };
+            let sa = s[3];
+            if sa <= 0.0 {
+                continue;
+            }
+            let d: [f32; 4] = if fresh(d16, p8) {
+                d16.map(|v| f32::from(v) * FROM_U16)
+            } else {
+                p8.map(|v| f32::from(v) * FROM_U8)
+            };
+            let da = d[3];
+            let out_a = sa + da * (1.0 - sa);
+            let a16 = (out_a.clamp(0.0, 1.0) * 65535.0).round() as u32;
+            for c in 0..4 {
+                let v = if c == 3 {
+                    a16
+                } else {
+                    let o = if multiply {
+                        s[c] * (1.0 - da) + d[c] * (1.0 - sa) + s[c] * d[c]
+                    } else {
+                        s[c] + d[c] * (1.0 - sa)
+                    };
+                    ((o.clamp(0.0, 1.0) * 65535.0).round() as u32).min(a16)
+                };
+                d16[c] = v as u16;
+                p8[c] = ((v + 128) / 257) as u8;
+            }
+        }
+    }
+
     /// Composite `src` into pixels `x0..x1` of row `y`, each with coverage
     /// `cov[x - x0]` out of 255 (`None`: full coverage), into both the
     /// shadow and `pixmap`.

@@ -841,6 +841,16 @@ renders eight examples in both and compares block-downsampled output).
   PDF's `ExtGState /BM`, and an exhaustive match on a local enum is
   what makes adding a third mode fail to compile until all three
   exporters learn about it.
+- `begingroup`/`endgroup` (#1406) are pscat transparency groups: `dict
+  begingroup` swaps the canvas (and the 16-bit shadow) for a transparent
+  page-sized layer that `endgroup` composites with `currentalpha x /Alpha`
+  and `/Blend` (PDF's group semantics: alpha 1 and Normal inside); PDF gets an
+  isolated group form XObject, SVG a `<g opacity>`. While a group is open
+  `Gfx::pixmap` is the *layer*: a live view reads `page_pixmap()`. Every
+  route that unwinds the graphics state past a group ends it first
+  (`restore_glyph_snapshot`, `leave_capture`, `showpage`/`copypage`/`erase`,
+  `step_n` at the end of a program); a new such route must too.
+  `notes/1406-transparency-groups.md`.
 - `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
   because it is non-standard (gs has no `.sameclip`): true when the clip in
   force is the very clip chain the gstate holds (both none, or the same
@@ -1030,7 +1040,8 @@ renders eight examples in both and compares block-downsampled output).
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two. Glyphs have a second seam since #1119:
    `Gfx::paint_glyph` takes the glyph as text (`src/textrun.rs`,
-   renderer-neutral) when `--svg-text` or `--pdf-text` is on, and each
+   renderer-neutral) when `--svg-text` is on or PDF text is (the
+   default since #1026; `--text-as-paths` turns it off), and each
    recorder decides on its own whether it takes the glyph as text
    (`textrun::svg_eligible`, `pdf_eligible`). SVG writes `<text>` runs
    for the standard faces (`notes/1119-svg-text.md`); PDF writes `TJ`
@@ -1039,8 +1050,9 @@ renders eight examples in both and compares block-downsampled output).
    pinned instance), for any face whose `fsType` allows it
    (`notes/1193-pdf-text.md`; Symbol and Dingbats glyph names get their
    text character from tables in `encodings.rs` that only PDF text reads,
-   `notes/1026-pdf-text-symbol-dingbats.md`; the wasm flag bit 8 / npm
-   `pdfText`, #1205, needs `pdf` as `svgText` needs `svg`, and
+   `notes/1026-pdf-text-symbol-dingbats.md`; text is the default since
+   #1026, `notes/1026-pdf-text-default.md`: wasm flag value 16 (bit 4) /
+   npm `pdfText: false` is the outline opt-out, value 8 (bit 3) a no-op, and
    `tests/wasm.rs` holds the
    CLI-vs-wasm byte check). The PDF's open text run is written at the
    top of `enter_clip`, so a new PDF hook that goes through `enter_clip`
@@ -1265,6 +1277,26 @@ renders eight examples in both and compares block-downsampled output).
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem
    (`notes/1080-718-1087-chalk-input-checks.md`).
+   #1409: dcchalk's `/From`/`/To` (0..1) draw part of each stroke by arc length
+   (after /Hand and /Corners). The stroke's variation, profile (`dcT*`, `dcL`, `dcdot`)
+   is computed on the WHOLE polyline; only the polyline handed to `dkstroke` is cut
+   (`dcpiece`, over `dctrim`) and `/Touch`/`/Pressure` read `From + t (To - From)`. Dust
+   draws every speck's random numbers in order and fills only those whose arc position
+   is in `[From, To)` (To 1 closed), so pieces partition the dust. Gotchas: `dctrim`
+   returns the WHOLE polyline when nothing is left (hence `dcpiece` decides empty
+   first); dots/zero-length strokes belong to the piece holding t = 0.5; the default
+   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. Measured: frames
+   3-4% apart leave the drawn part pixel-identical behind the pen's last ~12 widths, except
+   one edge-AA shift (<= ~43/255, edge rows only) where the stroke crosses a drykit chunk
+   boundary (proposed drykit follow-up: stable chunking). Incremental `/From prev /To now`
+   pieces are fine down to ~0.3 widths; much shorter ones overdraw their round caps and
+   lose texture (N=1500 pieces on a 190pt line: visibly greyer), so prefer `/From 0 /To t`.
+   drykit walks a piece's stops from its own start, so a seam is within ~40 levels (tip; up to ~110 and a few % of ink clearly different with /Tilt, where a lane flips on or off),
+   not exact, and a /Tilt piece past 0 draws its lanes' dropout chain afresh (the lane seed
+   is mixed with From: with the whole lane's seed alone, a lane that starts "off" stayed
+   off in every incremental piece, review finding on #1416). `dkstroke`/`dycrayon`/`dhstroke`
+   do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
+   `notes/1409-drychalk-from-to.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -1471,6 +1503,11 @@ renders eight examples in both and compares block-downsampled output).
    drivers today, not the decision record's 16) rather than performed.
 
 ## Gotchas for the next implementer
+
+- **halftonekit's faint-tone limit mirrors a renderer floor (#1408).** `hfthresh` (0.1 device px) in
+  `lib/halftonekit.ps` is the stroker's minimum width (`device_line_width` / `stroke_params` in
+  `src/gfx.rs`). A line/cross rule thinner than it is shortened, not thinned, so a tone fading to 0
+  fades. Raise or lower the stroker floor and `hfthresh` must follow (a raised floor fails the fade test).
 
 - **A failed operator's operands come back through the operand ledger**
   (#1047, `notes/1047-operand-ledger.md`). `Interp::run_op` wraps every
@@ -2435,6 +2472,12 @@ renders eight examples in both and compares block-downsampled output).
   fail. The `pscat` CLI's single-run path calls the hidden
   `Interp::leave_dicts_to_process_exit` so exit does not walk the graph
   (80 ms on a 600k-entry program); the sweep and spool loops do not.
+- A `Drop` reached from `Drop for Interp` must not use a thread-local with
+  `.with()` (#1404): a library user's `Interp` held in its own `thread_local!`
+  is dropped at thread exit, after any of this crate's thread-locals may be
+  destroyed, and a panic there aborts the process. `PsArray`/`Dict` teardown's
+  placeholder store goes through `object::empty_store` (`try_with`, with a
+  fresh store as fallback). Test: `tests/interp_thread_local_drop.rs`.
 - A deep dict chain frees iteratively: `impl Drop for Dict` (`object.rs`,
   next to `PsArray`'s) moves nested uniquely held dicts and arrays to a
   worklist, so a 100000-level chain neither overflows the stack at `Interp`
@@ -2832,6 +2875,13 @@ renders eight examples in both and compares block-downsampled output).
   source gains an unknown export or module syntax, so a new export in either
   file needs a line there), and `npm/test/global.test.mjs` loads it as a
   classic script. A new `Renderer` method needs no change.
+  The script is also a release asset (#1108): `release_stages.py manifest
+  --npm-from` unpacks `pscat.global.js` from the npm tarball into `dist/`
+  (the same bytes as npm), `npm/global.d.ts` types the `pscat` global (opt-in:
+  `pscat/global`), and a new member of the global needs a line in that file
+  (`global.test.mjs` compares the two). GitHub serves release assets with no
+  CORS headers: `<script src>` works, `fetch` of the wasm does not
+  (`notes/1108-global-js-release-asset.md`).
   Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
   `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
   DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:

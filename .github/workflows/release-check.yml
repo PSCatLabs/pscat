@@ -76,6 +76,7 @@ jobs:
       prerelease: ${{ steps.v.outputs.prerelease }}
       npm: ${{ steps.v.outputs.npm }}
       chatgpt_plugin: ${{ steps.v.outputs.chatgpt_plugin }}
+      global: ${{ steps.v.outputs.global }}
     steps:
       - name: Which version?
         id: v
@@ -103,7 +104,9 @@ jobs:
           NPM=$(python3 -c 'import sys; print(str(sys.argv[2] != "true" and tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 2)).lower())' "$V" "$PRE")
           # The hosted ChatGPT plugin ZIP is a release asset from 0.7.1 on (#1253), candidates included.
           PLUGIN=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 7, 1)).lower())' "$V")
-          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; echo "chatgpt_plugin=$PLUGIN"; } >> "$GITHUB_OUTPUT"
+          # pscat.global.js is a release asset from 0.7.1 on, candidates included (#1108).
+          GLOBAL=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 7, 1)).lower())' "$V")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; echo "chatgpt_plugin=$PLUGIN"; echo "global=$GLOBAL"; } >> "$GITHUB_OUTPUT"
           echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE, npm: $NPM)" >> "$GITHUB_STEP_SUMMARY"
 
   install-archive:
@@ -392,3 +395,40 @@ jobs:
           done
           [ "$OK" = true ] || { echo "::error::npm $RUNNER_OS: pscat@$VERSION does not install or run"; exit 1; }
           echo "- npm on $RUNNER_OS: npm install pscat@$VERSION ok, signature$([ "$ATTESTED" = true ] && echo ' and provenance') verified, renders" >> "$GITHUB_STEP_SUMMARY"
+
+  # The classic script attached to the release (#1108), from the public URL a
+  # page would pin. Runs for a candidate too: it is not on npm, so this is its
+  # only check. A release before 0.7.1 has no such asset.
+  install-global:
+    needs: install-version
+    if: needs.install-version.outputs.global == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Download pscat.global.js, verify it and load it as a classic script
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::pscat.global.js: $*"; exit 1; }
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          W="$RUNNER_TEMP/release-check-global"
+          rm -rf "$W" && mkdir -p "$W" && cd "$W"
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$BASE/SHA256SUMS" || fail "cannot download SHA256SUMS"
+          curl -fsSL --retry 5 --retry-all-errors -o pscat.global.js "$BASE/pscat.global.js" || fail "cannot download $BASE/pscat.global.js"
+          grep -E "^[0-9a-f]{64}  pscat\.global\.js\$" SHA256SUMS > mine.sum || fail "not listed in SHA256SUMS"
+          sha256sum -c mine.sum || fail "does not match SHA256SUMS"
+          # A classic script (vm.Script is a SyntaxError on module syntax) that defines the one global.
+          node -e '
+            const vm = require("node:vm"), fs = require("node:fs");
+            const src = fs.readFileSync("pscat.global.js", "utf8");
+            new vm.Script(src);
+            vm.runInThisContext(src);
+            const keys = Object.keys(globalThis.pscat).sort().join();
+            if (keys !== "PostScriptError,Renderer,createRenderer") { console.error("global pscat has " + keys); process.exit(1); }
+          '
+          echo "- pscat.global.js from the v$VERSION release matches SHA256SUMS and loads as a classic script" >> "$GITHUB_STEP_SUMMARY"

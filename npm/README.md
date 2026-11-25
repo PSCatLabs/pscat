@@ -67,6 +67,20 @@ release is on npm, load the file by name
 (`https://unpkg.com/pscat@X.Y.Z/pscat.global.js`): a bare package URL has no
 `pscat.wasm` beside it.
 
+Without npm, every GitHub release from 0.7.1 on (candidates too) carries the
+same script at a URL pinned to its tag, listed in the release's `SHA256SUMS`:
+
+```html
+<script src="https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat.global.js"></script>
+```
+
+GitHub sends no CORS headers for release assets, so a page cannot fetch the
+module from there: host `pscat.wasm` yourself (it is in the release's
+`pscat-X.Y.Z.tgz`, under `package/`) and pass `createRenderer({ wasm: url })`.
+
+In TypeScript, `/// <reference types="pscat/global" />` declares the `pscat`
+global; `import 'pscat'` alone does not.
+
 ## Watch it draw
 
 ```js
@@ -168,7 +182,7 @@ as Ghostscript does.
 | | |
 |---|---|
 | `createRenderer({ wasm }?)` | Load the interpreter and return a `Renderer`. Each one is a separate interpreter. `wasm` overrides where the module comes from: a URL, a `Response`, bytes or a `WebAssembly.Module` (in Node, also a file path). By default it is the package's `pscat.wasm`, found through `new URL('./pscat.wasm', import.meta.url)`. Bundlers that rewrite that pattern handle it; if yours does not (Vite's dependency pre-bundling, for one: add `pscat` to `optimizeDeps.exclude`), pass `wasm` the module's URL. |
-| `render(source, { width, height, dpi, svg, pdf, svgText, pdfText }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF; `svgText: true` (with `svg`) writes Helvetica, Times and Courier text as selectable SVG `<text>` instead of glyph outlines, like `pscat --svg-text`; `pdfText: true` (with `pdf`) writes text as selectable, searchable PDF text in embedded subset fonts instead of outlines, like `pscat --pdf-text` (a face given to `addFont` is embedded too). |
+| `render(source, { width, height, dpi, svg, pdf, svgText, pdfText }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF; `svgText: true` (with `svg`) writes Helvetica, Times and Courier text as selectable SVG `<text>` instead of glyph outlines, like `pscat --svg-text`; `pdf: true` writes text as selectable, searchable PDF text in embedded subset fonts (a face given to `addFont` is embedded too), like `pscat --pdf`; `pdfText: false` (with `pdf`) draws glyph outlines instead, like `pscat --text-as-paths`. |
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
 | `frames(source, { budget, ...page }?)` | A generator of `begin` plus one `step` per iteration. |

@@ -72,6 +72,7 @@ npm can lag the plugin's CLI (a release candidate is on GitHub, not npm): compar
 pscat --png out.png file.ps            # headless render to PNG
 pscat --svg out.svg file.ps            # vector SVG (one file per page)
 pscat --pdf out.pdf file.ps            # multi-page PDF
+pscat --text-as-paths --pdf out.pdf f.ps  # PDF text as glyph outlines (default: selectable text, embedded fonts)
 pscat --page 500x500 --png out.png f.ps  # canvas in points (default 612x792)
 pscat --dpi 300 --png out.png f.ps     # print resolution (default 72)
 pscat --halftone --png out.png f.ps    # screen like a mono laser printer
@@ -287,6 +288,7 @@ Each line says when to open which reference file in `references/`.
 - **A slow render** (`--profile`, `--bands`):
   [references/bands-profile.md](references/bands-profile.md).
 - **pscat-only operators and small tools**: `setalpha` / `setblendmode`,
+  `begingroup` / `endgroup` (fade a whole drawing as one),
   native noise (`gnoise2`, `fbm2`, ...), `writereals` / `readreals` for big
   arrays, `pscat photo-etch` (photo to engraving), the live window (`pscat
   file.ps`, `-i`, `--spool`), the `--capabilities` inventory:

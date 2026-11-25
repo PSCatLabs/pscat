@@ -135,8 +135,11 @@ struct Options {
     transparent: bool,
     /// `--svg-text`: standard-font text as SVG `<text>` (#1119).
     svg_text: bool,
-    /// `--pdf-text`: text as PDF text objects in embedded fonts (#1193).
+    /// `--pdf-text`: text as PDF text objects in embedded fonts (#1193),
+    /// the default since #1026; kept so scripts that name it still run.
     pdf_text: bool,
+    /// `--text-as-paths`: every PDF glyph as its outline (#1026).
+    text_as_paths: bool,
     /// The windowed REPL: type PostScript, watch it draw (Stage 8's
     /// last sliver).
     interactive: bool,
@@ -249,6 +252,7 @@ impl Options {
             transparent: false,
             svg_text: false,
             pdf_text: false,
+            text_as_paths: false,
             interactive: false,
             lint: false,
             lint_strict: false,
@@ -525,6 +529,14 @@ fn run_cli() -> ExitCode {
         eprintln!("pscat: --pdf-text needs --pdf output");
         return ExitCode::FAILURE;
     }
+    if options.text_as_paths && options.pdf.is_none() {
+        eprintln!("pscat: --text-as-paths needs --pdf output");
+        return ExitCode::FAILURE;
+    }
+    if options.pdf_text && options.text_as_paths {
+        eprintln!("pscat: --pdf-text and --text-as-paths contradict each other; give one");
+        return ExitCode::FAILURE;
+    }
 
     if options.transparent {
         // The window shows an opaque canvas, and --halftone screens the
@@ -746,8 +758,9 @@ fn run_cli() -> ExitCode {
         interp.gfx_mut().enable_svg();
     }
     if options.pdf.is_some() {
-        if options.pdf_text {
-            interp.gfx_mut().set_pdf_text(pscat::PdfText::Text);
+        // Text is the default (#1026); `--pdf-text` asks for it again.
+        if options.text_as_paths {
+            interp.gfx_mut().set_pdf_text(pscat::PdfText::Paths);
         }
         interp.gfx_mut().enable_pdf();
     }
@@ -2313,6 +2326,7 @@ fn parse_args() -> Result<Options, String> {
             "--transparent" => options.transparent = true,
             "--svg-text" => options.svg_text = true,
             "--pdf-text" => options.pdf_text = true,
+            "--text-as-paths" => options.text_as_paths = true,
             "-i" | "--interactive" => options.interactive = true,
             "--lint" => options.lint = true,
             // Strict *is* lint, with findings promoted to fatal — set
@@ -2457,8 +2471,13 @@ fn print_usage() {
     println!("                      selectable <text> rather than glyph outlines (smaller;");
     println!("                      the viewer draws it in a metric-compatible face)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
-    println!("      --pdf-text      with --pdf: write text as selectable, searchable text in");
-    println!("                      embedded subset fonts rather than glyph outlines");
+    println!("                      Text is selectable, searchable text in embedded subset");
+    println!("                      fonts; faces that forbid embedding, Type 1 and Type 3");
+    println!("                      fonts from a program and charpath stay outlines");
+    println!("      --text-as-paths with --pdf: draw every glyph as its outline (no fonts in");
+    println!("                      the file), as pscat did before 0.7.1");
+    println!("      --pdf-text      with --pdf: text as text, the default; accepted so older");
+    println!("                      scripts keep working, it changes nothing");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
     println!("      --spool DIR     watch DIR and render each .ps/.eps that lands there");
     println!(

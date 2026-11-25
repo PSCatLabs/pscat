@@ -139,7 +139,9 @@
 %           at or below 0 draws no mark at all — note this is load-
 %           bearing, not just an optimization: a zero-width stroke in
 %           PostScript is a hairline, not nothing, so the line/cross
-%           branches must skip rather than draw through zero.
+%           branches must skip rather than draw through zero. A
+%           positive sample too small for a visible rule shortens the
+%           rule instead of thinning it (see "Faint tones" below).
 %   /MaxRadius num > 0  the dot radius at full tone (default half the
 %           cell pitch, so full-tone dots exactly touch). Only read on
 %           the /dot branch — validated there
@@ -177,9 +179,35 @@
 % Size mapping: dot radius = /MaxRadius * sqrt(tone) — area-
 % proportional, the print-correct curve (ink coverage grows with the
 % dot's area, not its radius); line width = /MaxWidth * tone —
-% linear, since a rule's coverage grows with its width. Documented
+% linear, since a rule's coverage grows with its width (down to the
+% faint-tone limit just below, where the length takes over). Documented
 % here rather than merely implemented so the next reader doesn't
 % "simplify" the sqrt away.
+%
+% Faint tones (issue #1408): a line or cross screen whose tone fades to
+% 0 fades smoothly. A stroke thinner than a fraction of a device pixel
+% is not drawn thinner (pscat strokes it at 0.1 device pixel, as
+% `device_line_width` and `stroke_params` in src/gfx.rs do, and other
+% renderers draw a full pixel), so a rule narrower than that would stop
+% fading and the screen would pop in as soon as the tone left 0.
+% Below `hfthresh` (0.1 device pixel, measured across the rule, so it
+% follows the CTM and the render's --dpi) the rule keeps that width
+% and gets shorter instead: a butt-capped dash centered on its cell,
+% pitch * width / hfthresh long, which has exactly the ink area the
+% full rule's width would have given. Mean ink coverage therefore keeps
+% tracking tone all the way down, the dash width and so the look of a
+% rule never changes at or above the limit (byte-identical there), and
+% only core operators (`dtransform`, `setlinecap`) are used, so the
+% same marks are drawn under Ghostscript, though gs enforces its own
+% minimum line width of about a pixel, so a faint screen there does not
+% track tone the way it does in pscat; an alpha fade (`setalpha`) would
+% not run there at all. The limit is about the rule's width, not the
+% tone: an explicit /MaxWidth under 0.1 device pixel makes even a tone
+% of 1 a dash field (same total ink as before, no longer a continuous
+% hairline). At the default /MaxWidth and 72 dpi the switch is at
+% tone 0.0125; at 2x it is at 0.00625. A tone of exactly 0 still draws
+% nothing. The dot screen needs none of this: a dot's radius really
+% does go to nothing.
 %
 % Reproducibility: no random draws anywhere in this file, so none of
 % the seeded-stream caveats the rand-driven siblings document apply —
@@ -283,6 +311,29 @@
   dup type /arraytype eq
   1 index type /packedarraytype eq or
   exch xcheck and
+} def
+
+% hfthresh: the thinnest rule, in device pixels, this library lets a
+% line/cross mark be drawn at (see "Faint tones" in the header).
+% pscat strokes anything thinner than 0.1 device pixel at exactly 0.1
+% (`device_line_width` in src/gfx.rs; `stroke_params` applies the same
+% floor in pen space), so a rule whose width fades below that stops
+% fading and draws at a fixed faint ink. Below hfthresh the mark keeps
+% that width and shortens instead, so coverage keeps tracking tone.
+% Keep it in step with that floor. Not a documented option.
+% @internal
+/hfthresh 0.1 def
+
+% x y hfpixel -> u
+% The length, in user space, of one device pixel measured across the
+% direction (x, y) (a user-space vector, rotated by the CTM like a
+% rule's normal is). 0 when the CTM maps that vector to nothing (a
+% singular matrix), which the caller treats as "do not adapt".
+% @internal
+/hfpixel {
+  dtransform
+  dup mul exch dup mul add sqrt
+  dup 0 gt { 1 exch div } { pop 0 } ifelse
 } def
 
 % hfcleanup -
@@ -553,6 +604,13 @@
   % no zero/nonzero branches to keep agreeing.
   hfox hfoy translate
   1 setlinecap
+  % One device pixel in user units across each pass's rule, once per
+  % call (the CTM does not change in the walk): pass 0 rules run
+  % along (hfdx, hfdy), so they are measured across (hfnx, hfny);
+  % pass 1 rules run along (hfnx, hfny), measured across the
+  % direction (hfdx, hfdy) (a sign flip does not change the length).
+  hfnx hfny hfpixel /hfpix0 exch def
+  hfdx hfdy hfpixel /hfpix1 exch def
   % The cross screen's two passes share one lattice origin and one
   % tone sample per cell — only the segment direction swaps — so its
   % crosses stay centered and both arms agree even for a stateful
@@ -666,14 +724,34 @@
           % One pitch-long rule centered on the cell along the
           % pass direction: neighbors join into continuous lines
           % at uniform tone, round caps hiding the seams.
-          hfmaxw hfw mul setlinewidth
-          newpath
-          hfcx hfpdx hfpitch 2 div mul sub
-          hfcy hfpdy hfpitch 2 div mul sub
-          moveto
-          hfcx hfpdx hfpitch 2 div mul add
-          hfcy hfpdy hfpitch 2 div mul add
-          lineto stroke
+          % Faint tones (see the header): a rule thinner than hfthresh
+          % device pixels stays at that width and shortens in
+          % proportion, so ink area still tracks tone (a butt-capped
+          % dash, centered, of length pitch * width / thinnest).
+          hfmaxw hfw mul /hfwu exch def
+          hfpass 0 eq { hfpix0 } { hfpix1 } ifelse hfthresh mul /hfthin exch def
+          hfthin 0 gt hfwu hfthin lt and {
+            hfthin setlinewidth
+            0 setlinecap
+            /hfhalf hfpitch hfwu hfthin div mul 2 div def
+            newpath
+            hfcx hfpdx hfhalf mul sub
+            hfcy hfpdy hfhalf mul sub
+            moveto
+            hfcx hfpdx hfhalf mul add
+            hfcy hfpdy hfhalf mul add
+            lineto stroke
+            1 setlinecap
+          } {
+            hfwu setlinewidth
+            newpath
+            hfcx hfpdx hfpitch 2 div mul sub
+            hfcy hfpdy hfpitch 2 div mul sub
+            moveto
+            hfcx hfpdx hfpitch 2 div mul add
+            hfcy hfpdy hfpitch 2 div mul add
+            lineto stroke
+          } ifelse
         } ifelse
       } if
     } for

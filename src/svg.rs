@@ -101,6 +101,9 @@ pub struct SvgRecorder {
     /// Coverage masks in an uncoloured tile (#1340), by the paint they
     /// take the alpha of: the mask's id.
     coverage_ids: HashMap<String, String>,
+    /// Where each open transparency group (#1406) starts in `body`,
+    /// innermost last: `end_group` wraps what follows.
+    groups: Vec<usize>,
 }
 
 /// A shading pattern's address, its placement's bits and a pen's.
@@ -149,6 +152,7 @@ impl SvgRecorder {
             imported: Vec::new(),
             shading_ids: HashMap::new(),
             coverage_ids: HashMap::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -560,6 +564,41 @@ impl SvgRecorder {
             Self::color(run.rgb),
             Self::opacity_attr(run.comp, false),
         );
+    }
+
+    /// A transparency group opens (#1406): what is recorded from here
+    /// until [`end_group`](Self::end_group) is its content.
+    pub(crate) fn begin_group(&mut self) {
+        self.flush_text();
+        self.groups.push(self.body.len());
+    }
+
+    /// The group closes: its content goes in a `<g>` with its opacity and
+    /// blend. Opacity below 1 and `mix-blend-mode` each make the `<g>` an
+    /// isolated stacking context, as the raster's layer and the PDF form's
+    /// `/I true` are; with neither, `isolation:isolate` says so, since a
+    /// `/Multiply` mark inside blends with the backdrop otherwise. An empty
+    /// group writes nothing.
+    pub(crate) fn end_group(&mut self, comp: Composite) {
+        self.flush_text();
+        let Some(at) = self.groups.pop() else {
+            return;
+        };
+        if at >= self.body.len() {
+            return;
+        }
+        let opacity = if comp.alpha < 1.0 {
+            format!(" opacity=\"{}\"", fmt_f32(comp.alpha.max(0.0)))
+        } else {
+            String::new()
+        };
+        let style = match comp.blend {
+            BlendMode::Multiply => Self::blend_style(comp.blend),
+            BlendMode::Normal if comp.alpha < 1.0 => "",
+            BlendMode::Normal => " style=\"isolation:isolate\"",
+        };
+        self.body.insert_str(at, &format!("<g{opacity}{style}>"));
+        self.body.push_str("</g>");
     }
 
     pub(crate) fn set_transparent(&mut self, transparent: bool) {
@@ -1083,6 +1122,7 @@ impl SvgRecorder {
         self.tile_groups.clear();
         self.shading_ids.clear();
         self.coverage_ids.clear();
+        self.groups.clear();
     }
 
     fn document(&self) -> String {
