@@ -500,3 +500,24 @@ fn resvg_renders_the_svg_groups_as_pscat_rasters_them() {
         theirs.pixel(x, y)
     );
 }
+
+/// An error or `quit` inside a `PaintProc`, with a group open there and one
+/// on the page: the capture is unwound, both groups end, and the page (not
+/// a layer) is what remains.
+#[test]
+fn an_error_inside_a_paintproc_with_groups_open_leaves_the_page() {
+    for stop in ["nosuchop", "quit"] {
+        let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+        let _ = it.run_str(&format!(
+            "{GROUND} << /Alpha 0.5 >> begingroup
+             << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20]
+                /XStep 20 /YStep 20
+                /PaintProc {{ pop << >> begingroup 0 0 12 12 rectfill {stop} }}
+             >> matrix makepattern setpattern 0 0 50 50 rectfill"
+        ));
+        let pm = &it.gfx().pixmap;
+        assert_eq!((pm.width(), pm.height()), (SIZE, SIZE), "{stop}");
+        assert!(close(px(pm, 90, 90), [230, 204, 51, 255], 1), "{stop}");
+        assert!(close(px(pm, 5, 5), [230, 204, 51, 255], 1), "{stop}");
+    }
+}

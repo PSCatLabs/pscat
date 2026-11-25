@@ -81,9 +81,10 @@ would need a copy of the backdrop per group; nothing asked for it.
   is the barrier.
 - Groups nest; each `endgroup` composites the innermost into the one around
   it (or the page).
-- The clip in force at `begingroup` clips everything in the group (marks are
-  clipped as they are drawn into the layer; the layer is composited as it
-  is). `clip`, `initclip`, `clipsave`/`cliprestore` inside the group work
+- The clip in force at `begingroup` clips the group's marks as they are
+  drawn into the layer (the layer is composited as it is), unless an
+  `initclip` inside the group lifts it, as it would anywhere; raster, PDF
+  and SVG agree on that. `clip`, `initclip`, `clipsave`/`cliprestore` inside the group work
   as anywhere and end with it.
 
 ### Page boundaries, `restore`, end of job

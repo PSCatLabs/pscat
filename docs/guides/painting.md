@@ -738,7 +738,8 @@ marks inside may use `setalpha`/`setblendmode` among themselves. The group is
 not with the page; give the group itself `/Blend /Multiply` to overprint an
 ink layer. Groups nest, `begingroup` is a `gsave` level that a stray
 `grestore` inside cannot pop past, and `endgroup` brings back the state
-`begingroup` had. The clip in force at `begingroup` clips the whole group.
+`begingroup` had. The clip in force at `begingroup` clips the group's marks
+(unless an `initclip` inside the group lifts it, as it would anywhere).
 
 PNG, `--svg` (`<g opacity="0.5" style="mix-blend-mode:multiply">`) and
 `--pdf` (a transparency group form XObject, `/I true`, painted through an
