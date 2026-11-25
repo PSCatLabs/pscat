@@ -111,8 +111,12 @@ fn a_run_file_names_itself_and_the_main_program_does_not() {
     .expect("write lib");
     let lib = lib.to_string_lossy().into_owned();
     let mut interp = Interp::new();
-    // The error is in a later program than the one that ran the file.
-    interp.run_str(&format!("({lib}) run")).expect("run lib");
+    // The error is in a later program than the one that ran the file. A
+    // backslash in a PostScript string starts an escape (Windows paths).
+    let literal = lib.replace('\\', "\\\\");
+    interp
+        .run_str(&format!("({literal}) run"))
+        .expect("run lib");
     let t = trace_of(&mut interp, "\n/top {\n  shallow\n  1 pop\n} def\ntop");
     assert_eq!(at(&t[0]), (Some("deep"), Some(4), Some(lib.as_str())));
     assert_eq!(at(&t[1]), (Some("shallow"), Some(7), Some(lib.as_str())));
