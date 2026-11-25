@@ -1084,6 +1084,9 @@ fn interpreters_on_separate_threads_keep_their_operators_and_flags() {
             })
         })
         .collect();
+    // Only the workers hold a sender now: if thread 0 dies before it
+    // sends, `recv` fails instead of waiting for ever.
+    drop(ready_tx);
     ready.recv().unwrap();
     flags[0].store(true, Ordering::Relaxed);
     for (k, w) in workers.into_iter().enumerate() {

@@ -101,7 +101,16 @@ loop subtracted) `1 pop` 236/234, `1.5 2.5 mul pop` 507/503, `x y mul pop`
 
 Additive. No existing signature or behaviour changes; `PsError` gains a
 variant (the enum is `#[non_exhaustive]`). The full suite passes unchanged:
-3688 tests, 0 failures (`cargo test --profile ci`, 2026-11-23).
+3701 tests, 0 failures (`cargo test --profile ci`, 2026-11-24, after review
+round 1). For programs that do not use the host API, round 1 changed nothing
+visible: `scripts/identity_check.sh` with the two binaries rendered 127 of 127
+pages of the 96-file artkit corpus identically (control: a marker built into
+the base binary only), and the CLI's error reports are byte-identical.
+
+Within this branch, round 1 changed the host API itself: `push_value` and
+`define_value` return `Result`, a raised interrupt flag fails a run before it
+executes anything (so a host must lower it before a recovery run), and
+`pop_value` refuses a value past `MAX_VALUE_NODES`.
 
 ### Not done, and why
 
