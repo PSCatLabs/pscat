@@ -121,6 +121,20 @@ newpath 40 60 moveto 300 80 lineto
   - `/Corners /separate` cuts a path at its sharp corners, so a box is
     drawn as four strokes. Each one lands and lifts, and with `/Hand` it
     overshoots the corner a little.
+  - `/From` and `/To` (0 to 1, defaults 0 and 1) draw only part of each
+    stroke, measured along its length once `/Hand` and `/Corners` have
+    shaped it. The part is drawn with the pressure, width, texture and
+    dust the whole stroke has there, so `/From 0 /To t` with a growing
+    `t` grows a stroke without changing the part already drawn, and
+    `/To 0.5` plus `/From 0.5` make the whole (to within the pixels of
+    the seam and of the pen's last few widths). A long stroke's part
+    costs in proportion to its length, so a board written over time pays
+    for what each frame adds, not the whole stroke. The stroke's landing
+    belongs to the piece that holds `/From 0`, its lift to the one that
+    holds `/To 1`. Each subpath is cut by its own length; a dot belongs
+    to the one piece that holds its middle. With `/Tilt`, a piece that
+    starts past 0 restarts each lane's chance dropouts at its start.
+    `dkstroke`, crayon and charcoal do not take the keys yet.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 - **`dctext`** (`(text) x y opts`) writes a line of chalk lettering

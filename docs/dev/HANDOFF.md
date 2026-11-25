@@ -1267,6 +1267,19 @@ renders eight examples in both and compares block-downsampled output).
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem
    (`notes/1080-718-1087-chalk-input-checks.md`).
+   #1409: dcchalk's `/From`/`/To` (0..1) draw part of each stroke by arc length
+   (after /Hand and /Corners). The stroke's variation, profile (`dcT*`, `dcL`, `dcdot`)
+   is computed on the WHOLE polyline; only the polyline handed to `dkstroke` is cut
+   (`dcpiece`, over `dctrim`) and `/Touch`/`/Pressure` read `From + t (To - From)`. Dust
+   draws every speck's random numbers in order and fills only those whose arc position
+   is in `[From, To)` (To 1 closed), so pieces partition the dust. Gotchas: `dctrim`
+   returns the WHOLE polyline when nothing is left (hence `dcpiece` decides empty
+   first); dots/zero-length strokes belong to the piece holding t = 0.5; the default
+   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. drykit walks
+   a piece's stops from its own start, so a seam is within a few levels, not exact, and a
+   /Tilt piece past 0 restarts its lanes' dropout chain. `dkstroke`/`dycrayon`/`dhstroke`
+   do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
+   `notes/1409-drychalk-from-to.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

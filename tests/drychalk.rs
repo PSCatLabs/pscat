@@ -125,6 +125,8 @@ fn dcchalk_every_documented_parameter_changes_the_render() {
         ("Under", "/Under [0.5 0.1 0.1]"),
         ("Seed", "/Seed 6"),
         ("Hand", "/Hand 1"),
+        ("From", "/From 0.3"),
+        ("To", "/To 0.7"),
     ];
     for (_, extra) in varied {
         assert_ne!(
@@ -792,4 +794,240 @@ fn dcleader_dots_line_up_between_rows() {
     for (a, c) in t.iter().zip(&b) {
         assert!((a - c).abs() < 1.0, "dots at {a} and {c} do not line up");
     }
+}
+
+// ---------------------------------------------------------------------
+// Issue #1409: /From and /To draw part of each stroke with the whole
+// stroke's pressure, texture and dust.
+
+const PART_W: u32 = 200;
+const PART_H: u32 = 60;
+
+/// A board of `PART_W` x `PART_H` points at 2x, chalk drawn from `path`
+/// with `opts` (a fixed /Width 2.4 /Dust 1 beside them).
+fn part(path: &str, opts: &str) -> Interp {
+    on_board(
+        PART_W,
+        PART_H,
+        2.0,
+        &format!("{path} << /Width 2.4 /Dust 1 {opts} >> dcchalk"),
+    )
+}
+
+/// Per pixel, the largest channel difference between two renders, over the
+/// device columns `x0..x1`.
+fn diffs(a: &[u8], b: &[u8], x0: u32, x1: u32) -> Vec<u8> {
+    let w = (PART_W * 2) as usize;
+    assert_eq!(a.len(), b.len());
+    (0..a.len() / 4)
+        .filter(|i| (x0 as usize..x1 as usize).contains(&(i % w)))
+        .map(|i| {
+            (0..4)
+                .map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c]))
+                .max()
+                .unwrap()
+        })
+        .collect()
+}
+
+/// Pixels that differ from the bare board (the chalk, dust included).
+fn inked(it: &Interp, bare: &[u8]) -> usize {
+    data(it)
+        .chunks(4)
+        .zip(bare.chunks(4))
+        .filter(|(p, q)| p != q)
+        .count()
+}
+
+const LINE: &str = "newpath 10 30 moveto 60 36 lineto 190 24 lineto";
+
+/// /From 0 /To 1 is the whole stroke, byte for byte, in every mode that
+/// draws strokes (the match with the library from before #1409 is
+/// `scripts/identity_check.sh --loader lib/drychalk.ps`, run on the PR).
+#[test]
+fn the_whole_range_is_the_default() {
+    let shapes = [
+        LINE,
+        "newpath 10 10 moveto 130 10 lineto 130 50 lineto 10 50 lineto closepath 5 5 moveto 5 5 lineto",
+    ];
+    for path in shapes {
+        for opts in [
+            "",
+            "/Tilt 75 /Side 8",
+            "/Hand 1 /Corners /separate",
+            "/Seed 5 /Firm 1",
+        ] {
+            let plain = data(&part(path, opts));
+            let whole = data(&part(path, &format!("/From 0 /To 1 {opts}")));
+            assert_eq!(plain, whole, "/From 0 /To 1 changed `{path}` with `{opts}`");
+        }
+    }
+}
+
+/// A growing stroke grows: the part already drawn does not change (only
+/// the pen's last few widths do), and every frame adds ink. Straight
+/// line so the pen's place is known; checked with and without a /Seed, and
+/// with the stick on its side.
+#[test]
+fn a_growing_stroke_keeps_what_it_has_drawn() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    let line = "newpath 10 30 moveto 190 30 lineto";
+    for opts in ["/Seed 4", "", "/Tilt 75 /Side 8 /Seed 2", "/Firm 1"] {
+        let tos = [0.2, 0.4, 0.6, 0.8, 1.0];
+        let frames: Vec<Interp> = tos
+            .iter()
+            .map(|t| part(line, &format!("/From 0 /To {t} {opts}")))
+            .collect();
+        for k in 0..tos.len() - 1 {
+            let (a, b) = (data(&frames[k]), data(&frames[k + 1]));
+            // the pen was at 10 + 180 To: all but its last 12 points agree
+            let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
+            let d = diffs(&a, &b, 0, behind);
+            let worst = d.iter().copied().max().unwrap();
+            assert!(
+                worst <= 64,
+                "`{opts}`: frame {k} -> {} changed its drawn part by {worst}",
+                k + 1
+            );
+            assert!(
+                inked(&frames[k + 1], &bare) > inked(&frames[k], &bare),
+                "`{opts}`: frame {} added no ink",
+                k + 1
+            );
+        }
+    }
+}
+
+/// Two adjacent pieces are the whole stroke, apart from the seam and the
+/// edge pixels where a band of touch changes a pitch earlier or later.
+#[test]
+fn adjacent_pieces_make_the_whole_stroke() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    for (opts, ceiling) in [
+        ("/Seed 4", 48u8),
+        ("", 48),
+        ("/Tilt 75 /Side 8 /Seed 2", 96),
+    ] {
+        let whole = part(LINE, opts);
+        let halves = on_board(
+            PART_W,
+            PART_H,
+            2.0,
+            &format!(
+                "{LINE} << /Width 2.4 /Dust 1 {opts} /To 0.5 >> dcchalk \
+                 {LINE} << /Width 2.4 /Dust 1 {opts} /From 0.5 >> dcchalk"
+            ),
+        );
+        let thirds = on_board(
+            PART_W,
+            PART_H,
+            2.0,
+            &format!(
+                "{LINE} << /Width 2.4 /Dust 1 {opts} /To 0.3 >> dcchalk \
+                 {LINE} << /Width 2.4 /Dust 1 {opts} /From 0.3 /To 0.7 >> dcchalk \
+                 {LINE} << /Width 2.4 /Dust 1 {opts} /From 0.7 >> dcchalk"
+            ),
+        );
+        let ink = inked(&whole, &bare);
+        for (name, pieces) in [("halves", &halves), ("thirds", &thirds)] {
+            let d = diffs(&data(&whole), &data(pieces), 0, PART_W * 2);
+            let worst = d.iter().copied().max().unwrap();
+            let loud = d.iter().filter(|&&v| v > 32).count();
+            assert!(
+                worst <= ceiling,
+                "`{opts}` {name}: differ by {worst} from the whole stroke"
+            );
+            assert!(
+                loud * 50 < ink,
+                "`{opts}` {name}: {loud} of {ink} inked pixels differ clearly"
+            );
+        }
+    }
+}
+
+/// Every subpath is cut by its own length; a closed outline is cut round
+/// its perimeter; a dot belongs to the one piece that holds its middle; an
+/// empty range draws nothing.
+#[test]
+fn from_and_to_cut_each_stroke_by_its_own_length() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    // two lines of different lengths, one above the other
+    let two = "newpath 10 40 moveto 190 40 lineto 10 15 moveto 90 15 lineto";
+    let it = part(two, "/Seed 1 /To 0.5");
+    // device rows: y = 40 is row (60 - 40) * 2 = 40, y = 15 is row 90
+    let (a0, a1) = ink_columns(&it, 36, 44, 110.0);
+    let (b0, b1) = ink_columns(&it, 86, 94, 110.0);
+    assert!(
+        a0 <= 24 && (a1 as i32 - 200).abs() <= 8,
+        "long line: {a0}..{a1}"
+    );
+    assert!(
+        b0 <= 24 && (b1 as i32 - 100).abs() <= 8,
+        "short line: {b0}..{b1}"
+    );
+    // a closed outline: the halves cover about the whole, each about half
+    let boxed = "newpath 20 10 moveto 180 10 lineto 180 50 lineto 20 50 lineto closepath";
+    let ink = |o: &str| inked(&part(boxed, o), &bare) as f64;
+    let (all, first, second) = (
+        ink("/Seed 3"),
+        ink("/Seed 3 /To 0.5"),
+        ink("/Seed 3 /From 0.5"),
+    );
+    assert!(
+        (0.35..0.65).contains(&(first / all)) && (0.35..0.65).contains(&(second / all)),
+        "halves of a box: {first} and {second} of {all}"
+    );
+    // a dot: drawn whole by the piece with its middle, once
+    let dot = "newpath 100 30 moveto 100 30 lineto";
+    let whole = data(&part(dot, "/Seed 1"));
+    assert_ne!(whole, bare, "the dot is not drawn");
+    assert_eq!(
+        data(&part(dot, "/Seed 1 /From 0.5")),
+        whole,
+        "the dot's second half"
+    );
+    assert_eq!(
+        data(&part(dot, "/Seed 1 /To 0.5")),
+        bare,
+        "the dot's first half"
+    );
+    assert_eq!(
+        data(&part(dot, "/Seed 1 /From 0.5 /To 0.5")),
+        bare,
+        "an empty range on a dot"
+    );
+    // an empty range, a bare moveto, an empty path
+    assert_eq!(
+        data(&part(LINE, "/From 0.4 /To 0.4")),
+        bare,
+        "an empty range"
+    );
+    assert_eq!(
+        data(&part("newpath 20 20 moveto", "/To 0.5")),
+        bare,
+        "a bare moveto"
+    );
+    assert_eq!(
+        data(&part("newpath", "/From 0.2 /To 0.7")),
+        bare,
+        "an empty path"
+    );
+}
+
+/// The point of the keys: drawing part of a long stroke costs less than the
+/// whole of it. A tenth is drawn in well under half the time of the whole.
+#[test]
+fn a_short_piece_costs_less_than_the_whole_stroke() {
+    let zigzag = "newpath 10 10 moveto 0 1 7 { pop 11 40 rlineto 11 -40 rlineto } for";
+    let cost = |opts: &str| {
+        common::best_cpu_time_of(2, || {
+            part(zigzag, opts);
+        })
+    };
+    let whole = cost("/Seed 1");
+    let tenth = cost("/Seed 1 /From 0 /To 0.1");
+    assert!(
+        tenth.as_secs_f64() < whole.as_secs_f64() * 0.5,
+        "a tenth of the stroke took {tenth:?}, the whole {whole:?}"
+    );
 }
