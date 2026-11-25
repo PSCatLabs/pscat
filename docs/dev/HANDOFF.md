@@ -2826,7 +2826,8 @@ renders eight examples in both and compares block-downsampled output).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not
-  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  `println!`. `=`, `==`, `=only`, `==only` (#1413: Ghostscript's newline-less
+  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it; the wasm
   build turns on `capture_stdout` (a wasm32 module has no stdout) and
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
