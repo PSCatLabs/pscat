@@ -5105,11 +5105,12 @@ impl Gfx {
         };
         if g.recorded {
             let (w, h) = (self.pixmap.width(), self.pixmap.height());
+            let to_default = self.pattern_default_space();
             if let Some(svg) = &mut self.svg {
                 svg.end_group(g.comp);
             }
             if let Some(pdf) = &mut self.pdf {
-                pdf.end_group(g.comp, w, h);
+                pdf.end_group(g.comp, to_default, w, h);
             }
         }
         let mut work = 0;

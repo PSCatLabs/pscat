@@ -538,10 +538,24 @@ impl PdfRecorder {
 
     /// The group closes: what it recorded becomes a form XObject with an
     /// isolated transparency group (`/I true`, as the raster's layer starts
-    /// transparent), `/BBox` the canvas (`width` x `height`, in the stream's
-    /// own coordinates, which the form shares), painted in the stream below
-    /// with the group's alpha and blend. An empty group writes nothing.
-    pub(crate) fn end_group(&mut self, comp: Composite, width: u32, height: u32) {
+    /// transparent), painted in the stream below with the group's alpha and
+    /// blend. An empty group writes nothing.
+    ///
+    /// The form's space is the stream's *default* space, not the canvas
+    /// coordinates the marks are written in: `to_default` maps the canvas
+    /// (`width` x `height`) to it (the page's y-up points, or a pattern
+    /// capture's pattern space), the form's content starts with it as a
+    /// `cm`, and the `Do` undoes it first. A pattern's `/Matrix` maps to the
+    /// default space of the stream that paints with it, which inside a form
+    /// is the form's space (PDF 32000-1, 8.7.2): so a pattern painted in a
+    /// group is placed exactly as on the page.
+    pub(crate) fn end_group(
+        &mut self,
+        comp: Composite,
+        to_default: tiny_skia::Transform,
+        width: u32,
+        height: u32,
+    ) {
         let Some(saved) = self.groups.pop() else {
             return;
         };
@@ -549,16 +563,35 @@ impl PdfRecorder {
         if form.content.is_empty() {
             return;
         }
+        let Some(back) = to_default.invert() else {
+            return;
+        };
+        let mut corners = [
+            tiny_skia::Point::from_xy(0.0, 0.0),
+            tiny_skia::Point::from_xy(width as f32, 0.0),
+            tiny_skia::Point::from_xy(0.0, height as f32),
+            tiny_skia::Point::from_xy(width as f32, height as f32),
+        ];
+        to_default.map_points(&mut corners);
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for c in corners {
+            (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+        }
         form.group = true;
         form.dict = format!(
-            "/Type /XObject /Subtype /Form /BBox [0 0 {width} {height}] \
-             /Group << /Type /Group /S /Transparency /I true /CS /DeviceRGB >>"
+            "/Type /XObject /Subtype /Form /BBox [{} {} {} {}] \
+             /Group << /Type /Group /S /Transparency /I true /CS /DeviceRGB >>",
+            p(x0),
+            p(y0),
+            p(x1),
+            p(y1),
         );
+        form.content = format!("{} cm\n{}", matrix_text(to_default), form.content).into();
         self.patterns.push(form);
         let idx = self.patterns.len() - 1;
         self.current_patterns.push(idx);
         let gs = self.gs_ref(comp);
-        let _ = writeln!(self.content, "q {gs}/X{idx} Do Q");
+        let _ = writeln!(self.content, "q {} cm {gs}/X{idx} Do Q", matrix_text(back));
     }
 
     /// The pattern's `PaintProc` was unwound: put the page state back and

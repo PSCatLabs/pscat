@@ -424,10 +424,18 @@ fn gs_renders_the_pdf_groups_as_pscat_rasters_them() {
           0.2 0.6 1 setrgbcolor 140 10 50 180 rectfill
           << /Alpha 0.5 >> begingroup 0 0.5 0 setrgbcolor 150 20 30 160 rectfill endgroup
         endgroup
-        1 setalpha 10 150 40 40 rectclip
+        1 setalpha gsave 10 150 40 40 rectclip
         << /Alpha 0.7 >> begingroup /Multiply setblendmode
           0 0 0.5 setrgbcolor 0 0 200 200 rectfill
-        endgroup";
+        endgroup grestore
+        % A pattern painted inside a group, and a group inside a pattern's
+        % PaintProc: the pattern's /Matrix must place it in the form's space.
+        << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20]
+           /XStep 20 /YStep 20
+           /PaintProc { pop << /Alpha 0.5 >> begingroup
+             0 0 1 setrgbcolor 0 0 12 12 rectfill 6 6 12 12 rectfill
+           endgroup } >> matrix makepattern
+        << /Blend /Multiply >> begingroup setpattern 60 140 60 40 rectfill endgroup";
     let (pdf, ours) = pdf_and_canvas(src, 200);
     let theirs = gs_rasterize(&pdf, "groups", 200);
     let mut worst = 0;
