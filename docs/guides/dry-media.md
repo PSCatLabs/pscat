@@ -130,8 +130,8 @@ newpath 40 60 moveto 300 80 lineto
     moves between frames, except that drykit draws a long stroke in
     chunks and where a growing stroke crosses one, its edge pixels shift
     once by up to about 40 of 255 levels). `/To 0.5` plus `/From 0.5`
-    make the whole, to within about 40 of 255 levels at the seam (about
-    60 with `/Tilt`). A caller that
+    make the whole, to within about 40 of 255 levels at the seam (up to about
+    110 with `/Tilt`, on a few percent of the ink). A caller that
     keeps its canvas can draw `/From prev /To now` each frame instead;
     that holds for pieces down to a few tenths of a width, and much
     shorter pieces overdraw their own round ends and lose texture, so
@@ -144,7 +144,7 @@ newpath 40 60 moveto 300 80 lineto
     zero-length stroke is a dot). `dctext` and `dcleader` pass the keys
     on, so they cut every glyph stroke, not the line. With `/Tilt`, a
     piece that starts past 0 draws its lanes' chance dropouts afresh, so
-    2 to 3 percent of the ink differs clearly from the whole stroke.
+    a few percent of the ink differs clearly from the whole stroke.
     `dkstroke`, crayon and charcoal do not take the keys yet.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.

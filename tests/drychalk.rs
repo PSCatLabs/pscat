@@ -1010,6 +1010,30 @@ fn from_and_to_cut_each_stroke_by_its_own_length() {
         bare,
         "an empty range on a dot"
     );
+    // the same under /Tilt (lanes): the dot is drawn as the whole stroke draws it
+    for opts in [
+        "/Tilt 75 /Side 8 /Seed 1",
+        "/Tilt 75 /Side 8 /Seed 3",
+        "/Tilt 75 /Side 8",
+    ] {
+        let whole = data(&part(dot, opts));
+        assert_ne!(whole, bare, "the tilted dot is not drawn: {opts}");
+        assert_eq!(
+            data(&part(dot, &format!("{opts} /From 0.5"))),
+            whole,
+            "`{opts}` dot, second half"
+        );
+        assert_eq!(
+            data(&part(dot, &format!("{opts} /From 0.5 /To 0.9"))),
+            whole,
+            "`{opts}` dot, a piece"
+        );
+        assert_eq!(
+            data(&part(dot, &format!("{opts} /To 0.5"))),
+            bare,
+            "`{opts}` dot, first half"
+        );
+    }
     // an empty range, a bare moveto, an empty path
     assert_eq!(
         data(&part(LINE, "/From 0.4 /To 0.4")),
@@ -1111,7 +1135,8 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
 #[test]
 fn dust_is_cut_with_the_stroke() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
-    let line = "newpath 10 30 moveto 190 30 lineto";
+    // two segments, so the running arc position between them is tested too
+    let line = "newpath 10 30 moveto 100 30 lineto 190 30 lineto";
     let dust = |opts: &str| {
         let it = part(line, &format!("/Seed 6 /Dust 1 {opts}"));
         let w = (PART_W * 2) as usize;
