@@ -442,3 +442,53 @@ fn gs_renders_the_pdf_groups_as_pscat_rasters_them() {
     }
     assert!(worst <= 2, "gs and pscat differ by up to {worst}");
 }
+
+/// The SVG means what the raster meant: resvg renders the `<g opacity>` /
+/// `mix-blend-mode` / `isolation` groups as pscat's layers composite.
+#[test]
+fn resvg_renders_the_svg_groups_as_pscat_rasters_them() {
+    let src = "0.9 0.8 0.2 setrgbcolor 0 0 100 50 rectfill
+        << /Alpha 0.5 >> begingroup
+          0 0 1 setrgbcolor 10 10 50 50 rectfill
+          1 0 0 setrgbcolor 30 30 50 50 rectfill
+        endgroup
+        << /Blend /Multiply >> begingroup
+          0.2 0.6 1 setrgbcolor 70 5 25 90 rectfill
+        endgroup
+        << >> begingroup /Multiply setblendmode
+          0 0.5 0 setrgbcolor 5 80 20 15 rectfill
+        endgroup";
+    let mut it = Interp::with_page(SIZE, SIZE).expect("page");
+    it.gfx_mut().enable_svg();
+    it.run_str(src).expect("runs");
+    let ours = it.gfx().pixmap.clone();
+    let svg = it.gfx().svg_pages().expect("svg on").concat();
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
+        .expect("parse SVG");
+    let mut theirs = resvg::tiny_skia::Pixmap::new(SIZE, SIZE).expect("pixmap");
+    // The page is written in points (`width="100pt"`): draw it at one
+    // device pixel per user unit, as pscat's canvas is.
+    let size = tree.size();
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            SIZE as f32 / size.width(),
+            SIZE as f32 / size.height(),
+        ),
+        &mut theirs.as_mut(),
+    );
+    let mut worst = (0, 0);
+    for (i, (a, b)) in ours.data().iter().zip(theirs.data()).enumerate() {
+        if a.abs_diff(*b) > worst.0 {
+            worst = (a.abs_diff(*b), i / 4);
+        }
+    }
+    let (d, at) = worst;
+    let (x, y) = (at as u32 % SIZE, at as u32 / SIZE);
+    assert!(
+        d <= 2,
+        "resvg and pscat differ by {d} at device ({x}, {y}): {:?} vs {:?}\n{svg}",
+        ours.pixel(x, y),
+        theirs.pixel(x, y)
+    );
+}
