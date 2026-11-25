@@ -24,7 +24,7 @@ A new supported module, `pscat::host`, and a few methods beside `Page`:
 `push_value` and `define_value` return `Result<(), PsError>` (they refuse a
 foreign opaque value, below). `host::MAX_VALUE_NODES` bounds one copy.
 
-Tests: `tests/host_api.rs` (35 tests), `tests/host_api_memory.rs` (the copy
+Tests: `tests/host_api.rs` (38 tests), `tests/host_api_memory.rs` (the copy
 under `--max-memory`, its own binary with the tracking allocator) and the doc
 tests in `src/host.rs`, `src/page.rs` and the crate root. `docs/guides/library.md` has the user-facing
 section.
@@ -96,6 +96,33 @@ and 87 ms; the #863 dispatch groups (instructions retired per group, the empty
 loop subtracted) `1 pop` 236/234, `1.5 2.5 mul pop` 507/503, `x y mul pop`
 687/687, an empty procedure call 238/238, `{ 1 pop }` call 544/544,
 `1 2 3 1 index pop pop pop pop` 1103/1096.
+
+### Review round 2 (Codex, PR #1410)
+
+Four more holes of the same class in the round-1 code, three fixed, each with a
+test that failed on `deca3be` first:
+
+- **A dictionary key went around the copy's bounds.** A key that is not a name
+  or a string was spelled with the unbounded `repr()`, so an array key holding
+  itself twice expanded to 2^32 elements (`d extract` hung past a 60 s alarm).
+  It is now spelled within fixed bounds (depth 4, 16 elements, 256 bytes) and
+  counted as 8 nodes; a name or string key, and a name value, counts by its
+  length like a string value.
+- **A backtrace copied a procedure's name whole.** Names are cut to 256 bytes
+  at a character boundary, with `...`, without copying the rest.
+- **`lookup` copies were not charged.** `lookup` takes `&self`, so its steps
+  (a refused copy's work included) go into a `Cell` the next look at the limits
+  adds to the step count (`sync_decode_budget`, which already gathers decode
+  and mesh work); a copy between runs is free. `pop_value` likewise charges the
+  work of a refused copy.
+- **Not fixed: the name scan's cost follows a dictionary's capacity, not its
+  entries.** A dictionary that grew and was emptied keeps its buckets, and
+  `HashMap::iter` steps over the empty ones without spending the 65,536-entry
+  budget. Measured: after 4,194,304 entries were defined and removed, an
+  uncaught error 20 frames deep took 0.28 ms more than with an empty
+  dictionary, against 4.6 s to build the dictionary. The cost is bounded by
+  capacity the program already paid for (and the memory cap allowed), so it is
+  left as a known limit.
 
 ### Compatibility
 

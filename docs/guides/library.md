@@ -300,8 +300,12 @@ An opaque value belongs to the interpreter it came from: `push_value` and
 `define_value` refuse one from another interpreter with `invalidaccess`, since
 its host operators and save levels are that interpreter's. A copy is bounded:
 past `host::MAX_VALUE_NODES` (about a million elements and entries, however
-deep) `pop_value` is `limitcheck`, and inside an operator the copy counts
-against the program's limits like any other work.
+deep, a string or a dictionary key counting by its size) `pop_value` is
+`limitcheck`, and inside an operator the copy, by `pop_value` or `lookup`,
+counts against the program's limits like any other work (`lookup`'s at the
+program's next look at its limits). A dictionary key that is not a name or a
+string comes back as the text `==` prints for it, shortened past a few hundred
+bytes.
 
 ```rust
 use pscat::host::Value;
