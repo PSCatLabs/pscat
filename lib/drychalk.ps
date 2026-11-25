@@ -477,6 +477,11 @@
             dcSeedOn not {
                 dcSo /Seed dclp 0 get dclp 1 get dcposseed put
             } if
+            % a piece past the start draws its own chain: with the lane's seed
+            % alone, a lane that starts off would start off in every piece
+            dcPfrom 0 gt {
+                dcSo /Seed dcSo /Seed get dcPfrom 1e6 mul cvi 13 mul add 2147483000 mod put
+            } if
             dclp dcpiece /dclp exch def
             dclp length 0 gt {
                 dcSo /Touch { dcPspan mul dcPfrom add dctouchat } put
@@ -949,7 +954,7 @@
 % @param: /Under [rgb array] What lies beneath (default the board tone dcboard set, else the dksurface ground)
 % @param: /Seed [integer] Seed for every stroke's variation and texture; subpath i uses Seed + 7919 i. Leaves the caller's rand stream untouched (default from each stroke's position on the board)
 % @param: /Hand [0..1] Draws the path freehand rather than ruled: a slow drift to either side that grows with the stroke's length, a straight run past each end, and a closed outline that ends a little past or short of its start. 0 follows the path exactly; strokes shorter than about four widths (dots, ticks) are left as they are, and the drift fades in up to about 44 widths, so lettering moves far less than a long line (default 0)
-% @param: /From [0..1] Draws only the part of each stroke from this fraction of its length (after /Hand and /Corners have shaped it): the stroke's width, pressure, texture and dust there are those of the whole stroke, so drawing /From 0 /To t for a growing t grows the stroke without changing what is already drawn, and two adjacent pieces make the whole. A dot is drawn whole by the piece that holds its middle. With /Tilt, a piece that starts past 0 restarts each lane's chance dropouts at its start (default 0)
+% @param: /From [0..1] Draws only the part of each stroke from this fraction of its length (after /Hand and /Corners have shaped it): the stroke's width, pressure, texture and dust there are those of the whole stroke, so drawing /From 0 /To t for a growing t grows the stroke without changing what is already drawn, and two adjacent pieces make the whole. A dot is drawn whole by the piece that holds its middle. With /Tilt, a piece that starts past 0 draws each lane's chance dropouts afresh (default 0)
 % @param: /To [0..1] Draws only the part of each stroke up to this fraction of its length; must not be less than /From. 1 draws to the end, with the lift (default 1)
 % @param: /Corners [name] /joined draws each subpath as one stroke; /separate cuts it at every sharp corner between long legs, so a box is four strokes that land, lift and (with /Hand) overshoot on their own (default /joined)
 /dcchalk {

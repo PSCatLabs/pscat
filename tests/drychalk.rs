@@ -918,7 +918,7 @@ fn adjacent_pieces_make_the_whole_stroke() {
     for (opts, ceiling) in [
         ("/Seed 4", 48u8),
         ("", 48),
-        ("/Tilt 75 /Side 8 /Seed 2", 96),
+        ("/Tilt 75 /Side 8 /Seed 2", 140),
     ] {
         let whole = part(LINE, opts);
         let halves = on_board(
@@ -949,8 +949,10 @@ fn adjacent_pieces_make_the_whole_stroke() {
                 worst <= ceiling,
                 "`{opts}` {name}: differ by {worst} from the whole stroke"
             );
+            // (a side stroke's lanes draw their dropouts afresh in each piece)
+            let share = if opts.contains("Tilt") { 20 } else { 50 };
             assert!(
-                loud * 50 < ink,
+                loud * share < ink,
                 "`{opts}` {name}: {loud} of {ink} inked pixels differ clearly"
             );
         }
@@ -1066,29 +1068,78 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
             "`{opts}`: a 3% step changed the drawn part by {worst}"
         );
     }
-    let whole = part(LINE, "/Seed 4");
-    let ink = inked(&whole, &bare);
-    for pieces in [20, 100] {
-        let mut calls = String::new();
-        for i in 0..pieces {
-            calls += &format!(
-                "{LINE} << /Width 2.4 /Dust 1 /Seed 4 /From {i} {pieces} div /To {} {pieces} div >> dcchalk ",
-                i + 1
+    for opts in [
+        "/Seed 4",
+        "/Tilt 75 /Side 8 /Seed 1",
+        "/Tilt 75 /Side 8 /Seed 8",
+        "/Tilt 75 /Side 8",
+    ] {
+        let whole = part(LINE, opts);
+        let ink = inked(&whole, &bare);
+        for pieces in [20, 100] {
+            let mut calls = String::new();
+            for i in 0..pieces {
+                calls += &format!(
+                    "{LINE} << /Width 2.4 /Dust 1 {opts} /From {i} {pieces} div /To {} {pieces} div >> dcchalk ",
+                    i + 1
+                );
+            }
+            let drawn = on_board(PART_W, PART_H, 2.0, &calls);
+            let got = inked(&drawn, &bare);
+            assert!(
+                got * 20 > ink * 19 && got * 20 < ink * 21,
+                "`{opts}`, {pieces} pieces inked {got} pixels, the whole {ink}"
+            );
+            let loud = diffs(&data(&whole), &data(&drawn), 0, PART_W * 2)
+                .into_iter()
+                .filter(|&v| v > 64)
+                .count();
+            // a side stroke's lanes draw their dropouts afresh in each piece, so
+            // a few pixels differ strongly there; a tip stroke's none do
+            let allowed = if opts.contains("Tilt") { ink / 50 } else { 0 };
+            assert!(
+                loud <= allowed,
+                "`{opts}`, {pieces} pieces: {loud} pixels differ strongly from the whole"
             );
         }
-        let drawn = on_board(PART_W, PART_H, 2.0, &calls);
-        let got = inked(&drawn, &bare);
-        assert!(
-            got * 20 > ink * 19 && got * 20 < ink * 21,
-            "{pieces} pieces inked {got} pixels, the whole {ink}"
-        );
-        let loud = diffs(&data(&whole), &data(&drawn), 0, PART_W * 2)
-            .into_iter()
-            .filter(|&v| v > 64)
-            .count();
-        assert_eq!(
-            loud, 0,
-            "{pieces} pieces: {loud} pixels differ strongly from the whole"
-        );
     }
+}
+
+/// The dust of a stroke is cut by the same range as the stroke: pieces
+/// take specks in turn, none twice. Counted well off the line, where only
+/// dust lands (rows at least 4 points from the stroke).
+#[test]
+fn dust_is_cut_with_the_stroke() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    let line = "newpath 10 30 moveto 190 30 lineto";
+    let dust = |opts: &str| {
+        let it = part(line, &format!("/Seed 6 /Dust 1 {opts}"));
+        let w = (PART_W * 2) as usize;
+        let cols: Vec<usize> = data(&it)
+            .chunks(4)
+            .zip(bare.chunks(4))
+            .enumerate()
+            .filter(|(i, (p, q))| p != q && (i / w).abs_diff(60) >= 8)
+            .map(|(i, _)| i % w)
+            .collect();
+        (cols.len(), cols.last().copied().unwrap_or(0))
+    };
+    let (all, _) = dust("");
+    assert!(all > 60, "too little dust to measure: {all}");
+    let (first, first_end) = dust("/To 0.5");
+    let (second, _) = dust("/From 0.5");
+    // each half has about half of the specks, and the halves are the whole
+    assert!(
+        first * 4 < all * 3 && second * 4 < all * 3,
+        "{first} and {second} of {all}"
+    );
+    assert!(
+        (first + second) * 10 > all * 9 && (first + second) * 10 < all * 11,
+        "{first} + {second} is not {all}"
+    );
+    // and the first half's dust stays by its half of the line (10 + 90, 2x)
+    assert!(
+        first_end < (100 + 6) * 2,
+        "dust past the cut, at column {first_end}"
+    );
 }

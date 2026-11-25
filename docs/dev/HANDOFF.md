@@ -1281,8 +1281,10 @@ renders eight examples in both and compares block-downsampled output).
    boundary (proposed drykit follow-up: stable chunking). Incremental `/From prev /To now`
    pieces are fine down to ~0.3 widths; much shorter ones overdraw their round caps and
    lose texture (N=1500 pieces on a 190pt line: visibly greyer), so prefer `/From 0 /To t`.
-   drykit walks a piece's stops from its own start, so a seam is within a few levels, not exact, and a
-   /Tilt piece past 0 restarts its lanes' dropout chain. `dkstroke`/`dycrayon`/`dhstroke`
+   drykit walks a piece's stops from its own start, so a seam is within ~40 levels (tip; ~60, and 2-3% of ink clearly different, with /Tilt),
+   not exact, and a /Tilt piece past 0 draws its lanes' dropout chain afresh (the lane seed
+   is mixed with From: with the whole lane's seed alone, a lane that starts "off" stayed
+   off in every incremental piece, review finding on #1416). `dkstroke`/`dycrayon`/`dhstroke`
    do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
    `notes/1409-drychalk-from-to.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim

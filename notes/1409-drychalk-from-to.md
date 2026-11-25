@@ -14,7 +14,7 @@ PSCatLabs/psanim#30) used to draw the whole stroke each frame, clipped to a band
   `From + t (To - From)`, so the piece has the profile of its place in the stroke.
 - Texture is position-hashed in drykit (canvas cells), so it matches wherever the
   piece is drawn. drykit's walker places stops from the piece's own start, so a
-  seam is within a few levels (measured: max channel difference 26 of 255 on a tip
+  seam is within a few tens of levels (measured: max channel difference 26 of 255 on a tip
   stroke over a two-piece split, 36 over three), and the pen's last pitch shows the
   band of touch at the cut, not the next stop's.
 - Dust: every speck's random draws are made in order for the whole stroke; a speck is
@@ -24,7 +24,9 @@ PSCatLabs/psanim#30) used to draw the whole stroke each frame, clipped to a band
   piece with `From <= 0.5 < To`.
 - With `/Tilt`, each lane is cut by its own length; a piece with `From > 0` gets the
   whole lane's seed (so a seedless call agrees with the whole stroke) but its on/off
-  dropout chain starts afresh there.
+  dropout chain starts afresh there, seeded by the lane's seed mixed with `From`
+  (the lane's seed alone left a lane that starts off off in every incremental piece: ink 0.60
+  of the whole at 100 pieces for `/Seed 1`; now 0.98 to 1.02 over seeds).
 - Defaults leave the code path untouched (`dcPart` is false): identity-checked.
 
 **Growth, measured.** `/From 0 /To t` frames 3-4% apart on a 180pt line (0.3 to 1.0, no
