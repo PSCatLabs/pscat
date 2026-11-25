@@ -841,6 +841,16 @@ renders eight examples in both and compares block-downsampled output).
   PDF's `ExtGState /BM`, and an exhaustive match on a local enum is
   what makes adding a third mode fail to compile until all three
   exporters learn about it.
+- `begingroup`/`endgroup` (#1406) are pscat transparency groups: `dict
+  begingroup` swaps the canvas (and the 16-bit shadow) for a transparent
+  page-sized layer that `endgroup` composites with `currentalpha x /Alpha`
+  and `/Blend` (PDF's group semantics: alpha 1 and Normal inside); PDF gets an
+  isolated group form XObject, SVG a `<g opacity>`. While a group is open
+  `Gfx::pixmap` is the *layer*: a live view reads `page_pixmap()`. Every
+  route that unwinds the graphics state past a group ends it first
+  (`restore_glyph_snapshot`, `leave_capture`, `showpage`/`copypage`/`erase`,
+  `step_n` at the end of a program); a new such route must too.
+  `notes/1406-transparency-groups.md`.
 - `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
   because it is non-standard (gs has no `.sameclip`): true when the clip in
   force is the very clip chain the gstate holds (both none, or the same

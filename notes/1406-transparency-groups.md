@@ -25,9 +25,17 @@ endgroup
   are ignored, as gs ignores keys it does not use in a parameter dict
   (an image dictionary, a page device request); reserving the names PDF uses
   (`/Isolated`, `/Knockout`) for later.
-- `endgroup` with no group open, or with the innermost group opened outside
-  the pattern `PaintProc` now running, is `undefinedresult`... see
-  "Errors" below for the final choice and why.
+- `endgroup` closes the innermost group opened at the current level: the
+  page, or the pattern `PaintProc` running now. With none open there it
+  does nothing, as `grestore` with nothing saved and `cliprestore` with
+  nothing saved do. Not an error, because a group can end behind the
+  program's back (a `showpage` or a `restore` ends it, below), and a
+  program written `begingroup ... showpage endgroup` must not then fail.
+  An `endgroup` in a `PaintProc` never closes a group of the page around
+  it: that group's layer is not the canvas the tile is drawn on.
+- Errors: a non-dictionary is `typecheck`; a bad `/Alpha` or `/Blend` as
+  above; a 65th open group, or open layers past 2^28 pixels together (1 GiB),
+  `limitcheck`; a layer past `--max-memory`, `limitexceeded (memory)`.
 
 ### How `/Alpha` composes with `setalpha` and the blend mode
 
@@ -106,14 +114,14 @@ with no change, and the clip masks (page-sized) fit it. The 16-bit shadow
 (#731) is swapped too: the layer gets its own, so a stack of faint marks in
 a group still reaches the arithmetic colour. `endgroup` composites the
 layer onto the canvas below with the group's alpha and blend
-(premultiplied source-over or Multiply, tiny-skia's formulas, in f32), only
-over the rows and columns the group painted, and puts the canvas back.
+(premultiplied source-over or Multiply, tiny-skia's formulas, in f32),
+skipping the pixels the layer left transparent, and puts the canvas back.
 
 Why the full page and not a layer cropped to the clip: clip masks, the
 coverage scratch mask and the shadow are all page-sized and indexed by
 device pixel; a cropped layer would need every one re-made in the layer's
-coordinates. The composite itself only visits the painted box. A cropped
-layer is a possible follow-up if memory per group matters.
+coordinates. A cropped layer (and a composite over only the painted box)
+is a possible follow-up if memory or time per group matters.
 
 ### Limits
 

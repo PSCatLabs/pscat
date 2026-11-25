@@ -1505,11 +1505,15 @@ struct Group {
 /// source-over and Multiply formulas. Pixels the layer left transparent are
 /// skipped. Returns the pixels looked at, the work done.
 fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u32, u32)) -> u64 {
-    let g = comp.alpha.clamp(0.0, 1.0);
+    // NaN paints nothing, as `setalpha` with NaN does.
+    let g = if comp.alpha.is_nan() {
+        0.0
+    } else {
+        comp.alpha.clamp(0.0, 1.0)
+    };
     let (w, h) = (below.width() as usize, below.height() as usize);
     let (y0, y1) = (rows.0 as usize, (rows.1 as usize).min(h));
-    // NaN paints nothing, as `setalpha` with NaN does.
-    if !(g > 0.0) || y0 >= y1 || layer.width() as usize != w || layer.height() as usize != h {
+    if g <= 0.0 || y0 >= y1 || layer.width() as usize != w || layer.height() as usize != h {
         return 0;
     }
     let src = &layer.data()[y0 * w * 4..y1 * w * 4];
@@ -1528,14 +1532,14 @@ fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u
         let (sa, da) = (sv(3), dv(3));
         let out_a = sa + da * (1.0 - sa);
         let a8 = (out_a.clamp(0.0, 1.0) * 255.0).round() as u8;
-        for i in 0..3 {
+        for (i, out) in d.iter_mut().take(3).enumerate() {
             let (sc, dc) = (sv(i), dv(i));
             let o = match comp.blend {
                 BlendMode::Normal => sc + dc * (1.0 - sa),
                 BlendMode::Multiply => sc * (1.0 - da) + dc * (1.0 - sa) + sc * dc,
             };
             // Premultiplied: a channel never above the alpha.
-            d[i] = ((o.clamp(0.0, 1.0) * 255.0).round() as u8).min(a8);
+            *out = ((o.clamp(0.0, 1.0) * 255.0).round() as u8).min(a8);
         }
         d[3] = a8;
     }

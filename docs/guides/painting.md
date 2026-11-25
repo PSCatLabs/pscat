@@ -715,3 +715,39 @@ instead, which gs's own PDF interpreter renders correctly.
 `docs/dev/design/WATERCOLOR.md` is the decision record behind all of it (the
 architecture study), `examples/paintkit_wash_demo.ps` is the
 specimen sheet, and the gallery's First Rain is the piece.
+
+### Transparency groups: fading or blending a whole drawing
+
+`setalpha` fades each mark on its own, so where two faded shapes overlap the
+overlap is darker. To fade or blend a drawing *as one thing*, draw it in a
+transparency group (#1406, another pscat extension):
+
+```postscript
+<< /Alpha 0.5 >> begingroup          % or /Blend /Multiply, or both
+  0 0 1 setrgbcolor 72 72 200 200 rectfill
+  1 0 0 setrgbcolor 150 150 200 200 rectfill   % the overlap is no darker
+endgroup
+```
+
+The marks draw into a transparent layer that composites onto the page at
+`endgroup`, with `currentalpha` times `/Alpha` and with `/Blend` (or
+`currentblendmode`). Inside the group alpha starts at 1 and the blend at
+`/Normal`, so `0.5 setalpha << >> begingroup` also fades the whole group, and
+marks inside may use `setalpha`/`setblendmode` among themselves. The group is
+*isolated*: a `/Multiply` mark inside multiplies with the group's own marks,
+not with the page; give the group itself `/Blend /Multiply` to overprint an
+ink layer. Groups nest, `begingroup` is a `gsave` level that a stray
+`grestore` inside cannot pop past, and `endgroup` brings back the state
+`begingroup` had. The clip in force at `begingroup` clips the whole group.
+
+PNG, `--svg` (`<g opacity="0.5" style="mix-blend-mode:multiply">`) and
+`--pdf` (a transparency group form XObject, `/I true`, painted through an
+`ExtGState`) all get it, so a faded layered drawing stays vector. A group
+left open ends at `showpage`, `copypage`, `erasepage`, a `restore` past it,
+or the end of the program, with its marks kept; `endgroup` with no group
+open does nothing. `setpagedevice` inside a group is `invalidaccess`. Each
+open group holds a page-sized layer (4 bytes a pixel), counted against
+`--max-memory` and `--max-steps`; at most 64 may be open. Ghostscript cannot
+run it from PostScript (its `.begintransparencygroup` is not usable from a
+program), so as with `setalpha` hand on the PDF, which gs renders. Design and
+edge cases: `notes/1406-transparency-groups.md`.
