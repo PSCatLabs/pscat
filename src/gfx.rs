@@ -1518,7 +1518,12 @@ fn composite_group(below: &mut Pixmap, layer: &Pixmap, comp: Composite, rows: (u
     }
     let src = &layer.data()[y0 * w * 4..y1 * w * 4];
     let dst = &mut below.data_mut()[y0 * w * 4..y1 * w * 4];
-    for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
+    for (s, d) in src
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(dst.as_chunks_mut::<4>().0)
+    {
         if s[3] == 0 {
             continue;
         }
