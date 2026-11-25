@@ -5,6 +5,7 @@
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --skills-only
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth none
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --out DIR --root ROOT
+    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth none --production
 
 URL is the hosted server's endpoint, https://<your-pscat-mcp-host>/mcp.
 
@@ -69,6 +70,12 @@ first, in the order written, each to the result of the one before; `replace` and
 matches nothing, or twice, fails the build, so a change to the
 shared skill's wording that the overlay depended on is caught by
 `python3 scripts/test_build_chatgpt_plugin.py`.
+
+`--production` (with `--remote`) is the release workflow's switch (#1253): it
+refuses a URL that is empty, not https, or that names the staging service
+(anything containing `run.app`) or a reserved or example host, and the message
+names the repository variable `PSCAT_MCP_PROD_URL` that the release reads the
+URL from. Nothing is built when it refuses.
 
 The other files are copied unchanged. Only tracked files are used (`git
 ls-files`), so caches and untracked files never ship. The ZIP is
@@ -157,6 +164,33 @@ def check_remote_url(url):
         raise SystemExit(f"--remote {url!r}: ChatGPT needs a public host, not a local or "
                          "private address")
     return u._replace(scheme="https", netloc=u.netloc.lower()).geturl()
+
+
+# Hosts that can never be the production server (the --production check).
+NOT_PRODUCTION_SUFFIXES = (".invalid", ".example", ".test", ".localhost", ".local")
+NOT_PRODUCTION_HOSTS = ("example.com", "example.org", "example.net")
+
+
+def check_production_url(url):
+    """The production pscat-mcp endpoint the release ships in the plugin ZIP, or
+    a SystemExit. Stricter than check_remote_url: never the staging Cloud Run
+    service (a `*.run.app` address), never a placeholder host (#1253). `url` is
+    the value of the repository variable PSCAT_MCP_PROD_URL."""
+    var = "the repository variable PSCAT_MCP_PROD_URL"
+    if url is None or not url.strip():
+        raise SystemExit(f"--production: {var} is unset or empty; set it to the production "
+                         "pscat-mcp endpoint (https://<host>/mcp), see docs/dev/RELEASING.md")
+    if "run.app" in url.lower():
+        raise SystemExit(f"--production: {var} ({url}) is a run.app address, the staging "
+                         "service; the release ships the production URL only")
+    if not url.lower().startswith("https://"):
+        raise SystemExit(f"--production: {var} ({url}) must start with https://")
+    checked = check_remote_url(url)
+    host = urllib.parse.urlsplit(checked).hostname
+    if host.endswith(NOT_PRODUCTION_SUFFIXES) or host in NOT_PRODUCTION_HOSTS \
+            or host.endswith(tuple("." + h for h in NOT_PRODUCTION_HOSTS)):
+        raise SystemExit(f"--production: {var} ({url}) names a placeholder host, not a production server")
+    return checked
 
 
 def remote_mcp_json(url, auth):
@@ -330,7 +364,11 @@ def fill(text, where, values):
     return PLACEHOLDER.sub(sub, text)
 
 
-def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=None):
+def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=None, production=False):
+    if production:
+        if remote is None:
+            raise SystemExit("--production needs --remote")
+        remote = check_production_url(remote)
     if remote is not None and skills_only:
         raise SystemExit("--remote and --skills-only cannot be combined "
                          "(one drops mcp.json, the other replaces it)")
@@ -411,10 +449,13 @@ def main(argv):
                     help="how the hosted server is protected (required with --remote): none, "
                          "or bearer (a fixed token; ChatGPT cannot send one, see "
                          "docs/guides/chatgpt-hosted.md)")
+    ap.add_argument("--production", action="store_true",
+                    help="release builds: refuse an empty, non-https, run.app (staging) or "
+                         "placeholder URL (#1253)")
     args = ap.parse_args(argv)
     try:
         out = build(args.root, args.sums, args.out, args.skills_only, args.remote,
-                    args.remote_auth)
+                    args.remote_auth, args.production)
         if args.remote_auth == "bearer":
             print("warning: ChatGPT's connection form has no bearer-token input; this ZIP "
                   "declares one but ChatGPT cannot send it (docs/guides/chatgpt-hosted.md)",

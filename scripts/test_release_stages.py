@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import release_stages as rs  # noqa: E402
@@ -331,6 +332,113 @@ class Mismatch(Base):
         self.assertIn("does not exist", res[0]["detail"])
 
 
+def make_chatgpt_plugin(path, version=VERSION, url="https://mcp.pscat.example.org/mcp", name="pscat-cloud"):
+    """A minimal hosted ChatGPT plugin ZIP: plugin.json and mcp.json (#1253)."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("plugin.json", json.dumps({"name": name, "version": version}))
+        z.writestr("mcp.json", json.dumps({"mcpServers": {"pscat-cloud": {"type": "streamable-http", "url": url}}}))
+
+
+class ChatgptPlugin(Base):
+    """#1253: the remote ChatGPT plugin ZIP is a release asset: listed in the
+    manifest and SHA256SUMS, uploaded with the draft, and never optional once
+    the workflow asks for it."""
+
+    def _zip(self):
+        return os.path.join(os.path.dirname(self.crate), rs.chatgpt_plugin_name(VERSION))
+
+    def _attach(self, **kw):
+        make_chatgpt_plugin(self._zip(), **kw)
+        plugin = rs.find_chatgpt_plugin(os.path.dirname(self.crate), VERSION)
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, None, plugin), self.dist)
+        self.m = rs.load_manifest(self.dist)
+        return plugin
+
+    def test_asset_is_in_the_manifest_and_sums_after_the_archives(self):
+        plugin = self._attach()
+        name = os.path.basename(plugin)
+        self.assertEqual(name, f"pscat-cloud-chatgpt-plugin-{VERSION}.zip")
+        names = [a["name"] for a in self.m["assets"]]
+        self.assertEqual(names[-1], name, "after the archives")
+        self.assertEqual(rs.chatgpt_plugin_asset(self.m), name)
+        with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
+            self.assertIn(f"{rs.sha256_file(plugin)}  {name}\n", f.read())
+        self.assertIn(name, rs.release_files(self.m))
+        # A second pass over a dist that already holds the copy lists it once,
+        # and the copy is not mistaken for a binary archive.
+        self.assertNotIn(name, rs.archives_in(self.dist))
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, None, plugin), self.dist)
+        self.assertEqual([a["name"] for a in rs.load_manifest(self.dist)["assets"]].count(name), 1)
+
+    def test_rehearsal_runs_over_a_manifest_that_lists_the_zip(self):
+        # assemble's rehearsal runs on the exact dist the manifest step wrote.
+        self._attach()
+        lines = []
+        outcomes = rs.rehearse(self.dist, self.crate, self.repo, log=lines.append)
+        self.assertTrue(outcomes)
+        self.assertEqual([n for n, ok, _ in outcomes if not ok], [], lines)
+
+    def test_a_release_without_the_asset_has_none_to_find(self):
+        # What a missing asset looks like: the manifest has no ChatGPT plugin,
+        # and asking for one (the workflow always does) is an error.
+        self.assertIsNone(rs.chatgpt_plugin_asset(self.m))
+        with self.assertRaises(SystemExit):
+            rs.find_chatgpt_plugin(os.path.dirname(self.crate), VERSION)
+
+    def test_draft_uploads_it_and_the_notes_name_it(self):
+        plugin = self._attach()
+        name = os.path.basename(plugin)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["draft"]), (rs.EXIT_OK, "published"))
+        rel = self.fake.releases(TAG)[0]
+        asset = next(a for a in rel["assets"] if a["name"] == name)
+        self.assertEqual(self.fake.asset_sha256(asset), rs.sha256_file(plugin))
+        self.assertIn(name, rs.changelog_notes(VERSION, self.repo, None, name))
+
+    def test_a_draft_missing_the_asset_is_completed_not_trusted(self):
+        plugin = self._attach()
+        name = os.path.basename(plugin)
+        rid = self.fake.create_draft(TAG, "x", "x")
+        for n in rs.release_files(self.m):
+            if n != name:
+                self.fake.upload(rid, os.path.join(self.dist, n), n)
+        st, r, res = self.run_all()
+        self.assertEqual((st, r["draft"]), (rs.EXIT_OK, "published"))
+        self.assertIn(name, {x["stage"]: x["detail"] for x in res}["draft"])
+
+    def test_the_zip_must_be_this_releases_hosted_plugin(self):
+        src = os.path.dirname(self.crate)
+        for kw, why in (
+            ({"version": "0.0.1"}, "another version"),
+            ({"name": "pscat"}, "the local plugin"),
+            ({"url": "https://pscat-mcp-1234.us-central1.run.app/mcp"}, "the staging service"),
+            ({"url": "https://pscat-mcp-1234.us-central1.RUN.APP/mcp"}, "staging, upper case"),
+            ({"url": "http://mcp.pscat.example.org/mcp"}, "plain http"),
+        ):
+            make_chatgpt_plugin(self._zip(), **kw)
+            with self.assertRaises(SystemExit, msg=why):
+                rs.find_chatgpt_plugin(src, VERSION)
+            with self.assertRaises(SystemExit, msg=why):
+                rs.build_manifest(TAG, COMMIT, self.dist, self.crate, None, self._zip())
+        with open(self._zip(), "wb") as f:
+            f.write(b"not a zip")
+        with self.assertRaises(SystemExit):
+            rs.find_chatgpt_plugin(src, VERSION)
+
+    def test_manifest_cli_requires_and_attaches_the_zip(self):
+        cmd = [sys.executable, os.path.join(rs.ROOT, "scripts", "release_stages.py"), "manifest",
+               "--tag", TAG, "--commit", COMMIT, "--dist", self.dist, "--crate", self.crate,
+               "--chatgpt-plugin-from", os.path.dirname(self.crate), "--repo-root", self.repo]
+        missing = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("no hosted ChatGPT plugin ZIP", missing.stderr)
+        make_chatgpt_plugin(self._zip())
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        m = rs.load_manifest(self.dist)
+        self.assertEqual(rs.chatgpt_plugin_asset(m), rs.chatgpt_plugin_name(VERSION))
+        self.assertTrue(os.path.isfile(os.path.join(self.dist, rs.chatgpt_plugin_name(VERSION))))
+
+
 class Channels(Base):
     def _npm(self, version=VERSION, tarball=True, tarball_version=None):
         os.makedirs(os.path.join(self.repo, "npm"), exist_ok=True)
@@ -503,6 +611,46 @@ class Channels(Base):
         make_npm_tarball(self._tarball(), global_js=b"")  # an empty file is no build either
         with self.assertRaises(SystemExit):
             rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball())
+
+    def test_the_release_carries_both_pscat_global_js_and_the_chatgpt_plugin_zip(self):
+        """#1108 + #1253 together: archives, npm tarball, pscat.global.js, plugin ZIP,
+        in that order, each in SHA256SUMS, uploaded by `draft`, notes naming both."""
+        self._npm()
+        zip_path = os.path.join(os.path.dirname(self.crate), rs.chatgpt_plugin_name(VERSION))
+        make_chatgpt_plugin(zip_path)
+        plugin = rs.find_chatgpt_plugin(os.path.dirname(self.crate), VERSION)
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball(), plugin), self.dist)
+        self.m = rs.load_manifest(self.dist)
+        names = [a["name"] for a in self.m["assets"]]
+        tgz, glob, zname = os.path.basename(self._tarball()), "pscat.global.js", rs.chatgpt_plugin_name(VERSION)
+        self.assertEqual(names[-3:], [tgz, glob, zname])
+        self.assertEqual(len(names), len(rs.archives_in(self.dist)) + 3)
+        self.assertEqual((rs.global_asset(self.m), rs.chatgpt_plugin_asset(self.m)), (glob, zname))
+        with open(os.path.join(self.dist, rs.SUMS_NAME), encoding="utf-8") as f:
+            sums = f.read()
+        for n in (tgz, glob, zname):
+            self.assertIn(f"{rs.sha256_file(os.path.join(self.dist, n))}  {n}\n", sums)
+            self.assertIn(n, rs.release_files(self.m))
+        # Neither extra file is mistaken for a binary archive.
+        self.assertNotIn(zname, rs.archives_in(self.dist))
+        self.assertNotIn(glob, rs.archives_in(self.dist))
+        # A second pass over a dist that already holds the copies lists each once.
+        rs.write_manifest(rs.build_manifest(TAG, COMMIT, self.dist, self.crate, self._tarball(), plugin), self.dist)
+        again = [a["name"] for a in rs.load_manifest(self.dist)["assets"]]
+        self.assertEqual([again.count(n) for n in (tgz, glob, zname)], [1, 1, 1])
+        lines = []
+        outcomes = rs.rehearse(self.dist, self.crate, self.repo, log=lines.append)
+        self.assertEqual([n for n, ok, _ in outcomes if not ok], [], lines)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["draft"], r["publish"]), (rs.EXIT_OK, "published", "published"))
+        rel = self.fake.releases(TAG)[0]
+        uploaded = {a["name"]: a for a in rel["assets"]}
+        for n in (tgz, glob, zname):
+            self.assertEqual(self.fake.asset_sha256(uploaded[n]), rs.sha256_file(os.path.join(self.dist, n)))
+        notes = rs.changelog_notes(VERSION, self.repo, tgz, glob, zname)
+        self.assertIn(glob, notes)
+        self.assertIn(zname, notes)
+        self.assertIn("of the npm package and of the script and of the ChatGPT plugin;", notes)
 
     def test_no_npm_channel_no_pscat_global_js(self):
         self.assertIsNone(rs.global_asset(self.m))

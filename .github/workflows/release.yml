@@ -352,6 +352,39 @@ jobs:
         with:
           name: release-inputs
           path: release-inputs
+      # --- hosted ChatGPT plugin ZIP (#1253) -------------------------------
+      # pscat-cloud-chatgpt-plugin-<version>.zip, built against the
+      # PRODUCTION pscat-mcp URL in the repository variable PSCAT_MCP_PROD_URL
+      # (docs/dev/RELEASING.md). A real release fails closed: unset, empty,
+      # not https, a *.run.app (staging) address or a placeholder host stops
+      # the job before any ZIP exists. A dry run with the variable unset
+      # builds against a placeholder host so the rest of the pipeline is
+      # still rehearsed; that ZIP is never published (draft needs a real run).
+      # Built into release-inputs/, not dist/: dist/ is for the archives, and
+      # `manifest` below copies the ZIP into dist/ and lists it.
+      - name: Hosted ChatGPT plugin ZIP (#1253)
+        env:
+          PROD_URL: ${{ vars.PSCAT_MCP_PROD_URL }}
+          REAL: ${{ needs.verify.outputs.real }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          CHECK=--production
+          if [ -z "$PROD_URL" ] && [ "$REAL" != true ]; then
+            echo "::warning::PSCAT_MCP_PROD_URL is not set; this dry run builds the ChatGPT plugin against a placeholder host. A real release would stop here."
+            PROD_URL=https://pscat-mcp.example.com/mcp
+            CHECK=
+          fi
+          echo "pscat-mcp URL for the ChatGPT plugin: ${PROD_URL:-<unset>}"
+          # SHA256SUMS does not exist yet (the manifest step writes it); the
+          # builder only needs the archives' names and digests from it.
+          (cd dist && sha256sum pscat-*.tar.gz) > "$RUNNER_TEMP/archive-sums"
+          # shellcheck disable=SC2086 # CHECK is empty or one flag
+          python3 scripts/build_chatgpt_plugin.py --sums "$RUNNER_TEMP/archive-sums" \
+            --remote "$PROD_URL" --remote-auth none $CHECK --out release-inputs
+          ZIP="release-inputs/pscat-cloud-chatgpt-plugin-$VERSION.zip"
+          [ -f "$ZIP" ] || { echo "::error::the plugin builder did not write $ZIP (plugin/plugin.json version differs from $VERSION?)"; exit 1; }
+          { echo '### ChatGPT plugin ZIP'; echo "pscat-mcp URL: \`${PROD_URL}\` ($([ -n "$CHECK" ] && echo production || echo 'dry run placeholder'))"; } >> "$GITHUB_STEP_SUMMARY"
+      # ---------------------------------------------------------------------
       - name: Checksums and release manifest
         env:
           TAG: ${{ needs.verify.outputs.tag }}
@@ -362,8 +395,9 @@ jobs:
           # listed in SHA256SUMS (#1006); missing while npm/package.json
           # exists is an error.
           python3 scripts/release_stages.py manifest --tag "$TAG" --commit "$COMMIT" \
-            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs
-          N=$(ls dist/*.tar.gz dist/*.zip | wc -l)
+            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs \
+            --chatgpt-plugin-from release-inputs
+          N=$(ls dist/pscat-"$VERSION"-*.tar.gz dist/pscat-"$VERSION"-*.zip | wc -l)
           [ "$N" -eq 5 ] || { echo "::error::expected 5 archives, found $N"; exit 1; }
           { echo '### SHA256SUMS'; echo '```'; cat dist/SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       # The acceptance scenarios on this run's real artifacts, against fake

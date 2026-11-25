@@ -2153,6 +2153,18 @@ renders eight examples in both and compares block-downsampled output).
   fails if an overlay anchor stops matching: update the overlay's text too.** A
   new reference file in a skill needs no overlay unless it is local-only. See
   `notes/1256-pscat-cloud-profile.md`.
+- **The `pscat-cloud` ChatGPT ZIP is a release asset (#1253).** The `assemble`
+  job builds `pscat-cloud-chatgpt-plugin-<version>.zip` into `release-inputs/`
+  with `build_chatgpt_plugin.py --remote "$PSCAT_MCP_PROD_URL" --production`
+  (the URL is the repository variable `PSCAT_MCP_PROD_URL`; a real release
+  fails closed when it is unset, not https or a `*.run.app` staging address),
+  and `release_stages.py manifest --chatgpt-plugin-from` copies it into `dist/`
+  and lists it after the archives and the npm tarball. The name starts
+  `pscat-cloud-chatgpt-plugin-`, which `archives_in` skips: it ends in `.zip`
+  but is not a binary archive. `check_workflows.py` fails if `release.yml` stops
+  wiring it, `release-check.yml` checks the published ZIP, and
+  `docs/dev/RELEASING.md` has the variable. Not shipped: the local-server ZIP.
+  See `notes/1253-chatgpt-plugin-release-asset.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a

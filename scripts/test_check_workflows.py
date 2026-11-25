@@ -107,6 +107,25 @@ class Rules(unittest.TestCase):
         e = errors(text, ".github/workflows/release-check.yml")
         self.assertTrue(any("job build declares no permissions" in x for x in e), e)
 
+    def test_release_workflow_must_ship_the_chatgpt_plugin_zip(self):
+        # #1253: the ZIP is a listed release asset built from the production
+        # URL variable; losing either wiring, or baking in a staging URL, fails.
+        path = os.path.join(cw.ROOT, ".github", "workflows", "release.yml")
+        with open(path, encoding="utf-8") as f:
+            real = f.read()
+        self.assertEqual(cw.check_release_assets("release.yml", real), [])
+        for needle, expect in (
+            ("--chatgpt-plugin-from release-inputs", "--chatgpt-plugin-from"),
+            ("vars.PSCAT_MCP_PROD_URL", "PSCAT_MCP_PROD_URL"),
+            ("CHECK=--production", "--production"),
+            (" $CHECK ", "--production"),
+        ):
+            self.assertIn(needle, real, needle)
+            e = cw.check_release_assets("release.yml", real.replace(needle, "", 1))
+            self.assertTrue(any(expect in x for x in e), (needle, e))
+        e = cw.check_release_assets("release.yml", real + "\n      - run: echo https://x.us-central1.run.app/mcp\n")
+        self.assertTrue(any("run.app" in x for x in e), e)
+
     def test_the_repo_passes(self):
         self.assertEqual(cw.main([]), 0)
 
