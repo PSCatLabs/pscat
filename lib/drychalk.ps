@@ -330,7 +330,7 @@
 
 % pts -> pts'   (the part of a stroke's polyline from /From to /To of its
 % length, measured along it (#1409); an empty array when nothing of it is
-% drawn: a sliver under a twentieth of a width, or a zero-length stroke
+% drawn: a range under a millionth of the stroke's unit, or a zero-length stroke
 % that /From..To does not hold. A zero-length stroke (a dot) is whole or
 % nothing: it belongs to the piece that holds its middle, [/From, /To) with
 % /To 1 closed, so two adjacent pieces draw it once. dctrim hands back the
@@ -343,7 +343,7 @@
     dcPL 1e-6 le {
         dcPfrom 0.5 le dcPto 0.5 gt and { dcPp } { [ ] } ifelse
     } {
-        dcPto dcPfrom sub dcPL mul dcw 0.05 mul le { [ ] } {
+        dcPto dcPfrom sub dcPL mul 1e-6 le { [ ] } {
             dcPp dcPfrom dcPL mul 1 dcPto sub dcPL mul dctrim
         } ifelse
     } ifelse

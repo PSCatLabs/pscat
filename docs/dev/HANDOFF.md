@@ -1275,8 +1275,13 @@ renders eight examples in both and compares block-downsampled output).
    is in `[From, To)` (To 1 closed), so pieces partition the dust. Gotchas: `dctrim`
    returns the WHOLE polyline when nothing is left (hence `dcpiece` decides empty
    first); dots/zero-length strokes belong to the piece holding t = 0.5; the default
-   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. drykit walks
-   a piece's stops from its own start, so a seam is within a few levels, not exact, and a
+   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. Measured: frames
+   3-4% apart leave the drawn part pixel-identical behind the pen's last ~12 widths, except
+   one edge-AA shift (<= ~43/255, edge rows only) where the stroke crosses a drykit chunk
+   boundary (proposed drykit follow-up: stable chunking). Incremental `/From prev /To now`
+   pieces are fine down to ~0.3 widths; much shorter ones overdraw their round caps and
+   lose texture (N=1500 pieces on a 190pt line: visibly greyer), so prefer `/From 0 /To t`.
+   drykit walks a piece's stops from its own start, so a seam is within a few levels, not exact, and a
    /Tilt piece past 0 restarts its lanes' dropout chain. `dkstroke`/`dycrayon`/`dhstroke`
    do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
    `notes/1409-drychalk-from-to.md`).

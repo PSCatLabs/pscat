@@ -125,9 +125,16 @@ newpath 40 60 moveto 300 80 lineto
     stroke, measured along its length once `/Hand` and `/Corners` have
     shaped it. The part is drawn with the pressure, width, texture and
     dust the whole stroke has there, so `/From 0 /To t` with a growing
-    `t` grows a stroke without changing the part already drawn, and
-    `/To 0.5` plus `/From 0.5` make the whole (to within the pixels of
-    the seam and of the pen's last few widths). A long stroke's part
+    `t` grows a stroke without changing the part already drawn (its
+    texture and dust stay; behind the pen's last dozen widths nothing
+    moves between frames, except that drykit draws a long stroke in
+    chunks and where a growing stroke crosses one, its edge pixels shift
+    once by up to about 40 of 255 levels). `/To 0.5` plus `/From 0.5`
+    make the whole, to within a few levels at the seam. A caller that
+    keeps its canvas can draw `/From prev /To now` each frame instead;
+    that holds for pieces down to a few tenths of a width, and much
+    shorter pieces overdraw their own round ends and lose texture, so
+    redraw `/From 0 /To t` for those. A long stroke's part
     costs in proportion to its length, so a board written over time pays
     for what each frame adds, not the whole stroke. The stroke's landing
     belongs to the piece that holds `/From 0`, its lift to the one that

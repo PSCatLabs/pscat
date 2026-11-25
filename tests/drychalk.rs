@@ -867,26 +867,34 @@ fn the_whole_range_is_the_default() {
 /// A growing stroke grows: the part already drawn does not change (only
 /// the pen's last few widths do), and every frame adds ink. Straight
 /// line so the pen's place is known; checked with and without a /Seed, and
-/// with the stick on its side.
+/// with the stick on its side. One thing does move: drykit draws a long
+/// stroke in chunks, and where a growing stroke crosses a chunk boundary
+/// the AA of its edge pixels changes once (up to about 40 levels, nothing
+/// of the texture), so a few transitions may show it but most show nothing.
 #[test]
 fn a_growing_stroke_keeps_what_it_has_drawn() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
     let line = "newpath 10 30 moveto 190 30 lineto";
     for opts in ["/Seed 4", "", "/Tilt 75 /Side 8 /Seed 2", "/Firm 1"] {
-        let tos = [0.2, 0.4, 0.6, 0.8, 1.0];
+        let tos: Vec<f64> = (0..=15).map(|i| 0.25 + 0.05 * f64::from(i)).collect();
         let frames: Vec<Interp> = tos
             .iter()
             .map(|t| part(line, &format!("/From 0 /To {t} {opts}")))
             .collect();
+        let mut moved = 0;
         for k in 0..tos.len() - 1 {
             let (a, b) = (data(&frames[k]), data(&frames[k + 1]));
             // the pen was at 10 + 180 To: all but its last 12 points agree
             let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
             let d = diffs(&a, &b, 0, behind);
             let worst = d.iter().copied().max().unwrap();
+            let loud = d.iter().filter(|&&v| v > 16).count();
+            if loud > 0 {
+                moved += 1;
+            }
             assert!(
-                worst <= 64,
-                "`{opts}`: frame {k} -> {} changed its drawn part by {worst}",
+                loud * 2 < inked(&frames[k], &bare) && worst <= 64,
+                "`{opts}`: frame {k} -> {} changed {loud} pixels of its drawn part (by up to {worst})",
                 k + 1
             );
             assert!(
@@ -895,6 +903,10 @@ fn a_growing_stroke_keeps_what_it_has_drawn() {
                 k + 1
             );
         }
+        assert!(
+            moved <= 3,
+            "`{opts}`: {moved} of 15 frames redrew their edges"
+        );
     }
 }
 
@@ -1030,4 +1042,53 @@ fn a_short_piece_costs_less_than_the_whole_stroke() {
         tenth.as_secs_f64() < whole.as_secs_f64() * 0.5,
         "a tenth of the stroke took {tenth:?}, the whole {whole:?}"
     );
+}
+
+/// A pen that moves a little each frame leaves what it has drawn exactly as
+/// it was (no shimmer in a film), and the same stroke drawn as many
+/// adjacent pieces on one canvas (what a caller that keeps its canvas
+/// does) has no gap and keeps its weight, down to pieces a few tenths of a
+/// width long. Much shorter pieces overdraw their own round ends and lose
+/// texture: draw `/From 0 /To t` for those.
+#[test]
+fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    let line = "newpath 10 30 moveto 190 30 lineto";
+    for opts in ["/Seed 4", "/Tilt 75 /Side 8 /Seed 2"] {
+        let (a, b) = (
+            data(&part(line, &format!("/To 0.50 {opts}"))),
+            data(&part(line, &format!("/To 0.53 {opts}"))),
+        );
+        let behind = ((10.0 + 180.0 * 0.5 - 12.0) * 2.0) as u32;
+        let worst = diffs(&a, &b, 0, behind).into_iter().max().unwrap();
+        assert!(
+            worst <= 8,
+            "`{opts}`: a 3% step changed the drawn part by {worst}"
+        );
+    }
+    let whole = part(LINE, "/Seed 4");
+    let ink = inked(&whole, &bare);
+    for pieces in [20, 100] {
+        let mut calls = String::new();
+        for i in 0..pieces {
+            calls += &format!(
+                "{LINE} << /Width 2.4 /Dust 1 /Seed 4 /From {i} {pieces} div /To {} {pieces} div >> dcchalk ",
+                i + 1
+            );
+        }
+        let drawn = on_board(PART_W, PART_H, 2.0, &calls);
+        let got = inked(&drawn, &bare);
+        assert!(
+            got * 20 > ink * 19 && got * 20 < ink * 21,
+            "{pieces} pieces inked {got} pixels, the whole {ink}"
+        );
+        let loud = diffs(&data(&whole), &data(&drawn), 0, PART_W * 2)
+            .into_iter()
+            .filter(|&v| v > 64)
+            .count();
+        assert_eq!(
+            loud, 0,
+            "{pieces} pieces: {loud} pixels differ strongly from the whole"
+        );
+    }
 }

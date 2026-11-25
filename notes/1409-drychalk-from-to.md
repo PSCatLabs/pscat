@@ -27,6 +27,17 @@ PSCatLabs/psanim#30) used to draw the whole stroke each frame, clipped to a band
   dropout chain starts afresh there.
 - Defaults leave the code path untouched (`dcPart` is false): identity-checked.
 
+**Growth, measured.** `/From 0 /To t` frames 3-4% apart on a 180pt line (0.3 to 1.0, no
+`/Seed`): pixel-identical behind the pen's last 12 units in every transition but one, where
+the stroke crosses a drykit chunk boundary and its edge rows change once (318 pixels, up to
+42 of 255; texture untouched). Frames far apart (0.5 vs 1.0 on a curve): edge pixels up to 26.
+Adjacent pieces on one canvas (`/From i/N /To (i+1)/N`): N=20 and N=100 keep the weight
+(mean ink luma -3 and -6), N=300 (pieces 0.26 widths) -14, N=1500 (0.05 widths) visibly
+greyer, since each piece ends in a round cap that overdraws the last. `dcpiece` therefore
+drops only ranges under a millionth of the unit (where `dctrim` would hand back the
+whole), never slivers, so a slow pen leaves no gap. Proposed drykit follow-ups: stable
+chunking, cap-less interior ends.
+
 **Cost.** A tenth of a long multi-stroke path (8 repeats of a 1600-unit zigzag path, 144 dpi)
 renders in 0.78 s against 6.1 s for the whole (release, this machine; includes
 the board and start-up). The dust still draws every random number of the stroke it
