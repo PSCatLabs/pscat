@@ -317,7 +317,7 @@ limit can and cannot stop. `handwrite` runs
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
-Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `pstack`
+Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `==only`, `pstack`
 and `stack` truncate their own output well below that (1024 elements per array,
 4096 bytes per string, 16 KiB per operand, 32 KiB for a whole stack, ending in
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
