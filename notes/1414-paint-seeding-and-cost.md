@@ -24,27 +24,37 @@ read is not in this repository's paint docs.
   with `/Seed`; without it they take exactly one draw (`pkwash 1`, `pkpaper 1`).
   `pkcanvas` takes none (its `/Seed` defaults to the constant 1). `pkribbon` and
   `pknib` take none unless `/Jitter` is set (177 draws at `/Jitter 1`).
-- `/Seed` on any other preset is silently ignored: `pkdry << /Width 14 /Seed 9 >>`
-  renders byte-identical to `pkdry << /Width 14 >>`, with no error and no warning.
-  That is why the Heron author did both everywhere.
+- `/Seed` on any other preset is silently ignored. `det2.py` renders 22 cases
+  (every rand-driven preset, the six motions, `pkfeather`, `pkbrushedge`,
+  `pkwet`, and `pkribbon`/`pknib` with and without `/Jitter 1`) under the same
+  `1 srand`, with and without `/Seed 9`: every pair is byte-identical, with no
+  error and no warning. That is why the Heron author did both everywhere.
+- `pkwet` draws on its own account: 4 draws around a `pkribbon` that draws none
+  (12 with `/Direction 270`; `draws4.ps`).
+- Under `--sweep-seed` every literal `N srand` is forced to the sweep's seed:
+  `7 srand rand = 8 srand rand = 7 srand rand =` printed one number three times
+  with `--sweep-seed 5,6 --png out.png`, and the three differing numbers without it.
 - Draw counts depend on the path: `pkdry` 2322 draws on a 100 pt line, 10962 on
   a 540 pt curve, 22176 on a 1060 pt line. So without a `srand` per stroke, editing
   one stroke re-rolls the rest.
 - Cost follows stroke length and bristle count, not pixels: at 144 dpi a 600 pt
   `pkdry` was 66 ms against 64 ms at 72 dpi. A narrow clip does not make a
-  `pkwash` cheaper (14 to 21 ms clipped, 18 to 24 ms not). `pktrowelplane` is
+  `pkwash` cheaper (14 to 21 ms clipped, 18 to 24 ms not: a clip saves a few ms, no more). `pktrowelplane` is
   the one area-bound preset (1.5 to 1.7 s over a full frame).
 
 **Environment.** `pscat 0.7.1+90a130d` (`cargo build --release`), Apple M4,
 72 dpi, `--page 1280x720`, CPU time (user plus system of the child), best of 7
 runs minus the same page with no strokes. The machine was shared: load average
 was 15 to 34 during the runs, so figures under about 5 ms are noise-limited. The
-whole table was run twice; the rows over 10 ms agreed within 15%, and the
-published numbers are rounded to two figures. Ghostscript was not timed.
+whole table was run twice; most rows over 10 ms agreed within 15%, and the three that did
+not (`pkbrushedge` 100 x 60: 25 and 15 ms; the crisscross sky: 55 and 46 ms; a full-frame
+`pkwash`: 21 and 17 ms) are given as ranges. The published numbers are rounded to two figures. Ghostscript was not timed.
 
-**Deferred / proposed follow-ups.** An unknown or inapplicable `/Seed` should
-raise an error or warning on the rand-driven presets (an author believes a stroke
-is pinned when it is not).
+**Deferred / proposed follow-ups.** An inapplicable `/Seed` on a rand-driven preset
+should raise an error or warning (an author believes a stroke is pinned when it is not).
+
+Every script below is run from the repo root (`python3 -I /path/to/script.py`);
+`cost2.py` to `dry700.py` read `cost.py` from their own directory, so keep them together.
 
 ### Rand draws per preset (`draws.ps`)
 
@@ -95,7 +105,7 @@ reach that value.
 (pkbrushedge) { 40 40 moveto 400 40 lineto 400 160 lineto 40 160 lineto closepath << >> pkbrushedge } try
 ```
 
-The first file's last row, `pkbrushedge`, stops on `pkbroad-deposit-count-exceeds-safety-limit`. That is the probe, not the preset: the row has no `newpath`, so it appended its rectangle to the huge path `pkfeather` had just left behind (`pkfeather` replaces the current path). Run alone on the same rectangle it renders (exit 0, on the default page and at `--page 1280x720`). `draws2.ps` adds the `/Jitter` and path-length rows (its two `pkbrushedge` rows also lack a `newpath`, so read them as 'draws', not as a count); `draws3.ps` counts the edge presets from a clean path:
+The first file's last row, `pkbrushedge`, stops on `pkbroad-deposit-count-exceeds-safety-limit`. That is the probe, not the preset: the row has no `newpath`, so it appended its rectangle to the huge path `pkfeather` had just left behind (`pkfeather` replaces the current path). Run alone on the same rectangle it renders (exit 0, on the default page and at `--page 1280x720`). `draws2.ps` adds the `/Jitter` and path-length rows (its two `pkbrushedge` rows also lack a `newpath`, so read them as 'draws', not as a count); `draws3.ps` counts the edge presets from a clean path (output: `pkfeather, clean path 269`, `pkbrushedge, clean path 2196`, `pkbrushedge /Under, clean path 6023`); `draws4.ps` runs `pkwet` around a proc that draws nothing (output: `pkribbon alone 0`, `pkwet around pkribbon 4`, `pkwet around pkribbon, /Direction 270 12`).
 
 ```postscript
 (lib/artkit.ps) run
@@ -135,15 +145,31 @@ The first file's last row, `pkbrushedge`, stops on `pkbroad-deposit-count-exceed
 (pkbrushedge /Under, clean path) { newpath 100 100 moveto 160 100 lineto 160 140 lineto 100 140 lineto closepath << /Under [0.5 0.6 0.9] >> pkbrushedge } try
 ```
 
-Output: `pkfeather, clean path 269`, `pkbrushedge, clean path 2196`, `pkbrushedge /Under, clean path 6023`.
+```postscript
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+/curve { newpath 40 100 moveto 200 140 300 60 560 100 curveto } def
+/dcount {
+  /dproc exch def
+  5 srand dproc rand /dafter exch def
+  5 srand /di -1 def
+  0 1 300000 { rand dafter eq { /di exch def exit } { pop } ifelse } for
+  di
+} def
+/try { exch dup print ( ) print exch dcount = } def
+(pkribbon alone) { curve << /Width 12 >> pkribbon } try
+(pkwet around pkribbon) { { curve << /Width 12 >> pkribbon } << /Soft 0.8 /Under [0.6 0.7 0.9] >> pkwet } try
+(pkwet around pkribbon, /Direction 270) { { curve << /Width 12 >> pkribbon } << /Soft 0.8 /Direction 270 /Under [0.6 0.7 0.9] >> pkwet } try
+```
 
-### Same output? (`det.py`)
+### Same output? (`det.py`, `det2.py`)
 
-Run: `python3 -I det.py` (renders each case with `1 srand`, `1 srand` again, `2 srand`, and `1 srand` after 1000 junk draws; compares the PNG hashes).
+`det.py` renders each case with `1 srand`, `1 srand` again, `2 srand`, and `1 srand` after 1000 junk draws, and compares PNG hashes. `det2.py` is the `/Seed` check.
 
 ```python
-import subprocess, hashlib, os
-WT = "/Users/jeromebanks/dev/postscript_interpreter-issue-1414"
+import subprocess, hashlib, os, tempfile
+WT = os.getcwd()  # run from the repo root
+TMP = tempfile.mkdtemp()
 BIN = WT + "/target/release/pscat"
 HEAD = "(lib/artkit.ps) run (lib/paintkit.ps) run 0.97 0.95 0.9 setrgbcolor 0 0 400 200 rectfill 0.2 0.3 0.6 setrgbcolor\n"
 CURVE = "newpath 20 100 moveto 120 150 220 50 380 100 curveto "
@@ -169,7 +195,7 @@ cases = {
 }
 def render(body, pre):
     prog = HEAD + pre + body + "\n"
-    p = "/private/tmp/claude-501/-Users-jeromebanks-dev-postscript-interpreter/6fe1a128-4e28-4b07-9599-c019bab1e6e3/scratchpad/w/d.ps"
+    p = os.path.join(TMP, "d.ps")
     open(p, "w").write(prog)
     r = subprocess.run([BIN, "--page", "400x200", "--png", p + ".png", p], cwd=WT, capture_output=True, text=True)
     if r.returncode: return "ERR " + r.stderr[:80]
@@ -183,15 +209,62 @@ for name, body in cases.items():
     print("%-18s %-9s %-12s %-9s %s" % (name, a, "same" if a == b else "DIFF", "same" if a == c else "differs", "same" if a == d else "DIFF"))
 ```
 
+```python
+# Is /Seed ignored by the rand-driven presets? Render each with and without
+# /Seed 9 (same `1 srand`) and compare the PNGs. Run from the repo root.
+import subprocess, hashlib, os, tempfile
+WT = os.getcwd()
+TMP = tempfile.mkdtemp()
+BIN = WT + "/target/release/pscat"
+HEAD = "(lib/artkit.ps) run (lib/paintkit.ps) run 0.97 0.95 0.9 setrgbcolor 0 0 400 200 rectfill 0.2 0.3 0.6 setrgbcolor\n"
+CURVE = "newpath 20 100 moveto 120 150 220 50 380 100 curveto "
+BOX = "newpath 20 40 moveto 380 40 lineto 380 160 lineto 20 160 lineto closepath "
+# {S} stands for the options inside << >>
+cases = {
+ "pkdry": CURVE + "<< /Width 14 {S} >> pkdry",
+ "pkspray": CURVE + "<< /Nozzle 14 /Density 80 {S} >> pkspray",
+ "pkoil": CURVE + "<< /Width 14 {S} >> pkoil",
+ "pktrowel": CURVE + "<< /Width 14 {S} >> pktrowel",
+ "pktrowelplane": BOX + "<< /Width 14 {S} >> pktrowelplane",
+ "pkfan": CURVE + "<< /Width 14 {S} >> pkfan",
+ "pkbroad": CURVE + "<< /Width 14 {S} >> pkbroad",
+ "pkliner": CURVE + "<< /Width 3 {S} >> pkliner",
+ "pkdab": CURVE + "<< /Size 12 {S} >> pkdab",
+ "pkwet(pkspray)": "{ " + CURVE + "<< /Nozzle 14 /Density 80 >> pkspray } << /Soft 0.8 /Under [0.6 0.7 0.9] {S} >> pkwet",
+ "pkfeather": BOX + "<< {S} >> pkfeather << /Width 3 >> pkliner",
+ "pkbrushedge": BOX + "<< {S} >> pkbrushedge",
+ "pkcrisscross": "newpath 0 20 400 160 screct << /Count 20 /Length 30 {S} >> pkcrisscross << /Width 10 >> pkbroad",
+ "pkscumblein": "newpath 0 20 400 160 screct << /Count 20 /Radius 8 {S} >> pkscumblein << /Width 6 >> pkoil",
+ "pkscumble": CURVE + "<< /Radius 8 {S} >> pkscumble << /Width 6 >> pkoil",
+ "pktap": CURVE + "<< /Length 6 {S} >> pktap << /Width 6 >> pkfan",
+ "pkpull": CURVE + "<< /Length 20 /Direction 270 {S} >> pkpull << /Width 3 >> pkliner",
+ "pkzigzag": CURVE + "<< /Width 12 {S} >> pkzigzag << /Width 4 >> pkbroad",
+ "pkribbon /Jitter 1": CURVE + "<< /Width 14 /Jitter 1 {S} >> pkribbon",
+ "pknib /Jitter 1": CURVE + "<< /Width 14 /Jitter 1 {S} >> pknib",
+ "pkribbon": CURVE + "<< /Width 14 {S} >> pkribbon",
+ "pknib": CURVE + "<< /Width 14 {S} >> pknib",
+}
+def render(body):
+    p = os.path.join(TMP, "s.ps")
+    open(p, "w").write(HEAD + "1 srand " + body + "\n")
+    r = subprocess.run([BIN, "--page", "400x200", "--png", p + ".png", p], cwd=WT, capture_output=True, text=True)
+    if r.returncode: return "ERR " + r.stderr.strip()[:90]
+    return hashlib.md5(open(p + ".png", "rb").read()).hexdigest()[:8]
+for name, body in cases.items():
+    a = render(body.replace("{S}", ""))
+    b = render(body.replace("{S}", "/Seed 9"))
+    print("%-20s %s  %s" % (name, a, "/Seed ignored" if a == b else "/Seed CHANGES the output (%s)" % b))
+```
+
 ### Per-stroke cost (`cost.py`)
 
 Run: `python3 -I cost.py`. Strokes are 100 and 600 pt curves, 10 per run, `i srand` before each.
 
 ```python
-import subprocess, resource, os, sys, json, statistics
-WT = "/Users/jeromebanks/dev/postscript_interpreter-issue-1414"
+import subprocess, resource, os, sys, json, statistics, tempfile
+WT = os.getcwd()  # run from the repo root
 BIN = WT + "/target/release/pscat"
-W = os.path.dirname(os.path.abspath(__file__))
+W = tempfile.mkdtemp()
 REPS = 7
 def cpu(prog_path, png):
     r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -241,14 +314,11 @@ for name, call in presets:
 ### Areas and combinations (`cost2.py`, `cost3.py`, `cost4.py`)
 
 `cost2.py` ran each once; `cost3.py` repeats the small items 10 times in one program to dilute the noise; `cost4.py` times `pkcanvas` (a `pkcanvas set-up` row that was in `cost3.py` crashed on a stray `pop` and is left out here).
-Both import `cost.py`'s helpers by splitting its source at `only = sys.argv[1:]`.
 
 ```python
-import importlib.util, sys
-sys.argv = ["x", "NONE"]
-spec = importlib.util.spec_from_file_location("cost", "cost.py")
+import os
 # reuse helpers without running presets loop
-src = open("cost.py").read().split("only = sys.argv[1:]")[0]
+src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")).read().split("only = sys.argv[1:]")[0]
 exec(src)
 base_min, base_med = best(HEAD)
 print("baseline min %.3f" % base_min)
@@ -277,8 +347,9 @@ row("pkscumblein 400x200 + pkoil", "1 srand 100 100 400 200 screct << /Count 60 
 ```
 
 ```python
+import os
 # small items repeated 10x inside one program so the baseline noise is divided by 10
-src = open("cost.py").read().split("only = sys.argv[1:]")[0]
+src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")).read().split("only = sys.argv[1:]")[0]
 exec(src)
 bm = best(HEAD)[0]
 def rect(x, y, w, h): return "newpath %g %g moveto %g %g lineto %g %g lineto %g %g lineto closepath" % (x, y, x+w, y, x+w, y+h, x, y+h)
@@ -294,7 +365,8 @@ for (w, h) in ((200, 150), (1280, 720)):
 ```
 
 ```python
-src = open("cost.py").read().split("only = sys.argv[1:]")[0]
+import os
+src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")).read().split("only = sys.argv[1:]")[0]
 exec(src)
 bm = best(HEAD)[0]
 t = best(HEAD + "0 1 9 { pop << /Seed 7 /Weave 2.5 >> pkcanvas } for\n")[0]
@@ -304,7 +376,8 @@ print("pkcanvas set-up %.1f ms per call" % ((t - bm) / 10 * 1000))
 ### Dpi and the 700 pt `pkdry` (`dpi.py`, `dry700.py`)
 
 ```python
-src = open("cost.py").read().split("only = sys.argv[1:]")[0]
+import os
+src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")).read().split("only = sys.argv[1:]")[0]
 exec(src)
 def cpu2(prog_path, extra):
     r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -323,11 +396,11 @@ for name, call in [("pkdry","<< /Width 14 >> pkdry"),("pkoil","<< /Width 14 >> p
 ```
 
 ```python
-src = open("cost.py").read().split("only = sys.argv[1:]")[0]
+import os
+src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")).read().split("only = sys.argv[1:]")[0]
 exec(src)
 bm = best(HEAD)[0]
 for opts in ("<< /Width 24 >>", "<< /Width 24 /Bristles 100 >>"):
     t = best(stroke_prog(opts + " pkdry", 10, 700))[0]
     print("pkdry 700pt", opts, "%.1f ms/stroke" % ((t - bm) / 10 * 1000))
 ```
-

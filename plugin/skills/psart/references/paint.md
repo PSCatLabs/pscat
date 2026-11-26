@@ -253,7 +253,7 @@ Which tool to pick:
 `N srand` immediately before the call and that call paints the same marks
 every time. Do it before each stroke you will repaint (every frame of an
 animation, a stroke you are still tuning). The number of `rand` draws a call
-takes depends on its path (a 100 pt `pkdry` takes about 2300, a 600 pt one
+takes depends on its path (a 100 pt `pkdry` takes about 2300, a 1000 pt one
 about 22000), so without a `srand` per stroke, editing one stroke re-rolls
 every stroke after it. What each preset does with the stream, counted by
 asking for `rand` after a call (`notes/1414-paint-seeding-and-cost.md` has
@@ -261,12 +261,14 @@ the probe):
 
 | Preset | Draws from `rand`? | `/Seed` |
 | --- | --- | --- |
-| `pkdry`, `pkspray`, `pkoil`, `pktrowel`, `pktrowelplane`, `pkfan`, `pkbroad`, `pkliner`, `pkdab`, `pkwet`, `pkfeather`, `pkbrushedge`, the brush motions (`pkcrisscross`, `pkscumblein`, `pkscumble`, `pktap`, `pkpull`, `pkzigzag`) | yes | **none: the key is silently ignored** (no error, identical output with or without it), so `srand` is the only way to pin them |
+| `pkdry`, `pkspray`, `pkoil`, `pktrowel`, `pktrowelplane`, `pkfan`, `pkbroad`, `pkliner`, `pkdab`, `pkwet`, `pkfeather`, `pkbrushedge`, the brush motions (`pkcrisscross`, `pkscumblein`, `pkscumble`, `pktap`, `pkpull`, `pkzigzag`) | yes | **none: the key is silently ignored** (no error: the same pixels with or without `/Seed 9`, checked on each preset here), so `srand` is the only way to pin them; `pkwet` draws on its own account too, not only through its proc |
 | `pkribbon`, `pknib` | no, unless `/Jitter` is above 0 | none |
 | `pkwash`, `pkpaper` | one draw without `/Seed`, none with it | `/Seed N` pins this call alone: the same output under any `srand`, and no draw taken, so adding or removing the call shifts nothing after it |
 | `pkcanvas` | no | `/Seed` (default 1, a constant): the weave is the same on every run unless you change it |
 
-`/Touch` takes no draws either. So for a repainted frame: `N srand` before
+`/Touch` takes no draws either. Under `--sweep-seed` every literal `N srand`
+is forced to the sweep's seed, so all the strokes of a sweep start from one
+stream (`7 srand rand = 8 srand rand =` prints one number twice). So for a repainted frame: `N srand` before
 each brush stroke, and `/Seed` (or a `srand`) on each wash and ground. Doing
 both on a wash is harmless, just not needed.
 
@@ -309,7 +311,7 @@ stroke here. Areas:
 | Call | Cost |
 | --- | --- |
 | `pkwash` on a 200 x 150 / 640 x 360 / 1280 x 720 shape | 3.5 ms / 9 ms / 20 ms |
-| `pkwash` on a full-frame shape under a 1280 x 60 or 200 x 150 clip | 14 to 21 ms: a clip does not make a wash cheaper |
+| `pkwash` on a full-frame shape under a 1280 x 60 or 200 x 150 clip | 14 to 21 ms against 18 to 24 ms unclipped: a clip saves little |
 | `pkpaper` over 200 x 150 / 1280 x 720 | 0.7 ms / 18 ms |
 | `pkcanvas` set-up | 0.2 ms (the cost is in the `/Touch` strokes: a 600 pt `pkdry` goes from 65 to 120 ms) |
 | `pktrowelplane` over 200 x 150 / 1280 x 720 | 50 ms / 1.5 to 1.7 s |
