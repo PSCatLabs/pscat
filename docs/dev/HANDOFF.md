@@ -242,7 +242,9 @@ capabilities -- `--capabilities` on the CLI and `describe_art_
 capabilities` on `pscat-mcp` both print one JSON payload covering
 fonts, the Type 3 program faces, artkit's mood palettes, the
 `pagekit.ps` templates, and artkit's/the style packs' major
-procedures (`src/capabilities.rs`). Fonts are the one section built
+procedures (`src/capabilities.rs`; `--capabilities` takes `--name`,
+`--kind`, `--source` and `--brief`, and the tool `names`, `kind`, `source`
+and `brief`, #1079: the full payload is over 300 KB). Fonts are the one section built
 dynamically, off the same `font::catalog_entries()` `--fonts` and
 `findfont` resolution already use, so that section can't drift from
 what's actually installed; everything else is hand-maintained (no
@@ -570,8 +572,13 @@ renders eight examples in both and compares block-downsampled output).
   drops the mode to local (global afterwards only if it is global now and was
   at every discarded `save`), not the PLRM's reset to the saved value
   (`src/ops/vm.rs`, `VmMode`; `tests/status_setglobal.rs` pins the matrix
-  against gs). `gcheck` and `globaldict` do not exist, so a program that
-  asks which VM an object lives in stops at `undefined`.
+  against gs). `globaldict` (a plain dictionary between systemdict and
+  userdict on the dictionary stack, so `countdictstack` starts at 3 as in gs,
+  never rolled back by `restore`) and `gcheck` (true for simple
+  objects, `systemdict` and `globaldict`; false for every other composite)
+  stand in for global VM (#1159, `notes/1159-gcheck-globaldict.md`,
+  `tests/gcheck_globaldict.rs`): a composite made in global mode reports
+  local here, and no `invalidaccess` guards `globaldict`.
 - **`string status`** (#952) is the file-existence probe: `pages bytes
   referenced created true`, or `false`. It resolves the name through the
   same search order and the same read roots as `file`/`run`
@@ -594,10 +601,18 @@ renders eight examples in both and compares block-downsampled output).
   reference, `wcheck` reports it, and `put`, `putinterval`, `astore` and
   `copy` into it raise `invalidaccess`. Not modelled: reading is never refused
   (`rcheck` is always true, `get` on a `noaccess` array works), strings,
-  dictionaries and files have no attribute (those operators are identities on
-  them), `wcheck` on a name or operator answers true where gs raises
+  dictionaries and files have no attribute except one: `noaccess` on a string
+  or file makes executing it `invalidaccess` (#1321, `Object::noaccess`; the
+  other operators are identities on them), `wcheck` on a name or operator answers true where gs raises
   `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
+- `systemdict` is the one read-only dictionary (#1337), as in gs: `put`,
+  `def` (after `systemdict begin`), `store` of a name it defines, `undef` and
+  `copy` into it raise `invalidaccess`, and `systemdict wcheck` is false.
+  Rust code writes it directly and is not affected; the check is
+  `Interp::is_systemdict`. A refused write of a plain value over an operator
+  is kept for the `[shadowed-operator]` lint. See
+  `notes/1337-systemdict-read-only.md`.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
@@ -713,7 +728,13 @@ renders eight examples in both and compares block-downsampled output).
   ramp's average colour), its Function built from the same RGB stops the
   raster and SVG paint, with the shading's own `/Extend`
   and `/BBox` as a clip (`src/pdf.rs`, `notes/1028-pdf-real-shadings.md`,
-  `notes/1040-shfill-extend.md`).
+  `notes/1040-shfill-extend.md`). artkit's `axialsh`/`radialsh` put `/Extend [true true]` in
+  the dict they build (#1286, `notes/1286-artkit-shading-extend.md`); a raw dict keeps the default.
+  Both vector recorders take the shading from `vector_shading` (#1041): the
+  raster's sub-unit rescale and its degenerate disk, so SVG and PDF show
+  what the PNG shows (`tests/svg_shading.rs` checks every case under
+  resvg). An axis that collapses in f32 paints nothing anywhere, as in gs. Equal concentric circles follow gs's disk,
+  not its one-pixel ring (`notes/1041-svg-shading-edge-cases.md`).
   A ramp of more than 1024 stops reaches the raster resampled at 1024 even
   positions (#1188, `Shading::raster_stops`: tiny-skia's gradient costs
   pixels x stops), so a leg narrower than 1/1023 of the axis blends into
@@ -722,8 +743,66 @@ renders eight examples in both and compares block-downsampled output).
   them (#1219; same pixels, an integer rectangle has no edge to cut). Under
   limits the strips paint a copy of the page that replaces it only once
   they have all painted, so a stopped `shfill` is all or nothing, as `fill`.
-  ShadingType 1 and 4–7 and shading patterns (`makepattern`/`setpattern`,
-  `/Pattern` colour spaces) are not implemented at all, in any output.
+  ShadingType 1 (function-based) and FunctionType 0 (sampled) since #1039
+  (`notes/1039-function-based-shading.md`): the raster evaluates the
+  function at each device pixel into a layer cut by the Domain
+  parallelogram and painted by `Gfx::paint_shfill` (the gradient's own
+  paint path); SVG embeds that layer as an image; PDF writes a real
+  `/ShadingType 1` with a FunctionType 0 RGB table. Sampled `/Order 3` is
+  linear (gs is cubic) and DataSource must be a string. ShadingType 4–7
+  (meshes) since #1325 (`src/mesh.rs`, `notes/1325-mesh-shadings.md`):
+  decoded at `shfill`, every shape cut into triangles (patches tessellated
+  on S(u,v)) painted by pixel centre into a layer with 4x4-sample coverage
+  (no seams), then the Type 1 paint path; PDF writes a Type 4, 5 or 7 mesh
+  stream in RGB.
+  tiny-skia's anti-aliased fill panics on a path with corners around 1e9
+  device pixels away, so a `/BBox` of that size is cut to a guard rectangle
+  (the page grown by its own size) before the raster paints it (#1324,
+  `Gfx::bbox_in_guard`; Type 1 clips to its layer, #1039). SVG and PDF
+  keep the box as given.
+- Tiling patterns (#1038, `src/pattern.rs`, `notes/1038-tiling-patterns.md`):
+  `makepattern` PatternType 1 (PaintType 1 and 2), `setpattern` and the
+  `/Pattern` colour space, in PNG, SVG and PDF. `makepattern` runs the
+  `PaintProc` at once (gs: at first use), through `Frame::Pattern`, into a
+  *capture* (`Gfx::begin_pattern`): page canvas, SVG recorder and PDF page
+  state swapped for the tile's. Gotchas: the pattern matrix is adjusted to
+  whole-pixel steps and SVG/PDF get the adjusted one, so the outputs agree
+  (TilingType 2 is the exception, #1332: the cell keeps its true size and
+  the PNG lays cells at `floor(i * step)` per axis, `pattern::Lattice`;
+  SVG/PDF get the unadjusted matrix); cells are placed from the device
+  top-left corner of the `/BBox` rounded to a pixel, with gs's
+  centre-keeping whole-pixel move for an adjusted Type 1/3 cell, not from
+  the rounded origin (#1342, `pattern::gs_translation`,
+  `notes/1342-pattern-lattice-phase.md`);
+  a pattern used in a context (page or capture) other than the one it was
+  made in is placed as gs places it, its device matrix read in gs's
+  pattern-accumulator coordinates (#1300, `Capture::to_gs`,
+  `pattern::foreign_placement`; PDF writes a copy of the pattern stream
+  under the new `/Matrix`);
+  a mark painted with a pattern (of either kind) inside an *uncoloured*
+  pattern's `PaintProc` paints that pattern's coverage, as gs's raster
+  does (#1340, `notes/1340-uncoloured-paintproc-coverage.md`): SVG draws it
+  in `currentColor` through an alpha `<mask>`, and PDF through an `/SMask`
+  ExtGState whose form fills the `/BBox` with the inner pattern; gs drops an
+  uncoloured pattern whose resources hold a soft mask, so such an outer
+  pattern is written PaintType 1 in each colour it is used in
+  (`PdfRecorder::colored_variant`);
+  text output modes keep outlines under a pattern. `imagemask` paints the
+  pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
+  `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
+  mid-run for display should use `Gfx::page_pixmap`.
+- Shading patterns (#1298, `pattern::ShadingPattern`,
+  `notes/1298-shading-patterns.md`): `makepattern` PatternType 2 holds the
+  parsed shading, `/Background` and its device matrix; nothing runs. The
+  raster paints the shading per mark into a layer over the mark's pixels
+  (`gfx::shading_layer`, built from the same pieces as `shfill`:
+  `gradient_parts`, `two_root_layer`, `function_layer`, and
+  `mesh::mesh_layer` for a mesh, #1378), which
+  `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
+  the gradient itself, or a canvas-sized `<pattern>` with the background,
+  `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the
+  shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
+  the registry and `PatternColor` as `pattern::PatternRef`.
   SVG's two-circle radial
   model only renders faithfully when the focal circle sits entirely
   inside the outer one (`distance(centers) + focal_r <= outer_r`) — an
@@ -762,6 +841,16 @@ renders eight examples in both and compares block-downsampled output).
   PDF's `ExtGState /BM`, and an exhaustive match on a local enum is
   what makes adding a third mode fail to compile until all three
   exporters learn about it.
+- `begingroup`/`endgroup` (#1406) are pscat transparency groups: `dict
+  begingroup` swaps the canvas (and the 16-bit shadow) for a transparent
+  page-sized layer that `endgroup` composites with `currentalpha x /Alpha`
+  and `/Blend` (PDF's group semantics: alpha 1 and Normal inside); PDF gets an
+  isolated group form XObject, SVG a `<g opacity>`. While a group is open
+  `Gfx::pixmap` is the *layer*: a live view reads `page_pixmap()`. Every
+  route that unwinds the graphics state past a group ends it first
+  (`restore_glyph_snapshot`, `leave_capture`, `showpage`/`copypage`/`erase`,
+  `step_n` at the end of a program); a new such route must too.
+  `notes/1406-transparency-groups.md`.
 - `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
   because it is non-standard (gs has no `.sameclip`): true when the clip in
   force is the very clip chain the gstate holds (both none, or the same
@@ -801,7 +890,8 @@ renders eight examples in both and compares block-downsampled output).
   the error left the machine, snapshotted by `step_n`, capped at 8 named
   frames); a main-program error's report is unchanged byte for byte, which
   dozens of exact-string tests pin. `pscat-mcp` turns the two into `file`
-  and `run_chain` fields. Tagging procedure bodies with scan positions
+  and `run_chain` fields, and npm's `PostScriptError` into `file` and
+  `runChain` (#1116, parsed the same way). Tagging procedure bodies with scan positions
   would mean a position per array element: not done
   (`notes/1048-identity-operators-run-error-location.md`).
 - `product` `(pscat)`, `version` (the crate version string), `revision`
@@ -825,6 +915,10 @@ renders eight examples in both and compares block-downsampled output).
   panicking; `main` then exits 141. A new CLI line that is not program output
   is `eprintln!`. The flag, not an early exit, so the page and any open
   `--allow-write` files are still written (`notes/1058-cli-stream-hygiene.md`).
+  `pscat fonts` (library crate, `src/fontpacks/cli.rs`) has its own local
+  shadow with the same exit 141, and a sweep frame that met the closed pipe
+  is not reported or marked failed (#1117,
+  `notes/1117-fonts-and-sweep-closed-stdout.md`).
 
 - **Resolver candidates must be regular files** (#1177, `src/paths.rs`). A
   relative name's search-order candidate is opened once by `Probe::open`
@@ -946,15 +1040,20 @@ renders eight examples in both and compares block-downsampled output).
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two. Glyphs have a second seam since #1119:
    `Gfx::paint_glyph` takes the glyph as text (`src/textrun.rs`,
-   renderer-neutral) when `--svg-text` or `--pdf-text` is on, and each
+   renderer-neutral) when `--svg-text` is on or PDF text is (the
+   default since #1026; `--text-as-paths` turns it off), and each
    recorder decides on its own whether it takes the glyph as text
    (`textrun::svg_eligible`, `pdf_eligible`). SVG writes `<text>` runs
    for the standard faces (`notes/1119-svg-text.md`); PDF writes `TJ`
    runs in Type 0 fonts whose CID-keyed CFF subset `src/pdf_font.rs`
    rebuilds from the outlines pscat paints (variable faces at their
    pinned instance), for any face whose `fsType` allows it
-   (`notes/1193-pdf-text.md`; the wasm flag bit 8 / npm `pdfText`, #1205,
-   needs `pdf` as `svgText` needs `svg`, and `tests/wasm.rs` holds the
+   (`notes/1193-pdf-text.md`; Symbol and Dingbats glyph names get their
+   text character from tables in `encodings.rs` that only PDF text reads,
+   `notes/1026-pdf-text-symbol-dingbats.md`; text is the default since
+   #1026, `notes/1026-pdf-text-default.md`: wasm flag value 16 (bit 4) /
+   npm `pdfText: false` is the outline opt-out, value 8 (bit 3) a no-op, and
+   `tests/wasm.rs` holds the
    CLI-vs-wasm byte check). The PDF's open text run is written at the
    top of `enter_clip`, so a new PDF hook that goes through `enter_clip`
    keeps paint order for free; one that writes `content` directly must
@@ -1164,10 +1263,53 @@ renders eight examples in both and compares block-downsampled output).
    #1157: the supported facade has the same list: `chalkboard::Driver::explain(printed, err)`
    and `ChalkError::problems() -> &[chalkboard::Problem]` (empty for config/render/position-less errors).
    The hidden `ChalkError::Problems` stays for pscat-mcp until 0.7.0.
+   #1252: `chalkboard::user_output(printed) -> Cow<[u8]>` is the one place that drops the
+   `CKPROBLEM` lines (same prefix test as the parser) from program output shown to a user;
+   `pscat chalk` and `chalkboard_math` capture stdout and never return it, so they need no call.
+   #1111: `chalk.hand` (0..1, default 0) is drychalk's `/Hand`: `pscat chalk --hand` /
+   `--hand-amount A`, `chalkboard_math`'s `hand`, and the `chalk` JSON group (so the
+   supported `chalkboard::BoardConfig` takes it too). The driver adds ` /Hand A` to
+   `ckink` only above 0, so every existing board is byte for byte unchanged. It is
+   not the top-level `hand` key (the lettering face, reserved). The hidden
+   `chalk::Config` gained a public `hand` field: a downstream struct literal needs
+   `..Default::default()` (`notes/1111-chalk-hand.md`).
    #718: an unescaped `$` anywhere is a delimiter (a lone one is "Missing $
    inserted"), prose between pairs says to use `\text{}`, `\bigl\(` is a
    fence. #1087: `\varphi` is a closed loop on a vertical stem
    (`notes/1080-718-1087-chalk-input-checks.md`).
+   #1409: dcchalk's `/From`/`/To` (0..1) draw part of each stroke by arc length
+   (after /Hand and /Corners). The stroke's variation, profile (`dcT*`, `dcL`, `dcdot`)
+   is computed on the WHOLE polyline; only the polyline handed to `dkstroke` is cut
+   (`dcpiece`, over `dctrim`) and `/Touch`/`/Pressure` read `From + t (To - From)`. Dust
+   draws every speck's random numbers in order and fills only those whose arc position
+   is in `[From, To)` (To 1 closed), so pieces partition the dust. Gotchas: `dctrim`
+   returns the WHOLE polyline when nothing is left (hence `dcpiece` decides empty
+   first); dots/zero-length strokes belong to the piece holding t = 0.5; the default
+   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. Measured: frames
+   3-4% apart leave the drawn part pixel-identical behind the pen's last ~12 widths, except
+   one edge-AA shift (<= ~43/255, edge rows only) where the stroke crosses a drykit chunk
+   boundary (proposed drykit follow-up: stable chunking). Incremental `/From prev /To now`
+   pieces are fine down to ~0.3 widths; much shorter ones overdraw their round caps and
+   lose texture (N=1500 pieces on a 190pt line: visibly greyer), so prefer `/From 0 /To t`.
+   drykit walks a piece's stops from its own start, so a seam is within ~40 levels (tip; up to ~110 and a few % of ink clearly different with /Tilt, where a lane flips on or off),
+   not exact, and a /Tilt piece past 0 draws its lanes' dropout chain afresh (the lane seed
+   is mixed with From: with the whole lane's seed alone, a lane that starts "off" stayed
+   off in every incremental piece, review finding on #1416). `notes/1409-drychalk-from-to.md`.
+   #1418: `dkstroke` takes `/From`/`/To` too (and `dycrayon`, `dhstroke` through it).
+   drykit cuts AFTER resolving: `dkSsub` still resolves the whole subpath (stops, touch
+   bands, widths, lanes' chains, seed), and only when `dkSpart` it tags each lane stop
+   with its progress `t` (a 4th number; a dot is 0.5) and `dkFrun` cuts each run in
+   `dkSrecord` (interpolated end stops, plain `[x y hw]` back out), so the downstream
+   code never sees a 4-element stop. Fallout stops carry `t` too and `dkZfallout`'s
+   `/Mark` draws only particles whose place in the chunk is in range (all are placed, so
+   the random numbers match the whole). Default path (`dkSpart` false) is the old code,
+   identity-checked. Gotcha: about 1 frame in 14 a few hundred texture pixels along the WHOLE drawn part change (up to ~80 of 255,
+charcoal); cause not isolated (not the chunk budget, not `dkZthin`: both ruled out, `notes/1418-dry-media-from-to.md`).
+dcchalk still cuts its
+   polyline itself (a seam of a few tens of levels, a `/Tilt` piece's dropout chain
+   fresh); moving it onto drykit's keys would fix both but change its partial output.
+   `dhhatch`/`dhsketch` pass the keys to every stroke they lay (not stripped).
+   `notes/1418-dry-media-from-to.md`.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -1375,6 +1517,11 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **halftonekit's faint-tone limit mirrors a renderer floor (#1408).** `hfthresh` (0.1 device px) in
+  `lib/halftonekit.ps` is the stroker's minimum width (`device_line_width` / `stroke_params` in
+  `src/gfx.rs`). A line/cross rule thinner than it is shortened, not thinned, so a tone fading to 0
+  fades. Raise or lower the stroker floor and `hfthresh` must follow (a raised floor fails the fade test).
+
 - **A failed operator's operands come back through the operand ledger**
   (#1047, `notes/1047-operand-ledger.md`). `Interp::run_op` wraps every
   operator dispatch: `pop`, `pop_num` and `pop_int` record the caller's
@@ -1401,7 +1548,10 @@ renders eight examples in both and compares block-downsampled output).
   `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe
   `gs` ad hoc: the helper prints an uncapturable `SKIPPED` line when gs is
   missing and panics under `PSCAT_REQUIRE_GS=1`, which the macOS `test` and
-  Linux `cross-platform` CI jobs set after installing gs.
+  Linux `cross-platform` CI jobs set after installing gs. The poppler tests
+  (`pdftotext`, `pdftoppm`) use `common::poppler_available(tool)` and
+  `PSCAT_REQUIRE_POPPLER=1` the same way (#1206), set only on the Linux job
+  that installs `poppler-utils`; the other jobs skip them.
 
 - **An anisotropic CTM strokes in pen space** (#1196, `Gfx::stroke_space`,
   `notes/1196-anisotropic-stroke-pen.md`). `stroke`, `strokepath` and
@@ -1455,8 +1605,24 @@ renders eight examples in both and compares block-downsampled output).
   The default lowp pipeline rounds each blend with a bias, so a stack of
   faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
   `Paint` built anywhere in pscat must set the flag too, or its pixels drift
-  by a level from the rest. Storage is still 8-bit, rounded per blend (the
-  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+  by a level from the rest. See `notes/731-hq-compositing-pipeline.md`.
+
+- **Fills and glyphs composite in a 16-bit shadow of the page**
+  (`src/deep.rs`, #731 part 2). `fill_coverage_limited` blends every run
+  except an opaque, fully covered one at 16 bits with the exact alpha
+  (integers for translucent source-over, f32 in tiny-skia's order for the
+  rest), and writes both the shadow and the 8-bit `pixmap`, which stays the page every
+  reader sees. Strokes, images and `shfill` still write only the 8-bit
+  pixmap through tiny-skia; each shadow pixel checks itself against the
+  8-bit one and reloads from it when another writer moved it, so a new
+  writer needs no hook. Clear the shadow (`self.deep.clear()`) wherever
+  the page is erased. A first blend at alpha 1 gives tiny-skia's bytes
+  exactly (a test pins it), so only stacked or translucent pixels move
+  (an edge a second fill blends over counts as stacked).
+  Under `--max-memory` the shadow is off when a page of it (8 bytes a
+  pixel) would pass a quarter of the cap; fills then blend on the 8-bit
+  page. A `--bands` run keeps a shadow only for its own rows. See
+  `notes/731-16bit-compositing-shadow.md`.
 
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
@@ -1651,8 +1817,8 @@ renders eight examples in both and compares block-downsampled output).
   - Fuzzing: `fuzz/` (own workspace; `cargo +nightly fuzz run interp fuzz/corpus/interp fuzz/seeds/interp`),
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
-    input goes in `fuzz/regressions/<target>/`. Seven targets (#604, #704): `lexer`,
-    `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
+    input goes in `fuzz/regressions/<target>/`. Eight targets (#604, #704, #1134): `lexer`,
+    `check_syntax` (`syntax::check_syntax`, seeded from the lexer's), `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
     `type1_charstring` (decrypted charstring bytes into `type1::run`), `type1_font` (a
     whole PFA through `eexec`/`definefont`, then text in every defined font), `filters`
     (ASCIIHex/85, RunLength, eexec, Flate, LZW, DCT, chained) and `image` (a `%!`
@@ -1758,6 +1924,20 @@ renders eight examples in both and compares block-downsampled output).
   `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
   beside findings. A new lint check that reads the canvas must go through
   the stitched pages, not `check_band`.
+  After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
+  end-of-run findings (#942, #947) except those in
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  only if it reads state that survives the abort and can name the cause
+  (`notes/1110-lint-notes-in-a-failed-render.md`).
+  `[shadowed-operator]` (#1052, #1109, `notes/1109-shadowed-operator-line-and-systemdict.md`)
+  reads the finished `userdict`/`systemdict`; `Interp::trace_operator_shadows` (on
+  under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
+  line of each binding, nothing else. A name bound in a closed local dictionary stays
+  unreported on purpose (the notes have the corpus data).
+  `[stack-leak]` (#1081, `notes/1081-stack-leak-location.md`) names the line that left the
+  oldest leftover item: `Interp::trace_stack_leaks` (on under `--lint`) samples the operand
+  depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
+  per item) and credits growth to the previous token's line.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
@@ -1824,7 +2004,48 @@ renders eight examples in both and compares block-downsampled output).
   array, is read too (#1192). Not done: binary tokens 132 to 148 and 150 to 159 (single numbers,
   strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
-  `src/binobj.rs`. See `notes/733-binary-object-operators.md`.
+  `src/binobj.rs`. See `notes/733-binary-object-operators.md`. The decode charges the
+  interpreter's `DecodeBudget` (#1123, `notes/1123-binary-sequence-decode-limits.md`), so a
+  step or time limit stops a long decode inside it; keep that charge when changing `decode`.
+  An executable string or file met as an element of a running procedure runs as source, as in gs
+  (`ProcStep::Src`, `Interp::proc_source`, #1122, `notes/1122-executable-strings-in-procedures.md`), which
+  is also why `token`'s array runs a sequence's executable strings. #1321 finished the rule:
+  `exit` inside an executable string or file leaves the loop around it (`Lexer::exit_through`;
+  `run`, eexec and the main program stay boundaries), `noaccess` on one makes running it
+  `invalidaccess`, and `//name` met in a scanned stream runs it (`Interp::execute_element`). One
+  deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
+  `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
+  `notes/1321-executable-string-gs-parity.md`.
+- **`currentfilename` and `pscat lib install` (#1056).** `currentfilename` (a pscat
+  extension, `- currentfilename string`) answers with the name of the file the error
+  report's `Line:` would name: the innermost `run` file's `Lexer::run_name`, else the main
+  program's name, which the CLI hands `Interp::set_main_file_name` from `Options::new_interp`
+  (a file argument, not `-e`, not `-`). The main name is deliberately **not** `run_name`: a
+  main-program line must stay a bare number in `error_location` and in the MCP server's
+  `Line:` parser. Strings, eexec streams and exec'd file objects are skipped, so the answer
+  is the file around them; it is the file running *now*, so a library reads it at its top
+  level. `pscat lib install DIR [--name NAME]` / `pscat lib list` (`src/subcmd/lib_pkg.rs`)
+  copy a package to `lib/NAME/` under `Roots::lib_install_dir` (`$PSCAT_HOME`, else the
+  per-user data directory, as `pscat fonts install` chooses). They change **nothing** about
+  the `lib/` search order or the read roots (pscat-mcp#87/#92 depend on that): a file in
+  that directory outranks the compiled-in copy, which is exactly why `install` refuses any
+  NAME (compared case-insensitively) or file that matches a compiled-in `lib/` entry,
+  copies only regular files (a symlink would carry a file from outside into a directory
+  the MCP server may read), and swaps a re-install in from a staging directory so no stale
+  file survives. `tests/lib_pkg.rs` (shadow test included) and the `mcp.rs` test pin it.
+  See `notes/1056-currentfilename-and-lib-install.md`.
+  `currentfilename` keeps the name as given, backslashes included on Windows; the documented
+  `dirname` helper splits on `/` and `\` (#1346, `notes/1346-currentfilename-windows-separators.md`).
+  A killed install's `.NAME.new-<pid>` stage is swept by the next install and named by
+  `lib list` (#1344, `notes/1344-lib-install-stale-stage.md`); only a stage whose process is
+  gone and that carries a pscat marker (a real file, not a link) is deleted.
+- **`pscat lib remove NAME [--force]` (#1345).** Deletes `lib/NAME/` under the install
+  directory (`src/subcmd/lib_pkg.rs`, `remove`). Without `--force` only a directory whose
+  `.pscat-lib` marker is a regular file; a symlink or plain file named NAME is never
+  removed, and NAME is one plain component so nothing outside `lib/` is reachable. One
+  `fs::remove_dir_all(lib/NAME)` (never a hand-written walk: a `read_dir` of the path would
+  follow a link swapped in after the check); a killed run may leave a partial directory,
+  which `--force` finishes. Prints the file count and the absolute path. See `notes/1345-lib-remove.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
@@ -1843,6 +2064,12 @@ renders eight examples in both and compares block-downsampled output).
   `--cols` wrapping, through `Layout::packed` and `PackedRow` (`Layout::new` delegates to
   it and is unchanged for single-cell columns). With none of the new options the sheet is
   byte-identical to before. See `notes/706-sheet-sweeps-mat-cols.md`.
+  #1000 added `--captions LIST` (readable words for a sweep's values; next file only, one per
+  value, checked in `push`) and `--no-values` (no sweep value in the caption); the failure
+  message still names the value (`Sweep::label`). #1339 gave `review_sheet` the same
+  options (`sweep`, `captions`, `values`, `mat`, `cols`; see
+  `notes/1339-review-sheet-sweeps.md`). The five hybrid comparison sheets use
+  `--no-values`: their panels already carry (a), (b), (c). See `notes/1000-sheet-sweep-captions.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
@@ -1905,13 +2132,16 @@ renders eight examples in both and compares block-downsampled output).
   per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
-  with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
-  `zoom_nearest`). It repeats `src/subcmd/sheet.rs`'s composition loop and its
-  two type sizes (`SHEET_LABEL_PX`, `SHEET_CAPTION_PX`), so a change to the CLI
-  sheet's look must change both; `tests/mcp.rs`
-  `review_sheet_is_byte_identical_to_pscat_sheet` fails when they drift. The
-  fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
-  composer in the library (see `notes/708-mcp-review-sheet.md`).
+  with `pscat::contact_sheet::{SheetPlan, compose_sheet}`, the one composition
+  path (#744) that `pscat sheet` draws with too: layout, labels, captions,
+  frames, zoom, mats and the two type sizes (`LABEL_PX`, `CAPTION_PX`) live there
+  once. Each caller describes its cells (`SheetRow`/`SheetCell`), makes a plan
+  (which sizes the text and the layout before any cell renders, so the caller can
+  refuse an oversized sheet), and gives `compose_sheet` a closure that renders one
+  cell; only the rendering (in process for the CLI, a limited child for the tool)
+  and the caller's own size caps and error wording stay separate.
+  `tests/mcp.rs` `review_sheet_is_byte_identical_to_pscat_sheet` still pins the
+  two together (see `notes/708-mcp-review-sheet.md`, `notes/744-shared-contact-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz, functional-postscript; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
@@ -1936,6 +2166,18 @@ renders eight examples in both and compares block-downsampled output).
   fails if an overlay anchor stops matching: update the overlay's text too.** A
   new reference file in a skill needs no overlay unless it is local-only. See
   `notes/1256-pscat-cloud-profile.md`.
+- **The `pscat-cloud` ChatGPT ZIP is a release asset (#1253).** The `assemble`
+  job builds `pscat-cloud-chatgpt-plugin-<version>.zip` into `release-inputs/`
+  with `build_chatgpt_plugin.py --remote "$PSCAT_MCP_PROD_URL" --production`
+  (the URL is the repository variable `PSCAT_MCP_PROD_URL`; a real release
+  fails closed when it is unset, not https or a `*.run.app` staging address),
+  and `release_stages.py manifest --chatgpt-plugin-from` copies it into `dist/`
+  and lists it after the archives and the npm tarball. The name starts
+  `pscat-cloud-chatgpt-plugin-`, which `archives_in` skips: it ends in `.zip`
+  but is not a binary archive. `check_workflows.py` fails if `release.yml` stops
+  wiring it, `release-check.yml` checks the published ZIP, and
+  `docs/dev/RELEASING.md` has the variable. Not shipped: the local-server ZIP.
+  See `notes/1253-chatgpt-plugin-release-asset.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a
@@ -2243,6 +2485,12 @@ renders eight examples in both and compares block-downsampled output).
   fail. The `pscat` CLI's single-run path calls the hidden
   `Interp::leave_dicts_to_process_exit` so exit does not walk the graph
   (80 ms on a 600k-entry program); the sweep and spool loops do not.
+- A `Drop` reached from `Drop for Interp` must not use a thread-local with
+  `.with()` (#1404): a library user's `Interp` held in its own `thread_local!`
+  is dropped at thread exit, after any of this crate's thread-locals may be
+  destroyed, and a panic there aborts the process. `PsArray`/`Dict` teardown's
+  placeholder store goes through `object::empty_store` (`try_with`, with a
+  fresh store as fallback). Test: `tests/interp_thread_local_drop.rs`.
 - A deep dict chain frees iteratively: `impl Drop for Dict` (`object.rs`,
   next to `PsArray`'s) moves nested uniquely held dicts and arrays to a
   worklist, so a 100000-level chain neither overflows the stack at `Interp`
@@ -2603,7 +2851,8 @@ renders eight examples in both and compares block-downsampled output).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not
-  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  `println!`. `=`, `==`, `=only`, `==only` (#1413: Ghostscript's newline-less
+  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it; the wasm
   build turns on `capture_stdout` (a wasm32 module has no stdout) and
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
@@ -2640,6 +2889,13 @@ renders eight examples in both and compares block-downsampled output).
   source gains an unknown export or module syntax, so a new export in either
   file needs a line there), and `npm/test/global.test.mjs` loads it as a
   classic script. A new `Renderer` method needs no change.
+  The script is also a release asset (#1108): `release_stages.py manifest
+  --npm-from` unpacks `pscat.global.js` from the npm tarball into `dist/`
+  (the same bytes as npm), `npm/global.d.ts` types the `pscat` global (opt-in:
+  `pscat/global`), and a new member of the global needs a line in that file
+  (`global.test.mjs` compares the two). GitHub serves release assets with no
+  CORS headers: `<script src>` works, `fetch` of the wasm does not
+  (`notes/1108-global-js-release-asset.md`).
   Vector output (#1003) is opt-in at begin (`ps_begin_vector` flags,
   `{ svg, pdf }` in JS) and reuses the CLI's recorders, including the
   DSC `/Info` scan, so its bytes equal `pscat --svg`/`--pdf`:

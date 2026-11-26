@@ -83,9 +83,12 @@
     gsave Jbody clip newpath
         CX 190 sub 0 CX 190 add 0
         [ JB 0.62 shade  JB 0.92 shade  JB 1.06 shade  JB 0.92 shade  JB 0.62 shade ]
-        axialsh shfill
-        CX 320 sub 0 CX 168 sub 0 [ JB 0.55 shade  JB 0.85 shade ] axialsh shfill
-        CX 168 add 0 CX 320 add 0 [ JB 0.85 shade  JB 0.55 shade ] axialsh shfill
+        axialsh dup /Extend [false false] put shfill
+        % each layer covers only its own span (axialsh pads by default)
+        CX 320 sub 0 CX 168 sub 0 [ JB 0.55 shade  JB 0.85 shade ]
+        axialsh dup /Extend [false false] put shfill
+        CX 168 add 0 CX 320 add 0 [ JB 0.85 shade  JB 0.55 shade ]
+        axialsh dup /Extend [false false] put shfill
         % mesh knit: fine diagonal hatching a shade darker than the base
         JB 0.9 shade rgb 0.5 setlinewidth
         -900 6 1400 { /mx exch def

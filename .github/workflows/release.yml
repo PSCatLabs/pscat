@@ -43,7 +43,15 @@
 # `draft` and `publish`, and only once the repository variable
 # RELEASE_ENABLED is 'true'. A pull request touching the pipeline, or a
 # manual "Run workflow", is a dry run: everything up to `assemble`, with the
-# rehearsal. Publishing credentials exist only inside the `release`
+# rehearsal. A manual run rehearses the branch chosen under "Use workflow
+# from" (a scratch branch for a release candidate); there is no `ref` input
+# and no job names a checkout ref from outside the run, so CodeQL's
+# actions/cache-poisoning/poisonable-step has no untrusted checkout to flag
+# (#669). Every job checks out github.sha, which is the commit `verify`
+# checked. This workflow writes no cache and must not gain one: a cache
+# written by a run in the default branch's scope is restorable by every
+# other ref's runs.
+# Publishing credentials exist only inside the `release`
 # environment's job (crates.io trusted publishing over OIDC; `id-token:
 # write` appears nowhere else, which scripts/check_workflows.py enforces).
 # Actions are pinned to commit SHAs.
@@ -52,12 +60,9 @@ name: release
 on:
   push:
     tags: ["v*.*.*"]
+  # A manual dry run rehearses the branch picked under "Use workflow from";
+  # there is deliberately no `ref` input (#669, see the header).
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Branch, tag or commit to rehearse (always a dry run; a real release starts only from a pushed v* tag)"
-        required: false
-        default: ""
   pull_request:
     paths:
       - ".github/workflows/release.yml"
@@ -113,7 +118,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Real release or dry run?
@@ -125,6 +129,12 @@ jobs:
         run: |
           VERSION=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import release_stages as r; print(r.cargo_version())')
           COMMIT=$(git rev-parse HEAD)
+          # The jobs after this one check out github.sha (#669); that is this
+          # commit, because the checkout above names no ref. Fail closed if not.
+          if [ "$COMMIT" != "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]; then
+            echo "::error::HEAD $COMMIT is not the triggering commit $GITHUB_SHA"
+            exit 1
+          fi
           if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
             REAL=true
             TAG="$REF_NAME"
@@ -283,10 +293,12 @@ jobs:
     steps:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
@@ -324,10 +336,12 @@ jobs:
       run:
         shell: bash
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -338,6 +352,39 @@ jobs:
         with:
           name: release-inputs
           path: release-inputs
+      # --- hosted ChatGPT plugin ZIP (#1253) -------------------------------
+      # pscat-cloud-chatgpt-plugin-<version>.zip, built against the
+      # PRODUCTION pscat-mcp URL in the repository variable PSCAT_MCP_PROD_URL
+      # (docs/dev/RELEASING.md). A real release fails closed: unset, empty,
+      # not https, a *.run.app (staging) address or a placeholder host stops
+      # the job before any ZIP exists. A dry run with the variable unset
+      # builds against a placeholder host so the rest of the pipeline is
+      # still rehearsed; that ZIP is never published (draft needs a real run).
+      # Built into release-inputs/, not dist/: dist/ is for the archives, and
+      # `manifest` below copies the ZIP into dist/ and lists it.
+      - name: Hosted ChatGPT plugin ZIP (#1253)
+        env:
+          PROD_URL: ${{ vars.PSCAT_MCP_PROD_URL }}
+          REAL: ${{ needs.verify.outputs.real }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          CHECK=--production
+          if [ -z "$PROD_URL" ] && [ "$REAL" != true ]; then
+            echo "::warning::PSCAT_MCP_PROD_URL is not set; this dry run builds the ChatGPT plugin against a placeholder host. A real release would stop here."
+            PROD_URL=https://pscat-mcp.example.com/mcp
+            CHECK=
+          fi
+          echo "pscat-mcp URL for the ChatGPT plugin: ${PROD_URL:-<unset>}"
+          # SHA256SUMS does not exist yet (the manifest step writes it); the
+          # builder only needs the archives' names and digests from it.
+          (cd dist && sha256sum pscat-*.tar.gz) > "$RUNNER_TEMP/archive-sums"
+          # shellcheck disable=SC2086 # CHECK is empty or one flag
+          python3 scripts/build_chatgpt_plugin.py --sums "$RUNNER_TEMP/archive-sums" \
+            --remote "$PROD_URL" --remote-auth none $CHECK --out release-inputs
+          ZIP="release-inputs/pscat-cloud-chatgpt-plugin-$VERSION.zip"
+          [ -f "$ZIP" ] || { echo "::error::the plugin builder did not write $ZIP (plugin/plugin.json version differs from $VERSION?)"; exit 1; }
+          { echo '### ChatGPT plugin ZIP'; echo "pscat-mcp URL: \`${PROD_URL}\` ($([ -n "$CHECK" ] && echo production || echo 'dry run placeholder'))"; } >> "$GITHUB_STEP_SUMMARY"
+      # ---------------------------------------------------------------------
       - name: Checksums and release manifest
         env:
           TAG: ${{ needs.verify.outputs.tag }}
@@ -348,8 +395,9 @@ jobs:
           # listed in SHA256SUMS (#1006); missing while npm/package.json
           # exists is an error.
           python3 scripts/release_stages.py manifest --tag "$TAG" --commit "$COMMIT" \
-            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs
-          N=$(ls dist/*.tar.gz dist/*.zip | wc -l)
+            --dist dist --crate "release-inputs/pscat-$VERSION.crate" --npm-from release-inputs \
+            --chatgpt-plugin-from release-inputs
+          N=$(ls dist/pscat-"$VERSION"-*.tar.gz dist/pscat-"$VERSION"-*.zip | wc -l)
           [ "$N" -eq 5 ] || { echo "::error::expected 5 archives, found $N"; exit 1; }
           { echo '### SHA256SUMS'; echo '```'; cat dist/SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       # The acceptance scenarios on this run's real artifacts, against fake
@@ -391,10 +439,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -433,10 +483,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      # Exactly the commit `verify` checked (release-manifest.json records it).
+      # Exactly the commit `verify` checked (release-manifest.json records it):
+      # `verify` checks out github.sha, and its "Real release or dry run?" step
+      # fails if HEAD is anything else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
@@ -454,12 +506,15 @@ jobs:
       # published artifact always has one.
       # `gh attestation verify FILE --repo PSCatLabs/pscat` checks it
       # (RELEASING.md). A re-run attests the same digests again: harmless.
+      # #1108: dist/pscat.global.js is the classic script `manifest --npm-from`
+      # unpacked from the npm tarball into dist/ (a release asset of its own).
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
             dist/*.tgz
+            dist/pscat.global.js
             release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on

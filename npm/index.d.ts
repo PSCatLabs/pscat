@@ -42,9 +42,10 @@ export interface PageOptions {
    */
   svgText?: boolean;
   /**
-   * With pdf: write text as selectable, searchable, extractable PDF text in
-   * embedded subset fonts (a face given to addFont is embedded too) rather
-   * than glyph outlines, as `pscat --pdf-text` does. Default false.
+   * With pdf: true (the default) writes text as selectable, searchable,
+   * extractable PDF text in embedded subset fonts (a face given to addFont
+   * is embedded too), as `pscat --pdf` does; false draws every glyph as its
+   * outline, as `pscat --text-as-paths` does. Default true.
    */
   pdfText?: boolean;
 }
@@ -79,6 +80,16 @@ export class PostScriptError extends Error {
   readonly command: string | undefined;
   /** The source line the error happened on, when known. */
   readonly line: number | undefined;
+  /**
+   * The `run` file the error happened in, as the program named it; `line` is
+   * then that file's line. Undefined for an error in the main program.
+   */
+  readonly file: string | undefined;
+  /**
+   * The open `run` frames, innermost first (`inner.ps:5 <- outer.ps:2 <- line 1`),
+   * when the error was raised inside a run file. Undefined otherwise.
+   */
+  readonly runChain: string | undefined;
   /** The full report: `%%[ Error: ...; OffendingCommand: ... ]%%`, plus any hint. */
   readonly report: string;
   /** What the program printed before the error. */

@@ -439,6 +439,132 @@ fn hard_edges_at_the_axis_ends_keep_the_padded_colours() {
     assert_gs_matches(&pdf, &canvas, "sh_end_edges");
 }
 
+/// A Type 1 (function-based) `shfill` is a real `/ShadingType 1` (#1039):
+/// the shading's own Domain and Matrix, its function a FunctionType 0
+/// table of RGB samples that gs interpolates as the raster evaluates.
+#[test]
+fn function_based_shfill_is_a_real_pdf_shading() {
+    let src = b"<< /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [300 0 0 300 100 100]
+       /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [3 2]
+         /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff 000000 ffffff ff00ff> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 1);
+    let text = pdf_text(&pdf);
+    assert!(
+        text.contains("/Domain [0 1 0 1] /Matrix [300 0 0 300 100 100]"),
+        "{text}"
+    );
+    // Size 3 across: 2 x 32 + 1 nodes hold its middle node exactly.
+    assert!(
+        text.contains("/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [65 65]"),
+        "{text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_function");
+}
+
+/// A sampled function with a nondefault `/Encode`: the PDF's table sits on
+/// the source table's own nodes, so the narrow white stripe that Encode
+/// puts near x = 1/128 survives (Codex round 1 on #1322: a uniform grid
+/// over the Domain sampled only black).
+#[test]
+fn function_based_shfill_keeps_the_nodes_of_a_nondefault_encode() {
+    let src = b"<< /ShadingType 1 /ColorSpace /DeviceGray /Matrix [300 0 0 300 100 100]
+       /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1] /Size [3 2]
+         /Encode [0 128 0 1] /BitsPerSample 8 /DataSource <00ff00 00ff00> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_real_shading(&pdf, 1);
+    let text = pdf_text(&pdf);
+    // Index 0..2 split 32 ways (65 nodes), the Domain mapped to 0..4096.
+    assert!(
+        text.contains("/Size [65 65] /Encode [0 4096 0 64]"),
+        "{text}"
+    );
+    assert_gs_matches(&pdf, &canvas, "sh_function_encode");
+}
+
+/// Rotated, under a `/BBox` and a clip: the PDF clips to the BBox as the
+/// raster cuts it, and gs's render matches.
+#[test]
+fn function_based_shfill_keeps_bbox_and_clip() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill 60 40 400 300 rectclip
+       250 250 translate 30 rotate
+       << /ShadingType 1 /ColorSpace /DeviceRGB /Domain [-1 1 -1 1] /Matrix [180 0 0 120 0 0]
+          /BBox [-200 -60 150 200]
+          /Function << /FunctionType 0 /Domain [-1 1 -1 1] /Range [0 1 0 1 0 1] /Size [2 2]
+            /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let content = page_content(&pdf);
+    assert!(content.contains(" W n "), "the BBox clip: {content}");
+    assert!(content.contains(" cm /Sh0 sh\n"), "{content}");
+    assert_q_balanced(&pdf);
+    assert_gs_matches(&pdf, &canvas, "sh_function_bbox");
+}
+
+/// Mesh shadings (#1325) are real mesh streams: triangles a Type 4, a
+/// lattice a Type 5, Coons and tensor patches a Type 7, in RGB, and gs's
+/// render of each PDF is the raster's.
+#[test]
+fn mesh_shfills_are_real_pdf_mesh_shadings() {
+    let square = "50 50  50 183  50 317  50 450   183 480  317 480  450 450
+        450 317  450 183  450 50   317 50  183 50";
+    let corners = "1 0 0  0 1 0  0 0 1  1 1 0.5";
+    for (src, ty, name) in [
+        (
+            "<< /ShadingType 4 /ColorSpace /DeviceRGB
+                /DataSource [0 50 50 1 0 0  0 450 50 0 1 0  0 250 450 0 0 1  1 450 450 1 1 1] >> shfill"
+                .to_string(),
+            4,
+            "sh_mesh4",
+        ),
+        (
+            "<< /ShadingType 5 /ColorSpace /DeviceGray /VerticesPerRow 3
+                /DataSource [50 50 0  250 80 0.5  450 50 1  50 450 1  250 420 0.5  450 450 0] >> shfill"
+                .to_string(),
+            5,
+            "sh_mesh5",
+        ),
+        (
+            format!("<< /ShadingType 6 /ColorSpace /DeviceRGB /DataSource [0 {square} {corners}] >> shfill"),
+            7,
+            "sh_mesh6",
+        ),
+        (
+            format!(
+                "30 rotate 100 -150 translate << /ShadingType 7 /ColorSpace /DeviceRGB
+                   /DataSource [0 {square} 150 150  183 300  317 350  300 183 {corners}] >> shfill"
+            ),
+            7,
+            "sh_mesh7",
+        ),
+    ] {
+        let (pdf, canvas) = pdf_and_canvas(src.as_bytes());
+        assert_real_shading(&pdf, ty);
+        let text = pdf_text(&pdf);
+        assert!(text.contains("/BitsPerCoordinate 32 /BitsPerComponent 16"), "{text}");
+        assert_gs_matches(&pdf, &canvas, name);
+    }
+}
+
+/// A mesh with a `/Function` carries `t` per vertex and the function's
+/// ramp as a PDF function; under a `/BBox` the PDF clips as the raster cuts.
+#[test]
+fn mesh_shfill_keeps_its_function_and_bbox() {
+    let src = b"0.5 setgray 0 0 500 500 rectfill
+       << /ShadingType 4 /ColorSpace /DeviceRGB /BBox [0 0 300 300]
+          /DataSource [0 50 50 0  0 450 50 1  0 250 450 0.5]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 2 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ShadingType 4 "), "{text}");
+    assert!(
+        text.contains("/Decode [50 450 50 450 0 1] /Function "),
+        "{text}"
+    );
+    assert_q_balanced(&pdf);
+    assert!(page_content(&pdf).contains(" W n "), "the BBox clip");
+    assert_gs_matches(&pdf, &canvas, "sh_mesh_function");
+}
+
 /// Two coincident circles of one radius: gs paints a disk of the first
 /// colour if the start extends, nothing outside (#1040), and so does the
 /// raster; written as is, CoreGraphics would paint nothing. The PDF records
@@ -519,44 +645,45 @@ fn nearly_equal_and_huge_equal_circles_export_the_disk() {
     assert_eq!(canvas.pixel(250, 250).map(|c| c.green()), Some(255));
 }
 
-/// Coords distinct in f64 but one point in f32: the raster paints the last
-/// stop solid (tiny-skia's degenerate axis), so the PDF must too, not a
-/// zero-length shading readers skip (a Codex review of #1028). With the
-/// end not extended that stop is transparent, and nothing is recorded.
+/// Coords distinct in f64 but one point in f32 (#1041): gs 10.07.1 paints
+/// nothing for them under every `/Extend`, and so do the raster and the PDF
+/// (#1028 had recorded tiny-skia's solid last stop). The region on one side
+/// of the axis only, as well as across it.
 #[test]
-fn an_axis_that_collapses_in_f32_is_a_solid_fill() {
-    let (pdf, canvas) = pdf_and_canvas(
-        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
-             /Extend [true true]
-             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
-    );
-    let c = canvas.pixel(100, 100).expect("pixel");
-    assert_eq!(
-        (c.red(), c.green(), c.blue()),
-        (0, 0, 255),
-        "raster: solid C1"
-    );
-    let content = page_content(&pdf);
-    assert!(
-        content.contains("0 0 1 rg") && !content.contains(" sh"),
-        "{content}"
-    );
-    assert_gs_matches(&pdf, &canvas, "sh_collapsed_axis");
-    let (pdf, canvas) = pdf_and_canvas(
-        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [250 0 250.000001 0]
-             /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill",
-    );
-    let c = canvas.pixel(100, 100).expect("pixel");
-    assert_eq!(
-        (c.red(), c.green(), c.blue()),
-        (255, 255, 255),
-        "raster: nothing"
-    );
-    let content = page_content(&pdf);
-    assert!(
-        !content.contains(" rg") && !content.contains(" sh"),
-        "{content}"
-    );
+fn an_axis_that_collapses_in_f32_paints_nothing() {
+    for coords in ["250 0 250.000001 0", "1000 0 1000.00001 0"] {
+        for ext in ["false false", "true false", "false true", "true true"] {
+            let src = format!(
+                "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{coords}] /Extend [{ext}]
+                   /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill"
+            );
+            let (pdf, canvas) = pdf_and_canvas(src.as_bytes());
+            let c = canvas.pixel(100, 100).expect("pixel");
+            assert_eq!(
+                (c.red(), c.green(), c.blue()),
+                (255, 255, 255),
+                "[{coords}] [{ext}]: raster paints nothing"
+            );
+            let content = page_content(&pdf);
+            assert!(
+                !content.contains(" rg") && !content.contains(" sh"),
+                "[{coords}] [{ext}]: {content}"
+            );
+            if !common::gs_available() {
+                continue;
+            }
+            // gs on the PostScript itself (it reads it by its header), the
+            // reference the raster follows.
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            let theirs = gs_rasterize(ps.as_bytes(), "sh_collapsed_axis_ps");
+            let g = theirs.pixel(100, 100).expect("gs");
+            assert_eq!(
+                (g.red(), g.green(), g.blue()),
+                (255, 255, 255),
+                "[{coords}] [{ext}]: gs paints nothing"
+            );
+        }
+    }
 }
 
 /// Each `/Extend` on an axial and on radials (nested; a cone, whose
@@ -1022,4 +1149,73 @@ fn clip_groups_survive_copypage_showpage_and_erasepage() {
     // copypage, showpage, the final copypage, and the art painted after
     // it (finish() emits that as a trailing page).
     assert!(text.contains("/Count 4"), "unexpected page count");
+}
+
+/// A Type 1 shading whose `/Domain` pair differs in f64 but is equal as f32
+/// is zero-width to gs, which paints nothing for it, so the PNG and the PDF
+/// paint nothing too, not a PDF with an empty Domain (#1333). An exactly
+/// zero-width Domain already did. A pair distinct in f32 is still written.
+#[test]
+fn function_shading_with_a_zero_width_domain_is_not_exported() {
+    let shading = |dom: &str, matrix: &str| {
+        format!(
+            "0.9 setgray 0 0 500 500 rectfill
+             << /ShadingType 1 /ColorSpace /DeviceRGB /Domain {dom} /Matrix {matrix}
+                /Function << /FunctionType 0 /Domain {dom} /Range [0 1 0 1 0 1] /Size [2 2]
+                  /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> shfill"
+        )
+    };
+    for (name, dom, matrix) in [
+        (
+            "sh_f32_x",
+            "[1000000 1000000.001 0 1]",
+            "[100000 0 0 100 -99999999950 50]",
+        ),
+        (
+            "sh_f32_y",
+            "[0 1 1000000 1000000.001]",
+            "[100 0 0 100000 50 -99999999950]",
+        ),
+        ("sh_exact_zero", "[0 0 0 1]", "[100 0 0 100 50 50]"),
+    ] {
+        let (pdf, canvas) = pdf_and_canvas(shading(dom, matrix).as_bytes());
+        assert!(!pdf_text(&pdf).contains("/ShadingType"), "{name}");
+        assert!(!page_content(&pdf).contains(" sh\n"), "{name}");
+        assert_q_balanced(&pdf);
+        let c = canvas.pixel(60, 444).expect("pixel");
+        assert_eq!(
+            (c.red(), c.green()),
+            (230, 230),
+            "{name}: the PNG paints nothing"
+        );
+        assert_gs_matches(&pdf, &canvas, name);
+    }
+    let (pdf, _) = pdf_and_canvas(
+        shading("[1000000 1000000.125 0 1]", "[800 0 0 100 -800000000 50]").as_bytes(),
+    );
+    assert!(
+        pdf_text(&pdf).contains("/ShadingType 1 "),
+        "a distinct pair is kept"
+    );
+    assert!(page_content(&pdf).contains(" cm /Sh0 sh\n"));
+}
+
+/// A mesh whose vertex `t` lies outside the Function's Domain (Codex round
+/// 1 on #1376): the raster interpolates `t`, then clips it, so near the
+/// first vertex (t = -1) it is the ramp's first colour. The PDF carries the
+/// unclamped positions and a function that clips after, so gs's render of
+/// it matches.
+#[test]
+fn a_mesh_function_clips_after_interpolating_in_pdf_too() {
+    let src = b"<< /ShadingType 4 /ColorSpace /DeviceRGB
+          /DataSource [0 10 10 -1  0 490 10 1  0 250 490 1]
+          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> shfill";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/Decode [10 490 10 490 -1 1]"), "{text}");
+    assert!(text.contains("/FunctionType 3 /Domain [-1 1]"), "{text}");
+    // Near the first vertex the raster is red, as gs paints the program.
+    let px = canvas.pixel(40, SIZE - 1 - 30).expect("pixel");
+    assert!(px.red() > 200 && px.blue() < 40, "{px:?}");
+    assert_gs_matches(&pdf, &canvas, "sh_mesh_clip_after");
 }

@@ -153,11 +153,20 @@ fn dycrayon_every_documented_parameter_changes_the_render() {
         ("Streak", "/Streak 3.5"),
         ("Strength", "/Strength 0.5"),
         ("Seed", "/Seed 12"),
+        ("From", "/From 0.3"),
+        ("To", "/To 0.7"),
     ];
-    for (_, extra) in varied {
+    for (key, extra) in varied {
+        // At /Touch 0.7 the landing's press already saturates the core, so
+        // it is compared at a light touch (#731: the 8-bit page used to
+        // round a level differently on 2 pixels, which made it look live).
+        let (got, want) = if key == "Landing" {
+            (stroke(&format!("/Touch 0.3 {extra}")), stroke("/Touch 0.3"))
+        } else {
+            (stroke(extra), baseline.clone())
+        };
         assert_ne!(
-            stroke(extra),
-            baseline,
+            got, want,
             "{extra} rendered the same as the baseline: a no-op"
         );
     }
@@ -641,4 +650,172 @@ fn a_crayon_scene_renders_within_the_ci_budget() {
         )
     });
     assert!(inked(&it).iter().any(|&i| i), "nothing drawn");
+}
+
+// Issue #1418: /From and /To draw part of each stroke with the whole
+// stroke's landing, fade, wander, build-up, wear and texture.
+
+const PW: u32 = 200;
+const PH: u32 = 60;
+const CURVE: &str = "newpath 10 30 moveto 70 55 140 5 190 30 curveto";
+
+/// A `PW` x `PH` page at 2x, `path` in crayon with `opts` (a fixed /Seed 5).
+fn piece(path: &str, opts: &str) -> Interp {
+    render(
+        PW,
+        PH,
+        2.0,
+        &format!("0.2 0.3 0.8 setrgbcolor {path} << /Seed 5 {opts} >> dycrayon"),
+    )
+}
+
+/// The largest channel difference per pixel over the device columns `x0..x1`.
+fn col_diffs(a: &[u8], b: &[u8], x0: u32, x1: u32) -> Vec<u8> {
+    let w = (PW * 2) as usize;
+    assert_eq!(a.len(), b.len());
+    (0..a.len() / 4)
+        .filter(|i| (x0 as usize..x1 as usize).contains(&(i % w)))
+        .map(|i| {
+            (0..4)
+                .map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c]))
+                .max()
+                .unwrap()
+        })
+        .collect()
+}
+
+fn ink_over(it: &Interp, bare: &[u8]) -> usize {
+    data(it)
+        .chunks(4)
+        .zip(bare.chunks(4))
+        .filter(|(p, q)| p != q)
+        .count()
+}
+
+/// The part keys left out, or the whole range, are the whole stroke, byte
+/// for byte (the match with the library from before #1418 is
+/// `scripts/identity_check.sh --loader lib/drykit.ps`, run on the PR).
+#[test]
+fn the_whole_range_is_the_default() {
+    let shapes = [
+        CURVE,
+        "newpath 10 30 moveto 190 30 lineto 10 10 moveto 100 12 lineto",
+        "newpath 20 10 moveto 180 10 lineto 20 50 lineto closepath",
+        "newpath 100 30 moveto 100 30 lineto",
+    ];
+    for path in shapes {
+        for opts in [
+            "",
+            "/Pass 2 /Worn 0.9",
+            "/Touch { 0.3 mul 0.5 add } /Wear 1",
+        ] {
+            let plain = data(&piece(path, opts));
+            for keys in ["/From 0", "/To 1", "/From 0 /To 1"] {
+                assert_eq!(
+                    data(&piece(path, &format!("{opts} {keys}"))),
+                    plain,
+                    "`{keys}` on `{opts}` changed the whole stroke"
+                );
+            }
+        }
+    }
+}
+
+/// `/From 0 /To t` for a growing t leaves the part already drawn alone:
+/// the landing blob stays at the start, the fade and the wander are the
+/// whole stroke's, and the lift (the stroke's end) is only in the last
+/// frame.
+#[test]
+fn a_growing_crayon_stroke_keeps_what_it_has_drawn() {
+    let bare = data(&render(PW, PH, 2.0, ""));
+    for opts in ["", "/Fade 0.6 /Uneven 0.3 /Wear 2", "/Pass 3 /Worn 0.9"] {
+        let tos: Vec<f64> = (0..=14).map(|i| 0.3 + 0.05 * f64::from(i)).collect();
+        let frames: Vec<Interp> = tos
+            .iter()
+            .map(|t| piece(CURVE, &format!("{opts} /From 0 /To {t}")))
+            .collect();
+        for k in 0..tos.len() - 1 {
+            let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
+            let d = col_diffs(&data(&frames[k]), &data(&frames[k + 1]), 0, behind);
+            let worst = d.iter().copied().max().unwrap();
+            assert!(
+                worst <= 24,
+                "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
+                k + 1
+            );
+            // (a faded tail may add nothing a frame can see)
+            assert!(
+                ink_over(&frames[k + 1], &bare) >= ink_over(&frames[k], &bare),
+                "`{opts}`: frame {} lost ink",
+                k + 1
+            );
+        }
+        assert!(
+            ink_over(&frames[14], &bare) > 2 * ink_over(&frames[0], &bare),
+            "`{opts}`: the stroke did not grow"
+        );
+        // the finished frame is the whole stroke
+        assert_eq!(
+            data(&piece(CURVE, &format!("{opts} /From 0 /To 1"))),
+            data(&piece(CURVE, opts)),
+            "`{opts}` at t = 1"
+        );
+    }
+}
+
+/// Two or three adjacent pieces on one canvas make the whole crayon
+/// stroke, apart from the seam.
+#[test]
+fn adjacent_crayon_pieces_make_the_whole_stroke() {
+    for opts in ["", "/Fade 0.6 /Uneven 0.3", "/Pass 3 /Worn 0.9"] {
+        let whole = piece(CURVE, opts);
+        let drawn = |cuts: &[(f64, f64)]| {
+            let calls: String = cuts
+                .iter()
+                .map(|(a, b)| {
+                    format!(
+                        "0.2 0.3 0.8 setrgbcolor {CURVE} << /Seed 5 {opts} /From {a} /To {b} >> dycrayon "
+                    )
+                })
+                .collect();
+            render(PW, PH, 2.0, &calls)
+        };
+        let ink = ink_over(&whole, &data(&render(PW, PH, 2.0, "")));
+        for (name, pieces) in [
+            ("halves", drawn(&[(0.0, 0.5), (0.5, 1.0)])),
+            ("thirds", drawn(&[(0.0, 0.3), (0.3, 0.7), (0.7, 1.0)])),
+        ] {
+            let d = col_diffs(&data(&whole), &data(&pieces), 0, PW * 2);
+            let worst = d.iter().copied().max().unwrap();
+            let loud = d.iter().filter(|&&v| v > 32).count();
+            assert!(worst <= 96, "`{opts}` {name}: differ by up to {worst}");
+            assert!(
+                loud * 50 < ink,
+                "`{opts}` {name}: {loud} of {ink} inked pixels differ clearly"
+            );
+        }
+    }
+}
+
+/// Every subpath is cut by its own length, a part past the whole is
+/// refused with the crayon's own error, and an empty range draws nothing.
+#[test]
+fn crayon_parts_follow_each_subpath_and_an_empty_range_draws_nothing() {
+    let bare = data(&render(PW, PH, 2.0, ""));
+    let two = "newpath 10 40 moveto 190 40 lineto 10 15 moveto 90 15 lineto";
+    let whole = ink_over(&piece(two, ""), &bare);
+    let half = ink_over(&piece(two, "/To 0.5"), &bare);
+    assert!(
+        (0.35..0.65).contains(&(half as f64 / whole as f64)),
+        "half of two strokes inked {half} of {whole}"
+    );
+    for keys in ["/From 0.4 /To 0.4", "/From 1 /To 1", "/From 0 /To 0"] {
+        assert_eq!(data(&piece(CURVE, keys)), bare, "`{keys}` drew something");
+    }
+    // a dot belongs to the piece that holds its middle
+    let dot = "newpath 100 30 moveto 100 30 lineto";
+    let one = data(&piece(dot, ""));
+    assert_ne!(one, bare, "the dot is not drawn");
+    assert_eq!(data(&piece(dot, "/From 0.5")), one, "the dot's second half");
+    assert_eq!(data(&piece(dot, "/To 0.5")), bare, "the dot's first half");
 }

@@ -437,7 +437,7 @@ const CASES: &[(&str, &str, &str)] = &[
 ];
 
 /// Plain PostScript, valid in pscat and in gs: `P` prints any object the
-/// same way in both (`==` differs on reals and has no `==only` in pscat),
+/// same way in both (`==` differs on reals),
 /// and `T` runs one case.
 const PRELUDE: &str = r"
 /P { dup type /operatortype eq { (--) print 64 string cvs print (--) print } {

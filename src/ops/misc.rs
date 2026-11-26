@@ -12,6 +12,9 @@ pub fn install(dict: &mut Dict) {
     use super::op;
     op(dict, "=", print_text);
     op(dict, "==", print_syntactic);
+    // Ghostscript extensions (#1413): `=` and `==` without the newline.
+    op(dict, "=only", print_text_only);
+    op(dict, "==only", print_syntactic_only);
     op(dict, "stack", stack_dump);
     op(dict, "pstack", pstack_dump);
     op(dict, "print", print_string);
@@ -23,9 +26,11 @@ pub fn install(dict: &mut Dict) {
     // `invalidaccess`, and `bind` leaves it alone). Reading is never
     // refused, and every other type passes through unchanged, as every
     // real Type 1 font needs: it says `executeonly`/`noaccess` on its way in.
+    // The one read `noaccess` does refuse is running a string or file as
+    // source (#1321).
     op(dict, "executeonly", access_restrict);
     op(dict, "readonly", access_restrict);
-    op(dict, "noaccess", access_restrict);
+    op(dict, "noaccess", access_noaccess);
     op(dict, "rcheck", access_check);
     op(dict, "wcheck", wcheck);
 }
@@ -101,11 +106,24 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
     Err(PsError::from_name(name, text).unwrap_or(PsError::Undefined(name.to_string())))
 }
 
-/// `readonly`, `executeonly`, `noaccess`: the reference loses write
+/// `readonly`, `executeonly`: the reference loses write
 /// access if it is an array and is unchanged otherwise.
 fn access_restrict(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
+    // Access can only be given up further, and `noaccess` is the end of
+    // it: gs refuses to restrict a string or file again (#1321).
+    if obj.noaccess {
+        return Err(PsError::InvalidAccess);
+    }
     it.push(obj.into_readonly());
+    Ok(())
+}
+
+/// `noaccess`: as above, and a string or file can no longer be executed
+/// (`invalidaccess`, #1321). Reading it is still allowed.
+fn access_noaccess(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    it.push(obj.into_noaccess());
     Ok(())
 }
 
@@ -120,7 +138,12 @@ fn access_check(it: &mut Interp) -> Result<(), PsError> {
 
 fn wcheck(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    it.push(Object::bool(!obj.is_readonly()));
+    // systemdict is the one dictionary with a write attribute (#1337).
+    let writable = match &obj.value {
+        Value::Dict(d) => !it.is_systemdict(d),
+        _ => !obj.is_readonly(),
+    };
+    it.push(Object::bool(writable));
     Ok(())
 }
 
@@ -157,14 +180,33 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn print_text(it: &mut Interp) -> Result<(), PsError> {
-    let obj = it.pop()?;
-    let line = format!("{}\n", obj.text());
-    out(it, line.as_bytes(), false)
+    print_top(it, Object::text, true)
 }
 
 fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), true)
+}
+
+/// `=only` and `==only` (#1413), Ghostscript extensions outside the PLRM:
+/// exactly `=` and `==` minus the trailing newline. They share
+/// [`print_top`], so the two forms cannot drift apart.
+fn print_text_only(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, Object::text, false)
+}
+
+fn print_syntactic_only(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), false)
+}
+
+/// Pop the top operand and print `render` of it, plus a newline when
+/// `newline` is set. An empty stack raises `stackunderflow` before any
+/// output.
+fn print_top(it: &mut Interp, render: fn(&Object) -> String, newline: bool) -> Result<(), PsError> {
     let obj = it.pop()?;
-    let line = format!("{}\n", obj.repr_bounded(&OPERATOR_LIMITS));
+    let mut line = render(&obj);
+    if newline {
+        line.push('\n');
+    }
     out(it, line.as_bytes(), false)
 }
 

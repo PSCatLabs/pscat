@@ -83,7 +83,11 @@ ink, each with its own color, angle, and shift, is a two-plate
 risograph spread. Frequency is cells-per-inch, dots scale by
 square-root (area-proportional, the print-correct curve), and a single
 deterministic `/MaxCells` budget rejects pathological lattices before
-anything is drawn. No random draws anywhere, so fixed options
+anything is drawn. A line or cross screen fades smoothly to nothing as
+the tone falls to 0: once a rule would be thinner than 0.1 device pixel
+(tone 0.0125 at the defaults and 72 dpi) it is drawn at that width and
+cut shorter in proportion instead, so ink still tracks tone rather than
+holding at a faint floor. No random draws anywhere, so fixed options
 reproduce identically with no seed to manage. `examples/halftone.ps`
 is a four-panel specimen: a dot ramp, a line screen, a cross screen,
 and a misregistered second plate.

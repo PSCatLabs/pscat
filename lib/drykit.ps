@@ -740,6 +740,63 @@
         dkla dklk get dklb dklk get dkla dklk get sub dklt mul add } for ]
 } bind def
 
+% i -> x y hw   (stop i of the run being cut, without its progress)
+% @internal
+/dkFat {
+    dkFs exch get dup 0 get exch dup 1 get exch 2 get
+} bind def
+
+% t -> x y hw   (the point of the run being cut, between its stops dkFi and
+% dkFi + 1, where the subpath is t of the way along)
+% @internal
+/dkFcutat {
+    dkFs dkFi get 3 get sub
+    dkFs dkFi 1 add get 3 get dkFs dkFi get 3 get sub div /dkFf exch def
+    dkFs dkFi get /dkFp0 exch def dkFs dkFi 1 add get /dkFp1 exch def
+    0 1 2 { /dkFj exch def dkFp0 dkFj get dup dkFp1 dkFj get exch sub dkFf mul add } for
+} bind def
+
+% [key stops] -> [key stops'] or nothing   (#1418: the part of one run from
+% dkFa to dkFb of its subpath, along its length, which is the stops' fourth
+% number, 0..1; the part's stops are plain [x y hw]. A cut inside a segment
+% adds a stop there, interpolated, so the part is exactly that much of the
+% stroke the whole stroke would draw. A run of one point (a dot, or a lane
+% that is on at one stop only) is whole or nothing: it belongs to the piece
+% [dkFa, dkFb) that holds its place, dkFb 1 closed, so adjacent pieces draw
+% it once.)
+% @internal
+/dkFrun {
+    aload pop /dkFs exch def /dkFk exch def
+    /dkFn dkFs length def
+    dkFs 0 get 3 get /dkFt0 exch def
+    dkFs dkFn 1 sub get 3 get /dkFt1 exch def
+    dkFt1 dkFt0 sub 1e-9 le {
+        dkFt0 dkFa ge dkFt0 dkFb lt dkFb 1 ge or and {
+            dkFk [ 0 1 dkFn 1 sub { dkFat 3 array astore } for ] 2 array astore
+        } if
+    } {
+        dkFt0 dkFb lt dkFt1 dkFa gt and {
+            /dkFopen false def
+            [
+                0 1 dkFn 2 sub {
+                    /dkFi exch def
+                    dkFs dkFi get 3 get dkFa dkmax /dkFlo exch def
+                    dkFs dkFi 1 add get 3 get dkFb dkmin /dkFhi exch def
+                    dkFhi dkFlo sub 1e-9 gt {
+                        dkFopen not {
+                            /dkFopen true def
+                            dkFlo dkFs dkFi get 3 get gt { dkFlo dkFcutat } { dkFi dkFat } ifelse
+                            3 array astore
+                        } if
+                        dkFhi dkFs dkFi 1 add get 3 get lt { dkFhi dkFcutat } { dkFi 1 add dkFat } ifelse
+                        3 array astore
+                    } if
+                } for
+            ] dup length 1 gt { dkFk exch 2 array astore } { pop } ifelse
+        } if
+    } ifelse
+} bind def
+
 % -   (resolves one subpath, stops dkSall[dkSa .. dkSb], into runs on the
 % operand stack, each `[key run]`; called inside the record's `[ ... ]`)
 % @internal
@@ -782,7 +839,14 @@
     dkSfallout 0 gt {
         dkSfall dkSfn [ 0 1 dkSm 1 sub {
             /dkSi exch def
-            dkSall dkSa dkSi add get dup 0 get exch 1 get dkSwe dkSi get 3 array astore
+            dkSpart {
+                % a piece (#1418): each stop also says how far along the subpath it is
+                dkSall dkSa dkSi add get dup 0 get exch dup 1 get exch 3 get
+                /dkSft exch def
+                dkSwe dkSi get dkSft 4 array astore
+            } {
+                dkSall dkSa dkSi add get dup 0 get exch 1 get dkSwe dkSi get 3 array astore
+            } ifelse
         } for ] dkSseed 2 array astore put
         /dkSfn dkSfn 1 add def
     } if
@@ -814,7 +878,14 @@
                 dkSst 0 get dkSa0 sin neg dkSlo dkSwi mul mul add
                 dkSst 1 get dkSa0 cos dkSlo dkSwi mul mul add
                 dkSwi dkSlanes div 2 div dkSlanes 1 gt { 1.18 mul } if
-                3 array astore
+                dkSpart {
+                    % a piece (#1418): the stop also says how far along the
+                    % subpath it is, for dkFrun; a dot is at its middle
+                    dkSst 5 get 3 eq { 0.5 } { dkSst 3 get } ifelse
+                    4 array astore
+                } {
+                    3 array astore
+                } ifelse
                 /dkSnew exch def
                 /dkSk2 dkStk dkSi get dkSdt add dup 0 lt { pop 0 } if def
                 dkSopen {
@@ -892,6 +963,10 @@
         dkSo /Seed get dup dkisnum not { pop dkstroke-seed-must-be-a-number } if
         abs 2147483647 ge { dkstroke-seed-must-be-within-integer-range } if
     } if
+    /dkSfrom dkSo /From 0 0 1 /dkstroke-from-must-be-0-to-1 dkoptnum def
+    /dkSto dkSo /To 1 0 1 /dkstroke-to-must-be-0-to-1 dkoptnum def
+    dkSfrom dkSto gt { dkstroke-from-must-not-exceed-to } if
+    /dkSpart dkSfrom 0 gt dkSto 1 lt or def
     % Tilt: s = sin(Tilt) blends the tip's width toward /Side; a tilted
     % stick presses at the edges of its patch, so it gets at least three
     % lanes (edge, face, edge) to carry that.
@@ -916,7 +991,7 @@
     } walkpath
     newpath
 
-    /dkSrec 16 dict def
+    /dkSrec 20 dict def
     dkSrec /ctm matrix currentmatrix put
     dkSrec /pig [ currentrgbcolor ] put
     dkSrec /under dkSunder put
@@ -948,6 +1023,15 @@
         } for
     ] put
     dkSrec /falls dkSfall 0 dkSfn getinterval put
+    dkSpart {
+        % a piece (#1418): everything above was worked out for the whole
+        % stroke; cut the runs now, so the stops, the touch bands, the
+        % widths and the lanes' chains are the whole stroke's
+        /dkFa dkSfrom def /dkFb dkSto def
+        dkSrec /runs [ dkSrec /runs get { dkFrun } forall ] put
+        dkSrec /from dkSfrom put
+        dkSrec /to dkSto put
+    } if
 
     % A stop whose reach alone holds more cells than dkbudget can't be
     % drawn in any chunk, however dkZdraw splits it. Turn such a stroke
@@ -1509,7 +1593,14 @@ systemdict /.sameclip known /dkPsameok exch def
                     /dkZfh dkZfh 0.9 mul def
                     /dkZfc dkZflen dkZr /fallout get mul round cvi def
                     /dkZfi dkZfi 1 add def
-                    dkZfc 0 gt dkZflen 0 gt and dkZfh 0 gt and {
+                    dkZfc 0 gt dkZflen 0 gt and dkZfh 0 gt and
+                    % a piece (#1418): a piece of the stroke before or after
+                    % the range has no particles to draw
+                    dkZr /from known {
+                        dkZfs dkZp0 get 3 get dkZr /to get le
+                        dkZfs dkZp1 get 3 get dkZr /from get ge and and
+                    } if
+                    {
                         gsave
                             dkZr /ctm get setmatrix
                             dkZfcol aload pop setrgbcolor
@@ -1524,13 +1615,34 @@ systemdict /.sameclip known /dkPsameok exch def
                                 /Seed 100000 dkZfi add dksubseed dkrand 2147483646 mul cvi
                                 /Scale [0 1]
                                 /Weight { exch pop abs dkZfh div 1 exch sub }
-                                /Mark {
-                                    pop /dkZms exch def
-                                    dkZms dkZdy mul add exch dkZms dkZdx mul add exch
-                                    /dkZmy exch def /dkZmx exch def
-                                    newpath dkZmx dkZfr add dkZmy moveto
-                                    dkZmx dkZmy dkZfr 0 360 arc fill
-                                }
+                                /Mark dkZr /from known {
+                                    % a piece (#1418): the chunk's particles
+                                    % are all placed, as for the whole stroke,
+                                    % and only those at a place within the
+                                    % range are drawn (the chunk is a chord
+                                    % from stop p0 to p1, so x runs the
+                                    % subpath's progress from one to the other)
+                                    {
+                                        pop /dkZms exch def
+                                        1 index dkZflen div dkZfs dkZp1 get 3 get dkZfs dkZp0 get 3 get sub mul
+                                        dkZfs dkZp0 get 3 get add /dkZmt exch def
+                                        dkZms dkZdy mul add exch dkZms dkZdx mul add exch
+                                        /dkZmy exch def /dkZmx exch def
+                                        dkZmt dkZr /from get ge
+                                        dkZmt dkZr /to get lt dkZr /to get 1 ge or and {
+                                            newpath dkZmx dkZfr add dkZmy moveto
+                                            dkZmx dkZmy dkZfr 0 360 arc fill
+                                        } if
+                                    }
+                                } {
+                                    {
+                                        pop /dkZms exch def
+                                        dkZms dkZdy mul add exch dkZms dkZdx mul add exch
+                                        /dkZmy exch def /dkZmx exch def
+                                        newpath dkZmx dkZfr add dkZmy moveto
+                                        dkZmx dkZmy dkZfr 0 360 arc fill
+                                    }
+                                } ifelse
                             >> scatter
                         grestore
                     } if
@@ -1570,6 +1682,10 @@ systemdict /.sameclip known /dkPsameok exch def
 %   { << /Fallout -1 >> dkstroke } /dkstroke-fallout-must-be-0-to-20 (/Fallout -1) mustguard
 %   { << /Drift -3 >> dkstroke } /dkstroke-drift-must-not-be-negative (/Drift -3) mustguard
 %   { << /After 1 >> dkstroke } /dkstroke-after-must-be-a-boolean (a number /After) mustguard
+%   { << /From -0.1 >> dkstroke } /dkstroke-from-must-be-0-to-1 (/From -0.1) mustguard
+%   { << /From (a) >> dkstroke } /dkstroke-from-must-be-0-to-1 (a string /From) mustguard
+%   { << /To 1.5 >> dkstroke } /dkstroke-to-must-be-0-to-1 (/To 1.5) mustguard
+%   { << /From 0.6 /To 0.4 >> dkstroke } /dkstroke-from-must-not-exceed-to (/From past /To) mustguard
 %   { << /Seed (s) >> dkstroke } /dkstroke-seed-must-be-a-number (a string /Seed) mustguard
 %   { << /Seed 1e12 >> dkstroke } /dkstroke-seed-must-be-within-integer-range (/Seed 1e12) mustguard
 %   { << /Touch { pop (x) } >> dkstroke } /dkstroke-touch-procedure-must-return-a-number
@@ -1731,6 +1847,8 @@ systemdict /.sameclip known /dkPsameok exch def
 % @param: /Fallout [count per points] Loose particles per point of stroke length, 0..20, placed with artkit's scatter beside the stroke (default 0)
 % @param: /Drift [points] How far fallout drifts down canvas-space y: chalk on a vertical board falls (default 0)
 % @param: /Seed [integer] Seed for the tool-side randomness (contact chains, fallout); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas, so adding a stroke elsewhere never re-rolls this one)
+% @param: /From [0..1] Draws only the part of each subpath from this fraction of its length (arc length, 0 its first point): it is the whole subpath that is walked, so its stops, touch levels, widths, lanes' contact chains, seed, texture and fallout are the whole stroke's, and the part is cut from that. Drawing /From 0 /To t for a growing t grows a stroke without changing what is already drawn; a stroke's end is round, so an interior cut is, too (default 0)
+% @param: /To [0..1] Draws only the part of each subpath up to this fraction of its length; must not be less than /From. 1 draws to the end. A dot (a zero-length subpath) and a lane on at one stop only are whole or nothing, drawn by the piece that holds their place, [/From, /To) with /To 1 closed, so two adjacent pieces draw them once (default 1)
 % @param: /After [boolean] Inside a dkbatch, draw this stroke on its own after the batch's other strokes have rendered (after strokes in call order), as if it were made just after the batch closed: it keeps its colour, coordinate system and dkclip region, and may be a different colour from the batch, so an eraser or a smudge can be drawn from inside a batch over everything the batch lays. Ignored with no batch open (default false)
 /dkstroke {
     dkSrecord

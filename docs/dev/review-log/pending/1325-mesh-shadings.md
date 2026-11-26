@@ -1,0 +1,19 @@
+## Gouraud mesh shadings: shfill ShadingType 4 and 5 in PNG, SVG and PDF (issue #1325, part 1, 2026-11-20)
+
+- **What changed / what to look at:** a new feature. A free-form triangle fan (ShadingType 4, left) and a wavy lattice (ShadingType 5, right) are shown in all three outputs (PNG, the SVG rasterised by Chrome, and the PDF rasterised by gs), next to gs's own render of the program. The base build stops at the first `shfill` with a `rangecheck`, so the "before" image is a blank page. Patch meshes (types 6 and 7) come in a second PR.
+- **Perceptual check:** "A mesh specimen (a Gouraud triangle fan and a Coons patch) renders smoothly with no seams, and the PNG, SVG and PDF outputs agree with gs's render within a few levels." (Only the fan part applies here; the Coons patch is part 2.)
+- **Reviewer:** PASS, round 1 (see the PR's "Perceptual review, round 1" comment). Polish: pscat anti-aliases the mesh's outer edge, while gs fills every pixel the edge touches, so the lattice's sides look slightly more angular than gs's.
+
+| before | after, PNG | after, SVG (Chrome) | after, PDF (gs) | gs reference |
+|---|---|---|---|---|
+| ![before](https://github.com/PSCatLabs/pscat/blob/2e802b85846884a8a3a5982cfcf7b7f57acbaaf6/docs/dev/review-log/pending/1325-mesh-shadings/specimen-before.png?raw=true) | ![png](https://github.com/PSCatLabs/pscat/blob/2e802b85846884a8a3a5982cfcf7b7f57acbaaf6/docs/dev/review-log/pending/1325-mesh-shadings/specimen-after-png.png?raw=true) | ![svg](https://github.com/PSCatLabs/pscat/blob/2e802b85846884a8a3a5982cfcf7b7f57acbaaf6/docs/dev/review-log/pending/1325-mesh-shadings/specimen-after-svg-via-chrome.png?raw=true) | ![pdf](https://github.com/PSCatLabs/pscat/blob/2e802b85846884a8a3a5982cfcf7b7f57acbaaf6/docs/dev/review-log/pending/1325-mesh-shadings/specimen-after-pdf-via-gs.png?raw=true) | ![gs](https://github.com/PSCatLabs/pscat/blob/2e802b85846884a8a3a5982cfcf7b7f57acbaaf6/docs/dev/review-log/pending/1325-mesh-shadings/specimen-reference-gs.png?raw=true) |
+
+## Patch mesh shadings: shfill ShadingType 6 and 7 in PNG, SVG and PDF (issue #1325, part 2, 2026-11-20)
+
+- **What changed / what to look at:** the Coons patch on the right, with curved edges and four corner colours, beside the Type 4 fan from part 1. It is shown in all three outputs next to gs's own render. Before, part 1 paints the fan and stops at the Coons patch with a `rangecheck`.
+- **Perceptual check:** "A mesh specimen (a Gouraud triangle fan and a Coons patch) renders smoothly with no seams, and the PNG, SVG and PDF outputs agree with gs's render within a few levels."
+- **Reviewer:** PASS, round 1 (see the part-2 PR's "Perceptual review, round 1" comment). Its renders are byte-identical to this branch's. Polish: pscat's anti-aliased outline of the fan looks a little more faceted than gs's.
+
+| before | after, PNG | after, SVG (Chrome) | after, PDF (gs) | gs reference |
+|---|---|---|---|---|
+| ![before](https://github.com/PSCatLabs/pscat/blob/2eabe94962d738e5392e4bdfcca76413ef754abf/docs/dev/review-log/pending/1325-mesh-shadings/patches-before.png?raw=true) | ![png](https://github.com/PSCatLabs/pscat/blob/2eabe94962d738e5392e4bdfcca76413ef754abf/docs/dev/review-log/pending/1325-mesh-shadings/patches-after-png.png?raw=true) | ![svg](https://github.com/PSCatLabs/pscat/blob/2eabe94962d738e5392e4bdfcca76413ef754abf/docs/dev/review-log/pending/1325-mesh-shadings/patches-after-svg-via-chrome.png?raw=true) | ![pdf](https://github.com/PSCatLabs/pscat/blob/2eabe94962d738e5392e4bdfcca76413ef754abf/docs/dev/review-log/pending/1325-mesh-shadings/patches-after-pdf-via-gs.png?raw=true) | ![gs](https://github.com/PSCatLabs/pscat/blob/2eabe94962d738e5392e4bdfcca76413ef754abf/docs/dev/review-log/pending/1325-mesh-shadings/patches-reference-gs.png?raw=true) |

@@ -1,7 +1,10 @@
 # pscat for AI agents
 
 pscat is easy to drive from a coding agent — Claude Code, Codex,
-OpenClaw, Hermes, or anything else. There are two integration surfaces,
+OpenClaw, Hermes, or anything else. This page is the reference for the local
+route (the skills and the stdio `pscat-mcp`). Which client gets which route,
+the hosted (cloud) server, and whether to install or just connect are on
+[pscat in every AI client](clients.md). There are two integration surfaces,
 and both work against an **installed** pscat (no checkout needed):
 
 - **Skills**: plain Markdown in [`plugin/skills/`](../../plugin/skills/) (also
@@ -104,15 +107,18 @@ PIL composite. A one-call typewriter or chart is not added yet.
 ## The MCP server
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
-  or a PDF written to `out_path`), with page size, `dpi`, `halftone`,
-  `bands` and `gpu_preview` options (see "Banded renders" and "GPU preview"
-  below). Errors still return the partial render with the error text.
+  or a PDF written to `out_path`, whose text is selectable, searchable
+  text in embedded fonts, as `pscat --pdf` writes it), with page size,
+  `dpi`, `halftone`, `bands`, `svg_text` and `gpu_preview` options (see "Banded renders" and
+  "GPU preview" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack, a built-in
-  operator name such as `/sub` redefined as a plain value: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
+  (a blank page, an unbalanced `gsave`, stuff left on the stack with the line the oldest item was left on: `[stack-leak]`, a built-in
+  operator name such as `/sub` redefined as a plain value, with the line it was redefined on: `[shadowed-operator]`, silenced by a `%lint: allow shadowed-operator` comment line). A run that
   ended in a PostScript error gets the `PostScript error:` block and the
-  partly drawn page but no `Lint:` block: those findings describe where the
-  run stopped, so they would only be consequences of the error (#942).
+  partly drawn page, and no `Lint:` block for the findings that describe
+  where the run stopped: they would only be consequences of the error (#942).
+  The one kept is `[shadowed-operator]`, in its own `Lint:` block after the
+  error, because a redefined operator is often why the run failed (#1110).
   `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
   `eval_postscript` also
   return what a *successful* run wrote to stderr (a font falling back to a
@@ -127,7 +133,7 @@ PIL composite. A one-call typewriter or chart is not added yet.
   `&` alignment), a chalkboard PNG back: the `pscat chalk` board (#555), with
   its config keys as optional arguments (`size`, `irregular`, `slope`,
   `jitter`, `align`, `color`, `board` or `false` for a transparent page,
-  `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
+  `ghosting`, `hand` (0..1, freehand strokes), `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
   full `--json` schema). Same input and seed, the same bytes. A command
   outside mathkit's subset is a `latex_error` naming it (`code`
   `unsupported_command`, `token` `\aleph`); every unsupported command or
@@ -152,10 +158,24 @@ PIL composite. A one-call typewriter or chart is not added yet.
   logo sheet is one call:
   `{"entries": [{"source": "<a.ps>", "label": "A: one-line cat"}, ...],
   "width": 384, "height": 384, "dpi": [96, 9, {"dpi": 9, "zoom": 4}]}`.
+  The `pscat sheet` sweeps, mats and wrapping are inputs too (#1339). An
+  entry's `sweep` draws its program once per `{"seed": [1, 2, 3]}` or per
+  `{"param": "Density", "values": [10, 20]}` (lists of numbers, not the CLI's
+  `A:B` ranges), each cell captioned `seed=7` or `Density=20`, or with the
+  words in the entry's `captions` (one per value); `values: false` leaves the
+  value out of the captions. A `dpi` item takes `"mat": "#222"` (also `#rgb`,
+  `white`, `black`: the page drawn transparent, set on that colour, padded 10
+  px), and `cols` at the top level wraps a long row onto further lines. A
+  sweep's cells count toward the 32. Stacked columns (`+`) are CLI-only.
+  Each of these draws the sheet `pscat sheet` writes with the same options.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
-  [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)).
+  [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)). With no arguments it
+  returns all of it, over 300,000 characters, which a client may cut short;
+  `names`, `kind`, `source` and `brief` ask for less (`{"names": ["pkwash"]}`
+  for one entry's parameter table, `{"kind": "palette", "brief": true}` for a
+  list).
 - `eval_postscript` — run headlessly, get back what the program printed
   (plus a `Warnings:` item for anything it wrote to stderr), or the error (name, offending command, line) plus an operand-stack
   post-mortem.
@@ -284,8 +304,10 @@ text, before it is drawn. All are in `SECURITY.md`.
 `review_sheet` has caps too, checked before any program runs
 (`output_too_large`): 32 cells (`limit_cells`), the cells at most
 `--max-pixels` in all and the sheet at most `--max-pixels` and 8000 a side
-(`limit_pixels`), a label at most 200 characters, and the sources together at
-most `--max-input-bytes`. The cells share the one `--timeout`. Also in
+(`limit_pixels`), a label or a caption at most 200 characters, and the sources
+together at most `--max-input-bytes`. A sweep's values count toward the 32
+cells, at most 32 values of at most 40 characters, `param` an identifier and
+`captions` one per value; a mat's 10 px pad counts toward the 8000 side. The cells share the one `--timeout`. Also in
 `SECURITY.md`.
 
 The three interpreter limits (steps, time, memory) are on by default for
@@ -298,7 +320,7 @@ limit can and cannot stop. `handwrite` runs
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
-Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `pstack`
+Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `==only`, `pstack`
 and `stack` truncate their own output well below that (1024 elements per array,
 4096 bytes per string, 16 KiB per operand, 32 KiB for a whole stack, ending in
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
@@ -502,6 +524,16 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
   measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
   CPU (18x at one row per band), and a large band count multiplies the
   per-band step and time budgets. An agent has no measurement to tune it by.
+
+### SVG text
+
+`render_postscript` and `start_render` take `svg_text` (#1132), a boolean:
+`true` with `format: "svg"` renders as `pscat --svg --svg-text` does (see
+[getting started](getting-started.md)), writing Helvetica, Times and Courier
+text as selectable SVG `<text>` and so a much smaller file. Without it, or
+with `false`, the SVG is unchanged. It only applies to SVG: `png` and `pdf`
+ignore it, and anything but a boolean is `invalid_argument`. The name is
+the one the hosted pscat-mcp server uses for its own SVG text option.
 
 ### GPU preview
 

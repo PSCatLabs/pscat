@@ -1006,7 +1006,7 @@ fn tools_call(server: &Arc<Server>, id: Value, params: &Value) -> Option<Value> 
         "handwrite" => Tool::Child(handwrite),
         "chalkboard_math" => Tool::Child(chalkboard_math),
         "review_sheet" => Tool::Child(review_sheet),
-        "describe_art_capabilities" => Tool::Child(|cfg, _| describe_art_capabilities(cfg)),
+        "describe_art_capabilities" => Tool::Child(describe_art_capabilities),
         "eval_postscript" => Tool::Child(eval_postscript),
         "start_render" => Tool::Job(start_render),
         "render_status" => Tool::Job(render_status),
@@ -1133,6 +1133,7 @@ fn tool_list(cfg: &Config) -> Value {
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
+            "svg_text": { "type": "boolean", "description": "Write Helvetica, Times and Courier text as selectable SVG <text> instead of outlines, a much smaller file (pscat --svg-text; svg only, ignored for png and pdf; other fonts stay outlines)" },
             "bands": { "type": "integer", "minimum": 1, "maximum": cfg.max_bands, "description": bands_description(cfg) },
             "gpu_preview": { "type": "boolean", "description": gpu_preview_description() },
             "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
@@ -1236,6 +1237,7 @@ fn tool_list(cfg: &Config) -> Value {
                     "jitter": { "type": "number", "minimum": 0, "maximum": 0.5, "description": "Each glyph's wobble as a fraction of the size (default 0.016)" },
                     "align": { "type": "string", "enum": ["center", "left"], "description": "Where the lines sit across the board (default center)" },
                     "color": { "type": "string", "enum": pscat::chalk::CHALK_COLORS, "description": "Chalk colour (default white)" },
+                    "hand": { "type": "number", "minimum": 0, "maximum": 1, "description": "How freehand the chalk strokes are: 0 follows every stroke exactly (default), 1 lets long strokes (fraction bars, radicals, matrix brackets, integrals) drift and overshoot as a hand does; lettering moves little. The chalk.hand key of config; not the lettering face" },
                     "board": {
                         "description": "The board: true (default, a slate), false (chalk alone on a transparent page), \"slate\", \"greenboard\", [r, g, b] in 0..1, or an object of board keys (tone, haze, ghosting, swipes, wipes, smudges, ledge)",
                         "anyOf": [
@@ -1257,7 +1259,7 @@ fn tool_list(cfg: &Config) -> Value {
                     "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board height in points (default 400)" },
                     "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Resolution (default 144: the default board is 1600x800 pixels)" },
                     "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png; svg and pdf need out_path)" },
-                    "config": { "type": "object", "description": "The full board config, as pscat chalk --json takes it: groups layout (size, irregular, slope, jitter, align, margin, width, height, dpi), chalk (color, strength, pressure, tilt, dust, width), board (or false), and seed. The keys above are laid over it" },
+                    "config": { "type": "object", "description": "The full board config, as pscat chalk --json takes it: groups layout (size, irregular, slope, jitter, align, margin, width, height, dpi), chalk (color, strength, pressure, tilt, dust, hand, width), board (or false), and seed. The keys above are laid over it" },
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["latex"]
@@ -1275,7 +1277,12 @@ fn tool_list(cfg: &Config) -> Value {
                 sizes in one image. Returns one PNG: for the same programs, pages, dpis and labels, byte for byte what \
                 `pscat sheet` writes. A dpi entry {{\"dpi\": 9, \"zoom\": 4}} draws \
                 the 9 dpi render again enlarged 4x with no smoothing (whole factors 2..16), so a \
-                small icon can be read pixel by pixel. Programs are given inline as `source`, \
+                small icon can be read pixel by pixel, and {{\"dpi\": 9, \"mat\": \"#222\"}} sets \
+                the render on a mat (padded 10 px, drawn on a transparent page) to judge an icon \
+                on dark or light. An entry's `sweep` draws its program once per seed or per value \
+                of a named parameter, each cell captioned with the value or with your own \
+                `captions`, and `cols` wraps a long row onto further lines: twelve seeds of one \
+                piece are one entry. Programs are given inline as `source`, \
                 never as file names. Each cell runs in its own child under the interpreter's \
                 limits; a cell whose program fails is still drawn as far as it got, with the \
                 error text alongside. Labels in Latin (accents included), Korean, Japanese, \
@@ -1283,8 +1290,8 @@ fn tool_list(cfg: &Config) -> Value {
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
                 an existing .png), which is why this tool is not marked read-only. {preview} Limits: \
                 {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
-                side, and the cells rendered at most {max_pixels} pixels in all; labels at \
-                most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
+                side, and the cells rendered at most {max_pixels} pixels in all; labels and \
+                captions at most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
                 all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
                 The inline image is capped at {} bytes: past that, lower the dpi list or use \
                 out_path. {READS_BRIEF}",
@@ -1304,7 +1311,9 @@ fn tool_list(cfg: &Config) -> Value {
                                 "label": { "type": "string", "maxLength": MAX_SHEET_LABEL, "description": "The row label (default: \"program N\", N counting from 1)" },
                                 "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default: the top-level width)" },
                                 "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default: the top-level height)" },
-                                "dpi": sheet_dpi_schema("The cells of this row: one per item, left to right (default: the top-level dpi)")
+                                "dpi": sheet_dpi_schema("The cells of this row: one per item, left to right (default: the top-level dpi)"),
+                                "sweep": sheet_sweep_schema(),
+                                "captions": { "type": "array", "items": { "type": "string", "maxLength": MAX_SHEET_LABEL }, "description": "With `sweep`: a caption for each value, in order, in place of seed=7 or Density=20 (exactly one per value; an empty string leaves that cell's caption out)" }
                             },
                             "required": ["source"]
                         }
@@ -1314,6 +1323,8 @@ fn tool_list(cfg: &Config) -> Value {
                     "dpi": sheet_dpi_schema("One cell per item, left to right: a dpi (9..1200), or {\"dpi\": 9, \"zoom\": 4} to also draw it enlarged 4x. The default for entries that give no list (default [72])"),
                     "labels": { "type": "boolean", "description": "Draw the row labels (default true)" },
                     "sizes": { "type": "boolean", "description": "Draw the pixel-size caption under each cell (default true)" },
+                    "values": { "type": "boolean", "description": "With sweeps: draw each cell's sweep value (or its caption) in the caption (default true). false when the cells already say what they are; the pixel size stays unless sizes is false too" },
+                    "cols": { "type": "integer", "minimum": 1, "maximum": MAX_SHEET_CELLS, "description": "Wrap a row of more than this many cells onto further lines, the label only above the first; cells line up in columns across the lines. Default: one line per entry" },
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["entries"]
@@ -1327,10 +1338,32 @@ fn tool_list(cfg: &Config) -> Value {
                 Type 3 program faces, mood palettes, page templates, artkit/style-pack procedures, and \
                 native pscat operators. \
                 Structured JSON, safe to call instead of assuming names from documentation, which can \
-                drift from what's really loadable.",
+                drift from what's really loadable. With no arguments it returns every entry in full, \
+                over 300,000 characters, which a client may cut short. Ask for less: `brief` with a \
+                `kind` or `source` lists names and one-line descriptions, and `names` returns the \
+                full parameter tables of just the entries you name (for example `[\"pkwash\"]`).",
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "names": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Only these entries, by exact name (case-sensitive). Names no entry has come back in `unmatched_names`"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": pscat::capabilities::CapabilityKind::ALL.map(pscat::capabilities::CapabilityKind::as_str),
+                        "description": "Only entries of this kind"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Only entries from this library file, such as `paintkit` or `lib/paintkit.ps`; `systemdict` is the native operators"
+                    },
+                    "brief": {
+                        "type": "boolean",
+                        "description": "Give each entry's name, kind, source and first description sentence, without its parameters, load or example (default false)"
+                    }
+                },
                 "required": []
             }
         },
@@ -1544,6 +1577,10 @@ struct RenderPlan {
     bbox: bool,
     dpi: Option<f64>,
     halftone: bool,
+    /// `--svg-text` (issue #1132): standard-font text as SVG `<text>`. Only
+    /// ever true for an SVG render; the CLI refuses the flag with any other
+    /// output.
+    svg_text: bool,
     /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
     bands: u32,
     /// `--gpu-preview` (issue #1065): compiled kernels in f32 on the GPU.
@@ -1590,6 +1627,9 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
     };
     let dpi = optional_number(args, "dpi", 9.0, 1200.0)?;
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
+    // Checked for every format, so a wrong type is refused rather than
+    // ignored; then dropped unless the output is SVG (#1132).
+    let svg_text = optional_bool(args, "svg_text")?.unwrap_or(false) && format == "svg";
     // The canvas is allocated before `--max-memory` counts, so a page over
     // the pixel cap is refused before a child starts (#711). Every format
     // draws on the same raster.
@@ -1616,6 +1656,7 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         bbox,
         dpi,
         halftone,
+        svg_text,
         bands,
         gpu_preview,
         dest,
@@ -1697,6 +1738,7 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         bbox,
         dpi,
         halftone,
+        svg_text,
         bands,
         gpu_preview,
         dest,
@@ -1731,6 +1773,9 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     }
     if *gpu_preview {
         cmd.arg("--gpu-preview");
+    }
+    if *svg_text {
+        cmd.arg("--svg-text");
     }
     // A page the program's `setpagedevice` asks for is held to the same cap
     // as the first one, in the child (#909).
@@ -2258,7 +2303,7 @@ fn pixels_allowed(cfg: &Config, w: u64, h: u64) -> bool {
 
 /// The flat `chalkboard_math` keys that map onto one key of the #555 config:
 /// (argument, group, key).
-const CHALK_FLAT_KEYS: [(&str, &str, &str); 9] = [
+const CHALK_FLAT_KEYS: [(&str, &str, &str); 10] = [
     ("size", "layout", "size"),
     ("irregular", "layout", "irregular"),
     ("slope", "layout", "slope"),
@@ -2268,6 +2313,7 @@ const CHALK_FLAT_KEYS: [(&str, &str, &str); 9] = [
     ("height", "layout", "height"),
     ("dpi", "layout", "dpi"),
     ("color", "chalk", "color"),
+    ("hand", "chalk", "hand"),
 ];
 
 fn present<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
@@ -2500,11 +2546,6 @@ const MAX_SHEET_LABEL: usize = 200;
 /// Largest `zoom`, as `pscat sheet --dpi 9x16`.
 const MAX_SHEET_ZOOM: u32 = 16;
 
-/// Row label and caption type sizes in pixels: `pscat sheet`'s own
-/// (`src/subcmd/sheet.rs`), so the two tools draw the same sheet.
-const SHEET_LABEL_PX: u32 = 16;
-const SHEET_CAPTION_PX: u32 = 12;
-
 /// The least time worth giving a cell. Anything positive keeps the child's
 /// own `--max-time` from rounding to zero (which means no limit), and a
 /// `--timeout 1` server still draws a small sheet; under this the call stops
@@ -2514,12 +2555,81 @@ const MIN_CELL_BUDGET: Duration = Duration::from_millis(100);
 /// The longest error text kept per failed cell.
 const MAX_CELL_NOTE: usize = 2000;
 
+/// One requested cell of a dpi list: `96`, `{"dpi": 9, "zoom": 4, "mat": "#222"}`.
+#[derive(Clone, Copy)]
+struct CellReq {
+    dpi: f32,
+    /// 1 is no enlargement.
+    zoom: u32,
+    /// The colour the cell is set on (#1339), as `pscat sheet`'s `DPI@MAT`.
+    mat: Option<[u8; 3]>,
+}
+
+/// What a sweep varies (#1339): the seed, or a named value the program reads.
+/// Only lists of numbers: the flag CLI's `A:B:STEP` range grammar lives in
+/// `main.rs`, which this binary cannot call.
+enum SheetSweep {
+    Seed(Vec<i64>),
+    /// The name and each value as the text the child is given and the caption
+    /// shows.
+    Param(String, Vec<String>),
+}
+
+impl SheetSweep {
+    fn len(&self) -> usize {
+        match self {
+            SheetSweep::Seed(v) => v.len(),
+            SheetSweep::Param(_, v) => v.len(),
+        }
+    }
+
+    /// The caption of value `i` when the caller names none: `seed=7`,
+    /// `Density=20`, as `pscat sheet` does.
+    fn label(&self, i: usize) -> String {
+        match self {
+            SheetSweep::Seed(v) => format!("seed={}", v[i]),
+            SheetSweep::Param(name, v) => format!("{name}={}", v[i]),
+        }
+    }
+
+    /// The flags that make a child render this one value.
+    fn child_args(&self, i: usize, cmd: &mut Command) {
+        match self {
+            SheetSweep::Seed(v) => cmd.arg("--sweep-seed").arg(v[i].to_string()),
+            SheetSweep::Param(name, v) => cmd.arg("--sweep").arg(format!("{name}={}", v[i])),
+        };
+    }
+}
+
+/// One cell to draw: what the dpi list says and which sweep value it takes.
+struct PlannedCell {
+    req: CellReq,
+    value: Option<usize>,
+}
+
 struct SheetEntry<'a> {
     source: &'a str,
     label: String,
     page: (u32, u32),
-    /// `(dpi, zoom)` per cell; zoom 1 is no enlargement.
-    cells: Vec<(f32, u32)>,
+    /// Every cell in order: value by value, then dpi-list order.
+    cells: Vec<PlannedCell>,
+    sweep: Option<SheetSweep>,
+    /// One caption per sweep value in place of [`SheetSweep::label`]; an
+    /// empty one draws none.
+    captions: Option<Vec<String>>,
+}
+
+impl SheetEntry<'_> {
+    /// What the cell says is its sweep value, with the sweep to name it.
+    fn swept(&self, c: usize) -> Option<(&SheetSweep, usize)> {
+        self.sweep.as_ref().zip(self.cells[c].value)
+    }
+
+    /// ", seed=3" after a failure's "at 72 dpi", or nothing without a sweep.
+    fn value_note(&self, c: usize) -> String {
+        self.swept(c)
+            .map_or(String::new(), |(s, i)| format!(", {}", s.label(i)))
+    }
 }
 
 /// The schema of a dpi list, spelled out where it is used rather than as a
@@ -2536,7 +2646,8 @@ fn sheet_dpi_schema(description: &str) -> Value {
                     "type": "object",
                     "properties": {
                         "dpi": { "type": "number", "minimum": 9, "maximum": 1200 },
-                        "zoom": { "type": "integer", "minimum": 2, "maximum": MAX_SHEET_ZOOM }
+                        "zoom": { "type": "integer", "minimum": 2, "maximum": MAX_SHEET_ZOOM },
+                        "mat": { "type": "string", "description": "Set the render on a mat of this colour (#rgb, #rrggbb, white or black), padded 10 px, to judge an icon on dark or light. The page is drawn with a transparent background; an opaque page just gets the frame" }
                     },
                     "required": ["dpi"]
                 }
@@ -2545,8 +2656,22 @@ fn sheet_dpi_schema(description: &str) -> Value {
     })
 }
 
+/// The schema of an entry's `sweep` (a function, so the tool list's one
+/// `json!` stays inside the macro's recursion limit).
+fn sheet_sweep_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Draw this program once per value, every dpi item for each value in turn, each cell captioned with its value (seed=7, Density=20). Give `seed` (a list of whole numbers; each also seeds noise, unless the program calls noiseseed itself) or `param` and `values` (a name and a list of numbers: the program runs with /NAME <value> def already made, as `pscat sheet --sweep`)",
+        "properties": {
+            "seed": { "type": "array", "minItems": 1, "maxItems": MAX_SHEET_CELLS, "items": { "type": "integer" }, "description": "The seeds, one cell per seed; this program's srand calls are overridden" },
+            "param": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "maxLength": MAX_SWEEP_TEXT, "description": "The name the program reads, as in `/Density where { pop Density } { 10 } ifelse`" },
+            "values": { "type": "array", "minItems": 1, "maxItems": MAX_SHEET_CELLS, "items": { "type": "number" }, "description": "The values of `param`, one cell each" }
+        }
+    })
+}
+
 /// A dpi list: `[96, {"dpi": 9, "zoom": 4}]`.
-fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
+fn sheet_cells(key: &str, v: &Value) -> Result<Vec<CellReq>, ToolError> {
     let items = v
         .as_array()
         .filter(|a| !a.is_empty())
@@ -2561,7 +2686,11 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
     items
         .iter()
         .map(|item| match item {
-            Value::Number(_) => Ok((dpi(Some(item))?, 1)),
+            Value::Number(_) => Ok(CellReq {
+                dpi: dpi(Some(item))?,
+                zoom: 1,
+                mat: None,
+            }),
             Value::Object(o) => {
                 let zoom = match o.get("zoom") {
                     None | Some(Value::Null) => 1,
@@ -2574,17 +2703,171 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
                             ))
                         })? as u32,
                 };
-                Ok((dpi(o.get("dpi"))?, zoom))
+                let mat = match o.get("mat") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(m)) => Some(
+                        pscat::contact_sheet::parse_mat(m)
+                            .map_err(|e| ToolError::invalid(format!("{key}: {e}")))?,
+                    ),
+                    Some(m) => {
+                        return Err(ToolError::invalid(format!(
+                            "{key}: mat must be a colour string (#rgb, #rrggbb, white or black), got {m}"
+                        )));
+                    }
+                };
+                Ok(CellReq {
+                    dpi: dpi(o.get("dpi"))?,
+                    zoom,
+                    mat,
+                })
             }
             other => Err(ToolError::invalid(format!(
-                "{key}: a cell is a dpi number or {{\"dpi\", \"zoom\"}}, got {other}"
+                "{key}: a cell is a dpi number or {{\"dpi\", \"zoom\", \"mat\"}}, got {other}"
             ))),
         })
         .collect()
 }
 
+/// Longest name or value text a sweep takes: a caption that is the value
+/// stays a caption.
+const MAX_SWEEP_TEXT: usize = 40;
+
+/// A sweep value as one text for the child's `--sweep NAME=TEXT` and for the
+/// caption: a whole number prints bare (`2.0` is `2`, as the flag CLI's own
+/// `format_sweep_value` prints it), anything else in Rust's shortest
+/// round-trip decimal (never an exponent).
+fn sweep_number_text(key: &str, v: &Value) -> Result<String, ToolError> {
+    let text = match v {
+        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => i.to_string(),
+            (_, Some(u), _) => u.to_string(),
+            (_, _, Some(f)) if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15 => {
+                format!("{}", f as i64)
+            }
+            (_, _, Some(f)) if f.is_finite() => format!("{f}"),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    };
+    if text.is_empty() || text.chars().count() > MAX_SWEEP_TEXT {
+        return Err(ToolError::invalid(format!(
+            "{key}: a value must be a number of at most {MAX_SWEEP_TEXT} characters, got {v}"
+        )));
+    }
+    Ok(text)
+}
+
+/// An entry's `sweep`: `{"seed": [1, 2, 3]}` or
+/// `{"param": "Density", "values": [10, 20, 40]}` (#1339). One cell per value
+/// and per dpi-list item.
+fn parse_sheet_sweep(which: &str, item: &Value) -> Result<Option<SheetSweep>, ToolError> {
+    let key = format!("{which}.sweep");
+    let sweep = match item.get("sweep") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(o)) => o,
+        Some(_) => return Err(ToolError::invalid(format!("{key} must be an object"))),
+    };
+    if let Some(unknown) = sweep
+        .keys()
+        .find(|k| !matches!(k.as_str(), "seed" | "param" | "values"))
+    {
+        return Err(ToolError::invalid(format!(
+            "{key}: unknown key {unknown:?} (seed, or param and values)"
+        )));
+    }
+    let list = |name: &str| -> Result<&Vec<Value>, ToolError> {
+        match sweep.get(name) {
+            Some(Value::Array(a)) if !a.is_empty() && a.len() <= MAX_SHEET_CELLS => Ok(a),
+            _ => Err(ToolError::invalid(format!(
+                "{key}.{name} must be a list of 1 to {MAX_SHEET_CELLS} numbers"
+            ))),
+        }
+    };
+    let has = |name: &str| sweep.get(name).is_some_and(|v| !v.is_null());
+    match (has("seed"), has("param"), has("values")) {
+        (true, false, false) => {
+            let seeds = list("seed")?
+                .iter()
+                .map(|v| {
+                    v.as_i64().ok_or_else(|| {
+                        ToolError::invalid(format!(
+                            "{key}.seed: a seed must be a whole number, got {v}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(SheetSweep::Seed(seeds)))
+        }
+        (false, true, true) => {
+            let name = match sweep.get("param") {
+                Some(Value::String(n))
+                    if n.starts_with(|c: char| c.is_ascii_alphabetic())
+                        && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && n.len() <= MAX_SWEEP_TEXT =>
+                {
+                    n.clone()
+                }
+                other => {
+                    return Err(ToolError::invalid(format!(
+                        "{key}.param must be an identifier (letters, digits and _, starting \
+                         with a letter, at most {MAX_SWEEP_TEXT} characters), got {}",
+                        other.map_or("nothing".to_string(), Value::to_string)
+                    )));
+                }
+            };
+            let values = list("values")?
+                .iter()
+                .map(|v| sweep_number_text(&format!("{key}.values"), v))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(SheetSweep::Param(name, values)))
+        }
+        _ => Err(ToolError::invalid(format!(
+            "{key} takes either seed (a list of whole numbers) or param and values, not both"
+        ))),
+    }
+}
+
+/// An entry's `captions`: one text per sweep value, in place of `seed=7`.
+fn parse_sheet_captions(
+    which: &str,
+    item: &Value,
+    sweep: Option<&SheetSweep>,
+) -> Result<Option<Vec<String>>, ToolError> {
+    let key = format!("{which}.captions");
+    let list = match item.get("captions") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Array(a)) => a,
+        Some(_) => {
+            return Err(ToolError::invalid(format!(
+                "{key} must be a list of strings, one per sweep value"
+            )));
+        }
+    };
+    let Some(sweep) = sweep else {
+        return Err(ToolError::invalid(format!(
+            "{key} needs a sweep for the same entry"
+        )));
+    };
+    if list.len() != sweep.len() {
+        return Err(ToolError::invalid(format!(
+            "{key} has {} entries but the sweep has {} values",
+            list.len(),
+            sweep.len()
+        )));
+    }
+    list.iter()
+        .map(|c| match c {
+            Value::String(t) if t.chars().count() <= MAX_SHEET_LABEL => Ok(t.clone()),
+            _ => Err(ToolError::invalid(format!(
+                "{key}: each caption must be a string of at most {MAX_SHEET_LABEL} characters"
+            ))),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
 fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
-    use pscat::contact_sheet::{self as sheet, CellSize, Layout, RowSize};
+    use pscat::contact_sheet as sheet;
 
     let started = Instant::now();
     let max_pixels = cfg.max_pixels;
@@ -2597,11 +2880,17 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         optional_int(args, "height", 1, 8000)?.unwrap_or(792) as u32,
     );
     let default_cells = match args.get("dpi") {
-        None | Some(Value::Null) => vec![(72.0, 1)],
+        None | Some(Value::Null) => vec![CellReq {
+            dpi: 72.0,
+            zoom: 1,
+            mat: None,
+        }],
         Some(v) => sheet_cells("dpi", v)?,
     };
     let labels = optional_bool(args, "labels")?.unwrap_or(true);
     let sizes = optional_bool(args, "sizes")?.unwrap_or(true);
+    let values = optional_bool(args, "values")?.unwrap_or(true);
+    let cols = optional_int(args, "cols", 1, MAX_SHEET_CELLS as i64)?.map(|n| n as usize);
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, "png"))
         .transpose()?;
@@ -2638,15 +2927,28 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             optional_int(item, "width", 1, 8000)?.map_or(default_page.0, |w| w as u32),
             optional_int(item, "height", 1, 8000)?.map_or(default_page.1, |h| h as u32),
         );
-        let cells = match item.get("dpi") {
+        let reqs = match item.get("dpi") {
             None | Some(Value::Null) => default_cells.clone(),
             Some(v) => sheet_cells(&format!("{which}.dpi"), v)?,
         };
+        let sweep = parse_sheet_sweep(&which, item)?;
+        let captions = parse_sheet_captions(&which, item, sweep.as_ref())?;
+        // Value by value, then the dpi list, as `pscat sheet` expands a sweep.
+        let by_value: Vec<Option<usize>> = match &sweep {
+            Some(s) => (0..s.len()).map(Some).collect(),
+            None => vec![None],
+        };
+        let cells = by_value
+            .iter()
+            .flat_map(|&value| reqs.iter().map(move |&req| PlannedCell { req, value }))
+            .collect();
         entries.push(SheetEntry {
             source,
             label,
             page,
             cells,
+            sweep,
+            captions,
         });
     }
     if source_bytes > cfg.max_input {
@@ -2678,32 +2980,25 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             .with("limit_pixels", json!(max_pixels))
             .with("pixels", json!(pixels))
     };
-    let text = |t: &str, px: u32, bold: bool| {
-        sheet::render_text(t, px, bold).map_err(|e| ToolError::new("internal", e))
-    };
     let mut rendered_pixels = 0u64;
-    let mut headers = Vec::new();
-    let mut captions = Vec::new();
-    let mut row_sizes = Vec::new();
+    let mut rows = Vec::with_capacity(entries.len());
     for e in &entries {
-        let header = if labels {
-            text(&e.label, SHEET_LABEL_PX, true)?
-        } else {
-            None
-        };
-        let dims = |p: Option<&tiny_skia::Pixmap>| p.map_or((0, 0), |p| (p.width(), p.height()));
-        let mut row = RowSize {
-            header: dims(header.as_ref()),
-            cells: Vec::new(),
-        };
-        let mut row_captions = Vec::new();
-        for &(dpi, zoom) in &e.cells {
+        let mut cells = Vec::with_capacity(e.cells.len());
+        for (c, planned) in e.cells.iter().enumerate() {
+            let CellReq { dpi, zoom, mat } = planned.req;
             let (w, h) = device_pixels(e.page, dpi);
             let side = u64::from(sheet::MAX_SIDE_PX);
-            if w * u64::from(zoom) > side || h * u64::from(zoom) > side {
+            // A mat pads every side, so it counts toward the side cap (a
+            // cell `plan` would refuse as `CellTooLarge`).
+            let pad = if mat.is_some() {
+                2 * u64::from(sheet::MAT_PAD)
+            } else {
+                0
+            };
+            if w * u64::from(zoom) + pad > side || h * u64::from(zoom) + pad > side {
                 return Err(too_large(
                     format!(
-                        "{}: a {}x{} pt page at {dpi} dpi is {w}x{h} pixels{}; a cell is at most \
+                        "{}: a {}x{} pt page at {dpi} dpi is {w}x{h} pixels{}{}; a cell is at most \
                          {side} pixels on a side",
                         e.label,
                         e.page.0,
@@ -2714,6 +3009,11 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                                 w * u64::from(zoom),
                                 h * u64::from(zoom)
                             )
+                        } else {
+                            String::new()
+                        },
+                        if mat.is_some() {
+                            format!(", plus a {}-pixel mat on each side", sheet::MAT_PAD)
                         } else {
                             String::new()
                         }
@@ -2731,28 +3031,47 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                     rendered_pixels,
                 ));
             }
-            let caption = if sizes {
-                let note = if zoom > 1 {
-                    format!(" (shown at {zoom}x)")
-                } else {
-                    String::new()
-                };
-                text(&format!("{w}x{h} px{note}"), SHEET_CAPTION_PX, false)?
-            } else {
-                None
+            // The caption of a sweep value: the caller's words or `seed=7`.
+            let value = match (values, e.swept(c)) {
+                (true, Some((sweep, v))) => Some(match &e.captions {
+                    Some(names) => names[v].clone(),
+                    None => sweep.label(v),
+                }),
+                _ => None,
             };
-            row.cells.push(CellSize {
-                image: ((w as u32) * zoom, (h as u32) * zoom),
-                caption: dims(caption.as_ref()),
+            cells.push(sheet::SheetCell {
+                size: (w as u32, h as u32),
+                zoom,
+                mat,
+                value,
             });
-            row_captions.push(caption);
         }
-        headers.push(header);
-        captions.push(row_captions);
-        row_sizes.push(row);
+        rows.push(sheet::SheetRow {
+            label: labels.then(|| e.label.clone()),
+            column_len: vec![1; cells.len()],
+            cells,
+        });
     }
-    let layout = Layout::new(&row_sizes)
-        .map_err(|m| too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX)))?;
+    // The layout, text and all, is the one `pscat sheet` draws.
+    let plan = sheet::SheetPlan::new(&rows, &sheet::SheetOptions { sizes, wrap: cols }).map_err(
+        |err| match err {
+            sheet::PlanError::Text(m) => ToolError::new("internal", m),
+            sheet::PlanError::CellTooLarge { row, cell } => too_large(
+                format!(
+                    "{}: a cell is over {} pixels on a side after its zoom and mat",
+                    entries[row].label,
+                    sheet::MAX_SIDE_PX
+                ),
+                0,
+            )
+            .with("limit_side_px", json!(sheet::MAX_SIDE_PX))
+            .with("cell", json!(cell)),
+            sheet::PlanError::Layout(m) => {
+                too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX))
+            }
+        },
+    )?;
+    let layout = plan.layout();
     let sheet_pixels_total = u64::from(layout.width) * u64::from(layout.height);
     if sheet_pixels_total > max_pixels {
         return Err(too_large(
@@ -2766,9 +3085,6 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         .with("width_px", json!(layout.width))
         .with("height_px", json!(layout.height)));
     }
-    let mut out = layout
-        .new_sheet()
-        .map_err(|m| ToolError::new("internal", m))?;
 
     // Cells stream into the sheet, one frame in memory at a time. Each is
     // rendered by its own child under the interpreter's limits, and every
@@ -2779,97 +3095,101 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     // Stderr of the cells that succeeded (see `warnings_content`).
     let mut cell_stderr = String::new();
     let mut n = 0usize;
-    for (r, e) in entries.iter().enumerate() {
-        if let Some(h) = &headers[r] {
-            let (x, y) = layout.header_xy[r];
-            sheet::blit_at(&mut out, x, y, h);
+    let out = sheet::compose_sheet(&plan, |r, c| {
+        let e = &entries[r];
+        let CellReq { dpi, mat, .. } = e.cells[c].req;
+        n += 1;
+        let left = cfg.timeout.saturating_sub(started.elapsed());
+        if left < MIN_CELL_BUDGET {
+            return Err(sheet_timeout(cfg));
         }
-        for (c, &(dpi, zoom)) in e.cells.iter().enumerate() {
-            n += 1;
-            let left = cfg.timeout.saturating_sub(started.elapsed());
-            if left < MIN_CELL_BUDGET {
-                return Err(sheet_timeout(cfg));
-            }
-            let budget = Config {
-                timeout: left,
-                ..cfg.clone()
-            };
-            let png = scratch.path().join(format!("cell-{n}.png"));
-            let mut cmd = Command::new(&bin);
-            budget.interpreter_args(&mut cmd);
-            cmd.arg("--page")
-                .arg(format!("{}x{}", e.page.0, e.page.1))
-                .arg("--dpi")
-                .arg(number_arg(f64::from(dpi)))
-                .arg("--png")
-                .arg(&png)
-                .arg("-");
-            let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
-                Ok(run) => run,
-                Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
-                Err(other) => return Err(other),
-            };
-            // The last page, as `pscat sheet` takes it: a program that shows
-            // several pages contributes its final one.
-            let Some(page) = collect_pages(&png).pop() else {
-                return Err(failed_run(
-                    "render_failed",
-                    format!(
-                        "{} at {dpi} dpi produced no page:\n{}",
-                        e.label,
-                        run.stderr.trim_end()
-                    ),
-                    &run.stderr,
-                ));
-            };
-            if !run.success {
-                let mut why = run.stderr.trim_end().to_string();
-                if why.len() > MAX_CELL_NOTE {
-                    let mut end = MAX_CELL_NOTE;
-                    while !why.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    why.truncate(end);
-                    why.push_str("...");
+        let budget = Config {
+            timeout: left,
+            ..cfg.clone()
+        };
+        let png = scratch.path().join(format!("cell-{n}.png"));
+        let mut cmd = Command::new(&bin);
+        budget.interpreter_args(&mut cmd);
+        cmd.arg("--page")
+            .arg(format!("{}x{}", e.page.0, e.page.1))
+            .arg("--dpi")
+            .arg(number_arg(f64::from(dpi)))
+            .arg("--png")
+            .arg(&png);
+        // A matted cell is drawn on a transparent page, as `pscat sheet`
+        // does, and the shared composition sets it on the mat. One sweep
+        // value is a one-frame sweep: the same frame path as the CLI's.
+        if mat.is_some() {
+            cmd.arg("--transparent");
+        }
+        if let Some((sweep, v)) = e.swept(c) {
+            sweep.child_args(v, &mut cmd);
+        }
+        cmd.arg("-");
+        let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
+            Ok(run) => run,
+            Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
+            Err(other) => return Err(other),
+        };
+        // The last page, as `pscat sheet` takes it: a program that shows
+        // several pages contributes its final one.
+        let Some(page) = collect_pages(&png).pop() else {
+            return Err(failed_run(
+                "render_failed",
+                format!(
+                    "{} at {dpi} dpi{} produced no page:\n{}",
+                    e.label,
+                    e.value_note(c),
+                    run.stderr.trim_end()
+                ),
+                &run.stderr,
+            ));
+        };
+        if !run.success {
+            let mut why = run.stderr.trim_end().to_string();
+            if why.len() > MAX_CELL_NOTE {
+                let mut end = MAX_CELL_NOTE;
+                while !why.is_char_boundary(end) {
+                    end -= 1;
                 }
-                notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
-            } else {
-                cell_stderr.push_str(&run.stderr);
-                cell_stderr.push('\n');
+                why.truncate(end);
+                why.push_str("...");
             }
-            let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
-            let _ = std::fs::remove_file(&page);
-            let frame = tiny_skia::Pixmap::decode_png(&bytes)
-                .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
-            let want = device_pixels(e.page, dpi);
-            if (u64::from(frame.width()), u64::from(frame.height())) != want {
-                return Err(ToolError::new(
-                    "internal",
-                    format!(
-                        "{} at {dpi} dpi came back {}x{} pixels, not the {}x{} planned",
-                        e.label,
-                        frame.width(),
-                        frame.height(),
-                        want.0,
-                        want.1
-                    ),
-                ));
-            }
-            let frame = if zoom > 1 {
-                sheet::zoom_nearest(&frame, zoom)
-                    .ok_or_else(|| ToolError::new("internal", "cell too large to zoom"))?
-            } else {
-                frame
-            };
-            let (x, y) = layout.image_xy[r][c];
-            sheet::frame(&mut out, x, y, frame.width(), frame.height());
-            sheet::blit_at(&mut out, x, y, &frame);
-            if let Some(cap) = &captions[r][c] {
-                let (cx, cy) = layout.caption_xy[r][c];
-                sheet::blit_at(&mut out, cx, cy, cap);
-            }
+            notes.push(format!(
+                "{} at {dpi} dpi{} failed:\n{why}",
+                e.label,
+                e.value_note(c)
+            ));
+        } else {
+            cell_stderr.push_str(&run.stderr);
+            cell_stderr.push('\n');
         }
-    }
+        let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
+        let _ = std::fs::remove_file(&page);
+        let frame = tiny_skia::Pixmap::decode_png(&bytes)
+            .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
+        let want = device_pixels(e.page, dpi);
+        if (u64::from(frame.width()), u64::from(frame.height())) != want {
+            return Err(ToolError::new(
+                "internal",
+                format!(
+                    "{} at {dpi} dpi came back {}x{} pixels, not the {}x{} planned",
+                    e.label,
+                    frame.width(),
+                    frame.height(),
+                    want.0,
+                    want.1
+                ),
+            ));
+        }
+        Ok(frame)
+    })
+    .map_err(|err| match err {
+        sheet::ComposeError::Render(e) => e,
+        sheet::ComposeError::Zoom { .. } => ToolError::new("internal", "cell too large to zoom"),
+        sheet::ComposeError::Mat { .. } => ToolError::new("internal", "cell too large to mat"),
+        sheet::ComposeError::Sheet(m) => ToolError::new("internal", m),
+    })?;
     let sheet_png = scratch.path().join("sheet.png");
     // A sheet mixes cells of any dpi: nominal 72 dpi, as `pscat sheet`.
     pscat::png::save(&out, 1.0, &sheet_png).map_err(|e| format!("write the sheet: {e}"))?;
@@ -2905,9 +3225,62 @@ fn sheet_timeout(cfg: &Config) -> ToolError {
     .with("limit_seconds", json!(cfg.timeout.as_secs()))
 }
 
-fn describe_art_capabilities(cfg: &Config) -> Result<Value, ToolError> {
+/// Most entry names one `describe_art_capabilities` call may ask for.
+const MAX_CAPABILITY_NAMES: usize = 256;
+
+fn describe_art_capabilities(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("--capabilities");
+    // The filters ride on the CLI's own, so the two answer alike (#1079).
+    match args.get("names") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(names)) => {
+            if names.len() > MAX_CAPABILITY_NAMES {
+                return Err(ToolError::invalid(format!(
+                    "names takes at most {MAX_CAPABILITY_NAMES} entries, got {}",
+                    names.len()
+                )));
+            }
+            for name in names {
+                let Some(name) = name.as_str() else {
+                    return Err(ToolError::invalid("names must be a list of strings"));
+                };
+                // A value starting `--` would be read as the next flag.
+                if name.starts_with("--") {
+                    return Err(ToolError::invalid(format!(
+                        "names must be entry names, got {name:?}"
+                    )));
+                }
+                cmd.arg("--name").arg(name);
+            }
+        }
+        Some(_) => return Err(ToolError::invalid("names must be a list of strings")),
+    }
+    if let Some(kind) = optional_str(args, "kind")? {
+        if !pscat::capabilities::CapabilityKind::ALL
+            .iter()
+            .any(|k| k.as_str() == kind)
+        {
+            let valid: Vec<&str> = pscat::capabilities::CapabilityKind::ALL
+                .iter()
+                .map(|k| k.as_str())
+                .collect();
+            return Err(ToolError::invalid(format!(
+                "unknown kind {kind:?} (expected one of: {})",
+                valid.join(", ")
+            )));
+        }
+        cmd.arg("--kind").arg(kind);
+    }
+    if let Some(source) = optional_str(args, "source")? {
+        if source.starts_with("--") {
+            return Err(ToolError::invalid("source must not start with --"));
+        }
+        cmd.arg("--source").arg(source);
+    }
+    if optional_bool(args, "brief")?.unwrap_or(false) {
+        cmd.arg("--brief");
+    }
     let run = run_child(cfg, &mut cmd, b"")?;
     if !run.success {
         return Err(ToolError::new(
@@ -3086,6 +3459,12 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// partly drawn page is still returned. The CLI's `--lint` follows the same
 /// rule since #947, so this drop is a safety net for the child's output.
 ///
+/// The exception (#1110) is a finding that can *explain* the error, the
+/// ones in `pscat::lint::ERROR_EXPLAINING_CHECKS` (`[shadowed-operator]`: a
+/// program that redefined `ln` and then called it gets an error that never
+/// mentions the name). Those are kept, under `Lint:` as for a clean run,
+/// which the caller puts in its own block after the `PostScript error:` one.
+///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
 /// #847) is not a finding: it is kept, ahead of the findings, only when
 /// there are findings for it to explain, so a clean banded render stays
@@ -3113,7 +3492,12 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
         }
     }
     if errored {
-        findings.clear();
+        findings.retain(|line| {
+            line.strip_prefix(PREFIX)
+                .and_then(|rest| rest.strip_prefix('['))
+                .and_then(|rest| rest.split_once(']'))
+                .is_some_and(|(check, _)| pscat::lint::explains_an_error(check))
+        });
     }
     if !findings.is_empty() {
         findings.splice(0..0, notes);
@@ -4014,6 +4398,25 @@ mod tests {
             l, "pscat: lint: [gsave-imbalance] g",
             "a clean-exit run keeps them"
         );
+    }
+
+    #[test]
+    fn an_errored_run_keeps_only_the_findings_that_can_explain_the_error() {
+        // #1110: a redefined operator is the likely cause of the error, so it
+        // stays (with the note that explains it); the consequences go.
+        let shadow = "pscat: lint: [shadowed-operator] /sub was redefined as a string";
+        let note = "pscat: lint: note: --bands: band 1 of 8 only";
+        let (l, rest) = split_lint_findings(&format!(
+            "%%[ Error: typecheck ]%%\npscat: lint: [run-error] e\n{note}\n\
+             pscat: lint: [blank-page] b\n{shadow}\npscat: lint: [stack-leak] s\n"
+        ));
+        assert_eq!(l, format!("{note}\n{shadow}"));
+        assert_eq!(rest, "%%[ Error: typecheck ]%%");
+        // Without a kept finding the note is dropped, as before.
+        let (l, _) = split_lint_findings(&format!(
+            "pscat: lint: [run-error] e\n{note}\npscat: lint: [blank-page] b\n"
+        ));
+        assert_eq!(l, "");
     }
 
     #[test]

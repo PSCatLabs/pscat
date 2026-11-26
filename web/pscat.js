@@ -51,15 +51,18 @@ export class Pscat {
    * (dpi / 72). `record.svg` / `record.pdf` also record the run as
    * SVG / PDF, read with svg() / pdf(). `record.svgText` (with
    * `record.svg`) writes Helvetica, Times and Courier text as SVG <text>
-   * rather than glyph outlines, as `pscat --svg-text` does; `record.pdfText`
-   * (with `record.pdf`) writes text as selectable, searchable PDF text in
-   * embedded subset fonts, as `pscat --pdf-text` does. Throws on
-   * unusable page sizes.
+   * rather than glyph outlines, as `pscat --svg-text` does. A PDF writes
+   * text as selectable, searchable PDF text in embedded subset fonts, as
+   * `pscat --pdf` does; `record.pdfText: false` (with `record.pdf`) draws
+   * every glyph as its outline instead, as `pscat --text-as-paths` does
+   * (flag value 16, bit 4; value 8, bit 3, text, is the default and is
+   * never needed). Throws
+   * on unusable page sizes.
    */
   begin(source, width = 612, height = 792, scale = 1, record = {}) {
     const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
     const flags = (record.svg ? 1 : 0) | (record.pdf ? 2 : 0) | (record.svg && record.svgText ? 4 : 0)
-      | (record.pdf && record.pdfText ? 8 : 0);
+      | (record.pdf && record.pdfText === false ? 16 : 0);
     const ptr = this.#copyIn(bytes);
     const rc = flags !== 0
       ? this.ex.ps_begin_vector(ptr, bytes.length, width, height, scale, flags)

@@ -191,6 +191,54 @@ fn artkit_piece_matches_byte_for_byte() {
     );
 }
 
+/// Stacked faint fills composite in the 16-bit shadow (#731): each band
+/// keeps its own, and a band's rows come out as the plain render's.
+const FAINT_STACK: &str = "0 setgray 0 0 120 90 rectfill 1 setgray
+0.002 setalpha 1000 { 3 3 60 40 rectfill } repeat
+0.01 setalpha 200 { 90 45 30 0 360 arc fill } repeat
+showpage
+";
+
+/// Transparency groups (#1406) across band seams: a faded group of faint
+/// stacked fills, a Multiply group, and a stroke inside a clip.
+const GROUPS: &str = "%!PS
+0.9 0.8 0.2 setrgbcolor 0 0 120 90 rectfill
+<< /Alpha 0.5 >> begingroup
+  0 0 1 setrgbcolor 10 10 70 60 rectfill
+  1 0 0 setrgbcolor 0.05 setalpha 40 { 30 20 70 60 rectfill } repeat
+endgroup
+<< /Blend /Multiply >> begingroup
+  0.2 0.6 1 setrgbcolor 4 setlinewidth 5 5 moveto 115 85 lineto stroke
+  20 20 80 50 rectclip 0 0.5 0 setrgbcolor 0 45 120 3 rectfill
+endgroup
+";
+
+#[test]
+fn transparency_groups_match_byte_for_byte() {
+    let dir = common::scratch_dir("bands-groups");
+    let file = write_source(&dir, "groups.ps", GROUPS);
+    let file = file.to_str().expect("utf-8 path");
+    assert_bands_match(
+        "bands-groups-r",
+        file,
+        &["--page", "120x90", "--dpi", "100"],
+        &[2, 5],
+    );
+}
+
+#[test]
+fn a_stack_of_faint_fills_matches_byte_for_byte() {
+    let dir = common::scratch_dir("bands-faint");
+    let file = write_source(&dir, "faint.ps", FAINT_STACK);
+    let file = file.to_str().expect("utf-8 path");
+    assert_bands_match(
+        "bands-faint-r",
+        file,
+        &["--page", "120x90", "--dpi", "100"],
+        &[2, 5],
+    );
+}
+
 #[test]
 fn every_page_of_a_multi_page_program_is_banded() {
     let dir = common::scratch_dir("bands-pages");
@@ -746,6 +794,10 @@ fn lint_with_bands_reports_a_shadowed_operator_once_and_honours_the_allow() {
     let src = format!("/sub (hello) def {PAINTS}");
     let (_ok, err) = bands_stderr("bands-lint-shadow", &["--lint"], &src);
     assert_eq!(findings(&err, "shadowed-operator"), 1, "{err}");
+    assert!(
+        err.contains("/sub was redefined as a string when the program reached line 1,"),
+        "{err}"
+    );
     let allowed = format!("%lint: allow shadowed-operator\n{src}");
     let (_ok, err) = bands_stderr("bands-lint-shadow-allowed", &["--lint"], &allowed);
     assert_eq!(findings(&err, "shadowed-operator"), 0, "{err}");

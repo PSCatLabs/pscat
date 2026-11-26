@@ -66,6 +66,19 @@ impl PsArray {
         self.len == 0
     }
 
+    /// Where element `i` lives, for the lint's table of source lines
+    /// (#1338): the address of the shared storage (a loop body's clones and
+    /// a `getinterval` view all share it) and the element's index in it.
+    pub(crate) fn storage_site(&self, i: usize) -> (usize, usize) {
+        (Rc::as_ptr(&self.data) as usize, self.off + i)
+    }
+
+    /// A weak handle on the storage: held by that table so the address in
+    /// its key is never reused while the entry exists.
+    pub(crate) fn storage_weak(&self) -> std::rc::Weak<RefCell<Vec<Object>>> {
+        Rc::downgrade(&self.data)
+    }
+
     #[inline]
     pub fn get(&self, i: usize) -> Option<Object> {
         if i < self.len {
@@ -291,6 +304,11 @@ pub struct Object {
     /// A packed array (`packedarray`). Read-only like any other, but `bind`
     /// still enters it and the procedures nested in it, as Ghostscript does.
     pub(crate) packed: bool,
+    /// `noaccess` was applied to this string or file reference (#1321):
+    /// executing it raises `invalidaccess`, as in Ghostscript. Nothing else
+    /// reads it (a read of a `noaccess` string still succeeds, see
+    /// `ops/misc.rs`), and only strings and files carry it.
+    pub(crate) noaccess: bool,
 }
 
 impl Object {
@@ -299,6 +317,7 @@ impl Object {
             value,
             executable: false,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -308,6 +327,7 @@ impl Object {
             value,
             executable: true,
             readonly: false,
+            noaccess: false,
             packed: false,
         }
     }
@@ -326,6 +346,18 @@ impl Object {
             Err(PsError::InvalidAccess)
         } else {
             Ok(())
+        }
+    }
+
+    /// This reference as `noaccess` leaves it: write-protected like
+    /// `readonly` if it is an array, and not executable if it is a string
+    /// or file (#1321).
+    pub(crate) fn into_noaccess(mut self) -> Self {
+        if matches!(self.value, Value::String(_) | Value::File(_)) {
+            self.noaccess = true;
+            self
+        } else {
+            self.into_readonly()
         }
     }
 
@@ -381,6 +413,7 @@ impl Object {
             value,
             executable: self.executable,
             readonly: self.readonly,
+            noaccess: self.noaccess,
             packed: self.packed,
         }
     }
@@ -626,6 +659,23 @@ thread_local! {
     static EMPTY_STORE: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(Vec::new()));
 }
 
+/// The placeholder the teardown swaps in. A thread's local destructors run
+/// in no fixed order, so an `Interp` kept in a `thread_local!` of its own
+/// can be dropped after `EMPTY_STORE` is gone, and `with` would then panic
+/// inside a destructor and abort the process (#1404). `try_with` costs the
+/// same as `with` (both check the slot's state) and falls back to a fresh
+/// empty store, as `memtrack::fold_thread` falls back for its own slot. The
+/// fallback has a refcount of 1, so the swapped-out handle's own `drop`
+/// unwraps it and runs `teardown_last` once more over an empty vector; that
+/// next placeholder is again a plain `Rc` that the field's drop glue frees,
+/// so the recursion is one level deep, never a loop.
+#[inline(always)]
+fn empty_store() -> Rc<RefCell<Vec<Object>>> {
+    EMPTY_STORE
+        .try_with(Rc::clone)
+        .unwrap_or_else(|_| Rc::new(RefCell::new(Vec::new())))
+}
+
 /// Deeply nested arrays (10k levels of `[`) would drop recursively — one
 /// Rust stack frame per level — and abort the process. When this view is
 /// the last handle to an array's backing store, tear it down iteratively
@@ -651,7 +701,7 @@ impl Drop for PsArray {
 impl PsArray {
     #[inline(never)]
     fn teardown_last(&mut self) {
-        let data = std::mem::replace(&mut self.data, EMPTY_STORE.with(Rc::clone));
+        let data = std::mem::replace(&mut self.data, empty_store());
         let Ok(cell) = Rc::try_unwrap(data) else {
             return;
         };
@@ -662,7 +712,7 @@ impl PsArray {
             if let Value::Array(mut inner) = obj.value
                 && Rc::strong_count(&inner.data) == 1
             {
-                let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                let d = std::mem::replace(&mut inner.data, empty_store());
                 if let Ok(cell) = Rc::try_unwrap(d) {
                     pending.extend(cell.into_inner());
                 }
@@ -696,7 +746,7 @@ impl Drop for Dict {
                     }
                 }
                 Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
-                    let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                    let d = std::mem::replace(&mut inner.data, empty_store());
                     if let Ok(cell) = Rc::try_unwrap(d) {
                         pending.extend(cell.into_inner().into_iter().filter(is_container));
                     }
@@ -1077,6 +1127,12 @@ impl Dict {
     /// The values under name keys, in the map's (fixed) order.
     pub(crate) fn name_values(&self) -> impl Iterator<Item = &Object> {
         self.names.values()
+    }
+
+    /// The name-keyed entries as (interned id, value), in the order
+    /// [`pairs`](Self::pairs) gives them, without copying any.
+    pub(crate) fn name_entries(&self) -> impl Iterator<Item = (u32, &Object)> {
+        self.names.iter().map(|(k, v)| (*k, v))
     }
 
     /// Snapshot of (key, value) pairs for `forall`/`copy`. Name keys come

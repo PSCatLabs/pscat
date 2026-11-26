@@ -67,6 +67,36 @@ the stick's contact patch meets raised tooth.
   reaches less per lane). It is refused with
   `dkcatch-area-exceeds-safety-limit` when the stroke is made, before
   anything in its batch is drawn.
+- **`/From` and `/To`** (0 to 1, defaults 0 and 1) on `dkstroke`,
+  `dycrayon` and `dhstroke` draw only part of each subpath, measured along
+  its length, for a stroke that grows over time. The whole subpath is
+  worked out first (its stops, touch levels, widths, lanes and their
+  dropouts, seed, texture and fallout) and then cut, so the part has the
+  profile of its place in the whole stroke: a crayon's landing stays at its
+  start, a charcoal stick's flicked lift comes only with `/To 1`, and
+  `/Wear` is the whole stroke's, and `/From 0 /To t` for a growing `t` leaves what is
+  already drawn alone. Measured: behind the pen's last dozen points,
+  frames 5% apart differ by up to about 13 of 255 levels (edge
+  anti-aliasing), except now and then (about one frame in 14, charcoal
+  more than crayon or `dkstroke`) where a few hundred texture pixels
+  along the drawn part change, by up to about 80 levels (cause not isolated; dcchalk
+  shows the same). Two adjacent pieces drawn on one canvas make the
+  whole to within about 75 levels at the seam, on a few pixels. A caller
+  that keeps its canvas can draw `/From prev /To now` each frame, down to
+  pieces a few tenths of a width long (each piece ends in a round cap
+  that overdraws the last); shorter ones should redraw `/From 0 /To t`.
+  The catch and the ink cost in proportion to the part, though the walk
+  and the profile are worked out for the whole stroke (a tenth of a long
+  zigzag, start-up included: 0.09 s against 0.24 s for `dkstroke`, 0.08
+  against 0.45 for `dycrayon`, 0.07 against 0.31 for `dhstroke`). A dot, or
+  a lane that is on at one stop only, belongs to the one piece that holds
+  its place, `[/From, /To)` with `/To 1` closed. Errors:
+  `dkstroke-from-must-be-0-to-1`, `dkstroke-to-must-be-0-to-1`,
+  `dkstroke-from-must-not-exceed-to` (and `dycrayon-...` the same).
+  Fallout particles are all placed as for the whole stroke and drawn only
+  where their place is within the range, so none falls ahead of the pen.
+  `dcchalk` has the same two keys, cut a different way (it shapes the
+  polyline first, then cuts it), and a seam within a few tens of levels.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
@@ -121,6 +151,32 @@ newpath 40 60 moveto 300 80 lineto
   - `/Corners /separate` cuts a path at its sharp corners, so a box is
     drawn as four strokes. Each one lands and lifts, and with `/Hand` it
     overshoots the corner a little.
+  - `/From` and `/To` (0 to 1, defaults 0 and 1) draw only part of each
+    stroke, measured along its length once `/Hand` and `/Corners` have
+    shaped it. The part is drawn with the pressure, width, texture and
+    dust the whole stroke has there, so `/From 0 /To t` with a growing
+    `t` grows a stroke without changing the part already drawn (its
+    texture and dust stay; behind the pen's last dozen widths nothing
+    moves between frames, except that drykit draws a long stroke in
+    chunks and where a growing stroke crosses one, its edge pixels shift
+    once by up to about 40 of 255 levels). `/To 0.5` plus `/From 0.5`
+    make the whole, to within about 40 of 255 levels at the seam (up to about
+    110 with `/Tilt`, on a few percent of the ink). A caller that
+    keeps its canvas can draw `/From prev /To now` each frame instead;
+    that holds for pieces down to a few tenths of a width, and much
+    shorter pieces overdraw their own round ends and lose texture, so
+    redraw `/From 0 /To t` for those. A long stroke's part
+    costs in proportion to its length, so a board written over time pays
+    for what each frame adds, not the whole stroke. The stroke's landing
+    belongs to the piece that holds `/From 0`, its lift to the one that
+    holds `/To 1`. Each subpath is cut by its own length; a dot belongs
+    to the one piece that holds its middle (with `/Tilt`, only a
+    zero-length stroke is a dot). `dctext` and `dcleader` pass the keys
+    on, so they cut every glyph stroke, not the line. With `/Tilt`, a
+    piece that starts past 0 draws its lanes' chance dropouts afresh, so
+    a few percent of the ink differs clearly from the whole stroke.
+    `dkstroke`, `dycrayon` and `dhstroke` take the same two keys
+    (below).
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 - **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
@@ -130,9 +186,10 @@ newpath 40 60 moveto 300 80 lineto
   `/Strength`) goes to `dcchalk`. `/Width` defaults to 0.048 × `/Size`.
 - **`dcleader`** (`(left) (right) x1 x2 y opts`) is a menu, price-list or
   contents row. The left string starts at x1 and the right one ends at
-  x2, with a dotted leader of chalk dots between them. The dots are
-  thinner and fainter than the lettering, and `/Leader << ... >>` styles
-  them. They sit on whole multiples of `/Pitch`, so stacked rows line
+  x2, with a dotted leader of chalk dots between them, clear of both
+  strings by `/Gap` (half the size by default). The dots are thinner than
+  the lettering and a little brighter, so they stay visible over a
+  smudge, and `/Leader << ... >>` styles them. They sit on whole multiples of `/Pitch`, so stacked rows line
   their dots up, as typeset leaders do.
 
 A sign's wood frame, nails and doodles are part of the piece itself, so
@@ -164,7 +221,9 @@ newpath 60 90 moveto 300 90 lineto 300 150 lineto 60 150 lineto closepath
 `lib/drycrayon.ps` is wax crayon on paper, and a child's ways of drawing with it,
 built on drykit. `dypaper` sets up the paper (drykit's coarse construction-paper
 tooth on a white ground), `/name dycolor` picks a colour from the crayon box,
-and `dycrayon` draws the current path as wax. The "child's drawing" motions
+and `dycrayon` draws the current path as wax (`/From 0 /To t` draws the first
+part of each stroke, with the whole stroke's pressure and texture, so a child's
+stroke can grow over time). The "child's drawing" motions
 each build a path and paint nothing, so they compose with `dycrayon`:
 `dywobble` (a shaky, overshooting version of a path), `dyscribble`
 (back-and-forth scribble fill over a region), `dyloop` (a circle drawn in one
@@ -181,7 +240,8 @@ and Our House* is a whole picture drawn this way.
 `lib/drycharcoal.ps` is charcoal on drykit, with three media (`/vine`:
 grey and dusty; `/compressed`: dark and dense; `/pencil`: a sharp point) and a
 `/Grade` from 0 (hard) to 1 (soft). Its words are call patterns for
-`dkstroke`: `dhstroke` draws the current path in a medium, `dhhatch` hatches a
+`dkstroke`: `dhstroke` (which takes `/From` and `/To` for a stroke that grows;
+`dhhatch` and `dhsketch` apply them to each stroke they lay) draws the current path in a medium, `dhhatch` hatches a
 region to a value (a number, or a `{x y -> value}` callback), `dhsmudge` is a
 stump's or finger's track, `dhlift` is an eraser's track (kneaded or hard), and
 `dhsketch` lays faint construction lines. It needs hatchkit loaded.
@@ -245,6 +305,8 @@ skeletons with TeX's box model. The subset covers:
   `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
+- the escaped literals `\$ \% \& \# \_ \{ \}`, each the character itself as in
+  TeX (inside `\text{}` too; a bare `_ # &` there is refused, as in TeX);
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
@@ -358,7 +420,7 @@ pscat chalk: 4 problems in the LaTeX (line:column):
 (`pscat chalk --help` lists the supported subset)
 ```
 
-`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|``; accent
+`\text{}` sets ASCII letters and digits and ``!'()*+,-./:;<=>?[]|`` and the literals above; accent
 commands (`\"o`) and quotes inside it are not drawn, and a letter the board
 hand lacks is reported (`pscat chalk --help` says so).
 
@@ -371,7 +433,7 @@ the generated program instead of rendering it.
 
 The config is JSON. Every key is optional and an unknown key is an error;
 flags (`--seed`, `--size`, `--irregular`, `--color`, `--width`,
-`--height`, `--dpi`, `--no-board`) override it, and `--json '{...}'` takes it
+`--height`, `--dpi`, `--no-board`, `--hand`, `--hand-amount`) override it, and `--json '{...}'` takes it
 inline.
 
 ```json
@@ -379,7 +441,7 @@ inline.
   "layout": {"size": 64, "irregular": 1, "align": "center", "margin": 40,
              "width": 800, "height": 400, "dpi": 144},
   "chalk":  {"color": "white", "strength": 0.55, "pressure": 0.68,
-             "tilt": 0, "dust": 0.5},
+             "tilt": 0, "dust": 0.5, "hand": 0},
   "board":  {"tone": "slate", "haze": 0.4, "ghosting": 0.4,
              "swipes": 6, "wipes": 2, "smudges": 3, "ledge": 18},
   "seed": 1
@@ -401,6 +463,7 @@ inline.
 | `chalk.pressure` | 0.68 (0.34 with no board) | drychalk's `/Touch`: how much of the tooth catches |
 | `chalk.tilt` | 0 | degrees; toward 90 the stick lies on its side |
 | `chalk.dust` | 0.5 | loose dust beside each stroke |
+| `chalk.hand` | 0 | drychalk's `/Hand`, 0..1: how freehand the strokes are. 0 follows every stroke exactly; toward 1 a long stroke (a fraction bar, a radical's roof, a bracket, an integral) drifts to either side and runs a little past its ends. Lettering moves little, because the drift fades in over the first 44 stroke widths. `pscat chalk --hand` sets 1, `--hand-amount A` any amount; `chalkboard_math` takes `hand`. Not the top-level `hand` below |
 | `chalk.width` | 0.048 × size | stroke width in points |
 | `board.tone` | `slate` | `slate`, `greenboard`, or `[r, g, b]` |
 | `board.haze` | 0.4 | the dust film, 0 (freshly washed) to 1 |
@@ -409,7 +472,7 @@ inline.
 | `board.ledge` | 18 | the dusty band along the bottom, in points |
 | `board` | | `false` for chalk alone on a transparent page |
 | `seed` | 1 | the layout, chalk and board all follow it |
-| `hand` | `strokeglyphs` | reserved: the only hand there is |
+| `hand` | `strokeglyphs` | reserved: the lettering face, the only one there is (the freehand amount is `chalk.hand`) |
 
 The generator is `pscat::chalk` (`src/chalk.rs`), plain Rust with no file or
 environment access, so other front ends share it: `chalk::render(latex,

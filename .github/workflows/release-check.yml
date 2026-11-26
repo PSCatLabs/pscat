@@ -17,8 +17,19 @@
 # --locked` on Linux and macOS. With `attested`, `gh attestation verify` the
 # archives (#635).
 #
+# The npm package (#668): `npm install pscat@X.Y.Z` into a fresh project on
+# Linux, macOS and Windows, then render a page, SVG and PDF with it
+# (scripts/test_npm_tarball.sh, the script that checks the packed tarball in
+# npm.yml). `npm audit signatures` must pass; with `attested` the npm
+# provenance attestation must verify too.
+#
+# The hosted ChatGPT plugin ZIP (#1253, releases from 0.7.1 on): download
+# pscat-cloud-chatgpt-plugin-X.Y.Z.zip, check it against SHA256SUMS (and the
+# attestation), and check that its mcp.json is a public https URL, not the
+# staging *.run.app service.
+#
 # A release candidate X.Y.Z-rc.N (#854) is a GitHub pre-release only, so for
-# one the archive checks run and the crate checks are skipped.
+# one the archive checks run and the crate and npm checks are skipped.
 #
 # It publishes nothing and reads no secrets, so it runs outside the `release`
 # environment with read-only permissions (scripts/check_workflows.py).
@@ -63,6 +74,9 @@ jobs:
       check_version: ${{ steps.v.outputs.check_version }}
       attested: ${{ steps.v.outputs.attested }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+      npm: ${{ steps.v.outputs.npm }}
+      chatgpt_plugin: ${{ steps.v.outputs.chatgpt_plugin }}
+      global: ${{ steps.v.outputs.global }}
     steps:
       - name: Which version?
         id: v
@@ -86,8 +100,14 @@ jobs:
           # `pscat --version` exists from 0.6.1 on (#637); 0.6.0 is checked by
           # running a program instead.
           CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 1)).lower())' "$V")
-          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; } >> "$GITHUB_OUTPUT"
-          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE)" >> "$GITHUB_STEP_SUMMARY"
+          # The npm package exists from 0.6.2 on (#566), and a candidate is not on npm.
+          NPM=$(python3 -c 'import sys; print(str(sys.argv[2] != "true" and tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 2)).lower())' "$V" "$PRE")
+          # The hosted ChatGPT plugin ZIP is a release asset from 0.7.1 on (#1253), candidates included.
+          PLUGIN=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 7, 1)).lower())' "$V")
+          # pscat.global.js is a release asset from 0.7.1 on, candidates included (#1108).
+          GLOBAL=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 7, 1)).lower())' "$V")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; echo "npm=$NPM"; echo "chatgpt_plugin=$PLUGIN"; echo "global=$GLOBAL"; } >> "$GITHUB_OUTPUT"
+          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE, npm: $NPM)" >> "$GITHUB_STEP_SUMMARY"
 
   install-archive:
     needs: install-version
@@ -178,6 +198,53 @@ jobs:
           fi
           echo "- archive $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), runs, renders$([ "$FONTS" = true ] && echo ', font packs install')" >> "$GITHUB_STEP_SUMMARY"
 
+  # The hosted ChatGPT plugin ZIP (#1253): the same download URL the guide gives.
+  install-chatgpt-plugin:
+    needs: install-version
+    if: needs.install-version.outputs.chatgpt_plugin == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download, verify and read the plugin ZIP
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::ChatGPT plugin: $*"; exit 1; }
+          NAME="pscat-cloud-chatgpt-plugin-$VERSION.zip"
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          W="$RUNNER_TEMP/chatgpt-plugin"
+          rm -rf "$W" && mkdir -p "$W" && cd "$W"
+          curl -fsSL --retry 5 --retry-all-errors -o "$NAME" "$BASE/$NAME" || fail "cannot download $BASE/$NAME"
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$BASE/SHA256SUMS" || fail "cannot download SHA256SUMS"
+          grep -E "^[0-9a-f]{64}  $NAME\$" SHA256SUMS > mine.sum || fail "$NAME is not listed in SHA256SUMS"
+          sha256sum -c mine.sum || fail "$NAME does not match SHA256SUMS"
+          if [ "$ATTESTED" = true ]; then
+            gh attestation verify "$NAME" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" ||
+              fail "no valid provenance attestation for $NAME"
+          fi
+          python3 - "$NAME" "$VERSION" <<'PY' || fail "the ZIP is not the production hosted plugin"
+          import json, sys, zipfile
+          name, version = sys.argv[1:3]
+          with zipfile.ZipFile(name) as z:
+              plugin = json.loads(z.read("plugin.json"))
+              mcp = json.loads(z.read("mcp.json"))
+          assert plugin["name"] == "pscat-cloud" and plugin["version"] == version, plugin
+          (server,) = mcp["mcpServers"].values()
+          url = server["url"]
+          assert url.startswith("https://") and "run.app" not in url.lower(), f"mcp.json points at {url}"
+          print("mcp.json url:", url)
+          PY
+          echo "- ChatGPT plugin $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), mcp.json is a production https URL" >> "$GITHUB_STEP_SUMMARY"
+
   install-crate:
     needs: install-version
     # A release candidate is not on crates.io (#854).
@@ -259,3 +326,109 @@ jobs:
           else
             echo "::warning::crates.io's pscat-$VERSION.crate is not byte-identical to the attested one (see RELEASING.md)"
           fi
+
+  install-npm:
+    needs: install-version
+    # A release candidate is not on npm, and 0.6.1 and earlier predate the package.
+    if: needs.install-version.outputs.npm == 'true'
+    name: install-npm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Only the check script comes from the repository; the package under
+      # test comes from the registry. On a release the workflow runs at the
+      # release tag, so the script is the one that release shipped with.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # .gitattributes too: it keeps the script's line endings LF on Windows.
+          sparse-checkout: |
+            scripts/test_npm_tarball.sh
+            .gitattributes
+          sparse-checkout-cone-mode: false
+      # The consumer floor (npm/package.json engines).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Wait for the registry
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+        run: |
+          # Right after `publish` the registry can answer a moment late.
+          for i in $(seq 1 20); do
+            GOT=$(npm view "pscat@$VERSION" version 2>/dev/null || true)
+            if [ "$GOT" = "$VERSION" ]; then
+              echo "pscat@$VERSION is on npm"
+              exit 0
+            fi
+            echo "not on npm yet ($i/20)"
+            sleep 30
+          done
+          echo "::error::pscat@$VERSION is not on the npm registry after 10 minutes"
+          exit 1
+      - name: npm install pscat into a fresh project and render
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
+        run: |
+          set -euo pipefail
+          unset PSCAT_HOME PSCAT_ROOT PSCAT_LIB
+          # (An empty array under `set -u` is an error in macOS's bash 3.2.)
+          FLAG=--no-attested
+          if [ "$ATTESTED" = true ]; then FLAG=--attested; fi
+          # Up to 3 tries: right after `publish` the tarball, the signing keys and
+          # the attestation can reach a registry edge a little apart. The script
+          # installs into a fresh directory each time, so a retry is harmless.
+          OK=false
+          for i in 1 2 3; do
+            if ./scripts/test_npm_tarball.sh "pscat@$VERSION" "$FLAG"; then OK=true; break; fi
+            echo "attempt $i of 3 failed"
+            if [ "$i" -lt 3 ]; then sleep 30; fi
+          done
+          [ "$OK" = true ] || { echo "::error::npm $RUNNER_OS: pscat@$VERSION does not install or run"; exit 1; }
+          echo "- npm on $RUNNER_OS: npm install pscat@$VERSION ok, signature$([ "$ATTESTED" = true ] && echo ' and provenance') verified, renders" >> "$GITHUB_STEP_SUMMARY"
+
+  # The classic script attached to the release (#1108), from the public URL a
+  # page would pin. Runs for a candidate too: it is not on npm, so this is its
+  # only check. A release before 0.7.1 has no such asset.
+  install-global:
+    needs: install-version
+    if: needs.install-version.outputs.global == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Download pscat.global.js, verify it and load it as a classic script
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::pscat.global.js: $*"; exit 1; }
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          W="$RUNNER_TEMP/release-check-global"
+          rm -rf "$W" && mkdir -p "$W" && cd "$W"
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$BASE/SHA256SUMS" || fail "cannot download SHA256SUMS"
+          curl -fsSL --retry 5 --retry-all-errors -o pscat.global.js "$BASE/pscat.global.js" || fail "cannot download $BASE/pscat.global.js"
+          grep -E "^[0-9a-f]{64}  pscat\.global\.js\$" SHA256SUMS > mine.sum || fail "not listed in SHA256SUMS"
+          sha256sum -c mine.sum || fail "does not match SHA256SUMS"
+          # A classic script (vm.Script is a SyntaxError on module syntax) that defines the one global.
+          node -e '
+            const vm = require("node:vm"), fs = require("node:fs");
+            const src = fs.readFileSync("pscat.global.js", "utf8");
+            new vm.Script(src);
+            vm.runInThisContext(src);
+            const keys = Object.keys(globalThis.pscat).sort().join();
+            if (keys !== "PostScriptError,Renderer,createRenderer") { console.error("global pscat has " + keys); process.exit(1); }
+          '
+          echo "- pscat.global.js from the v$VERSION release matches SHA256SUMS and loads as a classic script" >> "$GITHUB_STEP_SUMMARY"

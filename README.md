@@ -126,7 +126,7 @@ MCP clients get the same board from the `chalkboard_math` tool.
 Everything else is in [`docs/guides/`](docs/guides/README.md):
 
 - [Getting started](docs/guides/getting-started.md): build, install, command-line flags, output formats
-- [pscat in the browser](docs/guides/browser.md) and [for AI agents](docs/guides/agents.md)
+- [pscat in the browser](docs/guides/browser.md), [in every AI client](docs/guides/clients.md) and [for AI agents](docs/guides/agents.md)
 - [Fonts](docs/guides/fonts.md) and [handwriting](docs/guides/handwriting.md)
 - [artkit](docs/guides/artkit.md): the generative-art toolkit, and [style packs and page templates](docs/guides/style-packs-and-templates.md)
 - [Painting](docs/guides/painting.md) and the [landscape cookbook](docs/guides/landscape-cookbook.md)
@@ -138,15 +138,16 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 
 ## For AI agents
 
-pscat works well from a coding agent. The skills in `plugin/skills/` (`pscat`,
+pscat works well from a coding agent. **[pscat in every AI client](docs/guides/clients.md)**
+has one table of where it works (Claude Code, claude.ai, ChatGPT, Codex, Muse and more),
+how to connect, and when to install pscat or use the hosted server. The skills in `plugin/skills/` (`pscat`,
 `psart`, `psviz`, `functional-postscript`) are plain Markdown any agent can read, and `pscat-mcp` is an
 MCP server with ten tools. In Claude Code, both come as one plugin:
 `/plugin install pscat --marketplace PSCatLabs/pscat`
 (after installing pscat; see [plugin/README.md](plugin/README.md)). In Codex:
 `codex plugin marketplace add PSCatLabs/pscat`, then
 `codex plugin add pscat@pscat`. See the
-[agents guide](docs/guides/agents.md). In Muse, paste a prompt and it sets
-pscat up itself: [pscat in Muse](docs/guides/muse.md). Any other MCP client can run
+[agents guide](docs/guides/agents.md). Any other MCP client can run
 `pscat mcp` (the same server as `pscat-mcp`), and pscat is listed in the
 [MCP Registry](https://registry.modelcontextprotocol.io/) from 0.6.3:
 

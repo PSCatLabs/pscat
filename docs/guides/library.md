@@ -141,7 +141,11 @@ and does not have to match pscat's version of one.
   error back into a TeX error with `driver.explain(interp.captured_stdout(),
   &err)` (call `interp.capture_stdout()` before the run): it carries every
   unsupported command or character in the formula, each with its place.
-  `chalkboard::explain(&err)` alone names only the first, with no place. A
+  `chalkboard::explain(&err)` alone names only the first, with no place. The
+  check pass reports on the program's standard output, so to show what the
+  program printed to a user, give `chalkboard::user_output(printed)` the same
+  bytes: it returns them without the check lines (`CKPROBLEM...`), byte for
+  byte otherwise. A
   `ChalkError` has a stable `code()`, the `token()` a TeX error named, and
   `message()`, which names a bad config key by its path
   (`layout.width must be ...`).
@@ -234,6 +238,148 @@ and does not have to match pscat's version of one.
   `pscat --capabilities` prints: fonts, Type 3 faces, palettes, templates,
   library procedures and native operators.
 
+## Extend the interpreter from your application
+
+Everything above runs a program and reads its pages. The `pscat::host` module
+is for an application that does more: one that gives programs operators of its
+own, feeds them data, draws many pictures from one loaded program, or reports
+errors as data. psanim, an animation engine that calls one procedure per
+frame, is built on it.
+
+**Operators backed by closures.** `register_operator` adds an operator to
+systemdict. To a program it is an ordinary operator: `bind` resolves it, an
+error it returns names it as the offending command, and the operands it popped
+before failing are put back.
+
+```rust
+use std::{cell::Cell, rc::Rc};
+
+let clock = Rc::new(Cell::new(0.0_f64));
+let mut interp = pscat::Interp::with_page(200, 200).expect("valid page size");
+let c = clock.clone();
+interp.register_operator("now", move |i| {
+    i.push_real(c.get());
+    Ok(())
+})?;
+interp.run_str("/hand { 100 100 translate now 6 mul neg rotate 0 0 moveto 0 80 lineto stroke } def")?;
+clock.set(15.0);
+interp.run_str("hand")?;
+```
+
+Registering the name of a built-in replaces it, which is how a host takes over
+`showpage` or `realtime`. An interpreter holds up to 256 host operators.
+
+The interpreter looks at its limits (`--max-steps`, `--max-time`,
+`--max-memory`, as `Limits`) and the interrupt flag between objects, so an
+operator that does a lot of work in one call, such as a loop whose count comes
+from the program, should call `check_limits(steps)` as it goes and return its
+error with `?`. It charges the steps and gives the same uncatchable error the
+interpreter would, or `PsError::Interrupted` for a raised flag.
+
+```rust
+interp.register_operator("spin", |i| {
+    let n = i.pop_int()?;
+    for k in 0..n {
+        // ... one unit of work ...
+        if k % 1000 == 999 {
+            i.check_limits(1000)?;
+        }
+    }
+    Ok(())
+})?;
+```
+
+**Values in and out.** `host::Value` is a PostScript object as plain Rust data:
+numbers, booleans, names, strings, arrays, dictionaries. `pop_value` and
+`push_value` move one across the operand stack, `lookup` and `define_value`
+read and write names, and `pop_f64`, `pop_int`, `pop_bool`, `pop_string`,
+`pop_name`, `pop_numbers` and the matching `push_*` cover the common cases. A
+procedure or a save object comes back as an opaque value that can be pushed
+again, so a host can hold a program's `save` and hand it back to `restore`.
+An opaque value belongs to the interpreter it came from: `push_value` and
+`define_value` refuse one from another interpreter with `invalidaccess`, since
+its host operators and save levels are that interpreter's. A copy is bounded:
+past `host::MAX_VALUE_NODES` (about a million elements and entries, however
+deep, a string or a dictionary key counting by its size) `pop_value` is
+`limitcheck`, and inside an operator the copy, by `pop_value` or `lookup`,
+counts against the program's limits like any other work (`lookup`'s at the
+program's next look at its limits). A dictionary key that is not a name or a
+string comes back as the text `==` prints for it, shortened past a few hundred
+bytes.
+
+```rust
+use pscat::host::Value;
+
+let mut interp = pscat::Interp::new();
+interp.run_str("<< /Size [640 360] /Title (Dawn) >>")?;
+let config = interp.pop_value()?;
+assert_eq!(config.get("Size").and_then(Value::as_numbers), Some(vec![640.0, 360.0]));
+```
+
+**The current path as data.** `current_path` returns the path in user space as
+`host::PathSegment`s and `set_current_path` replaces it, so a host operator can
+measure a path the program built, walk along it, or cut it short.
+
+**The canvas.** `canvas_premultiplied_rgba8` borrows the pixels of the page in
+progress with no copy. `swap_canvas` exchanges the raster the program paints
+on for another `Page` of the same size, leaving the graphics state alone: a
+host paints part of a picture on a `Page::transparent` layer and composites it
+itself (`Page::premultiplied_rgba8_mut`), or keeps a picture from one run to
+the next. Inside a pattern's `PaintProc` there is no page to exchange, and the
+`Page` comes back as the error.
+
+**Transparency groups.** While a program has a group open (`begingroup`, between
+slices of `begin_source` and `step_n`, or inside a host operator) its marks go to a
+layer, and what a host reads or exchanges is the page below that layer:
+`canvas_premultiplied_rgba8`, `pages`, `page`, `into_last_page` and
+`swap_canvas` all see the page without the layer's marks, and `swap_canvas` and
+`set_transparent_background` replace the page the group will composite onto. A
+run the host stops with its interrupt flag drops the open groups, as a time
+limit does; a step limit composites what they painted. Either way the next run
+starts on a whole page.
+
+**Errors as data.** `error_details` gives the error's name, offending command,
+line and file as fields, and a backtrace: the procedures that were running,
+innermost first, each with the element that was running marked among its
+neighbours.
+
+```text
+label:  10 20 moveto >>> show <<<
+page:   gsave 42 >>> label <<< grestore
+```
+
+**Stopping a program.** `set_interrupt` takes an `Arc<AtomicBool>`; raising it
+from another thread makes `run_str` return `PsError::Interrupted` at its next
+look: before the program starts, every few thousand steps, inside any host
+operator that calls `check_limits`, and when the program ends, so a run during
+which the flag was up fails however short it is. A program cannot catch it,
+nor an `Interrupted` a host operator returns.
+
+**Many pictures from one program.** These compose with PostScript's own
+`save` and `restore` into a frame loop. Run the program's setup once, take a
+`save`, then for each picture restore to it, erase, and call the drawing
+procedure. Every picture then starts from the same memory, so picture 300 is
+the same pixels whether or not pictures 0 to 299 were drawn first, and each
+costs only its own drawing: the interpreter and its libraries are not loaded
+again.
+
+```rust
+use pscat::host::Value;
+
+let mut interp = pscat::Interp::with_page(64, 64).expect("valid page size");
+interp.run_str("/n 0 def /draw { /n n 1 add def 10 10 44 44 rectfill } def save")?;
+let mut checkpoint: Value = interp.pop_value()?;
+for _ in 0..3 {
+    interp.push_value(&checkpoint)?;
+    interp.run_str("restore save")?;        // a save object is spent by its restore
+    checkpoint = interp.pop_value()?;
+    interp.run_str("erasepage initgraphics draw")?;
+    let _pixels: &[u8] = interp.canvas_premultiplied_rgba8();
+}
+// `draw` counted to 1 each time, never to 3: each run began from the checkpoint.
+assert_eq!(interp.lookup("n").and_then(|v| v.as_i64()), Some(1));
+```
+
 ## Supported builds
 
 | Build | Command | What you get |
@@ -250,8 +396,8 @@ version is the `rust-version` in `Cargo.toml` (1.88).
 ## Stability
 
 The supported API is what docs.rs shows: `Interp`, `Page`, `PsError`,
-`Limits`, `syntax::check_syntax`, and the `sheet`, `chalkboard`, `handwriting`
-and `catalog` modules. The crate has other public modules that the binaries, the browser
+`Limits`, `syntax::check_syntax`, and the `host`, `sheet`, `chalkboard`,
+`handwriting` and `catalog` modules. The crate has other public modules that the binaries, the browser
 build and the
 test suite use; they are hidden from the documentation and can change in any
 release.

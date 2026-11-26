@@ -65,3 +65,10 @@ path = "fuzz_targets/image.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "check_syntax"
+path = "fuzz_targets/check_syntax.rs"
+test = false
+doc = false
+bench = false

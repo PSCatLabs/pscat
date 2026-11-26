@@ -71,6 +71,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentalpha", currentalpha);
     op(dict, "setblendmode", setblendmode);
     op(dict, "currentblendmode", currentblendmode);
+    // pscat extension (issue #1406): transparency groups.
+    op(dict, "begingroup", begingroup);
+    op(dict, "endgroup", endgroup);
     // pscat extension (issue #488): a clip identity query, dot-named as
     // non-standard; lib/drykit.ps probes it with `where`.
     op(dict, ".sameclip", sameclip);
@@ -401,11 +404,28 @@ fn flattenpath(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// A marking operator that has to wait for the current pattern's
+/// `PaintProc` (#1341): starts it and returns `true`, and the operator
+/// runs again after, with its operands untouched.
+fn wait_for_pattern(
+    it: &mut Interp,
+    name: &'static str,
+    func: crate::object::OpFn,
+) -> Result<bool, PsError> {
+    it.pattern_gate(crate::object::Operator { name, func })
+}
+
 fn fill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "fill", fill)? {
+        return Ok(());
+    }
     fill_common(it, FillRule::Winding)
 }
 
 fn eofill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "eofill", eofill)? {
+        return Ok(());
+    }
     fill_common(it, FillRule::EvenOdd)
 }
 
@@ -422,7 +442,14 @@ fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
 }
 
 fn stroke(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.stroke();
+    if wait_for_pattern(it, "stroke", stroke)? {
+        return Ok(());
+    }
+    // Under the limits for a shading pattern's layer (#1298), whose work is
+    // held against the step limit before anything is painted.
+    let probe = it.limit_probe();
+    let work = it.gfx.stroke_limited(&probe)?;
+    it.charge_probed_steps(work / 1024);
     Ok(())
 }
 
@@ -648,6 +675,58 @@ fn currentblendmode(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// `dict begingroup -` -- open a transparency group (#1406): marks from
+/// here to the matching `endgroup` are drawn as one layer, which then
+/// composites onto the page with `currentalpha` times `/Alpha` and with
+/// `/Blend` (else `currentblendmode`), as a PDF transparency group XObject
+/// does. Inside, alpha starts at 1 and the blend at `/Normal`. A pscat
+/// extension: gs 10.x has `.begintransparencygroup` but no PostScript
+/// program can use it (`unregistered`, and no `.endtransparencygroup`).
+///
+/// `/Alpha` is clamped as `setalpha` clamps; `/Blend` takes the names
+/// `setblendmode` takes, anything else `rangecheck`. Other keys are
+/// ignored. See `notes/1406-transparency-groups.md`.
+fn begingroup(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::Dict(d) = &obj.value else {
+        return Err(PsError::Typecheck);
+    };
+    let (alpha, blend) = {
+        let d = d.borrow();
+        let alpha = match d.get("Alpha").map(|o| o.value) {
+            None => None,
+            Some(Value::Integer(n)) => Some((n as f64).clamp(0.0, 1.0) as f32),
+            Some(Value::Real(r)) => Some(r.clamp(0.0, 1.0) as f32),
+            Some(_) => return Err(PsError::Typecheck),
+        };
+        let blend = match d.get("Blend").map(|o| o.value) {
+            None => None,
+            Some(Value::Name(n)) => {
+                Some(crate::gfx::BlendMode::from_ps_name(&n).ok_or(PsError::Rangecheck)?)
+            }
+            Some(_) => return Err(PsError::Typecheck),
+        };
+        (alpha, blend)
+    };
+    let probe = it.limit_probe();
+    let work = it.gfx.begin_group(alpha, blend, &probe)?;
+    it.charge_probed_steps(work / 1024);
+    Ok(())
+}
+
+/// `- endgroup -` -- close the innermost transparency group opened at this
+/// level (the page, or the running pattern `PaintProc`) and composite it;
+/// the graphics state comes back to the one `begingroup` had. With no group
+/// open there it does nothing, as `grestore` with nothing saved does.
+fn endgroup(it: &mut Interp) -> Result<(), PsError> {
+    // The composite looks at the limits as it goes; the group is closed
+    // whatever it meets, and its work is charged either way.
+    let probe = it.limit_probe();
+    let (work, met) = it.gfx.end_group(&probe);
+    it.charge_probed_steps(work / 1024);
+    met
+}
+
 fn setlinecap(it: &mut Interp) -> Result<(), PsError> {
     let n = it.pop_int()?;
     it.gfx.set_line_cap(n)
@@ -728,6 +807,9 @@ fn sethsbcolor(it: &mut Interp) -> Result<(), PsError> {
     let s = it.pop_f64()?;
     let h = it.pop_f64()?;
     it.gfx.set_hsb(h, s, b);
+    // sethsbcolor sets DeviceRGB like setrgbcolor (PLRM), which also
+    // leaves a pattern space (#1038).
+    it.gfx.set_colorspace(crate::gfx::ColorSpace::Rgb);
     Ok(())
 }
 
@@ -841,6 +923,9 @@ fn append_rects(it: &mut Interp, rects: &[[f64; 4]]) -> Result<(), PsError> {
 /// `x y w h rectfill` / `numarray rectfill` — paint inside an implicit
 /// gsave: current path and graphics state untouched (gs-pinned).
 fn rectfill(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "rectfill", rectfill)? {
+        return Ok(());
+    }
     let rects = pop_rects(it)?;
     it.gfx.gsave();
     it.gfx.newpath();
@@ -862,6 +947,9 @@ fn rectfill(it: &mut Interp) -> Result<(), PsError> {
 /// matrix on top. gs pin: a 6-element array in top position is always
 /// the matrix, never a rect list; any other array is rects.
 fn rectstroke(it: &mut Interp) -> Result<(), PsError> {
+    if wait_for_pattern(it, "rectstroke", rectstroke)? {
+        return Ok(());
+    }
     let top = it.pop()?;
     let matrix = if matches!(&top.value, Value::Array(a) if a.len() == 6) {
         Some(super::matrix::read_matrix(&top)?)
@@ -879,7 +967,14 @@ fn rectstroke(it: &mut Interp) -> Result<(), PsError> {
         if let Some(m) = matrix {
             it.gfx.concat_ctm(m);
         }
-        it.gfx.stroke();
+        let probe = it.limit_probe();
+        match it.gfx.stroke_limited(&probe) {
+            Ok(work) => it.charge_probed_steps(work / 1024),
+            Err(e) => {
+                it.gfx.grestore();
+                return Err(e);
+            }
+        }
     }
     it.gfx.grestore();
     built

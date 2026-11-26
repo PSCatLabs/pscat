@@ -216,13 +216,6 @@ const MANDEL: &str = "/pixel {
 const SMOOTH: &str = "/pixel { /j exch def /i exch def
   i W 1 sub div  j H 1 sub div  i j add 5 mul sin 1 add 2 div } bind def";
 
-fn gs_available() -> bool {
-    std::process::Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 /// `body`'s 64 x 64 picture with the shim under gs, against pscat's native
 /// render: (max per-channel difference, pixels that differ, mean of the
 /// per-pixel max difference).
@@ -268,7 +261,7 @@ fn gs_against_native(body: &str) -> (u8, usize, f64) {
 
 #[test]
 fn ghostscript_renders_what_pscat_does() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping the gs check: gs not installed");
         return;
     }

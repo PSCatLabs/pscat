@@ -135,8 +135,11 @@ struct Options {
     transparent: bool,
     /// `--svg-text`: standard-font text as SVG `<text>` (#1119).
     svg_text: bool,
-    /// `--pdf-text`: text as PDF text objects in embedded fonts (#1193).
+    /// `--pdf-text`: text as PDF text objects in embedded fonts (#1193),
+    /// the default since #1026; kept so scripts that name it still run.
     pdf_text: bool,
+    /// `--text-as-paths`: every PDF glyph as its outline (#1026).
+    text_as_paths: bool,
     /// The windowed REPL: type PostScript, watch it draw (Stage 8's
     /// last sliver).
     interactive: bool,
@@ -249,6 +252,7 @@ impl Options {
             transparent: false,
             svg_text: false,
             pdf_text: false,
+            text_as_paths: false,
             interactive: false,
             lint: false,
             lint_strict: false,
@@ -332,6 +336,20 @@ impl Options {
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
         interp.set_max_page_pixels(self.max_pixels);
+        if self.lint {
+            interp.trace_operator_shadows();
+            interp.trace_stack_leaks();
+        }
+        // `currentfilename` (#1056) answers with the file as given; `-e`
+        // wins over a file argument, `-` is stdin, which has no name, and an
+        // `--interactive` file is a prelude whose name would otherwise
+        // answer for every line typed after it.
+        if self.eval.is_none()
+            && !self.interactive
+            && let Some(path) = self.file.as_deref().filter(|p| *p != "-")
+        {
+            interp.set_main_file_name(Some(path));
+        }
         Ok(interp)
     }
 
@@ -509,6 +527,14 @@ fn run_cli() -> ExitCode {
     }
     if options.pdf_text && options.pdf.is_none() {
         eprintln!("pscat: --pdf-text needs --pdf output");
+        return ExitCode::FAILURE;
+    }
+    if options.text_as_paths && options.pdf.is_none() {
+        eprintln!("pscat: --text-as-paths needs --pdf output");
+        return ExitCode::FAILURE;
+    }
+    if options.pdf_text && options.text_as_paths {
+        eprintln!("pscat: --pdf-text and --text-as-paths contradict each other; give one");
         return ExitCode::FAILURE;
     }
 
@@ -732,8 +758,9 @@ fn run_cli() -> ExitCode {
         interp.gfx_mut().enable_svg();
     }
     if options.pdf.is_some() {
-        if options.pdf_text {
-            interp.gfx_mut().set_pdf_text(pscat::PdfText::Text);
+        // Text is the default (#1026); `--pdf-text` asks for it again.
+        if options.text_as_paths {
+            interp.gfx_mut().set_pdf_text(pscat::PdfText::Paths);
         }
         interp.gfx_mut().enable_pdf();
     }
@@ -1356,8 +1383,10 @@ const RUN_ERROR_CHECK: &str = "run-error";
 /// parse them back out of the child's stderr). Returns whether anything
 /// was found, which is what `--lint-strict` turns into a non-zero exit;
 /// plain `--lint` stays advisory, as it has been since issue #17. After
-/// an error (`ok` false) it prints the `run-error` line and no findings:
-/// they would be consequences of the abort, not of the program (#947).
+/// an error (`ok` false) it prints the `run-error` line and only the
+/// findings that can explain the error (`pscat::lint::ERROR_EXPLAINING_CHECKS`,
+/// #1110): the rest would be consequences of the abort, not of the program
+/// (#947).
 ///
 /// `ok` is whether the program ran to the end. An errored run is never
 /// "clean" (issue #369): the verdict line used to say so right under the
@@ -1401,12 +1430,26 @@ pub(crate) fn print_lint(
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
         );
-        // Every other check reads end-of-run state, so after an abort it
-        // reports the abort (a blank page, an unbalanced gsave, a leaked
-        // dict), not the program (#947, as `pscat-mcp` since #942). The
-        // note explains findings and there are none, so it is left out
-        // too. The errored run fails on its own, whatever `--lint-strict`
-        // says.
+        // Most checks read end-of-run state, so after an abort they report
+        // the abort (a blank page, an unbalanced gsave, a leaked dict), not
+        // the program (#947, as `pscat-mcp` since #942). The exception is a
+        // finding that can explain the error, such as a redefined operator
+        // (#1110): it follows the `run-error` line, with the note that says
+        // what was linted, which would otherwise explain nothing. The errored
+        // run fails on its own, whatever `--lint-strict` says, and these
+        // findings add no footer.
+        let kept: Vec<_> = findings
+            .iter()
+            .filter(|f| pscat::lint::explains_an_error(f.check))
+            .collect();
+        if !kept.is_empty() {
+            if let Some(note) = note {
+                eprintln!("pscat: lint: {LINT_NOTE}{note}");
+            }
+            for f in kept {
+                eprintln!("pscat: lint: [{}] {}", f.check, f.message);
+            }
+        }
         return true;
     }
     if let Some(note) = note {
@@ -1648,6 +1691,13 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
 
             let ok = match interp.run_source(source) {
                 Ok(()) => true,
+                // The reader of stdout went away (`| head`): not the
+                // program's fault, and its `ioerror` would be noise (#1117).
+                // The frame's page is still written, as are the other frames'.
+                Err(PsError::Io) if interp.stdout_epipe_error() => {
+                    note_stdout_closed();
+                    true
+                }
                 Err(e) => {
                     eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
                     eprintln!("{}", interp.error_report(&e));
@@ -2149,7 +2199,26 @@ fn parse_args() -> Result<Options, String> {
                 exit_after_printing();
             }
             "--capabilities" => {
-                println!("{}", pscat::capabilities::payload_json());
+                // Filters follow the flag and are read only here, so a stray
+                // `--name` elsewhere stays an unknown option (#1079).
+                let mut filter = pscat::capabilities::CapabilityFilter::default();
+                while let Some(flag) = args
+                    .next_if(|a| matches!(a.as_str(), "--name" | "--kind" | "--source" | "--brief"))
+                {
+                    if flag == "--brief" {
+                        filter.brief = true;
+                        continue;
+                    }
+                    let value = args
+                        .next_if(|v| !v.starts_with("--"))
+                        .ok_or_else(|| format!("missing value after --capabilities {flag}"))?;
+                    match flag.as_str() {
+                        "--name" => filter.names.push(value),
+                        "--kind" => filter.kind = Some(value),
+                        _ => filter.source = Some(value),
+                    }
+                }
+                println!("{}", pscat::capabilities::payload_json_filtered(&filter)?);
                 exit_after_printing();
             }
             "-e" | "--eval" => {
@@ -2257,6 +2326,7 @@ fn parse_args() -> Result<Options, String> {
             "--transparent" => options.transparent = true,
             "--svg-text" => options.svg_text = true,
             "--pdf-text" => options.pdf_text = true,
+            "--text-as-paths" => options.text_as_paths = true,
             "-i" | "--interactive" => options.interactive = true,
             "--lint" => options.lint = true,
             // Strict *is* lint, with findings promoted to fatal — set
@@ -2401,8 +2471,13 @@ fn print_usage() {
     println!("                      selectable <text> rather than glyph outlines (smaller;");
     println!("                      the viewer draws it in a metric-compatible face)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
-    println!("      --pdf-text      with --pdf: write text as selectable, searchable text in");
-    println!("                      embedded subset fonts rather than glyph outlines");
+    println!("                      Text is selectable, searchable text in embedded subset");
+    println!("                      fonts; faces that forbid embedding, Type 1 and Type 3");
+    println!("                      fonts from a program and charpath stay outlines");
+    println!("      --text-as-paths with --pdf: draw every glyph as its outline (no fonts in");
+    println!("                      the file), as pscat did before 0.7.1");
+    println!("      --pdf-text      with --pdf: text as text, the default; accepted so older");
+    println!("                      scripts keep working, it changes nothing");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
     println!("      --spool DIR     watch DIR and render each .ps/.eps that lands there");
     println!(
@@ -2512,6 +2587,10 @@ fn print_usage() {
     println!(
         "      --capabilities  print the agent-usable art catalog (fonts, palettes, templates, procedures) as JSON, then exit"
     );
+    println!("                      narrow it by following with any of: --name NAME (repeatable),");
+    println!("                      --kind KIND (font, type3_face, palette, template, procedure,");
+    println!("                      operator, dial), --source FILE (paintkit, lib/paintkit.ps,");
+    println!("                      systemdict), --brief (name, kind, source, one sentence)");
     println!();
     println!("Sweeps (render file.ps once per value, needing --png and/or --contact-sheet):");
     println!("      --sweep-seed SPEC   reseed with each value in turn (A:B, A:B:STEP, or");
@@ -2531,6 +2610,14 @@ fn print_usage() {
     println!(
         "  pscat sheet a.ps b.ps ...    labelled review sheet: files or sweeps at several sizes, one PNG"
     );
+    println!(
+        "  pscat lib install DIR        copy a library of your own to lib/NAME/ in the per-user"
+    );
+    println!(
+        "                               data directory, so (lib/NAME/x.ps) run finds it anywhere;"
+    );
+    println!("                               pscat lib list shows the installed packages,");
+    println!("                               pscat lib remove NAME deletes one");
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
     println!();
     println!("Environment (where pscat finds lib/ and fonts; the full search order is in");

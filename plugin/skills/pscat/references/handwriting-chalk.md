@@ -31,6 +31,7 @@ pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o board.png
 pscat chalk 'f(x) &= (x+1)^2 \\ &= x^2 + 2x + 1' --seed 7 --color yellow -o derivation.png
 pscat chalk --file eq.tex --json '{"board": {"tone": "greenboard"}}' -o eq.png
 pscat chalk 'e^{i\pi} + 1 = 0' --no-board -o overlay.png    # transparent, chalk only
+pscat chalk '\frac{a+b}{c} = \sqrt{x}' --hand -o loose.png  # freehand: long strokes drift
 ```
 
 Raw LaTeX with **single** backslashes (unlike mathkit from PostScript),
@@ -46,5 +47,5 @@ With the MCP tools connected, use **`chalkboard_math`** for a chalkboard or
 an equation on a board: `{"latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}", "seed": 7}`
 (JSON escaping only; the LaTeX itself has single backslashes) returns the
 PNG inline. The same keys as flat arguments (`size`, `color`, `board` or
-`false`, `ghosting`, `width`/`height`, `dpi`, ...), `config` for the rest; a
+`false`, `ghosting`, `hand`, `width`/`height`, `dpi`, ...), `config` for the rest; `hand` (0..1) draws the strokes freehand, long ones (fraction bars, radicals, brackets) drifting and overshooting a little, lettering barely; a
 TeX error is a one-line `latex_error` naming the command.

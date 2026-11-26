@@ -351,9 +351,29 @@ jobs:
             echo "- runner image: $ImageOS $ImageVersion"
             echo "- gs: $(gs --version) at $(command -v gs)"
           } >> "$GITHUB_STEP_SUMMARY"
+      # poppler for the PDF text checks (issue #1206): tests/pdf_text.rs reads
+      # pscat's text PDFs back with pdftotext and rasterizes them with pdftoppm.
+      # Linux installs poppler-utils and requires it (PSCAT_REQUIRE_POPPLER
+      # below turns a missing tool into a failure); the version probes fail
+      # the step on a broken install. Windows has no poppler on the runner, so
+      # those two tests skip there. The macOS `test` job does not install it.
+      - name: Poppler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils
+          command -v pdftotext pdftoppm
+          pdftotext -v
+          pdftoppm -v
+          {
+            echo "### poppler"
+            echo
+            echo "- pdftotext: $(pdftotext -v 2>&1 | head -1) at $(command -v pdftotext)"
+            echo "- pdftoppm: $(pdftoppm -v 2>&1 | head -1) at $(command -v pdftoppm)"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Run tests
         env:
           PSCAT_REQUIRE_GS: ${{ runner.os == 'Linux' && '1' || '' }}
+          PSCAT_REQUIRE_POPPLER: ${{ runner.os == 'Linux' && '1' || '' }}
           PSCAT_GS_LOG: ${{ github.workspace }}/gs-parity.log
         run: cargo test --profile ci --no-fail-fast
       - name: Ghostscript parity tests that ran

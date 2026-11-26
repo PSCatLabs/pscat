@@ -1,0 +1,114 @@
+%!PS-Adobe-3.0
+%%Title: Shading patterns — a PatternType 2 specimen sheet
+%%BoundingBox: 0 0 612 792
+%%EndComments
+
+% Specimen sheet for #1298: makepattern with PatternType 2 (shading
+% patterns). A shading set as the colour fills text, strokes, any path and
+% an imagemask stencil, which shfill alone can do only under a clip. The
+% pattern is fixed where makepattern made it: shapes painted with it later
+% show the part of the shading under them. Plain PostScript, no libraries;
+% renders the same in Ghostscript.
+%
+%   pscat --page 612x792 examples/shading_patterns.ps
+%   gs -sDEVICE=png16m -r72 -o shading_patterns.png examples/shading_patterns.ps
+
+/ramp { % c0 c1 -> an exponential (linear) function from c0 to c1
+  2 dict begin /c1 exch def /c0 exch def
+  << /FunctionType 2 /Domain [0 1] /C0 c0 /C1 c1 /N 1 >>
+  end
+} def
+
+% A three-colour ramp: two legs stitched together.
+/sunset << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1]
+           /Functions [ [0.98 0.78 0.2] [0.9 0.25 0.3] ramp
+                        [0.9 0.25 0.3] [0.3 0.15 0.55] ramp ] >> def
+
+% The title: one axial pattern across the page.
+<< /PatternType 2
+   /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [90 0 522 0]
+               /Function sunset /Extend [true true] >> >> matrix makepattern setpattern
+/Helvetica-Bold findfont 40 scalefont setfont
+306 720 moveto (Shading Patterns) dup stringwidth pop 2 div neg 0 rmoveto show
+0.25 setgray /Helvetica findfont 11 scalefont setfont
+306 700 moveto (makepattern with /PatternType 2: a shading as the current colour)
+dup stringwidth pop 2 div neg 0 rmoveto show
+
+% A panel: x y (label) { paint } -> the paint procedure fills a 240 x 260
+% panel at x y, which then gets a frame and a label under it.
+/panel {
+  4 dict begin /proc exch def /label exch def /y exch def /x exch def
+  gsave
+    newpath x y 240 260 rectclip
+    0.97 0.96 0.93 setrgbcolor x y 240 260 rectfill /proc load exec
+  grestore
+  gsave 0.2 setgray 1 setlinewidth x y 240 260 rectstroke grestore
+  gsave /Helvetica findfont 10 scalefont setfont 0.25 setgray
+  x y 14 sub moveto label show grestore
+  end
+} def
+
+% 1. Text: each letter shows its part of one vertical ramp.
+<< /PatternType 2
+   /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 400 0 640]
+               /Function [0.1 0.35 0.75] [0.15 0.75 0.6] ramp /Extend [true true] >> >>
+matrix makepattern /sea exch def
+
+% 2. A radial sun with a /Background sky, cut to its /BBox: the shading
+%    paints its circles, the background everything else inside the box.
+<< /PatternType 2
+   /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [444 470 0 444 470 70]
+               /Function [1 0.95 0.6] [0.95 0.45 0.15] ramp
+               /Background [0.55 0.75 0.95] /BBox [344 410 544 630] >> >>
+matrix makepattern /sun exch def
+
+% 3. A function-based (Type 1) shading: a 2 x 2 colour table over a square.
+<< /PatternType 2
+   /Shading << /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [240 0 0 260 48 90]
+               /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1]
+                            /Size [2 2] /BitsPerSample 8
+                            /DataSource <e8433c 3c8ee8 f2c230 52b36b> >> >> >>
+matrix makepattern /table exch def
+
+% 4. A horizontal ramp for strokes, and the same sunset as an imagemask.
+<< /PatternType 2
+   /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [334 0 554 0]
+               /Function sunset /Extend [true true] >> >>
+matrix makepattern /band exch def
+
+48 390 (text painted with an axial pattern) {
+  sea setpattern
+  /Helvetica-Bold findfont 96 scalefont setfont
+  62 530 moveto (Sea) show
+  /Helvetica-Bold findfont 52 scalefont setfont
+  62 430 moveto (Wave) show
+} panel
+
+324 390 (a radial pattern with a Background, cut to its BBox) {
+  sun setpattern
+  324 390 240 260 rectfill
+} panel
+
+48 90 (a function-based pattern filling circles) {
+  table setpattern
+  0 1 3 { /i exch def
+    0 1 3 { /j exch def
+      i 60 mul 78 add j 62 mul 125 add 26 0 360 arc fill
+    } for
+  } for
+} panel
+
+324 90 (strokes and an imagemask, painted with patterns) {
+  band setpattern 12 setlinewidth 1 setlinecap 1 setlinejoin
+  344 300 moveto 384 340 424 260 464 300 curveto 504 340 524 280 544 300 curveto stroke
+  6 setlinewidth
+  344 250 moveto 544 250 lineto stroke
+  % A 16 x 16 heart stencil: imagemask paints the pattern through it.
+  gsave 384 110 translate 120 120 scale
+    16 16 true [16 0 0 -16 0 16]
+    {<0000 1c38 3e7c 7ffe 7ffe 7ffe 7ffe 3ffc 1ff8 0ff0 07e0 03c0 0180 0000 0000 0000>}
+    imagemask
+  grestore
+} panel
+
+showpage

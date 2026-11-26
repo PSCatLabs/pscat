@@ -137,6 +137,5 @@ try {
   for (const name of ['live-studio.html','studio.js','studio.css','index.html']) {
     report.source_sha256[name] = createHash('sha256').update(await fs.readFile(path.join(root,'docs/functional-postscript',name))).digest('hex');
   }
-  await fs.writeFile(path.join(root,'docs/functional-postscript/LIVE-BROWSER-VALIDATION.json'),JSON.stringify(report,null,2)+'\n');
   console.log(JSON.stringify(report,null,2));
 } finally { if(process.argv.includes('--close')) await call('Browser.close'); ws.close(); }

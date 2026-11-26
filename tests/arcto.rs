@@ -476,13 +476,6 @@ fn rounded_rectangle_svg_and_pdf_carry_the_curves() {
 
 // --- Ghostscript -----------------------------------------------------
 
-fn gs_available() -> bool {
-    Command::new("gs")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
 fn gs_output(body: &str) -> String {
     let dir = common::scratch_dir("arcto_gs");
     let ps = dir.join("cases.ps");
@@ -530,7 +523,7 @@ fn same_report(a: &str, b: &str) -> bool {
 
 #[test]
 fn ghostscript_agrees_case_by_case() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping the gs comparison: gs is not installed");
         return;
     }
@@ -607,7 +600,7 @@ fn ghostscript_agrees_case_by_case() {
 
 #[test]
 fn ghostscript_draws_the_same_rounded_rectangles() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping the gs raster comparison: gs is not installed");
         return;
     }
@@ -657,7 +650,7 @@ fn ghostscript_draws_the_same_rounded_rectangles() {
 
 #[test]
 fn ghostscript_rasterises_our_pdf_like_our_canvas() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping the gs PDF comparison: gs is not installed");
         return;
     }
@@ -833,7 +826,7 @@ fn close(a: &[f64], b: &[f64], rel: f64) -> bool {
 
 #[test]
 fn sweep_matches_ghostscript_where_well_conditioned() {
-    if !gs_available() {
+    if !common::gs_available() {
         eprintln!("skipping the gs sweep: gs is not installed");
         return;
     }

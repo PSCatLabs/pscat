@@ -72,6 +72,7 @@ npm can lag the plugin's CLI (a release candidate is on GitHub, not npm): compar
 pscat --png out.png file.ps            # headless render to PNG
 pscat --svg out.svg file.ps            # vector SVG (one file per page)
 pscat --pdf out.pdf file.ps            # multi-page PDF
+pscat --text-as-paths --pdf out.pdf f.ps  # PDF text as glyph outlines (default: selectable text, embedded fonts)
 pscat --page 500x500 --png out.png f.ps  # canvas in points (default 612x792)
 pscat --dpi 300 --png out.png f.ps     # print resolution (default 72)
 pscat --halftone --png out.png f.ps    # screen like a mono laser printer
@@ -208,6 +209,13 @@ command-line counterpart of the browser build's `renderer.addFont(name, bytes)`.
 has (fonts, palettes, templates, procedures, native operators) as JSON; prefer
 it over guessing a name from prose, this file included.
 
+The whole inventory is over 300,000 characters, which an MCP client may cut
+short. `pscat --capabilities --brief` lists names with one-line descriptions;
+`--name N` (repeatable), `--kind K` (`font`, `type3_face`, `palette`,
+`template`, `procedure`, `operator`, `dial`) and `--source FILE` (`paintkit`,
+`systemdict`) pick entries, in full unless `--brief`. The MCP tool
+`describe_art_capabilities` takes the same as `names`, `kind`, `source` and `brief`.
+
 ## Where `(lib/...) run` finds a file
 
 A `lib/` name tries, in order: `$PSCAT_LIB` (one directory that stands in for
@@ -226,8 +234,22 @@ the per-user data directory, so a library installed there works over MCP too;
 another directory needs the server's `--allow-read` (see
 [references/mcp.md](references/mcp.md)). The full list:
 [Where pscat finds its files](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files).
-A program cannot ask for the name of the file it is running, so a library that
-loads sibling files needs its directory passed in.
+
+**Install a library of your own** with `pscat lib install DIR [--name NAME]`: it
+copies DIR's files to `lib/NAME/` in the per-user data directory (in
+`$PSCAT_HOME` if that is set; the command prints where), and
+`(lib/NAME/x.ps) run` then works from any directory, in the CLI and over MCP.
+`pscat lib list` shows what is installed, `pscat lib remove NAME` uninstalls a
+package (a directory the command did not make needs `--force`). Running install
+again replaces the package
+(files DIR no longer has are removed). NAME may not match a built-in library
+(`artkit`, `qr`, ...), so an install cannot shadow one. `currentfilename`
+(`- currentfilename string`, a pscat extension: not in Ghostscript, probe with
+`systemdict /currentfilename known`) returns the name the running file was
+loaded by, so a library can load siblings: read it at the file's top level
+(`/mydir currentfilename dirname def`, with your own `dirname`), because a
+procedure called later reports its caller's file. It is `undefined` for `-e`,
+stdin and the main program of an MCP call.
 
 ## QR codes (lib/qr.ps)
 
@@ -266,6 +288,7 @@ Each line says when to open which reference file in `references/`.
 - **A slow render** (`--profile`, `--bands`):
   [references/bands-profile.md](references/bands-profile.md).
 - **pscat-only operators and small tools**: `setalpha` / `setblendmode`,
+  `begingroup` / `endgroup` (fade a whole drawing as one),
   native noise (`gnoise2`, `fbm2`, ...), `writereals` / `readreals` for big
   arrays, `pscat photo-etch` (photo to engraving), the live window (`pscat
   file.ps`, `-i`, `--spool`), the `--capabilities` inventory:

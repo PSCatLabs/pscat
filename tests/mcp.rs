@@ -7,13 +7,20 @@ use common::CommandDeadline as _;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 use serde_json::{Value, json};
 
 struct Server {
     child: Child,
-    reader: BufReader<ChildStdout>,
+    /// The server's stdout, one line per item, read on a thread of its own
+    /// (#1118). The test never blocks on the child's output while it writes
+    /// the child's input, so neither side can deadlock on a full pipe: a
+    /// macOS pipe holds 16-64 KB, but only 512 bytes when the system is out
+    /// of pipe memory, and the server answers a `ping` as it reads it.
+    /// The channel closes when the child's stdout does.
+    lines: Receiver<String>,
     /// Kills a hung server after the shared deadline (see `tests/common`).
     watchdog: Option<common::Watchdog>,
 }
@@ -76,12 +83,26 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn pscat-mcp");
-        let reader = BufReader::new(child.stdout.take().expect("stdout"));
-        // A hung server fails the test (EOF on `reader`) instead of hanging it.
+        let mut reader = BufReader::new(child.stdout.take().expect("stdout"));
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => {
+                        if tx.send(line).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        // A hung server fails the test (EOF on `lines`) instead of hanging it.
         let watchdog = Some(common::Watchdog::new(&child, common::default_deadline()));
         Server {
             child,
-            reader,
+            lines,
             watchdog,
         }
     }
@@ -96,8 +117,9 @@ impl Server {
     /// The next stdout line, which must be one JSON-RPC 2.0 message: the
     /// "stdout carries clean JSON-RPC" check runs on every reply read.
     fn read(&mut self) -> Value {
-        let mut line = String::new();
-        self.reader.read_line(&mut line).expect("read response");
+        let line = self.lines.recv().unwrap_or_else(|_| {
+            panic!("pscat-mcp closed its stdout: it exited, or the watchdog killed it")
+        });
         let v: Value = serde_json::from_str(&line)
             .unwrap_or_else(|e| panic!("stdout line is not JSON ({e}): {line:?}"));
         assert_eq!(v["jsonrpc"], "2.0", "not a JSON-RPC message: {line}");
@@ -139,14 +161,10 @@ impl Server {
     /// is left on stdout up to its end.
     fn close_and_drain(&mut self) -> Vec<Value> {
         drop(self.child.stdin.take());
-        let mut rest = Vec::new();
-        loop {
-            let mut line = String::new();
-            if self.reader.read_line(&mut line).expect("read") == 0 {
-                return rest;
-            }
-            rest.push(serde_json::from_str(&line).expect("JSON line"));
-        }
+        self.lines
+            .iter()
+            .map(|line| serde_json::from_str(&line).expect("JSON line"))
+            .collect()
     }
 
     fn ping_ok(&mut self) {
@@ -363,6 +381,7 @@ fn tool_schemas_use_only_the_portable_union_shape() {
         ]),
         "ghosting: a number or a bool"
     );
+    assert_eq!(props["hand"]["type"], "number", "hand: the freehand amount");
     assert!(
         props["ghosting"].get("type").is_none() && props["board"].get("type").is_none(),
         "the unions carry no outer `type`"
@@ -378,6 +397,15 @@ fn tool_schemas_use_only_the_portable_union_shape() {
         .map(|b| b["type"].as_str().unwrap())
         .collect();
     assert_eq!(kinds, ["number", "object"]);
+    // #1339: the object form takes a mat, entries a sweep and captions, the
+    // call a column count and the value switch.
+    assert!(item["anyOf"][1]["properties"]["mat"]["type"] == "string");
+    let entry = &sheet["inputSchema"]["properties"]["entries"]["items"]["properties"];
+    assert!(entry["sweep"]["properties"]["seed"]["items"]["type"] == "integer");
+    assert!(entry["sweep"]["properties"]["values"]["items"]["type"] == "number");
+    assert!(entry["captions"]["items"]["type"] == "string");
+    let top = &sheet["inputSchema"]["properties"];
+    assert!(top["cols"]["type"] == "integer" && top["values"]["type"] == "boolean");
 
     // The description must not claim `&` aligns every multi-row input
     // (#699: gather rows are centred).
@@ -449,6 +477,106 @@ fn pscat_mcp_subcommand_is_the_same_server() {
     // A tool call works too: the subcommand finds pscat (itself) to shell out to.
     let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
     assert_eq!(result["isError"], false, "{result}");
+}
+
+/// The text of a successful tool result's first content item.
+fn first_text(result: &Value) -> &str {
+    result["content"][0]["text"].as_str().expect("a text item")
+}
+
+/// #1079: `describe_art_capabilities` takes filters, and its schema's
+/// `kind` enum is the catalog's own list of kinds.
+#[test]
+fn describe_art_capabilities_filters() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let tool = resp["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "describe_art_capabilities")
+        .expect("the tool is listed");
+    let props = &tool["inputSchema"]["properties"];
+    let kinds: Vec<&str> = pscat::capabilities::CapabilityKind::ALL
+        .iter()
+        .map(|k| k.as_str())
+        .collect();
+    assert_eq!(props["kind"]["enum"], json!(kinds));
+    for key in ["names", "source", "brief"] {
+        assert!(props.get(key).is_some(), "schema lacks {key}");
+    }
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "names": ["pkwash", "nosuch"] }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert_eq!(payload["matched"], 1);
+    assert_eq!(payload["capabilities"][0]["name"], "pkwash");
+    assert!(
+        payload["capabilities"][0]["parameters"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 3
+    );
+    assert_eq!(payload["unmatched_names"], json!(["nosuch"]));
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "kind": "palette", "brief": true }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    let caps = payload["capabilities"].as_array().unwrap();
+    assert!(!caps.is_empty());
+    assert!(
+        caps.iter()
+            .all(|c| c["kind"] == "palette" && c.get("parameters").is_none())
+    );
+
+    let result = s.tool(
+        "describe_art_capabilities",
+        json!({ "source": "paintkit", "brief": true }),
+    );
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert!(
+        payload["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "pkwash")
+    );
+
+    // No arguments: the whole catalog, with no filter keys.
+    let result = s.tool("describe_art_capabilities", json!({}));
+    let payload: Value = serde_json::from_str(first_text(&result)).expect("JSON");
+    assert!(payload.get("matched").is_none());
+    assert!(payload["capabilities"].as_array().unwrap().len() > 100);
+}
+
+#[test]
+fn describe_art_capabilities_rejects_bad_arguments() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for args in [
+        json!({ "kind": "procedur" }),
+        json!({ "kind": 3 }),
+        json!({ "names": "pkwash" }),
+        json!({ "names": [1] }),
+        json!({ "names": ["--kind"] }),
+        json!({ "source": "--brief" }),
+        json!({ "brief": "yes" }),
+    ] {
+        let result = s.tool("describe_art_capabilities", args.clone());
+        assert_eq!(result["isError"], true, "{args}: {result}");
+        assert_eq!(
+            result["structuredContent"]["error"]["kind"], "invalid_argument",
+            "{args}"
+        );
+    }
 }
 
 #[test]
@@ -589,6 +717,47 @@ fn an_errored_render_has_no_lint_block_but_keeps_the_error_and_the_page() {
                     "the partial page is still returned, {what}"
                 );
             }
+        }
+    }
+}
+
+/// #1110: when a program redefines an operator and then fails, the result
+/// carries the `[shadowed-operator]` note, in its own `Lint:` block apart from
+/// the `PostScript error:` one. The consequence findings stay out (#942).
+#[test]
+fn an_errored_render_after_a_shadowed_operator_def_shows_the_lint_note() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source = "/sub (hello) def\n0 0 moveto 5 3 sub 10 lineto stroke showpage";
+    for tool in ["render_postscript", "start_render"] {
+        for bands in [1, 2] {
+            let args = json!({ "source": source, "width": 40, "height": 40, "bands": bands });
+            let result = if tool == "render_postscript" {
+                s.tool(tool, args)
+            } else {
+                job_result_of(&mut s, args)
+            };
+            let what = format!("{tool} bands {bands}: {result}");
+            let texts = texts(&result);
+            let err = texts
+                .iter()
+                .find(|t| t.starts_with("PostScript error:"))
+                .unwrap_or_else(|| panic!("an error block, {what}"));
+            assert!(!err.contains("shadowed-operator"), "{err} ({what})");
+            let lint = texts
+                .iter()
+                .find(|t| t.starts_with("Lint:"))
+                .unwrap_or_else(|| panic!("a Lint block, {what}"));
+            assert!(
+                lint.contains("[shadowed-operator] /sub was redefined as a string"),
+                "{what}"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .all(|t| !t.contains("[blank-page]") && !t.contains("run-error")),
+                "{what}"
+            );
         }
     }
 }
@@ -1084,6 +1253,77 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     assert!(!out.contains("away"), "{out}");
     let up = list(&mut s, "../outside/*");
     assert!(!up.contains("away"), "{up}");
+}
+
+/// `pscat lib install` (#1056) puts a package where `(lib/NAME/x.ps) run`
+/// works over MCP too, with the read roots and the search order unchanged:
+/// the install directory is one of the server's own roots, and the program
+/// still cannot read outside them or shadow the compiled-in library.
+#[test]
+fn an_installed_library_runs_by_name_over_mcp() {
+    let base = common::scratch_dir("mcp-lib-install");
+    let home = base.join("home");
+    let cwd = base.join("project");
+    let outside = base.join("outside");
+    let pkg = base.join("src/mypkg");
+    for d in [&cwd, &outside, &pkg] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
+    std::fs::write(
+        pkg.join("main.ps"),
+        "/dirname { dup length { dup 0 eq { pop pop () exit } if \
+         1 sub 2 copy get 47 eq { 1 add 0 exch getinterval exit } if } loop } def\n\
+         /concat { /b exch def /a exch def a length b length add string \
+         dup 0 a putinterval dup a length b putinterval } def\n\
+         currentfilename dirname (sib.ps) concat run\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("sib.ps"),
+        "(sibling of ) print currentfilename print\n",
+    )
+    .unwrap();
+    let install = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(&base)
+        .env("PSCAT_HOME", &home)
+        .env("PSCAT_NO_CHECKOUT", "1")
+        .args(["lib", "install"])
+        .arg(&pkg)
+        .output_deadline()
+        .unwrap();
+    assert!(install.status.success(), "{install:?}");
+
+    let env = [
+        ("PSCAT_HOME", home.to_str().unwrap()),
+        ("PSCAT_NO_CHECKOUT", "1"),
+    ];
+    let mut pscat_mcp = std::process::Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+    pscat_mcp.envs(env);
+    let mut pscat_sub = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"));
+    pscat_sub.arg("mcp").envs(env);
+    // The standalone server and `pscat mcp`, from a directory that holds
+    // neither the package nor a lib/.
+    for cmd in [pscat_mcp, pscat_sub] {
+        let mut s = Server::spawn(cmd, &cwd, &[]);
+        initialized(&mut s);
+        let result = s.tool(
+            "eval_postscript",
+            json!({ "source": "(lib/mypkg/main.ps) run" }),
+        );
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(texts(&result)[0], "sibling of lib/mypkg/sib.ps", "{result}");
+        // The program itself has no file name.
+        assert_eq!(eval_error(&mut s, "currentfilename"), "undefined");
+        // Read roots are what they were: outside them is still refused.
+        let away = common::ps_path(&outside.join("away.ps"));
+        assert_eq!(
+            eval_error(&mut s, &format!("({away}) run")),
+            "invalidfileaccess"
+        );
+        // And the bundled library is still the compiled-in one.
+        assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+    }
 }
 
 /// `string status` (#952) must not become a way to probe for files the read
@@ -2027,7 +2267,7 @@ fn chalkboard_math_draws_the_pinned_board() {
     );
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    assert_eq!(fnv1a(pm.data()), 0x7746bc8158136515, "the board moved");
+    assert_eq!(fnv1a(pm.data()), 0x77e56b62ee521faf, "the board moved");
     let cfg = pscat::chalk::Config::from_json(
         r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
     )
@@ -2053,6 +2293,50 @@ fn chalkboard_math_without_a_board_is_transparent() {
         .expect("decode");
     assert_eq!(pm.pixel(0, 0).unwrap().alpha(), 0, "a transparent corner");
     assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "some chalk");
+}
+
+/// `hand` is drychalk's `/Hand` (issue #1111): the same board the library
+/// draws with `chalk.hand`, a different one from the plain board, and a `hand`
+/// of 0 (or none) is the plain board byte for byte.
+#[test]
+fn chalkboard_math_hand_draws_freehand_and_zero_is_the_plain_board() {
+    let root = common::scratch_dir("mcp-chalk-hand");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let mut board = |name: &str, extra: Value| -> Vec<u8> {
+        let mut args = small_board(QUADRATIC);
+        args["out_path"] = json!(name);
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        let result = s.tool("chalkboard_math", args);
+        assert_eq!(result["isError"], false, "{result}");
+        std::fs::read(root.join(name)).unwrap()
+    };
+    let plain = board("plain.png", json!({}));
+    assert_eq!(
+        fnv1a(tiny_skia::Pixmap::decode_png(&plain).unwrap().data()),
+        0x77e56b62ee521faf
+    );
+    assert_eq!(
+        plain,
+        board("zero.png", json!({ "hand": 0 })),
+        "hand 0 is no hand"
+    );
+    let by_hand = board("hand.png", json!({ "hand": 1 }));
+    assert_ne!(plain, by_hand, "the strokes did not move");
+    let viaconfig = board(
+        "config.png",
+        json!({ "config": { "chalk": { "hand": 1 } } }),
+    );
+    assert_eq!(by_hand, viaconfig, "the flat key is chalk.hand");
+    let cfg = pscat::chalk::Config::from_json(
+        r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40},
+            "chalk": {"hand": 1}, "seed": 1}"#,
+    )
+    .unwrap();
+    let lib = pscat::chalk::render(QUADRATIC, &cfg, pscat::chalk::Format::Png).unwrap();
+    assert_eq!(by_hand, lib, "the tool draws exactly what the library does");
 }
 
 /// Every unsupported character or command comes back in one call, each with
@@ -2090,6 +2374,8 @@ fn chalkboard_math_reports_every_problem_at_once() {
         "{text}"
     );
     assert!(!text.contains("%%["), "{text}");
+    // the check pass's lines are internal (#1252): the reply never carries them
+    assert!(!result.to_string().contains("CKPROBLEM"), "{result}");
     assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
 }
 
@@ -2142,6 +2428,8 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
             json!({ "latex": "x", "color": "mauve" }),
             "color must be one of",
         ),
+        (json!({ "latex": "x", "hand": 2 }), "hand must be"),
+        (json!({ "latex": "x", "hand": "wild" }), "hand must be"),
         (json!({ "latex": "x", "board": "chalk" }), "board must be"),
         (json!({ "latex": "x", "board": 3 }), "board must be"),
         (json!({ "latex": "x", "seed": 1.5 }), "seed must be"),
@@ -2463,13 +2751,35 @@ fn review_sheet_has_one_time_budget_for_all_cells() {
 /// budget left for a cell is never rounded to "no limit".
 #[test]
 fn review_sheet_works_under_the_smallest_timeout() {
+    // The server runs the sibling `pscat` inside the 1 s budget. On macOS the
+    // first run of a freshly built binary waits 1-8 s for the system's
+    // security assessment, with no CPU used (#1118): that is not what this
+    // test measures, so run the binary once, outside the budget.
+    let warm = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--version")
+        .output_deadline()
+        .expect("run pscat");
+    assert!(warm.status.success(), "{warm:?}");
     let mut s = Server::start_in(&common::scratch_dir("mcp-sheet-1s"), &["--timeout", "1"]);
     initialized(&mut s);
-    let result = s.tool(
-        "review_sheet",
-        json!({ "entries": [{ "source": mark("0.8 0.2 0.1"), "label": "x" }], "width": 50, "height": 50 }),
-    );
-    assert_eq!(sheet_png(&result)[..4], [0x89, b'P', b'N', b'G']);
+    // A 1 s wall clock is also a race against the other work on the machine
+    // (a loaded host misses it a few times in a hundred). A `timeout` reply
+    // is the server doing what it was asked, so ask again; any other reply,
+    // or five misses in a row, fails the test.
+    let mut misses = Vec::new();
+    for _ in 0..5 {
+        let started = std::time::Instant::now();
+        let result = s.tool(
+            "review_sheet",
+            json!({ "entries": [{ "source": mark("0.8 0.2 0.1"), "label": "x" }], "width": 50, "height": 50 }),
+        );
+        if result["isError"] != true || error_kind(&result) != "timeout" {
+            assert_eq!(sheet_png(&result)[..4], [0x89, b'P', b'N', b'G']);
+            return;
+        }
+        misses.push(started.elapsed());
+    }
+    panic!("the sheet timed out on all 5 tries under --timeout 1 (took {misses:?})");
 }
 
 #[test]
@@ -2711,6 +3021,330 @@ fn review_sheet_labels_cannot_inject_postscript() {
         );
         assert_eq!(sheet_png(&result), cli, "{label:?}");
     }
+    s.ping_ok();
+}
+
+// --- review_sheet: mats, sweeps, captions and cols (#1339) ---------------------
+
+/// A seeded program: red or blue by the first `rand`, with a soft edge so
+/// the cell is not just two flat colours.
+const SEEDED: &str = "1 srand rand 2 mod 0 eq { 1 0 0 } { 0 0 1 } ifelse setrgbcolor \
+    rand 30 mod 15 add 30 20 0 360 arc fill";
+
+/// A parameter program: a bar `W` points wide, 1 when no sweep sets it.
+const BAR: &str = "/W where { pop } { /W 1 def } ifelse 0.9 0.3 0.1 setrgbcolor 5 5 W 40 rectfill";
+
+/// A matted cell, a zoomed one and a small one are the CLI's sheet to the
+/// byte: the child draws on a transparent page, the shared composition sets
+/// it on the mat. `mark` has antialiased edges (partly transparent pixels),
+/// the case a PNG hand-off could change by a level.
+#[test]
+fn review_sheet_mats_are_byte_identical_to_pscat_sheet() {
+    let a = mark("0.8 0.2 0.1");
+    let (cli, ok) = cli_sheet(
+        "mcp-sheet-mat-cli",
+        &[("a.ps", &a)],
+        &[&[
+            "--page",
+            "120x120",
+            "--label",
+            "a",
+            "--dpi",
+            "96,9@#222,9x4@white,40@abc",
+        ]],
+    );
+    assert!(ok);
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({
+            "entries": [{
+                "source": a, "label": "a", "width": 120, "height": 120,
+                "dpi": [96, { "dpi": 9, "mat": "#222" }, { "dpi": 9, "zoom": 4, "mat": "white" },
+                        { "dpi": 40, "mat": "abc" }]
+            }]
+        }),
+    );
+    assert_eq!(
+        sheet_png(&result),
+        cli,
+        "the matted sheet differs from the CLI's"
+    );
+    s.ping_ok();
+}
+
+/// A seed sweep, a parameter sweep with its values spelled as the CLI
+/// spells them (`10`, `0.5`, `2.0` is `2`), readable captions, no values and
+/// `cols` are each the CLI's sheet to the byte, and the sweep cells differ.
+#[test]
+fn review_sheet_sweeps_captions_and_cols_are_byte_identical_to_pscat_sheet() {
+    let page = ["--page", "60x50"];
+    let mut s = Server::start();
+    initialized(&mut s);
+    let noise = "0 1 9 { /i exch def 0 1 9 { /j exch def i 0.37 mul j 0.37 mul 3 0.5 2 fbm2 \
+         0.5 add setgray i 5 mul j 5 mul 5 5 rectfill } for } for";
+    // (tag, source, CLI flags, tool arguments)
+    let cases: Vec<(&str, String, Vec<&str>, Value)> = vec![
+        (
+            "seeds",
+            SEEDED.to_string(),
+            vec!["--dpi", "72,20", "--sweep-seed", "1,2,3"],
+            json!({ "sweep": { "seed": [1, 2, 3] }, "dpi": [72, 20] }),
+        ),
+        (
+            "noise-seeds",
+            noise.to_string(),
+            vec!["--sweep-seed", "1,2,1"],
+            json!({ "sweep": { "seed": [1, 2, 1] } }),
+        ),
+        (
+            "param",
+            BAR.to_string(),
+            // 2.0 is `2`, 0.50 is `0.5` and -3 stays: the caption and the
+            // defined value are the CLI's own text.
+            vec!["--sweep", "W=10,0.50,2.0,-3"],
+            json!({ "sweep": { "param": "W", "values": [10, 0.5, 2.0, -3] } }),
+        ),
+        (
+            "captions",
+            BAR.to_string(),
+            vec!["--sweep", "W=10,20,30", "--captions", "(a) one,,(c) three"],
+            json!({ "sweep": { "param": "W", "values": [10, 20, 30] },
+                    "captions": ["(a) one", "", "(c) three"] }),
+        ),
+        (
+            "no-values",
+            BAR.to_string(),
+            vec!["--no-values", "--sweep", "W=10,20"],
+            json!({ "sweep": { "param": "W", "values": [10, 20] }, "values": false }),
+        ),
+        (
+            "cols",
+            BAR.to_string(),
+            vec!["--cols", "2", "--dpi", "72,36", "--sweep", "W=10,20,30"],
+            json!({ "sweep": { "param": "W", "values": [10, 20, 30] }, "dpi": [72, 36], "cols": 2 }),
+        ),
+        (
+            "mat-sweep",
+            BAR.to_string(),
+            vec!["--dpi", "72@#222", "--sweep", "W=10,20"],
+            json!({ "sweep": { "param": "W", "values": [10, 20] },
+                    "dpi": [{ "dpi": 72, "mat": "#222" }] }),
+        ),
+    ];
+    for (tag, source, flags, extra) in cases {
+        let dir = common::scratch_dir(&format!("mcp-sheet-sweep-{tag}"));
+        std::fs::write(dir.join("p.ps"), &source).unwrap();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+        cmd.current_dir(&dir).arg("sheet").args(["-o", "cli.png"]);
+        cmd.args(page).args(&flags).args(["--label", "row", "p.ps"]);
+        let out = cmd.output_deadline().expect("pscat sheet");
+        assert!(
+            out.status.success(),
+            "{tag}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let cli = std::fs::read(dir.join("cli.png")).unwrap();
+
+        let mut entry = json!({ "source": source, "label": "row", "width": 60, "height": 50 });
+        let mut args = json!({});
+        for (k, v) in extra.as_object().unwrap() {
+            // The sweep and its captions belong to the entry, the rest to the call.
+            let target = if k == "sweep" || k == "captions" || k == "dpi" {
+                &mut entry
+            } else {
+                &mut args
+            };
+            target[k.as_str()] = v.clone();
+        }
+        args["entries"] = json!([entry]);
+        let result = s.tool("review_sheet", args);
+        assert_eq!(
+            sheet_png(&result),
+            cli,
+            "{tag}: the tool's sheet differs from pscat sheet's"
+        );
+    }
+    s.ping_ok();
+}
+
+/// A sweep cell is the same render as a one-frame sweep of the CLI: the
+/// seeds change the picture, and the same seed twice is the same cell.
+#[test]
+fn review_sheet_seed_cells_differ_by_seed_and_repeat_by_seed() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": SEEDED, "width": 60, "height": 60,
+                "sweep": { "seed": [1, 2, 3, 1] } }],
+            "labels": false, "sizes": false, "values": false }),
+    );
+    let sheet = tiny_skia::Pixmap::decode_png(&sheet_png(&result)).unwrap();
+    // Four 60 px cells, 1 px border, 14 px gap, 12 px margin, no text.
+    let cell = |k: u32| -> Vec<u8> {
+        let x0 = 12 + 1 + k * (62 + 14);
+        (13..73)
+            .flat_map(|y| (x0..x0 + 60).map(move |x| (x, y)))
+            .flat_map(|(x, y)| {
+                let i = ((y * sheet.width() + x) * 4) as usize;
+                sheet.data()[i..i + 4].to_vec()
+            })
+            .collect()
+    };
+    assert_eq!(cell(0), cell(3), "the same seed, the same cell");
+    assert!(
+        cell(0) != cell(1) || cell(1) != cell(2),
+        "different seeds must give different cells"
+    );
+    s.ping_ok();
+}
+
+/// A sweep cell runs in the same sandbox as any other: a read outside the
+/// roots fails the same way, and the failure names the sweep value.
+#[test]
+fn review_sheet_sweep_cells_are_sandboxed_and_failures_name_the_value() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let read = "(/etc/hosts) (r) file closefile";
+    let plain = s.tool("review_sheet", json!({ "entries": [{ "source": read }] }));
+    let swept = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": read, "sweep": { "seed": [7] } }] }),
+    );
+    let err = |r: &Value| texts(r).join("\n");
+    // The error a read outside the roots gives (invalidfileaccess where the
+    // file exists, undefinedfilename where it does not, as on Windows): the
+    // sweep cell's is the plain cell's.
+    let name = |r: &Value| {
+        let t = err(r);
+        let tail = t.split("Error: ").nth(1).unwrap_or_default();
+        tail.split(';').next().unwrap_or_default().to_string()
+    };
+    assert!(
+        ["invalidfileaccess", "undefinedfilename"].contains(&name(&plain).as_str()),
+        "{plain}"
+    );
+    assert_eq!(name(&swept), name(&plain), "{swept}");
+    assert!(err(&swept).contains("seed=7"), "{swept}");
+    let swept = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "nosuchoperator",
+                "sweep": { "param": "Density", "values": [20] } }] }),
+    );
+    assert!(err(&swept).contains("Density=20"), "{swept}");
+    // No `pscat: sweep:` progress line from the child reaches the content.
+    assert!(!err(&swept).contains("sweep: 1/1"), "{swept}");
+    s.ping_ok();
+}
+
+/// The new inputs are checked before anything runs.
+#[test]
+fn review_sheet_sweep_and_mat_arguments_are_structured_errors() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let src = |extra: Value| {
+        let mut e = json!({ "source": "0 setgray", "width": 20, "height": 20 });
+        for (k, v) in extra.as_object().unwrap() {
+            e[k.as_str()] = v.clone();
+        }
+        json!({ "entries": [e] })
+    };
+    for (args, says) in [
+        (src(json!({ "sweep": 7 })), "sweep must be an object"),
+        (src(json!({ "sweep": {} })), "either seed"),
+        (
+            src(json!({ "sweep": { "seed": [1], "param": "A", "values": [1] } })),
+            "either seed",
+        ),
+        (src(json!({ "sweep": { "param": "A" } })), "either seed"),
+        (
+            src(json!({ "sweep": { "seed": [] } })),
+            "seed must be a list",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1.5] } })),
+            "a seed must be a whole number",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1], "extra": 1 } })),
+            "unknown key",
+        ),
+        (
+            src(json!({ "sweep": { "param": "--evil", "values": [1] } })),
+            "param must be an identifier",
+        ),
+        (
+            src(json!({ "sweep": { "param": "a def (x", "values": [1] } })),
+            "param must be an identifier",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": ["1"] } })),
+            "a value must be a number",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": [1e300] } })),
+            "at most 40 characters",
+        ),
+        (
+            src(json!({ "sweep": { "param": "A", "values": vec![1; 33] } })),
+            "list of 1 to 32 numbers",
+        ),
+        (
+            src(json!({ "captions": ["a"] })),
+            "needs a sweep for the same entry",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1, 2] }, "captions": ["a"] })),
+            "1 entries but the sweep has 2 values",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1] }, "captions": [7] })),
+            "each caption must be a string",
+        ),
+        (
+            src(json!({ "sweep": { "seed": [1] }, "captions": ["x".repeat(201)] })),
+            "at most 200 characters",
+        ),
+        (
+            src(json!({ "dpi": [{ "dpi": 9, "mat": "red" }] })),
+            "invalid mat colour",
+        ),
+        (
+            src(json!({ "dpi": [{ "dpi": 9, "mat": 3 }] })),
+            "mat must be a colour string",
+        ),
+        (
+            json!({ "entries": [{ "source": "" }], "cols": 0 }),
+            "cols must be a whole number from 1 to 32",
+        ),
+        (
+            json!({ "entries": [{ "source": "" }], "values": "no" }),
+            "values must be true or false",
+        ),
+    ] {
+        let result = s.tool("review_sheet", args.clone());
+        assert_eq!(error_kind(&result), "invalid_argument", "{args}: {result}");
+        assert!(texts(&result)[0].contains(says), "{args}: {result}");
+    }
+    // A sweep multiplies the cells: 2 dpi items x 17 values is over 32.
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "", "dpi": [72, 36],
+                "sweep": { "param": "A", "values": (0..17).collect::<Vec<_>>() } }] }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["cells"], 34);
+    // A mat counts toward the 8000 px side: 7990 px is fine bare, not matted.
+    let wide = |dpi: Value| json!({ "entries": [{ "source": "", "width": 7990, "height": 10, "dpi": [dpi] }] });
+    let result = s.tool("review_sheet", wide(json!({ "dpi": 72, "mat": "#222" })));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert!(texts(&result)[0].contains("mat"), "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        40_000_000
+    );
     s.ping_ok();
 }
 
@@ -3854,4 +4488,95 @@ fn gpu_preview_renders_under_the_call_limits() {
         assert!(text.contains("limitexceeded (steps)"), "{text}");
     }
     assert_eq!(images(&result).len(), 1, "{result}");
+}
+
+// --- svg_text (#1132) -----------------------------------------------------
+
+/// Standard-font text, so `--svg-text` has something to write as `<text>`.
+const HELLO: &str = "/Helvetica findfont 12 scalefont setfont 10 10 moveto (Hello) show showpage";
+
+/// Only the two render tools take `svg_text`, as a boolean.
+#[test]
+fn svg_text_is_in_the_render_schemas() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let list = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let mut seen = 0;
+    for tool in list["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        let arg = &tool["inputSchema"]["properties"]["svg_text"];
+        if !["render_postscript", "start_render"].contains(&name) {
+            assert!(arg.is_null(), "{name} takes no svg_text");
+            continue;
+        }
+        seen += 1;
+        assert_eq!(arg["type"], "boolean", "{name}: {arg}");
+        let about = arg["description"].as_str().unwrap();
+        assert!(about.contains("svg only"), "{name}: {about}");
+    }
+    assert_eq!(seen, 2);
+}
+
+/// Anything but a boolean is refused, for every format.
+#[test]
+fn svg_text_must_be_a_boolean() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for tool in ["render_postscript", "start_render"] {
+        for format in ["png", "svg"] {
+            for bad in [json!("yes"), json!(1), json!([true])] {
+                let result = s.tool(
+                    tool,
+                    json!({ "source": HELLO, "format": format, "svg_text": bad }),
+                );
+                assert_eq!(error_kind(&result), "invalid_argument", "{tool}: {result}");
+                assert!(
+                    texts(&result).join("\n").contains("svg_text"),
+                    "{tool}: {result}"
+                );
+            }
+        }
+    }
+}
+
+/// `svg_text: true` writes the text as `<text>` in a smaller file; without
+/// it, or with `false`, the SVG is the same outlines as before; `start_render`
+/// gives the same SVG; png and pdf accept the option and ignore it.
+#[test]
+fn svg_text_writes_text_elements_only_for_svg() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let svg = |s: &mut Server, extra: Value| {
+        let mut args = json!({ "source": HELLO, "width": 100, "height": 40, "format": "svg" });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        let result = s.tool("render_postscript", args);
+        assert_eq!(result["isError"], false, "{result}");
+        texts(&result).join("\n")
+    };
+    let plain = svg(&mut s, json!({}));
+    let off = svg(&mut s, json!({ "svg_text": false }));
+    let on = svg(&mut s, json!({ "svg_text": true }));
+    assert!(!plain.contains("<text"), "outlines by default");
+    assert_eq!(off, plain, "false is the default");
+    assert!(on.contains("<text") && on.contains("Hello"), "{on}");
+    assert!(on.len() < plain.len(), "{} < {}", on.len(), plain.len());
+
+    let job = job_result_of(
+        &mut s,
+        json!({ "source": HELLO, "width": 100, "height": 40, "format": "svg", "svg_text": true }),
+    );
+    assert_eq!(texts(&job).join("\n"), on, "start_render");
+
+    let png = s.tool(
+        "render_postscript",
+        json!({ "source": HELLO, "width": 100, "height": 40 }),
+    );
+    let png_on = s.tool(
+        "render_postscript",
+        json!({ "source": HELLO, "width": 100, "height": 40, "svg_text": true }),
+    );
+    assert_eq!(png_on["isError"], false, "{png_on}");
+    assert!(images(&png_on) == images(&png), "png ignores svg_text");
 }

@@ -8,8 +8,11 @@
 //! its dpis is a cell, drawn at its own pixel size (a 48 px render stays
 //! 48 px beside a 512 px one) and centred in its column. Labels are set
 //! with pscat's own text rendering (`pscat::contact_sheet::render_text`;
-//! the face is picked per character by script), and the geometry is
-//! `pscat::contact_sheet::Layout`.
+//! the face is picked per character by script), and the geometry, labels,
+//! captions, frames and zoom are the shared `pscat::contact_sheet`
+//! composition (`SheetPlan`, `compose_sheet`), which the `review_sheet` MCP
+//! tool draws with too (issue #744). This file only parses the options and
+//! renders each cell.
 //!
 //! Issue #706 adds sweeps (one file over seeds or a parameter, each cell
 //! labelled with its value; the grammars and the value formatting are the
@@ -17,7 +20,9 @@
 //! `format_sweep_value` in `main.rs`, which a child module can call), a
 //! per-cell mat, stacked columns and `--cols` wrapping.
 
-use pscat::contact_sheet::{self as sheet, CellSize, Layout, PackedRow};
+use pscat::contact_sheet::{
+    self as sheet, ComposeError, PlanError, SheetCell, SheetOptions, SheetPlan, SheetRow,
+};
 use pscat::{Interp, Limits};
 use tiny_skia::Pixmap;
 
@@ -56,6 +61,16 @@ Render each FILE as a row of cells and compose them into one labelled PNG.
                      Density=10,20,40 or Density=10:50:10). A sweep takes every
                      --dpi cell once per value, and puts the value under each
                      cell as its caption: seed=7, Density=20.
+      --captions LIST
+                     the next file's sweep only: a readable caption for each
+                     value in place of seed=7 or Density=20, comma-separated,
+                     one per value: --sweep Panel=1,2,3 --captions
+                     '(a) image model,(b) pscat,(c) hybrid'. A caption cannot
+                     contain a comma; an empty one (a,,c) leaves that value's
+                     caption out. A failure message still names the value
+      --no-values    omit the sweep value from each caption (the pixel size
+                     stays, unless --no-sizes), for a sheet whose cells already
+                     say what they are. --captions then has nothing to show
       --cols N       wrap a row of more than N columns onto further lines (the
                      label only above the first); columns line up across lines
       --label TEXT   the next file's row label (default: its file name without .ps);
@@ -93,9 +108,6 @@ Example (twelve seeds of one piece, four to a line):
 const MAX_CELLS: usize = 256;
 /// Largest `--dpi` zoom factor.
 const MAX_ZOOM: u32 = 16;
-/// Row label and caption type sizes, in pixels.
-const LABEL_PX: u32 = 16;
-const CAPTION_PX: u32 = 12;
 
 /// One `--dpi` cell: `DPI[xZOOM][@MAT]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -136,6 +148,10 @@ struct Entry {
     /// `--dpi`'s columns: each a stack of one or more cells.
     columns: Vec<Vec<CellSpec>>,
     sweep: Option<Sweep>,
+    /// `--captions`: what to draw for each sweep value in place of
+    /// [`Sweep::label`] (an empty entry draws none). Always as long as the
+    /// sweep, which [`push`] checks.
+    captions: Option<Vec<String>>,
 }
 
 /// One cell to draw: what `--dpi` says, and which sweep value it takes.
@@ -175,6 +191,8 @@ struct Opts {
     entries: Vec<Entry>,
     labels: bool,
     sizes: bool,
+    /// `--no-values` turns this off: the sweep value in each caption.
+    values: bool,
     cols: Option<usize>,
     /// `--max-steps`, `--max-time`, `--max-memory` (issue #701), per cell.
     limits: Limits,
@@ -208,130 +226,99 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     }
 
     // Everything the layout needs is known before any cell renders, so an
-    // oversized sheet fails fast: pixel sizes from a probe interpreter,
-    // text from the label renderer.
-    let text = |t: &str, px: u32, bold: bool| sheet::render_text(t, px, bold).map_err(msg);
-    let mut headers: Vec<Option<Pixmap>> = Vec::new();
-    let mut captions: Vec<Vec<Option<Pixmap>>> = Vec::new();
-    let mut rows: Vec<PackedRow> = Vec::new();
+    // oversized sheet fails fast: pixel sizes from a probe interpreter, text
+    // from the shared composition's label renderer.
+    let mut rows: Vec<SheetRow> = Vec::with_capacity(opts.entries.len());
     for (e, (cells, column_len)) in opts.entries.iter().zip(&plans) {
-        let header = if opts.labels {
-            let label = e.label.clone().unwrap_or_else(|| stem(&e.path));
-            text(&label, LABEL_PX, true)?
-        } else {
-            None
-        };
-        let mut row = PackedRow {
-            header: dims(header.as_ref()),
-            cells: Vec::new(),
+        let mut row = SheetRow {
+            label: opts
+                .labels
+                .then(|| e.label.clone().unwrap_or_else(|| stem(&e.path))),
+            cells: Vec::with_capacity(cells.len()),
             column_len: column_len.clone(),
         };
-        let mut row_captions = Vec::new();
         for planned in cells {
             let CellSpec { dpi: d, zoom, mat } = planned.spec;
-            let (w, h) = probe(e.page, d)?;
-            // The caption: the sweep value if any, then the size.
-            let mut parts = Vec::new();
-            if let (Some(v), Some(sweep)) = (planned.value, &e.sweep) {
-                parts.push(sweep.label(v));
-            }
-            if opts.sizes {
-                let note = if zoom > 1 {
-                    format!(" (shown at {zoom}x)")
-                } else {
-                    String::new()
-                };
-                parts.push(format!("{w}x{h} px{note}"));
-            }
-            let caption = if parts.is_empty() {
-                None
-            } else {
-                text(&parts.join(", "), CAPTION_PX, false)?
+            let size = probe(e.page, d)?;
+            let value = match (opts.values, planned.value, &e.sweep) {
+                (true, Some(v), Some(sweep)) => Some(match &e.captions {
+                    Some(names) => names[v].clone(),
+                    None => sweep.label(v),
+                }),
+                _ => None,
             };
-            let pad = if mat.is_some() { 2 * sheet::MAT_PAD } else { 0 };
-            let (zw, zh) = (
-                w.checked_mul(zoom).and_then(|v| v.checked_add(pad)),
-                h.checked_mul(zoom).and_then(|v| v.checked_add(pad)),
-            );
-            let image = match (zw, zh) {
-                (Some(zw), Some(zh)) if zw <= sheet::MAX_SIDE_PX && zh <= sheet::MAX_SIDE_PX => {
-                    (zw, zh)
-                }
-                _ => {
-                    return Err(msg(format!(
-                        "{}: a {w}x{h} px cell shown at {zoom}x is over the {}px limit",
-                        e.path,
-                        sheet::MAX_SIDE_PX
-                    )));
-                }
-            };
-            row.cells.push(CellSize {
-                image,
-                caption: dims(caption.as_ref()),
+            row.cells.push(SheetCell {
+                size,
+                zoom,
+                mat,
+                value,
             });
-            row_captions.push(caption);
         }
-        headers.push(header);
-        captions.push(row_captions);
         rows.push(row);
     }
-    let layout = Layout::packed(&rows, opts.cols).map_err(|m| {
-        msg(match opts.cols {
+    let sheet_opts = SheetOptions {
+        sizes: opts.sizes,
+        wrap: opts.cols,
+    };
+    let plan = SheetPlan::new(&rows, &sheet_opts).map_err(|err| match err {
+        PlanError::Text(m) => msg(m),
+        PlanError::CellTooLarge { row, cell } => {
+            let (w, h) = rows[row].cells[cell].size;
+            msg(format!(
+                "{}: a {w}x{h} px cell shown at {}x is over the {}px limit",
+                opts.entries[row].path,
+                rows[row].cells[cell].zoom,
+                sheet::MAX_SIDE_PX
+            ))
+        }
+        PlanError::Layout(m) => msg(match opts.cols {
             None => format!("{m}; or wrap the rows with --cols N, or stack cells with +"),
             Some(_) => m,
-        })
+        }),
     })?;
-    let mut out = layout.new_sheet().map_err(msg)?;
 
     // Cells stream into the sheet, one frame in memory at a time.
     let mut any_failed = false;
-    for (r, (e, (cells, _))) in opts.entries.iter().zip(&plans).enumerate() {
-        if let Some(h) = &headers[r] {
-            let (x, y) = layout.header_xy[r];
-            sheet::blit_at(&mut out, x, y, h);
+    let mut seed_fired = false;
+    let out = sheet::compose_sheet(&plan, |r, c| {
+        let e = &opts.entries[r];
+        let planned = &plans[r].0[c];
+        let (frame, ok, fired) = render_cell(
+            &sources[r],
+            &e.path,
+            e.page,
+            planned.spec.dpi,
+            planned.spec.mat.is_some(),
+            e.sweep.as_ref().zip(planned.value),
+            opts.limits,
+        )?;
+        any_failed |= !ok;
+        if c == 0 {
+            seed_fired = false;
         }
-        let mut seed_fired = false;
-        for (c, planned) in cells.iter().enumerate() {
-            let CellSpec { dpi: d, zoom, mat } = planned.spec;
-            let sweep = e.sweep.as_ref().zip(planned.value);
-            let (frame, ok, fired) = render_cell(
-                &sources[r],
-                &e.path,
-                e.page,
-                d,
-                mat.is_some(),
-                sweep,
-                opts.limits,
-            )?;
-            any_failed |= !ok;
-            seed_fired |= fired;
-            let frame = if zoom > 1 {
-                sheet::zoom_nearest(&frame, zoom)
-                    .ok_or_else(|| msg(format!("{}: cell too large to zoom", e.path)))?
-            } else {
-                frame
-            };
-            let frame = match mat {
-                Some(rgb) => sheet::composite_on_mat(&frame, rgb, sheet::MAT_PAD)
-                    .ok_or_else(|| msg(format!("{}: cell too large to mat", e.path)))?,
-                None => frame,
-            };
-            let (x, y) = layout.image_xy[r][c];
-            sheet::frame(&mut out, x, y, frame.width(), frame.height());
-            sheet::blit_at(&mut out, x, y, &frame);
-            if let Some(cap) = &captions[r][c] {
-                let (cx, cy) = layout.caption_xy[r][c];
-                sheet::blit_at(&mut out, cx, cy, cap);
-            }
-        }
-        if matches!(e.sweep, Some(Sweep::Seed(_))) && !seed_fired {
+        seed_fired |= fired;
+        if c + 1 == plans[r].0.len()
+            && matches!(e.sweep, Some(Sweep::Seed(_)))
+            && !seed_fired
+        {
             eprintln!(
                 "pscat sheet: warning: {} never called srand or sampled noise -- --sweep-seed had no effect, \
                  every cell is identical",
                 e.path
             );
         }
-    }
+        Ok(frame)
+    })
+    .map_err(|err| match err {
+        ComposeError::Render(f) => f,
+        ComposeError::Zoom { row, .. } => {
+            msg(format!("{}: cell too large to zoom", opts.entries[row].path))
+        }
+        ComposeError::Mat { row, .. } => {
+            msg(format!("{}: cell too large to mat", opts.entries[row].path))
+        }
+        ComposeError::Sheet(m) => msg(m),
+    })?;
     // Cells of any dpi share the sheet, so it records no particular
     // resolution: 72 dpi, one pixel to the point.
     pscat::png::save(&out, 1.0, &opts.out)
@@ -342,10 +329,6 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     } else {
         Ok(())
     }
-}
-
-fn dims(p: Option<&Pixmap>) -> (u32, u32) {
-    p.map_or((0, 0), |p| (p.width(), p.height()))
 }
 
 /// The file name without directory or extension: the default row label.
@@ -470,7 +453,7 @@ fn parse_dpis(list: &str) -> Result<Vec<Vec<CellSpec>>, String> {
 
 fn parse_cell(item: &str) -> Result<CellSpec, String> {
     let (spec, mat) = match item.split_once('@') {
-        Some((spec, mat)) => (spec, Some(parse_mat(mat)?)),
+        Some((spec, mat)) => (spec, Some(sheet::parse_mat(mat)?)),
         None => (item, None),
     };
     let (d, zoom) = match spec.split_once('x') {
@@ -491,28 +474,6 @@ fn parse_cell(item: &str) -> Result<CellSpec, String> {
         zoom,
         mat,
     })
-}
-
-/// A mat colour: `#rgb` or `#rrggbb` (the `#` optional, so a shell that
-/// treats it as a pattern character is not a problem), `white` or `black`.
-fn parse_mat(s: &str) -> Result<[u8; 3], String> {
-    match s {
-        "white" => return Ok([255, 255, 255]),
-        "black" => return Ok([0, 0, 0]),
-        _ => {}
-    }
-    let hex = s.strip_prefix('#').unwrap_or(s);
-    let bad = || format!("invalid mat colour: {s:?} (expected #rgb, #rrggbb, white or black)");
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(bad());
-    }
-    let digit = |i: usize| u8::from_str_radix(&hex[i..i + 1], 16).map_err(|_| bad());
-    let pair = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| bad());
-    match hex.len() {
-        3 => Ok([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
-        6 => Ok([pair(0)?, pair(2)?, pair(4)?]),
-        _ => Err(bad()),
-    }
 }
 
 /// `--sweep NAME=SPEC`: the name is spliced into a `/NAME v def`, so it
@@ -546,6 +507,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         entries: Vec::new(),
         labels: true,
         sizes: true,
+        values: true,
         cols: None,
         limits: Limits::none(),
     };
@@ -558,6 +520,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         }]],
         label: None,
         sweep: None,
+        captions: None,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -580,19 +543,26 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
                     Sweep::Seed(parse_seed_spec(&spec)?)
                 });
             }
+            "--captions" => {
+                if pending.captions.is_some() {
+                    return Err("one --captions per file: it cannot be repeated".into());
+                }
+                pending.captions = Some(parse_captions(&args.value(&arg)?));
+            }
             "--cols" => o.cols = Some(parse_cols(&args.value(&arg)?)?),
             "--no-labels" => o.labels = false,
             "--no-sizes" => o.sizes = false,
+            "--no-values" => o.values = false,
             _ if take_limit_flag(&mut o.limits, &arg, &mut args)? => {}
             "--" => {
                 for rest in args.remaining() {
-                    push(&mut o, rest, &mut pending);
+                    push(&mut o, rest, &mut pending)?;
                 }
             }
             s if s.starts_with('-') && s.len() > 1 => {
                 return Err(format!("unknown option: {s}"));
             }
-            _ => push(&mut o, arg, &mut pending),
+            _ => push(&mut o, arg, &mut pending)?,
         }
     }
     if let Some(l) = pending.label {
@@ -601,26 +571,59 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
     if pending.sweep.is_some() {
         return Err("--sweep-seed/--sweep has no file after it".into());
     }
+    if pending.captions.is_some() {
+        return Err("--captions has no file after it".into());
+    }
     Ok(Some(o))
 }
 
 /// What the files that follow take from the options so far: `--page` and
-/// `--dpi` stay; `--label` and the sweep apply to the next file only.
+/// `--dpi` stay; `--label`, the sweep and `--captions` apply to the next
+/// file only.
 struct Pending {
     page: (u32, u32),
     columns: Vec<Vec<CellSpec>>,
     label: Option<String>,
     sweep: Option<Sweep>,
+    captions: Option<Vec<String>>,
 }
 
-fn push(o: &mut Opts, path: String, pending: &mut Pending) {
+/// `--captions`: one caption per comma-separated entry. Nothing is
+/// trimmed, so a space after a comma is part of the caption; an empty entry
+/// is a caption left out.
+fn parse_captions(list: &str) -> Vec<String> {
+    list.split(',').map(str::to_string).collect()
+}
+
+fn push(o: &mut Opts, path: String, pending: &mut Pending) -> Result<(), String> {
+    let sweep = pending.sweep.take();
+    let captions = pending.captions.take();
+    if let Some(names) = &captions {
+        match &sweep {
+            None => {
+                return Err(format!(
+                    "--captions needs a --sweep or --sweep-seed for the same file ({path})"
+                ));
+            }
+            Some(s) if s.len() != names.len() => {
+                return Err(format!(
+                    "--captions has {} entries but the sweep for {path} has {} values",
+                    names.len(),
+                    s.len()
+                ));
+            }
+            Some(_) => {}
+        }
+    }
     o.entries.push(Entry {
         path,
         label: pending.label.take(),
         page: pending.page,
         columns: pending.columns.clone(),
-        sweep: pending.sweep.take(),
+        sweep,
+        captions,
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -674,11 +677,11 @@ mod tests {
 
     #[test]
     fn mat_colours_are_hex_or_named() {
-        assert_eq!(parse_mat("#fff"), Ok([255, 255, 255]));
-        assert_eq!(parse_mat("1a2B3c"), Ok([0x1a, 0x2b, 0x3c]));
-        assert_eq!(parse_mat("black"), Ok([0, 0, 0]));
+        assert_eq!(sheet::parse_mat("#fff"), Ok([255, 255, 255]));
+        assert_eq!(sheet::parse_mat("1a2B3c"), Ok([0x1a, 0x2b, 0x3c]));
+        assert_eq!(sheet::parse_mat("black"), Ok([0, 0, 0]));
         for bad in ["", "#", "red", "#12", "#12345", "#ggg"] {
-            assert!(parse_mat(bad).is_err(), "{bad:?} must be refused");
+            assert!(sheet::parse_mat(bad).is_err(), "{bad:?} must be refused");
         }
     }
 
@@ -711,6 +714,7 @@ mod tests {
             page: (10, 10),
             columns: parse_dpis("72,9+9@#222").unwrap(),
             sweep: Some(Sweep::Seed(vec![3, 4])),
+            captions: None,
         };
         let (cells, column_len) = e.plan();
         assert_eq!(e.cell_count(), cells.len());
@@ -720,6 +724,13 @@ mod tests {
         assert_eq!(e.sweep.as_ref().unwrap().label(1), "seed=4");
         let p = parse_param_sweep("D=10:30:10").unwrap();
         assert_eq!((p.len(), p.label(2).as_str()), (3, "D=30"));
+    }
+
+    #[test]
+    fn captions_split_on_commas_and_keep_empty_entries() {
+        assert_eq!(parse_captions("(a) x,(b) y"), ["(a) x", "(b) y"]);
+        assert_eq!(parse_captions("a,,c,"), ["a", "", "c", ""]);
+        assert_eq!(parse_captions(""), [""]);
     }
 
     #[test]

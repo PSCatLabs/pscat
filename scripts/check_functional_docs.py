@@ -81,7 +81,7 @@ def check():
             assert png_size(path) == (int(img["width"]), int(img["height"])), f"wrong image dimensions: {path}"
     html = (DOCS / "index.html").read_text(encoding="utf-8")
     manifest = json.loads((DOCS / "assets/render-manifest.json").read_text(encoding="utf-8"))
-    expected_assets = {"ultraviolet", "sunprint", "blue-hour", "imperative", "ground", "detail", "primitives",
+    expected_assets = {"ultraviolet", "sunprint", "blue-hour", "ground", "detail", "primitives",
                        "type-nocturne", "type-sunprint", "type-blueprint", "type-risograph",
                        "type-neon", "type-opart", "press-inspected", "press-clean"}
     assert {Path(r["file"]).stem for r in manifest} == expected_assets, "render manifest missing a study"

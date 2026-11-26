@@ -238,21 +238,33 @@ that `/Spread` and `/Load` keep their one shared meaning.
   `systemdict`.** Since #754 the catalog lists the operators pscat adds
   beyond the PLRM, as hand-written `ENTRIES` rows with `kind: "operator"`:
   the noise operators (#734), `setalpha`/`currentalpha`/`setblendmode`/
-  `currentblendmode` (#47), `.sameclip` (#488) and `writereals`/
+  `currentblendmode` (#47), `begingroup`/`endgroup` (#1406), `.sameclip` (#488) and `writereals`/
   `readreals` (#735, #773). Not listed: PLRM Level 1/2/3 operators (the catalog
   has no PLRM coverage; `renamefile`, `deletefile` and `filenameforall`
   from #740 are PLRM Level 2), Ghostscript-compatibility `min`/`max`/
-  `.min`/`.max`, and `.permnoise2`, an internal hook for artkit's
+  `.min`/`.max` and `=only`/`==only` (#1413), and `.permnoise2`, an internal hook for artkit's
   `noise2`. To add an operator, add an `Operator` row (source
   `SYSTEMDICT`, stack signature as `example`);
   `tests/capabilities.rs::every_cataloged_operator_exists_in_systemdict`
   fails if the name is not a real operator in `systemdict`. The `nr*`
   procedures in `lib/noiseref.ps` name their native twin in their
   summary, and a test keeps that pointer honest.
-- **No `--capabilities <kind>` filter.** The CLI always prints the
-  full payload; an agent that wants just palettes filters the JSON
-  itself. Simpler for a first version — revisit if the payload size
-  becomes a real problem in practice.
+- **Filters (#1079).** The full payload is over 300,000 characters,
+  which an MCP client may truncate (one cut it at 100,000, in the middle
+  of the paintkit parameters). `--capabilities` therefore takes, right
+  after it, any of `--name NAME` (repeatable, exact), `--kind KIND`
+  (`font`, `type3_face`, `palette`, `template`, `procedure`, `operator`,
+  `dial`), `--source FILE` (`paintkit`, `paintkit.ps`, `lib/paintkit.ps`
+  or `systemdict`; case does not matter) and `--brief` (name, kind,
+  source, availability as one word and the description's first sentence,
+  at most 110 characters: no `parameters`, `load` or `example`). `describe_art_capabilities`
+  takes `names`, `kind`, `source` and `brief`. A filtered payload keeps
+  `pscat_version`, the whole catalog's `catalog_signature` and
+  `font_packs`, and adds `matched`, `total` and, if a requested name
+  matches nothing, `unmatched_names`. With no filter the payload is
+  exactly what it was before, with none of those keys: callers that
+  parse it need not change. The kinds are `CapabilityKind::ALL`, which
+  the `--kind` error message and the MCP schema's `enum` both read.
 - **Positional-argument procedures get no structured `parameters`.**
   See "Payload shape" above — PostScript's stack arguments don't map
   onto named, defaulted `Param`s, and forcing a fit would mean

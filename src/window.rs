@@ -341,7 +341,8 @@ fn draw_view(
         let pages = gfx.pages();
         &pages[pages.len() - back]
     } else {
-        &gfx.pixmap
+        // The page, not a pattern tile being captured (#1038).
+        gfx.page_pixmap()
     };
     let screened;
     let pixmap = if halftone {

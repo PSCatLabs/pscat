@@ -32,6 +32,40 @@ operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 known` in code that must run in both. Also pscat-only: `gstate .sameclip
 bool` (is the clip in force the one the gstate captured).
 
+Fade or blend a whole drawing as one thing (a transparency group; the
+overlaps inside do not darken):
+
+```postscript
+<< /Alpha 0.5 /Blend /Multiply >> begingroup   % both keys optional
+  0 0 1 setrgbcolor 72 72 200 200 rectfill
+  1 0 0 setrgbcolor 150 150 200 200 rectfill
+endgroup
+```
+
+The group composites with `currentalpha` times `/Alpha` and `/Blend` (else
+`currentblendmode`); inside, alpha starts at 1 and `/Normal`. Isolated, so
+`/Multiply` inside does not reach the page. Nests; `endgroup` restores the
+state `begingroup` had. Exported to SVG (`<g opacity>`) and PDF (a group
+XObject). An open group ends at `showpage` or the end of the program.
+
+## currentfilename: where a library was loaded from (pscat extension)
+
+```postscript partial
+currentfilename           % - currentfilename string
+% (lib/mylib/main.ps) run, inside that file:  /dir currentfilename dirname def
+```
+
+The name of the file being run, exactly as the program or the command line gave
+it: `lib/mylib/main.ps` for a library, the path as written to `run`, the file
+argument as written for the main program. It is the file an error report's
+`Line:` names. It raises `undefined` where no named file runs (`-e`, stdin,
+the REPL, an MCP tool call's program), and a call from a procedure reports the
+file running at that moment, its caller's. So read it at the library file's top
+level, and build sibling paths from that (the dirname and concat procedures are
+in [getting-started.md](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md#where-pscat-finds-its-files)).
+Not a PLRM operator: probe with `systemdict /currentfilename known`. Pair it
+with `pscat lib install DIR` (SKILL.md, "Where `(lib/...) run` finds a file").
+
 ## Noise: gnoise2 / fbm2 / ... (pscat extensions)
 
 ```postscript partial

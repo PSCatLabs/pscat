@@ -86,6 +86,11 @@ pub struct Lexer {
     /// an executable string, a file read whole) does not, so the interpreter
     /// hands it this handle. `None` outside an interpreter.
     limits: Option<Rc<DecodeBudget>>,
+    /// This scanner runs an executable string or file met by `exec` or in
+    /// an executing procedure. An `exit` inside it leaves the loop around
+    /// it, as in Ghostscript; the main program, a `run` file and an eexec
+    /// stream are source boundaries that stop it (#1321).
+    pub(crate) exit_through: bool,
 }
 
 const fn is_whitespace(b: u8) -> bool {
@@ -120,6 +125,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -135,6 +141,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -151,6 +158,7 @@ impl Lexer {
             token_start_line: None,
             binary_tokens: true,
             limits: None,
+            exit_through: false,
         }
     }
 
@@ -163,6 +171,18 @@ impl Lexer {
         }
     }
 
+    /// Mark this scanner as an executable string or file that an `exit`
+    /// inside it can leave (#1321).
+    pub(crate) fn exit_through(mut self) -> Self {
+        self.exit_through = true;
+        self
+    }
+
+    /// The limits this scanner charges its work to, if any (#1123).
+    pub(crate) fn decode_budget(&self) -> Option<&DecodeBudget> {
+        self.limits.as_deref()
+    }
+
     /// Have this scanner's token buffers ask `limits` before they grow.
     pub(crate) fn with_limits(mut self, limits: Rc<DecodeBudget>) -> Self {
         self.limits = Some(limits);
@@ -173,6 +193,11 @@ impl Lexer {
     /// main program and every unnamed source.
     pub(crate) fn run_name(&self) -> Option<&Rc<str>> {
         self.run_name.as_ref()
+    }
+
+    /// Whether this scanner reads the top-level program (`main_program`).
+    pub(crate) fn is_main(&self) -> bool {
+        self.is_main
     }
 
     /// The handle `currentfile` returns, if this scanner is a file.
@@ -199,6 +224,42 @@ impl Lexer {
     /// at, past any leading whitespace and comments.
     pub(crate) fn token_start(&self) -> usize {
         self.token_start_pos
+    }
+
+    /// The text of the executable name the last-returned token is, for the
+    /// lint (#1338), read back from an in-memory source on demand; `None`
+    /// for any other token or a source that is not in memory.
+    pub(crate) fn token_name(&self) -> Option<String> {
+        let file = self.file.borrow();
+        let rest = file.bytes_from(self.token_start_pos)?;
+        let len = rest.iter().take_while(|&&b| is_regular(b)).count();
+        if len == 0 || len > 256 {
+            return None;
+        }
+        String::from_utf8(rest[..len].to_vec()).ok()
+    }
+
+    /// Whether the source between byte offsets `from` and `to` is only white
+    /// space and comments (#1338); `false` for a source not in memory.
+    pub(crate) fn blank_between(&self, from: usize, to: usize) -> bool {
+        let file = self.file.borrow();
+        let Some(rest) = file.bytes_from(from) else {
+            return false;
+        };
+        let Some(gap) = rest.get(..to.saturating_sub(from)) else {
+            return false;
+        };
+        let mut comment = false;
+        for &b in gap {
+            if comment {
+                comment = b != b'\n' && b != b'\r';
+            } else if b == b'%' {
+                comment = true;
+            } else if !is_whitespace(b) {
+                return false;
+            }
+        }
+        true
     }
 
     fn peek(&mut self) -> Result<Option<u8>, PsError> {

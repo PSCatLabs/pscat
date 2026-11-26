@@ -67,7 +67,7 @@ command-line tool writes: `tests/wasm.rs` compares them at 72 and 144 dpi
 and checks that a second run, in the same instance or a fresh one, gives
 the same bytes. `{ svg: true, svgText: true }` writes standard-font text
 as selectable `<text>` rather than outlines, the bytes `pscat --svg
---svg-text` writes ([getting started](getting-started.md)), and `{ pdf: true, pdfText: true }` writes text as selectable, searchable PDF text in embedded subset fonts, the bytes `pscat --pdf --pdf-text` writes (a face given to `addFont`, such as a font-pack face, is embedded too). A `%%Title:` or `%%For:` comment becomes the PDF's title
+--svg-text` writes ([getting started](getting-started.md)), and `{ pdf: true }` writes text as selectable, searchable PDF text in embedded subset fonts, the bytes `pscat --pdf` writes (a face given to `addFont`, such as a font-pack face, is embedded too); `{ pdf: true, pdfText: false }` draws every glyph as its outline instead, the bytes `pscat --pdf --text-as-paths` writes. A `%%Title:` or `%%For:` comment becomes the PDF's title
 or author, as for a file on the command line. As there, SVG and PDF are
 sized in device pixels, so keep the default 72 dpi (scale 1) for a
 print-size vector page. The C ABI is `ps_begin_vector(src, len, w, h,
@@ -128,10 +128,12 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   document as a `Uint8Array`, the bytes `pscat --svg`/`--pdf` writes (see
   [SVG and PDF](#svg-and-pdf) above). `svgText: true` (with `svg`) writes
   Helvetica, Times and Courier text as `<text>`, like `--svg-text`;
-  `pdfText: true` (with `pdf`) writes text as selectable PDF text in embedded
-  fonts, like `--pdf-text`.
+  PDF text is selectable text in embedded fonts by default; `pdfText: false`
+  (with `pdf`) draws glyph outlines instead, like `--text-as-paths`.
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
-  offending `command`, the `line`, the full `report`, what the
+  offending `command`, the `line`, the `file` and `runChain` when the error
+  was raised inside a `run` file (`line` is then that file's line; both are
+  undefined for an error in the main program), the full `report`, what the
   program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - `pageCount()` is the number of pages the run holds now: those `showpage`
@@ -200,6 +202,22 @@ its pages with the ES module's. There is no inlined-wasm build: the module
 is 11 MB (5.4 MB gzipped, 7.2 MB as base64 of that), more than the whole
 package, so a self-contained page embeds it itself
 (`createRenderer({ wasm })` takes the bytes).
+
+**Without npm: the release asset.** From 0.7.1 on, every GitHub release carries
+the same file, byte for byte, at a URL pinned to its tag, listed in the
+release's `SHA256SUMS` (release candidates too):
+
+```html
+<script src="https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat.global.js"></script>
+```
+
+A `<script>` tag can load it across origins, but GitHub sends no CORS headers
+for release assets, so the default fetch of `pscat.wasm` from beside the script
+fails. Host the module yourself (`package/pscat.wasm` in the release's
+`pscat-X.Y.Z.tgz`: `tar -xzf pscat-X.Y.Z.tgz package/pscat.wasm`) and pass its
+URL: `pscat.createRenderer({ wasm: '/pscat.wasm' })`. In TypeScript,
+`/// <reference types="pscat/global" />` types the `pscat` global (the
+package's `global.d.ts`).
 
 The package's README ([`npm/README.md`](../../npm/README.md)) has the
 full API. To build and test it from a checkout:
