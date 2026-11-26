@@ -754,3 +754,20 @@ fn a_covering_placement_covers_the_canvas_at_any_scale() {
         }
     }
 }
+
+#[test]
+fn the_blend_mode_and_alpha_reach_svg_and_pdf() {
+    let grey = layer(1, 1, |_, _| [128, 128, 128, 200]);
+    let mut interp = canvas();
+    interp.enable_svg();
+    interp.enable_pdf();
+    interp
+        .run_str("0.5 setalpha /Multiply setblendmode 20 20 scale")
+        .unwrap();
+    interp.draw_page(&grey, Sampling::Nearest).unwrap();
+    let svg = interp.svg_pages().unwrap().concat();
+    assert!(svg.contains("multiply"), "{svg}");
+    assert!(svg.contains("opacity=\"0.5\""), "{svg}");
+    let pdf = String::from_utf8_lossy(&interp.pdf_document().unwrap()).into_owned();
+    assert!(pdf.contains("/BM /Multiply"), "{pdf}");
+}

@@ -383,3 +383,25 @@ fn a_borrowed_buffer_registered_by_a_host_operator_is_charged_as_host_work() {
     // A single registration is affordable.
     it.run_str("provide").unwrap();
 }
+
+// ---- checked beyond the review: nesting and unwinding ----
+
+#[test]
+fn a_virtual_file_that_runs_another_names_both_and_a_stopped_error_unwinds_cleanly() {
+    let mut it = interp();
+    it.add_virtual_file("components/outer.ps", b"(components/inner.ps) run\n")
+        .unwrap();
+    it.add_virtual_file("components/inner.ps", b"1\n1 0 idiv\n")
+        .unwrap();
+    let err = it.run_str("(components/outer.ps) run").unwrap_err();
+    let report = it.error_report(&err);
+    assert!(report.contains("components/inner.ps"), "{report}");
+    assert!(report.contains("components/outer.ps"), "{report}");
+    // Caught by `stopped`, the program goes on and a later run is whole.
+    it.run_str("{ (components/inner.ps) run } stopped").unwrap();
+    assert!(it.pop_bool().unwrap());
+    it.add_virtual_file("ok.ps", b"42").unwrap();
+    it.clear_operands();
+    it.run_str("(ok.ps) run").unwrap();
+    assert_eq!(it.pop_int().unwrap(), 42);
+}
