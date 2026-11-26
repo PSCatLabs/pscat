@@ -175,7 +175,8 @@ newpath 40 60 moveto 300 80 lineto
     on, so they cut every glyph stroke, not the line. With `/Tilt`, a
     piece that starts past 0 draws its lanes' chance dropouts afresh, so
     a few percent of the ink differs clearly from the whole stroke.
-    `dkstroke`, crayon and charcoal do not take the keys yet.
+    `dkstroke`, `dycrayon` and `dhstroke` take the same two keys
+    (below).
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 - **`dctext`** (`(text) x y opts`) writes a line of chalk lettering
