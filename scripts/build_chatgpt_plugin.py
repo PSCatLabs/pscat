@@ -3,9 +3,9 @@
 
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --skills-only
-    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth none
+    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth oauth
     python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --out DIR --root ROOT
-    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth none --production
+    python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS --remote URL --remote-auth oauth --production
 
 URL is the hosted server's endpoint, https://<your-pscat-mcp-host>/mcp.
 
@@ -39,10 +39,16 @@ The ZIP is the Agent Plugins 1.0 layout with `plugin.json` at its root:
   and rewrites the shared skills' local-only wording from the overlay in
   `plugin-chatgpt/cloud/` (see "Cloud overlay" below). The URL is an argument, never
   committed, and `--remote-auth` is required, because what ChatGPT can send
-  differs by choice: `none` declares no authentication; `bearer` declares a
-  fixed bearer token (`api_key`), which the manifest schema accepts but
-  ChatGPT's connection form cannot send (the build says so). The build never
-  puts a token, or a `headers` entry, in the ZIP.
+  differs by choice: `oauth` declares OAuth, which is what the production
+  server (https://mcp.pscat.dev/mcp) uses (#1431); `none` declares no
+  authentication, right only for a server that has none (OpenAI: "Don't
+  configure a protected server as `type: "none"`"); `bearer` declares a fixed bearer
+  token (`api_key`), which the manifest schema accepts but ChatGPT's
+  connection form cannot send (the build says so). The build never puts a
+  token, a client secret or a `headers` entry in the ZIP. `oauth` writes
+  `{"type": "oauth", "client": {"mode": "cimd"}}`: OpenAI's "prefer CIMD"
+  setting, with the endpoints and the registration left to discovery (the
+  server's protected-resource metadata), and DCR still the fallback.
 
 Cloud overlay (`--remote` only). `plugin/skills/` is also what Claude Code and
 Codex install, so it cannot carry cloud-only markers, and the local and
@@ -126,6 +132,11 @@ def excluded(rel, skills_only):
 REMOTE_AUTH = {
     "none": {"type": "none"},
     "bearer": {"type": "api_key", "headerScheme": "bearer"},
+    # OpenAI's plugin docs (build/plugins, "Configure MCP authentication"): `client`
+    # is optional, `mode` cimd means "prefer a client ID metadata document" and
+    # does not disable the DCR fallback. No client ID, secret or endpoint override:
+    # discovery supplies them, so nothing here is specific to one host (#1431).
+    "oauth": {"type": "oauth", "client": {"mode": "cimd"}},
 }
 
 
@@ -200,7 +211,7 @@ def remote_mcp_json(url, auth):
     entry = {
         "type": "streamable-http",
         "url": check_remote_url(url),
-        "extensions": {"com.openai": {"auth": dict(REMOTE_AUTH[auth])}},
+        "extensions": {"com.openai": {"auth": json.loads(json.dumps(REMOTE_AUTH[auth]))}},
     }
     doc = {"$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
            "mcpServers": {REMOTE_NAME: entry}}
@@ -376,7 +387,7 @@ def build(root, sums_path, out_dir, skills_only=False, remote=None, remote_auth=
         raise SystemExit("--remote-auth needs --remote")
     if remote is not None:
         if remote_auth is None:
-            raise SystemExit("--remote needs --remote-auth none|bearer: say how the "
+            raise SystemExit("--remote needs --remote-auth oauth|none|bearer: say how the "
                              "server is protected, there is no default")
         remote_json = remote_mcp_json(remote, remote_auth)
     root = pathlib.Path(root).resolve()
@@ -446,8 +457,9 @@ def main(argv):
                     help="replace the local MCP server with the hosted one at this https URL "
                          "(its /mcp endpoint, e.g. https://<your-pscat-mcp-host>/mcp)")
     ap.add_argument("--remote-auth", choices=sorted(REMOTE_AUTH),
-                    help="how the hosted server is protected (required with --remote): none, "
-                         "or bearer (a fixed token; ChatGPT cannot send one, see "
+                    help="how the hosted server is protected (required with --remote): oauth "
+                         "(the production server), none (a server with no sign-in), or "
+                         "bearer (a fixed token; ChatGPT cannot send one, see "
                          "docs/guides/chatgpt-hosted.md)")
     ap.add_argument("--production", action="store_true",
                     help="release builds: refuse an empty, non-https, run.app (staging) or "

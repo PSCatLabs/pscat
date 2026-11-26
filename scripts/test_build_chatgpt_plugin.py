@@ -157,10 +157,25 @@ class Remote(Fixture):
             "mcpServers"]["pscat-cloud"]["extensions"]["com.openai"]["auth"]
         self.assertEqual(auth, {"type": "api_key", "headerScheme": "bearer"})
 
-    def test_no_headers_entry(self):
-        for auth in ("none", "bearer"):
+    def test_oauth_declares_oauth_and_leaves_the_rest_to_discovery(self):
+        """#1431: production signs in with OAuth. OpenAI's shape: type oauth, client
+        mode cimd (a preference; DCR stays the fallback), no client ID, secret or
+        endpoint override."""
+        path = self.build(remote=URL, remote_auth="oauth")
+        self.assertEqual(self.mcp(path), {
+            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+            "mcpServers": {"pscat-cloud": {
+                "type": "streamable-http", "url": URL,
+                "extensions": {"com.openai": {"auth": {
+                    "type": "oauth", "client": {"mode": "cimd"}}}}}}})
+
+    def test_no_secret_or_header_for_any_choice(self):
+        for auth in ("none", "bearer", "oauth"):
             server = self.mcp(self.build(remote=URL, remote_auth=auth))["mcpServers"]["pscat-cloud"]
             self.assertNotIn("headers", server)
+            text = json.dumps(server).lower()
+            for word in ("secret", "token", "clientid", "password"):
+                self.assertNotIn(word, text)
 
     def manifest(self, path):
         with zipfile.ZipFile(path) as z:
@@ -308,7 +323,7 @@ class Remote(Fixture):
         with self.assertRaisesRegex(SystemExit, "--remote-auth"):
             self.build(remote=URL)
         with self.assertRaisesRegex(SystemExit, "one of"):
-            self.build(remote=URL, remote_auth="oauth")
+            self.build(remote=URL, remote_auth="basic")
         with self.assertRaisesRegex(SystemExit, "needs --remote"):
             self.build(remote_auth="none")
 
@@ -325,6 +340,10 @@ class Remote(Fixture):
         self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertIn("cannot send it", ok.stderr)  # the bearer warning
         self.assertTrue(ok.stdout.strip().endswith("/pscat-cloud-chatgpt-plugin-1.2.3.zip"))
+        oauth = subprocess.run(base + ["--remote", URL, "--remote-auth", "oauth"],
+                               capture_output=True, text=True)
+        self.assertEqual(oauth.returncode, 0, oauth.stderr)
+        self.assertEqual(oauth.stderr, "")  # no bearer warning
         bad = subprocess.run(base + ["--remote", "http://h.example/mcp", "--remote-auth", "none"],
                              capture_output=True, text=True)
         self.assertEqual(bad.returncode, 1)
