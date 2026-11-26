@@ -540,7 +540,7 @@ afterwards, like every release (see
 
 Each release (release candidates too, #1253) carries
 `pscat-cloud-chatgpt-plugin-X.Y.Z.zip`, the remote build of the ChatGPT plugin
-(`scripts/build_chatgpt_plugin.py --remote URL --remote-auth none`; how to use
+(`scripts/build_chatgpt_plugin.py --remote URL --remote-auth oauth`; how to use
 it is [`docs/guides/chatgpt-hosted.md`](../guides/chatgpt-hosted.md)). Its
 `mcp.json` points at the **production** pscat-mcp server, and the URL is read
 from a repository variable, never committed:
@@ -558,9 +558,11 @@ gh variable list --repo PSCatLabs/pscat      # check it
   names a placeholder host (`example.com`, `.invalid`, ...). The step prints
   the URL it used and writes it to the run summary; `release_stages.py
   manifest` then checks the finished ZIP's `mcp.json` once more.
-- **Auth is `none`** today (`--remote-auth none`): ChatGPT's connection form
-  takes only no authentication or OAuth (pscat-mcp#136). Changing it is a
-  one-word edit in the workflow step, once the server supports OAuth.
+- **Auth is `oauth`** (`--remote-auth oauth`, #1431): ChatGPT's connection form
+  takes only no authentication or OAuth (pscat-mcp#136), and the production
+  server signs in with OAuth. The 0.7.1 release candidates were built with
+  `none`. If the server's sign-in changes, change the word in the workflow
+  step; `none` is for a server with no sign-in.
 - **A resumed release uses the value the draft was built with.** The ZIP is
   reproducible, so a re-run with the same URL matches the draft. If you change
   the variable after a draft exists, `draft` halts on the differing asset:
