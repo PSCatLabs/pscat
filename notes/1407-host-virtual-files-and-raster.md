@@ -27,7 +27,8 @@ function the first three share).
   names are refused.
 - **Bounds.** 64 MiB a file (`paths::MAX_LIB_BYTES`, the bound on a `lib/` file
   from disk), 4096 files, 512 MiB together (`paths::MAX_RESOURCE_BYTES`). Past
-  one, `limitcheck` and nothing changes. The store holds `Rc<[u8]>`, so serving a
+  one, `limitcheck` and nothing changes. The store holds `Rc<Vec<u8>>` (the host's buffer is moved in,
+  not copied, so registering allocates nothing to charge), so serving a
   file does not copy it until the program's file object is made; that copy
   (one per `run`) is charged a step per KiB through `poll_limits`, with
   `check_alloc` before it, so a loop that loads a large file meets
@@ -87,6 +88,14 @@ to say the CTM; the unit square keeps the one `image` has and a 1:1 placement is
   the run, so the tests place from a host operator.
 - **Uncoloured patterns.** `image` is not skipped there (the tile keeps the
   raster's coverage and takes the pattern's colour), so neither is this.
+
+### Known limits
+
+- The PDF demultiply loop and the SVG PNG encode over a raster of up to 16 Mpx
+  never look at the clock (`image`'s recorders poll once a row). The work is
+  charged to the step cap up front, so only `--max-time` granularity is
+  affected.
+- `MAX_HOST_OPERATORS` (item 3 of the issue) is not touched.
 
 ### Identity and cost
 

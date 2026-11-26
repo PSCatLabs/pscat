@@ -160,6 +160,6 @@ mod tests {
         }
         assert_eq!(v.add("one-more", Vec::new()), Err(PsError::Limitcheck));
         v.add("f0", vec![1]).unwrap();
-        assert_eq!(v.get("./f0").as_deref(), Some(&[1u8][..]));
+        assert_eq!(v.get("./f0").as_deref(), Some(&vec![1u8]));
     }
 }
