@@ -1207,13 +1207,19 @@ impl BlendMode {
     }
 }
 
+/// Pixels of a host raster handled between two looks at the limits (#1407).
+const POLL_PIXELS: usize = 1 << 20;
+
 /// Where a host raster lands on the canvas (`Gfx::plan_raster`, #1407).
 pub(crate) struct RasterPlan {
     /// The raster's pixels to device space.
     t: Transform,
-    /// The raster's footprint in device space, cut to a guard rectangle
-    /// around the canvas.
+    /// The raster's footprint in device space: cut to a guard rectangle
+    /// around the canvas, and to the band's rows under `--bands`, so the
+    /// fill does the work that [`area`](Self::area) charges.
     poly: Vec<(f64, f64)>,
+    /// The canvas rows `[top, bottom)` the footprint's box reaches.
+    rows: (u32, u32),
     /// Device pixels of the canvas (and the band's rows) the footprint's
     /// box reaches: the work of painting it.
     pub(crate) area: u64,
@@ -4189,42 +4195,77 @@ impl Gfx {
     /// band's rows). In an uncoloured pattern's `PaintProc` it paints as
     /// `image` does: the tile keeps the raster's coverage and the pattern's
     /// colour replaces its own.
+    ///
+    /// The footprint is a polygon in device space, cut to a guard rectangle
+    /// around the canvas because tiny-skia's anti-aliased fill panics on
+    /// corners around 1e9 pixels away, and to the band's rows. A footprint
+    /// that covers the canvas whole is the canvas's own rectangle: the
+    /// corners of a placement scaled by 1e20 are too far apart for cutting
+    /// their edges to be exact, but whether it covers is decided in the
+    /// raster's own unit coordinates, where it is.
     pub(crate) fn plan_raster(&self, w: u32, h: u32) -> Option<RasterPlan> {
         if self.painting_off() {
             return None;
         }
         let ctm = self.state.ctm;
-        let finite = [ctm.sx, ctm.kx, ctm.ky, ctm.sy, ctm.tx, ctm.ty]
-            .iter()
-            .all(|v| v.is_finite());
-        if !finite || ctm.invert().is_none() {
+        let [a, b, c, d, e, f] = [ctm.sx, ctm.ky, ctm.kx, ctm.sy, ctm.tx, ctm.ty].map(f64::from);
+        let det = a * d - b * c;
+        if ![a, b, c, d, e, f, det].iter().all(|v| v.is_finite()) || det == 0.0 {
             return None;
         }
         // Raster pixels to the unit square, then to the device.
         let to_unit = Transform::from_row(1.0 / w as f32, 0.0, 0.0, -1.0 / h as f32, 0.0, 1.0);
         let t = ctm.pre_concat(to_unit);
-        let (cw, ch) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
-        let corner = |ux: f64, uy: f64| {
-            (
-                f64::from(ctm.sx) * ux + f64::from(ctm.kx) * uy + f64::from(ctm.tx),
-                f64::from(ctm.ky) * ux + f64::from(ctm.sy) * uy + f64::from(ctm.ty),
-            )
-        };
-        let quad = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].map(|(x, y)| corner(x, y));
-        if quad.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+        let (cw, ch) = (
+            f64::from(self.pixmap.width()),
+            f64::from(self.pixmap.height()),
+        );
+        let (mut top, mut bottom) = (0.0_f64, ch);
+        if let Some((band_top, band_bottom)) = self.band_rows() {
+            top = top.max(f64::from(band_top));
+            bottom = bottom.min(f64::from(band_bottom));
+        }
+        if bottom <= top {
             return None;
         }
-        // tiny-skia's anti-aliased fill panics on corners around 1e9 device
-        // pixels away (see `shfill_limited`): fill the part inside a guard
-        // rectangle, which holds every pixel the canvas has.
-        let poly = clip_polygon(&quad, (-cw, -ch, 2.0 * cw, 2.0 * ch));
+        // Whether the unit square covers the rectangle `r`: each corner's
+        // unit coordinates, which stay accurate where its device ones do not.
+        let unit_of = |x: f64, y: f64| {
+            let (dx, dy) = (x - e, y - f);
+            ((d * dx - c * dy) / det, (a * dy - b * dx) / det)
+        };
+        let inside = |(u, v): (f64, f64)| (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v);
+        let canvas = (-1.0, top - 1.0, cw + 1.0, bottom + 1.0);
+        let corners = [
+            (canvas.0, canvas.1),
+            (canvas.2, canvas.1),
+            (canvas.2, canvas.3),
+            (canvas.0, canvas.3),
+        ];
+        let poly = if corners.iter().all(|&(x, y)| inside(unit_of(x, y))) {
+            corners.to_vec()
+        } else {
+            let quad = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+                .map(|(u, v)| (a * u + c * v + e, b * u + d * v + f));
+            if quad.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+                return None;
+            }
+            let guard = (-cw, top - ch, 2.0 * cw, bottom + ch);
+            let cut = clip_polygon(&quad, guard);
+            // Under `--bands` only the band's rows: the fill then does the
+            // work charged, and a pixel row's coverage is the same cut at its
+            // edge as whole.
+            let cut = if top > 0.0 || bottom < ch {
+                clip_polygon(&cut, (guard.0, top, guard.2, bottom))
+            } else {
+                cut
+            };
+            cut.into_iter()
+                .map(|(x, y)| (x.clamp(guard.0, guard.2), y.clamp(top - 1.0, bottom + 1.0)))
+                .collect()
+        };
         if poly.len() < 3 {
             return None;
-        }
-        let (mut y0, mut y1) = (0.0_f64, ch);
-        if let Some((top, bottom)) = self.band_rows() {
-            y0 = y0.max(f64::from(top));
-            y1 = y1.min(f64::from(bottom));
         }
         let (mut bx0, mut by0, mut bx1, mut by1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
         for &(x, y) in &poly {
@@ -4233,52 +4274,136 @@ impl Gfx {
             bx1 = bx1.max(x);
             by1 = by1.max(y);
         }
-        let (dx, dy) = (
-            (bx1.min(cw).ceil() - bx0.max(0.0).floor()).max(0.0),
-            (by1.min(y1).ceil() - by0.max(y0).floor()).max(0.0),
-        );
-        if dx == 0.0 || dy == 0.0 {
+        let (x0, x1) = (bx0.max(0.0).floor(), bx1.min(cw).ceil());
+        let (y0, y1) = (by0.max(top).floor(), by1.min(bottom).ceil());
+        if x1 <= x0 || y1 <= y0 {
             return None;
         }
         Some(RasterPlan {
             t,
             poly,
-            area: (dx * dy) as u64,
+            rows: (y0 as u32, y1 as u32),
+            area: ((x1 - x0) * (y1 - y0)) as u64,
         })
     }
 
     /// Paint a host raster where [`plan_raster`](Self::plan_raster) put it,
     /// with the current clip, alpha and blend mode, and record it for SVG
     /// and PDF output as an image (#1407). The caller has charged the work.
-    pub(crate) fn place_raster(&mut self, src: &Pixmap, plan: &RasterPlan, smooth: bool) {
-        self.prepare_paint();
+    ///
+    /// `poll`, when there are limits or an interrupt flag to honour, is
+    /// called between the heavy steps: after the copies the recorders need
+    /// are made (and every [`POLL_PIXELS`] of them), and between strips of
+    /// the fill. A refusal leaves the canvas and the recorders as they were:
+    /// the recorders are written only after every copy is made.
+    ///
+    /// In an uncoloured pattern's `PaintProc` the canvas keeps the raster's
+    /// coverage in the pattern's colour, so the recorders get a stencil of
+    /// it: an SVG `<mask>` of its alpha, and in PDF an image mask (one bit
+    /// a pixel, set where the alpha is at least half).
+    pub(crate) fn place_raster(
+        &mut self,
+        src: &Pixmap,
+        plan: &RasterPlan,
+        smooth: bool,
+        mut poll: Option<&mut dyn FnMut() -> Result<(), PsError>>,
+    ) -> Result<(), PsError> {
+        let look = |poll: &mut Option<&mut dyn FnMut() -> Result<(), PsError>>| match poll {
+            Some(p) => p(),
+            None => Ok(()),
+        };
         let (w, h) = (src.width() as usize, src.height() as usize);
+        let uncolored = self.capturing_uncolored();
         let t = [
             plan.t.sx, plan.t.ky, plan.t.kx, plan.t.sy, plan.t.tx, plan.t.ty,
         ];
+        let rows_per_poll = (POLL_PIXELS / w).max(1);
+        // The recorders' copies, made first and polled as they go.
+        look(&mut poll)?;
+        let mut svg_png = None;
         if self.svg_wanted() {
-            // An image embedded in an SVG, not a file pscat writes: no resolution to record.
-            #[allow(clippy::disallowed_methods)]
-            let encoded = src.encode_png();
-            if let Ok(png) = encoded {
+            let png = if uncolored {
+                // White where the raster has coverage, alpha as the coverage.
+                let mut cover = Pixmap::new(w as u32, h as u32).ok_or(PsError::Limitcheck)?;
+                for (y, (row, from)) in cover
+                    .pixels_mut()
+                    .chunks_mut(w)
+                    .zip(src.pixels().chunks(w))
+                    .enumerate()
+                {
+                    if y % rows_per_poll == 0 {
+                        look(&mut poll)?;
+                    }
+                    for (px, s) in row.iter_mut().zip(from) {
+                        let a = s.alpha();
+                        *px = tiny_skia::PremultipliedColorU8::from_rgba(a, a, a, a).unwrap_or(*px);
+                    }
+                }
+                look(&mut poll)?;
+                // An image embedded in an SVG, not a file pscat writes: no resolution to record.
+                #[allow(clippy::disallowed_methods)]
+                cover.encode_png()
+            } else {
+                // An image embedded in an SVG, not a file pscat writes: no resolution to record.
+                #[allow(clippy::disallowed_methods)]
+                src.encode_png()
+            };
+            look(&mut poll)?;
+            svg_png = png.ok();
+        }
+        let mut pdf_data = None;
+        if self.pdf_wanted() {
+            if uncolored {
+                // An image mask, a bit a pixel, rows padded to bytes.
+                let row_bytes = w.div_ceil(8);
+                let mut bits = vec![0u8; row_bytes * h];
+                for (y, from) in src.pixels().chunks(w).enumerate() {
+                    if y % rows_per_poll == 0 {
+                        look(&mut poll)?;
+                    }
+                    for (x, s) in from.iter().enumerate() {
+                        if s.alpha() >= 128 {
+                            bits[y * row_bytes + x / 8] |= 0x80 >> (x % 8);
+                        }
+                    }
+                }
+                pdf_data = Some(crate::pdf::ImageData::Mask {
+                    bits,
+                    paint_ones: true,
+                });
+            } else {
+                let mut rgb = Vec::with_capacity(w * h * 3);
+                let mut alpha = Vec::with_capacity(w * h);
+                for (y, from) in src.pixels().chunks(w).enumerate() {
+                    if y % rows_per_poll == 0 {
+                        look(&mut poll)?;
+                    }
+                    for px in from {
+                        let c = px.demultiply();
+                        rgb.extend_from_slice(&[c.red(), c.green(), c.blue()]);
+                        alpha.push(c.alpha());
+                    }
+                }
+                // An opaque raster needs no soft mask.
+                pdf_data = Some(if alpha.iter().all(|&a| a == 255) {
+                    crate::pdf::ImageData::Rgb(rgb)
+                } else {
+                    crate::pdf::ImageData::RgbA { rgb, alpha }
+                });
+            }
+            look(&mut poll)?;
+        }
+        // Nothing has changed yet: from here the raster is committed.
+        self.prepare_paint();
+        if let Some(png) = svg_png {
+            if uncolored {
+                self.svg_stencil(&png, w, h, t);
+            } else {
                 self.svg_image(&png, w, h, t, smooth);
             }
         }
-        if self.pdf_wanted() {
-            let mut rgb = Vec::with_capacity(w * h * 3);
-            let mut alpha = Vec::with_capacity(w * h);
-            for px in src.pixels() {
-                let c = px.demultiply();
-                rgb.extend_from_slice(&[c.red(), c.green(), c.blue()]);
-                alpha.push(c.alpha());
-            }
-            // An opaque raster needs no soft mask.
-            let data = if alpha.iter().all(|&a| a == 255) {
-                crate::pdf::ImageData::Rgb(rgb)
-            } else {
-                crate::pdf::ImageData::RgbA { rgb, alpha }
-            };
-            self.pdf_image(w, h, data, t, smooth);
+        if let Some(data) = pdf_data {
+            self.pdf_image(w, h, data, t, smooth && !uncolored);
         }
         let comp = self.composite();
         let opacity = if comp.alpha.is_nan() { 0.0 } else { comp.alpha };
@@ -4302,27 +4427,52 @@ impl Gfx {
             force_hq_pipeline: true,
             ..Default::default()
         };
-        let mut pb = PathBuilder::new();
-        for (i, &(x, y)) in plan.poly.iter().enumerate() {
-            let (x, y) = (x as f32, y as f32);
-            if i == 0 {
-                pb.move_to(x, y);
+        let mask = self.clip_mask_data();
+        // With limits to honour the fill goes strip by strip, a strip being a
+        // whole number of pixel rows: a row's coverage is the same cut at its
+        // edge as whole, so the pixels come out as one fill's.
+        let (first, last) = plan.rows;
+        let strip = if poll.is_some() {
+            (POLL_PIXELS / self.pixmap.width().max(1) as usize).max(1) as u32
+        } else {
+            last - first
+        };
+        let mut y = first;
+        while y < last {
+            let end = y.saturating_add(strip).min(last);
+            let part = if (y, end) == (first, last) {
+                plan.poly.clone()
             } else {
-                pb.line_to(x, y);
+                let guard = (-1e12, f64::from(y), 1e12, f64::from(end));
+                clip_polygon(&plan.poly, guard)
+            };
+            if part.len() >= 3 {
+                let mut pb = PathBuilder::new();
+                for (i, &(px, py)) in part.iter().enumerate() {
+                    if i == 0 {
+                        pb.move_to(px as f32, py as f32);
+                    } else {
+                        pb.line_to(px as f32, py as f32);
+                    }
+                }
+                pb.close();
+                if let Some(path) = pb.finish() {
+                    self.pixmap.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::identity(),
+                        mask.as_deref(),
+                    );
+                    self.dirty = true;
+                }
+            }
+            y = end;
+            if y < last {
+                look(&mut poll)?;
             }
         }
-        pb.close();
-        if let Some(path) = pb.finish() {
-            let mask = self.clip_mask_data();
-            self.pixmap.fill_path(
-                &path,
-                &paint,
-                FillRule::Winding,
-                Transform::identity(),
-                mask.as_deref(),
-            );
-            self.dirty = true;
-        }
+        Ok(())
     }
 
     /// Reset everything `initgraphics` resets, per the PLRM: CTM,

@@ -559,3 +559,198 @@ fn a_showpage_before_the_placement_still_erases_first() {
     assert_eq!(at(&interp, 3, 3), [255, 0, 0, 255]);
     assert_eq!(interp.page_count(), 2);
 }
+
+// ---- Codex round 1 ----
+
+/// Codex finding 3: an uncoloured pattern's tile is the raster's coverage in
+/// the pattern's colour on the canvas; SVG and PDF must record that, not the
+/// raster's own colours (SVG) or nothing (PDF).
+#[test]
+fn an_uncoloured_pattern_records_the_coverage_in_svg_and_pdf() {
+    let red = Rc::new(layer(2, 2, |x, y| {
+        // Opaque on the diagonal, clear elsewhere.
+        if x == y {
+            [255, 0, 0, 255]
+        } else {
+            [255, 0, 0, 0]
+        }
+    }));
+    let program =
+        "/P << /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10
+            /PaintProc { pop gsave 10 10 scale place grestore } >> matrix makepattern def
+         [/Pattern /DeviceRGB] setcolorspace 0 0 1 P setcolor 0 0 20 20 rectfill";
+    let run = |record: &str| {
+        let mut interp = canvas();
+        let src = red.clone();
+        interp
+            .register_operator("place", move |i| i.draw_page(&src, Sampling::Nearest))
+            .unwrap();
+        match record {
+            "svg" => interp.enable_svg(),
+            "pdf" => interp.enable_pdf(),
+            _ => {}
+        }
+        interp.run_str(program).unwrap();
+        interp
+    };
+    // The canvas: blue where the raster has coverage, white elsewhere, no red.
+    let png = run("png");
+    assert!(
+        pixels(&png)
+            .chunks(4)
+            .all(|p| p == WHITE || p == [0, 0, 255, 255])
+    );
+    assert!(pixels(&png).chunks(4).any(|p| p == [0, 0, 255, 255]));
+    assert!(pixels(&png).chunks(4).any(|p| p == WHITE));
+
+    // SVG: a mask made of the coverage, filled with the tile's colour.
+    let svg = run("svg").svg_pages().unwrap().concat();
+    assert!(svg.contains("<mask"), "{svg}");
+    assert!(svg.contains("currentColor"), "{svg}");
+    // The only `<image>` is the stencil inside its `<mask>`.
+    assert_eq!(
+        svg.matches("<image").count(),
+        svg.matches("<mask").count(),
+        "{svg}"
+    );
+
+    // PDF: an image mask in the tile, which holds no colour image.
+    let pdf = String::from_utf8_lossy(&run("pdf").pdf_document().unwrap()).into_owned();
+    assert!(pdf.contains("/ImageMask true"), "{pdf}");
+}
+
+/// Codex finding 4: under `--bands` the fill paints only the band's rows,
+/// which is the work that is charged.
+#[test]
+fn a_banded_placement_fills_only_the_bands_rows() {
+    let red = Rc::new(layer(1, 1, |_, _| [255, 0, 0, 255]));
+    let mut interp = Interp::with_page(100, 100).unwrap();
+    interp.gfx_mut().set_band(3, 10); // rows 30..40
+    let r = red.clone();
+    interp
+        .register_operator("place", move |i| i.draw_page(&r, Sampling::Nearest))
+        .unwrap();
+    interp.run_str("100 100 scale place").unwrap();
+    for y in 0..100 {
+        let want = if (30..40).contains(&y) {
+            [255, 0, 0, 255]
+        } else {
+            WHITE
+        };
+        assert_eq!(at(&interp, 50, y), want, "row {y}");
+    }
+    // The same rows as an unbanded placement paints them.
+    let mut whole = Interp::with_page(100, 100).unwrap();
+    whole.run_str("100 100 scale").unwrap();
+    whole.draw_page(&red, Sampling::Nearest).unwrap();
+    assert_eq!(at(&whole, 50, 35), at(&interp, 50, 35));
+}
+
+#[test]
+fn a_banded_placement_is_charged_for_the_rows_it_fills() {
+    let red = Rc::new(layer(1, 1, |_, _| [255, 0, 0, 255]));
+    let mut interp = Interp::with_page(3000, 3000).unwrap();
+    interp.gfx_mut().set_band(1500, 3000); // one row
+    interp
+        .register_operator("place", move |i| i.draw_page(&red, Sampling::Nearest))
+        .unwrap();
+    // A row is 3000 pixels, about 3 steps; the whole canvas would be 8,800.
+    interp
+        .set_limits(Limits::none().with_max_steps(5_000))
+        .unwrap();
+    interp
+        .run_str("3000 3000 scale 200 { place } repeat")
+        .unwrap();
+    assert_eq!(at(&interp, 10, 1500), [255, 0, 0, 255]);
+    assert_eq!(at(&interp, 10, 1499), WHITE);
+}
+
+/// A raster of noise: slow to encode, so a limit can fire part way.
+fn noise(side: u32) -> Page {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut data = Vec::with_capacity((side * side * 4) as usize);
+    for _ in 0..side * side {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        data.extend_from_slice(&[state as u8, (state >> 8) as u8, (state >> 16) as u8, 255]);
+    }
+    Page::from_premultiplied_rgba8(side, side, data).unwrap()
+}
+
+/// Codex finding 5: a deadline that passes during the recorders' copies stops
+/// the placement before the canvas or the recorder is written.
+#[test]
+fn a_deadline_that_passes_during_the_copies_stops_the_placement() {
+    let big = Rc::new(noise(3000));
+    let mut interp = canvas();
+    interp.enable_svg();
+    let b = big.clone();
+    interp
+        .register_operator("place", move |i| i.draw_page(&b, Sampling::Nearest))
+        .unwrap();
+    interp
+        .set_limits(Limits::none().with_max_time(std::time::Duration::from_millis(20)))
+        .unwrap();
+    assert_eq!(
+        interp.run_str("20 20 scale place"),
+        Err(PsError::TimeExceeded)
+    );
+    assert!(pixels(&interp).chunks(4).all(|p| p == WHITE));
+    assert!(!interp.svg_pages().unwrap().concat().contains("<image"));
+}
+
+/// The same for the interrupt flag, raised by another thread while the
+/// copies are being made.
+#[test]
+fn the_interrupt_flag_raised_during_the_copies_stops_the_placement() {
+    let big = Rc::new(noise(3000));
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut interp = canvas();
+    interp.enable_svg();
+    interp.enable_pdf();
+    interp.set_interrupt(Some(stop.clone()));
+    let b = big.clone();
+    interp
+        .register_operator("place", move |i| i.draw_page(&b, Sampling::Nearest))
+        .unwrap();
+    let raiser = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            stop.store(true, Ordering::Relaxed);
+        })
+    };
+    assert_eq!(
+        interp.run_str("20 20 scale place"),
+        Err(PsError::Interrupted)
+    );
+    raiser.join().unwrap();
+    assert!(pixels(&interp).chunks(4).all(|p| p == WHITE));
+}
+
+/// Codex finding 6: a placement that covers the canvas covers all of it, at
+/// scales where cutting the corners' edges in device space loses everything.
+#[test]
+fn a_covering_placement_covers_the_canvas_at_any_scale() {
+    let red = layer(1, 1, |_, _| [255, 0, 0, 255]);
+    for setup in [
+        "-1e9 -1e9 translate 2e9 2e9 scale",
+        "-1e20 -1e20 translate 2e20 2e20 scale",
+        "-1e30 -1e30 translate 2e30 2e30 scale",
+        "10 10 translate 45 rotate -1e20 -1e20 translate 2e20 2e20 scale",
+        "10 10 translate 30 rotate -1e30 -1e30 translate 2e30 2e30 scale",
+        "-1e20 1e20 translate 2e20 -2e20 scale",
+    ] {
+        for sampling in [Sampling::Nearest, Sampling::Bilinear] {
+            let mut interp = canvas();
+            interp.run_str(setup).unwrap();
+            interp.draw_page(&red, sampling).unwrap();
+            let missing = pixels(&interp)
+                .chunks(4)
+                .filter(|p| *p != [255, 0, 0, 255])
+                .count();
+            assert_eq!(missing, 0, "{setup} {sampling:?}: {missing} pixels missed");
+        }
+    }
+}

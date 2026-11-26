@@ -393,8 +393,30 @@ impl crate::Interp {
         self.host_poll(work / 1024 + 1)?;
         self.check_alloc(usize::try_from(bytes).unwrap_or(usize::MAX))?;
         let smooth = matches!(sampling, Sampling::Bilinear);
-        self.gfx_mut().place_raster(page.pixmap(), &plan, smooth);
-        Ok(())
+        // The work is charged; what remains is looked at between the heavy
+        // steps (the recorders' copies, the strips of the fill) for the
+        // interrupt flag and, while a program runs, the time and memory caps.
+        // Between runs the limits belong to the run that ended: only the flag.
+        let flag = self.interrupt.clone();
+        let probe = if self.running() {
+            self.limit_probe()
+        } else {
+            crate::limits::LimitProbe::NONE
+        };
+        let mut look = || {
+            if flag
+                .as_ref()
+                .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            {
+                return Err(crate::PsError::Interrupted);
+            }
+            probe.check(0)
+        };
+        let watching = flag.is_some() || probe != crate::limits::LimitProbe::NONE;
+        let poll: Option<&mut dyn FnMut() -> Result<(), crate::PsError>> =
+            if watching { Some(&mut look) } else { None };
+        self.gfx_mut()
+            .place_raster(page.pixmap(), &plan, smooth, poll)
     }
 
     /// How many pages [`pages`](crate::Interp::pages) would return, without
