@@ -38,7 +38,8 @@ agent integration — skill, `pscat-mcp`, `pscat -` (14), the
 font library `lib/fonts/` — /Neon, /Marquee, /Constellation,
 /Lapidary + specimen (15), the browser build — wasm + web/pscat.js (16), the Pages site + pipeline — site/, scripts/build_site.sh, .github/workflows/pages.yml (17), and the font catalog —
 `fonts/catalog/` runtime loader completing the standard 35, plus
-/Circuitry, /Stitchwork, /Confetti (18), the art toolkit —
+/Circuitry, /Stitchwork, /Confetti (18; and the retro bitmap faces
+/Phosphor, /Pinpoint-Draft/-NLQ, /Diode7, /Diode5, #1426), the art toolkit —
 pathforall/flattenpath, lib/artkit.ps, the psart skill, Hortus
 Machinalis (19), and the style packs — `lib/styles/`
 steampunk/psychedelic/scifi/toon motif libraries over artkit, with
