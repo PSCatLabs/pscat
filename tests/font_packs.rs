@@ -274,7 +274,10 @@ fn fonts_list_names_the_type3_faces_and_how_to_load_them() {
         "type3 face: /Diode5 (load with: (lib/fonts/diode5.ps) run)",
         "type3 face: /Neon (load with: (lib/fonts/neon.ps) run)",
     ] {
-        assert!(out.lines().any(|l| l == line), "missing {line:?} in:\n{out}");
+        assert!(
+            out.lines().any(|l| l == line),
+            "missing {line:?} in:\n{out}"
+        );
     }
 }
 

@@ -256,9 +256,7 @@ fn diode5_prints_lowercase_as_capitals() {
         let mut it = loaded("lib/fonts/diode5.ps", 300, 40);
         run(
             &mut it,
-            &format!(
-                "/Diode5 findfont 25 scalefont setfont 5 8 moveto ({text}) show"
-            ),
+            &format!("/Diode5 findfont 25 scalefont setfont 5 8 moveto ({text}) show"),
         );
         it.gfx().pixmap.data().to_vec()
     };
@@ -272,7 +270,9 @@ fn diode5_prints_lowercase_as_capitals() {
 fn the_renderer_block_is_the_same_in_every_file() {
     let block = |path: &str| {
         let s = std::fs::read_to_string(path).expect("font file");
-        let start = s.find("  % --- the pixel renderer").expect("renderer start");
+        let start = s
+            .find("  % --- the pixel renderer")
+            .expect("renderer start");
         let end = s[start..]
             .find("Encoding 3 1 roll put } for pop\n")
             .expect("renderer end");
@@ -280,7 +280,10 @@ fn the_renderer_block_is_the_same_in_every_file() {
     };
     let first = block(FILES[0].0);
     for (path, _) in &FILES[1..] {
-        assert!(block(path) == first, "{path}: renderer differs from phosphor.ps");
+        assert!(
+            block(path) == first,
+            "{path}: renderer differs from phosphor.ps"
+        );
     }
 }
 
