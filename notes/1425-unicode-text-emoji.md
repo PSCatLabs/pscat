@@ -64,8 +64,8 @@ before wasm-bindgen/wasm-opt).
 
 | Artefact | Before (feature/0.8.0 @ 90a130d7) | After | Change |
 |---|---|---|---|
-| `pscat` release binary | 16,883,936 | 18,413,184 | +1,529,248 |
-| raw wasm (`pscat.wasm`) | 13,082,473 | 14,609,115 | +1,526,642 |
+| `pscat` release binary | 16,883,936 | 18,414,864 | +1,530,928 |
+| raw wasm (`pscat.wasm`) | 13,082,473 | 14,616,269 | +1,533,796 |
 | `.crate` (`cargo package`) | 5,877,722 | 6,627,968 | +750,246 |
 | npm tarball | 5,952,081 | 6,716,026 | +763,945 |
 | npm unpacked | 13,667,989 | 15,218,105 | +1,550,116 |
