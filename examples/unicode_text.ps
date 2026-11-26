@@ -1,0 +1,98 @@
+%!PS-Adobe-3.0
+%%Title: unicode_text.ps — UTF-8 text, fallback faces and colour emoji
+%%Creator: pscat
+%%BoundingBox: 0 0 420 600
+%%Pages: 1
+%%EndComments
+
+% A font dict with /PSCatUnicode true reads its strings as UTF-8 (issue
+% #1425). A character the face lacks comes from the compiled-in fallback
+% faces (Liberation Sans, Serif and Mono, Symbol, ZapfDingbats), an emoji
+% from the bundled Twemoji colour face, and a character nothing has is
+% drawn as .notdef with a warning. stringwidth measures exactly what show
+% draws, so the bubbles below are sized from it. There is no shaping or
+% bidi: Arabic and Hebrew come out in logical order, unjoined. A pscat
+% extension: Ghostscript ignores the key and shows the bytes. See docs/guides/fonts.md,
+% "Unicode text and emoji".
+%
+%   pscat --bbox --png unicode_text.png examples/unicode_text.ps
+
+% Name a Unicode-mode copy of a font: /New /Old unicodefont
+/unicodefont {
+  findfont dup length dict copy dup /PSCatUnicode true put definefont pop
+} def
+/Helvetica-U /Helvetica unicodefont
+/Helvetica-Bold-U /Helvetica-Bold unicodefont
+/Times-Italic-U /Times-Italic unicodefont
+
+/rrect { % x y w h r -> path of a rounded rectangle
+  /r exch def /h exch def /w exch def /y exch def /x exch def
+  newpath x r add y moveto
+  x w add y x w add y h add r arcto 4 {pop} repeat
+  x w add y h add x y h add r arcto 4 {pop} repeat
+  x y h add x y r arcto 4 {pop} repeat
+  x y x w add y r arcto 4 {pop} repeat
+  closepath
+} def
+
+0.97 0.96 0.93 setrgbcolor clippath fill
+
+/Helvetica-Bold-U findfont 22 scalefont setfont
+0.15 setgray 30 560 moveto (Unicode text and emoji 🎉) show
+/Times-Italic-U findfont 12 scalefont setfont
+0.35 setgray 30 541 moveto (one font, UTF-8 strings, the fallback faces fill the gaps) show
+
+% --- a text-message conversation ------------------------------------------
+/phone { 60 196 300 330 24 rrect } def
+1 setgray phone fill
+0.75 setgray 1.2 setlinewidth phone stroke
+
+/Helvetica-U findfont 13 scalefont setfont
+/by 488 def
+/bubble { % (text) mine? -> draws one message bubble and moves down
+  /mine exch def /txt exch def
+  /tw txt stringwidth pop def
+  /bw tw 24 add def
+  /bx mine { 340 bw sub } { 80 } ifelse def
+  mine { 0.16 0.47 0.96 setrgbcolor } { 0.90 0.90 0.92 setrgbcolor } ifelse
+  bx by bw 26 13 rrect fill
+  mine { 1 setgray } { 0.1 setgray } ifelse
+  bx 12 add by 9 add moveto txt show
+  /by by 36 sub def
+} def
+
+(Still on for tonight? 🍕) false bubble
+(Yes! 7pm 👍🏽) true bubble
+(Running late 😅 traffic 🚗🚗) false bubble
+(No worries ❤️ see you there) true bubble
+(Café on the corner ☕?) false bubble
+(🇫🇷 Parfait, à tout à l’heure 😊) true bubble
+(Grab 🥐🥐 on the way?) false bubble
+(On it 🫡) true bubble
+
+/Helvetica-U findfont 9 scalefont setfont
+0.55 setgray 300 by 28 add moveto (Read ✓✓) show
+
+% --- credits ------------------------------------------------------------------
+/Times-Italic-U findfont 11 scalefont setfont
+0.4 setgray
+/ctr { % (text) y -> centred line
+  /cy exch def dup stringwidth pop 2 div 210 exch sub cy moveto show
+} def
+(Directed by Zoë Saldaña-Núñez) 168 ctr
+(Music by Antonín Dvořák and Björk Guðmundsdóttir) 152 ctr
+(Ελληνικοί υπότιτλοι · Русские субтитры · Čeština) 136 ctr
+
+% --- signage -------------------------------------------------------------------
+/sign { % x y w (text) -> a sign with centred text
+  /t exch def /w exch def /y exch def /x exch def
+  0.13 0.36 0.24 setrgbcolor x y w 34 6 rrect fill
+  1 setgray x w t stringwidth pop sub 2 div add y 12 add moveto t show
+} def
+/Helvetica-Bold-U findfont 14 scalefont setfont
+30 76 170 (Ausgang → Exit) sign
+220 76 170 (⚠️ Wet floor ☂) sign
+30 32 170 (🚻 Toilets ↓) sign
+220 32 170 (Größe ≤ 2 m ✔) sign
+
+showpage

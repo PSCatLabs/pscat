@@ -567,3 +567,70 @@ Both licences permit embedding and redistribution. The choice, the
 candidate sheet and the caveat that the photo does not identify the
 original font are in `docs/archive/groovy_font_choice.md`; the specimen is
 `examples/groovy_faces.ps`, tested by `tests/groovy_faces.rs`.
+
+## Post-roadmap addendum — Unicode text, fallback faces and colour emoji (issue #1425)
+
+The Unicode-mode addenda above covered four catalog faces, each on its
+own: a character the face lacked advanced blank and nothing said so.
+#1425 opens Unicode mode to every outline font and gives it somewhere to
+go for a missing character.
+
+- **Opt-in by dict key.** `/PSCatUnicode true` (`font::UNICODE_KEY`) in an
+  outline font dict (`fid >= 0`) makes it Unicode-mode, alongside the
+  FID-keyed `CatalogEncoding::Unicode` faces (`font::outline_unicode`).
+  It rides `scalefont`/`makefont`'s shallow copy and the copy-and-
+  `definefont` idiom, so derived fonts keep it. Byte-mode fonts are
+  untouched: same bytes, same `Encoding` reads, so Ghostscript parity
+  holds (gs ignores the key). Type 1 dicts are not covered.
+- **Per scalar** (`src/font/unicode.rs`, `show_scalar`): the font's own
+  `cmap`; then a default-ignorable character (ZWJ, variation selectors,
+  bidi controls, tags) is zero width and a C0/C1 control blank with the
+  missing-glyph advance (as byte mode gives `\n`), neither reported; then
+  the compiled-in chain: Liberation Sans, Serif, Mono by `cmap`, and URW
+  Symbol and ZapfDingbats by glyph name through their encodings (their
+  `cmap`s hold only byte codes); then the emoji face; then the font's own
+  `.notdef` (glyph 0, a box on Liberation) with its own advance, and a
+  report. The emoji face goes first instead when the character has
+  `Emoji_Presentation` (Unicode 14 table), or U+FE0F, a skin-tone modifier
+  or U+20E3 follows; U+FE0E keeps it last.
+- **The catalog's Korean/Japanese/Thai faces are not in the chain.** They
+  are font packs, not compiled in, and loading a 10 MB face mid-show (the
+  memory and time to charge, the directory scan per glyph to avoid) is a
+  follow-up. The warning names the face (and pack) that has the script.
+- **Emoji.** `fonts/emoji/TwemojiMozilla.ttf` (Twemoji 14.0.1, Mozilla's
+  COLR v0 build, CC BY 4.0; `fonts/emoji/PROVENANCE.md`), `include_bytes!`d
+  and parsed once. A colour glyph's layers are collected through
+  ttf-parser's `colr::Painter` and each filled with its palette colour by
+  `Gfx::fill_path_rgb`, which swaps the state's colour (and colour space,
+  pattern, CMYK record; alpha multiplied) for the one fill and puts it
+  back, error or not. So emoji are vector in PNG, SVG and PDF, follow the
+  clip, CTM and current alpha, and are never written as SVG/PDF text.
+  `charpath` appends every layer's outline. Only the bundled face is
+  COLR-painted: a user's COLR font as the primary keeps its monochrome
+  outlines, so hostile COLR data never reaches the painter. The emoji em
+  is the text em (same FontMatrix); Twemoji spans −1/8 to 7/8 em.
+- **Sequences.** The face's GSUB type-4 ligatures (one `ccmp` lookup:
+  flags, keycaps, skin tones, ZWJ sequences) are matched longest-first
+  against at most 16 following scalars, decoded once into a fixed buffer;
+  every component compared is charged as work (U+1F468 starts 300-odd
+  ligatures). The scalars a ligature takes in stay glyph steps of their
+  own (`ShowCtx::absorb_end`), drawing nothing at zero width, so
+  `glyph_count`, `kshow`, `cshow` and `xshow` still see one step per
+  scalar. A kshow proc that switches to a byte-mode font ends the
+  ligature.
+- **Reporting.** `ShowCtx` records a missing character with the font's
+  name; the interpreter drains it after the step (and when an unwound
+  show frame is cleaned up) into `font_warnings` and stderr, once per
+  character, at most 32 per interpreter (`MISSING_GLYPH_NOTES`) and one
+  "not reported" line after.
+- **Limits.** Layer fills go through `fill_path_direct` with the show's
+  probe and work, the ligature search and symbolic-name scans add to
+  `work`, and registering an embedded fallback face is held against the
+  memory cap. Nothing is read from disk.
+- **Not done.** Shaping, GPOS, bidi; COLR v1 (gradients); style-matched
+  fallback (the chain is regular weight); Latin-1 recovery of invalid
+  UTF-8 (it is U+FFFD, reported).
+
+Size: the face is 1,474,284 bytes, compiled into the binary and wasm
+(numbers in `notes/1425-unicode-text-emoji.md`). Tests:
+`tests/unicode_text.rs`; specimen `examples/unicode_text.ps`.

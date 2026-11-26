@@ -101,7 +101,15 @@ BuildChar" addendum) that lets a Type 3 `BuildChar` receive a full
 Unicode codepoint instead of a byte; Unicode's Hangul-syllable
 arithmetic decomposes each codepoint into its jamo, which compose from
 just 14 atomic consonant stroke shapes plus a handful of vowel
-primitives (docs/archive/NOTES.md's entry has the full story). Also done: issue #10,
+primitives (docs/archive/NOTES.md's entry has the full story). Also done:
+issue #1425, UTF-8 text and colour emoji in any outline font —
+`/PSCatUnicode true` in the font dict, a fallback chain over the
+compiled-in faces, the bundled Twemoji COLR face painted layer by layer,
+and a once-per-character warning for what nothing covers
+(`src/font/unicode.rs`; docs/dev/FONTS.md's "Unicode text, fallback faces
+and colour emoji" addendum; `notes/1425-unicode-text-emoji.md`). Gotcha:
+the emoji art is CC BY 4.0, so the package licence expression carries
+`CC-BY-4.0` and THIRD_PARTY_NOTICES.md the credit. Also done: issue #10,
 hyperbolic geometry in the Poincare disk — `lib/artkit.ps`'s
 `hpoint`/`hpolar`/`horthocircle`/`hreflect`/`hgeo`/`hpoly`/`httile`
 (a breadth-first-reflection generator for regular {p,q} tessellations),
