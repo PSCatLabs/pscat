@@ -195,7 +195,10 @@ render. Two cases:
 With the pack installed the real face is used and nothing changes. The Type
 3 program faces load from the built-in library anywhere:
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
-/Circuitry, /Stitchwork, /Confetti).
+/Circuitry, /Stitchwork, /Confetti), and the retro bitmap faces in the caller's
+colour: /Phosphor and /Phosphor-Scan (terminal, `phosphor.ps`), /Pinpoint-Draft
+and /Pinpoint-NLQ (dot matrix, `pinpoint.ps`), /Diode7 and /Diode5 (LED,
+`diode7.ps`, `diode5.ps`); `pscat fonts list` names each with its `run` line.
 
 **Your own font files** (`.ttf`, `.otf`, `.ttc`) need no pack: put one in a
 subdirectory of `fonts/catalog/` in the current directory, `$PSCAT_HOME`, the

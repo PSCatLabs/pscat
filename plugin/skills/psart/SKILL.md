@@ -190,7 +190,10 @@ Also in the library, documented in each file's header and in
   set in the face you meant, so check `--fonts`.
 - Type 3 program faces load from the library anywhere:
   `(lib/fonts/neon.ps) run` — /Neon, /Marquee, /Constellation,
-  /Lapidary, /Circuitry, /Stitchwork, /Confetti.
+  /Lapidary, /Circuitry, /Stitchwork, /Confetti; and the retro bitmap
+  faces, drawn in the current colour: /Phosphor, /Phosphor-Scan
+  (`phosphor.ps`), /Pinpoint-Draft, /Pinpoint-NLQ (`pinpoint.ps`),
+  /Diode7, /Diode5 (`diode7.ps`, `diode5.ps`).
 - Text as geometry: `(word) true charpath` then fill/stroke/clip it, or
   walk it with `alongpath`.
 - Pair the built-in faces on purpose: a Palatino-Italic title over

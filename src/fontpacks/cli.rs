@@ -55,7 +55,8 @@ usage: pscat fonts install [--version <fonts-YYYY.MM[.N]>|latest] [--from <file>
             .tar.zst pack. --pack limits it to the named packs (default: all).
             This is the only command in pscat that uses the network.
   list      show the pinned release, installed packs (re-verified against
-            their manifests), and fonts/catalog overrides
+            their manifests), fonts/catalog overrides, and the Type 3
+            faces in lib/ (each with the `run` line that defines it)
   remove    remove installed packs (all of them when none are named)
 
 Packs install into $PSCAT_HOME/fonts/packs, else the per-user data directory.
@@ -205,6 +206,11 @@ fn cmd_list() -> Result<(), String> {
         if !installed.iter().any(|p| p.name == def.name) {
             println!("not installed: {} ({})", def.name, def.description);
         }
+    }
+    // Built in (lib/ is embedded), so never installed or missing: a program
+    // runs the file, then finds the face by name (#1426).
+    for (name, load) in crate::capabilities::type3_faces() {
+        println!("type3 face: /{name} (load with: {load})");
     }
     if bad {
         return Err("an installed pack failed verification; reinstall it".into());

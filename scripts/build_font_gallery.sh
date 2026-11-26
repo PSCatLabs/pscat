@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build_font_gallery.sh — render one card PNG per available font face for
-# site/fonts.html: the Type3 faces (the eight lib/fonts/ faces in their
+# site/fonts.html: the Type3 faces (the lib/fonts/ faces in their
 # natural materials, colors lifted from examples/font_library*.ps, plus
 # lib/handscript.ps and lib/typewriter.ps) and the fonts/catalog/ families
 # (the standard 35 plus the display shelf, same label/font/sample data as
@@ -121,6 +121,46 @@ card confetti 440x130 type3 <<'EOF'
 36 60 moveto (CONFETTI) show
 /Confetti findfont 14 scalefont setfont
 36 24 moveto (thrown and still falling) show
+showpage
+EOF
+
+card phosphor 440x130 type3 <<'EOF'
+%!PS
+(lib/fonts/phosphor.ps) run
+0.02 0.04 0.03 setrgbcolor clippath fill
+0.3 1 0.45 setrgbcolor
+/Phosphor-Scan findfont 48 scalefont setfont
+36 62 moveto (PHOSPHOR) show
+1 0.72 0.15 setrgbcolor
+/Phosphor findfont 16 scalefont setfont
+36 26 moveto ($ login: guest_) show
+showpage
+EOF
+
+card pinpoint 440x130 type3 <<'EOF'
+%!PS
+(lib/fonts/pinpoint.ps) run
+0.97 0.96 0.90 setrgbcolor clippath fill
+0.80 0.92 0.82 setrgbcolor 0 54 440 27 rectfill
+0.15 setgray
+/Pinpoint-Draft findfont 36 scalefont setfont
+36 64 moveto (PINPOINT) show
+/Pinpoint-NLQ findfont 18 scalefont setfont
+36 24 moveto (draft and NLQ dots) show
+showpage
+EOF
+
+card diode 440x130 type3 <<'EOF'
+%!PS
+(lib/fonts/diode7.ps) run
+(lib/fonts/diode5.ps) run
+0.05 0.05 0.05 setrgbcolor clippath fill
+1 0.18 0.1 setrgbcolor
+/Diode7 findfont 40 scalefont setfont
+36 62 moveto (DIODE 7:30) show
+1 0.68 0.08 setrgbcolor
+/Diode5 findfont 15 scalefont setfont
+36 24 moveto (FIVE LAMPS HIGH) show
 showpage
 EOF
 
