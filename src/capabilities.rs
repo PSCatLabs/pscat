@@ -794,6 +794,61 @@ static ENTRIES: &[Entry] = &[
         "/Confetti findfont 110 scalefont setfont",
         LIB
     ),
+    // --- retro screen and printer faces (lib/fonts/, #1426) --------
+    entry!(
+        "Phosphor",
+        CapabilityKind::Type3Face,
+        "Video-terminal font: printable ASCII on an 8x16 cell, square pixels in the current colour (green or amber phosphor is one setrgbcolor). 16 scalefont = one unit per pixel. Dials in the font dict (/DotShape /DotSize /ScanGap), varied with pf-variant; /Bitmaps holds each glyph's rows.",
+        &[],
+        "lib/fonts/phosphor.ps",
+        "0.3 1 0.45 setrgbcolor /Phosphor findfont 16 scalefont setfont",
+        LIB
+    ),
+    entry!(
+        "Phosphor-Scan",
+        CapabilityKind::Type3Face,
+        "/Phosphor with the dark gap between CRT scan lines (/ScanGap 0.45).",
+        &[],
+        "lib/fonts/phosphor.ps",
+        "/Phosphor-Scan findfont 32 scalefont setfont",
+        LIB
+    ),
+    entry!(
+        "Pinpoint-Draft",
+        CapabilityKind::Type3Face,
+        "Nine-pin dot-matrix printer font, draft mode: printable ASCII as round dots on 9 pins x 8 columns, in the current colour. 9 scalefont = one unit per dot pitch. /DotSize sets the dot diameter.",
+        &[],
+        "lib/fonts/pinpoint.ps",
+        "0.15 setgray /Pinpoint-Draft findfont 18 scalefont setfont",
+        LIB
+    ),
+    entry!(
+        "Pinpoint-NLQ",
+        CapabilityKind::Type3Face,
+        "/Pinpoint-Draft in near-letter-quality mode: a second pass of smaller dots between neighbouring dots, so strokes print solid.",
+        &[],
+        "lib/fonts/pinpoint.ps",
+        "/Pinpoint-NLQ findfont 18 scalefont setfont",
+        LIB
+    ),
+    entry!(
+        "Diode7",
+        CapabilityKind::Type3Face,
+        "LED sign font seven lamps high (plus one descender row), proportional, round lamps in the current colour. 8 scalefont = one unit per lamp, for frames at true LED size.",
+        &[],
+        "lib/fonts/diode7.ps",
+        "1 0.15 0.1 setrgbcolor /Diode7 findfont 8 scalefont setfont",
+        LIB
+    ),
+    entry!(
+        "Diode5",
+        CapabilityKind::Type3Face,
+        "LED strip font five lamps high: capitals, digits and ASCII punctuation (a-z print as capitals), proportional, round lamps in the current colour. 5 scalefont = one unit per lamp (a 65x5 strip at true size).",
+        &[],
+        "lib/fonts/diode5.ps",
+        "/Diode5 findfont 5 scalefont setfont",
+        LIB
+    ),
     entry!(
         "HandScript",
         CapabilityKind::Type3Face,
@@ -2451,6 +2506,18 @@ static ENTRIES: &[Entry] = &[
         LIB
     ),
 ];
+
+/// The Type 3 faces a program gets by running a `lib/` file first, as
+/// (name, `run` line) pairs, for `pscat fonts list` (#1426). They stay out
+/// of `--fonts`, which lists what `findfont` reaches with nothing loaded.
+/// `build.rs` takes no `@kind: Type3Face`, so every face is in `ENTRIES`.
+pub fn type3_faces() -> Vec<(&'static str, String)> {
+    ENTRIES
+        .iter()
+        .filter(|e| e.kind == CapabilityKind::Type3Face)
+        .map(|e| (e.name, load_sequence(e.kind, e.source)))
+        .collect()
+}
 
 /// Builds the full catalog: `ENTRIES` (hand-maintained, unmigrated
 /// files) plus `GENERATED_ENTRIES` (`build.rs`-parsed from `% @...`

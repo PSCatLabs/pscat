@@ -261,6 +261,23 @@ fn fonts_list_reports_the_builds_pin() {
     assert!(out.contains("not installed: extras"), "{out}");
 }
 
+/// #1426: the Type 3 faces in lib/ are listed too, each with the `run` line
+/// that defines it, since `findfont` alone does not reach them.
+#[test]
+fn fonts_list_names_the_type3_faces_and_how_to_load_them() {
+    let home = common::scratch_dir("fontpack-type3");
+    let (ok, out, _) = pscat(&home, &["fonts", "list"]);
+    assert!(ok);
+    for line in [
+        "type3 face: /Phosphor (load with: (lib/fonts/phosphor.ps) run)",
+        "type3 face: /Pinpoint-NLQ (load with: (lib/fonts/pinpoint.ps) run)",
+        "type3 face: /Diode5 (load with: (lib/fonts/diode5.ps) run)",
+        "type3 face: /Neon (load with: (lib/fonts/neon.ps) run)",
+    ] {
+        assert!(out.lines().any(|l| l == line), "missing {line:?} in:\n{out}");
+    }
+}
+
 #[test]
 fn bare_install_without_a_pin_says_so_and_touches_nothing() {
     // A pinned build would download the pinned release here; that path

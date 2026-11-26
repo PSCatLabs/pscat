@@ -1,0 +1,125 @@
+%!PS-Adobe-3.0
+%%Title: retro_fonts.ps — specimen of the terminal, dot-matrix and LED faces
+%%Creator: pscat — issue #1426
+%%BoundingBox: 0 0 760 1400
+%%EndComments
+
+% The four retro faces of lib/fonts/ on one sheet: every glyph of each,
+% at a magnified size and at true size (one font pixel per unit), with
+% their variants. /Phosphor on a terminal screen, /Pinpoint-Draft and
+% /Pinpoint-NLQ on printer paper, /Diode7 and /Diode5 on a dark LED
+% panel. The library files load relative to the repo root:
+%
+%   pscat --page 760x1400 --dpi 144 --png retro.png examples/retro_fonts.ps
+%   gs -dNOSAFER -dNOPAUSE -dBATCH -sDEVICE=png16m -g760x1400 -r72 \
+%      -o retro.png examples/retro_fonts.ps        (from the repo root)
+
+(lib/fonts/phosphor.ps) run
+(lib/fonts/pinpoint.ps) run
+(lib/fonts/diode7.ps) run
+(lib/fonts/diode5.ps) run
+
+/ascii1 ( !"#$%&'\(\)*+,-./0123456789:;<=>?) def
+/ascii2 (@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`) def
+/ascii3 (abcdefghijklmnopqrstuvwxyz{|}~) def
+
+% x y w h r g b panel -
+/panel { setrgbcolor rectfill } def
+% (text) x y label -   a small caption in Helvetica
+/label {
+  moveto /Helvetica 9 selectfont show
+} def
+% /Face size x y (text) at -
+/at {
+  5 1 roll moveto exch findfont exch scalefont setfont show
+} def
+% /Face size x y lead allthree -   the 95 printable ASCII glyphs, 3 lines
+/allthree {
+  /lead exch def /y exch def /x exch def /sz exch def /fc exch def
+  fc sz x y ascii1 at
+  fc sz x y lead sub ascii2 at
+  fc sz x y lead 2 mul sub ascii3 at
+} def
+
+1 setgray clippath fill
+
+% ------------------------------------------------------------- Phosphor
+0 760 760 640 0.02 0.04 0.03 panel
+0.55 0.7 0.6 setrgbcolor
+(PHOSPHOR  -  lib/fonts/phosphor.ps  -  8x16 cell, every printable ASCII glyph at 32 pt (2 units per pixel)) 24 1380 label
+0.3 1 0.45 setrgbcolor
+/Phosphor 32 24 1340 38 allthree
+0.55 0.7 0.6 setrgbcolor
+(/Phosphor-Scan at 48 pt: scan-line gaps (/ScanGap 0.45)) 24 1222 label
+0.3 1 0.45 setrgbcolor
+/Phosphor-Scan 48 24 1180 (READY. Scan lines) at
+/Phosphor-Scan 48 24 1130 (gjpqy 0O 1lI \(\){}) at
+0.55 0.7 0.6 setrgbcolor
+(Amber, true size: 16 pt, one unit per pixel, a terminal session) 24 1100 label
+1 0.72 0.15 setrgbcolor
+/Phosphor 16 24 1076 (PSCAT TERMINAL 80x24   (C) 2026 PSCatLabs) at
+/Phosphor 16 24 1060 (login: guest) at
+/Phosphor 16 24 1044 ($ ls -l /usr/games) at
+/Phosphor 16 24 1028 (-rwxr-xr-x  1 root  4096 Nov 26 14:02 lander) at
+/Phosphor 16 24 1012 (-rwxr-xr-x  1 root  8192 Nov 26 14:02 wumpus) at
+/Phosphor 16 24 996 ($ echo "{x: [1, 2], y: 'ok'} | grep ~/a_b") at
+/Phosphor 16 24 980 ($ _) at
+0.55 0.7 0.6 setrgbcolor
+(Variants by pf-variant: /DotShape /round /DotSize 0.85, white at 24 pt; /DotSize 0.7 squares at 24 pt) 24 954 label
+/Ph-Round /Phosphor << /DotShape /round /DotSize 0.85 >> pf-variant
+/Ph-Grid /Phosphor << /DotSize 0.7 >> pf-variant
+0.85 0.9 1 setrgbcolor
+/Ph-Round 24 24 924 (Round dots: The quick brown fox) at
+0.3 0.85 1 setrgbcolor
+/Ph-Grid 24 24 890 (Pixel grid: jumps over 0123456789) at
+0.55 0.7 0.6 setrgbcolor
+(Green, true size 16 pt:) 24 864 label
+0.3 1 0.45 setrgbcolor
+/Phosphor 16 24 842 ascii1 at
+/Phosphor 16 24 826 ascii2 at
+/Phosphor 16 24 810 ascii3 at
+/Phosphor 16 24 784 (The quick brown fox jumps over the lazy dog.) at
+
+% ------------------------------------------------------------- Pinpoint
+0 400 760 360 0.97 0.96 0.90 panel
+0.80 0.92 0.82 setrgbcolor
+0 1 4 { 54 mul 420 add 0 exch 760 27 rectfill } for
+0.35 setgray
+(PINPOINT  -  lib/fonts/pinpoint.ps  -  9-pin dot matrix, every glyph at 24 pt; Draft, then NLQ) 24 742 label
+0.15 setgray
+/Pinpoint-Draft 24 24 708 30 allthree
+/Pinpoint-NLQ 24 24 610 30 allthree
+0.35 setgray
+(18 pt and true size 9 pt (one unit per pin), Draft then NLQ) 24 518 label
+0.15 setgray
+/Pinpoint-Draft 18 24 494 (INVOICE 0042   Qty 3 @ $1.25   Total $3.75) at
+/Pinpoint-NLQ 18 24 470 (Dear Sir, the quick brown fox jumps.) at
+/Pinpoint-Draft 9 24 448 (INVOICE 0042   Qty 3 @ $1.25   Total $3.75   the quick brown fox jumps over the lazy dog) at
+/Pinpoint-NLQ 9 24 434 (INVOICE 0042   Qty 3 @ $1.25   Total $3.75   the quick brown fox jumps over the lazy dog) at
+0.1 0.1 0.45 setrgbcolor
+/Pinpoint-Draft 18 24 410 (Blue ribbon: Draft gjpqy_) at
+
+% ------------------------------------------------------------- Diode
+0 0 760 400 0.05 0.05 0.05 panel
+0.6 setgray
+(DIODE7  -  lib/fonts/diode7.ps  -  7 lamps high + 1 descender row, every glyph at 24 pt (3 units per lamp)) 24 382 label
+1 0.18 0.1 setrgbcolor
+/Diode7 24 24 350 30 allthree
+0.6 setgray
+(true size, 8 pt: one unit per lamp) 24 266 label
+1 0.18 0.1 setrgbcolor
+/Diode7 8 200 266 (NEWS 7:30  The quick brown fox jumps) at
+0.6 setgray
+(DIODE5  -  lib/fonts/diode5.ps  -  5 lamps high, capitals only, every glyph at 20 pt (4 units per lamp)) 24 216 label
+1 0.68 0.08 setrgbcolor
+/Diode5 20 24 194 30 allthree
+0.6 setgray
+(A 65x5 strip at true size (5 pt), and at 6x with the strip outline) 24 60 label
+1 0.68 0.08 setrgbcolor
+/Diode5 5 24 40 (HELLO 42 MON) at
+0.25 setgray 0.5 setlinewidth
+120 24 390 30 rectstroke
+0.2 0.8 1 setrgbcolor
+/Diode5 30 122 24 (HELLO 42 MON) at
+showpage
+%%EOF
