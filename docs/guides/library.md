@@ -328,6 +328,110 @@ itself (`Page::premultiplied_rgba8_mut`), or keeps a picture from one run to
 the next. Inside a pattern's `PaintProc` there is no page to exchange, and the
 `Page` comes back as the error.
 
+**Files from memory.** `add_virtual_file(name, bytes)` serves a named source to
+the program, so `(components/foo.ps) run`, `(components/foo.ps) (r) file`,
+`readreals` and `status` work with no disk: for WebAssembly, a sandboxed
+service, or an application with several library files of its own.
+
+```rust
+let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+interp.add_virtual_file("components/dot.ps", b"/dot { 50 50 5 0 360 arc fill } def")?;
+interp.run_str("(components/dot.ps) run dot")?;
+```
+
+The name is matched whole and exactly (a leading `./` is ignored), before the
+search order: a registered name shadows a disk file and the embedded `lib/` copy
+of the same name, which is how a host replaces a library. Every other name
+resolves as it always did, so registering a file changes nothing else, and under
+read roots an unregistered name outside them is still `invalidfileaccess`.
+Virtual files are memory, not disk, so read roots do not gate them, **by
+design**: only the host's own code can register a file, so a program can read
+exactly the names the host registered and nothing it did not. A sandbox that
+confines a program with read roots (`pscat-mcp`, `--allow-read`) stays closed:
+registering `components/foo.ps` grants the program that one name and no disk
+path. Only reading is served: `(name) (w) file`, `deletefile`, `renamefile` and
+`filenameforall` do not see them. An error inside a file run this way names it,
+in `ErrorDetails::file` and in a frame's `file` and `line`, as for a file on disk.
+
+`bytes` is an owned `Vec<u8>` (moved in, never copied) or a borrowed slice
+(copied once). Every check runs before the copy, so a refused registration
+allocates nothing; a borrowed copy is also held to `--max-memory` and, from a
+host operator, charged a step per KiB to the running program. A file is at most
+`host::MAX_VIRTUAL_FILE_BYTES` (64 MiB, the bound for a `lib/` file on disk), a
+name at most `MAX_VIRTUAL_NAME_BYTES` (4096), a store holds at most
+`MAX_VIRTUAL_FILES` (4096) files and `MAX_VIRTUAL_TOTAL_BYTES` (512 MiB, the
+bound for any one resource). The store counts what it keeps: each file's name
+and its buffer's *capacity*, so `shrink_to_fit` a `Vec` that reserved more than
+it holds. An empty name, a NUL, a `%` device name or a `..` component are
+refused. A registration past a bound is `limitcheck` and changes nothing. Each
+read copies the file into the program's file object and is charged as a read of
+that size (a step per KiB, the memory cap checked before the copy), so a program
+that loads a large file in a loop meets its limits; with no limits set it costs a
+lookup.
+
+**A raster under the transformation.** `draw_page(&page, Sampling)` paints a
+`Page` the host holds through the current transformation, clip, `setalpha` and
+`setblendmode`, as `image` does for samples a program supplied, so a layer a host
+keeps (a motion layer, a rendered component) goes through pscat's own sampler
+instead of the host's compositor. The page's pixel grid fills the user-space
+unit square with its first row on top, the mapping of
+`w h 8 [w 0 0 -h 0 h] image`; the host places it with the PostScript it
+already has and scales it to size.
+
+```rust
+use pscat::{Interp, Page, host::Sampling};
+
+let mut interp = Interp::with_page(200, 100).expect("valid page size");
+let layer = Page::transparent(64, 64).expect("valid size"); // painted elsewhere
+interp.run_str("gsave 100 50 translate 30 rotate 0.8 setalpha 80 80 scale -0.5 -0.5 translate")?;
+interp.draw_page(&layer, Sampling::Bilinear)?;
+interp.run_str("grestore")?;
+```
+
+`Sampling::Nearest` takes the pixel under each device pixel's centre (a 1:1
+placement reproduces the raster exactly); `Bilinear` blends the four nearest
+pixels, which suits a rotated or enlarged layer of soft art. The raster's edge is
+anti-aliased either way, its own transparency composes with `setalpha` and the
+blend mode, and the clip in force applies. `Page::from_premultiplied_rgba8`
+takes premultiplied pixels.
+
+It paints where the program paints: the layer while a transparency group is open
+(so a host operator that places a raster inside `begingroup` ... `endgroup` is
+composited at the group's alpha and blend mode, and a host reading the canvas
+meanwhile still sees the page below), the tile inside a pattern's `PaintProc`
+(in an uncoloured one, the raster's coverage in the pattern's colour; SVG
+records that as a mask of its alpha and PDF as an image mask, one bit a pixel,
+set where the alpha is at least half, since PDF allows no colour image there). A group is closed when a run ends, so draw into one from a host
+operator, or between `step_n` slices. A call that has nothing to paint
+(`nulldevice`, a singular or non-finite transformation, a footprint wholly off the
+canvas) is `Ok` and changes nothing; a transformation so large that the corners
+are 1e20 pixels away still covers the canvas it covers (that is decided in the
+raster's own unit coordinates; where an edge crosses the canvas at such a scale,
+the matrix's single precision decides where).
+
+SVG and PDF output **embed the raster as an image** at its placement, with the
+clip, alpha, blend mode and group, as they record `image`: a PNG in SVG, an RGB
+image with a soft mask in PDF (no mask when no pixel is transparent). Recording
+copies the pixels, so a raster over `host::MAX_EMBEDDED_RASTER_PIXELS` (16
+million) is `limitcheck` while either recorder is on, with nothing painted or
+recorded; PNG output paints the page in place and has no such limit. (Unlike
+`swap_canvas`, whose raster the recorders never see.) A raster wholly off the page
+is not embedded either.
+
+Under `--bands` only the band's rows are filled (and charged).
+
+The work is charged before anything is painted. From a host operator, a call
+counts a step per 1024 device pixels its footprint reaches on the canvas (not
+how far the transformation stretches it) plus a step per 1024 pixels recorded,
+looks at the time and memory caps and the interrupt flag, and is refused whole
+when one is passed: the canvas stays as it was. The time and memory caps and the
+interrupt flag are looked at again between the heavy steps (the recorders' pixel
+copies every million pixels, and strips of the fill), and the recorders are
+written only after their copies are made, so a limit that fires part way leaves
+the canvas and the output as they were. The PNG encode and the zlib compression
+inside one SVG or PDF image are single calls, polled before and after, not within. Between runs only the memory cap
+(for the recorders' copies) and the interrupt flag apply.
+
 **Transparency groups.** While a program has a group open (`begingroup`, between
 slices of `begin_source` and `step_n`, or inside a host operator) its marks go to a
 layer, and what a host reads or exchanges is the page below that layer:

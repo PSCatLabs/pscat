@@ -317,6 +317,115 @@ impl crate::Interp {
         }
     }
 
+    /// Paint `page`, a raster the host holds, through the current
+    /// transformation, clip, `setalpha` and `setblendmode`, as `image` paints
+    /// samples a program supplied. The raster's pixel grid fills the user-space
+    /// unit square with its first row along the top (`y = 1`), exactly the
+    /// mapping of `w h 8 [w 0 0 -h 0 h] image`, so the host places it with the
+    /// operators it already has and scales it up to size:
+    ///
+    /// ```
+    /// use pscat::{Interp, Page, host::Sampling};
+    /// let mut interp = Interp::with_page(20, 10).expect("valid page size");
+    /// // A layer: red on the left half, opaque; the rest transparent.
+    /// let mut layer = Page::transparent(2, 1).expect("valid size");
+    /// layer.premultiplied_rgba8_mut()[..4].copy_from_slice(&[255, 0, 0, 255]);
+    /// // Paint it 20 x 10 units from the origin, at half strength.
+    /// interp.run_str("gsave 0.5 setalpha 20 10 scale")?;
+    /// interp.draw_page(&layer, Sampling::Nearest)?;
+    /// interp.run_str("grestore")?;
+    /// let canvas = interp.canvas_premultiplied_rgba8();
+    /// let left = &canvas[(5 * 20 + 3) * 4..][..4]; // half-strength red on white
+    /// assert!(left[0] == 255 && (126..=129).contains(&left[1]) && left[3] == 255);
+    /// assert_eq!(&canvas[(5 * 20 + 15) * 4..][..4], &[255, 255, 255, 255]);
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    ///
+    /// The raster is composited where the program paints: on the layer while a
+    /// transparency group is open (the group composites it at `endgroup`, and a
+    /// host reading the canvas sees the page below until then), inside a
+    /// pattern's `PaintProc` on the tile. The clip, `setalpha` (as opacity)
+    /// and `setblendmode` apply as for a fill, and the edge of the raster is
+    /// anti-aliased. A `page` of straight-alpha art must be made premultiplied
+    /// ([`Page::from_premultiplied_rgba8`]); a transparent pixel paints nothing.
+    ///
+    /// It paints and records nothing, and is not an error, when the program
+    /// paints nowhere (`nulldevice`), the transformation is singular or not
+    /// finite, or the raster lies wholly off the canvas. A raster that is not
+    /// on the canvas at all is not embedded in SVG or PDF output either. In an
+    /// uncoloured pattern's `PaintProc` it paints as `image` does: the tile
+    /// keeps the raster's coverage and the pattern's colour replaces its own;
+    /// SVG records that as a mask of the raster's alpha and PDF as an image
+    /// mask (a bit a pixel, set where the alpha is at least half), which is
+    /// all a PDF tile without colour may hold.
+    ///
+    /// **SVG and PDF output** embed the raster as an image at its placement,
+    /// with the clip and the alpha and blend mode, as `image` is recorded
+    /// (PNG in SVG, an RGB image with a soft mask in PDF; a raster with no
+    /// transparent pixel carries no mask). Recording copies the pixels, so a
+    /// raster over [`MAX_EMBEDDED_RASTER_PIXELS`](crate::host::MAX_EMBEDDED_RASTER_PIXELS) is `limitcheck` while either
+    /// recorder is on, with nothing painted or recorded.
+    ///
+    /// **Limits.** Called from a host operator, the work is charged to the
+    /// running program: a step per 1024 device pixels the footprint reaches
+    /// (and per pixel recorded), and the time and memory caps and the
+    /// interrupt flag are looked at, all before anything is painted, so a
+    /// refused call leaves the canvas as it was. They are looked at again
+    /// between the heavy steps (the recorders' pixel copies, strips of the
+    /// fill), and the recorders are written only once their copies exist, so a
+    /// limit that fires part way leaves the canvas and the output as they were.
+    /// Between runs only the memory cap (for the recorders' copies) and the
+    /// interrupt flag apply. Under `--bands` only the band's rows are filled.
+    pub fn draw_page(
+        &mut self,
+        page: &Page,
+        sampling: crate::host::Sampling,
+    ) -> Result<(), crate::PsError> {
+        use crate::host::{MAX_EMBEDDED_RASTER_PIXELS, Sampling};
+        let (w, h) = (page.width(), page.height());
+        let Some(plan) = self.gfx().plan_raster(w, h) else {
+            return Ok(());
+        };
+        let (svg, pdf) = (self.gfx().svg_wanted(), self.gfx().pdf_wanted());
+        let px = u64::from(w) * u64::from(h);
+        let recorders = u64::from(svg) + u64::from(pdf);
+        if recorders > 0 && px > MAX_EMBEDDED_RASTER_PIXELS as u64 {
+            return Err(crate::PsError::Limitcheck);
+        }
+        // What the recorders hold at once: SVG, a premultiplied copy's
+        // demultiplied encode and the PNG (12 bytes a pixel); PDF, RGB, alpha
+        // and the demultiplied pixel (8).
+        let bytes = px * (if svg { 12 } else { 0 } + if pdf { 8 } else { 0 });
+        let work = plan.area.saturating_add(px.saturating_mul(recorders));
+        self.host_poll(work / 1024 + 1)?;
+        self.check_alloc(usize::try_from(bytes).unwrap_or(usize::MAX))?;
+        let smooth = matches!(sampling, Sampling::Bilinear);
+        // The work is charged; what remains is looked at between the heavy
+        // steps (the recorders' copies, the strips of the fill) for the
+        // interrupt flag and, while a program runs, the time and memory caps.
+        // Between runs the limits belong to the run that ended: only the flag.
+        let flag = self.interrupt.clone();
+        let probe = if self.running() {
+            self.limit_probe()
+        } else {
+            crate::limits::LimitProbe::NONE
+        };
+        let mut look = || {
+            if flag
+                .as_ref()
+                .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            {
+                return Err(crate::PsError::Interrupted);
+            }
+            probe.check(0)
+        };
+        let watching = flag.is_some() || probe != crate::limits::LimitProbe::NONE;
+        let poll: Option<&mut dyn FnMut() -> Result<(), crate::PsError>> =
+            if watching { Some(&mut look) } else { None };
+        self.gfx_mut()
+            .place_raster(page.pixmap(), &plan, smooth, poll)
+    }
+
     /// How many pages [`pages`](crate::Interp::pages) would return, without
     /// copying any of them.
     ///
