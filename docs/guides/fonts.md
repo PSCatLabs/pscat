@@ -19,7 +19,7 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   and the `N RD <binary>` idiom. Ghostscript accepts the Type 1 file the test
   suite generates, byte for byte.
 
-This guide covers accented text in the standard fonts, placing each glyph
+This guide covers accented text in the standard fonts, UTF-8 text and emoji, placing each glyph
 yourself, the Type 3 display library, the retro screen and printer faces, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
@@ -57,7 +57,66 @@ encoding holds, with Level 2 `glyphshow`:
 lacks advances by `.notdef`'s width. On a Type 3 font it calls `BuildGlyph`
 with the name. A Type 3 font with only `BuildChar` gets the first Encoding
 slot holding the name, or 0, as in Ghostscript. Latin faces do not read UTF-8:
-a byte is an Encoding slot.
+a byte is an Encoding slot, unless the font is Unicode-mode (next section).
+
+## Unicode text and emoji
+
+Put `/PSCatUnicode true` in a copy of any outline font and its strings are
+read as UTF-8: accented names, Greek, Cyrillic, arrows, math signs and colour
+emoji, straight from a UTF-8-saved `.ps` file, with no re-encoding.
+
+```postscript
+/Helvetica findfont dup length dict copy dup /PSCatUnicode true put
+/Helvetica-U exch definefont 18 scalefont setfont
+72 700 moveto (Zoë Saldaña · Ωμέγα · Жук · Café ☕ 👍🏽 🇫🇷) show
+```
+
+(`/Helvetica findfont 18 scalefont dup /PSCatUnicode true put setfont` works
+too. On Symbol and ZapfDingbats the key means characters, not codes: `α` is
+Symbol's alpha, `✓` Dingbats' check mark, and `A` falls back to a Latin A.) Each character is looked up by code point in the font's own face first.
+A character it lacks comes from the compiled-in fallback faces, in order:
+Liberation Sans, Serif and Mono (Latin, Greek, Cyrillic, Hebrew letters, most
+punctuation and symbols), Symbol (math, arrows) and ZapfDingbats (✓ ✔ ★ ☎).
+An emoji comes from the bundled colour face, [Twemoji](../../fonts/emoji/PROVENANCE.md),
+drawn as coloured vector layers in PNG, SVG and PDF alike, one em wide on the
+baseline with a slight descent, at the size of the text around it.
+
+- **Emoji or text.** A character that is an emoji by default (😀, 🍕, ☕)
+  draws as one. One that is text by default (❤ ☺ #) draws from the text faces
+  unless U+FE0F follows it (`❤️` is the red heart); U+FE0E keeps it text.
+- **Sequences.** Flags (🇺🇸), skin tones (👍🏽), keycaps (#️⃣) and ZWJ
+  sequences (👨‍👩‍👧) join into one glyph when the emoji face has it; an
+  unknown sequence draws its parts.
+- **Invisible characters.** Joiners, variation selectors and the other
+  default-ignorable characters take no width; a control character (a `\n`
+  left in a string) is blank with a space's width, as in byte mode.
+- **Missing characters.** A character no face has is drawn as the font's
+  `.notdef` box and reported once on stderr (and in `Interp::font_warnings` and
+  the npm `warnings`): `pscat: warning: no glyph for U+AC00 (가) in /Helvetica
+  or its fallback faces; drew .notdef`. Korean, Japanese and Thai are not in
+  the compiled-in chain; the warning names the Unicode-mode catalog face that
+  has them (`/NotoSansKR`, `/NotoSansJP`, `/NotoSansThai`). Up to 32
+  characters are reported per run.
+- **Measuring.** `stringwidth` and `charpath` take the same path as `show`, so
+  a width measured to wrap or centre a line is the width drawn. `kshow`,
+  `cshow` and `xshow` see one character per code point; the extra code points
+  of a joined emoji draw nothing and take no width (with `xshow` they still
+  take a number each), and `ashow`/`widthshow` add no spacing after them or
+  after a joiner or variation selector.
+- **Not supported.** No shaping, ligatures or bidi for text: Arabic and Hebrew
+  come out in logical order and unjoined, and Thai marks stack by their
+  advances. Fallback faces are regular weight, whatever the font's.
+
+The key is a pscat extension: Ghostscript ignores it and shows the bytes. The
+four catalog faces for Korean, Japanese and Thai have always been
+Unicode-mode, and now fall back the same way (an emoji in Korean text works).
+`examples/unicode_text.ps` is a specimen: a text-message conversation, film
+credits and signs.
+
+The emoji artwork is Twemoji, under CC BY 4.0. A render with an emoji in it
+carries that art, so a shared image or video credits it, for example: "Emoji
+graphics by Twemoji (Twitter, Inc and other contributors), CC BY 4.0"
+(`THIRD_PARTY_NOTICES.md`, "Colour emoji").
 
 ## Placing each glyph: xshow, yshow, xyshow and cshow
 

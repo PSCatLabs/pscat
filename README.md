@@ -179,9 +179,10 @@ pscat's code is dual-licensed under [MIT](LICENSE-MIT) or
 data: the Liberation faces, the URW Symbol and ZapfDingbats faces and the
 Courier Prime-derived typewriter outlines, under the
 [SIL Open Font License 1.1](LICENSE-OFL), and the TeX Gyre faces, under the
-GUST Font License (LPPL-1.3c). That's why `Cargo.toml` says
-`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. The font terms cover only
-the embedded font data, not pscat's code.
+GUST Font License (LPPL-1.3c), and the Twemoji colour emoji, under
+CC BY 4.0. That's why `Cargo.toml` says
+`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0`. The font terms cover
+only the embedded font data, not pscat's code.
 
 The fonts in `fonts/catalog/` keep their own upstream licences. The original
 gallery, example and shirt art is dedicated to the public domain under

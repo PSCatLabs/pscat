@@ -20,7 +20,7 @@
     "url": "git+https://github.com/PSCatLabs/pscat.git",
     "directory": "npm"
   },
-  "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
+  "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0",
   "author": "Jerome Banks",
   "type": "module",
   "sideEffects": [
@@ -65,6 +65,7 @@
     "LICENSE-OFL",
     "fonts/LICENSE",
     "fonts/base35",
+    "fonts/emoji",
     "THIRD_PARTY_NOTICES.md",
     "THIRD_PARTY_LICENSES.html",
     "licenses/assets.json"

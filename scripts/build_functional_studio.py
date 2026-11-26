@@ -46,7 +46,7 @@ def build(skip_wasm):
                           for name, text in sources.items()},
         "embedded_library_sha256": {f"lib/{name}": sha((ROOT / "lib" / name).read_bytes())
                                     for name in ("functional.ps", "aspect.ps", "artkit.ps")},
-        "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
+        "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0",
     }
     bundle = {"apiSource": api, "wasmGzipBase64": base64.b64encode(compressed).decode(),
               "programs": programs, "manifest": manifest}

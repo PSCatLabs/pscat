@@ -4821,6 +4821,34 @@ impl Gfx {
         Ok(())
     }
 
+    /// [`fill_path_direct`](Self::fill_path_direct) in a colour of its own,
+    /// not the current one: a colour emoji's layer (#1425). `alpha`
+    /// multiplies the current alpha; the blend mode and clip are the
+    /// state's. The current colour (and colour space, pattern and CMYK
+    /// record) is put back before the result is returned, error or not.
+    pub(crate) fn fill_path_rgb(
+        &mut self,
+        path: &PsPath,
+        rgb: (f32, f32, f32),
+        alpha: f32,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        let rgb0 = std::mem::replace(&mut self.state.rgb, rgb);
+        let cs0 = std::mem::replace(&mut self.state.colorspace, ColorSpace::Rgb);
+        let pattern0 = self.state.pattern.take();
+        let cmyk0 = self.state.cmyk.take();
+        let alpha0 = self.state.alpha;
+        self.state.alpha = alpha0 * alpha.clamp(0.0, 1.0);
+        let r = self.fill_path_direct(path, probe, work);
+        self.state.rgb = rgb0;
+        self.state.colorspace = cs0;
+        self.state.pattern = pattern0;
+        self.state.cmyk = cmyk0;
+        self.state.alpha = alpha0;
+        r
+    }
+
     /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that a
     /// vector recorder may take as text: SVG (#1119) and PDF (#1193) each
     /// decide on their own (`textrun::svg_eligible`, `pdf_eligible`) and
@@ -4903,6 +4931,28 @@ impl Gfx {
     /// Splice a glyph outline into the current path (`charpath`).
     pub(crate) fn append_path(&mut self, path: &PsPath) {
         self.state.path.extend_from(path);
+    }
+
+    /// [`append_path`](Self::append_path) under the limits, for `charpath`
+    /// (#1425, Codex round 1): the current path's growth is held against the
+    /// memory cap before it is made (a `charpath` of a million glyphs grew
+    /// it far past `--max-memory`), and the bytes appended are added to
+    /// `work`, charged as a step per KiB.
+    pub(crate) fn append_path_limited(
+        &mut self,
+        path: &PsPath,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        // The heap's growth so far (the path's capacity included, however
+        // it grew) plus this glyph's segments, against the cap, every time:
+        // `advance`'s moveto often grows the Vec first, so a check only at
+        // a reallocation here would rarely run.
+        let bytes = path.segs.len().saturating_mul(std::mem::size_of::<Seg>());
+        probe.check_alloc(bytes)?;
+        *work = work.saturating_add(bytes as u64);
+        self.state.path.extend_from(path);
+        Ok(())
     }
 
     /// Remember where the gsave stack is and what the state was, so a Type 3

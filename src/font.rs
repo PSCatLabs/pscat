@@ -36,6 +36,49 @@ pub(crate) const SUBSTITUTE: i64 = 0;
 /// can't serve: the idiom often renames it.
 pub(crate) const FACE_KEY: &str = "PSCatFace";
 
+mod unicode;
+pub(crate) use unicode::missing_glyph_note;
+
+/// The font dict key that makes any outline font Unicode-mode (issue
+/// #1425): with `/PSCatUnicode true`, `show`, `stringwidth` and `charpath`
+/// read the string as UTF-8, look each character up by code point, fall
+/// back across the compiled-in faces and the bundled colour emoji, and
+/// report a character nothing has. A pscat extension, like
+/// `/UnicodeBuildChar` for Type 3; Ghostscript ignores the key and shows
+/// the bytes. Copied by `scalefont`, `makefont` and the copy-and-
+/// `definefont` idiom, so a derived font keeps it.
+pub(crate) const UNICODE_KEY: &str = "PSCatUnicode";
+
+/// Whether an outline font (`fid >= 0`) is Unicode-mode: a Unicode-mode
+/// catalog face, or a dict carrying [`UNICODE_KEY`] `true`.
+fn outline_unicode(fs: &FontState) -> bool {
+    is_unicode_font(fs.fid)
+        || fs
+            .dict
+            .borrow()
+            .get(UNICODE_KEY)
+            .is_some_and(|o| matches!(o.value, Value::Boolean(true)))
+}
+
+/// The `FontName` of a font dict, for a message; `?` when it has none.
+fn font_name(fs: &FontState) -> String {
+    match fs.dict.borrow().get("FontName").map(|o| o.value.clone()) {
+        Some(Value::Name(n)) => n.to_string(),
+        Some(Value::String(s)) => s.text(),
+        _ => "?".to_string(),
+    }
+}
+
+/// Whether `fs` decodes its strings as UTF-8: an outline font by
+/// [`outline_unicode`], a Type 3 dict by `/UnicodeBuildChar`.
+fn font_unicode_mode(fs: &FontState) -> bool {
+    if fs.fid >= 0 {
+        outline_unicode(fs)
+    } else {
+        is_unicode_type3(&fs.dict)
+    }
+}
+
 /// The registry face a font dict's [`FACE_KEY`] names, if it names one that
 /// exists. A program can write anything there, so anything that is not an
 /// integer naming a loaded face is `None` (the caller substitutes).
@@ -856,6 +899,18 @@ pub(crate) fn is_unicode_font(fid: i64) -> bool {
         .is_some_and(|c| matches!(c.encoding, CatalogEncoding::Unicode))
 }
 
+/// The encoding of a symbolic face (Symbol or ZapfDingbats), whose `cmap`
+/// maps byte codes rather than characters; `None` for every other face.
+fn symbolic_encoding(fid: i64) -> Option<CatalogEncoding> {
+    let idx = usize::try_from(fid).ok()?.checked_sub(BUILTINS.len())?;
+    let encoding = CATALOG.read().ok()?.get(idx)?.encoding;
+    matches!(
+        encoding,
+        CatalogEncoding::Symbol | CatalogEncoding::Dingbats
+    )
+    .then_some(encoding)
+}
+
 /// The character a Symbol or ZapfDingbats glyph name (`alpha`,
 /// `summation`, `a12` ...) stands for, when the face is the Symbol or
 /// Dingbats catalog face and PDF text is being written (#1026). It comes
@@ -1538,6 +1593,26 @@ fn paint_resolved_glyph(
     .unwrap_or((0.0, 0.0))
 }
 
+/// Glyph units of `face` → device space for a glyph at `pen`: the em
+/// normalisation, the FontMatrix (its translation a per-glyph user-space
+/// offset) and the CTM, composed once.
+fn glyph_transform(gfx: &Gfx, face: &Face, fm: [f64; 6], pen: DevPoint) -> GlyphTransform {
+    let k = 1000.0 / f64::from(face.units_per_em());
+    let g = [fm[0] * k, fm[1] * k, fm[2] * k, fm[3] * k];
+    let ctm = gfx.ctm();
+    let (c00, c01) = (f64::from(ctm.sx), f64::from(ctm.kx));
+    let (c10, c11) = (f64::from(ctm.ky), f64::from(ctm.sy));
+    let fm_off = ctm_lin(gfx, (fm[4], fm[5]));
+    GlyphTransform {
+        a: c00 * g[0] + c01 * g[1],
+        b: c10 * g[0] + c11 * g[1],
+        c: c00 * g[2] + c01 * g[3],
+        d: c10 * g[2] + c11 * g[3],
+        tx: f64::from(pen.x) + fm_off.0,
+        ty: f64::from(pen.y) + fm_off.1,
+    }
+}
+
 /// [`paint_resolved_glyph`] under the limits (#1332): `probe` is looked at
 /// as the glyph is painted and its work (the rasteriser's and a pattern
 /// layout's) is added to `work`, for the show to charge.
@@ -1562,19 +1637,7 @@ fn paint_resolved_glyph_limited(
     if let Some(gid) = gid
         && !matches!(mode, ShowMode::Width)
     {
-        let ctm = gfx.ctm();
-        let (c00, c01) = (f64::from(ctm.sx), f64::from(ctm.kx));
-        let (c10, c11) = (f64::from(ctm.ky), f64::from(ctm.sy));
-        // The FontMatrix translation is a per-glyph user-space offset.
-        let fm_off = ctm_lin(gfx, (fm[4], fm[5]));
-        let m = GlyphTransform {
-            a: c00 * g[0] + c01 * g[1],
-            b: c10 * g[0] + c11 * g[1],
-            c: c00 * g[2] + c01 * g[3],
-            d: c10 * g[2] + c11 * g[3],
-            tx: f64::from(pen.x) + fm_off.0,
-            ty: f64::from(pen.y) + fm_off.1,
-        };
+        let m = glyph_transform(gfx, face, fm, pen);
         let mut sink = PathSink {
             path: PsPath::default(),
             m,
@@ -1620,7 +1683,7 @@ fn paint_resolved_glyph_limited(
         } else if !sink.path.is_empty() {
             match mode {
                 ShowMode::Paint => gfx.fill_path_direct(&sink.path, probe, work)?,
-                ShowMode::Charpath => gfx.append_path(&sink.path),
+                ShowMode::Charpath => gfx.append_path_limited(&sink.path, probe, work)?,
                 ShowMode::Width => unreachable!("checked above"),
             }
         }
@@ -1745,39 +1808,6 @@ fn outline_glyph(
     };
     paint_resolved_glyph_limited(
         gfx, face, fs.matrix, gid, mode, pen, text, missing, probe, work,
-    )
-}
-
-/// One glyph on a Unicode-mode catalog face (see `CatalogEncoding`):
-/// the decoded codepoint maps straight to a glyph id via the face's
-/// `cmap`, with no Encoding array or glyph-name lookup involved — the
-/// 256-slot Encoding model can't address Hangul/kana/kanji, so these
-/// faces skip it entirely.
-fn unicode_glyph(
-    gfx: &mut Gfx,
-    fs: &FontState,
-    code: u32,
-    mode: &ShowMode,
-    pen: DevPoint,
-    probe: &crate::limits::LimitProbe,
-    work: &mut u64,
-) -> Result<(f64, f64), PsError> {
-    let face = face_for(fs.fid)?;
-    let ch = char::from_u32(code);
-    let gid = ch.and_then(|c| glyph_for_char(face, c));
-    // Never a standard face, so SVG keeps the outlines; PDF text takes the
-    // character for its `/ToUnicode` map (Hangul, kana, kanji, Thai).
-    paint_resolved_glyph_limited(
-        gfx,
-        face,
-        fs.matrix,
-        gid,
-        mode,
-        pen,
-        ch.map(|c| (fs.fid, c)),
-        GlyphId(0),
-        probe,
-        work,
     )
 }
 
@@ -1997,11 +2027,7 @@ pub(crate) enum ShowStep {
 /// next glyph of the same show.)
 fn current_unicode_mode(gfx: &Gfx) -> Result<bool, PsError> {
     let fs = gfx.state().font.as_ref().ok_or(PsError::InvalidFont)?;
-    Ok(if fs.fid >= 0 {
-        is_unicode_font(fs.fid)
-    } else {
-        is_unicode_type3(&fs.dict)
-    })
+    Ok(font_unicode_mode(fs))
 }
 
 /// How many glyphs a show of `text` paints with the current font: one per
@@ -2111,6 +2137,18 @@ pub(crate) struct ShowCtx {
     /// Work the glyphs painted since the interpreter last took it (the
     /// rasteriser's and a pattern layout's, #1332), to charge as steps.
     work: u64,
+    /// Unicode mode: the scalars that start before this byte offset were
+    /// joined into the emoji ligature drawn before them (#1425), so they
+    /// draw nothing and take no width.
+    absorb_end: usize,
+    /// Characters no face had, with the font's name, since the
+    /// interpreter last took them (`take_missing`), for its warnings.
+    missing: Vec<(u32, String)>,
+    /// The glyph being finished draws nothing at zero width (a scalar an
+    /// emoji ligature took in, or a default-ignorable one), so it takes no
+    /// `ashow`/`widthshow` extra: letter-spacing a joined emoji must not
+    /// space out its invisible parts. Read and cleared by `advance`.
+    no_extra: bool,
 }
 
 impl ShowCtx {
@@ -2136,12 +2174,25 @@ impl ShowCtx {
             cshow: None,
             probe: crate::limits::LimitProbe::NONE,
             work: 0,
+            absorb_end: 0,
+            missing: Vec::new(),
+            no_extra: false,
         }
     }
 
-    /// The glyph work done since the last call.
+    /// The glyph work done since the last call, in whole KiB (the caller
+    /// charges a step per KiB). The rest stays for the next glyph, so many
+    /// glyphs of a few hundred units each still add up (#1425, Codex round 1).
     pub(crate) fn take_work(&mut self) -> u64 {
-        std::mem::take(&mut self.work)
+        let whole = self.work - self.work % 1024;
+        self.work -= whole;
+        whole
+    }
+
+    /// The characters with no glyph shown since the last call, each with
+    /// the font's name (at most one per step).
+    pub(crate) fn take_missing(&mut self) -> Vec<(u32, String)> {
+        std::mem::take(&mut self.missing)
     }
 
     pub(crate) fn set_limit_probe(&mut self, probe: crate::limits::LimitProbe) {
@@ -2249,11 +2300,13 @@ impl ShowCtx {
         // font is live right now rather than trusting a decision made
         // when the show began (issue #31).
         let fs = gfx.state().font.clone().ok_or(PsError::InvalidFont)?;
-        let unicode = if fs.fid >= 0 {
-            is_unicode_font(fs.fid)
-        } else {
-            is_unicode_type3(&fs.dict)
-        };
+        let unicode = font_unicode_mode(&fs);
+        // A kshow proc that switched to a byte-mode font mid-sequence ends
+        // the emoji ligature: its remaining bytes are glyphs of their own.
+        if !unicode {
+            self.absorb_end = 0;
+        }
+        let start = self.pos;
         let Some((code, len)) = decode_one(&self.text, self.pos, unicode) else {
             return Ok(match self.mode {
                 // cshow measures in this mode too, but returns nothing.
@@ -2279,15 +2332,32 @@ impl ShowCtx {
                     &self.probe,
                     &mut self.work,
                 )?,
-                None if unicode => unicode_glyph(
-                    gfx,
-                    &fs,
-                    code,
-                    &self.mode,
-                    self.pen,
-                    &self.probe,
-                    &mut self.work,
-                )?,
+                // Taken into the emoji ligature drawn before it.
+                None if unicode && start < self.absorb_end => {
+                    self.no_extra = true;
+                    (0.0, 0.0)
+                }
+                None if unicode => {
+                    let shown = unicode::show_scalar(
+                        gfx,
+                        &fs,
+                        code,
+                        &self.text,
+                        self.pos,
+                        &self.mode,
+                        self.pen,
+                        &self.probe,
+                        &mut self.work,
+                    )?;
+                    if shown.absorbed > 0 {
+                        self.absorb_end = self.pos + shown.absorbed;
+                    }
+                    if shown.missing {
+                        self.missing.push((code, font_name(&fs)));
+                    }
+                    self.no_extra = shown.ignorable;
+                    shown.adv
+                }
                 None => {
                     let name = encoding_name(&fs, code as u8);
                     outline_glyph(
@@ -2365,9 +2435,13 @@ impl ShowCtx {
         if let Some(d) = &mut self.displace {
             adv = d.take();
         }
-        adv.0 += self.params.extra.0;
-        adv.1 += self.params.extra.1;
+        let extras = !std::mem::take(&mut self.no_extra);
+        if extras {
+            adv.0 += self.params.extra.0;
+            adv.1 += self.params.extra.1;
+        }
         if let Some((ch, (cx, cy))) = self.params.char_extra
+            && extras
             && ch == code
         {
             adv.0 += cx;
