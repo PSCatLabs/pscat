@@ -625,9 +625,24 @@ name as the program gave it, and the chain of open `run` frames, innermost first
 %%[ Error: undefinedresult; OffendingCommand: div; Line: 5 (inner3.ps); Run chain: inner3.ps:5 <- lib/util.ps:12 <- line 2 ]%%
 ```
 
-A procedure keeps no record of where it was written, so an error inside one
-reports the line of the token being read when it ran: a procedure from a
-library, called from your program, reports your program's line that called it.
+`Line` is where execution was, so an error inside a procedure reports the line
+that called it: a procedure from a library, called from your program, reports
+your program's line. The lines after the report say where each procedure that
+was running is written, innermost first, with the element that was running
+marked (`>>> ... <<<`), so you can jump to it:
+
+```
+%%[ Error: typecheck; OffendingCommand: add; Line: 15 ]%%
+  in inner, line 3 (art.ps): ... 2 add pop (x) 3 >>> add <<< pop
+  in mid, line 8 (art.ps): 0 pop >>> inner <<< 1 pop
+  in outer, line 12 (art.ps): >>> mid <<< 2 pop
+```
+
+A procedure made while the program ran (`array`, `copy`), or read from a string,
+has no line; its entry shows the name and the elements. At most eight are
+shown. A tool reading the error should read the `%%[ ... ]%%` line only. The
+same fields are `frame.line`, `frame.file` and `frame.procedure` for a program
+that embeds pscat ([library guide](library.md)).
 `;`, `]` and line breaks in a file name are shown percent-escaped (`%3B`,
 `%5D`, `%0A`, `%0D`). `--pstack-on-error`
 adds the operand stack to the report.

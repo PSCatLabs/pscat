@@ -458,9 +458,9 @@ pub const MAX_TRACE_FRAMES: usize = 16;
 
 /// One procedure that was running when an error happened.
 ///
-/// The interpreter does not record which line of the source a procedure's
-/// body came from, so a frame locates the error in the procedure itself:
-/// the element that was running, shown among its neighbours.
+/// A frame locates the error in the procedure itself: the element that was
+/// running, shown among its neighbours, and, when the procedure was written
+/// in program text, the `line` and `file` of that element.
 ///
 /// A procedure is on the execution stack only until it issues its last
 /// element (that is what makes tail calls free), so a procedure whose
@@ -480,6 +480,38 @@ pub struct TraceFrame {
     /// shortened): `0 0 moveto >>> show <<< grestore`. A leading or
     /// trailing `...` means the body goes on.
     pub excerpt: String,
+    /// The 1-based line of the element that was running, where it was
+    /// written: in the main program or in a `run` file. `None` when the
+    /// procedure has no source line: it was made at run time (`array`,
+    /// `copy`, `astore`, `aload`), came from an executable string, a `token`
+    /// or an `eexec` stream (whose lines are not the program's), was read by
+    /// an earlier program that had no name (see `file`), or the interpreter
+    /// holds too many procedures to keep every position. `bind`, `cvx`,
+    /// `cvlit` and `getinterval` keep the line; an element changed with `put`
+    /// keeps the line of the token it replaced; a procedure written into with
+    /// `copy`, `astore` or `putinterval` has none. Unlike
+    /// [`ErrorDetails::line`], which is where execution was, this is where
+    /// the procedure is *written*.
+    pub line: Option<usize>,
+    /// The file `line` is in: the name a `run` file was run under, or the
+    /// name the host gave the main program with
+    /// [`Interp::set_main_file_name`] while the procedure was read. `None`
+    /// for the main program of the run that failed when no name was set, so
+    /// a host that runs several programs on one interpreter (a library
+    /// loaded by one, called from the next) names the one that defines
+    /// procedures before running it, then clears the name:
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::new();
+    /// interp.set_main_file_name(Some("scene.ps"));
+    /// interp.run_str("/label {\n  10 20 moveto\n  show\n} def")?;
+    /// interp.set_main_file_name(None);
+    /// let err = interp.run_str("1 label").unwrap_err();
+    /// let frame = &interp.error_details(&err).backtrace[0];
+    /// assert_eq!((frame.file.as_deref(), frame.line), (Some("scene.ps"), Some(3)));
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub file: Option<String>,
 }
 
 /// Names leaked for [`Operator::name`], which is `&'static str`. Each

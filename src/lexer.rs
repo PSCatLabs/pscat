@@ -476,6 +476,22 @@ impl Lexer {
         self.ask(grown - cap)
     }
 
+    /// `MemoryExceeded` if `bytes` more heap would pass the cap: for what the
+    /// interpreter keeps about the text as it scans it (the source-position
+    /// table, #1405).
+    pub(crate) fn check_alloc(&self, bytes: usize) -> Result<(), PsError> {
+        self.ask(bytes)
+    }
+
+    /// Charge `bytes` of work beyond reading the text to the limits, as a
+    /// decode filter's output is (a step per KiB).
+    pub(crate) fn charge_work(&self, bytes: usize) -> Result<(), PsError> {
+        match &self.limits {
+            Some(limits) => limits.charge(bytes),
+            None => Ok(()),
+        }
+    }
+
     /// `MemoryExceeded` if `bytes` more heap would pass the cap.
     fn ask(&self, bytes: usize) -> Result<(), PsError> {
         match &self.limits {

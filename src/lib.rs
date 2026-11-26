@@ -240,6 +240,7 @@ pub mod profile;
 pub mod read_roots;
 #[doc(hidden)]
 pub mod repl;
+pub(crate) mod srcpos;
 // Reads library files off disk to run their `%%SelfTest` blocks —
 // a developer/CI tool, not something the wasm playground can host.
 pub(crate) mod mesh;

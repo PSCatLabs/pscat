@@ -289,6 +289,7 @@ fn putinterval(it: &mut Interp) -> Result<(), PsError> {
         (Value::Array(d), Value::Array(s)) => {
             dst.check_writable()?;
             it.journal_array(d);
+            it.forget_positions(d);
             // Snapshot first so overlapping views over the same storage
             // copy correctly.
             let items = s.snapshot();
@@ -322,6 +323,7 @@ pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
             };
             top.check_writable()?;
             it.journal_array(dst);
+            it.forget_positions(dst);
             let items = src.snapshot();
             if items.len() > dst.len() {
                 return Err(PsError::Rangecheck);
@@ -461,6 +463,7 @@ fn astore(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::StackUnderflow);
     };
     it.journal_array(a);
+    it.forget_positions(a);
     for (i, el) in it.ostack.drain(base..).enumerate() {
         a.put(i, el)?;
     }
