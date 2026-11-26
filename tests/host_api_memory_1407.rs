@@ -24,7 +24,7 @@ fn a_virtual_file_copy_is_held_to_the_memory_cap() {
         big.extend_from_slice(b"% padding padding padding padding padding\n");
     }
     it.add_virtual_file("big.ps", big).unwrap();
-    it.add_virtual_file("small.ps", "1").unwrap();
+    it.add_virtual_file("small.ps", b"1").unwrap();
     it.set_limits(Limits::none().with_max_memory(1 << 20))
         .unwrap();
     assert_eq!(
@@ -65,4 +65,22 @@ fn a_raster_the_recorders_cannot_copy_is_refused_before_anything_changes() {
     it.run_str("10 10 scale").unwrap();
     it.draw_page(&layer, Sampling::Nearest).unwrap();
     assert_eq!(&it.canvas_premultiplied_rgba8()[..4], &[255; 4]);
+}
+
+/// A borrowed buffer is copied only after the memory cap has been asked, so a
+/// registration the cap refuses allocates nothing (Codex, PR #1432 round 1).
+#[test]
+fn a_borrowed_registration_is_refused_by_the_memory_cap_before_the_copy() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let big = vec![b' '; pscat::host::MAX_VIRTUAL_FILE_BYTES];
+    let mut it = Interp::with_page(10, 10).unwrap();
+    it.set_limits(Limits::none().with_max_memory(1 << 20))
+        .unwrap();
+    assert_eq!(
+        it.add_virtual_file("big.ps", &big[..]),
+        Err(PsError::MemoryExceeded)
+    );
+    // Nothing was registered; an owned buffer is moved in, not copied.
+    assert_eq!(it.run_str("(big.ps) run"), Err(PsError::UndefinedFilename));
+    it.add_virtual_file("big.ps", big).unwrap();
 }

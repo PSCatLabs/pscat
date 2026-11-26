@@ -335,7 +335,7 @@ service, or an application with several library files of its own.
 
 ```rust
 let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
-interp.add_virtual_file("components/dot.ps", "/dot { 50 50 5 0 360 arc fill } def")?;
+interp.add_virtual_file("components/dot.ps", b"/dot { 50 50 5 0 360 arc fill } def")?;
 interp.run_str("(components/dot.ps) run dot")?;
 ```
 

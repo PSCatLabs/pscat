@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use pscat::host::{MAX_VIRTUAL_FILE_BYTES, MAX_VIRTUAL_FILES};
+use pscat::host::{MAX_VIRTUAL_FILE_BYTES, MAX_VIRTUAL_FILES, MAX_VIRTUAL_NAME_BYTES};
 use pscat::{Interp, Limits, PsError};
 
 mod common;
@@ -27,7 +27,7 @@ fn interp() -> Interp {
 #[test]
 fn run_loads_a_virtual_file_with_no_disk() {
     let mut it = interp();
-    it.add_virtual_file("components/foo.ps", "/foo { 7 } def")
+    it.add_virtual_file("components/foo.ps", b"/foo { 7 } def")
         .unwrap();
     it.run_str("(components/foo.ps) run foo").unwrap();
     assert_eq!(it.pop_int().unwrap(), 7);
@@ -69,10 +69,10 @@ fn readreals_reads_a_virtual_file() {
 #[test]
 fn a_leading_dot_slash_is_the_same_name_and_registering_again_replaces() {
     let mut it = interp();
-    it.add_virtual_file("./a.ps", "1").unwrap();
+    it.add_virtual_file("./a.ps", b"1").unwrap();
     it.run_str("(a.ps) run").unwrap();
     assert_eq!(it.pop_int().unwrap(), 1);
-    it.add_virtual_file("a.ps", "2").unwrap();
+    it.add_virtual_file("a.ps", b"2").unwrap();
     it.run_str("(./a.ps) run").unwrap();
     assert_eq!(it.pop_int().unwrap(), 2);
 }
@@ -80,7 +80,7 @@ fn a_leading_dot_slash_is_the_same_name_and_registering_again_replaces() {
 #[test]
 fn a_removed_file_is_gone_and_an_unregistered_name_is_undefinedfilename() {
     let mut it = interp();
-    it.add_virtual_file("gone.ps", "1").unwrap();
+    it.add_virtual_file("gone.ps", b"1").unwrap();
     assert!(it.remove_virtual_file("./gone.ps"));
     assert!(!it.remove_virtual_file("gone.ps"));
     assert_eq!(it.run_str("(gone.ps) run"), Err(PsError::UndefinedFilename));
@@ -104,9 +104,9 @@ fn a_virtual_name_shadows_disk_and_the_embedded_lib_and_others_fall_through() {
 
     // Registered under the same names: the host's bytes win.
     // Registered under the spelling the program uses (`/` separators).
-    it.add_virtual_file(&common::ps_path(&dir.join("on_disk.ps")), "(memory)")
+    it.add_virtual_file(&common::ps_path(&dir.join("on_disk.ps")), b"(memory)")
         .unwrap();
-    it.add_virtual_file("lib/functional.ps", "/replaced true def")
+    it.add_virtual_file("lib/functional.ps", b"/replaced true def")
         .unwrap();
     it.run_str(&format!("{on_disk} run")).unwrap();
     assert_eq!(text(&mut it), "memory");
@@ -131,9 +131,10 @@ fn read_roots_do_not_gate_a_virtual_file_but_still_gate_everything_else() {
     let outside = dir.join("outside.ps");
     let mut it = interp();
     it.set_read_roots(&[&root]).unwrap();
-    it.add_virtual_file("components/foo.ps", "42").unwrap();
+    it.add_virtual_file("components/foo.ps", b"42").unwrap();
     let known = dir.join("known.ps");
-    it.add_virtual_file(&common::ps_path(&known), "43").unwrap();
+    it.add_virtual_file(&common::ps_path(&known), b"43")
+        .unwrap();
 
     it.run_str("(components/foo.ps) run").unwrap();
     assert_eq!(it.pop_int().unwrap(), 42);
@@ -163,7 +164,7 @@ fn read_roots_do_not_gate_a_virtual_file_but_still_gate_everything_else() {
 #[test]
 fn a_write_to_a_virtual_name_still_goes_to_the_write_policy() {
     let mut it = interp();
-    it.add_virtual_file("out.txt", "x").unwrap();
+    it.add_virtual_file("out.txt", b"x").unwrap();
     assert_eq!(
         it.run_str("(out.txt) (w) file"),
         Err(PsError::InvalidFileAccess)
@@ -177,22 +178,22 @@ fn a_write_to_a_virtual_name_still_goes_to_the_write_policy() {
 #[test]
 fn bad_names_and_oversize_files_are_refused_and_change_nothing() {
     let mut it = interp();
-    assert_eq!(it.add_virtual_file("", "x"), Err(PsError::Rangecheck));
-    assert_eq!(it.add_virtual_file("a\0b", "x"), Err(PsError::Rangecheck));
+    assert_eq!(it.add_virtual_file("", b"x"), Err(PsError::Rangecheck));
+    assert_eq!(it.add_virtual_file("a\0b", b"x"), Err(PsError::Rangecheck));
     assert_eq!(
-        it.add_virtual_file("%stdout", "x"),
+        it.add_virtual_file("%stdout", b"x"),
         Err(PsError::InvalidFileAccess)
     );
     assert_eq!(
-        it.add_virtual_file("../x.ps", "x"),
+        it.add_virtual_file("../x.ps", b"x"),
         Err(PsError::InvalidFileAccess)
     );
     assert_eq!(
-        it.add_virtual_file("a/../b.ps", "x"),
+        it.add_virtual_file("a/../b.ps", b"x"),
         Err(PsError::InvalidFileAccess)
     );
 
-    it.add_virtual_file("ok.ps", "1").unwrap();
+    it.add_virtual_file("ok.ps", b"1").unwrap();
     let too_big = vec![b' '; MAX_VIRTUAL_FILE_BYTES + 1];
     assert_eq!(
         it.add_virtual_file("ok.ps", too_big),
@@ -209,23 +210,23 @@ fn bad_names_and_oversize_files_are_refused_and_change_nothing() {
 fn the_number_of_files_is_bounded() {
     let mut it = interp();
     for i in 0..MAX_VIRTUAL_FILES {
-        it.add_virtual_file(&format!("f/{i}.ps"), "").unwrap();
+        it.add_virtual_file(&format!("f/{i}.ps"), b"").unwrap();
     }
     assert_eq!(
-        it.add_virtual_file("one/more.ps", ""),
+        it.add_virtual_file("one/more.ps", b""),
         Err(PsError::Limitcheck)
     );
     // Replacing a registered name is not a new file.
-    it.add_virtual_file("f/0.ps", "1").unwrap();
+    it.add_virtual_file("f/0.ps", b"1").unwrap();
     assert!(it.remove_virtual_file("f/1.ps"));
-    it.add_virtual_file("one/more.ps", "2").unwrap();
+    it.add_virtual_file("one/more.ps", b"2").unwrap();
 }
 
 #[test]
 fn a_host_operator_can_register_a_file_for_the_program_that_called_it() {
     let mut it = interp();
     it.register_operator("provide", |i| {
-        i.add_virtual_file("made/later.ps", "/later 99 def")
+        i.add_virtual_file("made/later.ps", b"/later 99 def")
     })
     .unwrap();
     it.run_str("provide (made/later.ps) run later").unwrap();
@@ -239,7 +240,7 @@ fn an_error_in_a_virtual_file_names_it_in_the_report_and_the_frames() {
     let mut it = interp();
     it.add_virtual_file(
         "components/foo.ps",
-        "/fine { 1 } def\n/boom {\n  1 0 div\n} def\n",
+        b"/fine { 1 } def\n/boom {\n  1 0 div\n} def\n",
     )
     .unwrap();
     it.run_str("(components/foo.ps) run").unwrap();
@@ -252,7 +253,7 @@ fn an_error_in_a_virtual_file_names_it_in_the_report_and_the_frames() {
     assert_eq!(frame.line, Some(3));
 
     // An error at the file's own top level names it as the error's file.
-    it.add_virtual_file("components/bad.ps", "1\n2 0 idiv\n")
+    it.add_virtual_file("components/bad.ps", b"1\n2 0 idiv\n")
         .unwrap();
     let err = it.run_str("(components/bad.ps) run").unwrap_err();
     let details = it.error_details(&err);
@@ -264,7 +265,7 @@ fn an_error_in_a_virtual_file_names_it_in_the_report_and_the_frames() {
 #[test]
 fn currentfilename_inside_a_virtual_file_is_its_name() {
     let mut it = interp();
-    it.add_virtual_file("components/who.ps", "currentfilename")
+    it.add_virtual_file("components/who.ps", b"currentfilename")
         .unwrap();
     it.run_str("(components/who.ps) run").unwrap();
     assert_eq!(text(&mut it), "components/who.ps");
@@ -317,7 +318,7 @@ fn a_virtual_file_paints_into_an_open_group_like_any_program() {
         Ok(())
     })
     .unwrap();
-    it.add_virtual_file("mark.ps", "0 0 1 setrgbcolor 0 0 20 20 rectfill")
+    it.add_virtual_file("mark.ps", b"0 0 1 setrgbcolor 0 0 20 20 rectfill")
         .unwrap();
     it.run_str("<< >> begingroup (mark.ps) run peek endgroup")
         .unwrap();
@@ -325,4 +326,60 @@ fn a_virtual_file_paints_into_an_open_group_like_any_program() {
     assert_eq!(canvas_corner.get(), [255, 255, 255, 255]);
     // ... and the group composited the file's marks at `endgroup`.
     assert_eq!(&it.canvas_premultiplied_rgba8()[..4], &[0, 0, 255, 255]);
+}
+
+// ---- Codex round 1: what registration costs and keeps ----
+
+#[test]
+fn a_name_over_the_limit_is_refused_so_names_cannot_hold_memory() {
+    let mut it = interp();
+    let long = "n".repeat(MAX_VIRTUAL_NAME_BYTES + 1);
+    assert_eq!(it.add_virtual_file(&long, b""), Err(PsError::Limitcheck));
+    // The longest name is kept and read back.
+    let longest = "n".repeat(MAX_VIRTUAL_NAME_BYTES);
+    it.add_virtual_file(&longest, b"7").unwrap();
+    it.run_str(&format!("({longest}) run")).unwrap();
+    assert_eq!(it.pop_int().unwrap(), 7);
+}
+
+#[test]
+fn a_buffers_reserved_capacity_counts_against_the_bounds() {
+    let mut it = interp();
+    // Nothing in it, but it keeps more than a file may be.
+    let hoard: Vec<u8> = Vec::with_capacity(MAX_VIRTUAL_FILE_BYTES + 1);
+    assert_eq!(
+        it.add_virtual_file("hoard", hoard),
+        Err(PsError::Limitcheck)
+    );
+    // Eight empty buffers that each reserve 60 MiB fill the store (untouched
+    // pages: no memory is used here); the ninth does not fit.
+    for i in 0..8 {
+        it.add_virtual_file(&format!("r{i}"), Vec::<u8>::with_capacity(60 << 20))
+            .unwrap();
+    }
+    assert_eq!(
+        it.add_virtual_file("r8", Vec::<u8>::with_capacity(60 << 20)),
+        Err(PsError::Limitcheck)
+    );
+    // Replacing one with a tight buffer frees its reservation.
+    it.add_virtual_file("r0", b"1").unwrap();
+    it.add_virtual_file("r8", Vec::<u8>::with_capacity(60 << 20))
+        .unwrap();
+}
+
+#[test]
+fn a_borrowed_buffer_registered_by_a_host_operator_is_charged_as_host_work() {
+    let blob = std::rc::Rc::new(vec![b' '; 1 << 20]);
+    let mut it = interp();
+    let b = blob.clone();
+    it.register_operator("provide", move |i| i.add_virtual_file("blob.ps", &b[..]))
+        .unwrap();
+    it.set_limits(Limits::none().with_max_steps(5_000)).unwrap();
+    // A MiB is about 1025 steps a call: a loop of them meets the cap.
+    assert_eq!(
+        it.run_str("100 { provide } repeat"),
+        Err(PsError::StepsExceeded)
+    );
+    // A single registration is affordable.
+    it.run_str("provide").unwrap();
 }

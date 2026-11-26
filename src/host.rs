@@ -75,7 +75,7 @@ use crate::object::{Dict, Object, OpFn, Operator, Value as Raw};
 pub const MAX_HOST_OPERATORS: usize = 256;
 
 pub use crate::virtual_files::{
-    MAX_VIRTUAL_FILE_BYTES, MAX_VIRTUAL_FILES, MAX_VIRTUAL_TOTAL_BYTES,
+    MAX_VIRTUAL_FILE_BYTES, MAX_VIRTUAL_FILES, MAX_VIRTUAL_NAME_BYTES, MAX_VIRTUAL_TOTAL_BYTES,
 };
 
 /// The largest raster (in pixels) [`Interp::draw_page`] embeds in SVG or PDF
@@ -1162,11 +1162,18 @@ impl Interp {
     ///
     /// ```
     /// let mut interp = pscat::Interp::new();
-    /// interp.add_virtual_file("components/dot.ps", "/dot { 3 3 moveto } def")?;
+    /// interp.add_virtual_file("components/dot.ps", b"/dot { 3 3 moveto } def")?;
     /// interp.run_str("(components/dot.ps) run dot currentpoint")?;
     /// assert_eq!((interp.pop_f64()?, interp.pop_f64()?), (3.0, 3.0));
     /// # Ok::<(), pscat::PsError>(())
     /// ```
+    ///
+    /// `bytes` is an owned `Vec<u8>` (moved in, never copied) or a borrowed
+    /// slice (copied once, after every check below has passed, so a refused
+    /// call allocates nothing). The sizes are looked at first: a borrowed
+    /// copy is also held to `--max-memory` (`memoryexceeded` before it is made)
+    /// and, called from a host operator, charged a step per KiB to the
+    /// running program like any host work.
     ///
     /// The name is matched whole and exactly (one leading `./` is ignored),
     /// and wins over a disk file and the embedded `lib/` copy of the same
@@ -1174,28 +1181,46 @@ impl Interp {
     /// before: registering files changes nothing else, and under read roots
     /// ([`set_read_roots`](Self::set_read_roots)) an unregistered name outside
     /// them is still `invalidfileaccess`. Virtual files are not disk reads, so
-    /// the roots do not gate them. Only reading is served: opening one for
-    /// writing, `deletefile`, `renamefile` and `filenameforall` do not see
-    /// them. An error inside a file `run` this way is reported with the name
-    /// (`error_details().file`, the backtrace frames, `currentfilename`).
+    /// the roots do not gate them: a program can read exactly the names the
+    /// host registered, which is how a sandbox (`pscat-mcp`, `--allow-read`)
+    /// stays closed, since only the host's own code registers a file. Only
+    /// reading is served: opening one for writing, `deletefile`,
+    /// `renamefile` and `filenameforall` do not see them. An error inside a
+    /// file `run` this way is reported with the name (`error_details().file`,
+    /// the backtrace frames, `currentfilename`).
     ///
     /// Refused, with nothing changed: an empty name or one with a NUL
     /// (`rangecheck`); a name that starts with `%` (a device) or has a `..`
-    /// component (`invalidfileaccess`); a file over
-    /// [`MAX_VIRTUAL_FILE_BYTES`], a store that would pass
-    /// [`MAX_VIRTUAL_FILES`] files or [`MAX_VIRTUAL_TOTAL_BYTES`] bytes
-    /// (`limitcheck`).
+    /// component (`invalidfileaccess`); a name over
+    /// [`MAX_VIRTUAL_NAME_BYTES`], a file over [`MAX_VIRTUAL_FILE_BYTES`], a
+    /// store that would pass [`MAX_VIRTUAL_FILES`] files or
+    /// [`MAX_VIRTUAL_TOTAL_BYTES`] bytes (`limitcheck`). The store counts what
+    /// it keeps: each file's name and its buffer's *capacity*, so
+    /// `shrink_to_fit` a `Vec` that reserved more than it holds.
     ///
     /// Each read of a virtual file copies it into the program's file object,
     /// and is charged like reading that many bytes from disk (a step per KiB
     /// against `--max-steps`, the memory cap checked before the copy), so a
     /// program that loads a large file in a loop meets its limits.
-    pub fn add_virtual_file(
+    pub fn add_virtual_file<'a>(
         &mut self,
         name: &str,
-        bytes: impl Into<Vec<u8>>,
+        bytes: impl Into<std::borrow::Cow<'a, [u8]>>,
     ) -> Result<(), PsError> {
-        self.virtual_files.add(name, bytes.into())
+        use std::borrow::Cow;
+        let bytes = bytes.into();
+        let (len, capacity) = match &bytes {
+            Cow::Borrowed(b) => (b.len(), b.len()),
+            Cow::Owned(v) => (v.len(), v.capacity()),
+        };
+        self.virtual_files.check(name, len, capacity)?;
+        if matches!(bytes, Cow::Borrowed(_)) {
+            // A copy is about to be made: under the memory cap, and as host
+            // work for the program that is running (a host operator).
+            self.check_alloc(len)?;
+            self.charge_host_steps((len / 1024) as u64 + 1)?;
+        }
+        self.virtual_files.add(name, bytes.into_owned())
     }
 
     /// Stop serving `name` (see [`add_virtual_file`](Self::add_virtual_file));

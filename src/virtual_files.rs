@@ -46,10 +46,16 @@ pub const MAX_VIRTUAL_FILES: usize = 4096;
 /// (`paths::MAX_RESOURCE_BYTES`).
 pub const MAX_VIRTUAL_TOTAL_BYTES: usize = 512 << 20;
 
+/// The longest name a virtual file may have, in bytes.
+pub const MAX_VIRTUAL_NAME_BYTES: usize = 4096;
+
 /// The registered files.
 #[derive(Debug)]
 pub(crate) struct VirtualFiles {
     files: HashMap<String, Rc<Vec<u8>>>,
+    /// What the store holds: for each file its name's length and its
+    /// buffer's capacity (not just its length: a `Vec` keeps what it
+    /// reserved), counted against [`MAX_VIRTUAL_TOTAL_BYTES`].
     total: usize,
     /// [`MAX_VIRTUAL_TOTAL_BYTES`], lowered by the unit tests so that the
     /// bound can be reached without holding half a gigabyte.
@@ -73,8 +79,12 @@ fn key(name: &str) -> &str {
 
 /// Whether `name` may be registered. Refused names could never be read
 /// back (`..` is `invalidfileaccess` under read roots before any lookup, and
-/// a `%` name is a device, not a file), or would only confuse (empty, NUL).
+/// a `%` name is a device, not a file), or would only confuse (empty, NUL),
+/// or are too long to keep ([`MAX_VIRTUAL_NAME_BYTES`]).
 fn valid(name: &str) -> Result<(), PsError> {
+    if name.len() > MAX_VIRTUAL_NAME_BYTES {
+        return Err(PsError::Limitcheck);
+    }
     let key = key(name);
     if key.is_empty() || key.contains('\0') {
         return Err(PsError::Rangecheck);
@@ -83,6 +93,11 @@ fn valid(name: &str) -> Result<(), PsError> {
         return Err(PsError::InvalidFileAccess);
     }
     Ok(())
+}
+
+/// What one entry holds: its name and its buffer's capacity.
+fn cost(key_len: usize, capacity: usize) -> usize {
+    key_len.saturating_add(capacity)
 }
 
 impl VirtualFiles {
@@ -95,32 +110,48 @@ impl VirtualFiles {
         self.files.get(key(name)).cloned()
     }
 
-    /// Register or replace `name`. Nothing changes on an error.
-    pub(crate) fn add(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), PsError> {
+    /// Whether a file called `name` with `len` bytes in a buffer of
+    /// `capacity` could be registered now, looking at nothing but sizes, so
+    /// that a host can refuse before it copies anything.
+    pub(crate) fn check(&self, name: &str, len: usize, capacity: usize) -> Result<(), PsError> {
         valid(name)?;
-        if bytes.len() > MAX_VIRTUAL_FILE_BYTES {
+        if len > MAX_VIRTUAL_FILE_BYTES || capacity > MAX_VIRTUAL_FILE_BYTES {
             return Err(PsError::Limitcheck);
         }
         let key = key(name);
-        let old = self.files.get(key).map(|old| old.len());
+        let old = self
+            .files
+            .get(key)
+            .map(|old| cost(key.len(), old.capacity()));
         if old.is_none() && self.files.len() >= MAX_VIRTUAL_FILES {
             return Err(PsError::Limitcheck);
         }
-        let replaced = old.unwrap_or(0);
-        let total = self.total - replaced + bytes.len();
+        let total = self.total - old.unwrap_or(0) + cost(key.len(), capacity);
         if total > self.max_total {
             return Err(PsError::Limitcheck);
         }
+        Ok(())
+    }
+
+    /// Register or replace `name`. Nothing changes on an error.
+    pub(crate) fn add(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), PsError> {
+        self.check(name, bytes.len(), bytes.capacity())?;
+        let key = key(name);
+        let old = self
+            .files
+            .get(key)
+            .map(|old| cost(key.len(), old.capacity()));
+        self.total = self.total - old.unwrap_or(0) + cost(key.len(), bytes.capacity());
         self.files.insert(key.to_owned(), Rc::new(bytes));
-        self.total = total;
         Ok(())
     }
 
     /// Forget `name`; whether it was registered.
     pub(crate) fn remove(&mut self, name: &str) -> bool {
-        match self.files.remove(key(name)) {
+        let key = key(name);
+        match self.files.remove(key) {
             Some(old) => {
-                self.total -= old.len();
+                self.total -= cost(key.len(), old.capacity());
                 true
             }
             None => false,
@@ -138,18 +169,20 @@ mod tests {
             max_total: 10,
             ..Default::default()
         };
-        v.add("a", vec![0; 6]).unwrap();
-        v.add("b", vec![0; 4]).unwrap();
+        // Each entry costs its name (1 byte here) and its buffer.
+        v.add("a", vec![0; 5]).unwrap();
+        v.add("b", vec![0; 3]).unwrap();
+        assert_eq!(v.total, 10);
         assert_eq!(v.add("c", vec![0]), Err(PsError::Limitcheck));
         // Replacing `a` with something larger passes the total; with
         // something that fits it does not.
         assert_eq!(v.add("a", vec![0; 7]), Err(PsError::Limitcheck));
-        v.add("a", vec![0; 5]).unwrap();
+        v.add("a", vec![0; 4]).unwrap();
         assert_eq!(v.total, 9);
         assert!(v.remove("b"));
         assert!(!v.remove("b"));
         assert_eq!(v.total, 5);
-        v.add("c", vec![0; 5]).unwrap();
+        v.add("c", vec![0; 4]).unwrap();
     }
 
     #[test]
