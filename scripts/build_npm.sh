@@ -74,10 +74,11 @@ node "$ROOT/scripts/build_npm_global.mjs" "$NPM/pscat.global.js"
 mkdir -p "$NPM/fonts" "$NPM/licenses"
 cp "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/LICENSE-OFL" "$ROOT/THIRD_PARTY_NOTICES.md" "$NPM/"
 cp "$ROOT/fonts/LICENSE" "$NPM/fonts/LICENSE"
-# The compiled-in TeX Gyre and URW faces' licence files (#757), the same set
-# scripts/package_release.sh bundles.
-rm -rf "$NPM/fonts/base35"
-for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md}; do
+# The compiled-in TeX Gyre and URW faces' licence files (#757) and the
+# Twemoji colour emoji's (#1425), the same set scripts/package_release.sh
+# bundles.
+rm -rf "$NPM/fonts/base35" "$NPM/fonts/emoji"
+for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md} "$ROOT"/fonts/emoji/{LICENSE.md,PROVENANCE.md}; do
   rel=${f#"$ROOT/"}
   mkdir -p "$NPM/$(dirname "$rel")"
   cp "$f" "$NPM/$rel"
@@ -107,7 +108,8 @@ root = sys.argv[5]
 base35 = {
     os.path.relpath(p, root)
     for p in glob.glob(os.path.join(root, "fonts/base35/*/GUST-FONT-LICENSE.txt"))
-} | {f"fonts/base35/URW-symbols/{n}" for n in ("LICENSE.md", "LICENSE.OFL", "PROVENANCE.md")}
+} | {f"fonts/base35/URW-symbols/{n}" for n in ("LICENSE.md", "LICENSE.OFL", "PROVENANCE.md")} \
+  | {f"fonts/emoji/{n}" for n in ("LICENSE.md", "PROVENANCE.md")}
 expected = {
     "package.json", "README.md", "index.js", "node.js", "renderer.js", "core.js", "index.d.ts",
     "global.d.ts", "pscat.global.js", "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",

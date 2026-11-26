@@ -8,7 +8,7 @@ description = "PostScript for precision and imagination: a PostScript and EPS in
 # faces and lib/typewriter_outlines.ps (derived from Courier Prime). LPPL-1.3c
 # (the GUST Font License) covers the embedded TeX Gyre faces (issue #757).
 # See THIRD_PARTY_NOTICES.md (issue #563).
-license = "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c"
+license = "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0"
 authors = ["Jerome Banks"]
 repository = "https://github.com/PSCatLabs/pscat"
 homepage = "https://pscatlabs.github.io/pscat/"
@@ -36,6 +36,9 @@ include = [
     "/fonts/base35/URW-symbols/LICENSE.md",
     "/fonts/base35/URW-symbols/LICENSE.OFL",
     "/fonts/base35/URW-symbols/PROVENANCE.md",
+    "/fonts/emoji/TwemojiMozilla.ttf",
+    "/fonts/emoji/LICENSE.md",
+    "/fonts/emoji/PROVENANCE.md",
     "/fonts/LICENSE",
     "/fonts/README.md",
     "/fonts/packs.json",

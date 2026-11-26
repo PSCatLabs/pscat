@@ -37,7 +37,7 @@
 # LICENSE-OFL and fonts/LICENSE (the Liberation faces and the Courier
 # Prime-derived lib/typewriter_outlines.ps compiled into the binaries), the
 # licence files of the compiled-in TeX Gyre and URW faces under fonts/base35/
-# (issue #757; the same set scripts/build_npm.sh ships), THIRD_PARTY_NOTICES.md with licenses/assets.json, and the cargo-about
+# (issue #757) and of the Twemoji colour emoji under fonts/emoji/ (issue #1425; the same set scripts/build_npm.sh ships), THIRD_PARTY_NOTICES.md with licenses/assets.json, and the cargo-about
 # notices for every Rust dependency linked into the binaries.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -103,7 +103,7 @@ done
 cp "$ROOT/licenses/assets.json" "$BUNDLE/licenses/assets.json"
 cp "$ROOT/fonts/LICENSE" "$BUNDLE/fonts/LICENSE"
 BASE35_LICENCES=()
-for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md}; do
+for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md} "$ROOT"/fonts/emoji/{LICENSE.md,PROVENANCE.md}; do
   rel=${f#"$ROOT/"}
   BASE35_LICENCES+=("$rel")
   mkdir -p "$BUNDLE/$(dirname "$rel")"

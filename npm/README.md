@@ -205,7 +205,7 @@ has more.
 
 ## Licence
 
-`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. The code is MIT or
+`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0`. The code is MIT or
 Apache-2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). The font data
 compiled into `pscat.wasm` keeps its own licences: the SIL Open Font
 License 1.1 (`LICENSE-OFL`) covers the Liberation fonts (`fonts/LICENSE`),
@@ -214,7 +214,9 @@ typewriter outlines generated from Courier Prime; the GUST Font License
 (LPPL-1.3c, `fonts/base35/TeXGyre-*/GUST-FONT-LICENSE.txt`) covers the TeX
 Gyre faces behind Palatino, Bookman, New Century Schoolbook, Avant Garde,
 Zapf Chancery and Helvetica-Narrow. All of the PostScript standard 35 are
-built in. `THIRD_PARTY_NOTICES.md` lists every component, and
+built in. The colour emoji are Twemoji graphics (Twitter, Inc and other
+contributors) under CC BY 4.0, in Mozilla's twemoji-colr font
+(`fonts/emoji/`). `THIRD_PARTY_NOTICES.md` lists every component, and
 `THIRD_PARTY_LICENSES.html` holds the licences of the Rust crates compiled
 into the module.
 

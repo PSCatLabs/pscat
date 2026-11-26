@@ -160,11 +160,12 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   is `new URL('./pscat.wasm', import.meta.url)`; CI tests the package in
   Node, and a bundler and headless-browser test is #660 (with Vite, add
   `pscat` to `optimizeDeps.exclude`).
-- Licence: `(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`, the crate's:
+- Licence: `(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0`, the crate's:
   the OFL covers the embedded font data (Liberation, the URW Symbol and
   ZapfDingbats faces, and the Courier Prime outlines in
-  `lib/typewriter_outlines.ps`), and LPPL-1.3c (the GUST Font License)
-  the embedded TeX Gyre faces. The package carries the licence texts,
+  `lib/typewriter_outlines.ps`), LPPL-1.3c (the GUST Font License)
+  the embedded TeX Gyre faces, and CC BY 4.0 the Twemoji colour emoji
+  (`fonts/emoji/`). The package carries the licence texts,
   `THIRD_PARTY_NOTICES.md`, and the Rust dependencies' notices
   (`THIRD_PARTY_LICENSES.html`).
 

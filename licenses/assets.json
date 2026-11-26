@@ -1,7 +1,7 @@
 {
   "schema": "pscat-asset-licenses/1",
   "about": "Licence of every tracked file in this repository (issue #563). Entries are checked in order and the first whose paths glob matches a file applies to it ('**' matches any number of directories, '*' stays within one). THIRD_PARTY_NOTICES.md is the readable form. ships_in: crate, npm, binaries (the core packages); font-pack (the separately distributed font catalog); site (the project website); repo-only.",
-  "package_license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
+  "package_license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c AND CC-BY-4.0",
   "entries": [
     {
       "id": "functional-studio-wasm",
@@ -83,6 +83,24 @@
         "fonts/base35/URW-symbols/PROVENANCE.md"
       ],
       "notes": "OFL-1.1 elected from URW++'s 2017 AGPL-3.0/LPPL-1.3c/OFL-1.1 triple licence; see fonts/base35/URW-symbols/PROVENANCE.md. Compiled in with include_bytes! (src/font.rs, issue #757)."
+    },
+    {
+      "id": "font-emoji-twemoji",
+      "paths": [
+        "fonts/emoji/**"
+      ],
+      "license": "CC-BY-4.0",
+      "copyright": "Twemoji graphics: Copyright Twitter, Inc and other contributors (CC BY 4.0); the twemoji-colr font build: Copyright 2016-2018 Mozilla Foundation (Apache-2.0)",
+      "ships_in": [
+        "crate",
+        "npm",
+        "binaries"
+      ],
+      "license_files": [
+        "fonts/emoji/LICENSE.md",
+        "fonts/emoji/PROVENANCE.md"
+      ],
+      "notes": "Twemoji 14.0.1 as Mozilla's COLR font, twemoji-colr 0.7.0, unchanged; the art is CC BY 4.0 (attribution required), the font-building code Apache-2.0; see fonts/emoji/PROVENANCE.md. Compiled in with include_bytes! (src/font/unicode.rs, issue #1425)."
     },
     {
       "id": "font-AbrilFatface",
