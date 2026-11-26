@@ -341,3 +341,21 @@ fn svg_and_pdf_get_the_emoji_as_coloured_paths() {
     );
     assert!(std::fs::metadata(&pdf).expect("pdf").len() > 1000);
 }
+
+#[test]
+fn ashow_spacing_skips_the_invisible_parts_of_a_joined_emoji() {
+    // Letter-spaced credits: the extra goes after each visible glyph, not
+    // after the ZWJs and code points a family emoji took in.
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    let mut it = run(&format!(
+        "{} 0 0 moveto 5 0 ({family}A\u{200D}B) ashow currentpoint pop \
+         ({family}AB) stringwidth pop",
+        ufont(20)
+    ));
+    let plain = num(&mut it);
+    let spaced = num(&mut it);
+    assert!(
+        (spaced - (plain + 3.0 * 5.0)).abs() < 1e-6,
+        "{spaced} vs {plain} + 15"
+    );
+}

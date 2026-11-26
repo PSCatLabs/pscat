@@ -2132,6 +2132,11 @@ pub(crate) struct ShowCtx {
     /// Characters no face had, with the font's name, since the
     /// interpreter last took them (`take_missing`), for its warnings.
     missing: Vec<(u32, String)>,
+    /// The glyph being finished draws nothing at zero width (a scalar an
+    /// emoji ligature took in, or a default-ignorable one), so it takes no
+    /// `ashow`/`widthshow` extra: letter-spacing a joined emoji must not
+    /// space out its invisible parts. Read and cleared by `advance`.
+    no_extra: bool,
 }
 
 impl ShowCtx {
@@ -2159,6 +2164,7 @@ impl ShowCtx {
             work: 0,
             absorb_end: 0,
             missing: Vec::new(),
+            no_extra: false,
         }
     }
 
@@ -2311,7 +2317,10 @@ impl ShowCtx {
                     &mut self.work,
                 )?,
                 // Taken into the emoji ligature drawn before it.
-                None if unicode && start < self.absorb_end => (0.0, 0.0),
+                None if unicode && start < self.absorb_end => {
+                    self.no_extra = true;
+                    (0.0, 0.0)
+                }
                 None if unicode => {
                     let shown = unicode::show_scalar(
                         gfx,
@@ -2330,6 +2339,7 @@ impl ShowCtx {
                     if shown.missing {
                         self.missing.push((code, font_name(&fs)));
                     }
+                    self.no_extra = shown.ignorable;
                     shown.adv
                 }
                 None => {
@@ -2409,9 +2419,13 @@ impl ShowCtx {
         if let Some(d) = &mut self.displace {
             adv = d.take();
         }
-        adv.0 += self.params.extra.0;
-        adv.1 += self.params.extra.1;
+        let extras = !std::mem::take(&mut self.no_extra);
+        if extras {
+            adv.0 += self.params.extra.0;
+            adv.1 += self.params.extra.1;
+        }
         if let Some((ch, (cx, cy))) = self.params.char_extra
+            && extras
             && ch == code
         {
             adv.0 += cx;

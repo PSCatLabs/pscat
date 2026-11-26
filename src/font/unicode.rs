@@ -239,6 +239,9 @@ pub(super) struct Shown {
     pub absorbed: usize,
     /// No face had the character: `.notdef` was drawn and it is reported.
     pub missing: bool,
+    /// A default-ignorable character no face drew: it takes no
+    /// `ashow`/`widthshow` extra either, like the scalars a ligature took in.
+    pub ignorable: bool,
 }
 
 impl Shown {
@@ -247,6 +250,7 @@ impl Shown {
             adv,
             absorbed: 0,
             missing: false,
+            ignorable: false,
         }
     }
 }
@@ -291,10 +295,17 @@ pub(super) fn show_scalar(
             probe,
             work,
         )?;
-        return Ok(Shown::drawn(adv));
+        // A face's own joiner or selector glyph is zero width too.
+        return Ok(Shown {
+            ignorable: in_ranges(IGNORABLE, code),
+            ..Shown::drawn(adv)
+        });
     }
     if in_ranges(IGNORABLE, code) {
-        return Ok(Shown::drawn((0.0, 0.0)));
+        return Ok(Shown {
+            ignorable: true,
+            ..Shown::drawn((0.0, 0.0))
+        });
     }
     if is_control(code) {
         let adv = paint_resolved_glyph_limited(
@@ -387,9 +398,8 @@ fn missing(
         work,
     )?;
     Ok(Shown {
-        adv,
-        absorbed: 0,
         missing: true,
+        ..Shown::drawn(adv)
     })
 }
 
@@ -416,9 +426,8 @@ fn emoji(
     let (gid, absorbed) = ligature(face, first, text, after, work);
     let adv = paint_emoji(gfx, face, fs.matrix, gid, mode, pen, probe, work)?;
     Ok(Some(Shown {
-        adv,
         absorbed,
-        missing: false,
+        ..Shown::drawn(adv)
     }))
 }
 

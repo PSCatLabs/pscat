@@ -100,7 +100,8 @@ baseline with a slight descent, at the size of the text around it.
   a width measured to wrap or centre a line is the width drawn. `kshow`,
   `cshow` and `xshow` see one character per code point; the extra code points
   of a joined emoji draw nothing and take no width (with `xshow` they still
-  take a number each).
+  take a number each), and `ashow`/`widthshow` add no spacing after them or
+  after a joiner or variation selector.
 - **Not supported.** No shaping, ligatures or bidi for text: Arabic and Hebrew
   come out in logical order and unjoined, and Thai marks stack by their
   advances. Fallback faces are regular weight, whatever the font's.
