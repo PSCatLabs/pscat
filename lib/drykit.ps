@@ -1450,39 +1450,44 @@ systemdict /.sameclip known /dkPsameok exch def
     } ifelse
 } bind def
 
-% -   (#1419: clips away what lies behind the start of the run dkZir, which
-% a /From cut: the side of the line across its first stop, square to its
-% first segment, that the run came from, as far as any of its discs or its
-% round cap (and the halo dkZha) could reach. Everything else stays: an
-% eoclip of a box round the whole run with that small box taken out, so a
-% run that turns back on itself further on is not cut. The previous piece's
-% round end covers the cut, so its anti-aliased edge leaves no seam.)
+% -   (#1419: clips away the ink of the run dkZir that a /From cut at its first
+% stop would paint back over the piece before it: the half-disc behind the line
+% across the first stop, square to its first segment, as far back as any of the
+% run's discs or its round cap (and the halo dkZha) reaches past that line. That
+% is within the previous piece's round end, which ends at the same stop with the
+% same width, so nothing is lost; the rest of the run stays (an eoclip of a box
+% round the whole run with the half-disc taken out), so a run that turns at a
+% corner just past the cut keeps its ink.)
 % @internal
 /dkZbehind {
-    /dkZbr 0 def /dkZbl 0 def
-    dkZir { 2 get dkZha add dkZbr dkmax /dkZbr exch def } forall
-    /dkZbr dkZbr 1.5 mul 1 add def
     /dkZbx dkZir 0 get 0 get def /dkZby dkZir 0 get 1 get def
-    /dkZbdx 0 def /dkZbdy 0 def
-    1 1 dkZir length 1 sub {
-        dkZir exch get dup 0 get dkZbx sub exch 1 get dkZby sub
-        2 copy dup mul exch dup mul add sqrt
-        dup dkZbl add /dkZbl exch def
-        dkZbdx 0 eq dkZbdy 0 eq and 1 index 0 gt and {
-            dup 3 1 roll div /dkZbdy exch def div /dkZbdx exch def
-        } { pop pop pop } ifelse
-    } for
+    /dkZbr 0 def /dkZbm 0 def /dkZbl 0 def /dkZbdx 0 def /dkZbdy 0 def
+    dkZir {
+        dup 0 get dkZbx sub /dkZbu exch def
+        dup 1 get dkZby sub /dkZbv exch def
+        2 get dkZha add dup dkZbm dkmax /dkZbm exch def
+        % a disc of radius r at distance q from the cut reaches at most
+        % sqrt(r^2 - q^2) from the cut point on the far side of the line
+        dup mul dkZbu dup mul dkZbv dup mul add dup sqrt /dkZbq exch def
+        sub dup 0 gt { sqrt dkZbr dkmax /dkZbr exch def } { pop } ifelse
+        /dkZbl dkZbl dkZbq add def
+        dkZbdx 0 eq dkZbdy 0 eq and dkZbq 0 gt and {
+            /dkZbdx dkZbu dkZbq div def /dkZbdy dkZbv dkZbq div def
+        } if
+    } forall
     dkZbdx 0 eq dkZbdy 0 eq and { /dkZbdx 1 def } if
-    /dkZbL dkZbl dkZbr 4 mul add 10 add def
+    /dkZbL dkZbl dkZbm 2 mul add 10 add def
     newpath
     dkZbx dkZbL sub dkZby dkZbL sub moveto
     dkZbL 2 mul 0 rlineto 0 dkZbL 2 mul rlineto dkZbL 2 mul neg 0 rlineto closepath
-    % the small box behind the cut: across it +-dkZbr, back from it dkZbr
-    dkZbx dkZbdy dkZbr mul add dkZby dkZbdx dkZbr mul sub moveto
-    dkZbdx dkZbr mul neg dkZbdy dkZbr mul neg rlineto
-    dkZbdy dkZbr 2 mul mul neg dkZbdx dkZbr 2 mul mul rlineto
-    dkZbdx dkZbr mul dkZbdy dkZbr mul rlineto
-    closepath
+    dkZbr 0 gt {
+        % and a device pixel more, for the anti-aliased rim of the discs
+        /dkZbr dkZbr 1 0 idtransform dup mul exch dup mul add sqrt add def
+        /dkZbt dkZbdy dkZbdx atan def
+        dkZbx dkZbdy dkZbr mul sub dkZby dkZbdx dkZbr mul add moveto
+        dkZbx dkZby dkZbr dkZbt 90 add dkZbt 270 add arc
+        closepath
+    } if
     eoclip newpath
 } bind def
 

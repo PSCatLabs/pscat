@@ -21,8 +21,14 @@ whole run's width varies; 1 = cut at its start, on the first stop's own copy):
 - `dkZthin` takes the whole run's step (widest stop, mean canvas segment length), so a
   growing part keeps the stops its catch was thinned to;
 - `dkZgroup` sizes chunks with the whole run's widest stop, so chunk boundaries do not move;
-- a run cut at its start is clipped flat (`dkZbehind`: an eoclip of a big box minus a box
-  behind the cut line), in either branch, so the stroke branch's AA is unchanged.
+- a run cut at its start is clipped flat (`dkZbehind`: an eoclip of a big box minus the
+  half-disc behind the cut line, as far as any of the run's discs reaches past it plus a
+  device pixel), in either branch, so the stroke branch's AA is unchanged. A first version
+  took out a box 1.5 reach deep and wide, which notched the next leg of a piece that starts
+  just before a corner; the half-disc is inside the previous piece's round end, so nothing
+  it removes is lost (`a_flat_start_leaves_no_notch_at_a_corner`). Pieces of a zigzag and a
+  box (300 pieces): weight 0.99 to 1.00 (before: 0.77 and 0.85). Ghostscript runs part mode
+  (100 pieces and a chalk part) cleanly.
 `dcchalk`'s tip strokes now hand drykit the whole polyline with `/From`/`/To` (instead of
 cutting it with `dcpiece` and remapping `/Touch`/`/Pressure`), so they get all of the above
 and share the whole stroke's stop grid. `/Tilt` side strokes still cut their lanes in

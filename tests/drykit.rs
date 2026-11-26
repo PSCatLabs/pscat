@@ -2103,6 +2103,56 @@ fn many_short_pieces_keep_the_strokes_weight() {
     );
 }
 
+/// The flat start of a piece takes away only what the piece before it
+/// already covers (its round end): a piece that starts just before a corner
+/// keeps the ink of the leg after the corner, and pieces cut at a sharp
+/// vertex leave no hole. Measured on the ink of the whole stroke: no pixel
+/// the whole inks clearly is left bare by the pieces.
+#[test]
+fn a_flat_start_leaves_no_notch_at_a_corner() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    // a box (perimeter 2 * (160 + 40) = 400): the first corner is at 160
+    let boxed = "newpath 20 10 moveto 180 10 lineto 180 50 lineto 20 50 lineto closepath";
+    let zig = "newpath 10 10 moveto 40 50 lineto 70 10 lineto 100 50 lineto 130 10 lineto";
+    for (path, cut) in [
+        (boxed, "158.5 400 div"),
+        (boxed, "159.5 400 div"),
+        (zig, "0.25"),
+        (zig, "0.5"),
+    ] {
+        let opts = "/Width 6 /Seed 2";
+        let whole = data(&board(
+            PW,
+            PH,
+            2.0,
+            &format!("{path} << {opts} >> dkstroke"),
+        ));
+        let halves = data(&board(
+            PW,
+            PH,
+            2.0,
+            &format!(
+                "{path} << {opts} /To {cut} >> dkstroke {path} << {opts} /From {cut} >> dkstroke"
+            ),
+        ));
+        let holes = (0..whole.len() / 4)
+            .filter(|&i| {
+                let d = |img: &[u8]| {
+                    (0..3)
+                        .map(|c| img[i * 4 + c].abs_diff(bare[i * 4 + c]))
+                        .max()
+                        .unwrap()
+                };
+                d(&whole) > 96 && d(&halves) < 16
+            })
+            .count();
+        assert_eq!(
+            holes, 0,
+            "`{path}` cut at {cut}: {holes} pixels of ink left bare"
+        );
+    }
+}
+
 /// A tilted piece past 0 draws each lane's chance dropouts as the whole
 /// stroke does (the stops and the chain are the whole subpath's, cut
 /// afterwards): the right half of a side stroke agrees with the whole
