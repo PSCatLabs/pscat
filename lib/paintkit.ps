@@ -1040,9 +1040,8 @@
 % for the full parameter list with defaults. Caveats the terse tags
 % don't carry: /Width bounds the bristle *scatter*, not one mark's own
 % thickness (see /BristleWidth for that); /Bristles is a hard safety
-% cap (1..100) chosen so even the cap combined with a long path at the
-% default /Pitch stays in the single-digit seconds (see Performance
-% below) -- it alone doesn't bound total ink deposits, see the
+% cap (1..100) chosen so even the cap at the default /Pitch stays well
+% under a second on a 700-unit path (see Performance below) -- it alone doesn't bound total ink deposits, see the
 % deposit-budget check further down for that. /Load and /Dropout are
 % both expressed as a rate per one /Width's worth of travel along the
 % path, *not* per raw walkpath sample -- scaled down to a per-sample

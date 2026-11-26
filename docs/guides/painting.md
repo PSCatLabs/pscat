@@ -652,7 +652,9 @@ the probe):
 
 `/Touch` takes no draws either. Under `--sweep-seed` every literal `N srand`
 is forced to the sweep's seed, so all the strokes of a sweep start from one
-stream (`7 srand rand = 8 srand rand =` prints one number twice). So for a repainted frame: `N srand` before
+stream (`7 srand rand = 8 srand rand =` prints one number twice); `/Seed`
+on a wash or ground is not varied by a sweep either (`pscat` warns that the
+sweep had no effect). So for a repainted frame: `N srand` before
 each brush stroke, and `/Seed` (or a `srand`) on each wash and ground. Doing
 both on a wash is harmless, just not needed.
 
@@ -669,7 +671,7 @@ showpage
 
 ## What a stroke costs
 
-Measured with release `pscat` on a 1280 x 720 page
+Measured with release `pscat` 0.7.1 on a 1280 x 720 page
 (1 pixel per point): CPU time of the whole run minus a run with the same
 page and no strokes, best of 7, on an Apple M4 that other jobs were also
 using, so read a figure as "about" and anything under 5 ms as small. Each
@@ -693,8 +695,9 @@ about 100 pt and about 600 pt long:
 
 A stroke's cost follows its length and its bristle count, not the pixels it
 covers: a 700 pt `pkdry` at `/Width 24` takes 76 ms with its 18 bristles and
-420 ms at `/Bristles 100`, while the same 600 pt strokes at 144 dpi cost
-`pkdry` 66 ms against 64, `pkoil` 23 against 22, `pkbroad` 9 against 6. `pkwet` runs its mark once per pass, about 4 times the plain
+420 ms at `/Bristles 100`, while the same 600 pt strokes at 144 dpi (four times the pixels)
+cost `pkdry` 66 ms against 64 at 72 dpi and `pkoil` 23 against 22; the
+raster-heavier `pkbroad` and `pkspray` go from 6 to 9 ms and from 5.5 to 8 ms. `pkwet` runs its mark once per pass, about 4 times the plain
 stroke here. Areas:
 
 | Call | Cost |

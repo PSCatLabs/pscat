@@ -31,9 +31,10 @@ read is not in this repository's paint docs.
   error and no warning. That is why the Heron author did both everywhere.
 - `pkwet` draws on its own account: 4 draws around a `pkribbon` that draws none
   (12 with `/Direction 270`; `draws4.ps`).
+- `/Touch` takes no draws: `pkdry` is 10962 draws with or without `/Touch 0.5` after `pkcanvas` (`draws5.ps`).
 - Under `--sweep-seed` every literal `N srand` is forced to the sweep's seed:
   `7 srand rand = 8 srand rand = 7 srand rand =` printed one number three times
-  with `--sweep-seed 5,6 --png out.png`, and the three differing numbers without it.
+  with `--sweep-seed 5,6 --png out.png`, and the three differing numbers without it. A `pkwash << /Seed 3 >>` alone gave two identical PNGs under `--sweep-seed 5,6` and a warning that the sweep had no effect: `/Seed` is not varied by a sweep.
 - Draw counts depend on the path: `pkdry` 2322 draws on a 100 pt line, 10962 on
   a 540 pt curve, 22176 on a 1060 pt line. So without a `srand` per stroke, editing
   one stroke re-rolls the rest.
@@ -160,6 +161,25 @@ The first file's last row, `pkbrushedge`, stops on `pkbroad-deposit-count-exceed
 (pkribbon alone) { curve << /Width 12 >> pkribbon } try
 (pkwet around pkribbon) { { curve << /Width 12 >> pkribbon } << /Soft 0.8 /Under [0.6 0.7 0.9] >> pkwet } try
 (pkwet around pkribbon, /Direction 270) { { curve << /Width 12 >> pkribbon } << /Soft 0.8 /Direction 270 /Under [0.6 0.7 0.9] >> pkwet } try
+```
+
+`draws5.ps` (`/Touch`; output `pkdry 10962`, `pkdry /Touch 0.5 10962`):
+
+```postscript
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+/curve { newpath 40 100 moveto 200 140 300 60 560 100 curveto } def
+/dcount {
+  /dproc exch def
+  5 srand dproc rand /dafter exch def
+  5 srand /di -1 def
+  0 1 300000 { rand dafter eq { /di exch def exit } { pop } ifelse } for
+  di
+} def
+/try { exch dup print ( ) print exch dcount = } def
+<< /Seed 7 >> pkcanvas
+(pkdry) { curve << /Width 12 >> pkdry } try
+(pkdry /Touch 0.5) { curve << /Width 12 /Touch 0.5 >> pkdry } try
 ```
 
 ### Same output? (`det.py`, `det2.py`)
