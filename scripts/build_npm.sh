@@ -30,9 +30,12 @@ NPM="$ROOT/npm"
 # #1325 (mesh shadings, all four types) grew the wasm by code alone, not by
 # anything embedded, and took the unpacked size about 21 KB past 13 MiB.
 # The unpacked cap is now 13.5 MiB.
+# #1425 compiled in the Twemoji colour emoji face (1.47 MB): measured
+# tarball 5,952,081 -> 6,716,026 bytes, unpacked 13,667,989 -> 15,218,105.
+# The caps are now 7 MiB and 15.5 MiB (an owner decision on that PR).
 # A breach means something new got embedded; decide on purpose, then raise it.
-MAX_TARBALL=$((6 * 1024 * 1024))
-MAX_UNPACKED=$((27 * 512 * 1024))
+MAX_TARBALL=$((7 * 1024 * 1024))
+MAX_UNPACKED=$((31 * 512 * 1024))
 
 NOTICES=""
 NO_NOTICES=0
