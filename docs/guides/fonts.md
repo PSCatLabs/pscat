@@ -177,7 +177,9 @@ copy-and-`definefont` idiom:
 /Amber-Dots findfont 32 scalefont setfont
 ```
 
-Do not `put` into a defined font to change a dial: Ghostscript makes a defined
+`pf-variant` checks the dials: `/DotSize` above 0 up to 4, `/ScanGap` from 0 up to
+(not including) 1, a wrong type is a `typecheck` and a value out of range a
+`rangecheck`, and nothing is defined. Do not `put` into a defined font to change a dial: Ghostscript makes a defined
 font read-only, and a glyph it has already cached would not change. The glyph
 data is public: `/Diode5 findfont /Bitmaps get /A get` is the A's rows, top to
 bottom, `#` lit and `.` dark, for a program that drives a real LED grid or

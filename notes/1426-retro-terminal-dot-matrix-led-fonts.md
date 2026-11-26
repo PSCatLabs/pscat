@@ -38,3 +38,11 @@ test in `tests/font_packs.rs`. Specimen: `examples/retro_fonts.ps`,
 
 Deferred: a 10x20 terminal cell, a block-cursor glyph, unlit-LED backgrounds,
 glow (psanim's side), a gallery `specimens` entry (#581), site font-gallery cards.
+
+Review round 1 (Codex): a caught error inside BuildChar left the font and
+scratch dictionaries on the dictionary stack. BuildChar now runs its body under
+`stopped`, closes both, and raises the error again (`stop`; pscat and gs both
+still report the original error). `pf-variant` checks each dial when the
+variant is made: a wrong type is a `typecheck`, a value out of range a
+`rangecheck` (`/DotShape` `/square` or `/round`, `/DotSize` in (0, 4],
+`/ScanGap` in [0, 1), `/Interpolate` a boolean), and nothing is defined.

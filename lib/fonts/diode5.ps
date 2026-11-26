@@ -633,9 +633,13 @@ Diode5Dict begin
     } for
   } bind def
 
+  % The body runs under stopped so that an error in it (a bad dial put in
+  % by hand-copying the font) still closes both dictionaries, then is
+  % raised again with its own name.
   /BuildChar {
     exch begin
       work begin
+      {
       Encoding exch get
       Glyphs 1 index known not { pop /.notdef } if
       Glyphs exch get /g exch def
@@ -660,8 +664,10 @@ Diode5Dict begin
         } ifelse
       } ifelse
       fill
+      } stopped
       end
     end
+    { stop } if
   } bind def
 
   /Encoding 256 array def
@@ -685,7 +691,32 @@ end
 
 % /New /Base << dials >> pf-variant -   a copy of /Base with the dials
 % changed, defined as /New (the copy idiom: every key but FID).
+% A dial of the wrong type is a typecheck and one out of range a
+% rangecheck, raised here, before anything is defined: /DotShape /square
+% or /round, /DotSize above 0 up to 4, /ScanGap from 0 up to (not
+% including) 1, /Interpolate a boolean.
 /pf-variant {
+  dup /DotShape known {
+    dup /DotShape get
+    dup type /nametype ne { /pf-variant errordict /typecheck get exec } if
+    dup /square ne exch /round ne and { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /DotSize known {
+    dup /DotSize get
+    dup type dup /integertype ne exch /realtype ne and
+    { /pf-variant errordict /typecheck get exec } if
+    dup 0 le exch 4 gt or { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /ScanGap known {
+    dup /ScanGap get
+    dup type dup /integertype ne exch /realtype ne and
+    { /pf-variant errordict /typecheck get exec } if
+    dup 0 lt exch 1 ge or { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /Interpolate known {
+    dup /Interpolate get type /booleantype ne
+    { /pf-variant errordict /typecheck get exec } if
+  } if
   3 1 roll findfont
   dup length 3 index length add dict begin
     { 1 index /FID ne { def } { pop pop } ifelse } forall

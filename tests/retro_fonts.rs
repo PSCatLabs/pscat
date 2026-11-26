@@ -279,10 +279,24 @@ fn the_renderer_block_is_the_same_in_every_file() {
         s[start..start + end].to_string()
     };
     let first = block(FILES[0].0);
+    // pf-variant (and its dial checks) is the other shared block.
+    let variant = |path: &str| {
+        let s = std::fs::read_to_string(path).expect("font file");
+        let start = s
+            .find("% A dial of the wrong type")
+            .expect("pf-variant start");
+        let end = s[start..].find("} bind def\n").expect("pf-variant end");
+        s[start..start + end].to_string()
+    };
+    let first_variant = variant(FILES[0].0);
     for (path, _) in &FILES[1..] {
         assert!(
             block(path) == first,
             "{path}: renderer differs from phosphor.ps"
+        );
+        assert!(
+            variant(path) == first_variant,
+            "{path}: pf-variant differs from phosphor.ps"
         );
     }
 }
@@ -335,4 +349,77 @@ fn the_specimen_sheet_renders() {
     it.run_source(&src)
         .unwrap_or_else(|e| panic!("retro_fonts.ps failed: {}", it.error_report(&e)));
     assert_eq!(it.gfx().pages().len(), 1);
+}
+
+/// A bad dial for each check `pf-variant` makes: (dials, the error it raises).
+const BAD_DIALS: [(&str, &str); 8] = [
+    ("/DotSize (bad)", "typecheck"),
+    ("/DotShape 3", "typecheck"),
+    ("/ScanGap /wide", "typecheck"),
+    ("/Interpolate 1", "typecheck"),
+    ("/DotSize 0", "rangecheck"),
+    ("/DotSize 9", "rangecheck"),
+    ("/DotShape /hexagon", "rangecheck"),
+    ("/ScanGap 1.5", "rangecheck"),
+];
+
+/// #1426 review: `pf-variant` refuses a bad dial when the variant is made,
+/// with the right error, defines nothing and leaves the dictionary stack as
+/// it was.
+#[test]
+fn pf_variant_rejects_bad_dials_and_leaves_the_dict_stack_alone() {
+    for (path, faces) in FILES {
+        for (dials, err) in BAD_DIALS {
+            let mut it = loaded(path, 10, 10);
+            run(
+                &mut it,
+                &format!(
+                    "/n0 countdictstack def
+                     {{ /Bad /{} << {dials} >> pf-variant }} stopped /caught exch def
+                     clear
+                     caught $error /errorname get /{err} eq and
+                     countdictstack n0 eq and
+                     /Bad /Font resourcestatus {{ pop pop false }} {{ true }} ifelse and",
+                    faces[0]
+                ),
+            );
+            assert_eq!(top(&it), "true", "{path} with << {dials} >>");
+        }
+    }
+}
+
+/// #1426 review: a caught error inside BuildChar (a bad dial put in by the
+/// copy idiom, which `pf-variant` cannot check) unwinds the font and scratch
+/// dictionaries and reports the original error.
+#[test]
+fn a_caught_error_in_buildchar_unwinds_its_dictionaries() {
+    for (path, faces) in FILES {
+        for (dials, _) in BAD_DIALS {
+            // A type error stops the show; an out-of-range dial may only draw
+            // oddly. Either way the dictionary stack must come back as it was,
+            // and a caught error keeps its own name.
+            let mut it = loaded(path, 40, 40);
+            run(
+                &mut it,
+                &format!(
+                    "/Bad /{} findfont dup length dict begin
+                       {{ 1 index /FID ne {{ def }} {{ pop pop }} ifelse }} forall
+                       << {dials} >> {{ def }} forall
+                     currentdict end definefont pop
+                     /Bad findfont 20 scalefont setfont
+                     /n0 countdictstack def
+                     {{ 5 5 moveto (A) show }} stopped /caught exch def
+                     clear
+                     caught {{ $error /errorname get /stop ne }} {{ true }} ifelse
+                     countdictstack n0 eq and",
+                    faces[0]
+                ),
+            );
+            assert_eq!(
+                top(&it),
+                "true",
+                "{path} with << {dials} >>: dict stack changed by a show"
+            );
+        }
+    }
 }
