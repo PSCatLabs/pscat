@@ -1,7 +1,10 @@
 # pscat for AI agents
 
 pscat is easy to drive from a coding agent — Claude Code, Codex,
-OpenClaw, Hermes, or anything else. There are two integration surfaces,
+OpenClaw, Hermes, or anything else. This page is the reference for the local
+route (the skills and the stdio `pscat-mcp`). Which client gets which route,
+the hosted (cloud) server, and whether to install or just connect are on
+[pscat in every AI client](clients.md). There are two integration surfaces,
 and both work against an **installed** pscat (no checkout needed):
 
 - **Skills**: plain Markdown in [`plugin/skills/`](../../plugin/skills/) (also
@@ -317,7 +320,7 @@ limit can and cannot stop. `handwrite` runs
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
-Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `pstack`
+Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `==only`, `pstack`
 and `stack` truncate their own output well below that (1024 elements per array,
 4096 bytes per string, 16 KiB per operand, 32 KiB for a whole stack, ending in
 `... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed

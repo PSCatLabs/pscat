@@ -2862,7 +2862,8 @@ renders eight examples in both and compares block-downsampled output).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not
-  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  `println!`. `=`, `==`, `=only`, `==only` (#1413: Ghostscript's newline-less
+  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it; the wasm
   build turns on `capture_stdout` (a wasm32 module has no stdout) and
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
@@ -2912,13 +2913,12 @@ renders eight examples in both and compares block-downsampled output).
   `wasm_vector_output_matches_the_cli` in `tests/wasm.rs` holds that, and
   a change to what the CLI does around the recorders (src/main.rs) must be
   mirrored in `ps_begin_vector`. It started as PSCatLabs/print-shop's
-  adapter patch; print-shop has run on this ABI since its #16, and on the released rc.4
-  package since its #28. Release-status
+  adapter patch; print-shop has run on this ABI since its #16, and on a
+  published pscat package (not a clone) since its #28. Release-status
   sentences go stale: `docs/guides/when-to-use-pscat.md`,
   `site/when-to-use.html` and `docs/guides/browser.md` say SVG/PDF from wasm
-  first ships in 0.7.0-rc.4 (npm at 0.7.0), and that print-shop runs on the
-  rc.4 package (#1007). At 0.7.0 final, say it is on npm, and update the
-  print-shop line once print-shop#29 moves it to `pscat@0.7.0`.
+  are in 0.7.0 (first in the 0.7.0-rc.4 pre-release) and on npm (#1007);
+  recheck them when a release changes that.
   `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed

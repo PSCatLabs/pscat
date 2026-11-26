@@ -67,7 +67,8 @@ cargo test                                # language + pixel-level render tests
 
 More on the less obvious ones:
 
-- **Streams.** stdout is the program's own output (`print`, `=`, `==`) and
+- **Streams.** stdout is the program's own output (`print`, `=`, `==`, and the
+  Ghostscript newline-less `=only` and `==only`) and
   nothing else: `pscat: wrote FILE` and every other note go to stderr, so
   `pscat --pdf out.pdf prog.ps | jq .` pipes cleanly. If the reader of stdout
   goes away (`| head`) pscat ends quietly with status 141, after writing the

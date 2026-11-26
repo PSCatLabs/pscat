@@ -15,14 +15,17 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   command-line flags, the live window, and PNG, SVG and PDF output.
 - [pscat in the browser](browser.md): the WebAssembly build and a JavaScript
   quick start.
+- [pscat in every AI client](clients.md): one table of the local and cloud
+  routes for Claude Code, claude.ai, ChatGPT, Codex, Muse, Grok and others, and
+  when to install pscat or connect to the hosted server.
 - [pscat for AI agents](agents.md): the skills, the `pscat-mcp` server and how
   to register it.
 - [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md): what
   ChatGPT accepts for a remote server (and for its authentication), the
   connector setup, and the `--remote` plugin ZIP.
 - [pscat in Muse](muse.md): install pscat in Muse with a prebuilt local binary
-  (the hosted MCP server is paused), with the prompts to paste and what Muse should
-  report back.
+  (the staging preview of the hosted server is paused), with the prompts to
+  paste and what Muse should report back.
 - [pscat as a Rust library](library.md): the crate's API, its `window`
   feature, the supported builds and the stability policy.
 
