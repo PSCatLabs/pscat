@@ -988,6 +988,14 @@ pub struct Dict {
     exotic: HashMap<ExoticKey, ExoticEntry>,
     /// Next insertion sequence number for `exotic`.
     next_seq: u64,
+    /// The most slots each table (`names`, `exotic`) held at the moment of
+    /// an `undef`. A table never shrinks, and walking it costs its size, but
+    /// `capacity()` is `len` plus the free slots, and removals leave
+    /// tombstones that are not free: after emptying a table it can read a
+    /// fraction of the size. The table is tombstone-free whenever it has
+    /// just grown, and the next `undef` reads it then, so this is its size
+    /// without asking the allocator. See [`slack`](Self::slack).
+    peak_slots: [usize; 2],
 }
 
 /// One non-name dictionary entry: insertion sequence, key object, value.
@@ -1107,9 +1115,11 @@ impl Dict {
     pub fn undef(&mut self, key: &Object) -> Result<(), PsError> {
         match classify_key(key)? {
             KeyClass::Name(n) => {
+                self.peak_slots[0] = self.peak_slots[0].max(self.names.capacity());
                 self.names.remove(&n.id());
             }
             KeyClass::Exotic(k) => {
+                self.peak_slots[1] = self.peak_slots[1].max(self.exotic.capacity());
                 self.exotic.remove(&k);
             }
         }
@@ -1127,6 +1137,20 @@ impl Dict {
     /// The values under name keys, in the map's (fixed) order.
     pub(crate) fn name_values(&self) -> impl Iterator<Item = &Object> {
         self.names.values()
+    }
+
+    /// Empty slots the name-keyed table retains beyond its live entries.
+    /// An iteration over the table costs about its size, not its length:
+    /// `undef` never shrinks it, so a dictionary that once held millions of
+    /// entries stays that expensive to walk (#1422).
+    pub(crate) fn name_slack(&self) -> usize {
+        self.names.capacity().max(self.peak_slots[0]) - self.names.len()
+    }
+
+    /// [`name_slack`](Self::name_slack) for both tables: the empty slots a
+    /// walk over every entry ([`pairs`](Self::pairs)) passes over.
+    pub(crate) fn slack(&self) -> usize {
+        self.name_slack() + (self.exotic.capacity().max(self.peak_slots[1]) - self.exotic.len())
     }
 
     /// The name-keyed entries as (interned id, value), in the order
