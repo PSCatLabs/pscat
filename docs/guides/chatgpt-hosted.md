@@ -12,6 +12,13 @@ to staging. Releases from 0.7.1 on carry a plugin ZIP built against the
 auth choice is on pscat-mcp#136; the earlier decision is on issue #1240).
 Whether ChatGPT accepts the ZIP upload itself is still unverified (#1089).
 
+**Update, 2026-11-25:** the production server is live at
+`https://mcp.pscat.dev/mcp` and signs callers in with OAuth, not
+no-authentication. The `--remote-auth none` ZIP above was built for the other
+choice, so whether it connects to production is not yet verified. For the
+custom-server route below, choose **OAuth** for authentication. The table of
+every client's routes is [pscat in every AI client](clients.md).
+
 ## What ChatGPT accepts
 
 Checked against OpenAI's documentation on 2026-11-16

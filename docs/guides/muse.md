@@ -21,6 +21,7 @@ one that keeps working. The hosted server (Option B) is paused: its
 anonymous preview ended on 2026-11-18.
 
 For the other clients (Claude Code, Codex, ChatGPT) see
+[pscat in every AI client](clients.md), which has the table of routes for each,
 [pscat for AI agents](agents.md) and
 [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md).
 
@@ -104,9 +105,15 @@ still give 0.6.3, which has only 4 MCP tools, no `chalkboard_math` and no
 `pscat chalk` command. 0.7.0-rc.5 is a GitHub pre-release only: it is not on
 crates.io, npm or the MCP Registry.
 
-## Option B: hosted server (paused)
+## Option B: hosted server (the staging preview is paused)
 
-**The hosted preview is paused.** Its anonymous access ended on 2026-11-18,
+**Update, 2026-11-25:** the production server is live at
+`https://mcp.pscat.dev/mcp` and signs callers in with OAuth. This guide has not
+tried it in Muse, so it has no prompt for it yet; whether Muse can complete an
+OAuth sign-in for a custom connector is not yet verified. Use Option A. The
+[client table](clients.md) tracks the state of every client's cloud route.
+
+**The staging preview described below is paused.** Its anonymous access ended on 2026-11-18,
 a day earlier than first announced. The staging server
 (`https://pscat-mcp-145279231681.us-central1.run.app/mcp`) now accepts only
 bearer tokens, and there is no public way to get one, so Muse's no-auth

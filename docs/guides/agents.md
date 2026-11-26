@@ -1,7 +1,10 @@
 # pscat for AI agents
 
 pscat is easy to drive from a coding agent — Claude Code, Codex,
-OpenClaw, Hermes, or anything else. There are two integration surfaces,
+OpenClaw, Hermes, or anything else. This page is the reference for the local
+route (the skills and the stdio `pscat-mcp`). Which client gets which route,
+the hosted (cloud) server, and whether to install or just connect are on
+[pscat in every AI client](clients.md). There are two integration surfaces,
 and both work against an **installed** pscat (no checkout needed):
 
 - **Skills**: plain Markdown in [`plugin/skills/`](../../plugin/skills/) (also
