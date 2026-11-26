@@ -14,7 +14,7 @@ pscat reaches an AI client by one of two routes:
   [`plugin/README.md`](../../plugin/README.md).
 - **Cloud**: the hosted MCP server at `https://mcp.pscat.dev/mcp`. Nothing to
   install: you add it to the client as a remote server and sign in with OAuth
-  (the sign-in is by WorkOS AuthKit; anyone who can sign in can use it). It has
+  (by WorkOS AuthKit, as the project owner set it up; anyone who signs in can use it). It has
   seven tools and tighter limits (see below).
 
 ## Which routes each client has
@@ -28,10 +28,10 @@ here is "coming": the cloud server is live.
 
 | Client | Local route | Cloud route | Status |
 |---|---|---|---|
-| **Claude Code** (terminal, IDE) | Plugin: `/plugin marketplace add PSCatLabs/pscat`, then `/plugin install pscat@pscat`. It installs the skills and registers `pscat-mcp`, downloading pscat on first use if you have none. | `claude mcp add --transport http pscat-cloud https://mcp.pscat.dev/mcp`, then sign in from `/mcp`. Name it `pscat-cloud`: the plugin's local server is `pscat`. | Local: documented, plugin checked in CI on Linux and Windows. Cloud: the tools work in Claude Code when the connector comes from your claude.ai account (seen on 2026-11-25); the `claude mcp add` line is not yet verified. |
+| **Claude Code** (terminal, IDE) | Plugin: `/plugin marketplace add PSCatLabs/pscat`, then `/plugin install pscat@pscat`. It installs the skills and registers `pscat-mcp`, downloading pscat on first use if you have none. | `claude mcp add --transport http pscat-cloud https://mcp.pscat.dev/mcp`, then sign in from `/mcp`. Name it `pscat-cloud`: the plugin's local server is `pscat`. | Local: documented, plugin checked in CI on Linux and Windows. Cloud: works through a claude.ai-account connector (seen on 2026-11-25); the `claude mcp add` line is not yet verified. |
 | **Claude desktop app** (Cowork) | Plugin: **Customize > Plugins**, **Add > Add marketplace**, `PSCatLabs/pscat`, then install **pscat**. Cowork runs the server on your computer. A Cowork session that runs in the cloud gets the skills and the command line, not the MCP tools (seen in the 0.7.0-rc.1 trial). | The same custom connector as claude.ai, below. | Local: documented. Cloud: as claude.ai. |
-| **claude.ai** (website, mobile) | None for the tools: chat does not start local MCP servers. In a code-execution workspace the skill can fetch the command-line tool and render with it (`pscat-mcp.sh --locate`, [the skill's "No MCP, or a cloud sandbox"](../../plugin/skills/pscat/SKILL.md)). | A custom connector with the URL `https://mcp.pscat.dev/mcp`, signing in with OAuth. | Cloud: the connector works (a claude.ai-account connector, authenticated by OAuth, answered `get_renderer_info` and returned a render in a Claude Code session, 2026-11-25), but this page has not watched it in the claude.ai website or the mobile app. Menu labels for adding a connector: not yet verified. Whether claude.ai needs a `dpi` hint to show a sharp picture: not yet verified. Sandbox route: not yet verified. |
-| **ChatGPT** (web, desktop) | A plugin ZIP installs, but the stdio MCP server runs only on the desktop app (OpenAI marks it "Desktop only"); the web and mobile app get the skills only, with a GitHub-connector fallback that installs the command-line tool ([#1089](https://github.com/PSCatLabs/pscat/issues/1089), [`plugin/README.md`](../../plugin/README.md#chatgpt-trial)). | The `pscat-cloud` plugin installs beside the local one. Connect it by URL (**Add custom MCP server**, authentication **OAuth**) or from the release ZIP: [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md). | Not yet verified in either route. The release ZIP is built with `--remote-auth none`, which does not match a server that signs in with OAuth: see that page's status. Directory listing: [#682](https://github.com/PSCatLabs/pscat/issues/682). |
+| **claude.ai** (website, mobile) | None for the tools: chat does not start local MCP servers. In a code-execution workspace the skill can fetch the command-line tool and render with it (`pscat-mcp.sh --locate`, [the skill's "No MCP, or a cloud sandbox"](../../plugin/skills/pscat/SKILL.md)). | A custom connector with the URL `https://mcp.pscat.dev/mcp`, signing in with OAuth. | Cloud: the connector works, but the website and mobile app were not tested (a claude.ai-account connector, authenticated by OAuth, answered `get_renderer_info` and returned a render in a Claude Code session, 2026-11-25). Menu labels for adding a connector: not yet verified. Whether claude.ai needs a `dpi` hint to show a sharp picture: not yet verified. Sandbox route: not yet verified. |
+| **ChatGPT** (web, desktop) | A plugin ZIP can be built (`scripts/build_chatgpt_plugin.py`; the upload is not yet verified). Per OpenAI's documentation a stdio MCP server is "Desktop only", so the web and mobile app get the skills only, with a GitHub-connector fallback that installs the command-line tool ([#1089](https://github.com/PSCatLabs/pscat/issues/1089), [`plugin/README.md`](../../plugin/README.md#chatgpt-trial)). | The `pscat-cloud` plugin installs beside the local one. Connect it by URL ("Add custom MCP server", authentication OAuth, as OpenAI's documentation names them on 2026-11-16; labels not verified) or from the release ZIP: [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md). | Not yet verified in either route. The release ZIP is built with `--remote-auth none`, which does not match a server that signs in with OAuth: see that page's status. Directory listing: [#682](https://github.com/PSCatLabs/pscat/issues/682). |
 | **Codex** (CLI, IDE, app) | Plugin: `codex plugin marketplace add PSCatLabs/pscat`, then `codex plugin add pscat@pscat`. | An `[mcp_servers.pscat-cloud]` entry with `url = "https://mcp.pscat.dev/mcp"` in `config.toml`, then `codex mcp login pscat-cloud` for OAuth. | Local: documented, plugin checked in CI. Cloud: not yet verified, neither the entry nor the login step. |
 | **Codex cloud tasks** | The command-line tool inside the task's sandbox, fetched with `--locate`. | As above, if the task can reach the server. | Not yet verified. |
 | **Muse** | Ask Muse to install the prebuilt Linux binary and register `pscat-mcp` over stdio, from a prompt you paste: [pscat in Muse](muse.md). | A Muse custom connector with the hosted URL. | Local: **works** (2026-11-17). Cloud: worked on 2026-11-17 against the earlier no-authentication preview; not yet re-tested against the production server with OAuth. |
@@ -82,13 +82,15 @@ server's, not yours to change.
 | Reads | the working directory, `--allow-read` folders, pscat's data directories | only the built-in `lib/`: no font packs, no your-own-files |
 | Writes | `out_path`, inside one output folder | none: the result comes back in the reply |
 | SVG and PDF | `out_path`, or inline | inline: an SVG over 128 KiB (131072 bytes) comes back as a base64 file blob, up to 8 MiB of output in all |
-| Concurrency | your computer | 2 renders at a time, shared by all callers |
+| Concurrency | your computer | 2 renders at a time |
 | Tools | 10 | 7: no `eval_postscript` (use `validate_postscript`), no `start_render`, `render_status`, `render_result`, `cancel_render` |
 | Network | none for programs | none for programs |
 | Privacy | stays on your computer | the program and the picture go through the hosted server. By default nothing is stored; if the client asks for a download link, the file is kept for 30 minutes |
 
-**Both routes** run the same engine and the same skills, so the same program
-gives the same picture. To check you have the same version, run `pscat --version`
+**Both routes** run the same engine, so a program that uses only the built-in
+`lib/` and the standard fonts gives the same picture when the versions match.
+(The cloud has no font packs or files of yours, and the ChatGPT `pscat-cloud`
+skills are reworded for it.) To check you have the same version, run `pscat --version`
 locally and call `get_renderer_info` on the cloud server: each prints the pscat
 version it runs.
 
@@ -126,7 +128,7 @@ Not verified, so this page does not say: the exact menu labels for adding a
 connector in claude.ai and ChatGPT (including ChatGPT's Developer mode), whether
 claude.ai needs a `dpi` hint, the `claude mcp add` and Codex `[mcp_servers]` lines
 against the production server, how a client behaves when its OAuth sign-in
-expires, and anything about sign-in beyond OAuth through WorkOS AuthKit.
+expires, and who can sign up and how (this page knows only that sign-in is OAuth through WorkOS AuthKit).
 
 ## Related
 

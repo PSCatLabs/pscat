@@ -5,7 +5,7 @@ ChatGPT on the web cannot start a local MCP server, so the pscat plugin's
 page covers connecting ChatGPT to the hosted `pscat-mcp`, what you see, and
 the one open question: how the server proves who is calling.
 
-Status (November 2026): the staging server is protected by a static bearer
+Status (mid-November 2026; superseded in part by the update below): the staging server is protected by a static bearer
 token, and **ChatGPT cannot send a static bearer token**, so it cannot connect
 to staging. Releases from 0.7.1 on carry a plugin ZIP built against the
 **production** server with authentication `none`, which ChatGPT can use (the
