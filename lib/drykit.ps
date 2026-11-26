@@ -758,12 +758,16 @@
 
 % [key stops] -> [key stops'] or nothing   (#1418: the part of one run from
 % dkFa to dkFb of its subpath, along its length, which is the stops' fourth
-% number, 0..1; the part's stops are plain [x y hw]. A cut inside a segment
-% adds a stop there, interpolated, so the part is exactly that much of the
-% stroke the whole stroke would draw. A run of one point (a dot, or a lane
-% that is on at one stop only) is whole or nothing: it belongs to the piece
-% [dkFa, dkFb) that holds its place, dkFb 1 closed, so adjacent pieces draw
-% it once.)
+% number, 0..1. A cut inside a segment adds a stop there, interpolated, so
+% the part is exactly that much of the stroke the whole stroke would draw. A
+% run of one point (a dot, or a lane that is on at one stop only) is whole or
+% nothing: it belongs to the piece [dkFa, dkFb) that holds its place, dkFb 1
+% closed, so adjacent pieces draw it once; its stops are plain [x y hw].
+% A part of a longer run has stops [x y hw flags] (#1419), flags for dkZink:
+% 2 on every stop when the WHOLE run's width varies, so the part is inked as
+% the whole run is (a filled union) even where the part alone is constant;
+% 1 more on the first stop when the run was cut there (dkFa inside it), so
+% that end is flat and does not paint back over the piece before it.)
 % @internal
 /dkFrun {
     aload pop /dkFs exch def /dkFk exch def
@@ -776,6 +780,26 @@
         } if
     } {
         dkFt0 dkFb lt dkFt1 dkFa gt and {
+            % the whole run's ink branch, decided once for every part of it
+            /dkFvar 0 def /dkFhm 0 def
+            dkFs {
+                2 get dup dkFs 0 get 2 get ne { /dkFvar 2 def } if
+                dkFhm dkmax /dkFhm exch def
+            } forall
+            % and its length in canvas space (as dkZdraw maps it), for the
+            % catch's thinning: dkZthin's step is the whole run's
+            /dkFcl 0 def
+            0 1 dkFn 1 sub {
+                /dkFj exch def
+                dkFs dkFj get dup 0 get exch 1 get transform userdict /pjCTM get itransform
+                /dkFcy exch def /dkFcx exch def
+                dkFj 0 gt {
+                    dkFcx dkFpx sub dup mul dkFcy dkFpy sub dup mul add sqrt
+                    dkFcl add /dkFcl exch def
+                } if
+                /dkFpx dkFcx def /dkFpy dkFcy def
+            } for
+            /dkFref [ dkFvar dkFhm dkFcl dkFn ] def
             /dkFopen false def
             [
                 0 1 dkFn 2 sub {
@@ -786,10 +810,11 @@
                         dkFopen not {
                             /dkFopen true def
                             dkFlo dkFs dkFi get 3 get gt { dkFlo dkFcutat } { dkFi dkFat } ifelse
-                            3 array astore
+                            dkFa dkFt0 1e-9 add gt { [ dkFvar 1 add dkFhm dkFcl dkFn ] } { dkFref } ifelse
+                            4 array astore
                         } if
                         dkFhi dkFs dkFi 1 add get 3 get lt { dkFhi dkFcutat } { dkFi 1 add dkFat } ifelse
-                        3 array astore
+                        dkFref 4 array astore
                     } if
                 } for
             ] dup length 1 gt { dkFk exch 2 array astore } { pop } ifelse
@@ -1274,10 +1299,14 @@ systemdict /.sameclip known /dkPsameok exch def
                 /dkZsv dkZde 5 get /sv get def
                 /dkZha dkZde 7 get def
                 [ dkZde 6 get {
+                    % a part's stops carry dkFrun's flags (#1419): x y hw only
+                    dup length 3 gt { 0 3 getinterval } if
                     aload pop dkZha add dkZsv mul
                     3 1 roll dkZm transform userdict /pjCTM get itransform 3 -1 roll
                     3 array astore
-                } forall ] dkZthin
+                } forall ]
+                /dkZtref dkZde 6 get 0 get dup length 3 gt { 3 get } { pop null } ifelse def
+                dkZthin
             } forall
         ]
         % dkZgroup's estimate is made before dkZthin grows the reach, so a
@@ -1370,7 +1399,14 @@ systemdict /.sameclip known /dkPsameok exch def
                 add def
         } for
         dkZtr { 2 get dup dkZth gt { /dkZth exch def } { pop } ifelse } forall
+        % a part's run (#1419): the step is its whole run's, so a growing
+        % part keeps the stops its catch was thinned to
+        dkZtref null ne {
+            /dkZth dkZtref 1 get dkZha add dkZsv mul def
+            /dkZtl dkZtref 2 get def /dkZtn dkZtref 3 get def
+        } if
         /dkZtk dkZth dkZKc add 2 mul dkZtl dkZtn 1 sub div 1e-9 dkmax div floor cvi 1 dkmax def
+        /dkZtn dkZtr length def
         dkZtk 1 eq {
             dkZtr
         } {
@@ -1414,17 +1450,66 @@ systemdict /.sameclip known /dkPsameok exch def
     } ifelse
 } bind def
 
+% -   (#1419: clips away what lies behind the start of the run dkZir, which
+% a /From cut: the side of the line across its first stop, square to its
+% first segment, that the run came from, as far as any of its discs or its
+% round cap (and the halo dkZha) could reach. Everything else stays: an
+% eoclip of a box round the whole run with that small box taken out, so a
+% run that turns back on itself further on is not cut. The previous piece's
+% round end covers the cut, so its anti-aliased edge leaves no seam.)
+% @internal
+/dkZbehind {
+    /dkZbr 0 def /dkZbl 0 def
+    dkZir { 2 get dkZha add dkZbr dkmax /dkZbr exch def } forall
+    /dkZbr dkZbr 1.5 mul 1 add def
+    /dkZbx dkZir 0 get 0 get def /dkZby dkZir 0 get 1 get def
+    /dkZbdx 0 def /dkZbdy 0 def
+    1 1 dkZir length 1 sub {
+        dkZir exch get dup 0 get dkZbx sub exch 1 get dkZby sub
+        2 copy dup mul exch dup mul add sqrt
+        dup dkZbl add /dkZbl exch def
+        dkZbdx 0 eq dkZbdy 0 eq and 1 index 0 gt and {
+            dup 3 1 roll div /dkZbdy exch def div /dkZbdx exch def
+        } { pop pop pop } ifelse
+    } for
+    dkZbdx 0 eq dkZbdy 0 eq and { /dkZbdx 1 def } if
+    /dkZbL dkZbl dkZbr 4 mul add 10 add def
+    newpath
+    dkZbx dkZbL sub dkZby dkZbL sub moveto
+    dkZbL 2 mul 0 rlineto 0 dkZbL 2 mul rlineto dkZbL 2 mul neg 0 rlineto closepath
+    % the small box behind the cut: across it +-dkZbr, back from it dkZbr
+    dkZbx dkZbdy dkZbr mul add dkZby dkZbdx dkZbr mul sub moveto
+    dkZbdx dkZbr mul neg dkZbdy dkZbr mul neg rlineto
+    dkZbdy dkZbr 2 mul mul neg dkZbdx dkZbr 2 mul mul rlineto
+    dkZbdx dkZbr mul dkZbdy dkZbr mul rlineto
+    closepath
+    eoclip newpath
+} bind def
+
 % run -   (paints one run's ink, in the current (the run's own) space)
 % A run of one stop is a dot. Otherwise a constant-width run is a
 % round-capped stroke, and a varying one is the union of a disc at every
 % stop and a quadrilateral along every segment, all counter-clockwise so
 % the nonzero fill is their union: the ink stays within each segment's
 % wider end, the reach dkcatch was cut for.
+% A part's run (#1419, dkFrun's flags on its stops) takes the branch of its
+% whole run, so a growing /From 0 /To t keeps its edge pixels when the part
+% first reaches a change of width (the two branches anti-alias differently);
+% a part cut at its start is clipped flat there (dkZbehind), so the piece
+% after another does not paint its faint level and halo back over it.
 % @internal
 /dkZink {
     /dkZir exch def
-    /dkZconst true def
+    /dkZflat false def
+    dkZir 0 get length 3 gt {
+        /dkZvar false def
+        dkZir { dup length 3 gt { 3 get 0 get cvi 2 and 0 ne { /dkZvar true def } if } { pop } ifelse } forall
+        /dkZflat dkZir 0 get 3 get 0 get cvi 1 and 0 ne def
+        /dkZir [ dkZir { 0 3 getinterval } forall ] def
+    } { /dkZvar false def } ifelse
+    /dkZconst dkZvar not def
     dkZir { 2 get dkZir 0 get 2 get ne { /dkZconst false def } if } forall
+    dkZflat { gsave dkZbehind } if
     dkZir length 1 eq dkZconst not or {
         newpath
         dkZir {
@@ -1459,6 +1544,7 @@ systemdict /.sameclip known /dkPsameok exch def
             stroke
         } { pop } ifelse
     } ifelse
+    dkZflat { grestore } if
 } bind def
 
 % entries -   (dkZdraw in chunks whose estimated cells fit dkbudget)
@@ -1475,6 +1561,9 @@ systemdict /.sameclip known /dkPsameok exch def
         /dkZhr dkZe 7 get def
         /dkZmaxh 0 def
         dkZrr { 2 get dkZhr add dup dkZmaxh gt { /dkZmaxh exch def } { pop } ifelse } forall
+        % a part's run (#1419): its whole run's widest stop, so the chunks
+        % of a growing part are the whole run's
+        dkZrr 0 get length 3 gt { /dkZmaxh dkZrr 0 get 3 get 1 get dkZhr add def } if
         /dkZsvE dkZe 5 get /sv get def
         /dkZRr dkZmaxh dkZK dkZsvE div add def
         dkZrr dkZRr dkZest
@@ -1847,7 +1936,7 @@ systemdict /.sameclip known /dkPsameok exch def
 % @param: /Fallout [count per points] Loose particles per point of stroke length, 0..20, placed with artkit's scatter beside the stroke (default 0)
 % @param: /Drift [points] How far fallout drifts down canvas-space y: chalk on a vertical board falls (default 0)
 % @param: /Seed [integer] Seed for the tool-side randomness (contact chains, fallout); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas, so adding a stroke elsewhere never re-rolls this one)
-% @param: /From [0..1] Draws only the part of each subpath from this fraction of its length (arc length, 0 its first point): it is the whole subpath that is walked, so its stops, touch levels, widths, lanes' contact chains, seed, texture and fallout are the whole stroke's, and the part is cut from that. Drawing /From 0 /To t for a growing t grows a stroke without changing what is already drawn; a stroke's end is round, so an interior cut is, too (default 0)
+% @param: /From [0..1] Draws only the part of each subpath from this fraction of its length (arc length, 0 its first point): it is the whole subpath that is walked, so its stops, touch levels, widths, lanes' contact chains, seed, texture and fallout are the whole stroke's, and the part is cut from that. Drawing /From 0 /To t for a growing t grows a stroke without changing a pixel of what is already drawn. A cut at /To ends round, as a stroke does; a cut at /From starts flat, so a piece drawn after the one before it (/From where that one's /To was) does not paint back over it (default 0)
 % @param: /To [0..1] Draws only the part of each subpath up to this fraction of its length; must not be less than /From. 1 draws to the end. A dot (a zero-length subpath) and a lane on at one stop only are whole or nothing, drawn by the piece that holds their place, [/From, /To) with /To 1 closed, so two adjacent pieces draw them once (default 1)
 % @param: /After [boolean] Inside a dkbatch, draw this stroke on its own after the batch's other strokes have rendered (after strokes in call order), as if it were made just after the batch closed: it keeps its colour, coordinate system and dkclip region, and may be a different colour from the batch, so an eraser or a smudge can be drawn from inside a batch over everything the batch lays. Ignored with no batch open (default false)
 /dkstroke {

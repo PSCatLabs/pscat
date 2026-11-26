@@ -1935,9 +1935,9 @@ fn the_whole_range_is_the_default() {
 }
 
 /// `/From 0 /To t` for a growing t leaves the part already drawn alone:
-/// every row of pixels behind the pen's last dozen points agrees between
-/// frames to within a few levels of edge anti-aliasing, whatever the
-/// stroke's profile, lanes and dropouts (they are the whole stroke's).
+/// every pixel behind the pen's last dozen points is the same in every
+/// frame, whatever the stroke's profile, lanes and dropouts (they are the
+/// whole stroke's, and so is each run's ink branch, #1419).
 #[test]
 fn a_growing_stroke_keeps_what_it_has_drawn() {
     let bare = data(&board(PW, PH, 2.0, ""));
@@ -1958,7 +1958,7 @@ fn a_growing_stroke_keeps_what_it_has_drawn() {
             let d = col_diffs(&data(&frames[k]), &data(&frames[k + 1]), 0, behind);
             let worst = d.iter().copied().max().unwrap();
             assert!(
-                worst <= 24,
+                worst == 0,
                 "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
                 k + 1
             );
@@ -2005,6 +2005,102 @@ fn adjacent_pieces_make_the_whole_stroke() {
             );
         }
     }
+}
+
+/// Issue #1419: a part is inked the way its whole run is. drykit fills a run
+/// whose width varies (a disc per stop and a quadrilateral per segment) and
+/// strokes one whose width does not, and the two anti-alias an edge
+/// differently. A growing part that stopped short of the run's first change
+/// of width used to be stroked, then filled from the frame that reached it,
+/// so every edge pixel already drawn moved in that one frame (up to about
+/// 30 levels on chalk, 80 on charcoal). Here the width steps up 60% of the
+/// way along; the frames before and after the step agree exactly behind the
+/// pen, through to the whole stroke. With a low `dkbudget`, drykit draws
+/// the run in several chunks; the growing frames still agree, but the whole
+/// stroke (not a part) thins and inks each chunk by its own stops, so its
+/// frame may differ from the last part's (a run that long is thousands of
+/// points at the shipped budget).
+#[test]
+fn a_part_is_inked_as_its_whole_run_is() {
+    for (budget, tos) in [
+        ("", &[0.35, 0.45, 0.55, 0.65, 0.8, 1.0][..]),
+        (
+            "/dkbudget 1500 def",
+            &[0.35, 0.45, 0.55, 0.65, 0.8, 0.95][..],
+        ),
+    ] {
+        let opts = "/Seed 4 /Pressure { 0.6 gt { 1.5 } { 1 } ifelse }";
+        let frames: Vec<Vec<u8>> = tos
+            .iter()
+            .map(|t| {
+                data(&board(
+                    PW,
+                    PH,
+                    2.0,
+                    &format!("{budget} {CURVE} << /Width 3 {opts} /From 0 /To {t} >> dkstroke"),
+                ))
+            })
+            .collect();
+        for k in 0..tos.len() - 1 {
+            let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
+            let d = col_diffs(&frames[k], &frames[k + 1], 0, behind);
+            let moved = d.iter().filter(|&&v| v > 0).count();
+            let worst = d.iter().copied().max().unwrap();
+            assert!(
+                moved == 0,
+                "`{budget}`: /To {} -> {} moved {moved} pixels of the drawn part, by up to {worst}",
+                tos[k],
+                tos[k + 1]
+            );
+        }
+    }
+}
+
+/// Issue #1419: a stroke drawn as many short pieces, each `/From` where the
+/// last one stopped (an animation that adds only what the pen drew since
+/// the last frame), keeps the whole stroke's weight. A piece cut at its
+/// start begins flat there, so it does not paint its faint level and halo
+/// back over the piece before it; its round end is painted over by the
+/// next piece. Before, 300 pieces a fifth of a width long drew the stroke
+/// about a quarter lighter.
+#[test]
+fn many_short_pieces_keep_the_strokes_weight() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    let line = "newpath 10 30 moveto 70 36 lineto 190 24 lineto";
+    let opts = "/Seed 4 /Width 6";
+    let whole = data(&board(
+        PW,
+        PH,
+        2.0,
+        &format!("{line} << {opts} >> dkstroke"),
+    ));
+    let mask: Vec<usize> = (0..whole.len() / 4)
+        .filter(|&i| (0..3).any(|c| whole[i * 4 + c].abs_diff(bare[i * 4 + c]) > 2))
+        .collect();
+    let weight = |img: &[u8]| {
+        mask.iter()
+            .map(|&i| {
+                (0..3)
+                    .map(|c| f64::from(img[i * 4 + c].abs_diff(bare[i * 4 + c])))
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let n = 300;
+    let pieces = data(&board(
+        PW,
+        PH,
+        2.0,
+        &format!(
+            "0 1 {} {{ /i exch def {line} << {opts} /From i {n} div /To i 1 add {n} div >> dkstroke }} for",
+            n - 1
+        ),
+    ));
+    let ratio = weight(&pieces) / weight(&whole);
+    assert!(
+        (0.95..1.08).contains(&ratio),
+        "{n} pieces drew {ratio:.3} of the whole stroke's weight"
+    );
 }
 
 /// A tilted piece past 0 draws each lane's chance dropouts as the whole

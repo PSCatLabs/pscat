@@ -867,10 +867,11 @@ fn the_whole_range_is_the_default() {
 /// A growing stroke grows: the part already drawn does not change (only
 /// the pen's last few widths do), and every frame adds ink. Straight
 /// line so the pen's place is known; checked with and without a /Seed, and
-/// with the stick on its side. One thing does move: drykit draws a long
-/// stroke in chunks, and where a growing stroke crosses a chunk boundary
-/// the AA of its edge pixels changes once (up to about 40 levels, nothing
-/// of the texture), so a few transitions may show it but most show nothing.
+/// with the stick on its side. A tip stroke is cut by drykit from the whole
+/// stroke (#1419), so its drawn part is the same pixel for pixel. A side
+/// stroke's lanes are still cut by drychalk (#1420), and drykit inks a lane
+/// that changes width differently from one that does not, so a few
+/// transitions may move its edge pixels once (up to about 40 levels).
 #[test]
 fn a_growing_stroke_keeps_what_it_has_drawn() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
@@ -891,6 +892,13 @@ fn a_growing_stroke_keeps_what_it_has_drawn() {
             let loud = d.iter().filter(|&&v| v > 16).count();
             if loud > 0 {
                 moved += 1;
+            }
+            if !opts.contains("Tilt") {
+                assert!(
+                    worst == 0,
+                    "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
+                    k + 1
+                );
             }
             assert!(
                 loud * 2 < inked(&frames[k], &bare) && worst <= 64,
@@ -1127,6 +1135,51 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
             );
         }
     }
+}
+
+/// Issue #1419: a tip stroke drawn as many pieces a fifth of a width long,
+/// each `/From` where the last stopped, keeps the whole stroke's weight. A
+/// piece cut at its start begins flat there instead of painting its round
+/// end back over the piece before it (300 pieces used to come out about a
+/// tenth lighter; 1500 still lose some, so draw `/From 0 /To t` for those).
+#[test]
+fn many_short_pieces_keep_the_strokes_weight() {
+    let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
+    let line = "newpath 10 30 moveto 190 31 lineto";
+    let opts = "/Seed 4 /Width 3";
+    let whole = data(&on_board(
+        PART_W,
+        PART_H,
+        2.0,
+        &format!("{line} << {opts} /Dust 0 >> dcchalk"),
+    ));
+    let mask: Vec<usize> = (0..whole.len() / 4)
+        .filter(|&i| (0..3).any(|c| whole[i * 4 + c].abs_diff(bare[i * 4 + c]) > 2))
+        .collect();
+    let weight = |img: &[u8]| {
+        mask.iter()
+            .map(|&i| {
+                (0..3)
+                    .map(|c| f64::from(img[i * 4 + c].abs_diff(bare[i * 4 + c])))
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let n = 300;
+    let pieces = data(&on_board(
+        PART_W,
+        PART_H,
+        2.0,
+        &format!(
+            "0 1 {} {{ /i exch def {line} << {opts} /Dust 0 /From i {n} div /To i 1 add {n} div >> dcchalk }} for",
+            n - 1
+        ),
+    ));
+    let ratio = weight(&pieces) / weight(&whole);
+    assert!(
+        (0.95..1.05).contains(&ratio),
+        "{n} pieces drew {ratio:.3} of the whole stroke's weight"
+    );
 }
 
 /// The dust of a stroke is cut by the same range as the stroke: pieces

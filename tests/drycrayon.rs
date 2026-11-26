@@ -721,10 +721,10 @@ fn the_whole_range_is_the_default() {
     }
 }
 
-/// `/From 0 /To t` for a growing t leaves the part already drawn alone:
-/// the landing blob stays at the start, the fade and the wander are the
-/// whole stroke's, and the lift (the stroke's end) is only in the last
-/// frame.
+/// `/From 0 /To t` for a growing t leaves the part already drawn alone,
+/// pixel for pixel (#1419): the landing blob stays at the start, the fade
+/// and the wander are the whole stroke's, and the lift (the stroke's end)
+/// is only in the last frame.
 #[test]
 fn a_growing_crayon_stroke_keeps_what_it_has_drawn() {
     let bare = data(&render(PW, PH, 2.0, ""));
@@ -739,7 +739,7 @@ fn a_growing_crayon_stroke_keeps_what_it_has_drawn() {
             let d = col_diffs(&data(&frames[k]), &data(&frames[k + 1]), 0, behind);
             let worst = d.iter().copied().max().unwrap();
             assert!(
-                worst <= 24,
+                worst == 0,
                 "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
                 k + 1
             );
