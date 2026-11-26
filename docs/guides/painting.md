@@ -5,7 +5,8 @@ path** as its guide (the centreline, or the area, or the spine of a cluster) and
 an options dictionary, and paints with the **current colour**, so the pattern is
 always: set a colour, build a path, call a brush with its options. It builds on
 [artkit](artkit.md) (load artkit first). Everything is deterministic under
-`srand`.
+`srand`; [which presets draw from it](#seeding-repainting-the-same-stroke) and
+[what a stroke costs](#what-a-stroke-costs) are near the end.
 
 ## A first stroke
 
@@ -629,6 +630,87 @@ bush << /Count 300 /Radius 3 /Light 135 /Reach 0.3 >> pkscumblein
 ```
 
 ![Light-aware massing: before and after](../dev/design/paintkit_massing_demo.png)
+
+## Seeding: repainting the same stroke
+
+One rule covers every preset: put
+`N srand` immediately before the call and that call paints the same marks
+every time. Do it before each stroke you will repaint (every frame of an
+animation, a stroke you are still tuning). The number of `rand` draws a call
+takes depends on its path (a 100 pt `pkdry` takes about 2300, a 600 pt one
+about 22000), so without a `srand` per stroke, editing one stroke re-rolls
+every stroke after it. What each preset does with the stream, counted by
+asking for `rand` after a call (`notes/1414-paint-seeding-and-cost.md` has
+the probe):
+
+| Preset | Draws from `rand`? | `/Seed` |
+| --- | --- | --- |
+| `pkdry`, `pkspray`, `pkoil`, `pktrowel`, `pktrowelplane`, `pkfan`, `pkbroad`, `pkliner`, `pkdab`, `pkwet`, `pkfeather`, `pkbrushedge`, the brush motions (`pkcrisscross`, `pkscumblein`, `pkscumble`, `pktap`, `pkpull`, `pkzigzag`) | yes | **none: the key is silently ignored** (no error, identical output with or without it), so `srand` is the only way to pin them |
+| `pkribbon`, `pknib` | no, unless `/Jitter` is above 0 | none |
+| `pkwash`, `pkpaper` | one draw without `/Seed`, none with it | `/Seed N` pins this call alone: the same output under any `srand`, and no draw taken, so adding or removing the call shifts nothing after it |
+| `pkcanvas` | no | `/Seed` (default 1, a constant): the weave is the same on every run unless you change it |
+
+`/Touch` takes no draws either. So for a repainted frame: `N srand` before
+each brush stroke, and `/Seed` (or a `srand`) on each wash and ground. Doing
+both on a wash is harmless, just not needed.
+
+```postscript
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+% the same stroke on every frame: reseed right before it
+7 srand newpath 40 120 moveto 300 150 lineto << /Width 14 >> pkdry
+% a wash pinned on its own: untouched by srand, takes no rand draw
+newpath 40 40 moveto 300 40 lineto 300 100 lineto 40 100 lineto closepath
+<< /Seed 3 /Alpha 0.3 >> pkwash
+showpage
+```
+
+## What a stroke costs
+
+Measured with release `pscat` on a 1280 x 720 page
+(1 pixel per point): CPU time of the whole run minus a run with the same
+page and no strokes, best of 7, on an Apple M4 that other jobs were also
+using, so read a figure as "about" and anything under 5 ms as small. Each
+row is one stroke at `/Width 14` (`pkliner` 3, `pkdab` `/Size 12`, `pkspray`
+`/Nozzle 14 /Density 80`) with every other key at its default, along a curve
+about 100 pt and about 600 pt long:
+
+| Preset | 100 pt stroke | 600 pt stroke |
+| --- | --- | --- |
+| `pkribbon` | 0.4 ms | 1 ms |
+| `pkliner` | 0.7 ms | 2.5 ms |
+| `pknib` | 0.7 ms | 7 ms |
+| `pkbroad` | 2 ms | 6 ms |
+| `pkdab` | 2 ms | 9 ms |
+| `pktrowel` | 2 ms | 9 ms |
+| `pkspray` | 1.5 ms | 5.5 ms |
+| `pkoil` | 4.5 ms | 20 ms |
+| `pkdry` | 12 ms | 65 ms |
+| `pkfan` | 70 ms | 360 ms |
+| `pkwet` around that `pkspray`, `/Soft 0.8` | 5 ms | 22 ms |
+
+A stroke's cost follows its length and its bristle count, not the pixels it
+covers: a 700 pt `pkdry` at `/Width 24` takes 76 ms with its 18 bristles and
+420 ms at `/Bristles 100`, while the same 600 pt strokes at 144 dpi cost
+`pkdry` 66 ms against 64, `pkoil` 23 against 22, `pkbroad` 9 against 6. `pkwet` runs its mark once per pass, about 4 times the plain
+stroke here. Areas:
+
+| Call | Cost |
+| --- | --- |
+| `pkwash` on a 200 x 150 / 640 x 360 / 1280 x 720 shape | 3.5 ms / 9 ms / 20 ms |
+| `pkwash` on a full-frame shape under a 1280 x 60 or 200 x 150 clip | 14 to 21 ms: a clip does not make a wash cheaper |
+| `pkpaper` over 200 x 150 / 1280 x 720 | 0.7 ms / 18 ms |
+| `pkcanvas` set-up | 0.2 ms (the cost is in the `/Touch` strokes: a 600 pt `pkdry` goes from 65 to 120 ms) |
+| `pktrowelplane` over 200 x 150 / 1280 x 720 | 50 ms / 1.5 to 1.7 s |
+| `pkbrushedge` round a 100 x 60 / 300 x 200 mass | 15 to 25 ms / 65 to 70 ms |
+| `pkcrisscross` sky 1280 x 300, then `pkbroad` | 45 to 55 ms |
+| `pkscumblein` (60 circles, radius 20) over 400 x 200, then `pkoil` | 280 ms |
+
+Budget the heavy ones first: `pkfan`, `pkdry` (and `/Touch` on it),
+`pkscumblein` into `pkoil`, and `pktrowelplane` over a large area. The lever
+on those is the number and length of strokes and the `/Bristles`, not how
+much of the frame is painted. The harness is in
+`notes/1414-paint-seeding-and-cost.md`.
 
 ## Putting it together: landscapes
 
