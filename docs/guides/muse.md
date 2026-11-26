@@ -1,7 +1,7 @@
 # pscat in Muse
 
 Tested by the project owner in Muse on 2026-11-17, when both routes below
-worked; the hosted route has been paused since 2026-11-18 (what was and was
+worked; the staging preview of the hosted route has been paused since 2026-11-18 (what was and was
 not re-checked is at the end of this page). pscat is
 a PostScript interpreter in Rust: it renders PostScript to PNG, SVG and PDF,
 writes handwriting-style notes, and draws LaTeX formulas on a chalkboard. This
@@ -17,10 +17,11 @@ this works there.
 
 Use the local install (Option A) if you can. The binary runs in Muse's
 workspace and calls nothing on the pscat project's servers, so it is also the
-one that keeps working. The hosted server (Option B) is paused: its
+one that keeps working. The hosted staging preview (Option B) is paused: its
 anonymous preview ended on 2026-11-18.
 
 For the other clients (Claude Code, Codex, ChatGPT) see
+[pscat in every AI client](clients.md), which has the table of routes for each,
 [pscat for AI agents](agents.md) and
 [pscat in ChatGPT through the hosted MCP server](chatgpt-hosted.md).
 
@@ -104,19 +105,26 @@ still give 0.6.3, which has only 4 MCP tools, no `chalkboard_math` and no
 `pscat chalk` command. 0.7.0-rc.5 is a GitHub pre-release only: it is not on
 crates.io, npm or the MCP Registry.
 
-## Option B: hosted server (paused)
+## Option B: hosted server (the staging preview is paused)
 
-**The hosted preview is paused.** Its anonymous access ended on 2026-11-18,
+**Update, 2026-11-25:** the production server is live at
+`https://mcp.pscat.dev/mcp` and signs callers in with OAuth. This guide has not
+tried it in Muse, so it has no prompt for it yet; whether Muse can complete an
+OAuth sign-in for a custom connector is not yet verified. Use Option A. The
+[client table](clients.md) tracks the state of every client's cloud route.
+
+**The staging preview described below is paused.** Its anonymous access ended on 2026-11-18,
 a day earlier than first announced. The staging server
 (`https://pscat-mcp-145279231681.us-central1.run.app/mcp`) now accepts only
 bearer tokens, and there is no public way to get one, so Muse's no-auth
 connector gets `401 Unauthorized`. Use Option A.
 
-The hosted route comes back when the server supports sign-in with OAuth
+The hosted route was to come back when the server supports sign-in with OAuth
 ([pscat-cloud#15](https://github.com/PSCatLabs/pscat-cloud/issues/15)) or a
 public server launches
-([pscat-cloud#26](https://github.com/PSCatLabs/pscat-cloud/issues/26)). This
-page will then have a new prompt. If you set up the hosted connector before
+([pscat-cloud#26](https://github.com/PSCatLabs/pscat-cloud/issues/26)). Both
+have happened (see the update above); this page will have a new prompt once
+the production server is checked in Muse. If you set up the hosted connector before
 2026-11-18, remove it or switch it off, so Muse does not keep trying it.
 
 As of 2026-11-18, the staging server differs from the local one in two ways:

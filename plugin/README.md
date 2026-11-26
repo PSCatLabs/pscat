@@ -21,6 +21,10 @@ interpreter. The plugin bundles:
   `render_status`, `render_result` and `cancel_render` for a render longer
   than one call allows.
 
+Which AI clients get this plugin, which can use the hosted (cloud) server
+instead, and when to install or just connect:
+[pscat in every AI client](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/clients.md).
+
 pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
 It isn't meant for imitating a specific person's handwriting or presenting
 writing as someone else's.
@@ -374,8 +378,9 @@ custom MCP server**) or a ZIP built with `--remote URL --remote-auth none` (a se
 named `pscat-cloud`, so it installs beside this one; it leaves out `scripts/`,
 `pscat-release` and the setup skill, and rewrites the skills' local-only
 wording for the hosted tools from `plugin-chatgpt/cloud/`, #1256).
-Neither has been tried in ChatGPT yet. The staging server is protected by a
-static bearer token, which ChatGPT cannot send, so its authentication is an
-owner decision: see
+Neither has been tried in ChatGPT yet. The production server
+(`https://mcp.pscat.dev/mcp`) signs callers in with OAuth; see
 [pscat in ChatGPT through the hosted MCP server](../docs/guides/chatgpt-hosted.md)
-(#1240).
+(#1240) for what ChatGPT accepts, and
+[pscat in every AI client](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/clients.md)
+for the state of each client.

@@ -5,12 +5,19 @@ ChatGPT on the web cannot start a local MCP server, so the pscat plugin's
 page covers connecting ChatGPT to the hosted `pscat-mcp`, what you see, and
 the one open question: how the server proves who is calling.
 
-Status (November 2026): the staging server is protected by a static bearer
+Status (mid-November 2026; superseded in part by the update below): the staging server is protected by a static bearer
 token, and **ChatGPT cannot send a static bearer token**, so it cannot connect
 to staging. Releases from 0.7.1 on carry a plugin ZIP built against the
 **production** server with authentication `none`, which ChatGPT can use (the
 auth choice is on pscat-mcp#136; the earlier decision is on issue #1240).
 Whether ChatGPT accepts the ZIP upload itself is still unverified (#1089).
+
+**Update, 2026-11-25:** the production server is live at
+`https://mcp.pscat.dev/mcp` and signs callers in with OAuth, not
+no-authentication. The `--remote-auth none` ZIP above was built for the other
+choice, so whether it connects to production is not yet verified. For the
+custom-server route below, choose **OAuth** for authentication. The table of
+every client's routes is [pscat in every AI client](clients.md).
 
 ## What ChatGPT accepts
 
