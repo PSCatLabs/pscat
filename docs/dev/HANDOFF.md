@@ -2846,9 +2846,12 @@ renders eight examples in both and compares block-downsampled output).
   measure of that size after removals (tombstones are not free slots: a
   300,000-entry table read 363,000 of 458,752 once emptied, and the gap
   grows with the hash's clustering), so `Dict::undef` records the largest
-  `capacity()` it saw, and `Dict::slack` is that minus the live entries.
+  `capacity()` it saw, and `Dict::name_overhead` is that minus the live entries
+  and minus what a table that only grew has (twice its length), so ordinary
+  dictionaries are never charged.
   The host copy (`host.rs` `Walk::scan`) and the name scan
-  (`snapshot_error_trace`) charge it, four slots to a node or entry. Do not
+  (`snapshot_error_trace`, from a slot budget of its own, leaving the entry
+  budget alone) charge it, four slots to a node or entry. Do not
   shrink on `undef` to fix this: the table size sets the `forall` order of
   name keys. `forall` and `copy` on a sparse dictionary are still not
   charged (steps stand for iterations there).

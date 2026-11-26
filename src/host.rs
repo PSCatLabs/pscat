@@ -386,7 +386,7 @@ impl Value {
                     len.saturating_mul(size_of::<(String, Value)>() + 2 * size_of::<Object>()),
                 )?;
                 // `pairs` walks every slot the tables retain, live or not.
-                walk.scan(d.borrow().slack())?;
+                walk.scan(d.borrow().slot_overhead())?;
                 // Copied out first: the borrow must end before a member
                 // that is this dictionary is read.
                 let pairs = d.borrow().pairs();

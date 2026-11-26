@@ -994,7 +994,7 @@ pub struct Dict {
     /// tombstones that are not free: after emptying a table it can read a
     /// fraction of the size. The table is tombstone-free whenever it has
     /// just grown, and the next `undef` reads it then, so this is its size
-    /// without asking the allocator. See [`slack`](Self::slack).
+    /// without asking the allocator. See [`name_overhead`](Self::name_overhead).
     peak_slots: [usize; 2],
 }
 
@@ -1139,18 +1139,32 @@ impl Dict {
         self.names.values()
     }
 
-    /// Empty slots the name-keyed table retains beyond its live entries.
-    /// An iteration over the table costs about its size, not its length:
-    /// `undef` never shrinks it, so a dictionary that once held millions of
-    /// entries stays that expensive to walk (#1422).
-    pub(crate) fn name_slack(&self) -> usize {
-        self.names.capacity().max(self.peak_slots[0]) - self.names.len()
+    /// Empty slots the name-keyed table keeps beyond what a table that only
+    /// ever grew has. Such a table is at least 7/16 full, so it holds fewer
+    /// than its length in empty slots; only `undef` leaves more, and a walk
+    /// over this table costs its size, not its length (#1422). Counting
+    /// only the excess over twice the length leaves every dictionary that
+    /// never lost many entries uncharged, so an existing program is
+    /// untouched.
+    pub(crate) fn name_overhead(&self) -> usize {
+        Self::overhead(
+            self.names.capacity().max(self.peak_slots[0]),
+            self.names.len(),
+        )
     }
 
-    /// [`name_slack`](Self::name_slack) for both tables: the empty slots a
-    /// walk over every entry ([`pairs`](Self::pairs)) passes over.
-    pub(crate) fn slack(&self) -> usize {
-        self.name_slack() + (self.exotic.capacity().max(self.peak_slots[1]) - self.exotic.len())
+    /// [`name_overhead`](Self::name_overhead) for both tables: the retained
+    /// slots a walk over every entry ([`pairs`](Self::pairs)) passes over.
+    pub(crate) fn slot_overhead(&self) -> usize {
+        self.name_overhead()
+            + Self::overhead(
+                self.exotic.capacity().max(self.peak_slots[1]),
+                self.exotic.len(),
+            )
+    }
+
+    fn overhead(table_slots: usize, len: usize) -> usize {
+        (table_slots - len).saturating_sub(2 * len)
     }
 
     /// The name-keyed entries as (interned id, value), in the order

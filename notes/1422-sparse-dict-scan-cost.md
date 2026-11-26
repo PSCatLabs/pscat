@@ -10,18 +10,23 @@ error is reported (about 0.28 ms after 4,194,304 entries). The same walk is in
 
 ### What changed
 
-- `Dict::slack()` / `name_slack()`: the empty slots a walk passes over. Not
+- `Dict::name_overhead()` / `slot_overhead()`: the empty slots a walk passes over
+  beyond what a table that only grew has (more than twice its length: such a table
+  is at least 7/16 full, so it never has more empty slots than entries). Not
   `capacity() - len()`: removals leave tombstones, and `capacity()` counts only
   free slots, so an emptied table of 458,752 slots read 363,378 in std and
   158,758 with the interner's id hash. `Dict::undef` therefore records the
   largest `capacity()` it saw (a table is tombstone-free just after it grows),
   in `peak_slots`; one compare per `undef`, nothing on `def`.
-- The name scan charges `slack / 4` against its `NAME_SCAN` budget per
-  dictionary (four slots to an entry visit, an overcharge) and, when that does
-  not fit, stops there: the frames not yet named stay unnamed. It does not skip
-  to an outer dictionary, which would let an outer definition win over the
-  innermost. A dictionary that only grew costs at most a quarter of its length
-  extra, so every existing backtrace is named as before.
+- The name scan keeps its `NAME_SCAN` entry budget exactly as it was and charges
+  the overhead against a second budget of its own (`NAME_SCAN * 4` slots), and,
+  when that does not fit, stops there: the frames not yet named stay unnamed. It
+  does not skip to an outer dictionary, which would let an outer definition win
+  over the innermost. A dictionary that never lost many entries has no overhead,
+  so every existing backtrace is named as before. (The first version charged all
+  slack from the entry budget; a 60,000-entry dictionary, table 114,688 slots,
+  then ate enough of it that a procedure below it went unnamed. Found by Codex
+  round 1; `a_dictionary_that_only_grew_leaves_the_entry_budget_as_it_was`.)
 - The host copy (`Walk::scan`) charges `slack` in steps (4 slots to a node, 1,024
   nodes to a step), not in nodes, so `MAX_VALUE_NODES` and the `limitcheck` of
   a small dictionary are unchanged; the step, time, memory and interrupt looks

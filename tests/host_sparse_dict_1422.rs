@@ -152,3 +152,23 @@ fn a_sparse_dictionary_that_holds_itself_cannot_make_a_copy_walk_its_table_forev
         },
     );
 }
+
+/// A dictionary that only grew must not eat the name scan's entry budget (a
+/// round-1 finding on PR #1440): `d` has 60,000 live entries and a table of
+/// 114,688 slots, the scan visits all 60,000 of them first, and `p` in
+/// userdict must still be named as it is without the slot charge.
+#[test]
+fn a_dictionary_that_only_grew_leaves_the_entry_budget_as_it_was() {
+    let mut interp = Interp::new();
+    interp
+        .run_str(
+            "/p { 1 pop (x) 1 add pop } def /d 1 dict def d begin
+             0 1 59999 { 12 string cvs cvn 0 def } for",
+        )
+        .unwrap();
+    let err = interp.run_str("p").unwrap_err();
+    assert_eq!(err, PsError::Typecheck);
+    let trace = interp.error_details(&err).backtrace;
+    assert_eq!(trace.len(), 1, "{trace:?}");
+    assert_eq!(trace[0].procedure.as_deref(), Some("p"));
+}
