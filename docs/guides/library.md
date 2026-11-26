@@ -303,7 +303,10 @@ past `host::MAX_VALUE_NODES` (about a million elements and entries, however
 deep, a string or a dictionary key counting by its size) `pop_value` is
 `limitcheck`, and inside an operator the copy, by `pop_value` or `lookup`,
 counts against the program's limits like any other work (`lookup`'s at the
-program's next look at its limits). A dictionary key that is not a name or a
+program's next look at its limits). A dictionary that once held many entries
+keeps its table after `undef`, and copying it passes over the empty slots, so
+they count as steps (about 4,096 slots to a step) even when few entries are
+left. A dictionary key that is not a name or a
 string comes back as the text `==` prints for it, shortened past a few hundred
 bytes.
 

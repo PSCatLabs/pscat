@@ -104,17 +104,22 @@ fn lookup_of_a_sparse_dictionary_is_charged_at_the_next_look() {
             Ok(())
         })
         .unwrap();
+    interp
+        .register_operator("peeksmall", |i| {
+            i.lookup("small");
+            Ok(())
+        })
+        .unwrap();
     interp.run_str(&sparse("stale")).unwrap();
+    interp.run_str("/small << /a 1 >> def").unwrap();
     interp
         .set_limits(Limits::none().with_max_steps(60))
         .unwrap();
-    // `lookup` charges at the program's next look at its limits (the end of
-    // the slice at the latest); the cap is still held.
+    // `lookup` takes `&self`, so its copy is charged at the program's next
+    // look at its limits (the end of the slice at the latest).
+    interp.run_str("peeksmall peeksmall").unwrap();
     assert_eq!(
-        interp
-            .run_str("peek 1 pop 1 pop 1 pop")
-            .and_then(|()| interp.run_str("1 100 { pop 1 } repeat pop"))
-            .unwrap_err(),
+        interp.run_str("peek peek").unwrap_err(),
         PsError::StepsExceeded
     );
 }
