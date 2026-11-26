@@ -5,19 +5,30 @@ ChatGPT on the web cannot start a local MCP server, so the pscat plugin's
 page covers connecting ChatGPT to the hosted `pscat-mcp`, what you see, and
 the one open question: how the server proves who is calling.
 
-Status (mid-November 2026; superseded in part by the update below): the staging server is protected by a static bearer
+Status (mid-November 2026; superseded in part by the updates below): the staging server is protected by a static bearer
 token, and **ChatGPT cannot send a static bearer token**, so it cannot connect
 to staging. Releases from 0.7.1 on carry a plugin ZIP built against the
-**production** server with authentication `none`, which ChatGPT can use (the
-auth choice is on pscat-mcp#136; the earlier decision is on issue #1240).
-Whether ChatGPT accepts the ZIP upload itself is still unverified (#1089).
+**production** server (the auth choice is on pscat-mcp#136; the earlier decision
+is on issue #1240). Whether ChatGPT accepts the ZIP upload itself is still
+unverified (#1089).
 
 **Update, 2026-11-25:** the production server is live at
 `https://mcp.pscat.dev/mcp` and signs callers in with OAuth, not
-no-authentication. The `--remote-auth none` ZIP above was built for the other
-choice, so whether it connects to production is not yet verified. For the
-custom-server route below, choose **OAuth** for authentication. The table of
-every client's routes is [pscat in every AI client](clients.md).
+no-authentication. The ZIP of release 0.7.1 (and of its candidates) points at the
+production server but declares authentication `none` (checked 2026-11-26 by
+unzipping its `mcp.json`), which does not match a server that answers 401 until
+the caller signs in. For the custom-server route below, choose **OAuth** for
+authentication. The table of every client's routes is
+[pscat in every AI client](clients.md).
+
+**Update, 2026-11-26 (#1431):** `build_chatgpt_plugin.py` has a
+`--remote-auth oauth` choice, and the release workflow now builds the ZIP with
+it. The next release after that change carries a ZIP whose `mcp.json` declares
+OAuth, the authentication production uses. What that has and has not shown:
+the builder's output was checked against OpenAI's documented shape, and the
+production server was seen to advertise OAuth discovery. A ChatGPT session has
+**not** yet uploaded the ZIP, signed in, or called a tool, so neither route is
+verified end to end (#1089).
 
 ## What ChatGPT accepts
 
@@ -37,9 +48,12 @@ Checked against OpenAI's documentation on 2026-11-16
    Every release, release candidates included, carries
    `pscat-cloud-chatgpt-plugin-<version>.zip`: the `--remote` build below,
    made by the release workflow against the **production** pscat-mcp server
-   (#1253). Its authentication setting is `none`, because ChatGPT connectors
-   accept only no authentication or OAuth (pscat-mcp#136). Releases from
-   0.7.1 on have it; earlier ones do not.
+   (#1253). Its authentication setting is `oauth` from the first release after
+   #1431 (0.7.1 and its candidates declared `none`), because ChatGPT
+   connectors accept only no authentication or OAuth (pscat-mcp#136) and
+   production signs in with OAuth. Releases from 0.7.1 on have a ZIP; earlier
+   ones do not. Unzip `mcp.json` and look at `extensions` > `com.openai` >
+   `auth` to see which one yours has.
 
    ```sh
    V=0.7.1    # the release you want, for example 0.7.1-rc.1 for a candidate
@@ -77,9 +91,9 @@ connect only a server you trust.
    `run.app` address and production differs: read the production URL from
    the `mcp.json` of the release ZIP (route 1), or ask the server's owner.
    Never paste a token into the URL.
-4. Authentication: choose the method the server was set up for, **No
-   authentication** or **OAuth** (the owner's decision; a bearer-protected
-   server will fail here).
+4. Authentication: choose the method the server was set up for. The
+   production server signs in with **OAuth**; **No authentication** is for a
+   server with no sign-in, and a bearer-protected server will fail here.
 5. Read the risk warning, select **I understand and want to continue**, then
    **Create as a plugin**.
 6. Find the resulting plugin in your personal plugins (or the workspace where
@@ -145,17 +159,22 @@ in one account (#1254):
 ```sh
 gh release download "$(grep '^v' plugin/pscat-release)" -R PSCatLabs/pscat -p SHA256SUMS
 python3 scripts/build_chatgpt_plugin.py --sums SHA256SUMS \
-    --remote 'https://<your-pscat-mcp-host>/mcp' --remote-auth none
+    --remote 'https://<your-pscat-mcp-host>/mcp' --remote-auth oauth
 # dist/pscat-cloud-chatgpt-plugin-<version>.zip
 ```
 
 - `--remote-auth` is required, with no default, because the server's
-  protection decides what ChatGPT can do. `none` writes
-  `"auth": {"type": "none"}`; `bearer` writes `{"type": "api_key",
-  "headerScheme": "bearer"}`, which describes today's staging server
-  truthfully but which ChatGPT cannot send (the build warns). There is no
-  `oauth` choice yet: its settings (a registered client, or dynamic
-  registration, and the endpoints) follow the owner's choice of provider.
+  protection decides what ChatGPT can do. `oauth` writes
+  `"auth": {"type": "oauth", "client": {"mode": "cimd"}}` (#1431): OpenAI's
+  "prefer a client ID metadata document" setting, with DCR still the fallback
+  and the endpoints left to the server's discovery metadata, so it holds no
+  client ID, secret or host. Use it for the production server. `none` writes
+  `"auth": {"type": "none"}`, right only for a server with no sign-in (OpenAI
+  says not to declare a protected server as `none`); `bearer` writes
+  `{"type": "api_key", "headerScheme": "bearer"}`, which describes the old
+  staging server truthfully but which ChatGPT cannot send (the build warns).
+  A server that needs a pre-registered client, or another registration mode,
+  is not covered: the build has no `client.mode: "provided"` choice.
 - The URL must be `https`, with a host and a path (usually `/mcp`), and no
   credentials, query string or fragment. The URL is an argument and is never
   committed. No token goes in the ZIP, and no `headers` entry either (OpenAI's
