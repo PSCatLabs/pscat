@@ -5,6 +5,13 @@ request. Versions follow semantic versioning; before 1.0 a minor release
 may change the library API, a patch release does not (docs/STABILITY.md).
 Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
+## [0.7.1] - 2026-11-26
+
+### Features and changes
+
+- 0.7.1: merge feature/0.7.1 into main (#1287)
+- when-to-use, browser guide: release-status sentences for 0.7.0 (#1007) (#1138)
+
 ## [0.7.0] - 2026-11-23
 
 ### Features and changes
