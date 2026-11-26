@@ -20,7 +20,7 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   suite generates, byte for byte.
 
 This guide covers accented text in the standard fonts, UTF-8 text and emoji, placing each glyph
-yourself, the Type 3 display library, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
+yourself, the Type 3 display library, the retro screen and printer faces, the typewriter, and the runtime catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
 
@@ -190,6 +190,67 @@ are the specimen posters:
 cargo run --release -- --png poster.png examples/font_library.ps
 cargo run --release -- --png poster2.png examples/font_library2.ps
 ```
+
+## Retro screen and printer faces
+
+Four more files in `lib/fonts/` are bitmap faces for old machines (issue #1426),
+our own pixel designs, not copies of any terminal, printer or LED controller's
+character ROM:
+
+| Face | File | Grid |
+|---|---|---|
+| `/Phosphor`, `/Phosphor-Scan` | `phosphor.ps` | a video terminal: 8x16 cell (cap height 10, descenders 3), square pixels; `-Scan` leaves the dark gap between scan lines |
+| `/Pinpoint-Draft`, `/Pinpoint-NLQ` | `pinpoint.ps` | a nine-pin dot-matrix printer: 9 pins x 8 columns, round dots; NLQ adds a pass of dots between neighbours, so strokes print solid |
+| `/Diode7` | `diode7.ps` | an LED sign: 7 lamps high plus a descender row, proportional |
+| `/Diode5` | `diode5.ps` | a very low LED strip: 5 lamps high, capitals only (a-z print as capitals), proportional |
+
+All cover printable ASCII (32-126). They draw in the current colour, so a
+green or amber screen and a red sign are one `setrgbcolor`, and the em is the
+cell height in pixels: `16 scalefont` on `/Phosphor`, `9` on `/Pinpoint-*`,
+`8` on `/Diode7` and `5` on `/Diode5` put one font pixel on one unit. With
+square marks the size of the pitch (`/Phosphor`'s default), 72 dpi and
+whole-number coordinates, a glyph lands exactly on device pixels. For a raw LED
+grid (a 65x5 page as a real 65x5 strip, each lamp fully on or off) make that
+variant of the round-lamp faces:
+`/Diode5-Grid /Diode5 << /DotShape /square /DotSize 1 >> pf-variant`. Round dots
+and scan-line gaps are a look, not a grid: they need at least two device pixels
+per font pixel (a scan gap at 16 points and 72 dpi just dims the text).
+
+```postscript
+(lib/fonts/phosphor.ps) run
+0 setgray clippath fill  0.3 1 0.45 setrgbcolor
+/Phosphor findfont 16 scalefont setfont
+36 700 moveto (READY.) show
+```
+
+The look is set by dials in the font dict: `/DotShape` (`/square` or
+`/round`), `/DotSize` (the mark as a fraction of the pixel pitch; below 1 the
+marks stand apart), `/ScanGap` (the fraction of each row left dark, square
+marks) and `/Interpolate` (the in-between dots, round marks). Make a variant
+with `pf-variant`, which every one of these files defines, or with the usual
+copy-and-`definefont` idiom:
+
+```postscript
+(lib/fonts/phosphor.ps) run
+/Amber-Dots /Phosphor << /DotShape /round /DotSize 0.85 >> pf-variant
+/Amber-Dots findfont 32 scalefont setfont
+```
+
+`pf-variant` checks the dials: `/DotSize` above 0 up to 4, `/ScanGap` from 0 up to
+(not including) 1, a wrong type is a `typecheck` and a value out of range a
+`rangecheck`, and nothing is defined. Do not `put` into a defined font to change a dial: Ghostscript makes a defined
+font read-only, and a glyph it has already cached would not change. The glyph
+data is public: `/Diode5 findfont /Bitmaps get /A get` is the A's rows, top to
+bottom, `#` lit and `.` dark, for a program that drives a real LED grid or
+writes a frame at grid size. Look a character up through the font's `/Encoding`
+(code, then glyph name, then `/Bitmaps`): `/Diode5` has no lowercase bitmaps,
+its Encoding maps a-z to the capitals. `examples/retro_fonts.ps` is the specimen:
+
+<p><img src="../dev/design/retro_fonts/specimen.png" width="60%" alt="Every glyph of /Phosphor, /Pinpoint-Draft, /Pinpoint-NLQ, /Diode7 and /Diode5, magnified and at true size"/></p>
+
+The designs are original work for pscat, under the same licence as the rest of
+`lib/` (MIT OR Apache-2.0). At these sizes some letters have only one legible
+form, so a likeness to other pixel fonts there comes from the grid.
 
 ## The /Typewriter font
 

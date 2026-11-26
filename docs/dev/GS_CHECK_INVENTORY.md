@@ -48,6 +48,7 @@ caught) but it is not a check on *output*.
 | 2 | `ghostscript_accepts_the_scatter_specimen_sheet` | `tests/artkit.rs:3248` | `examples/scatter.ps` | the committed example file, run as-is | exit code |
 | 3 | `ghostscript_accepts_dataviz` | `tests/dataviz.rs:428` | `lib/dataviz.ps` | inline: `setdvframe` + chart calls | exit code |
 | 4 | `ghostscript_accepts_every_font` | `tests/fontlib.rs:157` | 7 files under `lib/fonts/` | one generated per face (`FONTS`: neon, marquee, constellation, lapidary, circuitry, stitchwork, confetti) | exit code, per face — **7 separate `gs` runs** |
+| 4b | `ghostscript_accepts_every_face` | `tests/retro_fonts.rs` | the 4 retro files under `lib/fonts/` (#1426) | one generated per face (6 faces) plus a `pf-variant` round-dot copy | exit code and empty stdout, per face — **6 separate `gs` runs** |
 | 5 | `ghostscript_accepts_graph` | `tests/graph.rs:196` | `lib/graph.ps` | inline: `setframe` + plotting calls | exit code |
 | 6 | `ghostscript_accepts_the_halftone_specimen_sheet` | `tests/halftonekit.rs:1048` | `examples/halftone.ps` | the committed example file | exit code |
 | 7 | `ghostscript_accepts_packed_tone_callbacks` | `tests/halftonekit.rs:1080` | `lib/halftonekit.ps` | inline, opens with `true setpacking` | exit code — **but see "the packed-array checks" below**; this one exists *because* `pscat` can't produce the type |

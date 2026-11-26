@@ -1,0 +1,1373 @@
+%!PS-Adobe-3.0
+%%Title: phosphor.ps — /Phosphor, a video-terminal font on an 8x16 cell
+%%Creator: pscat — issue #1426, the retro screen and printer faces
+%%EndComments
+
+% /Phosphor — the character set of an imagined 1980s video terminal:
+% every printable ASCII character on an 8x16 cell (cap height 10,
+% x-height 7, descenders 3, a gap column on the right), two-pixel
+% vertical stems and one-pixel horizontals, a dotted zero. Each lit
+% pixel is a square mark in the current colour, so
+%
+%   0.2 1 0.4 setrgbcolor          % green phosphor (1 0.7 0.1 is amber)
+%   /Phosphor findfont 16 scalefont setfont
+%   36 700 moveto (READY.) show
+%
+% puts one font pixel on one unit: at 16 points and 72 dpi the glyphs
+% land on whole device pixels. /Phosphor-Scan is the same face with the
+% dark gap between scan lines that a CRT shows; the gap needs at least
+% two device pixels per font pixel (32 points at 72 dpi) to show.
+%
+% Dials (read from the font dict at BuildChar time; make a variant with
+% the copy-and-definefont idiom, or pf-variant below, never by putting
+% into a defined font, which Ghostscript makes read-only):
+%   /DotShape  /square or /round           (default /square)
+%   /DotSize   mark size, fraction of the pixel pitch (default 1)
+%   /ScanGap   fraction of each pixel row left dark (square marks only;
+%              default 0, /Phosphor-Scan 0.45)
+%   /Interpolate  true adds a dot between neighbouring dots (round
+%              marks only; default false)
+%
+%   /Phosphor-Wide /Phosphor << /DotSize 0.8 /DotShape /round >> pf-variant
+%
+% The bitmaps are readable: /Phosphor findfont /Bitmaps get /A get is
+% the A's rows, top to bottom, '#' lit and '.' dark (cap top is row 0,
+% the baseline sits under row 9), for a program that wants the raw
+% pixel grid (an LED strip, a frame at true size).
+%
+% Provenance: an original design drawn for pscat in 2026 on this grid,
+% not traced, converted or copied from any existing font or terminal
+% character ROM. At this size several letters have only one legible
+% form, so a likeness to other 8x16 faces there is forced by the grid.
+% Licence: the same as the rest of pscat's lib/ (MIT OR Apache-2.0;
+% THIRD_PARTY_NOTICES.md).
+%
+% Draws nothing on load; runs unchanged in Ghostscript.
+
+/PhosphorDict 40 dict def
+PhosphorDict begin
+
+  /FontType 3 def
+  /FontMatrix [0.0625 0 0 0.0625 0 0] def   % 16 pixel rows to the em
+  /FontBBox [0 -4 8 12] def
+  /Cell 8 def                % advance, pixels (monospaced)
+  /Proportional false def
+  /Gap 0 def
+  /Ascent 10 def             % row 0 of a bitmap is the cap top
+  /DotShape /square def
+  /DotSize 1 def
+  /ScanGap 0 def
+  /Interpolate false def
+
+  /Bitmaps 100 dict def
+  Bitmaps begin
+    /.notdef [] def
+    /space [] def
+    /exclam [
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (.......)
+      (..##...)
+      (..##...)
+    ] def
+    /quotedbl [
+      (.##.##.)
+      (.##.##.)
+      (.##.##.)
+    ] def
+    /numbersign [
+      (.......)
+      (.##.##.)
+      (.##.##.)
+      (#######)
+      (.##.##.)
+      (.##.##.)
+      (#######)
+      (.##.##.)
+      (.##.##.)
+    ] def
+    /dollar [
+      (...#...)
+      (.#####.)
+      (##.#.##)
+      (##.#...)
+      (.#####.)
+      (...#.##)
+      (...#.##)
+      (##.#.##)
+      (.#####.)
+      (...#...)
+    ] def
+    /percent [
+      (.......)
+      (##...##)
+      (##..##.)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+      (.##..##)
+      (##...##)
+    ] def
+    /ampersand [
+      (..###..)
+      (.##.##.)
+      (.##.##.)
+      (..###..)
+      (.###...)
+      (##.##.#)
+      (##..###)
+      (##...##)
+      (##..###)
+      (.###.##)
+    ] def
+    /quotesingle [
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /parenleft [
+      (....##.)
+      (...##..)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (...##..)
+      (....##.)
+    ] def
+    /parenright [
+      (.##....)
+      (..##...)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (..##...)
+      (.##....)
+    ] def
+    /asterisk [
+      (.......)
+      (.......)
+      (.##.##.)
+      (..###..)
+      (#######)
+      (..###..)
+      (.##.##.)
+    ] def
+    /plus [
+      (.......)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+      (######.)
+      (..##...)
+      (..##...)
+    ] def
+    /comma [
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+      (.##....)
+    ] def
+    /hyphen [
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (######.)
+    ] def
+    /period [
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+    ] def
+    /slash [
+      (.....##)
+      (....##.)
+      (....##.)
+      (...##..)
+      (...##..)
+      (..##...)
+      (..##...)
+      (.##....)
+      (.##....)
+      (##.....)
+    ] def
+    /zero [
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##.#.##)
+      (##.#.##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /one [
+      (..##...)
+      (.###...)
+      (####...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (######.)
+    ] def
+    /two [
+      (.#####.)
+      (##...##)
+      (.....##)
+      (.....##)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+      (##.....)
+      (#######)
+    ] def
+    /three [
+      (.#####.)
+      (##...##)
+      (.....##)
+      (.....##)
+      (..####.)
+      (.....##)
+      (.....##)
+      (.....##)
+      (##...##)
+      (.#####.)
+    ] def
+    /four [
+      (....##.)
+      (...###.)
+      (..####.)
+      (.##.##.)
+      (##..##.)
+      (##..##.)
+      (#######)
+      (....##.)
+      (....##.)
+      (....##.)
+    ] def
+    /five [
+      (#######)
+      (##.....)
+      (##.....)
+      (##.....)
+      (######.)
+      (.....##)
+      (.....##)
+      (.....##)
+      (##...##)
+      (.#####.)
+    ] def
+    /six [
+      (..####.)
+      (.##....)
+      (##.....)
+      (##.....)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /seven [
+      (#######)
+      (.....##)
+      (.....##)
+      (....##.)
+      (...##..)
+      (...##..)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /eight [
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /nine [
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+      (.....##)
+      (.....##)
+      (....##.)
+      (.####..)
+    ] def
+    /colon [
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+    ] def
+    /semicolon [
+      (.......)
+      (.......)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+      (.......)
+      (.......)
+      (..##...)
+      (..##...)
+      (.##....)
+    ] def
+    /less [
+      (.......)
+      (.......)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+      (..##...)
+      (...##..)
+      (....##.)
+    ] def
+    /equal [
+      (.......)
+      (.......)
+      (.......)
+      (######.)
+      (.......)
+      (.......)
+      (######.)
+    ] def
+    /greater [
+      (.......)
+      (.......)
+      (.##....)
+      (..##...)
+      (...##..)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+    ] def
+    /question [
+      (.#####.)
+      (##...##)
+      (.....##)
+      (....##.)
+      (...##..)
+      (..##...)
+      (..##...)
+      (.......)
+      (..##...)
+      (..##...)
+    ] def
+    /at [
+      (.#####.)
+      (##...##)
+      (##..###)
+      (##.#.##)
+      (##.#.##)
+      (##.#.##)
+      (##..###)
+      (##.....)
+      (##...##)
+      (.#####.)
+    ] def
+    /A [
+      (..###..)
+      (.##.##.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (#######)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+    ] def
+    /B [
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+    ] def
+    /C [
+      (.#####.)
+      (##...##)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##...##)
+      (.#####.)
+    ] def
+    /D [
+      (#####..)
+      (##..##.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##..##.)
+      (#####..)
+    ] def
+    /E [
+      (#######)
+      (##.....)
+      (##.....)
+      (##.....)
+      (######.)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (#######)
+    ] def
+    /F [
+      (#######)
+      (##.....)
+      (##.....)
+      (##.....)
+      (######.)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+    ] def
+    /G [
+      (.#####.)
+      (##...##)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.####)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /H [
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (#######)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+    ] def
+    /I [
+      (.####..)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (.####..)
+    ] def
+    /J [
+      (...####)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (.####..)
+    ] def
+    /K [
+      (##...##)
+      (##..##.)
+      (##.##..)
+      (####...)
+      (###....)
+      (####...)
+      (##.##..)
+      (##..##.)
+      (##...##)
+      (##...##)
+    ] def
+    /L [
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (#######)
+    ] def
+    /M [
+      (##...##)
+      (###.###)
+      (#######)
+      (##.#.##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+    ] def
+    /N [
+      (##...##)
+      (##...##)
+      (###..##)
+      (###..##)
+      (##.#.##)
+      (##.#.##)
+      (##..###)
+      (##..###)
+      (##...##)
+      (##...##)
+    ] def
+    /O [
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /P [
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+    ] def
+    /Q [
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##.#.##)
+      (##..##.)
+      (.###.##)
+    ] def
+    /R [
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+      (##.##..)
+      (##..##.)
+      (##...##)
+      (##...##)
+    ] def
+    /S [
+      (.#####.)
+      (##...##)
+      (##.....)
+      (##.....)
+      (.#####.)
+      (.....##)
+      (.....##)
+      (.....##)
+      (##...##)
+      (.#####.)
+    ] def
+    /T [
+      (######.)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /U [
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /V [
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (.####..)
+      (.####..)
+      (..##...)
+    ] def
+    /W [
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##.#.##)
+      (##.#.##)
+      (#######)
+      (###.###)
+      (.#...#.)
+    ] def
+    /X [
+      (##...##)
+      (##...##)
+      (.##.##.)
+      (.##.##.)
+      (..###..)
+      (..###..)
+      (.##.##.)
+      (.##.##.)
+      (##...##)
+      (##...##)
+    ] def
+    /Y [
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (.####..)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /Z [
+      (#######)
+      (.....##)
+      (.....##)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+      (##.....)
+      (##.....)
+      (#######)
+    ] def
+    /bracketleft [
+      (.####..)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.##....)
+      (.####..)
+    ] def
+    /backslash [
+      (##.....)
+      (.##....)
+      (.##....)
+      (..##...)
+      (..##...)
+      (...##..)
+      (...##..)
+      (....##.)
+      (....##.)
+      (.....##)
+    ] def
+    /bracketright [
+      (.####..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (.####..)
+    ] def
+    /asciicircum [
+      (...#...)
+      (..###..)
+      (.##.##.)
+      (##...##)
+    ] def
+    /underscore [
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (........)
+      (########)
+    ] def
+    /grave [
+      (.##....)
+      (..##...)
+    ] def
+    /a [
+      (.......)
+      (.......)
+      (.......)
+      (.#####.)
+      (.....##)
+      (.######)
+      (##...##)
+      (##...##)
+      (##..###)
+      (.###.##)
+    ] def
+    /b [
+      (##.....)
+      (##.....)
+      (##.....)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+    ] def
+    /c [
+      (.......)
+      (.......)
+      (.......)
+      (.#####.)
+      (##...##)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##...##)
+      (.#####.)
+    ] def
+    /d [
+      (.....##)
+      (.....##)
+      (.....##)
+      (.######)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+    ] def
+    /e [
+      (.......)
+      (.......)
+      (.......)
+      (.#####.)
+      (##...##)
+      (##...##)
+      (#######)
+      (##.....)
+      (##.....)
+      (.#####.)
+    ] def
+    /f [
+      (...####)
+      (..##...)
+      (..##...)
+      (######.)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /g [
+      (.......)
+      (.......)
+      (.......)
+      (.######)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+      (.....##)
+      (.....##)
+      (.#####.)
+    ] def
+    /h [
+      (##.....)
+      (##.....)
+      (##.....)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+    ] def
+    /i [
+      (.......)
+      (..##...)
+      (.......)
+      (.###...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (.####..)
+    ] def
+    /j [
+      (.......)
+      (....##.)
+      (.......)
+      (...###.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (....##.)
+      (##..##.)
+      (.####..)
+    ] def
+    /k [
+      (##.....)
+      (##.....)
+      (##.....)
+      (##..##.)
+      (##.##..)
+      (####...)
+      (###....)
+      (####...)
+      (##.##..)
+      (##..##.)
+    ] def
+    /l [
+      (.###...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (.####..)
+    ] def
+    /m [
+      (.......)
+      (.......)
+      (.......)
+      (###.##.)
+      (#######)
+      (##.#.##)
+      (##.#.##)
+      (##.#.##)
+      (##.#.##)
+      (##.#.##)
+    ] def
+    /n [
+      (.......)
+      (.......)
+      (.......)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+    ] def
+    /o [
+      (.......)
+      (.......)
+      (.......)
+      (.#####.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.#####.)
+    ] def
+    /p [
+      (.......)
+      (.......)
+      (.......)
+      (######.)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (######.)
+      (##.....)
+      (##.....)
+      (##.....)
+    ] def
+    /q [
+      (.......)
+      (.......)
+      (.......)
+      (.######)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+      (.....##)
+      (.....##)
+      (.....##)
+    ] def
+    /r [
+      (.......)
+      (.......)
+      (.......)
+      (##.###.)
+      (###..##)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+      (##.....)
+    ] def
+    /s [
+      (.......)
+      (.......)
+      (.......)
+      (.#####.)
+      (##.....)
+      (##.....)
+      (.#####.)
+      (.....##)
+      (.....##)
+      (.#####.)
+    ] def
+    /t [
+      (.......)
+      (..##...)
+      (..##...)
+      (######.)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (...###.)
+    ] def
+    /u [
+      (.......)
+      (.......)
+      (.......)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+    ] def
+    /v [
+      (.......)
+      (.......)
+      (.......)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (##..##.)
+      (.####..)
+      (..##...)
+    ] def
+    /w [
+      (.......)
+      (.......)
+      (.......)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##.#.##)
+      (##.#.##)
+      (#######)
+      (.##.##.)
+    ] def
+    /x [
+      (.......)
+      (.......)
+      (.......)
+      (##...##)
+      (.##.##.)
+      (..###..)
+      (...#...)
+      (..###..)
+      (.##.##.)
+      (##...##)
+    ] def
+    /y [
+      (.......)
+      (.......)
+      (.......)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (##...##)
+      (.######)
+      (.....##)
+      (.....##)
+      (.#####.)
+    ] def
+    /z [
+      (.......)
+      (.......)
+      (.......)
+      (#######)
+      (....##.)
+      (...##..)
+      (..##...)
+      (.##....)
+      (##.....)
+      (#######)
+    ] def
+    /braceleft [
+      (....###)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (###....)
+      (...##..)
+      (...##..)
+      (...##..)
+      (...##..)
+      (....###)
+    ] def
+    /bar [
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+    ] def
+    /braceright [
+      (###....)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (....###)
+      (..##...)
+      (..##...)
+      (..##...)
+      (..##...)
+      (###....)
+    ] def
+    /asciitilde [
+      (.......)
+      (.......)
+      (.......)
+      (.###.##)
+      (##.###.)
+    ] def
+  end
+
+  % --- the pixel renderer (the same block in phosphor.ps, pinpoint.ps
+  % and diode.ps: each file stays self-contained) -------------------
+  % At load, each bitmap becomes [advance runs dots mids]: runs are
+  % x y w triples (one per horizontal stretch of lit pixels, for square
+  % marks), dots are pixel centres, mids the points halfway between two
+  % lit neighbours (Interpolate). BuildChar then only builds one path
+  % and fills it once, so abutting squares never leave hairline seams.
+  % Every subpath runs counterclockwise (arc does too), so overlapping
+  % marks union under the nonzero rule instead of punching holes.
+  /work 30 dict def
+
+  % c r on -> bool   (pixel c of row r of the bitmap being prepared)
+  /on {
+    /rr exch def /cc exch def
+    rr 0 ge rr nr lt and {
+      /ss rows rr get def
+      cc 0 ge cc ss length lt and { ss cc get 35 eq } { false } ifelse
+    } { false } ifelse
+  } bind def
+
+  % rows prep -> [advance runs dots mids]
+  /prep {
+    work begin
+    /rows exch def
+    /nr rows length def
+    /w 0 def
+    rows { length dup w gt { /w exch def } { pop } ifelse } forall
+    /adv Proportional { w Gap add } { Cell } ifelse def
+    /runs [
+      0 1 nr 1 sub {
+        /r exch def
+        /s rows r get def
+        /y Ascent r sub 1 sub def
+        /c 0 def
+        {
+          c s length ge { exit } if
+          s c get 35 eq {
+            /c0 c def
+            { c s length ge { exit } if s c get 35 ne { exit } if /c c 1 add def } loop
+            c0 y c c0 sub
+          } { /c c 1 add def } ifelse
+        } loop
+      } for
+    ] def
+    /dots [
+      0 1 nr 1 sub {
+        /r exch def
+        /s rows r get def
+        0 1 s length 1 sub {
+          /c exch def
+          s c get 35 eq { c 0.5 add Ascent r sub 0.5 sub } if
+        } for
+      } for
+    ] def
+    /mids [
+      0 1 nr 1 sub {
+        /r exch def
+        /s rows r get def
+        0 1 s length 1 sub {
+          /c exch def
+          c r on {
+            c 1 add r on { c 1 add Ascent r sub 0.5 sub } if
+            c r 1 add on { c 0.5 add Ascent r sub 1 sub } if
+            c 1 add r 1 add on { c 1 add Ascent r sub 1 sub } if
+            c 1 sub r 1 add on { c Ascent r sub 1 sub } if
+          } if
+        } for
+      } for
+    ] def
+    [ adv runs dots mids ]
+    end
+  } bind def
+
+  /Glyphs Bitmaps length dict def
+  Bitmaps { prep Glyphs 3 1 roll put } forall
+
+  % [x y ...] dotpath -   a disc of radius rad at each centre
+  /dotpath {
+    /a exch def
+    0 2 a length 1 sub {
+      /i exch def
+      a i get a i 1 add get
+      2 copy exch rad add exch moveto
+      rad 0 360 arc closepath
+    } for
+  } bind def
+
+  % [x y w ...] runpath -   one pw-padded, ph-tall bar per run
+  /runpath {
+    /a exch def
+    0 3 a length 1 sub {
+      /i exch def
+      a i get ext sub
+      a i 1 add get 0.5 add ph 2 div sub moveto
+      a i 2 add get ext 2 mul add
+      dup 0 rlineto 0 ph rlineto neg 0 rlineto closepath
+    } for
+  } bind def
+
+  % [x y ...] sqpath -   a pw x ph square at each centre
+  /sqpath {
+    /a exch def
+    0 2 a length 1 sub {
+      /i exch def
+      a i get pw 2 div sub a i 1 add get ph 2 div sub moveto
+      pw 0 rlineto 0 ph rlineto pw neg 0 rlineto closepath
+    } for
+  } bind def
+
+  % The body runs under stopped so that an error in it (a bad dial put in
+  % by hand-copying the font) still closes both dictionaries, then is
+  % raised again with its own name.
+  /BuildChar {
+    exch begin
+      work begin
+      {
+      Encoding exch get
+      Glyphs 1 index known not { pop /.notdef } if
+      Glyphs exch get /g exch def
+      % marks larger than the pitch overhang the cell: widen the cache box
+      /o DotSize 1 gt { DotSize 1 sub 2 div } { 0 } ifelse 0.05 add def
+      g 0 get 0
+      o neg FontBBox 1 get o sub g 0 get o add FontBBox 3 get o add
+      setcachedevice
+      newpath
+      DotShape /round eq {
+        /rad DotSize 2 div def
+        g 2 get dotpath
+        Interpolate { g 3 get dotpath } if
+      } {
+        /pw DotSize def
+        /ph DotSize 1 ScanGap sub mul def
+        pw 1 ge {
+          /ext pw 1 sub 2 div def
+          g 1 get runpath
+        } {
+          g 2 get sqpath
+        } ifelse
+      } ifelse
+      fill
+      } stopped
+      end
+    end
+    { stop } if
+  } bind def
+
+  /Encoding 256 array def
+  0 1 255 { Encoding exch /.notdef put } for
+  [ /space /exclam /quotedbl /numbersign /dollar /percent /ampersand
+    /quotesingle /parenleft /parenright /asterisk /plus /comma /hyphen
+    /period /slash /zero /one /two /three /four /five /six /seven /eight
+    /nine /colon /semicolon /less /equal /greater /question /at
+    /A /B /C /D /E /F /G /H /I /J /K /L /M /N /O /P /Q /R /S /T /U /V /W
+    /X /Y /Z /bracketleft /backslash /bracketright /asciicircum
+    /underscore /grave
+    /a /b /c /d /e /f /g /h /i /j /k /l /m /n /o /p /q /r /s /t /u /v /w
+    /x /y /z /braceleft /bar /braceright /asciitilde ]
+  0 1 94 { 2 copy get exch 32 add exch Encoding 3 1 roll put } for pop
+
+end
+
+/Phosphor PhosphorDict definefont pop
+
+% /New /Base << dials >> pf-variant -   a copy of /Base with the dials
+% changed, defined as /New (the copy idiom: every key but FID).
+% A dial of the wrong type is a typecheck and one out of range a
+% rangecheck, raised here, before anything is defined: /DotShape /square
+% or /round, /DotSize above 0 up to 4, /ScanGap from 0 up to (not
+% including) 1, /Interpolate a boolean.
+/pf-variant {
+  dup /DotShape known {
+    dup /DotShape get
+    dup type /nametype ne { /pf-variant errordict /typecheck get exec } if
+    dup /square ne exch /round ne and { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /DotSize known {
+    dup /DotSize get
+    dup type dup /integertype ne exch /realtype ne and
+    { /pf-variant errordict /typecheck get exec } if
+    dup 0 le exch 4 gt or { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /ScanGap known {
+    dup /ScanGap get
+    dup type dup /integertype ne exch /realtype ne and
+    { /pf-variant errordict /typecheck get exec } if
+    dup 0 lt exch 1 ge or { /pf-variant errordict /rangecheck get exec } if
+  } if
+  dup /Interpolate known {
+    dup /Interpolate get type /booleantype ne
+    { /pf-variant errordict /typecheck get exec } if
+  } if
+  3 1 roll findfont
+  dup length 3 index length add dict begin
+    { 1 index /FID ne { def } { pop pop } ifelse } forall
+    exch { def } forall
+  currentdict end definefont pop
+} bind def
+
+/Phosphor-Scan /Phosphor << /ScanGap 0.45 >> pf-variant
+%%EOF

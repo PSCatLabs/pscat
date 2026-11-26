@@ -568,6 +568,38 @@ candidate sheet and the caveat that the photo does not identify the
 original font are in `docs/archive/groovy_font_choice.md`; the specimen is
 `examples/groovy_faces.ps`, tested by `tests/groovy_faces.rs`.
 
+## Post-roadmap addendum — retro screen and printer faces (issue #1426)
+
+`lib/fonts/phosphor.ps`, `pinpoint.ps`, `diode7.ps` and `diode5.ps` are
+bitmap Type 3 faces (terminal, nine-pin dot matrix, LED rows) drawn by one
+pixel renderer, copied verbatim into each file so each stays self-contained
+(`tests/retro_fonts.rs` checks the copies match). Choices that differ from the
+older display library:
+
+- **The caller's colour.** BuildChar sets no colour and calls
+  `setcachedevice`, widened by the overhang of a mark larger than the pitch,
+  so the faces cache in gs and print in any ink.
+- **Dials in the font dict, variants by copy.** The display faces keep their
+  dials in a scratch dict (`/work`) the caller mutates. These read `/DotShape`,
+  `/DotSize`, `/ScanGap` and `/Interpolate` from the font dict itself, and a
+  variant is a copy defined under a new name (`pf-variant`). A mutated dial
+  would leave gs serving stale cached glyphs; a copy gets a new font and a new
+  cache. Do not move the dials back into `/work`.
+- **Precomputed at load.** Each `/Bitmaps` entry (rows of `#` and `.`, the
+  source of truth, editable in place) becomes `[advance runs dots mids]` once,
+  when the file runs. BuildChar builds one path of counterclockwise squares or
+  discs and fills it once: no seams between abutting rows, and overlapping
+  marks union under the nonzero rule.
+- **The em is the cell.** FontMatrix is 1/rows, so `rows scalefont` puts one
+  font pixel on one unit; at 72 dpi and integer coordinates a square-mark
+  glyph is pixel-exact (tested against `/Bitmaps`).
+
+All the work is PostScript, so it counts against `--max-steps`,
+`--max-time` and `--max-memory` like any program. `pscat fonts list` now
+also lists every Type 3 face with the `run` line that defines it
+(`capabilities::type3_faces`); `--fonts` does not, since it lists what
+`findfont` reaches with nothing loaded.
+
 ## Post-roadmap addendum — Unicode text, fallback faces and colour emoji (issue #1425)
 
 The Unicode-mode addenda above covered four catalog faces, each on its
