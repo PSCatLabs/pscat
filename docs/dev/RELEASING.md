@@ -560,8 +560,8 @@ gh variable list --repo PSCatLabs/pscat      # check it
   manifest` then checks the finished ZIP's `mcp.json` once more.
 - **Auth is `oauth`** (`--remote-auth oauth`, #1431): ChatGPT's connection form
   takes only no authentication or OAuth (pscat-mcp#136), and the production
-  server signs in with OAuth. The 0.7.1 release candidates were built with
-  `none`. If the server's sign-in changes, change the word in the workflow
+  server signs in with OAuth. Release 0.7.1 and its candidates were built
+  with `none`. If the server's sign-in changes, change the word in the workflow
   step; `none` is for a server with no sign-in.
 - **A resumed release uses the value the draft was built with.** The ZIP is
   reproducible, so a re-run with the same URL matches the draft. If you change

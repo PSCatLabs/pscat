@@ -59,6 +59,15 @@ session. The Agent Plugins `mcp.schema.json` (1.0.0) does not describe `auth`
 (it is in the `com.openai` extension), so there is no published schema to
 validate against.
 
+## What shipped before
+
+Release 0.7.1 (published 2026-11-26) carries
+`pscat-cloud-chatgpt-plugin-0.7.1.zip`; its `mcp.json` points at
+`https://mcp.pscat.dev/mcp` and declares `"auth": {"type": "none"}` (downloaded
+and unzipped to check). The workflow change lands on `feature/0.8.0`, so a patch
+release cut from `main` before that branch merges would still declare `none`
+unless the change is backported.
+
 ## Not verified
 
 - Whether ChatGPT accepts the ZIP upload at all (#1089), whether it labels the

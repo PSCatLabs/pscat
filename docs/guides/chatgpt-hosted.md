@@ -14,8 +14,9 @@ unverified (#1089).
 
 **Update, 2026-11-25:** the production server is live at
 `https://mcp.pscat.dev/mcp` and signs callers in with OAuth, not
-no-authentication. The ZIPs of the 0.7.1 release candidates were built with
-authentication `none`, which does not match a server that answers 401 until
+no-authentication. The ZIP of release 0.7.1 (and of its candidates) points at the
+production server but declares authentication `none` (checked 2026-11-26 by
+unzipping its `mcp.json`), which does not match a server that answers 401 until
 the caller signs in. For the custom-server route below, choose **OAuth** for
 authentication. The table of every client's routes is
 [pscat in every AI client](clients.md).
@@ -48,7 +49,7 @@ Checked against OpenAI's documentation on 2026-11-16
    `pscat-cloud-chatgpt-plugin-<version>.zip`: the `--remote` build below,
    made by the release workflow against the **production** pscat-mcp server
    (#1253). Its authentication setting is `oauth` from the first release after
-   #1431 (it was `none` in the 0.7.1 release candidates), because ChatGPT
+   #1431 (0.7.1 and its candidates declared `none`), because ChatGPT
    connectors accept only no authentication or OAuth (pscat-mcp#136) and
    production signs in with OAuth. Releases from 0.7.1 on have a ZIP; earlier
    ones do not. Unzip `mcp.json` and look at `extensions` > `com.openai` >
@@ -90,9 +91,9 @@ connect only a server you trust.
    `run.app` address and production differs: read the production URL from
    the `mcp.json` of the release ZIP (route 1), or ask the server's owner.
    Never paste a token into the URL.
-4. Authentication: choose the method the server was set up for, **No
-   authentication** or **OAuth** (the owner's decision; a bearer-protected
-   server will fail here).
+4. Authentication: choose the method the server was set up for. The
+   production server signs in with **OAuth**; **No authentication** is for a
+   server with no sign-in, and a bearer-protected server will fail here.
 5. Read the risk warning, select **I understand and want to continue**, then
    **Create as a plugin**.
 6. Find the resulting plugin in your personal plugins (or the workspace where

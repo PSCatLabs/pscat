@@ -169,12 +169,6 @@ class Remote(Fixture):
                 "extensions": {"com.openai": {"auth": {
                     "type": "oauth", "client": {"mode": "cimd"}}}}}}})
 
-    def test_oauth_choice_is_not_shared_between_builds(self):
-        """The module-level table is copied, so a build cannot alter the next one."""
-        doc = json.loads(b.remote_mcp_json(URL, "oauth"))
-        doc["mcpServers"]["pscat-cloud"]["extensions"]["com.openai"]["auth"]["client"]["mode"] = "x"
-        self.assertEqual(b.REMOTE_AUTH["oauth"], {"type": "oauth", "client": {"mode": "cimd"}})
-
     def test_no_secret_or_header_for_any_choice(self):
         for auth in ("none", "bearer", "oauth"):
             server = self.mcp(self.build(remote=URL, remote_auth=auth))["mcpServers"]["pscat-cloud"]

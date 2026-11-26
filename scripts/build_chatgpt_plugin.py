@@ -41,8 +41,8 @@ The ZIP is the Agent Plugins 1.0 layout with `plugin.json` at its root:
   committed, and `--remote-auth` is required, because what ChatGPT can send
   differs by choice: `oauth` declares OAuth, which is what the production
   server (https://mcp.pscat.dev/mcp) uses (#1431); `none` declares no
-  authentication, which is right only for a server that has none, and ChatGPT
-  cannot connect it to one that answers 401; `bearer` declares a fixed bearer
+  authentication, right only for a server that has none (OpenAI: "Don't
+  configure a protected server as `type: "none"`"); `bearer` declares a fixed bearer
   token (`api_key`), which the manifest schema accepts but ChatGPT's
   connection form cannot send (the build says so). The build never puts a
   token, a client secret or a `headers` entry in the ZIP. `oauth` writes
