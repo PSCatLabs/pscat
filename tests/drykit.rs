@@ -1315,6 +1315,8 @@ fn dkstroke_every_documented_parameter_changes_the_render() {
         ("Fallout", "/Fallout 4"),
         ("Drift", "/Drift 9"),
         ("Seed", "/Seed 6"),
+        ("From", "/From 0.3"),
+        ("To", "/To 0.7"),
     ];
     for (_, extra) in varied {
         assert_ne!(
@@ -1855,4 +1857,332 @@ fn ghostscript_follows_a_cliprestore_in_a_batch() {
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Issue #1418: /From and /To draw part of each subpath with the whole
+// stroke's touch, widths, lanes, texture and fallout.
+
+const PW: u32 = 200;
+const PH: u32 = 60;
+
+/// A `PW` x `PH` greenboard at 2x with `path` stroked with `opts` (and a
+/// fixed /Width 3).
+fn piece(path: &str, opts: &str) -> Interp {
+    board(
+        PW,
+        PH,
+        2.0,
+        &format!("{path} << /Width 3 {opts} >> dkstroke"),
+    )
+}
+
+/// Per pixel, the largest channel difference between two renders over the
+/// device columns `x0..x1`.
+fn col_diffs(a: &[u8], b: &[u8], x0: u32, x1: u32) -> Vec<u8> {
+    let w = (PW * 2) as usize;
+    assert_eq!(a.len(), b.len());
+    (0..a.len() / 4)
+        .filter(|i| (x0 as usize..x1 as usize).contains(&(i % w)))
+        .map(|i| {
+            (0..4)
+                .map(|c| a[i * 4 + c].abs_diff(b[i * 4 + c]))
+                .max()
+                .unwrap()
+        })
+        .collect()
+}
+
+/// Pixels that differ from the bare board (the ink, fallout included).
+fn ink_over(it: &Interp, bare: &[u8]) -> usize {
+    data(it)
+        .chunks(4)
+        .zip(bare.chunks(4))
+        .filter(|(p, q)| p != q)
+        .count()
+}
+
+const CURVE: &str = "newpath 10 30 moveto 70 55 140 5 190 30 curveto";
+
+/// A part with the whole range, or with neither key, is the whole stroke,
+/// byte for byte, in every mode that draws a stroke (the match with the
+/// library from before #1418 is `scripts/identity_check.sh --loader
+/// lib/drykit.ps`, run on the PR).
+#[test]
+fn the_whole_range_is_the_default() {
+    let shapes = [
+        CURVE,
+        "newpath 10 30 moveto 190 30 lineto 10 10 moveto 100 12 lineto",
+        "newpath 20 10 moveto 180 10 lineto 180 50 lineto 20 50 lineto closepath",
+        "newpath 100 30 moveto 100 30 lineto",
+    ];
+    for path in shapes {
+        for opts in [
+            "/Seed 4",
+            "/Seed 4 /Touch { 0.4 mul 0.5 add } /Pressure { 1 exch sub 0.5 add } /Wear 1",
+            "/Tilt 70 /Side 8 /Dropout 0.3 /Load 0.5",
+            "/Lanes 4 /Dropout 0.3 /Load 0.5 /Fallout 2 /Drift 2 /Levels 3",
+        ] {
+            let plain = data(&piece(path, opts));
+            for keys in ["/From 0", "/To 1", "/From 0 /To 1"] {
+                assert_eq!(
+                    data(&piece(path, &format!("{opts} {keys}"))),
+                    plain,
+                    "`{keys}` on `{opts}` changed the whole stroke"
+                );
+            }
+        }
+    }
+}
+
+/// `/From 0 /To t` for a growing t leaves the part already drawn alone:
+/// every row of pixels behind the pen's last dozen points agrees between
+/// frames to within a few levels of edge anti-aliasing, whatever the
+/// stroke's profile, lanes and dropouts (they are the whole stroke's).
+#[test]
+fn a_growing_stroke_keeps_what_it_has_drawn() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    for opts in [
+        "/Seed 4",
+        "/Seed 4 /Touch { 0.4 mul 0.5 add } /Pressure { 1 exch sub 0.5 add } /Wear 1",
+        "/Seed 2 /Tilt 70 /Side 8 /Dropout 0.3 /Load 0.5",
+        "/Seed 2 /Lanes 4 /Dropout 0.3 /Load 0.5 /Fallout 2 /Drift 2",
+    ] {
+        let tos: Vec<f64> = (0..=14).map(|i| 0.3 + 0.05 * f64::from(i)).collect();
+        let frames: Vec<Interp> = tos
+            .iter()
+            .map(|t| piece(CURVE, &format!("{opts} /From 0 /To {t}")))
+            .collect();
+        for k in 0..tos.len() - 1 {
+            // the pen was at about 10 + 180 To: all but its last 12 points agree
+            let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
+            let d = col_diffs(&data(&frames[k]), &data(&frames[k + 1]), 0, behind);
+            let worst = d.iter().copied().max().unwrap();
+            assert!(
+                worst <= 24,
+                "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
+                k + 1
+            );
+            assert!(
+                ink_over(&frames[k + 1], &bare) > ink_over(&frames[k], &bare),
+                "`{opts}`: frame {} added no ink",
+                k + 1
+            );
+        }
+    }
+}
+
+/// Adjacent pieces on one canvas make the whole stroke, apart from the
+/// seam (a round end overdrawn by the next piece, and a stroke's levels
+/// drawn once per piece rather than once across it).
+#[test]
+fn adjacent_pieces_make_the_whole_stroke() {
+    for opts in [
+        "/Seed 4",
+        "/Seed 4 /Touch { 0.4 mul 0.5 add } /Pressure { 1 exch sub 0.5 add }",
+        "/Seed 2 /Tilt 70 /Side 8 /Dropout 0.3 /Load 0.5",
+        "/Seed 2 /Lanes 4 /Dropout 0.3 /Load 0.5 /Fallout 2 /Drift 2",
+    ] {
+        let whole = piece(CURVE, opts);
+        let drawn = |cuts: &[(f64, f64)]| {
+            let calls: String = cuts
+                .iter()
+                .map(|(a, b)| format!("{CURVE} << /Width 3 {opts} /From {a} /To {b} >> dkstroke "))
+                .collect();
+            board(PW, PH, 2.0, &calls)
+        };
+        let ink = ink_over(&whole, &data(&board(PW, PH, 2.0, "")));
+        for (name, pieces) in [
+            ("halves", drawn(&[(0.0, 0.5), (0.5, 1.0)])),
+            ("thirds", drawn(&[(0.0, 0.3), (0.3, 0.7), (0.7, 1.0)])),
+        ] {
+            let d = col_diffs(&data(&whole), &data(&pieces), 0, PW * 2);
+            let worst = d.iter().copied().max().unwrap();
+            let loud = d.iter().filter(|&&v| v > 32).count();
+            assert!(worst <= 96, "`{opts}` {name}: differ by up to {worst}");
+            assert!(
+                loud * 50 < ink,
+                "`{opts}` {name}: {loud} of {ink} inked pixels differ clearly"
+            );
+        }
+    }
+}
+
+/// A tilted piece past 0 draws each lane's chance dropouts as the whole
+/// stroke does (the stops and the chain are the whole subpath's, cut
+/// afterwards): the right half of a side stroke agrees with the whole
+/// stroke beyond the seam to within edge anti-aliasing, for any seed.
+#[test]
+fn a_tilted_piece_keeps_the_whole_strokes_lane_dropouts() {
+    for seed in 1..=4 {
+        let opts = format!("/Seed {seed} /Tilt 70 /Side 8 /Dropout 0.4 /Load 0.4");
+        let whole = data(&piece(CURVE, &opts));
+        let right = data(&piece(CURVE, &format!("{opts} /From 0.5")));
+        // the cut is near x = 100: from 8 points on, the two agree
+        let d = col_diffs(&whole, &right, 216, PW * 2);
+        let worst = d.iter().copied().max().unwrap();
+        assert!(
+            worst <= 24,
+            "seed {seed}: the right half differs from the whole stroke by up to {worst}"
+        );
+    }
+}
+
+/// Fallout is placed as for the whole stroke and drawn only where a
+/// particle's place along the stroke is within the range: nothing falls
+/// ahead of the pen.
+#[test]
+fn fallout_follows_the_pen() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    let line = "newpath 10 30 moveto 190 30 lineto";
+    let opts = "/Seed 3 /Fallout 6 /Width 2";
+    let half = piece(line, &format!("{opts} /To 0.5"));
+    // the pen is at x = 100 (device 200); its cap and halo reach about 3 points,
+    // so from device 208 nothing is drawn, even a particle of the chunk the pen
+    // is in (x 90 to 110)
+    let ahead = col_diffs(&data(&half), &bare, 208, PW * 2);
+    assert!(
+        ahead.iter().all(|&v| v == 0),
+        "something was drawn ahead of the pen"
+    );
+    assert!(
+        ink_over(&half, &bare) > 400,
+        "the part drew no ink behind the pen"
+    );
+    let whole = piece(line, opts);
+    assert!(
+        ink_over(&whole, &bare) > ink_over(&half, &bare) + 200,
+        "the whole stroke has no more fallout than half of it"
+    );
+}
+
+/// Every subpath is cut by its own length; a dot is whole or nothing and
+/// belongs to the one piece that holds its middle; an empty range draws
+/// nothing, and neither does a path with nothing to draw.
+#[test]
+fn from_and_to_cut_each_subpath_by_its_own_length() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    let two = "newpath 10 40 moveto 190 40 lineto 10 15 moveto 90 15 lineto";
+    let it = piece(two, "/Seed 1 /To 0.5");
+    let last_ink = |y0: u32, y1: u32| {
+        let pm = &it.gfx().pixmap;
+        let w = pm.width();
+        let mut best = 0;
+        for y in y0..y1 {
+            for x in 0..w {
+                let p = pm.pixels()[(y * w + x) as usize];
+                if luma(p) > 110.0 {
+                    best = best.max(x);
+                }
+            }
+        }
+        best as i32
+    };
+    // y = 40 is device row 40, y = 15 is row 90: the long line is half drawn
+    // (to x = 100, device 200), the short one half drawn (to x = 50, device 100)
+    assert!(
+        (last_ink(36, 44) - 200).abs() <= 8,
+        "long line to {}",
+        last_ink(36, 44)
+    );
+    assert!(
+        (last_ink(86, 94) - 100).abs() <= 8,
+        "short line to {}",
+        last_ink(86, 94)
+    );
+    // a dot is drawn whole by the piece with its middle, once
+    let dot = "newpath 100 30 moveto 100 30 lineto";
+    for opts in ["/Seed 1", "/Seed 1 /Tilt 70 /Side 6 /Lanes 3", "/Fallout 2"] {
+        let whole = data(&piece(dot, opts));
+        assert_ne!(whole, bare, "the dot is not drawn: {opts}");
+        for (keys, drawn) in [
+            ("/From 0.5", true),
+            ("/From 0.2 /To 0.9", true),
+            ("/From 0.5 /To 1", true),
+            ("/To 0.5", false),
+            ("/From 0.5 /To 0.5", false),
+            ("/From 0.6", false),
+        ] {
+            assert_eq!(
+                data(&piece(dot, &format!("{opts} {keys}"))) == whole,
+                drawn,
+                "`{opts}` dot with `{keys}`"
+            );
+        }
+    }
+    // an empty range, a bare moveto, an empty path, a range under any length
+    for (path, keys) in [
+        (CURVE, "/From 0.4 /To 0.4"),
+        (CURVE, "/From 1 /To 1"),
+        (CURVE, "/From 0 /To 0"),
+        ("newpath 20 20 moveto", "/To 0.5"),
+        ("newpath", "/From 0.2 /To 0.7"),
+    ] {
+        assert_eq!(
+            data(&piece(path, keys)),
+            bare,
+            "`{path}` with `{keys}` drew something"
+        );
+    }
+    // a sliver is drawn, not dropped, and never raises
+    let sliver = piece(CURVE, "/From 0.5 /To 0.5000001 /Seed 1");
+    let _ = data(&sliver);
+}
+
+/// An empty range inside a batch is a stroke like any other: it checks the
+/// batch's pigment (the colour is the whole stroke's) and draws nothing.
+#[test]
+fn a_part_inside_a_batch_is_a_stroke_like_any_other() {
+    let bare = data(&board(PW, PH, 2.0, ""));
+    let it = board(
+        PW,
+        PH,
+        2.0,
+        &format!(
+            "{{ {CURVE} << /Width 3 /Seed 1 /From 0.4 /To 0.4 >> dkstroke \
+               {CURVE} << /Width 3 /Seed 2 /To 0.5 >> dkstroke }} dkbatch"
+        ),
+    );
+    assert_ne!(data(&it), bare, "the batch drew nothing");
+    let mixed = std::panic::catch_unwind(|| {
+        board(
+            PW,
+            PH,
+            2.0,
+            &format!(
+                "{{ {CURVE} << /From 0.4 /To 0.4 >> dkstroke 1 0 0 setrgbcolor \
+                   {CURVE} << /To 0.5 >> dkstroke }} dkbatch"
+            ),
+        )
+    });
+    let msg = match mixed {
+        Ok(_) => panic!("a second colour was accepted after an empty part in a batch"),
+        Err(e) => e
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default(),
+    };
+    assert!(
+        msg.contains("dkbatch-mixes-pigments"),
+        "the second colour raised something else: {msg}"
+    );
+}
+
+/// The point of the keys: drawing part of a long stroke costs less than the
+/// whole of it. A tenth is drawn in well under half the time of the whole.
+#[test]
+fn a_short_piece_costs_less_than_the_whole_stroke() {
+    let zigzag = "newpath 10 10 moveto 0 1 7 { pop 11 40 rlineto 11 -40 rlineto } for";
+    let cost = |opts: &str| {
+        common::best_cpu_time_of(2, || {
+            piece(zigzag, opts);
+        })
+    };
+    let whole = cost("/Seed 1");
+    let tenth = cost("/Seed 1 /From 0 /To 0.1");
+    eprintln!("whole {whole:?}, a tenth {tenth:?}");
+    assert!(
+        tenth.as_secs_f64() < whole.as_secs_f64() * 0.5,
+        "a tenth of the stroke took {tenth:?}, the whole {whole:?}"
+    );
 }

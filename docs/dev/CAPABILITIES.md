@@ -242,7 +242,7 @@ that `/Spread` and `/Load` keep their one shared meaning.
   `readreals` (#735, #773). Not listed: PLRM Level 1/2/3 operators (the catalog
   has no PLRM coverage; `renamefile`, `deletefile` and `filenameforall`
   from #740 are PLRM Level 2), Ghostscript-compatibility `min`/`max`/
-  `.min`/`.max`, and `.permnoise2`, an internal hook for artkit's
+  `.min`/`.max` and `=only`/`==only` (#1413), and `.permnoise2`, an internal hook for artkit's
   `noise2`. To add an operator, add an `Operator` row (source
   `SYSTEMDICT`, stack signature as `example`);
   `tests/capabilities.rs::every_cataloged_operator_exists_in_systemdict`

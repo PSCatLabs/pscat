@@ -12,6 +12,9 @@ pub fn install(dict: &mut Dict) {
     use super::op;
     op(dict, "=", print_text);
     op(dict, "==", print_syntactic);
+    // Ghostscript extensions (#1413): `=` and `==` without the newline.
+    op(dict, "=only", print_text_only);
+    op(dict, "==only", print_syntactic_only);
     op(dict, "stack", stack_dump);
     op(dict, "pstack", pstack_dump);
     op(dict, "print", print_string);
@@ -177,14 +180,33 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn print_text(it: &mut Interp) -> Result<(), PsError> {
-    let obj = it.pop()?;
-    let line = format!("{}\n", obj.text());
-    out(it, line.as_bytes(), false)
+    print_top(it, Object::text, true)
 }
 
 fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), true)
+}
+
+/// `=only` and `==only` (#1413), Ghostscript extensions outside the PLRM:
+/// exactly `=` and `==` minus the trailing newline. They share
+/// [`print_top`], so the two forms cannot drift apart.
+fn print_text_only(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, Object::text, false)
+}
+
+fn print_syntactic_only(it: &mut Interp) -> Result<(), PsError> {
+    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), false)
+}
+
+/// Pop the top operand and print `render` of it, plus a newline when
+/// `newline` is set. An empty stack raises `stackunderflow` before any
+/// output.
+fn print_top(it: &mut Interp, render: fn(&Object) -> String, newline: bool) -> Result<(), PsError> {
     let obj = it.pop()?;
-    let line = format!("{}\n", obj.repr_bounded(&OPERATOR_LIMITS));
+    let mut line = render(&obj);
+    if newline {
+        line.push('\n');
+    }
     out(it, line.as_bytes(), false)
 }
 
