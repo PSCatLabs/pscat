@@ -241,7 +241,10 @@ fn missing_glyph_warnings_are_capped() {
     let many: String = (0xAC00u32..0xAC00 + 40)
         .filter_map(char::from_u32)
         .collect();
-    let it = run(&format!("{} ({many}) stringwidth pop pop", ufont(10)));
+    let mut it = Interp::with_page(200, 120).expect("test page");
+    it.quiet_stderr();
+    it.run_str(&format!("{} ({many}) stringwidth pop pop", ufont(10)))
+        .expect("run");
     let w = it.font_warnings();
     assert_eq!(w.lines().filter(|l| l.contains("no glyph for")).count(), 32);
     assert_eq!(w.lines().filter(|l| l.contains("not reported")).count(), 1);

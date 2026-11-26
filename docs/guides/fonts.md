@@ -112,6 +112,11 @@ Unicode-mode, and now fall back the same way (an emoji in Korean text works).
 `examples/unicode_text.ps` is a specimen: a text-message conversation, film
 credits and signs.
 
+The emoji artwork is Twemoji, under CC BY 4.0. A render with an emoji in it
+carries that art, so a shared image or video credits it, for example: "Emoji
+graphics by Twemoji (Twitter, Inc and other contributors), CC BY 4.0"
+(`THIRD_PARTY_NOTICES.md`, "Colour emoji").
+
 ## Placing each glyph: xshow, yshow, xyshow and cshow
 
 `show` moves the current point by each glyph's own width. The Level 2

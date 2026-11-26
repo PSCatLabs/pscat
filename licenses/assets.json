@@ -103,6 +103,22 @@
       "notes": "Twemoji 14.0.1 as Mozilla's COLR font, twemoji-colr 0.7.0, unchanged; the art is CC BY 4.0 (attribution required), the font-building code Apache-2.0; see fonts/emoji/PROVENANCE.md. Compiled in with include_bytes! (src/font/unicode.rs, issue #1425)."
     },
     {
+      "id": "review-log-1425-emoji-renders",
+      "paths": [
+        "docs/dev/review-log/*/1425-unicode-text-emoji/*.png"
+      ],
+      "license": "CC-BY-4.0",
+      "copyright": "Renders by the pscat contributors containing Twemoji graphics (Twitter, Inc and other contributors)",
+      "ships_in": [
+        "repo-only"
+      ],
+      "license_files": [
+        "fonts/emoji/LICENSE.md",
+        "fonts/emoji/PROVENANCE.md"
+      ],
+      "notes": "Before/after renders for issue #1425's perceptual review; the emoji in them are Twemoji art, CC BY 4.0, credited in THIRD_PARTY_NOTICES.md (\"Colour emoji\")."
+    },
+    {
       "id": "font-AbrilFatface",
       "paths": [
         "fonts/catalog/AbrilFatface/**"
