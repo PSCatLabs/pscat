@@ -75,16 +75,19 @@ the stick's contact patch meets raised tooth.
   profile of its place in the whole stroke: a crayon's landing stays at its
   start, a charcoal stick's flicked lift comes only with `/To 1`, and
   `/Wear` is the whole stroke's, and `/From 0 /To t` for a growing `t` leaves what is
-  already drawn alone. Measured: behind the pen's last dozen points,
-  frames 5% apart differ by up to about 13 of 255 levels (edge
-  anti-aliasing), except now and then (about one frame in 14, charcoal
-  more than crayon or `dkstroke`) where a few hundred texture pixels
-  along the drawn part change, by up to about 80 levels (cause not isolated; dcchalk
-  shows the same). Two adjacent pieces drawn on one canvas make the
-  whole to within about 75 levels at the seam, on a few pixels. A caller
-  that keeps its canvas can draw `/From prev /To now` each frame, down to
-  pieces a few tenths of a width long (each piece ends in a round cap
-  that overdraws the last); shorter ones should redraw `/From 0 /To t`.
+  already drawn alone: behind the pen's last dozen points, every pixel is
+  the same from frame to frame, through to `/To 1`. (Each run is inked,
+  thinned for its catch and chunked as its whole run is; a stroke long
+  enough for drykit to draw in several chunks, thousands of points, may
+  still change once at `/To 1`.) A piece ends round at `/To` and starts
+  flat at a `/From` cut, so two adjacent pieces drawn on one canvas make
+  the whole to within about 25 levels at the seam, on a few pixels. A
+  caller that keeps its canvas can draw `/From prev /To now` each frame:
+  300 pieces a fifth of a width long keep the stroke's weight to within a
+  few percent. Much shorter pieces (a twentieth of a width, under a
+  device pixel) come out a little lighter and flatter, from the
+  anti-aliased edge at every cut (about 10% on charcoal), so redraw
+  `/From 0 /To t` for those.
   The catch and the ink cost in proportion to the part, though the walk
   and the profile are worked out for the whole stroke (a tenth of a long
   zigzag, start-up included: 0.09 s against 0.24 s for `dkstroke`, 0.08
@@ -95,8 +98,10 @@ the stick's contact patch meets raised tooth.
   `dkstroke-from-must-not-exceed-to` (and `dycrayon-...` the same).
   Fallout particles are all placed as for the whole stroke and drawn only
   where their place is within the range, so none falls ahead of the pen.
-  `dcchalk` has the same two keys, cut a different way (it shapes the
-  polyline first, then cuts it), and a seam within a few tens of levels.
+  `dcchalk` has the same two keys: it shapes the polyline first, then
+  hands drykit the whole stroke with the range, so a tip stroke is cut
+  exactly as here (a `/Tilt` side stroke's lanes are still cut by
+  drychalk itself).
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
@@ -156,16 +161,17 @@ newpath 40 60 moveto 300 80 lineto
     shaped it. The part is drawn with the pressure, width, texture and
     dust the whole stroke has there, so `/From 0 /To t` with a growing
     `t` grows a stroke without changing the part already drawn (its
-    texture and dust stay; behind the pen's last dozen widths nothing
-    moves between frames, except that drykit draws a long stroke in
-    chunks and where a growing stroke crosses one, its edge pixels shift
-    once by up to about 40 of 255 levels). `/To 0.5` plus `/From 0.5`
-    make the whole, to within about 40 of 255 levels at the seam (up to about
-    110 with `/Tilt`, on a few percent of the ink). A caller that
-    keeps its canvas can draw `/From prev /To now` each frame instead;
-    that holds for pieces down to a few tenths of a width, and much
-    shorter pieces overdraw their own round ends and lose texture, so
-    redraw `/From 0 /To t` for those. A long stroke's part
+    texture and dust stay; behind the pen's last dozen widths no pixel
+    moves between frames; with `/Tilt`, whose lanes drychalk cuts itself,
+    a lane's edge pixels may shift once by up to about 40 of 255 levels).
+    `/To 0.5` plus `/From 0.5` make the whole, to within a few levels at
+    the seam (up to about 110 with `/Tilt`, on a few percent of the ink).
+    A caller that keeps its canvas can draw `/From prev /To now` each
+    frame instead: each piece starts flat where the last one ended, so
+    pieces down to a fifth of a width keep the stroke's weight, and only
+    much shorter ones (under a device pixel) come out somewhat lighter
+    (about 13% at a twentieth of a width), so redraw `/From 0 /To t` for
+    those. A long stroke's part
     costs in proportion to its length, so a board written over time pays
     for what each frame adds, not the whole stroke. The stroke's landing
     belongs to the piece that holds `/From 0`, its lift to the one that

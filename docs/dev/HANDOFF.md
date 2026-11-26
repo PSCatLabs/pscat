@@ -1280,24 +1280,33 @@ renders eight examples in both and compares block-downsampled output).
    (`notes/1080-718-1087-chalk-input-checks.md`).
    #1409: dcchalk's `/From`/`/To` (0..1) draw part of each stroke by arc length
    (after /Hand and /Corners). The stroke's variation, profile (`dcT*`, `dcL`, `dcdot`)
-   is computed on the WHOLE polyline; only the polyline handed to `dkstroke` is cut
-   (`dcpiece`, over `dctrim`) and `/Touch`/`/Pressure` read `From + t (To - From)`. Dust
+   is computed on the WHOLE polyline. Since #1419 a tip stroke hands drykit the whole
+   polyline with `/From`/`/To` (drykit cuts it, see below); a `/Tilt` side stroke's lanes are
+   still cut by drychalk (`dcpiece`, over `dctrim`, `/Touch`/`/Pressure` read
+   `From + t (To - From)`; #1420 is about moving them too). Dust
    draws every speck's random numbers in order and fills only those whose arc position
    is in `[From, To)` (To 1 closed), so pieces partition the dust. Gotchas: `dctrim`
    returns the WHOLE polyline when nothing is left (hence `dcpiece` decides empty
    first); dots/zero-length strokes belong to the piece holding t = 0.5; the default
-   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. Measured: frames
-   3-4% apart leave the drawn part pixel-identical behind the pen's last ~12 widths, except
-   one edge-AA shift (<= ~43/255, edge rows only) where the stroke crosses a drykit chunk
-   boundary (proposed drykit follow-up: stable chunking). Incremental `/From prev /To now`
-   pieces are fine down to ~0.3 widths; much shorter ones overdraw their round caps and
-   lose texture (N=1500 pieces on a 190pt line: visibly greyer), so prefer `/From 0 /To t`.
-   drykit walks a piece's stops from its own start, so a seam is within ~40 levels (tip; up to ~110 and a few % of ink clearly different with /Tilt, where a lane flips on or off),
-   not exact, and a /Tilt piece past 0 draws its lanes' dropout chain afresh (the lane seed
+   path (From 0, To 1) is untouched code (`dcPart` false), byte-identical. #1418 gave
+   `dkstroke`/`dycrayon`/`dhstroke` the same keys, cut in drykit after the whole subpath
+   is resolved (`dkFrun`). #1419 made a growing part exact: the one-frame shimmer was NOT a
+   chunk boundary but `dkZink`'s two ink branches (a round-capped `stroke` for a
+   constant-width run, a filled disc-and-quad union otherwise) anti-aliasing differently,
+   so a cut run flipped branch when it first reached a change of width; and `dkZthin`'s
+   step came from the cut run's length. Now a part's stops are `[x y hw ref]`, `ref`
+   = `[flags hwmax canvaslength n]` of the WHOLE run (flags: 2 width varies, 1 cut at its
+   start), and the ink branch, the thinning step and `dkZgroup`'s chunk reach use it; a run
+   cut at its start is clipped flat (`dkZbehind`), so incremental pieces do not paint their
+   faint level and halo back over the last piece. Gotchas: anything that destructures a
+   stop must take 4 slots (`0 3 getinterval`); a run split into chunks still thins and
+   inks each chunk by its own stops when drawn whole, so a stroke long enough to chunk
+   (thousands of points) may change once at `/To 1`; incremental pieces under a device
+   pixel long lose ~10% weight to AA at every cut (no fix in PostScript), so prefer
+   `/From 0 /To t` (`notes/1419-drykit-stable-growing-parts.md`). A `/Tilt` chalk piece
+   past 0 draws its lanes' dropout chain afresh (the lane seed
    is mixed with From: with the whole lane's seed alone, a lane that starts "off" stayed
-   off in every incremental piece, review finding on #1416). `dkstroke`/`dycrayon`/`dhstroke`
-   do not take the keys (their profiles live in drykit/drycrayon/drycharcoal;
-   `notes/1409-drychalk-from-to.md`).
+   off in every incremental piece, review finding on #1416; #1420).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

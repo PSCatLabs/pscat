@@ -53,3 +53,5 @@ of a longer run, but that is not shown. Not chased further.
 **Proposed follow-ups.** (1) Find why a longer run re-textures the whole of its drawn part (not chunking, not thinning), and make a prefix stable. (2) Move `dcchalk` onto drykit's
 `/From /To` (drops `dcpiece`, the touch remap and the lane-seed mixing; changes its partial output).
 (3) Cap-less interior ends for sub-width incremental pieces (as in #1409).
+
+**Update (#1419).** The occasional shift is explained and fixed: the cut run switched `dkZink` branch (stroke to fill) when it first reached a change of width, and `dkZthin` took its step from the cut run. Parts now use the whole run's branch, thinning step and chunk reach (`notes/1419-drykit-stable-growing-parts.md`).
