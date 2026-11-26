@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has five
+//! a server that gives programs a few operators of its own. It has seven
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -25,6 +25,13 @@
 //! - **Interruption.** [`Interp::set_interrupt`] gives the interpreter a flag
 //!   another thread can raise to stop a running program with
 //!   [`PsError::Interrupted`].
+//! - **Virtual files.** [`Interp::add_virtual_file`] serves a named source
+//!   from memory to `run` and `(name) (r) file`, so a program can load
+//!   `components/foo.ps` where no disk (or no right to read it) exists.
+//! - **A raster under the transformation.** [`Interp::draw_page`] paints a
+//!   [`Page`](crate::Page) the host holds through the current transformation,
+//!   clip, `setalpha` and `setblendmode`, as `image` paints a program's own
+//!   samples.
 //!
 //! The canvas itself is reached through [`Page`](crate::Page):
 //! [`Interp::swap_canvas`](crate::Interp::swap_canvas) exchanges the raster a
@@ -66,6 +73,33 @@ use crate::object::{Dict, Object, OpFn, Operator, Value as Raw};
 /// The most operators one interpreter can have registered with
 /// [`Interp::register_operator`].
 pub const MAX_HOST_OPERATORS: usize = 256;
+
+pub use crate::virtual_files::{
+    MAX_VIRTUAL_FILE_BYTES, MAX_VIRTUAL_FILES, MAX_VIRTUAL_TOTAL_BYTES,
+};
+
+/// The largest raster (in pixels) [`Interp::draw_page`] embeds in SVG or PDF
+/// output. PNG output paints the host's page in place and needs no copy, so
+/// it has no such limit; the recorders keep a straight-alpha copy of the
+/// pixels (and, for SVG, its PNG encoding), which this bounds.
+pub const MAX_EMBEDDED_RASTER_PIXELS: usize = 16 << 20;
+
+/// How [`Interp::draw_page`] reads a raster where it is scaled.
+///
+/// `Nearest` takes the pixel that contains each device pixel's centre, as
+/// `image` does; it keeps hard pixel edges and is what a 1:1 placement
+/// reproduces exactly. `Bilinear` blends the four nearest pixels, which is
+/// what a rotated or enlarged layer of soft art wants. Both leave the edge of
+/// the raster anti-aliased.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Sampling {
+    /// The nearest pixel.
+    #[default]
+    Nearest,
+    /// A bilinear blend of the four nearest pixels.
+    Bilinear,
+}
 
 /// How deep [`Interp::pop_value`] and [`Interp::lookup`] follow nested arrays
 /// and dictionaries before giving the rest back as [`Value::Other`]. A
@@ -1117,5 +1151,64 @@ impl Interp {
         self.interrupt
             .as_ref()
             .is_some_and(|f| f.load(Ordering::Relaxed))
+    }
+}
+
+impl Interp {
+    /// Serve `bytes` to programs under `name`: `(name) run`, `(name) (r) file`,
+    /// `readreals` and `status` then read these bytes, with no disk involved.
+    /// A second registration of the same name replaces the first. A program
+    /// that was already running a file under the name keeps its own copy.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::new();
+    /// interp.add_virtual_file("components/dot.ps", "/dot { 3 3 moveto } def")?;
+    /// interp.run_str("(components/dot.ps) run dot currentpoint")?;
+    /// assert_eq!((interp.pop_f64()?, interp.pop_f64()?), (3.0, 3.0));
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    ///
+    /// The name is matched whole and exactly (one leading `./` is ignored),
+    /// and wins over a disk file and the embedded `lib/` copy of the same
+    /// name, so a host can replace a library. Any other name is resolved as
+    /// before: registering files changes nothing else, and under read roots
+    /// ([`set_read_roots`](Self::set_read_roots)) an unregistered name outside
+    /// them is still `invalidfileaccess`. Virtual files are not disk reads, so
+    /// the roots do not gate them. Only reading is served: opening one for
+    /// writing, `deletefile`, `renamefile` and `filenameforall` do not see
+    /// them. An error inside a file `run` this way is reported with the name
+    /// (`error_details().file`, the backtrace frames, `currentfilename`).
+    ///
+    /// Refused, with nothing changed: an empty name or one with a NUL
+    /// (`rangecheck`); a name that starts with `%` (a device) or has a `..`
+    /// component (`invalidfileaccess`); a file over
+    /// [`MAX_VIRTUAL_FILE_BYTES`], a store that would pass
+    /// [`MAX_VIRTUAL_FILES`] files or [`MAX_VIRTUAL_TOTAL_BYTES`] bytes
+    /// (`limitcheck`).
+    ///
+    /// Each read of a virtual file copies it into the program's file object,
+    /// and is charged like reading that many bytes from disk (a step per KiB
+    /// against `--max-steps`, the memory cap checked before the copy), so a
+    /// program that loads a large file in a loop meets its limits.
+    pub fn add_virtual_file(
+        &mut self,
+        name: &str,
+        bytes: impl Into<Vec<u8>>,
+    ) -> Result<(), PsError> {
+        self.virtual_files.add(name, bytes.into())
+    }
+
+    /// Stop serving `name` (see [`add_virtual_file`](Self::add_virtual_file));
+    /// whether it was registered. Reads of it fall back to the ordinary
+    /// search order.
+    pub fn remove_virtual_file(&mut self, name: &str) -> bool {
+        self.virtual_files.remove(name)
+    }
+
+    /// The bytes of a registered virtual file, shared, for the readers of
+    /// files (`run`, `file`, `readreals`, `status`). `None` when `name` is
+    /// not registered; the caller charges the copy it makes.
+    pub(crate) fn virtual_file(&self, name: &str) -> Option<std::rc::Rc<[u8]>> {
+        self.virtual_files.get(name)
     }
 }

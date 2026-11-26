@@ -62,6 +62,14 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// the bytes arrive, so `(/dev/zero) (r) file` or a FIFO ends in a limit
 /// error instead of running on inside this one operator (issue #702).
 pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
+    // A host's virtual file (#1407) answers before the search order does. It
+    // is memory, not disk: read roots do not gate it, and the copy it makes
+    // is charged as a read of that size, before it is made.
+    if let Some(bytes) = it.virtual_file(name) {
+        it.poll_limits((bytes.len() / 1024) as u64)?;
+        it.check_alloc(bytes.len())?;
+        return Ok(bytes.to_vec());
+    }
     // A program reads back what it wrote, closed or not (issue #762). A
     // file whose write failed reports that itself, not through this read.
     let _ = it.flush_files();
@@ -562,6 +570,10 @@ fn status(it: &mut Interp) -> Result<(), PsError> {
 /// a root costs nothing and the execution limits have nothing to meter.
 fn status_fields(it: &mut Interp, name: &str) -> Option<[i64; 4]> {
     use std::cell::RefCell;
+    // A host's virtual file (#1407): in memory, no times.
+    if let Some(bytes) = it.virtual_file(name) {
+        return Some([bytes.len().div_ceil(512) as i64, bytes.len() as i64, 0, 0]);
+    }
     // What a program wrote is on disk before it asks.
     let _ = it.flush_files();
     let stat: RefCell<Option<[i64; 4]>> = RefCell::new(None);

@@ -1207,6 +1207,18 @@ impl BlendMode {
     }
 }
 
+/// Where a host raster lands on the canvas (`Gfx::plan_raster`, #1407).
+pub(crate) struct RasterPlan {
+    /// The raster's pixels to device space.
+    t: Transform,
+    /// The raster's footprint in device space, cut to a guard rectangle
+    /// around the canvas.
+    poly: Vec<(f64, f64)>,
+    /// Device pixels of the canvas (and the band's rows) the footprint's
+    /// box reaches: the work of painting it.
+    pub(crate) area: u64,
+}
+
 /// The alpha/blend pair a recorded paint carries into `--svg`/`--pdf`
 /// (issue #47) — bundled rather than threaded through the exporters'
 /// already-long per-element signatures as two more positional
@@ -4166,6 +4178,149 @@ impl Gfx {
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(svg) = &mut self.svg {
             svg.image(png, w, h, t, interpolate, comp, &chain);
+        }
+    }
+
+    /// Where a host raster of `w` x `h` pixels lands under the current
+    /// transformation (#1407): its first row along the unit square's top
+    /// edge, as `w h 8 [w 0 0 -h 0 h] image` has it. `None` when it paints
+    /// nothing: `nulldevice` or a metrics-only run, an uncoloured pattern
+    /// (whose `PaintProc` takes no colour data), a transformation that is
+    /// singular or not finite, or a footprint wholly off the canvas (or the
+    /// band's rows).
+    pub(crate) fn plan_raster(&self, w: u32, h: u32) -> Option<RasterPlan> {
+        if self.painting_off() || self.capturing_uncolored() {
+            return None;
+        }
+        let ctm = self.state.ctm;
+        let finite = [ctm.sx, ctm.kx, ctm.ky, ctm.sy, ctm.tx, ctm.ty]
+            .iter()
+            .all(|v| v.is_finite());
+        if !finite || ctm.invert().is_none() {
+            return None;
+        }
+        // Raster pixels to the unit square, then to the device.
+        let to_unit = Transform::from_row(1.0 / w as f32, 0.0, 0.0, -1.0 / h as f32, 0.0, 1.0);
+        let t = ctm.pre_concat(to_unit);
+        let (cw, ch) = (self.pixmap.width() as f64, self.pixmap.height() as f64);
+        let corner = |ux: f64, uy: f64| {
+            (
+                f64::from(ctm.sx) * ux + f64::from(ctm.kx) * uy + f64::from(ctm.tx),
+                f64::from(ctm.ky) * ux + f64::from(ctm.sy) * uy + f64::from(ctm.ty),
+            )
+        };
+        let quad = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].map(|(x, y)| corner(x, y));
+        if quad.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+            return None;
+        }
+        // tiny-skia's anti-aliased fill panics on corners around 1e9 device
+        // pixels away (see `shfill_limited`): fill the part inside a guard
+        // rectangle, which holds every pixel the canvas has.
+        let poly = clip_polygon(&quad, (-cw, -ch, 2.0 * cw, 2.0 * ch));
+        if poly.len() < 3 {
+            return None;
+        }
+        let (mut y0, mut y1) = (0.0_f64, ch);
+        if let Some((top, bottom)) = self.band_rows() {
+            y0 = y0.max(f64::from(top));
+            y1 = y1.min(f64::from(bottom));
+        }
+        let (mut bx0, mut by0, mut bx1, mut by1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(x, y) in &poly {
+            bx0 = bx0.min(x);
+            by0 = by0.min(y);
+            bx1 = bx1.max(x);
+            by1 = by1.max(y);
+        }
+        let (dx, dy) = (
+            (bx1.min(cw).ceil() - bx0.max(0.0).floor()).max(0.0),
+            (by1.min(y1).ceil() - by0.max(y0).floor()).max(0.0),
+        );
+        if dx == 0.0 || dy == 0.0 {
+            return None;
+        }
+        Some(RasterPlan {
+            t,
+            poly,
+            area: (dx * dy) as u64,
+        })
+    }
+
+    /// Paint a host raster where [`plan_raster`](Self::plan_raster) put it,
+    /// with the current clip, alpha and blend mode, and record it for SVG
+    /// and PDF output as an image (#1407). The caller has charged the work.
+    pub(crate) fn place_raster(&mut self, src: &Pixmap, plan: &RasterPlan, smooth: bool) {
+        self.prepare_paint();
+        let (w, h) = (src.width() as usize, src.height() as usize);
+        let t = [
+            plan.t.sx, plan.t.ky, plan.t.kx, plan.t.sy, plan.t.tx, plan.t.ty,
+        ];
+        if self.svg_wanted() {
+            // An image embedded in an SVG, not a file pscat writes: no resolution to record.
+            #[allow(clippy::disallowed_methods)]
+            let encoded = src.encode_png();
+            if let Ok(png) = encoded {
+                self.svg_image(&png, w, h, t, smooth);
+            }
+        }
+        if self.pdf_wanted() {
+            let mut rgb = Vec::with_capacity(w * h * 3);
+            let mut alpha = Vec::with_capacity(w * h);
+            for px in src.pixels() {
+                let c = px.demultiply();
+                rgb.extend_from_slice(&[c.red(), c.green(), c.blue()]);
+                alpha.push(c.alpha());
+            }
+            // An opaque raster needs no soft mask.
+            let data = if alpha.iter().all(|&a| a == 255) {
+                crate::pdf::ImageData::Rgb(rgb)
+            } else {
+                crate::pdf::ImageData::RgbA { rgb, alpha }
+            };
+            self.pdf_image(w, h, data, t, smooth);
+        }
+        let comp = self.composite();
+        let opacity = if comp.alpha.is_nan() { 0.0 } else { comp.alpha };
+        let quality = if smooth {
+            tiny_skia::FilterQuality::Bilinear
+        } else {
+            tiny_skia::FilterQuality::Nearest
+        };
+        let paint = Paint {
+            shader: tiny_skia::Pattern::new(
+                src.as_ref(),
+                SpreadMode::Pad,
+                quality,
+                opacity,
+                plan.t,
+            ),
+            blend_mode: comp.blend.to_skia(),
+            anti_alias: true,
+            // As `paint()`: the f32 pipeline, so a stack of faint layers
+            // rounds as a fill's does (#731).
+            force_hq_pipeline: true,
+            ..Default::default()
+        };
+        let mut pb = PathBuilder::new();
+        for (i, &(x, y)) in plan.poly.iter().enumerate() {
+            let (x, y) = (x as f32, y as f32);
+            if i == 0 {
+                pb.move_to(x, y);
+            } else {
+                pb.line_to(x, y);
+            }
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            let mask = self.clip_mask_data();
+            self.pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                mask.as_deref(),
+            );
+            self.dirty = true;
         }
     }
 

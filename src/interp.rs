@@ -667,6 +667,9 @@ pub struct Interp {
     /// Directories the program may read files from (issue #763); `None`
     /// (the default) reads wherever the search order finds a file.
     read_roots: Option<crate::read_roots::ReadRoots>,
+    /// Named in-memory files served to `run` and `file` (#1407); empty
+    /// unless a host called `add_virtual_file`.
+    pub(crate) virtual_files: crate::virtual_files::VirtualFiles,
     /// Disk files the program has open for writing (issue #762), weakly:
     /// a file nothing refers to any more drops, closing its descriptor and
     /// flushing itself. Counted against [`MAX_OPEN_OUTPUT_FILES`] and
@@ -924,6 +927,7 @@ impl Interp {
             decode_budget: Rc::default(),
             write_roots: Default::default(),
             read_roots: None,
+            virtual_files: Default::default(),
             open_outputs: Vec::new(),
             lost_write: Rc::new(Cell::new(false)),
             bytes_written: Arc::new(AtomicU64::new(0)),

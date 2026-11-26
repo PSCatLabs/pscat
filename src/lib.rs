@@ -174,6 +174,7 @@ pub mod limits;
 pub mod memtrack;
 pub mod page;
 pub mod syntax;
+pub(crate) mod virtual_files;
 // `sheet`, `chalkboard` and `catalog` are facades over the hidden
 // `contact_sheet`, `chalk` and `capabilities` modules (issue #1098): they
 // take and return `Page`, never a tiny-skia type, so tiny-skia stays a
