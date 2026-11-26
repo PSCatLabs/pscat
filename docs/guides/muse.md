@@ -5,7 +5,7 @@ worked; the staging preview of the hosted route has been paused since 2026-11-18
 not re-checked is at the end of this page). pscat is
 a PostScript interpreter in Rust: it renders PostScript to PNG, SVG and PDF,
 writes handwriting-style notes, and draws LaTeX formulas on a chalkboard. This
-page covers 0.7.0-rc.5, a GitHub pre-release.
+page covers 0.7.1.
 
 Muse has no plugin marketplace and no MCP slot you click to install pscat.
 Instead you ask Muse to set up a small connector in its own workspace: paste
@@ -29,15 +29,15 @@ For the other clients (Claude Code, Codex, ChatGPT) see
 
 What you need: Muse, with a workspace on a machine the prebuilt binary runs on.
 No Rust toolchain is needed. The release has these archives (all in
-<https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.5>):
+<https://github.com/PSCatLabs/pscat/releases/tag/v0.7.1>):
 
 | Platform | Archive |
 | --- | --- |
-| Linux, x86_64 | `pscat-0.7.0-rc.5-x86_64-unknown-linux-musl.tar.gz` |
-| Linux, ARM64 | `pscat-0.7.0-rc.5-aarch64-unknown-linux-musl.tar.gz` |
-| macOS, Apple silicon | `pscat-0.7.0-rc.5-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `pscat-0.7.0-rc.5-x86_64-apple-darwin.tar.gz` |
-| Windows, x86_64 | `pscat-0.7.0-rc.5-x86_64-pc-windows-msvc.zip` |
+| Linux, x86_64 | `pscat-0.7.1-x86_64-unknown-linux-musl.tar.gz` |
+| Linux, ARM64 | `pscat-0.7.1-aarch64-unknown-linux-musl.tar.gz` |
+| macOS, Apple silicon | `pscat-0.7.1-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `pscat-0.7.1-x86_64-apple-darwin.tar.gz` |
+| Windows, x86_64 | `pscat-0.7.1-x86_64-pc-windows-msvc.zip` |
 
 The prompt below names the Linux x86_64 archive, which is what Muse's workspace
 used in the owner's test. If Muse's workspace is something else (ask it to run
@@ -47,16 +47,16 @@ ask Muse to pick the matching asset itself.
 Copy and paste this into Muse:
 
 ```text
-Install pscat 0.7.0-rc.5 locally for me as a custom MCP connector. Download the
+Install pscat 0.7.1 locally for me as a custom MCP connector. Download the
 prebuilt Linux x86_64 release from
-https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.5/pscat-0.7.0-rc.5-x86_64-unknown-linux-musl.tar.gz
+https://github.com/PSCatLabs/pscat/releases/download/v0.7.1/pscat-0.7.1-x86_64-unknown-linux-musl.tar.gz
 and the SHA256SUMS file from the same release
-(https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.5/SHA256SUMS).
+(https://github.com/PSCatLabs/pscat/releases/download/v0.7.1/SHA256SUMS).
 Compare the archive's SHA-256 with its line in SHA256SUMS, and stop if they
 differ. Extract the archive into ~/workspace/custom-connectors/custom.pscat/bin/
 without its top-level folder (tar -xzf <archive> --strip-components=1 -C <bin>),
 so that pscat, pscat-mcp and lib/ sit together in bin/. Keep them together.
-Confirm bin/pscat --version says 0.7.0-rc.5. Create
+Confirm bin/pscat --version says 0.7.1. Create
 ~/workspace/custom-connectors/custom.pscat/output/ first, then start the MCP
 server over stdio with protocol 2025-11-25 as
 <the absolute path of bin/pscat-mcp> --out-root <the absolute path of that
@@ -71,7 +71,7 @@ reusable skill so a later session can find it.
 
 What Muse should report back:
 
-- `pscat --version` says 0.7.0-rc.5, and the SHA-256 matched the release's
+- `pscat --version` says 0.7.1, and the SHA-256 matched the release's
   `SHA256SUMS`.
 - `tools/list` returns 10 tools: `render_postscript`, `eval_postscript`,
   `handwrite`, `chalkboard_math`, `review_sheet`, `describe_art_capabilities`,
@@ -98,12 +98,6 @@ Notes on the prompt:
   `out_path` off if that is `/`.
 - Check the hash against the release's `SHA256SUMS`, not against a number
   copied into a guide or a chat, which can go stale.
-
-<!-- rc-only: delete at 0.7.0 (docs/dev/RELEASING.md) -->
-Do not use `cargo install pscat` or `npm install pscat` for this version. Both
-still give 0.6.3, which has only 4 MCP tools, no `chalkboard_math` and no
-`pscat chalk` command. 0.7.0-rc.5 is a GitHub pre-release only: it is not on
-crates.io, npm or the MCP Registry.
 
 ## Option B: hosted server (the staging preview is paused)
 
@@ -170,10 +164,6 @@ Two things worth knowing:
 
 ## Troubleshooting
 
-<!-- rc-only: delete the next bullet at 0.7.0 (docs/dev/RELEASING.md) -->
-- **Muse reports 0.6.3, or only 4 tools.** You have the old stable release.
-  Install 0.7.0-rc.5 from the GitHub release in Option A, not from cargo or
-  npm.
 - **The hosted server answers `401 Unauthorized`.** The anonymous preview
   ended on 2026-11-18 (see Option B). Use Option A.
 - **The binary will not run ("cannot execute", "exec format error").** The
