@@ -103,7 +103,8 @@ fn a_virtual_name_shadows_disk_and_the_embedded_lib_and_others_fall_through() {
     it.run_str("(lib/functional.ps) run").unwrap();
 
     // Registered under the same names: the host's bytes win.
-    it.add_virtual_file(dir.join("on_disk.ps").to_str().unwrap(), "(memory)")
+    // Registered under the spelling the program uses (`/` separators).
+    it.add_virtual_file(&common::ps_path(&dir.join("on_disk.ps")), "(memory)")
         .unwrap();
     it.add_virtual_file("lib/functional.ps", "/replaced true def")
         .unwrap();
@@ -131,20 +132,19 @@ fn read_roots_do_not_gate_a_virtual_file_but_still_gate_everything_else() {
     let mut it = interp();
     it.set_read_roots(&[&root]).unwrap();
     it.add_virtual_file("components/foo.ps", "42").unwrap();
-    it.add_virtual_file("/not/a/root/known.ps", "43").unwrap();
+    let known = dir.join("known.ps");
+    it.add_virtual_file(&common::ps_path(&known), "43").unwrap();
 
     it.run_str("(components/foo.ps) run").unwrap();
     assert_eq!(it.pop_int().unwrap(), 42);
-    it.run_str("(/not/a/root/known.ps) run").unwrap();
+    it.run_str(&format!("{} run", lit(&known))).unwrap();
     assert_eq!(it.pop_int().unwrap(), 43);
 
     // Names nobody registered keep the read-root rules.
     let src = format!("{} run", lit(&outside));
     assert_eq!(it.run_str(&src), Err(PsError::InvalidFileAccess));
-    assert_eq!(
-        it.run_str("(/not/a/root/other.ps) run"),
-        Err(PsError::InvalidFileAccess)
-    );
+    let other = format!("{} run", lit(&dir.join("other.ps")));
+    assert_eq!(it.run_str(&other), Err(PsError::InvalidFileAccess));
     assert_eq!(
         it.run_str("(components/../x.ps) run"),
         Err(PsError::InvalidFileAccess)
