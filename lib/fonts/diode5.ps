@@ -13,8 +13,13 @@
 %   /Diode5 findfont 5 scalefont setfont   % one lamp pitch per unit
 %   0 0 moveto (HELLO 42) show
 %
-% Five scalefont puts one lamp on one unit: a 65x5 page at 72 dpi is a
-% 65x5 LED strip at its true size, one device pixel per lamp.
+% Five scalefont puts one lamp pitch on one unit. For a raw grid (a 65x5
+% page at 72 dpi as a real 65x5 strip, one device pixel per lamp, each
+% fully on or off) use square marks the size of the pitch:
+%
+%   /Diode5-Grid /Diode5 << /DotShape /square /DotSize 1 >> pf-variant
+%
+% The default round lamps need a few device pixels each to read as lamps.
 %
 % Dials (read from the font dict at BuildChar time; make a variant with
 % pf-variant or the copy-and-definefont idiom, never by putting into a
@@ -27,7 +32,9 @@
 %   /Diode5-Pixel /Diode5 << /DotShape /square /DotSize 1 >> pf-variant
 %
 % /Diode5 findfont /Bitmaps get /A get is the A's rows, top to bottom,
-% '#' lit and '.' dark, for a program that drives a real LED grid.
+% '#' lit and '.' dark, for a program that drives a real LED grid. Look a
+% character up through the Encoding (code -> glyph name -> /Bitmaps):
+% lowercase has no bitmaps of its own here.
 %
 % Provenance: an original design drawn for pscat in 2026 on this grid,
 % not traced, converted or copied from any existing font. At five rows

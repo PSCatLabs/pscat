@@ -834,7 +834,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "Diode7",
         CapabilityKind::Type3Face,
-        "LED sign font seven lamps high (plus one descender row), proportional, round lamps in the current colour. 8 scalefont = one unit per lamp, for frames at true LED size.",
+        "LED sign font seven lamps high (plus one descender row), proportional, round lamps in the current colour. 8 scalefont = one unit per lamp; for a raw grid at 72 dpi use a square /DotSize 1 variant (pf-variant).",
         &[],
         "lib/fonts/diode7.ps",
         "1 0.15 0.1 setrgbcolor /Diode7 findfont 8 scalefont setfont",
@@ -843,7 +843,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "Diode5",
         CapabilityKind::Type3Face,
-        "LED strip font five lamps high: capitals, digits and ASCII punctuation (a-z print as capitals), proportional, round lamps in the current colour. 5 scalefont = one unit per lamp (a 65x5 strip at true size).",
+        "LED strip font five lamps high: capitals, digits and ASCII punctuation (a-z print as capitals), proportional, round lamps in the current colour. 5 scalefont = one unit per lamp; for a raw 65x5 grid at 72 dpi use a square /DotSize 1 variant (pf-variant).",
         &[],
         "lib/fonts/diode5.ps",
         "/Diode5 findfont 5 scalefont setfont",

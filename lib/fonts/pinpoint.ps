@@ -16,7 +16,8 @@
 %   /Pinpoint-NLQ findfont 18 scalefont setfont
 %   36 700 moveto (INVOICE 0042  Qty 3 @ $1.25) show
 %
-% Nine scalefont puts one dot pitch on one unit.
+% Nine scalefont puts one dot pitch on one unit; round dots need a few
+% device pixels each to read as dots.
 %
 % Dials (read from the font dict at BuildChar time; make a variant with
 % pf-variant or the copy-and-definefont idiom, never by putting into a

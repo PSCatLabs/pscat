@@ -15,7 +15,8 @@
 %
 % puts one font pixel on one unit: at 16 points and 72 dpi the glyphs
 % land on whole device pixels. /Phosphor-Scan is the same face with the
-% dark gap between scan lines that a CRT shows.
+% dark gap between scan lines that a CRT shows; the gap needs at least
+% two device pixels per font pixel (32 points at 72 dpi) to show.
 %
 % Dials (read from the font dict at BuildChar time; make a variant with
 % the copy-and-definefont idiom, or pf-variant below, never by putting

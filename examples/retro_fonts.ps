@@ -114,9 +114,10 @@
 1 0.68 0.08 setrgbcolor
 /Diode5 20 24 194 30 allthree
 0.6 setgray
-(A 65x5 strip at true size (5 pt), and at 6x with the strip outline) 24 60 label
+(A 65x5 strip at 5 pt as a raw grid \(square /DotSize 1 variant\), and at 6x with the strip outline) 24 60 label
 1 0.68 0.08 setrgbcolor
-/Diode5 5 24 40 (HELLO 42 MON) at
+/Diode5-Grid /Diode5 << /DotShape /square /DotSize 1 >> pf-variant
+/Diode5-Grid 5 24 40 (HELLO 42 MON) at
 0.25 setgray 0.5 setlinewidth
 120 24 390 30 rectstroke
 0.2 0.8 1 setrgbcolor

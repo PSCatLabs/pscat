@@ -148,9 +148,14 @@ character ROM:
 All cover printable ASCII (32-126). They draw in the current colour, so a
 green or amber screen and a red sign are one `setrgbcolor`, and the em is the
 cell height in pixels: `16 scalefont` on `/Phosphor`, `9` on `/Pinpoint-*`,
-`8` on `/Diode7` and `5` on `/Diode5` put one font pixel on one unit. At 72 dpi
-and whole-number coordinates a glyph then lands exactly on device pixels, so a
-65x5 page is a 65x5 LED strip at true size.
+`8` on `/Diode7` and `5` on `/Diode5` put one font pixel on one unit. With
+square marks the size of the pitch (`/Phosphor`'s default), 72 dpi and
+whole-number coordinates, a glyph lands exactly on device pixels. For a raw LED
+grid (a 65x5 page as a real 65x5 strip, each lamp fully on or off) make that
+variant of the round-lamp faces:
+`/Diode5-Grid /Diode5 << /DotShape /square /DotSize 1 >> pf-variant`. Round dots
+and scan-line gaps are a look, not a grid: they need at least two device pixels
+per font pixel (a scan gap at 16 points and 72 dpi just dims the text).
 
 ```postscript
 (lib/fonts/phosphor.ps) run
@@ -167,6 +172,7 @@ with `pf-variant`, which every one of these files defines, or with the usual
 copy-and-`definefont` idiom:
 
 ```postscript
+(lib/fonts/phosphor.ps) run
 /Amber-Dots /Phosphor << /DotShape /round /DotSize 0.85 >> pf-variant
 /Amber-Dots findfont 32 scalefont setfont
 ```
@@ -175,7 +181,9 @@ Do not `put` into a defined font to change a dial: Ghostscript makes a defined
 font read-only, and a glyph it has already cached would not change. The glyph
 data is public: `/Diode5 findfont /Bitmaps get /A get` is the A's rows, top to
 bottom, `#` lit and `.` dark, for a program that drives a real LED grid or
-writes a frame at grid size. `examples/retro_fonts.ps` is the specimen:
+writes a frame at grid size. Look a character up through the font's `/Encoding`
+(code, then glyph name, then `/Bitmaps`): `/Diode5` has no lowercase bitmaps,
+its Encoding maps a-z to the capitals. `examples/retro_fonts.ps` is the specimen:
 
 <p><img src="../dev/design/retro_fonts/specimen.png" width="60%" alt="Every glyph of /Phosphor, /Pinpoint-Draft, /Pinpoint-NLQ, /Diode7 and /Diode5, magnified and at true size"/></p>
 
