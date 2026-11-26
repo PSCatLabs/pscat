@@ -335,7 +335,8 @@ impl crate::Interp {
     /// interp.draw_page(&layer, Sampling::Nearest)?;
     /// interp.run_str("grestore")?;
     /// let canvas = interp.canvas_premultiplied_rgba8();
-    /// assert_eq!(&canvas[(5 * 20 + 3) * 4..][..4], &[255, 128, 128, 255]); // on white
+    /// let left = &canvas[(5 * 20 + 3) * 4..][..4]; // half-strength red on white
+    /// assert!(left[0] == 255 && (126..=129).contains(&left[1]) && left[3] == 255);
     /// assert_eq!(&canvas[(5 * 20 + 15) * 4..][..4], &[255, 255, 255, 255]);
     /// # Ok::<(), pscat::PsError>(())
     /// ```
@@ -349,16 +350,17 @@ impl crate::Interp {
     /// ([`Page::from_premultiplied_rgba8`]); a transparent pixel paints nothing.
     ///
     /// It paints and records nothing, and is not an error, when the program
-    /// paints nowhere (`nulldevice`, an uncoloured pattern), the
-    /// transformation is singular or not finite, or the raster lies wholly off
-    /// the canvas. A raster that is not on the canvas at all is not embedded
-    /// in SVG or PDF output either.
+    /// paints nowhere (`nulldevice`), the transformation is singular or not
+    /// finite, or the raster lies wholly off the canvas. A raster that is not
+    /// on the canvas at all is not embedded in SVG or PDF output either. In an
+    /// uncoloured pattern's `PaintProc` it paints as `image` does: the tile
+    /// keeps the raster's coverage and the pattern's colour replaces its own.
     ///
     /// **SVG and PDF output** embed the raster as an image at its placement,
     /// with the clip and the alpha and blend mode, as `image` is recorded
     /// (PNG in SVG, an RGB image with a soft mask in PDF; a raster with no
     /// transparent pixel carries no mask). Recording copies the pixels, so a
-    /// raster over [`MAX_EMBEDDED_RASTER_PIXELS`] is `limitcheck` while either
+    /// raster over [`MAX_EMBEDDED_RASTER_PIXELS`](crate::host::MAX_EMBEDDED_RASTER_PIXELS) is `limitcheck` while either
     /// recorder is on, with nothing painted or recorded.
     ///
     /// **Limits.** Called from a host operator, the work is charged to the

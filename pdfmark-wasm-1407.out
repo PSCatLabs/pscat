@@ -1,0 +1,50 @@
+    Finished `ci` profile [optimized] target(s) in 0.07s
+     Running tests/pdf_pdfmark.rs (target/ci/deps/pdf_pdfmark-1942d9750c4265fe)
+
+running 1 test
+
+thread 'wasm_pdfmark_document_matches_the_cli' (2291712) panicked at tests/pdf_pdfmark.rs:448:5:
+wasm build failed:
+   Compiling pscat v0.7.0-rc.5 (/Users/jeromebanks/dev/postscript_interpreter-issue-1407)
+error[E0425]: cannot find value `MAX_LIB_BYTES` in module `crate::paths`
+   --> src/virtual_files.rs:38:57
+    |
+ 38 | pub const MAX_VIRTUAL_FILE_BYTES: usize = crate::paths::MAX_LIB_BYTES as usize;
+    |                                                         ^^^^^^^^^^^^^ not found in `crate::paths`
+    |
+note: found an item that was configured out
+   --> src/paths.rs:357:18
+    |
+356 | #[cfg(not(target_arch = "wasm32"))]
+    |          ------------------------ the item is gated here
+357 | pub(crate) const MAX_LIB_BYTES: u64 = 64 << 20;
+    |                  ^^^^^^^^^^^^^
+
+error[E0425]: cannot find value `MAX_RESOURCE_BYTES` in module `crate::paths`
+   --> src/virtual_files.rs:45:58
+    |
+ 45 | pub const MAX_VIRTUAL_TOTAL_BYTES: usize = crate::paths::MAX_RESOURCE_BYTES as usize;
+    |                                                          ^^^^^^^^^^^^^^^^^^ not found in `crate::paths`
+    |
+note: found an item that was configured out
+   --> src/paths.rs:363:18
+    |
+362 | #[cfg(not(target_arch = "wasm32"))]
+    |          ------------------------ the item is gated here
+363 | pub(crate) const MAX_RESOURCE_BYTES: u64 = 512 << 20;
+    |                  ^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `pscat` (lib) due to 2 previous errors
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test wasm_pdfmark_document_matches_the_cli ... FAILED
+
+failures:
+
+failures:
+    wasm_pdfmark_document_matches_the_cli
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 19 filtered out; finished in 1.81s
+
+error: test failed, to rerun pass `--test pdf_pdfmark`

@@ -1208,7 +1208,7 @@ impl Interp {
     /// The bytes of a registered virtual file, shared, for the readers of
     /// files (`run`, `file`, `readreals`, `status`). `None` when `name` is
     /// not registered; the caller charges the copy it makes.
-    pub(crate) fn virtual_file(&self, name: &str) -> Option<std::rc::Rc<[u8]>> {
+    pub(crate) fn virtual_file(&self, name: &str) -> Option<std::rc::Rc<Vec<u8>>> {
         self.virtual_files.get(name)
     }
 }

@@ -5,6 +5,11 @@
 use pscat::host::Sampling;
 use pscat::{Interp, Limits, Page, PsError};
 
+use std::sync::Mutex;
+
+/// The cap counts the whole process's heap, so these tests must not overlap.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
@@ -12,6 +17,7 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 /// it is made, uncatchably, and the interpreter is usable afterwards.
 #[test]
 fn a_virtual_file_copy_is_held_to_the_memory_cap() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let mut it = Interp::with_page(10, 10).unwrap();
     let mut big = Vec::new();
     while big.len() < 4 << 20 {
@@ -34,6 +40,7 @@ fn a_virtual_file_copy_is_held_to_the_memory_cap() {
 /// painting (which copies nothing) still works under the same cap.
 #[test]
 fn a_raster_the_recorders_cannot_copy_is_refused_before_anything_changes() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let layer = Page::from_premultiplied_rgba8(800, 800, vec![255; 800 * 800 * 4]).unwrap();
     for record in ["svg", "pdf"] {
         let mut it = Interp::with_page(10, 10).unwrap();

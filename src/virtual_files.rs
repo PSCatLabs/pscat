@@ -33,21 +33,23 @@ use std::rc::Rc;
 
 use crate::error::PsError;
 
-/// The longest one virtual file may be: the same bound a `lib/` file read
-/// from disk has (`paths::MAX_LIB_BYTES`).
-pub const MAX_VIRTUAL_FILE_BYTES: usize = crate::paths::MAX_LIB_BYTES as usize;
+/// The longest one virtual file may be: 64 MiB, the bound a `lib/` file read
+/// from disk has (`paths::MAX_LIB_BYTES`, which the wasm build, with no disk,
+/// does not compile).
+pub const MAX_VIRTUAL_FILE_BYTES: usize = 64 << 20;
 
 /// The most virtual files one interpreter holds.
 pub const MAX_VIRTUAL_FILES: usize = 4096;
 
 /// The most bytes all of one interpreter's virtual files may hold together:
-/// the bound on any one resource read from disk (`paths::MAX_RESOURCE_BYTES`).
-pub const MAX_VIRTUAL_TOTAL_BYTES: usize = crate::paths::MAX_RESOURCE_BYTES as usize;
+/// 512 MiB, the bound on any one resource read from disk
+/// (`paths::MAX_RESOURCE_BYTES`).
+pub const MAX_VIRTUAL_TOTAL_BYTES: usize = 512 << 20;
 
 /// The registered files.
 #[derive(Debug)]
 pub(crate) struct VirtualFiles {
-    files: HashMap<String, Rc<[u8]>>,
+    files: HashMap<String, Rc<Vec<u8>>>,
     total: usize,
     /// [`MAX_VIRTUAL_TOTAL_BYTES`], lowered by the unit tests so that the
     /// bound can be reached without holding half a gigabyte.
@@ -84,8 +86,9 @@ fn valid(name: &str) -> Result<(), PsError> {
 }
 
 impl VirtualFiles {
-    /// The bytes registered under `name`, shared (no copy).
-    pub(crate) fn get(&self, name: &str) -> Option<Rc<[u8]>> {
+    /// The bytes registered under `name`, shared (no copy). Registration moves
+    /// the host's buffer in as it is, so it costs no allocation either.
+    pub(crate) fn get(&self, name: &str) -> Option<Rc<Vec<u8>>> {
         if self.files.is_empty() {
             return None;
         }
@@ -108,7 +111,7 @@ impl VirtualFiles {
         if total > self.max_total {
             return Err(PsError::Limitcheck);
         }
-        self.files.insert(key.to_owned(), Rc::from(bytes));
+        self.files.insert(key.to_owned(), Rc::new(bytes));
         self.total = total;
         Ok(())
     }
@@ -131,8 +134,10 @@ mod tests {
 
     #[test]
     fn the_total_is_bounded_and_a_replacement_counts_net() {
-        let mut v = VirtualFiles::default();
-        v.max_total = 10;
+        let mut v = VirtualFiles {
+            max_total: 10,
+            ..Default::default()
+        };
         v.add("a", vec![0; 6]).unwrap();
         v.add("b", vec![0; 4]).unwrap();
         assert_eq!(v.add("c", vec![0]), Err(PsError::Limitcheck));
