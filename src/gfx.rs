@@ -4184,12 +4184,13 @@ impl Gfx {
     /// Where a host raster of `w` x `h` pixels lands under the current
     /// transformation (#1407): its first row along the unit square's top
     /// edge, as `w h 8 [w 0 0 -h 0 h] image` has it. `None` when it paints
-    /// nothing: `nulldevice` or a metrics-only run, an uncoloured pattern
-    /// (whose `PaintProc` takes no colour data), a transformation that is
+    /// nothing: `nulldevice` or a metrics-only run, a transformation that is
     /// singular or not finite, or a footprint wholly off the canvas (or the
-    /// band's rows).
+    /// band's rows). In an uncoloured pattern's `PaintProc` it paints as
+    /// `image` does: the tile keeps the raster's coverage and the pattern's
+    /// colour replaces its own.
     pub(crate) fn plan_raster(&self, w: u32, h: u32) -> Option<RasterPlan> {
-        if self.painting_off() || self.capturing_uncolored() {
+        if self.painting_off() {
             return None;
         }
         let ctm = self.state.ctm;

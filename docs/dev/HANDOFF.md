@@ -1504,6 +1504,18 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Virtual files and host rasters (#1407, `src/virtual_files.rs`, `Interp::draw_page`,
+  `Gfx::plan_raster`/`place_raster`).** `read_resource` (`run`, `file`, `readreals`) and
+  `status_fields` ask `Interp::virtual_file` first; it is one `HashMap` lookup, skipped when nothing is
+  registered, and it sits outside the search order and read roots on purpose (memory, not disk).
+  `draw_page` charges before it paints (`plan.area / 1024` plus the recorders' pixels, through
+  `host_poll`) and fills the clipped footprint polygon with a tiny-skia `Pattern` shader, never the raw
+  unit square: tiny-skia panics on corners about 1e9 pixels away (`bbox_in_guard`'s reason). SVG and PDF
+  embed the raster through `svg_image`/`pdf_image`, so a new recorder feature for `image` (a new
+  `ImageData` form, a different clip chain) applies here too. A group is closed at the end of a run, so
+  a test of the layer must place from a host operator or between `step_n` slices.
+  `notes/1407-host-virtual-files-and-raster.md`.
+
 - **Procedure bodies keep their source lines in a side table (#1405, `src/srcpos.rs`).**
   `Object` has no room for a position, so the scanner records, per procedure body read from the main
   program or a `run` file, the first element's line and `(element, line)` runs, keyed by the address of
