@@ -89,6 +89,9 @@ fn ledger_value(bits: u64, tag: u8) -> Object {
 /// before eliding to the outermost one (issue #1043).
 const ERROR_CHAIN_LIMIT: usize = 8;
 
+/// The most characters an interpreter reports as having no glyph (#1425).
+const MISSING_GLYPH_NOTES: usize = 32;
+
 /// What a procedure literal (an executable array met in a body) runs as,
 /// so the step loop dispatches it like any operator (#864).
 #[inline(never)]
@@ -555,6 +558,9 @@ pub struct Interp {
     /// (issue #728), so a `save`/`restore` loop warns once per name per
     /// interpreter, not once per call.
     pub(crate) font_notes_shown: std::collections::HashSet<String>,
+    /// The missing-glyph notes (#1425) given so far, one per character, up
+    /// to [`MISSING_GLYPH_NOTES`]; then one note that the rest go unsaid.
+    missing_glyph_notes: usize,
     /// The notes `findfont` raised for substituted pack faces this run,
     /// one per name, newline-joined. The wasm build has no stderr, so
     /// the npm package reads them here (`Renderer.warnings`, issue #750).
@@ -896,6 +902,7 @@ impl Interp {
             refused_system_stores: Default::default(),
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
+            missing_glyph_notes: 0,
             font_warnings: String::new(),
             rand_state: 1,
             seed_override: None,
@@ -1724,6 +1731,9 @@ impl Interp {
             // Type 3 glyph contexts' graphics-state snapshot and paint
             // suppression must not leak past the show that created them.
             Frame::Show(mut ctx) => {
+                // A character reported on the step that failed.
+                let missing = ctx.take_missing();
+                self.note_missing_glyphs(missing);
                 ctx.cleanup(&mut self.gfx);
                 self.after_device_change();
             }
@@ -2868,6 +2878,10 @@ impl Interp {
                 self.charge_probed_steps(layer_work / 1024);
             }
             if stepped_show {
+                if let Some(Frame::Show(ctx)) = self.estack.last_mut() {
+                    let missing = ctx.take_missing();
+                    self.note_missing_glyphs(missing);
+                }
                 self.after_device_change();
                 self.device_restore_result()?;
             }
@@ -4738,9 +4752,38 @@ impl Interp {
         self.stdout_capture.as_deref().unwrap_or(&[])
     }
 
+    /// Warn once per character about the characters a Unicode-mode show
+    /// found in no face (#1425), on stderr and in
+    /// [`font_warnings`](Self::font_warnings) like `findfont`'s notes. At most
+    /// [`MISSING_GLYPH_NOTES`] of them, so a string of thousands of
+    /// distinct missing characters cannot grow the warnings without bound.
+    fn note_missing_glyphs(&mut self, missing: Vec<(u32, String)>) {
+        for (cp, font) in missing {
+            if self.missing_glyph_notes > MISSING_GLYPH_NOTES
+                || !self.font_notes_shown.insert(format!("\0glyph U+{cp:04X}"))
+            {
+                continue;
+            }
+            self.missing_glyph_notes += 1;
+            let note = if self.missing_glyph_notes > MISSING_GLYPH_NOTES {
+                "pscat: warning: more characters had no glyph; they are not reported".to_string()
+            } else {
+                crate::font::missing_glyph_note(cp, &font)
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let _ = self.write_stderr(format!("{note}\n").as_bytes(), false);
+            if !self.font_warnings.is_empty() {
+                self.font_warnings.push('\n');
+            }
+            self.font_warnings.push_str(&note);
+        }
+    }
+
     /// The one-line notes `findfont` raised for pack faces it replaced
-    /// with a built-in one, newline-joined, once per name (the lines the
-    /// native binary prints on stderr); empty when nothing was replaced.
+    /// with a built-in one, once per name, and the notes for characters a
+    /// Unicode-mode `show` found in no face, once per character (#1425),
+    /// newline-joined (the lines the native binary prints on stderr);
+    /// empty when there were none.
     pub fn font_warnings(&self) -> &str {
         &self.font_warnings
     }

@@ -4821,6 +4821,34 @@ impl Gfx {
         Ok(())
     }
 
+    /// [`fill_path_direct`](Self::fill_path_direct) in a colour of its own,
+    /// not the current one: a colour emoji's layer (#1425). `alpha`
+    /// multiplies the current alpha; the blend mode and clip are the
+    /// state's. The current colour (and colour space, pattern and CMYK
+    /// record) is put back before the result is returned, error or not.
+    pub(crate) fn fill_path_rgb(
+        &mut self,
+        path: &PsPath,
+        rgb: (f32, f32, f32),
+        alpha: f32,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        let rgb0 = std::mem::replace(&mut self.state.rgb, rgb);
+        let cs0 = std::mem::replace(&mut self.state.colorspace, ColorSpace::Rgb);
+        let pattern0 = self.state.pattern.take();
+        let cmyk0 = self.state.cmyk.take();
+        let alpha0 = self.state.alpha;
+        self.state.alpha = alpha0 * alpha.clamp(0.0, 1.0);
+        let r = self.fill_path_direct(path, probe, work);
+        self.state.rgb = rgb0;
+        self.state.colorspace = cs0;
+        self.state.pattern = pattern0;
+        self.state.cmyk = cmyk0;
+        self.state.alpha = alpha0;
+        r
+    }
+
     /// [`fill_path_direct`](Self::fill_path_direct) for a glyph that a
     /// vector recorder may take as text: SVG (#1119) and PDF (#1193) each
     /// decide on their own (`textrun::svg_eligible`, `pdf_eligible`) and
