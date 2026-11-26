@@ -1040,9 +1040,8 @@
 % for the full parameter list with defaults. Caveats the terse tags
 % don't carry: /Width bounds the bristle *scatter*, not one mark's own
 % thickness (see /BristleWidth for that); /Bristles is a hard safety
-% cap (1..100) chosen so even the cap combined with a long path at the
-% default /Pitch stays in the single-digit seconds (see Performance
-% below) -- it alone doesn't bound total ink deposits, see the
+% cap (1..100) chosen so even the cap at the default /Pitch stays well
+% under a second on a 700-unit path (see Performance below) -- it alone doesn't bound total ink deposits, see the
 % deposit-budget check further down for that. /Load and /Dropout are
 % both expressed as a rate per one /Width's worth of travel along the
 % path, *not* per raw walkpath sample -- scaled down to a per-sample
@@ -1096,12 +1095,13 @@
 % budget (150000) before any drawing starts
 % (`pkdry-deposit-count-exceeds-safety-limit`) -- the documented safety
 % limit against an accidentally unbounded bristle or deposit count.
-% Measured on a ~700-unit curved stroke (the demo's flourish, Width
-% 24): the default (18 bristles, default Pitch) renders in ~1.5s; the
-% /Bristles safety cap (100) at the same default Pitch takes ~8s.
-% Custom, finer /Pitch values raise the sample count and cost
-% proportionally -- see docs/archive/NOTES.md's issue #43 entry for the full
-% figures.
+% Measured (issue #1414, release pscat 0.7.1 on an Apple M4, CPU time) on
+% a ~700-unit curved stroke, Width 24: the default (18 bristles, default
+% Pitch) takes ~76 ms; the /Bristles safety cap (100) at the same default
+% Pitch takes ~420 ms. (This note used to say ~1.5 s and ~8 s, measured in
+% issue #43 on the demo's flourish; that path was not re-run.) Custom, finer /Pitch values
+% raise the sample count and cost proportionally; per-preset costs are in
+% docs/guides/painting.md, "What a stroke costs".
 %
 % Cusp guard (issue #79): the stop budget above doesn't see the cost of
 % each dash's nested pkribbon call, which re-walks its offset polyline
