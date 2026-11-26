@@ -14,9 +14,9 @@ use ttf_parser::colr::{ClipBox, CompositeMode, Paint, Painter};
 use ttf_parser::{Face, GlyphId, RgbaColor, Transform};
 
 use super::{
-    FontState, GlyphTransform, PathSink, ShowMode, advance_of, builtin_index, decode_one,
-    embedded_fid, face_for, glyph_for_char, glyph_transform, loaded_fid, missing_glyph,
-    paint_resolved_glyph_limited, resolve_glyph,
+    CatalogEncoding, FontState, GlyphTransform, PathSink, ShowMode, advance_of, builtin_index,
+    decode_one, embedded_fid, face_for, glyph_for_char, glyph_transform, loaded_fid, missing_glyph,
+    paint_resolved_glyph_limited, resolve_glyph, symbolic_encoding,
 };
 use crate::encodings;
 use crate::error::PsError;
@@ -188,14 +188,46 @@ enum Fallback {
     /// A built-in face, by its standard name.
     Builtin(&'static str),
     /// An embedded symbolic face (Symbol, ZapfDingbats), whose `cmap` holds
-    /// only its byte codes: a character is found through the face's
-    /// encoding, by glyph name.
-    Symbolic {
-        stem: &'static str,
-        names: fn() -> [&'static str; 256],
-        to_char: fn(&str) -> Option<char>,
-    },
+    /// only its byte codes: a character is found by glyph name
+    /// ([`symbolic_glyph`]).
+    Symbolic(&'static str),
 }
+
+/// A symbolic face's glyph for `ch`, by name: the face's encoding, read
+/// backwards (`α` is `alpha` in Symbol, `✓` is `a19` in ZapfDingbats). The
+/// reverse maps are built once per process from the 256-name encodings, so
+/// a lookup is one hash probe, not a scan (#1425, Codex round 1).
+fn symbolic_glyph(face: &Face, encoding: CatalogEncoding, ch: char) -> Option<GlyphId> {
+    type Map = std::collections::HashMap<char, &'static str>;
+    fn build(names: [&'static str; 256], to_char: fn(&str) -> Option<char>) -> Map {
+        let mut map = Map::new();
+        for name in names {
+            if let Some(c) = to_char(name) {
+                map.entry(c).or_insert(name);
+            }
+        }
+        map
+    }
+    static SYMBOL: OnceLock<Map> = OnceLock::new();
+    static DINGBATS: OnceLock<Map> = OnceLock::new();
+    let map = match encoding {
+        CatalogEncoding::Symbol => SYMBOL
+            .get_or_init(|| build(encodings::symbol_encoding(), encodings::symbol_name_to_char)),
+        CatalogEncoding::Dingbats => DINGBATS.get_or_init(|| {
+            build(
+                encodings::dingbats_encoding(),
+                encodings::dingbat_name_to_char,
+            )
+        }),
+        CatalogEncoding::Standard | CatalogEncoding::Unicode => return glyph_for_char(face, ch),
+    };
+    resolve_glyph(face, map.get(&ch)?)
+}
+
+/// The work charged for each face a character is looked up in past the
+/// font's own (a `cmap` search or a hash probe): a string of characters
+/// nothing has walks the whole chain for every one of them.
+const LOOKUP_WORK: u64 = 64;
 
 /// Liberation Sans, Serif and Mono (Latin, Greek, Cyrillic, Hebrew and
 /// common punctuation and symbols), then URW Symbol (math, arrows) and
@@ -207,16 +239,8 @@ const FALLBACKS: [Fallback; 5] = [
     Fallback::Builtin("Helvetica"),
     Fallback::Builtin("Times-Roman"),
     Fallback::Builtin("Courier"),
-    Fallback::Symbolic {
-        stem: "StandardSymbolsPS",
-        names: encodings::symbol_encoding,
-        to_char: encodings::symbol_name_to_char,
-    },
-    Fallback::Symbolic {
-        stem: "D050000L",
-        names: encodings::dingbats_encoding,
-        to_char: encodings::dingbat_name_to_char,
-    },
+    Fallback::Symbolic("StandardSymbolsPS"),
+    Fallback::Symbolic("D050000L"),
 ];
 
 /// The FID of an embedded symbolic face, registering it on first use. The
@@ -282,7 +306,14 @@ pub(super) fn show_scalar(
     if want_emoji && let Some(shown) = emoji(gfx, fs, ch, text, after, mode, pen, probe, work)? {
         return Ok(shown);
     }
-    if let Some(gid) = glyph_for_char(face, ch) {
+    // A symbolic primary (Symbol, ZapfDingbats) is read by character too:
+    // `A` is not in Symbol and falls back to Latin A, `α` is Symbol's alpha
+    // (Codex round 1: its byte `cmap` drew Alpha for `A`).
+    let own = match symbolic_encoding(fs.fid) {
+        Some(encoding) => symbolic_glyph(face, encoding, ch),
+        None => glyph_for_char(face, ch),
+    };
+    if let Some(gid) = own {
         let adv = paint_resolved_glyph_limited(
             gfx,
             face,
@@ -323,6 +354,7 @@ pub(super) fn show_scalar(
         return Ok(Shown::drawn(adv));
     }
     for fallback in &FALLBACKS {
+        *work = work.saturating_add(LOOKUP_WORK);
         let found =
             match fallback {
                 Fallback::Builtin(name) => builtin_index(name)
@@ -331,20 +363,11 @@ pub(super) fn show_scalar(
                         let face = face_for(fid).ok()?;
                         Some((fid, face, glyph_for_char(face, ch)?))
                     }),
-                Fallback::Symbolic {
-                    stem,
-                    names,
-                    to_char,
-                } => match symbolic_fid(stem, probe)? {
-                    Some(fid) if fid != fs.fid => {
-                        // A scan of the 256 encoding names, only for a
-                        // character the earlier faces lacked.
-                        *work = work.saturating_add(256);
-                        face_for(fid).ok().and_then(|face| {
-                            let name = names().into_iter().find(|n| to_char(n) == Some(ch))?;
-                            Some((fid, face, resolve_glyph(face, name)?))
-                        })
-                    }
+                Fallback::Symbolic(stem) => match symbolic_fid(stem, probe)? {
+                    Some(fid) if fid != fs.fid => symbolic_encoding(fid).and_then(|encoding| {
+                        let face = face_for(fid).ok()?;
+                        Some((fid, face, symbolic_glyph(face, encoding, ch)?))
+                    }),
                     _ => None,
                 },
             };
@@ -591,7 +614,7 @@ fn paint_emoji(
                 );
                 gfx.fill_path_rgb(&sink.path, rgb, f32::from(c.alpha) / 255.0, probe, work)?;
             }
-            ShowMode::Charpath => gfx.append_path(&sink.path),
+            ShowMode::Charpath => gfx.append_path_limited(&sink.path, probe, work)?,
             ShowMode::Width => {}
         }
     }

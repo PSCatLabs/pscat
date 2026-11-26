@@ -4933,6 +4933,28 @@ impl Gfx {
         self.state.path.extend_from(path);
     }
 
+    /// [`append_path`](Self::append_path) under the limits, for `charpath`
+    /// (#1425, Codex round 1): the current path's growth is held against the
+    /// memory cap before it is made (a `charpath` of a million glyphs grew
+    /// it far past `--max-memory`), and the bytes appended are added to
+    /// `work`, charged as a step per KiB.
+    pub(crate) fn append_path_limited(
+        &mut self,
+        path: &PsPath,
+        probe: &crate::limits::LimitProbe,
+        work: &mut u64,
+    ) -> Result<(), PsError> {
+        // The heap's growth so far (the path's capacity included, however
+        // it grew) plus this glyph's segments, against the cap, every time:
+        // `advance`'s moveto often grows the Vec first, so a check only at
+        // a reallocation here would rarely run.
+        let bytes = path.segs.len().saturating_mul(std::mem::size_of::<Seg>());
+        probe.check_alloc(bytes)?;
+        *work = work.saturating_add(bytes as u64);
+        self.state.path.extend_from(path);
+        Ok(())
+    }
+
     /// Remember where the gsave stack is and what the state was, so a Type 3
     /// glyph (or a `save`) can be sealed off no matter what the procedure
     /// does (unbalanced gsave/grestore included).

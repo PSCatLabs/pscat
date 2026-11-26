@@ -899,6 +899,18 @@ pub(crate) fn is_unicode_font(fid: i64) -> bool {
         .is_some_and(|c| matches!(c.encoding, CatalogEncoding::Unicode))
 }
 
+/// The encoding of a symbolic face (Symbol or ZapfDingbats), whose `cmap`
+/// maps byte codes rather than characters; `None` for every other face.
+fn symbolic_encoding(fid: i64) -> Option<CatalogEncoding> {
+    let idx = usize::try_from(fid).ok()?.checked_sub(BUILTINS.len())?;
+    let encoding = CATALOG.read().ok()?.get(idx)?.encoding;
+    matches!(
+        encoding,
+        CatalogEncoding::Symbol | CatalogEncoding::Dingbats
+    )
+    .then_some(encoding)
+}
+
 /// The character a Symbol or ZapfDingbats glyph name (`alpha`,
 /// `summation`, `a12` ...) stands for, when the face is the Symbol or
 /// Dingbats catalog face and PDF text is being written (#1026). It comes
@@ -1671,7 +1683,7 @@ fn paint_resolved_glyph_limited(
         } else if !sink.path.is_empty() {
             match mode {
                 ShowMode::Paint => gfx.fill_path_direct(&sink.path, probe, work)?,
-                ShowMode::Charpath => gfx.append_path(&sink.path),
+                ShowMode::Charpath => gfx.append_path_limited(&sink.path, probe, work)?,
                 ShowMode::Width => unreachable!("checked above"),
             }
         }
@@ -2168,9 +2180,13 @@ impl ShowCtx {
         }
     }
 
-    /// The glyph work done since the last call.
+    /// The glyph work done since the last call, in whole KiB (the caller
+    /// charges a step per KiB). The rest stays for the next glyph, so many
+    /// glyphs of a few hundred units each still add up (#1425, Codex round 1).
     pub(crate) fn take_work(&mut self) -> u64 {
-        std::mem::take(&mut self.work)
+        let whole = self.work - self.work % 1024;
+        self.work -= whole;
+        whole
     }
 
     /// The characters with no glyph shown since the last call, each with

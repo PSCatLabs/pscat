@@ -83,3 +83,26 @@ order); COLR v1; style-matched fallback (the chain is regular weight); Latin-1
 recovery of invalid UTF-8 (U+FFFD, reported); loading the catalog's CJK and
 Thai faces mid-show; an `emoji` cargo feature for builds that want the 1.4 MB
 back; the #1412 lint for UTF-8 in a byte-mode font.
+
+**Codex round 1 (three findings, all reproduced, all fixed).**
+
+1. *`charpath` past the memory cap.* `charpath` appended each glyph's
+   outline with no check; the cap was only seen after the whole string. A
+   262,144-emoji `charpath` under `--max-memory 16` (MiB; the reviewer's
+   scenario gave bytes) peaked at 395 MB RSS before `limitexceeded`; the
+   same happened in byte mode (262,144 letter O's on the feature/0.8.0 base:
+   354 MB), so it predates this PR. `Gfx::append_path_limited` now holds
+   each glyph's segments against the cap before appending and charges them
+   as work: both stop at about 27 MB RSS. `tests/unicode_limits.rs`.
+2. *Fallback work not charged.* Each character nothing had did two
+   256-name scans, charged per glyph as under 1 KiB and so dropped: a
+   1,048,576-syllable Hangul `stringwidth` ran 16.5 s under
+   `--max-steps 200000` and finished. The symbolic lookups are now a reverse
+   map (one hash probe), each fallback face tried adds 64 units of work,
+   and `ShowCtx::take_work` keeps the sub-KiB remainder across glyphs. The
+   same run now stops with `limitexceeded (steps)` in 0.44 s.
+3. *Symbolic primary read as bytes.* `/Symbol` with `/PSCatUnicode` read
+   its byte `cmap` as Unicode, so `A` drew Alpha. Decision: the key means
+   characters on every face, so a Symbol or Dingbats primary is looked up
+   by glyph name like the fallbacks (`α` is alpha, `A` falls back to
+   Helvetica's A).

@@ -588,7 +588,10 @@ go for a missing character.
   missing-glyph advance (as byte mode gives `\n`), neither reported; then
   the compiled-in chain: Liberation Sans, Serif, Mono by `cmap`, and URW
   Symbol and ZapfDingbats by glyph name through their encodings (their
-  `cmap`s hold only byte codes); then the emoji face; then the font's own
+  `cmap`s hold only byte codes; a reverse map built once, so one hash
+  probe). A Symbol or Dingbats *primary* face is read the same way, so
+  `A` in a Unicode-mode Symbol falls back to a Latin A rather than the
+  byte-code Alpha; then the emoji face; then the font's own
   `.notdef` (glyph 0, a box on Liberation) with its own advance, and a
   report. The emoji face goes first instead when the character has
   `Emoji_Presentation` (Unicode 14 table), or U+FE0F, a skin-tone modifier
@@ -624,9 +627,15 @@ go for a missing character.
   character, at most 32 per interpreter (`MISSING_GLYPH_NOTES`) and one
   "not reported" line after.
 - **Limits.** Layer fills go through `fill_path_direct` with the show's
-  probe and work, the ligature search and symbolic-name scans add to
-  `work`, and registering an embedded fallback face is held against the
-  memory cap. Nothing is read from disk.
+  probe and work; the ligature search and each fallback face tried add to
+  `work`; registering an embedded fallback face is held against the
+  memory cap. `ShowCtx::take_work` hands over whole KiB and keeps the
+  rest, so many cheap glyphs still add up to steps. `charpath` appends
+  through `Gfx::append_path_limited`, which holds each glyph's segments
+  against the memory cap before adding them and charges them as work
+  (byte-mode fonts too: a long `charpath` used to grow the path far past
+  `--max-memory` and stop only after the whole string). Nothing is read
+  from disk.
 - **Not done.** Shaping, GPOS, bidi; COLR v1 (gradients); style-matched
   fallback (the chain is regular weight); Latin-1 recovery of invalid
   UTF-8 (it is U+FFFD, reported).

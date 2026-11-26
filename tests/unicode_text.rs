@@ -362,3 +362,48 @@ fn ashow_spacing_skips_the_invisible_parts_of_a_joined_emoji() {
         "{spaced} vs {plain} + 15"
     );
 }
+
+#[test]
+fn a_long_string_of_missing_characters_is_charged_to_the_step_limit() {
+    // Each character nothing has walks the whole fallback chain (#1425,
+    // Codex round 1): 262,144 Hangul syllables through stringwidth must hit
+    // a 20,000-step cap, not finish for a handful of steps.
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.quiet_stderr();
+    it.set_limits(Limits::none().with_max_steps(20_000))
+        .expect("limits");
+    let src = format!(
+        "{} /s 786432 string def s 0 <EAB080> putinterval /n 3 def \
+         {{ n 786432 ge {{ exit }} if s 0 n getinterval s n n getinterval copy pop \
+         /n n 2 mul def }} loop s stringwidth pop pop",
+        ufont(12)
+    );
+    let err = it.run_str(&src).expect_err("the step cap stops it");
+    assert!(err.to_string().contains("limitexceeded"), "{err}");
+}
+
+#[test]
+fn a_symbolic_primary_reads_characters_not_byte_codes() {
+    // In Unicode mode a Symbol font reads `A` as the Latin letter (which it
+    // lacks, so the fallback chain gives Helvetica's A), and `α` as its own
+    // alpha: not the byte-code Alpha its cmap holds at 0x41.
+    let symbol = "/Symbol findfont 100 scalefont dup /PSCatUnicode true put setfont";
+    let a = width(symbol, "A");
+    let helvetica_a = width("/Helvetica findfont 100 scalefont setfont", "A");
+    assert!(
+        (a - helvetica_a).abs() < 1e-9,
+        "A {a} vs Helvetica A {helvetica_a}"
+    );
+    let alpha = width(symbol, "\u{3b1}");
+    let byte_alpha = width("/Symbol findfont 100 scalefont setfont", "a");
+    assert!(
+        (alpha - byte_alpha).abs() < 1e-9,
+        "alpha {alpha} vs {byte_alpha}"
+    );
+    let check = width(
+        "/ZapfDingbats findfont 100 scalefont dup /PSCatUnicode true put setfont",
+        "\u{2713}",
+    );
+    let a19 = width("/ZapfDingbats findfont 100 scalefont setfont", "3");
+    assert!((check - a19).abs() < 1e-9, "check {check} vs a19 {a19}");
+}

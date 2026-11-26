@@ -72,7 +72,8 @@ emoji, straight from a UTF-8-saved `.ps` file, with no re-encoding.
 ```
 
 (`/Helvetica findfont 18 scalefont dup /PSCatUnicode true put setfont` works
-too.) Each character is looked up by code point in the font's own face first.
+too. On Symbol and ZapfDingbats the key means characters, not codes: `α` is
+Symbol's alpha, `✓` Dingbats' check mark, and `A` falls back to a Latin A.) Each character is looked up by code point in the font's own face first.
 A character it lacks comes from the compiled-in fallback faces, in order:
 Liberation Sans, Serif and Mono (Latin, Greek, Cyrillic, Hebrew letters, most
 punctuation and symbols), Symbol (math, arrows) and ZapfDingbats (✓ ✔ ★ ☎).
