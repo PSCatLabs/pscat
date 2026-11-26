@@ -114,6 +114,8 @@ pub const MAX_VALUE_DEPTH: usize = 32;
 /// which within [`MAX_VALUE_DEPTH`] alone could be billions of nodes
 /// (`/a 2 array def a 0 a put a 1 a put`). A larger value is `limitcheck`
 /// from `pop_value`, and comes back whole as [`Value::Other`] from `lookup`.
+/// The empty slots a dictionary keeps after `undef` count as steps, and past
+/// 64 times this many in one copy it is a `limitcheck` too.
 pub const MAX_VALUE_NODES: usize = 1 << 20;
 
 /// How a dictionary key that is not a name or a string is spelled in a
@@ -136,6 +138,14 @@ const NODES_PER_STEP: usize = 1024;
 /// dictionary keeps the table of its largest size after `undef`, and a copy
 /// walks all of it, so the copy is charged for the empty slots too (#1422).
 const SLOTS_PER_NODE: usize = 4;
+
+/// The most empty dictionary slots one conversion may pass over. Slots count
+/// as steps, which bound a run but not a copy made between runs, and a
+/// dictionary that holds itself twice is copied again for every path to it
+/// (up to [`MAX_VALUE_NODES`] nodes): each visit walks the whole retained
+/// table. No one dictionary keeps anything near this many slots, so a copy
+/// that reaches it is `limitcheck`, like one past the node cap.
+const MAX_SCAN_SLOTS: usize = 64 * MAX_VALUE_NODES;
 
 /// One conversion's running count, held to the interpreter's limits.
 struct Walk<'a> {
@@ -168,6 +178,9 @@ impl Walk<'_> {
     fn scan(&mut self, n: usize) -> Result<(), PsError> {
         let before = self.steps();
         self.slots = self.slots.saturating_add(n);
+        if self.slots > MAX_SCAN_SLOTS {
+            return Err(PsError::Limitcheck);
+        }
         if self.steps() != before {
             self.interp.host_look(self.steps(), 0)?;
         }

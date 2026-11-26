@@ -306,7 +306,7 @@ counts against the program's limits like any other work (`lookup`'s at the
 program's next look at its limits). A dictionary that once held many entries
 keeps its table after `undef`, and copying it passes over the empty slots, so
 they count as steps (about 4,096 slots to a step) even when few entries are
-left. A dictionary key that is not a name or a
+left, and a copy that passes over more than 64 million of them is `limitcheck`. A dictionary key that is not a name or a
 string comes back as the text `==` prints for it, shortened past a few hundred
 bytes.
 

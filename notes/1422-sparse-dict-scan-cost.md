@@ -27,6 +27,18 @@ error is reported (about 0.28 ms after 4,194,304 entries). The same walk is in
   a small dictionary are unchanged; the step, time, memory and interrupt looks
   see it.
 
+- A copy may pass over at most `64 * MAX_VALUE_NODES` (67 million) empty slots,
+  then it is `limitcheck`. Slots are steps, which bound a run but not a copy
+  between runs, and a sparse dictionary that holds itself twice is copied once
+  per path to it (up to the node cap, about 500,000 visits), each visit walking
+  the whole table. No real dictionary keeps that many slots.
+- What a reader of an error report sees: the scan stops at the first dictionary
+  (innermost first) whose retained slots do not fit the budget, so every
+  procedure that lives in that dictionary or in one below it on the stack is
+  reported as `in a procedure`, not only the stale dictionary's own. The
+  alternative, skipping that dictionary and scanning the rest, would let an
+  outer definition win over the innermost one.
+
 ### The `pairs()` allocation question
 
 `Value::from_object` takes `len` nodes and `len * (size of an entry's copy)` bytes
@@ -43,4 +55,11 @@ not. That is what is charged now.
   uncharged (steps stand for iterations there): a follow-up.
 
 Tests: `tests/host_sparse_dict_1422.rs` (its own binary: it interns a few hundred
-thousand names). All three fail on the base commit.
+thousand names). All four fail on the base commit; the last (the cap) fails on
+CPU time, 12.1 s there against 0.009 s here, since the refusal is `limitcheck` on
+both.
+
+Identity: two-binary `scripts/identity_check.sh --loader lib/artkit.ps`, 127 of
+127 pages identical. No render changes, so `--control` has nothing to differ on;
+the control was a tracked crafted error file in the corpus, which reports `in p`
+on the base binary and `in a procedure` on the head binary.

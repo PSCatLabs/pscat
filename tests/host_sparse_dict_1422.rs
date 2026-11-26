@@ -9,6 +9,9 @@
 //! hundred thousand names, which the other test binaries need not carry.
 
 use pscat::{Interp, Limits, PsError};
+use std::time::Duration;
+
+mod common;
 
 /// Entries defined and removed to make a dictionary sparse. The table
 /// grows to 2^19 buckets (458,752 usable slots), so the empty slots cost
@@ -121,5 +124,31 @@ fn lookup_of_a_sparse_dictionary_is_charged_at_the_next_look() {
     assert_eq!(
         interp.run_str("peek peek").unwrap_err(),
         PsError::StepsExceeded
+    );
+}
+
+/// Between runs the copy's own bound is all that stands (only the memory cap
+/// is looked at). A dictionary holding itself twice is copied again for every
+/// path to it, until the node cap: about half a million visits, each of which
+/// walked the whole 458,752-slot table, so tens of seconds before #1422. The
+/// refusal is `limitcheck` either way; what the budget pins is how soon.
+#[test]
+fn a_sparse_dictionary_that_holds_itself_cannot_make_a_copy_walk_its_table_forever() {
+    let mut interp = Interp::new();
+    interp.run_str(&sparse("stale")).unwrap();
+    interp
+        .run_str("stale /a stale put stale /b stale put stale")
+        .unwrap();
+    common::within_cpu_budget(
+        "pop_value of a doubly self-holding sparse dictionary",
+        Duration::from_secs(2),
+        1,
+        || {
+            assert_eq!(interp.pop_value().unwrap_err(), PsError::Limitcheck);
+            assert!(matches!(
+                interp.lookup("stale"),
+                Some(pscat::host::Value::Other(_))
+            ));
+        },
     );
 }
