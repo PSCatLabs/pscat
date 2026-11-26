@@ -103,3 +103,52 @@ Programs that use neither feature are unchanged: the only edits on their path
 are a field in `Interp`, one `HashMap` lookup (skipped when empty) per `run` or
 `(r) file`, and nothing in the step loop. See the PR body for the two-binary
 identity run and the `benches/perf` figures.
+
+### Review round 1 (Codex, PR #1432, head c25a15b6)
+
+Six defects, each with a test that failed on that head before its fix (the
+virtual-file ones are in `tests/host_virtual_files.rs` and
+`tests/host_api_memory_1407.rs`, the raster ones in `tests/host_raster.rs`).
+
+1. **Registration copied before it checked.** `add_virtual_file` took
+   `impl Into<Vec<u8>>`, so a borrowed slice was copied (up to 64 MiB) before
+   any bound was looked at. It now takes `impl Into<Cow<[u8]>>`: an owned `Vec`
+   is moved in, a borrowed slice is checked (name, sizes, count, total), held
+   to `--max-memory` with `check_alloc` and, inside a host operator, charged a
+   step per KiB, and only then copied. (A `&str` is passed as bytes.)
+2. **The store kept more than it counted.** The total counted lengths only.
+   It now counts each entry's name length and its buffer's *capacity* (no
+   `shrink_to_fit` on registration: that is itself a copy), refuses a buffer
+   whose capacity passes the per-file bound, and names are limited to
+   `MAX_VIRTUAL_NAME_BYTES` (4096).
+3. **Uncoloured patterns.** The canvas shows the raster's coverage in the
+   pattern's colour, so SVG and PDF now record a stencil of it, as for
+   `imagemask`: an SVG `<mask>` of the alpha (`svg_stencil`, filled
+   `currentColor`), and a PDF image mask. PDF's mask is one bit a pixel (alpha at
+   least half): PDF allows no colour image in such a tile and no other form of
+   mask there, so partial coverage is thresholded in PDF only.
+4. **Banded fills.** The charge was band-restricted but the fill was not. The
+   footprint polygon is now cut to the band's rows, which is exact (a row's
+   coverage is the same cut at its edge as whole).
+5. **No polls during the work.** `place_raster` takes an optional poll that
+   looks at the interrupt flag and, while a program runs, the time and memory
+   caps (a `LimitProbe` taken after the up-front charge). It is called between
+   the recorders' copies and every million pixels inside them (the
+   demultiply, the stencil build), and between strips of the fill, which goes
+   strip by strip (whole pixel rows) only when something is being watched. The
+   recorders are written after every copy exists, so a refusal leaves canvas
+   and output untouched. The PNG encode and the zlib compression inside one SVG
+   or PDF image are single library calls: polled before and after, not within.
+6. **Huge-CTM cancellation.** Cutting a parallelogram whose corners are 1e20
+   away loses its edges' positions (f64 has 16 digits). Whether the placement
+   covers the canvas (with a pixel of margin) is now decided in the raster's
+   own unit coordinates, where it is accurate, and a covering footprint is that
+   rectangle. A footprint that only crosses the canvas at such a scale is still
+   cut in f64, and where the edge falls is limited by the matrix's single
+   precision, which nothing here can repair.
+
+Read roots: virtual files bypass them by design (host-supplied memory, not the
+disk). A program can read only the names the host registered, so `pscat-mcp`'s
+sandbox and `--allow-read` are unaffected by registering files; the
+registration is the host's grant of that one name. Documented in
+`docs/guides/library.md` and on `add_virtual_file`.

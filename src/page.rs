@@ -354,7 +354,10 @@ impl crate::Interp {
     /// finite, or the raster lies wholly off the canvas. A raster that is not
     /// on the canvas at all is not embedded in SVG or PDF output either. In an
     /// uncoloured pattern's `PaintProc` it paints as `image` does: the tile
-    /// keeps the raster's coverage and the pattern's colour replaces its own.
+    /// keeps the raster's coverage and the pattern's colour replaces its own;
+    /// SVG records that as a mask of the raster's alpha and PDF as an image
+    /// mask (a bit a pixel, set where the alpha is at least half), which is
+    /// all a PDF tile without colour may hold.
     ///
     /// **SVG and PDF output** embed the raster as an image at its placement,
     /// with the clip and the alpha and blend mode, as `image` is recorded
@@ -367,8 +370,12 @@ impl crate::Interp {
     /// running program: a step per 1024 device pixels the footprint reaches
     /// (and per pixel recorded), and the time and memory caps and the
     /// interrupt flag are looked at, all before anything is painted, so a
-    /// refused call leaves the canvas as it was. Between runs only the memory
-    /// cap (for the recorders' copies) and the interrupt flag apply.
+    /// refused call leaves the canvas as it was. They are looked at again
+    /// between the heavy steps (the recorders' pixel copies, strips of the
+    /// fill), and the recorders are written only once their copies exist, so a
+    /// limit that fires part way leaves the canvas and the output as they were.
+    /// Between runs only the memory cap (for the recorders' copies) and the
+    /// interrupt flag apply. Under `--bands` only the band's rows are filled.
     pub fn draw_page(
         &mut self,
         page: &Page,
