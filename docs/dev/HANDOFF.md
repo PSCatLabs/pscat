@@ -2013,9 +2013,11 @@ renders eight examples in both and compares block-downsampled output).
   body's, a procedure's), from the #1405 table: while tracing, `step_n` runs `step_n_timed` (the
   `--profile-ops` copy of the step loop; it does not fuse `{ } if`, which is most of the lint's
   cost), and before each step `note_stack_step` keeps the lowest depth since the token boundary
-  and the element that pushed the item above it, as a `storage_site` resolved to a line only when
-  the finding is made, and only if it was written in the text being scanned (a library's line is
-  not named; its call is). The plain loop is untouched: a third copy of it cost the plain path
+  and the element that pushed the item above it, as a `storage_site` resolved to a line at
+  the boundary, and only if it was written in the text being scanned (a library's line is
+  not named; its call is), the table of lines has not changed since the site was taken
+  (`BodyLines::generation`) and the slot still holds what the element pushed (`Witness`); else the
+  token's line. The plain loop is untouched: a third copy of it cost the plain path
   2% in instructions (inlining shifts), so do not add one.
   `[utf8-in-byte-font]` (#1412, `notes/1412-lint-utf8-in-byte-font.md`) reads
   `Interp::trace_utf8_text` (on under `--lint`): `Interp::begin_show`, which every

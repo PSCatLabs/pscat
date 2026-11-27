@@ -11,6 +11,8 @@
 
 use tiny_skia::Pixmap;
 
+use std::rc::Rc;
+
 use crate::object::PsString;
 use crate::{Interp, Object, Value};
 
@@ -395,32 +397,112 @@ const SHADOWED_SHOWN: usize = 10;
 /// step how low the stack went and which element pushed the item just above
 /// that low point, which is the oldest item the token left.
 ///
+/// A credit is kept only while it can be shown to still hold. The element's
+/// site is turned into a line at the boundary, if no body has been added to or
+/// dropped from the table of lines since the site was taken (an address freed
+/// and given to another body is not the same body) and the item at that slot
+/// is still what the element pushed ([`Witness`]); otherwise the token's line
+/// is credited, as before #1366. The bottom item's witness is checked at every
+/// boundary, so an item replaced in place (`]` for its mark, `exch`, `restore`)
+/// takes the token's line too (#1081).
+///
 /// Kept as runs, not one entry per item: `start` is the depth at which a run
 /// of items begins, and a run is dropped when the depth falls back to it, so
 /// `clear`, `aload` of 10 000 items or a loop that pushes a million values
-/// cost a handful of entries. At most [`MAX_RUNS`] of them: a program that
-/// leaks from thousands of lines would otherwise keep one each, so past the
-/// cap the newest items share the last run's origin.
-#[derive(Default, Clone)]
+/// cost a handful of entries. At most [`MAX_RUNS`] of them, in a vector
+/// allocated when tracing starts (so the memory cap sees it then, and a run
+/// never grows it): a program that leaks from thousands of lines would
+/// otherwise keep one each, so past the cap the newest items share the last
+/// run's origin.
+#[derive(Clone)]
 pub(crate) struct StackTrace {
     runs: Vec<StackRun>,
-    /// The lowest depth since that boundary: the items below it are the
+    /// The lowest depth since the last boundary: the items below it are the
     /// same ones, the items from it up are new.
     low: usize,
-    /// The element that pushed the item at depth `low`, a
-    /// [`storage_site`](crate::object::PsArray::storage_site) (`0`, the key of
-    /// no body, when it was not an element: a scanned token or a loop's own
-    /// push), valid when `item_set`.
-    item: (usize, usize),
+    /// What the bottom item was when the first run began, to see it replaced.
+    bottom: Option<Witness>,
+    /// The element that pushed the item at depth `low`, valid when `item_set`.
+    item: Credit,
     item_set: bool,
-    /// The procedure element the step now running executes, in the same
-    /// form. A `tentative` one is the first element of the body of the loop
-    /// frame on top, guessed before the loop has said whether it iterates;
-    /// the next sample checks it ([`StackTrace::ran`]).
-    pending: (usize, usize),
+    /// The procedure element the step now running executes. A `tentative`
+    /// one is the first element of the body of the loop frame on top, guessed
+    /// before the loop has said whether it iterates; the next sample checks it
+    /// ([`StackTrace::ran`]).
+    pending: Site,
     tentative: bool,
     /// The depth of the execution stack when a tentative site was set.
     pending_frames: usize,
+}
+
+/// A procedure element, as a
+/// [`storage_site`](crate::object::PsArray::storage_site), and the generation
+/// of the table of lines when it was taken. Key `0` is no element: a scanned
+/// token, or a loop's own push.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Site {
+    pub(crate) key: usize,
+    pub(crate) slot: usize,
+    pub(crate) generation: u32,
+}
+
+/// An element's claim to the item it pushed: the site, and what the item was.
+#[derive(Clone, Copy)]
+struct Credit {
+    site: Site,
+    wit: Witness,
+}
+
+impl Credit {
+    const NONE: Credit = Credit {
+        site: Site {
+            key: 0,
+            slot: 0,
+            generation: 0,
+        },
+        wit: Witness::NONE,
+    };
+}
+
+/// Enough of an object to notice it was replaced: its kind and, for a scalar,
+/// its value; a composite by its storage and extent, so another array or
+/// string is another object. Three words, compared as numbers: it is taken at
+/// every token boundary.
+#[derive(Clone, Copy, PartialEq)]
+struct Witness {
+    kind: u8,
+    a: u64,
+    b: u64,
+}
+
+impl Witness {
+    const NONE: Witness = Witness {
+        kind: 0,
+        a: 0,
+        b: 0,
+    };
+
+    #[inline]
+    fn of(o: &Object) -> Witness {
+        let (kind, a, b) = match &o.value {
+            Value::Integer(i) => (1, *i as u64, 0),
+            Value::Real(r) => (2, r.to_bits(), 0),
+            Value::Boolean(v) => (3, u64::from(*v), 0),
+            Value::Name(n) => (4, u64::from(n.id()), 0),
+            Value::Array(arr) => {
+                let (k, off, len) = arr.identity();
+                (5, k as u64, ((off as u64) << 32) ^ len as u64)
+            }
+            Value::String(st) => {
+                let (k, off, len) = st.identity();
+                (6, k as u64, ((off as u64) << 32) ^ len as u64)
+            }
+            Value::Dict(d) => (7, Rc::as_ptr(d) as *const () as u64, 0),
+            // The other kinds by their type name (a string literal's address).
+            _ => (8, o.type_name().as_ptr() as u64, 0),
+        };
+        Witness { kind, a, b }
+    }
 }
 
 /// Most runs a [`StackTrace`] keeps. Each is a few dozen bytes, so the trace
@@ -433,21 +515,21 @@ struct StackRun {
     at: Origin,
 }
 
-/// What the scanner was on when the stack grew, and the procedure element
-/// that left the oldest of the new items, when one did (#1366).
+/// What the scanner was on when the stack grew, and the line of the procedure
+/// element that left the oldest of the new items, when one did (#1366). Plain
+/// numbers, no address: nothing here can name a body that is gone.
 #[derive(Clone, PartialEq)]
 struct Origin {
-    /// The element, as a [`storage_site`](crate::object::PsArray::storage_site)
-    /// (`0` for none): turned into a line only when the finding is made, so a
-    /// step costs no lookup.
-    site: (usize, usize),
+    /// The element's own line, `0` for none.
+    own: u32,
     /// The line of the scanner's last token: the call (or the loop's end)
     /// that ran the element, and what is named when the element's own line is
-    /// not known or is not in this text.
-    line: Option<usize>,
+    /// not known or is not in this text. `0` when unknown, which a run left
+    /// by an earlier program is.
+    line: u32,
     /// The text the scanner was reading: a `run` file's name, or the main
     /// program's (the host's name for it, `None` if it has none).
-    source: Option<std::rc::Rc<str>>,
+    source: Option<Rc<str>>,
     /// Whether `source` is a `run` file (named in the finding) and not the
     /// main program.
     is_run: bool,
@@ -458,11 +540,11 @@ struct Origin {
 #[derive(Clone, Copy)]
 pub(crate) enum TopFrame {
     /// A procedure: its body's key, its `pc`, and the site of the element
-    /// before the `pc` (`(0, 0)` if it is the first).
+    /// before the `pc` (key `0` if it is the first).
     Proc {
         key: usize,
         pc: usize,
-        before: (usize, usize),
+        before: Site,
     },
     /// A loop: its body's key.
     Loop {
@@ -477,25 +559,56 @@ pub(crate) struct ScanAt<'a> {
     /// The line of the last token scanned.
     pub(crate) line: Option<usize>,
     /// The `run` file being read, `None` for the main program.
-    pub(crate) run: Option<&'a std::rc::Rc<str>>,
+    pub(crate) run: Option<&'a Rc<str>>,
     /// The name the host gave the main program.
-    pub(crate) main: Option<&'a std::rc::Rc<str>>,
+    pub(crate) main: Option<&'a Rc<str>>,
+}
+
+/// How the trace stands at a boundary, before this boundary's own run.
+struct Settled {
+    /// The lowest depth that was kept: runs from it up are dropped.
+    low: usize,
+    /// The bottom item was replaced in place (or the runs are lost): drop them
+    /// all, and credit the token.
+    replaced: bool,
 }
 
 impl StackTrace {
-    /// The state a sample after a step needs, as the interpreter's
-    /// [`note_stack_step`](crate::Interp) reads and writes it: the depth `d`
-    /// the step left. Constant work, inlined into the traced step loop.
-    ///
-    /// `ran` is asked for only when an item has just appeared at the low
-    /// point (the element that pushed it).
+    pub(crate) fn new() -> Self {
+        StackTrace {
+            runs: Vec::with_capacity(MAX_RUNS),
+            low: 0,
+            bottom: None,
+            item: Credit::NONE,
+            item_set: false,
+            pending: Site::default(),
+            tentative: false,
+            pending_frames: 0,
+        }
+    }
+
+    /// After a step: the stack is `ostack`. Notes how low it has been since the
+    /// last boundary and, when an item has just appeared at that low point,
+    /// which procedure element pushed it and what it was. Constant work,
+    /// inlined into the traced step loop. `ran` is asked for only then (the
+    /// element that has just run, with the table generation to match it).
     #[inline(always)]
-    pub(crate) fn step(&mut self, d: usize, ran: impl FnOnce(&Self) -> (usize, usize)) {
+    pub(crate) fn step(&mut self, ostack: &[Object], ran: impl FnOnce(&Self) -> Site) {
+        let d = ostack.len();
         if d <= self.low {
             self.low = d;
             self.item_set = false;
         } else if !self.item_set {
-            self.item = ran(self);
+            // A token or a loop's own push has no element to name: nothing
+            // to look at, nothing to check later.
+            self.item = if self.pending.key == 0 && !self.tentative {
+                Credit::NONE
+            } else {
+                Credit {
+                    site: ran(self),
+                    wit: Witness::of(&ostack[self.low]),
+                }
+            };
             self.item_set = true;
         }
     }
@@ -507,10 +620,10 @@ impl StackTrace {
         !self.item_set
     }
 
-    /// The procedure element the step about to run executes (`(0, 0)` for
+    /// The procedure element the step about to run executes (key `0` for
     /// none), and whether that is only the guess for a loop's first element.
     #[inline(always)]
-    pub(crate) fn set_pending(&mut self, site: (usize, usize), tentative: bool, frames: usize) {
+    pub(crate) fn set_pending(&mut self, site: Site, tentative: bool, frames: usize) {
         self.pending = site;
         self.tentative = tentative;
         self.pending_frames = frames;
@@ -525,41 +638,102 @@ impl StackTrace {
     /// procedure now on top, which is right unless that element was the
     /// parent's last (its frame is gone, and the call into it is named, as
     /// without #1366).
-    pub(crate) fn ran(&self, top: TopFrame, frames: usize) -> (usize, usize) {
+    pub(crate) fn ran(&self, top: TopFrame, frames: usize) -> Site {
         if !self.tentative {
             return self.pending;
         }
         match top {
-            TopFrame::Proc { key, pc, .. } if key == self.pending.0 && pc == 1 => self.pending,
-            TopFrame::Loop { key } if key == self.pending.0 && frames == self.pending_frames => {
+            TopFrame::Proc { key, pc, .. } if key == self.pending.key && pc == 1 => self.pending,
+            TopFrame::Loop { key } if key == self.pending.key && frames == self.pending_frames => {
                 self.pending
             }
             TopFrame::Proc { before, .. } => before,
-            _ => (0, 0),
+            _ => Site::default(),
         }
     }
 
-    /// A token boundary: the stack is now `ostack` and the scanner `at`.
-    /// What the last token (and everything it ran) left above the lowest the
-    /// stack went is a new run credited to it, and to the element that pushed
-    /// its oldest item when there was one.
-    pub(crate) fn note(&mut self, ostack: &[Object], at: ScanAt<'_>) {
+    /// A program begins: what is on the stack was left by an earlier one,
+    /// whose lines are not this program's. Its runs name no line.
+    pub(crate) fn begin_program(&mut self, depth: usize) {
+        for r in &mut self.runs {
+            r.at.own = 0;
+            r.at.line = 0;
+        }
+        self.low = depth;
+        self.item_set = false;
+        self.pending = Site::default();
+        self.tentative = false;
+    }
+
+    fn settle(&self, ostack: &[Object]) -> Settled {
+        let low = self.low.min(ostack.len());
+        // Below the low point nothing was touched, unless the bottom item was
+        // replaced inside an operator (`]` for its mark, `exch`, `restore`),
+        // which the depth does not show.
+        let replaced = low > 0
+            && (self.runs.is_empty() || self.bottom.is_some_and(|w| Witness::of(&ostack[0]) != w));
+        Settled {
+            low: if replaced { 0 } else { low },
+            replaced,
+        }
+    }
+
+    /// The origin of what lies above `low`, which is new: the token, and the
+    /// element's own line when it can be shown to be the right one.
+    fn origin(
+        &self,
+        ostack: &[Object],
+        low: usize,
+        trusted: bool,
+        at: ScanAt<'_>,
+        lines: &crate::srcpos::BodyLines,
+    ) -> Origin {
+        let source = at.run.or(at.main).cloned();
+        let own = (trusted && self.item_set && self.item.site.key != 0)
+            .then(|| {
+                let c = &self.item;
+                (c.site.generation == lines.generation() && Witness::of(&ostack[low]) == c.wit)
+                    .then(|| lines.position_at((c.site.key, c.site.slot)))
+                    .flatten()
+                    .filter(|(_, name)| name.map(|n| &**n) == source.as_deref())
+                    .map_or(0, |(line, _)| line)
+            })
+            .unwrap_or(0);
+        Origin {
+            own,
+            line: at.line.and_then(|l| u32::try_from(l).ok()).unwrap_or(0),
+            source,
+            is_run: at.run.is_some(),
+        }
+    }
+
+    /// A token boundary: the stack is now `ostack` and the scanner `at`. What
+    /// the last token (and everything it ran) left above the lowest the stack
+    /// went is a new run credited to it, and to the element that pushed its
+    /// oldest item when there was one.
+    pub(crate) fn note(
+        &mut self,
+        ostack: &[Object],
+        at: ScanAt<'_>,
+        lines: &crate::srcpos::BodyLines,
+    ) {
         let depth = ostack.len();
-        let low = self.low.min(depth);
+        let Settled { low, replaced } = self.settle(ostack);
+        if replaced {
+            self.runs.clear();
+        }
         // Whatever was above the low point is gone.
         while self.runs.last().is_some_and(|r| r.start >= low) {
             self.runs.pop();
         }
         if depth > low {
-            let origin = Origin {
-                site: if self.item_set { self.item } else { (0, 0) },
-                line: at.line,
-                source: at.run.or(at.main).cloned(),
-                is_run: at.run.is_some(),
-            };
+            let origin = self.origin(ostack, low, !replaced, at, lines);
             // A run that continues from the same place stays one entry; past
             // the cap the newest items join the last run.
             if self.runs.len() < MAX_RUNS && self.runs.last().is_none_or(|r| r.at != origin) {
+                if self.runs.is_empty() {
+                    self.bottom = Some(Witness::of(&ostack[0]));
+                }
                 self.runs.push(StackRun {
                     start: low,
                     at: origin,
@@ -569,7 +743,7 @@ impl StackTrace {
         self.low = depth;
         self.item_set = false;
         // A boundary step runs a scanned token, no procedure element.
-        self.pending = (0, 0);
+        self.pending = Site::default();
         self.tentative = false;
     }
 
@@ -580,7 +754,8 @@ impl StackTrace {
 
     /// Where the oldest item on the finished `ostack` came from, as
     /// `line N` (` (file)` for a `run` file). The last token ran after the
-    /// last sample, so it is noted first. `None` when no line is known.
+    /// last sample, so it is settled first, as [`note`](Self::note) would,
+    /// without changing the trace. `None` when no line is known.
     ///
     /// The line is the element's own (#1366) when the program wrote it in the
     /// text the scanner was reading then: the main program, or the `run` file
@@ -594,19 +769,23 @@ impl StackTrace {
         last: ScanAt<'_>,
         lines: &crate::srcpos::BodyLines,
     ) -> Option<String> {
-        let mut done = self.clone();
-        done.note(ostack, last);
-        let at = &done.runs.first()?.at;
-        let own = (at.site.0 != 0)
-            .then(|| lines.position_at(at.site))
-            .flatten()
-            .filter(|(_, name)| name.map(|n| &**n) == at.source.as_deref())
-            .map(|(line, _)| line);
-        // Line 0 is what a body with no element has: no answer.
-        let line = match own.filter(|l| *l > 0) {
-            Some(line) => usize::try_from(line).ok()?,
-            None => at.line?,
+        if ostack.is_empty() {
+            return None;
+        }
+        let Settled { low, replaced } = self.settle(ostack);
+        let kept = self.runs.first().filter(|r| !replaced && r.start < low);
+        let made;
+        let at = match kept {
+            Some(r) => &r.at,
+            None => {
+                made = self.origin(ostack, low, !replaced, last, lines);
+                &made
+            }
         };
+        let line = if at.own > 0 { at.own } else { at.line };
+        if line == 0 {
+            return None;
+        }
         let file = at
             .source
             .as_deref()
@@ -1572,11 +1751,14 @@ mod tests {
     #[test]
     fn a_leak_in_a_loop_names_the_element_in_its_body() {
         // #1366: the line of the leaking element, not the closing `} for`.
+        // The first item here is the loop index, swapped away by `exch` and
+        // `pop`: the tracker cannot show which element's value it is, so the
+        // loop's closing line is named (as before #1366).
         let src = "0 1 9 {\n  /gq exch\n  pop\n  /gq 1\n} for\nshowpage";
         let m = leak_message(src);
         assert!(m.contains("30 item(s)"), "{m}");
         assert!(
-            m.contains("was left when the program reached line 2"),
+            m.contains("was left when the program reached line 5"),
             "{m}"
         );
         let src = "0 1 9 {\n  pop\n  /gq 1\n} for\nshowpage";
@@ -1601,10 +1783,12 @@ mod tests {
 
     #[test]
     fn a_leak_two_calls_deep_names_the_innermost_element() {
+        // `mul` replaced the 7 with 14: its producer's value is gone, so the
+        // call that ran it is named.
         let src = "/f {\n  1 pop\n  7\n} def\n/g {\n  f\n  2 mul\n} def\ng\n";
         let m = leak_message(src);
         assert!(
-            m.contains("the oldest, 14, was left when the program reached line 3"),
+            m.contains("the oldest, 14, was left when the program reached line 9"),
             "{m}"
         );
         // The leak is in `f`, which `g` calls and nothing pops.
@@ -1882,6 +2066,52 @@ mod tests {
             .expect("leak")
             .message;
         assert!(!second.contains("was left when"), "{second}");
+    }
+
+    #[test]
+    fn a_site_taken_before_the_table_changed_is_not_resolved() {
+        // Address reuse, controlled (no allocator involved): the site of a
+        // body the table knows, but taken at an older generation of the
+        // table, as one is when the body it was taken from is gone and its
+        // address now belongs to this one. It must not name this one's line.
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.run_str("/a {\n  1\n  2\n} def\n").expect("runs");
+        let Some(Object {
+            value: Value::Array(body),
+            ..
+        }) = it.load("a")
+        else {
+            panic!("a is a procedure");
+        };
+        let (key, slot) = body.storage_site(0);
+        let lines = it.body_lines();
+        let stack = [Object::int(1)];
+        let at = ScanAt {
+            line: Some(9),
+            run: None,
+            main: None,
+        };
+        let say = |generation: u32| {
+            let mut t = StackTrace::new();
+            t.set_pending(
+                Site {
+                    key,
+                    slot,
+                    generation,
+                },
+                false,
+                0,
+            );
+            t.step(&stack, |t| t.ran(TopFrame::None, 0));
+            t.oldest(&stack, at, &lines)
+        };
+        // The same site at the table's current generation is the body's line.
+        assert_eq!(say(lines.generation()).as_deref(), Some("line 2"));
+        // At any other, the token's.
+        assert_eq!(
+            say(lines.generation().wrapping_sub(1)).as_deref(),
+            Some("line 9")
+        );
     }
 
     #[test]

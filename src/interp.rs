@@ -589,6 +589,9 @@ pub struct Interp {
     /// are read from, and the lint's def sites. Behind a pointer to keep
     /// the interpreter's hot fields where they were. See `srcpos.rs`.
     source_lines: Box<RefCell<crate::srcpos::BodyLines>>,
+    /// `source_lines`' generation, shared so the traced step loop reads it
+    /// without borrowing the table (#1366).
+    src_gen: Rc<std::cell::Cell<u32>>,
     /// The file the CLI gave as the main program (issue #1056), for
     /// `currentfilename`. Kept apart from `Lexer::run_name` so that a
     /// main-program line stays a bare number in error reports. Set only
@@ -932,6 +935,8 @@ impl Interp {
         );
         let plrm_dicts = PlrmDicts::new();
         plrm_dicts.install(&mut system.borrow_mut());
+        let source_lines: Box<RefCell<crate::srcpos::BodyLines>> = Box::default();
+        let src_gen = source_lines.borrow().generation_handle();
         Some(Interp {
             ostack: Vec::new(),
             host_ops: Vec::new(),
@@ -963,7 +968,8 @@ impl Interp {
             last_file: None,
             shadow_trace: None,
             utf8_text_trace: None,
-            source_lines: Box::default(),
+            source_lines,
+            src_gen,
             main_file_name: None,
             stack_trace: None,
             instrumented: false,
@@ -1450,6 +1456,10 @@ impl Interp {
         self.source_lines
             .borrow_mut()
             .begin_program(self.shadow_trace.is_some());
+        // What is on the stack now was left by an earlier program (#1366).
+        if let Some(trace) = self.stack_trace.as_mut() {
+            trace.begin_program(self.ostack.len());
+        }
         self.error_chain.clear();
         self.error_trace.clear();
         self.host_steps_pending.set(0);
@@ -3934,7 +3944,8 @@ impl Interp {
     /// `--lint` turns it on.
     #[doc(hidden)]
     pub fn trace_stack_leaks(&mut self) {
-        self.stack_trace.get_or_insert_with(Default::default);
+        self.stack_trace
+            .get_or_insert_with(|| Box::new(crate::lint::StackTrace::new()));
         self.instrumented = true;
     }
 
@@ -3965,13 +3976,27 @@ impl Interp {
     /// above the scanner and are gone by now.
     #[inline(never)]
     fn note_stack_depth(&mut self) {
-        if let Some(trace) = self.stack_trace.as_mut() {
+        let Interp {
+            stack_trace,
+            ostack,
+            source_lines,
+            last_line,
+            last_file,
+            main_file_name,
+            ..
+        } = self;
+        if let Some(trace) = stack_trace.as_mut() {
             let at = crate::lint::ScanAt {
-                line: self.last_line,
-                run: self.last_file.as_ref(),
-                main: self.main_file_name.as_ref(),
+                line: *last_line,
+                run: last_file.as_ref(),
+                main: main_file_name.as_ref(),
             };
-            trace.note(&self.ostack, at);
+            // The scanner holds the table only while it registers a body,
+            // which is not now; a busy table names no element's line.
+            match source_lines.try_borrow() {
+                Ok(lines) => trace.note(ostack, at, &lines),
+                Err(_) => trace.note(ostack, at, &crate::srcpos::BodyLines::default()),
+            }
         }
     }
 
@@ -3988,22 +4013,32 @@ impl Interp {
     /// Constant work per step, nothing looked up or allocated.
     #[inline(always)]
     fn note_stack_step(&mut self, next: bool) {
+        use crate::lint::{Site, TopFrame};
         let Interp {
             stack_trace,
             ostack,
             estack,
+            src_gen,
             ..
         } = self;
         let Some(trace) = stack_trace.as_deref_mut() else {
             return;
         };
-        trace.step(ostack.len(), |t| {
-            use crate::lint::TopFrame;
+        trace.step(ostack, |t| {
+            let generation = src_gen.get();
+            let site = |body: &PsArray, i: usize| {
+                let (key, slot) = body.storage_site(i);
+                Site {
+                    key,
+                    slot,
+                    generation,
+                }
+            };
             let top = match estack.last() {
                 Some(Frame::Proc { body, pc }) => TopFrame::Proc {
                     key: body.storage_site(0).0,
                     pc: *pc,
-                    before: pc.checked_sub(1).map_or((0, 0), |p| body.storage_site(p)),
+                    before: pc.checked_sub(1).map_or(Site::default(), |p| site(body, p)),
                 },
                 Some(
                     Frame::Repeat { body, .. }
@@ -4020,15 +4055,24 @@ impl Interp {
         // Nothing reads the element if an item is already found at the low
         // point (the next sample only moves the low point, which needs none).
         if trace.wants_pending() {
+            let generation = src_gen.get();
+            let site = |body: &PsArray, i: usize| {
+                let (key, slot) = body.storage_site(i);
+                Site {
+                    key,
+                    slot,
+                    generation,
+                }
+            };
             let (site, tentative) = match estack.last() {
-                Some(Frame::Proc { body, pc }) if next => (body.storage_site(*pc), false),
+                Some(Frame::Proc { body, pc }) if next => (site(body, *pc), false),
                 Some(
                     Frame::Repeat { body, .. }
                     | Frame::Loop { body }
                     | Frame::For { body, .. }
                     | Frame::Forall { body, .. },
-                ) if next && !body.is_empty() => (body.storage_site(0), true),
-                _ => ((0, 0), false),
+                ) if next && !body.is_empty() => (site(body, 0), true),
+                _ => (Site::default(), false),
             };
             trace.set_pending(site, tentative, estack.len());
         }

@@ -43,9 +43,36 @@ token, so everything a token ran (a loop, a call) was one lump. Two things now:
    run for what is left above it, whose origin is the token's line plus that
    element's site.
 
-The element's site becomes a line only when the finding is made
-(`StackTrace::oldest`, one `BodyLines::position_at` lookup), so the run loop
-does no table lookup per push.
+The element's site becomes a line at the boundary, in the one place that can show it is
+still the right one (next section). The runs keep plain numbers (a line, a source name),
+never an address, so nothing in them can name a body that is gone.
+
+## Round 1 of the review (Codex, PR #1474): when a credit is kept
+
+The first version trusted a credit for as long as the item stayed on the stack. A stack item
+can be consumed and replaced inside one operator, which the depth does not show, and an
+address can be freed and given to another body. Rule now: when the tracker cannot prove a slot
+still holds the value it credited, it names the token's line (what #1081 named), never an own
+line of a producer whose value is gone.
+
+- **Witness.** When an item first appears at the low point its `Witness` (kind and scalar
+  value; a composite by storage and extent) is kept with the element. At the boundary the
+  element's line is used only if the item at that slot is still that. `]`, `>>`, `exch`,
+  `roll`, `restore` and an arithmetic result over the pushed value all change it, so they
+  fall back (`[ 77 ]` and `<< /a 77 >>` name line 3 again, as on the base). The bottom
+  item's witness is checked at every boundary, as #1081 did: a replaced bottom item drops all
+  the runs and credits the token.
+- **Generation.** `BodyLines` counts every entry added or dropped (`register`, `forget`, a
+  sweep, `begin_program`). A site carries the count it was taken at and is resolved only if it
+  is unchanged at the boundary, which runs before the next token is scanned. A swept body's
+  address given to another body is therefore never answered for (test
+  `a_site_taken_before_the_table_changed_is_not_resolved` controls it with no allocator, and
+  `a_swept_body_is_never_named_by_a_later_one` is the 32766-body program).
+- **Programs.** `begin_source` calls `StackTrace::begin_program`: the runs of an earlier
+  program name no line (an operand a host left on the stack is of unknown origin, not a line
+  of the next text).
+- The 1024 runs are allocated when tracing starts, so the memory cap sees them then and a run
+  never grows the vector; the report no longer clones the trace.
 
 ## When the element's own line is named
 
@@ -66,18 +93,16 @@ has dropped its caller's frame anyway.
 ## What it is, and is not
 
 - The oldest item is credited to the element that pushed the item at the low point of
-  the token's run. An item replaced in place (`7` then `2 mul`) keeps the line of the
-  value it came from. A loop's index that the body does not consume is the loop's own
-  push, made in the same step that runs the body's first element, so it is credited to
-  that element's line (`0 1 9 {` / `1 pop` / `} for` names line 2); a loop with an empty
-  body has no element and names the `} for` token (an own line of 0, what an empty
-  body's table entry holds, is treated as unknown).
-- A bottom-item witness (#1081) is gone: the low point does what it did, for a token that
-  consumed the stack and left another. What it also did, crediting an accumulator
-  (`0` on line 1, `1 add` on line 2) to the last token that changed it, is not done: it
-  is credited to the line that pushed the item.
+  the token's run, while that item is what the element pushed. An accumulator (`7` then
+  `2 mul`) or a swapped item names the token, not the element. A loop's index that the
+  body does not consume is the loop's own push, made in the same step that runs the body's
+  first element, so it is credited to that element's line (`0 1 9 {` / `1 pop` / `} for` names
+  line 2); a loop with an empty body has no element and names the `} for` token (an own line
+  of 0, what an empty body's table entry holds, is treated as unknown).
 - A body of one element is named through the guess above only when the loop's frame is
   back on top with as many frames as before.
+- A leak in a loop that `exch`es the index away, as in `/gq exch pop`, names the `} for` as
+  before: the tracker cannot show which element's value the first item is.
 
 ## Bounds
 
@@ -89,23 +114,28 @@ has dropped its caller's frame anyway.
 - The runs are at most 1024 (`MAX_RUNS`). Before, a program that leaked from a million
   different lines held a million runs; now the newest items past the cap share the last
   run's origin. Test `a_program_that_leaks_from_every_line_keeps_the_trace_bounded`.
-- At report time: one hash lookup and one binary search in one body's lines.
+- At a boundary that credits an element: one hash lookup and one binary search in one body's
+  lines.
 
 ## Cost
 
-`--release` binaries, base = the merge base with `origin/feature/0.8.0` (`1f4a6269`), head =
-this branch, `/usr/bin/time -l` instructions retired (the figure is stable; wall time is not):
+`--release` binaries, base = `origin/feature/0.8.0` at `58bb0d24`, head = this branch,
+`/usr/bin/time -l` instructions retired (the figure is stable; wall time is not):
 
 | program | mode | base | head |
 | --- | --- | --- | --- |
-| 13.5M-token flat file (`1 2 add pop 3 4 mul pop` x 1.5M) | plain | 17 826M | 17 822M |
-| same | `--lint` | 19 540M | 20 349M (+4.1%) |
-| `0 1 3000000 { /x exch def } for` | plain | 3 463M | 3 462M |
-| same | `--lint` | 3 667M | 4 074M (+11%) |
-| `/f { 1 pop } def 0 1 10000000 { pop f } for` | plain | 12 241M | 12 236M |
-| same | `--lint` | 12 239M | 14 216M (+16%) |
-| `gallery/alpine_lake.ps` (a heavy, loop-bound render) | plain | 457 719M | 457 820M |
-| same | `--lint` | 473 608M | 571 536M (+21%) |
+| 13.5M-token flat file (`1 2 add pop 3 4 mul pop` x 1.5M) | plain | 17 864M | 17 865M |
+| same | `--lint` | 19 580M | 21 344M (+9.0%) |
+| `0 1 3000000 { /x exch def } for` | plain | 3 523M | 3 525M |
+| same | `--lint` | 3 727M | 4 148M (+11%) |
+| `/f { 1 pop } def 0 1 10000000 { pop f } for` | plain | 12 508M | 12 508M |
+| same | `--lint` | 12 514M | 14 500M (+16%) |
+| `gallery/alpine_lake.ps` (a heavy, loop-bound render) | plain | 467 582M | 467 001M |
+| same | `--lint` | 483 453M | 572 250M (+18%) |
+
+Before the fixes of round 1 the same rows were +4%, +11%, +16% and +21% (against the
+previous base): the witness taken at every token boundary is what the flat file pays, a
+comparison of three words.
 
 The plain loop is untouched: one `bool` test per slice replaces the profile test that was
 there. A lint run pays the figures above: about two thirds of the alpine figure is the
