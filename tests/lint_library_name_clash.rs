@@ -37,6 +37,11 @@ fn lint(tag: &str, files: &[(&str, &str)], main: &str) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+/// A path as the inside of a PostScript string: no backslashes (Windows).
+fn ps_path(p: &std::path::Path) -> String {
+    p.display().to_string().replace('\\', "/")
+}
+
 const CHECK: &str = "[shadowed-library-name]";
 
 fn finding(stderr: &str) -> Option<&str> {
@@ -239,7 +244,7 @@ fn the_note_is_for_the_program_that_defined_the_name_not_the_next_one() {
     std::fs::write(&lib, LIB).expect("write lib");
     let mut it = Interp::with_page(50, 50).expect("page");
     it.trace_operator_shadows();
-    let load = format!("({}) run", lib.display());
+    let load = format!("({}) run", ps_path(&lib));
     it.run_str(&format!("{load} /helper [1 2] def use"))
         .expect_err("typecheck");
     let first = it.lint(true);
@@ -272,7 +277,7 @@ fn without_lint_nothing_is_traced() {
     let lib = dir.join("lib1.ps");
     std::fs::write(&lib, LIB).expect("write lib");
     let mut it = Interp::with_page(50, 50).expect("page");
-    it.run_str(&format!("({}) run /helper [1 2] def use", lib.display()))
+    it.run_str(&format!("({}) run /helper [1 2] def use", ps_path(&lib)))
         .expect_err("typecheck");
     assert!(
         it.lint(true)
