@@ -6221,7 +6221,7 @@ impl Gfx {
     /// anti-aliasing. Only the clip's mask changes: its path, which `clippath`
     /// and the exporters read, stays the `/BBox`. The work is the rectangle's
     /// perimeter (at most 2 x 16384 pixels a side), on the mask `clip`
-    /// just made.
+    /// just made: bounded and allocation-free, whatever the `/BBox`.
     fn snap_clip_to_pixels(&mut self) {
         let [x0, y0, x1, y1] = match self.captures.last() {
             Some(c) => c.spec.bbox,
@@ -6241,17 +6241,21 @@ impl Gfx {
             i64::from(self.pixmap.width()),
             i64::from(self.pixmap.height()),
         );
-        // Outward to whole pixels, inside the canvas.
-        let inside = |v: f32, up: bool, limit: i64| -> i64 {
-            let v = if up {
-                (v - NOISE).ceil()
+        // Outward to whole pixels, inside the canvas. A footprint narrower
+        // than the noise guard would collapse to nothing; it is still
+        // non-empty (`hi > lo`), so it keeps the pixels it touches rather
+        // than being left to the anti-aliased mask (#1470).
+        let span = |lo: f32, hi: f32, limit: i64| -> (i64, i64) {
+            let (a, b) = ((lo + NOISE).floor(), (hi - NOISE).ceil());
+            let (a, b) = if a < b || hi <= lo {
+                (a, b)
             } else {
-                (v + NOISE).floor()
+                (lo.floor(), hi.ceil())
             };
-            (v as i64).clamp(0, limit)
+            ((a as i64).clamp(0, limit), (b as i64).clamp(0, limit))
         };
-        let (ix0, ix1) = (inside(lo(|c| c.0), false, w), inside(hi(|c| c.0), true, w));
-        let (iy0, iy1) = (inside(lo(|c| c.1), false, h), inside(hi(|c| c.1), true, h));
+        let (ix0, ix1) = span(lo(|c| c.0), hi(|c| c.0), w);
+        let (iy0, iy1) = span(lo(|c| c.1), hi(|c| c.1), h);
         if ix0 >= ix1 || iy0 >= iy1 {
             return;
         }
