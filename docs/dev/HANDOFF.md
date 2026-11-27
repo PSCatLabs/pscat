@@ -1764,6 +1764,16 @@ renders eight examples in both and compares block-downsampled output).
     empty body never yields an object, so `next_item` calls `tick()` on every
     `Iterate*` action to poll the limits itself; a new loop-like frame must tick
     too, or `{ } loop` hangs again.
+  - A program's stdout/stderr write can block on a reader (#1457), so under a
+    time limit or an interrupt flag `Interp::write_stdout`/`write_stderr` take
+    `src/timed_write.rs` for a pipe or socket: `poll` then a write small
+    enough not to block (`PIPE_BUF`; `send(MSG_DONTWAIT)` on a Linux socket),
+    never `O_NONBLOCK` (the file description is shared with the shell). That
+    path bypasses std's `LineWriter`, so it keeps `stdout_pending` and
+    `step_n` flushes it at every slice end. A new writer to fd 1 or 2 goes
+    through those two methods and passes their `PsError` up unchanged (a
+    `map_err` to `Io` would make the stop catchable). No limit, a file or a
+    terminal, Windows: the old blocking write. `notes/1457-stdout-write-deadline.md`.
   - A whole-file read (`file`, `run`) is inside one operator, so it polls the
     limits itself (#702): `ops/file.rs` `read_resource` takes
     `file::read_path_limited` (64 KiB chunks, a helper thread for anything that

@@ -626,6 +626,13 @@ pub struct Interp {
     /// Set once the capture buffer has dropped output and carries the
     /// truncation note; later writes are discarded.
     stdout_truncated: bool,
+    /// Program stdout not yet written, on the timed path only (a time
+    /// limit or an interrupt flag, stdout a pipe or socket; #1457). That
+    /// path writes past std's line buffer, so it keeps its own: a line goes
+    /// out at its newline, as `LineWriter` sends it, and a partial line at
+    /// `flush` or the end of the slice. Never more than
+    /// `STDOUT_PENDING_MAX` bytes.
+    stdout_pending: Vec<u8>,
     /// When set, what the program writes to stderr (`(%stderr)` files,
     /// `handleerror`, `findfont`'s stand-in notes) is dropped; the notes
     /// still collect in `font_warnings`. `pscat --bands` sets it on every
@@ -732,6 +739,12 @@ pub struct Interp {
 /// The most a captured stdout keeps (see [`Interp::capture_stdout`]): a
 /// runaway `{ 1 == } loop` in a browser tab must not grow without limit.
 pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
+
+/// The most program stdout the timed path holds back for a newline
+/// (`Interp::stdout_pending`, #1457); a write this big goes out at once,
+/// from the caller's bytes, with no copy.
+#[cfg(unix)]
+const STDOUT_PENDING_MAX: usize = 8 * 1024;
 
 /// Steps per `step_n` call in `run_source` when a time or memory limit is
 /// set: small enough to notice a runaway within milliseconds, large enough
@@ -922,6 +935,7 @@ impl Interp {
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
+            stdout_pending: Vec::new(),
             quiet_stderr: false,
             limits: Limits::none(),
             max_page_pixels: None,
@@ -1444,6 +1458,19 @@ impl Interp {
         } else {
             self.step_n_inner(budget)
         };
+        // The timed path's held-back partial line goes out at the end of
+        // every slice (#1457), so none is pending when the host has control
+        // and the CLI's own output after the run comes after it. A stop
+        // while writing it is the slice's error unless it already has one.
+        #[cfg(unix)]
+        if !self.stdout_pending.is_empty() {
+            let flushed = self.flush_stdout_pending();
+            if result.is_ok()
+                && let Err(e) = flushed
+            {
+                result = Err(e);
+            }
+        }
         // A program that is done ends the transparency groups it left open
         // before the limits are looked at, so their work is held to them
         // (#1406); an aborted one ends them in `unwind_all`.
@@ -4860,15 +4887,127 @@ impl Interp {
     }
 
     /// Program output to stderr, unless [`quiet_stderr`](Self::quiet_stderr)
-    /// is on.
-    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    /// is on. Under a time limit, a write to a pipe or socket that would
+    /// block past it stops with the limit's error (#1457); any other failure
+    /// is `ioerror`.
+    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> Result<(), PsError> {
         use std::io::Write;
         if self.quiet_stderr {
             return Ok(());
         }
+        #[cfg(unix)]
+        if self.timed_output() {
+            let kind = crate::timed_write::stderr_kind();
+            if kind != crate::timed_write::FdKind::Blocking {
+                // std's stderr is unbuffered: only its lock, so the bytes
+                // do not interleave with another thread's.
+                let _lock = std::io::stderr().lock();
+                return crate::timed_write::write_all(2, kind, bytes, &mut || self.write_look())
+                    .map_err(|stop| match stop {
+                        crate::timed_write::WriteStop::Limit(e) => e,
+                        crate::timed_write::WriteStop::Io(_) => PsError::Io,
+                    });
+            }
+        }
         let mut err = std::io::stderr();
-        err.write_all(bytes)?;
-        if flush { err.flush() } else { Ok(()) }
+        err.write_all(bytes)
+            .and_then(|()| if flush { err.flush() } else { Ok(()) })
+            .map_err(|_| PsError::Io)
+    }
+
+    /// Whether program output takes the timed path (#1457): a time limit
+    /// or a host interrupt flag is set. With neither, a write blocks as it
+    /// always did.
+    #[cfg(unix)]
+    fn timed_output(&self) -> bool {
+        self.limits.max_time.is_some() || self.interrupt.is_some()
+    }
+
+    /// The look a timed write takes while it waits on its reader: the host's
+    /// interrupt flag and the time limit, read as a slice's end reads it.
+    /// Not gated on a running program: the end-of-slice flush runs after
+    /// the program has finished, and is held to the run's deadline too.
+    #[cfg(unix)]
+    fn write_look(&self) -> Result<(), PsError> {
+        if self.interrupted() {
+            return Err(PsError::Interrupted);
+        }
+        if let Some(max) = self.limits.max_time
+            && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
+        {
+            return Err(PsError::TimeExceeded);
+        }
+        Ok(())
+    }
+
+    /// Program stdout on the timed path: held back to a line end as std's
+    /// `LineWriter` does, then written with [`crate::timed_write`]. A write
+    /// of [`STDOUT_PENDING_MAX`] bytes or more goes out at once from
+    /// `bytes`, after what is pending.
+    #[cfg(unix)]
+    fn write_stdout_timed(
+        &mut self,
+        kind: crate::timed_write::FdKind,
+        bytes: &[u8],
+        flush: bool,
+    ) -> Result<(), PsError> {
+        if bytes.len() >= STDOUT_PENDING_MAX {
+            self.flush_stdout_pending()?;
+            return self.write_fd1(kind, bytes);
+        }
+        self.stdout_pending.extend_from_slice(bytes);
+        let upto = if flush || self.stdout_pending.len() >= STDOUT_PENDING_MAX {
+            self.stdout_pending.len()
+        } else {
+            match bytes.iter().rposition(|&b| b == b'\n') {
+                // The newline is in `bytes`, at the end of `pending`.
+                Some(i) => self.stdout_pending.len() - bytes.len() + i + 1,
+                None => return Ok(()),
+            }
+        };
+        let pending = std::mem::take(&mut self.stdout_pending);
+        let written = self.write_fd1(kind, &pending[..upto]);
+        if written.is_ok() {
+            self.stdout_pending = pending;
+            self.stdout_pending.drain(..upto);
+        }
+        // On a stop the rest is dropped with it: the write was cut short,
+        // and a later one must not append to a line it never finished.
+        written
+    }
+
+    /// Write what the timed path holds back, all of it.
+    #[cfg(unix)]
+    fn flush_stdout_pending(&mut self) -> Result<(), PsError> {
+        if self.stdout_pending.is_empty() {
+            return Ok(());
+        }
+        let pending = std::mem::take(&mut self.stdout_pending);
+        self.write_fd1(crate::timed_write::stdout_kind(), &pending)
+    }
+
+    /// A timed write of `bytes` to fd 1, holding std's stdout lock so the
+    /// CLI's own output stays in order around it.
+    #[cfg(unix)]
+    fn write_fd1(&mut self, kind: crate::timed_write::FdKind, bytes: &[u8]) -> Result<(), PsError> {
+        use std::io::Write;
+        let mut lock = std::io::stdout().lock();
+        // Whatever the CLI left in std's buffer goes first (normally
+        // nothing: no system call then).
+        let mut written = lock.flush().map_err(crate::timed_write::WriteStop::Io);
+        if written.is_ok() {
+            written = crate::timed_write::write_all(1, kind, bytes, &mut || self.write_look());
+        }
+        match written {
+            Ok(()) => Ok(()),
+            Err(crate::timed_write::WriteStop::Limit(e)) => Err(e),
+            Err(crate::timed_write::WriteStop::Io(e)) => {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    self.stdout_epipe_error = true;
+                }
+                Err(PsError::Io)
+            }
+        }
     }
 
     /// What has been printed since [`Interp::capture_stdout`]; empty when
@@ -4915,10 +5054,20 @@ impl Interp {
 
     /// Program output: to the capture buffer when one is on, else stdout
     /// (flushed when `flush` is set, as `print` does: a prompt with no
-    /// newline must still appear).
-    pub(crate) fn write_stdout(&mut self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    /// newline must still appear). Under a time limit, a write to a pipe or
+    /// socket that would block past it stops with the limit's error
+    /// (#1457); any other failure is `ioerror`, with a reader that went
+    /// away noted for the CLI ([`stdout_epipe_error`](Self::stdout_epipe_error)).
+    pub(crate) fn write_stdout(&mut self, bytes: &[u8], flush: bool) -> Result<(), PsError> {
         use std::io::Write;
         let Some(buf) = self.stdout_capture.as_mut() else {
+            #[cfg(unix)]
+            if self.timed_output() {
+                let kind = crate::timed_write::stdout_kind();
+                if kind != crate::timed_write::FdKind::Blocking {
+                    return self.write_stdout_timed(kind, bytes, flush);
+                }
+            }
             let mut out = std::io::stdout();
             let written = out
                 .write_all(bytes)
@@ -4928,7 +5077,7 @@ impl Interp {
             {
                 self.stdout_epipe_error = true;
             }
-            return written;
+            return written.map_err(|_| PsError::Io);
         };
         if self.stdout_truncated || bytes.is_empty() {
             return Ok(());

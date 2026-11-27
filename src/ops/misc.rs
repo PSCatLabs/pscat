@@ -284,7 +284,7 @@ fn print_string(it: &mut Interp) -> Result<(), PsError> {
 /// Program output goes through the interpreter, which sends it to stdout
 /// or, in the browser build, to a buffer the page reads (issue #252).
 fn out(it: &mut Interp, bytes: &[u8], flush: bool) -> Result<(), PsError> {
-    it.write_stdout(bytes, flush).map_err(|_| PsError::Io)
+    it.write_stdout(bytes, flush)
 }
 
 fn quit(it: &mut Interp) -> Result<(), PsError> {

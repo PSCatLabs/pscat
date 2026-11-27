@@ -93,7 +93,7 @@ fn charge(it: &mut Interp, bytes: usize) -> Result<(), PsError> {
 /// obj tag printobject -
 fn printobject(it: &mut Interp) -> Result<(), PsError> {
     let bytes = encoded(it, "printobject")?;
-    it.write_stdout(&bytes, false).map_err(|_| PsError::Io)
+    it.write_stdout(&bytes, false)
 }
 
 /// file obj tag writeobject -

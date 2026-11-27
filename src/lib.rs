@@ -255,6 +255,9 @@ pub mod spool;
 #[doc(hidden)]
 pub mod svg;
 pub(crate) mod textrun;
+// A stdout/stderr write the run's deadline can stop (#1457): `poll(2)`.
+#[cfg(unix)]
+pub(crate) mod timed_write;
 pub(crate) mod type1;
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
