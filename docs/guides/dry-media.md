@@ -81,13 +81,32 @@ the stick's contact patch meets raised tooth.
   enough for drykit to draw in several chunks, thousands of points, may
   still change once at `/To 1`.) A piece ends round at `/To` and starts
   flat at a `/From` cut, so two adjacent pieces drawn on one canvas make
-  the whole to within about 25 levels at the seam, on a few pixels. A
-  caller that keeps its canvas can draw `/From prev /To now` each frame:
-  300 pieces a fifth of a width long keep the stroke's weight to within a
-  few percent. Much shorter pieces (a twentieth of a width, under a
-  device pixel) come out a little lighter and flatter, from the
-  anti-aliased edge at every cut (about 10% on charcoal), so redraw
-  `/From 0 /To t` for those.
+  the whole to within about 20 levels at the seam (about 30 with a `/Touch`
+  procedure, also where its touch changes band at or near the cut), on a
+  few pixels. A part that runs to `/To 1` ends exactly as the whole
+  stroke does. A caller that keeps its canvas can draw `/From prev /To
+  now` each frame. How close that comes depends on the touch, because each
+  piece's round end is painted again by the next few pieces, and pscat's
+  clip edges are anti-aliased, so every repaint adds a little coverage to
+  each tooth's rim. (Ghostscript clips hard-edged; there, 50 and 300 pieces at
+  `/Touch 0.5` stay within about 1%.) Measured against the whole stroke's
+  ink, on a 180 pt stroke at 144 dpi, cut into 50, 300 or 1500 pieces:
+  - The default touch (0.8) stays within 2% for 50 to 300 pieces at
+    widths 4 to 12. 1500 pieces (0.12 pt each) come out about 8% light.
+  - `/Touch 0.7` is 3 to 5% heavy (40 or 300 pieces, widths 6 and 8).
+  - `/Touch 0.5` is 9 to 20% heavy at 50 pieces and 26 to 32% at 300 or
+    more. The wider the stroke, the heavier.
+  - A touch procedure in the same range, such as `{ 0.4 mul 0.3 add }`,
+    is 7 to 15% heavy at 50 pieces and 21 to 26% at 300 or more.
+  - `/Touch 0.3` nearly doubles at 300 pieces.
+
+  `dcchalk`, `dycrayon` and `dhstroke` at their defaults stay within 7%
+  for 40 to 300 pieces (300: chalk 4% light, crayon 5 to 7% heavy). Pieces
+  under a device pixel come out lighter, from the anti-aliased edge at
+  every cut: at 1500 pieces (0.12 pt) charcoal is 5% light and chalk at
+  `/Width` 2 or 3 is 13 to 15% light. Redraw `/From 0
+  /To t` each frame where the weight must match (psanim does): it is
+  exact.
   The catch and the ink cost in proportion to the part, though the walk
   and the profile are worked out for the whole stroke (a tenth of a long
   zigzag, start-up included: 0.09 s against 0.24 s for `dkstroke`, 0.08
@@ -164,15 +183,15 @@ newpath 40 60 moveto 300 80 lineto
     texture and dust stay; behind the pen's last dozen widths no pixel
     moves between frames, with `/Tilt` too: each lane keeps the whole
     lane's dropouts). `/To 0.5` plus `/From 0.5` make the whole: at the seam
-    a handful of pixels differ, by a few dozen levels, except where the
-    stroke's touch changes band just past the cut, which can leave a faint
-    one-pixel arc across a wide stroke or a `/Tilt` mark.
+    a handful of pixels differ, by a few dozen levels, also where the
+    stroke's touch changes band at or near the cut.
     A caller that keeps its canvas can draw `/From prev /To now` each
     frame instead: each piece starts flat where the last one ended, so
-    pieces down to a fifth of a width keep the stroke's weight, and only
-    much shorter ones (under a device pixel) come out somewhat lighter
-    (about 13% at a twentieth of a width), so redraw `/From 0 /To t` for
-    those. A long stroke's part
+    40 pieces keep the stroke's weight to within 1%, and 300 pieces
+    (0.6 pt each on a 180 pt stroke, widths 4 to 12) come out about 4%
+    lighter. Pieces under a device pixel are lighter still (1500 pieces of
+    0.12 pt at `/Width` 2 or 3: 13 to 15%); redraw `/From 0 /To t` where it
+    must match exactly. A long stroke's part
     costs in proportion to its length, so a board written over time pays
     for what each frame adds, not the whole stroke. The stroke's landing
     belongs to the piece that holds `/From 0`, its lift to the one that

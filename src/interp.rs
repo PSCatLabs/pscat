@@ -256,6 +256,16 @@ struct TailCall {
     parent_pc: usize,
 }
 
+/// Whose `def` is running, for the lint's library-name trace (#1456).
+enum DefOrigin {
+    /// Written in the program's own text, on this line.
+    Program(u32),
+    /// Written in a `run` file.
+    Library,
+    /// Not told at constant cost.
+    Unknown,
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -379,8 +389,9 @@ pub(crate) enum ForallSrc {
     /// Bytes pushed as integers.
     Str(PsString, usize),
     /// Dict pairs are snapshotted when `forall` starts; the PLRM leaves
-    /// order and mid-loop mutation behavior unspecified.
-    Pairs(Vec<(Object, Object)>, usize),
+    /// order and mid-loop mutation behavior unspecified. The dictionary is
+    /// kept for `execstack` to show (#1468).
+    Pairs(Rc<RefCell<Dict>>, Vec<(Object, Object)>, usize),
 }
 
 pub(crate) struct ForControl {
@@ -417,11 +428,26 @@ impl ForControl {
     }
 
     fn value(&self) -> Object {
+        self.number(self.current)
+    }
+
+    fn number(&self, v: f64) -> Object {
         if self.integral {
-            Object::int(self.current as i64)
+            Object::int(v as i64)
         } else {
-            Object::real(self.current)
+            Object::real(v)
         }
+    }
+
+    /// The next control value, the increment and the limit, as `execstack`
+    /// shows them (gs 10.07.1: `1 2 9 { ... } for` shows `3 2 9` in the
+    /// first pass).
+    fn parts(&self) -> [Object; 3] {
+        [
+            self.number(self.current),
+            self.number(self.increment),
+            self.number(self.limit),
+        ]
     }
 }
 
@@ -589,6 +615,9 @@ pub struct Interp {
     /// are read from, and the lint's def sites. Behind a pointer to keep
     /// the interpreter's hot fields where they were. See `srcpos.rs`.
     source_lines: Box<RefCell<crate::srcpos::BodyLines>>,
+    /// `source_lines`' generation, shared so the traced step loop reads it
+    /// without borrowing the table (#1366).
+    src_gen: Rc<std::cell::Cell<u32>>,
     /// The file the CLI gave as the main program (issue #1056), for
     /// `currentfilename`. Kept apart from `Lexer::run_name` so that a
     /// main-program line stays a bare number in error reports. Set only
@@ -600,6 +629,10 @@ pub struct Interp {
     /// `[stack-leak]` can name the line that left the oldest item. `None`
     /// otherwise, which costs `sync_scan_line` one branch.
     stack_trace: Option<Box<crate::lint::StackTrace>>,
+    /// Whether `step_n` runs a slice in the instrumented copy of the step
+    /// loop, `step_n_timed`: `--profile-ops` times operators, or `--lint`
+    /// traces stack leaks (#1366). One flag, so the plain path tests one byte.
+    instrumented: bool,
     /// Operator names a program tried to overwrite in the read-only
     /// systemdict (issue #1337), with the type of value it tried to store:
     /// the `[shadowed-operator]` lint reports them, since the store itself
@@ -933,6 +966,8 @@ impl Interp {
         );
         let plrm_dicts = PlrmDicts::new();
         plrm_dicts.install(&mut system.borrow_mut());
+        let source_lines: Box<RefCell<crate::srcpos::BodyLines>> = Box::default();
+        let src_gen = source_lines.borrow().generation_handle();
         Some(Interp {
             ostack: Vec::new(),
             host_ops: Vec::new(),
@@ -964,9 +999,11 @@ impl Interp {
             last_file: None,
             shadow_trace: None,
             utf8_text_trace: None,
-            source_lines: Box::default(),
+            source_lines,
+            src_gen,
             main_file_name: None,
             stack_trace: None,
+            instrumented: false,
             refused_system_stores: Default::default(),
             error_chain: Vec::new(),
             font_notes_shown: std::collections::HashSet::new(),
@@ -1454,6 +1491,10 @@ impl Interp {
         self.source_lines
             .borrow_mut()
             .begin_program(self.shadow_trace.is_some());
+        // What is on the stack now was left by an earlier program (#1366).
+        if let Some(trace) = self.stack_trace.as_mut() {
+            trace.begin_program(self.ostack.len());
+        }
         self.error_chain.clear();
         self.error_trace.clear();
         self.host_steps_pending.set(0);
@@ -1473,6 +1514,7 @@ impl Interp {
         self.refused_system_stores.clear();
         if let Some(trace) = self.shadow_trace.as_mut() {
             trace.forget_system();
+            trace.names.begin_program();
         }
         // The text the last program showed is that program's (#1412).
         if let Some(trace) = self.utf8_text_trace.as_mut() {
@@ -1510,8 +1552,13 @@ impl Interp {
         };
         // `--profile-ops` times every operator, in its own copy of the loop
         // (checked once per slice, so the plain loop carries no per-step test).
-        let mut result = if self.profile.as_deref().is_some_and(|p| p.ops_on()) {
-            self.step_n_timed(budget)
+        // `--lint` samples the operand stack after every step in the same copy
+        // (#1366).
+        let mut result = if self.instrumented {
+            let result = self.step_n_timed(budget);
+            // The last step of the slice ran after the last sample.
+            self.note_stack_step(false);
+            result
         } else {
             self.step_n_inner(budget)
         };
@@ -1902,11 +1949,16 @@ impl Interp {
         // `slice_budget` then counts the steps run (#1213).
         self.slice_left = 0;
         self.slice_budget = 0;
+        let timing = self.profile.as_deref().is_some_and(|p| p.ops_on());
+        let tracing = self.stack_trace.is_some();
         for _ in 0..budget {
             self.slice_budget += 1;
             if self.quit_requested {
                 self.slice_budget -= 1;
                 return Ok(false);
+            }
+            if tracing {
+                self.note_stack_step(true);
             }
             let mut step = self.proc_step::<true>();
             if let ProcStep::Other = step {
@@ -1918,8 +1970,10 @@ impl Interp {
                     Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
-                            (Value::Name(n), true) => self.execute_name_timed(n.id()),
-                            (Value::Operator(op), true) => self.timed_op(op.name, op.func),
+                            (Value::Name(n), true) if timing => self.execute_name_timed(n.id()),
+                            (Value::Operator(op), true) if timing => {
+                                self.timed_op(op.name, op.func)
+                            }
                             _ => self.execute_element(obj),
                         };
                         if let Err(e) = done {
@@ -1939,8 +1993,10 @@ impl Interp {
                 // (and never fused here, `slice_left` being zero).
                 ProcStep::Lit => self.proc_literal(),
                 ProcStep::Src => self.proc_source(),
-                ProcStep::Op(func) => self.timed_op(self.op_name, func),
-                ProcStep::Name(id) => self.execute_name_timed(id),
+                ProcStep::Op(func) if timing => self.timed_op(self.op_name, func),
+                ProcStep::Op(func) => self.run_op(func, ""),
+                ProcStep::Name(id) if timing => self.execute_name_timed(id),
+                ProcStep::Name(id) => self.execute_name(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
@@ -1975,7 +2031,8 @@ impl Interp {
         self.execute_resolved(resolved, id)
     }
 
-    // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
+    // `step_n_timed` is a copy of this loop (`--profile-ops`, and `--lint`'s stack
+    // trace): change both.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         // An explicit count of the steps left, so a fused run of several
         // elements (#864) can charge each of them.
@@ -2539,6 +2596,9 @@ impl Interp {
         });
         let mut trace = Vec::new();
         let mut bodies: Vec<&PsArray> = Vec::new();
+        // For a `--lint` run (#1456): the names the excerpts show, by frame.
+        let lint_names = self.shadow_trace.is_some();
+        let mut read: Vec<(usize, u32)> = Vec::new();
         for (body, at) in tail
             .map(|t| (&t.body, t.body.len().saturating_sub(1)))
             .into_iter()
@@ -2548,6 +2608,21 @@ impl Interp {
                 break;
             }
             let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
+            if lint_names {
+                // The elements up to and including the running one had run
+                // (a procedure's body runs in order); the ones after had not.
+                for k in from..to.min(at + 1) {
+                    let id = body
+                        .peek(k, |o| match &o.value {
+                            Value::Name(n) if o.executable => Some(n.id()),
+                            _ => None,
+                        })
+                        .flatten();
+                    if let Some(id) = id {
+                        read.push((trace.len(), id));
+                    }
+                }
+            }
             let mut excerpt = String::new();
             if from > 0 {
                 excerpt.push_str("... ");
@@ -2617,13 +2692,32 @@ impl Interp {
         // Where each element was written: one binary search per frame, in a
         // table the scanner kept (#1405).
         let lines = self.source_lines.borrow();
-        for (frame, body) in trace.iter_mut().zip(&bodies) {
+        // Which frames were written in a `run` file: `file` is also set for
+        // the main program when the host names it, as the CLI does.
+        let mut library = vec![false; if lint_names { trace.len() } else { 0 }];
+        for (i, (frame, body)) in trace.iter_mut().zip(&bodies).enumerate() {
             if let Some(p) = lines.position(body, frame.element) {
                 frame.line = Some(p.line as usize);
                 frame.file = p.file.as_deref().map(report_name);
             }
+            if lint_names {
+                library[i] = lines
+                    .line_of(body, frame.element)
+                    .is_some_and(|(_, file)| file.is_some());
+            }
         }
         drop(lines);
+        // The names the library procedures on the stack read by name (#1456):
+        // those of a frame written in a `run` file, once each.
+        if let Some(lint) = self.shadow_trace.as_mut() {
+            let mut names: Vec<u32> = Vec::new();
+            for (frame, id) in read {
+                if library[frame] && !names.contains(&id) {
+                    names.push(id);
+                }
+            }
+            lint.names.set_read(names);
+        }
         self.error_trace = trace;
     }
 
@@ -2886,7 +2980,7 @@ impl Interp {
                                 Action::IterateWith(Object::int(i64::from(b)), body.clone())
                             }
                         },
-                        ForallSrc::Pairs(pairs, i) => match pairs.get(*i) {
+                        ForallSrc::Pairs(_, pairs, i) => match pairs.get(*i) {
                             None => Action::Pop,
                             Some((k, v)) => {
                                 let (k, v) = (k.clone(), v.clone());
@@ -3204,6 +3298,7 @@ impl Interp {
     pub fn enable_profile_ops(&mut self) {
         if let Some(p) = self.profile.as_mut() {
             p.set_ops();
+            self.instrumented = true;
         }
     }
 
@@ -3843,11 +3938,12 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
-        if self.shadow_trace.is_some()
-            && let Some(top) = self.dstack.last()
-            && let Some(scope) = self.shadow_scope_of(top)
-        {
-            self.note_shadow(name, &obj, scope);
+        if self.shadow_trace.is_some() {
+            let scope = self.dstack.last().and_then(|top| self.shadow_scope_of(top));
+            if let Some(scope) = scope {
+                self.note_shadow(name, &obj, scope);
+            }
+            self.note_library_name(name, &obj, scope == Some(crate::lint::ShadowScope::User));
         }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
@@ -3939,7 +4035,9 @@ impl Interp {
     /// `--lint` turns it on.
     #[doc(hidden)]
     pub fn trace_stack_leaks(&mut self) {
-        self.stack_trace.get_or_insert_with(Default::default);
+        self.stack_trace
+            .get_or_insert_with(|| Box::new(crate::lint::StackTrace::new()));
+        self.instrumented = true;
     }
 
     pub(crate) fn stack_trace(&self) -> Option<&crate::lint::StackTrace> {
@@ -3948,19 +4046,126 @@ impl Interp {
 
     /// The line (and `run` file) of the last source token scanned: what ran
     /// most recently, so the end-of-program stack is attributed to it.
-    pub(crate) fn last_scan_location(&self) -> (Option<usize>, Option<&Rc<str>>) {
-        (self.last_line, self.last_file.as_ref())
+    pub(crate) fn last_scan_at(&self) -> crate::lint::ScanAt<'_> {
+        crate::lint::ScanAt {
+            line: self.last_line,
+            run: self.last_file.as_ref(),
+            main: self.main_file_name.as_ref(),
+        }
     }
 
-    /// Record the depth the previous token left, at the next token's
-    /// boundary: `last_line` is still the previous token's, and the
-    /// scanner has not been advanced past this token yet. The stack here
-    /// is the result of everything before it, loops and calls included,
-    /// since their frames sit above the scanner and are gone by now.
+    /// The table of where procedure bodies were written (#1405), which the
+    /// `[stack-leak]` finding reads to name an element's own line.
+    pub(crate) fn body_lines(&self) -> std::cell::Ref<'_, crate::srcpos::BodyLines> {
+        self.source_lines.borrow()
+    }
+
+    /// Record what the previous token left, at the next token's boundary:
+    /// `last_line` is still the previous token's, and the scanner has not
+    /// been advanced past this token yet. The stack here is the result of
+    /// everything before it, loops and calls included, since their frames sit
+    /// above the scanner and are gone by now.
     #[inline(never)]
     fn note_stack_depth(&mut self) {
-        if let Some(trace) = self.stack_trace.as_mut() {
-            trace.note(&self.ostack, self.last_line, self.last_file.as_ref());
+        let Interp {
+            stack_trace,
+            ostack,
+            source_lines,
+            last_line,
+            last_file,
+            main_file_name,
+            ..
+        } = self;
+        if let Some(trace) = stack_trace.as_mut() {
+            let at = crate::lint::ScanAt {
+                line: *last_line,
+                run: last_file.as_ref(),
+                main: main_file_name.as_ref(),
+            };
+            // The scanner holds the table only while it registers a body,
+            // which is not now; a busy table names no element's line.
+            match source_lines.try_borrow() {
+                Ok(lines) => trace.note(ostack, at, &lines),
+                Err(_) => trace.note(ostack, at, &crate::srcpos::BodyLines::default()),
+            }
+        }
+    }
+
+    /// After a step of a run that traces stack leaks (#1366): note how low
+    /// the operand stack has been since the last token boundary, and which
+    /// procedure element pushed the item just above that point, so
+    /// [`note_stack_depth`](Self::note_stack_depth) can credit what a token
+    /// left to the element that left it, not only to the token. With `next`,
+    /// the top frame's element is the one about to run: a procedure's at its
+    /// `pc`, or, for a loop frame, the first element of its body (a guess the
+    /// next sample checks, since the step that starts an iteration runs that
+    /// element in the same step).
+    ///
+    /// Constant work per step, nothing looked up or allocated.
+    #[inline(always)]
+    fn note_stack_step(&mut self, next: bool) {
+        use crate::lint::{Site, TopFrame};
+        let Interp {
+            stack_trace,
+            ostack,
+            estack,
+            src_gen,
+            ..
+        } = self;
+        let Some(trace) = stack_trace.as_deref_mut() else {
+            return;
+        };
+        trace.step(ostack, |t| {
+            let generation = src_gen.get();
+            let site = |body: &PsArray, i: usize| {
+                let (key, slot) = body.storage_site(i);
+                Site {
+                    key,
+                    slot,
+                    generation,
+                }
+            };
+            let top = match estack.last() {
+                Some(Frame::Proc { body, pc }) => TopFrame::Proc {
+                    key: body.storage_site(0).0,
+                    pc: *pc,
+                    before: pc.checked_sub(1).map_or(Site::default(), |p| site(body, p)),
+                },
+                Some(
+                    Frame::Repeat { body, .. }
+                    | Frame::Loop { body }
+                    | Frame::For { body, .. }
+                    | Frame::Forall { body, .. },
+                ) => TopFrame::Loop {
+                    key: body.storage_site(0).0,
+                },
+                _ => TopFrame::None,
+            };
+            t.ran(top, estack.len())
+        });
+        // Nothing reads the element if an item is already found at the low
+        // point (the next sample only moves the low point, which needs none).
+        if trace.wants_pending() {
+            let generation = src_gen.get();
+            let site = |body: &PsArray, i: usize| {
+                let (key, slot) = body.storage_site(i);
+                Site {
+                    key,
+                    slot,
+                    generation,
+                }
+            };
+            let (site, tentative) = match estack.last() {
+                Some(Frame::Proc { body, pc }) if next => (site(body, *pc), false),
+                Some(
+                    Frame::Repeat { body, .. }
+                    | Frame::Loop { body }
+                    | Frame::For { body, .. }
+                    | Frame::Forall { body, .. },
+                ) if next && !body.is_empty() => (site(body, 0), true),
+                _ => (Site::default(), false),
+            };
+            trace.set_pending(site, tentative, estack.len());
         }
     }
 
@@ -4050,9 +4255,109 @@ impl Interp {
     ) {
         if self.shadow_trace.is_some()
             && let Value::Name(name) = &key.value
-            && let Some(scope) = self.shadow_scope_of(dict)
         {
-            self.note_shadow(name, value, scope);
+            let scope = self.shadow_scope_of(dict);
+            if let Some(scope) = scope {
+                self.note_shadow(name, value, scope);
+            }
+            self.note_library_name(name, value, scope == Some(crate::lint::ShadowScope::User));
+        }
+    }
+
+    /// `def` and `store`'s half of the library-name trace (#1456): `name` is
+    /// being bound to `value`; `in_user` is whether in `userdict`.
+    ///
+    /// - A library's definition: the innermost source is a `run` file
+    ///   (`last_file`) and the name goes into `userdict`; its kind is kept.
+    ///   The program's own `def` run while a library loads (a callback) is not
+    ///   one.
+    /// - While the program runs, a name a library defines: a `def` found to be
+    ///   written in the program's own text sets the line; one found to be in a
+    ///   library's procedure sets the kind the library has now; any other (a
+    ///   callback in tail position, a call through a name) leaves the line
+    ///   unknown. Whether the program's binding is in force is not decided
+    ///   here but when the finding is made.
+    ///
+    /// Cold and out of line: only a traced (`--lint`) run gets here, and a name
+    /// no library defines costs one probe of the table.
+    #[inline(never)]
+    fn note_library_name(&mut self, name: &crate::name::PsName, value: &Object, in_user: bool) {
+        let id = name.id();
+        let Some(mut trace) = self.shadow_trace.take() else {
+            return;
+        };
+        if let Some(file) = &self.last_file {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => {
+                    if trace.names.contains(id) {
+                        trace.names.set_line(id, line);
+                    }
+                }
+                _ => {
+                    if in_user {
+                        trace
+                            .names
+                            .library_def(id, file, crate::lint::Kind::of(value));
+                    }
+                }
+            }
+        } else if trace.names.contains(id) {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => trace.names.set_line(id, line),
+                DefOrigin::Library => {
+                    trace
+                        .names
+                        .set_library_kind(id, crate::lint::Kind::of(value));
+                }
+                DefOrigin::Unknown => trace.names.set_line(id, 0),
+            }
+        }
+        self.shadow_trace = Some(trace);
+    }
+
+    /// Whose `def` or `store` of `name_id` is running now, from the frame on top
+    /// of the execution stack, at constant cost: the program's text read
+    /// directly (the token is the `def`), or the procedure frame on top whose
+    /// previous element is a `def` spelling `/name`, found in the table of lines
+    /// to be written in the program's text or in a `run` file. A `def` in tail
+    /// position, whose frame is gone, a callback and the like are `Unknown`.
+    fn def_origin(&self, name_id: u32) -> DefOrigin {
+        let Some(frame) = self
+            .estack
+            .iter()
+            .rev()
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))
+        else {
+            return DefOrigin::Unknown;
+        };
+        match frame {
+            Frame::Scanner(lexer) if lexer.token_is_binding() => {
+                if lexer.is_main() {
+                    lexer
+                        .line()
+                        .and_then(|l| u32::try_from(l).ok())
+                        .map_or(DefOrigin::Unknown, DefOrigin::Program)
+                } else {
+                    DefOrigin::Library
+                }
+            }
+            Frame::Proc { body, pc } if *pc > 0 => {
+                let at = *pc - 1;
+                if body
+                    .get(at)
+                    .is_some_and(|el| crate::lint::is_binding_op(&el))
+                    && crate::lint::writes_name(body, at, name_id)
+                {
+                    match self.source_lines.borrow().line_of(body, at) {
+                        Some((line, None)) => DefOrigin::Program(line),
+                        Some((_, Some(_))) => DefOrigin::Library,
+                        None => DefOrigin::Unknown,
+                    }
+                } else {
+                    DefOrigin::Unknown
+                }
+            }
+            _ => DefOrigin::Unknown,
         }
     }
 
@@ -5559,6 +5864,189 @@ impl Interp {
             self.last_name = Some(crate::name::intern(op.name).id());
             self.error_command = Some(Object::exec(Value::Operator(op)));
         }
+    }
+}
+
+/// The heap a copied string takes beyond its bytes: the shared cell
+/// (`Rc` counts, `RefCell` flag, `Vec` header) `PsString::from_bytes` makes.
+const STRING_COPY_OVERHEAD: usize =
+    2 * std::mem::size_of::<usize>() + std::mem::size_of::<RefCell<Vec<u8>>>();
+
+/// The operators `execstack` shows for the loop and `stopped` frames, in
+/// [`LoopOps`] order. gs shows internal continuations there
+/// (`--%repeat_continue--`, `--%stopped_push--`) that have no PostScript
+/// name; the operator that made the frame stands in for each (#1468).
+const LOOP_OPS: [&str; 6] = ["repeat", "loop", "for", "forall", "pathforall", "stopped"];
+type LoopOps = [Object; 6];
+
+/// How many entries `execstack` shows for `frame`, and how many bytes its
+/// copy of an executable string's unread text takes (#1468). The one
+/// definition of a frame's shape: [`frame_entries`] checks that it wrote
+/// exactly this many.
+///
+/// The frames with no PostScript form show nothing: a show (its glyph
+/// procedures and `kshow` procedure run as frames above it, and show), an
+/// image (likewise its data procedures), a tint-transform continuation, a
+/// pattern's `PaintProc` boundary, the profiler's return marker (it exists
+/// only under `--profile`, which must not change what a program sees) and
+/// a procedure that has issued its last element, and an executable string
+/// with no text left: gs has already removed a string whose last token
+/// (with at most the one delimiter that ends it) has been read, so
+/// `(countexecstack) cvx exec` counts as the top level, while a string with
+/// more after its last token (two spaces, a comment) still shows.
+fn frame_shape(frame: &Frame) -> (usize, usize) {
+    match frame {
+        Frame::Scanner(lx) => match lx.with_unread(<[u8]>::len) {
+            None => (1, 0),
+            Some(0) => (0, 0),
+            Some(n) => (1, n.saturating_add(STRING_COPY_OVERHEAD)),
+        },
+        Frame::Proc { body, pc } => (usize::from(*pc < body.len()), 0),
+        Frame::Repeat { .. } | Frame::Forall { .. } => (3, 0),
+        Frame::Loop { .. } => (2, 0),
+        Frame::For { .. } | Frame::PathForall { .. } => (5, 0),
+        Frame::StopMark => (1, 0),
+        Frame::Show(_)
+        | Frame::Image(_)
+        | Frame::PostOp(_)
+        | Frame::Pattern(_)
+        | Frame::ProfReturn => (0, 0),
+    }
+}
+
+/// Hand `put` what `execstack` shows for `frame`, bottom first, in gs
+/// 10.07.1's order: a file as itself; an executable string as a new string
+/// of its unread text; a procedure as the view of its unexecuted rest; a
+/// loop as its control values, its body and the loop operator; `stopped`
+/// as the operator. A frame does not keep its procedure's access
+/// attributes, so the procedure and array views are read-only (gs gives
+/// them the procedure's own, often writable): `execstack` must not hand
+/// out write access to a read-only procedure.
+fn frame_entries(
+    frame: &Frame,
+    ops: &LoopOps,
+    put: &mut impl FnMut(Object) -> Result<(), PsError>,
+) -> Result<(), PsError> {
+    let proc = |b: &PsArray| Object::exec(Value::Array(b.clone())).into_readonly();
+    // A view of what is left of a sequence a frame walks.
+    let rest = |len: usize, at: usize| (at.min(len), len - at.min(len));
+    match frame {
+        Frame::Scanner(lx) => match lx.file() {
+            Some(f) => put(Object::exec(Value::File(f.clone()))),
+            None => {
+                let text = lx.with_unread(<[u8]>::to_vec).unwrap_or_default();
+                if text.is_empty() {
+                    return Ok(());
+                }
+                put(Object::exec(Value::String(PsString::from_bytes(text))))
+            }
+        },
+        Frame::Proc { body, pc } => {
+            if *pc >= body.len() {
+                return Ok(());
+            }
+            let (at, len) = rest(body.len(), *pc);
+            put(Object::exec(Value::Array(body.interval(at, len)?)).into_readonly())
+        }
+        Frame::Repeat { body, remaining } => {
+            put(Object::int(*remaining))?;
+            put(proc(body))?;
+            put(ops[0].clone())
+        }
+        Frame::Loop { body } => {
+            put(proc(body))?;
+            put(ops[1].clone())
+        }
+        Frame::For { body, control } => {
+            for part in control.parts() {
+                put(part)?;
+            }
+            put(proc(body))?;
+            put(ops[2].clone())
+        }
+        Frame::Forall { body, src } => {
+            let source = match src {
+                ForallSrc::Array(a, i) => {
+                    let (at, len) = rest(a.len(), *i);
+                    Object::lit(Value::Array(a.interval(at, len)?)).into_readonly()
+                }
+                ForallSrc::Str(s, i) => {
+                    let (at, len) = rest(s.len(), *i);
+                    Object::lit(Value::String(s.interval(at, len)?))
+                }
+                // gs adds its internal slot index after the body.
+                ForallSrc::Pairs(d, _, _) => Object::lit(Value::Dict(d.clone())),
+            };
+            put(source)?;
+            put(proc(body))?;
+            put(ops[3].clone())
+        }
+        // gs shows the four procedures, then its path enumerator, which has
+        // no PostScript form.
+        Frame::PathForall { procs, .. } => {
+            for p in procs.iter() {
+                put(p.clone())?;
+            }
+            put(ops[4].clone())
+        }
+        // gs: `false 1 --%stopped_push--`, an internal error mask and the
+        // continuation.
+        Frame::StopMark => put(ops[5].clone()),
+        Frame::Show(_)
+        | Frame::Image(_)
+        | Frame::PostOp(_)
+        | Frame::Pattern(_)
+        | Frame::ProfReturn => Ok(()),
+    }
+}
+
+/// `countexecstack`, `execstack` and `dictstack` (#1468).
+impl Interp {
+    /// The number of entries `execstack` would write, and the bytes its
+    /// copies of executable strings take. A step per frame, with the limits
+    /// looked at every 1024 frames: a full stack is 10,000 frames.
+    pub(crate) fn exec_stack_shape(&mut self) -> Result<(usize, usize), PsError> {
+        const POLL_EVERY: usize = 1024;
+        let (mut entries, mut bytes) = (0usize, 0usize);
+        let frames = self.estack.len();
+        for i in 0..frames {
+            let (n, b) = frame_shape(&self.estack[i]);
+            entries += n;
+            bytes = bytes.saturating_add(b);
+            if i % POLL_EVERY == POLL_EVERY - 1 {
+                self.poll_limits(POLL_EVERY as u64)?;
+            }
+        }
+        self.poll_limits((frames % POLL_EVERY) as u64)?;
+        Ok((entries, bytes))
+    }
+
+    /// Write the execution stack, bottom first, into the first `entries`
+    /// slots of `a` (`entries` from [`exec_stack_shape`](Self::exec_stack_shape),
+    /// which `a` has room for). Cannot fail once those checks have passed.
+    pub(crate) fn write_exec_stack(&self, a: &PsArray, entries: usize) -> Result<(), PsError> {
+        let ops: LoopOps = {
+            let system = self.dstack[0].borrow();
+            LOOP_OPS.map(|name| system.get(name).unwrap_or_else(|| Object::lit(Value::Null)))
+        };
+        let mut i = 0;
+        for frame in &self.estack {
+            let start = i;
+            frame_entries(frame, &ops, &mut |o| {
+                a.put(i, o)?;
+                i += 1;
+                Ok(())
+            })?;
+            debug_assert_eq!(i - start, frame_shape(frame).0, "a frame's shape drifted");
+        }
+        debug_assert_eq!(i, entries);
+        Ok(())
+    }
+
+    /// The dictionary stack, bottom first: systemdict, globaldict,
+    /// userdict, then what `begin` pushed.
+    pub(crate) fn dict_stack(&self) -> &[Rc<RefCell<Dict>>] {
+        &self.dstack
     }
 }
 

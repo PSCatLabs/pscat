@@ -110,7 +110,11 @@ predates it.
   and a shared name gets clobbered by the other run. The helper returns a new
   directory unique per call and per process; put a file under it with
   `.join(name)`. `tests/scratch_paths.rs` fails on any other route
-  (`notes/487-unique-test-scratch-paths.md`).
+  (`notes/487-unique-test-scratch-paths.md`). On unix a test process removes
+  its directories when it ends and sweeps stale `pscat-test-<pid>` ones of
+  dead processes; `PSCAT_KEEP_TEST_TMP=1` keeps them for debugging, and a test
+  that writes tens of MiB deletes its own directory when done
+  (`notes/1481-test-scratch-cleanup.md`).
 - **A test that runs `pscat` or `pscat-mcp` never waits on it without a
   deadline** (`notes/841-test-child-deadline.md`). A child that does not exit
   (a limit that regressed, a test written before its feature) would block the

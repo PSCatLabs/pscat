@@ -62,6 +62,7 @@
 //! Colour operators in the `PaintProc` are ignored, as in gs.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
@@ -480,6 +481,46 @@ pub(crate) fn orient_cell(content: &Pixmap, lat: &Lattice) -> Option<Pixmap> {
     Some(cell)
 }
 
+/// Rows of a cell turned between two looks at the limits.
+const TURN_ROWS_PER_CHECK: u32 = 64;
+
+/// [`orient_cell`] for `lat.orient` a signed permutation with a whole
+/// translation (what [`lattice_in_gs`] gives), copied pixel by pixel so
+/// the limits are looked at every [`TURN_ROWS_PER_CHECK`] rows (#1373,
+/// Codex round 1, finding B): the same pixels as `orient_cell`.
+fn orient_cell_polled(
+    content: &Pixmap,
+    lat: &Lattice,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Option<Pixmap>, PsError> {
+    let Some(mut cell) = Pixmap::new(lat.cell.0, lat.cell.1) else {
+        return Ok(None);
+    };
+    let Some(inv) = lat.orient.invert() else {
+        return Ok(None);
+    };
+    let (sw, sh) = (i64::from(content.width()), i64::from(content.height()));
+    let src = content.pixels();
+    let (w, h) = (lat.cell.0, lat.cell.1);
+    let dst = cell.pixels_mut();
+    for v in 0..h {
+        if v % TURN_ROWS_PER_CHECK == 0 {
+            probe.check(0)?;
+        }
+        for u in 0..w {
+            // The source pixel whose centre the pixel centre maps from.
+            let (x, y) = (f64::from(u) + 0.5, f64::from(v) + 0.5);
+            let sx = (f64::from(inv.sx) * x + f64::from(inv.kx) * y + f64::from(inv.tx)).floor();
+            let sy = (f64::from(inv.ky) * x + f64::from(inv.sy) * y + f64::from(inv.ty)).floor();
+            let (sx, sy) = (sx as i64, sy as i64);
+            if (0..sw).contains(&sx) && (0..sh).contains(&sy) {
+                dst[(v * w + u) as usize] = src[(sy * sw + sx) as usize];
+            }
+        }
+    }
+    Ok(Some(cell))
+}
+
 /// The device positions `origin + floor(i * step)` of the cells along one
 /// axis that reach `[0, len)`, each `size` pixels long. Computed from the
 /// pattern's origin for every `i`, never by adding steps up, so a band or
@@ -502,16 +543,120 @@ fn lattice_positions(origin: i32, step: f64, size: u32, len: u32) -> Vec<i32> {
     at
 }
 
+/// How many cells [`lattice_positions`] gives along one axis, and how many
+/// `i` it looks at to find them, counted without allocating.
+fn lattice_count(origin: i32, step: f64, size: u32, len: u32) -> (u64, u64) {
+    let (o, sz, l) = (f64::from(origin), f64::from(size), f64::from(len));
+    let (a, b) = ((-sz - 1.0 - o) / step, (l + 1.0 - o) / step);
+    let (lo, hi) = (a.min(b).floor() as i64 - 1, a.max(b).ceil() as i64 + 1);
+    let n = (lo..=hi)
+        .filter(|&i| {
+            let pos = o + (i as f64 * step + 1e-6).floor();
+            pos + sz > 0.0 && pos < l
+        })
+        .count();
+    (n as u64, (hi - lo + 1).max(0) as u64)
+}
+
 /// What laying `cell` out over a `w` x `h` canvas takes: the peak bytes
-/// held (the canvas, a row of cells, and for an uncoloured pattern the
-/// recoloured cell) and the work in pixels written, for the limits.
-fn lay_out_cost(cell: (u32, u32), lat: &Lattice, w: u32, h: u32, recolored: bool) -> (usize, u64) {
+/// held (the canvas, a row of cells, the cell positions, the cell turned
+/// to gs's device when `turned`, and for an uncoloured pattern the
+/// recoloured cell) and the work: pixels written (the turn and the
+/// recolouring included) and positions looked at; and whether any cell
+/// reaches the canvas. With none, the layout is the empty canvas: nothing
+/// is turned, recoloured or copied (#1373, Codex round 1, finding B).
+fn lay_out_cost(
+    cell: (u32, u32),
+    lat: &Lattice,
+    w: u32,
+    h: u32,
+    recolored: bool,
+    turned: bool,
+) -> (usize, u64, bool) {
     let (cw, ch) = (u64::from(cell.0), u64::from(cell.1));
-    let nx = lattice_positions(lat.origin.0, lat.step.0, cell.0, w).len() as u64;
-    let ny = lattice_positions(lat.origin.1, lat.step.1, cell.1, h).len() as u64;
+    let (nx, ix) = lattice_count(lat.origin.0, lat.step.0, cell.0, w);
+    let (ny, iy) = lattice_count(lat.origin.1, lat.step.1, cell.1, h);
     let (w, h) = (u64::from(w), u64::from(h));
-    let bytes = 4 * (w * h + w * ch + if recolored { cw * ch } else { 0 });
-    (bytes as usize, nx * cw * ch + ny * w * ch)
+    if nx == 0 || ny == 0 {
+        let bytes = usize::try_from(4 * w * h).unwrap_or(usize::MAX);
+        return (bytes, ix + iy, false);
+    }
+    let extra = u64::from(recolored) + u64::from(turned);
+    let bytes = 4 * (w * h + w * ch + extra * cw * ch + nx + ny);
+    let work = extra * cw * ch + nx * cw * ch + ny * w * ch + ix + iy;
+    (usize::try_from(bytes).unwrap_or(usize::MAX), work, true)
+}
+
+/// The lattice `lat` (in its pattern's context's device coordinates) in
+/// gs's device coordinates for that context, which `to_gs` maps to, its
+/// `orient` the map from `lat`'s oriented cell to the cell there (#1373). gs lays
+/// the cells out at `floor(i * step)` in the device that paints: for a
+/// context whose coordinates are flipped or turned against gs's (a
+/// capture of a pattern whose axes are not the device's), the steps are
+/// floored there, not in pscat's coordinates. `None` when `to_gs` is not a
+/// signed permutation with a whole-pixel translation.
+fn lattice_in_gs(lat: &Lattice, to_gs: Transform) -> Option<Lattice> {
+    let t = pixel_exact(to_gs)?;
+    let (sx, ky, kx, sy) = (
+        f64::from(t.sx),
+        f64::from(t.ky),
+        f64::from(t.kx),
+        f64::from(t.sy),
+    );
+    // The device step vectors (step.0, 0) and (0, step.1) under t.
+    let along = ky == 0.0;
+    let step = if along {
+        (sx * lat.step.0, sy * lat.step.1)
+    } else {
+        (kx * lat.step.1, ky * lat.step.0)
+    };
+    // Cell 0's pixel rectangle, mapped.
+    let (x0, y0) = (f64::from(lat.origin.0), f64::from(lat.origin.1));
+    let (x1, y1) = (x0 + f64::from(lat.cell.0), y0 + f64::from(lat.cell.1));
+    let map = |x: f64, y: f64| {
+        (
+            sx * x + kx * y + f64::from(t.tx),
+            ky * x + sy * y + f64::from(t.ty),
+        )
+    };
+    let corners = [map(x0, y0), map(x1, y0), map(x0, y1), map(x1, y1)];
+    let gx = corners.iter().map(|c| c.0).fold(f64::INFINITY, f64::min);
+    let gy = corners.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
+    if gx.abs() > 1e9 || gy.abs() > 1e9 {
+        return None;
+    }
+    let cell = if along {
+        lat.cell
+    } else {
+        (lat.cell.1, lat.cell.0)
+    };
+    // Oriented cell pixel (u, v) is context pixel (x0 + u, y0 + v), so the
+    // turn is t's linear part with the translation map(x0, y0) - (gx, gy),
+    // a whole number between 0 and the cell's size. Worked out in f64:
+    // composed in f32, a far origin (1e8 px) cancels it away (#1373, Codex
+    // round 1, finding A).
+    let (tx, ty) = map(x0, y0);
+    let turn = Transform::from_row(t.sx, t.ky, t.kx, t.sy, (tx - gx) as f32, (ty - gy) as f32);
+    Some(Lattice {
+        step,
+        origin: (gx as i32, gy as i32),
+        orient: turn,
+        cell,
+    })
+}
+
+/// The box, in gs's device coordinates, of a `w` x `h` canvas whose
+/// coordinates `here_to_gs` (a signed permutation, whole translation) maps
+/// there: its top-left pixel and size.
+fn canvas_in_gs(here_to_gs: Transform, w: u32, h: u32) -> ((i32, i32), (u32, u32)) {
+    let mut pts = [
+        tiny_skia::Point::from_xy(0.0, 0.0),
+        tiny_skia::Point::from_xy(w as f32, h as f32),
+    ];
+    here_to_gs.map_points(&mut pts);
+    let (x, y) = (pts[0].x.min(pts[1].x), pts[0].y.min(pts[1].y));
+    let size = if here_to_gs.ky == 0.0 { (w, h) } else { (h, w) };
+    ((x.round() as i32, y.round() as i32), size)
 }
 
 /// `cell` repeated on the lattice over a `w` x `h` canvas (same device
@@ -585,9 +730,15 @@ pub(crate) struct PatternTile {
     pub(crate) to_gs: Transform,
 }
 
-/// A lattice laid out over a canvas of `.0` x `.1` pixels, in the colour
-/// `.2` (zero for a coloured pattern).
-type LaidOut = ((u32, u32, [u8; 3]), Rc<Pixmap>);
+/// What a layout was made for: the canvas's size, the colour (zero for a
+/// coloured pattern), and the painting context's map to gs's device
+/// coordinates (rounded: it is a signed permutation with a whole
+/// translation).
+type LaidKey = (u32, u32, [u8; 3], [i32; 6]);
+
+/// A lattice laid out over a canvas, what it was made for, and its shader
+/// transform (the layout's pixels to the canvas's).
+type LaidOut = (LaidKey, Rc<Pixmap>, Transform);
 
 /// Where a pattern made in another context paints (#1300): its matrix in
 /// the painting context's coordinates, the raster shader, and the PDF
@@ -722,20 +873,21 @@ impl PatternTile {
     /// The raster shader's source: the period (recoloured to `rgb` for an
     /// uncoloured pattern), its transform, and the sampling. A fractional
     /// TilingType 2 tile paints from its cells laid out over the `canvas`
-    /// instead (#1332) when [`lay`](Self::lay) has made that layout, and
-    /// from the period when it has not (a layout a limit or the size
-    /// refused). `place`, for a pattern of another context, gives the
-    /// transform and sampling instead.
+    /// instead (#1332), in this context or another (#1373), when
+    /// [`lay`](Self::lay) has made that layout for the same `here_to_gs`,
+    /// and from the period when it has not (a layout a limit or the size
+    /// refused, or a context not pixel-aligned with gs's device). `place`,
+    /// for a pattern of another context, gives the period's transform and
+    /// sampling.
     pub(crate) fn raster(
         &self,
         rgb: (f32, f32, f32),
         place: Option<&Placement>,
         canvas: (u32, u32),
+        here_to_gs: Transform,
     ) -> (Rc<Pixmap>, Transform, FilterQuality) {
-        if place.is_none()
-            && let Some(pm) = self.laid_over(rgb, canvas)
-        {
-            return (pm, Transform::identity(), FilterQuality::Nearest);
+        if let Some((pm, t)) = self.laid_over(rgb, canvas, here_to_gs) {
+            return (pm, t, FilterQuality::Nearest);
         }
         let (shader, quality) = match place {
             Some(p) => (p.shader, p.quality),
@@ -761,20 +913,30 @@ impl PatternTile {
 }
 
 impl PatternTile {
-    fn laid_key(&self, rgb: (f32, f32, f32), canvas: (u32, u32)) -> (u32, u32, [u8; 3]) {
+    /// The key of a layout over `canvas` in a context whose coordinates
+    /// map to gs's by `here` (already [`pixel_exact`]).
+    fn laid_key(&self, rgb: (f32, f32, f32), canvas: (u32, u32), here: Transform) -> LaidKey {
         let c = if self.uncolored {
             [to_u8(rgb.0), to_u8(rgb.1), to_u8(rgb.2)]
         } else {
             [0; 3]
         };
-        (canvas.0, canvas.1, c)
+        let m = [here.sx, here.ky, here.kx, here.sy, here.tx, here.ty].map(|v| v as i32);
+        (canvas.0, canvas.1, c, m)
     }
 
-    /// The layout [`lay`](Self::lay) made for this canvas (and colour).
-    fn laid_over(&self, rgb: (f32, f32, f32), canvas: (u32, u32)) -> Option<Rc<Pixmap>> {
-        let key = self.laid_key(rgb, canvas);
+    /// The layout [`lay`](Self::lay) made for this canvas (and colour) in
+    /// a context mapping to gs's device by `here_to_gs`, and its shader.
+    fn laid_over(
+        &self,
+        rgb: (f32, f32, f32),
+        canvas: (u32, u32),
+        here_to_gs: Transform,
+    ) -> Option<(Rc<Pixmap>, Transform)> {
+        let here = pixel_exact(here_to_gs)?;
+        let key = self.laid_key(rgb, canvas, here);
         match &*self.laid.borrow() {
-            Some((k, pm)) if *k == key => Some(pm.clone()),
+            Some((k, pm, t)) if *k == key => Some((pm.clone(), *t)),
             _ => None,
         }
     }
@@ -786,45 +948,86 @@ impl PatternTile {
     /// the tile paints from its period). Its work, in pixels, is added to
     /// `work` for the operator to charge, and a limit (steps, time or
     /// memory while laying out) is an error. A matching layout is reused
-    /// before anything is checked; a layout for another canvas or colour is
-    /// dropped first, so only one is ever held.
+    /// before anything is checked; a layout for another canvas, colour or
+    /// context is dropped first, so only one is ever held.
+    ///
+    /// The cells are laid out in gs's device coordinates, where gs floors
+    /// the steps (#1373): the canvas's coordinates map there by
+    /// `here_to_gs` (identity on the page), the tile's context's by its
+    /// [`to_gs`](Self::to_gs), the two being the same space in gs (a
+    /// pattern keeps its device matrix in whatever device paints with it).
+    /// Either map not a signed permutation with a whole translation (a
+    /// context turned off the device axes or scaled): the period instead.
     pub(crate) fn lay(
         &self,
         rgb: (f32, f32, f32),
         canvas: (u32, u32),
+        here_to_gs: Transform,
         probe: &crate::limits::LimitProbe,
         work: &mut u64,
     ) -> Result<(), PsError> {
         let (Some(cell), Some(lat)) = (self.cell.as_ref(), self.geom.lattice.as_ref()) else {
             return Ok(());
         };
-        let key = self.laid_key(rgb, canvas);
-        if self.laid_over(rgb, canvas).is_some() {
+        if self.laid_over(rgb, canvas, here_to_gs).is_some() {
             return Ok(());
         }
         *self.laid.borrow_mut() = None;
+        let (Some(here), Some(gs_lat)) = (pixel_exact(here_to_gs), lattice_in_gs(lat, self.to_gs))
+        else {
+            return Ok(());
+        };
         if u64::from(canvas.0) * u64::from(canvas.1) > MAX_LATTICE_PIXELS {
             return Ok(());
         }
-        let (bytes, cost) = lay_out_cost(
-            (cell.width(), cell.height()),
-            lat,
-            canvas.0,
-            canvas.1,
-            self.uncolored,
-        );
+        let Some(from_gs) = here.invert() else {
+            return Ok(());
+        };
+        let key = self.laid_key(rgb, canvas, here);
+        // The canvas in gs's device coordinates, and the lattice relative
+        // to its top-left pixel.
+        let ((gx, gy), (w, h)) = canvas_in_gs(here, canvas.0, canvas.1);
+        let ox = i64::from(gs_lat.origin.0) - i64::from(gx);
+        let oy = i64::from(gs_lat.origin.1) - i64::from(gy);
+        let (Ok(ox), Ok(oy)) = (i32::try_from(ox), i32::try_from(oy)) else {
+            return Ok(());
+        };
+        let lat = Lattice {
+            origin: (ox, oy),
+            ..gs_lat
+        };
+        let turned = !gs_lat.orient.is_identity();
+        let (bytes, cost, any) = lay_out_cost(lat.cell, &lat, w, h, self.uncolored, turned);
         if probe.check_alloc(bytes).is_err() {
             return Ok(());
         }
+        // The whole layout's work, the turn included, before any of it.
         probe.check(cost / 1024)?;
-        let laid = if self.uncolored {
-            let tinted = recolor(cell, [key.2[0], key.2[1], key.2[2]]);
-            lay_out(&tinted, lat, canvas.0, canvas.1, probe)?
+        let turned_cell;
+        let cell: &Pixmap = if !any {
+            cell
+        } else if turned {
+            match orient_cell_polled(cell, &gs_lat, probe)? {
+                Some(c) => {
+                    turned_cell = c;
+                    &turned_cell
+                }
+                None => return Ok(()),
+            }
         } else {
-            lay_out(cell, lat, canvas.0, canvas.1, probe)?
+            cell
+        };
+        let laid = if !any {
+            Pixmap::new(w, h)
+        } else if self.uncolored {
+            let tinted = recolor(cell, [key.2[0], key.2[1], key.2[2]]);
+            lay_out(&tinted, &lat, w, h, probe)?
+        } else {
+            lay_out(cell, &lat, w, h, probe)?
         };
         if let Some(pm) = laid {
-            *self.laid.borrow_mut() = Some((key, Rc::new(pm)));
+            let shader = from_gs.pre_concat(Transform::from_translate(gx as f32, gy as f32));
+            *self.laid.borrow_mut() = Some((key, Rc::new(pm), shader));
             *work = work.saturating_add(cost);
         }
         Ok(())
@@ -1025,6 +1228,13 @@ pub(crate) struct ShadingPattern {
     pub(crate) to_gs: Transform,
     /// Present when SVG was being recorded at `makepattern`.
     pub(crate) svg: Option<SvgShading>,
+    /// The SVG images made for uses in other contexts (#1368), by
+    /// [`SvgUseKey`]. `None` is a use the shading does not reach. Held here
+    /// so the mark that needs one makes it under its limits
+    /// ([`Gfx::pattern_source`](crate::gfx::Gfx::pattern_source)) and the
+    /// recorder only reads it; the bytes are the process's heap, which the
+    /// memory limit counts.
+    pub(crate) svg_uses: RefCell<HashMap<SvgUseKey, Option<Rc<SvgImage>>>>,
     /// The PDF recorder's pattern index, when PDF was being recorded and
     /// the shading paints anything.
     pub(crate) pdf: Option<usize>,
@@ -1042,11 +1252,51 @@ pub(crate) struct SvgShading {
     /// stops and `/Extend`; `None` for a Type 1 shading and for one that
     /// paints nothing.
     pub(crate) gradient: Option<SvgGradient>,
-    /// A Type 1 shading's layer: PNG, size, and its top-left pixel.
-    pub(crate) image: Option<(Vec<u8>, u32, u32, i32, i32)>,
+    /// A Type 1 or mesh shading's layer, over the canvas it was made on.
+    pub(crate) image: Option<SvgImage>,
+    /// The canvas `image` was cut to: a mark on another canvas, or in
+    /// another context, needs an image of its own (`svg_uses`).
+    pub(crate) canvas: (u32, u32),
+    /// Where a Type 1 or mesh shading paints: its box in device space
+    /// `[x0, y0, x1, y1]`, cut to the `/BBox`, before any canvas cuts it.
+    /// `None` for a gradient (which SVG draws itself) and a shading that
+    /// paints nothing.
+    pub(crate) shape: Option<[f64; 4]>,
     /// The `/BBox` corners in device space.
     pub(crate) bbox: Option<[(f32, f32); 4]>,
     pub(crate) background: Option<(f32, f32, f32)>,
+}
+
+/// A Type 1 or mesh shading's layer as SVG embeds it: the PNG, its size and
+/// its top-left pixel, in the device space of the canvas it was made for.
+pub(crate) type SvgImage = (Vec<u8>, u32, u32, i32, i32);
+
+/// Which image a use in another context needs (#1368): the bits of the map
+/// from the shading's context to the painting one, and the painting
+/// canvas's size.
+pub(crate) type SvgUseKey = ([u32; 6], u32, u32);
+
+impl ShadingPattern {
+    /// The key of the SVG image a mark on `canvas`, with the context map
+    /// `hop` (`None` for the context the pattern was made in), needs, when
+    /// the image made at `makepattern` is not it: the use is in another
+    /// context or on a canvas of another size, and the shading has an image
+    /// to make. Computed here for both the mark that makes the image and
+    /// the recorder that writes it, so they cannot disagree.
+    pub(crate) fn svg_use_key(
+        &self,
+        hop: Option<Transform>,
+        canvas: (u32, u32),
+    ) -> Option<SvgUseKey> {
+        let svg = self.svg.as_ref()?;
+        svg.shape?;
+        let hop = hop.unwrap_or_default();
+        if hop.is_identity() && canvas == svg.canvas {
+            return None;
+        }
+        let bits = [hop.sx, hop.ky, hop.kx, hop.sy, hop.tx, hop.ty].map(f32::to_bits);
+        Some((bits, canvas.0, canvas.1))
+    }
 }
 
 /// An axial or radial shading as SVG writes it: geometry, its own space to
@@ -1078,6 +1328,90 @@ pub(crate) fn context_hop(there_to_gs: Transform, here_to_gs: Transform) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 37 x 150 canvas with every pixel distinct, and a lattice of its
+    /// cell turned by `orient` (the eight signed permutations).
+    fn turn_case(orient: [f32; 4]) -> (Pixmap, Lattice) {
+        let (w, h) = (37u32, 150u32);
+        let mut pm = Pixmap::new(w, h).unwrap();
+        for (i, p) in pm.pixels_mut().iter_mut().enumerate() {
+            let v = (i % 251) as u8;
+            *p = PremultipliedColorU8::from_rgba(v / 2, v / 3, v / 4, v.max(1)).unwrap();
+        }
+        let [a, b, c, d] = orient;
+        let along = b == 0.0;
+        let cell = if along { (w, h) } else { (h, w) };
+        // The translation that puts the turned canvas at (0, 0).
+        let tx = -(a.min(0.0) * w as f32 + c.min(0.0) * h as f32);
+        let ty = -(b.min(0.0) * w as f32 + d.min(0.0) * h as f32);
+        let lat = Lattice {
+            step: (1.0, 1.0),
+            origin: (0, 0),
+            orient: Transform::from_row(a, b, c, d, tx, ty),
+            cell,
+        };
+        (pm, lat)
+    }
+
+    const TURNS: [[f32; 4]; 8] = [
+        [1.0, 0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0, -1.0],
+        [-1.0, 0.0, 0.0, -1.0],
+        [0.0, 1.0, 1.0, 0.0],
+        [0.0, -1.0, 1.0, 0.0],
+        [0.0, 1.0, -1.0, 0.0],
+        [0.0, -1.0, -1.0, 0.0],
+    ];
+
+    /// The polled turn gives the pixels the nearest-sampled draw gives, and
+    /// looks at the limits as it goes (#1373, Codex round 1 on PR #1480,
+    /// finding B).
+    #[test]
+    fn the_polled_turn_matches_the_draw_and_looks_at_the_limits() {
+        for o in TURNS {
+            let (pm, lat) = turn_case(o);
+            let drawn = orient_cell(&pm, &lat).unwrap();
+            crate::limits::CHECKS.with(|c| c.set(0));
+            let polled = orient_cell_polled(&pm, &lat, &crate::limits::LimitProbe::NONE)
+                .unwrap()
+                .unwrap();
+            assert!(polled.data() == drawn.data(), "{o:?}");
+            let rows = u64::from(lat.cell.1).div_ceil(u64::from(TURN_ROWS_PER_CHECK));
+            assert_eq!(crate::limits::CHECKS.with(|c| c.get()), rows, "{o:?}");
+        }
+        let (pm, lat) = turn_case(TURNS[5]);
+        let past = crate::limits::LimitProbe {
+            deadline_ns: Some(0),
+            ..crate::limits::LimitProbe::NONE
+        };
+        assert_eq!(
+            orient_cell_polled(&pm, &lat, &past).err(),
+            Some(PsError::TimeExceeded)
+        );
+    }
+
+    /// No cell reaching the canvas: no turn, no recolouring, no copies, so
+    /// none of their work or bytes; one reaching: the turn and the
+    /// recolouring are charged with the copies (finding B).
+    #[test]
+    fn a_layout_charges_its_turn_only_when_a_cell_reaches() {
+        let lat = |origin| Lattice {
+            step: (4000.3, 4000.3),
+            origin,
+            orient: Transform::identity(),
+            cell: (2000, 2000),
+        };
+        let (bytes, work, any) =
+            lay_out_cost((2000, 2000), &lat((1000, -2900)), 100, 100, true, true);
+        assert!(!any);
+        assert_eq!(bytes, 4 * 100 * 100);
+        assert!(work < 16, "{work}");
+        let (_, plain, any) = lay_out_cost((2000, 2000), &lat((0, 0)), 100, 100, false, false);
+        assert!(any);
+        let (_, both, _) = lay_out_cost((2000, 2000), &lat((0, 0)), 100, 100, true, true);
+        assert_eq!(both - plain, 2 * 2000 * 2000);
+    }
 
     fn spec(matrix: Transform, bbox: [f64; 4], xstep: f64, ystep: f64) -> TileSpec {
         TileSpec {

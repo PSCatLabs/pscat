@@ -132,4 +132,166 @@ fn laid_out_cells_obey_the_limits() {
         v.len() > 10 && on(&v, &lattice_pos) && !on(&v, &period_pos),
         "{v:?}"
     );
+
+    foreign_layouts_obey_the_limits();
+}
+
+/// The page's pattern of `program`, painted by a one-pixel fill (`fill`)
+/// inside the PaintProc of an outer pattern whose cell is `w` x `h`, which
+/// the page then fills over `page_fill` (#1373): the inner pattern's cells
+/// are laid out over the outer pattern's capture canvas.
+fn foreign(inner: &str, w: u32, h: u32, fill: &str, page_fill: &str) -> String {
+    let inner = inner.replace("setpattern\n", "/inner exch def\n");
+    format!(
+        "{inner}<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {w} {h}] \
+         /XStep {} /YStep {} /PaintProc {{ pop inner setpattern {fill} rectfill }} >> \
+         matrix makepattern setpattern\n{page_fill} rectfill\n",
+        2 * w,
+        2 * h
+    )
+}
+
+/// A blank page of the size of `it`'s: what a stopped run must leave.
+fn blank(it: &Interp) -> bool {
+    let pm = &it.gfx().pixmap;
+    let fresh = Interp::with_page(pm.width(), pm.height()).expect("page");
+    pm.data() == fresh.gfx().pixmap.data()
+}
+
+/// The limits hold for a layout in another context than the pattern was
+/// made in (#1373): the layout is over the capture canvas of the pattern
+/// whose PaintProc paints, up to 2^26 pixels, against the lattice's 2^24.
+fn foreign_layouts_obey_the_limits() {
+    // Steps: 100x100 cells on 1.1 px steps over a 1000x1000 capture, for a
+    // one-pixel fill, some 100 million pixels written. A Type 1 inner
+    // pattern, which lays nothing out, runs under the same cap.
+    let inner = program(100, 100, "1.1", "1.1", &[]);
+    let src = foreign(&inner, 1000, 1000, "0 0 1 1", "0 0 1 1");
+    let (it, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &src);
+    assert_eq!(r, Err(PsError::StepsExceeded), "foreign: steps");
+    assert!(blank(&it), "foreign: a stop paints nothing");
+    // Nor records anything: the SVG and PDF are those of the program
+    // without the fill that stopped.
+    let recorded = |src: &str| {
+        let mut it = Interp::with_page(1000, 1000).expect("page");
+        it.set_limits(Limits::none().with_max_steps(1000))
+            .expect("the allocator is installed");
+        it.enable_svg();
+        it.gfx_mut().enable_pdf();
+        let r = it.run_source(src.as_bytes());
+        (r, it.svg_pages(), it.gfx().pdf_document())
+    };
+    let (r, svg, pdf) = recorded(&src);
+    assert_eq!(r, Err(PsError::StepsExceeded), "foreign: steps, recording");
+    let before = src.trim_end().trim_end_matches("0 0 1 1 rectfill");
+    let (r, svg0, pdf0) = recorded(before);
+    assert_eq!(r, Ok(()));
+    assert_eq!(svg, svg0, "foreign: a stop records no SVG");
+    // The page's content stream (the PDF's first) is the same. The inner
+    // pattern's own object is in the stopped PDF, unreferenced: its
+    // PaintProc ran before the fill stopped, as on the page before #1373.
+    let first_stream = |pdf: Option<Vec<u8>>| -> Vec<u8> {
+        let pdf = pdf.expect("pdf on");
+        let at = |pat: &[u8], from: usize| {
+            from + pdf[from..]
+                .windows(pat.len())
+                .position(|w| w == pat)
+                .expect("a stream")
+        };
+        let start = at(b"stream\n", 0);
+        pdf[start..at(b"endstream", start)].to_vec()
+    };
+    assert_eq!(
+        first_stream(pdf),
+        first_stream(pdf0),
+        "foreign: a stop records nothing on the PDF page"
+    );
+    let one = src.replace("/TilingType 2", "/TilingType 1");
+    let (_, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &one);
+    assert_eq!(r, Ok(()), "foreign: Type 1 control");
+
+    // Time: 50x50 cells on 1.1 px steps over the same capture, some 47
+    // million pixels, the copies polled against the clock. A ladder of
+    // clocks, no fixed budget (Codex round 1 on PR #1480, nitpick C): each
+    // run either finishes with the whole page or stops with it blank.
+    let inner = program(50, 50, "1.1", "1.1", &[]);
+    let src = foreign(&inner, 1000, 1000, "0 0 1 1", "0 0 1 1");
+    let (whole, r) = run(1000, 1000, Limits::none(), &src);
+    assert_eq!(r, Ok(()));
+    let (mut stopped, mut finished) = (0, 0);
+    for ms in [1u64, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096] {
+        let limits = Limits::none().with_max_time(std::time::Duration::from_millis(ms));
+        let (it, r) = run(1000, 1000, limits, &src);
+        match r {
+            Ok(()) => {
+                finished += 1;
+                assert!(
+                    it.gfx().pixmap.data() == whole.gfx().pixmap.data(),
+                    "{ms} ms: the whole page"
+                );
+            }
+            Err(PsError::TimeExceeded) => {
+                stopped += 1;
+                assert!(blank(&it), "{ms} ms: a stop at the clock paints nothing");
+            }
+            Err(e) => panic!("{ms} ms: {e:?}"),
+        }
+    }
+    assert!(
+        stopped > 0 && finished > 0,
+        "foreign: time, {stopped} stopped, {finished} finished"
+    );
+
+    // A cell made in a PaintProc (so turned into gs's device to be laid
+    // out) is charged for the turn before it is made (Codex round 1 on PR
+    // #1480, finding B): a 2000 x 2000 cell is some 3,900 steps to turn on
+    // top of what its capture and its layout cost, which a 6,000-step cap
+    // allowed when the turn was free.
+    let turned = |m: &str, canvases: u32| {
+        format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 100 100] /XStep 100 /YStep 100
+   /PaintProc {{ pop
+     << /PatternType 1 /PaintType 1 /TilingType 2 /BBox [0 0 2000 2000] /XStep 4000.3 /YStep 4000.3
+        /PaintProc {{ pop 0 0 1 setrgbcolor 0 0 2000 2000 rectfill }} >> {m} makepattern
+     /inner exch def
+     0 1 {} {{ /n exch def
+       << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 n 100 add 100] /XStep 1000 /YStep 1000
+          /PaintProc {{ pop inner setpattern 0 0 1 1 rectfill }} >> matrix makepattern setpattern
+       0 0 1 1 rectfill }} for
+   }} >> matrix makepattern setpattern
+0 0 1 1 rectfill",
+            canvases - 1
+        )
+    };
+    let src = turned("[1 0 0 1 0 0]", 1);
+    let (it, r) = run(100, 100, Limits::none().with_max_steps(6000), &src);
+    assert_eq!(
+        r,
+        Err(PsError::StepsExceeded),
+        "turned: the turn is charged"
+    );
+    assert!(blank(&it), "turned: a stop paints nothing");
+    let (_, r) = run(100, 100, Limits::none().with_max_steps(20_000), &src);
+    assert_eq!(r, Ok(()), "turned: with room");
+    // With no cell reaching the canvas nothing is turned: five canvases
+    // that each would turn the cell again run under 1,000 steps, and paint
+    // what they paint with no limits.
+    let src = turned("[1 0 0 1 1000 -2900]", 5);
+    let (free, r) = run(100, 100, Limits::none(), &src);
+    assert_eq!(r, Ok(()));
+    let (it, r) = run(100, 100, Limits::none().with_max_steps(1000), &src);
+    assert_eq!(r, Ok(()), "no cell reaches: nothing to turn");
+    assert!(it.gfx().pixmap.data() == free.gfx().pixmap.data());
+
+    // Memory: a 2 x 8000 cell makes a 32 MB row for a 1000x10 capture.
+    // Under an 8 MiB cap the layout is not made and the cells come from the
+    // period, 7 px apart; with room, 7.3.
+    let inner = program(2, 8000, "7.3", "8000.2", &[]);
+    let src = foreign(&inner, 1000, 10, "0 0 1000 10", "0 0 1000 10");
+    let (it, r) = run(1000, 10, Limits::none().with_max_memory(8 * MIB), &src);
+    assert_eq!(r, Ok(()), "foreign: memory cap");
+    assert_eq!(starts(&it, 0)[..6], PERIOD, "foreign: under the cap");
+    let (it, r) = run(1000, 10, Limits::none().with_max_memory(200 * MIB), &src);
+    assert_eq!(r, Ok(()), "foreign: memory with room");
+    assert_eq!(starts(&it, 0)[..6], LATTICE, "foreign: with room");
 }

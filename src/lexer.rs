@@ -205,6 +205,16 @@ impl Lexer {
         self.is_file.then_some(&self.file)
     }
 
+    /// `f` of the text an executable string's scanner has not read yet,
+    /// for `execstack` (#1468); `None` for a file, which shows as itself.
+    pub(crate) fn with_unread<R>(&self, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        if self.is_file {
+            return None;
+        }
+        let file = self.file.borrow();
+        file.bytes_from(file.pos()).map(f)
+    }
+
     /// Bytes consumed so far — the `token` operator's remainder split.
     pub(crate) fn pos(&self) -> usize {
         self.file.borrow().pos()
@@ -237,6 +247,19 @@ impl Lexer {
             return None;
         }
         String::from_utf8(rest[..len].to_vec()).ok()
+    }
+
+    /// Whether the last-returned token is the word `def` or `store`, read back
+    /// from an in-memory source without a copy (#1456); `false` for a source
+    /// that is not in memory.
+    pub(crate) fn token_is_binding(&self) -> bool {
+        let file = self.file.borrow();
+        let Some(rest) = file.bytes_from(self.token_start_pos) else {
+            return false;
+        };
+        let word =
+            |w: &[u8]| rest.starts_with(w) && rest.get(w.len()).is_none_or(|&b| !is_regular(b));
+        word(b"def") || word(b"store")
     }
 
     /// Whether the source between byte offsets `from` and `to` is only white

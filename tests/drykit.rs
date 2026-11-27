@@ -2159,6 +2159,108 @@ fn a_flat_start_leaves_no_notch_at_a_corner() {
     }
 }
 
+/// Issue #1444: a /From cut at a touch band change, or within one reach
+/// before it, joins two pieces without a ring. The run of the new band starts
+/// round there, and drykit draws levels faint-first, so in the whole stroke
+/// that round start's faint level lies under the earlier band's bright one;
+/// the second piece used to paint it over the first piece's finished ink, a
+/// darker arc (up to 82 levels on 21 to 90 pixels at 216 dpi). Touch rising,
+/// falling, and coming back to a band the stroke has already drawn (which
+/// dkrender draws first in each pass), with three levels, at the band change
+/// (0.5 or 0.75), just before it and just after it: now no pixel differs by
+/// more than an ordinary seam's.
+#[test]
+fn a_cut_at_a_touch_band_change_leaves_no_ring() {
+    let line = "newpath 10 20 moveto 90 20 lineto";
+    for (touch, cuts) in [
+        ("{ 0.4 mul 0.3 add }", &["0.5", "0.47"][..]),
+        ("{ 0.4 mul 0.3 add } /Levels 3", &["0.5", "0.47"][..]),
+        ("{ 0.4 mul 0.7 exch sub }", &["0.5", "0.47", "0.53"][..]),
+        ("{ 0.5 sub abs 0.8 mul 0.3 add }", &["0.75", "0.73"][..]),
+    ] {
+        let opts = format!("/Width 8 /Touch {touch} /Seed 3");
+        let whole = data(&board(
+            100,
+            40,
+            3.0,
+            &format!("{line} << {opts} >> dkstroke"),
+        ));
+        for cut in cuts {
+            let halves = data(&board(
+                100,
+                40,
+                3.0,
+                &format!(
+                    "{line} << {opts} /To {cut} >> dkstroke {line} << {opts} /From {cut} >> dkstroke"
+                ),
+            ));
+            let ring = (0..whole.len() / 4)
+                .filter(|&i| {
+                    (0..3)
+                        .map(|c| whole[i * 4 + c].abs_diff(halves[i * 4 + c]))
+                        .max()
+                        .unwrap()
+                        > 40
+                })
+                .count();
+            assert_eq!(
+                ring, 0,
+                "/Touch {touch} cut at {cut}: {ring} pixels differ from the whole stroke by over 40"
+            );
+        }
+    }
+}
+
+/// Issue #1482: a part that reaches a stroke's end ends as the whole stroke
+/// does. When the walk pitch divides a subpath (80 pt at /Width 8, pitch 4),
+/// walkpath's guaranteed end stop repeats the last pitch stop; the whole run
+/// inks that stop twice, and a part used to drop the segment of no length,
+/// so the far end of a varying-width stroke differed by up to about 40
+/// levels whatever the cut, even for `/From 1e-9`. Now `/From 1e-9` is the
+/// whole stroke, and halves differ only near their seam (by a level or two
+/// elsewhere, anti-aliasing noise), with lanes that are on at the end stop
+/// too.
+#[test]
+fn a_part_ends_as_the_whole_stroke_does() {
+    let line = "newpath 10 20 moveto 90 20 lineto";
+    for opts in [
+        "/Width 8 /Touch 0.5 /Pressure { 0.3 mul 0.85 add } /Seed 3",
+        "/Width 8 /Seed 2 /Lanes 4 /Dropout 0.3 /Load 0.5 /Pressure { 0.3 mul 0.85 add }",
+    ] {
+        let whole = data(&board(
+            100,
+            40,
+            2.0,
+            &format!("{line} << {opts} >> dkstroke"),
+        ));
+        let tiny = data(&board(
+            100,
+            40,
+            2.0,
+            &format!("{line} << {opts} /From 1e-9 >> dkstroke"),
+        ));
+        assert!(tiny == whole, "`{opts}` /From 1e-9 is not the whole stroke");
+        let halves = data(&board(
+            100,
+            40,
+            2.0,
+            &format!(
+                "{line} << {opts} /To 0.537 >> dkstroke {line} << {opts} /From 0.537 >> dkstroke"
+            ),
+        ));
+        // the seam is at 10 + 80 x 0.537 = 53 pt; a reach is under 8 pt
+        let w = 200;
+        let far = (0..whole.len() / 4)
+            .filter(|&i| !(90..122).contains(&(i % w)))
+            .filter(|&i| (0..3).any(|c| whole[i * 4 + c].abs_diff(halves[i * 4 + c]) > 2))
+            .count();
+        assert_eq!(
+            far, 0,
+            "`{opts}` halves: {far} pixels away from the seam differ"
+        );
+    }
+}
+
 /// A tilted piece past 0 draws each lane's chance dropouts as the whole
 /// stroke does (the stops and the chain are the whole subpath's, cut
 /// afterwards): the right half of a side stroke agrees with the whole

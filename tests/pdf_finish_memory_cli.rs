@@ -37,7 +37,11 @@ fn run(src: &str, mib: u32) -> (bool, String, Option<Vec<u8>>) {
     let pdf = dir.join("doc.pdf");
     let _ = std::fs::remove_file(&pdf);
     let (ok, stderr) = run_to(src, mib, &pdf, &dir);
-    (ok, stderr, std::fs::read(&pdf).ok())
+    let file = std::fs::read(&pdf).ok();
+    // The documents here run to 50 MiB: do not leave them for the end of the
+    // process (issue #1481).
+    let _ = std::fs::remove_dir_all(&dir);
+    (ok, stderr, file)
 }
 
 /// The same, writing to `out` (a path of the test's choosing); the source
@@ -178,6 +182,7 @@ fn a_refused_write_leaves_the_existing_file_and_a_symlinked_target_alone() {
             .to_string_lossy()
             .contains(".tmp"))
     );
+    let _ = std::fs::remove_dir_all(&dir); // 20 MiB (issue #1481)
 }
 
 /// A read-only destination is refused as it always was, and kept: the

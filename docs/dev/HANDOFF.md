@@ -806,7 +806,11 @@ renders eight examples in both and compares block-downsampled output).
   made in is placed as gs places it, its device matrix read in gs's
   pattern-accumulator coordinates (#1300, `Capture::to_gs`,
   `pattern::foreign_placement`; PDF writes a copy of the pattern stream
-  under the new `/Matrix`);
+  under the new `/Matrix`); a TilingType 2 lattice is laid out in gs's
+  device coordinates for the painting context (`to_gs`), so it keeps its
+  `floor(i * step)` spacing in any context, a flipped capture included
+  (#1373, `pattern::lattice_in_gs`; a context not pixel-aligned with gs's
+  device still paints from the period);
   a mark painted with a pattern (of either kind) inside an *uncoloured*
   pattern's `PaintProc` paints that pattern's coverage, as gs's raster
   does (#1340, `notes/1340-uncoloured-paintproc-coverage.md`): SVG draws it
@@ -831,7 +835,10 @@ renders eight examples in both and compares block-downsampled output).
   `mesh::mesh_layer` for a mesh, #1378), which
   `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
   the gradient itself, or a canvas-sized `<pattern>` with the background,
-  `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the
+  `/BBox` clip or a Type 1 image (cut to the canvas it was made on; a use
+  in another context or on a canvas of another size makes its own image in
+  `Gfx::pattern_source`, #1368, `ShadingPattern::svg_uses`); PDF a
+  `/PatternType 2` dictionary on the
   shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
   the registry and `PatternColor` as `pattern::PatternRef`.
   SVG's two-circle radial
@@ -977,6 +984,10 @@ renders eight examples in both and compares block-downsampled output).
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.
+  Cleanup (#1481, unix): the process removes `pscat-test-<pid>` at exit
+  (`atexit`), the first call sweeps stale ones of dead pids (an hour old, 200
+  per process, `PSCAT_KEEP_TEST_TMP=1` keeps yours). Windows leaves its
+  directories (no `libc` there). `notes/1481-test-scratch-cleanup.md`.
 
 - **`pscat::syntax::check_syntax` is the supported way to ask "does this
   scan?"** (#1096, `src/syntax.rs`): token count or the first syntax error
@@ -1348,9 +1359,22 @@ renders eight examples in both and compares block-downsampled output).
    pieces used to restart each lane's dropout chain (a seam up to ~110 levels); now
    drykit walks the whole lane, so halves/thirds differ by under ~60 on a few pixels and a
    growing `/Tilt` stroke keeps every drawn pixel (`notes/1420-drychalk-tilt-whole-lanes.md`).
-   Open gap (any drykit medium): a run that starts at a touch-band change within one reach
-   after a `/From` cut is not cut, so it keeps its round start and paints its level back
-   over the previous piece: a 1px arc up to ~80 levels (repro in that note).
+   #1444: at a touch-band change within one reach of a `/From` cut the new band's run
+   keeps its round start (and the old one its round end), so `dkFrun` (`dkFover`) puts
+   the old run's tail before it as an overlap run (flag 16, clipped by `dkZover` to the
+   shared stop's reach on the far side of the cut, drawn at every level but the
+   faintest; a level is one colour for the whole record, so the brightest level wins): the pieces layer their levels there as
+   the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
+   Gotcha: `dkrender` leaves an overlap out of the passes it lacks by `dkZp`/`dkZmax`, so
+   nothing it calls before that filter may reuse those names.
+   #1482: walkpath repeats a subpath's last pitch stop when the pitch divides its length
+   (a segment of no length); `dkFrun` keeps it in a part that reaches it, because the whole
+   run inks that stop twice and pscat's AA counts a coincident disc again (a part used to
+   differ by ~40 levels at the far end). Many `/From prev /To now` pieces are heavy at a low
+   touch (`/Touch 0.5`: +9-32%) because pscat's clip mask is anti-aliased and each piece's
+   round end is repainted by the next few; gs (hard clip) stays within 1%. Not fixable in
+   the lib without changing `/From 0 /To t` tips or biting a lone `/From` part; documented
+   (`notes/1482-drykit-incremental-pieces.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -2018,9 +2042,19 @@ renders eight examples in both and compares block-downsampled output).
   the stitched pages, not `check_band`.
   After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
   end-of-run findings (#942, #947) except those in
-  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110, and `shadowed-library-name`, #1456): add a check there
   only if it reads state that survives the abort and can name the cause
   (`notes/1110-lint-notes-in-a-failed-render.md`).
+  `[shadowed-library-name]` (#1456, `notes/1456-lint-library-name-clash.md`) is made only for a
+  run that ended in an error, and only when it can be shown: under `--lint`,
+  `Interp::note_library_name` (in `def`/`store`, next to the operator-shadow note) keeps
+  `lint::NameClashes`, the names `run` files define in `userdict` (at most 3584, allocated when
+  tracing starts, not charged to `--max-memory`) with their file and kind; `snapshot_error_trace`
+  keeps the names library procedure frames had run (the elements up to the running one); the check
+  looks each name up through the dictionary stack as the error left it and reports it only if its
+  kind differs from the library's. A hook set to the same kind is silent. The static alternative (a
+  note on every program that defines a library's name) was swept and rejected: 7 of 124
+  library-loading programs do it, correctly.
   `[shadowed-operator]` (#1052, #1109, `notes/1109-shadowed-operator-line-and-systemdict.md`)
   reads the finished `userdict`/`systemdict`; `Interp::trace_operator_shadows` (on
   under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
@@ -2029,7 +2063,17 @@ renders eight examples in both and compares block-downsampled output).
   `[stack-leak]` (#1081, `notes/1081-stack-leak-location.md`) names the line that left the
   oldest leftover item: `Interp::trace_stack_leaks` (on under `--lint`) samples the operand
   depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
-  per item) and credits growth to the previous token's line.
+  per item, at most 1024) and credits what the token left to its line. #1366
+  (`notes/1366-stack-leak-own-line.md`) names the leaking *element's* line instead (a loop
+  body's, a procedure's), from the #1405 table: while tracing, `step_n` runs `step_n_timed` (the
+  `--profile-ops` copy of the step loop; it does not fuse `{ } if`, which is most of the lint's
+  cost), and before each step `note_stack_step` keeps the lowest depth since the token boundary
+  and the element that pushed the item above it, as a `storage_site` resolved to a line at
+  the boundary, and only if it was written in the text being scanned (a library's line is
+  not named; its call is), the table of lines has not changed since the site was taken
+  (`BodyLines::generation`) and the slot still holds what the element pushed (`Witness`); else the
+  token's line. The plain loop is untouched: a third copy of it cost the plain path
+  2% in instructions (inlining shifts), so do not add one.
   `[utf8-in-byte-font]` (#1412, `notes/1412-lint-utf8-in-byte-font.md`) reads
   `Interp::trace_utf8_text` (on under `--lint`): `Interp::begin_show`, which every
   show-family operator reaches, passes the string and font to `font::utf8_in_byte_font`,
@@ -2119,6 +2163,13 @@ renders eight examples in both and compares block-downsampled output).
   deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
   `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
   `notes/1321-executable-string-gs-parity.md`.
+- **`countexecstack`, `execstack`, `dictstack` (#1468).** The native `Frame` stack is shown as gs
+  10.07.1 shows the same constructs (`frame_shape` / `frame_entries` at the end of `src/interp.rs`:
+  a procedure as its read-only unexecuted rest, a loop as its control values, body and the loop
+  operator standing in for gs's internal `--%..._continue--`, `stopped` as `--stopped--`); show,
+  image, `PostOp`, `Pattern` and `ProfReturn` frames show nothing. A new `Frame` variant must be
+  given a shape there (the matches have no wildcard). Counts differ from gs's by its 38-entry
+  startup, so tests pin differences. `notes/1468-execstack-dictstack.md`, `tests/execstack.rs`.
 - **`currentfilename` and `pscat lib install` (#1056).** `currentfilename` (a pscat
   extension, `- currentfilename string`) answers with the name of the file the error
   report's `Line:` would name: the innermost `run` file's `Lexer::run_name`, else the main
