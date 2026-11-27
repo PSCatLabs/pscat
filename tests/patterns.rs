@@ -2817,3 +2817,136 @@ fn a_thin_or_long_bbox_keeps_the_shapes_own_edge_coverage() {
     );
     assert_eq!(ink_at(&it, 2001, 46), 0);
 }
+
+// --- #1368: a pattern's SVG image in a context it was not made in ---------
+
+/// A 2 x 2 table Type 1 shading, `m` its matrix: a smooth colour square.
+fn type1(m: &str) -> String {
+    format!(
+        "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB /Matrix {m} \
+         /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [2 2] \
+         /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> >> matrix makepattern"
+    )
+}
+
+/// A Type 4 mesh (one triangle) as a pattern, over the area a 600 pt tile
+/// reaches and past the 400 pt page.
+const MESH_TRIANGLE: &str = "<< /PatternType 2 /Shading << /ShadingType 4 \
+    /ColorSpace /DeviceRGB /DataSource [0 -100 -100 1 0 0  0 700 -100 0 1 0  0 300 800 0 0 1] \
+    >> >> matrix makepattern";
+
+/// A page pattern `grad` used inside a 600 pt cell's `PaintProc`, in a tile
+/// whose origin puts its right half on the page: the shading the page sees
+/// there is the cell's, painted past the page's own 400 pt canvas.
+fn page_pattern_in_a_big_tile(pattern: &str) -> String {
+    format!(
+        "{pattern} /grad exch def \
+         << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+            /PaintProc {{ pop grad setpattern 0 0 600 600 rectfill }} >> \
+         [1 0 0 1 -300 -100] makepattern setpattern 0 0 400 400 rectfill"
+    )
+}
+
+/// A pattern made in a small `PaintProc` and used on the page (`/inner`),
+/// whose shading reaches past the tile's own 80 pt canvas.
+fn tile_pattern_used_on_the_page(pattern: &str) -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 80 80] /XStep 400 /YStep 400 \
+            /PaintProc {{ pop 1 0 0 setrgbcolor 0 0 5 5 rectfill {pattern} \
+              userdict /inner 3 -1 roll put }} >> \
+         [1 0 0 1 4.3 7.6] makepattern /outer exch def \
+         outer setpattern 0 0 30 30 rectfill inner setpattern 50 50 300 300 rectfill"
+    )
+}
+
+/// The widest `<image>` in `svg`, in pixels (0 when it has none).
+fn widest_image(svg: &str) -> u32 {
+    svg.split("<image width=\"")
+        .skip(1)
+        .filter_map(|s| s.split('"').next()?.parse().ok())
+        .max()
+        .unwrap_or(0)
+}
+
+/// A Type 1 or mesh shading pattern's SVG image is made over the canvas it
+/// is painted on, not only the one `makepattern` ran in (#1368): used in
+/// another context, the SVG showed nothing past the made canvas where the
+/// PNG, the PDF and gs paint it.
+#[test]
+fn a_function_or_mesh_pattern_used_in_another_context_paints_in_svg_as_in_the_png() {
+    let cases = [
+        (
+            "type 1 in a bigger tile",
+            page_pattern_in_a_big_tile(&type1("[600 0 0 600 0 -200]")),
+            400,
+            &[][..],
+        ),
+        (
+            "mesh in a bigger tile",
+            page_pattern_in_a_big_tile(MESH_TRIANGLE),
+            400,
+            &[][..],
+        ),
+        (
+            "type 1 made in a tile, used on the page",
+            tile_pattern_used_on_the_page(&type1("[400 0 0 400 -10 -300]")),
+            80,
+            &["-dMaxPatternBitmap=1"][..],
+        ),
+    ];
+    // Every case is run and every miss reported, not only the first.
+    let misses = std::cell::RefCell::new(Vec::new());
+    let close = |what: String, ours: &Pixmap, theirs: &Pixmap| {
+        let diff = mean_block_diff(ours, theirs);
+        eprintln!("{what}: mean block diff {diff:.3}");
+        if diff > 3.0 {
+            misses
+                .borrow_mut()
+                .push(format!("{what}: mean block diff {diff:.2} > 3"));
+        }
+    };
+    for (name, src, made, gs_flags) in cases {
+        let out = render(&src);
+        let painted = out
+            .png
+            .pixels()
+            .iter()
+            .filter(|p| p.red() < 250 || p.green() < 250 || p.blue() < 250)
+            .count();
+        assert!(painted > 20_000, "{name}: only {painted} pixels painted");
+        close(
+            format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+        );
+        // The structural check: the image is wider than the canvas the
+        // pattern was made on, so a lookup that missed (and fell back to
+        // the made image) fails here and not only in the pixels.
+        if widest_image(&out.svg) <= made {
+            misses.borrow_mut().push(format!(
+                "{name}: the SVG image is {} wide, no wider than the {made} px canvas it was made on",
+                widest_image(&out.svg)
+            ));
+        }
+        close(
+            format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+        );
+        if common::gs_available() {
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            close(
+                format!("{name}: the program in gs"),
+                &out.png,
+                &gs_png_with(ps.as_bytes(), "ps", name, 1, gs_flags),
+            );
+            close(
+                format!("{name}: our PDF via gs"),
+                &out.png,
+                &gs_png(&out.pdf, "pdf", name),
+            );
+        }
+    }
+    let misses = misses.into_inner();
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
