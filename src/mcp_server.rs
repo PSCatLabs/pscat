@@ -3462,7 +3462,8 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// The exception (#1110) is a finding that can *explain* the error, the
 /// ones in `pscat::lint::ERROR_EXPLAINING_CHECKS` (`[shadowed-operator]`: a
 /// program that redefined `ln` and then called it gets an error that never
-/// mentions the name). Those are kept, under `Lint:` as for a clean run,
+/// mentions the name; `[shadowed-library-name]` (#1456): a program's own
+/// `shade` that a library procedure found instead of the library's). Those are kept, under `Lint:` as for a clean run,
 /// which the caller puts in its own block after the `PostScript error:` one.
 ///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
@@ -4417,6 +4418,17 @@ mod tests {
             "pscat: lint: [run-error] e\n{note}\npscat: lint: [blank-page] b\n"
         ));
         assert_eq!(l, "");
+    }
+
+    #[test]
+    fn an_errored_run_keeps_the_library_name_finding_too() {
+        // #1456: a program's own `shade` that a library procedure found.
+        let clash =
+            "pscat: lint: [shadowed-library-name] `shade` is defined at line 4 of your program";
+        let (l, _) = split_lint_findings(&format!(
+            "pscat: lint: [run-error] e\npscat: lint: [stack-leak] s\n{clash}\n"
+        ));
+        assert_eq!(l, clash);
     }
 
     #[test]

@@ -1493,6 +1493,7 @@ impl Interp {
         self.refused_system_stores.clear();
         if let Some(trace) = self.shadow_trace.as_mut() {
             trace.forget_system();
+            trace.names.begin_program();
         }
         // The text the last program showed is that program's (#1412).
         if let Some(trace) = self.utf8_text_trace.as_mut() {
@@ -2559,6 +2560,9 @@ impl Interp {
         });
         let mut trace = Vec::new();
         let mut bodies: Vec<&PsArray> = Vec::new();
+        // For a `--lint` run (#1456): the names the excerpts show, by frame.
+        let lint_names = self.shadow_trace.is_some();
+        let mut read: Vec<(usize, u32)> = Vec::new();
         for (body, at) in tail
             .map(|t| (&t.body, t.body.len().saturating_sub(1)))
             .into_iter()
@@ -2568,6 +2572,19 @@ impl Interp {
                 break;
             }
             let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
+            if lint_names {
+                for k in from..to {
+                    let id = body
+                        .peek(k, |o| match &o.value {
+                            Value::Name(n) if o.executable => Some(n.id()),
+                            _ => None,
+                        })
+                        .flatten();
+                    if let Some(id) = id {
+                        read.push((trace.len(), id));
+                    }
+                }
+            }
             let mut excerpt = String::new();
             if from > 0 {
                 excerpt.push_str("... ");
@@ -2644,6 +2661,17 @@ impl Interp {
             }
         }
         drop(lines);
+        // The names the library procedures on the stack read by name (#1456):
+        // those of a frame written in a `run` file, once each.
+        if let Some(lint) = self.shadow_trace.as_mut() {
+            let mut names: Vec<u32> = Vec::new();
+            for (frame, id) in read {
+                if trace[frame].file.is_some() && !names.contains(&id) {
+                    names.push(id);
+                }
+            }
+            lint.names.set_read(names);
+        }
         self.error_trace = trace;
     }
 
@@ -3864,11 +3892,12 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
-        if self.shadow_trace.is_some()
-            && let Some(top) = self.dstack.last()
-            && let Some(scope) = self.shadow_scope_of(top)
-        {
-            self.note_shadow(name, &obj, scope);
+        if self.shadow_trace.is_some() {
+            let scope = self.dstack.last().and_then(|top| self.shadow_scope_of(top));
+            if let Some(scope) = scope {
+                self.note_shadow(name, &obj, scope);
+            }
+            self.note_library_name(name, scope == Some(crate::lint::ShadowScope::User));
         }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
@@ -4180,9 +4209,131 @@ impl Interp {
     ) {
         if self.shadow_trace.is_some()
             && let Value::Name(name) = &key.value
-            && let Some(scope) = self.shadow_scope_of(dict)
         {
-            self.note_shadow(name, value, scope);
+            let scope = self.shadow_scope_of(dict);
+            if let Some(scope) = scope {
+                self.note_shadow(name, value, scope);
+            }
+            self.note_library_name(name, scope == Some(crate::lint::ShadowScope::User));
+        }
+    }
+
+    /// `def` and `store`'s half of the library-name trace (#1456): `name` is
+    /// being bound; `in_user` is whether in `userdict`.
+    ///
+    /// - A library's definition: the innermost source is a `run` file
+    ///   (`last_file`) and the name goes into `userdict`. The first one is kept.
+    /// - The program's: a name a library defines, bound while no `run` file is
+    ///   being read, where the `def` is found to be written in the program
+    ///   itself (a library procedure that `def`s its own state while the program
+    ///   runs is the library's). Noted with its line, once per program, in
+    ///   whatever dictionary it is made (#1225: a local one).
+    ///
+    /// Cold and out of line: only a traced (`--lint`) run gets here, and a name
+    /// no library defines costs one probe of the table.
+    #[inline(never)]
+    fn note_library_name(&mut self, name: &crate::name::PsName, in_user: bool) {
+        use crate::lint::ProgramDef;
+        let id = name.id();
+        let Some(mut trace) = self.shadow_trace.take() else {
+            return;
+        };
+        match trace.names.program_def(id) {
+            None => {
+                if in_user && let Some(file) = &self.last_file {
+                    // The name is in `userdict` already only because the program
+                    // put it there before this file was loaded.
+                    let before = self
+                        .dstack
+                        .get(2)
+                        .is_some_and(|u| u.borrow().get_id_ref(id).is_some());
+                    trace.names.library_def(id, file, before);
+                }
+            }
+            Some(ProgramDef::No | ProgramDef::Before) if self.last_file.is_none() => {
+                // The same place that was found not to be the program's: a
+                // library procedure keeping its own state, run in a loop.
+                let site = self.def_site();
+                if site.is_some_and(|s| trace.names.is_known_library_site(id, s)) {
+                    self.shadow_trace = Some(trace);
+                    return;
+                }
+                match self.program_def_line(id) {
+                    Some(line) => trace.names.set_program_line(id, line),
+                    None => {
+                        if let Some(site) = site {
+                            trace.names.set_library_site(id, site);
+                        }
+                    }
+                }
+            }
+            Some(_) => {}
+        }
+        self.shadow_trace = Some(trace);
+    }
+
+    /// Where the `def` running now was called from: what the frame on top of
+    /// the execution stack is, as a key that is the same each time that call
+    /// site runs, and the generation of the table of lines it is valid for.
+    fn def_site(&self) -> Option<(usize, usize, u32)> {
+        let frame = self
+            .estack
+            .iter()
+            .rev()
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))?;
+        let (key, slot) = match frame {
+            Frame::Proc { body, pc } => body.storage_site(*pc),
+            Frame::Scanner(lexer) => (usize::MAX, lexer.token_start()),
+            Frame::Repeat { body, .. }
+            | Frame::Loop { body }
+            | Frame::For { body, .. }
+            | Frame::Forall { body, .. } => (body.storage_site(0).0, usize::MAX),
+            _ => return None,
+        };
+        Some((key, slot, self.source_lines.borrow().generation()))
+    }
+
+    /// The line of the program's own text a `def` or `store` of `name_id` that
+    /// is running now is written on; `None` when it is not found to be in the
+    /// program (a library's, a procedure built at run time, a computed name).
+    /// The program's text read directly, and the procedure frame on top whose
+    /// previous element is that `def`, are answered at once; the rest go to
+    /// [`running_def_site`](Self::running_def_site).
+    fn program_def_line(&self, name_id: u32) -> Option<u32> {
+        let frame = self
+            .estack
+            .iter()
+            .rev()
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))?;
+        let bodies = self.source_lines.borrow();
+        match frame {
+            // The program's own `def`. A scanner on top with another token is a
+            // procedure whose last element, the `def`, has run out of its frame.
+            Frame::Scanner(lexer) if lexer.token_is_binding() => {
+                return if lexer.is_main() {
+                    lexer.line().and_then(|l| u32::try_from(l).ok())
+                } else {
+                    None
+                };
+            }
+            Frame::Proc { body, pc } if *pc > 0 => {
+                let at = *pc - 1;
+                if body
+                    .get(at)
+                    .is_some_and(|el| crate::lint::is_binding_op(&el))
+                    && crate::lint::writes_name(body, at, name_id)
+                {
+                    return match bodies.line_of(body, at)? {
+                        (line, None) => Some(line),
+                        (_, Some(_)) => None,
+                    };
+                }
+            }
+            _ => {}
+        }
+        match self.running_def_site(name_id, &bodies)? {
+            (line, None) => Some(line),
+            (_, Some(_)) => None,
         }
     }
 

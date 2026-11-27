@@ -1997,9 +1997,17 @@ renders eight examples in both and compares block-downsampled output).
   the stitched pages, not `check_band`.
   After an error (`[run-error]`) both `--lint` and `split_lint_findings` drop the
   end-of-run findings (#942, #947) except those in
-  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110): add a check there
+  `lint::ERROR_EXPLAINING_CHECKS` (`shadowed-operator`, #1110, and `shadowed-library-name`, #1456): add a check there
   only if it reads state that survives the abort and can name the cause
   (`notes/1110-lint-notes-in-a-failed-render.md`).
+  `[shadowed-library-name]` (#1456, `notes/1456-lint-library-name-clash.md`) is made only for a
+  run that ended in an error: under `--lint`, `Interp::note_library_name` (in `def`/`store`,
+  next to the operator-shadow note) keeps `lint::NameClashes`, a table of the names `run` files
+  define in `userdict` (at most 3584, allocated when tracing starts) with the line the program
+  defined the same name on, in any dictionary; `snapshot_error_trace` keeps the names shown around
+  each library frame's running element, and the check reports the ones in both. The static
+  alternative (a note on every program that defines a library's name) was swept and rejected:
+  correct programs do it (`shade`, `tx`, `w`).
   `[shadowed-operator]` (#1052, #1109, `notes/1109-shadowed-operator-line-and-systemdict.md`)
   reads the finished `userdict`/`systemdict`; `Interp::trace_operator_shadows` (on
   under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner

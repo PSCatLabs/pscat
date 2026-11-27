@@ -137,12 +137,12 @@ fn an_error_that_does_not_involve_the_name_gets_no_note() {
 
 #[test]
 fn a_library_redefining_its_own_state_is_not_blamed_on_the_program() {
-    // `bump` is a library procedure that `def`s the library's own `count`
+    // `bump` is a library procedure that `def`s the library's own `tally`
     // while the program is running; `fail` then reads it. The program never
-    // defined `count`.
-    let lib = "%!PS\n/count 0 def\n\
-        /bump { count 1 add /count exch def } def\n\
-        /fail { count (x) add } def\n";
+    // defined `tally`.
+    let lib = "%!PS\n/tally 0 def\n\
+        /bump { tally 1 add /tally exch def } def\n\
+        /fail { tally (x) add } def\n";
     let stderr = lint(
         "clash-libstate",
         &[("lib2.ps", lib)],
@@ -154,16 +154,36 @@ fn a_library_redefining_its_own_state_is_not_blamed_on_the_program() {
 
 #[test]
 fn a_library_state_name_the_program_also_sets_is_named() {
-    // The same library, but now the program stores into `count` too.
-    let lib = "%!PS\n/count 0 def\n/fail { count (x) add } def\n";
+    // The same library, but now the program stores into `tally` too.
+    let lib = "%!PS\n/tally 0 def\n/fail { tally (x) add } def\n";
     let stderr = lint(
         "clash-libstate-program",
         &[("lib2.ps", lib)],
-        "%!PS\n(lib2.ps) run\n/count 7 def\nfail\n",
+        "%!PS\n(lib2.ps) run\n/tally 7 def\nfail\n",
     );
     let line = finding(&stderr).unwrap_or_else(|| panic!("no finding: {stderr}"));
     assert!(
-        line.contains("`count`") && line.contains("line 3 of your program"),
+        line.contains("`tally`") && line.contains("line 3 of your program"),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_program_definition_after_the_librarys_own_runs_is_still_named() {
+    // `bump` keeps the library's `tally` from a loop first; the program then
+    // sets it too, from inside a procedure it calls from a loop.
+    let lib = "%!PS\n/tally 0 def\n\
+        /bump { tally 1 add /tally exch def } def\n\
+        /fail { tally (x) add } def\n";
+    let stderr = lint(
+        "clash-after-lib-runs",
+        &[("lib2.ps", lib)],
+        "%!PS\n(lib2.ps) run\n0 1 5 { pop bump } for\n\
+         /setit { /tally 9 def } def\n0 1 2 { pop setit } for\nfail\n",
+    );
+    let line = finding(&stderr).unwrap_or_else(|| panic!("no finding: {stderr}"));
+    assert!(
+        line.contains("`tally`") && line.contains("line 4 of your program"),
         "{line}"
     );
 }

@@ -117,8 +117,14 @@ PIL composite. A one-call typewriter or chart is not added yet.
   ended in a PostScript error gets the `PostScript error:` block and the
   partly drawn page, and no `Lint:` block for the findings that describe
   where the run stopped: they would only be consequences of the error (#942).
-  The one kept is `[shadowed-operator]`, in its own `Lint:` block after the
-  error, because a redefined operator is often why the run failed (#1110).
+  The ones kept are `[shadowed-operator]`, in its own `Lint:` block after the
+  error, because a redefined operator is often why the run failed (#1110), and
+  `[shadowed-library-name]`: a name your program defined (in any dictionary,
+  `2 dict begin /shade ... def` included) that a loaded library also defines and
+  that a library procedure read by name where the error happened, with the line
+  of your definition, the library file, and the fix (rename yours, or write
+  `//name exec` where you mean the library's); silenced by
+  `%lint: allow shadowed-library-name` (#1456). A program that works gets no new line.
   `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
   `eval_postscript` also
   return what a *successful* run wrote to stderr (a font falling back to a
