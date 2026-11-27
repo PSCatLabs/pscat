@@ -603,6 +603,24 @@ fn an_execstackoverflow_leaves_the_operands() {
             "/r { { r } exec 0 pop } def",
             "/execstackoverflow --exec-- {r}",
         ),
+        // An executable name resolves to a procedure that needs a frame, so
+        // the overflow leaves the name too (#1242; gs 10.07.1 leaves `r`).
+        (
+            "/r { /r cvx exec 0 pop } def",
+            "/execstackoverflow --exec-- r",
+        ),
+        (
+            "/r { /s cvx exec 0 pop } def /s /r cvx def",
+            "/execstackoverflow --exec-- s",
+        ),
+        (
+            "/r { /s cvx exec 0 pop } def /s /t cvx def /t /r cvx def",
+            "/execstackoverflow --exec-- s",
+        ),
+        // A name that resolves to an operator needs no frame: `pop` runs at
+        // the limit (the body's own frame is the last one that fits), and
+        // the overflow is the recursive call's, with the stack as it was.
+        ("/r { 1 /pop cvx exec r 0 pop } def", "/execstackoverflow r"),
     ] {
         let mut it = Interp::new();
         it.capture_stdout();
@@ -615,6 +633,74 @@ fn an_execstackoverflow_leaves_the_operands() {
             tidy(&String::from_utf8_lossy(it.captured_stdout())).join(" "),
             want,
             "{def}"
+        );
+    }
+}
+
+/// An image's own error names the operator that began it, as an object, not
+/// the name it was reached through (#1242): redefining `image` after a
+/// procedure that calls it was bound must not change the blame. Ghostscript
+/// 10.07.1 prints `--image--` for each (the data procedure's `99` is not a
+/// string). The redefinition is in `userdict`, so each program runs in its
+/// own interpreter.
+const IMAGE_BLAME: &[(&str, &str)] = &[
+    ("image", "{ 4 4 8 [4 0 0 4 0 0] { 99 } image }"),
+    ("imagemask", "{ 4 4 true [4 0 0 4 0 0] { 99 } imagemask }"),
+    (
+        "colorimage",
+        "{ 4 4 8 [4 0 0 4 0 0] { 99 } false 1 colorimage }",
+    ),
+];
+
+fn image_blame_program(op: &str, body: &str, redefine: bool) -> String {
+    let redefined = if redefine {
+        format!("/{op} /pop load def")
+    } else {
+        String::new()
+    };
+    format!(
+        "/p {body} bind def {redefined} {{ p }} stopped pop \
+         $error /errorname get == $error /command get =="
+    )
+}
+
+#[test]
+fn an_images_blame_survives_the_operator_being_redefined() {
+    for (op, body) in IMAGE_BLAME {
+        for redefine in [false, true] {
+            let mut it = Interp::new();
+            it.capture_stdout();
+            let src = image_blame_program(op, body, redefine);
+            it.run_str(&src)
+                .unwrap_or_else(|e| panic!("{op}: {}", it.error_report(&e)));
+            assert_eq!(
+                tidy(&String::from_utf8_lossy(it.captured_stdout())),
+                ["/typecheck".to_string(), format!("--{op}--")],
+                "{op} (redefined: {redefine})"
+            );
+        }
+    }
+}
+
+#[test]
+fn ghostscript_blames_the_image_operator_after_it_is_redefined() {
+    if !common::gs_available() {
+        return;
+    }
+    for (op, body) in IMAGE_BLAME {
+        let dir = common::scratch_dir("operand_restore_image_blame");
+        let ps = dir.join("blame.ps");
+        std::fs::write(&ps, image_blame_program(op, body, true)).expect("write ps");
+        let out = Command::new("gs")
+            .args(["-q", "-dNOSAFER", "-dNODISPLAY", "-dBATCH"])
+            .arg(&ps)
+            .output_deadline()
+            .expect("run gs");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            tidy(&String::from_utf8_lossy(&out.stdout)),
+            ["/typecheck".to_string(), format!("--{op}--")],
+            "{op}"
         );
     }
 }
