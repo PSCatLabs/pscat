@@ -2906,7 +2906,8 @@ impl Gfx {
         match self.ink() {
             Some(crate::pattern::Ink::Pattern(tile, rgb, place)) => {
                 let canvas = (self.pixmap.width(), self.pixmap.height());
-                Ok((Some(tile.raster(rgb, place.as_ref(), canvas)), 0))
+                let src = tile.raster(rgb, place.as_ref(), canvas, self.here_to_gs());
+                Ok((Some(src), 0))
             }
             Some(crate::pattern::Ink::Shading(sp, place)) => {
                 let matrix = match place {
@@ -3041,7 +3042,8 @@ impl Gfx {
     }
 
     /// Lay out the cells of a fractional TilingType 2 pattern over the
-    /// canvas before it paints (#1332), adding the layout's work to `work`.
+    /// canvas before it paints (#1332), here or in another context than it
+    /// was made in (#1373), adding the layout's work to `work`.
     /// Does nothing for any other colour. A layout that would not fit the
     /// limits' headroom is not made and the pattern paints from its
     /// period; a limit reached while laying out is the error.
@@ -3050,11 +3052,20 @@ impl Gfx {
         probe: &crate::limits::LimitProbe,
         work: &mut u64,
     ) -> Result<(), PsError> {
-        if let Some(crate::pattern::Ink::Pattern(tile, rgb, None)) = self.ink() {
+        if let Some(crate::pattern::Ink::Pattern(tile, rgb, _)) = self.ink() {
             let canvas = (self.pixmap.width(), self.pixmap.height());
-            tile.lay(rgb, canvas, probe, work)?;
+            tile.lay(rgb, canvas, self.here_to_gs(), probe, work)?;
         }
         Ok(())
+    }
+
+    /// This context's coordinates to gs's device coordinates for it
+    /// (#1300): identity on the page, a capture's `to_gs` inside a
+    /// `PaintProc`.
+    fn here_to_gs(&self) -> Transform {
+        self.captures
+            .last()
+            .map_or(Transform::identity(), |c| c.to_gs)
     }
 
     /// Paint the current pattern through a stencil (`imagemask`, #1299):
@@ -3144,10 +3155,7 @@ impl Gfx {
             return Some(crate::pattern::Ink::Rgb(rgb));
         }
         let p = self.state.pattern.as_ref()?;
-        let here = self
-            .captures
-            .last()
-            .map_or(Transform::identity(), |c| c.to_gs);
+        let here = self.here_to_gs();
         match &p.pattern {
             crate::pattern::PatternRef::Tile(lazy) => {
                 // A pattern whose `PaintProc` has not run paints nothing:

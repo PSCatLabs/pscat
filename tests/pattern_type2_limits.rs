@@ -132,4 +132,66 @@ fn laid_out_cells_obey_the_limits() {
         v.len() > 10 && on(&v, &lattice_pos) && !on(&v, &period_pos),
         "{v:?}"
     );
+
+    foreign_layouts_obey_the_limits();
+}
+
+/// The page's pattern of `program`, painted by a one-pixel fill (`fill`)
+/// inside the PaintProc of an outer pattern whose cell is `w` x `h`, which
+/// the page then fills over `page_fill` (#1373): the inner pattern's cells
+/// are laid out over the outer pattern's capture canvas.
+fn foreign(inner: &str, w: u32, h: u32, fill: &str, page_fill: &str) -> String {
+    let inner = inner.replace("setpattern\n", "/inner exch def\n");
+    format!(
+        "{inner}<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {w} {h}] \
+         /XStep {} /YStep {} /PaintProc {{ pop inner setpattern {fill} rectfill }} >> \
+         matrix makepattern setpattern\n{page_fill} rectfill\n",
+        2 * w,
+        2 * h
+    )
+}
+
+/// A blank page of the size of `it`'s: what a stopped run must leave.
+fn blank(it: &Interp) -> bool {
+    let pm = &it.gfx().pixmap;
+    let fresh = Interp::with_page(pm.width(), pm.height()).expect("page");
+    pm.data() == fresh.gfx().pixmap.data()
+}
+
+/// The limits hold for a layout in another context than the pattern was
+/// made in (#1373): the layout is over the capture canvas of the pattern
+/// whose PaintProc paints, up to 2^26 pixels, against the lattice's 2^24.
+fn foreign_layouts_obey_the_limits() {
+    // Steps: 100x100 cells on 1.1 px steps over a 1000x1000 capture, for a
+    // one-pixel fill, some 100 million pixels written. A Type 1 inner
+    // pattern, which lays nothing out, runs under the same cap.
+    let inner = program(100, 100, "1.1", "1.1", &[]);
+    let src = foreign(&inner, 1000, 1000, "0 0 1 1", "0 0 1 1");
+    let (it, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &src);
+    assert_eq!(r, Err(PsError::StepsExceeded), "foreign: steps");
+    assert!(blank(&it), "foreign: a stop paints nothing");
+    let one = src.replace("/TilingType 2", "/TilingType 1");
+    let (_, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &one);
+    assert_eq!(r, Ok(()), "foreign: Type 1 control");
+
+    // Time: 200x200 cells on 1.01 px steps over the same capture are some
+    // 240 million pixels, the copies polled against the clock.
+    let inner = program(200, 200, "1.01", "1.01", &[]);
+    let src = foreign(&inner, 1000, 1000, "0 0 1 1", "0 0 1 1");
+    let limits = Limits::none().with_max_time(std::time::Duration::from_millis(50));
+    let (it, r) = run(1000, 1000, limits, &src);
+    assert_eq!(r, Err(PsError::TimeExceeded), "foreign: time");
+    assert!(blank(&it), "foreign: a stop at the clock paints nothing");
+
+    // Memory: a 2 x 8000 cell makes a 32 MB row for a 1000x10 capture.
+    // Under an 8 MiB cap the layout is not made and the cells come from the
+    // period, 7 px apart; with room, 7.3.
+    let inner = program(2, 8000, "7.3", "8000.2", &[]);
+    let src = foreign(&inner, 1000, 10, "0 0 1000 10", "0 0 1000 10");
+    let (it, r) = run(1000, 10, Limits::none().with_max_memory(8 * MIB), &src);
+    assert_eq!(r, Ok(()), "foreign: memory cap");
+    assert_eq!(starts(&it, 0)[..6], PERIOD, "foreign: under the cap");
+    let (it, r) = run(1000, 10, Limits::none().with_max_memory(200 * MIB), &src);
+    assert_eq!(r, Ok(()), "foreign: memory with room");
+    assert_eq!(starts(&it, 0)[..6], LATTICE, "foreign: with room");
 }
