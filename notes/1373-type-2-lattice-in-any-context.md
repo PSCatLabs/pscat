@@ -59,6 +59,13 @@ copies as before. `tests/pattern_type2_limits.rs`
 pattern runs under the same cap); 200 px cells on 1.01 px steps stop at a
 50 ms deadline with the page blank; a 2 x 8000 cell over a 1000 x 10
 capture falls back to the period under 8 MiB and lays out with 200 MiB.
+The steps stop also leaves the SVG and the PDF page's content as they were
+without the fill. By hand (release build, 3 pt cells on 1.01 px steps
+inside a `PaintProc`): a 5000 x 4000 pt outer cell (20M px, past the 2^24
+lattice cap) paints from the period in 0.14 s; a 4000 x 4000 one (2^24) is
+laid out in 0.24 s, and runs under `--max-steps 100000` and
+`--max-memory 400`; `--max-memory 100` stops both at the outer capture
+itself, as before.
 
 ## Checked against gs
 
@@ -68,7 +75,10 @@ programs: the page's pattern in a `PaintProc`, the same with the outer
 pattern turned 180 degrees and the inner translated, one made in a
 `PaintProc` used on the page (`-dMaxPatternBitmap=1`, as `MADE_INSIDE`),
 and one made and used in the same `PaintProc`. All four fail on the old
-code. Whole pictures against gs (pixels differing by more than half the
+code. `an_uncoloured_type_2_pattern_keeps_its_spacing_in_each_colour_in_another_context`
+paints an uncoloured page pattern in two colours inside the turned
+`PaintProc` (a turned and recoloured cell, a layout per colour): each
+colour on gs's lattice, 0 pixels differing strongly from gs (12435 before). Whole pictures against gs (pixels differing by more than half the
 range): 0 of 160000 for each, where the old code differed in 12620,
 14244, 12435 and 4464; gs's raster of
 our PDF: 0 for each, before and after. With a 3.65 pt cell the starts match
@@ -82,6 +92,10 @@ SVG's `patternTransform`s lands where gs's lattice anchors (by hand: the
 turned case at device (13, 591), the made-and-used case at (50, 277)).
 
 ## Gaps
+
+- A fill stopped by a limit leaves its pattern's own PDF object in the
+  document, unreferenced (its `PaintProc` ran before the fill stopped). It
+  is the same on the page on the base, and invisible.
 
 - An outer pattern turned off the device axes, or scaled so its capture
   is not pixel-aligned with gs's accumulator: the period, as before.
