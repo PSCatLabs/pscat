@@ -335,7 +335,7 @@ output is cut off at 64 KiB.
 | Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200; a `setpagedevice` page too (#909), and `--max-pixels N` caps it lower | `src/main.rs`, `src/interp.rs`, `src/ops/pagedevice.rs` |
 | Canvas, sheet or board size under the MCP server | at most 40,000,000 device pixels by default (`--max-pixels`, at most 64,000,000) | `src/mcp_server.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
-| Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000; the site's playground 500,000 per frame, set before each `step()` (`Pscat.maxSteps`, #1210) | `src/interp.rs`, `src/wasm.rs` |
+| Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000; the site's playground 500,000 per frame, set before each `step()` (`Pscat.maxSteps`, #1210); the npm `Renderer` none, opt in per program with `maxSteps` or per frame with `frameMaxSteps` (#1223) | `src/interp.rs`, `src/wasm.rs` |
 | Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s); a render job `--job-timeout` less the same margin (3600 s default) | `src/interp.rs` |
 | Heap growth per run (opt in: `--max-memory MIB`, `Limits::max_memory`) | none by default; MCP 1024 MiB | `src/interp.rs`, `src/memtrack.rs` |
 
@@ -605,7 +605,9 @@ without the limits above:
   before each `step()`: about 500 MiB of decoded data, some six seconds,
   where the heaviest frame of any piece or example charges 5,306
   (`site/playground.html`, `notes/1210-playground-step-limit.md`). The CLI,
-  the npm package and `Pscat` itself keep no cap by default.
+  the npm package and `Pscat` itself keep no cap by default; the npm `Renderer` takes
+  one as `maxSteps` (the whole program) or `frameMaxSteps` (each `frames()`
+  frame) and reads the count as `stepsUsed` (#1223).
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
   `--bands` band (steps and time; the bands share `--max-memory` and

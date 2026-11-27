@@ -809,6 +809,9 @@ renders eight examples in both and compares block-downsampled output).
   uncoloured pattern whose resources hold a soft mask, so such an outer
   pattern is written PaintType 1 in each colour it is used in
   (`PdfRecorder::colored_variant`);
+  the capture's `/BBox` clip mask is whole pixels on its edge rows and
+  columns, so a shape ending at the `/BBox` paints its edge once
+  (#1375, `Gfx::snap_clip_to_pixels`);
   text output modes keep outlines under a pattern. `imagemask` paints the
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
@@ -2992,7 +2995,9 @@ renders eight examples in both and compares block-downsampled output).
   `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to
   `web/pscat.js` ships in the package too: keep `npm/renderer.js` and
-  `npm/index.d.ts` in step, and run the `npm` workflow's steps
+  `npm/index.d.ts` in step (the step cap is `maxSteps` / `frameMaxSteps` /
+  `stepsUsed`, #1223: `begin()` always re-arms the module instance's cap (kept
+  across programs), 0 when the option is absent, so a cap never leaks into the next program), and run the `npm` workflow's steps
   (`build_npm.sh --pack`, `npm test` in `npm/`, `cargo test --test wasm`,
   `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
   Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond

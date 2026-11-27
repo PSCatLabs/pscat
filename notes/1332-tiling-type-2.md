@@ -105,7 +105,8 @@ Fixed in #1342 (`notes/1342-pattern-lattice-phase.md`).
   last case. The lattice reads its anchor from `geom.shader.tx/ty`, so
   that fix moves Types 1, 2 and 3 together.
 - A PaintProc's `rectfill` inside the capture of a 3.65 pt cell paints a
-  partial edge pixel of 50% coverage (alpha 125), where the same
+  partial edge pixel of 50% coverage (alpha 125; fixed in #1375,
+  `notes/1375-pattern-bbox-clip-edge-coverage.md`), where the same
   `rectfill` on the page paints 65%. It is the same with whole-pixel
   steps, so it predates this change. gs paints the edge pixel solid (its
   pattern cells are aliased).
