@@ -381,7 +381,13 @@ fn harness(cases: &[String]) -> String {
     src
 }
 
-fn run_pscat(dir: &Path, program: &str) -> String {
+/// What one interpreter printed for the harness, and whether it exited cleanly.
+struct Run {
+    stdout: String,
+    success: bool,
+}
+
+fn run_pscat(dir: &Path, program: &str) -> Run {
     std::fs::write(dir.join("harness.ps"), program).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
         .args(["--headless"])
@@ -389,17 +395,53 @@ fn run_pscat(dir: &Path, program: &str) -> String {
         .current_dir(dir)
         .output_deadline()
         .unwrap();
-    String::from_utf8_lossy(&out.stdout).into_owned()
+    Run {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        success: out.status.success(),
+    }
 }
 
-fn run_gs(dir: &Path, program: &str) -> String {
+fn run_gs(dir: &Path, program: &str) -> Run {
     std::fs::write(dir.join("harness-gs.ps"), program).unwrap();
     let out = Command::new("gs")
         .args(["-q", "-dNOSAFER", "-dNODISPLAY", "-dBATCH", "harness-gs.ps"])
         .current_dir(dir)
         .output()
         .unwrap();
-    String::from_utf8_lossy(&out.stdout).into_owned()
+    Run {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        success: out.status.success(),
+    }
+}
+
+/// The result line of each case, or why the run cannot be compared. A child
+/// that failed, or printed anything but one line per case, would otherwise
+/// pass by agreeing with its own truncated twin (#1473).
+fn result_lines<'a>(who: &str, run: &'a Run, cases: usize) -> Result<Vec<&'a str>, String> {
+    if !run.success {
+        return Err(format!("{who} did not exit successfully"));
+    }
+    let lines: Vec<&str> = run.stdout.lines().collect();
+    if lines.len() != cases {
+        return Err(format!(
+            "{who} printed {} lines for {cases} cases",
+            lines.len()
+        ));
+    }
+    Ok(lines)
+}
+
+/// The two runs' result lines, case by case, once each is complete.
+fn parity<'a>(
+    ours: &'a Run,
+    theirs: &'a Run,
+    cases: usize,
+) -> Result<Vec<(&'a str, &'a str)>, String> {
+    let (a, b) = (
+        result_lines("pscat", ours, cases)?,
+        result_lines("gs", theirs, cases)?,
+    );
+    Ok(a.into_iter().zip(b).collect())
 }
 
 #[test]
@@ -412,8 +454,35 @@ fn the_probes_agree_with_ghostscript() {
     let dir = common::scratch_dir("statusdict-gs");
     let program = harness(&cases);
     let (ours, theirs) = (run_pscat(&dir, &program), run_gs(&dir, &program));
-    for (i, (a, b)) in ours.lines().zip(theirs.lines()).enumerate() {
+    let pairs = parity(&ours, &theirs, cases.len()).unwrap_or_else(|e| panic!("{e}"));
+    for (i, (a, b)) in pairs.into_iter().enumerate() {
         assert_eq!(a, b, "{}", cases[i]);
     }
-    assert_eq!(ours.lines().count(), theirs.lines().count());
+}
+
+/// Negative check for the harness above: two equal but truncated outputs, a
+/// child that failed, and extra lines must each be refused, and a complete
+/// pair accepted.
+#[test]
+fn the_parity_harness_refuses_truncated_or_failed_output() {
+    let run = |stdout: &str, success: bool| Run {
+        stdout: stdout.to_string(),
+        success,
+    };
+    let full = run("[1]\n[2]\n[3]\n", true);
+    assert_eq!(
+        parity(&full, &full, 3).unwrap(),
+        [("[1]", "[1]"), ("[2]", "[2]"), ("[3]", "[3]")]
+    );
+    // Both children stopped after two lines and agree with each other.
+    let cut = run("[1]\n[2]\n", true);
+    let err = parity(&cut, &cut, 3).unwrap_err();
+    assert!(err.contains("printed 2 lines for 3 cases"), "{err}");
+    // A complete output from a child that exited non-zero.
+    let failed = run("[1]\n[2]\n[3]\n", false);
+    let err = parity(&full, &failed, 3).unwrap_err();
+    assert!(err.contains("gs did not exit successfully"), "{err}");
+    // More lines than cases (an error report on stdout) is not a pass either.
+    let extra = run("[1]\n[2]\n[3]\nError: x\n", true);
+    assert!(parity(&extra, &full, 3).is_err());
 }
