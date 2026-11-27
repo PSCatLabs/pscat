@@ -79,8 +79,8 @@ const PARITY: &[(&str, &str, &str)] = &[
     ),
     (
         "one-short",
-        "{ countexecstack 1 sub array execstack 0 pop } stopped = clear",
-        "true",
+        "{ countexecstack 1 sub array execstack 0 pop } stopped $error /errorname get 2 array astore == clear",
+        "[true /rangecheck]",
     ),
     // What execstack shows: a procedure is its unexecuted rest, a loop
     // its control values and body, an executable string its unread text.
@@ -128,6 +128,54 @@ const PARITY: &[(&str, &str, &str)] = &[
         "subarray",
         "100 array dup execstack dup length exch 0 get 3 -1 roll 0 get eq exch countexecstack eq and =",
         "true",
+    ),
+    // The result shares the operand's storage: a write through it shows.
+    (
+        "subarray-shares",
+        "100 array dup execstack 0 (x) put 0 get ==",
+        "(x)",
+    ),
+    (
+        "dictstack-shares",
+        "10 array dup dictstack 0 (x) put 0 get ==",
+        "(x)",
+    ),
+    // An executable string whose last token has been read, with nothing
+    // or one delimiter after it, is already gone; any more text keeps it.
+    (
+        "string-last-token",
+        "(countexecstack) cvx exec B sub =",
+        "0",
+    ),
+    (
+        "string-one-space",
+        "(countexecstack ) cvx exec B sub =",
+        "0",
+    ),
+    (
+        "string-one-newline",
+        "(countexecstack\\n) cvx exec B sub =",
+        "0",
+    ),
+    (
+        "string-two-spaces",
+        "(countexecstack  ) cvx exec B sub =",
+        "1",
+    ),
+    (
+        "string-comment",
+        "(countexecstack % hi) cvx exec B sub =",
+        "1",
+    ),
+    (
+        "string-last-entry",
+        "(top) cvx exec dup length B sub exch dup length 1 sub get type 2 array astore ==",
+        "[0 filetype]",
+    ),
+    (
+        "string-then-proc",
+        "({ countexecstack B sub = } exec) cvx exec",
+        "1",
     ),
     (
         "result-attrs",
@@ -287,6 +335,38 @@ const OWN: &[(&str, &str, &str, &str)] = &[
         "false",
         "true",
     ),
+    // The scanner runs an executable string from a copy, so its remainder
+    // is a new string, not a view of the original (gs: a view).
+    (
+        "string-rest-copy",
+        "/s (top dup length 1 sub get /v exch def 0 pop) def s cvx exec /v load 0 88 put s ==",
+        "(top dup length 1 sub get /v exch def 0 pop)",
+        "(top Xup length 1 sub get /v exch def 0 pop)",
+    ),
+    // gs runs these through PostScript procedures of its own, which show;
+    // pscat's image, mask and pattern frames show nothing.
+    (
+        "image-proc",
+        "1 1 8 [1 0 0 1 0 0] { countexecstack B sub = <00> } image",
+        "1",
+        "20",
+    ),
+    (
+        "imagemask-proc",
+        "1 1 true [1 0 0 1 0 0] { countexecstack B sub = <00> } imagemask",
+        "1",
+        "16",
+    ),
+    // pscat also shows the one-element retry procedure `{--rectfill--}`
+    // under the PaintProc; gs a `--%pattern_paint_finish--` among others.
+    (
+        "paintproc",
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 \
+         /YStep 10 /PaintProc { pop countexecstack B sub = } >> matrix makepattern \
+         setpattern 0 0 10 10 rectfill",
+        "2",
+        "9",
+    ),
 ];
 
 fn program(cases: &[(&str, &str)]) -> String {
@@ -402,6 +482,98 @@ fn countexecstack_always_sizes_execstack_exactly() {
             let src = format!("{PRELUDE}{}", ctx.replace('X', body));
             assert_eq!(pscat_lines(&src), [want], "{ctx}");
         }
+    }
+}
+
+/// The eexec-encrypted form of `plain` (key 55665, four leading zeros), as hex.
+fn eexec_hex(plain: &[u8]) -> String {
+    let mut r: u16 = 55665;
+    let mut out = String::new();
+    for &p in [0u8; 4].iter().chain(plain) {
+        let c = p ^ (r >> 8) as u8;
+        r = (u16::from(c).wrapping_add(r))
+            .wrapping_mul(52845)
+            .wrapping_add(22719);
+        out.push_str(&format!("{c:02x}"));
+    }
+    out
+}
+
+/// `run` and `eexec` are one frame each here; gs runs them through
+/// procedures and `stopped` contexts of its own (`run` +25, `eexec` +6 in
+/// gs 10.07.1).
+#[test]
+fn run_and_eexec_add_one_frame() {
+    let dir = common::scratch_dir("execstack_run_eexec");
+    let inner = dir.join("inner.ps");
+    std::fs::write(&inner, "countexecstack B sub =\n").expect("write inner");
+    let src = format!(
+        "{PRELUDE}({}) run\ncurrentfile eexec\n{}\n",
+        common::ps_path(&inner),
+        eexec_hex(b"countexecstack B sub = currentfile closefile\n")
+    );
+    assert_eq!(pscat_lines(&src), ["1", "1"]);
+    if common::gs_available() {
+        assert_eq!(gs_lines(&src), ["25", "6"]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Inside a `save`, the first write into an array copies its whole backing
+/// store into the journal. That copy is held against `--max-memory` and
+/// charged to `--max-steps` before anything is written, so a refusal leaves
+/// the operand (a ten-slot view of a million-slot array) as it was.
+#[test]
+fn the_journal_copy_is_refused_before_the_write() {
+    for op in ["execstack", "dictstack"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .args([
+                "--headless",
+                "--max-memory",
+                "60",
+                "--pstack-on-error",
+                "-e",
+                &format!("/A 1000000 array def save A 0 10 getinterval {op} quit"),
+            ])
+            .output_deadline()
+            .expect("run pscat");
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.status.success(), "{op}: {all}");
+        assert!(all.contains("limitexceeded (memory)"), "{op}: {all}");
+        assert!(
+            all.contains(&format!("OffendingCommand: {op};")),
+            "{op}: {all}"
+        );
+        assert!(
+            all.contains("-save- [null null null null null null null null null null]"),
+            "{op}: {all}"
+        );
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .args([
+                "--headless",
+                "--max-steps",
+                "100",
+                "-e",
+                &format!("/A 1000000 array def save A 0 10 getinterval {op} length = quit"),
+            ])
+            .output_deadline()
+            .expect("run pscat");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{op}: steps");
+        assert!(err.contains("limitexceeded (steps)"), "{op}: {err}");
+        assert!(
+            err.contains(&format!("OffendingCommand: {op};")),
+            "{op}: {err}"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "{op}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
     }
 }
 
