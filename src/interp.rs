@@ -4921,10 +4921,12 @@ impl Interp {
     /// (#1457): the exit flush will send it, and under a time limit it must
     /// not block there. Wait, within the limit, for the room; past it, the
     /// bytes are dropped and the run ends at its limit. Nothing is written
-    /// here: with room they leave when they would without a limit.
+    /// here: with room they leave when they would without a limit. Only
+    /// under a time limit: with an interrupt flag alone there is no deadline
+    /// for the exit flush to outlast, and the host gets its run back at once.
     #[cfg(unix)]
     fn stdout_room_at_end(&self) -> Result<(), PsError> {
-        if !crate::timed_write::buffered() || !self.timed_output() {
+        if !crate::timed_write::buffered() || self.limits.max_time.is_none() {
             return Ok(());
         }
         crate::timed_write::ensure_room_at_end(self.fd_kind(1), &mut || self.write_look())

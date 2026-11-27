@@ -94,15 +94,19 @@ may be stuck in a write). An embedder that writes to stdout itself while a
 timed run has a partial line buffered should call `pscat::hand_over_stdout`
 first (doc-hidden); otherwise its line can come before the program's.
 
-**End of a run.** A run that ends (finished, error, `quit`, a limit) with
-bytes in the buffer under a time limit checks that stdout has room for them
+**End of a run.** A run that ends (finished, error, `quit`, a limit, found
+in the slice or at its start or end) with bytes in the buffer under a time
+limit checks that stdout has room for them
 (at most 1024 bytes: `poll`, or `fstat` on macOS), waiting within the limit,
 so the exit flush cannot hang. With room nothing is written there (the
 bytes leave when they would without a limit). Without room by the deadline
 the bytes are dropped and the run ends at its limit; a run that had
 finished reports `limitexceeded (time)` with the last operator it ran as
 the offending command
-(`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`).
+(`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`). With a host
+interrupt flag and no time limit there is no such wait: the run returns at
+once, and the bytes wait for the exit flush as without the flag (the writes
+themselves still stop when the flag is raised).
 
 **State after a stop.** Bytes already written stay written; a stop in the
 middle of a flush keeps the unwritten part in the buffer as `flush_buf`
@@ -145,6 +149,14 @@ path's.
   (`--png`/`--svg`/`--pdf` take a file name).
 - A terminal stopped with XOFF (Ctrl-S), a named FIFO on macOS and a
   datagram socket block as before.
+- A timed write first flushes std's own stdout buffer, without a deadline.
+  In the CLI that buffer is empty during a run; an embedder that leaves bytes
+  in it (writing without a newline, or another `Interp` dropped mid-way, which
+  hands its line over) and then runs a program into a full pipe can block
+  there.
+- No test drives a panic: the CLI has no trigger for one. The mechanism is
+  `Drop for Interp` running while it unwinds, with a lock that tolerates
+  poisoning.
 
 ### Cost
 

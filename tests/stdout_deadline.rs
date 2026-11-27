@@ -548,7 +548,8 @@ fn a_stopped_write_restores_its_operands() {
     );
     let mut held = Vec::new();
     reader.read_to_end(&mut held).expect("read the pipe");
-    assert!(held.len() >= prefilled, "the pipe lost its prefill");
+    // Only the prefill: the flush was blocked from its first byte.
+    assert_eq!(held.len(), prefilled, "the child's bytes got through");
 }
 
 /// A run that ends with a partial line in std's buffer and a full pipe:
