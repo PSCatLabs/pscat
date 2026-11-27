@@ -169,6 +169,20 @@ fn a_library_state_name_the_program_also_sets_is_named() {
 }
 
 #[test]
+fn the_programs_own_procedures_are_not_library_procedures() {
+    // The program's own `g` calls the program's own `helper` by name and fails
+    // next to it. Under the CLI the main program has a file name too, so a
+    // frame with a file is not the same as a library's frame.
+    let stderr = lint(
+        "clash-own-proc",
+        &[("lib1.ps", LIB)],
+        "%!PS\n(lib1.ps) run\n/helper { 2 mul } def\n/g { 1 helper (x) add } def\ng\n",
+    );
+    assert!(stderr.contains("OffendingCommand: add"), "{stderr}");
+    assert!(finding(&stderr).is_none(), "{stderr}");
+}
+
+#[test]
 fn a_program_definition_after_the_librarys_own_runs_is_still_named() {
     // `bump` keeps the library's `tally` from a loop first; the program then
     // sets it too, from inside a procedure it calls from a loop.
