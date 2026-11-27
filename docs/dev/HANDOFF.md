@@ -1766,15 +1766,20 @@ renders eight examples in both and compares block-downsampled output).
     too, or `{ } loop` hangs again.
   - A program's stdout/stderr write can block on a reader (#1457), so under a
     time limit or an interrupt flag `Interp::write_stdout`/`write_stderr` take
-    `src/timed_write.rs` for a pipe or socket: a write no bigger than the
-    room (Linux: `poll` then `PIPE_BUF`; macOS: `fstat`'s free space, letting
-    a full pipe grow 16 -> 64 KiB as a plain write does; `send(MSG_DONTWAIT)`
-    on a Linux socket), never `O_NONBLOCK` (the description is shared). That
-    path bypasses std's `LineWriter`, so it keeps `stdout_pending` and
-    `step_n` flushes it at every slice end. A new writer to fd 1 or 2 goes
-    through those two methods and passes their `PsError` up unchanged (a
-    `map_err` to `Io` would make the stop catchable). No limit, a file or a
-    terminal, Windows: the old blocking write. `notes/1457-stdout-write-deadline.md`.
+    `src/timed_write.rs` for an anonymous pipe or a stream socket: a write no
+    bigger than the room (Linux: `poll` then `PIPE_BUF`; macOS: `fstat`'s free
+    space, letting a full pipe grow 16 -> 64 KiB; `send(MSG_DONTWAIT)` on a
+    Linux socket), never `O_NONBLOCK` (the description is shared). Stdout
+    keeps std's `LineWriter` rules exactly in `timed_write::BUFFER` (1024
+    bytes, process-wide), so `2>&1` order and the operator a write error
+    surfaces in are the plain path's; never flush it at a slice end. Anything
+    else that writes to stdout calls `pscat::hand_over_stdout()` first (the
+    CLI's `stdout_text`/`flush_stdout`, the window prompt, bands, `Drop`). A
+    new writer to fd 1 or 2 goes through those two methods and passes their
+    `PsError` up unchanged (a `map_err` to `Io` would make the stop
+    catchable). No limit, a file, a terminal, a datagram socket, a macOS named
+    FIFO, Windows: the old blocking write. `tests/stdout_deadline.rs` compares
+    merged output with and without a limit; `notes/1457-stdout-write-deadline.md`.
   - A whole-file read (`file`, `run`) is inside one operator, so it polls the
     limits itself (#702): `ops/file.rs` `read_resource` takes
     `file::read_path_limited` (64 KiB chunks, a helper thread for anything that

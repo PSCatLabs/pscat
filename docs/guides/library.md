@@ -280,7 +280,11 @@ With a time limit or an interrupt flag set, a program's write to the
 process's stdout or stderr that waits on a pipe or socket (Linux, macOS) is
 held to them as well: it stops with the limit's error, or `Interrupted`,
 instead of blocking on a reader that never reads. With neither set, or with
-stdout captured (`capture_stdout`), writing is unchanged.
+stdout captured (`capture_stdout`), writing is unchanged. Stdout keeps std's
+line buffering on that path in a buffer of its own; if your host writes to
+stdout itself while a run under a limit may have left a partial line there,
+call `pscat::hand_over_stdout()` first so the two stay in order (dropping the
+`Interp` does it too).
 
 ```rust
 interp.register_operator("spin", |i| {

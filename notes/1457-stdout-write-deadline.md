@@ -5,103 +5,148 @@ deadline, so `16777216 string =` with stdout a pipe nobody drains blocked
 forever with 64 KiB in the pipe, whatever `--max-time` said. The same held
 for every writer through `Interp::write_stdout` (`=`, `==`, `print`,
 `stack`, `pstack`, `write`/`writestring`/`writehexstring`/`flushfile` on
-`%stdout`, `flush`, `printobject`) and for `%stderr` through
+`%stdout`, `flush`, `printobject`, `writeobject`) and for `%stderr` through
 `Interp::write_stderr`. Found by Codex on PR #1452.
 
-**What changed.** `src/timed_write.rs` (unix only) writes to a pipe or a
-socket so that a wait can be stopped. Under a time limit or a host interrupt
-flag, `write_stdout`/`write_stderr` use it for fd 1/2 when that is a FIFO or
-socket (`fstat`, once per process):
+### The write
 
-- FIFO on Linux: `poll(POLLOUT, 10 ms)`, then a blocking `write` of at most
-  `PIPE_BUF` (4096) bytes. A writable pipe has a free page slot, so the write
-  returns at once.
-- FIFO on macOS: `fstat` on the write end gives the buffer size
+`src/timed_write.rs` (unix only) writes so that a wait can be stopped.
+Under a time limit or a host interrupt flag, `write_stdout`/`write_stderr`
+use it for fd 1/2 when that is one of these (looked at once per run, so a
+host may move the descriptors between runs):
+
+- An anonymous pipe, Linux: `poll(POLLOUT)`, then a blocking `write` of at
+  most `PIPE_BUF` (4096) bytes. A writable pipe has a free page slot, so the
+  write returns at once. Any FIFO on Linux is one.
+- An anonymous pipe, macOS: `fstat` on the write end gives the buffer size
   (`st_blksize`) and the bytes in it (`st_size`), so the write takes exactly
   the free room. `poll` alone is not enough there: macOS starts a pipe at
   16 KiB and grows it to 64 KiB on a write that does not fit, but `poll`
-  calls a full 16 KiB pipe not writable. The first version trusted `poll`,
-  and an undrained pipe then held 16 KiB where a plain write leaves 64 KiB
-  (`==` of a 4 MiB string, whose output `==` bounds, fit on the base and hit
-  the limit on the branch). So a full pipe below 64 KiB gets a `PIPE_BUF`
-  (512-byte) write, which grows it as a plain write would. That write blocks
-  only if the kernel cannot grow the pipe (the system is out of pipe
-  memory), the one case where the deadline is not kept on macOS.
-  `output_that_fits_the_pipe_is_written_in_full_under_a_time_limit` pins it.
-- Socket: on Linux `send(MSG_DONTWAIT | MSG_NOSIGNAL)` with a `poll` on
-  `EAGAIN`. macOS ignores `MSG_DONTWAIT` on a blocking socket (the first
-  version of this was caught asleep in `sendto` by the test), so there a
-  socket is written like a pipe, 512 bytes after each `POLLOUT` (below the
-  2048-byte send low-water mark).
-- Between waits, and every 64 KiB written, it asks the interrupt flag and the
-  deadline; a stop returns `limitexceeded (time)` or `Interrupted`, both
-  uncatchable, so `stopped` cannot swallow it. The callers used to map every
-  write error to `ioerror`; they now pass the `PsError` up, and only an I/O
-  failure is `ioerror` (a reader that went away still sets
-  `stdout_epipe_error`, so the CLI's quiet exit 141 is unchanged).
+  calls a full 16 KiB pipe not writable (the first version trusted it, and
+  an undrained pipe then held a quarter of what a plain write leaves). A full
+  pipe below 64 KiB gets a 512-byte write, which grows it as a plain write
+  would.
+- A stream socket (`SO_TYPE` is `SOCK_STREAM`): on Linux
+  `send(MSG_DONTWAIT | MSG_NOSIGNAL)` with a `poll` on `EAGAIN`; on macOS,
+  which ignores `MSG_DONTWAIT` on a blocking socket (a test caught `sendto`
+  asleep), 512 bytes after each `POLLOUT` (a writable macOS socket has its
+  2048-byte low-water mark free).
+
+Everything else keeps the old blocking write: regular files, terminals
+(`poll` on a macOS tty is not dependable), `/dev/null`, datagram and
+seqpacket sockets (splitting a write would change the message boundaries:
+`a_datagram_stdout_gets_the_same_datagrams_under_a_time_limit`), and on
+macOS a named FIFO. A macOS named FIFO is socket-backed: `fstat` reports
+size 0 and `st_blksize` 4096 whatever it holds, and `poll` calls it writable
+with one byte free, so no write size is safe; it is told from an anonymous
+pipe by `st_dev` (set for a FIFO on a file system, even once unlinked; 0 for
+`pipe()`). Checked by hand: an undrained named FIFO, linked or unlinked,
+blocks past `--max-time` as before.
 
 `O_NONBLOCK` is never set: it is a flag of the open file description, which
-the shell and sibling processes share, and setting it makes their writes fail
-with `EAGAIN` (the classic "node left my terminal non-blocking"). The cost is
-one race: another process writing into the same pipe between our `poll` and
-our `write` can fill it, and then that write blocks as before.
+the shell and sibling processes share, and setting it makes their writes
+fail with `EAGAIN`.
 
-**Line buffering.** The timed path writes past std's `LineWriter`, so it
-keeps its own `Interp::stdout_pending` (at most 8 KiB): a write goes out
-through its last newline, all of it at `flush`/`print`, and a write of 8 KiB
-or more goes out at once from the caller's bytes (no copy the memory cap did
-not see). `step_n` writes what is left at the end of every slice, so nothing
-is pending when the host has control, and the CLI's own output after the run
-comes after the program's. Before each timed write std's stdout lock is taken
-and its buffer flushed (empty in practice: no system call), so output stays in
-order. A drained timed run writes byte for byte what an unlimited run writes
-(`a_timed_run_writes_what_an_unlimited_one_does`, a mixed program to a pipe
-and to a socket).
+The write asks the interrupt flag and the deadline before its first byte,
+whenever it would wait (it polls every 10 ms), after an `EINTR`, and every
+64 KiB written (also after the last chunk). A stop returns
+`limitexceeded (time)` or `Interrupted`, both uncatchable. A zero-byte
+`write` is `WriteZero`, as in std. A hung-up pipe (`POLLHUP`/`POLLERR`) is
+written to, so the `EPIPE` comes back as from a plain write: a full pipe
+whose reader closes ends in 2 ms with the quiet exit 141.
 
-**State after a stop.** Bytes already written stay written (the pipe holds a
-prefix of the output); the rest of that write, and any held-back partial line,
-are dropped. The operator's operands are restored by the central operand
-ledger as for any error; the stop is uncatchable, so the run ends.
+### Stdout's line buffer (Codex round 1, I1-I4)
 
-**Operand stack after a stop.** The stop is an operator error like any
-other, so the central operand ledger restores the operands: `1 2 <4 MiB>
-print` stopped at the limit leaves `Operand stack (3): 1 2 (\000...`
-(`a_stopped_write_restores_its_operands`), as a loop stopped in `add` leaves
-its operands.
+std's stdout is a `LineWriter` of 1024 bytes, and where it flushes decides
+how stdout and stderr interleave (`2>&1`) and in which operator a write
+error surfaces. The timed path cannot write through it (std's flush would
+block), and the first version kept its own 8 KiB buffer flushed at every
+slice end. Codex showed what that changed with no limit reached: `f 2000
+string writestring e (B) writestring` put B first; an `(A)` before an error
+came after the report instead of before; an `EPIPE` arrived at the slice
+end, outside the `stopped` that should catch it; a buffered `write` stopped
+later had already lost its operands.
 
-**What did not change.** No time limit and no interrupt flag (`--max-time 0`
-included): the old blocking `write_all`, byte for byte the same code. Stdout
-captured (`capture_stdout`: MCP server, wasm playground): unchanged. The MCP
-server's program stderr is not captured and the server runs with a time
-limit, so a program's `%stderr` writes there now take the timed path when
-the server's stderr is a pipe: the same bytes, but a client that never reads
-the server's stderr now sees the run stop at its limit instead of hanging. A regular
-file, a terminal or `/dev/null`: the old write; a file does not wait on a
-reader, and `poll` on a macOS tty is not dependable. Windows: the old write
-(no `poll` on pipes there; the module is `cfg(unix)` and the tests too).
+So the timed path now keeps std's buffer itself (`timed_write::BUFFER`):
+process-wide like std's, 1024 bytes, with `LineWriterShim::write_all` and
+`BufWriter::write_all`/`flush_buf` rules copied exactly (a write with no
+newline is buffered while it is smaller than the room, flushes first when
+it is bigger, goes straight through at 1024 bytes or more; a write with a
+newline sends through the last one; `flush_buf` keeps what it could not
+write). The flush points were pinned on the base binary first (1023, 1024
+and 1025 bytes then a stderr byte; 1023 + 1; 1023 + 1 + 1; 1000 + 100);
+`a_timed_run_merges_stdout_and_stderr_as_an_unlimited_one_does` runs them
+and every writer, quit, stop and errors under `2>&1`, from `-e`, a file and
+the REPL, with and without `--max-time`, and compares the merged bytes.
+Bytes leave at the same operator as without a limit, and a write error is
+that operator's (`stopped` catches `ioerror` as before).
 
-**Deferred.** The CLI's own writes after the run (the error report on stderr,
-`--pstack-on-error`, the `pscat: wrote FILE` lines) are still plain blocking
-writes: a run stopped with stderr a full, undrained pipe ends its program but
-the process then waits on that report. The `%stderr` test uses a slow reader
-for that reason. The resource notes in `src/paths.rs` (`PSCAT_TRACE_RESOURCES`, a resource too large) and
-`--bands`' own messages are `eprintln!` too. There is no page-to-stdout
-output (`--png`/`--svg`/`--pdf` take a file name). A terminal stopped with XOFF (Ctrl-S) also still blocks.
+The buffer is handed over to std's own buffer (`timed_write::hand_over`:
+a partial line under 1024 bytes, written in two pieces so std never takes
+its write-through path, so no I/O) before anything else writes to stdout:
+the CLI's `stdout_text`/`flush_stdout` (its own output and the REPL prompt),
+the interactive window's prompt, `--bands`' flush, the plain path's next
+write, and `Drop for Interp` (normal end, error, `quit`, panic unwinding).
+Then std's exit flush sends it, as it would have without a limit. The
+parent-gone watch, which calls `process::exit` from another thread, writes
+it without waiting first (`drain_now`, no locks waited on: the main thread
+may be stuck in a write). An embedder that writes to stdout itself while a
+timed run has a partial line buffered should call `pscat::hand_over_stdout`
+first (doc-hidden); otherwise its line can come before the program's.
 
-**Cost** (child CPU, min of 7 interleaved with a base-binary control, macOS,
-release; a guard, not a goal). With no limit, and to a file with one, head
-equals base within the control's spread. With `--max-time` to a drained pipe:
+**End of a run.** A run that ends (finished, error, `quit`, a limit) with
+bytes in the buffer under a time limit checks that stdout has room for them
+(at most 1024 bytes: `poll`, or `fstat` on macOS), waiting within the limit,
+so the exit flush cannot hang. With room nothing is written there (the
+bytes leave when they would without a limit). Without room by the deadline
+the bytes are dropped and the run ends at its limit; a run that had
+finished reports `limitexceeded (time)` with the last operator it ran as
+the offending command
+(`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`).
 
-| program | base | head |
-|---|---|---|
-| `1 1 1000000 { = } for` | 0.381 s | 0.811 s |
-| 5M single-byte `write`s to `%stdout` | 0.570 s | 0.610 s |
-| 8 x `16777216 string print` | 0.016 s | 0.018 s |
+**State after a stop.** Bytes already written stay written; a stop in the
+middle of a flush keeps the unwritten part in the buffer as `flush_buf`
+does, and the end-of-run rule then drops it if the pipe stays full. The
+operator's operands are restored by the central operand ledger as for any
+error: `f <1023 bytes> writestring f 65 write 1 2 f 66 write` into a full
+pipe stops in that last `write` with `Operand stack (4): 1 2 -file- 66`
+(`a_stopped_write_restores_its_operands`). A single buffered byte that does
+not flush cannot be stopped inside its `write`: it writes nothing, as
+without a limit, and the stop comes at the end of the run.
 
-The first is one `fstat` per line on top of the `write` `LineWriter` already
-made (about 0.4 us a line); a big write takes the pipe's whole free room per
-`write`, so it costs almost nothing extra. On Linux (not measured here) a line
-costs a `poll` instead, and a big write is a `poll`+`write` per 4 KiB. Not
-tuned: skipping the look while a known free-space credit lasts would also have
-to account for every other writer into the same pipe (stderr as `2>&1`, the
-REPL prompt), or it would hang in exactly the case this fixes. Hosted runs capture stdout and pay nothing.
+### What did not change
+
+No time limit and no interrupt flag (`--max-time 0` included): the old
+blocking `write_all` through std, plus one relaxed atomic load to know the
+timed buffer is empty. Stdout captured (`capture_stdout`: in-process renders,
+the wasm playground): unchanged. Windows: the old write (no `poll` on pipes
+there; the module and its tests are `cfg(unix)`).
+
+The MCP server runs the CLI as a child for its renders, with stdout and
+stderr both pipes it drains on its own threads and always with a time
+limit, so that child's program output takes the timed path on both
+descriptors. That is why the merged order has to be exactly the plain
+path's.
+
+### Limits of the guarantee
+
+- **One writer.** The room is read, then written; another process writing
+  into the same pipe in between can fill it, and the write then blocks as it
+  always did. On macOS a full pipe below 64 KiB is grown by a blocking write,
+  which sleeps if the kernel cannot grow it (the system is out of pipe
+  memory).
+- **The CLI's own writes after the run** (the error report on stderr,
+  `--pstack-on-error`, `pscat: wrote FILE`) are plain blocking writes: a run
+  stopped with stderr a full, undrained pipe ends its program, but the
+  process then waits on that report. The `%stderr` test uses a slow reader
+  for that reason. The resource notes in `src/paths.rs`
+  (`PSCAT_TRACE_RESOURCES`, a resource too large) and `--bands`' own
+  messages are `eprintln!` too. There is no page-to-stdout output
+  (`--png`/`--svg`/`--pdf` take a file name).
+- A terminal stopped with XOFF (Ctrl-S), a named FIFO on macOS and a
+  datagram socket block as before.
+
+### Cost
+
+Child CPU, min of 7 interleaved with a base-binary control, macOS, release
+(a guard, not a goal; not tuned). The table is in PR #1465.
