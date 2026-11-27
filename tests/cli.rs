@@ -413,7 +413,7 @@ fn lint_names_the_line_a_stack_leak_started_on() {
     let (ok, _out, stderr) = run(&["--lint", "-"], src);
     assert!(ok, "{stderr}");
     assert!(
-        stderr.contains("[stack-leak] 10 item(s) left on the operand stack at the end of the program: /gq /gq /gq /gq /gq (top 5 of 10 shown, topmost first); the oldest, /gq, was left when the program reached line 3"),
+        stderr.contains("[stack-leak] 10 item(s) left on the operand stack at the end of the program: /gq /gq /gq /gq /gq (top 5 of 10 shown, topmost first); the oldest, /gq, was left when the program reached line 2"),
         "{stderr}"
     );
 }

@@ -1449,25 +1449,181 @@ mod tests {
     }
 
     #[test]
-    fn a_leak_in_a_loop_points_at_the_loop_not_its_body() {
+    fn a_leak_in_a_loop_names_the_element_in_its_body() {
+        // #1366: the line of the leaking element, not the closing `} for`.
         let src = "0 1 9 {\n  /gq exch\n  pop\n  /gq 1\n} for\nshowpage";
         let m = leak_message(src);
         assert!(m.contains("30 item(s)"), "{m}");
         assert!(
-            m.contains("was left when the program reached line 5"),
+            m.contains("was left when the program reached line 2"),
+            "{m}"
+        );
+        let src = "0 1 9 {\n  pop\n  /gq 1\n} for\nshowpage";
+        let m = leak_message(src);
+        assert!(
+            m.contains("the oldest, /gq, was left when the program reached line 3"),
             "{m}"
         );
     }
 
     #[test]
-    fn a_leaky_call_is_credited_to_the_call_not_the_definition() {
+    fn a_leaky_call_names_the_element_that_left_the_item() {
+        // #1366: the line inside the procedure, not the call site (#1081).
         let src = "/leak {\n  1 2\n  3\n} def\n1 2 add pop\nleak\nshowpage";
         let m = leak_message(src);
         assert!(m.contains("3 item(s)"), "{m}");
         assert!(
-            m.contains("was left when the program reached line 6"),
+            m.contains("the oldest, 1, was left when the program reached line 2"),
             "{m}"
         );
+    }
+
+    #[test]
+    fn a_leak_two_calls_deep_names_the_innermost_element() {
+        let src = "/f {\n  1 pop\n  7\n} def\n/g {\n  f\n  2 mul\n} def\ng\n";
+        let m = leak_message(src);
+        assert!(
+            m.contains("the oldest, 14, was left when the program reached line 7"),
+            "{m}"
+        );
+        // The leak is in `f`, which `g` calls and nothing pops.
+        let src = "/f {\n  1 pop\n  7\n} def\n/g {\n  f\n} def\ng\n";
+        let m = leak_message(src);
+        assert!(
+            m.contains("the oldest, 7, was left when the program reached line 3"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leak_in_a_conditional_branch_names_its_line() {
+        let src = "/f {\n  true {\n    5\n  } if\n} def\nf\n";
+        let m = leak_message(src);
+        assert!(
+            m.contains("the oldest, 5, was left when the program reached line 3"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leak_from_a_run_file_stays_on_the_call_into_it_when_the_caller_is_the_program() {
+        // A library procedure that returns a value the program does not pop:
+        // the lib's own line is no use to its caller, the call is (#1366).
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        it.add_virtual_file("lib.ps", b"% lib\n/leak {\n  42\n} def\n".as_slice())
+            .expect("virtual file");
+        let _ = it.run_str("(lib.ps) run\n\nleak\n");
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("the oldest, 42, was left when the program reached line 3"),
+            "{m}"
+        );
+        assert!(!m.contains("lib.ps"), "{m}");
+        // Through a procedure of the program's own, the call inside it.
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        it.add_virtual_file("lib.ps", b"% lib\n/leak {\n  42\n} def\n".as_slice())
+            .expect("virtual file");
+        let _ = it.run_str("(lib.ps) run\n/user {\n  1 pop\n  leak\n} def\n\nuser\n");
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("the oldest, 42, was left when the program reached line 4"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leak_in_a_run_file_names_the_line_in_that_file() {
+        // The scanner is in the file when its own procedure leaks.
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        it.add_virtual_file(
+            "lib.ps",
+            b"% lib\n/leak {\n  42\n} def\n\nleak\n".as_slice(),
+        )
+        .expect("virtual file");
+        let _ = it.run_str("(lib.ps) run\n");
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("the oldest, 42, was left when the program reached line 3 (lib.ps)"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_prelude_the_host_named_is_not_mistaken_for_the_program() {
+        // psanim's pattern (#1405): a prelude read in one `run_str` under a
+        // name, a scene in a later one. A body of the prelude has a line, but
+        // not of this text.
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        it.set_main_file_name(Some("prelude.ps"));
+        let _ = it.run_str("% prelude\n\n/leak {\n  42\n} def\n");
+        it.set_main_file_name(None);
+        let _ = it.run_str("leak\n");
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("the oldest, 42, was left when the program reached line 1"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_leak_that_alternates_lines_keeps_the_trace_bounded() {
+        let mut it = Interp::with_page(50, 50).expect("page");
+        it.trace_stack_leaks();
+        let _ = it.run_str("100000 {\n  1\n  2\n} repeat");
+        let t = it.stack_trace().expect("trace");
+        // One run per change of line, up to a cap (the items past it share
+        // the last run), not one per leaked item.
+        assert!((100..=1024).contains(&t.run_count()), "{}", t.run_count());
+        let m = check(&it, true)
+            .into_iter()
+            .find(|f| f.check == "stack-leak")
+            .expect("leak")
+            .message;
+        assert!(
+            m.contains("the oldest, 1, was left when the program reached line 2"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn tracing_the_stack_changes_no_step_count_or_result() {
+        // The traced run steps through the instrumented loop, which does not
+        // fuse `{ } if`: the count and the stacks must be the same (#1213).
+        let src =
+            "0 1 200 {\n  dup 2 mod 0 eq { 1 add } { 2 sub } ifelse\n  3 gt { 5 } if\n} for\n";
+        let run = |on: bool| {
+            let mut it = Interp::with_page(50, 50).expect("page");
+            it.set_limits(crate::Limits::none().with_max_steps(10_000_000))
+                .expect("limits");
+            if on {
+                it.trace_stack_leaks();
+            }
+            it.run_str(src).expect("runs");
+            (it.steps_used(), it.operand_count())
+        };
+        let (off, on) = (run(false), run(true));
+        assert_eq!(off, on);
+        assert!(off.0 > 0);
     }
 
     #[test]
