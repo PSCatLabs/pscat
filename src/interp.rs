@@ -1440,6 +1440,8 @@ impl Interp {
             match self.limit_budget(budget) {
                 Ok(n) => n,
                 Err(e) => {
+                    #[cfg(unix)]
+                    let _ = self.stdout_room_at_end();
                     self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
@@ -1455,21 +1457,6 @@ impl Interp {
         } else {
             self.step_n_inner(budget)
         };
-        // A run that ends with program stdout still in the line buffer
-        // (#1457): the exit flush will send it, and under a time limit it
-        // must not block there. Wait, within the limit, for the room; past
-        // it, the bytes are dropped and the run ends at its limit. Nothing
-        // is written here: with room they leave when they would without one.
-        #[cfg(unix)]
-        if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
-            && crate::timed_write::buffered()
-            && self.timed_output()
-            && let Err(e) =
-                crate::timed_write::ensure_room_at_end(self.fd_kind(1), &mut || self.write_look())
-            && result.is_ok()
-        {
-            result = Err(e);
-        }
         // A program that is done ends the transparency groups it left open
         // before the limits are looked at, so their work is held to them
         // (#1406); an aborted one ends them in `unwind_all`.
@@ -1478,6 +1465,13 @@ impl Interp {
         }
         if limited {
             result = self.after_slice(result);
+        }
+        #[cfg(unix)]
+        if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
+            && let Err(e) = self.stdout_room_at_end()
+            && result.is_ok()
+        {
+            result = Err(e);
         }
         if result.is_err() || self.quit_requested {
             // Every uncaught error, limits included, passes here with the
@@ -4923,7 +4917,20 @@ impl Interp {
         self.limits.max_time.is_some() || self.interrupt.is_some()
     }
 
-    /// What fd 1 (`fd` 1) or fd 2 is this run, looked at once per run.
+    /// A run that ends with program stdout still in the line buffer
+    /// (#1457): the exit flush will send it, and under a time limit it must
+    /// not block there. Wait, within the limit, for the room; past it, the
+    /// bytes are dropped and the run ends at its limit. Nothing is written
+    /// here: with room they leave when they would without a limit.
+    #[cfg(unix)]
+    fn stdout_room_at_end(&self) -> Result<(), PsError> {
+        if !crate::timed_write::buffered() || !self.timed_output() {
+            return Ok(());
+        }
+        crate::timed_write::ensure_room_at_end(self.fd_kind(1), &mut || self.write_look())
+    }
+
+    /// What fd 1 or fd 2 is this run, looked at once per run.
     #[cfg(unix)]
     fn fd_kind(&self, fd: usize) -> crate::timed_write::FdKind {
         let mut kinds = self.fd_kinds.get();
