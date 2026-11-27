@@ -282,23 +282,192 @@ pub fn without_mcp_env(cmd: &mut std::process::Command) -> &mut std::process::Co
     cmd
 }
 
+/// Every scratch directory of one test process lives under
+/// `<temp>/pscat-test-<pid>/`; the digits are what the sweep below reads.
+const SCRATCH_PREFIX: &str = "pscat-test-";
+
+/// Set to anything but `0` or the empty string to keep this process's
+/// scratch directories for debugging (issue #1481): nothing is removed at
+/// exit, and a `.keep` file in the directory tells every later sweep to
+/// leave it alone, so it survives until you delete it by hand.
+const KEEP_VAR: &str = "PSCAT_KEEP_TEST_TMP";
+
+/// The directory the `pscat-test-<pid>` directories sit in.
+fn scratch_base() -> std::path::PathBuf {
+    let base = std::env::temp_dir();
+    // Some harnesses point TMPDIR into target/, which is inside the
+    // checkout; `identity_check.sh` refuses a scratch dir inside either tree.
+    if base.starts_with(env!("CARGO_MANIFEST_DIR")) {
+        return std::path::PathBuf::from("/tmp");
+    }
+    base
+}
+
+/// This process's `pscat-test-<pid>` directory, with the pid that owns it.
+/// Made on the first call; see `scratch_dir` for what happens to it.
+fn scratch_root() -> &'static std::path::Path {
+    use std::sync::OnceLock;
+    static ROOT: OnceLock<(u32, std::path::PathBuf)> = OnceLock::new();
+    let (_, root) = ROOT.get_or_init(|| {
+        let pid = std::process::id();
+        let root = scratch_base().join(format!("{SCRATCH_PREFIX}{pid}"));
+        // What an earlier process with this pid left (pids are reused, and
+        // `tag-0` would otherwise open onto its files). Nobody else can
+        // hold the directory: a live process owns its pid.
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create scratch root");
+        let keep = std::env::var_os(KEEP_VAR).is_some_and(|v| !v.is_empty() && v != "0");
+        if keep {
+            let _ = std::fs::write(root.join(".keep"), b"");
+        } else {
+            #[cfg(unix)]
+            {
+                // `atexit` runs when the test harness ends the process, after
+                // the last test thread has finished (a `Drop` in a `static`
+                // never runs). A process that is killed leaves its directory
+                // for the sweep in the next one. Windows has no `libc` here,
+                // so a Windows process leaves its directory behind; CI
+                // runners there are fresh, and a developer machine can delete
+                // `pscat-test-*` by hand.
+                extern "C" fn remove_at_exit() {
+                    // Never panic here (it would abort the exit). Only the
+                    // process that made the directory removes it, not a
+                    // `fork`ed child that calls `exit`.
+                    if let Some((owner, root)) = ROOT.get()
+                        && *owner == std::process::id()
+                    {
+                        let _ = std::fs::remove_dir_all(root);
+                    }
+                }
+                // SAFETY: registers a plain function; no state is passed.
+                unsafe { libc::atexit(remove_at_exit) };
+                // Off the test thread: some tests measure their own CPU time.
+                let base = scratch_base();
+                let _ = std::thread::Builder::new()
+                    .name("scratch-sweep".into())
+                    .spawn(move || {
+                        sweep_stale_scratch(
+                            &base,
+                            SWEEP_MIN_AGE,
+                            SWEEP_MAX_ATTEMPTS,
+                            &process_is_alive,
+                        )
+                    });
+            }
+        }
+        (pid, root)
+    });
+    root
+}
+
+/// A directory this old, whose process is gone, is stale.
+#[cfg(unix)]
+const SWEEP_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// One sweep removes at most this many directories (counting failures), so
+/// a backlog of thousands is cleared over several test runs, not by one.
+#[cfg(unix)]
+const SWEEP_MAX_ATTEMPTS: usize = 200;
+
+/// Does a process with this id exist? Only "no such process" says no;
+/// anything else (a process of another user, an id that is not a plain pid)
+/// says yes, so the sweep leaves that directory alone.
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return true;
+    };
+    if pid <= 0 {
+        return true; // 0 and negatives address process groups, not a process
+    }
+    // SAFETY: signal 0 sends nothing; it only checks the process exists.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+/// The pid in a directory named exactly `pscat-test-<digits>`, else `None`.
+#[cfg(unix)]
+fn scratch_dir_pid(name: &str) -> Option<u32> {
+    let digits = name.strip_prefix(SCRATCH_PREFIX)?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// Remove the `pscat-test-<pid>` directories directly under `base` that an
+/// earlier test process left behind (issue #1481); returns how many it
+/// removed. It touches only a real directory (never a symlink or a file)
+/// named `pscat-test-` and digits, whose pid `pid_alive` says is gone, that
+/// was last changed at least `min_age` ago and holds no `.keep` file, and it
+/// stops after `max_attempts` removals (failures count: parallel test
+/// processes sweep the same directories, so a `NotFound` is normal). Errors
+/// are ignored.
+#[cfg(unix)]
+pub fn sweep_stale_scratch(
+    base: &std::path::Path,
+    min_age: std::time::Duration,
+    max_attempts: usize,
+    pid_alive: &dyn Fn(u32) -> bool,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return 0;
+    };
+    let (mut attempts, mut removed) = (0, 0);
+    // The temp dir of a busy machine can hold thousands of entries.
+    for entry in entries.take(100_000).flatten() {
+        if attempts >= max_attempts {
+            break;
+        }
+        let Some(pid) = entry.file_name().to_str().and_then(scratch_dir_pid) else {
+            continue;
+        };
+        let path = entry.path();
+        // `symlink_metadata`: a symlink named like a scratch dir is not a
+        // directory here, so it (and what it points at) stays.
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.is_dir() || pid == std::process::id() || pid_alive(pid) {
+            continue;
+        }
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age >= min_age);
+        if !old || std::fs::symlink_metadata(path.join(".keep")).is_ok() {
+            continue;
+        }
+        attempts += 1;
+        // Does not follow symlinks inside, and a swap to a symlink at this
+        // path removes the link, not its target.
+        if std::fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// A new, already created directory that no other call shares, in this
 /// process or any other: `<temp>/pscat-test-<pid>/<tag>-<n>`. `tag` only
 /// helps a human reading the temp dir; put a file under it with
-/// `.join(name)`. Nothing is cleaned up unless the caller does it.
+/// `.join(name)`.
+///
+/// The directory is there for the life of the process (a child a test
+/// spawns can read it), and a unix process removes all of its directories
+/// when it exits (issue #1481). The first call also sweeps stale
+/// `pscat-test-<pid>` directories whose process is gone, on a background
+/// thread (`sweep_stale_scratch`). `PSCAT_KEEP_TEST_TMP=1` keeps this
+/// process's directories for debugging. A test that writes tens of MiB
+/// should delete its own directory when it is done with it.
 pub fn scratch_dir(tag: &str) -> std::path::PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let mut base = std::env::temp_dir();
-    // Some harnesses point TMPDIR into target/, which is inside the
-    // checkout; `identity_check.sh` refuses a scratch dir inside either tree.
-    if base.starts_with(env!("CARGO_MANIFEST_DIR")) {
-        base = std::path::PathBuf::from("/tmp");
-    }
-    let dir = base
-        .join(format!("pscat-test-{}", std::process::id()))
-        .join(format!("{tag}-{n}"));
+    let dir = scratch_root().join(format!("{tag}-{n}"));
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
 }

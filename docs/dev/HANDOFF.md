@@ -984,6 +984,10 @@ renders eight examples in both and compares block-downsampled output).
 - **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.
+  Cleanup (#1481, unix): the process removes `pscat-test-<pid>` at exit
+  (`atexit`), the first call sweeps stale ones of dead pids (an hour old, 200
+  per process, `PSCAT_KEEP_TEST_TMP=1` keeps yours). Windows leaves its
+  directories (no `libc` there). `notes/1481-test-scratch-cleanup.md`.
 
 - **`pscat::syntax::check_syntax` is the supported way to ask "does this
   scan?"** (#1096, `src/syntax.rs`): token count or the first syntax error
