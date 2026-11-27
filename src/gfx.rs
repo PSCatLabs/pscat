@@ -549,12 +549,12 @@ impl PsPath {
         )?;
         let mut subs: Vec<Sub> = Vec::with_capacity(count);
         let mut start = DevPoint { x: 0.0, y: 0.0 };
-        for i in 0..n {
+        for (i, seg) in self.segs.iter().enumerate() {
             if begins(i) {
                 if let Some(last) = subs.last_mut() {
                     last.hi = i;
                 }
-                let lo = match self.segs[i] {
+                let lo = match *seg {
                     Seg::Move(p) => {
                         start = p;
                         i + 1
