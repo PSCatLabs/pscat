@@ -2865,7 +2865,10 @@ impl Gfx {
         let passes = if smaller_root.is_some() { 3 } else { 1 };
         let mut work = shfill_work(pw, ph, nstops).saturating_mul(passes);
         if smaller_root.is_some() {
-            // The SVG then holds a second gradient of every stop (#1370).
+            // The SVG then holds a second gradient of every stop (#1370). The
+            // SVG decides on `shading.extend`, the raster on the extend it
+            // paints with; they agree because `shfill_ends_reached` takes a
+            // cone to reach both ends, so a cone is never relaxed.
             work = work.saturating_add(svg_second_gradient_work(shading.stops.len()));
             probe.check_alloc(shading.stops.len().saturating_mul(SVG_STOP_BYTES))?;
         }
@@ -7086,7 +7089,9 @@ pub(crate) fn shading_layer(
                 .saturating_mul(passes)
                 .saturating_add(base);
             if smaller.is_some() {
-                // The SVG then holds a second gradient of every stop (#1370).
+                // The SVG then holds a second gradient of every stop (#1370),
+                // charged on every mark though a page writes it once: on
+                // purpose conservative.
                 work = work.saturating_add(svg_second_gradient_work(g.stops.len()));
                 probe.check_alloc(g.stops.len().saturating_mul(SVG_STOP_BYTES))?;
             }

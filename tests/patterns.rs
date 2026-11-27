@@ -1880,6 +1880,76 @@ fn a_page_shading_pattern_paints_inside_a_paintproc_as_gs_places_it() {
     }
 }
 
+/// A cone (circles not nested, end not extended) with no `/BBox` and no
+/// `/Background` is a `<pattern>` over the canvas in SVG, not the gradient
+/// itself (#1370), so the branches that routing now enters are held against
+/// the PNG here: a pen-space stroke (`patternTransform`), and a pattern
+/// inside a tiling pattern's PaintProc (the context hop). The SVG, the PDF
+/// through gs and hayro, and gs on the program.
+const CONE_PEN: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [60 100 10 260 160 60]
+   /Function ramp /Extend [true false] >> >> matrix makepattern /cone exch def
+gsave 1 3 scale cone setpattern 14 setlinewidth 150 40 moveto 340 40 lineto stroke grestore
+cone setpattern 150 100 200 120 rectfill
+";
+
+const CONE_ACROSS: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [40 360 5 140 360 95]
+   /Function ramp /Extend [true false] >> >> matrix makepattern /cone exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 80 80] /XStep 100 /YStep 100
+   /PaintProc { pop cone setpattern 10 10 60 60 rectfill }
+>> [1 0 0 1 10 10] makepattern setpattern
+0 0 400 400 rectfill
+";
+
+#[test]
+fn a_cone_pattern_with_no_bbox_agrees_in_a_pen_stroke_and_a_paintproc() {
+    for (name, body, hayro, least) in [
+        ("cone pen", CONE_PEN, true, 2000),
+        ("cone across", CONE_ACROSS, false, 2000),
+    ] {
+        let src = format!("{RAMP}{body}");
+        let out = render(&src);
+        assert!(pdf_text(&out.pdf).contains("/PatternType 2 "), "{name}");
+        let painted = out
+            .png
+            .pixels()
+            .iter()
+            .filter(|p| p.red() < 250 || p.green() < 250 || p.blue() < 250)
+            .count();
+        assert!(painted > least, "{name}: only {painted} pixels painted");
+        assert_close(
+            &format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+            3.0,
+        );
+        if hayro {
+            assert_close(
+                &format!("{name}: PDF via hayro"),
+                &out.png,
+                &hayro_png(&out.pdf),
+                3.0,
+            );
+        }
+        if common::gs_available() {
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            assert_close(
+                &format!("{name}: the program in gs"),
+                &out.png,
+                &gs_png(ps.as_bytes(), "ps", name),
+                3.0,
+            );
+            assert_close(
+                &format!("{name}: our PDF via gs"),
+                &out.png,
+                &gs_png(&out.pdf, "pdf", name),
+                3.0,
+            );
+        }
+    }
+}
+
 const SHADING: &str = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] \
                        /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
 

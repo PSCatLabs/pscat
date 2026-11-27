@@ -22,11 +22,16 @@ it painted the smaller root where gs paints the larger. It was invisible
 because nothing compared a shrinking cone; it now is (`cone-shrink`, all four
 `/Extend`s).
 
-**Does `fr > r` draw?** Probed before relying on it. Chrome 158 draws it as
-canvas `createRadialGradient` does (0 pixels differ over the whole cone),
-and so does resvg. SVG 1.1 has no `fr` at all, so a viewer without SVG 2
-radial gradients was already wrong for these cones. WebKit (`qlmanage`
-thumbnail) differs from the PNG only on the cone's edge pixels.
+**Does `fr > r` draw?** Probed before relying on it. Chrome 158 (Playwright)
+draws it as canvas `createRadialGradient` does (0 pixels of 62,000 differ
+from the canvas gradient; and 0 differ from our PNG over sixteen cone
+programs under every `/Extend`, two apex pixels aside), and so does resvg.
+WebKit (`qlmanage` thumbnail) differs from the PNG only on the cone's edge
+pixels. Firefox was not checked. SVG 1.1 has no `fr` at all: a viewer
+without SVG 2 radial gradients moves a focal point outside the circle onto
+it, so the backward gradient's padding can flood the page in the start
+colour, which is worse than the old hole, but those viewers were already
+wrong for every cone.
 
 **The fix** (`src/svg.rs`).
 - A cone is never swapped (`is_cone`): the start is the focal circle, so the
