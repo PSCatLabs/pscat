@@ -11,14 +11,14 @@ use common::CommandDeadline as _;
 use pscat::Interp;
 
 /// Plain PostScript, valid in pscat and in gs. `T` holds one value of each
-/// type on which the two interpreters print `=` and `==` identically (the
-/// known gaps are `=` of an operator and of a string with high bytes, and
-/// the spelling of large reals; those are covered by `matches_the_newline_forms`).
+/// type on which the two interpreters print `=` and `==` identically (a string
+/// with high bytes, which this table cannot hold, and the reals where pscat
+/// keeps its own digits are in `tests/print_gs_parity.rs`).
 /// Each value goes through `=`, `=only`, `==` and `==only`, framed so the
 /// absence of the newline shows.
 const SHARED: &str = "\
 /T [ 42 -3.5 true null /nm (a\\(b\\)\\n) [1 /a (s) {x y}] {1 2 add} << /a 1 >> \
-/abc cvx (abc) cvx -1 0.0 1.0e-10 /with#20space () 100000000000 (a\\\\b) [] {} 2147483648 ] def \
+/abc cvx (abc) cvx -1 0.0 1.0e-10 /with#20space () 100000000000 (a\\\\b) [] {} 2147483648 /add load ] def \
 T { dup (=: ) print = (=only: ) print =only (|\\n) print } forall \
 T { dup (==: ) print == (==only: ) print ==only (|\\n) print } forall \
 mark ==only (|\\n) print mark =only (|\\n) print\n";
@@ -69,6 +69,8 @@ const SHARED_OUT: &str = "\
     =only: --nostringval--|\n\
     =: 2147483648\n\
     =only: 2147483648|\n\
+    =: add\n\
+    =only: add|\n\
     ==: 42\n\
     ==only: 42|\n\
     ==: -3.5\n\
@@ -111,6 +113,8 @@ const SHARED_OUT: &str = "\
     ==only: {}|\n\
     ==: 2147483648\n\
     ==only: 2147483648|\n\
+    ==: --add--\n\
+    ==only: --add--|\n\
     -mark-|\n\
     --nostringval--|\n\
 ";
@@ -148,8 +152,7 @@ fn gs_prints_the_pinned_bytes() {
 
 /// For every type, `=only` is `=` and `==only` is `==`, minus the newline.
 /// The newline-less forms share the printer, so this also holds where pscat
-/// and gs differ in what `=` prints (an operator, a high-byte string, a real
-/// of 1e20 or more).
+/// and gs differ in what `=` prints (a real pscat prints with more digits).
 #[test]
 fn matches_the_newline_forms() {
     let values = [
@@ -207,11 +210,9 @@ fn consumes_one_operand_and_underflows_on_an_empty_stack() {
     assert_eq!(run("1 2 =only count ="), "21\n");
     assert_eq!(run("1 2 ==only count ="), "21\n");
     for op in ["=only", "==only"] {
-        // `=` of an operator is a pre-existing gap (pscat prints
-        // --nostringval--, gs the name), so read the name through cvs.
         let out = run(&format!(
             "{{ {op} }} stopped {{ $error /errorname get = \
-             $error /command get 32 string cvs = count = }} if"
+             $error /command get = count = }} if"
         ));
         assert!(
             out.starts_with("stackunderflow\n") && out.ends_with("\n0\n"),

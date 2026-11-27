@@ -143,7 +143,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 /pgcertificate {
     /peDict exch def
     /peH exch def /peW exch def /peY exch def /peX exch def
-    /pePal peDict /Palette /vellum pggetdef pal def
+    /pePal peDict /Palette /vellum pggetdef //pal exec def
 
     /peTitle peDict /Title (Certificate of Achievement) pggetdef def
     /peAwardee peDict /Awardee () pggetdef def
@@ -190,7 +190,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     pePal 0 get aload pop setrgbcolor
     /Times-Bold findfont peTS scalefont setfont
     /peTitleY peTop peH 0.07 mul sub peTS 0.66 mul sub def
-    peTitle peCX peTitleY showctr
+    peTitle peCX peTitleY //showctr exec
 
     % signature block, bottom up: caption baseline, rule, name baseline
     /peKY peBot peH 0.06 mul add def
@@ -214,7 +214,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
         aload pop
         /peBodyW exch peW mul def /peLead exch peH mul def /peBS exch peH mul def
         /Times-Roman findfont peBS scalefont setfont
-        /peLines peBody peBodyW tfwrap length def
+        /peLines peBody peBodyW //tfwrap exec length def
         /peRoom peSpace peCluster sub peMin 3 mul sub peBS 0.66 mul sub def
         /peMaxLines peRoom 0 lt { 0 } { peRoom peLead div floor cvi 1 add } ifelse def
         peLines peMaxLines le { exit } if
@@ -232,12 +232,12 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     % caption + awardee
     /Times-Italic findfont peCS scalefont setfont
     /peCapY peTitleY peGap sub peCS 0.66 mul sub def
-    (This certifies that) peCX peCapY showctr
+    (This certifies that) peCX peCapY //showctr exec
 
     pePal 1 get aload pop setrgbcolor
     /Times-BoldItalic findfont peAS scalefont setfont
     /peAwardeeY peCapY peCapToAw sub peAS 0.66 mul sub def
-    peAwardee peCX peAwardeeY showctr
+    peAwardee peCX peAwardeeY //showctr exec
 
     % citation: a box that holds exactly peLines baselines, the first one
     % peGap below the awardee; the text past them is the leftover
@@ -248,7 +248,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     peLines 0 gt {
         peCX peBodyW 2 div sub peBoxBot
         peBodyW peFirstY peLead add peBoxBot sub
-        peLead /center peBody tfblock
+        peLead /center peBody //tfblock exec
     } {
         peBody
     } ifelse
@@ -267,13 +267,13 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     % Presenter/Date are agent-supplied and could be arbitrarily long;
     % the two fixed captions never vary in length, so they stay unfitted.
     /Times-Roman findfont peNS scalefont setfont
-    pePresenter dup peW 0.28 mul pgzfitmax peX peW 0.26 mul add peNY showctr
+    pePresenter dup peW 0.28 mul pgzfitmax peX peW 0.26 mul add peNY //showctr exec
     /Times-Roman findfont peNS scalefont setfont
-    peDate dup peW 0.28 mul pgzfitmax peX peW 0.74 mul add peNY showctr
+    peDate dup peW 0.28 mul pgzfitmax peX peW 0.74 mul add peNY //showctr exec
 
     /Times-Italic findfont peKS scalefont setfont
-    (Presenter) peX peW 0.26 mul add peKY showctr
-    (Date) peX peW 0.74 mul add peKY showctr
+    (Presenter) peX peW 0.26 mul add peKY //showctr exec
+    (Date) peX peW 0.74 mul add peKY //showctr exec
 
     grestore
     peLeftover
@@ -286,7 +286,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 /pgcard {
     /pcDict exch def
     /pcH exch def /pcW exch def /pcY exch def /pcX exch def
-    /pcPal pcDict /Palette /dusk pggetdef pal def
+    /pcPal pcDict /Palette /dusk pggetdef //pal exec def
 
     /pcTitle pcDict /Title () pggetdef def
     /pcBody pcDict /Body () pggetdef def
@@ -294,9 +294,9 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 
     gsave
     /pcR pcW pcH min 0.06 mul def
-    newpath pcX pcY pcW pcH pcR rrect
+    newpath pcX pcY pcW pcH pcR //rrect exec
     pcPal 4 get aload pop setrgbcolor fill
-    newpath pcX pcY pcW pcH pcR rrect
+    newpath pcX pcY pcW pcH pcR //rrect exec
     pcPal 0 get aload pop setrgbcolor
     pcH 0.005 mul setlinewidth stroke
 
@@ -304,14 +304,14 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     /Times-Italic findfont pcH 0.075 mul scalefont setfont
     /pcCX pcX pcW 2 div add def
     /pcTitleY pcY pcH add pcH 0.14 mul sub def
-    pcTitle dup pcW 0.75 mul pgzfitmax pcCX pcTitleY showctr
+    pcTitle dup pcW 0.75 mul pgzfitmax pcCX pcTitleY //showctr exec
 
     pcPal 1 get aload pop setrgbcolor
     /Helvetica findfont pcH 0.032 mul scalefont setfont
     /pcBodyTop pcTitleY pcH 0.10 mul sub def
     /pcBodyBottom pcY pcH 0.16 mul add def
     pcX pcW 0.12 mul add pcBodyBottom pcW 0.76 mul pcBodyTop pcBodyBottom sub
-    pcH 0.05 mul /center pcBody tfblock
+    pcH 0.05 mul /center pcBody //tfblock exec
     /pcLeftover exch def
 
     /Times-Italic findfont pcH 0.032 mul scalefont setfont
@@ -331,7 +331,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 /pgletter {
     /plDict exch def
     /plH exch def /plW exch def /plY exch def /plX exch def
-    /plPal plDict /Palette /stone pggetdef pal def
+    /plPal plDict /Palette /stone pggetdef //pal exec def
 
     /plDate plDict /Date () pggetdef def
     /plSalutation plDict /Salutation () pggetdef def
@@ -357,7 +357,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     /plBodyTop plY plH 0.78 mul add def
     /plBodyBottom plY plH 0.16 mul add def
     plX plBodyBottom plW plBodyTop plBodyBottom sub
-    plH 0.032 mul /left plBody tfblock
+    plH 0.032 mul /left plBody //tfblock exec
     /plLeftover exch def
 
     /Times-Roman findfont plH 0.022 mul scalefont setfont
@@ -375,7 +375,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 /pginvitation {
     /piDict exch def
     /piH exch def /piW exch def /piY exch def /piX exch def
-    /piPal piDict /Palette /marigold pggetdef pal def
+    /piPal piDict /Palette /marigold pggetdef //pal exec def
 
     /piTitle piDict /Title () pggetdef def
     /piWhen piDict /When () pggetdef def
@@ -394,23 +394,23 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     piPal 0 get aload pop setrgbcolor
     /Helvetica-Bold findfont piH 0.07 mul scalefont setfont
     /piTitleY piY piH add piH 0.16 mul sub def
-    piTitle dup piW 0.78 mul pgzfitmax piCX piTitleY showctr
+    piTitle dup piW 0.78 mul pgzfitmax piCX piTitleY //showctr exec
 
     piPal 1 get aload pop setrgbcolor
     /piY1 piTitleY piH 0.09 mul sub def
     /Helvetica findfont piH 0.028 mul scalefont setfont
-    piWhen dup piW 0.85 mul pgzfitmax piCX piY1 showctr
+    piWhen dup piW 0.85 mul pgzfitmax piCX piY1 //showctr exec
     /Helvetica findfont piH 0.028 mul scalefont setfont
-    piWhere dup piW 0.85 mul pgzfitmax piCX piY1 piH 0.045 mul sub showctr
+    piWhere dup piW 0.85 mul pgzfitmax piCX piY1 piH 0.045 mul sub //showctr exec
     /Helvetica findfont piH 0.028 mul scalefont setfont
-    piHost dup piW 0.85 mul pgzfitmax piCX piY1 piH 0.09 mul sub showctr
+    piHost dup piW 0.85 mul pgzfitmax piCX piY1 piH 0.09 mul sub //showctr exec
 
     piPal 0 get aload pop setrgbcolor
     /Times-Italic findfont piH 0.026 mul scalefont setfont
     /piBodyTop piY1 piH 0.15 mul sub def
     /piBodyBottom piY piH 0.10 mul add def
     piX piW 0.10 mul add piBodyBottom piW 0.80 mul piBodyTop piBodyBottom sub
-    piH 0.04 mul /center piBody tfblock
+    piH 0.04 mul /center piBody //tfblock exec
     /piLeftover exch def
 
     grestore
@@ -425,7 +425,7 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 /pgposter {
     /ppDict exch def
     /ppH exch def /ppW exch def /ppY exch def /ppX exch def
-    /ppPal ppDict /Palette /ember pggetdef pal def
+    /ppPal ppDict /Palette /ember pggetdef //pal exec def
 
     /ppTitle ppDict /Title () pggetdef def
     /ppTagline ppDict /Tagline () pggetdef def
@@ -440,24 +440,24 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     ppPal 0 get aload pop setrgbcolor
     /Helvetica-Bold findfont ppH 0.11 mul scalefont setfont
     /ppTitleY ppY ppH add ppH 0.14 mul sub def
-    ppTitle dup ppW 0.90 mul pgzfitmax ppCX ppTitleY showctr
+    ppTitle dup ppW 0.90 mul pgzfitmax ppCX ppTitleY //showctr exec
 
     ppPal 1 get aload pop setrgbcolor
     /Helvetica-Oblique findfont ppH 0.035 mul scalefont setfont
     /ppTaglineY ppTitleY ppH 0.09 mul sub def
-    ppTagline dup ppW 0.85 mul pgzfitmax ppCX ppTaglineY showctr
+    ppTagline dup ppW 0.85 mul pgzfitmax ppCX ppTaglineY //showctr exec
 
     ppPal 0 get aload pop setrgbcolor
     /Helvetica findfont ppH 0.03 mul scalefont setfont
     /ppBodyTop ppTaglineY ppH 0.08 mul sub def
     /ppBodyBottom ppY ppH 0.10 mul add def
     ppX ppW 0.10 mul add ppBodyBottom ppW 0.80 mul ppBodyTop ppBodyBottom sub
-    ppH 0.045 mul /center ppBody tfblock
+    ppH 0.045 mul /center ppBody //tfblock exec
     /ppLeftover exch def
 
     ppPal 1 get aload pop setrgbcolor
     /Helvetica-Oblique findfont ppH 0.02 mul scalefont setfont
-    ppFooter dup ppW 0.85 mul pgzfitmax ppCX ppY ppH 0.05 mul add showctr
+    ppFooter dup ppW 0.85 mul pgzfitmax ppCX ppY ppH 0.05 mul add //showctr exec
 
     grestore
     ppLeftover

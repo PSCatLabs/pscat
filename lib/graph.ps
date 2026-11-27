@@ -73,8 +73,8 @@
 /gmapx { GraphFrame begin x0 sub x1 x0 sub div pw mul px add end } def  % x -> device x
 /gmapy { GraphFrame begin y0 sub y1 y0 sub div ph mul py add end } def  % y -> device y
 
-/gmoveto { exch gmapx exch gmapy moveto } def    % x y gmoveto -
-/glineto { exch gmapx exch gmapy lineto } def    % x y glineto -
+/gmoveto { exch //gmapx exec exch //gmapy exec moveto } def    % x y gmoveto -
+/glineto { exch //gmapx exec exch //gmapy exec lineto } def    % x y glineto -
 
 % --- 2D curves ---------------------------------------------------------
 % All three sample n+1 points and append to the current path (moveto
@@ -88,7 +88,7 @@
         /gpi exch def
         /gpx gpx0 gpx1 gpx0 sub gpi gpn div mul add def
         gpx gpfn /gpy exch def
-        gpx gpy gpi 0 eq { gmoveto } { glineto } ifelse
+        gpx gpy gpi 0 eq { //gmoveto exec } { //glineto exec } ifelse
     } for
 } def
 
@@ -98,7 +98,7 @@
         /gpi exch def
         /gpt gpt0 gpt1 gpt0 sub gpi gpn div mul add def
         gpt gpfn
-        gpi 0 eq { gmoveto } { glineto } ifelse
+        gpi 0 eq { //gmoveto exec } { //glineto exec } ifelse
     } for
 } def
 
@@ -109,7 +109,7 @@
         /gpth gpth0 gpth1 gpth0 sub gpi gpn div mul add def
         gpth gpfn /gpr exch def
         gpr gpth cos mul gpr gpth sin mul
-        gpi 0 eq { gmoveto } { glineto } ifelse
+        gpi 0 eq { //gmoveto exec } { //glineto exec } ifelse
     } for
 } def
 
@@ -181,7 +181,7 @@
     0 1 g3nx {
         /g3i exch def
         /g3x g3x0 g3x1 g3x0 sub g3i g3nx div mul add def
-        g3x g3y 2 copy g3fn project3
+        g3x g3y 2 copy g3fn //project3 exec
         g3i 0 eq { moveto } { lineto } ifelse
     } for
 } def
@@ -191,7 +191,7 @@
     0 1 g3ny {
         /g3j exch def
         /g3y g3y0 g3y1 g3y0 sub g3j g3ny div mul add def
-        g3x g3y 2 copy g3fn project3
+        g3x g3y 2 copy g3fn //project3 exec
         g3j 0 eq { moveto } { lineto } ifelse
     } for
 } def
@@ -201,19 +201,19 @@
     /gsfy1 exch def /gsfy0 exch def /gsfx1 exch def /gsfx0 exch def
     0 1 gsfny {
         /gsfj exch def
-        gsfx0 gsfx1 gsfy0 gsfy1 gsfy0 sub gsfj gsfny div mul add gsfnx { gsffn } surfacerow
+        gsfx0 gsfx1 gsfy0 gsfy1 gsfy0 sub gsfj gsfny div mul add gsfnx { gsffn } //surfacerow exec
     } for
     0 1 gsfnx {
         /gsfi exch def
-        gsfy0 gsfy1 gsfx0 gsfx1 gsfx0 sub gsfi gsfnx div mul add gsfny { gsffn } surfacecol
+        gsfy0 gsfy1 gsfx0 gsfx1 gsfx0 sub gsfi gsfnx div mul add gsfny { gsffn } //surfacecol exec
     } for
 } def
 
 % lx ly lz axes3 -   (three axis segments from the 3D origin, current view)
 /axes3 {
     /g3lz exch def /g3ly exch def /g3lx exch def
-    0 0 0 project3 moveto g3lx 0 0 project3 lineto
-    0 0 0 project3 moveto 0 g3ly 0 project3 lineto
-    0 0 0 project3 moveto 0 0 g3lz project3 lineto
+    0 0 0 //project3 exec moveto g3lx 0 0 //project3 exec lineto
+    0 0 0 //project3 exec moveto 0 g3ly 0 //project3 exec lineto
+    0 0 0 //project3 exec moveto 0 0 g3lz //project3 exec lineto
 } def
 %%EOF

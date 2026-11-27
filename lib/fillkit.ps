@@ -166,7 +166,7 @@
   fkpn 1 eq { fkpal 0 get aload pop } {
     /fkri fkrt floor cvi def
     fkri fkpn 2 sub gt { /fkri fkpn 2 sub def } if
-    fkpal fkri get fkpal fkri 1 add get fkrt fkri sub mix3
+    fkpal fkri get fkpal fkri 1 add get fkrt fkri sub //mix3 exec
   } ifelse
 } def
 
@@ -209,16 +209,16 @@
 % @internal
 /fkgrain {
   fkrgbn 0 gt {
-    /fknb exch frnd 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
-    /fkng exch frnd 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
-    /fknr exch frnd 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
+    /fknb exch //frnd exec 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
+    /fkng exch //frnd exec 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
+    /fknr exch //frnd exec 0.5 sub 2 mul fkrgbn mul add 0 1 fkclamp def
     fknr fkng fknb
   } if
   fkhsvon {
     fkrgb2hsv
-    /fknv exch frnd 0.5 sub 2 mul fkhsvn 2 get mul add 0 1 fkclamp def
-    /fkns exch frnd 0.5 sub 2 mul fkhsvn 1 get mul add 0 1 fkclamp def
-    frnd 0.5 sub 2 mul fkhsvn 0 get mul add
+    /fknv exch //frnd exec 0.5 sub 2 mul fkhsvn 2 get mul add 0 1 fkclamp def
+    /fkns exch //frnd exec 0.5 sub 2 mul fkhsvn 1 get mul add 0 1 fkclamp def
+    //frnd exec 0.5 sub 2 mul fkhsvn 0 get mul add
     dup 0 lt { 1 add } if dup 1 ge { 1 sub } if
     fkns fknv fkhsv2rgb
   } if
@@ -242,10 +242,10 @@
 /fkds {
   /fkga fkgn fkgn mul array def
   0 1 fkgn fkgn mul 1 sub { fkga exch 0 put } for
-  fkga 0 frnd put
-  fkga fkgn 1 sub frnd put
-  fkga fkgn 1 sub fkgn mul frnd put
-  fkga fkgn fkgn mul 1 sub frnd put
+  fkga 0 //frnd exec put
+  fkga fkgn 1 sub //frnd exec put
+  fkga fkgn 1 sub fkgn mul //frnd exec put
+  fkga fkgn fkgn mul 1 sub //frnd exec put
   /fkstep fkgn 1 sub def
   {
     fkstep 2 lt { exit } if
@@ -258,7 +258,7 @@
         fkxx fkhalf add fkyy fkhalf sub fkat add
         fkxx fkhalf sub fkyy fkhalf add fkat add
         fkxx fkhalf add fkyy fkhalf add fkat add 4 div
-        frnd 0.5 sub fkamp mul add
+        //frnd exec 0.5 sub fkamp mul add
         fkga fkyy fkgn mul fkxx add 3 -1 roll put
       } for
     } for
@@ -270,7 +270,7 @@
         fkxx fkhalf add dup fkgn 1 sub le { fkyy fkat fksum add /fksum exch def /fkcnt fkcnt 1 add def } { pop } ifelse
         fkyy fkhalf sub dup 0 ge { fkxx exch fkat fksum add /fksum exch def /fkcnt fkcnt 1 add def } { pop } ifelse
         fkyy fkhalf add dup fkgn 1 sub le { fkxx exch fkat fksum add /fksum exch def /fkcnt fkcnt 1 add def } { pop } ifelse
-        fksum fkcnt div frnd 0.5 sub fkamp mul add
+        fksum fkcnt div //frnd exec 0.5 sub fkamp mul add
         fkga fkyy fkgn mul fkxx add 3 -1 roll put
       } for
     } for
@@ -392,8 +392,8 @@
     fkpx 0.5 add fkw div
     fkh fkrowi 0.5 add sub fkh div
     fkspread 0 gt {
-      exch frnd 0.5 sub 2 mul fkspread mul add 0 1 fkclamp
-      exch frnd 0.5 sub 2 mul fkspread mul add 0 1 fkclamp
+      exch //frnd exec 0.5 sub 2 mul fkspread mul add 0 1 fkclamp
+      exch //frnd exec 0.5 sub 2 mul fkspread mul add 0 1 fkclamp
     } if
     fkalg cvx exec
     fkgrain
@@ -442,7 +442,7 @@
 /fkpaint {
   /fksaved rrand def
   fkseed cvi srand
-  fkalg /fkalg-solid2 eq fkalg /fkalg-diff eq or { noiseinit } if
+  fkalg /fkalg-solid2 eq fkalg /fkalg-diff eq or { //noiseinit exec } if
   fkalg /fkalg-plasma eq {
     fknopal {
       fkds /fkgr exch def fkds /fkgg exch def fkds /fkgb exch def

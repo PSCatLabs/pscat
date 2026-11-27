@@ -267,7 +267,7 @@
       % started yet (no `sc-` scratch is live to collide with), is
       % what actually guarantees agreement with scatter's own /Weight
       % validation, which is the whole point.
-      spdensbox 0 get sccallable {
+      spdensbox 0 get //sccallable exec {
         spscopts /MaxDensity known not
           { stipple-maxdensity-required-when-density-is-callable } if
         % Same wrap, same reason as /DotRadius above -- a malformed
@@ -288,5 +288,5 @@
     } if
   } if
 
-  spregbox 0 get spscopts scatter
+  spregbox 0 get spscopts //scatter exec
 } def

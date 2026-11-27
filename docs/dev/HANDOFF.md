@@ -653,6 +653,10 @@ renders eight examples in both and compares block-downsampled output).
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
   There is no `setdevice`/`currentdevice`, so nothing else can install a
   device.
+- `reversepath` (#1266, `notes/1266-reversepath.md`) matches gs on every
+  `pathforall` trace pinned in `tests/reversepath.rs`; a trailing lone
+  `moveto` is dropped unless it is the whole path (gs does; the PLRM is
+  silent), and it is limit-aware like `flattenpath`.
 - `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
   quarter-pixel tolerance (`setflat` not modeled — chord counts
@@ -2902,7 +2906,20 @@ renders eight examples in both and compares block-downsampled output).
   operator lookup about 30% more (`notes/307-*.md` has the numbers). The
   catch is that an operator redefined after a library loads no longer
   reaches its procedures; library names that are not operators are still
-  late-bound, so overriding `dkbudget`, `pkribbon` and the like works.
+  late-bound where a procedure body writes them as a bare name (data such as
+  `dkbudget` and `wkmaxsegs`, forward references, recursion). **A helper
+  that is already defined when a body is scanned is reached as `//name exec`
+  instead** (#1225): a caller's own `/shade` or `/mix3` on the dictionary
+  stack can no longer shadow it (that was a `typecheck: shade` inside
+  `pkliner`). So write `//helper exec` for a new call to an earlier
+  procedure and keep state by name; `tests/lib_helper_shadowing.rs` fails on a
+  bare name that the same file also reaches through `//`.
+  `notes/1225-library-helpers-by-name.md` lists what stays by name and why.
+  Redefining a converted helper such as `frnd` or `walkpath` no longer changes
+  what a library does (a test that needs a stand-in overwrites the start of the
+  procedure's array in place, `tests/paintkit.rs`'s
+  `pre_walkpath_scans_refuse_...`, and only works because the stand-in is never
+  meant to return).
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest
@@ -2914,7 +2931,10 @@ renders eight examples in both and compares block-downsampled output).
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not
   `println!`. `=`, `==`, `=only`, `==only` (#1413: Ghostscript's newline-less
-  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it; the wasm
+  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it
+  (#1428: `=`, `stack` and `cvs` print an operator by name and a string's bytes
+  raw, as gs does, and `format_real` spells an exponent `1e+20`/`1e-05`; the
+  digits stay f64, `notes/1428-print-operators-gs-parity.md`); the wasm
   build turns on `capture_stdout` (a wasm32 module has no stdout) and
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes

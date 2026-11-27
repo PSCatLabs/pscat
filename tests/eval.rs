@@ -60,9 +60,9 @@ fn mixed_and_real_arithmetic() {
 
 #[test]
 fn integer_overflow_promotes_to_real() {
-    assert_eq!(eval("9223372036854775807 1 add"), ["9.223372036854776e18"]);
-    assert_eq!(eval("-9223372036854775808 neg"), ["9.223372036854776e18"]);
-    assert_eq!(eval("-9223372036854775808 abs"), ["9.223372036854776e18"]);
+    assert_eq!(eval("9223372036854775807 1 add"), ["9.223372036854776e+18"]);
+    assert_eq!(eval("-9223372036854775808 neg"), ["9.223372036854776e+18"]);
+    assert_eq!(eval("-9223372036854775808 abs"), ["9.223372036854776e+18"]);
 }
 
 #[test]
