@@ -20,8 +20,9 @@
 
 /Palatino-Bold findfont 18 scalefont setfont
 (Paper Figure 2: Charts) 306 740 showctr
+% \320 is the em dash in the byte-encoded Palatino faces (StandardEncoding).
 /Palatino-Italic findfont 10 scalefont setfont
-(bar, line, and pie charts with lib/dataviz.ps — DVColors, dvaxes) 306 724 showctr
+(bar, line, and pie charts with lib/dataviz.ps \320 DVColors, dvaxes) 306 724 showctr
 
 % --- top: bar chart ---
 0 24 72 520 468 170 setdvframe
@@ -30,7 +31,7 @@ newpath [8 15 12 19 14 22 17] 0.22 { pop dvcolor } barchart
 newpath 7 4 5 dvaxes stroke
 0.12 0.12 0.14 setrgbcolor
 /Palatino findfont 8 scalefont setfont
-(Bar chart — 7 categories) 306 620 showctr
+(Bar chart \320 7 categories) 306 620 showctr
 /Palatino findfont 7 scalefont setfont
 0 1 6 { /i exch def i 1 add 3 string cvs i 7 dvcatx 452 showctr } for
 
@@ -42,14 +43,14 @@ newpath [4 6 5 9 7 11 9 13 10] linechart stroke
 newpath 9 4 5 dvaxes stroke
 0.12 0.12 0.14 setrgbcolor
 /Palatino findfont 8 scalefont setfont
-(Line chart — 9 points) 306 460 showctr
+(Line chart \320 9 points) 306 460 showctr
 
 % --- bottom: pie chart + scatter inset ---
 % Pie on left
 [28 22 18 14 10 8] 180 190 85 0 { pop dvcolor } piechart
 /Palatino findfont 8 scalefont setfont
 0.12 0.12 0.14 setrgbcolor
-(Pie chart — 6 wedges) 180 90 showctr
+(Pie chart \320 6 wedges) 180 90 showctr
 
 % Scatter on right (continuous frame)
 0 0 10 10 340 110 200 150 setscatterframe
@@ -58,7 +59,7 @@ newpath [[1 2] [2 5.5] [3 3.2] [4 7.8] [5 4.5] [6 8.2] [7 3.8] [8 6.9] [2.5 6]] 
 newpath 340 110 moveto 540 110 lineto 340 110 moveto 340 260 lineto stroke
 /Palatino findfont 8 scalefont setfont
 0.12 0.12 0.14 setrgbcolor
-(Scatter — continuous domain) 440 90 showctr
+(Scatter \320 continuous domain) 440 90 showctr
 
 % --- caption ---
 /Palatino findfont 7.5 scalefont setfont
