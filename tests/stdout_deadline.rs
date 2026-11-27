@@ -96,9 +96,23 @@ fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
             "/f (%stdout) (w) file def { f (AAAA) writestring f flushfile } loop".into(),
             b"A",
         ),
-        ("stack", format!("{big} string stack"), b"\0"),
-        ("pstack", format!("{big} string pstack"), b"(\\0"),
-        ("printobject", format!("{big} string 0 printobject"), b""),
+        // `stack` and `pstack` bound what one call prints (#703), so a
+        // loop of them, not one big operand, passes the pipe's size.
+        (
+            "stack",
+            "{ 1 1 1000 { } for stack clear } loop".into(),
+            b"0123456789\n",
+        ),
+        (
+            "pstack",
+            "{ 1 1 1000 { } for pstack clear } loop".into(),
+            b"0123456789\n",
+        ),
+        (
+            "printobject",
+            "{ 60000 string 0 printobject } loop".into(),
+            b"",
+        ),
     ];
     for (what, program, alphabet) in cases {
         let (stderr, code, held) = undrained_pipe(&program);
