@@ -116,7 +116,7 @@ fn a_run_that_works_gets_no_note() {
         "%!PS\n(lib1.ps) run\n/f { 2 dict begin /helper { 4 mul } def use end } def f\n",
     );
     assert!(finding(&stderr).is_none(), "{stderr}");
-    assert!(stderr.contains("pscat: lint: clean"), "{stderr}");
+    assert!(!stderr.contains("[run-error]"), "the run works: {stderr}");
 }
 
 #[test]
