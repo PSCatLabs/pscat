@@ -65,9 +65,9 @@ end (an axis a whole length each way; a radial back to the circle of
 radius 0, or one t forward), with a transparent run from a zero-width step
 at the real end. Both ends extended writes exactly what it did before.
 Checked in Chrome and in WebKit (`qlmanage`) against the PNG on the grid.
-The remaining gap is SVG's own: it paints only a point's larger root, so a
-cone with its end not extended shows a hole where PNG and PDF paint the
-smaller root.
+The remaining gap was SVG's own (it paints only a point's larger root, so a
+cone with its end not extended showed a hole where PNG and PDF paint the
+smaller root); closed by #1370 (`notes/1370-svg-cone-smaller-root.md`).
 
 **Corpus.** Only `gallery/varsity_backs.ps` and `examples/gradients.ps` relied
 on the old padding (130 pages compared). Rendered to the spec, both looked
