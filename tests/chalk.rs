@@ -106,8 +106,8 @@ fn the_five_formulas_render_as_pinned() {
     // Windows cases value is from #731's windows-latest CI run.
     // #1224 (a zero-length segment no longer aims a stroke's cap or join): 0 to 3
     // pixels of each board moved, by at most 10/255 (the cases board by 2). The
-    // macOS and Linux pins are re-taken; the Windows cases value is the old
-    // one, not re-taken (no Windows machine): the cross-platform job reports it.
+    // macOS and Linux pins are re-taken; the Windows cases value is from this
+    // PR's windows-latest run.
     let pinned: [u64; 5] = [
         0x51599077cd625d9d,
         0xce8a3ed9f44a44ef,
@@ -117,7 +117,7 @@ fn the_five_formulas_render_as_pinned() {
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x97e14df3576b5980
+            0xf82e062d86e358b4
         } else {
             0x195a31c6e1a944b5
         },
