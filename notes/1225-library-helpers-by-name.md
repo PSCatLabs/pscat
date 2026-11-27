@@ -73,12 +73,16 @@ Files changed: `artkit`, `paintkit`, `pagekit`, `fillkit`, `lettering`,
 ### A consequence to know
 
 HANDOFF used to say library names that are not operators stay late-bound, "so
-overriding `pkribbon` and the like works". It still works for a program's own
-calls. It no longer reaches a *library's* calls to a helper listed above: a
-program that redefines `frnd` or `shade` to change what paintkit does has to
-patch the procedure's array in place instead
-(`/walkpath load 0 { ... } putinterval`, as `tests/paintkit.rs`'s
-`pre_walkpath_scans_refuse_...` now does) or edit the library.
+overriding `pkribbon` and the like works". That still holds for the public
+paintkit brushes and for data. It no longer holds for a converted *helper*: a
+program that redefines `frnd`, `shade` or `walkpath` does not change what a
+library does with it, because the library's bodies hold the procedure itself.
+(`tests/paintkit.rs`'s pre-walkpath test needs a stand-in, and overwrites the
+first elements of `/walkpath load` in place; that works only because the
+stand-in must never be reached, since the rest of the original body would run
+after it.) A library whose `@requires` prerequisite is not loaded now fails
+while it loads (`undefined` for the first `//name`), not when a procedure
+runs.
 
 ### Tests
 

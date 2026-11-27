@@ -2907,8 +2907,11 @@ renders eight examples in both and compares block-downsampled output).
   procedure and keep state by name; `tests/lib_helper_shadowing.rs` fails on a
   bare name that the same file also reaches through `//`.
   `notes/1225-library-helpers-by-name.md` lists what stays by name and why.
-  Redefining a helper such as `frnd` no longer changes what a library does:
-  patch the array in place (`/walkpath load 0 { ... } putinterval`).
+  Redefining a converted helper such as `frnd` or `walkpath` no longer changes
+  what a library does (a test that needs a stand-in overwrites the start of the
+  procedure's array in place, `tests/paintkit.rs`'s
+  `pre_walkpath_scans_refuse_...`, and only works because the stand-in is never
+  meant to return).
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest

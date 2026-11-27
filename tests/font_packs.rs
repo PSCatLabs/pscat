@@ -664,7 +664,7 @@ fn the_libraries_still_reject_a_stand_in_face() {
             "headline-font-not-found",
         ),
     ] {
-        // lettering and jersey call artkit, which they `@require`.
+        // lettering calls artkit, which it `@require`s (#1225).
         let prog = format!("(lib/artkit.ps) run (lib/{lib}.ps) run {call} clear");
         let (ok, _, err) = pscat_bare(&home, &["-e", &prog]);
         assert!(!ok, "{call} passed");
@@ -682,7 +682,7 @@ fn the_libraries_still_reject_a_stand_in_face() {
         ("headline", "(Palatino-Italic) hlfontcheck"),
         ("jersey", "/ZapfChancery jyfontcheck"),
     ] {
-        // lettering and jersey call artkit, which they `@require`.
+        // lettering calls artkit, which it `@require`s (#1225).
         let prog = format!("(lib/artkit.ps) run (lib/{lib}.ps) run {call} clear");
         let (ok, _, err) = pscat_bare(&home, &["-e", &prog]);
         assert!(ok, "{call}: {err}");
