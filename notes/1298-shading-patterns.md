@@ -149,8 +149,9 @@ only in gs's aliased edges.
 
 ## Gaps
 
-- **Foreign SVG.** A Type 1 pattern's SVG image covers the made context's
-  canvas only. Used in another context, it shows nothing past that.
+- **Foreign SVG.** Closed by #1368 (`notes/1368-svg-function-pattern-other-context.md`):
+  a Type 1 or mesh pattern used in another context, or on a canvas of
+  another size, gets an SVG image made for that canvas.
 - **Not-nested radials in SVG.** Closed by #1370
   (`notes/1370-svg-cone-smaller-root.md`): the SVG has a second gradient
   for the smaller root.
