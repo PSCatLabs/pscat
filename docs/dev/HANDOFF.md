@@ -2847,6 +2847,22 @@ renders eight examples in both and compares block-downsampled output).
   sequence number. Before #277 the non-name half used a randomly seeded
   hash map and changed on every run (#258's symptom). `dkcatch` still
   keeps its own first-seen list (it predates the fix).
+- **A dictionary never shrinks, and anything that walks it costs its
+  size, not its length** (#1422). `undef` leaves the table at its largest
+  size, so `pairs` (`forall`, `copy`, the host value copy) and the error
+  backtrace's name scan pass over every empty slot. `capacity()` is no
+  measure of that size after removals (tombstones are not free slots: a
+  300,000-entry table read 363,000 of 458,752 once emptied, and the gap
+  grows with the hash's clustering), so `Dict::undef` records the largest
+  `capacity()` it saw, and `Dict::name_overhead` is that minus the live entries
+  and minus what a table that only grew has (twice its length), so ordinary
+  dictionaries are never charged.
+  The host copy (`host.rs` `Walk::scan`) and the name scan
+  (`snapshot_error_trace`, from a slot budget of its own, leaving the entry
+  budget alone) charge it, four slots to a node or entry. Do not
+  shrink on `undef` to fix this: the table size sets the `forall` order of
+  name keys. `forall` and `copy` on a sparse dictionary are still not
+  charged (steps stand for iterations there).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.

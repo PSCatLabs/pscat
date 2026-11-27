@@ -2384,11 +2384,23 @@ impl Interp {
     /// not by the program: at most `MAX_TRACE_FRAMES` frames of bounded
     /// excerpts, and one pass over at most `NAME_SCAN` name entries of the
     /// dictionary stack for all the frames' names together, copying none.
+    /// The empty slots a dictionary keeps after `undef` count against a
+    /// budget of their own (`SLOTS_PER_ENTRY` to an entry of `NAME_SCAN`), so
+    /// what the program once put in a dictionary and removed does not make
+    /// the scan dearer, and a dictionary that only grew costs nothing extra.
     fn snapshot_error_trace(&mut self, err: &PsError) {
         use crate::host::{MAX_TRACE_FRAMES, TraceFrame};
         // Dictionary entries looked at for the frames' names, all frames
         // together. A procedure defined past them is reported unnamed.
         const NAME_SCAN: usize = 1 << 16;
+        // Retained empty table slots (beyond what a table that only grew
+        // has) that cost as much as looking at one entry. An iteration
+        // passes over the slots a dictionary kept after `undef` too, so a
+        // dictionary that was once huge is charged for them (#1422), from a
+        // budget of its own: the entry budget above is as it always was. A
+        // slot is a byte or two of control data, an entry a compare, so
+        // this overcharges.
+        const SLOTS_PER_ENTRY: usize = 4;
         // Elements shown before and after the one that was running.
         const BEFORE: usize = 5;
         const AFTER: usize = 3;
@@ -2481,8 +2493,17 @@ impl Interp {
         // key is left unnamed.
         let mut unnamed = trace.len();
         let mut budget = NAME_SCAN;
+        let mut slot_budget = NAME_SCAN * SLOTS_PER_ENTRY;
         'dicts: for d in self.dstack.iter().skip(1).rev() {
             let Ok(d) = d.try_borrow() else { continue };
+            // Past the slot budget the rest is unnamed, as for any other
+            // dictionary too large to scan: not skipped, since an outer
+            // definition would then win over the innermost one.
+            let overhead = d.name_overhead();
+            if overhead > slot_budget {
+                break 'dicts;
+            }
+            slot_budget -= overhead;
             for (id, v) in d.name_entries() {
                 if unnamed == 0 || budget == 0 {
                     break 'dicts;
