@@ -572,8 +572,9 @@ type T2Case = (&'static str, String, u32, u32, Vec<u32>, Vec<u32>);
 /// Every list is gs's, measured from `gs -q -dNOPAUSE -dBATCH -dSAFER
 /// -dMaxPatternBitmap=1 -sDEVICE=png16m -g400x400 -r72` on the program
 /// with `showpage` (aliased; `-dMaxPatternBitmap=1` because gs crashes on
-/// the made-inside program without it, as with `MADE_INSIDE`), and gs's
-/// raster of our PDF gives the same lists for all four.
+/// the made-inside program without it, as with `MADE_INSIDE`; the other
+/// programs render byte-identically with and without it), and gs's raster
+/// of our PDF gives the same lists for all four.
 #[test]
 fn a_type_2_pattern_painted_in_another_context_keeps_its_spacing() {
     let cases: [T2Case; 4] = [
@@ -632,6 +633,45 @@ fn a_type_2_pattern_painted_in_another_context_keeps_its_spacing() {
         assert_eq!(row, want_row, "{what}: starts along row {y}");
         assert_eq!(col, want_col, "{what}: starts down column {x}");
     }
+}
+
+/// An uncoloured TilingType 2 pattern from the page, in two colours inside
+/// a PaintProc turned 180 degrees (#1373): each colour's cells on gs's
+/// lattice (the same `gs` command as above; gs's raster of our PDF agrees).
+#[test]
+fn an_uncoloured_type_2_pattern_keeps_its_spacing_in_each_colour_in_another_context() {
+    let src = "<< /PatternType 1 /PaintType 2 /TilingType 2
+   /BBox [0 0 3 3] /XStep 7.3 /YStep 9.7
+   /PaintProc { pop 0 0 3 3 rectfill } >> [1 0 0 1 2.4 1.3] makepattern /t2u exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc { pop [/Pattern /DeviceRGB] setcolorspace
+     0.1 0.2 0.7 t2u setcolor 0 0 300 100 rectfill
+     0.8 0.1 0.1 t2u setcolor 0 100 300 100 rectfill } >> [-1 0 0 -1 310.6 205.2] makepattern /outer exch def
+outer setpattern 0 0 400 400 rectfill";
+    let out = render(src);
+    let starts = |ink: &dyn Fn(u32, u32) -> bool, y: u32, x: u32| -> (Vec<u32>, Vec<u32>) {
+        let row = (1..SIZE).filter(|&u| ink(u, y) && !ink(u - 1, y)).collect();
+        let col = (1..SIZE).filter(|&v| ink(x, v) && !ink(x, v - 1)).collect();
+        (row, col)
+    };
+    let px = |x: u32, y: u32| out.png.pixel(x, y).expect("pixel");
+    let blue = |x: u32, y: u32| px(x, y).blue() > 150 && px(x, y).red() < 100;
+    let red = |x: u32, y: u32| px(x, y).red() > 150 && px(x, y).blue() < 100;
+    let row = gs_row(13, 0..41);
+    assert_eq!(
+        starts(&blue, 243, 14),
+        (
+            row.clone(),
+            vec![195, 203, 212, 222, 232, 241, 251, 261, 270, 280, 290]
+        ),
+        "blue"
+    );
+    assert_eq!(
+        starts(&red, 348, 14),
+        (row, vec![300, 309, 319, 329, 338, 348, 358, 367, 377, 387]),
+        "red"
+    );
 }
 
 #[test]

@@ -170,6 +170,42 @@ fn foreign_layouts_obey_the_limits() {
     let (it, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &src);
     assert_eq!(r, Err(PsError::StepsExceeded), "foreign: steps");
     assert!(blank(&it), "foreign: a stop paints nothing");
+    // Nor records anything: the SVG and PDF are those of the program
+    // without the fill that stopped.
+    let recorded = |src: &str| {
+        let mut it = Interp::with_page(1000, 1000).expect("page");
+        it.set_limits(Limits::none().with_max_steps(1000))
+            .expect("the allocator is installed");
+        it.enable_svg();
+        it.gfx_mut().enable_pdf();
+        let r = it.run_source(src.as_bytes());
+        (r, it.svg_pages(), it.gfx().pdf_document())
+    };
+    let (r, svg, pdf) = recorded(&src);
+    assert_eq!(r, Err(PsError::StepsExceeded), "foreign: steps, recording");
+    let before = src.trim_end().trim_end_matches("0 0 1 1 rectfill");
+    let (r, svg0, pdf0) = recorded(before);
+    assert_eq!(r, Ok(()));
+    assert_eq!(svg, svg0, "foreign: a stop records no SVG");
+    // The page's content stream (the PDF's first) is the same. The inner
+    // pattern's own object is in the stopped PDF, unreferenced: its
+    // PaintProc ran before the fill stopped, as on the page before #1373.
+    let first_stream = |pdf: Option<Vec<u8>>| -> Vec<u8> {
+        let pdf = pdf.expect("pdf on");
+        let at = |pat: &[u8], from: usize| {
+            from + pdf[from..]
+                .windows(pat.len())
+                .position(|w| w == pat)
+                .expect("a stream")
+        };
+        let start = at(b"stream\n", 0);
+        pdf[start..at(b"endstream", start)].to_vec()
+    };
+    assert_eq!(
+        first_stream(pdf),
+        first_stream(pdf0),
+        "foreign: a stop records nothing on the PDF page"
+    );
     let one = src.replace("/TilingType 2", "/TilingType 1");
     let (_, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &one);
     assert_eq!(r, Ok(()), "foreign: Type 1 control");
