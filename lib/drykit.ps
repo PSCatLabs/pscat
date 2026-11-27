@@ -814,7 +814,20 @@
                         } if
                         dkFhi dkFs dkFi 1 add get 3 get lt { dkFhi dkFcutat } { dkFi 1 add dkFat } ifelse
                         dkFref 4 array astore
-                    } if
+                    } {
+                        % #1482: a segment of no length, which walkpath's
+                        % guaranteed end stop makes where the pitch divides
+                        % the subpath. The whole run inks that stop twice
+                        % (pscat's anti-aliasing counts a coincident disc
+                        % again at its rim), so a part that holds it, open
+                        % and in [dkFa, dkFb) or dkFb 1, keeps it and ends as
+                        % the whole run does. It lies at the subpath's end,
+                        % so a /To below 1 never holds it.
+                        dkFopen
+                        dkFs dkFi 1 add get 3 get dkFs dkFi get 3 get sub abs 1e-9 le and
+                        dkFs dkFi get 3 get dup dkFa ge exch dkFb lt dkFb 1 ge or and and
+                        { dkFi 1 add dkFat dkFref 4 array astore } if
+                    } ifelse
                 } for
             ] dup length 1 gt { dkFk exch 2 array astore } { pop } ifelse
         } if
