@@ -37,6 +37,13 @@ Python scan over the same files, which also counts the names libraries keep in p
 dictionaries, such as the turtle's `tx`, said 10 files; the interpreter-level count is the
 one that matters.)
 
+`OffendingCommand` is not a separate rule. The issue's wording was "an error's
+OffendingCommand is that name", but the issue's own program ended in
+`OffendingCommand: setrgbcolor`, three elements after a library element `shade`, so that rule would
+have missed the motivating case. A name that is the offending command and was run inside a
+library procedure is in that procedure's excerpt already; one run from the program's own text
+is the program calling its own name, and a library-defined name would be a false claim there.
+
 The error-time note adds nothing to a run that works: it is made only when the run ended in
 an error, and then only for a name a library procedure read by name where the error
 happened. The sweep over the same files gives output identical to the base's (numbers in the
@@ -81,7 +88,9 @@ on.
 3. **The error.** `snapshot_error_trace` (it runs only for an uncaught error, and it already
    walks the procedure frames for `$error`/`error_details`) keeps, for a lint run, the
    executable names in the elements it excerpts around each frame's running element, for the
-   frames that were written in a `run` file. At most 16 frames of 9 elements. These are the
+   frames that were written in a `run` file (`BodyLines::line_of`, which knows `run` files only: the
+   main program has a file name too under the CLI, and its own procedures are not a library's, test
+   `the_programs_own_procedures_are_not_library_procedures`). At most 16 frames of 9 elements. These are the
    names the report's `in a procedure ...` lines show.
 4. **The check.** `check_shadowed_library_names` reports each of those names that the
    table says the program also defined.
