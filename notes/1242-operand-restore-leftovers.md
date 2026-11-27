@@ -26,3 +26,9 @@ holds the `Operator` (name and function, `Copy`), and `blame_image` builds
 the object from it. `begin_image` takes the `Operator`; the dict forms
 (`ImageType 3`, `imagemask` with a dict) pass theirs through, and the kernel's
 `kernelimage` gives its own, which the old lookup also named.
+
+The fix also covers the shape a prolog uses to wrap the operator
+(`/oldimage /image load def /image { oldimage } def`): the old lookup found a
+procedure, not an operator, and gave up, so `$error /command` was the name
+`image`; gs, and now pscat, give the operator `--image--`. This is the one
+intended change to error output, and it is a fourth case in the test.
