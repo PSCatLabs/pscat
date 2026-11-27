@@ -323,6 +323,26 @@ fn deviation_global_font_directory_is_writable_and_stays_empty() {
         stack("GlobalFontDirectory /gk 1 put SharedFontDirectory /gk get"),
         s(&["1"])
     );
+    // Reported global, but not exempt from `restore` as `globaldict` is: gs
+    // refuses the write, so there is nothing to keep across a restore there.
+    assert_eq!(
+        stack("save GlobalFontDirectory /rk 1 put restore GlobalFontDirectory /rk known"),
+        s(&["false"])
+    );
+}
+
+/// pscat only. `scheck` is `gcheck` and inherits its one difference from gs:
+/// a composite made while `currentglobal` is true is shared there (`true`), and
+/// local here, because nothing is allocated differently.
+#[test]
+fn deviation_scheck_reports_a_composite_made_in_global_mode_as_local() {
+    for src in [
+        "true setglobal [1] false setglobal scheck",
+        "true setglobal 1 dict false setglobal scheck",
+        "true setglobal (x) false setglobal scheck",
+    ] {
+        assert_eq!(stack(src), s(&["false"]), "{src}");
+    }
 }
 
 /// The new dictionaries are never on the dictionary stack, and name lookup

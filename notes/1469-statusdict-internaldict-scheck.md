@@ -36,6 +36,11 @@ real file needs them.
   is read-only, so a second read-only rule for one dictionary would touch every
   write path (`put`, `def`, `store`, `undef`, `copy`, the fused paths) for a
   probe nobody makes.
+- `GlobalFontDirectory` reports global but is rolled back by `restore` like
+  any dictionary (`globaldict` alone is exempt); gs refuses the write, so
+  there is no gs behaviour to keep.
+- `scheck` inherits `gcheck`'s one difference (#1159): a composite made while
+  `currentglobal` is true is shared in gs and local here.
 - `internaldict` opens for a real within single precision of the key in gs
   (`1183615870.0`, `1183615869.5`); here only the exact value does.
 
