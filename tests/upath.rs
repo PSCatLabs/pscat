@@ -946,6 +946,111 @@ const CASES: &[(&str, &str, &str)] = &[
         r#"newpath 50 50 moveto 60 60 lineto { { 0 0 10 10 setbbox 20 20 moveto } ustrokepath } T { 5 ustrokepath } T { ustrokepath } T nl 1 setlinewidth pb"#,
         "ERR rangecheck n=1 ERR typecheck n=1 ERR stackunderflow n=0 \n12800 12800 15360 15360 \n",
     ),
+    (
+        "uappend: a box-only user path takes away a pending lone moveto",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend dump"#,
+        "@ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: and a lineto then has no current point",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend { 2 2 lineto } T nl dump"#,
+        "ERR nocurrentpoint n=2 \n@ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: and an rlineto, a curveto and an rcurveto too",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend { 2 2 rlineto } T { 1 1 2 2 3 3 curveto } T { 1 1 2 2 3 3 rcurveto } T nl dump"#,
+        "ERR nocurrentpoint n=2 ERR nocurrentpoint n=6 ERR nocurrentpoint n=6 \n@ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: a moveto after it starts a path as ever",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend 4 4 moveto 5 5 lineto dump"#,
+        "m 4.0 4.0 l 5.0 5.0 @ 5.0 5.0 \n",
+    ),
+    (
+        "uappend: a lone moveto after a line is taken away, the current point stays",
+        r#"newpath 1 1 moveto 3 3 lineto 5 5 moveto { 0 0 10 10 setbbox } uappend dump"#,
+        "m 1.0 1.0 l 3.0 3.0 @ 5.0 5.0 \n",
+    ),
+    (
+        "uappend: a closepath-only user path takes it away too",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox closepath } uappend dump"#,
+        "@ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: a moveto that is closed is a subpath and stays",
+        r#"newpath 1 1 moveto closepath { 0 0 10 10 setbbox } uappend dump"#,
+        "m 1.0 1.0 z @ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: an open line stays",
+        r#"newpath 1 1 moveto 3 3 lineto { 0 0 10 10 setbbox } uappend dump"#,
+        "m 1.0 1.0 l 3.0 3.0 @ 3.0 3.0 \n",
+    ),
+    (
+        "uappend: a closepath after the taken-away moveto does nothing",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend closepath dump"#,
+        "@ 1.0 1.0 \n",
+    ),
+    (
+        "uappend: an arc after the taken-away moveto starts a subpath",
+        r#"newpath 1 1 moveto { 0 0 10 10 setbbox } uappend 5 5 2 0 90 arc currentpoint q q nl"#,
+        "1792 1280 \n",
+    ),
+    (
+        "uappend: a refused user path leaves the lone moveto",
+        r#"newpath 1 1 moveto { { 0 0 10 10 setbbox 50 50 moveto } uappend } T nl dump"#,
+        "ERR rangecheck n=1 \nm 1.0 1.0 @ 1.0 1.0 \n",
+    ),
+    (
+        "setbbox: a fractional box is rounded outward onto the 1/256 grid",
+        r#"newpath 0.001 0.001 10.001 10.001 setbbox pb"#,
+        "-3 -3 2564 2564 \n",
+    ),
+    (
+        "setbbox: a negative fractional box",
+        r#"newpath -0.001 -0.001 10.001 10.001 setbbox pb"#,
+        "-4 -4 2564 2564 \n",
+    ),
+    (
+        "setbbox: a box already on the grid",
+        r#"newpath 0.5 1.5 2.5 3.5 setbbox pb"#,
+        "125 381 643 899 \n",
+    ),
+    (
+        "setbbox: a box a hair off the grid",
+        r#"newpath 0.3 0.3 10.3 10.3 setbbox pb"#,
+        "73 73 2640 2640 \n",
+    ),
+    (
+        "setbbox: the point the fractional box lets in",
+        r#"newpath 0.001 0.001 10.001 10.001 setbbox 10.015625 5 moveto currentpoint q q nl"#,
+        "1280 2564 \n",
+    ),
+    (
+        "setbbox: the point past it",
+        r#"newpath 0.001 0.001 10.001 10.001 setbbox { 10.02 5 moveto } T nl dump"#,
+        "ERR rangecheck n=2 \nnocp\n",
+    ),
+    (
+        "setbbox: the same inside a user path",
+        r#"newpath { 0.001 0.001 10.001 10.001 setbbox 10.015625 5 moveto 5 5 lineto } uappend currentpoint q q nl"#,
+        "1280 1280 \n",
+    ),
+    (
+        "setbbox: the same refused inside a user path",
+        r#"newpath { { 0.001 0.001 10.001 10.001 setbbox 10.02 5 moveto } uappend } T nl dump"#,
+        "ERR rangecheck n=1 \nnocp\n",
+    ),
+    (
+        "setbbox: the grid is the device's, under a scale",
+        r#"newpath 2 2 scale 0.001 0.001 10.001 10.001 setbbox pb"#,
+        "-1 -1 2562 2562 \n",
+    ),
+    (
+        "setbbox: a fractional box joins a path's own points",
+        r#"newpath 50 50 moveto 60 60 lineto 0.001 0.001 10.001 10.001 setbbox pb"#,
+        "-3 -3 15360 15360 \n",
+    ),
 ];
 
 /// What pscat prints for `src` after the prelude, or the error that stopped

@@ -8724,6 +8724,105 @@ mod tests {
         );
     }
 
+    // --- Codex round 1 on #1264: the copies and the measured outline ----
+
+    /// A path of `n` unit lines, all meeting the pixel at (5, 5) of a
+    /// 100 x 100 page.
+    fn page_of_lines(n: usize) -> Gfx {
+        let mut gfx = Gfx::new(100, 100).expect("pixmap");
+        gfx.moveto(1.0, 1.0);
+        for i in 0..n {
+            gfx.lineto(
+                1.0 + f64::from((i % 2) as u32) * 8.0,
+                2.0 + f64::from((i % 7) as u32),
+            )
+            .expect("lineto");
+        }
+        gfx
+    }
+
+    #[test]
+    fn near_asks_the_heap_before_it_copies() {
+        let p = long_path(10_000);
+        let tight = crate::limits::LimitProbe::memory_only(Some((0, 100_000)));
+        // The kept subpath is 280 KB: refused before it is copied.
+        assert_eq!(
+            p.near([0.0, -1.0, 1e9, 1.0], &tight).err(),
+            Some(PsError::MemoryExceeded)
+        );
+        // A rect it does not meet keeps nothing, so asks for nothing.
+        assert!(p.near([0.0, 50.0, 1e9, 60.0], &tight).is_ok());
+        let roomy = crate::limits::LimitProbe::memory_only(Some((0, 64 << 20)));
+        assert!(p.near([0.0, -1.0, 1e9, 1.0], &roomy).is_ok());
+    }
+
+    #[test]
+    fn the_hit_tests_ask_the_heap_before_they_copy() {
+        let gfx = page_of_lines(10_000);
+        let here = gfx.user_to_device(5.0, 4.0);
+        let tight = crate::limits::LimitProbe::memory_only(Some((0, 100_000)));
+        assert_eq!(
+            gfx.hit_fill(FillRule::Winding, here, &tight).err(),
+            Some(PsError::MemoryExceeded)
+        );
+        assert_eq!(
+            gfx.hit_stroke(here, &tight).err(),
+            Some(PsError::MemoryExceeded)
+        );
+        assert_eq!(gfx.state.path.seg_count(), 10_001);
+    }
+
+    /// `1 setlinewidth [1e9 1e9] 0 setdash 0 0 moveto 0 1e6 1e6 -1e6 1e6 0
+    /// curveto`: priced at about 68 units, an outline of 5,119 elements.
+    fn long_dashed_curve() -> Gfx {
+        let mut gfx = Gfx::new(100, 100).expect("pixmap");
+        gfx.state.line_width = 1.0;
+        gfx.state.dash = Some((vec![1e9, 1e9], 0.0));
+        gfx.moveto(0.0, 0.0);
+        gfx.curveto(0.0, 1e6, 1e6, -1e6, 1e6, 0.0).expect("curveto");
+        gfx
+    }
+
+    /// `1e6 setlinewidth 0 0 moveto 0 1e8 1e8 -1e8 1e8 0 curveto`: priced at
+    /// 64 units and a KiB, an outline of millions of elements.
+    fn wide_pen_curve() -> Gfx {
+        let mut gfx = Gfx::new(100, 100).expect("pixmap");
+        gfx.state.line_width = 1e6;
+        gfx.moveto(0.0, 0.0);
+        gfx.curveto(0.0, 1e8, 1e8, -1e8, 1e8, 0.0).expect("curveto");
+        gfx
+    }
+
+    #[test]
+    fn a_stroke_is_charged_for_what_it_made_before_it_is_kept() {
+        for (what, mut gfx, steps) in [
+            ("dashed", long_dashed_curve(), 3),
+            ("wide pen", wide_pen_curve(), 100),
+        ] {
+            let before = gfx.state.path.to_svg_data();
+            let at = crate::limits::LimitProbe {
+                steps_left: Some(steps),
+                ..crate::limits::LimitProbe::NONE
+            };
+            assert_eq!(
+                gfx.stroke_path_limited(&at).err(),
+                Some(PsError::StepsExceeded),
+                "{what}: the elements it made are steps"
+            );
+            assert_eq!(gfx.state.path.to_svg_data(), before, "{what}");
+        }
+        // The heap: the outline of the wide pen is millions of segments,
+        // refused before they are made into a path.
+        let mut gfx = wide_pen_curve();
+        let before = gfx.state.path.to_svg_data();
+        let tight = crate::limits::LimitProbe::memory_only(Some((0, 20 << 20)));
+        assert_eq!(
+            gfx.stroke_path_limited(&tight).err(),
+            Some(PsError::MemoryExceeded)
+        );
+        assert_eq!(gfx.state.path.to_svg_data(), before);
+    }
+
     /// The loop `turn_past` replaces (#1176), the reference it must match
     /// bit for bit.
     fn plain_turn(mut a2: f64, a1: f64) -> f64 {
