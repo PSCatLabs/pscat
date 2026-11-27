@@ -6104,7 +6104,72 @@ impl Gfx {
             self.abort_pattern();
             return Err(e);
         }
+        self.snap_clip_to_pixels();
         Ok(())
+    }
+
+    /// Make the `/BBox` clip's mask whole pixels (#1375). The capture
+    /// canvas is the `/BBox`'s pixel footprint, so its edge pixels are the
+    /// tile's own: a shape that ends where the `/BBox` ends must paint
+    /// them once. With the clip anti-aliased as well, an edge 0.65 into a
+    /// pixel counted twice (the clip's 0.75 samples x the shape's 0.65 =
+    /// 0.49, where the page paints 0.65), and a shape running past the
+    /// `/BBox` was cut at a fraction of its edge pixel. gs's cells are
+    /// aliased and paint the edge pixel solid; this keeps the shape's own
+    /// anti-aliasing. Only the clip's mask changes: its path, which `clippath`
+    /// and the exporters read, stays the `/BBox`. The work is the rectangle's
+    /// perimeter (at most 2 x 16384 pixels a side), on the mask `clip`
+    /// just made.
+    fn snap_clip_to_pixels(&mut self) {
+        let [x0, y0, x1, y1] = match self.captures.last() {
+            Some(c) => c.spec.bbox,
+            None => return,
+        };
+        let m = self.state.ctm;
+        let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| {
+            let (x, y) = (x as f32, y as f32);
+            (m.sx * x + m.kx * y + m.tx, m.ky * x + m.sy * y + m.ty)
+        });
+        let lo = |f: fn(&(f32, f32)) -> f32| corners.iter().map(f).fold(f32::INFINITY, f32::min);
+        let hi =
+            |f: fn(&(f32, f32)) -> f32| corners.iter().map(f).fold(f32::NEG_INFINITY, f32::max);
+        // An edge within rounding noise of a pixel boundary is on it.
+        const NOISE: f32 = 1e-3;
+        let (w, h) = (
+            i64::from(self.pixmap.width()),
+            i64::from(self.pixmap.height()),
+        );
+        // Outward to whole pixels, inside the canvas.
+        let inside = |v: f32, up: bool, limit: i64| -> i64 {
+            let v = if up {
+                (v - NOISE).ceil()
+            } else {
+                (v + NOISE).floor()
+            };
+            (v as i64).clamp(0, limit)
+        };
+        let (ix0, ix1) = (inside(lo(|c| c.0), false, w), inside(hi(|c| c.0), true, w));
+        let (iy0, iy1) = (inside(lo(|c| c.1), false, h), inside(hi(|c| c.1), true, h));
+        if ix0 >= ix1 || iy0 >= iy1 {
+            return;
+        }
+        let Some(mask) = self
+            .state
+            .clip
+            .as_mut()
+            .and_then(|c| std::rc::Rc::get_mut(&mut c.mask))
+        else {
+            return;
+        };
+        let stride = w as usize;
+        let data = mask.data_mut();
+        for y in [iy0, iy1 - 1] {
+            data[y as usize * stride + ix0 as usize..y as usize * stride + ix1 as usize].fill(255);
+        }
+        for y in iy0..iy1 {
+            data[y as usize * stride + ix0 as usize] = 255;
+            data[y as usize * stride + ix1 as usize - 1] = 255;
+        }
     }
 
     /// Put back what the innermost capture swapped out; its canvas, SVG
