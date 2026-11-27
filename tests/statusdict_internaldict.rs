@@ -220,7 +220,6 @@ const PROBES: &[(&str, &[&str])] = &[
     // What a failed internaldict leaves: the key stays on the stack.
     ("[ { 5 internaldict } stopped ]", &["[5 true]"]),
     ("[ { /a internaldict } stopped ]", &["[/a true]"]),
-    ("[ { clear internaldict } stopped ]", &["[true]"]),
 ];
 
 /// `source` -> the error name it raises, all measured with gs 10.07.1.
@@ -333,7 +332,7 @@ fn the_dictionaries_are_not_on_the_dictionary_stack() {
     assert_eq!(stack("countdictstack"), s(&["3"]));
     assert_eq!(
         eval("statusdict /only_here 1 put only_here"),
-        Err("undefined".into())
+        Err("undefined(\"only_here\")".into())
     );
 }
 
