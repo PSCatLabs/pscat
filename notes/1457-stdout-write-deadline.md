@@ -72,7 +72,7 @@ came after the report instead of before; an `EPIPE` arrived at the slice
 end, outside the `stopped` that should catch it; a buffered `write` stopped
 later had already lost its operands.
 
-So the timed path now keeps std's buffer itself (`timed_write::BUFFER`):
+So the timed path now keeps std's buffer itself (`timed_write::LINE`):
 process-wide like std's, 1024 bytes, with `LineWriterShim::write_all` and
 `BufWriter::write_all`/`flush_buf` rules copied exactly (a write with no
 newline is buffered while it is smaller than the room, flushes first when
