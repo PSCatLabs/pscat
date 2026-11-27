@@ -455,7 +455,6 @@
         dcPart dclp dcplen 1e-6 le and {
             % a dot (a zero-length stroke) is whole or nothing, drawn as the
             % whole stroke draws it: its own seed, its own profile
-            dcSeedOn not { dcSo /Seed undef } if
             dcPfrom 0.5 le dcPto 0.5 gt and { dclp dcpolypath dcSo dkstroke } if
         } {
         dcPart {

@@ -874,7 +874,13 @@ fn the_whole_range_is_the_default() {
 fn a_growing_stroke_keeps_what_it_has_drawn() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
     let line = "newpath 10 30 moveto 190 30 lineto";
-    for opts in ["/Seed 4", "", "/Tilt 75 /Side 8 /Seed 2", "/Firm 1"] {
+    for opts in [
+        "/Seed 4",
+        "",
+        "/Tilt 75 /Side 8 /Seed 2",
+        "/Tilt 75 /Side 8",
+        "/Firm 1",
+    ] {
         let tos: Vec<f64> = (0..=15).map(|i| 0.25 + 0.05 * f64::from(i)).collect();
         let frames: Vec<Interp> = tos
             .iter()
@@ -1027,12 +1033,17 @@ fn from_and_to_cut_each_stroke_by_its_own_length() {
             "`{opts}` dot, first half"
         );
     }
-    // an empty range, a bare moveto, an empty path
-    assert_eq!(
-        data(&part(LINE, "/From 0.4 /To 0.4")),
-        bare,
-        "an empty range"
-    );
+    // an empty range (also under /Tilt, whose lanes drykit cuts), a bare
+    // moveto, an empty path
+    for range in ["/From 0.4 /To 0.4", "/From 0 /To 0", "/From 1 /To 1"] {
+        for opts in ["", "/Tilt 75 /Side 8 /Seed 2", "/Tilt 75 /Side 8"] {
+            assert_eq!(
+                data(&part(LINE, &format!("{range} {opts}"))),
+                bare,
+                "an empty range: `{range} {opts}`"
+            );
+        }
+    }
     assert_eq!(
         data(&part("newpath 20 20 moveto", "/To 0.5")),
         bare,
@@ -1081,7 +1092,7 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
         let behind = ((10.0 + 180.0 * 0.5 - 12.0) * 2.0) as u32;
         let worst = diffs(&a, &b, 0, behind).into_iter().max().unwrap();
         assert!(
-            worst <= 8,
+            worst == 0,
             "`{opts}`: a 3% step changed the drawn part by {worst}"
         );
     }

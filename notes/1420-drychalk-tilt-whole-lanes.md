@@ -33,7 +33,7 @@ frame. The many-piece residue is #1419's: each piece paints an anti-aliased edge
 last one's finished colour, and a side stroke's overlapping lanes are all cut at once.
 `/From 0 /To t` stays the exact way to animate.
 
-Cost: a tenth of a 8-repeat zigzag (`/Tilt 75`) renders in 0.08 s against 0.07 s before
+Cost: a tenth of an 8-repeat zigzag (`/Tilt 75`) renders in 0.08 s against 0.07 s before
 (whole: 0.60 s): every piece now walks each lane whole, the trade #1419 made for tips.
 Ghostscript runs a three-piece `/Tilt` file cleanly.
 
