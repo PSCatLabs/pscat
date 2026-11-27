@@ -8,13 +8,14 @@
 # Decisions where gs and the PLRM disagree (the PLRM decides):
 #  * gs lacks, PLRM lists: the CIDInit, BitmapFontInit, Trapping and ColorRendering procedure-set members, StartData,
 #    UserObjects and exitserver. They are PLRM 8.2 entries but are not systemdict names (a procedure set or userdict
-#    member), so they are `omitted` (exitserver is `missing`: #1270 tracks it).
+#    member), so they are `omitted`, except exitserver, which is `missing` (#1270 tracks it; the test probes it in serverdict).
 #  * gs defines, PLRM does not list: 187 non-dot names (command-line switches such as NOPAUSE, the PDF interpreter,
 #    `.`-less extensions such as rsearch, max, min). They are outside the PLRM list, so the test ignores them.
 #  * Names the PLRM index lacks and so needs no entry: Display PostScript extras and the Level 1 statusdict members
 #    (setpageparams, setpapertray, ...) are not in the PLRM third edition's operator details.
 #  * exitserver is probed in serverdict, where the PLRM and gs put it (see HOME_DICT in the test).
-#  * Not carried over from the PLRM: the 28 error names (typecheck, VMerror, ...) are not operators; DeviceGray, DeviceRGB,
+#  * Not carried over from the PLRM: the 28 error names (typecheck, VMerror, ...) are not operators
+#    (handleerror is one of them and is also a systemdict procedure; the test does not check it); DeviceGray, DeviceRGB,
 #    DeviceCMYK and /Font are names inside signatures, not operators.
 missing	currenttransfer	#1267	transfer functions
 missing	settransfer	#1267	transfer functions

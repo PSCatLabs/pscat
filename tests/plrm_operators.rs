@@ -24,7 +24,10 @@ fn plrm_index() -> Vec<(String, String)> {
         .map(|l| {
             let mut cols = l.split('\t');
             let name = cols.next().expect("name column").to_string();
-            let section = cols.next().unwrap_or("").to_string();
+            let section = cols
+                .next()
+                .unwrap_or_else(|| panic!("plrm_operators.txt line needs a section column: {l:?}"))
+                .to_string();
             (name, section)
         })
         .collect()
