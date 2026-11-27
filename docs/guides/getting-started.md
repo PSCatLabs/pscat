@@ -677,6 +677,25 @@ A procedure that keeps one of these four names as a local variable (`dict
 begin /version exch def ... end`) and is `bind`-ed gets the operator instead,
 as in Ghostscript: rename the local.
 
+## Caching objects by number
+
+`defineuserobject` stores an object under an integer index, `execuserobject`
+runs it (a procedure runs, anything else is pushed) and `undefineuserobject`
+clears the slot. This is the Level 2 way for a generated program to name a
+procedure once and call it by number:
+
+```postscript
+0 { 72 72 moveto 100 0 rlineto stroke } defineuserobject
+1 (cached text) defineuserobject
+0 execuserobject      % draws the line
+1 execuserobject      % pushes (cached text)
+0 undefineuserobject
+```
+
+The objects live in the `UserObjects` array in `userdict`, which grows as
+needed. An index over 65535 is `rangecheck`, an index never defined holds
+`null`, and the error names and growth are those of Ghostscript.
+
 ## Where next
 
 - [Handwriting](handwriting.md): turn a string into a handwriting-style PNG.

@@ -3864,6 +3864,12 @@ impl Interp {
         found
     }
 
+    /// The permanent `userdict`: where the Level 2 user-object operators
+    /// keep `/UserObjects`, whatever dictionary is open on top of it.
+    pub(crate) fn userdict(&self) -> Rc<RefCell<Dict>> {
+        self.dstack[2].clone()
+    }
+
     /// Is `dict` the permanent systemdict? A program's writes to it are
     /// refused: Ghostscript's is read-only once initialisation ends
     /// (`systemdict /x 1 put` is `invalidaccess` there; issue #1337).
