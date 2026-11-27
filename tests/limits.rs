@@ -1552,6 +1552,202 @@ mod one_operator {
     }
 
     // --- #1235: leftovers of #1219 ------------------------------------------
+    /// Hit tests and user paths under the limits (#1264): the work on a
+    /// path the program made is held against the step limit and polled
+    /// before and while it is done, and a stop leaves the operands, the
+    /// path and the CTM as they were.
+    mod issue_1264 {
+        use super::*;
+
+        /// 600,000 segments: lines out and back.
+        const MANY_LINES: &str =
+            "newpath 10 10 moveto 300000 { 50 20 rlineto -50 -10 rlineto } repeat";
+        /// A million segments none of which is a line: each subpath is a
+        /// moveto and a closepath.
+        const MANY_EMPTIES: &str = "newpath 500000 { 70 70 moveto closepath } repeat";
+        /// 100,000 page-sized curves, one subpath each, all meeting a pixel
+        /// near the middle of the page.
+        const HUGE_CURVES: &str = "newpath 100000 { 0 0 moveto 600 700 -300 900 612 792 curveto \
+             0 792 lineto closepath } repeat";
+
+        /// `src` under a step limit, on an interpreter that `setup` made: the
+        /// stop, the report, and the path as `pathforall` counts it.
+        fn stopped(setup: &str, src: &str, steps_left: u64) -> (PsError, String, String) {
+            let mut it = Interp::new();
+            it.run_str(setup).expect("the setup runs");
+            it.set_limits(steps(steps_left)).expect("limits");
+            let err = it.run_str(src).expect_err("the step limit stops it");
+            let report = it.error_report(&err);
+            let elements = path_elements(&mut it);
+            (err, report, elements)
+        }
+
+        fn counted(setup: &str) -> String {
+            let mut it = Interp::new();
+            it.run_str(setup).expect("the setup runs");
+            path_elements(&mut it)
+        }
+
+        #[test]
+        fn a_step_limit_stops_the_hit_tests_inside_them_and_leaves_the_path() {
+            for (setup, what) in [
+                (MANY_LINES, "many lines"),
+                (MANY_EMPTIES, "move and close only"),
+                (HUGE_CURVES, "huge curves"),
+            ] {
+                let before = counted(setup);
+                for op in ["infill", "ineofill", "instroke"] {
+                    let (err, report, after) = stopped(setup, &format!("30 30 {op}"), 40);
+                    assert_eq!(err, PsError::StepsExceeded, "{what} {op}: {report}");
+                    assert!(
+                        report.contains(&format!("OffendingCommand: {op};")),
+                        "{what}: refused by {op} itself: {report}"
+                    );
+                    assert_eq!(after, before, "{what} {op}: the path is as it was");
+                }
+            }
+        }
+
+        #[test]
+        fn the_operands_of_a_refused_hit_test_come_back() {
+            let mut it = Interp::new();
+            it.run_str(MANY_LINES).expect("setup");
+            it.set_limits(steps(40)).expect("limits");
+            let err = it.run_str("77 30 30 infill").expect_err("stops");
+            assert_eq!(err, PsError::StepsExceeded);
+            it.set_limits(Limits::none()).expect("no limits");
+            it.capture_stdout();
+            it.run_str("count = = = =").expect("stack");
+            assert_eq!(it.captured_stdout(), b"3\n30\n30\n77\n");
+        }
+
+        #[test]
+        fn a_hit_test_of_a_far_pixel_is_cheap_on_a_path_of_millions_of_subpaths() {
+            // The subpaths are all at 70, 70: a pixel at 5, 5 meets none of
+            // them, so nothing is rasterised, and it is answered under a
+            // limit of the scan alone (a million segments are 976 steps, a look).
+            let mut it = Interp::new();
+            it.run_str(MANY_EMPTIES).expect("setup");
+            it.set_limits(steps(4000)).expect("limits");
+            it.capture_stdout();
+            it.run_str("5 5 infill = 5 5 instroke = 70 70 infill =")
+                .expect("within the limit");
+            assert_eq!(it.captured_stdout(), b"false\nfalse\nfalse\n");
+        }
+
+        #[test]
+        fn huge_curves_stop_a_hit_test_by_the_clock_inside_it() {
+            for op in ["infill", "instroke"] {
+                stops_inside(
+                    op,
+                    HUGE_CURVES.into(),
+                    match op {
+                        "infill" => "300 400 infill",
+                        _ => "300 400 instroke",
+                    },
+                    op,
+                    Duration::from_millis(1500),
+                );
+            }
+        }
+
+        /// A user path of `n` pieces of `1 1 moveto 2 2 lineto`.
+        fn big_userpath(n: usize) -> String {
+            format!(
+                "/up {} array def up 0 {{ 0 0 100 100 setbbox }} putinterval \
+                 /piece {{ 1 1 moveto 2 2 lineto }} cvlit def \
+                 0 1 {} {{ 6 mul 5 add up exch piece putinterval }} for",
+                n * 6 + 5,
+                n - 1
+            )
+        }
+
+        #[test]
+        fn uappend_polls_and_charges_a_long_user_path_and_takes_back_what_it_did() {
+            let setup = format!("newpath 5 5 moveto 6 6 lineto {}", big_userpath(200_000));
+            let before = counted(&setup);
+            let (err, report, after) = stopped(&setup, "up uappend", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(report.contains("OffendingCommand: uappend;"), "{report}");
+            assert_eq!(after, before, "nothing of the user path stays");
+            // The same under no limit adds it all.
+            let mut it = Interp::new();
+            it.run_str(&setup).expect("setup");
+            it.run_str("up uappend").expect("appends");
+            assert_eq!(path_elements(&mut it), "400002");
+        }
+
+        #[test]
+        fn every_user_path_operator_stops_on_a_long_user_path() {
+            let setup = big_userpath(200_000);
+            for op in ["uappend", "ufill", "ueofill", "ustroke", "ustrokepath"] {
+                let (err, report, _) = stopped(&setup, &format!("up {op}"), 100);
+                assert_eq!(err, PsError::StepsExceeded, "{op}: {report}");
+                assert!(
+                    report.contains(&format!("OffendingCommand: {op};")),
+                    "{op}: {report}"
+                );
+            }
+            let (err, report, _) = stopped(&setup, "30 30 up inufill", 100);
+            assert_eq!(err, PsError::StepsExceeded, "inufill: {report}");
+            let (err, report, _) = stopped(&setup, "30 30 up inustroke", 100);
+            assert_eq!(err, PsError::StepsExceeded, "inustroke: {report}");
+        }
+
+        #[test]
+        fn an_arc_in_a_user_path_is_charged_as_an_arc_is() {
+            // Ten turns a billion: millions of segments in one element.
+            let setup = "newpath 5 5 moveto 6 6 lineto /up { 0 0 100 100 setbbox 50 50 10 0 1e9 arc } cvlit def";
+            let before = counted(setup);
+            let (err, report, after) = stopped(setup, "up uappend", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert_eq!(after, before, "the partial arc is taken back");
+        }
+
+        #[test]
+        fn upath_polls_and_charges_while_it_builds_the_array() {
+            for setup in [MANY_LINES, MANY_EMPTIES] {
+                let before = counted(setup);
+                let (err, report, after) = stopped(setup, "false upath pop", 100);
+                assert_eq!(err, PsError::StepsExceeded, "{report}");
+                assert!(report.contains("OffendingCommand: upath;"), "{report}");
+                assert_eq!(after, before);
+            }
+        }
+
+        #[test]
+        fn strokepath_and_ustrokepath_are_priced_before_the_stroker_runs() {
+            let before = counted(MANY_LINES);
+            let (err, report, after) = stopped(MANY_LINES, "strokepath", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert!(report.contains("OffendingCommand: strokepath;"), "{report}");
+            assert_eq!(after, before, "refused, so the path is as it was");
+            // A dash pattern that makes millions of dashes is priced by them.
+            let setup =
+                "newpath 0 0 moveto 600 0 lineto 0.0001 setlinewidth [0.0001 0.0001] 0 setdash";
+            let (err, report, _) = stopped(setup, "strokepath", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            let (err, report, _) = stopped(setup, "30 0 instroke", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+        }
+
+        #[test]
+        fn the_ctm_is_back_after_a_user_path_operator_stops() {
+            let mut it = Interp::new();
+            it.run_str(&big_userpath(200_000)).expect("setup");
+            it.run_str("2 3 scale matrix currentmatrix /m exch def")
+                .expect("ctm");
+            it.set_limits(steps(100)).expect("limits");
+            let err = it.run_str("up [4 0 0 4 0 0] ustroke").expect_err("stops");
+            assert_eq!(err, PsError::StepsExceeded);
+            it.set_limits(Limits::none()).expect("no limits");
+            it.capture_stdout();
+            it.run_str("matrix currentmatrix m 0 get = m 3 get =")
+                .expect("ctm");
+            assert_eq!(it.captured_stdout(), b"2.0\n-3.0\n");
+        }
+    }
+
     mod issue_1235 {
         use super::*;
 

@@ -705,4 +705,28 @@ fn memory_growth_is_capped() {
         ));
         assert_eq!(r, Ok(()), "the second page fits as the first did");
     }
+
+    // `upath` and `uappend` ask the heap cap before they make what they
+    // make (#1264): a million-segment path would be a ten-million-object
+    // array, and a user path of 1.2 million elements 77 MB of path. Both are
+    // refused with the path as it was, and the interpreter runs on.
+    let mut it = Interp::new();
+    it.run_str(
+        "newpath 0 0 moveto 500000 { 1 1 rlineto -1 0 rlineto } repeat \
+         /up 1200005 array def up 0 { 0 0 100 100 setbbox } putinterval \
+         /piece { 1 1 moveto 2 2 lineto } cvlit def \
+         0 1 199999 { 6 mul 5 add up exch piece putinterval } for",
+    )
+    .expect("setup");
+    it.set_limits(Limits::none().with_max_memory(50 * MIB))
+        .expect("the allocator is installed");
+    assert_eq!(it.run_str("false upath pop"), Err(PsError::MemoryExceeded));
+    assert_eq!(it.run_str("up uappend"), Err(PsError::MemoryExceeded));
+    it.set_limits(Limits::none()).expect("no limits");
+    it.capture_stdout();
+    it.run_str(
+        "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } pathforall =",
+    )
+    .expect("the path is still there");
+    assert_eq!(it.captured_stdout(), b"1000001\n");
 }

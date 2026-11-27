@@ -34,4 +34,4 @@ subpaths is two million segments), and
 a step is charged per 1024 segments written. The current path is replaced only
 once the copy is whole, so a limit leaves it as it was.
 
-Not done: `ufill` and the other user-path operators stay undefined.
+Not done here: `ufill` and the other user-path operators (done in #1264, `notes/1264-hit-testing-and-user-paths.md`).

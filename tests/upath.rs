@@ -1004,3 +1004,194 @@ fn ghostscript_prints_the_pinned_output() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- what fill and stroke paint --------------------------------------------
+
+const SIDE: u32 = 80;
+
+/// The page's pixels after `src`, the gray of each (255: untouched).
+fn painted(src: &str) -> Vec<u8> {
+    let mut it = Interp::with_page(SIDE, SIDE).expect("page");
+    it.run_str(&format!("0 setgray {src}"))
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    (0..SIDE * SIDE)
+        .map(|i| {
+            it.gfx()
+                .pixmap
+                .pixel(i % SIDE, i / SIDE)
+                .expect("on the page")
+                .red()
+        })
+        .collect()
+}
+
+/// `test` (a hit test taking `x y`) at the centre of every pixel, row 0 the
+/// page's top: the pixel's centre in device space, taken to user space under
+/// whatever CTM `path` leaves (`itransform`).
+fn hits(path: &str, test: &str) -> Vec<bool> {
+    let mut it = Interp::with_page(SIDE, SIDE).expect("page");
+    it.capture_stdout();
+    let src = format!(
+        "{path} 0 1 {} {{ /r exch def 0 1 {} {{ /c exch def \
+         c .5 add r .5 add itransform {test} {{ (1) }} {{ (0) }} ifelse print }} for }} for",
+        SIDE - 1,
+        SIDE - 1,
+    );
+    it.run_str(&src)
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    it.captured_stdout().iter().map(|b| *b == b'1').collect()
+}
+
+/// A hit test agrees with the paint: a pixel that is painted is a hit, one
+/// that is not a hit is untouched, and the few hits on a pixel the paint
+/// left white are edge slivers (under a sixteenth of a pixel, which
+/// tiny-skia's 4x4 sampler can miss: `fill` here measures area, `stroke`
+/// samples).
+fn agree(what: &str, path: &str, paint: &str, test: &str, slivers_per_hundred: usize) {
+    let ink = painted(&format!("{path} {paint}"));
+    let hit = hits(path, test);
+    let (mut missed, mut spurious, mut total) = (0, 0, 0);
+    for (i, (h, p)) in hit.iter().zip(&ink).enumerate() {
+        total += usize::from(*h);
+        if *p < 128 && !h {
+            missed += 1;
+            eprintln!(
+                "{what}: pixel {} {} is painted ({p}) but no hit",
+                i as u32 % SIDE,
+                i as u32 / SIDE
+            );
+        }
+        if *h && *p == 255 {
+            spurious += 1;
+        }
+        assert!(
+            *h || *p >= 250,
+            "{what}: pixel {} {} is painted ({p}) but no hit",
+            i as u32 % SIDE,
+            i as u32 / SIDE
+        );
+    }
+    assert_eq!(missed, 0, "{what}");
+    assert!(
+        total > 150,
+        "{what}: only {total} hits, the path is not exercised"
+    );
+    assert!(
+        spurious * 100 <= total * slivers_per_hundred,
+        "{what}: {spurious} of {total} hits are on pixels the paint left white"
+    );
+}
+
+const STAR: &str = "newpath 40 70 moveto 52 14 lineto 8 50 lineto 72 50 lineto 28 14 lineto closepath \
+                    20 20 moveto 30 20 40 35 25 40 curveto";
+
+#[test]
+fn infill_and_ineofill_agree_with_fill_and_eofill() {
+    agree("infill star", STAR, "fill", "infill", 3);
+    agree("ineofill star", STAR, "eofill", "ineofill", 3);
+    agree(
+        "infill under a rotation and a scale",
+        &format!("15 rotate 0.7 1.3 scale 10 -10 translate {STAR}"),
+        "fill",
+        "infill",
+        3,
+    );
+}
+
+const DASHES: &str = "newpath 8 8 moveto 70 8 lineto 70 30 lineto 12 62 lineto \
+                      20 40 moveto 60 70 lineto 10 70 moveto 30 75 50 60 70 72 curveto \
+                      5 setlinewidth [7 3] 2 setdash 1 setlinejoin 1 setlinecap";
+
+#[test]
+fn instroke_agrees_with_stroke() {
+    agree("instroke dashed subpaths", DASHES, "stroke", "instroke", 8);
+    agree(
+        "instroke, miter joins and square caps",
+        "newpath 10 10 moveto 60 12 lineto 20 60 lineto 6 setlinewidth 0 setlinejoin 2 setlinecap",
+        "stroke",
+        "instroke",
+        8,
+    );
+    // Under an anisotropic CTM the pen is not round in device space, and a
+    // dash is long enough to want pen space (#1196).
+    agree(
+        "instroke under a nonuniform scale",
+        "newpath 1 0.4 scale 8 20 moveto 70 20 lineto 70 150 lineto 6 setlinewidth [9 5] 0 setdash",
+        "stroke",
+        "instroke",
+        8,
+    );
+    agree(
+        "instroke under a rotation and a scale",
+        "newpath 20 rotate 1.6 0.8 scale 6 4 moveto 40 4 lineto 40 40 lineto 5 setlinewidth",
+        "stroke",
+        "instroke",
+        8,
+    );
+}
+
+#[test]
+fn a_hit_on_a_path_with_far_subpaths_is_the_hit_on_the_whole() {
+    // The subpaths that cannot reach a pixel are left out of its test. Two
+    // hundred of them far off the page and a few near it must answer as the
+    // few alone do.
+    let far =
+        "newpath 200 { 1e5 1e5 moveto 1e5 1.0001e5 lineto 1.0001e5 1e5 lineto closepath } repeat";
+    let near =
+        "10 10 moveto 40 10 lineto 40 40 lineto closepath 50 50 moveto 70 50 lineto 4 setlinewidth";
+    let with = hits(&format!("{far} {near}"), "infill");
+    let alone = hits(&format!("newpath {near}"), "infill");
+    assert_eq!(with, alone);
+    assert!(with.iter().any(|h| *h));
+    let with = hits(&format!("{far} {near}"), "instroke");
+    let alone = hits(&format!("newpath {near}"), "instroke");
+    assert_eq!(with, alone);
+    assert!(with.iter().any(|h| *h));
+}
+
+#[test]
+fn the_user_path_painters_paint_as_the_path_operators_do() {
+    let up = "{ 0 0 100 100 setbbox 10 10 moveto 60 15 lineto 40 60 lineto closepath \
+               25 25 moveto 50 25 lineto 40 40 lineto closepath } cvlit";
+    let same = |user: &str, plain: &str| {
+        assert_eq!(
+            painted(&format!("{up} {user}")),
+            painted(&format!("gsave newpath {up} uappend {plain} grestore")),
+            "{user}"
+        );
+    };
+    same("ufill", "fill");
+    same("ueofill", "eofill");
+    same(
+        "4 setlinewidth [6 3] 0 setdash ustroke",
+        "4 setlinewidth [6 3] 0 setdash stroke",
+    );
+    // The matrix shapes the pen, as `matrix concat` after the path does.
+    same(
+        "4 setlinewidth [1 0 0 3 0 0] ustroke",
+        "4 setlinewidth [1 0 0 3 0 0] concat stroke",
+    );
+    // Something is painted, and not by the pattern of the comparison alone.
+    assert!(painted(&format!("{up} ufill")).contains(&0));
+    // The outline `ustrokepath` leaves fills as the stroke paints, to within
+    // the two rasterisers' edge shades.
+    let filled = painted(&format!("4 setlinewidth {up} ustrokepath fill"));
+    let stroked = painted(&format!("4 setlinewidth {up} ustroke"));
+    assert!(filled.contains(&0));
+    for (i, (a, b)) in filled.iter().zip(&stroked).enumerate() {
+        assert!(a.abs_diff(*b) < 90, "pixel {i}: {a} against {b}");
+    }
+}
+
+#[test]
+fn the_new_operators_are_defined_and_leave_the_graphics_state_alone() {
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(
+        "[ /infill /ineofill /instroke /inufill /inueofill /inustroke /uappend /upath \
+           /ufill /ueofill /ustroke /ustrokepath /ucache /setbbox ] \
+         { dup where { pop pop } { = } ifelse } forall (done) =",
+    )
+    .expect("run");
+    assert_eq!(it.captured_stdout(), b"done\n");
+}
