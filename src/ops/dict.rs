@@ -169,14 +169,14 @@ fn countdictstack(it: &mut Interp) -> Result<(), PsError> {
 /// `array dictstack subarray` (#1468): the dictionary stack, bottom first
 /// (systemdict, globaldict, userdict, then what `begin` pushed), in the
 /// first slots of `array`. The stack has no depth limit, so the entries
-/// are charged as steps before anything is written: a stop leaves the
-/// array as it was.
+/// (and the journal's copy of the array inside a `save`) are charged before
+/// anything is written: a refusal or a stop leaves the array as it was.
 fn dictstack(it: &mut Interp) -> Result<(), PsError> {
-    use super::control::{check_room, push_filled, stack_copy_target};
+    use super::control::{check_room, preflight_write, push_filled, stack_copy_target};
     let (a, target) = stack_copy_target(it)?;
     let entries = it.dict_stack_len();
     check_room(&target, &a, entries)?;
-    it.poll_limits(entries as u64)?;
+    preflight_write(it, &a, 0, entries)?;
     it.pop_settled();
     it.journal_array(&a);
     it.forget_positions(&a);

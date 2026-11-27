@@ -5398,6 +5398,11 @@ impl Interp {
     }
 }
 
+/// The heap a copied string takes beyond its bytes: the shared cell
+/// (`Rc` counts, `RefCell` flag, `Vec` header) `PsString::from_bytes` makes.
+const STRING_COPY_OVERHEAD: usize =
+    2 * std::mem::size_of::<usize>() + std::mem::size_of::<RefCell<Vec<u8>>>();
+
 /// The operators `execstack` shows for the loop and `stopped` frames, in
 /// [`LoopOps`] order. gs shows internal continuations there
 /// (`--%repeat_continue--`, `--%stopped_push--`) that have no PostScript
@@ -5415,10 +5420,18 @@ type LoopOps = [Object; 6];
 /// image (likewise its data procedures), a tint-transform continuation, a
 /// pattern's `PaintProc` boundary, the profiler's return marker (it exists
 /// only under `--profile`, which must not change what a program sees) and
-/// a procedure that has issued its last element.
+/// a procedure that has issued its last element, and an executable string
+/// with no text left: gs has already removed a string whose last token
+/// (with at most the one delimiter that ends it) has been read, so
+/// `(countexecstack) cvx exec` counts as the top level, while a string with
+/// more after its last token (two spaces, a comment) still shows.
 fn frame_shape(frame: &Frame) -> (usize, usize) {
     match frame {
-        Frame::Scanner(lx) => (1, lx.with_unread(<[u8]>::len).unwrap_or(0)),
+        Frame::Scanner(lx) => match lx.with_unread(<[u8]>::len) {
+            None => (1, 0),
+            Some(0) => (0, 0),
+            Some(n) => (1, n.saturating_add(STRING_COPY_OVERHEAD)),
+        },
         Frame::Proc { body, pc } => (usize::from(*pc < body.len()), 0),
         Frame::Repeat { .. } | Frame::Forall { .. } => (3, 0),
         Frame::Loop { .. } => (2, 0),
@@ -5453,6 +5466,9 @@ fn frame_entries(
             Some(f) => put(Object::exec(Value::File(f.clone()))),
             None => {
                 let text = lx.with_unread(<[u8]>::to_vec).unwrap_or_default();
+                if text.is_empty() {
+                    return Ok(());
+                }
                 put(Object::exec(Value::String(PsString::from_bytes(text))))
             }
         },

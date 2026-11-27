@@ -177,13 +177,31 @@ fn execstack(it: &mut Interp) -> Result<(), PsError> {
     let (a, target) = stack_copy_target(it)?;
     let (entries, bytes) = it.exec_stack_shape()?;
     check_room(&target, &a, entries)?;
-    it.check_alloc(bytes)?;
-    it.poll_limits(entries as u64)?;
+    preflight_write(it, &a, bytes, entries)?;
     it.pop_settled();
     it.journal_array(&a);
     it.forget_positions(&a);
     it.write_exec_stack(&a, entries)?;
     push_filled(it, &a, target, entries)
+}
+
+/// Refuse the work of writing `entries` objects into `a` before any is
+/// written: `bytes` of new heap and, inside a `save`, the journal's copy of
+/// `a`'s whole backing store (the first write at a save level copies it all,
+/// however short the view), against `--max-memory`; a step per entry and one
+/// per 64 journalled slots (as `ops::level2`'s `preflight`, #1459) against
+/// `--max-steps` and `--max-time`. A refusal leaves the operand and the
+/// array as they were.
+pub(crate) fn preflight_write(
+    it: &mut Interp,
+    a: &PsArray,
+    bytes: usize,
+    entries: usize,
+) -> Result<(), PsError> {
+    const JOURNAL_SLOTS_PER_STEP: usize = 64;
+    let slots = it.array_snapshot_slots(a);
+    it.check_alloc(bytes.saturating_add(slots.saturating_mul(std::mem::size_of::<Object>())))?;
+    it.poll_limits(entries.saturating_add(slots.div_ceil(JOURNAL_SLOTS_PER_STEP)) as u64)
 }
 
 /// The array operand of `execstack` and `dictstack`, left on the stack:
