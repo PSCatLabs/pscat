@@ -37,4 +37,17 @@ Cost: a tenth of a 8-repeat zigzag (`/Tilt 75`) renders in 0.08 s against 0.07 s
 (whole: 0.60 s): every piece now walks each lane whole, the trade #1419 made for tips.
 Ghostscript runs a three-piece `/Tilt` file cleanly.
 
+**Not done: a round start just past a cut (drykit, every medium).** The remaining seams
+at some joins show as a faint one-pixel arc, about the stroke's half-width behind the cut
+(clearest across a `/Tilt` mark's wide face lane). It is not the lanes: drykit splits a
+lane's (or any stroke's) run where the touch band changes, and a run that starts at a band
+change within one reach after the `/From` cut is not itself cut, so it keeps its round
+start and paints its level back over the previous piece. Bare `dkstroke` shows it: `/Width
+8 /Touch { 0.4 mul 0.3 add } /Seed 3`, a line from 10 to 90 at 432 dpi, halves cut at 0.47
+or 0.50 (the band changes at 0.5) differ from the whole by up to 82, darker, 15 to 30 device
+pixels behind the cut; cut at 0.40 or 0.53, by at most 33 (the usual round end ahead of the
+cut). A fix has to respect paint order: there the whole stroke painted the new band's
+start under the earlier run, which may not hold for a band change the other way, so
+clipping every run behind the cut is not obviously right. `/From 0 /To t` is unaffected.
+
 Default renders (no `/From`/`/To`) do not reach the changed code: identity-checked.

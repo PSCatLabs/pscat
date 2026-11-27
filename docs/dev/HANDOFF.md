@@ -1314,6 +1314,9 @@ renders eight examples in both and compares block-downsampled output).
    pieces used to restart each lane's dropout chain (a seam up to ~110 levels); now
    drykit walks the whole lane, so halves/thirds differ by under ~60 on a few pixels and a
    growing `/Tilt` stroke keeps every drawn pixel (`notes/1420-drychalk-tilt-whole-lanes.md`).
+   Open gap (any drykit medium): a run that starts at a touch-band change within one reach
+   after a `/From` cut is not cut, so it keeps its round start and paints its level back
+   over the previous piece: a 1px arc up to ~80 levels (repro in that note).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
