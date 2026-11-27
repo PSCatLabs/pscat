@@ -3709,6 +3709,41 @@ fn the_clock_leaves_a_foreign_use_all_or_nothing() {
     );
 }
 
+/// `makepattern` of a Type 1 shading makes the SVG's image on the canvas it
+/// runs on, and the encoding of that image is charged to the step limit
+/// before it runs, as a foreign use's is (#1477): it costs the pixels' layer
+/// (what `shfill` of the same shading charges) and more by the encoder's
+/// units, and a budget between the two refuses it with the page, the SVG and
+/// the operands as they were.
+#[test]
+fn makepattern_of_a_shading_charges_the_images_encoding() {
+    let shading = "<< /ShadingType 1 /ColorSpace /DeviceRGB /Matrix [600 0 0 600 0 0] \
+         /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [2 2] \
+         /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >>";
+    let fill = fewest_steps(&format!("{shading} shfill"));
+    let made = format!("<< /PatternType 2 /Shading {shading} >> matrix makepattern pop");
+    let need = fewest_steps(&made);
+    // 600 x 600 pixels at 32 units, a step a KiB of them.
+    let encode = 600 * 600 * 32 / 1024;
+    assert!(
+        need >= fill + encode * 9 / 10,
+        "makepattern needs {need} steps, its layer alone {fill}, the encoding {encode}"
+    );
+    let (_, svg_before, px_before) = run_600("", pscat::Limits::none());
+    let (r, svg, px) = run_600(
+        &made,
+        pscat::Limits::none().with_max_steps(fill + encode / 2),
+    );
+    assert_eq!(r, Err(pscat::PsError::StepsExceeded));
+    assert_eq!(svg, svg_before, "the SVG is as it was");
+    assert!(px == px_before, "the page is as it was");
+    // With no SVG recorded there is no image to charge.
+    let mut it = Interp::with_page(600, 600).expect("page");
+    it.set_limits(pscat::Limits::none().with_max_steps(fill + encode / 2))
+        .expect("limits");
+    assert_eq!(it.run_source(made.as_bytes()), Ok(()));
+}
+
 /// [`limited`] on a page of `page`, with the SVG and the PNG the run
 /// leaves (the CLI writes both after a limit stops the program). Both must
 /// be there and decode: an export that is missing or empty is a failure of

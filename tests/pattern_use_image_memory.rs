@@ -38,11 +38,11 @@ fn peak_growth<R>(f: impl FnOnce() -> R) -> (usize, R) {
     (peak.load(Ordering::Relaxed), r)
 }
 
-/// A 64 x 64 table of noise as a Type 1 shading's function: a smooth-edged
-/// image that PNG compresses poorly.
-fn noise_table() -> String {
+/// An `n` x `n` table of noise as a Type 1 shading's function: a
+/// smooth-edged image that PNG compresses poorly (the more so the larger `n`).
+fn noise_table(n: usize) -> String {
     let mut seed = 5u32;
-    (0..64 * 64 * 3)
+    (0..n * n * 3)
         .map(|_| {
             seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             format!("{:02x}", seed >> 24)
@@ -57,6 +57,17 @@ fn run(
     tiles: &str,
     cap: usize,
 ) -> (usize, Result<(), PsError>, String, Vec<u8>) {
+    let (peak, r, svg, px, _) = run_full(page, pattern, tiles, cap);
+    (peak, r, svg, px)
+}
+
+/// [`run`], and how many operands the program left on the stack.
+fn run_full(
+    page: u32,
+    pattern: &str,
+    tiles: &str,
+    cap: usize,
+) -> (usize, Result<(), PsError>, String, Vec<u8>, usize) {
     let mut it = Interp::with_page(page, page).expect("page");
     it.gfx_mut().enable_svg();
     it.run_source(format!("1 0 0 setrgbcolor 0 0 {page} {page} rectfill {pattern}").as_bytes())
@@ -65,16 +76,22 @@ fn run(
         .expect("the allocator is installed");
     let (peak, r) = peak_growth(|| it.run_source(tiles.as_bytes()));
     let svg = it.gfx().svg_pages().expect("svg on").concat();
-    (peak, r, svg, it.gfx().pixmap.data().to_vec())
+    let depth = it.operand_stack().len();
+    (peak, r, svg, it.gfx().pixmap.data().to_vec(), depth)
 }
 
 fn grad(size: u32) -> String {
+    grad_n(size, 64)
+}
+
+/// [`grad`] with an `n` x `n` table.
+fn grad_n(size: u32, n: usize) -> String {
     format!(
         "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB \
          /Matrix [{size} 0 0 {size} 0 0] /Function << /FunctionType 0 /Domain [0 1 0 1] \
-         /Range [0 1 0 1 0 1] /Size [64 64] /BitsPerSample 8 /DataSource <{}> >> >> >> \
+         /Range [0 1 0 1 0 1] /Size [{n} {n}] /BitsPerSample 8 /DataSource <{}> >> >> >> \
          matrix makepattern /grad exch def",
-        noise_table()
+        noise_table(n)
     )
 }
 
@@ -100,10 +117,11 @@ const TWELVE_TILES: &str = "/tile { /i exch def << /PatternType 1 /PaintType 1 /
 #[test]
 fn foreign_use_images_never_take_the_heap_past_the_cap() {
     assert!(pscat::memtrack::installed());
-    // The margin is for what no check of this change covers (a cell's own
-    // canvas, a few strings and tables, a quarter of a MiB at most); the
-    // faults below are whole copies of an image, several MiB.
-    let margin = MIB;
+    // The margin is for what no check covers (a few strings and tables, a
+    // quarter of a MiB at most; a cell's own canvases are checked since
+    // #1477, which tightened it from 3 MiB); the faults below are whole
+    // copies of an image or a canvas, several MiB.
+    let margin = MIB / 2;
 
     // R2: a 2000 x 2000 cell's image is 16 MB of pixels, and the encoder
     // copies them and writes about as much again, none of which a cap used
@@ -147,7 +165,7 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         let (peak, r, svg, _) = run(1000, &pattern, TWELVE_TILES, cap);
         assert_eq!(r, Err(PsError::MemoryExceeded), "cap {cap_mib} MiB");
         assert!(
-            peak <= cap + 3 * margin,
+            peak <= cap + margin,
             "cap {cap_mib} MiB: the heap grew {:.2} MiB past its start",
             peak as f64 / MIB as f64
         );
@@ -184,5 +202,99 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         peak <= 40 * MIB + margin,
         "the heap grew {:.2} MiB past its start under a 40 MiB cap",
         peak as f64 / MIB as f64
+    );
+
+    // #1477: a tile's own canvases. A 2000 x 2000 cell holds its capture
+    // canvas (16 MiB), the clip mask and the first fill's coverage mask
+    // (4 MiB each) and, folded at the end of the `PaintProc`, its period
+    // (16 MiB) and, for a TilingType 2 lattice, its oriented cell (16 MiB
+    // more). A cap in between must refuse the cell before the one that does
+    // not fit is made, and leave the page, the SVG and the operands as an
+    // unmade pattern leaves them.
+    for tiling in [1, 2] {
+        let cell = format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType {tiling} /BBox [0 0 2000 2000] \
+             /XStep 2000 /YStep 2000 /PaintProc {{ pop 0 setgray 0 0 1 1 rectfill }} >> matrix \
+             makepattern setpattern 0 0 100 100 rectfill"
+        );
+        let (_, r, quiet, quiet_px, _) = run_full(1000, "", "", 400 * MIB);
+        assert_eq!(r, Ok(()));
+        let (_, r, _, made_px, _) = run_full(1000, "", &cell, 400 * MIB);
+        assert_eq!(r, Ok(()), "TilingType {tiling} with room");
+        assert!(made_px != quiet_px, "the pattern paints");
+        let (mut refused, mut fitted, mut depth) = (0, 0, None);
+        for cap_mib in (20..=60).step_by(2) {
+            let cap = cap_mib * MIB;
+            let (peak, r, svg, px, left) = run_full(1000, "", &cell, cap);
+            assert!(
+                peak <= cap + margin,
+                "TilingType {tiling}, cap {cap_mib} MiB: the heap grew {:.2} MiB past its start",
+                peak as f64 / MIB as f64
+            );
+            match r {
+                Ok(()) => {
+                    fitted += 1;
+                    assert!(
+                        px == made_px,
+                        "cap {cap_mib} MiB: the pattern paints as it does"
+                    );
+                }
+                Err(PsError::MemoryExceeded) => {
+                    refused += 1;
+                    assert_eq!(svg, quiet, "cap {cap_mib} MiB: the SVG is as it was");
+                    assert!(px == quiet_px, "cap {cap_mib} MiB: the page is as it was");
+                    // The same operands whichever way it was refused.
+                    assert_eq!(
+                        *depth.get_or_insert(left),
+                        left,
+                        "TilingType {tiling}, cap {cap_mib} MiB: operands put back"
+                    );
+                }
+                Err(e) => panic!("TilingType {tiling}, cap {cap_mib} MiB: {e:?}"),
+            }
+        }
+        assert!(
+            refused > 0 && fitted > 0,
+            "the ladder crosses the cell's size"
+        );
+    }
+
+    // #1477: `makepattern` of a Type 1 shading makes the SVG's image on the
+    // canvas it runs on (1000 x 1000, 4 MiB of pixels), and the encoder
+    // copies the pixels and writes its output. A cap that fits the layer but
+    // not the copy refuses the `makepattern`, whole: its operands stay, the
+    // page and the SVG as they were, and the heap never passes the cap.
+    let made = format!("{} grad pop", grad_n(2000, 512));
+    let (_, r, quiet, quiet_px, _) = run_full(1000, "", "", 400 * MIB);
+    assert_eq!(r, Ok(()));
+    let (_, r, svg, _, _) = run_full(1000, "", &made, 400 * MIB);
+    assert_eq!(r, Ok(()), "with room it is made");
+    assert_eq!(
+        svg, quiet,
+        "an image is written at a mark, not at makepattern"
+    );
+    let (mut refused, mut fitted) = (0, 0);
+    for cap_kib in (4 * 1024..=30 * 1024).step_by(1024) {
+        let cap = cap_kib * 1024;
+        let (peak, r, svg, px, left) = run_full(1000, "", &made, cap);
+        assert!(
+            peak <= cap + margin,
+            "cap {cap_kib} KiB: the heap grew {:.2} MiB past its start",
+            peak as f64 / MIB as f64
+        );
+        match r {
+            Ok(()) => fitted += 1,
+            Err(PsError::MemoryExceeded) => {
+                refused += 1;
+                assert_eq!(svg, quiet, "cap {cap_kib} KiB: the SVG is as it was");
+                assert!(px == quiet_px, "cap {cap_kib} KiB: the page is as it was");
+                assert_eq!(left, 2, "cap {cap_kib} KiB: the dict and the matrix stay");
+            }
+            Err(e) => panic!("cap {cap_kib} KiB: {e:?}"),
+        }
+    }
+    assert!(
+        refused > 0 && fitted > 0,
+        "the ladder crosses the image's size"
     );
 }
