@@ -148,9 +148,8 @@ mod sweep {
         base.join(name)
     }
 
-    /// The liveness check the real sweep uses.
+    /// A fake liveness check: only this process is alive.
     fn alive(pid: u32) -> bool {
-        // A real pid: our own is alive, a reaped child's is not.
         pid == std::process::id()
     }
 
@@ -180,22 +179,43 @@ mod sweep {
         assert!(kept.join("probe-0/big.bin").is_file(), ".keep is honoured");
         assert!(mine.is_dir(), "our own directory is never swept");
         assert!(alive_other.is_dir(), "a live process's directory stays");
-        // The real check agrees about these two.
-        assert!(common::sweep_stale_scratch(&base, Duration::ZERO, 100, &alive) == 1);
+        assert_eq!(
+            common::sweep_stale_scratch(&base, Duration::ZERO, 100, &alive),
+            1
+        );
         assert!(!alive_other.exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn a_young_dead_directory_is_kept_with_the_real_age_and_pid_checks() {
-        // The real defaults: a directory that was just made is never touched.
+    fn the_real_liveness_check_tells_a_dead_process_from_a_live_one() {
+        use std::os::unix::process::parent_id;
+        let dead = dead_pid();
+        assert!(!common::process_is_alive(dead), "a reaped child");
+        assert!(common::process_is_alive(std::process::id()), "this process");
+        assert!(common::process_is_alive(parent_id()), "the parent (cargo)");
+        // Never a dead process: group addressing and out-of-range ids.
+        assert!(common::process_is_alive(0));
+        assert!(common::process_is_alive(u32::MAX));
+
+        // A sweep with the real check removes the dead child's directory and
+        // leaves the parent's.
+        let base = common::scratch_dir("sweep-real");
+        let gone = fake_stale(&base, &format!("pscat-test-{dead}"));
+        let parent = fake_stale(&base, &format!("pscat-test-{}", parent_id()));
+        let n = common::sweep_stale_scratch(&base, Duration::ZERO, 100, &common::process_is_alive);
+        assert_eq!(n, 1);
+        assert!(!gone.exists() && parent.is_dir());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_directory_that_is_too_young_is_kept_even_for_a_dead_pid() {
         let base = common::scratch_dir("sweep-young");
-        let dead = fake_stale(&base, &format!("pscat-test-{}", dead_pid()));
-        let n = common::sweep_stale_scratch(&base, Duration::from_secs(3600), 100, &|pid| {
-            pid == std::process::id()
-        });
-        assert_eq!(n, 0);
-        assert!(dead.is_dir());
+        let dir = fake_stale(&base, &format!("pscat-test-{}", dead_pid()));
+        let hour = Duration::from_secs(3600);
+        assert_eq!(common::sweep_stale_scratch(&base, hour, 100, &|_| false), 0);
+        assert!(dir.is_dir());
         let _ = std::fs::remove_dir_all(&base);
     }
 

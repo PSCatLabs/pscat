@@ -303,11 +303,12 @@ fn scratch_base() -> std::path::PathBuf {
     base
 }
 
+/// The pid that made the scratch root, and the root.
+static ROOT: std::sync::OnceLock<(u32, std::path::PathBuf)> = std::sync::OnceLock::new();
+
 /// This process's `pscat-test-<pid>` directory, with the pid that owns it.
 /// Made on the first call; see `scratch_dir` for what happens to it.
 fn scratch_root() -> &'static std::path::Path {
-    use std::sync::OnceLock;
-    static ROOT: OnceLock<(u32, std::path::PathBuf)> = OnceLock::new();
     let (_, root) = ROOT.get_or_init(|| {
         let pid = std::process::id();
         let root = scratch_base().join(format!("{SCRATCH_PREFIX}{pid}"));
@@ -320,45 +321,46 @@ fn scratch_root() -> &'static std::path::Path {
         if keep {
             let _ = std::fs::write(root.join(".keep"), b"");
         } else {
-            #[cfg(unix)]
-            {
-                // `atexit` runs when the test harness ends the process, after
-                // the last test thread has finished (a `Drop` in a `static`
-                // never runs). A process that is killed leaves its directory
-                // for the sweep in the next one. Windows has no `libc` here,
-                // so a Windows process leaves its directory behind; CI
-                // runners there are fresh, and a developer machine can delete
-                // `pscat-test-*` by hand.
-                extern "C" fn remove_at_exit() {
-                    // Never panic here (it would abort the exit). Only the
-                    // process that made the directory removes it, not a
-                    // `fork`ed child that calls `exit`.
-                    if let Some((owner, root)) = ROOT.get()
-                        && *owner == std::process::id()
-                    {
-                        let _ = std::fs::remove_dir_all(root);
-                    }
-                }
-                // SAFETY: registers a plain function; no state is passed.
-                unsafe { libc::atexit(remove_at_exit) };
-                // Off the test thread: some tests measure their own CPU time.
-                let base = scratch_base();
-                let _ = std::thread::Builder::new()
-                    .name("scratch-sweep".into())
-                    .spawn(move || {
-                        sweep_stale_scratch(
-                            &base,
-                            SWEEP_MIN_AGE,
-                            SWEEP_MAX_ATTEMPTS,
-                            &process_is_alive,
-                        )
-                    });
-            }
+            arm_cleanup();
         }
         (pid, root)
     });
     root
 }
+
+/// Remove the scratch root when the process ends and sweep stale ones of
+/// other processes (unix; see `scratch_dir`).
+#[cfg(unix)]
+fn arm_cleanup() {
+    // `atexit` runs when the test harness ends the process, after the last
+    // test thread has finished (a `Drop` in a `static` never runs). A process
+    // that is killed leaves its directory for the sweep in the next one.
+    extern "C" fn remove_at_exit() {
+        // Never panic here (it would abort the exit). Only the process that
+        // made the directory removes it, not a `fork`ed child that calls
+        // `exit`.
+        if let Some((owner, root)) = ROOT.get()
+            && *owner == std::process::id()
+        {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+    // SAFETY: registers a plain function; no state is passed.
+    unsafe { libc::atexit(remove_at_exit) };
+    // Off the test thread: some tests measure their own CPU time.
+    let base = scratch_base();
+    let _ = std::thread::Builder::new()
+        .name("scratch-sweep".into())
+        .spawn(move || {
+            sweep_stale_scratch(&base, SWEEP_MIN_AGE, SWEEP_MAX_ATTEMPTS, &process_is_alive)
+        });
+}
+
+/// Windows has no `libc` here, so a Windows process leaves its directory
+/// behind and nothing is swept; CI runners there are fresh machines, and a
+/// developer machine can delete `pscat-test-*` by hand.
+#[cfg(not(unix))]
+fn arm_cleanup() {}
 
 /// A directory this old, whose process is gone, is stale.
 #[cfg(unix)]
@@ -373,7 +375,7 @@ const SWEEP_MAX_ATTEMPTS: usize = 200;
 /// anything else (a process of another user, an id that is not a plain pid)
 /// says yes, so the sweep leaves that directory alone.
 #[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
+pub fn process_is_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return true;
     };
@@ -436,7 +438,8 @@ pub fn sweep_stale_scratch(
         let old = meta
             .modified()
             .ok()
-            .and_then(|m| m.elapsed().ok())
+            // A modification time slightly in the future is age zero.
+            .map(|m| m.elapsed().unwrap_or_default())
             .is_some_and(|age| age >= min_age);
         if !old || std::fs::symlink_metadata(path.join(".keep")).is_ok() {
             continue;
