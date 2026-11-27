@@ -48,11 +48,48 @@ export interface PageOptions {
    * outline, as `pscat --text-as-paths` does. Default true.
    */
   pdfText?: boolean;
+  /**
+   * Cap on the steps the whole program may run, counted from begin(): objects
+   * executed, loop passes, and a step per KiB a decode filter produces, as
+   * `pscat --max-steps` counts them. Over it the run throws a PostScriptError
+   * with errorName 'limitexceeded' and `limitexceeded (steps)` in its report;
+   * the page drawn so far and the renderer survive. 0, null or undefined is no
+   * limit, the default, and every begin() sets it afresh, so one program's cap
+   * never carries into the next. A whole number, 0 to 2^53 - 1; anything else
+   * throws RangeError (a non-number throws TypeError).
+   *
+   * The module has no clock, so a step cap is the only limit that stops an
+   * endless loop, or one operator draining a decompression bomb, in a call to
+   * render() or step(). It is a bound on work, not a deadline: an ordinary step
+   * takes tens of nanoseconds, a bomb's KiB step about 11 microseconds (so a cap
+   * that lets a heavy program finish still lets a bomb run for minutes). To bound each
+   * frame of a stepped page instead of the whole program, see
+   * FrameOptions.frameMaxSteps.
+   */
+  maxSteps?: number | null;
 }
 
 export interface FrameOptions extends PageOptions {
   /** Objects executed per frame. Default 5000. */
   budget?: number;
+  /**
+   * Cap on the steps each frame (each step(budget) call) may run, re-armed
+   * before every frame so the count restarts: a program of any length passes
+   * while no one frame is over it. This is what keeps a tab responsive, since
+   * the work that freezes it is one call, and it is how the site's playground
+   * bounds a frame (500,000 steps). Same values and errors as `maxSteps`,
+   * which it replaces: both non-zero is a TypeError (one of them 0, null or
+   * undefined is fine). stepsUsed then reads the latest frame's count.
+   *
+   * The cap is coarse. The runtime counts in slices of up to 4096 steps and
+   * enforces the cap between slices, so a frame may end over it, by less than
+   * one slice, without an error: the overrun is only noticed by the next call,
+   * and each frame restarts the count first. A frame that runs far over the cap
+   * (a runaway loop, a decompression bomb) is stopped with `limitexceeded`; a
+   * cap below one slice can let many small frames each overrun it. Pick a cap
+   * well above 4096, as the playground's 500,000 is.
+   */
+  frameMaxSteps?: number | null;
 }
 
 /** A rendered page. `data` is RGBA, row by row from the top, the ImageData layout. */
@@ -128,6 +165,15 @@ export class Renderer {
   readonly output: string;
   /** Font substitution notes since begin(), as in RenderResult.warnings. */
   readonly warnings: string[];
+  /**
+   * Steps run since the cap was last armed: begin() under `maxSteps`, or the
+   * start of the latest frame under `frameMaxSteps`. Counted only while a cap
+   * is set (0 without one) and 0 before begin(). Readable after the run
+   * finishes, after a PostScriptError and after a `limitexceeded` stop. It is
+   * not clipped to the cap: a run can end over it by up to one slice of the
+   * runtime's counting (less than 4096 steps; 1997 was seen for a cap of 1000).
+   */
+  readonly stepsUsed: number;
   /** A copy of the page as RGBA bytes. */
   pixels(): Uint8ClampedArray;
   /** The page as width, height, RGBA data, output and warnings. */
