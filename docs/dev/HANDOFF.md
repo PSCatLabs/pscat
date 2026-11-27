@@ -1367,6 +1367,14 @@ renders eight examples in both and compares block-downsampled output).
    the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
    Gotcha: `dkrender` leaves an overlap out of the passes it lacks by `dkZp`/`dkZmax`, so
    nothing it calls before that filter may reuse those names.
+   #1482: walkpath repeats a subpath's last pitch stop when the pitch divides its length
+   (a segment of no length); `dkFrun` keeps it in a part that reaches it, because the whole
+   run inks that stop twice and pscat's AA counts a coincident disc again (a part used to
+   differ by ~40 levels at the far end). Many `/From prev /To now` pieces are heavy at a low
+   touch (`/Touch 0.5`: +9-32%) because pscat's clip mask is anti-aliased and each piece's
+   round end is repainted by the next few; gs (hard clip) stays within 1%. Not fixable in
+   the lib without changing `/From 0 /To t` tips or biting a lone `/From` part; documented
+   (`notes/1482-drykit-incremental-pieces.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
