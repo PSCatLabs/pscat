@@ -5,14 +5,18 @@
 //! consumer. Each test here bounds its own run: the child is waited on with
 //! the deadline helpers in `tests/common`, which kill it and fail the test
 //! instead of hanging the suite. Unix only: the timed write is built on
-//! `poll(2)`, and on Windows a write still blocks as before.
+//! `poll(2)`/`fstat(2)`, and on Windows a write still blocks as before.
+//!
+//! Under a limit that is not reached, nothing may change: the bytes, their
+//! order against stderr, where a write error surfaces. The differential
+//! tests run each program with and without `--max-time` and compare.
 #![cfg(unix)]
 
 mod common;
 
-use std::io::Read;
-use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixStream;
+use std::io::{Read, Write};
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -26,6 +30,13 @@ const GUARD: Duration = Duration::from_secs(30);
 /// write of it blocks once the buffer is full.
 const BIG: usize = 4 << 20;
 
+/// The time limit for the runs that must stop: long enough for any of the
+/// programs below to fill a pipe first, so the stop is a blocked write.
+const STOP_AFTER: &str = "0.5";
+
+/// The two files every differential program writes through.
+const FILES: &str = "/f (%stdout) (w) file def /e (%stderr) (w) file def ";
+
 fn spawn(args: &[&str], stdout: Stdio, stderr: Stdio) -> Child {
     Command::new(BIN)
         .args(args)
@@ -36,13 +47,51 @@ fn spawn(args: &[&str], stdout: Stdio, stderr: Stdio) -> Child {
         .expect("spawn pscat")
 }
 
-/// Run `program` with `--max-time 0.1` and stdout a pipe the test never reads
-/// while the child runs. Returns the child's stderr, its exit code and what
-/// the pipe held when it exited.
+fn set_nonblocking(fd: &impl AsRawFd, on: bool) {
+    let fd = fd.as_raw_fd();
+    // SAFETY: plain fcntl flag changes on a descriptor the test owns.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        assert!(flags >= 0);
+        let flags = if on {
+            flags | libc::O_NONBLOCK
+        } else {
+            flags & !libc::O_NONBLOCK
+        };
+        assert!(libc::fcntl(fd, libc::F_SETFL, flags) == 0);
+    }
+}
+
+/// Fill `writer`'s pipe until it takes no more (big pieces, then single
+/// bytes, so a macOS pipe also grows to its largest), and return how many
+/// bytes it holds. The descriptor is blocking again afterwards, as a child
+/// expects it.
+fn fill(writer: &mut std::io::PipeWriter) -> usize {
+    set_nonblocking(writer, true);
+    let mut n = 0;
+    for piece in [4096usize, 1] {
+        let chunk = vec![b'#'; piece];
+        while let Ok(k) = writer.write(&chunk) {
+            n += k;
+        }
+    }
+    set_nonblocking(writer, false);
+    n
+}
+
+/// How much a fresh pipe holds on this machine.
+fn pipe_capacity() -> usize {
+    let (_reader, mut writer) = std::io::pipe().expect("a pipe");
+    fill(&mut writer)
+}
+
+/// Run `program` with a short `--max-time` and stdout a pipe the test never
+/// reads while the child runs. Returns the child's stderr, its exit code and
+/// what the pipe held when it exited.
 fn undrained_pipe(program: &str) -> (String, Option<i32>, Vec<u8>) {
     let (mut reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
     let child = spawn(
-        &["--max-time", "0.1", "-e", program],
+        &["--max-time", STOP_AFTER, "-e", program],
         writer.into(),
         Stdio::piped(),
     );
@@ -67,10 +116,12 @@ fn assert_stopped_by_time(what: &str, stderr: &str, code: Option<i32>) {
 }
 
 /// Every writer that sends a program's output to stdout stops at the time
-/// limit when the reader never drains the pipe. The bytes the pipe holds are
-/// the start of the output: what was written stays written.
+/// limit when the reader never drains the pipe. The pipe is full when the
+/// child exits (the stop was a write waiting on it), and holds the start of
+/// the output: what was written stays written.
 #[test]
 fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
+    let capacity = pipe_capacity();
     let big = BIG.to_string();
     let cases: Vec<(&str, String, &[u8])> = vec![
         ("=", format!("{big} string ="), b"\0"),
@@ -97,6 +148,7 @@ fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
             "/f (%stdout) (w) file def { f (AAAA) writestring f flushfile } loop".into(),
             b"A",
         ),
+        ("flush", "{ (AAAA) print flush } loop".into(), b"A"),
         // `stack` and `pstack` bound what one call prints (#703), so a
         // loop of them, not one big operand, passes the pipe's size.
         (
@@ -118,7 +170,12 @@ fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
     for (what, program, alphabet) in cases {
         let (stderr, code, held) = undrained_pipe(&program);
         assert_stopped_by_time(what, &stderr, code);
-        assert!(!held.is_empty(), "{what}: nothing reached the pipe");
+        // Full, give or take one write's worth: the writer was waiting.
+        assert!(
+            held.len() + 4096 >= capacity,
+            "{what}: the pipe holds {} of {capacity} bytes: the stop was not a blocked write",
+            held.len()
+        );
         assert!(held.len() < BIG, "{what}: the whole output was written");
         if !alphabet.is_empty() {
             assert!(
@@ -129,13 +186,13 @@ fn every_stdout_writer_stops_at_max_time_on_an_undrained_pipe() {
     }
 }
 
-/// The same for a stdout that is a socket (libuv gives children socketpairs
-/// for stdio).
+/// The same for a stdout that is a stream socket (libuv gives children
+/// socketpairs for stdio).
 #[test]
 fn a_stdout_socket_nobody_reads_stops_at_max_time() {
     let (mut ours, theirs) = UnixStream::pair().expect("a socket pair");
     let child = spawn(
-        &["--max-time", "0.1", "-e", &format!("{BIG} string =")],
+        &["--max-time", STOP_AFTER, "-e", &format!("{BIG} string =")],
         Stdio::from(OwnedFd::from(theirs)),
         Stdio::piped(),
     );
@@ -144,7 +201,29 @@ fn a_stdout_socket_nobody_reads_stops_at_max_time() {
     ours.read_to_end(&mut held).expect("read the socket");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_stopped_by_time("= to a socket", &stderr, out.status.code());
+    assert!(!held.is_empty(), "nothing reached the socket");
     assert!(held.len() < BIG && held.iter().all(|&b| b == 0));
+}
+
+/// A datagram socket keeps its message boundaries under a limit: one write
+/// of 2048 bytes is one datagram of 2048 bytes, as without one.
+#[test]
+fn a_datagram_stdout_gets_the_same_datagrams_under_a_time_limit() {
+    for flags in [&[][..], &["--max-time", "30"][..]] {
+        let (ours, theirs) = UnixDatagram::pair().expect("a datagram socket pair");
+        let mut args = flags.to_vec();
+        args.extend(["-e", "(%stdout) (w) file 2048 string writestring"]);
+        let child = spawn(&args, Stdio::from(OwnedFd::from(theirs)), Stdio::piped());
+        let out = common::wait_with_deadline(child, GUARD);
+        assert!(out.status.success(), "{flags:?}");
+        ours.set_nonblocking(true).expect("non-blocking");
+        let mut sizes = Vec::new();
+        let mut buf = vec![0u8; 1 << 16];
+        while let Ok(n) = ours.recv(&mut buf) {
+            sizes.push(n);
+        }
+        assert_eq!(sizes, [2048], "{flags:?}: the datagrams received");
+    }
 }
 
 /// `(%stderr)` is held to the limit too. The reader here is slow, not absent
@@ -188,6 +267,7 @@ fn a_stderr_write_to_a_slow_reader_stops_at_max_time() {
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("limitexceeded (time)"), "{tail}");
     assert_eq!(out.status.code(), Some(1));
+    assert!(total > 0, "nothing reached stderr");
     assert!(total < 16 << 20, "the whole stderr write went through");
 }
 
@@ -218,6 +298,113 @@ fn with_no_time_limit_a_write_waits_for_the_reader() {
     }
 }
 
+/// Run `pscat <flags> <args>` with stdout and stderr the same drained pipe
+/// (`2>&1`), `stdin` fed to it, and return the merged bytes and the status.
+fn merged(flags: &[&str], args: &[&str], stdin: &[u8]) -> (Vec<u8>, Option<i32>) {
+    let (mut reader, writer) = std::io::pipe().expect("a pipe for the child's output");
+    let err = writer.try_clone().expect("a second write end");
+    let mut all_args = flags.to_vec();
+    all_args.extend_from_slice(args);
+    let mut child = Command::new(BIN)
+        .args(&all_args)
+        .stdin(Stdio::piped())
+        .stdout(writer)
+        .stderr(err)
+        .spawn()
+        .expect("spawn pscat");
+    let drained = std::thread::spawn(move || {
+        let mut all = Vec::new();
+        let _ = reader.read_to_end(&mut all);
+        all
+    });
+    common::feed_stdin(&mut child, stdin);
+    let out = common::wait_with_deadline(child, GUARD);
+    (
+        drained.join().expect("the reader thread"),
+        out.status.code(),
+    )
+}
+
+/// Programs whose stdout and stderr bytes interleave in a way only std's
+/// line buffering decides: the capacity (1024 bytes), a write that fills it
+/// exactly, one that overflows it, a newline in the middle, every writer, an
+/// error report, `quit`, `stop`, a caught error.
+fn order_programs() -> Vec<String> {
+    let mut p: Vec<String> = [
+        // The cases Codex reported (#1465).
+        "f 2000 string writestring e (B) writestring",
+        "f (A) writestring 1 1 10000 { pop } for e (B) writestring",
+        "f (A) writestring nosuchoperator",
+        // std's LineWriter edges, pinned on the base binary.
+        "f 1023 string writestring e (E) writestring",
+        "f 1024 string writestring e (E) writestring",
+        "f 1025 string writestring e (E) writestring",
+        "f 1023 string writestring f 0 write e (E) writestring",
+        "f 1023 string writestring f 0 write f 0 write e (E) writestring",
+        "f 1022 string writestring f 0 write f 0 write e (E) writestring",
+        "f 10 string writestring f (\\n) writestring f 5 string writestring e (E) writestring",
+        "f 1000 string writestring f 100 string writestring e (E) writestring",
+        "f (ab\\ncd) writestring e (E) writestring f (ef\\n) writestring e (F) writestring",
+        // Every writer, each followed by a stderr byte.
+        "(x) print e (E) writestring",
+        "42 = e (E) writestring",
+        "(abc) == e (E) writestring",
+        "1 2 stack e (E) writestring",
+        "1 2 pstack e (E) writestring",
+        "f 65 write e (E) writestring",
+        "f (ab) writehexstring e (E) writestring",
+        "f (q) writestring f flushfile e (E) writestring",
+        "f (q) writestring flush e (E) writestring",
+        "(q) 0 printobject e (E) writestring",
+        "f (q) writestring f (r) 0 writeobject e (E) writestring",
+        // Ends: quit, stop, a caught and an uncaught error, handleerror.
+        "f (A) writestring e (B) writestring quit",
+        "f (A) writestring stop",
+        "{ f (A) writestring nosuch } stopped pop e (B) writestring f (C) writestring",
+        "{ nosuch } stopped pop f (A) writestring handleerror f (B) writestring",
+    ]
+    .iter()
+    .map(|s| format!("{FILES}{s}"))
+    .collect();
+    // Long output with partial lines, across many slices.
+    p.push(format!(
+        "{FILES}1 1 3000 {{ dup = (x) print f 65 write e (.) writestring }} for (tail) print f 66 write"
+    ));
+    p
+}
+
+/// Under a limit that is not reached, stdout and stderr merged into one pipe
+/// (`2>&1`) carry the same bytes in the same order as without a limit, for
+/// `-e`, for a program file, and at the REPL prompt.
+#[test]
+fn a_timed_run_merges_stdout_and_stderr_as_an_unlimited_one_does() {
+    let dir = common::scratch_dir("stdout-deadline-order");
+    for (i, program) in order_programs().iter().enumerate() {
+        let file = dir.join(format!("p{i}.ps"));
+        std::fs::write(&file, program).expect("write the program");
+        let file = file.to_str().expect("a UTF-8 path");
+        let runs: [(&str, Vec<&str>, Vec<u8>); 3] = [
+            ("-e", vec!["-e", program.as_str()], Vec::new()),
+            ("file", vec![file], Vec::new()),
+            (
+                "REPL",
+                vec![],
+                program.replace("} ", "}\n").replace(' ', "\n").into_bytes(),
+            ),
+        ];
+        for (how, args, stdin) in runs {
+            let plain = merged(&[], &args, &stdin);
+            let timed = merged(&["--max-time", "60"], &args, &stdin);
+            assert_eq!(
+                String::from_utf8_lossy(&timed.0),
+                String::from_utf8_lossy(&plain.0),
+                "{how}: {program}"
+            );
+            assert_eq!(timed.1, plain.1, "{how}: exit status of {program}");
+        }
+    }
+}
+
 /// A program that mixes the writers: `=` lines, `print` with no newline,
 /// single bytes through `%stdout`, `stack`, `flush`, and a last partial line
 /// before an error.
@@ -238,8 +425,8 @@ fn mixed_output(flags: &[&str]) -> Vec<u8> {
 }
 
 /// Under a time limit that is not reached, a drained stdout gets exactly what
-/// an unlimited run writes, in the same order, the unfinished last line
-/// included; to a socket too.
+/// an unlimited run writes, the unfinished last line included; to a stream
+/// socket too.
 #[test]
 fn a_timed_run_writes_what_an_unlimited_one_does() {
     let plain = mixed_output(&[]);
@@ -287,52 +474,103 @@ fn a_closed_stdout_under_a_time_limit_ends_quietly() {
     }
 }
 
+/// A write that fails because the reader went away fails inside the
+/// operator that wrote, so `stopped` catches it as `ioerror`, under a limit
+/// as without one.
+#[test]
+fn stopped_catches_a_write_error_under_a_time_limit() {
+    let program = format!(
+        "{FILES}{{ f 2000 string writestring }} stopped \
+         {{ e (caught) writestring }} {{ e (missed) writestring }} ifelse"
+    );
+    for flags in [&[][..], &["--max-time", "30"][..]] {
+        let (reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+        drop(reader);
+        let mut args = flags.to_vec();
+        args.extend(["-e", program.as_str()]);
+        let out = common::wait_with_deadline(spawn(&args, writer.into(), Stdio::piped()), GUARD);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(stderr, "caught", "{flags:?}");
+    }
+}
+
 /// Output a pipe can hold is still written in full when nobody reads until
 /// the child exits: under the time limit as without it. (macOS starts a pipe
 /// at 16 KiB and grows it to 64 KiB on a write that does not fit; the timed
 /// path must let it grow, not stop at the first 16 KiB.)
 #[test]
 fn output_that_fits_the_pipe_is_written_in_full_under_a_time_limit() {
-    for (program, len) in [
-        ("40000 string print", 40_000),
-        ("1 1 7000 { 10000 add = } for", 7000 * 6),
+    let len = pipe_capacity() * 3 / 4;
+    let lines = len / 6;
+    for (program, expect) in [
+        (format!("{len} string print"), len),
+        (format!("1 1 {lines} {{ 10000 add = }} for"), lines * 6),
     ] {
         for flags in [&[][..], &["--max-time", "30"][..]] {
             let (mut reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
             let mut args = flags.to_vec();
-            args.extend(["-e", program]);
+            args.extend(["-e", program.as_str()]);
             let child = spawn(&args, writer.into(), Stdio::piped());
             let out = common::wait_with_deadline(child, GUARD);
             let mut held = Vec::new();
             reader.read_to_end(&mut held).expect("read the pipe");
             let stderr = String::from_utf8_lossy(&out.stderr);
             assert!(out.status.success(), "{program} {flags:?}: {stderr}");
-            assert_eq!(held.len(), len, "{program} {flags:?}");
+            assert_eq!(held.len(), expect, "{program} {flags:?}");
         }
     }
 }
 
-/// A stopped write is an operator error like any other: the operand stack is
-/// restored (the string is back on it), as `--pstack-on-error` shows.
+/// A write stopped while it waits on a full pipe is an operator error like
+/// any other: the operand stack is restored. The pipe is full before the
+/// child starts; 1024 bytes fill std's line buffer (no output yet, as without
+/// a limit), and the next byte must flush it, so that `write` is the one
+/// that waits and is stopped.
 #[test]
 fn a_stopped_write_restores_its_operands() {
-    let (_reader, writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    let (mut reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    let prefilled = fill(&mut writer);
+    let program = format!("{FILES}f 1023 string writestring f 65 write 1 2 f 66 write");
     let child = spawn(
-        &[
-            "--max-time",
-            "0.1",
-            "--pstack-on-error",
-            "-e",
-            &format!("1 2 {BIG} string print"),
-        ],
+        &["--max-time", "0.3", "--pstack-on-error", "-e", &program],
         writer.into(),
         Stdio::piped(),
     );
     let out = common::wait_with_deadline(child, GUARD);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("limitexceeded (time); OffendingCommand: print"),
+        stderr.contains("limitexceeded (time); OffendingCommand: write"),
         "{stderr}"
     );
-    assert!(stderr.contains("Operand stack (3): 1 2 ("), "{stderr}");
+    assert!(
+        stderr.contains("Operand stack (4): 1 2 -file- 66"),
+        "{stderr}"
+    );
+    let mut held = Vec::new();
+    reader.read_to_end(&mut held).expect("read the pipe");
+    assert!(held.len() >= prefilled, "the pipe lost its prefill");
+}
+
+/// A program that finishes with a partial line in std's buffer and a full
+/// pipe: without a limit the process would wait at exit for a reader; under
+/// one the run ends at its limit (the bytes that cannot be written are
+/// dropped), it does not hang.
+#[test]
+fn a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit() {
+    let (_reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    fill(&mut writer);
+    let child = spawn(
+        &[
+            "--max-time",
+            "0.3",
+            "-e",
+            &format!("{FILES}f (A) writestring"),
+        ],
+        writer.into(),
+        Stdio::piped(),
+    );
+    let out = common::wait_with_deadline(child, GUARD);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("limitexceeded (time)"), "{stderr}");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
 }
