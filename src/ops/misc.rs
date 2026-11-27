@@ -26,8 +26,9 @@ pub fn install(dict: &mut Dict) {
     // `invalidaccess`, and `bind` leaves it alone). Reading is never
     // refused, and every other type passes through unchanged, as every
     // real Type 1 font needs: it says `executeonly`/`noaccess` on its way in.
-    // The one read `noaccess` does refuse is running a string or file as
-    // source (#1321).
+    // The reads `noaccess` does refuse on a string are running it as source
+    // (#1321) and `cvs`, `cvrs`, `search`, `anchorsearch`, `token` and
+    // `copy` (#1362); the other string operators still read it.
     op(dict, "executeonly", access_restrict);
     op(dict, "readonly", access_restrict);
     op(dict, "noaccess", access_noaccess);

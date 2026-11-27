@@ -186,6 +186,64 @@ fn a_noaccess_executable_string_raises_invalidaccess() {
     check(&cases);
 }
 
+/// `cvs`, `cvrs`, `search`, `anchorsearch` and `token` read or write the
+/// string, so gs refuses a `noaccess` one outright (`invalidaccess`) and
+/// leaves every operand where it was; none of them hands back a view
+/// carrying the flag (#1362). Each refusal comes before the check that would
+/// have raised `rangecheck`. `cvrs` is the exception: a bad radix wins, and
+/// its number comes after the access check. The depth printed after the name
+/// is the operand count left.
+#[test]
+fn a_noaccess_string_is_refused_by_cvs_cvrs_search_anchorsearch_and_token() {
+    let cases: Vec<(String, &str)> = [
+        // `cvs`: the buffer or the string being converted.
+        ("7 (x) noaccess cvs", "/invalidaccess\n2\n"),
+        ("7 (x) noaccess cvs cvx exec", "/invalidaccess\n2\n"),
+        ("12345 (x) noaccess cvs", "/invalidaccess\n2\n"),
+        ("(abcdef) noaccess 2 string cvs", "/invalidaccess\n2\n"),
+        ("(abcdef) 2 string noaccess cvs", "/invalidaccess\n2\n"),
+        ("(7) noaccess 10 string cvs", "/invalidaccess\n2\n"),
+        ("(a) noaccess (a) noaccess cvs", "/invalidaccess\n2\n"),
+        // The same calls on a reference that is not `noaccess`.
+        ("(abcdef) 2 string cvs", "/rangecheck\n2\n"),
+        ("7 (xy) dup noaccess pop cvs", "(7)\n"),
+        ("(ab) dup noaccess pop 4 string cvs", "(ab)\n"),
+        // `cvrs`.
+        ("255 16 (xx) noaccess cvrs", "/invalidaccess\n3\n"),
+        ("255 16 (x) noaccess cvrs", "/invalidaccess\n3\n"),
+        ("(a) 10 (xx) noaccess cvrs", "/invalidaccess\n3\n"),
+        ("999 40 (x) noaccess cvrs", "/rangecheck\n3\n"),
+        ("255 1 (x) noaccess cvrs", "/rangecheck\n3\n"),
+        ("255 (a) (xx) noaccess cvrs", "/typecheck\n3\n"),
+        ("255 16 (xx) dup noaccess pop cvrs", "(FF)\n"),
+        // `search`: either operand, found or not.
+        ("(7) noaccess (z) search", "/invalidaccess\n2\n"),
+        (
+            "(7) noaccess (z) search pop cvx exec",
+            "/invalidaccess\n2\n",
+        ),
+        ("(abcdef) noaccess (cd) search", "/invalidaccess\n2\n"),
+        ("(abc) (b) noaccess search", "/invalidaccess\n2\n"),
+        ("() noaccess () search", "/invalidaccess\n2\n"),
+        ("(abcdef) (cd) search", "(ef)\n(cd)\n(ab)\ntrue\n"),
+        ("(abcdef) dup noaccess pop (z) search", "(abcdef)\nfalse\n"),
+        // `anchorsearch`.
+        ("(abc) noaccess (a) anchorsearch", "/invalidaccess\n2\n"),
+        ("(abc) (a) noaccess anchorsearch", "/invalidaccess\n2\n"),
+        ("(abc) noaccess (z) anchorsearch", "/invalidaccess\n2\n"),
+        ("(abc) () noaccess anchorsearch", "/invalidaccess\n2\n"),
+        ("(abc) (a) anchorsearch", "(bc)\n(a)\ntrue\n"),
+        // `token`: a `noaccess` string, executable or not.
+        ("(7 8) noaccess token", "/invalidaccess\n1\n"),
+        ("(7 8) noaccess cvx token", "/invalidaccess\n1\n"),
+        ("(7 8) dup noaccess pop token", "(8)\n7\ntrue\n"),
+    ]
+    .into_iter()
+    .map(|(p, w)| (stopped(p), w))
+    .collect();
+    check(&cases);
+}
+
 #[test]
 fn a_noaccess_executable_file_raises_invalidaccess() {
     let root = common::scratch_dir("exec-strings-noaccess-file");

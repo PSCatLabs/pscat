@@ -63,6 +63,39 @@ fn cvs_of_a_large_string_is_preflighted_and_charged() {
         );
     }
 
+    // A `noaccess` string or buffer is refused before the copy is asked of
+    // the memory cap or counted as work (#1362): `invalidaccess`, where an
+    // unrefused call would be `MemoryExceeded` or run out of steps.
+    let mut it = Interp::new();
+    it.set_limits(Limits::none().with_max_memory(24 * MIB))
+        .expect("the allocator is installed");
+    it.capture_stdout();
+    assert_eq!(
+        it.run_str(
+            "/s 16777216 string noaccess def \
+             { s dup cvs } stopped { $error /errorname get = count = clear } if \
+             { 7 s cvs } stopped { $error /errorname get = count = clear } if"
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        it.captured_stdout(),
+        b"invalidaccess\n2\ninvalidaccess\n2\n"
+    );
+    let mut it = Interp::new();
+    it.set_limits(
+        Limits::none()
+            .with_max_memory(100 * MIB)
+            .with_max_steps(1000),
+    )
+    .expect("the allocator is installed");
+    assert_eq!(
+        it.run_str(
+            "/s 16777216 string noaccess def 100 { { s dup cvs } stopped pop clear } repeat"
+        ),
+        Ok(())
+    );
+
     // A string too long for its buffer is a rangecheck before any copy, and
     // `s s cvs` (one storage for both operands) still reads its own bytes.
     let mut it = Interp::new();

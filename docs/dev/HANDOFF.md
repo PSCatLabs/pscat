@@ -615,8 +615,9 @@ renders eight examples in both and compares block-downsampled output).
   `copy` into it raise `invalidaccess`. Not modelled: reading is never refused
   (`rcheck` is always true, `get` on a `noaccess` array works), strings,
   dictionaries and files have no attribute except one: `noaccess` on a string
-  or file makes executing it `invalidaccess` (#1321, `Object::noaccess`; the
-  other operators are identities on them), `wcheck` on a name or operator answers true where gs raises
+  or file makes executing it `invalidaccess` (#1321, `Object::noaccess`), and on a string also
+  `copy`, `cvs`, `cvrs`, `search`, `anchorsearch` and `token` (#1362; the
+  other operators, `cvi`, `cvr`, `cvn`, `get`, are identities on them), `wcheck` on a name or operator answers true where gs raises
   `typecheck`, and procedures scanned under `true setpacking` stay
   writable arrays. See `notes/1189-bind-read-only.md`.
 - `systemdict` is the one read-only dictionary (#1337), as in gs: `put`,
@@ -2140,7 +2141,9 @@ renders eight examples in both and compares block-downsampled output).
   `run`, eexec and the main program stay boundaries), `noaccess` on one makes running it
   `invalidaccess`, and `//name` met in a scanned stream runs it (`Interp::execute_element`). One
   deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
-  `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
+  `execstackoverflow`, where gs loops forever. #1362: `cvs`/`cvrs` into a `noaccess` buffer, `cvs`
+  of a `noaccess` string and `search`/`anchorsearch`/`token` on one are `invalidaccess` (no flagged
+  views come back, gs refuses). `tests/exec_strings.rs`;
   `notes/1321-executable-string-gs-parity.md`.
 - **`countexecstack`, `execstack`, `dictstack` (#1468).** The native `Frame` stack is shown as gs
   10.07.1 shows the same constructs (`frame_shape` / `frame_entries` at the end of `src/interp.rs`:

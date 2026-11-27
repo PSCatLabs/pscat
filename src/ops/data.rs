@@ -35,8 +35,13 @@ pub fn install(dict: &mut Dict) {
     op(dict, "token", token);
 }
 
+/// Pop a string for an operator that reads it. A `noaccess` one is
+/// `invalidaccess`, as in gs (#1362); the operands are put back by the
+/// ledger, and the check comes before any work is done.
 fn pop_string(it: &mut Interp) -> Result<crate::object::PsString, PsError> {
-    match &it.pop()?.value {
+    let obj = it.pop()?;
+    match &obj.value {
+        Value::String(_) if obj.noaccess => Err(PsError::InvalidAccess),
         Value::String(s) => Ok(s.clone()),
         _ => Err(PsError::Typecheck),
     }
@@ -99,6 +104,7 @@ fn anchorsearch(it: &mut Interp) -> Result<(), PsError> {
 fn token(it: &mut Interp) -> Result<(), PsError> {
     let src = it.pop()?;
     let s = match &src.value {
+        Value::String(_) if src.noaccess => return Err(PsError::InvalidAccess),
         Value::String(s) => s.clone(),
         Value::File(f) => {
             match it.scan_token_from_file(f.clone())? {

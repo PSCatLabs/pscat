@@ -98,6 +98,13 @@ fn cvs(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let any = it.pop()?;
+    // A `noaccess` buffer cannot be written and a `noaccess` string cannot
+    // be read, as in gs (#1362). Refused before the length check and before
+    // anything is asked of the limits, so a refused call costs nothing; the
+    // operands are put back by the ledger.
+    if buf_obj.noaccess || (any.noaccess && matches!(any.value, Value::String(_))) {
+        return Err(PsError::InvalidAccess);
+    }
     // A string is copied as its bytes, not decoded (gs keeps a byte above
     // 127). One too long for the buffer is refused before the copy. The copy
     // that is made (a string as long as its buffer, which may be 16 MiB) is
@@ -127,6 +134,11 @@ fn cvrs(it: &mut Interp) -> Result<(), PsError> {
     let radix = it.pop_int()?;
     if !(2..=36).contains(&radix) {
         return Err(PsError::Rangecheck);
+    }
+    // After the radix and before the number, as gs orders them (#1362): a
+    // `noaccess` buffer cannot be written.
+    if buf_obj.noaccess {
+        return Err(PsError::InvalidAccess);
     }
     let n = match it.pop_num()? {
         Num::Int(i) => i,
