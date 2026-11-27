@@ -113,7 +113,7 @@ fn a_run_that_works_gets_no_note() {
     let stderr = lint(
         "clash-clean",
         &[("lib1.ps", LIB)],
-        "%!PS\n(lib1.ps) run\n/f { 2 dict begin /helper { 5 } def use end } def f\n",
+        "%!PS\n(lib1.ps) run\n/f { 2 dict begin /helper { 4 mul } def use end } def f\n",
     );
     assert!(finding(&stderr).is_none(), "{stderr}");
     assert!(stderr.contains("pscat: lint: clean"), "{stderr}");
