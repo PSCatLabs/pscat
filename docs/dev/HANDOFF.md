@@ -806,7 +806,11 @@ renders eight examples in both and compares block-downsampled output).
   made in is placed as gs places it, its device matrix read in gs's
   pattern-accumulator coordinates (#1300, `Capture::to_gs`,
   `pattern::foreign_placement`; PDF writes a copy of the pattern stream
-  under the new `/Matrix`);
+  under the new `/Matrix`); a TilingType 2 lattice is laid out in gs's
+  device coordinates for the painting context (`to_gs`), so it keeps its
+  `floor(i * step)` spacing in any context, a flipped capture included
+  (#1373, `pattern::lattice_in_gs`; a context not pixel-aligned with gs's
+  device still paints from the period);
   a mark painted with a pattern (of either kind) inside an *uncoloured*
   pattern's `PaintProc` paints that pattern's coverage, as gs's raster
   does (#1340, `notes/1340-uncoloured-paintproc-coverage.md`): SVG draws it

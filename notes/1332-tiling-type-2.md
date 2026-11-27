@@ -68,7 +68,9 @@ keeps the cell undistorted and spreads the spacing instead.
   `--max-memory` (`Gfx::lattice_canvas`, a read-only check: two canvases'
   worth of RGBA beyond what is live; the lattice is built lazily per
   tile, cached, and freed with it), steps under 1 px, and a pattern used in another
-  context than it was made in (#1300's `foreign_placement`).
+  context than it was made in (#1300's `foreign_placement`; laid out since
+  #1373, `notes/1373-type-2-lattice-in-any-context.md`, unless that
+  context is turned or scaled against gs's device).
   A pattern turned off the device axes keeps the adjusted whole-pixel
   matrix in all three outputs, as before (gs's behaviour there was not
   measured).
