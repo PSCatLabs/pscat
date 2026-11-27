@@ -1365,7 +1365,9 @@ systemdict /.sameclip known /dkPsameok exch def
                 /dkZsa dkZse 6 get 0 get def /dkZsb dkZse 6 get 1 get def
                 dkZsb 0 get dkZsa 0 get sub dup mul dkZsb 1 get dkZsa 1 get sub dup mul add sqrt
                 dkZse 5 get /sv get mul userdict /pjW get gt {
-                    /dkZsm [ 0 1 2 { dup dkZsa exch get exch dkZsb exch get add 2 div } for ] def
+                    /dkZsm [ 0 1 2 { dup dkZsa exch get exch dkZsb exch get add 2 div } for
+                        % a part's stop keeps its whole run's ref (#1419)
+                        dkZsb length 3 gt { dkZsb 3 get } if ] def
                     [ [ dkZse aload pop pop pop [ dkZsa dkZsm ] dkZse 7 get ] ]
                     [ [ dkZse aload pop pop pop [ dkZsm dkZsb ] dkZse 7 get ] ]
                     true
@@ -1452,10 +1454,11 @@ systemdict /.sameclip known /dkPsameok exch def
 
 % -   (#1419: clips away the ink of the run dkZir that a /From cut at its first
 % stop would paint back over the piece before it: the half-disc behind the line
-% across the first stop, square to its first segment, as far back as any of the
-% run's discs or its round cap (and the halo dkZha) reaches past that line. That
-% is within the previous piece's round end, which ends at the same stop with the
-% same width, so nothing is lost; the rest of the run stays (an eoclip of a box
+% across the first stop, square to its first segment, of that stop's radius
+% (and the halo dkZha), and a device pixel. That is the previous piece's round
+% end, which ends at the same stop with the same width, so nothing is lost
+% (a wider stop just past the cut still reaches a little further back, over
+% ink the previous piece also drew); the rest of the run stays (an eoclip of a box
 % round the whole run with the half-disc taken out), so a run that turns at a
 % corner just past the cut keeps its ink.)
 % @internal
@@ -1465,17 +1468,17 @@ systemdict /.sameclip known /dkPsameok exch def
     dkZir {
         dup 0 get dkZbx sub /dkZbu exch def
         dup 1 get dkZby sub /dkZbv exch def
-        2 get dkZha add dup dkZbm dkmax /dkZbm exch def
-        % a disc of radius r at distance q from the cut reaches at most
-        % sqrt(r^2 - q^2) from the cut point on the far side of the line
-        dup mul dkZbu dup mul dkZbv dup mul add dup sqrt /dkZbq exch def
-        sub dup 0 gt { sqrt dkZbr dkmax /dkZbr exch def } { pop } ifelse
+        2 get dkZha add dkZbm dkmax /dkZbm exch def
+        dkZbu dup mul dkZbv dup mul add sqrt /dkZbq exch def
         /dkZbl dkZbl dkZbq add def
         dkZbdx 0 eq dkZbdy 0 eq and dkZbq 0 gt and {
             /dkZbdx dkZbu dkZbq div def /dkZbdy dkZbv dkZbq div def
         } if
     } forall
     dkZbdx 0 eq dkZbdy 0 eq and { /dkZbdx 1 def } if
+    % the previous piece's round end: the cut stop's own reach, never a
+    % wider stop's further on, which the previous piece never painted
+    /dkZbr dkZir 0 get 2 get dkZha add def
     /dkZbL dkZbl dkZbm 2 mul add 10 add def
     newpath
     dkZbx dkZbL sub dkZby dkZbL sub moveto

@@ -2106,7 +2106,8 @@ fn many_short_pieces_keep_the_strokes_weight() {
 /// The flat start of a piece takes away only what the piece before it
 /// already covers (its round end): a piece that starts just before a corner
 /// keeps the ink of the leg after the corner, and pieces cut at a sharp
-/// vertex leave no hole. Measured on the ink of the whole stroke: no pixel
+/// vertex leave no hole, nor does a piece whose width steps up just past
+/// its start. Measured on the ink of the whole stroke: no pixel
 /// the whole inks clearly is left bare by the pieces.
 #[test]
 fn a_flat_start_leaves_no_notch_at_a_corner() {
@@ -2114,13 +2115,18 @@ fn a_flat_start_leaves_no_notch_at_a_corner() {
     // a box (perimeter 2 * (160 + 40) = 400): the first corner is at 160
     let boxed = "newpath 20 10 moveto 180 10 lineto 180 50 lineto 20 50 lineto closepath";
     let zig = "newpath 10 10 moveto 40 50 lineto 70 10 lineto 100 50 lineto 130 10 lineto";
-    for (path, cut) in [
-        (boxed, "158.5 400 div"),
-        (boxed, "159.5 400 div"),
-        (zig, "0.25"),
-        (zig, "0.5"),
+    // and a width that doubles just past the cut (review finding on #1441):
+    // the wider stop must not take out more than the previous piece covers
+    let line = "newpath 10 30 moveto 190 30 lineto";
+    let step = "/Width 12 /Seed 2 /Pressure { 0.5 gt { 2 } { 1 } ifelse }";
+    for (path, cut, opts) in [
+        (boxed, "158.5 400 div", "/Width 6 /Seed 2"),
+        (boxed, "159.5 400 div", "/Width 6 /Seed 2"),
+        (zig, "0.25", "/Width 6 /Seed 2"),
+        (zig, "0.5", "/Width 6 /Seed 2"),
+        (line, "0.499", step),
+        (line, "0.4995", step),
     ] {
-        let opts = "/Width 6 /Seed 2";
         let whole = data(&board(
             PW,
             PH,

@@ -22,8 +22,9 @@ whole run's width varies; 1 = cut at its start, on the first stop's own copy):
   growing part keeps the stops its catch was thinned to;
 - `dkZgroup` sizes chunks with the whole run's widest stop, so chunk boundaries do not move;
 - a run cut at its start is clipped flat (`dkZbehind`: an eoclip of a big box minus the
-  half-disc behind the cut line, as far as any of the run's discs reaches past it plus a
-  device pixel), in either branch, so the stroke branch's AA is unchanged. A first version
+  half-disc behind the cut line, of the cut stop's own reach plus a device pixel: the
+  previous piece's round end; an earlier draft took the widest reach of any stop, which
+  notched a stroke whose width steps up just past the cut, review finding on PR #1441), in either branch, so the stroke branch's AA is unchanged. A first version
   took out a box 1.5 reach deep and wide, which notched the next leg of a piece that starts
   just before a corner; the half-disc is inside the previous piece's round end, so nothing
   it removes is lost (`a_flat_start_leaves_no_notch_at_a_corner`). Pieces of a zigzag and a
