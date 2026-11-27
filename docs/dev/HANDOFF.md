@@ -1355,9 +1355,14 @@ renders eight examples in both and compares block-downsampled output).
    pieces used to restart each lane's dropout chain (a seam up to ~110 levels); now
    drykit walks the whole lane, so halves/thirds differ by under ~60 on a few pixels and a
    growing `/Tilt` stroke keeps every drawn pixel (`notes/1420-drychalk-tilt-whole-lanes.md`).
-   Open gap (any drykit medium): a run that starts at a touch-band change within one reach
-   after a `/From` cut is not cut, so it keeps its round start and paints its level back
-   over the previous piece: a 1px arc up to ~80 levels (repro in that note).
+   #1444: at a touch-band change within one reach of a `/From` cut the new band's run
+   keeps its round start (and the old one its round end), so `dkFrun` (`dkFover`) puts
+   the old run's tail before it as an overlap run (flag 16, clipped by `dkZover` to the
+   shared stop's reach on the far side of the cut, drawn at every level but the
+   faintest; a level is one colour for the whole record, so the brightest level wins): the pieces layer their levels there as
+   the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
+   Gotcha: `dkrender` leaves an overlap out of the passes it lacks by `dkZp`/`dkZmax`, so
+   nothing it calls before that filter may reuse those names.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
