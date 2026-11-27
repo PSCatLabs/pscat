@@ -551,26 +551,31 @@ fn a_stopped_write_restores_its_operands() {
     assert!(held.len() >= prefilled, "the pipe lost its prefill");
 }
 
-/// A program that finishes with a partial line in std's buffer and a full
-/// pipe: without a limit the process would wait at exit for a reader; under
-/// one the run ends at its limit (the bytes that cannot be written are
-/// dropped), it does not hang.
+/// A run that ends with a partial line in std's buffer and a full pipe:
+/// without a limit the process would wait at exit for a reader; under one the
+/// run ends at its limit (the bytes that cannot be written are dropped), it
+/// does not hang. Whether the program finished, or was stopped by the limit
+/// at a slice's start or end with the line still buffered.
 #[test]
 fn a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit() {
-    let (_reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
-    fill(&mut writer);
-    let child = spawn(
-        &[
-            "--max-time",
-            "0.3",
-            "-e",
-            &format!("{FILES}f (A) writestring"),
-        ],
-        writer.into(),
-        Stdio::piped(),
-    );
-    let out = common::wait_with_deadline(child, GUARD);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("limitexceeded (time)"), "{stderr}");
-    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    for program in [
+        "f (A) writestring",
+        "f (A) writestring { } loop",
+        "f (A) writestring { 1 pop } loop",
+    ] {
+        let (_reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+        fill(&mut writer);
+        let child = spawn(
+            &["--max-time", "0.3", "-e", &format!("{FILES}{program}")],
+            writer.into(),
+            Stdio::piped(),
+        );
+        let out = common::wait_with_deadline(child, GUARD);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("limitexceeded (time)"),
+            "{program}: {stderr}"
+        );
+        assert_eq!(out.status.code(), Some(1), "{program}: {stderr}");
+    }
 }
