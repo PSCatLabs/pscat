@@ -34,25 +34,30 @@ not look at (only the foreign image was). `pattern_source` now holds the cap
 against `SvgRecorder::made_image_cost` (two copies of the base64 and the
 defs' growth) before the mark records, and the recorder writes the base64
 straight into the content instead of through a formatted copy (the same bytes).
-The check is made at every mark that uses the made image, a cached one too, as
-the recorder does not say which pen the mark will have: on purpose
-conservative, only near the cap.
+A mark whose pattern the recorder wrote already (same hop, no pen) costs
+nothing, so a hundred marks need no more room than one. A pen-space stroke
+after it writes a copy of its own, which is not looked at (a follow-up).
 
 **The encoder's bound was too low** (`png_encode_bytes`). #1475 held the heap
-against 8 bytes a pixel for the encoder's copy and output. Measured on a
-1000 x 1000 image of independent random colours, which deflate barely shrinks,
-`encode_png` peaks 11.0 bytes a pixel past its layer (the copy of the pixels, 4,
-and the output vector growing by doubling). Both users now hold 12 a pixel.
+against 8 bytes a pixel for the encoder's copy and output. Measured on images of
+independent random colours, which deflate barely shrink (3.4 bytes a pixel of
+output), at eleven sizes from 300 to 2000 pixels a side, `encode_png` peaked
+from 9.1 to 16.2 bytes a pixel past its layer, by where the output vector's
+doubling fell (the copy of the pixels, 4, and the old and new buffers together).
+The worst case is 4 + 3 x 4.1 = 16.3; both users now hold 20 a pixel.
 
 **Tests.** `tests/pattern_use_image_memory.rs` (one test, its binary: the cap
-counts the process): a ladder of caps on a 2000 pt cell, TilingType 1 and 2,
-and on `makepattern` of a noise shading; each run's heap peak stays within half a
-MiB of its cap, and a refused run leaves the SVG, the page and the operand
-stack as they were. The twelve-tile allowance (3 MiB) is half a MiB now.
-`tests/patterns.rs`: `makepattern` of a shading costs its encoding in steps and
-a budget between refuses it with nothing changed. Before the fix: the 2000 pt
-cell passed a 32 MiB cap by 2.3 MiB, the shading's encoding a 12 MiB cap by
-5 MiB, and the twelve tiles a 32 MiB cap by 0.6 MiB past the new margin.
+counts the process): ladders of caps on a 2000 pt cell (TilingType 1, and 2 with
+a fractional step, which keeps a lattice cell), on a `PaintProc` that grows the
+heap by 8 MB and leaves three operands (the end-of-capture look: the PDF, SVG
+and page as they were, four operands left), on `makepattern` of a noise shading
+and on the mark that writes its image, with a hundred marks under the smallest
+cap that holds one; each run's heap peak stays within half a MiB of its cap.
+The twelve-tile allowance (3 MiB) is half a MiB now. `tests/patterns.rs`:
+`makepattern` of a shading costs its encoding in steps and a budget between
+refuses it with nothing changed. Each failed before the fix (the 2000 pt cell
+by 4 MiB at a 38 MiB cap, the shading's encoding a 12 MiB cap by 5 MiB, the
+twelve tiles a 32 MiB cap by 0.6 MiB past the new margin, the encoding's steps).
 
 **Not covered.** The coverage mask a fill makes is checked where a capture
 begins (the cell's), not where each fill makes it, so a `PaintProc` that grows

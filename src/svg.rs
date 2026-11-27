@@ -257,6 +257,25 @@ impl SvgRecorder {
     /// or the Type 1 layer as an image, cut to the `/BBox`. The canvas is
     /// all a mark here can show, so the cell never repeats where it is
     /// seen.
+    fn shading_key(
+        &self,
+        sp: &ShadingPattern,
+        hop: Option<tiny_skia::Transform>,
+        pen: Option<tiny_skia::Transform>,
+    ) -> ShadingKey {
+        let bits = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f32::to_bits);
+        (
+            std::ptr::from_ref(sp) as usize,
+            hop.map(bits),
+            pen.map(|l| {
+                bits(tiny_skia::Transform::from_row(
+                    l.sx, l.ky, l.kx, l.sy, 0.0, 0.0,
+                ))
+            }),
+            (self.width, self.height),
+        )
+    }
+
     fn shading_ref(
         &mut self,
         sp: &Rc<ShadingPattern>,
@@ -266,17 +285,7 @@ impl SvgRecorder {
         let Some(form) = &sp.svg else {
             return "none".to_string();
         };
-        let bits = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f32::to_bits);
-        let key = (
-            Rc::as_ptr(sp) as usize,
-            hop.map(bits),
-            pen.map(|l| {
-                bits(tiny_skia::Transform::from_row(
-                    l.sx, l.ky, l.kx, l.sy, 0.0, 0.0,
-                ))
-            }),
-            (self.width, self.height),
-        );
+        let key = self.shading_key(sp, hop, pen);
         if let Some((_, paint)) = self.shading_ids.get(&key) {
             return paint.clone();
         }
@@ -465,10 +474,28 @@ impl SvgRecorder {
     /// one `makepattern` made, `png_len` bytes of PNG) would take, at most
     /// (#1477): the image sits inline in a `<pattern>`, whose content the
     /// clip and hop groups copy once each (two copies are alive at a time)
-    /// before it goes into the defs. A mark that has the pattern written
-    /// already is charged too, as the recorder does not tell which pen the
-    /// mark has: on purpose conservative.
-    pub(crate) fn made_image_cost(&self, png_len: usize) -> usize {
+    /// before it goes into the defs. A mark whose pattern this recorder has
+    /// written already (at the same hop, with no pen) writes nothing and is
+    /// not charged; a pen-space stroke that comes after it writes a copy of
+    /// its own, which this does not look at.
+    pub(crate) fn made_image_cost(
+        &self,
+        sp: &ShadingPattern,
+        hop: Option<tiny_skia::Transform>,
+        png_len: usize,
+    ) -> usize {
+        if self
+            .shading_ids
+            .contains_key(&self.shading_key(sp, hop, None))
+        {
+            return 0;
+        }
+        self.made_write_bytes(png_len)
+    }
+
+    /// [`made_image_cost`](Self::made_image_cost) for a mark that has not
+    /// written the image yet.
+    pub(crate) fn made_write_bytes(&self, png_len: usize) -> usize {
         let need = Self::base64_bytes(png_len);
         need.saturating_mul(2)
             .saturating_add(self.defs_growth(need))

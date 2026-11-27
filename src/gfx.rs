@@ -185,14 +185,16 @@ const SVG_STOP_BYTES: usize = 256;
 const PNG_ENCODE_UNITS: u64 = 32;
 
 /// The heap `encode_png` takes beyond its layer for a `px`-pixel image, at
-/// most, plus the encoder's fixed state (#1368, #1477): the encoder's copy
-/// of the pixels (4 bytes a pixel) and its output, which a vector grows by
-/// doubling (a copy of the old beside the new). Measured, a 1000 x 1000
-/// image of independent random colours, which deflate barely shrinks, took
-/// 11.0 bytes a pixel at its peak (3.4 MB out of 4 MB of pixels), smoother
-/// ones less; 12 leaves room.
+/// most, plus the encoder's fixed state (#1368, #1477): its copy of the
+/// pixels (4 bytes a pixel) and its output, which a vector grows by doubling,
+/// so the old and the new buffer are alive together. Measured on images of
+/// independent random colours, which deflate barely shrinks (3.4 bytes of
+/// output a pixel), at eleven sizes from 300 to 2000 pixels a side, the peak
+/// ran from 9.1 to 16.2 bytes a pixel with where the doubling fell. The
+/// worst case is the copy and three times an output of 4.1 bytes a pixel
+/// (incompressible RGBA, and the filter byte): 16.3; 20 leaves room.
 fn png_encode_bytes(px: usize) -> usize {
-    px.saturating_mul(12).saturating_add(4096)
+    px.saturating_mul(20).saturating_add(4096)
 }
 
 /// Units of work writing that second gradient for `stops` stops is: a tag a
@@ -2988,7 +2990,7 @@ impl Gfx {
             if let (Some(svg), Some(img)) =
                 (&self.svg, sp.svg.as_ref().and_then(|v| v.image.as_ref()))
             {
-                probe.check_alloc(svg.made_image_cost(img.0.len()))?;
+                probe.check_alloc(svg.made_image_cost(sp, hop, img.0.len()))?;
             }
             return Ok(0);
         };
@@ -6507,7 +6509,7 @@ impl Gfx {
                     let write = self
                         .svg
                         .as_ref()
-                        .map_or(0, |svg| svg.made_image_cost(png.len()));
+                        .map_or(0, |svg| svg.made_write_bytes(png.len()));
                     probe.check_alloc(write)?;
                     work = work
                         .saturating_add(encode_work)

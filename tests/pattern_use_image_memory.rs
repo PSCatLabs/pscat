@@ -61,23 +61,49 @@ fn run(
     (peak, r, svg, px)
 }
 
-/// [`run`], and how many operands the program left on the stack.
+/// What a run left: the heap's peak, how it ended, the SVG, the page's
+/// pixels, the PDF and how many operands are on the stack.
+struct Ran {
+    peak: usize,
+    r: Result<(), PsError>,
+    svg: String,
+    px: Vec<u8>,
+    pdf: Vec<u8>,
+    depth: usize,
+}
+
+/// [`run`], with the operand stack as well.
 fn run_full(
     page: u32,
     pattern: &str,
     tiles: &str,
     cap: usize,
 ) -> (usize, Result<(), PsError>, String, Vec<u8>, usize) {
+    let ran = run_with(page, pattern, tiles, cap, false);
+    (ran.peak, ran.r, ran.svg, ran.px, ran.depth)
+}
+
+/// [`run_full`], recording a PDF too when `pdf` is set.
+fn run_with(page: u32, pattern: &str, tiles: &str, cap: usize, pdf: bool) -> Ran {
     let mut it = Interp::with_page(page, page).expect("page");
     it.gfx_mut().enable_svg();
+    if pdf {
+        it.gfx_mut().enable_pdf();
+    }
     it.run_source(format!("1 0 0 setrgbcolor 0 0 {page} {page} rectfill {pattern}").as_bytes())
         .expect("setup");
     it.set_limits(Limits::none().with_max_memory(cap))
         .expect("the allocator is installed");
     let (peak, r) = peak_growth(|| it.run_source(tiles.as_bytes()));
     let svg = it.gfx().svg_pages().expect("svg on").concat();
-    let depth = it.operand_stack().len();
-    (peak, r, svg, it.gfx().pixmap.data().to_vec(), depth)
+    Ran {
+        peak,
+        r,
+        svg,
+        px: it.gfx().pixmap.data().to_vec(),
+        pdf: it.gfx().pdf_document().unwrap_or_default(),
+        depth: it.operand_stack().len(),
+    }
 }
 
 fn grad(size: u32) -> String {
@@ -212,9 +238,12 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
     // not fit is made, and leave the page, the SVG and the operands as an
     // unmade pattern leaves them.
     for tiling in [1, 2] {
+        // A step that is no whole number of pixels makes a TilingType 2
+        // tile a lattice, which keeps a cell of its own.
+        let step = if tiling == 2 { "1999.5" } else { "2000" };
         let cell = format!(
             "<< /PatternType 1 /PaintType 1 /TilingType {tiling} /BBox [0 0 2000 2000] \
-             /XStep 2000 /YStep 2000 /PaintProc {{ pop 0 setgray 0 0 1 1 rectfill }} >> matrix \
+             /XStep {step} /YStep {step} /PaintProc {{ pop 0 setgray 0 0 1 1 rectfill }} >> matrix \
              makepattern setpattern 0 0 100 100 rectfill"
         );
         let (_, r, quiet, quiet_px, _) = run_full(1000, "", "", 400 * MIB);
@@ -223,7 +252,7 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         assert_eq!(r, Ok(()), "TilingType {tiling} with room");
         assert!(made_px != quiet_px, "the pattern paints");
         let (mut refused, mut fitted, mut depth) = (0, 0, None);
-        for cap_mib in (20..=60).step_by(2) {
+        for cap_mib in (20..=76).step_by(2) {
             let cap = cap_mib * MIB;
             let (peak, r, svg, px, left) = run_full(1000, "", &cell, cap);
             assert!(
@@ -308,7 +337,7 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
     let (_, r, svg, _, _) = run_full(1000, "", &used, 400 * MIB);
     assert_eq!(r, Ok(()), "with room it is painted");
     assert_eq!(svg.matches("<image ").count(), 1, "the image is written");
-    let (mut refused, mut fitted) = (0, 0);
+    let (mut refused, mut fitted, mut first_fit) = (0, 0, None);
     for cap_mib in (16..=48).step_by(2) {
         let cap = cap_mib * MIB;
         let (peak, r, svg, px, _) = run_full(1000, "", &used, cap);
@@ -318,7 +347,10 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
             peak as f64 / MIB as f64
         );
         match r {
-            Ok(()) => fitted += 1,
+            Ok(()) => {
+                fitted += 1;
+                first_fit.get_or_insert(cap_mib);
+            }
             Err(PsError::MemoryExceeded) => {
                 refused += 1;
                 if svg != quiet {
@@ -335,4 +367,56 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         refused > 0 && fitted > 0,
         "the ladder crosses the write's size"
     );
+
+    // #1477: the end of a `PaintProc` looks at the heap again. This one
+    // grows it by 8 MB of its own and leaves three operands behind, so a cap
+    // that holds what the capture reserved at its start (content and masks
+    // 24 MiB, period 16 MiB; a lattice's cell 16 more) is passed by the
+    // period made at its end. The refusal unwinds the capture, with the PDF
+    // recorder as it was, and puts the operands back.
+    for (tiling, caps) in [(1, 38..=56), (2, 54..=72)] {
+        // A step that is no whole number of pixels makes a TilingType 2
+        // tile a lattice, which keeps a cell of its own.
+        let step = if tiling == 2 { "1999.5" } else { "2000" };
+        let cell = format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType {tiling} /BBox [0 0 2000 2000] \
+             /XStep {step} /YStep {step} /PaintProc {{ pop 8000000 string /big exch def 1 2 3 \
+             0 setgray 0 0 1 1 rectfill }} >> matrix makepattern setpattern 0 0 100 100 rectfill"
+        );
+        let quiet = run_with(1000, "", "", 400 * MIB, true);
+        let made = run_with(1000, "", &cell, 400 * MIB, true);
+        assert_eq!(made.r, Ok(()), "TilingType {tiling} with room");
+        assert!(made.px != quiet.px, "the pattern paints");
+        let (mut refused, mut fitted) = (0, 0);
+        for cap_mib in caps.step_by(2) {
+            let cap = cap_mib * MIB;
+            let ran = run_with(1000, "", &cell, cap, true);
+            assert!(
+                ran.peak <= cap + margin,
+                "TilingType {tiling}, cap {cap_mib} MiB: the heap grew {:.2} MiB past its start",
+                ran.peak as f64 / MIB as f64
+            );
+            match ran.r {
+                Ok(()) => {
+                    fitted += 1;
+                    assert!(ran.px == made.px, "cap {cap_mib} MiB: paints as it does");
+                    assert_eq!(ran.depth, made.depth, "cap {cap_mib} MiB: the stack");
+                }
+                Err(PsError::MemoryExceeded) => {
+                    refused += 1;
+                    assert_eq!(ran.svg, quiet.svg, "cap {cap_mib} MiB: the SVG as it was");
+                    assert!(ran.px == quiet.px, "cap {cap_mib} MiB: the page as it was");
+                    assert!(ran.pdf == quiet.pdf, "cap {cap_mib} MiB: the PDF as it was");
+                    // The operands of `rectfill`, and not what the `PaintProc`
+                    // left above them.
+                    assert_eq!(ran.depth, 4, "cap {cap_mib} MiB: operands put back");
+                }
+                Err(e) => panic!("TilingType {tiling}, cap {cap_mib} MiB: {e:?}"),
+            }
+        }
+        assert!(
+            refused > 0 && fitted > 0,
+            "the ladder crosses the cell's size"
+        );
+    }
 }
