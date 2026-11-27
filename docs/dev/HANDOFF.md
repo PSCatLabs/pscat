@@ -647,7 +647,9 @@ renders eight examples in both and compares block-downsampled output).
   stack (#1047), as a PLRM handler would see them.
 - An error inside an image's data procedure names the operator that
   failed in `$error /command`; gs names `image` (#1047,
-  `tests/operand_restore.rs`).
+  `tests/operand_restore.rs`). The image frame holds the operator object
+  itself, not its name, so redefining `image` later does not change the
+  blame (#1242).
 - `nulldevice` is a flag in the graphics state (#739): marking operators
   consume their operands and paint and record nothing, `showpage`/
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
@@ -929,6 +931,13 @@ renders eight examples in both and compares block-downsampled output).
   copying Ghostscript's `gs_dps2.ps`: indices to 65535, the array grows by its
   rule, and a growth is charged to the step, time and memory limits before it
   is made. `notes/1265-user-objects.md` lists the deliberate differences.
+- **Level 3 coverage test** (#1280, `tests/plrm_operators.rs`): every operator in the
+  PLRM third edition's "Operator Details" (`tests/data/plrm_operators.txt`,
+  derived by `scripts/plrm_operator_index.py`) must be in `systemdict` or listed in
+  `tests/data/plrm_operator_gaps.txt` (`missing`, each with its issue, or `omitted`, each
+  with a reason). Define an operator on that list and the test fails until you delete its
+  line; a new gap fails it until it is listed. `languagelevel` stays 2 until no `missing`
+  line is left (`notes/1280-plrm-operator-coverage-test.md`).
 
 - `resourcestatus` of a Font (#1214) uses `font::locate`, the lookup
   `findfont` is built on (`font::resolve` = `locate` plus the missing-pack
@@ -1594,7 +1603,9 @@ renders eight examples in both and compares block-downsampled output).
   object and `OffendingCommand` its name, found from the procedure on top
   of the execution stack or systemdict when the step carried only the
   function. `ProcStep` stays one word plus a tag: adding the name to it
-  cost 15% on a step-heavy loop.
+  cost 15% on a step-heavy loop. `exec_room` asks for room by what an
+  executable name resolves to, so `exec` of a name at the execution-stack
+  limit leaves the name on the stack too (#1242).
 
 - **Ghostscript tests go through `common::gs_available()`** (#985,
   `tests/common/mod.rs`; `notes/985-ci-require-ghostscript.md`). Never probe

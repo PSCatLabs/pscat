@@ -3244,19 +3244,50 @@ impl Interp {
     /// `execstackoverflow` if running `obj` would need a frame and the
     /// execution stack is full: `if`, `ifelse` and `exec` ask before they
     /// take their operands, so the error leaves them on the stack, as in
-    /// Ghostscript (#1047).
+    /// Ghostscript (#1047). An executable name counts for what it resolves
+    /// to (#1242): `/r cvx exec` on a full stack leaves `r`.
     #[inline]
     pub(crate) fn exec_room(&self, obj: &Object) -> Result<(), PsError> {
-        let needs_frame = obj.executable
-            && match &obj.value {
-                Value::Array(a) => !a.is_empty(),
-                Value::String(_) | Value::File(_) => true,
-                _ => false,
-            };
-        if needs_frame && self.estack.len() >= EXEC_STACK_LIMIT {
+        if self.estack.len() < EXEC_STACK_LIMIT {
+            return Ok(());
+        }
+        if self.would_push_frame(obj) {
             return Err(PsError::ExecStackOverflow);
         }
         Ok(())
+    }
+
+    /// Whether `execute_resolved` would push a frame to run `obj`. Only
+    /// asked on a full execution stack, so it is out of line. It follows an
+    /// executable name chain as `execute_resolved` does (same 100-hop
+    /// budget, no write to `last_name`) and stops at anything that fails or
+    /// runs without a frame (an undefined name, an operator, a `noaccess`
+    /// string or file): execution raises those errors itself.
+    #[cold]
+    #[inline(never)]
+    fn would_push_frame(&self, obj: &Object) -> bool {
+        let mut cur = obj.clone();
+        let mut hops = 0;
+        loop {
+            if !cur.executable {
+                return false;
+            }
+            match &cur.value {
+                Value::Array(a) => return !a.is_empty(),
+                Value::String(_) | Value::File(_) => return !cur.noaccess,
+                Value::Name(n) => {
+                    hops += 1;
+                    if hops > 100 {
+                        return false;
+                    }
+                    match self.load_id(n.id()) {
+                        Some(next) => cur = next,
+                        None => return false,
+                    }
+                }
+                _ => return false,
+            }
+        }
     }
 
     #[inline(always)]
@@ -3505,13 +3536,14 @@ impl Interp {
 
     /// Queue an image (image/imagemask/colorimage) frame. `op` is the
     /// operator that began it, for an error the frame raises later: the last
-    /// name run is not it when the operator was bound (#1047).
+    /// name run is not it when the operator was bound (#1047), and a name
+    /// looked up again may by then be something else (#1242).
     pub(crate) fn begin_image(
         &mut self,
         mut ctx: ImageCtx,
-        op: &'static str,
+        op: crate::object::Operator,
     ) -> Result<(), PsError> {
-        ctx.op_name = Some(crate::name::intern(op).id());
+        ctx.op = Some(op);
         // For the SVG and PDF recorders (#1188), checked with no steps.
         ctx.probe = self.limit_probe();
         // The SVG and PDF recorders decode the whole image into a buffer of
@@ -5425,14 +5457,10 @@ impl Interp {
     fn blame_image(&mut self) {
         if self.error_command.is_none()
             && let Some(Frame::Image(ctx)) = self.estack.last()
-            && let Some(id) = ctx.op_name
+            && let Some(op) = ctx.op
         {
-            self.last_name = Some(id);
-            if let Some(o) = self.load_id(id)
-                && matches!(o.value, Value::Operator(_))
-            {
-                self.error_command = Some(o);
-            }
+            self.last_name = Some(crate::name::intern(op.name).id());
+            self.error_command = Some(Object::exec(Value::Operator(op)));
         }
     }
 }

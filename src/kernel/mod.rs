@@ -657,7 +657,10 @@ fn paint(it: &mut Interp, a: &Args, bytes: Vec<u8>) -> Result<(), PsError> {
             ImageColor::Direct,
             ImageSource::Bytes(bytes),
         ),
-        "kernelimage",
+        crate::object::Operator {
+            name: "kernelimage",
+            func: kernelimage,
+        },
     )
 }
 

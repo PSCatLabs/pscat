@@ -6,7 +6,7 @@ use crate::error::PsError;
 use crate::gfx::ColorSpace;
 use crate::image::{ImageColor, ImageCtx, ImageSource};
 use crate::interp::Interp;
-use crate::object::{Dict, Object, Value};
+use crate::object::{Dict, Object, Operator, Value};
 
 pub fn install(dict: &mut Dict) {
     use super::op;
@@ -114,7 +114,10 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
             ImageColor::Direct,
             source,
         ),
-        "image",
+        Operator {
+            name: "image",
+            func: image,
+        },
     )
 }
 
@@ -151,7 +154,10 @@ fn imagemask(it: &mut Interp) -> Result<(), PsError> {
             ImageColor::Direct,
             source,
         ),
-        "imagemask",
+        Operator {
+            name: "imagemask",
+            func: imagemask,
+        },
     )
 }
 
@@ -197,7 +203,10 @@ fn colorimage(it: &mut Interp) -> Result<(), PsError> {
             sources,
             multi,
         ),
-        "colorimage",
+        Operator {
+            name: "colorimage",
+            func: colorimage,
+        },
     )
 }
 
@@ -219,7 +228,18 @@ fn dict_image(
     mask: Option<bool>,
 ) -> Result<(), PsError> {
     let ctx = image_ctx(it, &d.borrow(), ncomp, mask)?;
-    it.begin_image(ctx, if mask.is_some() { "imagemask" } else { "image" })
+    let op = if mask.is_some() {
+        Operator {
+            name: "imagemask",
+            func: imagemask,
+        }
+    } else {
+        Operator {
+            name: "image",
+            func: image,
+        }
+    };
+    it.begin_image(ctx, op)
 }
 
 /// Level 3 `ImageType 3` (#739): an image gated by a 1-bit stencil.
@@ -260,7 +280,11 @@ fn image_type3(
         // plain `imagemask` dict, whose default [0 1] paints the 0s.
         stencil.mask = Some(true);
     }
-    it.begin_image(image.with_stencil(stencil), "image")
+    let op = Operator {
+        name: "image",
+        func: self::image,
+    };
+    it.begin_image(image.with_stencil(stencil), op)
 }
 
 /// Build the engine context for one Level 2 image dictionary.

@@ -1,0 +1,111 @@
+# Operators in tests/data/plrm_operators.txt that pscat's systemdict does not define, and why.
+# Read by tests/plrm_operators.rs. Format, tab separated:
+#   missing  <name>  <#issue | untracked>  <note>   a gap to close; the issue tracks it. `untracked`: no issue yet (none today).
+#   omitted  <name>  -                       <why>    a decision not to define it in systemdict (PLRM decides, gs cross-checks).
+# The test fails when a PLRM operator is absent and not listed here (newly missing), and when a listed name is now defined
+# (delete its line; the list must not rot). Level 3 (`languagelevel` 3, #1280) needs every `missing` line gone.
+#
+# Decisions where gs and the PLRM disagree (the PLRM decides):
+#  * gs lacks, PLRM lists: the CIDInit, BitmapFontInit, Trapping and ColorRendering procedure-set members, StartData,
+#    UserObjects and exitserver. They are PLRM 8.2 entries but are not systemdict names (a procedure set or userdict
+#    member), so they are `omitted`, except exitserver, which is `missing` (#1270 tracks it; the test probes it in serverdict).
+#  * gs defines, PLRM does not list: 187 non-dot names (command-line switches such as NOPAUSE, the PDF interpreter,
+#    `.`-less extensions such as rsearch, max, min). They are outside the PLRM list, so the test ignores them.
+#  * Names the PLRM index lacks and so needs no entry: Display PostScript extras and the Level 1 statusdict members
+#    (setpageparams, setpapertray, ...) are not in the PLRM third edition's operator details.
+#  * exitserver is probed in serverdict, where the PLRM and gs put it (see HOME_DICT in the test).
+#  * Not carried over from the PLRM: the 27 error names (typecheck, VMerror, ...) are not operators
+#    (handleerror is one of them and is also a systemdict procedure; the test does not check it); DeviceGray, DeviceRGB,
+#    DeviceCMYK and /Font are names inside signatures, not operators.
+missing	currenttransfer	#1267	transfer functions
+missing	settransfer	#1267	transfer functions
+missing	currentcolortransfer	#1267	transfer functions
+missing	setcolortransfer	#1267	transfer functions
+missing	sethalftone	#1268	screens and halftones
+missing	currenthalftone	#1268	screens and halftones
+missing	setscreen	#1268	screens and halftones
+missing	currentscreen	#1268	screens and halftones
+missing	setcolorscreen	#1268	screens and halftones
+missing	currentcolorscreen	#1268	screens and halftones
+missing	setblackgeneration	#1269	black generation, undercolor removal, colour rendering
+missing	currentblackgeneration	#1269	black generation, undercolor removal, colour rendering
+missing	setundercolorremoval	#1269	black generation, undercolor removal, colour rendering
+missing	currentundercolorremoval	#1269	black generation, undercolor removal, colour rendering
+missing	setcolorrendering	#1269	black generation, undercolor removal, colour rendering
+missing	currentcolorrendering	#1269	black generation, undercolor removal, colour rendering
+missing	findcolorrendering	#1269	black generation, undercolor removal, colour rendering
+missing	setuserparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentuserparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setsystemparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentsystemparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setdevparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentdevparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	cachestatus	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setcachelimit	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setcacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentcacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setucacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	startjob	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	exitserver	#1270	PLRM puts it in serverdict (probed there by the test), and gs has no systemdict exitserver either; needs serverdict (below) as well
+missing	vmreclaim	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setshared	#1270	same as setglobal; PLRM compatibility name
+missing	currentshared	#1270	same as currentglobal; PLRM compatibility name
+missing	ucachestatus	#1270	the PLRM name; #1270's text names currentucacheparams, which is not a PLRM operator, so the issue needs this name added
+missing	setvmthreshold	#1270	named in no issue; same family as vmreclaim, so tracked under #1270 once its text lists it
+missing	shareddict	#1270	same dictionary as globaldict (#1159); PLRM compatibility name
+missing	setoverprint	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentoverprint	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	setsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	currentsmoothness	#1270	parameter, cache, job-control, overprint and smoothness operators
+missing	execform	#1271	execform
+missing	composefont	#1272	composite fonts
+missing	findencoding	#1272	composite fonts
+missing	rootfont	#1272	composite fonts
+missing	undefinefont	#1272	composite fonts
+missing	resourceforall	#1218	resourceforall
+missing	countexecstack	#1468	execution-stack introspection; gs has it
+missing	execstack	#1468	execution-stack introspection; gs has it
+missing	dictstack	#1468	dictionary-stack introspection; gs has it (countdictstack exists)
+missing	statusdict	#1469	product-dependent dictionary; many printer prologs test /statusdict where; gs has it
+missing	GlobalFontDirectory	#1469	Font resources defined in global VM; gs has it
+missing	SharedFontDirectory	#1469	same dictionary as GlobalFontDirectory; PLRM compatibility name
+missing	scheck	#1469	same as gcheck (#1159); PLRM compatibility name
+missing	serverdict	#1469	job server dictionary holding exitserver; gs has it
+missing	internaldict	#1469	1183615869 internaldict, used inside Type 1 font programs; gs has it
+omitted	beginbfchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	beginbfrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	begincidchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	begincidrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	begincmap	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	begincodespacerange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	beginnotdefchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	beginnotdefrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	beginrearrangedfont	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	beginusematrix	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endbfchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endbfrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endcidchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endcidrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endcmap	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endcodespacerange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endnotdefchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endnotdefrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endrearrangedfont	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	endusematrix	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	usecmap	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	usefont	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
+omitted	StartData	-	member of the CIDInit and FontSetInit procedure sets (CID-keyed font data), not a systemdict name; not in gs systemdict
+omitted	addglyph	-	BitmapFontInit procedure set, Type 4 bitmap CIDFonts (device-specific font technology); not in gs systemdict
+omitted	removeall	-	BitmapFontInit procedure set, Type 4 bitmap CIDFonts (device-specific font technology); not in gs systemdict
+omitted	removeglyphs	-	BitmapFontInit procedure set, Type 4 bitmap CIDFonts (device-specific font technology); not in gs systemdict
+omitted	currenttrapparams	-	Trapping procedure set, in-RIP trapping on a press device (PLRM 6.3); not in gs systemdict
+omitted	settrapparams	-	Trapping procedure set, in-RIP trapping on a press device (PLRM 6.3); not in gs systemdict
+omitted	settrapzone	-	Trapping procedure set, in-RIP trapping on a press device (PLRM 6.3); not in gs systemdict
+omitted	GetHalftoneName	-	ColorRendering procedure set, called by a colour-rendering dictionary prolog on a device; not in gs systemdict
+omitted	GetPageDeviceName	-	ColorRendering procedure set, called by a colour-rendering dictionary prolog on a device; not in gs systemdict
+omitted	GetSubstituteCRD	-	ColorRendering procedure set, called by a colour-rendering dictionary prolog on a device; not in gs systemdict
+omitted	UserObjects	-	an array in userdict created by the first defineuserobject (#1265), never a systemdict name; gs agrees
+omitted	echo	-	interactive executive only: the PLRM says echo "is not defined in products that do not support executive"; pscat has no PLRM executive (its REPL is not one). gs defines it
+omitted	executive	-	the PLRM interactive executive (section 2.4.4); a program run by pscat is never typed at it. pscat has no executive, so none of executive, echo, prompt is defined. gs defines it
+omitted	prompt	-	the PLRM says prompt "is not defined in products that do not support executive"; pscat has no executive. gs defines it
+omitted	start	-	executed once at interpreter startup, its definition "depends on the environment in which the PostScript interpreter is operating" (PLRM 8.2); pscat runs the program given and has no startup procedure. gs defines it
