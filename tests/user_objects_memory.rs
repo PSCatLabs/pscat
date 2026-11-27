@@ -62,4 +62,82 @@ fn a_growth_past_the_memory_limit_is_refused_before_it_is_made() {
         .expect("the allocator is installed");
     it.run_str("65535 (x) defineuserobject 65535 execuserobject type pop")
         .expect("grows within the limit");
+
+    refusals_leave_the_state_alone(slot);
+}
+
+/// What a refusal left: the operand stack as `count`, the top object's
+/// type, and `UserObjects`' length (0 for none), read with no limit.
+fn state_after(it: &mut Interp) -> (usize, String, usize) {
+    it.set_limits(Limits::none()).expect("no limit");
+    it.capture_stdout();
+    it.run_str(
+        "count 8 string cvs print ( ) print count 0 gt { dup type 16 string cvs print } if \
+         ( ) print userdict /UserObjects known { userdict /UserObjects get length } { 0 } ifelse \
+         8 string cvs print",
+    )
+    .expect("the interpreter still runs");
+    let out = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    let mut words = out.split_whitespace();
+    let count = words.next().and_then(|w| w.parse().ok()).expect("count");
+    let top = words.next().expect("top").to_string();
+    let len = words.next().and_then(|w| w.parse().ok()).expect("length");
+    (count, top, len)
+}
+
+/// Codex round 1 (L1, L2, L3, L4): each refusal comes before anything is
+/// made or installed, so the operands and `UserObjects` are as they were.
+fn refusals_leave_the_state_alone(slot: usize) {
+    // L1: a one-slot view over a 200000-slot array; the save snapshot
+    // copies all of it, which is what is refused.
+    for (write, operands) in [("0 (new) defineuserobject", 3), ("0 undefineuserobject", 2)] {
+        let mut it = Interp::new();
+        it.run_str("/big 200000 array def userdict /UserObjects big 0 1 getinterval put")
+            .expect("a view");
+        it.set_limits(Limits::none().with_max_memory(200000 * slot / 2))
+            .expect("the allocator is installed");
+        assert_eq!(
+            it.run_str(&format!("save {write}")),
+            Err(PsError::MemoryExceeded),
+            "L1 {write}"
+        );
+        let (count, _, len) = state_after(&mut it);
+        assert_eq!((count, len), (operands, 1), "L1 {write}");
+    }
+
+    // L2: the snapshot is taken once per save level, so a second write
+    // needs no more room than the first.
+    let mut it = Interp::new();
+    it.run_str("65535 null defineuserobject").expect("an array");
+    it.set_limits(Limits::none().with_max_memory(65535 * slot * 3 / 2))
+        .expect("the allocator is installed");
+    it.run_str("save 0 null defineuserobject 0 (new) defineuserobject 0 undefineuserobject")
+        .expect("one snapshot fits, and a second is not taken");
+
+    // L3: the first write to a big userdict inside a save copies it.
+    let mut it = Interp::new();
+    it.run_str("1 1 100000 { 20 string cvs cvn 0 def } for")
+        .expect("a big userdict");
+    it.set_limits(Limits::none().with_max_memory(1 << 20))
+        .expect("the allocator is installed");
+    assert_eq!(
+        it.run_str("save 0 null defineuserobject"),
+        Err(PsError::MemoryExceeded),
+        "L3"
+    );
+    let (count, _, len) = state_after(&mut it);
+    assert_eq!((count, len), (3, 0), "L3: nothing installed");
+
+    // L4: a growth builds its final capacity at once. The old array is
+    // kept, so a copy-then-resize (which doubles the capacity) would hold
+    // twice what the new array needs.
+    let mut it = Interp::new();
+    it.run_str("userdict /UserObjects 65534 array put /old userdict /UserObjects get def")
+        .expect("an array");
+    it.set_limits(Limits::none().with_max_memory(65536 * slot * 3 / 2))
+        .expect("the allocator is installed");
+    it.run_str("65535 null defineuserobject")
+        .expect("the new array is one allocation of 65536 slots");
+    let (_, _, len) = state_after(&mut it);
+    assert_eq!(len, 65536);
 }

@@ -118,3 +118,92 @@ fn a_tail_recursive_object_is_stopped_by_the_step_limit() {
         Err(PsError::StepsExceeded)
     );
 }
+
+/// What a stop left: the operand stack as `count` and the top object,
+/// and the length of `UserObjects` (0 when there is none), read with the
+/// limits lifted. A refused operator puts its operands back (the ledger),
+/// so these are what they were before it ran.
+fn state_after(it: &mut Interp) -> (usize, String, usize) {
+    it.set_limits(Limits::none()).expect("no memory limit");
+    it.capture_stdout();
+    it.run_str(
+        "count 8 string cvs print ( ) print count 0 gt { dup type 16 string cvs print } if \
+         ( ) print userdict /UserObjects known { userdict /UserObjects get length } { 0 } ifelse \
+         8 string cvs print",
+    )
+    .expect("the interpreter still runs");
+    let out = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    let mut words = out.split_whitespace();
+    let count = words.next().and_then(|w| w.parse().ok()).expect("count");
+    let top = words.next().expect("top").to_string();
+    let len = words.next().and_then(|w| w.parse().ok()).expect("length");
+    (count, top, len)
+}
+
+#[test]
+fn a_snapshot_of_a_narrow_view_is_charged_for_the_whole_backing_store() {
+    // `journal_array` copies the whole 655350-slot storage under a
+    // one-slot view, so the charge is for that (Codex round 1, L1).
+    for (write, operands) in [("0 null defineuserobject", 3), ("0 undefineuserobject", 2)] {
+        let mut it = Interp::new();
+        it.run_str("userdict /UserObjects 655350 array 0 1 getinterval put")
+            .expect("a view");
+        it.set_limits(Limits::none().with_max_steps(100))
+            .expect("no memory limit");
+        it.capture_stdout();
+        assert_eq!(
+            it.run_str(&format!("save {write} (done) =")),
+            Err(PsError::StepsExceeded),
+            "{write}"
+        );
+        assert!(it.captured_stdout().is_empty(), "{write}");
+        let (count, _, len) = state_after(&mut it);
+        assert_eq!((count, len), (operands, 1), "{write}: operands restored");
+    }
+}
+
+#[test]
+fn only_the_first_write_at_a_save_level_is_charged_a_snapshot() {
+    // 100 writes in one save copy the array once (L2): 1025 steps for the
+    // snapshot, a handful for each write.
+    let mut it = Interp::new();
+    it.run_str("65535 null defineuserobject").expect("an array");
+    it.set_limits(Limits::none().with_max_steps(10_000))
+        .expect("no memory limit");
+    it.run_str("save 100 { 0 null defineuserobject } repeat pop")
+        .expect("one snapshot, not a hundred");
+    it.run_str("save 100 { 0 undefineuserobject } repeat pop")
+        .expect("the same for undefine");
+}
+
+#[test]
+fn the_first_userdict_snapshot_is_charged_before_userobjects_is_installed() {
+    // A save makes the first write to userdict copy all of it (L3).
+    let mut it = Interp::new();
+    it.run_str("1 1 100000 { 20 string cvs cvn 0 def } for")
+        .expect("a big userdict");
+    it.set_limits(Limits::none().with_max_steps(100))
+        .expect("no memory limit");
+    assert_eq!(
+        it.run_str("save 0 null defineuserobject"),
+        Err(PsError::StepsExceeded)
+    );
+    let (count, _, len) = state_after(&mut it);
+    assert_eq!((count, len), (3, 0), "nothing installed, operands back");
+}
+
+#[test]
+fn new_slots_are_charged_as_they_are_initialised() {
+    // 65535 fresh nulls cost steps too, not only a copy (L5).
+    let mut it = Interp::new();
+    it.set_limits(Limits::none().with_max_steps(100))
+        .expect("no memory limit");
+    it.capture_stdout();
+    assert_eq!(
+        it.run_str("65535 null defineuserobject (done) ="),
+        Err(PsError::StepsExceeded)
+    );
+    assert!(it.captured_stdout().is_empty());
+    let (count, _, len) = state_after(&mut it);
+    assert_eq!((count, len), (2, 0), "no array made, operands back");
+}
