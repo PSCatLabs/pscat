@@ -23,7 +23,7 @@ because nothing compared a shrinking cone; it now is (`cone-shrink`, all four
 `/Extend`s).
 
 **Does `fr > r` draw?** Probed before relying on it. Chrome 158 (Playwright)
-draws it as canvas `createRadialGradient` does (0 pixels of 62,000 differ
+draws it as canvas `createRadialGradient` does (0 of 21,124 painted pixels differ
 from the canvas gradient; and 0 differ from our PNG over sixteen cone
 programs under every `/Extend`, two apex pixels aside), and so does resvg.
 WebKit (`qlmanage` thumbnail) differs from the PNG only on the cone's edge
