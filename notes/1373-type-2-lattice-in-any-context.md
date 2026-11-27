@@ -104,3 +104,27 @@ turned case at device (13, 591), the made-and-used case at (50, 277)).
   7.3 gives 7 14 21 28 here and 7 14 21 29 in gs) and #1390 need
   `geometry()` to give those patterns a lattice. Once it does, this change
   lays them out in any context too.
+
+## Codex round 1 on PR #1480
+
+- **A, a far origin.** The cell's turn into gs's device
+  (`lattice_in_gs`) was composed in f32. With the cell near 1e8 px,
+  cancellation lost the small translation that keeps the turned cell
+  inside its bitmap, so the page came out blank. The turn is now worked
+  out in f64. gs paints 7,688 px at 1e7, 1e8 and -1e8; we paint 7,688,
+  7,688 and 7,440 (the starts drift by f32 rounding there, as on the
+  base). Past 1e8 gs loses cells itself (992 px at 1e9, 1,364 at -1e9).
+  At -1e9 the lattice guard (1e9 px) sends the pattern to the period,
+  which paints 25,800 px, as Type 1 and 3 do there (they are unchanged
+  from the base at every translation tried).
+- **B, an uncharged turn.** The turn and the recolouring are counted in
+  the layout's work and charged with the copies, before any of it is
+  done. The turn is copied pixel by pixel and looks at the limits every
+  64 rows (`orient_cell_polled`), with the same pixels as the
+  nearest-sampled draw. With no cell reaching the canvas, nothing is
+  turned, recoloured or copied: the layout is the empty canvas.
+- **C.** Tests for both, gs's starts for a 7.35 step, negative steps,
+  overlapping two-colour cells and two nested `PaintProc`s (plain, and
+  the middle turned), and a ladder of clocks instead of a 50 ms budget. A
+  sub-pixel cell is not pinned: gs paints it aliased, we paint its
+  coverage (#1375).

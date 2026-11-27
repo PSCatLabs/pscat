@@ -481,6 +481,46 @@ pub(crate) fn orient_cell(content: &Pixmap, lat: &Lattice) -> Option<Pixmap> {
     Some(cell)
 }
 
+/// Rows of a cell turned between two looks at the limits.
+const TURN_ROWS_PER_CHECK: u32 = 64;
+
+/// [`orient_cell`] for `lat.orient` a signed permutation with a whole
+/// translation (what [`lattice_in_gs`] gives), copied pixel by pixel so
+/// the limits are looked at every [`TURN_ROWS_PER_CHECK`] rows (#1373,
+/// Codex round 1, finding B): the same pixels as `orient_cell`.
+fn orient_cell_polled(
+    content: &Pixmap,
+    lat: &Lattice,
+    probe: &crate::limits::LimitProbe,
+) -> Result<Option<Pixmap>, PsError> {
+    let Some(mut cell) = Pixmap::new(lat.cell.0, lat.cell.1) else {
+        return Ok(None);
+    };
+    let Some(inv) = lat.orient.invert() else {
+        return Ok(None);
+    };
+    let (sw, sh) = (i64::from(content.width()), i64::from(content.height()));
+    let src = content.pixels();
+    let (w, h) = (lat.cell.0, lat.cell.1);
+    let dst = cell.pixels_mut();
+    for v in 0..h {
+        if v % TURN_ROWS_PER_CHECK == 0 {
+            probe.check(0)?;
+        }
+        for u in 0..w {
+            // The source pixel whose centre the pixel centre maps from.
+            let (x, y) = (f64::from(u) + 0.5, f64::from(v) + 0.5);
+            let sx = (f64::from(inv.sx) * x + f64::from(inv.kx) * y + f64::from(inv.tx)).floor();
+            let sy = (f64::from(inv.ky) * x + f64::from(inv.sy) * y + f64::from(inv.ty)).floor();
+            let (sx, sy) = (sx as i64, sy as i64);
+            if (0..sw).contains(&sx) && (0..sh).contains(&sy) {
+                dst[(v * w + u) as usize] = src[(sy * sw + sx) as usize];
+            }
+        }
+    }
+    Ok(Some(cell))
+}
+
 /// The device positions `origin + floor(i * step)` of the cells along one
 /// axis that reach `[0, len)`, each `size` pixels long. Computed from the
 /// pattern's origin for every `i`, never by adding steps up, so a band or
@@ -521,7 +561,10 @@ fn lattice_count(origin: i32, step: f64, size: u32, len: u32) -> (u64, u64) {
 /// What laying `cell` out over a `w` x `h` canvas takes: the peak bytes
 /// held (the canvas, a row of cells, the cell positions, the cell turned
 /// to gs's device when `turned`, and for an uncoloured pattern the
-/// recoloured cell) and the work: pixels written and positions looked at.
+/// recoloured cell) and the work: pixels written (the turn and the
+/// recolouring included) and positions looked at; and whether any cell
+/// reaches the canvas. With none, the layout is the empty canvas: nothing
+/// is turned, recoloured or copied (#1373, Codex round 1, finding B).
 fn lay_out_cost(
     cell: (u32, u32),
     lat: &Lattice,
@@ -529,15 +572,19 @@ fn lay_out_cost(
     h: u32,
     recolored: bool,
     turned: bool,
-) -> (usize, u64) {
+) -> (usize, u64, bool) {
     let (cw, ch) = (u64::from(cell.0), u64::from(cell.1));
     let (nx, ix) = lattice_count(lat.origin.0, lat.step.0, cell.0, w);
     let (ny, iy) = lattice_count(lat.origin.1, lat.step.1, cell.1, h);
     let (w, h) = (u64::from(w), u64::from(h));
+    if nx == 0 || ny == 0 {
+        let bytes = usize::try_from(4 * w * h).unwrap_or(usize::MAX);
+        return (bytes, ix + iy, false);
+    }
     let extra = u64::from(recolored) + u64::from(turned);
     let bytes = 4 * (w * h + w * ch + extra * cw * ch + nx + ny);
-    let work = nx * cw * ch + ny * w * ch + ix + iy;
-    (usize::try_from(bytes).unwrap_or(usize::MAX), work)
+    let work = extra * cw * ch + nx * cw * ch + ny * w * ch + ix + iy;
+    (usize::try_from(bytes).unwrap_or(usize::MAX), work, true)
 }
 
 /// The lattice `lat` (in its pattern's context's device coordinates) in
@@ -583,10 +630,13 @@ fn lattice_in_gs(lat: &Lattice, to_gs: Transform) -> Option<Lattice> {
     } else {
         (lat.cell.1, lat.cell.0)
     };
-    // Oriented cell pixel (u, v) is context pixel (x0 + u, y0 + v).
-    let turn = Transform::from_translate(-gx as f32, -gy as f32)
-        .pre_concat(t)
-        .pre_concat(Transform::from_translate(x0 as f32, y0 as f32));
+    // Oriented cell pixel (u, v) is context pixel (x0 + u, y0 + v), so the
+    // turn is t's linear part with the translation map(x0, y0) - (gx, gy),
+    // a whole number between 0 and the cell's size. Worked out in f64:
+    // composed in f32, a far origin (1e8 px) cancels it away (#1373, Codex
+    // round 1, finding A).
+    let (tx, ty) = map(x0, y0);
+    let turn = Transform::from_row(t.sx, t.ky, t.kx, t.sy, (tx - gx) as f32, (ty - gy) as f32);
     Some(Lattice {
         step,
         origin: (gx as i32, gy as i32),
@@ -947,14 +997,17 @@ impl PatternTile {
             ..gs_lat
         };
         let turned = !gs_lat.orient.is_identity();
-        let (bytes, cost) = lay_out_cost(lat.cell, &lat, w, h, self.uncolored, turned);
+        let (bytes, cost, any) = lay_out_cost(lat.cell, &lat, w, h, self.uncolored, turned);
         if probe.check_alloc(bytes).is_err() {
             return Ok(());
         }
+        // The whole layout's work, the turn included, before any of it.
         probe.check(cost / 1024)?;
         let turned_cell;
-        let cell: &Pixmap = if turned {
-            match orient_cell(cell, &gs_lat) {
+        let cell: &Pixmap = if !any {
+            cell
+        } else if turned {
+            match orient_cell_polled(cell, &gs_lat, probe)? {
                 Some(c) => {
                     turned_cell = c;
                     &turned_cell
@@ -964,7 +1017,9 @@ impl PatternTile {
         } else {
             cell
         };
-        let laid = if self.uncolored {
+        let laid = if !any {
+            Pixmap::new(w, h)
+        } else if self.uncolored {
             let tinted = recolor(cell, [key.2[0], key.2[1], key.2[2]]);
             lay_out(&tinted, &lat, w, h, probe)?
         } else {
@@ -1273,6 +1328,90 @@ pub(crate) fn context_hop(there_to_gs: Transform, here_to_gs: Transform) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 37 x 150 canvas with every pixel distinct, and a lattice of its
+    /// cell turned by `orient` (the eight signed permutations).
+    fn turn_case(orient: [f32; 4]) -> (Pixmap, Lattice) {
+        let (w, h) = (37u32, 150u32);
+        let mut pm = Pixmap::new(w, h).unwrap();
+        for (i, p) in pm.pixels_mut().iter_mut().enumerate() {
+            let v = (i % 251) as u8;
+            *p = PremultipliedColorU8::from_rgba(v / 2, v / 3, v / 4, v.max(1)).unwrap();
+        }
+        let [a, b, c, d] = orient;
+        let along = b == 0.0;
+        let cell = if along { (w, h) } else { (h, w) };
+        // The translation that puts the turned canvas at (0, 0).
+        let tx = -(a.min(0.0) * w as f32 + c.min(0.0) * h as f32);
+        let ty = -(b.min(0.0) * w as f32 + d.min(0.0) * h as f32);
+        let lat = Lattice {
+            step: (1.0, 1.0),
+            origin: (0, 0),
+            orient: Transform::from_row(a, b, c, d, tx, ty),
+            cell,
+        };
+        (pm, lat)
+    }
+
+    const TURNS: [[f32; 4]; 8] = [
+        [1.0, 0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0, -1.0],
+        [-1.0, 0.0, 0.0, -1.0],
+        [0.0, 1.0, 1.0, 0.0],
+        [0.0, -1.0, 1.0, 0.0],
+        [0.0, 1.0, -1.0, 0.0],
+        [0.0, -1.0, -1.0, 0.0],
+    ];
+
+    /// The polled turn gives the pixels the nearest-sampled draw gives, and
+    /// looks at the limits as it goes (#1373, Codex round 1 on PR #1480,
+    /// finding B).
+    #[test]
+    fn the_polled_turn_matches_the_draw_and_looks_at_the_limits() {
+        for o in TURNS {
+            let (pm, lat) = turn_case(o);
+            let drawn = orient_cell(&pm, &lat).unwrap();
+            crate::limits::CHECKS.with(|c| c.set(0));
+            let polled = orient_cell_polled(&pm, &lat, &crate::limits::LimitProbe::NONE)
+                .unwrap()
+                .unwrap();
+            assert!(polled.data() == drawn.data(), "{o:?}");
+            let rows = u64::from(lat.cell.1).div_ceil(u64::from(TURN_ROWS_PER_CHECK));
+            assert_eq!(crate::limits::CHECKS.with(|c| c.get()), rows, "{o:?}");
+        }
+        let (pm, lat) = turn_case(TURNS[5]);
+        let past = crate::limits::LimitProbe {
+            deadline_ns: Some(0),
+            ..crate::limits::LimitProbe::NONE
+        };
+        assert_eq!(
+            orient_cell_polled(&pm, &lat, &past).err(),
+            Some(PsError::TimeExceeded)
+        );
+    }
+
+    /// No cell reaching the canvas: no turn, no recolouring, no copies, so
+    /// none of their work or bytes; one reaching: the turn and the
+    /// recolouring are charged with the copies (finding B).
+    #[test]
+    fn a_layout_charges_its_turn_only_when_a_cell_reaches() {
+        let lat = |origin| Lattice {
+            step: (4000.3, 4000.3),
+            origin,
+            orient: Transform::identity(),
+            cell: (2000, 2000),
+        };
+        let (bytes, work, any) =
+            lay_out_cost((2000, 2000), &lat((1000, -2900)), 100, 100, true, true);
+        assert!(!any);
+        assert_eq!(bytes, 4 * 100 * 100);
+        assert!(work < 16, "{work}");
+        let (_, plain, any) = lay_out_cost((2000, 2000), &lat((0, 0)), 100, 100, false, false);
+        assert!(any);
+        let (_, both, _) = lay_out_cost((2000, 2000), &lat((0, 0)), 100, 100, true, true);
+        assert_eq!(both - plain, 2 * 2000 * 2000);
+    }
 
     fn spec(matrix: Transform, bbox: [f64; 4], xstep: f64, ystep: f64) -> TileSpec {
         TileSpec {
