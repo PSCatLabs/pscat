@@ -705,4 +705,41 @@ fn memory_growth_is_capped() {
         ));
         assert_eq!(r, Ok(()), "the second page fits as the first did");
     }
+    // A radial whose circles are not nested, its end not extended, has a
+    // second gradient in the SVG, one tag a stop (#1370): 8190 stops of a
+    // 4095-leg ramp are held against the cap before anything is painted, so
+    // a refused one leaves the page and the SVG as they were. The nested
+    // radial of the same ramp has no second gradient and runs under the
+    // same cap.
+    let cone_setup = "/n 4095 def \
+         /fns [ 0 1 n 1 sub { 2 mod 0 eq \
+           { << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> } \
+           { << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 1 0] /N 1 >> } ifelse } for ] def \
+         /bounds [ 1 1 n 1 sub { n div } for ] def \
+         /encode [ 0 1 n 1 sub { pop 0 1 } for ] def \
+         1 0 0 setrgbcolor 0 0 8 8 rectfill";
+    let shade = |coords: &str| {
+        format!(
+            "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{coords}] \
+             /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+             /Bounds bounds /Encode encode >> >> shfill"
+        )
+    };
+    for (coords, refused) in [("2 4 1 6 4 3", true), ("4 4 1 4 4 3", false)] {
+        let mut it = Interp::with_page(8, 8).expect("page");
+        it.enable_svg();
+        it.run_str(cone_setup).expect("setup");
+        it.set_limits(Limits::none().with_max_memory(MIB))
+            .expect("the allocator is installed");
+        let r = it.run_str(&shade(coords));
+        let red = it.gfx().pixmap.pixel(4, 4).expect("pixel").red();
+        let svg = it.svg_pages().unwrap_or_default().concat();
+        if refused {
+            assert_eq!(r, Err(PsError::MemoryExceeded), "{coords}");
+            assert_eq!(red, 255, "{coords}: the page is untouched");
+            assert!(!svg.contains("Gradient"), "{coords}: nothing recorded");
+        } else {
+            assert_eq!(r, Ok(()), "{coords}");
+        }
+    }
 }

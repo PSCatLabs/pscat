@@ -169,6 +169,18 @@ fn shfill_work(w: usize, h: usize, stops: usize) -> u64 {
         .saturating_mul(16 + (stops as u64) / 4)
 }
 
+/// Bytes the SVG's second gradient (the smaller root of a radial whose
+/// circles are not nested, #1370) takes a stop: its `<stop>` tag and the
+/// string it is formatted in, which is why it is held before anything is
+/// painted.
+const SVG_STOP_BYTES: usize = 256;
+
+/// Units of work writing that second gradient for `stops` stops is: a tag a
+/// stop, about as much as painting 500 pixels.
+fn svg_second_gradient_work(stops: usize) -> u64 {
+    (stops as u64).saturating_mul(512)
+}
+
 /// Rows of the page one `shfill` strip paints between looks at the limits:
 /// about [`SHFILL_STRIP_WORK`] units, so a strip is milliseconds.
 fn shfill_strip_rows(w: usize, stops: usize) -> usize {
@@ -2851,7 +2863,12 @@ impl Gfx {
         // (three walks with a two-root layer: two gradients and its paint).
         let (pw, ph) = (self.pixmap.width() as usize, self.pixmap.height() as usize);
         let passes = if smaller_root.is_some() { 3 } else { 1 };
-        let work = shfill_work(pw, ph, nstops).saturating_mul(passes);
+        let mut work = shfill_work(pw, ph, nstops).saturating_mul(passes);
+        if smaller_root.is_some() {
+            // The SVG then holds a second gradient of every stop (#1370).
+            work = work.saturating_add(svg_second_gradient_work(shading.stops.len()));
+            probe.check_alloc(shading.stops.len().saturating_mul(SVG_STOP_BYTES))?;
+        }
         probe.check(work / 1024)?;
         let layer = match smaller_root {
             Some(smaller) => Some(two_root_layer(
@@ -7065,9 +7082,14 @@ pub(crate) fn shading_layer(
                 return Ok((layer, base));
             };
             let passes = if smaller.is_some() { 3 } else { 1 };
-            let work = shfill_work(wu, hu, nstops)
+            let mut work = shfill_work(wu, hu, nstops)
                 .saturating_mul(passes)
                 .saturating_add(base);
+            if smaller.is_some() {
+                // The SVG then holds a second gradient of every stop (#1370).
+                work = work.saturating_add(svg_second_gradient_work(g.stops.len()));
+                probe.check_alloc(g.stops.len().saturating_mul(SVG_STOP_BYTES))?;
+            }
             probe.check(work / 1024)?;
             match smaller {
                 Some(smaller) => {

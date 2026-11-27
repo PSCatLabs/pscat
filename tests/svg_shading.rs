@@ -26,7 +26,7 @@ const HARD_EDGES: &str = "/Function << /FunctionType 3 /Domain [0 1] /Bounds [0 
 const EXTENDS: [&str; 4] = ["false false", "true false", "false true", "true true"];
 
 /// (name, what goes before the dictionary, the dictionary's own keys).
-const CASES: [(&str, &str, &str); 15] = [
+const CASES: [(&str, &str, &str); 17] = [
     ("edges", "", "/ShadingType 2 /Coords [100 0 400 0]"),
     (
         "equal",
@@ -95,6 +95,18 @@ const CASES: [(&str, &str, &str); 15] = [
         "cone-shrink",
         "",
         "/ShadingType 3 /Coords [260 250 60 160 250 20]",
+    ),
+    // A cone from a point and one to a point: SVG's outer circle of radius
+    // 0 would paint the last stop everywhere.
+    (
+        "cone-from-point",
+        "",
+        "/ShadingType 3 /Coords [160 250 0 300 250 60]",
+    ),
+    (
+        "cone-to-point",
+        "",
+        "/ShadingType 3 /Coords [300 250 60 160 250 0]",
     ),
 ];
 
@@ -358,16 +370,28 @@ fn each_degenerate_case_writes_what_the_png_paints() {
 /// need it, with its end extended, is one gradient as before.
 #[test]
 fn a_cone_with_its_end_not_extended_paints_its_smaller_root_first() {
-    for case in [13, 14] {
+    for case in 13..=16 {
         let (name, pre, dict) = CASES[case];
         for ext in ["false false", "true false"] {
             let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
-            assert_eq!(svg.matches("<radialGradient").count(), 2, "{name} [{ext}]: {svg}");
-            assert_eq!(svg.matches("fill=\"url(#").count(), 2, "{name} [{ext}]: {svg}");
+            assert_eq!(
+                svg.matches("<radialGradient").count(),
+                2,
+                "{name} [{ext}]: {svg}"
+            );
+            assert_eq!(
+                svg.matches("fill=\"url(#").count(),
+                2,
+                "{name} [{ext}]: {svg}"
+            );
         }
         for ext in ["false true", "true true"] {
             let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
-            assert_eq!(svg.matches("<radialGradient").count(), 1, "{name} [{ext}]: {svg}");
+            assert_eq!(
+                svg.matches("<radialGradient").count(),
+                1,
+                "{name} [{ext}]: {svg}"
+            );
         }
         // The hole: a point right of the end circle (260, 250), 110 from
         // the start circle's centre, where the larger root is past the end.
@@ -382,6 +406,29 @@ fn a_cone_with_its_end_not_extended_paints_its_smaller_root_first() {
                 }
             }
         }
-        assert_eq!(hole, 0, "{name}: {hole} pixels the PNG paints are bare in the SVG");
+        assert_eq!(
+            hole, 0,
+            "{name}: {hole} pixels the PNG paints are bare in the SVG"
+        );
+    }
+}
+
+/// A translucent cone composites once: the two gradients share one group
+/// that carries the opacity, so where both roots paint the page shows
+/// through as it does in the PNG, not twice over.
+#[test]
+fn a_translucent_cone_composites_its_two_roots_as_one() {
+    let (name, pre, dict) = CASES[13];
+    let src = program(name, &format!("0.5 setalpha {pre}"), dict, "false false");
+    let (png, svg) = png_and_svg(&src);
+    assert!(svg.contains("<g opacity=\"0.5\"><path"), "{svg}");
+    assert_eq!(svg.matches("opacity=\"0.5\"").count(), 1, "{svg}");
+    let theirs = resvg_raster(&svg);
+    for (x, y) in [(150, 250), (210, 250), (270, 250), (300, 250)] {
+        let (a, b) = (rgb(&png, x, y), rgb(&theirs, x, y));
+        assert!(
+            a.iter().zip(b).all(|(p, q)| p.abs_diff(q) <= 24),
+            "({x},{y}): PNG {a:?}, SVG {b:?}"
+        );
     }
 }
