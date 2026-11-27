@@ -1889,9 +1889,18 @@ mod tests {
         let off = "/Helvetica findfont dup length dict copy dup /PSCatUnicode false put \
                    /H-B exch definefont 12 scalefont setfont 5 40 moveto ";
         assert!(utf8_messages(&format!("{off}{text}")).is_empty());
+        // A composite (Type 0) dict reads codes of its own.
+        let t0 = "/Helvetica findfont dup length dict copy dup /FontType 0 put \
+                  /H-0 exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert!(utf8_messages(&format!("{t0}{text}")).is_empty());
         // The catalog's Unicode-mode faces, when this build has one.
-        let it = run("/NanumBrushScript-Regular findfont pop");
-        if it.operand_stack().is_empty() {
+        // (A face that is not found is replaced by Helvetica, so the guard
+        // reads the name the dict ended up with.)
+        let mut it = run("/NanumBrushScript-Regular findfont /FontName get");
+        let loaded = it.pop().is_ok_and(
+            |n| matches!(&n.value, Value::Name(n) if &**n == "NanumBrushScript-Regular"),
+        );
+        if loaded {
             let src = format!(
                 "/NanumBrushScript-Regular findfont 12 scalefont setfont 5 40 moveto {text}"
             );

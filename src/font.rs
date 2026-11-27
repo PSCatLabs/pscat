@@ -70,8 +70,9 @@ fn outline_unicode(fs: &FontState) -> bool {
 ///   skipped, as is Symbol and ZapfDingbats, whose high bytes are symbol
 ///   codes that can happen to form UTF-8;
 /// - a Unicode-mode font ([`UNICODE_KEY`], and so a copy made by
-///   `scalefont`, `definefont` and the like) and a font that says
-///   `/PSCatUnicode false` (bytes on purpose) are left alone.
+///   `scalefont`, `definefont` and the like), a font that says
+///   `/PSCatUnicode false` (bytes on purpose) and a `/FontType 0` dict
+///   (whose codes are the program's own) are left alone.
 ///
 /// The Encoding is not read: a re-encoded font still gets bytes, not UTF-8.
 pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(String, &'a str)> {
@@ -81,14 +82,19 @@ pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(S
     if outline_unicode(fs) || symbolic_encoding(fs.fid).is_some() {
         return None;
     }
-    let off = fs
-        .dict
-        .borrow()
+    // `/PSCatUnicode false` is bytes on purpose; a composite font (Type 0)
+    // reads multi-byte codes of its own, which can look like UTF-8.
+    let dict = fs.dict.borrow();
+    let off = dict
         .get(UNICODE_KEY)
         .is_some_and(|o| matches!(o.value, Value::Boolean(false)));
-    if off {
+    let composite = dict
+        .get("FontType")
+        .is_some_and(|o| matches!(o.value, Value::Integer(0)));
+    if off || composite {
         return None;
     }
+    drop(dict);
     let text = std::str::from_utf8(text).ok()?;
     Some((font_name(fs), text))
 }

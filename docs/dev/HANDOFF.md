@@ -1962,8 +1962,10 @@ renders eight examples in both and compares block-downsampled output).
   `Interp::trace_utf8_text` (on under `--lint`): `Interp::begin_show`, which every
   show-family operator reaches, passes the string and font to `font::utf8_in_byte_font`,
   which errs toward silence (whole-string UTF-8, outline non-symbolic face, no
-  `/PSCatUnicode`), into a bounded `lint::Utf8TextTrace`. Library embedders (psanim,
-  pscat-mcp) must call `trace_utf8_text()` (doc(hidden)) to get it.
+  `/PSCatUnicode`), into a bounded `lint::Utf8TextTrace`. The CLI and this crate's
+  `pscat mcp` server (it runs `--lint`) get it; a host that builds its own `Interp`
+  (psanim's `check`, the separate pscat-mcp repo) must call the doc(hidden)
+  `trace_utf8_text()` before the run.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
