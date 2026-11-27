@@ -47,17 +47,39 @@ Dashing runs after the trim. The dashes fall where they do on the real line,
 zero-length dashes included (they are cut from a real subpath, not a
 zero-length segment).
 
-**Cost and limits.** One pass over the path's segments per stroke to find a
-zero-length segment, and a clone of the path only when one is found (before,
-only a square-capped path with a point subpath was cloned). A stroke already
-copies the whole path into a tiny-skia path (`to_skia_for_stroke`), uncharged
-and the same size, so the clone at most doubles a transient the stroke
-already makes. `--max-memory` is a process-heap count (`src/memtrack.rs`,
-`TrackingAllocator`), so the clone is counted like any allocation and the run
-stops at the next step check if it crosses the cap. `--max-steps` and
-`--max-time` are charged per executed operator, and the pass is linear in a
-path whose segments those operators already paid for; nothing loops on a
-user-chosen count and nothing is quadratic.
+**A curve after a dropped segment (Codex round 1, PR #1454).** gs rounds
+every point to its grid, so a curve's first control point on the start's grid
+point has no direction and the cap or join follows the next control point.
+tiny-skia does that only for a control point that is the start to the bit,
+and otherwise takes a hair's width as the tangent: after dropping
+`25.001 25.001 lineto`, `25.001 25 60 60 90 40 curveto` (20 wide, square caps)
+gave a cap along +x, `strokepath pathbbox` starting `[15 15 ...]` against gs's
+`[10.859375 10.859375 ...]` and the base's `[10.858812 10.858826 ...]`. The
+trimmed path now sets a curve's first control point to the start it has in
+the copy when both are on one grid point, and its second to its end
+likewise (`without_degenerate_segments`), so the pre-existing near-miss the
+base got by luck is also right. The far end of the curve's outline is a
+separate 2.9 px gap to gs on the clean path (the upper y), left alone.
+
+**Cost and limits (Codex round 1, PR #1454).** The walks are held to the
+limits as `reversepath` (#1266) is. `without_degenerate_segments` takes the
+operator's probe and counts every segment each walk looks at on a `Meter`:
+the subpath discovery (`subpaths`, now fallible, polls inside the loop that
+finds a subpath's end and the one that tests whether it moves), the scan
+for what changes, and the copy. The probe is looked at every 4096 segments
+counted (`FLATTEN_POLL`, a step per 1024). The count comes back as the work
+`stroke` and `strokepath` hand to the operator, which charges a step per 1024
+(`charge_probed_steps`). A path with nothing to change is walked about
+twice (find the subpaths, test them) and charged for it; one with something
+to change about three times. `stroke_space` runs the same walk over the
+pen-space path, so a stroke under an anisotropic CTM is charged for both:
+twice the walks, counted twice. The scan counts the path's subpaths first, and
+the copy (at most the path's segments and a moveto per subpath) is held
+against the heap cap before it is made. A stop returns before the path or
+the graphics state is touched, since the trimmed path is a new one.
+`strokepath` has the same limited form (`stroke_path_limited`). Cost with no
+limits: the walks are a counter increment per segment, no clone when nothing
+changes.
 
 **Tests** (`tests/stroke_anisotropic.rs`, last section). Butt and square caps
 with miter and bevel joins are pinned against gs (`strokepath` bbox and the

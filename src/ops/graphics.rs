@@ -467,7 +467,11 @@ fn stroke(it: &mut Interp) -> Result<(), PsError> {
 /// `strokepath` -- replace the current path with the outline `stroke`
 /// would paint. No error on an empty path (gs-pinned).
 fn strokepath(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.stroke_path();
+    // Under the limits (#1224): the walks that drop zero-length segments
+    // are charged a step per 1024 segments, and a stop leaves the path.
+    let probe = it.limit_probe();
+    let work = it.gfx.stroke_path_limited(&probe)?;
+    it.charge_probed_steps(work / 1024);
     Ok(())
 }
 
