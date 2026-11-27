@@ -2817,3 +2817,53 @@ fn a_thin_or_long_bbox_keeps_the_shapes_own_edge_coverage() {
     );
     assert_eq!(ink_at(&it, 2001, 46), 0);
 }
+
+/// A `/BBox` narrower than the snap's 1e-3 px noise guard still owns the
+/// pixel it falls in (#1470): the guard used to leave such a footprint
+/// empty, so nothing was snapped and the cell kept the clip's own
+/// anti-aliased mask, which is 0 for a sliver. A shape past the `/BBox`
+/// fills the footprint's pixel solid and stops, as for any other cell
+/// (`a_rectfill_past_the_bbox_fills_the_edge_pixel_and_stops`).
+#[test]
+fn a_sub_pixel_bbox_still_fills_its_pixel_when_a_shape_runs_past_it() {
+    // [0 0.0004] sits inside column 0.
+    let it = cell_and_page(2, "0 0 0.0004 5.65", "7.3", "-5 -5 20 20", "50 0 1 1");
+    for y in 44..50 {
+        let row: Vec<i32> = (0..3).map(|x| ink_at(&it, x, y)).collect();
+        assert_eq!(row, [255, 0, 0], "row {y}");
+    }
+    assert_eq!(ink_at(&it, 0, 43), 0, "the cell stops at its top");
+
+    // [0.9995 1.0004] straddles the boundary of columns 0 and 1, within the
+    // guard's reach of both. The lattice puts the cell's corner on column 1
+    // (0.9995 rounds up, as gs's accumulator does), so it is a sliver at that
+    // column's left edge: the same case as above, one column along.
+    let it = cell_and_page(2, "0.9995 0 1.0004 5.65", "7.3", "-5 -5 20 20", "50 0 1 1");
+    for y in 44..50 {
+        let row: Vec<i32> = (0..3).map(|x| ink_at(&it, x, y)).collect();
+        assert_eq!(row, [0, 255, 0], "straddling cell, row {y}");
+    }
+}
+
+/// A shape that ends where such a `/BBox` ends keeps its own coverage, the
+/// page's value for the same rectangle (a few thousandths of a pixel, so
+/// nothing is painted): the snap must not turn a sliver of ink into a pixel.
+#[test]
+fn a_sub_pixel_bbox_keeps_an_edge_on_rectfill_s_own_coverage() {
+    let it = cell_and_page(
+        2,
+        "0 0 0.0004 5.65",
+        "7.3",
+        "0 0 0.0004 5.65",
+        "50 0.35 0.0004 5.65",
+    );
+    for y in 43..50 {
+        for x in 0..2u32 {
+            let (cell, page) = (ink_at(&it, x, y), ink_at(&it, 50 + x, y));
+            assert!(
+                (cell - page).abs() <= 2 && cell <= 2,
+                "pixel ({x}, {y}) is {cell} in the cell, {page} on the page"
+            );
+        }
+    }
+}
