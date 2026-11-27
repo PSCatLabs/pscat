@@ -2227,7 +2227,12 @@ fn a_part_ends_as_the_whole_stroke_does() {
         "/Width 8 /Touch 0.5 /Pressure { 0.3 mul 0.85 add } /Seed 3",
         "/Width 8 /Seed 2 /Lanes 4 /Dropout 0.3 /Load 0.5 /Pressure { 0.3 mul 0.85 add }",
     ] {
-        let whole = data(&board(100, 40, 2.0, &format!("{line} << {opts} >> dkstroke")));
+        let whole = data(&board(
+            100,
+            40,
+            2.0,
+            &format!("{line} << {opts} >> dkstroke"),
+        ));
         let tiny = data(&board(
             100,
             40,
@@ -2249,7 +2254,10 @@ fn a_part_ends_as_the_whole_stroke_does() {
             .filter(|&i| !(90..122).contains(&(i % w)))
             .filter(|&i| (0..3).any(|c| whole[i * 4 + c].abs_diff(halves[i * 4 + c]) > 2))
             .count();
-        assert_eq!(far, 0, "`{opts}` halves: {far} pixels away from the seam differ");
+        assert_eq!(
+            far, 0,
+            "`{opts}` halves: {far} pixels away from the seam differ"
+        );
     }
 }
 
