@@ -23,7 +23,7 @@ lacks; 296 pixels over 32 at cut 0.50).
 band's start. `dkFrun` (`dkFover`) finds a run in the part that carries on
 from the run before it, where the stop they share lies within one reach
 (half-width, halo and a device pixel) of the cut. It puts the earlier run's
-tail (three reaches back) before it as an *overlap run*, with flag 16 on its
+tail (two reaches back) before it as an *overlap run*, with flag 16 on its
 stops and `[f hm cl n cx cy chw dx dy bx by br D side]`. `dkZink` draws the
 overlap at every level but the faintest. Each level is one colour for every
 run of a record, drawn pass by pass, so a pixel ends up the colour of the

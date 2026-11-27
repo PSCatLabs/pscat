@@ -889,8 +889,9 @@
         dkFD 0 ge {
             /dkFps dkFprev 1 get def
             dkFps dkFstats /dkFpl exch def /dkFph exch def /dkFpv exch def
-            % the tail: back from the shared stop by three reaches
-            /dkFlim dkFph dkFhalo add 3 mul dkFdp 2 mul add def
+            % the tail: back from the shared stop by two reaches (the clip's
+            % radius and the widest half-width that can reach into it)
+            /dkFlim dkFph dkFhalo add 2 mul dkFdp 2 mul add def
             /dkFj dkFps length 1 sub def /dkFd 0 def
             {
                 dkFj 0 le dkFd dkFlim ge or { exit } if
@@ -1637,22 +1638,18 @@ systemdict /.sameclip known /dkPsameok exch def
 % @internal
 /dkZink {
     /dkZir exch def
-    /dkZflat false def /dkZov null def /dkZskip false def
+    /dkZflat false def /dkZov null def
     dkZir 0 get length 3 gt {
         /dkZvar false def
         dkZir { dup length 3 gt { 3 get 0 get cvi 2 and 0 ne { /dkZvar true def } if } { pop } ifelse } forall
         /dkZflat dkZir 0 get 3 get 0 get cvi 1 and 0 ne def
-        % #1444: the overlap of a cut band's tail (dkFrun's 16), only at the
-        % levels it has there and only inside dkZover's region
-        dkZir 0 get 3 get dup 0 get cvi 16 and 0 ne {
-            /dkZov exch def
-            dkZmax dkZp sub dkZov 12 get gt { /dkZskip true def } if
-        } { pop } ifelse
+        % #1444: the overlap of a cut band's tail (dkFrun's 16), only inside
+        % dkZover's region (dkrender leaves it out at the levels it lacks)
+        dkZir 0 get 3 get dup 0 get cvi 16 and 0 ne { /dkZov exch def } { pop } ifelse
         /dkZir [ dkZir { 0 3 getinterval } forall ] def
     } { /dkZvar false def } ifelse
     /dkZconst dkZvar not def
     dkZir { 2 get dkZir 0 get 2 get ne { /dkZconst false def } if } forall
-    dkZskip not {
     dkZflat { gsave dkZbehind } if
     dkZov null ne { gsave dkZover } if
     dkZir length 1 eq dkZconst not or {
@@ -1691,7 +1688,6 @@ systemdict /.sameclip known /dkPsameok exch def
     } ifelse
     dkZov null ne { grestore } if
     dkZflat { grestore } if
-    } if
 } bind def
 
 % entries -   (dkZdraw in chunks whose estimated cells fit dkbudget)
@@ -1769,8 +1765,16 @@ systemdict /.sameclip known /dkPsameok exch def
                     /dkZha dkZj 1 eq dkZL 2 ge and { dkZr /halo get } { 0 } ifelse def
                     dkZr /runs get {
                         aload pop /dkZrun exch def
-                        dkZoff add dkZr /streak get dkZcol aload pop
-                        dkZr dkZrun dkZha 8 array astore
+                        % #1444: an overlap run (dkFover's 16) only at its levels
+                        dkZrun 0 get dup length 3 gt {
+                            3 get dup 0 get cvi 16 and 0 ne
+                                { 12 get dkZmax dkZp sub lt } { pop false } ifelse
+                        } { pop false } ifelse {
+                            pop
+                        } {
+                            dkZoff add dkZr /streak get dkZcol aload pop
+                            dkZr dkZrun dkZha 8 array astore
+                        } ifelse
                     } forall
                 } if
             } forall
