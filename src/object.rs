@@ -157,6 +157,12 @@ impl PsArray {
         (Rc::as_ptr(&self.data) as usize, self.off, self.len)
     }
 
+    /// Slots in the whole backing store, which a view may be a small part
+    /// of: what a `journal_array` copy costs.
+    pub(crate) fn storage_len(&self) -> usize {
+        self.data.try_borrow().map_or(self.len, |d| d.len())
+    }
+
     pub(crate) fn data_rc(&self) -> &Rc<RefCell<Vec<Object>>> {
         &self.data
     }
