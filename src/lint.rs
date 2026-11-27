@@ -689,16 +689,16 @@ impl StackTrace {
         lines: &crate::srcpos::BodyLines,
     ) -> Origin {
         let source = at.run.or(at.main).cloned();
-        let own = (trusted && self.item_set && self.item.site.key != 0)
-            .then(|| {
-                let c = &self.item;
-                (c.site.generation == lines.generation() && Witness::of(&ostack[low]) == c.wit)
-                    .then(|| lines.position_at((c.site.key, c.site.slot)))
-                    .flatten()
-                    .filter(|(_, name)| name.map(|n| &**n) == source.as_deref())
-                    .map_or(0, |(line, _)| line)
-            })
-            .unwrap_or(0);
+        let c = &self.item;
+        let own = if trusted && self.item_set && c.site.key != 0 {
+            (c.site.generation == lines.generation() && Witness::of(&ostack[low]) == c.wit)
+                .then(|| lines.position_at((c.site.key, c.site.slot)))
+                .flatten()
+                .filter(|(_, name)| name.map(|n| &**n) == source.as_deref())
+                .map_or(0, |(line, _)| line)
+        } else {
+            0
+        };
         Origin {
             own,
             line: at.line.and_then(|l| u32::try_from(l).ok()).unwrap_or(0),
