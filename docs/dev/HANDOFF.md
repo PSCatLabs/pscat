@@ -1969,6 +1969,14 @@ renders eight examples in both and compares block-downsampled output).
   oldest leftover item: `Interp::trace_stack_leaks` (on under `--lint`) samples the operand
   depth at each source-token boundary in `sync_scan_line` into `lint::StackTrace` (runs, not
   per item) and credits growth to the previous token's line.
+  `[utf8-in-byte-font]` (#1412, `notes/1412-lint-utf8-in-byte-font.md`) reads
+  `Interp::trace_utf8_text` (on under `--lint`): `Interp::begin_show`, which every
+  show-family operator reaches, passes the string and font to `font::utf8_in_byte_font`,
+  which errs toward silence (whole-string UTF-8, outline non-symbolic face, no
+  `/PSCatUnicode`), into a bounded `lint::Utf8TextTrace`. The CLI and this crate's
+  `pscat mcp` server (it runs `--lint`) get it; a host that builds its own `Interp`
+  (psanim's `check`, the separate pscat-mcp repo) must call the doc(hidden)
+  `trace_utf8_text()` before the run.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
