@@ -99,7 +99,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "rotate", rotate);
 }
 
-fn pop_xy(it: &mut Interp) -> Result<(f64, f64), PsError> {
+pub(super) fn pop_xy(it: &mut Interp) -> Result<(f64, f64), PsError> {
     let y = it.pop_f64()?;
     let x = it.pop_f64()?;
     Ok((x, y))
@@ -112,8 +112,8 @@ fn newpath(it: &mut Interp) -> Result<(), PsError> {
 
 fn moveto(it: &mut Interp) -> Result<(), PsError> {
     let (x, y) = pop_xy(it)?;
-    it.gfx.moveto(x, y);
-    Ok(())
+    // A point past the box `setbbox` set is a `rangecheck` (#1264).
+    it.gfx.moveto_checked(x, y)
 }
 
 fn lineto(it: &mut Interp) -> Result<(), PsError> {
@@ -154,15 +154,39 @@ fn arc_common(it: &mut Interp, ccw: bool) -> Result<(), PsError> {
     let ang1 = it.pop_f64()?;
     let r = it.pop_f64()?;
     let (x, y) = pop_xy(it)?;
+    arc_apply(it, x, y, r, ang1, ang2, ccw)
+}
+
+/// `arc` / `arcn` on the operands already popped, under the limits (also a
+/// user path's, #1264).
+pub(super) fn arc_apply(
+    it: &mut Interp,
+    x: f64,
+    y: f64,
+    r: f64,
+    ang1: f64,
+    ang2: f64,
+    ccw: bool,
+) -> Result<(), PsError> {
     let probe = it.limit_probe();
-    let segments = it.gfx.arc_limited(x, y, r, ang1, ang2, ccw, &probe)?;
-    // A step per 1024 segments, as a file read is charged per KiB (#1176),
-    // so a step cap bounds a run of huge arcs too. An ordinary arc (four
-    // segments a turn) is not charged and costs no clock read.
-    if segments >= 1024 {
-        it.poll_limits((segments / 1024) as u64)?;
-    }
-    Ok(())
+    // An arc a limit stops is taken back whole (#1264): the path is as it
+    // was, as for every operator that is refused.
+    let mark = it.gfx.path_mark();
+    let done = it
+        .gfx
+        .arc_limited(x, y, r, ang1, ang2, ccw, &probe)
+        .and_then(|segments| {
+            // A step per 1024 segments, as a file read is charged per KiB
+            // (#1176), so a step cap bounds a run of huge arcs too. An
+            // ordinary arc (four segments a turn) is not charged and costs
+            // no clock read.
+            if segments >= 1024 {
+                it.poll_limits((segments / 1024) as u64)?;
+            }
+            Ok(())
+        });
+    it.gfx.path_finish(mark, done.is_ok());
+    done
 }
 
 fn arc(it: &mut Interp) -> Result<(), PsError> {
@@ -269,6 +293,20 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
     let r = it.pop_f64()?;
     let (x2, y2) = pop_xy(it)?;
     let (x1, y1) = pop_xy(it)?;
+    arcto_apply(it, x1, y1, x2, y2, r)
+}
+
+/// `arcto` on the operands already popped (also `arct` in a user path,
+/// #1264). Under a `setbbox` box the line and the curve are taken back
+/// together if either leaves it.
+pub(super) fn arcto_apply(
+    it: &mut Interp,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    r: f64,
+) -> Result<[f64; 4], PsError> {
     let q0 = it
         .gfx
         .current_device_point()
@@ -297,8 +335,13 @@ fn arcto_common(it: &mut Interp) -> Result<[f64; 4], PsError> {
             Ok([x1, y1, x1, y1])
         }
         ArcTo::Arc { t1, c1, c2, t2 } => {
-            it.gfx.lineto(t1.0, t1.1)?;
-            it.gfx.curveto(c1.0, c1.1, c2.0, c2.1, t2.0, t2.1)?;
+            let mark = it.gfx.path_mark();
+            let done = it
+                .gfx
+                .lineto(t1.0, t1.1)
+                .and_then(|()| it.gfx.curveto(c1.0, c1.1, c2.0, c2.1, t2.0, t2.1));
+            it.gfx.path_finish(mark, done.is_ok());
+            done?;
             Ok([t1.0, t1.1, t2.0, t2.1])
         }
     }
@@ -418,7 +461,7 @@ fn reversepath(it: &mut Interp) -> Result<(), PsError> {
 /// A marking operator that has to wait for the current pattern's
 /// `PaintProc` (#1341): starts it and returns `true`, and the operator
 /// runs again after, with its operands untouched.
-fn wait_for_pattern(
+pub(super) fn wait_for_pattern(
     it: &mut Interp,
     name: &'static str,
     func: crate::object::OpFn,
@@ -445,7 +488,7 @@ fn eofill(it: &mut Interp) -> Result<(), PsError> {
 /// charges its segments. An ordinary fill is not charged. The rasteriser
 /// holds the whole work against the step limit before anything is painted,
 /// so this only counts it.
-fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
+pub(super) fn fill_common(it: &mut Interp, rule: FillRule) -> Result<(), PsError> {
     let probe = it.limit_probe();
     let work = it.gfx.fill_limited(rule, &probe)?;
     it.charge_probed_steps(work / 1024);
@@ -467,8 +510,9 @@ fn stroke(it: &mut Interp) -> Result<(), PsError> {
 /// `strokepath` -- replace the current path with the outline `stroke`
 /// would paint. No error on an empty path (gs-pinned).
 fn strokepath(it: &mut Interp) -> Result<(), PsError> {
-    // Under the limits (#1224): the walks that drop zero-length segments
-    // are charged a step per 1024 segments, and a stop leaves the path.
+    // Under the limits (#1224, #1264): the walks that drop zero-length
+    // segments are charged a step per 1024 segments, the stroker's work is
+    // priced before it runs, and a stop leaves the path.
     let probe = it.limit_probe();
     let work = it.gfx.stroke_path_limited(&probe)?;
     it.charge_probed_steps(work / 1024);

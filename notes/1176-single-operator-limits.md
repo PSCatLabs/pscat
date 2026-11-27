@@ -151,7 +151,7 @@ read from the code (marked).
 | dashed `stroke` / `strokepath` | tiny-skia gives up past its dash cap. `[0.00001] 0 setdash` on a 600-point line: 0.03 s. Measured. |
 | `flattenpath` | Open: up to 65,536 segments per curve (depth 16), with no memory check. 1000 curves at 1e20 took 0.7 s and about 1.8 GB. Measured. |
 | `fill` / `eofill` / `clip` (pscat's coverage rasteriser) | Open: lines × bands. 100,000 curves: 2.5 s in one `fill`, 1M: well past 8 s. Measured. |
-| `pathforall` `pathbbox` `rectfill` `rectstroke` | Linear; `pathforall` is frame-driven. Read. `reversepath`, `ufill` and the other user-path operators are not implemented. |
+| `pathforall` `pathbbox` `rectfill` `rectstroke` | Linear; `pathforall` is frame-driven. Read. `reversepath` (#1266) and the user-path operators and hit tests (#1264, `notes/1264-hit-testing-and-user-paths.md`) are implemented under the limits. |
 | `shfill` (function parse) | **Fixed** (4096-dict cap). Measured. |
 | `shfill` (painting a many-leg stitch) | Open: pixels × stops, 4.4 s for 4095 legs at 300 dpi. Measured. |
 | `image` `imagemask` `colorimage` (raster) | Bounded by the device box. A file source is one bulk read of `needed()` bytes. Read. |

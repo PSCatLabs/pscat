@@ -22,6 +22,7 @@ pub mod pdfmark;
 pub mod realsio;
 pub mod shading;
 pub mod stack;
+pub mod upath;
 pub mod vm;
 
 use crate::object::{Dict, Object, OpFn, Operator, Value};
@@ -59,6 +60,7 @@ pub fn install_all(dict: &mut Dict) {
     crate::kernel::install(dict);
     pagedevice::install(dict);
     pdfmark::install(dict);
+    upath::install(dict);
 
     // Constants: executing a name bound to a literal object pushes the
     // object, which is exactly the behavior `true`, `mark`, etc. need —

@@ -712,7 +712,7 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
     // ShadingType, Coords, and pixels to compare: before the start, past
     // the end, and one in range.
     type Case<'a> = (&'a str, &'a str, [(u32, u32); 3]);
-    let cases: [Case; 3] = [
+    let cases: [Case; 4] = [
         ("2", "150 0 350 0", [(50, 250), (450, 250), (250, 250)]),
         (
             "3",
@@ -723,6 +723,12 @@ fn extend_reaches_the_pdf_and_gs_paints_it_as_the_raster_does() {
             "3",
             "125 250 50 325 250 100",
             [(325, 250), (475, 250), (25, 250)],
+        ),
+        // The same cone run the other way, shrinking (#1370).
+        (
+            "3",
+            "325 250 100 125 250 50",
+            [(250, 250), (150, 250), (330, 250)],
         ),
     ];
     for (case, (ty, coords, points)) in cases.into_iter().enumerate() {
