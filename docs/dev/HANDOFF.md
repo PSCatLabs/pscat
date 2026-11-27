@@ -588,6 +588,10 @@ renders eight examples in both and compares block-downsampled output).
   stand in for global VM (#1159, `notes/1159-gcheck-globaldict.md`,
   `tests/gcheck_globaldict.rs`): a composite made in global mode reports
   local here, and no `invalidaccess` guards `globaldict`.
+  `scheck`, `statusdict`, `serverdict`, `internaldict`, `GlobalFontDirectory` and
+  `SharedFontDirectory` (#1469, `notes/1469-statusdict-internaldict-scheck.md`,
+  `tests/statusdict_internaldict.rs`) are defined as empty dictionaries (and `scheck` as `gcheck`)
+  so a probe finds them; none holds gs's printer or font-hook entries.
 - **`string status`** (#952) is the file-existence probe: `pages bytes
   referenced created true`, or `false`. It resolves the name through the
   same search order and the same read roots as `file`/`run`

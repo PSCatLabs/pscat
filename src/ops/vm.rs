@@ -45,6 +45,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentglobal", currentglobal);
     op(dict, "setglobal", setglobal);
     op(dict, "gcheck", gcheck);
+    op(dict, "scheck", scheck);
+    op(dict, "internaldict", internaldict);
 }
 
 fn save(it: &mut Interp) -> Result<(), PsError> {
@@ -97,20 +99,63 @@ fn setglobal(it: &mut Interp) -> Result<(), PsError> {
 ///
 /// pscat has one VM, so a composite is not allocated anywhere in particular
 /// and `setglobal` does not change that. The model: the composites that
-/// stand in for global VM are `globaldict` and `systemdict` (true), every
-/// other string, array, dictionary and gstate is local (false), whatever
-/// `currentglobal` said when it was made. Ghostscript would answer `true`
-/// for one made while the mode was global; that is the one place this
-/// differs (`tests/gcheck_globaldict.rs`). Simple objects, names, operators,
-/// files and `save` objects are `true`, as in gs.
+/// stand in for global VM are `globaldict`, `systemdict` and
+/// `GlobalFontDirectory` (true), every other string, array, dictionary and
+/// gstate is local (false), whatever `currentglobal` said when it was made.
+/// Ghostscript would answer `true` for one made while the mode was global;
+/// that is the one place this differs (`tests/gcheck_globaldict.rs`). Simple
+/// objects, names, operators, files and `save` objects are `true`, as in gs.
 fn gcheck(it: &mut Interp) -> Result<(), PsError> {
     let o = it.pop()?;
-    let global = match &o.value {
+    it.push(Object::bool(is_global(it, &o)));
+    Ok(())
+}
+
+/// `any scheck bool` (#1469): is the object in shared VM. pscat has no
+/// shared VM apart from the global one, and gs answers exactly as `gcheck`
+/// does for every object (measured with 10.07.1), so it is `gcheck` under its
+/// PLRM name.
+fn scheck(it: &mut Interp) -> Result<(), PsError> {
+    let o = it.pop()?;
+    it.push(Object::bool(is_global(it, &o)));
+    Ok(())
+}
+
+fn is_global(it: &Interp, o: &Object) -> bool {
+    match &o.value {
         Value::String(_) | Value::Array(_) | Value::GState(_) => false,
-        Value::Dict(d) => Rc::ptr_eq(d, &it.globaldict) || Rc::ptr_eq(d, &it.systemdict()),
+        Value::Dict(d) => {
+            Rc::ptr_eq(d, &it.globaldict)
+                || Rc::ptr_eq(d, &it.systemdict())
+                || Rc::ptr_eq(d, &it.plrm_dicts.global_fonts)
+        }
         _ => true,
+    }
+}
+
+/// The key `internaldict` opens for (PLRM 3rd ed. names no key; Adobe's
+/// Type 1 font programs and gs use this one).
+const INTERNALDICT_KEY: i64 = 1_183_615_869;
+
+/// `int internaldict dict` (#1469): the dictionary a Type 1 font program
+/// reaches with `1183615869 internaldict`. It is an empty local dictionary
+/// that accepts `def`, the same one on every call, and runs nothing: gs
+/// keeps a few font-procedure hooks in its own (`.execute_scheduled_inits`,
+/// `CCRun`), pscat none. Any other key is `invalidaccess`, whatever its type
+/// (not `typecheck`), and the key stays on the stack, as in gs. A real equal
+/// to the key opens it too; gs also opens it for reals within single
+/// precision of the key, which pscat does not.
+fn internaldict(it: &mut Interp) -> Result<(), PsError> {
+    let key = it.pop()?;
+    let opens = match key.value {
+        Value::Integer(i) => i == INTERNALDICT_KEY,
+        Value::Real(r) => r == INTERNALDICT_KEY as f64,
+        _ => false,
     };
-    it.push(Object::bool(global));
+    if !opens {
+        return Err(PsError::InvalidAccess);
+    }
+    it.push(Object::lit(Value::Dict(it.plrm_dicts.internal.clone())));
     Ok(())
 }
 
