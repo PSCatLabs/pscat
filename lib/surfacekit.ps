@@ -408,7 +408,7 @@
   } if
 
   gsave
-  sfregion sfscopts scatter
+  sfregion sfscopts //scatter exec
   grestore
 } def
 
@@ -468,7 +468,7 @@
     % `scokrange` (or anything else) ever got a chance to check its
     % type (Codex review, PR #125).
     sfscopts /Length [ 3 9 ] sfgetdef 1 array astore /sfflenbox exch def
-    sfflenbox 0 get scokrange not
+    sfflenbox 0 get //scokrange exec not
       { fiber-length-must-be-a-two-number-range } if
     /sffiberlen0 sfflenbox 0 get 0 get def
     /sffiberlen1 sfflenbox 0 get 1 get def
@@ -479,7 +479,7 @@
   } if
 
   gsave
-  sfregion sfscopts scatter
+  sfregion sfscopts //scatter exec
   grestore
 } def
 
@@ -550,7 +550,7 @@
     % Wrapped before any bare reference -- see fiber's own /Length
     % handling and sfcolordef's header for why.
     sfscopts /Length [ 14 40 ] sfgetdef 1 array astore /sfulenbox exch def
-    sfulenbox 0 get scokrange not
+    sfulenbox 0 get //scokrange exec not
       { scuff-length-must-be-a-two-number-range } if
     /sfscufflen0 sfulenbox 0 get 0 get def
     /sfscufflen1 sfulenbox 0 get 1 get def
@@ -563,7 +563,7 @@
   } if
 
   gsave
-  sfregion sfscopts scatter
+  sfregion sfscopts //scatter exec
   grestore
 } def
 
@@ -628,7 +628,7 @@
   } if
 
   gsave
-  sfregion sfscopts scatter
+  sfregion sfscopts //scatter exec
   grestore
 } def
 
@@ -736,9 +736,9 @@
       /sfwcol exch def
       /sfwcx sfwx0 sfwcol 0.5 add sfwpx mul add def
       /sfwcy sfwy0 sfwrow 0.5 add sfwpy mul add def
-      sfwcx sfwcy sfregion scin {
+      sfwcx sfwcy sfregion //scin exec {
         sfwrow sfwcol add cvi 2 mod 0 eq /sfwover exch def
-        sfweaveseeded { frnd 0.1 mul 0.05 sub } { 0 } ifelse /sfwjit exch def
+        sfweaveseeded { //frnd exec 0.1 mul 0.05 sub } { 0 } ifelse /sfwjit exch def
         sfwover
           { sfweaveR sfweaveG sfweaveB sfweavestrength sfwjit 0.75 add sfshade }
           { sfweaveR sfweaveG sfweaveB sfweavestrength sfwjit 0.35 add sfshade }

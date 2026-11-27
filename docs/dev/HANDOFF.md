@@ -2898,7 +2898,17 @@ renders eight examples in both and compares block-downsampled output).
   operator lookup about 30% more (`notes/307-*.md` has the numbers). The
   catch is that an operator redefined after a library loads no longer
   reaches its procedures; library names that are not operators are still
-  late-bound, so overriding `dkbudget`, `pkribbon` and the like works.
+  late-bound where a procedure body writes them as a bare name (data such as
+  `dkbudget` and `wkmaxsegs`, forward references, recursion). **A helper
+  that is already defined when a body is scanned is reached as `//name exec`
+  instead** (#1225): a caller's own `/shade` or `/mix3` on the dictionary
+  stack can no longer shadow it (that was a `typecheck: shade` inside
+  `pkliner`). So write `//helper exec` for a new call to an earlier
+  procedure and keep state by name; `tests/lib_helper_shadowing.rs` fails on a
+  bare name that the same file also reaches through `//`.
+  `notes/1225-library-helpers-by-name.md` lists what stays by name and why.
+  Redefining a helper such as `frnd` no longer changes what a library does:
+  patch the array in place (`/walkpath load 0 { ... } putinterval`).
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest

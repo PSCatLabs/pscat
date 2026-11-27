@@ -12972,15 +12972,17 @@ fn the_loading_demo_shows_what_each_panel_is_for() {
 /// Issue #299: pkribbon, pknib and pkfeather scan the whole path with their
 /// own `pathforall` before they reach `walkpath`, so walkpath's segment bound
 /// (issue #110) cannot fire first. The scan (`pkscanclosed`) now carries the
-/// same bound. Deterministic, not timed: `walkpath` is replaced by a stub that
-/// records it was reached, so a refusal that comes from walkpath's own pass
-/// (the old behaviour) fails here, however fast the machine is.
+/// same bound. Deterministic, not timed: `walkpath`'s body is overwritten in
+/// place with a stub that records it was reached (the libraries reach it as
+/// `//walkpath exec`, so redefining the name would no longer intercept it,
+/// #1225), so a refusal that comes from walkpath's own pass (the old
+/// behaviour) fails here, however fast the machine is.
 #[test]
 fn pre_walkpath_scans_refuse_a_huge_segment_count_before_walkpath() {
     for call in ["<< >> pkribbon", "<< >> pknib", "<< >> pkfeather"] {
         let mut it = fresh(200, 200);
         it.run_str(
-            "/reached false def /walkpath { pop pop /reached true def } def \
+            "/reached false def /walkpath load 0 { pop pop /reached true def } putinterval \
              newpath 20 20 moveto 400000 { 0 0 rlineto } repeat 100 0 rlineto",
         )
         .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));

@@ -311,7 +311,7 @@ fn artkits_own_guards_are_covered_the_same_way() {
     proves_the_guard_is_load_bearing(
         "artkit-scatter",
         "lib/artkit.ps",
-        "    /scmark load sccallable not { scatter-mark-must-be-a-procedure } if\n",
+        "    /scmark load //sccallable exec not { scatter-mark-must-be-a-procedure } if\n",
         "0 0 100 100 screct << /Mark 5 >> scatter",
         Unguarded::Accepted,
         "scatter-validates-its-option-dict",

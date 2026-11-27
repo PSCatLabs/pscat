@@ -1008,12 +1008,12 @@
     % one costs walk and catch time for no visible change.
     /dkSpitch dkSw 0.75 mul dup 1 lt { pop 1 } if dup 4 gt { pop 4 } if def
     /dkSn 0 def
-    dkSpitch { pop pop pop pop pop pop /dkSn dkSn 1 add def } walkpath
+    dkSpitch { pop pop pop pop pop pop /dkSn dkSn 1 add def } //walkpath exec
     /dkSall dkSn array def
     /dkSi 0 def
     dkSpitch {
         6 array astore dkSall dkSi 3 -1 roll put /dkSi dkSi 1 add def
-    } walkpath
+    } //walkpath exec
     newpath
 
     /dkSrec 20 dict def
@@ -1706,7 +1706,7 @@ systemdict /.sameclip known /dkPsameok exch def
                             dkZfs dkZp1 get 0 get dkZfs dkZp0 get 0 get sub atan rotate
                             0 dkZr /drift get neg userdict /pjCTM get dtransform idtransform
                             /dkZdy exch def /dkZdx exch def
-                            0 dkZfh neg dkZflen dkZfh 2 mul screct
+                            0 dkZfh neg dkZflen dkZfh 2 mul //screct exec
                             <<
                                 /Count dkZfc
                                 /Seed 100000 dkZfi add dksubseed dkrand 2147483646 mul cvi
@@ -1740,7 +1740,7 @@ systemdict /.sameclip known /dkPsameok exch def
                                         dkZmx dkZmy dkZfr 0 360 arc fill
                                     }
                                 } ifelse
-                            >> scatter
+                            >> //scatter exec
                         grestore
                     } if
                     /dkZp0 dkZp1 def

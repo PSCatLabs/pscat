@@ -206,7 +206,7 @@
 % -> integer 0..999999   (one caller draw, as a seed for dysrand)
 % @internal
 /dyslotseed {
-    frnd 999999 mul cvi
+    //frnd exec 999999 mul cvi
 } def
 
 % --- the crayon box ---------------------------------------------------
@@ -418,14 +418,14 @@
     % Its own walk, at the rim's pitch: length and the turn at each stop.
     /dyKpitch dyKw 0.75 mul 1 4 dyclamp def
     /dyKn 0 def
-    dyKpitch { pop pop pop pop pop pop /dyKn dyKn 1 add def } walkpath
+    dyKpitch { pop pop pop pop pop pop /dyKn dyKn 1 add def } //walkpath exec
     /dyKang dyKn array def
     /dyKi 0 def /dyKL 0 def
     dyKpitch {
         pop /dyKsp exch def pop dyKang dyKi 3 -1 roll put pop pop
         dyKi 0 gt { /dyKL dyKL dyKsp add def } if
         /dyKi dyKi 1 add def
-    } walkpath
+    } //walkpath exec
     % Turning per stop (0 at a straight stop, 1 at a reversal), summed over
     % three stops so a curved turn counts as much as a sharp one, then
     % spread one stop either side: the hand slows before and after.
@@ -732,13 +732,13 @@
         pop pop pop pop pop pop
         /dyCn dyCn 1 add def
         dyCn dyCcap gt { dyCg } if
-    } walkpath
+    } //walkpath exec
     /dyCs dyCn array def
     /dyCi 0 def
     dyCp {
         6 array astore dyCs dyCi 3 -1 roll put
         /dyCi dyCi 1 add def
-    } walkpath
+    } //walkpath exec
 } def
 
 % -> [ [a b] ... ]   (index ranges of dyCs, one per subpath)
@@ -770,11 +770,11 @@
 /dyWline {
     /dyWover exch def /dyWtrem exch def /dyWlam exch def /dyWamp exch def
     /dyWP exch def
-    /dyWp1 frnd 360 mul def
-    /dyWp2 frnd 360 mul def
-    /dyWfe frnd def
-    /dyWfs frnd def
-    /dyWfh frnd def
+    /dyWp1 //frnd exec 360 mul def
+    /dyWp2 //frnd exec 360 mul def
+    /dyWfe //frnd exec def
+    /dyWfs //frnd exec def
+    /dyWfh //frnd exec def
     dyslotseed dysrand
     /dyWp3 dyrand 360 mul def
     /dyWn dyWP length 2 idiv def
@@ -1001,14 +1001,14 @@
     /dySside 1 def
     0 1 dySrows 1 sub {
         /dySr exch def
-        /dySfo frnd def /dySfm frnd def /dySfd frnd def /dySfs frnd def
+        /dySfo //frnd exec def /dySfm //frnd exec def /dySfd //frnd exec def /dySfs //frnd exec def
         /dySv dySv0 dySv1 add 2 div dySr dySrows 1 sub 2 div sub dySsp mul add def
         /dySa 1e30 def /dySb -1e30 def
         0 1 dySk {
             dySdu mul dySu0 add /dySu exch def
             dySu dySc mul dySv dySs mul sub
             dySu dySs mul dySv dySc mul add
-            dySR scin {
+            dySR //scin exec {
                 dySu dySa lt { /dySa dySu def } if
                 dySu dySb gt { /dySb dySu def } if
             } if
@@ -1053,12 +1053,12 @@
 /dyLloop {
     /dyLcw exch def /dyLwob exch def /dyLlean exch def /dyLsq exch def
     /dyLgap exch def /dyLr exch def /dyLcy exch def /dyLcx exch def
-    /dyLa0 90 frnd 2 mul 1 sub 40 mul add def
-    /dyLsweep 360 frnd 2 mul 1 sub dyLgap mul add def
-    /dyLdrift frnd 2 mul 1 sub 0.08 mul def
-    /dyLtilt frnd 2 mul 1 sub dyLlean mul def
-    /dyLq1 frnd 360 mul def
-    /dyLq2 frnd 360 mul def
+    /dyLa0 90 //frnd exec 2 mul 1 sub 40 mul add def
+    /dyLsweep 360 //frnd exec 2 mul 1 sub dyLgap mul add def
+    /dyLdrift //frnd exec 2 mul 1 sub 0.08 mul def
+    /dyLtilt //frnd exec 2 mul 1 sub dyLlean mul def
+    /dyLq1 //frnd exec 360 mul def
+    /dyLq2 //frnd exec 360 mul def
     /dyLn dyLsweep 6 div ceiling cvi 1 dymax def
     0 1 dyLn {
         /dyLk exch def
@@ -1231,7 +1231,7 @@
     % (two draws for its slot and length, then dyWseg's six)
     1 1 dyFhair {
         /dyFi exch def
-        /dyFfa frnd def /dyFfl frnd def
+        /dyFfa //frnd exec def /dyFfl //frnd exec def
         /dyFa 90 55 sub 110 dyFi 0.5 sub dyFhair div mul add
               dyFfa 2 mul 1 sub 40 dyFhair div mul add def
         /dyFl dyFhr 0.32 mul 0.6 dyFfl 0.8 mul add mul def
@@ -1305,7 +1305,7 @@
     newpath
     0 1 dyRn 1 sub {
         /dyRi exch def
-        /dyRfw frnd def /dyRfl frnd def /dyRfj frnd def /dyRfg frnd def
+        /dyRfw //frnd exec def /dyRfl //frnd exec def /dyRfj //frnd exec def /dyRfg //frnd exec def
         /dyRa dyRi 360 mul dyRn div 90 add dyRfw 2 mul 1 sub dyRw mul 360 mul dyRn div add def
         /dyRd dyRr dyRg 0.5 dyRfg add mul add def
         /dyRh dyRa dyRfl 2 mul 1 sub dyRlean mul add def
@@ -1386,7 +1386,7 @@
             /dyGi exch def
             dyCs dyGi get aload pop
             /dyGend exch def /dyGsp1 exch def pop /dyGang exch def /dyGy exch def /dyGx exch def
-            /dyGfw frnd def /dyGfl frnd def /dyGfj frnd def
+            /dyGfw //frnd exec def /dyGfl //frnd exec def /dyGfj //frnd exec def
             % walkpath's closing stop can sit just past the last regular one
             dyGend 2 and 2 eq dyGsp1 dyGsp 0.5 mul lt and dyGi dyGa gt and not {
                 /dyGo dyGfw 2 mul 1 sub dyGw mul dyGsp mul 0.5 mul def

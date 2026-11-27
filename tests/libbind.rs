@@ -53,13 +53,21 @@ const LIBS: [&str; 9] = [
 
 /// Libraries a checked one needs but that are not themselves checked:
 /// loaded before the snapshot, so their names are part of the baseline.
-const PREREQS: [&str; 5] = [
+const PREREQS: [&str; 4] = [
     "lib/handscript.ps",
-    "lib/surfacekit.ps",
     "lib/strokeglyphs.ps",
     "lib/hatchkit.ps",
     "lib/typewriter_outlines.ps",
 ];
+
+/// Prerequisites that call artkit by `//name exec` (#1225), so they must load
+/// after it. artkit is itself checked, so they cannot join `PREREQS`: they load
+/// right after artkit, and `LATE_BEGIN`/`LATE_END` add the names they define
+/// to the snapshot so the walk skips them.
+const LATE_PREREQS: [&str; 1] = ["lib/surfacekit.ps"];
+const LATE_BEGIN: &str = "/bkBefore userdict dup length 40 add dict copy def\n";
+const LATE_END: &str =
+    "\nuserdict { pop dup bkBefore exch known { pop } { bkSnap exch true put } ifelse } forall\n";
 
 /// Defines the walker, snapshots userdict, and leaves its checks for
 /// `EPILOGUE`. Everything it defines is defined before the snapshot, so
@@ -79,7 +87,7 @@ const PROLOGUE: &str = "
         } ifelse
     } forall
 } def
-/bkSnap userdict dup length 40 add dict copy def
+/bkSnap userdict dup length 400 add dict copy def
 ";
 
 /// The control, then the walk, then the names found, as an array of
@@ -108,6 +116,15 @@ fn library_procedures_are_bound() {
         let text = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
         it.run_source(&text)
             .unwrap_or_else(|e| panic!("{path} failed to load: {}", it.error_report(&e)));
+        if path == "lib/artkit.ps" {
+            it.run_str(LATE_BEGIN).expect("late begin");
+            for late in LATE_PREREQS {
+                let text = std::fs::read(late).unwrap_or_else(|e| panic!("{late}: {e}"));
+                it.run_source(&text)
+                    .unwrap_or_else(|e| panic!("{late} failed to load: {}", it.error_report(&e)));
+            }
+            it.run_str(LATE_END).expect("late end");
+        }
     }
     it.run_str(EPILOGUE).expect("epilogue");
     let found = it.operand_stack().last().expect("the names").repr();
@@ -134,6 +151,14 @@ fn library_procedures_are_bound_in_ghostscript() {
     for path in LIBS {
         src.push_str(&std::fs::read_to_string(path).expect("read lib"));
         src.push('\n');
+        if path == "lib/artkit.ps" {
+            src.push_str(LATE_BEGIN);
+            for late in LATE_PREREQS {
+                src.push_str(&std::fs::read_to_string(late).expect("read late prerequisite"));
+                src.push('\n');
+            }
+            src.push_str(LATE_END);
+        }
     }
     src.push_str(EPILOGUE);
     src.push_str("\n==\n");

@@ -453,7 +453,7 @@
   % #128, round 3, the same class of bug round 2 already fixed for
   % engraving).
   /prneedregion prwchipcount 0 gt prres /Paper get or def
-  prneedregion { /prregion scpath def } if
+  prneedregion { /prregion //scpath exec def } if
 
   prres /Paper get {
     /prpopts 4 dict def
@@ -461,7 +461,7 @@
     prpopts /Strength 0.18 put
     prpopts /Budget prbudget put
     prpopts 0 prres prapplyseed
-    prregion prpopts grain
+    prregion prpopts //grain exec
   } if
 
   prres /ColorR get prres /ColorG get prres /ColorB get setrgbcolor
@@ -483,7 +483,7 @@
   prhopts /Trim [ 0 prwtrimhi ] put
   prhopts /MaxLines prbudget put
   prhopts 1 prres prapplyseed
-  prhopts hatch
+  prhopts //hatch exec
 
   prwchipcount 0 gt {
     /prsopts 6 dict def
@@ -493,7 +493,7 @@
     prsopts /Mark /prchipmark load put
     prsopts /Budget prbudget put
     prsopts 2 prres prapplyseed
-    prregion prsopts scatter
+    prregion prsopts //scatter exec
   } if
 
   grestore
@@ -542,7 +542,7 @@
   % #128, round 3, the same class of bug round 2 already fixed for
   % engraving).
   /prneedregion prlchipcount 0 gt prres /Paper get or def
-  prneedregion { /prregion scpath def } if
+  prneedregion { /prregion //scpath exec def } if
 
   prres /Paper get {
     /prpopts 4 dict def
@@ -550,7 +550,7 @@
     prpopts /Strength 0.18 put
     prpopts /Budget prbudget put
     prpopts 0 prres prapplyseed
-    prregion prpopts grain
+    prregion prpopts //grain exec
   } if
 
   prres /ColorR get prres /ColorG get prres /ColorB get setrgbcolor
@@ -572,7 +572,7 @@
   prhopts /Trim [ 0 prltrimhi ] put
   prhopts /MaxLines prbudget put
   prhopts 1 prres prapplyseed
-  prhopts hatch
+  prhopts //hatch exec
 
   prlchipcount 0 gt {
     /prsopts 6 dict def
@@ -582,7 +582,7 @@
     prsopts /Mark /prchipmark load put
     prsopts /Budget prbudget put
     prsopts 2 prres prapplyseed
-    prregion prsopts scatter
+    prregion prsopts //scatter exec
   } if
 
   grestore
@@ -618,13 +618,13 @@
   clip
 
   prres /Paper get {
-    /prregion scpath def
+    /prregion //scpath exec def
     /prpopts 4 dict def
     prpopts /Density 0.02 put
     prpopts /Strength 0.18 put
     prpopts /Budget prbudget put
     prpopts 0 prres prapplyseed
-    prregion prpopts grain
+    prregion prpopts //grain exec
   } if
 
   prres /ColorR get prres /ColorG get prres /ColorB get setrgbcolor
@@ -646,7 +646,7 @@
   prhopts /Trim [ 0 pretrimhi ] put
   prhopts /MaxLines prbudget put
   prhopts 1 prres prapplyseed
-  prhopts hatch
+  prhopts //hatch exec
 
   grestore
 } def

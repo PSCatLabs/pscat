@@ -269,13 +269,13 @@
     /pkht exch def
     pkwidth
     pkht pkpressure
-    pkht pktaperf
+    pkht //pktaperf exec
     mul mul 2 div
 } bind def
 
 % amount -> offset in -amount..amount, deterministic under srand
 % @internal
-/pkjit { frnd 2 mul 1 sub mul } bind def
+/pkjit { //frnd exec 2 mul 1 sub mul } bind def
 
 % x y ang halfw side -> ex ey   (side: -1 right / +1 left of travel;
 % applies /Jitter along the perpendicular, skipped entirely at 0)
@@ -283,7 +283,7 @@
 /pkedge {
     /pkeside exch def /pkehw exch def /pkeang exch def
     /pkey exch def /pkex exch def
-    /pkeoff pkjitter 0 eq { pkehw } { pkehw pkjitter pkjit add } ifelse def
+    /pkeoff pkjitter 0 eq { pkehw } { pkehw pkjitter //pkjit exec add } ifelse def
     /pkepa pkeang 90 pkeside mul add def
     pkex pkepa cos pkeoff mul add
     pkey pkepa sin pkeoff mul add
@@ -321,13 +321,13 @@
     pkraw pklfrom get
     dup 0 get /pklx exch def dup 1 get /pkly exch def
     dup 2 get /pklang exch def 3 get /pklt exch def
-    pklx pkly pklang pklt pkhalfwat pklside pkedge moveto
+    pklx pkly pklang pklt //pkhalfwat exec pklside //pkedge exec moveto
     pklfrom pklstep add pklstep pklto {
         /pkli exch def
         pkraw pkli get
         dup 0 get /pklx exch def dup 1 get /pkly exch def
         dup 2 get /pklang exch def 3 get /pklt exch def
-        pklx pkly pklang pklt pkhalfwat pklside pkedge lineto
+        pklx pkly pklang pklt //pkhalfwat exec pklside //pkedge exec lineto
     } for
     closepath
 } bind def
@@ -348,7 +348,7 @@
     pkraw pkostart get
     dup 0 get /pkox0 exch def dup 1 get /pkoy0 exch def
     dup 2 get /pkoang0 exch def 3 get /pkot0 exch def
-    /pkohw0 pkot0 pkhalfwat def
+    /pkohw0 pkot0 //pkhalfwat exec def
     /pkostartpointed
         pkstartcap /pointed eq pkohw0 0 le or
     def
@@ -356,7 +356,7 @@
     pkraw pkoend get
     dup 0 get /pkoxe exch def dup 1 get /pkoye exch def
     dup 2 get /pkoange exch def 3 get /pkotend exch def
-    /pkohwe pkotend pkhalfwat def
+    /pkohwe pkotend //pkhalfwat exec def
     /pkoendpointed
         pkendcap /pointed eq pkohwe 0 le or
     def
@@ -384,22 +384,22 @@
         /pkomdy pkoye pkoy0 sub def
         pkomdx 0 eq pkomdy 0 eq and
         {
-            pkraw pkostart get pkdot
+            pkraw pkostart get //pkdot exec
         } {
             /pkomidx pkox0 pkoxe add 2 div def
             /pkomidy pkoy0 pkoye add 2 div def
             /pkomidang pkomdy pkomdx atan def
             /pkomidt pkot0 pkotend add 2 div def
             pkox0 pkoy0 moveto
-            pkomidx pkomidy pkomidang pkomidt pkhalfwat -1 pkedge lineto
+            pkomidx pkomidy pkomidang pkomidt //pkhalfwat exec -1 //pkedge exec lineto
             pkoxe pkoye lineto
-            pkomidx pkomidy pkomidang pkomidt pkhalfwat 1 pkedge lineto
+            pkomidx pkomidy pkomidang pkomidt //pkhalfwat exec 1 //pkedge exec lineto
             closepath
         } ifelse
     } {
         pkostartpointed
             { pkox0 pkoy0 moveto }
-            { pkox0 pkoy0 pkoang0 pkohw0 -1 pkedge moveto }
+            { pkox0 pkoy0 pkoang0 pkohw0 -1 //pkedge exec moveto }
         ifelse
 
         pkostart 1 add 1 pkorightlast {
@@ -407,7 +407,7 @@
             pkraw pkoi get
             dup 0 get /pkoix exch def dup 1 get /pkoiy exch def
             dup 2 get /pkoiang exch def 3 get /pkoit exch def
-            pkoix pkoiy pkoiang pkoit pkhalfwat -1 pkedge lineto
+            pkoix pkoiy pkoiang pkoit //pkhalfwat exec -1 //pkedge exec lineto
         } for
 
         pkoendpointed {
@@ -416,7 +416,7 @@
             pkendcap /round eq {
                 pkoxe pkoye pkohwe pkoange 90 sub pkoange 90 add arc
             } {
-                pkoxe pkoye pkoange pkohwe 1 pkedge lineto
+                pkoxe pkoye pkoange pkohwe 1 //pkedge exec lineto
             } ifelse
         } ifelse
 
@@ -426,7 +426,7 @@
             pkraw pkoi get
             dup 0 get /pkoix exch def dup 1 get /pkoiy exch def
             dup 2 get /pkoiang exch def 3 get /pkoit exch def
-            pkoix pkoiy pkoiang pkoit pkhalfwat 1 pkedge lineto
+            pkoix pkoiy pkoiang pkoit //pkhalfwat exec 1 //pkedge exec lineto
         } for
 
         pkostartpointed { } {
@@ -459,7 +459,7 @@
         /pkbrend pkbrend 1 sub def
     } if
     pkbrstart pkbrend eq pkraw pkbrstart get 5 get 3 eq and {
-        pkraw pkbrstart get pkdot
+        pkraw pkbrstart get //pkdot exec
     } {
         pkraw pkbrstart get 0 get /pkbrx0 exch def
         pkraw pkbrstart get 1 get /pkbry0 exch def
@@ -481,13 +481,13 @@
             % them.
             /pkbrhasinterior pkbrend pkbrstart 1 add gt def
             pkbrhasinterior {
-                pkbrstart pkbrend -1 false pkloop
-                pkbrstart pkbrend 1 true pkloop
+                pkbrstart pkbrend -1 false //pkloop exec
+                pkbrstart pkbrend 1 true //pkloop exec
             } {
-                pkraw pkbrstart get pkdot
+                pkraw pkbrstart get //pkdot exec
             } ifelse
         } {
-            pkbrstart pkbrend pkopenrun
+            pkbrstart pkbrend //pkopenrun exec
         } ifelse
     } ifelse
 } bind def
@@ -654,13 +654,13 @@
     % support (Codex review, round 7). Checked with `load`, same
     % reason as /Pressure: a bare `pkwidth xcheck` would itself
     % auto-execute pkwidth before xcheck ever saw it.
-    /pkwidth pkopts /Width 6 pkgetdef def
+    /pkwidth pkopts /Width 6 //pkgetdef exec def
     /pkwidth load xcheck { pkribbon-width-must-not-be-a-procedure } if
     pkwidth 0 le { pkribbon-width-must-be-positive } if
     /pkpitch
         pkopts /Pitch
         pkwidth 0.5 mul dup 6 gt { pop 6 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pkpitch load xcheck { pkribbon-pitch-must-not-be-a-procedure } if
     pkpitch 0 le { pkribbon-pitch-must-be-positive } if
@@ -689,7 +689,7 @@
     % procedure literal like the /Pressure default itself, `{ pkflat }`,
     % can legitimately have this type instead of `arraytype`, and
     % rejecting it would make `pkribbon` fail even on its own default.
-    /pkpressure pkopts /Pressure { pkflat } pkgetdef def
+    /pkpressure pkopts /Pressure { pkflat } //pkgetdef exec def
     /pkpressure load xcheck
     /pkpressure load type
     dup /arraytype eq
@@ -704,11 +704,11 @@
     % of full width) but that's a real contract violation, not merely a
     % style choice, so it's validated the same as every other documented
     % constraint here (Codex review, round 5).
-    /pkstarttaper pkopts /StartTaper 0 pkgetdef def
+    /pkstarttaper pkopts /StartTaper 0 //pkgetdef exec def
     /pkstarttaper load xcheck { pkribbon-starttaper-must-not-be-a-procedure } if
     pkstarttaper 0 lt pkstarttaper 1 gt or
         { pkribbon-starttaper-must-be-0-to-1 } if
-    /pkendtaper pkopts /EndTaper 0 pkgetdef def
+    /pkendtaper pkopts /EndTaper 0 //pkgetdef exec def
     /pkendtaper load xcheck { pkribbon-endtaper-must-not-be-a-procedure } if
     pkendtaper 0 lt pkendtaper 1 gt or
         { pkribbon-endtaper-must-be-0-to-1 } if
@@ -718,20 +718,20 @@
     % ness first, same reason as /Width above: an executable value
     % (even one that happens to push a valid cap name when run) isn't
     % itself one of the three documented literal values.
-    /pkstartcap pkopts /StartCap /round pkgetdef def
+    /pkstartcap pkopts /StartCap /round //pkgetdef exec def
     /pkstartcap load xcheck { pkribbon-startcap-must-not-be-a-procedure } if
     pkstartcap /round eq pkstartcap /flat eq or pkstartcap /pointed eq or not
         { pkribbon-startcap-must-be-round-flat-or-pointed } if
-    /pkendcap pkopts /EndCap /round pkgetdef def
+    /pkendcap pkopts /EndCap /round //pkgetdef exec def
     /pkendcap load xcheck { pkribbon-endcap-must-not-be-a-procedure } if
     pkendcap /round eq pkendcap /flat eq or pkendcap /pointed eq or not
         { pkribbon-endcap-must-be-round-flat-or-pointed } if
-    /pkjitter pkopts /Jitter 0 pkgetdef def
+    /pkjitter pkopts /Jitter 0 //pkgetdef exec def
     /pkjitter load xcheck { pkribbon-jitter-must-not-be-a-procedure } if
 
     % Scan first, name second: the bound (issue #299) can raise inside the
     % scan, and a name pushed ahead of it would be left on the stack.
-    pkscanclosed /pkclosedflags exch def
+    //pkscanclosed exec /pkclosedflags exch def
 
     % Two walkpath passes over the same (surviving, per its own
     % contract) flattened path -- count, then fill a preallocated
@@ -749,13 +749,13 @@
     % inputs every call (store-by-index, net stack effect zero) sidesteps
     % it regardless of how deep it's nested in someone else's callback.
     /pkcount 0 def
-    pkpitch { pop pop pop pop pop pop /pkcount pkcount 1 add def } walkpath
+    pkpitch { pop pop pop pop pop pop /pkcount pkcount 1 add def } //walkpath exec
     /pkraw pkcount array def
     /pkci 0 def
     pkpitch {
         6 array astore pkraw pkci 3 -1 roll put
         /pkci pkci 1 add def
-    } walkpath
+    } //walkpath exec
     /pkn pkraw length def
 
     pkn 0 gt {
@@ -769,7 +769,7 @@
             pkraw pki get 5 get /pkae exch def
             pkae 1 and 1 eq { /pkrunstart pki def } if
             pkae 2 and 2 eq {
-                pkrunstart pki pkclosedflags pksubidx get pkbuildrun
+                pkrunstart pki pkclosedflags pksubidx get //pkbuildrun exec
                 /pksubidx pksubidx 1 add def
             } if
             /pki pki 1 add def
@@ -916,7 +916,7 @@
     pnangles length 1 eq
         { 1.0 }
         {
-            pnpt pnangleat pnangle sub sin abs
+            pnpt //pnangleat exec pnangle sub sin abs
             dup pnminwidth lt { pop pnminwidth } if
         }
     ifelse
@@ -946,7 +946,7 @@
     % segment-count bound (issue #299): a pathforall of its own here
     % would scan a pathological path in full before walkpath's bound
     % could fire.
-    pkscanclosed /pnflags exch def
+    //pkscanclosed exec /pnflags exch def
     /pnmoveto pnflags length def /pnclosed false def
     pnflags { { /pnclosed true def } if } forall
     pnmoveto 1 gt { pknib-path-must-be-a-single-subpath } if
@@ -963,21 +963,21 @@
     % dict, unlike pkribbon's own `typecheck` for the same call (Codex
     % review, PR #77). Only the sampling/rendering work below is
     % actually conditional on a non-empty path.
-    /pnwidth pnopts /Width 6 pkgetdef def
+    /pnwidth pnopts /Width 6 //pkgetdef exec def
     /pnwidth load xcheck { pknib-width-must-not-be-a-procedure } if
     pnwidth 0 le { pknib-width-must-be-positive } if
     /pnpitch
         pnopts /Pitch
         pnwidth 0.5 mul dup 6 gt { pop 6 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pnpitch load xcheck { pknib-pitch-must-not-be-a-procedure } if
     pnpitch 0 le { pknib-pitch-must-be-positive } if
 
-    /pnangle pnopts /Angle 45 pkgetdef def
+    /pnangle pnopts /Angle 45 //pkgetdef exec def
     /pnangle load xcheck { pknib-angle-must-not-be-a-procedure } if
 
-    /pnminwidth pnopts /MinWidth 0.08 pkgetdef def
+    /pnminwidth pnopts /MinWidth 0.08 //pkgetdef exec def
     /pnminwidth load xcheck { pknib-minwidth-must-not-be-a-procedure } if
     pnminwidth 0 lt pnminwidth 1 gt or { pknib-minwidth-must-be-0-to-1 } if
 
@@ -985,7 +985,7 @@
     % there): must actually be callable, not just executable, since
     % pnpressure above calls it by bare reference expecting it to
     % consume t and leave one number.
-    /pnuserpressure pnopts /Pressure { pkflat } pkgetdef def
+    /pnuserpressure pnopts /Pressure { pkflat } //pkgetdef exec def
     /pnuserpressure load xcheck
     /pnuserpressure load type
     dup /arraytype eq
@@ -1006,7 +1006,7 @@
     % callback never fires, same as pkribbon's own width-computation
     % pass over an empty path), so nothing here needs a separate guard.
     /pnn 0 def
-    pnpitch { pop pop pop pop pop pop /pnn pnn 1 add def } walkpath
+    pnpitch { pop pop pop pop pop pop /pnn pnn 1 add def } //walkpath exec
     /pnangles pnn array def
     /pnj 0 def
     pnpitch {
@@ -1014,7 +1014,7 @@
         /pnaang exch def /pnay exch def /pnax exch def
         pnangles pnj pnat pnax pnay pnaang 4 array astore put
         /pnj pnj 1 add def
-    } walkpath
+    } //walkpath exec
 
     /pnribbonopts pnopts length 1 add dict def
     pnopts pnribbonopts copy pop
@@ -1189,11 +1189,11 @@
     count 1 lt { pkdry-needs-an-options-dict } if
     /pbopts exch def
 
-    /pbwidth pbopts /Width 6 pkgetdef def
+    /pbwidth pbopts /Width 6 //pkgetdef exec def
     /pbwidth load xcheck { pkdry-width-must-not-be-a-procedure } if
     pbwidth 0 le { pkdry-width-must-be-positive } if
 
-    /pbbristles pbopts /Bristles 18 pkgetdef def
+    /pbbristles pbopts /Bristles 18 //pkgetdef exec def
     /pbbristles load xcheck { pkdry-bristles-must-not-be-a-procedure } if
     % Must be a whole number, not just in range: /Bristles feeds the
     % deposit-budget calculation below (Bristles * raw stop count) as
@@ -1205,41 +1205,41 @@
     pbbristles 1 lt pbbristles 100 gt or pbbristles truncate pbbristles ne or
         { pkdry-bristles-must-be-1-to-100 } if
 
-    /pbspread pbopts /Spread 0.85 pkgetdef def
+    /pbspread pbopts /Spread 0.85 //pkgetdef exec def
     /pbspread load xcheck { pkdry-spread-must-not-be-a-procedure } if
     pbspread 0 lt pbspread 1 gt or { pkdry-spread-must-be-0-to-1 } if
 
-    /pbbristlewidth pbopts /BristleWidth pbwidth 0.12 mul pkgetdef def
+    /pbbristlewidth pbopts /BristleWidth pbwidth 0.12 mul //pkgetdef exec def
     /pbbristlewidth load xcheck
         { pkdry-bristlewidth-must-not-be-a-procedure } if
     pbbristlewidth 0 le { pkdry-bristlewidth-must-be-positive } if
 
-    /pbwidthjitter pbopts /WidthJitter 0.4 pkgetdef def
+    /pbwidthjitter pbopts /WidthJitter 0.4 //pkgetdef exec def
     /pbwidthjitter load xcheck
         { pkdry-widthjitter-must-not-be-a-procedure } if
     pbwidthjitter 0 lt pbwidthjitter 1 gt or
         { pkdry-widthjitter-must-be-0-to-1 } if
 
-    /pbload pbopts /Load 0.6 pkgetdef def
+    /pbload pbopts /Load 0.6 //pkgetdef exec def
     /pbload load xcheck { pkdry-load-must-not-be-a-procedure } if
     pbload 0 lt pbload 1 gt or { pkdry-load-must-be-0-to-1 } if
 
-    /pbdropout pbopts /Dropout 0.4 pkgetdef def
+    /pbdropout pbopts /Dropout 0.4 //pkgetdef exec def
     /pbdropout load xcheck { pkdry-dropout-must-not-be-a-procedure } if
     pbdropout 0 lt pbdropout 1 gt or { pkdry-dropout-must-be-0-to-1 } if
 
-    /pbjitter pbopts /Jitter 0 pkgetdef def
+    /pbjitter pbopts /Jitter 0 //pkgetdef exec def
     /pbjitter load xcheck { pkdry-jitter-must-not-be-a-procedure } if
 
     /pbpitch
         pbopts /Pitch
         pbbristlewidth 0.6 mul dup 6 gt { pop 6 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pbpitch load xcheck { pkdry-pitch-must-not-be-a-procedure } if
     pbpitch 0 le { pkdry-pitch-must-be-positive } if
 
-    /pbcolorjitter pbopts /ColorJitter 0.06 pkgetdef def
+    /pbcolorjitter pbopts /ColorJitter 0.06 //pkgetdef exec def
     /pbcolorjitter load xcheck
         { pkdry-colorjitter-must-not-be-a-procedure } if
     pbcolorjitter 0 lt pbcolorjitter 1 gt or
@@ -1248,7 +1248,7 @@
     % /Touch (issue #222, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
     % a canvas. Only a value below 1 builds a catch, so unset and 1 take
     % exactly the path they took before /Touch existed.
-    /pbtouch pbopts /Touch 1 pkgetdef def
+    /pbtouch pbopts /Touch 1 //pkgetdef exec def
     /pbtouch load xcheck { pkdry-touch-must-not-be-a-procedure } if
     pbtouch 0 lt pbtouch 1 gt or { pkdry-touch-must-be-0-to-1 } if
     pbopts /Touch known {
@@ -1306,7 +1306,7 @@
                 { pkdry-cusp-resample-count-exceeds-safety-limit } if
         } if
         /pbcprev pbcang def
-    } walkpath
+    } //walkpath exec
     /pbn pbcount def
 
     /pbraw pbn array def
@@ -1314,7 +1314,7 @@
     pbpitch {
         6 array astore pbraw pbci 3 -1 roll put
         /pbci pbci 1 add def
-    } walkpath
+    } //walkpath exec
 
     % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
     % farthest any emitter puts paint from it, checked against the cell
@@ -1366,17 +1366,17 @@
                     % jitter/width/color *draws* are re-rolled.
                     /pboff
                         pbevenfrac 0.5 sub 2 mul pbhalfspread mul
-                        pbhalfspread 0.15 mul pkjit
+                        pbhalfspread 0.15 mul //pkjit exec
                         add
                     def
                     /pbw
-                        pbbristlewidth pbwidthjitter pbbristlewidth mul pkjit
+                        pbbristlewidth pbwidthjitter pbbristlewidth mul //pkjit exec
                         add
                     def
                     pbw pbbristlewidth 0.05 mul lt
                         { /pbw pbbristlewidth 0.05 mul def } if
-                    /pbk pbcolorjitter pkjit 1 add def
-                    pbbasecolor pbk shade setrgbcolor
+                    /pbk pbcolorjitter //pkjit exec 1 add def
+                    pbbasecolor pbk //shade exec setrgbcolor
 
                     pboff pbw pbrunstart pbsi pbdashrun
                 } if
@@ -1399,7 +1399,7 @@
 /pbroll {
     dup 1 ge
         { pop true }
-        { dup 0 le { pop false } { frnd exch lt } ifelse }
+        { dup 0 le { pop false } { //frnd exec exch lt } ifelse }
     ifelse
 } bind def
 
@@ -1457,7 +1457,7 @@
     % /Load 1 /Dropout 0 still leave most bristles unmarked for an
     % isolated dab, since a Pitch/Width-scaled rate is typically well
     % under 1 even at pbload 1.
-    /pbdrstate pbload pbroll def
+    /pbdrstate pbload //pbroll exec def
     /pbdrwasoff true def
 
     /pbdri pbdrstart def
@@ -1471,8 +1471,8 @@
 
         pbdrsingle
             {
-                /pbdrex pbdrpx pbdroff pkjit add def
-                /pbdrey pbdrpy pbdroff pkjit add def
+                /pbdrex pbdrpx pbdroff //pkjit exec add def
+                /pbdrey pbdrpy pbdroff //pkjit exec add def
             }
             {
                 /pbdrex pbdrpx pbdrpang 90 add cos pbdroff mul add def
@@ -1486,11 +1486,11 @@
         pbdri pbdrstart gt {
             pbdrstate
                 {
-                    pbdropout pbdrsp pbwidth div mul pbroll
+                    pbdropout pbdrsp pbwidth div mul //pbroll exec
                         { /pbdrstate false def } if
                 }
                 {
-                    pbload pbdrsp pbwidth div mul pbroll
+                    pbload pbdrsp pbwidth div mul //pbroll exec
                         { /pbdrstate true def } if
                 }
             ifelse
@@ -1643,7 +1643,7 @@
 % header records the confirmed seed-5659 failure that fix came from).
     dup 1 ge
         { pop true }
-        { dup 0 le { pop false } { frnd exch lt } ifelse }
+        { dup 0 le { pop false } { //frnd exec exch lt } ifelse }
     ifelse
 } bind def
 
@@ -1654,12 +1654,12 @@
 % @internal
 /pzpdot {
     /pzdbR exch def /pzdy exch def /pzdx exch def
-    pzoverspray pzroll {
+    pzoverspray //pzroll exec {
         % Escaped mist: uniformly in the outer band, half size. The
         % band scales off the particle's own base radius -- the nozzle
         % for ordinary particles, the bloomed burst radius for
         % trigger-dwell/dab particles (Codex review, PR #83).
-        frnd pzdbR pzoverspray mul mul pzdbR add
+        //frnd exec pzdbR pzoverspray mul mul pzdbR add
         /pzdr exch def
         /pzdsz pzspeck 0.5 mul def
     } {
@@ -1668,14 +1668,14 @@
         % always wins the min.
         /pzrmin 2 def
         1 1 pzm {
-            pop frnd dup pzrmin lt { /pzrmin exch def } { pop } ifelse
+            pop //frnd exec dup pzrmin lt { /pzrmin exch def } { pop } ifelse
         } for
         /pzdr pzdbR pzrmin mul def
         /pzdsz pzspeck def
     } ifelse
     % Angle and size jitter draw regardless of branch, in pinned order.
-    /pzda frnd 360 mul def
-    /pzdsz pzdsz pzspeckle pzspeck mul pkjit add def
+    /pzda //frnd exec 360 mul def
+    /pzdsz pzdsz pzspeckle pzspeck mul //pkjit exec add def
     pzdsz pzspeck 0.1 mul lt { /pzdsz pzspeck 0.1 mul def } if
     /pzdpx pzdx pzdr pzda cos mul add def
     /pzdpz pzdy pzdr pzda sin mul add def
@@ -1691,7 +1691,7 @@
 % @internal
 /pzburstcluster {
     /pzbc exch def /pzbbR exch def /pzby exch def /pzbx exch def
-    1 1 pzbc { pop pzbx pzby pzbbR pzpdot } for
+    1 1 pzbc { pop pzbx pzby pzbbR //pzpdot exec } for
 } bind def
 
 % opts pkspray -
@@ -1722,29 +1722,29 @@
     % every later bare reference (the trap pkgetdef's own header
     % documents), so `/key load xcheck` rejects them outright the way
     % pkribbon rejects an executable /Width (Codex review, round 7).
-    /pznozzle pzopts /Nozzle 8 pkgetdef def
+    /pznozzle pzopts /Nozzle 8 //pkgetdef exec def
     /pznozzle load xcheck { pkspray-nozzle-must-not-be-a-procedure } if
     pznozzle 0 le { pkspray-nozzle-must-be-positive } if
 
-    /pzdensity pzopts /Density 30 pkgetdef def
+    /pzdensity pzopts /Density 30 //pkgetdef exec def
     /pzdensity load xcheck { pkspray-density-must-not-be-a-procedure } if
     pzdensity 0 lt { pkspray-density-must-be-non-negative } if
 
-    /pzfalloff pzopts /Falloff 0.5 pkgetdef def
+    /pzfalloff pzopts /Falloff 0.5 //pkgetdef exec def
     /pzfalloff load xcheck { pkspray-falloff-must-not-be-a-procedure } if
     pzfalloff 0 lt pzfalloff 1 gt or { pkspray-falloff-must-be-0-to-1 } if
 
-    /pzoverspray pzopts /Overspray 0.12 pkgetdef def
+    /pzoverspray pzopts /Overspray 0.12 //pkgetdef exec def
     /pzoverspray load xcheck
         { pkspray-overspray-must-not-be-a-procedure } if
     pzoverspray 0 lt pzoverspray 1 gt or
         { pkspray-overspray-must-be-0-to-1 } if
 
-    /pzspeck pzopts /Speck 1.4 pkgetdef def
+    /pzspeck pzopts /Speck 1.4 //pkgetdef exec def
     /pzspeck load xcheck { pkspray-speck-must-not-be-a-procedure } if
     pzspeck 0 le { pkspray-speck-must-be-positive } if
 
-    /pzspeckle pzopts /Speckle 0.35 pkgetdef def
+    /pzspeckle pzopts /Speckle 0.35 //pkgetdef exec def
     /pzspeckle load xcheck { pkspray-speckle-must-not-be-a-procedure } if
     pzspeckle 0 lt pzspeckle 1 gt or
         { pkspray-speckle-must-be-0-to-1 } if
@@ -1752,18 +1752,18 @@
     /pzpitch
         pzopts /Pitch
         pznozzle 0.5 mul dup 6 gt { pop 6 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pzpitch load xcheck { pkspray-pitch-must-not-be-a-procedure } if
     pzpitch 0 le { pkspray-pitch-must-be-positive } if
 
-    /pzstartburst pzopts /StartBurst 0 pkgetdef def
+    /pzstartburst pzopts /StartBurst 0 //pkgetdef exec def
     /pzstartburst load xcheck
         { pkspray-startburst-must-not-be-a-procedure } if
     pzstartburst 0 lt pzstartburst 1 gt or
         { pkspray-startburst-must-be-0-to-1 } if
 
-    /pzendburst pzopts /EndBurst 0 pkgetdef def
+    /pzendburst pzopts /EndBurst 0 //pkgetdef exec def
     /pzendburst load xcheck { pkspray-endburst-must-not-be-a-procedure } if
     pzendburst 0 lt pzendburst 1 gt or
         { pkspray-endburst-must-be-0-to-1 } if
@@ -1807,7 +1807,7 @@
         pzest 150000 gt
             { pkspray-deposit-count-exceeds-safety-limit } if
         /pzcount pzcount 1 add def
-    } walkpath
+    } //walkpath exec
 
     % Collection pass into a preallocated array -- count, then fill,
     % the only shape that survives walkpath's cross-subpath stack
@@ -1817,7 +1817,7 @@
     pzpitch {
         6 array astore pzraw pzci 3 -1 roll put
         /pzci pzci 1 add def
-    } walkpath
+    } //walkpath exec
 
     pzcount 0 gt {
         gsave
@@ -1836,16 +1836,16 @@
                 % last stop, so requested endpoint bursts apply here
                 % too (Codex review, PR #83).
                 pzx pzy pznozzle pzdensity 2 mul truncate
-                pzburstcluster
+                //pzburstcluster exec
                 pzstartburst 0 gt {
                     pzx pzy pznozzle pzstartburst 0.5 mul 1 add mul
                     pzstartburst pzdensity mul 2 mul truncate
-                    pzburstcluster
+                    //pzburstcluster exec
                 } if
                 pzendburst 0 gt {
                     pzx pzy pznozzle pzendburst 0.5 mul 1 add mul
                     pzendburst pzdensity mul 2 mul truncate
-                    pzburstcluster
+                    //pzburstcluster exec
                 } if
             } {
                 pzae 1 and 1 eq {
@@ -1856,19 +1856,19 @@
                     pzstartburst 0 gt {
                         pzx pzy pznozzle pzstartburst 0.5 mul 1 add mul
                         pzstartburst pzdensity mul 2 mul truncate
-                        pzburstcluster
+                        //pzburstcluster exec
                     } if
                 } if
                 /pzacc pzacc pzdensity pzsp mul pznozzle 2 mul div add def
                 /pzn pzacc truncate def
                 /pzacc pzacc pzn sub def
-                1 1 pzn { pop pzx pzy pznozzle pzpdot } for
+                1 1 pzn { pop pzx pzy pznozzle //pzpdot exec } for
                 pzae 2 and 2 eq {
                     pzendburst 0 gt {
                         pzx pzy
                         pznozzle pzendburst 0.5 mul 1 add mul
                         pzendburst pzdensity mul 2 mul truncate
-                        pzburstcluster
+                        //pzburstcluster exec
                     } if
                 } if
             } ifelse
@@ -1932,7 +1932,7 @@
 %
 % @internal
 /poroll {
-    dup 1 ge { pop true } { dup 0 le { pop false } { frnd exch lt } ifelse } ifelse
+    dup 1 ge { pop true } { dup 0 le { pop false } { //frnd exec exch lt } ifelse } ifelse
 } bind def
 
 % Pressure proc handed to each nested pkribbon call. The nested ribbon
@@ -1956,7 +1956,7 @@
 /porad {
     /porend exch def /porstart exch def /porw exch def /poroff exch def
     /porsingle porstart porend eq def
-    /porstate poLoad poroll def
+    /porstate poLoad //poroll exec def
     /porwasoff true def
     /poradi porstart def
     {
@@ -1964,29 +1964,29 @@
         poraw poradi get dup 0 get /porpx exch def dup 1 get /porpy exch def dup 2 get /porpang exch def dup 3 get /porpt exch def 4 get /porsp exch def
         /pormul porsingle { 1 } { porpt poPressure dup 0 lt { pop 0 } if } ifelse def
         porsingle {
-            /porex porpx poroff pormul mul pkjit add def
-            /porey porpy poroff pormul mul pkjit add def
+            /porex porpx poroff pormul mul //pkjit exec add def
+            /porey porpy poroff pormul mul //pkjit exec add def
         } {
             /porex porpx porpang 90 add cos poroff mul pormul mul add def
             /porey porpy porpang 90 add sin poroff mul pormul mul add def
         } ifelse
         poradi porstart gt {
             porstate {
-                poDropout porsp poWidth div mul poroll { /porstate false def } if
+                poDropout porsp poWidth div mul //poroll exec { /porstate false def } if
             } {
-                poLoad porsp poWidth div mul poroll { /porstate true def } if
+                poLoad porsp poWidth div mul //poroll exec { /porstate true def } if
             } ifelse
         } if
         porstate {
             porwasoff { /porT0 porpt def newpath porex porey moveto } { porex porey lineto } ifelse
             /porT1 porpt def
         } {
-            porwasoff not { porbr } if
+            porwasoff not { //porbr exec } if
         } ifelse
         /porwasoff porstate not def
         /poradi poradi 1 add def
     } loop
-    porstate { porbr } if
+    porstate { //porbr exec } if
 } bind def
 
 %%SelfTest: pkoil-hue-keys
@@ -2070,45 +2070,45 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkoil-needs-an-options-dict } if
     /poopts exch def
-    /poWidth poopts /Width 14 pkgetdef def
+    /poWidth poopts /Width 14 //pkgetdef exec def
     /poWidth load xcheck { pkoil-width-must-not-be-a-procedure } if
     poWidth 0 le { pkoil-width-must-be-positive } if
-    /poPitch poopts /Pitch poWidth 0.35 mul dup 4 gt { pop 4 } if pkgetdef def
+    /poPitch poopts /Pitch poWidth 0.35 mul dup 4 gt { pop 4 } if //pkgetdef exec def
     /poPitch load xcheck { pkoil-pitch-must-not-be-a-procedure } if
     poPitch 0 le { pkoil-pitch-must-be-positive } if
-    /poRidges poopts /Ridges 12 pkgetdef def
+    /poRidges poopts /Ridges 12 //pkgetdef exec def
     /poRidges load xcheck { pkoil-ridges-must-not-be-a-procedure } if
     poRidges 1 lt poRidges 40 gt or poRidges truncate poRidges ne or { pkoil-ridges-must-be-1-to-40 } if
-    /poRidgeSpread poopts /RidgeSpread 0.75 pkgetdef def
+    /poRidgeSpread poopts /RidgeSpread 0.75 //pkgetdef exec def
     /poRidgeSpread load xcheck { pkoil-ridgespread-must-not-be-a-procedure } if
     poRidgeSpread 0 lt poRidgeSpread 1 gt or { pkoil-ridgespread-must-be-0-to-1 } if
-    /poRidgeWidth poopts /RidgeWidth poWidth 0.14 mul pkgetdef def
+    /poRidgeWidth poopts /RidgeWidth poWidth 0.14 mul //pkgetdef exec def
     /poRidgeWidth load xcheck { pkoil-ridgewidth-must-not-be-a-procedure } if
     poRidgeWidth 0 le { pkoil-ridgewidth-must-be-positive } if
-    /poWidthJitter poopts /WidthJitter 0.3 pkgetdef def
+    /poWidthJitter poopts /WidthJitter 0.3 //pkgetdef exec def
     /poWidthJitter load xcheck { pkoil-widthjitter-must-not-be-a-procedure } if
     poWidthJitter 0 lt poWidthJitter 1 gt or { pkoil-widthjitter-must-be-0-to-1 } if
-    /poLoad poopts /Load 0.85 pkgetdef def
+    /poLoad poopts /Load 0.85 //pkgetdef exec def
     /poLoad load xcheck { pkoil-load-must-not-be-a-procedure } if
     poLoad 0 lt poLoad 1 gt or { pkoil-load-must-be-0-to-1 } if
-    /poDropout poopts /Dropout 0.18 pkgetdef def
+    /poDropout poopts /Dropout 0.18 //pkgetdef exec def
     /poDropout load xcheck { pkoil-dropout-must-not-be-a-procedure } if
     poDropout 0 lt poDropout 1 gt or { pkoil-dropout-must-be-0-to-1 } if
-    /poColorJitter poopts /ColorJitter 0.08 pkgetdef def
+    /poColorJitter poopts /ColorJitter 0.08 //pkgetdef exec def
     /poColorJitter load xcheck { pkoil-colorjitter-must-not-be-a-procedure } if
     poColorJitter 0 lt poColorJitter 1 gt or { pkoil-colorjitter-must-be-0-to-1 } if
-    /poEdgePickup poopts /EdgePickup 0.15 pkgetdef def
+    /poEdgePickup poopts /EdgePickup 0.15 //pkgetdef exec def
     /poEdgePickup load xcheck { pkoil-edgepickup-must-not-be-a-procedure } if
     poEdgePickup 0 lt poEdgePickup 1 gt or { pkoil-edgepickup-must-be-0-to-1 } if
-    /poHighlight poopts /Highlight 0.12 pkgetdef def
+    /poHighlight poopts /Highlight 0.12 //pkgetdef exec def
     /poHighlight load xcheck { pkoil-highlight-must-not-be-a-procedure } if
     poHighlight 0 lt poHighlight 1 gt or { pkoil-highlight-must-be-0-to-1 } if
-    /poShadow poopts /Shadow 0.10 pkgetdef def
+    /poShadow poopts /Shadow 0.10 //pkgetdef exec def
     /poShadow load xcheck { pkoil-shadow-must-not-be-a-procedure } if
     poShadow 0 lt poShadow 1 gt or { pkoil-shadow-must-be-0-to-1 } if
-    /poJitter poopts /Jitter 0 pkgetdef def
+    /poJitter poopts /Jitter 0 //pkgetdef exec def
     /poJitter load xcheck { pkoil-jitter-must-not-be-a-procedure } if
-    /poPressure poopts /Pressure { pkflat } pkgetdef def
+    /poPressure poopts /Pressure { pkflat } //pkgetdef exec def
     /poPressure load xcheck /poPressure load type dup /arraytype eq exch dup /operatortype eq exch /packedarraytype eq or or and not { pkoil-pressure-must-be-a-procedure } if
     % The two colours the highlight and shadow ridges mix toward: null when the
     % key is unset, so the branch below is `... null ne` and an unset key keeps
@@ -2123,11 +2123,11 @@
         dup null ne { aload pop puwet 3 array astore } if /poShadowColor exch def
     % counting pass with safety budget
     /pocount 0 def
-    poPitch { pop pop pop pop pop pop /pocount pocount 1 add def poRidges pocount mul 120000 gt { pkoil-deposit-count-exceeds-safety-limit } if } walkpath
+    poPitch { pop pop pop pop pop pop /pocount pocount 1 add def poRidges pocount mul 120000 gt { pkoil-deposit-count-exceeds-safety-limit } if } //walkpath exec
     /pon pocount def
     /poraw pon array def
     /poci 0 def
-    poPitch { 6 array astore poraw poci 3 -1 roll put /poci poci 1 add def } walkpath
+    poPitch { 6 array astore poraw poci 3 -1 roll put /poci poci 1 add def } //walkpath exec
     pon 0 gt {
         gsave
         /pobasecolor [ currentrgbcolor ] def
@@ -2146,12 +2146,12 @@
                 poraw posi get 5 get /poae exch def
                 poae 1 and 1 eq { /porunstart posi def } if
                 poae 2 and 2 eq {
-                    /pooff poevenfrac 0.5 sub 2 mul pohalfspread mul pohalfspread 0.15 mul pkjit add def
-                    /porw poRidgeWidth poWidthJitter poRidgeWidth mul pkjit add def
+                    /pooff poevenfrac 0.5 sub 2 mul pohalfspread mul pohalfspread 0.15 mul //pkjit exec add def
+                    /porw poRidgeWidth poWidthJitter poRidgeWidth mul //pkjit exec add def
                     porw poRidgeWidth 0.05 mul lt { /porw poRidgeWidth 0.05 mul def } if
-                    /poshade 1 pori 1 eq pori poRidges eq or { poEdgePickup 0.5 mul neg } { 0 } ifelse poColorJitter pkjit add add def
-                    pobasecolor poshade shade setrgbcolor
-                    pooff porw porunstart posi porad
+                    /poshade 1 pori 1 eq pori poRidges eq or { poEdgePickup 0.5 mul neg } { 0 } ifelse poColorJitter //pkjit exec add add def
+                    pobasecolor poshade //shade exec setrgbcolor
+                    pooff porw porunstart posi //porad exec
                     pobasecolor aload pop setrgbcolor
                 } if
                 /posi posi 1 add def
@@ -2162,9 +2162,9 @@
             /pohoff pohalfspread 0.85 mul def
             /pohpow poRidgeWidth 0.6 mul def
             poHighlightColor null ne {
-                pobasecolor poHighlightColor poHighlight mix3
+                pobasecolor poHighlightColor poHighlight //mix3 exec
             } {
-                pobasecolor poHighlight 1 add shade
+                pobasecolor poHighlight 1 add //shade exec
             } ifelse
             setrgbcolor
             /posi 0 def /porunstart 0 def
@@ -2172,7 +2172,7 @@
                 posi pon ge { exit } if
                 poraw posi get 5 get /poae exch def
                 poae 1 and 1 eq { /porunstart posi def } if
-                poae 2 and 2 eq { pohoff pohpow porunstart posi porad } if
+                poae 2 and 2 eq { pohoff pohpow porunstart posi //porad exec } if
                 /posi posi 1 add def
             } loop
             pobasecolor aload pop setrgbcolor
@@ -2182,9 +2182,9 @@
             /posoff pohalfspread -0.85 mul def
             /pospow poRidgeWidth 0.6 mul def
             poShadowColor null ne {
-                pobasecolor poShadowColor poShadow mix3
+                pobasecolor poShadowColor poShadow //mix3 exec
             } {
-                pobasecolor poShadow neg 1 add shade
+                pobasecolor poShadow neg 1 add //shade exec
             } ifelse
             setrgbcolor
             /posi 0 def /porunstart 0 def
@@ -2192,7 +2192,7 @@
                 posi pon ge { exit } if
                 poraw posi get 5 get /poae exch def
                 poae 1 and 1 eq { /porunstart posi def } if
-                poae 2 and 2 eq { posoff pospow porunstart posi porad } if
+                poae 2 and 2 eq { posoff pospow porunstart posi //porad exec } if
                 /posi posi 1 add def
             } loop
             pobasecolor aload pop setrgbcolor
@@ -2306,7 +2306,7 @@
 % benefit is that the draw count depends on (Lanes, stops) alone.
 % @internal
 /ptroll {
-    frnd exch
+    //frnd exec exch
     dup 1 ge { pop pop true } { dup 0 le { pop pop false } { lt } ifelse } ifelse
 } bind def
 
@@ -2338,7 +2338,7 @@
     puat
     % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
     ptraw ptcli ptclj add 2 idiv get dup 0 get exch 1 get
-    puwetat 3 array astore ptcsh shade setrgbcolor
+    puwetat 3 array astore ptcsh //shade exec setrgbcolor
 } bind def
 
 % - ptemit -   (fills the ptk accumulated stops as one strip, resets ptk)
@@ -2373,19 +2373,19 @@
         % the length (and every run outside such a call) takes the code below.
         /ptcuts ptColorRec null ne ptk 1 gt and { ptfillcuts } { null } ifelse def
         ptcuts null ne { ptsplitfill } {
-        ptColorRec null ne { ptri 0 get ptri ptk 1 sub get ptcolor } if
+        ptColorRec null ne { ptri 0 get ptri ptk 1 sub get //ptcolor exec } if
         /ptlast ptk 1 sub def
         /ptext0 ptDrag ptraw ptri 0 get get 6 get mul ptPitch 0.5 mul add def
         /ptext1 ptDrag ptraw ptri ptlast get get 6 get mul ptPitch 0.5 mul add def
         newpath
-        ptri 0 get ptua 0 get ptext0 neg ptpt moveto
+        ptri 0 get ptua 0 get ptext0 neg //ptpt exec moveto
         0 1 ptlast { /ptei exch def
-            ptri ptei get ptua ptei get 0 ptpt lineto } for
-        ptri ptlast get ptua ptlast get ptext1 ptpt lineto
-        ptri ptlast get ptub ptlast get ptext1 ptpt lineto
+            ptri ptei get ptua ptei get 0 //ptpt exec lineto } for
+        ptri ptlast get ptua ptlast get ptext1 //ptpt exec lineto
+        ptri ptlast get ptub ptlast get ptext1 //ptpt exec lineto
         ptlast -1 0 { /ptei exch def
-            ptri ptei get ptub ptei get 0 ptpt lineto } for
-        ptri 0 get ptub 0 get ptext0 neg ptpt lineto
+            ptri ptei get ptub ptei get 0 //ptpt exec lineto } for
+        ptri 0 get ptub 0 get ptext0 neg //ptpt exec lineto
         closepath fill
         } ifelse
     } if
@@ -2418,18 +2418,18 @@
         /ptfk exch def
         /ptfa ptfk 0 eq { 0 } { ptcuts ptfk get 1 sub } ifelse def
         /ptfb ptcuts ptfk 1 add get def
-        ptri ptfa get ptri ptfb get ptcolor
+        ptri ptfa get ptri ptfb get //ptcolor exec
         /ptfe0 ptfa 0 eq { ptext0 } { 0 } ifelse def
         /ptfe1 ptfb ptlast eq { ptext1 } { 0 } ifelse def
         newpath
-        ptri ptfa get ptua ptfa get ptfe0 neg ptpt moveto
+        ptri ptfa get ptua ptfa get ptfe0 neg //ptpt exec moveto
         ptfa 1 ptfb { /ptei exch def
-            ptri ptei get ptua ptei get 0 ptpt lineto } for
-        ptri ptfb get ptua ptfb get ptfe1 ptpt lineto
-        ptri ptfb get ptub ptfb get ptfe1 ptpt lineto
+            ptri ptei get ptua ptei get 0 //ptpt exec lineto } for
+        ptri ptfb get ptua ptfb get ptfe1 //ptpt exec lineto
+        ptri ptfb get ptub ptfb get ptfe1 //ptpt exec lineto
         ptfb -1 ptfa { /ptei exch def
-            ptri ptei get ptub ptei get 0 ptpt lineto } for
-        ptri ptfa get ptub ptfa get ptfe0 neg ptpt lineto
+            ptri ptei get ptub ptei get 0 //ptpt exec lineto } for
+        ptri ptfa get ptub ptfa get ptfe0 neg //ptpt exec lineto
         closepath fill
     } for
 } bind def
@@ -2442,15 +2442,15 @@
 % coupling `ptroll` draws-before-it-clamps to avoid: a second pktrowel
 % call, or any seeded art placed after this one, would silently move.
 % @internal
-/ptgemit { ptEdgeBuildup 0 gt { ptemit } { /ptk 0 def } ifelse } bind def
+/ptgemit { ptEdgeBuildup 0 gt { //ptemit exec } { /ptk 0 def } ifelse } bind def
 
 % na nb ptridge -   (a continuous strip between two normalized blade
 % offsets, one per subpath -- the edge buildup, which never breaks)
 % @internal
 /ptridge {
     /ptrgb exch def /ptrga exch def
-    /ptrt0 frnd ptTrim mul def
-    /ptrt1 1 frnd ptTrim mul sub def
+    /ptrt0 //frnd exec ptTrim mul def
+    /ptrt1 1 //frnd exec ptTrim mul sub def
     /ptk 0 def
     0 1 ptn 1 sub {
         /ptgi exch def
@@ -2459,13 +2459,13 @@
         ptgrec 5 get 3 and 3 eq or {
             /ptgh ptgrec 6 get def
             ptri ptk ptgi put
-            ptua ptk ptrga ptgh mul ptJitter 0.5 mul pkjit add put
-            ptub ptk ptrgb ptgh mul ptJitter 0.5 mul pkjit add put
+            ptua ptk ptrga ptgh mul ptJitter 0.5 mul //pkjit exec add put
+            ptub ptk ptrgb ptgh mul ptJitter 0.5 mul //pkjit exec add put
             /ptk ptk 1 add def
-        } { ptgemit } ifelse
-        ptgrec 5 get 2 and 2 eq { ptgemit } if
+        } { //ptgemit exec } ifelse
+        ptgrec 5 get 2 and 2 eq { //ptgemit exec } if
     } for
-    ptgemit
+    //ptgemit exec
 } bind def
 
 %%SelfTest: pktrowel-touch-guards
@@ -2631,47 +2631,47 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pktrowel-needs-an-options-dict } if
     /ptopts exch def
-    /ptWidth ptopts /Width 24 pkgetdef def
+    /ptWidth ptopts /Width 24 //pkgetdef exec def
     /ptWidth load xcheck { pktrowel-width-must-not-be-a-procedure } if
     ptWidth 0 le { pktrowel-width-must-be-positive } if
-    /ptPitch ptopts /Pitch ptWidth 0.35 mul dup 4 gt { pop 4 } if pkgetdef def
+    /ptPitch ptopts /Pitch ptWidth 0.35 mul dup 4 gt { pop 4 } if //pkgetdef exec def
     /ptPitch load xcheck { pktrowel-pitch-must-not-be-a-procedure } if
     ptPitch 0 le { pktrowel-pitch-must-be-positive } if
-    /ptLanes ptopts /Lanes 14 pkgetdef def
+    /ptLanes ptopts /Lanes 14 //pkgetdef exec def
     /ptLanes load xcheck { pktrowel-lanes-must-not-be-a-procedure } if
     ptLanes 1 lt ptLanes 40 gt or ptLanes truncate ptLanes ne or { pktrowel-lanes-must-be-1-to-40 } if
     % /Cover, or the deprecated /Load alias when /Cover is absent (issue
     % #141). The inner pkgetdef resolves the alias, so /Cover wins.
-    /ptLoad ptopts /Cover ptopts /Load 0.85 pkgetdef pkgetdef def
+    /ptLoad ptopts /Cover ptopts /Load 0.85 //pkgetdef exec //pkgetdef exec def
     /ptLoad load xcheck { pktrowel-cover-must-not-be-a-procedure } if
     ptLoad 0 lt ptLoad 1 gt or { pktrowel-cover-must-be-0-to-1 } if
-    /ptAngle ptopts /Angle 0 pkgetdef def
+    /ptAngle ptopts /Angle 0 //pkgetdef exec def
     /ptAngle load xcheck { pktrowel-angle-must-not-be-a-procedure } if
     ptAngle -80 lt ptAngle 80 gt or { pktrowel-angle-must-be-minus80-to-80 } if
-    /ptDrag ptopts /Drag 0.35 pkgetdef def
+    /ptDrag ptopts /Drag 0.35 //pkgetdef exec def
     /ptDrag load xcheck { pktrowel-drag-must-not-be-a-procedure } if
     ptDrag 0 lt ptDrag 1 gt or { pktrowel-drag-must-be-0-to-1 } if
-    /ptViscosity ptopts /Viscosity 0.6 pkgetdef def
+    /ptViscosity ptopts /Viscosity 0.6 //pkgetdef exec def
     /ptViscosity load xcheck { pktrowel-viscosity-must-not-be-a-procedure } if
     ptViscosity 0 lt ptViscosity 1 gt or { pktrowel-viscosity-must-be-0-to-1 } if
-    /ptCoverage ptopts /Coverage 0.82 pkgetdef def
+    /ptCoverage ptopts /Coverage 0.82 //pkgetdef exec def
     /ptCoverage load xcheck { pktrowel-coverage-must-not-be-a-procedure } if
     ptCoverage 0 lt ptCoverage 1 gt or { pktrowel-coverage-must-be-0-to-1 } if
-    /ptScrape ptopts /Scrape 0.15 pkgetdef def
+    /ptScrape ptopts /Scrape 0.15 //pkgetdef exec def
     /ptScrape load xcheck { pktrowel-scrape-must-not-be-a-procedure } if
     ptScrape 0 lt ptScrape 1 gt or { pktrowel-scrape-must-be-0-to-1 } if
-    /ptEdgeBuildup ptopts /EdgeBuildup 0.35 pkgetdef def
+    /ptEdgeBuildup ptopts /EdgeBuildup 0.35 //pkgetdef exec def
     /ptEdgeBuildup load xcheck { pktrowel-edgebuildup-must-not-be-a-procedure } if
     ptEdgeBuildup 0 lt ptEdgeBuildup 1 gt or { pktrowel-edgebuildup-must-be-0-to-1 } if
-    /ptJitter ptopts /Jitter 0 pkgetdef def
+    /ptJitter ptopts /Jitter 0 //pkgetdef exec def
     /ptJitter load xcheck { pktrowel-jitter-must-not-be-a-procedure } if
-    /ptColorJitter ptopts /ColorJitter 0.06 pkgetdef def
+    /ptColorJitter ptopts /ColorJitter 0.06 //pkgetdef exec def
     /ptColorJitter load xcheck { pktrowel-colorjitter-must-not-be-a-procedure } if
     ptColorJitter 0 lt ptColorJitter 1 gt or { pktrowel-colorjitter-must-be-0-to-1 } if
     % /Touch (issue #222, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
     % a canvas. Only a value below 1 builds a catch, so unset and 1 take
     % exactly the path they took before /Touch existed.
-    /ptTouch ptopts /Touch 1 pkgetdef def
+    /ptTouch ptopts /Touch 1 //pkgetdef exec def
     /ptTouch load xcheck { pktrowel-touch-must-not-be-a-procedure } if
     ptTouch 0 lt ptTouch 1 gt or { pktrowel-touch-must-be-0-to-1 } if
     ptopts /Touch known {
@@ -2682,14 +2682,14 @@
     % `ptColorRec null ne` and an unset key never reaches it.
     ptopts (pktrowel) puparse /ptColorRec exch def
     ptopts (pktrowel) pulightneedscolors
-    /ptPressure ptopts /Pressure { pkflat } pkgetdef def
+    /ptPressure ptopts /Pressure { pkflat } //pkgetdef exec def
     /ptPressure load xcheck /ptPressure load type dup /arraytype eq exch dup /operatortype eq exch /packedarraytype eq or or and not { pktrowel-pressure-must-be-a-procedure } if
     % Counting pass with the safety budget checked inside the walk, so
     % an unbounded path is rejected before any allocation (pkoil's
     % placement argument).
     /ptcount 0 def
     ptPitch { pop pop pop pop pop pop /ptcount ptcount 1 add def
-              ptLanes ptcount mul 120000 gt { pktrowel-deposit-count-exceeds-safety-limit } if } walkpath
+              ptLanes ptcount mul 120000 gt { pktrowel-deposit-count-exceeds-safety-limit } if } //walkpath exec
     /ptn ptcount def
     /ptloadf 0.35 0.65 ptLoad mul add def
     /ptraw ptn array def
@@ -2708,7 +2708,7 @@
               ptWidth 0.5 mul ptt ptPressure mul ptloadf mul ]
         put
         /ptci ptci 1 add def
-    } walkpath
+    } //walkpath exec
     % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
     % farthest any emitter puts paint from it, checked against the cell
     % budget before anything is drawn. Every emitter is one ptemit strip:
@@ -2795,15 +2795,15 @@
             % 0.5 must consume exactly what a live lane at Scrape 0
             % does, or turning /Scrape re-rolls every other lane's
             % texture.
-            /ptdead frnd ptScrape 0.35 mul lt def
-            /ptcj ptColorJitter pkjit def
+            /ptdead //frnd exec ptScrape 0.35 mul lt def
+            /ptcj ptColorJitter //pkjit exec def
             % Per-lane entry/exit trim: a blade does not touch down or
             % lift off all at once, and without this every lane starts
             % and stops at the same stop, giving the mark two perfectly
             % straight machined ends.
-            /ptt0 frnd ptTrim mul def
-            /ptt1 1 frnd ptTrim mul sub def
-            ptbasecolor 1 ptcj add shade setrgbcolor
+            /ptt0 //frnd exec ptTrim mul def
+            /ptt1 1 //frnd exec ptTrim mul sub def
+            ptbasecolor 1 ptcj add //shade exec setrgbcolor
             % With a load, ptemit sets the color at each fill, from the lane's
             % head position and this jitter.
             ptColorRec null ne { /ptcu ptnc def /ptcsh 1 ptcj add def } if
@@ -2818,22 +2818,22 @@
                     % /Coverage, its steady state -- not from /Cover,
                     % which is a width control here and would bias the
                     % first run.
-                    /ptstate ptCoverage ptroll def
+                    /ptstate ptCoverage //ptroll exec def
                     ptae 2 and 2 eq { /ptstate true def } if
                 } {
                     /ptstep ptrec 4 get ptWidth div ptrate mul def
                     ptstep ptstepmax gt { /ptstep ptstepmax def } if
                     ptstate {
-                        1 ptCoverage sub ptstep mul ptroll { /ptstate false def } if
+                        1 ptCoverage sub ptstep mul //ptroll exec { /ptstate false def } if
                     } {
-                        ptCoverage ptstep mul ptroll { /ptstate true def } if
+                        ptCoverage ptstep mul //ptroll exec { /ptstate true def } if
                     } ifelse
                 } ifelse
                 % Drawn every stop for every lane whatever the contact
                 % state, so the stream length is fixed by (Lanes, stops)
                 % alone.
-                /ptj1 ptJitter pkjit def
-                /ptj2 ptJitter pkjit def
+                /ptj1 ptJitter //pkjit exec def
+                /ptj2 ptJitter //pkjit exec def
                 % A degenerate single-point subpath (atend 3) is a
                 % pressed knife: it ignores the trim, or the one stop it
                 % has would be trimmed away and the dab would vanish.
@@ -2846,11 +2846,11 @@
                     ptub ptk ptnb pth mul ptj2 add put
                     /ptk ptk 1 add def
                 } {
-                    ptemit
+                    //ptemit exec
                 } ifelse
-                ptae 2 and 2 eq { ptemit } if
+                ptae 2 and 2 eq { //ptemit exec } if
             } for
-            ptemit
+            //ptemit exec
         } for
         % Edge buildup last, so the ridges sit on top of the masses.
         % The pass itself is unconditional (ptgemit decides whether to
@@ -2858,14 +2858,14 @@
         % any other value -- see ptgemit's own note.
         /ptrwn ptEdgeBuildup 0.28 mul def
         ptEdgeBuildup 0 gt {
-            ptbasecolor 1 ptEdgeBuildup 0.5 mul sub shade setrgbcolor
+            ptbasecolor 1 ptEdgeBuildup 0.5 mul sub //shade exec setrgbcolor
         } if
         % Each ridge takes the color at its own edge (+1 is the left),
         % darkened by the same shade as today.
         ptColorRec null ne { /ptcu 1 def /ptcsh 1 ptEdgeBuildup 0.5 mul sub def } if
-        1 ptrwn sub 1 ptridge
+        1 ptrwn sub 1 //ptridge exec
         ptColorRec null ne { /ptcu -1 def } if
-        -1 ptrwn 1 sub ptridge
+        -1 ptrwn 1 sub //ptridge exec
         ptbasecolor aload pop setrgbcolor
         grestore
     } if
@@ -3004,31 +3004,31 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pktrowelplane-needs-an-options-dict } if
     /tplopts exch def
-    /tplWidth tplopts /Width 24 pkgetdef def
+    /tplWidth tplopts /Width 24 //pkgetdef exec def
     /tplWidth load xcheck { pktrowelplane-width-must-not-be-a-procedure } if
     tplWidth 0 le { pktrowelplane-width-must-be-positive } if
-    /tplDir tplopts /Direction -90 pkgetdef def
+    /tplDir tplopts /Direction -90 //pkgetdef exec def
     /tplDir load xcheck { pktrowelplane-direction-must-not-be-a-procedure } if
-    /tplLanes tplopts /Lanes 14 pkgetdef def
-    /tplAngle tplopts /Angle 0 pkgetdef def
+    /tplLanes tplopts /Lanes 14 //pkgetdef exec def
+    /tplAngle tplopts /Angle 0 //pkgetdef exec def
     /tplAngle load xcheck { pktrowelplane-angle-must-not-be-a-procedure } if
     tplAngle -80 lt tplAngle 80 gt or { pktrowelplane-angle-must-be-minus80-to-80 } if
-    /tplCover tplopts /Cover tplopts /Load 0.85 pkgetdef pkgetdef def
+    /tplCover tplopts /Cover tplopts /Load 0.85 //pkgetdef exec //pkgetdef exec def
     /tplCover load xcheck { pktrowelplane-cover-must-not-be-a-procedure } if
     tplCover 0 lt tplCover 1 gt or { pktrowelplane-cover-must-be-0-to-1 } if
-    /tplCoverage tplopts /Coverage 0.82 pkgetdef def
+    /tplCoverage tplopts /Coverage 0.82 //pkgetdef exec def
     /tplCoverage load xcheck { pktrowelplane-coverage-must-not-be-a-procedure } if
     tplCoverage 0 lt tplCoverage 1 gt or { pktrowelplane-coverage-must-be-0-to-1 } if
-    /tplDrag tplopts /Drag 0.35 pkgetdef def
+    /tplDrag tplopts /Drag 0.35 //pkgetdef exec def
     /tplDrag load xcheck { pktrowelplane-drag-must-not-be-a-procedure } if
     tplDrag 0 lt tplDrag 1 gt or { pktrowelplane-drag-must-be-0-to-1 } if
-    /tplPitch tplopts /Pitch tplWidth 0.35 mul dup 4 gt { pop 4 } if pkgetdef def
+    /tplPitch tplopts /Pitch tplWidth 0.35 mul dup 4 gt { pop 4 } if //pkgetdef exec def
     /tplPitch load xcheck { pktrowelplane-pitch-must-not-be-a-procedure } if
     tplPitch 0 le { pktrowelplane-pitch-must-be-positive } if
-    /tplOverlap tplopts /Overlap 0.15 0.6 1 tplCoverage sub mul add pkgetdef def
+    /tplOverlap tplopts /Overlap 0.15 0.6 1 tplCoverage sub mul add //pkgetdef exec def
     /tplOverlap load xcheck { pktrowelplane-overlap-must-not-be-a-procedure } if
     tplOverlap 0 lt tplOverlap 0.95 ge or { pktrowelplane-overlap-must-be-0-to-under-0.95 } if
-    /tplAJit tplopts /AngleJitter 0 pkgetdef def
+    /tplAJit tplopts /AngleJitter 0 //pkgetdef exec def
     /tplAJitSet tplopts /AngleJitter known def
     /tplAJit load xcheck { pktrowelplane-anglejitter-must-not-be-a-procedure } if
     tplAJit 0 lt tplAJit 20 gt or { pktrowelplane-anglejitter-must-be-0-to-20 } if
@@ -3036,7 +3036,7 @@
     /tplF tplWidth tplAngle cos abs mul 0.35 0.65 tplCover mul add mul def
     % the default /RowJitter needs the effective band (below), so it is set there
     /tplRJitSet tplopts /RowJitter known def
-    /tplRJit tplopts /RowJitter 0 pkgetdef def
+    /tplRJit tplopts /RowJitter 0 //pkgetdef exec def
     /tplRJit load xcheck { pktrowelplane-rowjitter-must-not-be-a-procedure } if
     tplRJit 0 lt { pktrowelplane-rowjitter-must-not-be-negative } if
     % Every key `pktrowel` checks is checked here, on an empty path: it runs all
@@ -3060,7 +3060,7 @@
     /tpln 0 def /tplover false def
     gsave
         flattenpath
-        { tplpt } { tplpt }
+        { //tplpt exec } { //tplpt exec }
         { } { /tpln tpln 1 add def tpln wkmaxsegs gt { /tplover true def exit } if }
         pathforall
     grestore
@@ -3140,8 +3140,8 @@
             0 1 tplrows 1 sub {
                 /tpli exch def
                 % both draws are unconditional: a fixed stream
-                /tplrt tplt0 tpli tplStep mul add tplRJit pkjit add def
-                /tplra tplAJit pkjit def
+                /tplrt tplt0 tpli tplStep mul add tplRJit //pkjit exec add def
+                /tplra tplAJit //pkjit exec def
                 newpath
                 tplsc tplhl tplra cos mul sub  tplrt tplhl tplra sin mul sub moveto
                 tplsc tplhl tplra cos mul add  tplrt tplhl tplra sin mul add lineto
@@ -3429,7 +3429,7 @@
 % preset's scratch namespace staying put.
 % @internal
 /pfroll {
-    dup 1 ge { pop true } { dup 0 le { pop false } { frnd exch lt } ifelse } ifelse
+    dup 1 ge { pop true } { dup 0 le { pop false } { //frnd exec exch lt } ifelse } ifelse
 } bind def
 
 % t pfopen -> multiplier   (reads pfferrule)
@@ -3454,7 +3454,7 @@
     puat
     % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
     pfraw pfcli pfclj add 2 idiv get dup 0 get exch 1 get
-    puwetat 3 array astore 1 pfcj add shade setrgbcolor
+    puwetat 3 array astore 1 pfcj add //shade exec setrgbcolor
 } bind def
 
 % runstart runend islast pfrun -
@@ -3481,8 +3481,8 @@
         dup 0 get /pfrx exch def
         dup 1 get /pfry exch def
         dup 2 get /pfra exch def
-        3 get pfopen /pfro exch def
-        /pfrd pfub pfhalf mul pfro mul pfJitter pkjit add def
+        3 get //pfopen exec /pfro exch def
+        /pfrd pfub pfhalf mul pfro mul pfJitter //pkjit exec add def
         /pfpx pfrx pfra 90 add cos pfrd mul add def
         /pfpy pfry pfra 90 add sin pfrd mul add def
         pfri pfrstart gt {
@@ -3511,7 +3511,7 @@
     /pfnpts pfrend pfrstart sub 1 add def
     /pfrp pflen 8 pfnpts mul div def
     pfrp pfPitch lt { /pfrp pfPitch def } if
-    pfColorRec null ne { pfrstart pfrend pfcolor } if
+    pfColorRec null ne { pfrstart pfrend //pfcolor exec } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pflast { pfFlick } { 0 } ifelse >> pkribbon
 } bind def
@@ -3568,8 +3568,8 @@
         dup 0 get /pfrx exch def
         dup 1 get /pfry exch def
         dup 2 get /pfra exch def
-        3 get pfopen /pfro exch def
-        /pfrd pfub pfhalf mul pfro mul pfJitter pkjit add def
+        3 get //pfopen exec /pfro exch def
+        /pfrd pfub pfhalf mul pfro mul pfJitter //pkjit exec add def
         /pfpx pfrx pfra 90 add cos pfrd mul add def
         /pfpy pfry pfra 90 add sin pfrd mul add def
         pfri pfrstart gt {
@@ -3596,7 +3596,7 @@
             /pfpst0 pfscum pfpa pfrstart sub get pflen div def
             /pfpsd pfscum pfpb pfrstart sub get pflen div pfpst0 sub def
         } { /pfpst0 0 def /pfpsd 1 def } ifelse
-        pfpa pfpb pfcolor
+        pfpa pfpb //pfcolor exec
         newpath
         pfpa 1 pfpb {
             /pfri exch def
@@ -3606,7 +3606,7 @@
         << /Width pfrw /Pitch pfrp
            /StartCap pfpk 0 eq { /pointed } { /flat } ifelse
            /EndCap pfpk pfcuts length 2 sub eq { /pointed } { /flat } ifelse
-           /Pressure { pfpress } >> pkribbon
+           /Pressure { //pfpress exec } >> pkribbon
     } for
 } bind def
 
@@ -3625,7 +3625,7 @@
     /pfrayi exch def
     pfraw pfrayi get dup 0 get /pfdx exch def 1 get /pfdy exch def
     /pfda pfub 70 mul 90 add def
-    /pfdl pfhalf 1.15 mul 1 pfRagged frnd mul sub mul def
+    /pfdl pfhalf 1.15 mul 1 pfRagged //frnd exec mul sub mul def
     % The outer safety budget counts source-path stops, and a degenerate
     % subpath contributes exactly one however fine /Pitch is -- so the
     % ray's own resampling is the one place nested cost is *not* bounded
@@ -3638,7 +3638,7 @@
     newpath
     pfdx pfdy moveto
     pfdx pfda cos pfdl mul add  pfdy pfda sin pfdl mul add  lineto
-    pfColorRec null ne { pfrayi dup pfcolor } if
+    pfColorRec null ne { pfrayi dup //pfcolor exec } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pfFlick >> pkribbon
 } bind def
@@ -3782,49 +3782,49 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkfan-needs-an-options-dict } if
     /pfopts exch def
-    /pfWidth pfopts /Width 30 pkgetdef def
+    /pfWidth pfopts /Width 30 //pkgetdef exec def
     /pfWidth load xcheck { pkfan-width-must-not-be-a-procedure } if
     pfWidth 0 le { pkfan-width-must-be-positive } if
-    /pfBristles pfopts /Bristles 24 pkgetdef def
+    /pfBristles pfopts /Bristles 24 //pkgetdef exec def
     /pfBristles load xcheck { pkfan-bristles-must-not-be-a-procedure } if
     pfBristles 1 lt pfBristles 60 gt or pfBristles truncate pfBristles ne or
         { pkfan-bristles-must-be-1-to-60 } if
-    /pfSpread pfopts /Spread 0.9 pkgetdef def
+    /pfSpread pfopts /Spread 0.9 //pkgetdef exec def
     /pfSpread load xcheck { pkfan-spread-must-not-be-a-procedure } if
     pfSpread 0 lt pfSpread 1 gt or { pkfan-spread-must-be-0-to-1 } if
-    /pfSplay pfopts /Splay 0.6 pkgetdef def
+    /pfSplay pfopts /Splay 0.6 //pkgetdef exec def
     /pfSplay load xcheck { pkfan-splay-must-not-be-a-procedure } if
     pfSplay 0 lt pfSplay 1 gt or { pkfan-splay-must-be-0-to-1 } if
-    /pfrwbase pfopts /BristleWidth pfWidth 0.035 mul pkgetdef def
+    /pfrwbase pfopts /BristleWidth pfWidth 0.035 mul //pkgetdef exec def
     /pfrwbase load xcheck { pkfan-bristlewidth-must-not-be-a-procedure } if
     pfrwbase 0 le { pkfan-bristlewidth-must-be-positive } if
-    /pfWidthJitter pfopts /WidthJitter 0.35 pkgetdef def
+    /pfWidthJitter pfopts /WidthJitter 0.35 //pkgetdef exec def
     /pfWidthJitter load xcheck { pkfan-widthjitter-must-not-be-a-procedure } if
     pfWidthJitter 0 lt pfWidthJitter 1 gt or { pkfan-widthjitter-must-be-0-to-1 } if
-    /pfLoad pfopts /Load 0.92 pkgetdef def
+    /pfLoad pfopts /Load 0.92 //pkgetdef exec def
     /pfLoad load xcheck { pkfan-load-must-not-be-a-procedure } if
     pfLoad 0 lt pfLoad 1 gt or { pkfan-load-must-be-0-to-1 } if
-    /pfDropout pfopts /Dropout 0.08 pkgetdef def
+    /pfDropout pfopts /Dropout 0.08 //pkgetdef exec def
     /pfDropout load xcheck { pkfan-dropout-must-not-be-a-procedure } if
     pfDropout 0 lt pfDropout 1 gt or { pkfan-dropout-must-be-0-to-1 } if
-    /pfRagged pfopts /Ragged 0.25 pkgetdef def
+    /pfRagged pfopts /Ragged 0.25 //pkgetdef exec def
     /pfRagged load xcheck { pkfan-ragged-must-not-be-a-procedure } if
     pfRagged 0 lt pfRagged 1 gt or { pkfan-ragged-must-be-0-to-1 } if
-    /pfFlick pfopts /Flick 0.5 pkgetdef def
+    /pfFlick pfopts /Flick 0.5 //pkgetdef exec def
     /pfFlick load xcheck { pkfan-flick-must-not-be-a-procedure } if
     pfFlick 0 lt pfFlick 1 gt or { pkfan-flick-must-be-0-to-1 } if
-    /pfJitter pfopts /Jitter 0 pkgetdef def
+    /pfJitter pfopts /Jitter 0 //pkgetdef exec def
     /pfJitter load xcheck { pkfan-jitter-must-not-be-a-procedure } if
-    /pfPitch pfopts /Pitch pfrwbase 0.6 mul dup 6 gt { pop 6 } if pkgetdef def
+    /pfPitch pfopts /Pitch pfrwbase 0.6 mul dup 6 gt { pop 6 } if //pkgetdef exec def
     /pfPitch load xcheck { pkfan-pitch-must-not-be-a-procedure } if
     pfPitch 0 le { pkfan-pitch-must-be-positive } if
-    /pfColorJitter pfopts /ColorJitter 0.06 pkgetdef def
+    /pfColorJitter pfopts /ColorJitter 0.06 //pkgetdef exec def
     /pfColorJitter load xcheck { pkfan-colorjitter-must-not-be-a-procedure } if
     pfColorJitter 0 lt pfColorJitter 1 gt or { pkfan-colorjitter-must-be-0-to-1 } if
     % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
     % a canvas. Only a value below 1 builds a catch, so unset and 1 take
     % exactly the path they took before /Touch existed.
-    /pfTouch pfopts /Touch 1 pkgetdef def
+    /pfTouch pfopts /Touch 1 //pkgetdef exec def
     /pfTouch load xcheck { pkfan-touch-must-not-be-a-procedure } if
     pfTouch 0 lt pfTouch 1 gt or { pkfan-touch-must-be-0-to-1 } if
     pfopts /Touch known {
@@ -3857,11 +3857,11 @@
                   pfcae 3 and 3 eq { pfraycharge } { 1 } ifelse
               add def
               pfBristles pfcount mul 150000 gt
-                  { pkfan-deposit-count-exceeds-safety-limit } if } walkpath
+                  { pkfan-deposit-count-exceeds-safety-limit } if } //walkpath exec
     /pfn pfstops def
     /pfraw pfn array def
     /pfci 0 def
-    pfPitch { 6 array astore pfraw pfci 3 -1 roll put /pfci pfci 1 add def } walkpath
+    pfPitch { 6 array astore pfraw pfci 3 -1 roll put /pfci pfci 1 add def } //walkpath exec
     % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
     % farthest any emitter puts paint from it, checked against the cell
     % budget before anything is drawn. With half = Width/2 * Spread:
@@ -3899,21 +3899,21 @@
         1 1 pfBristles {
                 /pfb exch def
                 /pfub pfb 0.5 sub pfBristles div 2 mul 1 sub def
-                /pfrw pfrwbase pfWidthJitter pfrwbase mul pkjit add def
+                /pfrw pfrwbase pfWidthJitter pfrwbase mul //pkjit exec add def
                 pfrw pfrwbase 0.05 mul lt { /pfrw pfrwbase 0.05 mul def } if
                 % Each bristle keeps its own length, so the tips feather
                 % rather than stopping on one straight edge.
-                /pfstop 1 pfRagged frnd mul sub def
+                /pfstop 1 pfRagged //frnd exec mul sub def
                 % The jitter draw is taken here either way. Unloaded, it
                 % colours the bristle now; loaded, it is stored and applied
                 % per run (pfcolor), because the load's colour depends on
                 % the run's subpath under /Light.
                 pfColorRec null ne {
-                    /pfcj pfColorJitter pkjit def
+                    /pfcj pfColorJitter //pkjit exec def
                 } {
-                    pfbasecolor 1 pfColorJitter pkjit add shade setrgbcolor
+                    pfbasecolor 1 pfColorJitter //pkjit exec add //shade exec setrgbcolor
                 } ifelse
-                /pfstate pfLoad pfroll def
+                /pfstate pfLoad //pfroll exec def
                 /pfrunning false def
                 /pfstart 0 def
                 0 1 pfn 1 sub {
@@ -3923,14 +3923,14 @@
                     /pfin pfrec 3 get pfstop le def
                     pfae 1 and 1 eq {
                         % A new subpath opens its own fan.
-                        pfrunning { pfstart pfi 1 sub false pfrun /pfrunning false def } if
-                        /pfstate pfLoad pfroll def
+                        pfrunning { pfstart pfi 1 sub false //pfrun exec /pfrunning false def } if
+                        /pfstate pfLoad //pfroll exec def
                     } {
                         /pfstep pfrec 4 get pfWidth div def
                         pfstate {
-                            pfDropout pfstep mul pfroll { /pfstate false def } if
+                            pfDropout pfstep mul //pfroll exec { /pfstate false def } if
                         } {
-                            pfLoad pfstep mul pfroll { /pfstate true def } if
+                            pfLoad pfstep mul //pfroll exec { /pfstate true def } if
                         } ifelse
                     } ifelse
                     pfae 3 and 3 eq {
@@ -3938,7 +3938,7 @@
                         % fan radiating about the point. It honors the
                         % contact state like any other stop, so /Load 0
                         % leaves no dab rather than a full one.
-                        pfstate pfin and { pfi pfray } if
+                        pfstate pfin and { pfi //pfray exec } if
                     } {
                         pfstate pfin and {
                             pfrunning not { /pfstart pfi def /pfrunning true def } if
@@ -3947,16 +3947,16 @@
                                 % The flick belongs to the run that
                                 % actually reaches this bristle's end,
                                 % not to every dash along the way.
-                                pfstart pfi 1 sub pfin not pfstate and pfrun
+                                pfstart pfi 1 sub pfin not pfstate and //pfrun exec
                                 /pfrunning false def
                             } if
                         } ifelse
                         pfae 2 and 2 eq {
-                            pfrunning { pfstart pfi true pfrun /pfrunning false def } if
+                            pfrunning { pfstart pfi true //pfrun exec /pfrunning false def } if
                         } if
                     } ifelse
                 } for
-                pfrunning { pfstart pfn 1 sub true pfrun /pfrunning false def } if
+                pfrunning { pfstart pfn 1 sub true //pfrun exec /pfrunning false def } if
         } for
         pfbasecolor aload pop setrgbcolor
         grestore
@@ -4090,7 +4090,7 @@
     puat
     % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
     pmraw pmcli pmclj add 2 idiv get dup 0 get exch 1 get
-    puwetat 3 array astore 1 pmcj add shade setrgbcolor
+    puwetat 3 array astore 1 pmcj add //shade exec setrgbcolor
 } bind def
 
 % i na nb back fwd pmstamp -   (the brush's footprint at a single stop)
@@ -4118,7 +4118,7 @@
 /pmstamp {
     /pmsfwd exch def /pmsback exch def
     /pmsnb exch def /pmsna exch def /pmsi exch def
-    pmColorRec null ne { pmsi dup pmcolor } if
+    pmColorRec null ne { pmsi dup //pmcolor exec } if
     % The footprint's long axis is the stop's own travel direction
     % turned by /Angle -- the same rotation pmpt applies across the
     % band. walkpath reports angle 0 at a degenerate stop, so there this
@@ -4129,8 +4129,8 @@
     /pmsang pmraw pmsi get 2 get pmAngle add def
     /pmscos pmsang cos def
     /pmssin pmsang sin def
-    pmsi pmsna pmhalf mul pmpt /pmsay exch def /pmsax exch def
-    pmsi pmsnb pmhalf mul pmpt /pmsby exch def /pmsbx exch def
+    pmsi pmsna pmhalf mul //pmpt exec /pmsay exch def /pmsax exch def
+    pmsi pmsnb pmhalf mul //pmpt exec /pmsby exch def /pmsbx exch def
     newpath
     pmsax pmsback pmscos mul sub  pmsay pmsback pmssin mul sub moveto
     pmsax pmsfwd  pmscos mul add  pmsay pmsfwd  pmssin mul add lineto
@@ -4178,16 +4178,16 @@
         % the length (and every run outside such a call) takes the code below.
         /pmcuts pmColorRec null ne { pmfillcuts } { null } ifelse def
         pmcuts null ne { pmsplitfill } {
-        pmColorRec null ne { pmstart pmend pmcolor } if
+        pmColorRec null ne { pmstart pmend //pmcolor exec } if
         newpath
         pmstart 1 pmend {
             /pmei exch def
-            pmei pmnav pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt
+            pmei pmnav pmtaper pmhalf mul pmEdge pmedge mul //pkjit exec add //pmpt exec
             pmei pmstart eq { moveto } { lineto } ifelse
         } for
         pmend -1 pmstart {
             /pmei exch def
-            pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt lineto
+            pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul //pkjit exec add //pmpt exec lineto
         } for
         closepath fill
         } ifelse
@@ -4204,7 +4204,7 @@
         % the stop and reaches forward only as far as the stroke
         % actually travels -- unlike the degenerate case, a one-sample
         % run knows which way the brush was going.
-        pmstart pmnav pmnbv 0 pmstart pmgap pmstamp
+        pmstart pmnav pmnbv 0 pmstart //pmgap exec //pmstamp exec
     } ifelse
 } bind def
 
@@ -4238,19 +4238,19 @@
     /pmfpb pmspan 1 add array def
     pmstart 1 pmend {
         /pmei exch def
-        pmei pmnav pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt
+        pmei pmnav pmtaper pmhalf mul pmEdge pmedge mul //pkjit exec add //pmpt exec
         2 array astore pmfpa exch pmei pmstart sub exch put
     } for
     pmend -1 pmstart {
         /pmei exch def
-        pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt
+        pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul //pkjit exec add //pmpt exec
         2 array astore pmfpb exch pmei pmstart sub exch put
     } for
     0 1 pmcuts length 2 sub {
         /pmfk exch def
         /pmfa pmfk 0 eq { pmstart } { pmcuts pmfk get 1 sub } ifelse def
         /pmfb pmcuts pmfk 1 add get def
-        pmfa pmfb pmcolor
+        pmfa pmfb //pmcolor exec
         newpath
         pmfa pmstart sub pmfpa exch get aload pop moveto
         pmfa 1 add 1 pmfb { pmstart sub pmfpa exch get aload pop lineto } for
@@ -4435,36 +4435,36 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkbroad-needs-an-options-dict } if
     /pmopts exch def
-    /pmWidth pmopts /Width 40 pkgetdef def
+    /pmWidth pmopts /Width 40 //pkgetdef exec def
     /pmWidth load xcheck { pkbroad-width-must-not-be-a-procedure } if
     pmWidth 0 le { pkbroad-width-must-be-positive } if
-    /pmAngle pmopts /Angle 0 pkgetdef def
+    /pmAngle pmopts /Angle 0 //pkgetdef exec def
     /pmAngle load xcheck { pkbroad-angle-must-not-be-a-procedure } if
     pmAngle -80 lt pmAngle 80 gt or { pkbroad-angle-must-be-minus80-to-80 } if
-    /pmCharge pmopts /Charge 0.95 pkgetdef def
+    /pmCharge pmopts /Charge 0.95 //pkgetdef exec def
     /pmCharge load xcheck { pkbroad-charge-must-not-be-a-procedure } if
     pmCharge 0 lt pmCharge 1 gt or { pkbroad-charge-must-be-0-to-1 } if
-    /pmDepletion pmopts /Depletion 0.5 pkgetdef def
+    /pmDepletion pmopts /Depletion 0.5 //pkgetdef exec def
     /pmDepletion load xcheck { pkbroad-depletion-must-not-be-a-procedure } if
     pmDepletion 0 lt pmDepletion 1 gt or { pkbroad-depletion-must-be-0-to-1 } if
-    /pmGrain pmopts /Grain 14 pkgetdef def
+    /pmGrain pmopts /Grain 14 //pkgetdef exec def
     /pmGrain load xcheck { pkbroad-grain-must-not-be-a-procedure } if
     pmGrain 1 lt pmGrain 40 gt or pmGrain truncate pmGrain ne or
         { pkbroad-grain-must-be-1-to-40 } if
     /pmGrain pmGrain cvi def
-    /pmEdge pmopts /Edge 0.15 pkgetdef def
+    /pmEdge pmopts /Edge 0.15 //pkgetdef exec def
     /pmEdge load xcheck { pkbroad-edge-must-not-be-a-procedure } if
     pmEdge 0 lt pmEdge 1 gt or { pkbroad-edge-must-be-0-to-1 } if
-    /pmPitch pmopts /Pitch pmWidth 0.3 mul dup 4 gt { pop 4 } if pkgetdef def
+    /pmPitch pmopts /Pitch pmWidth 0.3 mul dup 4 gt { pop 4 } if //pkgetdef exec def
     /pmPitch load xcheck { pkbroad-pitch-must-not-be-a-procedure } if
     pmPitch 0 le { pkbroad-pitch-must-be-positive } if
-    /pmColorJitter pmopts /ColorJitter 0.05 pkgetdef def
+    /pmColorJitter pmopts /ColorJitter 0.05 //pkgetdef exec def
     /pmColorJitter load xcheck { pkbroad-colorjitter-must-not-be-a-procedure } if
     pmColorJitter 0 lt pmColorJitter 1 gt or { pkbroad-colorjitter-must-be-0-to-1 } if
     % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
     % a canvas. Only a value below 1 builds a catch, so unset and 1 take
     % exactly the path they took before /Touch existed.
-    /pmTouch pmopts /Touch 1 pkgetdef def
+    /pmTouch pmopts /Touch 1 //pkgetdef exec def
     /pmTouch load xcheck { pkbroad-touch-must-not-be-a-procedure } if
     pmTouch 0 lt pmTouch 1 gt or { pkbroad-touch-must-be-0-to-1 } if
     pmopts /Touch known {
@@ -4478,11 +4478,11 @@
     /pmcount 0 def
     pmPitch { pop pop pop pop pop pop /pmcount pmcount 1 add def
               pmGrain pmcount mul 120000 gt
-                  { pkbroad-deposit-count-exceeds-safety-limit } if } walkpath
+                  { pkbroad-deposit-count-exceeds-safety-limit } if } //walkpath exec
     /pmn pmcount def
     /pmraw pmn array def
     /pmci 0 def
-    pmPitch { 6 array astore pmraw pmci 3 -1 roll put /pmci pmci 1 add def } walkpath
+    pmPitch { 6 array astore pmraw pmci 3 -1 roll put /pmci pmci 1 add def } //walkpath exec
     % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
     % farthest any emitter puts paint from it, checked against the cell
     % budget before anything is drawn. pmpt puts every boundary point at
@@ -4537,14 +4537,14 @@
         pmGrain array /pmcjs exch def
         0 1 pmGrain 1 sub {
             /pmg exch def
-            pmaffs pmg frnd put
-            pmcjs pmg pmColorJitter pkjit put
+            pmaffs pmg //frnd exec put
+            pmcjs pmg pmColorJitter //pkjit exec put
         } for
         1 1 pmGrain {
             /pmg exch def
             /pmaff pmaffs pmg 1 sub get def
             /pmcj pmcjs pmg 1 sub get def
-            pmbase 1 pmcj add shade setrgbcolor
+            pmbase 1 pmcj add //shade exec setrgbcolor
             % The striations abut, so they need the same overlap
             % pktrowel's lanes do, or every boundary leaves an
             % anti-aliased hairline (see that preset's own note).
@@ -4589,28 +4589,28 @@
                 /pmrec pmraw pmi get def
                 /pmae pmrec 5 get def
                 pmae 1 and 1 eq {
-                    pmrun { pmstart pmi 1 sub pmna pmnb false pmemit /pmrun false def } if
+                    pmrun { pmstart pmi 1 sub pmna pmnb false //pmemit exec /pmrun false def } if
                 } if
                 /pmch pmCharge 1 pmDepletion pmrec 3 get mul sub mul def
-                pmch pmaff pmwets {
+                pmch pmaff //pmwets exec {
                     pmrun not { /pmstart pmi def /pmrun true def } if
                 } {
-                    pmrun { pmstart pmi 1 sub pmna pmnb true pmemit /pmrun false def } if
+                    pmrun { pmstart pmi 1 sub pmna pmnb true //pmemit exec /pmrun false def } if
                 } ifelse
                 pmae 3 and 3 eq {
                     % A degenerate subpath: press the footprint rather
                     % than trying to draw a zero-area strip through one
                     % stop. It honors the charge like any other stop.
-                    pmch pmaff pmwets
-                        { pmi pmna pmnb pmPitch 0.5 mul dup pmstamp } if
+                    pmch pmaff //pmwets exec
+                        { pmi pmna pmnb pmPitch 0.5 mul dup //pmstamp exec } if
                     /pmrun false def
                 } {
                     pmae 2 and 2 eq {
-                        pmrun { pmstart pmi pmna pmnb false pmemit /pmrun false def } if
+                        pmrun { pmstart pmi pmna pmnb false //pmemit exec /pmrun false def } if
                     } if
                 } ifelse
             } for
-            pmrun { pmstart pmn 1 sub pmna pmnb false pmemit /pmrun false def } if
+            pmrun { pmstart pmn 1 sub pmna pmnb false //pmemit exec /pmrun false def } if
         } for
         pmbase aload pop setrgbcolor
         grestore
@@ -4845,7 +4845,7 @@
 % @internal
 /pqrunw {
     /pqri exch def
-    pqraw pqri get 3 get pqhw
+    pqraw pqri get 3 get //pqhw exec
     pqrspan 0 gt {
         /pqrf pqri pqrstart sub pqrspan div def
         % ...but a *brief* touch has no room to thin, so how deeply the
@@ -4883,8 +4883,8 @@
 % @internal
 /pqside {
     /pqsdd exch def /pqsdi exch def
-    pqsdi pqnrm /pqsny exch def /pqsnx exch def
-    /pqsw pqsdi pqrunw pqsdd mul def
+    pqsdi //pqnrm exec /pqsny exch def /pqsnx exch def
+    /pqsw pqsdi //pqrunw exec pqsdd mul def
     pqcx pqsdi get pqsnx pqsw mul add
     pqcy pqsdi get pqsny pqsw mul add
 } bind def
@@ -4907,12 +4907,12 @@
         newpath
         pqrstart 1 pqrend {
             /pqei exch def
-            pqei 1 pqside
+            pqei 1 //pqside exec
             pqei pqrstart eq { moveto } { lineto } ifelse
         } for
         pqrend -1 pqrstart {
             /pqei exch def
-            pqei -1 pqside lineto
+            pqei -1 //pqside exec lineto
         } for
         closepath fill
     } {
@@ -4968,7 +4968,7 @@
                 /pqmxb pqcx pqrstart get def /pqmyb pqcy pqrstart get def
             } if
         } ifelse
-        /pqmw pqrstart pqrunw def
+        /pqmw pqrstart //pqrunw exec def
         pqmok {
             /pqmdx pqmxb pqmxa sub def
             /pqmdy pqmyb pqmya sub def
@@ -5001,7 +5001,7 @@
 % @internal
 /pqrun {
     /pqrtoff exch def /pqrton exch def
-    pqemit
+    //pqemit exec
 } bind def
 
 %%SelfTest: pkliner-touch-guards
@@ -5062,20 +5062,20 @@
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkliner-needs-an-options-dict } if
     /pqopts exch def
-    /pqWidth pqopts /Width 2.4 pkgetdef def
+    /pqWidth pqopts /Width 2.4 //pkgetdef exec def
     /pqWidth load xcheck { pkliner-width-must-not-be-a-procedure } if
     pqWidth 0 le { pkliner-width-must-be-positive } if
-    /pqTaper pqopts /Taper 0.85 pkgetdef def
+    /pqTaper pqopts /Taper 0.85 //pkgetdef exec def
     /pqTaper load xcheck { pkliner-taper-must-not-be-a-procedure } if
     pqTaper 0 lt pqTaper 1 gt or { pkliner-taper-must-be-0-to-1 } if
-    /pqCharge pqopts /Charge 0.95 pkgetdef def
+    /pqCharge pqopts /Charge 0.95 //pkgetdef exec def
     /pqCharge load xcheck { pkliner-charge-must-not-be-a-procedure } if
     pqCharge 0 lt pqCharge 1 gt or { pkliner-charge-must-be-0-to-1 } if
-    /pqDepletion pqopts /Depletion 0.35 pkgetdef def
+    /pqDepletion pqopts /Depletion 0.35 //pkgetdef exec def
     /pqDepletion load xcheck { pkliner-depletion-must-not-be-a-procedure } if
     pqDepletion 0 lt pqDepletion 1 gt or
         { pkliner-depletion-must-be-0-to-1 } if
-    /pqWaver pqopts /Waver 0.8 pkgetdef def
+    /pqWaver pqopts /Waver 0.8 //pkgetdef exec def
     /pqWaver load xcheck { pkliner-waver-must-not-be-a-procedure } if
     pqWaver 0 lt pqWaver 10 gt or { pkliner-waver-must-be-0-to-10 } if
     % Floored as well as capped, unlike the siblings' pitch defaults: a
@@ -5086,11 +5086,11 @@
     /pqPitch
         pqopts /Pitch
         pqWidth 0.8 mul dup 3 gt { pop 3 } if dup 0.5 lt { pop 0.5 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pqPitch load xcheck { pkliner-pitch-must-not-be-a-procedure } if
     pqPitch 0 le { pkliner-pitch-must-be-positive } if
-    /pqColorJitter pqopts /ColorJitter 0.05 pkgetdef def
+    /pqColorJitter pqopts /ColorJitter 0.05 //pkgetdef exec def
     /pqColorJitter load xcheck
         { pkliner-colorjitter-must-not-be-a-procedure } if
     pqColorJitter 0 lt pqColorJitter 1 gt or
@@ -5098,7 +5098,7 @@
     % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
     % a canvas. Only a value below 1 builds a catch, so unset and 1 take
     % exactly the path they took before /Touch existed.
-    /pqTouch pqopts /Touch 1 pkgetdef def
+    /pqTouch pqopts /Touch 1 //pkgetdef exec def
     /pqTouch load xcheck { pkliner-touch-must-not-be-a-procedure } if
     pqTouch 0 lt pqTouch 1 gt or { pkliner-touch-must-be-0-to-1 } if
     pqopts /Touch known {
@@ -5115,14 +5115,14 @@
         /pqcount pqcount 1 add def
         pqcount 120000 gt
             { pkliner-deposit-count-exceeds-safety-limit } if
-    } walkpath
+    } //walkpath exec
     /pqn pqcount def
     /pqraw pqn array def
     /pqci 0 def
     pqPitch {
         6 array astore pqraw pqci 3 -1 roll put
         /pqci pqci 1 add def
-    } walkpath
+    } //walkpath exec
 
     % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
     % farthest any emitter puts paint from it, checked against the cell
@@ -5182,10 +5182,10 @@
             % is what makes the per-subpath draw count fixed -- see the
             % header -- so /Charge and /Depletion re-shape this mark
             % rather than re-rolling the next one.
-            /pqPh1 frnd 360 mul def
-            /pqPh2 frnd 360 mul def
-            /pqPh3 frnd 360 mul def
-            /pqtint pqColorJitter pkjit def
+            /pqPh1 //frnd exec 360 mul def
+            /pqPh2 //frnd exec 360 mul def
+            /pqPh3 //frnd exec 360 mul def
+            /pqtint pqColorJitter //pkjit exec def
             % Squared, not uniform: the tooth is what the surface does to
             % a passing tip, and a surface is mostly smooth with
             % occasional high spots. Rendered flat first -- a uniform
@@ -5194,7 +5194,7 @@
             % outset, which is the mark of a nearly empty brush, not a
             % full one. Squaring leaves the loaded end near-continuous
             % and still hands the depleting end plenty to catch on.
-            0 1 pqKnots 1 sub { pqknots exch frnd dup mul put } for
+            0 1 pqKnots 1 sub { pqknots exch //frnd exec dup mul put } for
 
             % Arc length within the subpath, then the displaced
             % centerline. Both are needed before any normal can be taken,
@@ -5219,13 +5219,13 @@
                 % since pqoff draws nothing.
                 pqprec 5 get 3 and 3 eq
                     { 0 }
-                    { pqarc pqpi get pqprec 3 get pqoff }
+                    { pqarc pqpi get pqprec 3 get //pqoff exec }
                 ifelse /pqpo exch def
                 pqcx pqpi pqprec 0 get pqpn cos pqpo mul add put
                 pqcy pqpi pqprec 1 get pqpn sin pqpo mul add put
             } for
 
-            pqbase 1 pqtint add shade setrgbcolor
+            pqbase 1 pqtint add //shade exec setrgbcolor
 
             pqraw pqlo get 5 get 3 and 3 eq {
                 % A pressed tip: the dot lands on any charge at all --
@@ -5234,7 +5234,7 @@
                 pqCharge 0 gt {
                     newpath
                     pqcx pqlo get pqcy pqlo get
-                    pqraw pqlo get 3 get pqhw
+                    pqraw pqlo get 3 get //pqhw exec
                     0 360 arc fill
                 } if
             } {
@@ -5246,7 +5246,7 @@
                         pqCharge
                         1 pqDepletion pqraw pqsi get 3 get mul sub mul
                     def
-                    pqch pqarc pqsi get pqaff pqwets {
+                    pqch pqarc pqsi get //pqaff exec //pqwets exec {
                         pqwet not {
                             /pqstart pqsi def /pqwet true def
                         } if
@@ -5256,7 +5256,7 @@
                             % this run's tail thins. It lifted *on* only
                             % if it didn't start where the stroke did.
                             pqstart pqsi 1 sub
-                            pqstart pqlo ne true pqrun
+                            pqstart pqlo ne true //pqrun exec
                             /pqwet false def
                         } if
                     } ifelse
@@ -5265,7 +5265,7 @@
                     % Still carrying paint when the stroke ended: the
                     % stroke's own end, so no lift-off taper on top of
                     % the /Taper the whole line already has.
-                    pqstart pqhi pqstart pqlo ne false pqrun
+                    pqstart pqhi pqstart pqlo ne false //pqrun exec
                     /pqwet false def
                 } if
             } ifelse
@@ -5762,7 +5762,7 @@
 /pqdset { userdict /pqdepth 3 -1 roll put } bind def
 % -> frame   (this invocation's 10-slot frame; pkwet lists the slots)
 % @internal
-/pqmyframe { userdict /pqframes get pqdnow get } bind def
+/pqmyframe { userdict /pqframes get //pqdnow exec get } bind def
 
 % x y -> [r g b]   (issue #179: ask the /Under procedure for the backdrop
 % at one point and check its answer)
@@ -5775,21 +5775,21 @@
 % @internal
 /pqaskunder {
     count 2 sub /pqc0 exch def
-    { pqUnderProc } stopped { pqdnow 1 sub pqdset stop } if
+    { pqUnderProc } stopped { //pqdnow exec 1 sub //pqdset exec stop } if
     % Exactly three results, nothing more, nothing fewer. Anything
     % else is dropped back to the entry count (if the procedure ate
     % into the caller's items there is nothing to put back) and
     % named, rather than left to fail inside mix3.
     count pqc0 sub 3 ne {
         count pqc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
-        pqdnow 1 sub pqdset pkwet-under-procedure-must-return-3-numbers
+        //pqdnow exec 1 sub //pqdset exec pkwet-under-procedure-must-return-3-numbers
     } if
     3 array astore /pqur exch def
     0 1 2 {
         pqur exch get dup type dup /integertype ne exch /realtype ne and
-            { pop pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
+            { pop //pqdnow exec 1 sub //pqdset exec pkwet-under-procedure-results-must-be-numbers } if
         dup 0 lt exch 1 gt or
-            { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
+            { //pqdnow exec 1 sub //pqdset exec pkwet-under-procedure-results-must-be-0-to-1 } if
     } for
     pqur
 } bind def
@@ -5810,12 +5810,12 @@
             /pqent exch def
             pqAt 0 get pqent 0 get add
             pqAt 1 get pqent 1 get add
-            pqaskunder /pqur exch def
+            //pqaskunder exec /pqur exch def
             pqunders pqi pqur put
             pqplan pqi
             [
                 pqent 0 get pqent 1 get
-                pqbase pqur pqks pqi get mix3
+                pqbase pqur pqks pqi get //mix3 exec
             ]
             put
         } { pop } ifelse
@@ -5864,7 +5864,7 @@
         pqxe pqbi
         pqbi 0 eq { pqbx 100000 sub } {
             pqbi pqCols eq { pqbx pqbw pqCols mul add 100000 add }
-                           { pqbx pqbi pqbw mul add pqsx } ifelse } ifelse
+                           { pqbx pqbi pqbw mul add //pqsx exec } ifelse } ifelse
         put
     } for
     0 1 pqRows {
@@ -5872,7 +5872,7 @@
         pqye pqbj
         pqbj 0 eq { pqby 100000 sub } {
             pqbj pqRows eq { pqby pqbh pqRows mul add 100000 add }
-                           { pqby pqbj pqbh mul add pqsy } ifelse } ifelse
+                           { pqby pqbj pqbh mul add //pqsy exec } ifelse } ifelse
         put
     } for
     /pqrects pqCols pqRows mul array def
@@ -5883,7 +5883,7 @@
             /pqbi exch def
             pqbx pqbi pqbw mul add pqbw 2 div add
             pqby pqbj pqbh mul add pqbh 2 div add
-            pqaskunder /pqur exch def
+            //pqaskunder exec /pqur exch def
             pqbks pqbj pqCols mul pqbi add pqur put
             pqrects pqbj pqCols mul pqbi add
             [ pqxe pqbi get  pqye pqbj get
@@ -5900,7 +5900,7 @@
             0 1 pqbks length 1 sub {
                 /pqbn exch def
                 pqmixed pqi get pqbn
-                [ pqbase pqbks pqbn get pqks pqi get mix3 ]
+                [ pqbase pqbks pqbn get pqks pqi get //mix3 exec ]
                 put
             } for
         } if
@@ -5929,20 +5929,20 @@
 % wrapped procedure may itself call pkwet, which would overwrite them.
 % @internal
 /pqwetbandpass {
-    pqmyframe 8 get 3 rrand put
-    0 1 pqmyframe 8 get 0 get length 1 sub {
+    //pqmyframe exec 8 get 3 rrand put
+    0 1 //pqmyframe exec 8 get 0 get length 1 sub {
         /pqwc exch def
-        pqmyframe 8 get /pqwr exch def
+        //pqmyframe exec 8 get /pqwr exch def
         pqwr 0 get length 1 gt pqwc 0 gt and { pqwr 3 get srand } if
         gsave
             pqwr 0 get length 1 gt { pqwr 0 get pqwc get aload pop rectclip } if
-            pqwr 2 get pqmyframe 6 get get pqwc get aload pop setrgbcolor
-            pqmyframe 5 pqwr 1 get pqwc get put
-            pqmyframe 0 get pqmyframe 6 get get dup 0 get exch 1 get translate
-            { pqmyframe 1 get exec } stopped
+            pqwr 2 get //pqmyframe exec 6 get get pqwc get aload pop setrgbcolor
+            //pqmyframe exec 5 pqwr 1 get pqwc get put
+            //pqmyframe exec 0 get //pqmyframe exec 6 get get dup 0 get exch 1 get translate
+            { //pqmyframe exec 1 get exec } stopped
         {
             grestore
-            pqdnow 1 sub pqdset
+            //pqdnow exec 1 sub //pqdset exec
             stop
         } if
         grestore
@@ -6319,7 +6319,7 @@
     /pqproc load xcheck
         /pqproc load type dup /arraytype eq exch /packedarraytype eq or
         and not { pkwet-first-operand-must-be-a-procedure } if
-    /pqSoft pqopts /Soft 0.6 pkgetdef def
+    /pqSoft pqopts /Soft 0.6 //pkgetdef exec def
     /pqSoft load xcheck { pkwet-soft-must-not-be-a-procedure } if
     pqSoft 0 lt pqSoft 1 gt or { pkwet-soft-must-be-0-to-1 } if
     % Directional mode (issue #181) is keyed off whether /Direction is
@@ -6327,7 +6327,7 @@
     % always did: same defaults, same 1..6 cap, same plan loop, same
     % draws. It is decided first because it sets the /Layers cap.
     /pqdir pqopts /Direction known def
-    /pqLayers pqopts /Layers pqSoft 5 mul round cvi 1 add pkgetdef def
+    /pqLayers pqopts /Layers pqSoft 5 mul round cvi 1 add //pkgetdef exec def
     /pqLayers load xcheck { pkwet-layers-must-not-be-a-procedure } if
     pqLayers 1 lt pqLayers pqdir { 32 } { 6 } ifelse gt or
     pqLayers truncate pqLayers ne or
@@ -6343,13 +6343,13 @@
     % (issue #141: /Spread everywhere else in this file is a fraction of
     % /Width, not points). The inner pkgetdef resolves the alias, so when
     % both are given /Offset wins and /Spread is never read.
-    /pqSpread pqopts /Offset pqopts /Spread pqSoft 14 mul pkgetdef pkgetdef def
+    /pqSpread pqopts /Offset pqopts /Spread pqSoft 14 mul //pkgetdef exec //pkgetdef exec def
     /pqSpread load xcheck { pkwet-offset-must-not-be-a-procedure } if
     pqSpread 0 lt { pkwet-offset-must-not-be-negative } if
-    /pqPickup pqopts /Pickup 0.85 pkgetdef def
+    /pqPickup pqopts /Pickup 0.85 //pkgetdef exec def
     /pqPickup load xcheck { pkwet-pickup-must-not-be-a-procedure } if
     pqPickup 0 lt pqPickup 1 gt or { pkwet-pickup-must-be-0-to-1 } if
-    /pqUnder pqopts /Under [ 1 1 1 ] pkgetdef def
+    /pqUnder pqopts /Under [ 1 1 1 ] //pkgetdef exec def
     % /Under is a literal [r g b] or, since issue #179, a backdrop
     % procedure `x y -> r g b` (see "A backdrop that varies" in the header).
     % The array branch is the code that was always here, verbatim, so a
@@ -6409,7 +6409,7 @@
         % /PerFill (issue #403): ask this procedure again, at each loaded-colour
         % fill's own position. /At stays required: it is still where the
         % inherited-colour passes are asked.
-        /pqperfill pqopts /PerFill false pkgetdef def
+        /pqperfill pqopts /PerFill false //pkgetdef exec def
         /pqperfill load xcheck { pkwet-perfill-must-not-be-a-procedure } if
         /pqperfill load type /booleantype ne { pkwet-perfill-must-be-a-boolean } if
         pqperfill pqbanded and { pkwet-perfill-and-box-are-exclusive } if
@@ -6454,17 +6454,17 @@
         /pqDirection load xcheck { pkwet-direction-must-not-be-a-procedure } if
         /pqDirection load type dup /integertype ne exch /realtype ne and
             { pkwet-direction-must-be-a-number } if
-        /pqStretch pqopts /Stretch 8 pkgetdef def
+        /pqStretch pqopts /Stretch 8 //pkgetdef exec def
         /pqStretch load xcheck { pkwet-stretch-must-not-be-a-procedure } if
         /pqStretch load type dup /integertype ne exch /realtype ne and
             { pkwet-stretch-must-be-a-number } if
         pqStretch 1 lt { pkwet-stretch-must-be-at-least-1 } if
-        /pqSmooth pqopts /Smooth 0 pkgetdef def
+        /pqSmooth pqopts /Smooth 0 //pkgetdef exec def
         /pqSmooth load xcheck { pkwet-smooth-must-not-be-a-procedure } if
         /pqSmooth load type dup /integertype ne exch /realtype ne and
             { pkwet-smooth-must-be-a-number } if
         pqSmooth 0 lt pqSmooth 1 gt or { pkwet-smooth-must-be-0-to-1 } if
-        /pqOneSided pqopts /OneSided false pkgetdef def
+        /pqOneSided pqopts /OneSided false //pkgetdef exec def
         /pqOneSided load type /booleantype ne { pkwet-onesided-must-be-a-boolean } if
         % Every pass is an identical copy of the mark (a procedure that
         % reseeds, as every reflected element must, draws the same marks
@@ -6495,12 +6495,12 @@
         pqopts /Smooth known { pkwet-smooth-needs-a-direction } if
         pqopts /OneSided known { pkwet-onesided-needs-a-direction } if
     } ifelse
-    pqdnow 1 add pqdset
+    //pqdnow exec 1 add //pqdset exec
     % Roll the depth back *before* signalling. A caller that catches this
     % with `stopped` would otherwise be left with pqdepth stuck above the
     % limit, so one rejected nested call would poison every later
     % top-level pkwet until the library was reloaded (Codex review).
-    pqdnow 8 gt { pqdnow 1 sub pqdset pkwet-nesting-too-deep } if
+    //pqdnow exec 8 gt { //pqdnow exec 1 sub //pqdset exec pkwet-nesting-too-deep } if
     % The pass budget (issue #181). Nesting multiplies: every pass of an
     % outer call runs the inner call's every pass, so the wrapped mark's
     % cost is the *product* of /Layers down the chain. Directional mode
@@ -6515,8 +6515,8 @@
     % is read off its frame rather than a counter that would need
     % unwinding -- the depth machinery below already restores which frame
     % is live. Depth 1 has no parent; slot 0 is never written.
-    pqdnow 1 gt
-        { userdict /pqframes get pqdnow 1 sub get dup 2 get exch 3 get }
+    //pqdnow exec 1 gt
+        { userdict /pqframes get //pqdnow exec 1 sub get dup 2 get exch 3 get }
         { 1 false }
     ifelse
     pqdir or pqbanded or /pqchaindir exch def
@@ -6525,7 +6525,7 @@
     pqbanded { pqLayers 1 sub pqCols pqRows mul mul 1 add } { pqLayers } ifelse
     mul /pqchain exch def
     pqchaindir pqchain 64 gt and
-        { pqdnow 1 sub pqdset pkwet-too-many-passes } if
+        { //pqdnow exec 1 sub //pqdset exec pkwet-too-many-passes } if
     % Ten slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
     % running product and flag, 4-6 the pass mix that loaded colours
     % read (issue #183 slice L3, below), and 7 the per-pass backdrop
@@ -6537,10 +6537,10 @@
     % #492; null for any other call, which is what keeps puwetat on puwet's
     % old path). The later slots go at the end
     % so 0-3 keep the meaning the budget and the nesting machinery rely on.
-    userdict /pqframes get pqdnow 10 array put
-    pqmyframe 1 /pqproc load put
-    pqmyframe 2 pqchain put
-    pqmyframe 3 pqchaindir put
+    userdict /pqframes get //pqdnow exec 10 array put
+    //pqmyframe exec 1 /pqproc load put
+    //pqmyframe exec 2 pqchain put
+    //pqmyframe exec 3 pqchaindir put
     /pqbase [ currentrgbcolor ] def
     % Plan every pass before running any of them, so that none of pkwet's
     % own randomness is interleaved with the wrapped proc's -- otherwise
@@ -6595,7 +6595,7 @@
                     % stream is the same either way; and the default never
                     % enters this branch, so an unset call is byte-identical.
                     pqSmooth 0 gt {
-                        frnd 2 mul 1 sub
+                        //frnd exec 2 mul 1 sub
                         pqplus { pqwobp } { pqwobm } ifelse
                         dup null eq { pop } {
                             pqSmooth mul exch 1 pqSmooth dup mul sub sqrt mul add
@@ -6603,13 +6603,13 @@
                         dup pqplus { /pqwobp } { /pqwobm } ifelse exch def
                         pqmag pqStretch div mul
                     } {
-                        pqmag pqStretch div pkjit
+                        pqmag pqStretch div //pkjit exec
                     } ifelse
                     /pqacross exch def
                     pqalong pqDirection cos mul pqacross pqDirection sin mul sub
                     pqalong pqDirection sin mul pqacross pqDirection cos mul add
                 } {
-                    /pqang pqi 137.5 mul 40 pkjit add def
+                    /pqang pqi 137.5 mul 40 //pkjit exec add def
                     pqang cos pqmag mul  pqang sin pqmag mul
                 } ifelse
             } { 0 0 } ifelse
@@ -6625,7 +6625,7 @@
             % review). The softening passes do set an RGB color, because
             % mixing toward /Under is defined in RGB -- each is inside
             % its own gsave/grestore, so that never escapes.
-            pqf 0 gt { pqbase pqUnder pqf pqPickup mul mix3 } if
+            pqf 0 gt { pqbase pqUnder pqf pqPickup mul //mix3 exec } if
         ]
         put
         % The same factor, published for loaded colours: 0 at the core,
@@ -6637,7 +6637,7 @@
     % so the backdrop procedure sees the final geometry and the wrapped
     % procedure has not run yet.
     % (a single-layer call has only the core, which asks nothing, banded or not)
-    pqunderp { pqbanded { pqLayers 1 gt { pqwetbands } if } { pqwetunder } ifelse } if
+    pqunderp { pqbanded { pqLayers 1 gt { //pqwetbands exec } if } { //pqwetunder exec } ifelse } if
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
     % exactly on the path.
@@ -6649,7 +6649,7 @@
     % mark is a reasonable thing to write -- without the inner call
     % overwriting the outer one's plan mid-loop. See the header for why
     % neither plain names nor the operand stack works here.
-    pqmyframe 0 pqplan put
+    //pqmyframe exec 0 pqplan put
     % The pass mix, for a preset painting in *loaded* colours (`/Colors`,
     % issue #183 slice L3, docs/dev/design/PAINT_LOADING.md 3.4). Setting the colour
     % before a pass grades an inherited colour, but a loaded brush paints
@@ -6662,21 +6662,21 @@
     % Only puwet reads these slots, and only for depths that are live, so
     % a stale frame left by a finished or unwound call is never read and
     % the error path needs nothing new. Every existing render is unchanged.
-    pqmyframe 4 pqks put
-    pqmyframe 5 pqUnder aload pop 3 array astore put
+    //pqmyframe exec 4 pqks put
+    //pqmyframe exec 5 pqUnder aload pop 3 array astore put
     % A procedural /Under's per-pass colours, for puwet; pqwetunder left
     % them in pqunders. Slot 5 is then the unread white placeholder.
-    pqunderp pqbanded not and { pqmyframe 7 pqunders put } if
+    pqunderp pqbanded not and { //pqmyframe exec 7 pqunders put } if
     % A banded call's cells, clips and colours (issue #359); slot 8 stays null
     % for any other call, and the pass loop tests it.
-    pqbanded pqLayers 1 gt and { pqmyframe 8 pqbrec put } if
+    pqbanded pqLayers 1 gt and { //pqmyframe exec 8 pqbrec put } if
     % A /PerFill call's procedure and CTM (issue #403), for puwetat: copied
     % into the frame now, because the globals are overwritten by a nested
     % call before this one's fills run. Slot 7 stays filled either way, so
     % a `puwet` with no position (pkoil's ridge colours) still has its
     % per-pass answers to read.
     pqperfill pqLayers 1 gt and
-        { pqmyframe 9 [ /pqUnderProc load matrix currentmatrix pqfilllen ] put } if
+        { //pqmyframe exec 9 [ /pqUnderProc load matrix currentmatrix pqfilllen ] put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -6717,28 +6717,28 @@
     pqLayers 1 sub -1 0 {
         % Slot 6 names the pass about to run, written in the same place
         % its colour is set.
-        dup pqmyframe 6 3 -1 roll put
-        pqmyframe 0 get exch get
+        dup //pqmyframe exec 6 3 -1 roll put
+        //pqmyframe exec 0 get exch get
         % A banded softening pass (issue #359) goes cell by cell; the core,
         % and every pass of any other call, takes the path that was here.
-        dup length 2 gt pqmyframe 8 get null ne and
-        { pop pqwetbandpass }
+        dup length 2 gt //pqmyframe exec 8 get null ne and
+        { pop //pqwetbandpass exec }
         {
         gsave
             dup length 2 gt
                 { aload pop setrgbcolor translate }
                 { aload pop translate }
             ifelse
-            { pqmyframe 1 get exec } stopped
+            { //pqmyframe exec 1 get exec } stopped
         {
             grestore
-            pqdnow 1 sub pqdset
+            //pqdnow exec 1 sub //pqdset exec
             stop
         } if
         grestore
         } ifelse
     } for
-    pqdnow 1 sub pqdset
+    //pqdnow exec 1 sub //pqdset exec
     % No trailing setrgbcolor: every pass ran inside its own
     % gsave/grestore, so the caller's color is already restored -- and
     % restoring it *by hand* would force the graphics state into
@@ -6929,10 +6929,10 @@ systemdict /setalpha known /pwhasalpha exch def
         /pwk exch def
         /pwav
             1 pwfreqs pwk get 0.8 exp div
-            0.55 pwrand 0.9 mul add mul
+            0.55 //pwrand exec 0.9 mul add mul
         def
         pwamp pwk pwav put
-        pwpha pwk pwrand 360 mul put
+        pwpha pwk //pwrand exec 360 mul put
         /pwsum pwsum pwav add def
     } for
     /pwanorm 1 pwsum div def
@@ -6943,8 +6943,8 @@ systemdict /setalpha known /pwhasalpha exch def
     % internal contour lines a glazed wash actually has. Deliberately a
     % translation rather than an inward bias: "inward" would depend on
     % the caller's winding direction, which nothing here can know.
-    /pwdx pwrand 0.6 mul 0.3 sub def
-    /pwdy pwrand 0.6 mul 0.3 sub def
+    /pwdx //pwrand exec 0.6 mul 0.3 sub def
+    /pwdy //pwrand exec 0.6 mul 0.3 sub def
 } bind def
 
 % t subphase -> displacement in about -1..1
@@ -6986,7 +6986,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pwmk exch def
     pkalphaok
         { pwmk pwca mul setalpha }
-        { 1 1 pwcum sub 1 pwmk sub mul sub pwsetflat }
+        { 1 1 pwcum sub 1 pwmk sub mul sub //pwsetflat exec }
     ifelse
 } bind def
 
@@ -7013,7 +7013,7 @@ systemdict /setalpha known /pwhasalpha exch def
         % Displace along the local normal. Each subpath gets its own
         % phase offset, or every subpath of a multi-blob wash would
         % wobble in lockstep.
-        /pwd pwt pwsub 137 mul pwwob pwwet mul def
+        /pwd pwt pwsub 137 mul //pwwob exec pwwet mul def
         /pwnx pwang 90 add cos pwd mul pwx add pwdx pwwet mul add def
         /pwny pwang 90 add sin pwd mul pwy add pwdy pwwet mul add def
         pwfirst { pwnx pwny moveto } { pwnx pwny lineto } ifelse
@@ -7044,36 +7044,36 @@ systemdict /setalpha known /pwhasalpha exch def
     % (an empty path must still reject a malformed dict). `/key load
     % xcheck` rejects procedure-valued options: no key here takes one,
     % and a name bound to a procedure auto-executes on bare reference.
-    /pwalpha pwopts /Alpha 0.32 pkgetdef def
+    /pwalpha pwopts /Alpha 0.32 //pkgetdef exec def
     /pwalpha load xcheck { pkwash-alpha-must-not-be-a-procedure } if
     pwalpha 0 lt pwalpha 1 gt or { pkwash-alpha-must-be-0-to-1 } if
 
-    /pwlayers pwopts /Layers 2 pkgetdef def
+    /pwlayers pwopts /Layers 2 //pkgetdef exec def
     /pwlayers load xcheck { pkwash-layers-must-not-be-a-procedure } if
     /pwlayers pwlayers truncate cvi def
     pwlayers 1 lt pwlayers 8 gt or { pkwash-layers-must-be-1-to-8 } if
 
-    /pwwet pwopts /Wet 2.5 pkgetdef def
+    /pwwet pwopts /Wet 2.5 //pkgetdef exec def
     /pwwet load xcheck { pkwash-wet-must-not-be-a-procedure } if
     pwwet 0 lt { pkwash-wet-must-be-non-negative } if
 
-    /pwbloom pwopts /Bloom 0.45 pkgetdef def
+    /pwbloom pwopts /Bloom 0.45 //pkgetdef exec def
     /pwbloom load xcheck { pkwash-bloom-must-not-be-a-procedure } if
     pwbloom 0 lt pwbloom 1 gt or { pkwash-bloom-must-be-0-to-1 } if
 
     /pwbloomw
         pwopts /BloomWidth
         pwwet 1.5 mul dup 2 lt { pop 2 } if
-        pkgetdef
+        //pkgetdef exec
     def
     /pwbloomw load xcheck { pkwash-bloomwidth-must-not-be-a-procedure } if
     pwbloomw 0 le { pkwash-bloomwidth-must-be-positive } if
 
-    /pwgrain pwopts /Grain 0 pkgetdef def
+    /pwgrain pwopts /Grain 0 //pkgetdef exec def
     /pwgrain load xcheck { pkwash-grain-must-not-be-a-procedure } if
     pwgrain 0 lt pwgrain 1 gt or { pkwash-grain-must-be-0-to-1 } if
 
-    /pwblend pwopts /Blend /Normal pkgetdef def
+    /pwblend pwopts /Blend /Normal //pkgetdef exec def
     % The executable-value guard has to come *before* the first bare
     % `pwblend` reference, not after: a name bound to a procedure
     % auto-executes on bare reference (pkgetdef's own header documents
@@ -7086,11 +7086,11 @@ systemdict /setalpha known /pwhasalpha exch def
     % and the caller's-stream default reach every later pwrand call
     % identically.
     pwopts /Seed known
-        { pwopts /Seed get pwsrand }
-        { rand pwsrand }
+        { pwopts /Seed get //pwsrand exec }
+        { rand //pwsrand exec }
     ifelse
 
-    pwwarn
+    //pwwarn exec
 
     % An explicitly supplied /Pitch is validated *here*, before any
     % traversal: the measurement pass below is O(length/8), and making
@@ -7125,7 +7125,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pwae 1 and 1 eq { /pwsubs pwsubs 1 add def } if
         /pwmeas pwmeas 1 add def
         pwmeas 40000 gt { pkwash-path-too-long-for-safety-limit } if
-    } walkpath
+    } //walkpath exec
 
     % A default pitch derived from the path's own size: a wash is a
     % region, not a stroke, so its scale is whatever the caller drew --
@@ -7168,7 +7168,7 @@ systemdict /setalpha known /pwhasalpha exch def
     pwpitch {
         6 array astore pwraw pwci 3 -1 roll put
         /pwci pwci 1 add def
-    } walkpath
+    } //walkpath exec
     /pwcount pwci def
 
     pwcount 0 gt {
@@ -7232,9 +7232,9 @@ systemdict /setalpha known /pwhasalpha exch def
         /pwcum 0 def
         1 1 pwlayers {
             pop
-            pwwobinit
-            pwalpha pwmark
-            newpath pwbuild fill
+            //pwwobinit exec
+            pwalpha //pwmark exec
+            newpath //pwbuild exec fill
             /pwcum 1 1 pwcum sub 1 pwalpha sub mul sub def
         } for
 
@@ -7246,7 +7246,7 @@ systemdict /setalpha known /pwhasalpha exch def
         % boundary is whatever the last layer built: the rim belongs to
         % the edge that is actually visible.
         pwbloom 0 gt {
-            newpath pwbuild
+            newpath //pwbuild exec
             gsave
                 clip
                 % Cap, join, width *and* dash: an inherited dash pattern
@@ -7254,13 +7254,13 @@ systemdict /setalpha known /pwhasalpha exch def
                 % rim is the one mark here whose whole job is to be
                 % continuous (Codex review, PR #109).
                 1 setlinejoin 1 setlinecap [] 0 setdash
-                newpath pwbuild
+                newpath //pwbuild exec
                 pwbloomw 2 mul setlinewidth
-                pwalpha pwbloom mul 0.55 mul pwmark
+                pwalpha pwbloom mul 0.55 mul //pwmark exec
                 stroke
-                newpath pwbuild
+                newpath //pwbuild exec
                 pwbloomw 0.8 mul setlinewidth
-                pwalpha pwbloom mul pwmark
+                pwalpha pwbloom mul //pwmark exec
                 stroke
             grestore
         } if
@@ -7269,17 +7269,17 @@ systemdict /setalpha known /pwhasalpha exch def
         % seeded dots clipped to the wash. One accumulated path and one
         % fill, not a fill per dot.
         pwgrain 0 gt {
-            newpath pwbuild
+            newpath //pwbuild exec
             pwn 0 gt {
                 gsave
                     clip
-                    pwalpha pwgrain mul 0.8 mul pwmark
+                    pwalpha pwgrain mul 0.8 mul //pwmark exec
                     newpath
                     1 1 pwn {
                         pop
-                        /pwgx pwx0 pwrand pwx1 pwx0 sub mul add def
-                        /pwgy pwy0 pwrand pwy1 pwy0 sub mul add def
-                        /pwgr 0.35 pwrand 0.95 mul add def
+                        /pwgx pwx0 //pwrand exec pwx1 pwx0 sub mul add def
+                        /pwgy pwy0 //pwrand exec pwy1 pwy0 sub mul add def
+                        /pwgr 0.35 //pwrand exec 0.95 mul add def
                         pwgx pwgr add pwgy moveto
                         pwgx pwgy pwgr 0 360 arc
                         closepath
@@ -7387,7 +7387,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pvy exch def
     /pvx exch def
 
-    /pvtone pvopts /Tone [0.965 0.95 0.915] pkgetdef def
+    /pvtone pvopts /Tone [0.965 0.95 0.915] //pkgetdef exec def
     % Before any bare `pvtone`, and before the type check specifically:
     % a procedure *is* arraytype, so the type check alone would accept
     % one -- after having already executed it on the bare reference.
@@ -7408,33 +7408,33 @@ systemdict /setalpha known /pwhasalpha exch def
         pop
     } for
 
-    /pvgrain pvopts /Grain 0.5 pkgetdef def
+    /pvgrain pvopts /Grain 0.5 //pkgetdef exec def
     /pvgrain load xcheck { pkpaper-grain-must-not-be-a-procedure } if
     pvgrain 0 lt pvgrain 1 gt or { pkpaper-grain-must-be-0-to-1 } if
 
-    /pvalpha pvopts /Alpha 0.18 pkgetdef def
+    /pvalpha pvopts /Alpha 0.18 //pkgetdef exec def
     /pvalpha load xcheck { pkpaper-alpha-must-not-be-a-procedure } if
     pvalpha 0 lt pvalpha 1 gt or { pkpaper-alpha-must-be-0-to-1 } if
 
-    /pvdepth pvopts /Depth 0.28 pkgetdef def
+    /pvdepth pvopts /Depth 0.28 //pkgetdef exec def
     /pvdepth load xcheck { pkpaper-depth-must-not-be-a-procedure } if
     pvdepth 0 lt pvdepth 1 gt or { pkpaper-depth-must-be-0-to-1 } if
 
-    /pvfiber pvopts /Fiber 0.18 pkgetdef def
+    /pvfiber pvopts /Fiber 0.18 //pkgetdef exec def
     /pvfiber load xcheck { pkpaper-fiber-must-not-be-a-procedure } if
     pvfiber 0 lt pvfiber 1 gt or { pkpaper-fiber-must-be-0-to-1 } if
 
-    /pvblend pvopts /Blend /Normal pkgetdef def
+    /pvblend pvopts /Blend /Normal //pkgetdef exec def
     /pvblend load xcheck { pkpaper-blend-must-not-be-a-procedure } if
     pvblend /Normal ne pvblend /Multiply ne and
         { pkpaper-blend-must-be-Normal-or-Multiply } if
 
     pvopts /Seed known
-        { pvopts /Seed get pwsrand }
-        { rand pwsrand }
+        { pvopts /Seed get //pwsrand exec }
+        { rand //pwsrand exec }
     ifelse
 
-    pwwarn
+    //pwwarn exec
 
     pvw 0 le pvh 0 le or not {
         /pvtr pvtone 0 get def
@@ -7465,7 +7465,7 @@ systemdict /setalpha known /pwhasalpha exch def
         % forced-fallback preview -- see that dial's own header (Codex
         % review, PR #109, rounds 3 and 4).
         pwhasalpha { pvca setalpha /Normal setblendmode } if
-        pvrect
+        //pvrect exec
         pvtr pvtg pvtb setrgbcolor
         fill
 
@@ -7486,7 +7486,7 @@ systemdict /setalpha known /pwhasalpha exch def
                     pvtb 1 pvdepth sub mul
                     setrgbcolor
                 } {
-                    pvtr pvflat pvtg pvflat pvtb pvflat setrgbcolor
+                    pvtr //pvflat exec pvtg //pvflat exec pvtb //pvflat exec setrgbcolor
                 } ifelse
                 % Clipped to the same rectangle the ground filled:
                 % centers are sampled right up to the edges, and a
@@ -7495,20 +7495,20 @@ systemdict /setalpha known /pwhasalpha exch def
                 % `pkpaper` would otherwise scatter texture onto its
                 % neighbour (Codex review, PR #109, round 5).
                 gsave
-                pvrect clip
+                //pvrect exec clip
                 newpath
                 1 1 pvn {
                     pop
-                    /pvgx pvx pwrand pvw mul add def
-                    /pvgy pvy pwrand pvh mul add def
-                    pwrand pvfiber lt {
+                    /pvgx pvx //pwrand exec pvw mul add def
+                    /pvgy pvy //pwrand exec pvh mul add def
+                    //pwrand exec pvfiber lt {
                         pvgx pvgy
-                        1.5 pwrand 4 mul add
-                        0.3 pwrand 0.35 mul add
-                        pwrand 180 mul
-                        pvfleck
+                        1.5 //pwrand exec 4 mul add
+                        0.3 //pwrand exec 0.35 mul add
+                        //pwrand exec 180 mul
+                        //pvfleck exec
                     } {
-                        /pvgr 0.3 pwrand 0.5 mul add def
+                        /pvgr 0.3 //pwrand exec 0.5 mul add def
                         pvgx pvgr add pvgy moveto
                         pvgx pvgy pvgr 0 360 arc
                         closepath
@@ -7807,40 +7807,40 @@ systemdict /setalpha known /pwhasalpha exch def
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkdab-needs-an-options-dict } if
     /pdopts exch def
-    /pdsize pdopts /Size 6 pkgetdef def
+    /pdsize pdopts /Size 6 //pkgetdef exec def
     /pdsize load xcheck { pkdab-size-must-not-be-a-procedure } if
     pdsize 0 le { pkdab-size-must-be-positive } if
     % /Scatter, or the deprecated /Spread alias when /Scatter is absent
     % (issue #141: /Spread elsewhere in this file is a fraction of /Width).
     % The inner pkgetdef resolves the alias, so /Scatter wins.
-    /pdspread pdopts /Scatter pdopts /Spread pdsize 2.5 mul pkgetdef pkgetdef def
+    /pdspread pdopts /Scatter pdopts /Spread pdsize 2.5 mul //pkgetdef exec //pkgetdef exec def
     /pdspread load xcheck { pkdab-scatter-must-not-be-a-procedure } if
     pdspread 0 le { pkdab-scatter-must-be-positive } if
-    /pddens pdopts /Density 3 pkgetdef def
+    /pddens pdopts /Density 3 //pkgetdef exec def
     /pddens load xcheck { pkdab-density-must-not-be-a-procedure } if
     pddens 0 lt { pkdab-density-must-be-non-negative } if
-    /pdclump pdopts /Clump 18 pkgetdef def
+    /pdclump pdopts /Clump 18 //pkgetdef exec def
     /pdclump load xcheck { pkdab-clump-must-not-be-a-procedure } if
     pdclump 1 lt pdclump 400 gt or pdclump truncate pdclump ne or
         { pkdab-clump-must-be-1-to-400 } if
-    /pdirr pdopts /Irregular 0.5 pkgetdef def
+    /pdirr pdopts /Irregular 0.5 //pkgetdef exec def
     /pdirr load xcheck { pkdab-irregular-must-not-be-a-procedure } if
     pdirr 0 lt pdirr 1 gt or { pkdab-irregular-must-be-0-to-1 } if
-    /pdcharge pdopts /Charge 0.9 pkgetdef def
+    /pdcharge pdopts /Charge 0.9 //pkgetdef exec def
     /pdcharge load xcheck { pkdab-charge-must-not-be-a-procedure } if
     pdcharge 0 lt pdcharge 1 gt or { pkdab-charge-must-be-0-to-1 } if
-    /pdshadow pdopts /Shadow 0.4 pkgetdef def
+    /pdshadow pdopts /Shadow 0.4 //pkgetdef exec def
     /pdshadow load xcheck { pkdab-shadow-must-not-be-a-procedure } if
     pdshadow 0 lt pdshadow 1 gt or { pkdab-shadow-must-be-0-to-1 } if
-    /pdhl pdopts /Highlight 0.4 pkgetdef def
+    /pdhl pdopts /Highlight 0.4 //pkgetdef exec def
     /pdhl load xcheck { pkdab-highlight-must-not-be-a-procedure } if
     pdhl 0 lt pdhl 1 gt or { pkdab-highlight-must-be-0-to-1 } if
-    /pdlight pdopts /Light 120 pkgetdef def
+    /pdlight pdopts /Light 120 //pkgetdef exec def
     /pdlight load xcheck { pkdab-light-must-not-be-a-procedure } if
-    /pdpitch pdopts /Pitch pdsize dup 6 gt { pop 6 } if pkgetdef def
+    /pdpitch pdopts /Pitch pdsize dup 6 gt { pop 6 } if //pkgetdef exec def
     /pdpitch load xcheck { pkdab-pitch-must-not-be-a-procedure } if
     pdpitch 0 le { pkdab-pitch-must-be-positive } if
-    /pdcj pdopts /ColorJitter 0.08 pkgetdef def
+    /pdcj pdopts /ColorJitter 0.08 //pkgetdef exec def
     /pdcj load xcheck { pkdab-colorjitter-must-not-be-a-procedure } if
     pdcj 0 lt pdcj 1 gt or { pkdab-colorjitter-must-be-0-to-1 } if
     % The load and the two colours the layers mix toward: each null when its key
@@ -7878,14 +7878,14 @@ systemdict /setalpha known /pwhasalpha exch def
         % is still recorded below.
         /pdcount pdcount 1 add def
         pdcount 100000 gt { pkdab-sample-count-exceeds-safety-limit } if
-    } walkpath
+    } //walkpath exec
 
     /pdraw pdcount array def
     /pdci 0 def
     pdpitch {
         6 array astore pdraw pdci 3 -1 roll put
         /pdci pdci 1 add def
-    } walkpath
+    } //walkpath exec
 
     pdcount 0 gt {
         gsave
@@ -7922,19 +7922,19 @@ systemdict /setalpha known /pwhasalpha exch def
             1 1 pdnd {
                 pop
                 /pdd 15 array def
-                frnd 360 mul /pdsa exch def
-                frnd sqrt pdspread mul /pdsr exch def
+                //frnd exec 360 mul /pdsa exch def
+                //frnd exec sqrt pdspread mul /pdsr exch def
                 pdd 0 pdx pdsr pdsa cos mul add put
                 pdd 1 pdy pdsr pdsa sin mul add put
-                pdd 2 frnd 0.8 mul 0.6 add pdsize mul put
+                pdd 2 //frnd exec 0.8 mul 0.6 add pdsize mul put
                 % frnd can return exactly 1.0, so a bare `lt` would reject some
                 % slots at /Charge 1; the draw is still consumed either way.
-                pdd 3 frnd pdcharge lt pdcharge 1 ge or { 1 } { 0 } ifelse put
-                pdd 4 frnd put
-                pdd 5 frnd put
+                pdd 3 //frnd exec pdcharge lt pdcharge 1 ge or { 1 } { 0 } ifelse put
+                pdd 4 //frnd exec put
+                pdd 5 //frnd exec put
                 0 1 6 {
                     6 add pdd exch
-                    1 frnd 0.5 sub pdirr mul 1.3 mul add dup 0.3 lt { pop 0.3 } if
+                    1 //frnd exec 0.5 sub pdirr mul 1.3 mul add dup 0.3 lt { pop 0.3 } if
                     put
                 } for
                 % Lit-side measure, -1..1: where the dab sits in its
@@ -7969,13 +7969,13 @@ systemdict /setalpha known /pwhasalpha exch def
                     pdShadowColor null ne {
                         % Toward /ShadowColor by the same strength, then the jitter as
                         % its own shade, so /ColorJitter keeps its meaning.
-                        pdd 14 get pdShadowColor pdshadow 0.55 mul mix3
-                        3 array astore 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                        pdd 14 get pdShadowColor pdshadow 0.55 mul //mix3 exec
+                        3 array astore 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add //shade exec
                     } {
-                        pdd 14 get 1 pdshadow 0.55 mul sub pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                        pdd 14 get 1 pdshadow 0.55 mul sub pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add //shade exec
                     } ifelse
                     setrgbcolor
-                    newpath pddab fill
+                    newpath //pddab exec fill
                 } if
             } for
         } if
@@ -7987,9 +7987,9 @@ systemdict /setalpha known /pwhasalpha exch def
                 /pdr pdd 2 get def
                 /pdcx pdd 0 get def
                 /pdcy pdd 1 get def
-                pdd 14 get 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                pdd 14 get 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add //shade exec
                 setrgbcolor
-                newpath pddab fill
+                newpath //pddab exec fill
             } if
         } for
 
@@ -8003,12 +8003,12 @@ systemdict /setalpha known /pwhasalpha exch def
                     /pdcx pdd 0 get pdlx pdd 2 get mul 0.3 mul add def
                     /pdcy pdd 1 get pdly pdd 2 get mul 0.3 mul add def
                     pdHighlightColor null ne {
-                        pdd 14 get pdHighlightColor pdhl 0.6 mul mix3
+                        pdd 14 get pdHighlightColor pdhl 0.6 mul //mix3 exec
                     } {
-                        pdd 14 get 1 pdhl 0.6 mul add shade
+                        pdd 14 get 1 pdhl 0.6 mul add //shade exec
                     } ifelse
                     setrgbcolor
-                    newpath pddab fill
+                    newpath //pddab exec fill
                 } if
             } for
         } if
@@ -8130,7 +8130,7 @@ systemdict /setalpha known /pwhasalpha exch def
         dup type /arraytype ne { pigmix-entry-must-be-a-name-or-rgb-array } if
         dup length 3 ne { pigmix-entry-must-be-a-name-or-rgb-array } if
         dup {
-            dup pgmnum { dup 0 ge exch 1 le and } { pop false } ifelse
+            dup //pgmnum exec { dup 0 ge exch 1 le and } { pop false } ifelse
             not { pigmix-rgb-components-must-be-0-to-1 } if
         } forall
         aload pop 1
@@ -8152,19 +8152,19 @@ systemdict /setalpha known /pwhasalpha exch def
     /pgmn 0 def /pgmsum 0 def /pgmk0 0 def /pgmk1 0 def /pgmk2 0 def
     0 2 pgms length 2 sub {
         /pgmi exch def
-        pgms pgmi 1 add get dup pgmnum not { pigmix-weight-must-be-a-number } if
+        pgms pgmi 1 add get dup //pgmnum exec not { pigmix-weight-must-be-a-number } if
         dup 0 lt { pigmix-weight-must-not-be-negative } if
         /pgmw exch def
         % The entry is checked even at weight 0, so a typo is never silent.
-        pgms pgmi get pgmentry /pgmst exch def 3 array astore /pgmcur exch def
+        pgms pgmi get //pgmentry exec /pgmst exch def 3 array astore /pgmcur exch def
         pgmw 0 gt {
             /pgml pgmcur def
             /pgma pgmw pgmst mul def
             /pgmn pgmn 1 add def
             /pgmsum pgmsum pgma add def
-            /pgmk0 pgml 0 get pgmks pgma mul pgmk0 add def
-            /pgmk1 pgml 1 get pgmks pgma mul pgmk1 add def
-            /pgmk2 pgml 2 get pgmks pgma mul pgmk2 add def
+            /pgmk0 pgml 0 get //pgmks exec pgma mul pgmk0 add def
+            /pgmk1 pgml 1 get //pgmks exec pgma mul pgmk1 add def
+            /pgmk2 pgml 2 get //pgmks exec pgma mul pgmk2 add def
         } if
     } for
     pgmn 0 eq { pigmix-weights-sum-to-zero } if
@@ -8172,7 +8172,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pgml aload pop
     } {
         pgmk0 pgmsum div pgmk1 pgmsum div pgmk2 pgmsum div
-        pgmr 3 1 roll pgmr 3 1 roll pgmr 3 1 roll
+        //pgmr exec 3 1 roll //pgmr exec 3 1 roll //pgmr exec 3 1 roll
     } ifelse
 } bind def
 
@@ -8194,7 +8194,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pgmt exch def /pgmp exch def
     /pgmt load xcheck { pigtint-amount-must-not-be-a-procedure } if
     /pgmp load xcheck { pigtint-pigment-must-not-be-a-procedure } if
-    /pgmt load pgmnum not { pigtint-amount-must-be-a-number } if
+    /pgmt load //pgmnum exec not { pigtint-amount-must-be-a-number } if
     pgmt 0 lt pgmt 1 gt or { pigtint-amount-must-be-0-to-1 } if
     [ pgmp 1 pgmt sub /titaniumwhite pgmt ] pigmix
 } bind def
@@ -8209,7 +8209,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pgmt exch def /pgmp exch def
     /pgmt load xcheck { pigshade-amount-must-not-be-a-procedure } if
     /pgmp load xcheck { pigshade-pigment-must-not-be-a-procedure } if
-    /pgmt load pgmnum not { pigshade-amount-must-be-a-number } if
+    /pgmt load //pgmnum exec not { pigshade-amount-must-be-a-number } if
     pgmt 0 lt pgmt 1 gt or { pigshade-amount-must-be-0-to-1 } if
     [ pgmp 1 pgmt sub /midnightblack pgmt ] pigmix
 } bind def
@@ -8239,8 +8239,8 @@ systemdict /setalpha known /pwhasalpha exch def
         % A plain [r g b] array is kept as the colour it is; a spec starts
         % with a name.
         dup type /arraytype eq
-            { dup length 0 gt { dup 0 get pgmnum } { false } ifelse } { false } ifelse
-        { pgmentry pop 3 array astore } { pigcolor } ifelse
+            { dup length 0 gt { dup 0 get //pgmnum exec } { false } ifelse } { false } ifelse
+        { //pgmentry exec pop 3 array astore } { pigcolor } ifelse
         put
     } for
 } bind def
@@ -8414,7 +8414,7 @@ systemdict /setalpha known /pwhasalpha exch def
     puso /HighlightColour known or
     puso /ShadowColour known or
     puso /TipColour known or
-        { pusn (-colours-is-spelled-colors) pugrd } if
+        { pusn (-colours-is-spelled-colors) //pugrd exec } if
 } bind def
 
 % (a) (b) pucat -> (ab)   (concatenate two strings; builds a guard prefix)
@@ -8450,7 +8450,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /pupig {
     /pujn exch def /pujp exch def
-    Pigments pujn known not { pujp (-unknown-pigment-see-PigmentNames) pugrd } if
+    Pigments pujn known not { pujp (-unknown-pigment-see-PigmentNames) //pugrd exec } if
     Pigments pujn get aload pop pop 3 array astore
 } bind def
 
@@ -8466,17 +8466,17 @@ systemdict /setalpha known /pwhasalpha exch def
     /puhp exch def /puhk exch def /puho exch def
     puho puhk known not { null } {
         /puhv puho puhk get def
-        /puhv load xcheck { puhp (-must-be-an-rgb-array) pugrd } if
+        /puhv load xcheck { puhp (-must-be-an-rgb-array) //pugrd exec } if
         % A literal name is a pigment: resolve it once, then it is checked like
         % any [r g b].
-        /puhv load type /nametype eq { /puhv puhp /puhv load pupig def } if
-        /puhv load type /arraytype ne { puhp (-must-be-an-rgb-array) pugrd } if
-        puhv pujspec { puhp (-pigmix-spec-needs-pigcolors) pugrd } if
-        puhv length 3 ne { puhp (-must-be-an-rgb-array) pugrd } if
+        /puhv load type /nametype eq { /puhv puhp /puhv load //pupig exec def } if
+        /puhv load type /arraytype ne { puhp (-must-be-an-rgb-array) //pugrd exec } if
+        puhv //pujspec exec { puhp (-pigmix-spec-needs-pigcolors) //pugrd exec } if
+        puhv length 3 ne { puhp (-must-be-an-rgb-array) //pugrd exec } if
         puhv {
             dup type dup /integertype eq exch /realtype eq or
                 { dup 0 ge exch 1 le and } { pop false } ifelse
-            not { puhp (-components-must-be-0-to-1) pugrd } if
+            not { puhp (-components-must-be-0-to-1) //pugrd exec } if
         } forall
         puhv
     } ifelse
@@ -8489,7 +8489,7 @@ systemdict /setalpha known /pwhasalpha exch def
 /pulightneedscolors {
     /pulnn exch def /pulno exch def
     pulno /Light known pulno /Colors known not and
-        { pulnn (-light-needs-colors) pugrd } if
+        { pulnn (-light-needs-colors) //pugrd exec } if
 } bind def
 
 % opts (preset) puparse -> rec | null
@@ -8499,17 +8499,17 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /puparse {
     /pupn exch def /pupo exch def
-    pupo pupn puspell
+    pupo pupn //puspell exec
     pupo /Colors known not {
-        pupo /ColorMix known { pupn (-colormix-needs-colors) pugrd } if
+        pupo /ColorMix known { pupn (-colormix-needs-colors) //pugrd exec } if
         null
     } {
         /pupc pupo /Colors get def
         % `xcheck` before any type check: a procedure is an `arraytype` too.
-        /pupc load xcheck { pupn (-colors-must-be-an-array) pugrd } if
-        /pupc load type /arraytype ne { pupn (-colors-must-be-an-array) pugrd } if
+        /pupc load xcheck { pupn (-colors-must-be-an-array) //pugrd exec } if
+        /pupc load type /arraytype ne { pupn (-colors-must-be-an-array) //pugrd exec } if
         pupc length dup 1 lt exch 8 gt or
-            { pupn (-colors-must-have-1-to-8-colors) pugrd } if
+            { pupn (-colors-must-have-1-to-8-colors) //pugrd exec } if
         % A bare pigment name stands for its colour: resolve each one here, once,
         % so the rest of the checks and the record see only [r g b] arrays. The
         % copy is made only when a name is present, so a load without one is the
@@ -8522,7 +8522,7 @@ systemdict /setalpha known /pwhasalpha exch def
                 /pujk exch def
                 pupc pujk get
                 dup xcheck not 1 index type /nametype eq and
-                    { /pujv exch def pupn (-colors) pucat pujv pupig } if
+                    { /pujv exch def pupn (-colors) //pucat exec pujv //pupig exec } if
                 pujr exch pujk exch put
             } for
             /pupc pujr def
@@ -8530,29 +8530,29 @@ systemdict /setalpha known /pwhasalpha exch def
         % Each entry is a literal 3-element array, not a procedure that
         % happens to hold three items. A pigmix spec gets its own guard.
         pupc {
-            dup pujspec { pupn (-colors-pigmix-spec-needs-pigcolors) pugrd } if
+            dup //pujspec exec { pupn (-colors-pigmix-spec-needs-pigcolors) //pugrd exec } if
             dup xcheck { pop false } {
                 dup type /arraytype eq { length 3 eq } { pop false } ifelse
             } ifelse
-            not { pupn (-colors-entries-must-be-rgb-arrays) pugrd } if
+            not { pupn (-colors-entries-must-be-rgb-arrays) //pugrd exec } if
         } forall
         pupc {
             {
                 dup type dup /integertype eq exch /realtype eq or
                     { dup 0 ge exch 1 le and } { pop false } ifelse
-                not { pupn (-colors-components-must-be-0-to-1) pugrd } if
+                not { pupn (-colors-components-must-be-0-to-1) //pugrd exec } if
             } forall
         } forall
-        /pupm pupo /ColorMix 0.3 pkgetdef def
-        /pupm load xcheck { pupn (-colormix-must-not-be-a-procedure) pugrd } if
+        /pupm pupo /ColorMix 0.3 //pkgetdef exec def
+        /pupm load xcheck { pupn (-colormix-must-not-be-a-procedure) //pugrd exec } if
         /pupm load type dup /integertype ne exch /realtype ne and
-            { pupn (-colormix-must-be-a-number) pugrd } if
-        pupm 0 lt pupm 1 gt or { pupn (-colormix-must-be-0-to-1) pugrd } if
+            { pupn (-colormix-must-be-a-number) //pugrd exec } if
+        pupm 0 lt pupm 1 gt or { pupn (-colormix-must-be-0-to-1) //pugrd exec } if
         pupo /Light known {
             /pupl pupo /Light get def
-            /pupl load xcheck { pupn (-light-must-not-be-a-procedure) pugrd } if
+            /pupl load xcheck { pupn (-light-must-not-be-a-procedure) //pugrd exec } if
             /pupl load type dup /integertype ne exch /realtype ne and
-                { pupn (-light-must-be-a-number) pugrd } if
+                { pupn (-light-must-be-a-number) //pugrd exec } if
             /pupls true def
         } {
             /pupl 0 def /pupls false def
@@ -8596,7 +8596,7 @@ systemdict /setalpha known /pwhasalpha exch def
             { puac puak get aload pop }
             { puatt 1 eq
                 { puac puak 1 add get aload pop }
-                { puac puak get puac puak 1 add get puatt mix3 }
+                { puac puak get puac puak 1 add get puatt //mix3 exec }
               ifelse }
         ifelse
     } ifelse
@@ -8615,16 +8615,16 @@ systemdict /setalpha known /pwhasalpha exch def
 % to the last bit. Reads only its operands and the live frames; no draws.
 % @internal
 /puwet {
-    pqdnow 0 gt {
+    //pqdnow exec 0 gt {
         3 array astore /puwc exch def
-        1 1 pqdnow {
+        1 1 //pqdnow exec {
             userdict /pqframes get exch get /puwf exch def
             puwf 4 get puwf 6 get get /puwk exch def
             puwk 0 ne {
                 % a procedural /Under (issue #179) keeps one backdrop per pass
                 /puwc [ puwc
                     puwf 7 get dup null eq { pop puwf 5 get } { puwf 6 get get } ifelse
-                    puwk mix3 ] def
+                    puwk //mix3 exec ] def
             } if
         } for
         puwc aload pop
@@ -8673,18 +8673,18 @@ systemdict /setalpha known /pwhasalpha exch def
 % the colour is returned as it came. No draws.
 % @internal
 /puwetat {
-    pqdnow 0 gt {
+    //pqdnow exec 0 gt {
         transform /puwdy exch def /puwdx exch def
         3 array astore /puwc exch def
-        1 1 pqdnow {
+        1 1 //pqdnow exec {
             userdict /pqframes get exch get /puwf exch def
             puwf 4 get puwf 6 get get /puwk exch def
             puwk 0 ne {
                 puwf 9 get dup null eq {
                     pop puwf 7 get dup null eq { pop puwf 5 get } { puwf 6 get get } ifelse
-                } { puaskfill } ifelse
+                } { //puaskfill exec } ifelse
                 /puwb exch def
-                /puwc [ puwc puwb puwk mix3 ] def
+                /puwc [ puwc puwb puwk //mix3 exec ] def
             } if
         } for
         puwc aload pop
@@ -8701,8 +8701,8 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /pufilllen {
     /pufnmin 0 def
-    pqdnow 0 gt {
-        1 1 pqdnow {
+    //pqdnow exec 0 gt {
+        1 1 //pqdnow exec {
             userdict /pqframes get exch get /pufnfr exch def
             pufnfr 9 get dup null eq { pop } {
                 2 get dup 0 gt
@@ -9267,7 +9267,7 @@ systemdict /setalpha known /pwhasalpha exch def
     mhreg /BBox get aload pop
     /mhgy1 exch def /mhgx1 exch def /mhgy0 exch def /mhgx0 exch def
     /mhbw mhgx1 mhgx0 sub def /mhbh mhgy1 mhgy0 sub def
-    /mharea mhreg scarea def
+    /mharea mhreg //scarea exec def
     mharea 0 gt mhbw 0 gt and mhbh 0 gt and
     {
         /mhtarget mhcount mhbw mhbh mul mul mharea div def
@@ -9299,13 +9299,13 @@ systemdict /setalpha known /pwhasalpha exch def
         pop pop pop pop pop pop
         /mhn mhn 1 add def
         mhn mhcap gt { mhguard } if
-    } walkpath
+    } //walkpath exec
     /mhstops mhn array def
     /mhi 0 def
     mhpitch {
         6 array astore mhstops mhi 3 -1 roll put
         /mhi mhi 1 add def
-    } walkpath
+    } //walkpath exec
 } bind def
 
 %%SelfTest: motion-region-and-budget-guards
@@ -9570,31 +9570,31 @@ systemdict /setalpha known /pwhasalpha exch def
     % below would underflow and leave a name on the stack (#947).
     count 2 lt { pkcrisscross-needs-a-region-and-an-options-dict } if
     /mxopts exch def /mxreg exch def
-    mxreg mhisregion not { pkcrisscross-needs-a-region } if
-    /mxcount mxopts /Count 40 pkgetdef def
+    mxreg //mhisregion exec not { pkcrisscross-needs-a-region } if
+    /mxcount mxopts /Count 40 //pkgetdef exec def
     /mxcount load xcheck { pkcrisscross-count-must-not-be-a-procedure } if
     mxcount 1 lt mxcount 5000 gt or mxcount truncate mxcount ne or
         { pkcrisscross-count-must-be-1-to-5000 } if
-    /mxlen mxopts /Length 30 pkgetdef def
+    /mxlen mxopts /Length 30 //pkgetdef exec def
     /mxlen load xcheck { pkcrisscross-length-must-not-be-a-procedure } if
     mxlen 0 le { pkcrisscross-length-must-be-positive } if
-    /mxangle mxopts /Angle 35 pkgetdef def
+    /mxangle mxopts /Angle 35 //pkgetdef exec def
     /mxangle load xcheck { pkcrisscross-angle-must-not-be-a-procedure } if
     mxangle 0 lt mxangle 90 gt or { pkcrisscross-angle-must-be-0-to-90 } if
     % /Lean, or the deprecated /Spread alias when /Lean is absent (issue
     % #141: /Spread elsewhere in this file is a fraction of /Width). The
     % inner pkgetdef resolves the alias, so /Lean wins.
-    /mxspread mxopts /Lean mxopts /Spread 6 pkgetdef pkgetdef def
+    /mxspread mxopts /Lean mxopts /Spread 6 //pkgetdef exec //pkgetdef exec def
     /mxspread load xcheck { pkcrisscross-lean-must-not-be-a-procedure } if
     mxspread 0 lt { pkcrisscross-lean-must-be-non-negative } if
-    /mxlj mxopts /LengthJitter 0.3 pkgetdef def
+    /mxlj mxopts /LengthJitter 0.3 //pkgetdef exec def
     /mxlj load xcheck { pkcrisscross-lengthjitter-must-not-be-a-procedure } if
     mxlj 0 lt mxlj 1 gt or { pkcrisscross-lengthjitter-must-be-0-to-1 } if
-    /mxbow mxopts /Bow 0 pkgetdef def
+    /mxbow mxopts /Bow 0 //pkgetdef exec def
     /mxbow load xcheck { pkcrisscross-bow-must-not-be-a-procedure } if
     mxbow 0 lt mxbow 0.5 gt or { pkcrisscross-bow-must-be-0-to-0.5 } if
 
-    mxreg mxcount mhgrid
+    mxreg mxcount //mhgrid exec
     mhcols mhrows mul 40000 gt { pkcrisscross-too-many-cells } if
     newpath
     0 1 mhrows cvi 1 sub {
@@ -9602,12 +9602,12 @@ systemdict /setalpha known /pwhasalpha exch def
         0 1 mhcols cvi 1 sub {
             /mxc exch def
             % Six draws per cell whether or not the cell is kept.
-            frnd /mxfx exch def frnd /mxfy exch def
-            frnd /mxfam exch def frnd /mxfa exch def
-            frnd /mxfl exch def frnd /mxfb exch def
+            //frnd exec /mxfx exch def //frnd exec /mxfy exch def
+            //frnd exec /mxfam exch def //frnd exec /mxfa exch def
+            //frnd exec /mxfl exch def //frnd exec /mxfb exch def
             /mxx mhgx0 mxc mxfx add mhcw mul add def
             /mxy mhgy0 mxr mxfy add mhch mul add def
-            mxx mxy mhreg scin {
+            mxx mxy mhreg //scin exec {
                 /mxang mxangle mxfam 0.5 lt { 1 } { -1 } ifelse mul
                     mxfa 2 mul 1 sub mxspread mul add def
                 /mxhl mxlen 1 mxfl 2 mul 1 sub mxlj mul add mul 2 div def
@@ -9649,18 +9649,18 @@ systemdict /setalpha known /pwhasalpha exch def
     % below would underflow and leave a name on the stack (#947).
     count 2 lt { pkscumblein-needs-a-region-and-an-options-dict } if
     /mcopts exch def /mcreg exch def
-    mcreg mhisregion not { pkscumblein-needs-a-region } if
-    /mccount mcopts /Count 60 pkgetdef def
+    mcreg //mhisregion exec not { pkscumblein-needs-a-region } if
+    /mccount mcopts /Count 60 //pkgetdef exec def
     /mccount load xcheck { pkscumblein-count-must-not-be-a-procedure } if
     mccount 1 lt mccount 5000 gt or mccount truncate mccount ne or
         { pkscumblein-count-must-be-1-to-5000 } if
-    /mcrad mcopts /Radius 4 pkgetdef def
+    /mcrad mcopts /Radius 4 //pkgetdef exec def
     /mcrad load xcheck { pkscumblein-radius-must-not-be-a-procedure } if
     mcrad 0 le { pkscumblein-radius-must-be-positive } if
-    /mcrj mcopts /RadiusJitter 0.4 pkgetdef def
+    /mcrj mcopts /RadiusJitter 0.4 //pkgetdef exec def
     /mcrj load xcheck { pkscumblein-radiusjitter-must-not-be-a-procedure } if
     mcrj 0 lt mcrj 1 gt or { pkscumblein-radiusjitter-must-be-0-to-1 } if
-    /mcsq mcopts /Squash 1 pkgetdef def
+    /mcsq mcopts /Squash 1 //pkgetdef exec def
     /mcsq load xcheck { pkscumblein-squash-must-not-be-a-procedure } if
     mcsq 0 le mcsq 1 gt or { pkscumblein-squash-must-be-0-exclusive-to-1 } if
     % Light-aware massing (issue #345). Tested with `known`, not by value:
@@ -9672,10 +9672,10 @@ systemdict /setalpha known /pwhasalpha exch def
         /mclight load xcheck { pkscumblein-light-must-not-be-a-procedure } if
         /mclight load type dup /integertype ne exch /realtype ne and
             { pkscumblein-light-must-be-a-number } if
-        /mcreach mcopts /Reach 0.3 pkgetdef def
+        /mcreach mcopts /Reach 0.3 //pkgetdef exec def
         /mcreach load xcheck { pkscumblein-reach-must-not-be-a-procedure } if
         mcreach 0 le mcreach 1 gt or { pkscumblein-reach-must-be-0-exclusive-to-1 } if
-        /mcfeather mcopts /Feather 0.5 pkgetdef def
+        /mcfeather mcopts /Feather 0.5 //pkgetdef exec def
         /mcfeather load xcheck { pkscumblein-feather-must-not-be-a-procedure } if
         mcfeather 0 lt mcfeather 1 gt or { pkscumblein-feather-must-be-0-to-1 } if
     } {
@@ -9683,7 +9683,7 @@ systemdict /setalpha known /pwhasalpha exch def
         mcopts /Feather known { pkscumblein-feather-needs-light } if
     } ifelse
 
-    mcreg mccount mhgrid
+    mcreg mccount //mhgrid exec
     mclit {
         % The region's depth along the light: the length of the line through
         % its bounding box's centre in the light's direction, i.e. the box's
@@ -9704,11 +9704,11 @@ systemdict /setalpha known /pwhasalpha exch def
         /mcr exch def
         0 1 mhcols cvi 1 sub {
             /mcc exch def
-            frnd /mcfx exch def frnd /mcfy exch def
-            frnd /mcfr exch def frnd /mcph exch def
+            //frnd exec /mcfx exch def //frnd exec /mcfy exch def
+            //frnd exec /mcfr exch def //frnd exec /mcph exch def
             /mcx mhgx0 mcc mcfx add mhcw mul add def
             /mcy mhgy0 mcr mcfy add mhch mul add def
-            mcx mcy mcreg scin
+            mcx mcy mcreg //scin exec
             mclit {
                 % Lit when a step toward the light leaves the region: the
                 % circle sits within that step of the edge facing the light,
@@ -9718,7 +9718,7 @@ systemdict /setalpha known /pwhasalpha exch def
                 % grades the inner border without a new draw.
                 {
                     /mcstep mcreach mcdepth mul 1 mcfeather mcph mul sub mul def
-                    mcx mclx mcstep mul add mcy mcly mcstep mul add mcreg scin not
+                    mcx mclx mcstep mul add mcy mcly mcstep mul add mcreg //scin exec not
                 } { false } ifelse
             } if {
                 /mcrr mcrad 1 mcfr 2 mul 1 sub mcrj mul add mul 0.1 mcrad mul max def
@@ -9746,21 +9746,21 @@ systemdict /setalpha known /pwhasalpha exch def
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkscumble-needs-an-options-dict } if
     /msopts exch def
-    /msrad msopts /Radius 4 pkgetdef def
+    /msrad msopts /Radius 4 //pkgetdef exec def
     /msrad load xcheck { pkscumble-radius-must-not-be-a-procedure } if
     msrad 0 le { pkscumble-radius-must-be-positive } if
-    /msstep msopts /Step msrad 1.6 mul pkgetdef def
+    /msstep msopts /Step msrad 1.6 mul //pkgetdef exec def
     /msstep load xcheck { pkscumble-step-must-not-be-a-procedure } if
     msstep 0 le { pkscumble-step-must-be-positive } if
-    /msrj msopts /RadiusJitter 0.3 pkgetdef def
+    /msrj msopts /RadiusJitter 0.3 //pkgetdef exec def
     /msrj load xcheck { pkscumble-radiusjitter-must-not-be-a-procedure } if
     msrj 0 lt msrj 1 gt or { pkscumble-radiusjitter-must-be-0-to-1 } if
-    /mssq msopts /Squash 1 pkgetdef def
+    /mssq msopts /Squash 1 //pkgetdef exec def
     /mssq load xcheck { pkscumble-squash-must-not-be-a-procedure } if
     mssq 0 le mssq 1 gt or { pkscumble-squash-must-be-0-exclusive-to-1 } if
 
     % 24 samples per loop; the walk pitch is one sample's worth of travel.
-    msstep 24 div 100000 { pkscumble-sample-count-exceeds-safety-limit } mhcollect
+    msstep 24 div 100000 { pkscumble-sample-count-exceeds-safety-limit } //mhcollect exec
     newpath
     0 1 mhn 1 sub {
         mhstops exch get aload pop
@@ -9771,7 +9771,7 @@ systemdict /setalpha known /pwhasalpha exch def
         % a whole sample added a hook of terminal geometry (Codex round 3).
         msatend 1 and 1 eq { /mscum 0 def /msloop -1 def } { /mscum mscum mssp add def } ifelse
         % One draw per stop; a new loop radius is taken at each loop start.
-        frnd /msd exch def
+        //frnd exec /msd exch def
         /msturn mscum msstep div def
         msturn floor /msnl exch def
         msnl msloop gt {
@@ -9821,31 +9821,31 @@ systemdict /setalpha known /pwhasalpha exch def
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pktap-needs-an-options-dict } if
     /mtopts exch def
-    /mtspacing mtopts /Spacing 8 pkgetdef def
+    /mtspacing mtopts /Spacing 8 //pkgetdef exec def
     /mtspacing load xcheck { pktap-spacing-must-not-be-a-procedure } if
     mtspacing 0 le { pktap-spacing-must-be-positive } if
-    /mtlen mtopts /Length 6 pkgetdef def
+    /mtlen mtopts /Length 6 //pkgetdef exec def
     /mtlen load xcheck { pktap-length-must-not-be-a-procedure } if
     mtlen 0 lt { pktap-length-must-be-non-negative } if
-    /mtdir mtopts /Direction 90 pkgetdef def
+    /mtdir mtopts /Direction 90 //pkgetdef exec def
     /mtdir load xcheck { pktap-direction-must-not-be-a-procedure } if
-    /mtlean mtopts /Lean 15 pkgetdef def
+    /mtlean mtopts /Lean 15 //pkgetdef exec def
     /mtlean load xcheck { pktap-lean-must-not-be-a-procedure } if
     mtlean 0 lt { pktap-lean-must-be-non-negative } if
-    /mtscat mtopts /Scatter 3 pkgetdef def
+    /mtscat mtopts /Scatter 3 //pkgetdef exec def
     /mtscat load xcheck { pktap-scatter-must-not-be-a-procedure } if
     mtscat 0 lt { pktap-scatter-must-be-non-negative } if
-    /mtlj mtopts /LengthJitter 0.5 pkgetdef def
+    /mtlj mtopts /LengthJitter 0.5 //pkgetdef exec def
     /mtlj load xcheck { pktap-lengthjitter-must-not-be-a-procedure } if
     mtlj 0 lt mtlj 1 gt or { pktap-lengthjitter-must-be-0-to-1 } if
 
-    mtspacing 50000 { pktap-count-exceeds-safety-limit } mhcollect
+    mtspacing 50000 { pktap-count-exceeds-safety-limit } //mhcollect exec
     newpath
     0 1 mhn 1 sub {
         mhstops exch get aload pop
         /mtatend exch def /mtsp exch def pop pop /mty exch def /mtx exch def
-        frnd /mtfx exch def frnd /mtfy exch def
-        frnd /mtfl exch def frnd /mtfj exch def
+        //frnd exec /mtfx exch def //frnd exec /mtfy exch def
+        //frnd exec /mtfl exch def //frnd exec /mtfj exch def
         % The walk's guaranteed final stop can sit right on top of the
         % previous one; a tap there would just double it up.
         mtatend 3 and 2 eq mtsp mtspacing 0.5 mul lt and not {
@@ -9875,24 +9875,24 @@ systemdict /setalpha known /pwhasalpha exch def
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkpull-needs-an-options-dict } if
     /mpopts exch def
-    /mplen mpopts /Length 30 pkgetdef def
+    /mplen mpopts /Length 30 //pkgetdef exec def
     /mplen load xcheck { pkpull-length-must-not-be-a-procedure } if
     mplen 0 le { pkpull-length-must-be-positive } if
-    /mplj mpopts /LengthJitter 0.5 pkgetdef def
+    /mplj mpopts /LengthJitter 0.5 //pkgetdef exec def
     /mplj load xcheck { pkpull-lengthjitter-must-not-be-a-procedure } if
     mplj 0 lt mplj 1 gt or { pkpull-lengthjitter-must-be-0-to-1 } if
-    /mpspacing mpopts /Spacing 4 pkgetdef def
+    /mpspacing mpopts /Spacing 4 //pkgetdef exec def
     /mpspacing load xcheck { pkpull-spacing-must-not-be-a-procedure } if
     mpspacing 0 le { pkpull-spacing-must-be-positive } if
-    /mpwander mpopts /Wander 0.5 pkgetdef def
+    /mpwander mpopts /Wander 0.5 //pkgetdef exec def
     /mpwander load xcheck { pkpull-wander-must-not-be-a-procedure } if
     mpwander 0 lt mpwander 1 gt or { pkpull-wander-must-be-0-to-1 } if
-    /mpdir mpopts /Direction -90 pkgetdef def
+    /mpdir mpopts /Direction -90 //pkgetdef exec def
     /mpdir load xcheck { pkpull-direction-must-not-be-a-procedure } if
-    /mplean mpopts /Lean 6 pkgetdef def
+    /mplean mpopts /Lean 6 //pkgetdef exec def
     /mplean load xcheck { pkpull-lean-must-not-be-a-procedure } if
     mplean 0 lt { pkpull-lean-must-be-non-negative } if
-    /mpbow mpopts /Bow 0 pkgetdef def
+    /mpbow mpopts /Bow 0 //pkgetdef exec def
     /mpbow load xcheck { pkpull-bow-must-not-be-a-procedure } if
     mpbow 0 lt mpbow 0.5 gt or { pkpull-bow-must-be-0-to-0.5 } if
     % /Scatter has no default: unset draws no extra value per stroke, so a
@@ -9911,7 +9911,7 @@ systemdict /setalpha known /pwhasalpha exch def
     % interpolating between the even slots did. 120000 samples bound 20000
     % strokes.
     /mpn 6 def
-    mpspacing mpn div 120000 { pkpull-count-exceeds-safety-limit } mhcollect
+    mpspacing mpn div 120000 { pkpull-count-exceeds-safety-limit } //mhcollect exec
     newpath
     0 1 mhn 1 sub {
         /mpi exch def
@@ -9937,8 +9937,8 @@ systemdict /setalpha known /pwhasalpha exch def
             { false }
         ifelse
         or {
-            frnd /mpfw exch def frnd /mpfl exch def
-            frnd /mpfj exch def frnd /mpfb exch def
+            //frnd exec /mpfw exch def //frnd exec /mpfl exch def
+            //frnd exec /mpfj exch def //frnd exec /mpfb exch def
             /mpj mpi mpfw 2 mul 1 sub mpwander mul mpn 2 div mul round cvi add def
             mpj mpbase lt { /mpj mpbase def } if
             mpj mpend gt { /mpj mpend def } if
@@ -9947,7 +9947,7 @@ systemdict /setalpha known /pwhasalpha exch def
             mpscatset {
                 % Across the spine: along the normal of the stop the start
                 % slid to (its tangent angle is element 2, in degrees).
-                frnd 2 mul 1 sub mpscat mul /mpsoff exch def
+                //frnd exec 2 mul 1 sub mpscat mul /mpsoff exch def
                 /mpsx mpsx mpst 2 get sin mpsoff mul sub def
                 /mpsy mpsy mpst 2 get cos mpsoff mul add def
             } if
@@ -9985,16 +9985,16 @@ systemdict /setalpha known /pwhasalpha exch def
     % underflow and leave a name on the stack, naming no missing operand (#947).
     count 1 lt { pkzigzag-needs-an-options-dict } if
     /mzopts exch def
-    /mzamp mzopts /Amplitude 6 pkgetdef def
+    /mzamp mzopts /Amplitude 6 //pkgetdef exec def
     /mzamp load xcheck { pkzigzag-amplitude-must-not-be-a-procedure } if
     mzamp 0 lt { pkzigzag-amplitude-must-be-non-negative } if
-    /mzwave mzopts /Wavelength 18 pkgetdef def
+    /mzwave mzopts /Wavelength 18 //pkgetdef exec def
     /mzwave load xcheck { pkzigzag-wavelength-must-not-be-a-procedure } if
     mzwave 0 le { pkzigzag-wavelength-must-be-positive } if
-    /mzaj mzopts /AmpJitter 0.3 pkgetdef def
+    /mzaj mzopts /AmpJitter 0.3 //pkgetdef exec def
     /mzaj load xcheck { pkzigzag-ampjitter-must-not-be-a-procedure } if
     mzaj 0 lt mzaj 1 gt or { pkzigzag-ampjitter-must-be-0-to-1 } if
-    /mzwj mzopts /WaveJitter 0.2 pkgetdef def
+    /mzwj mzopts /WaveJitter 0.2 //pkgetdef exec def
     /mzwj load xcheck { pkzigzag-wavejitter-must-not-be-a-procedure } if
     mzwj 0 lt mzwj 1 gt or { pkzigzag-wavejitter-must-be-0-to-1 } if
 
@@ -10004,7 +10004,7 @@ systemdict /setalpha known /pwhasalpha exch def
     % left the guide at every corner (Codex round 4). 300000 samples bound
     % 50000 vertices.
     /mzn 6 def
-    mzwave 2 div mzn div 300000 { pkzigzag-point-count-exceeds-safety-limit } mhcollect
+    mzwave 2 div mzn div 300000 { pkzigzag-point-count-exceeds-safety-limit } //mhcollect exec
     newpath
     /mzk 0 def
     0 1 mhn 1 sub {
@@ -10035,7 +10035,7 @@ systemdict /setalpha known /pwhasalpha exch def
                 mzi mzbase sub mzn mod 0 eq
                 mzend mzi sub 1 sub mzwave 2 div mzn div mul
                     mhstops mzend get 4 get add mzwave 2 div 0.5 mul ge and {
-                    frnd /mzfa exch def frnd /mzfw exch def
+                    //frnd exec /mzfa exch def //frnd exec /mzfw exch def
                     /mzk mzk 1 add def
                     /mzside mzk 2 mod 1 eq { 1 } { -1 } ifelse def
                     /mzoff mzamp 1 mzfa 2 mul 1 sub mzaj mul add mul mzside mul def
@@ -10530,7 +10530,7 @@ systemdict /setalpha known /pwhasalpha exch def
 
 % x y -> bool   is the point inside the mass (mfreg)?
 % @internal
-/mfinmass { mfreg siinside } bind def
+/mfinmass { mfreg //siinside exec } bind def
 
 % n -> u   a number in [0, 1) that depends only on n and mfseed: the crisp
 % stretches' own generator, so they do not move with the frnd stream.
@@ -10543,7 +10543,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /mfivlen {
     mfrun mfbrushing { 1 mfcrisp sub } { mfcrisp } ifelse mul
-    mfsub 7919 mul mfiv 2 mul add 2 add mfu 1.2 mul 0.4 add mul
+    mfsub 7919 mul mfiv 2 mul add 2 add //mfu exec 1.2 mul 0.4 add mul
 } bind def
 
 % @kind: Procedure
@@ -10568,47 +10568,47 @@ systemdict /setalpha known /pwhasalpha exch def
     count 1 lt { pkfeather-needs-an-options-dict } if
     /mfopts exch def
     /mfopts load type /dicttype ne { pkfeather-needs-an-options-dict } if
-    /mftoward mfopts /Toward /out pkgetdef def
+    /mftoward mfopts /Toward /out //pkgetdef exec def
     /mftoward load type /nametype ne { pkfeather-toward-must-be-out-in-or-both } if
     /mftoward load /out ne /mftoward load /in ne and /mftoward load /both ne and
         { pkfeather-toward-must-be-out-in-or-both } if
-    /mflen mfopts /Length 8 pkgetdef def
+    /mflen mfopts /Length 8 //pkgetdef exec def
     /mflen load xcheck { pkfeather-length-must-not-be-a-procedure } if
     mflen 0 le { pkfeather-length-must-be-positive } if
-    /mflj mfopts /LengthJitter 0.6 pkgetdef def
+    /mflj mfopts /LengthJitter 0.6 //pkgetdef exec def
     /mflj load xcheck { pkfeather-lengthjitter-must-not-be-a-procedure } if
     mflj 0 lt mflj 1 gt or { pkfeather-lengthjitter-must-be-0-to-1 } if
-    /mfover mfopts /Overlap 0.35 pkgetdef def
+    /mfover mfopts /Overlap 0.35 //pkgetdef exec def
     /mfover load xcheck { pkfeather-overlap-must-not-be-a-procedure } if
     mfover 0 lt mfover 1 gt or { pkfeather-overlap-must-be-0-to-1 } if
-    /mfspacing mfopts /Spacing 3 pkgetdef def
+    /mfspacing mfopts /Spacing 3 //pkgetdef exec def
     /mfspacing load xcheck { pkfeather-spacing-must-not-be-a-procedure } if
     mfspacing 0 le { pkfeather-spacing-must-be-positive } if
-    /mfwander mfopts /Wander 0.5 pkgetdef def
+    /mfwander mfopts /Wander 0.5 //pkgetdef exec def
     /mfwander load xcheck { pkfeather-wander-must-not-be-a-procedure } if
     mfwander 0 lt mfwander 1 gt or { pkfeather-wander-must-be-0-to-1 } if
-    /mflean mfopts /Lean 30 pkgetdef def
+    /mflean mfopts /Lean 30 //pkgetdef exec def
     /mflean load xcheck { pkfeather-lean-must-not-be-a-procedure } if
     mflean 0 lt { pkfeather-lean-must-be-non-negative } if
-    /mfslant mfopts /Slant 0 pkgetdef def
+    /mfslant mfopts /Slant 0 //pkgetdef exec def
     /mfslant load xcheck { pkfeather-slant-must-not-be-a-procedure } if
     mfslant -80 lt mfslant 80 gt or { pkfeather-slant-must-be-minus-80-to-80 } if
-    /mfbow mfopts /Bow 0 pkgetdef def
+    /mfbow mfopts /Bow 0 //pkgetdef exec def
     /mfbow load xcheck { pkfeather-bow-must-not-be-a-procedure } if
     mfbow 0 lt mfbow 0.5 gt or { pkfeather-bow-must-be-0-to-0.5 } if
-    /mfcrisp mfopts /Crisp 0 pkgetdef def
+    /mfcrisp mfopts /Crisp 0 //pkgetdef exec def
     /mfcrisp load xcheck { pkfeather-crisp-must-not-be-a-procedure } if
     mfcrisp 0 lt mfcrisp 1 gt or { pkfeather-crisp-must-be-0-to-1 } if
-    /mfrun mfopts /CrispRun 60 pkgetdef def
+    /mfrun mfopts /CrispRun 60 //pkgetdef exec def
     /mfrun load xcheck { pkfeather-crisprun-must-not-be-a-procedure } if
     mfrun 0 le { pkfeather-crisprun-must-be-positive } if
     % The seed is drawn whether or not it is given, so giving it moves
     % nothing else.
-    frnd /mfseed0 exch def
-    /mfseed mfopts /CrispSeed mfseed0 pkgetdef def
+    //frnd exec /mfseed0 exch def
+    /mfseed mfopts /CrispSeed mfseed0 //pkgetdef exec def
     /mfseed load xcheck { pkfeather-crispseed-must-not-be-a-procedure } if
     mfseed 0 lt mfseed 1 gt or { pkfeather-crispseed-must-be-0-to-1 } if
-    /mfoutward mfopts /Outward 90 pkgetdef def
+    /mfoutward mfopts /Outward 90 //pkgetdef exec def
     /mfoutward load xcheck { pkfeather-outward-must-not-be-a-procedure } if
     /mfoutward load type dup /integertype ne exch /realtype ne and
         { pkfeather-outward-must-be-a-number } if
@@ -10616,10 +10616,10 @@ systemdict /setalpha known /pwhasalpha exch def
     % Which subpaths were closed with closepath, and, if any was, the mass
     % they bound: the whole path as fill would paint it. Both read the path
     % before mhcollect walks it (walkpath leaves it in place, flattened).
-    pkscanclosed /mfclosed exch def
+    //pkscanclosed exec /mfclosed exch def
     /mfanyclosed false def
     mfclosed { { /mfanyclosed true def } if } forall
-    mfanyclosed { scpath /mfreg exch def } if
+    mfanyclosed { //scpath exec /mfreg exch def } if
     % Two or more closed subpaths may overlap (a cloud bank built from
     % several blobs): an edge lying inside the others' mass is hidden, and
     % its strokes are skipped (issue #381). One closed subpath is its own
@@ -10632,7 +10632,7 @@ systemdict /setalpha known /pwhasalpha exch def
     % one of those samples, as in pkpull: a stroke can slide along the edge
     % by whole samples without leaving it. 120000 samples bound 20000 strokes.
     /mfn 6 def
-    mfspacing mfn div 120000 { pkfeather-count-exceeds-safety-limit } mhcollect
+    mfspacing mfn div 120000 { pkfeather-count-exceeds-safety-limit } //mhcollect exec
 
     % The crisp stretches are walked along the whole edge, so their count is
     % bounded too: a tiny /CrispRun on a long edge would otherwise loop for
@@ -10679,9 +10679,9 @@ systemdict /setalpha known /pwhasalpha exch def
                     /mfeps0 mfeps def
                     40 {
                         mfst 0 get mfnx mfeps mul add mfst 1 get mfny mfeps mul add
-                        mfinmass /mfpl exch def
+                        //mfinmass exec /mfpl exch def
                         mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
-                        mfinmass /mfpr exch def
+                        //mfinmass exec /mfpr exch def
                         mfpl mfpr ne {
                             /mfvotes mfvotes 1 add def
                             mfpl { /mfleft mfleft 1 add def } if
@@ -10735,10 +10735,10 @@ systemdict /setalpha known /pwhasalpha exch def
             % whatever their spacing.
             /mfarc 0 def /mfiv 0 def
             /mftot 0 mfbase 1 add 1 mfend { mhstops exch get 4 get add } for def
-            /mfbrushing mfsub 7919 mul mfu mfcrisp ge def
+            /mfbrushing mfsub 7919 mul //mfu exec mfcrisp ge def
             % Start partway into the first stretch, so subpaths do not all
             % begin on a stretch boundary.
-            /mfnext mfivlen mfsub 7919 mul 1 add mfu mul def
+            /mfnext //mfivlen exec mfsub 7919 mul 1 add //mfu exec mul def
         } {
             /mfarc mfarc mhstops mfi get 4 get add def
         } ifelse
@@ -10746,7 +10746,7 @@ systemdict /setalpha known /pwhasalpha exch def
             { mfarc mfnext le { exit } if
               /mfbrushing mfbrushing not def
               /mfiv mfiv 1 add def
-              /mfnext mfnext mfivlen add def } loop
+              /mfnext mfnext //mfivlen exec add def } loop
         } if
         % A slot is every sixth sample, plus an open subpath's end when it is
         % at least half a spacing past the last slot. A closed subpath ends
@@ -10764,8 +10764,8 @@ systemdict /setalpha known /pwhasalpha exch def
         ifelse
         or {
             % Four draws per slot, brushed or crisp.
-            frnd /mffw exch def frnd /mffl exch def
-            frnd /mffj exch def frnd /mffb exch def
+            //frnd exec /mffw exch def //frnd exec /mffl exch def
+            //frnd exec /mffj exch def //frnd exec /mffb exch def
             mfbrushing {
                 /mfj mfi mffw 2 mul 1 sub mfwander mul mfn 2 div mul round cvi add def
                 mfj mfbase lt { /mfj mfbase def } if
@@ -10784,9 +10784,9 @@ systemdict /setalpha known /pwhasalpha exch def
                     [ 1 0.015625 ] {
                         mfspacing mfn div 0.5 mul mul /mfhe exch def
                         mfst 0 get mfst 2 get 90 add cos mfhe mul add
-                        mfst 1 get mfst 2 get 90 add sin mfhe mul add mfinmass
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul add //mfinmass exec
                         mfst 0 get mfst 2 get 90 add cos mfhe mul sub
-                        mfst 1 get mfst 2 get 90 add sin mfhe mul sub mfinmass
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul sub //mfinmass exec
                         and not { /mfhide false def exit } if
                     } forall
                 } if
@@ -10835,14 +10835,14 @@ systemdict /setalpha known /pwhasalpha exch def
     pecolp
     count pec0 sub 3 ne {
         count pec0 sub dup 0 gt { { pop } repeat } { pop } ifelse
-        pecolx (-procedure-must-return-3-numbers) pugrd
+        pecolx (-procedure-must-return-3-numbers) //pugrd exec
     } if
     3 array astore /peur exch def
     0 1 2 {
         peur exch get dup type dup /integertype ne exch /realtype ne and
-            { pop pecolx (-procedure-results-must-be-numbers) pugrd } if
+            { pop pecolx (-procedure-results-must-be-numbers) //pugrd exec } if
         dup 0 lt exch 1 gt or
-            { pecolx (-procedure-results-must-be-0-to-1) pugrd } if
+            { pecolx (-procedure-results-must-be-0-to-1) //pugrd exec } if
     } for
     peur aload pop setrgbcolor
 } bind def
@@ -10863,16 +10863,16 @@ systemdict /setalpha known /pwhasalpha exch def
         } {
         /pekv load xcheck {
             /pekv load type dup /arraytype eq exch /packedarraytype eq or not
-                { pekp (-must-be-a-3-element-array) pugrd } if
+                { pekp (-must-be-a-3-element-array) //pugrd exec } if
             /pekv load 2
         } {
-            /pekv load type /nametype eq { /pekv pekp pekv pupig def } if
-            /pekv load type /arraytype ne { pekp (-must-be-a-3-element-array) pugrd } if
-            pekv length 3 ne { pekp (-must-be-a-3-element-array) pugrd } if
+            /pekv load type /nametype eq { /pekv pekp pekv //pupig exec def } if
+            /pekv load type /arraytype ne { pekp (-must-be-a-3-element-array) //pugrd exec } if
+            pekv length 3 ne { pekp (-must-be-a-3-element-array) //pugrd exec } if
             0 1 2 {
                 pekv exch get dup type dup /integertype ne exch /realtype ne and
-                    { pekp (-components-must-be-numbers) pugrd } if
-                dup 0 lt exch 1 gt or { pekp (-components-must-be-0-to-1) pugrd } if
+                    { pekp (-components-must-be-numbers) //pugrd exec } if
+                dup 0 lt exch 1 gt or { pekp (-components-must-be-0-to-1) //pugrd exec } if
             } for
             pekv 1
         } ifelse
@@ -10901,28 +10901,28 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /peregions {
     /perp exch def /perl exch def
-    perl length 2 lt { perp (-regions-need-a-region-and-a-default-colour) pugrd } if
-    perl dup length 1 sub get peislist
-        { perp (-regions-must-end-with-a-default-colour) pugrd } if
+    perl length 2 lt { perp (-regions-need-a-region-and-a-default-colour) //pugrd exec } if
+    perl dup length 1 sub get //peislist exec
+        { perp (-regions-must-end-with-a-default-colour) //pugrd exec } if
     [
     0 1 perl length 1 sub {
         /peri exch def
         peri perl length 1 sub lt {
             perl peri get /pere exch def
-            /pere load xcheck { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
+            /pere load xcheck { perp (-region-entries-must-be-region-colour-pairs) //pugrd exec } if
             /pere load type dup /arraytype eq exch /packedarraytype eq or not
-                { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
-            pere length 2 ne { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
-            pere 0 get dup mhisregion {
+                { perp (-region-entries-must-be-region-colour-pairs) //pugrd exec } if
+            pere length 2 ne { perp (-region-entries-must-be-region-colour-pairs) //pugrd exec } if
+            pere 0 get dup //mhisregion exec {
                 % a region dict (artkit's screct or scpath), used as is
             } {
                 dup xcheck
                 1 index type dup /arraytype eq exch /packedarraytype eq or and {
                     gsave
-                    { newpath exec scpath } stopped { grestore stop } if
+                    { newpath exec //scpath exec } stopped { grestore stop } if
                     grestore
                 } {
-                    pop perp (-region-must-be-a-region-or-a-path-procedure) pugrd
+                    pop perp (-region-must-be-a-region-or-a-path-procedure) //pugrd exec
                 } ifelse
             } ifelse
             pere 1 get
@@ -10931,9 +10931,9 @@ systemdict /setalpha known /pwhasalpha exch def
         } ifelse
         % region colour -> [ region mode value ]
         /pecv exch def
-        /pecv load peislist
-            { perp (-region-colours-must-not-be-region-lists) pugrd } if
-        << /C /pecv load >> /C perp pecolkey exch 3 array astore
+        /pecv load //peislist exec
+            { perp (-region-colours-must-not-be-region-lists) //pugrd exec } if
+        << /C /pecv load >> /C perp //pecolkey exec exch 3 array astore
     } for
     ]
 } bind def
@@ -10945,7 +10945,7 @@ systemdict /setalpha known /pwhasalpha exch def
 /pereglook {
     /perl exch def /pery exch def /perx exch def
     perl {
-        dup 0 get dup null eq { pop true } { perx pery 3 -1 roll siinside } ifelse
+        dup 0 get dup null eq { pop true } { perx pery 3 -1 roll //siinside exec } ifelse
         { exit } if
         pop
     } forall
@@ -10967,7 +10967,7 @@ systemdict /setalpha known /pwhasalpha exch def
     {
         pei pesegs length ge { exit } if
         pesegs pei get /m eq {
-            pesegs pei 1 add get pesegs pei 2 add get pecolat
+            pesegs pei 1 add get pesegs pei 2 add get //pecolat exec
             newpath pesegs pei 1 add get pesegs pei 2 add get moveto
             /pei pei 3 add def
             pei pesegs length lt {
@@ -11010,11 +11010,11 @@ systemdict /setalpha known /pwhasalpha exch def
     % A key that is not a number is passed on untouched, so pkfeather's
     % own guard names it.
     petow /in eq {
-        dup /Length 8 pkgetdef dup penum
+        dup /Length 8 //pkgetdef exec dup //penum exec
             { peinlen mul 1 index exch /Length exch put } { pop } ifelse
-        dup /Spacing 3 pkgetdef dup penum
+        dup /Spacing 3 //pkgetdef exec dup //penum exec
             { peinspace mul 1 index exch /Spacing exch put } { pop } ifelse
-        dup /Overlap 0.35 pkgetdef dup penum
+        dup /Overlap 0.35 //pkgetdef exec dup //penum exec
             { 1 exch sub 1 index exch /Overlap exch put } { pop } ifelse
     } if
 } bind def
@@ -11043,68 +11043,68 @@ systemdict /setalpha known /pwhasalpha exch def
     peopts0 /Toward known { pkbrushedge-sets-toward-itself } if
     /pebrush peopts0 /Brush
         { << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }
-        pkgetdef def
+        //pkgetdef exec def
     /pebrush load xcheck not { pkbrushedge-brush-must-be-a-procedure } if
-    /peinlen peopts0 /InLength 1 pkgetdef def
+    /peinlen peopts0 /InLength 1 //pkgetdef exec def
     /peinlen load xcheck { pkbrushedge-inlength-must-not-be-a-procedure } if
     peinlen 0 le { pkbrushedge-inlength-must-be-positive } if
-    /peinspace peopts0 /InSpacing 2 pkgetdef def
+    /peinspace peopts0 /InSpacing 2 //pkgetdef exec def
     /peinspace load xcheck { pkbrushedge-inspacing-must-not-be-a-procedure } if
     peinspace 0 le { pkbrushedge-inspacing-must-be-positive } if
     % /Under (the backdrop) and /Mass (the pulled-out colour): each none, a
     % colour (array or pigment name), or a procedure x y -> r g b.
-    peopts0 /Under (pkbrushedge-under) pecolkey /pemode exch def /peUnder exch def
-    peopts0 /Mass (pkbrushedge-mass) pecolkey /pemmode exch def /peMass exch def
+    peopts0 /Under (pkbrushedge-under) //pecolkey exec /pemode exch def /peUnder exch def
+    peopts0 /Mass (pkbrushedge-mass) //pecolkey exec /pemmode exch def /peMass exch def
 
     % Every gsave below goes through pegsave, which counts it, so an error
     % raised in the middle (a bad pkfeather key, a backdrop procedure's bad
     % answer, the brush's own guard) can be unwound to the caller's level
     % and passed on: the caller's graphics state is never left open.
-    frnd /peseed exch def
+    //frnd exec /peseed exch def
     /pedepth 0 def
     {
-    pegsave
+    //pegsave exec
         % In first: the backdrop cut back into the mass.
         pemode 1 eq {
-            pegsave peUnder aload pop setrgbcolor /in peopts pkfeather pebrush pegrestore
+            //pegsave exec peUnder aload pop setrgbcolor /in //peopts exec pkfeather pebrush //pegrestore exec
         } if
         pemode 2 eq {
             % One brush call per stroke, each in the backdrop where it
             % starts.
-            pegsave
+            //pegsave exec
                 /pecolp /peUnder load def /pecolx (pkbrushedge-under) def
-                /in peopts pkfeather pestrokes
-            pegrestore
+                /in //peopts exec pkfeather //pestrokes exec
+            //pegrestore exec
         } if
         pemode 3 eq {
             % A region list (issue #456): the same, each stroke in the
             % colour of the region it starts in.
-            pegsave
-                /pecolp { peUnder pereglook } def /pecolx (pkbrushedge-under) def
-                /in peopts pkfeather pestrokes
-            pegrestore
+            //pegsave exec
+                /pecolp { peUnder //pereglook exec } def /pecolx (pkbrushedge-under) def
+                /in //peopts exec pkfeather //pestrokes exec
+            //pegrestore exec
         } if
         % Out, last: the mass's own colour pulled over what is behind it, on
         % top of the nicks, so the two interlock. That is the current colour,
         % or /Mass: one colour, or (a procedure) one brush call per stroke,
         % each in the mass's colour where it starts (issue #426).
-        pemmode 0 eq { pegsave /out peopts pkfeather pebrush pegrestore } if
+        pemmode 0 eq { //pegsave exec /out //peopts exec pkfeather pebrush //pegrestore exec } if
         pemmode 1 eq {
-            pegsave peMass aload pop setrgbcolor /out peopts pkfeather pebrush pegrestore
+            //pegsave exec peMass aload pop setrgbcolor /out //peopts exec pkfeather pebrush //pegrestore exec
         } if
         pemmode 2 eq {
-            pegsave
+            //pegsave exec
                 /pecolp /peMass load def /pecolx (pkbrushedge-mass) def
-                /out peopts pkfeather pestrokes
-            pegrestore
+                /out //peopts exec pkfeather //pestrokes exec
+            //pegrestore exec
         } if
         pemmode 3 eq {
-            pegsave
-                /pecolp { peMass pereglook } def /pecolx (pkbrushedge-mass) def
-                /out peopts pkfeather pestrokes
-            pegrestore
+            //pegsave exec
+                /pecolp { peMass //pereglook exec } def /pecolx (pkbrushedge-mass) def
+                /out //peopts exec pkfeather //pestrokes exec
+            //pegrestore exec
         } if
-    pegrestore
+    //pegrestore exec
     } stopped { pedepth { grestore } repeat stop } if
 } bind def
 
@@ -11253,13 +11253,13 @@ systemdict /setalpha known /pwhasalpha exch def
 % x y -> 0..1   (the slow mottle at a canvas-space point)
 % @internal
 /pjmottle {
-    userdict /pjM get div dup pjwrap /pjmy exch def dup floor sub /pjfy exch def
-    userdict /pjM get div dup pjwrap /pjmx exch def dup floor sub /pjfx exch def
+    userdict /pjM get div dup //pjwrap exec /pjmy exch def dup floor sub /pjfy exch def
+    userdict /pjM get div dup //pjwrap exec /pjmx exch def dup floor sub /pjfx exch def
     /pjux pjfx dup mul 3 2 pjfx mul sub mul def
     /pjuy pjfy dup mul 3 2 pjfy mul sub mul def
-    pjmx pjmy 101 pjhash pjmx 1 add pjmy 101 pjhash pjux pjlerp
-    pjmx pjmy 1 add 101 pjhash pjmx 1 add pjmy 1 add 101 pjhash pjux pjlerp
-    pjuy pjlerp
+    pjmx pjmy 101 //pjhash exec pjmx 1 add pjmy 101 //pjhash exec pjux //pjlerp exec
+    pjmx pjmy 1 add 101 //pjhash exec pjmx 1 add pjmy 1 add 101 //pjhash exec pjux //pjlerp exec
+    pjuy //pjlerp exec
 } bind def
 
 % i j -> height 0..1   (the knuckle in cell (i, j); i and j integers)
@@ -11277,8 +11277,8 @@ systemdict /setalpha known /pwhasalpha exch def
         {
             /pjhr userdict /pjR get def
             /pjhw userdict /pjW get def
-            1 pjhr sub pjhi pjhj 0 pjhash mul
-            pjhr pjhi 0.5 add pjhw mul pjhj 0.5 add pjhw mul pjmottle mul
+            1 pjhr sub pjhi pjhj 0 //pjhash exec mul
+            pjhr pjhi 0.5 add pjhw mul pjhj 0.5 add pjhw mul //pjmottle exec mul
             add
             pjhk 0 ge { pjmd length pjmemocap lt { pjmd pjhk 2 index put } if } if
         }
@@ -11312,7 +11312,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pjwq pjwk 3 div floor cvi def
     /pjwf pjwk pjwq 3 mul sub 3 div def
     /pjwf pjwf dup mul 3 2 pjwf mul sub mul def
-    pjwt pjwq pjws pjhash pjwt pjwq 1 add pjws pjhash pjwf pjlerp
+    pjwt pjwq pjws //pjhash exec pjwt pjwq 1 add pjws //pjhash exec pjwf //pjlerp exec
     0.5 sub 0.7 mul
 } bind def
 
@@ -11358,7 +11358,7 @@ systemdict /setalpha known /pwhasalpha exch def
           ( pt\). Drop /Touch from it, split it into separate strokes that each reach less, )
           (or set a coarser /Weave in pkcanvas) ]
     } ifelse
-    pjjoin errordict /limitcheck get exec
+    //pjjoin exec errordict /limitcheck get exec
 } bind def
 
 % llx lly urx ury -   (sets pji0 pjj0 pji1 pjj1 and pjhuge)
@@ -11377,9 +11377,9 @@ systemdict /setalpha known /pwhasalpha exch def
     /pjrcm userdict /pjCTM get def
     pjrx0 pjry0 transform pjrcm itransform /pjby0 exch def /pjbx0 exch def
     /pjbx1 pjbx0 def /pjby1 pjby0 def
-    pjrx1 pjry0 pjrgrow
-    pjrx0 pjry1 pjrgrow
-    pjrx1 pjry1 pjrgrow
+    pjrx1 pjry0 //pjrgrow exec
+    pjrx0 pjry1 //pjrgrow exec
+    pjrx1 pjry1 //pjrgrow exec
     /pjrw userdict /pjW get def
     /pjrm pjrw 1.75 mul def
     /pjhuge false def
@@ -11394,7 +11394,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % llx lly urx ury -> cells   (how many cells a catch over this box builds)
 % @internal
 /pjcells {
-    pjrange
+    //pjrange exec
     pjhuge
         { pjbudget 1 add }
         { pji1 pji0 sub 1 add cvr pjj1 pjj0 sub 1 add cvr mul }
@@ -11465,7 +11465,7 @@ systemdict /setalpha known /pwhasalpha exch def
         userdict /pjWholePage known {
             pop pop pop pop clippath pathbbox newpath
         } if
-        pjcells pjbudget gt { pjcatch-area-exceeds-safety-limit } if
+        //pjcells exec pjbudget gt { pjcatch-area-exceeds-safety-limit } if
         /pjcw userdict /pjW get def
         /pjp userdict /pjP get def
         /pjgrow pjt 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.45 mul 1 add def
@@ -11477,20 +11477,20 @@ systemdict /setalpha known /pwhasalpha exch def
             /pjci exch def
             pjj0 1 pjj1 {
                 /pjcj exch def
-                /pjd pjci pjcj pjheight pjt add 1 sub def
+                /pjd pjci pjcj //pjheight exec pjt add 1 sub def
                 pjd 0 gt {
                     /pjs pjd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
                         pjgrow mul pjcw mul def
-                    /pjs pjs pjci pjcj 4 pjhash 0.4 mul 0.8 add mul def
-                    pjci 0.5 add pjci pjcj 2 pjhash 0.5 sub 0.3 mul add
-                        pjci pjcj 5 pjwander add pjcw mul
-                    pjcj 0.5 add pjci pjcj 3 pjhash 0.5 sub 0.3 mul add
-                        pjcj pjci 6 pjwander add pjcw mul
+                    /pjs pjs pjci pjcj 4 //pjhash exec 0.4 mul 0.8 add mul def
+                    pjci 0.5 add pjci pjcj 2 //pjhash exec 0.5 sub 0.3 mul add
+                        pjci pjcj 5 //pjwander exec add pjcw mul
+                    pjcj 0.5 add pjci pjcj 3 //pjhash exec 0.5 sub 0.3 mul add
+                        pjcj pjci 6 //pjwander exec add pjcw mul
                     pjci pjcj add 1 and 1 eq
                         { pjs 0.65 mul pjs 0.55 mul }
                         { pjs 0.55 mul pjs 0.65 mul }
                     ifelse
-                    pjoval
+                    //pjoval exec
                     /pjn pjn 1 add def
                 } if
             } for
@@ -11624,33 +11624,33 @@ systemdict /setalpha known /pwhasalpha exch def
 
     % Every guard runs before any state is written, so a rejected call
     % leaves the previous surface (or none) in place.
-    /pjsseed pjopts /Seed 1 pkgetdef def
+    /pjsseed pjopts /Seed 1 //pkgetdef exec def
     /pjsseed load xcheck { pkcanvas-seed-must-not-be-a-procedure } if
-    pjsseed pjisnum not { pkcanvas-seed-must-be-a-number } if
+    pjsseed //pjisnum exec not { pkcanvas-seed-must-be-a-number } if
     pjsseed abs 2147483647 ge { pkcanvas-seed-must-be-within-integer-range } if
 
-    /pjsweave pjopts /Weave 2.5 pkgetdef def
+    /pjsweave pjopts /Weave 2.5 //pkgetdef exec def
     /pjsweave load xcheck { pkcanvas-weave-must-not-be-a-procedure } if
-    pjsweave pjisnum not { pkcanvas-weave-must-be-a-number } if
+    pjsweave //pjisnum exec not { pkcanvas-weave-must-be-a-number } if
     pjsweave 0 le { pkcanvas-weave-must-be-positive } if
 
-    /pjsmottle pjopts /Mottle pjsweave 8 mul pkgetdef def
+    /pjsmottle pjopts /Mottle pjsweave 8 mul //pkgetdef exec def
     /pjsmottle load xcheck { pkcanvas-mottle-must-not-be-a-procedure } if
-    pjsmottle pjisnum not { pkcanvas-mottle-must-be-a-number } if
+    pjsmottle //pjisnum exec not { pkcanvas-mottle-must-be-a-number } if
     pjsmottle 0 le { pkcanvas-mottle-must-be-positive } if
 
-    /pjsrelief pjopts /Relief 0.7 pkgetdef def
+    /pjsrelief pjopts /Relief 0.7 //pkgetdef exec def
     /pjsrelief load xcheck { pkcanvas-relief-must-not-be-a-procedure } if
-    pjsrelief pjisnum not { pkcanvas-relief-must-be-a-number } if
+    pjsrelief //pjisnum exec not { pkcanvas-relief-must-be-a-number } if
     pjsrelief 0 lt pjsrelief 1 gt or { pkcanvas-relief-must-be-0-to-1 } if
 
     % Fisher-Yates over 0..255 from the private generator.
-    pjsseed pjsrand
+    pjsseed //pjsrand exec
     /pjstab 256 array def
     0 1 255 { pjstab exch dup put } for
     255 -1 1 {
         /pjsk exch def
-        /pjsr pjrand pjsk 1 add mul floor cvi def
+        /pjsr //pjrand exec pjsk 1 add mul floor cvi def
         pjsr pjsk gt { /pjsr pjsk def } if
         pjstab pjsk get
         pjstab pjsr get

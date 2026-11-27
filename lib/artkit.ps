@@ -64,17 +64,17 @@
 % high bits — successive low bits correlate (the marquee.ps finding).
 
 /chance { rand 8192 idiv exch mod } bind def          % n -> 0..n-1
+/frnd { rand 8192 idiv 262143 and 262143 div } bind def  % -> 0.0..1.0
 % An integer j draws through `chance` (mod), exactly as it always has, so
 % every seeded integer piece is byte-identical. A real j can't go through
 % `mod`, so it scales one `frnd` draw instead: same -j..j range, real result.
 /jit {
     dup type /integertype eq
-    { dup 2 mul 1 add chance exch sub }
-    { dup 2 mul frnd mul exch sub }
+    { dup 2 mul 1 add //chance exec exch sub }
+    { dup 2 mul //frnd exec mul exch sub }
     ifelse
 } bind def                                            % j -> -j..j
-/frnd { rand 8192 idiv 262143 and 262143 div } bind def  % -> 0.0..1.0
-/oneof { dup length chance get } bind def             % array -> element
+/oneof { dup length //chance exec get } bind def             % array -> element
 
 % --- color -----------------------------------------------------------
 
@@ -122,7 +122,7 @@
 >> def
 
 /pal { Palettes exch get } bind def                   % /name -> array
-/palpick { pal oneof aload pop } bind def             % /name -> r g b
+/palpick { //pal exec //oneof exec aload pop } bind def             % /name -> r g b
 
 % --- turtle ----------------------------------------------------------
 % A pen with a heading. `thome` moveto's the start; `fd` draws into
@@ -297,7 +297,7 @@ end
 
 /alongpath {                                     % pitch proc -
     exch /aponepitch exch def
-    { aponepitch } exch alintern
+    { aponepitch } exch //alintern exec
 } bind def
 
 % --- brushes: centerline sampler (foundation for painterly brushes) --
@@ -450,12 +450,12 @@ end
     /wkproc exch def /wkpitch exch def
     wkpitch 0 le { walkpath-pitch-must-be-positive } if
     flattenpath
-    wkmeasure /wklens exch def
+    //wkmeasure exec /wklens exch def
     /wksi 0 def /wkx 0 def /wky 0 def /wksx 0 def /wksy 0 def
     /wksub 0 def /wkrem 0 def /wkcum 0 def /wklast 0 def
     /wkfirst true def /wkemitted false def /wkstarted false def
     {                                             % moveto x y
-        wkstarted { wkend } if
+        wkstarted { //wkend exec } if
         /wky exch def /wkx exch def
         /wksx wkx def /wksy wky def
         /wksub wklens wksi get def
@@ -464,11 +464,11 @@ end
         /wkstarted true def
         /wksi wksi 1 add def
     }
-    { wkseg }
+    { //wkseg exec }
     { pop pop pop pop pop pop }
-    { wksx wksy wkseg }
+    { wksx wksy //wkseg exec }
     pathforall
-    wkstarted { wkend } if
+    wkstarted { //wkend exec } if
 } bind def
 
 % Self-tests: `pscat --selftest lib/artkit.ps` (see docs/dev/SELFTEST.md).
@@ -526,7 +526,7 @@ end
           grestore
           /pti pti 1 add def
       } { pop pop pop } ifelse }
-    alintern
+    //alintern exec
 } bind def
 
 % cx cy r ang (str) ctext -
@@ -549,7 +549,7 @@ end
     /ctspan ctstr stringwidth pop ctr div 57.29578 mul def  % 57.29578 = degrees/radian
     gsave
         newpath ctx cty ctr ctang ctang ctspan 1.05 mul sub arcn
-        ctstr pathtext
+        ctstr //pathtext exec
     grestore
 } bind def
 
@@ -561,7 +561,7 @@ end
 /ctextctr {
     /ctcstr exch def /ctcr exch def /ctcy exch def /ctcx exch def
     /ctcspan ctcstr stringwidth pop ctcr div 57.29578 mul def  % degrees/radian
-    ctcx ctcy ctcr 90 ctcspan 2 div add ctcstr ctext
+    ctcx ctcy ctcr 90 ctcspan 2 div add ctcstr //ctext exec
 } bind def
 
 % --- shapes (appended to the current path) ---------------------------
@@ -654,25 +654,25 @@ end
 } bind def
 
 /ellipserot {                                    % cx cy rx ry rot -
-    { 1 0 moveto 0 0 1 0 360 arc closepath } elrun
+    { 1 0 moveto 0 0 1 0 360 arc closepath } //elrun exec
 } bind def
 /ellipsenrot {                                   % cx cy rx ry rot -
-    { 1 0 moveto 0 0 1 360 0 arcn closepath } elrun
+    { 1 0 moveto 0 0 1 360 0 arcn closepath } //elrun exec
 } bind def
 /ellipsearcrot {                                 % cx cy rx ry a1 a2 rot -
     0 1 2 { index 0 add pop } for   % typecheck rot a2 a1 before binding them
     /elrot exch def /ela2 exch def /ela1 exch def
-    elrot { 0 0 1 ela1 ela2 arc } elrun
+    elrot { 0 0 1 ela1 ela2 arc } //elrun exec
 } bind def
 /ellipsearcnrot {                                % cx cy rx ry a1 a2 rot -
     0 1 2 { index 0 add pop } for   % typecheck rot a2 a1 before binding them
     /elrot exch def /ela2 exch def /ela1 exch def
-    elrot { 0 0 1 ela1 ela2 arcn } elrun
+    elrot { 0 0 1 ela1 ela2 arcn } //elrun exec
 } bind def
-/ellipse   { 0 ellipserot } bind def             % cx cy rx ry -
-/ellipsen  { 0 ellipsenrot } bind def            % cx cy rx ry -
-/ellipsearc  { 0 ellipsearcrot } bind def        % cx cy rx ry a1 a2 -
-/ellipsearcn { 0 ellipsearcnrot } bind def       % cx cy rx ry a1 a2 -
+/ellipse   { 0 //ellipserot exec } bind def             % cx cy rx ry -
+/ellipsen  { 0 //ellipsenrot exec } bind def            % cx cy rx ry -
+/ellipsearc  { 0 //ellipsearcrot exec } bind def        % cx cy rx ry a1 a2 -
+/ellipsearcn { 0 //ellipsearcnrot exec } bind def       % cx cy rx ry a1 a2 -
 
 % Self-tests: `pscat --selftest lib/artkit.ps` (see docs/dev/SELFTEST.md).
 % The ellipse builders must leave the CTM exactly as they found it, on
@@ -855,7 +855,7 @@ end
         /twlines twstr length 1 add array def
         /twn 0 def
         {
-            twstr twwidth tflinebreak
+            twstr twwidth //tflinebreak exec
             /twlast exch def /twrest exch def /twline exch def
             twlines twn twline put /twn twn 1 add def
             /twstr twrest def
@@ -898,7 +898,7 @@ end
         tdx0 tdx1 tdx0 sub tdw sub 2 div add tdy moveto tdline show
     } {
     tdjust /justify eq tdlast not and {
-        tdline tfwordgaps /tdgaps exch def
+        tdline //tfwordgaps exec /tdgaps exch def
         tdgaps 0 gt {
             % tdw already includes the line's own natural space widths,
             % so the per-gap advance is that natural space plus an even
@@ -952,9 +952,9 @@ end
         tfy tfybot lt { exit } if
         tfy tfbp
         /tfx1 exch def /tfx0 exch def
-        tfstr tfx1 tfx0 sub tflinebreak
+        tfstr tfx1 tfx0 sub //tflinebreak exec
         /tflast exch def /tfrest exch def /tfline exch def
-        tfx0 tfx1 tfy tfjust tflast tfline tfdrawline
+        tfx0 tfx1 tfy tfjust tflast tfline //tfdrawline exec
         /tfy tfy tfleading sub def
         /tfstr tfrest def
     } loop
@@ -972,7 +972,7 @@ end
     { pop tbx tbx tbw add }
     tby tbh add tblead sub
     tby tblead tbjust tbstr
-    tfflow
+    //tfflow exec
 } bind def
 
 % x0 y0 colw gap h ncols leading just (str) tfcols  (leftover) -
@@ -989,7 +989,7 @@ end
         /tci exch def
         tcstr length 0 eq { exit } if
         tcx tci tcw tcgap add mul add
-        tcy tcw tch tclead tcjust tcstr tfblock
+        tcy tcw tch tclead tcjust tcstr //tfblock exec
         /tcstr exch def
     } for
     tcstr
@@ -1199,7 +1199,7 @@ end
 /scodds {
     dup 1 ge
         { pop true }
-        { dup 0 le { pop false } { frnd exch lt } ifelse }
+        { dup 0 le { pop false } { //frnd exec exch lt } ifelse }
     ifelse
 } bind def
 
@@ -1253,7 +1253,7 @@ end
             { pop false }
             { dup length 2 ne
                 { pop false }
-                { dup 0 get scisnum exch 1 get scisnum and }
+                { dup 0 get //scisnum exec exch 1 get //scisnum exec and }
               ifelse }
           ifelse }
     ifelse
@@ -1280,7 +1280,7 @@ end
         dup type /arraytype ne { pop false } {
         dup xcheck { pop false } {
         dup length 4 ne { pop false } {
-            true exch { scisnum and } forall
+            true exch { //scisnum exec and } forall
         } ifelse } ifelse } ifelse
     } ifelse
 } bind def
@@ -1291,7 +1291,7 @@ end
         dup type /arraytype ne { pop false } {
         dup xcheck { pop false } {
         dup length 4 mod 0 ne { pop false } {
-            true exch { scisnum and } forall
+            true exch { //scisnum exec and } forall
         } ifelse } ifelse } ifelse
     } ifelse
 } bind def
@@ -1302,8 +1302,8 @@ end
 % bare reference, so binding first and validating through the name
 % would execute a malformed operand instead of rejecting it (#123).
 % An operand still sitting on the stack is only ever inspected.
-    3 index scisnum 3 index scisnum and
-    2 index scisnum and 1 index scisnum and
+    3 index //scisnum exec 3 index //scisnum exec and
+    2 index //scisnum exec and 1 index //scisnum exec and
         not { screct-needs-four-numbers } if
     /sqrh exch def /sqrw exch def /sqry exch def /sqrx exch def
     sqrw 0 le sqrh 0 le or { screct-width-and-height-must-be-positive } if
@@ -1435,7 +1435,7 @@ end
     sqhave not {
         /sqsx sqcx def /sqsy sqcy def /sqhave true def
     } if
-    sqcx sqcy sqlx sqly sqemit
+    sqcx sqcy sqlx sqly //sqemit exec
     % Bounds come from *edges*, never from a bare moveto: `fill`
     % ignores a subpath that never draws, so a stray `1e6 1e6 moveto`
     % must not stretch the region's bbox around a candidate area a
@@ -1443,9 +1443,9 @@ end
     % review, round 5). Both endpoints are offered here rather than
     % only the new one, since the first point of a subpath is a real
     % vertex exactly once an edge leaves it.
-    sqcx sqcy sqbounds
-    sqlx sqly sqbounds
-    sqlx sqly sqpcollinear
+    sqcx sqcy //sqbounds exec
+    sqlx sqly //sqbounds exec
+    sqlx sqly //sqpcollinear exec
     /sqpn sqpn 1 add def
     /sqcx sqlx def /sqcy sqly def
 } bind def
@@ -1464,15 +1464,15 @@ end
         % and (since bounds come from edges) stretch the bbox around a
         % subpath `fill` ignores entirely -- a bare `moveto` with
         % nothing after it being exactly that case.
-        sqcx sqsx ne sqcy sqsy ne or { sqsx sqsy sqline } if
-        sqpmerge
+        sqcx sqsx ne sqcy sqsy ne or { sqsx sqsy //sqline exec } if
+        //sqpmerge exec
         /sqhave false def
     } if
 } bind def
 
 /sqmove {                                        % x y -   (subpath start)
     /sqmy exch def /sqmx exch def
-    sqclose                                      % close the previous one
+    //sqclose exec                                      % close the previous one
     /sqpstart sqn def
     /sqpn 0 def
     /sqpfirst true def
@@ -1504,12 +1504,12 @@ end
     /sqcx 0 def /sqcy 0 def /sqsx 0 def /sqsy 0 def
     /sqbx0 0 def /sqby0 0 def /sqbx1 0 def /sqby1 0 def
     flattenpath
-    { sqmove }
-    { sqline }
+    { //sqmove exec }
+    { //sqline exec }
     { pop pop pop pop pop pop }
-    { sqclose }
+    { //sqclose exec }
     pathforall
-    sqclose                                      % and the last subpath
+    //sqclose exec                                      % and the last subpath
     << /Kind /path
        /BBox [ sqbx0 sqby0 sqbx1 sqby1 ]
        /Edges sqbuf 0 sqn getinterval
@@ -1575,9 +1575,9 @@ end
     dup type /dicttype ne { scarea-needs-a-region } if
     dup /Area known {
         /Area get
-        dup scisnum not { scarea-area-must-be-a-number } if
+        dup //scisnum exec not { scarea-area-must-be-a-number } if
     } {
-        dup scedgesok not { scarea-region-edges-must-be-numbers } if
+        dup //scedgesok exec not { scarea-region-edges-must-be-numbers } if
         dup /Rule known not { scarea-region-needs-a-rule } if
         sqmeasure
     } ifelse
@@ -1732,7 +1732,7 @@ end
                 /sqauu sqadx sqary mul sqady sqarx mul sub sqaden div def
                 sqatt 0 gt sqatt 1 lt and
                 sqauu 0 gt sqauu 1 lt and and
-                    { sqapy sqary sqatt mul add sqainsert } if
+                    { sqapy sqary sqatt mul add //sqainsert exec } if
             } if
         } for
         sqawork sqabudget gt { scarea-region-too-complex-to-measure } if
@@ -1758,10 +1758,10 @@ end
         /sqanys 0 def
         0 4 sqaedges length 4 sub {
             /sqai exch def
-            sqaedges sqai 1 add get sqainsert
-            sqaedges sqai 3 add get sqainsert
+            sqaedges sqai 1 add get //sqainsert exec
+            sqaedges sqai 3 add get //sqainsert exec
         } for
-        sqacrossings
+        //sqacrossings exec
         /sqaxs sqan 1 add array def
         /sqads sqan 1 add array def
         /sqatotal 0 def
@@ -1772,7 +1772,7 @@ end
             sqahi sqalo gt {
                 /sqasy sqalo sqahi add 2 div def
                 /sqatotal
-                    sqatotal sqscanline sqahi sqalo sub mul add def
+                    sqatotal //sqscanline exec sqahi sqalo sub mul add def
             } if
         } for
         sqatotal
@@ -1801,7 +1801,7 @@ end
     /siedges sireg /Edges get def
     /siw 0 def
     /sic 0 def
-    0 4 siedges length 4 sub { siedge } for
+    0 4 siedges length 4 sub { //siedge exec } for
     sireg /Rule get /evenodd eq
         { sic 2 mod 0 ne }
         { siw 0 ne }
@@ -1817,7 +1817,7 @@ end
     six sibb 0 get lt six sibb 2 get gt or
     siy sibb 1 get lt or siy sibb 3 get gt or
         { false }
-        { sireg /Kind get /rect eq { true } { siscan } ifelse }
+        { sireg /Kind get /rect eq { true } { //siscan exec } ifelse }
     ifelse
 } bind def
 
@@ -1832,9 +1832,9 @@ end
     dup /Kind known not { scin-region-kind-must-be-rect-or-path } if
     dup /Kind get dup /rect eq exch /path eq or not
         { scin-region-kind-must-be-rect-or-path } if
-    dup scbboxok not { scin-region-bbox-must-be-four-numbers } if
+    dup //scbboxok exec not { scin-region-bbox-must-be-four-numbers } if
     dup /Kind get /path eq {
-        dup scedgesok not { scin-region-edges-must-be-numbers } if
+        dup //scedgesok exec not { scin-region-edges-must-be-numbers } if
         dup /Rule known not { scin-region-needs-a-rule } if
     } if
 } bind def
@@ -1858,14 +1858,14 @@ end
 % not looked at again, and nor is a path region's /BBox replaced in a
 % copy; `region /Checked undef` re-arms the check.
     dup type /dicttype ne { scin-needs-a-region } if
-    1 index scisnum 3 index scisnum and
+    1 index //scisnum exec 3 index //scisnum exec and
         not { scin-needs-two-numbers } if
     dup /Checked known {
         dup dup /Edges known { /Edges } { /BBox } ifelse get
         1 index /Checked get eq
     } { false } ifelse
-        not { scregionvet } if
-    siinside
+        not { //scregionvet exec } if
+    //siinside exec
 } bind def
 
 % --- scatter ---------------------------------------------------------
@@ -1898,7 +1898,7 @@ end
 } bind def
 
 /scwins {                                        % -> bool  (weight roll)
-    schasw { scpx scpy scwt scodds } { true } ifelse
+    schasw { scpx scpy scwt //scodds exec } { true } ifelse
 } bind def
 
 /scdeposit {                                     % -   (place one mark)
@@ -1910,9 +1910,9 @@ end
         put
     } if
     /scsc scslo scshi eq
-        { scslo } { scslo frnd scshi scslo sub mul add } ifelse def
+        { scslo } { scslo //frnd exec scshi scslo sub mul add } ifelse def
     /scang scrlo scrhi eq
-        { scrlo } { scrlo frnd scrhi scrlo sub mul add } ifelse def
+        { scrlo } { scrlo //frnd exec scrhi scrlo sub mul add } ifelse def
     % The running count is a local, published to ScatterState on every
     % placement: a nested scatter (from inside a /Mark or /Weight,
     % wrapped in the caller's own dict as this section's nesting note
@@ -2320,49 +2320,49 @@ end
     % undefined from siscan), so it gets a name too.
     screg /Kind get dup /rect eq exch /path eq or not
         { scatter-region-kind-must-be-rect-or-path } if
-    screg scbboxok not { scatter-region-bbox-must-be-four-numbers } if
+    screg //scbboxok exec not { scatter-region-bbox-must-be-four-numbers } if
     screg /Kind get /path eq {
-        screg scedgesok not { scatter-region-edges-must-be-numbers } if
+        screg //scedgesok exec not { scatter-region-edges-must-be-numbers } if
         screg /Rule known not { scatter-region-needs-a-rule } if
     } if
 
     scopts /Mark known not { scatter-mark-is-required } if
     /scmark scopts /Mark get def
-    /scmark load sccallable not { scatter-mark-must-be-a-procedure } if
+    /scmark load //sccallable exec not { scatter-mark-must-be-a-procedure } if
 
     /schasw scopts /Weight known def
     schasw {
         /scwt scopts /Weight get def
-        /scwt load sccallable not
+        /scwt load //sccallable exec not
             { scatter-weight-must-be-a-procedure } if
     } if
 
-    scopts /MinSpacing 0 scgetdef
-    dup scisnum not { scatter-minspacing-must-be-a-number } if
+    scopts /MinSpacing 0 //scgetdef exec
+    dup //scisnum exec not { scatter-minspacing-must-be-a-number } if
     /scmin exch def
     scmin 0 lt { scatter-minspacing-must-be-non-negative } if
 
-    scopts /Tries 20 scgetdef
-    dup scisnum not { scatter-tries-must-be-a-number } if
+    scopts /Tries 20 //scgetdef exec
+    dup //scisnum exec not { scatter-tries-must-be-a-number } if
     /sctries exch def
     sctries 1 lt sctries 100 gt or { scatter-tries-must-be-1-to-100 } if
     /sctries sctries truncate cvi def
 
-    scopts /Budget 20000 scgetdef
-    dup scisnum not { scatter-budget-must-be-a-number } if
+    scopts /Budget 20000 //scgetdef exec
+    dup //scisnum exec not { scatter-budget-must-be-a-number } if
     /scbudget exch def
     scbudget 0 lt scbudget 200000 gt or
         { scatter-budget-must-be-0-to-200000 } if
 
-    scopts /Scale [ 1 1 ] scgetdef
-    dup scokrange not { scatter-scale-must-be-two-numbers } if
+    scopts /Scale [ 1 1 ] //scgetdef exec
+    dup //scokrange exec not { scatter-scale-must-be-two-numbers } if
     /scsr exch def
     /scslo scsr 0 get def
     /scshi scsr 1 get def
     scslo scshi gt { scatter-scale-range-must-be-low-then-high } if
 
-    scopts /Rotate [ 0 0 ] scgetdef
-    dup scokrange not { scatter-rotate-must-be-two-numbers } if
+    scopts /Rotate [ 0 0 ] //scgetdef exec
+    dup //scokrange exec not { scatter-rotate-must-be-two-numbers } if
     /scrr exch def
     /scrlo scrr 0 get def
     /scrhi scrr 1 get def
@@ -2372,16 +2372,16 @@ end
         { scatter-count-and-density-are-mutually-exclusive } if
     scopts /Density known {
         scopts /Density get
-        dup scisnum not { scatter-density-must-be-a-number } if
+        dup //scisnum exec not { scatter-density-must-be-a-number } if
         /scdens exch def
         scdens 0 lt { scatter-density-must-be-non-negative } if
-        /scregarea screg scarea def
+        /scregarea screg //scarea exec def
         scregarea 0 le
             { scatter-density-needs-a-region-with-positive-area } if
         /scwant scdens scregarea mul def
     } {
-        scopts /Count 120 scgetdef
-        dup scisnum not { scatter-count-must-be-a-number } if
+        scopts /Count 120 //scgetdef exec
+        dup //scisnum exec not { scatter-count-must-be-a-number } if
         /scwant exch def
         scwant 0 lt { scatter-count-must-be-non-negative } if
     } ifelse
@@ -2414,7 +2414,7 @@ end
     /scseeded scopts /Seed known def
     scseeded {
         scopts /Seed get
-        dup scisnum not { scatter-seed-must-be-a-number } if
+        dup //scisnum exec not { scatter-seed-must-be-a-number } if
         /scseed exch def
         scseed abs 2147483647 gt { scatter-seed-out-of-range } if
         /scsaved rrand def
@@ -2433,14 +2433,14 @@ end
         pop
         1 1 sctries {
             pop
-            /scpx scbx frnd scbw mul add def
-            /scpy scby frnd scbh mul add def
+            /scpx scbx //frnd exec scbw mul add def
+            /scpy scby //frnd exec scbh mul add def
             /scwork scwork sccost add def
             scwork scworkmax gt
                 { scatter-containment-work-exceeds-safety-limit } if
-            scpx scpy screg siinside {
-                scfree {
-                    scwins { scdeposit exit } if
+            scpx scpy screg //siinside exec {
+                //scfree exec {
+                    //scwins exec { //scdeposit exec exit } if
                 } if
             } if
         } for
@@ -2619,7 +2619,7 @@ ScatterState /placed 0 put
                 tgx tgi tgcw mul add tgcw 2 div add
                 tgy tgj tgch mul add tgch 2 div add
                 translate
-                4 chance 90 mul rotate
+                4 //chance exec 90 mul rotate
                 tgcw tgch tgproc
             grestore
         } for
@@ -2743,7 +2743,7 @@ ScatterState /placed 0 put
         /epdy epy2 epy1 sub def
         /eplen epdx dup mul epdy dup mul add sqrt def
         /epang epdy epdx atan def
-        eplen epang epturns epscale epdepth edgefractal
+        eplen epang epturns epscale epdepth //edgefractal exec
     } for
     closepath
 } bind def
@@ -3136,7 +3136,7 @@ ScatterState /placed 0 put
     /hgy2 exch def /hgx2 exch def
     /hgy1 exch def /hgx1 exch def
     /hgr exch def /hgcy exch def /hgcx exch def
-    hgx1 hgy1 hgx2 hgy2 horthocircle
+    hgx1 hgy1 hgx2 hgy2 //horthocircle exec
     /hgisline exch def /hgor exch def /hgob exch def /hgoa exch def
     % Drawing-only approximation: a large-but-finite orthogonal-circle
     % radius overwhelms `arc` (gs raised limitcheck on one) long before
@@ -3192,7 +3192,7 @@ ScatterState /placed 0 put
         /hyy1 hyverts hyi 2 mul 1 add get def
         /hyx2 hyverts hyj 2 mul get def
         /hyy2 hyverts hyj 2 mul 1 add get def
-        hyx1 hyy1 hyx2 hyy2 horthocircle
+        hyx1 hyy1 hyx2 hyy2 //horthocircle exec
         /hyisline exch def /hyor exch def /hyob exch def /hyoa exch def
         % Same drawing-only large-radius fallback as hgeo -- see there.
         /hyisline hyisline hyor 50 gt or def
@@ -3325,7 +3325,7 @@ ScatterState /placed 0 put
         % into the very first tile's path instead of the documented
         % "proc sees exactly one closed p-gon" contract.
         newpath
-        htcx htcy htr htverts hpoly
+        htcx htcy htr htverts //hpoly exec
         htgen htproc
         htgen htdepth lt {
             0 1 htp 1 sub {
@@ -3335,14 +3335,14 @@ ScatterState /placed 0 put
                 /hty1 htverts hti 2 mul 1 add get def
                 /htx2 htverts htj 2 mul get def
                 /hty2 htverts htj 2 mul 1 add get def
-                htx1 hty1 htx2 hty2 horthocircle
+                htx1 hty1 htx2 hty2 //horthocircle exec
                 /htisline exch def /htor exch def /htob exch def /htoa exch def
                 /htnb htp 2 mul array def
                 0 1 htp 1 sub {
                     /htk exch def
                     /htvx htverts htk 2 mul get def
                     /htvy htverts htk 2 mul 1 add get def
-                    htoa htob htor htisline htvx htvy hreflect
+                    htoa htob htor htisline htvx htvy //hreflect exec
                     /htny exch def /htnx exch def
                     htnb htk 2 mul htnx put
                     htnb htk 2 mul 1 add htny put
@@ -3495,7 +3495,7 @@ ScatterState /placed 0 put
     0 1 255 { /nii exch def Perm nii nii put } for
     255 -1 1 {
         /nii exch def
-        /nij nii 1 add chance def
+        /nij nii 1 add //chance exec def
         /nitmp Perm nii get def
         Perm nii Perm nij get put
         Perm nij nitmp put
@@ -3538,15 +3538,15 @@ ScatterState /placed 0 put
     /n2yi n2y0 255 and def
     /n2xi1 n2xi 1 add 255 and def
     /n2yi1 n2yi 1 add 255 and def
-    /n2u n2xf nfade def
-    /n2v n2yf nfade def
-    /n2n00 n2xi n2yi gethash n2xf n2yf grad2 def
-    /n2n10 n2xi1 n2yi gethash n2xf 1 sub n2yf grad2 def
-    /n2n01 n2xi n2yi1 gethash n2xf n2yf 1 sub grad2 def
-    /n2n11 n2xi1 n2yi1 gethash n2xf 1 sub n2yf 1 sub grad2 def
-    n2n00 n2n10 n2u nlerp
-    n2n01 n2n11 n2u nlerp
-    n2v nlerp
+    /n2u n2xf //nfade exec def
+    /n2v n2yf //nfade exec def
+    /n2n00 n2xi n2yi //gethash exec n2xf n2yf //grad2 exec def
+    /n2n10 n2xi1 n2yi //gethash exec n2xf 1 sub n2yf //grad2 exec def
+    /n2n01 n2xi n2yi1 //gethash exec n2xf n2yf 1 sub //grad2 exec def
+    /n2n11 n2xi1 n2yi1 //gethash exec n2xf 1 sub n2yf 1 sub //grad2 exec def
+    n2n00 n2n10 n2u //nlerp exec
+    n2n01 n2n11 n2u //nlerp exec
+    n2v //nlerp exec
 } bind def
 
 % #734: on pscat, the same formula runs natively. `.permnoise2` reads
@@ -3663,7 +3663,7 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
     << /ShadingType 2 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdx1 gdy1]
        /Extend [true true]
-       /Function gdcolors gradfn >>
+       /Function gdcolors //gradfn exec >>
 } bind def
 
 /radialsh {                        % x0 y0 r0 x1 y1 r1 colors -> shdict
@@ -3673,7 +3673,7 @@ systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
     << /ShadingType 3 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdr0 gdx1 gdy1 gdr1]
        /Extend [true true]
-       /Function gdcolors gradfn >>
+       /Function gdcolors //gradfn exec >>
 } bind def
 
 /gradfill { gsave clip shfill grestore } bind def          % shadingdict gradfill -
