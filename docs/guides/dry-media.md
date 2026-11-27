@@ -81,7 +81,9 @@ the stick's contact patch meets raised tooth.
   enough for drykit to draw in several chunks, thousands of points, may
   still change once at `/To 1`.) A piece ends round at `/To` and starts
   flat at a `/From` cut, so two adjacent pieces drawn on one canvas make
-  the whole to within about 25 levels at the seam, on a few pixels. A
+  the whole to within about 20 levels at the seam (about 30 with a `/Touch`
+  procedure, also where its touch changes band at or near the cut), on a
+  few pixels. A
   caller that keeps its canvas can draw `/From prev /To now` each frame:
   300 pieces a fifth of a width long keep the stroke's weight to within a
   few percent. Much shorter pieces (a twentieth of a width, under a
@@ -164,9 +166,8 @@ newpath 40 60 moveto 300 80 lineto
     texture and dust stay; behind the pen's last dozen widths no pixel
     moves between frames, with `/Tilt` too: each lane keeps the whole
     lane's dropouts). `/To 0.5` plus `/From 0.5` make the whole: at the seam
-    a handful of pixels differ, by a few dozen levels, except where the
-    stroke's touch changes band just past the cut, which can leave a faint
-    one-pixel arc across a wide stroke or a `/Tilt` mark.
+    a handful of pixels differ, by a few dozen levels, also where the
+    stroke's touch changes band at or near the cut.
     A caller that keeps its canvas can draw `/From prev /To now` each
     frame instead: each piece starts flat where the last one ended, so
     pieces down to a fifth of a width keep the stroke's weight, and only
