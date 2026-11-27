@@ -1600,6 +1600,10 @@ renders eight examples in both and compares block-downsampled output).
   A zero-length subpath under square caps is dropped before either path
   (`Gfx::stroke_dropped`, #1215, `notes/1215-square-cap-zero-length-subpath.md`):
   gs draws nothing for it, tiny-skia and SVG would draw a square.
+  `stroke_dropped` also drops a zero-length segment of a subpath that has
+  length, at the start, the end or the middle, under every cap (#1224,
+  `notes/1224-zero-length-segments-in-a-stroke.md`): gs ignores it, and
+  tiny-skia would aim a cap or a join along rounding noise.
 
 - **The page size has a precedence** (#921, #909): `--page` (MCP
   `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
