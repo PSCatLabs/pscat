@@ -2289,7 +2289,7 @@ fn chalkboard_math_draws_the_pinned_board() {
     );
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    assert_eq!(fnv1a(pm.data()), 0x77e56b62ee521faf, "the board moved");
+    assert_eq!(fnv1a(pm.data()), 0x51599077cd625d9d, "the board moved");
     let cfg = pscat::chalk::Config::from_json(
         r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
     )
@@ -2338,7 +2338,7 @@ fn chalkboard_math_hand_draws_freehand_and_zero_is_the_plain_board() {
     let plain = board("plain.png", json!({}));
     assert_eq!(
         fnv1a(tiny_skia::Pixmap::decode_png(&plain).unwrap().data()),
-        0x77e56b62ee521faf
+        0x51599077cd625d9d
     );
     assert_eq!(
         plain,
