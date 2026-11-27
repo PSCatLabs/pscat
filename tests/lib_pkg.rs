@@ -537,6 +537,74 @@ fn a_linked_marker_or_a_running_pid_keeps_the_stage_and_list_says_so() {
     assert!(outside.is_file());
 }
 
+/// How long a `pscat lib list` over a hostile marker may run before the test
+/// fails instead of hanging (#1356). A regression blocks forever (FIFO) or
+/// allocates without bound (`/dev/zero`); the child is killed at this deadline
+/// and the call panics. A real `list` takes milliseconds.
+#[cfg(unix)]
+const LIST_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `pscat lib list` under [`LIST_WATCHDOG`], which must succeed.
+#[cfg(unix)]
+fn list_within_watchdog(home: &Path, cwd: &Path) -> String {
+    let o = base_command(cwd)
+        .env("PSCAT_HOME", home)
+        .env("HOME", home.join("unused-home"))
+        .args(["lib", "list"])
+        .output_within(LIST_WATCHDOG)
+        .unwrap();
+    ok(o)
+}
+
+/// The `.pscat-lib` marker is read with the opener `install` uses (#1356): a
+/// FIFO there (no writer, so a plain open blocks forever) is not a marker,
+/// and `list` still answers.
+#[cfg(unix)]
+#[test]
+fn a_fifo_marker_does_not_hang_list() {
+    let base = common::scratch_dir("lib-list-fifo-marker");
+    let home = base.join("home");
+    let pkg = home.join("lib/fifopkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("a.ps"), "%!\n").unwrap();
+    let fifo = pkg.join(".pscat-lib");
+    let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+
+    let listed = list_within_watchdog(&home, &base);
+    let line = listed
+        .lines()
+        .find(|l| l.starts_with("lib/fifopkg:"))
+        .unwrap_or_else(|| panic!("fifopkg not listed: {listed}"));
+    assert!(
+        line.ends_with("(not made by pscat lib install)"),
+        "{listed}"
+    );
+}
+
+/// A marker that is a symbolic link to `/dev/zero` is refused, not read: it
+/// would otherwise be an endless file (#1356).
+#[cfg(unix)]
+#[test]
+fn a_marker_linked_to_dev_zero_does_not_run_away() {
+    let base = common::scratch_dir("lib-list-zero-marker");
+    let home = base.join("home");
+    let pkg = home.join("lib/zeropkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("a.ps"), "%!\n").unwrap();
+    std::os::unix::fs::symlink("/dev/zero", pkg.join(".pscat-lib")).unwrap();
+
+    let listed = list_within_watchdog(&home, &base);
+    let line = listed
+        .lines()
+        .find(|l| l.starts_with("lib/zeropkg:"))
+        .unwrap_or_else(|| panic!("zeropkg not listed: {listed}"));
+    assert!(
+        line.ends_with("(not made by pscat lib install)"),
+        "{listed}"
+    );
+}
+
 #[test]
 fn help_mentions_lib_remove() {
     let base = common::scratch_dir("lib-remove-help");

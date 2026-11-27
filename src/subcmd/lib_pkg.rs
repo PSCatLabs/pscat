@@ -730,6 +730,30 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
+/// The most of a `.pscat-lib` marker `list` will read. `install` writes one
+/// line, a fixed phrase and the source path, so this is well over any real
+/// marker (a path is at most 4096 bytes on Linux); a longer file is not one.
+const MARKER_MAX_BYTES: u64 = 16 << 10;
+
+/// The text of the marker at `path`, or `None` when it is missing, is not a
+/// regular file (a link, a FIFO, a device such as `/dev/zero`), cannot be
+/// read, or runs past [`MARKER_MAX_BYTES`]. Opened as `install` opens what it
+/// copies ([`open_regular`]), so a FIFO cannot block `list` and a link to an
+/// endless device cannot make it allocate without bound.
+fn read_marker(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    open_regular(path)
+        .ok()?
+        .take(MARKER_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MARKER_MAX_BYTES {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
 fn list(lib: &Path) -> Result<(), Failure> {
     println!("install directory: {}", lib.display());
     let mut names: Vec<_> = match fs::read_dir(lib) {
@@ -748,8 +772,7 @@ fn list(lib: &Path) -> Result<(), Failure> {
     }
     for n in names {
         let path = lib.join(&n);
-        let from = fs::read_to_string(path.join(MARKER))
-            .ok()
+        let from = read_marker(&path.join(MARKER))
             .and_then(|m| {
                 m.trim()
                     .strip_prefix("installed by pscat lib install from ")
@@ -989,6 +1012,27 @@ mod tests {
         let e = copy_item(&root, b, &to, &mut 0).expect_err("followed a directory link");
         assert!(e.to_string().contains("outside"), "{e}");
         assert!(!to.exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_marker_is_read_up_to_its_cap_and_no_further() {
+        let base = scratch("marker-cap");
+        let m = base.join(MARKER);
+        let line = "installed by pscat lib install from /some/dir\n";
+        fs::write(&m, line).unwrap();
+        assert_eq!(read_marker(&m).as_deref(), Some(line));
+        // Exactly the cap is read; one byte more is not a marker.
+        let pad = |n: u64| format!("{line}{}", "x".repeat(n as usize - line.len()));
+        fs::write(&m, pad(MARKER_MAX_BYTES)).unwrap();
+        assert!(read_marker(&m).is_some());
+        fs::write(&m, pad(MARKER_MAX_BYTES + 1)).unwrap();
+        assert!(read_marker(&m).is_none());
+        // Missing, and not text.
+        fs::remove_file(&m).unwrap();
+        assert!(read_marker(&m).is_none());
+        fs::write(&m, [0xff, 0xfe]).unwrap();
+        assert!(read_marker(&m).is_none());
         let _ = fs::remove_dir_all(&base);
     }
 
