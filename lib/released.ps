@@ -492,12 +492,12 @@ RelState begin {
 % surfacekit's grain (foxing) and fibres over the sheet; a copy has lost them
 /rlTexture {
     rlAge 0 gt rlCC 0 gt rlHzK 0 gt and not and {
-        0 0 rlW rlH screct /rlReg exch def
+        0 0 rlW rlH //screct exec /rlReg exch def
         rlReg << /Count rlAge 220 mul cvi 1 add /Color [ 0.55 0.42 0.26 rlCol ]
-                 /Strength 0.5 1 rlCC sub mul /Radius 0.7 /Seed rlSeed 101 add >> grain
+                 /Strength 0.5 1 rlCC sub mul /Radius 0.7 /Seed rlSeed 101 add >> //grain exec
         rlReg << /Count rlAge 110 mul cvi 1 add /Color [ 0.62 0.54 0.4 rlCol ]
                  /Strength 0.4 1 rlCC sub mul /Length [ 3 11 ] /Width 0.45
-                 /Rotate [ 0 360 ] /Seed rlSeed 102 add >> fiber
+                 /Rotate [ 0 360 ] /Seed rlSeed 102 add >> //fiber exec
     } if
 } bind def
 % folds: a soft shadow band, a highlight beside it and a dry, broken crease
