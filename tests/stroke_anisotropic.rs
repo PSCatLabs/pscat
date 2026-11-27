@@ -1406,3 +1406,89 @@ fn zero_length_dashes_of_a_subpath_with_a_zero_length_start_still_draw() {
     assert!(ink_c > 10.0, "dashes vanished: {ink_c:.3}");
     assert!((ink_d - ink_c).abs() < 1e-3, "{ink_d} against {ink_c}");
 }
+
+// Codex review, round 1 on PR #1454: a curve after a dropped zero-length
+// segment. gs rounds every point to its 1/256 px grid, so a first control
+// point on the start's grid point has no direction and the cap follows the
+// next control point (as a curve whose first control point is the start
+// does anywhere). pscat's f32 points stay a hair apart, and tiny-skia took
+// that hair for the tangent.
+
+/// (open, with the lower-left corner set by the start's cap or join, with
+/// near-zero segments or control points; the same path made exact).
+const NEAR_START_CURVES: [(&str, &str); 6] = [
+    // The report: a dropped line, then a curve whose first control point is
+    // a hair off the start.
+    (
+        "25 25 moveto 25.001 25.001 lineto 25.001 25 60 60 90 40 curveto",
+        "25 25 moveto 25 25 60 60 90 40 curveto",
+    ),
+    (
+        "25 25 moveto 25.001 25.001 lineto 24.999 25.001 60 60 90 40 curveto",
+        "25 25 moveto 25 25 60 60 90 40 curveto",
+    ),
+    // No dropped segment: the control point alone.
+    (
+        "25 25 moveto 25.001 25 60 60 90 40 curveto",
+        "25 25 moveto 25 25 60 60 90 40 curveto",
+    ),
+    // An exact zero-length line, then the displaced control point.
+    (
+        "25 25 moveto 25 25 lineto 25.001 25 60 60 90 40 curveto",
+        "25 25 moveto 25 25 60 60 90 40 curveto",
+    ),
+    // In the middle of a subpath, under a join.
+    (
+        "5 5 moveto 25 25 lineto 25.001 25.001 lineto 25.001 25 60 60 90 40 curveto",
+        "5 5 moveto 25 25 lineto 25 25 60 60 90 40 curveto",
+    ),
+    // A curve first in a subpath that has a line after it.
+    (
+        "25 25 moveto 25.001 25.001 lineto 25.001 25 60 60 90 40 curveto 90 70 lineto",
+        "25 25 moveto 25 25 60 60 90 40 curveto 90 70 lineto",
+    ),
+];
+
+#[test]
+fn a_curve_after_a_dropped_segment_takes_its_direction_from_the_next_control_point() {
+    for join in [0, 2] {
+        for cap in [0, 2] {
+            for (near, exact) in NEAR_START_CURVES {
+                let pre = format!("20 setlinewidth {join} setlinejoin {cap} setlinecap");
+                let (n, e) = (format!("{pre} {near}"), format!("{pre} {exact}"));
+                let ours = outline_bbox(&n, false).expect("outline");
+                assert_same_bbox(&n, &ours, &outline_bbox(&e, false).expect("outline"));
+                // The lower-left corner is the start's cap or join. The far
+                // end of a curve's outline is a separate gap to gs on the
+                // clean path too, so only this corner is pinned.
+                if common::gs_available() {
+                    let theirs = outline_bbox(&n, true).expect("gs outline");
+                    for k in 0..2 {
+                        assert!(
+                            (ours[k] - theirs[k]).abs() < 0.1,
+                            "{n}: pscat {ours:?}, gs {theirs:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_closed_curve_after_a_dropped_segment_is_the_exact_path() {
+    for join in [0, 2] {
+        for cap in [0, 2] {
+            let pre = format!("20 setlinewidth {join} setlinejoin {cap} setlinecap");
+            let near = format!(
+                "{pre} 25 25 moveto 25.001 25.001 lineto 25.001 25 60 60 90 40 curveto closepath"
+            );
+            let exact = format!("{pre} 25 25 moveto 25 25 60 60 90 40 curveto closepath");
+            assert_same_bbox(
+                &near,
+                &outline_bbox(&near, false).expect("outline"),
+                &outline_bbox(&exact, false).expect("outline"),
+            );
+        }
+    }
+}

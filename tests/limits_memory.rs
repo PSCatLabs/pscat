@@ -705,4 +705,45 @@ fn memory_growth_is_capped() {
         ));
         assert_eq!(r, Ok(()), "the second page fits as the first did");
     }
+
+    // `stroke` and `strokepath` drop a zero-length segment of a subpath
+    // that has length (#1224), which makes a transient copy of the path. It
+    // is held against the cap before it is made (Codex, PR #1454: a path
+    // of 3,000,000 lines stroked under 120 MiB took its ~100 MB copy past a
+    // poll), and a refusal leaves the path and the graphics state as they
+    // were.
+    for op in ["stroke", "strokepath"] {
+        let mut it = Interp::new();
+        it.run_str(
+            "newpath 0 0 moveto 0 0 lineto 3000000 { 1 0 rlineto } repeat \
+             3 setlinewidth 1 setlinecap",
+        )
+        .unwrap();
+        it.set_limits(Limits::none().with_max_memory(80 * MIB))
+            .expect("the allocator is installed");
+        let before = pscat::memtrack::live_bytes();
+        let err = it.run_str(op).unwrap_err();
+        assert_eq!(err, PsError::MemoryExceeded, "{op}");
+        let report = it.error_report(&err);
+        assert!(
+            report.contains(&format!("OffendingCommand: {op};")),
+            "{op}: {report}"
+        );
+        // Refused before the copy was made, not freed after it.
+        let grown = pscat::memtrack::live_bytes().saturating_sub(before);
+        assert!(grown < 8 * MIB, "{op}: the copy was made ({grown} bytes)");
+        it.set_limits(Limits::none()).unwrap();
+        it.capture_stdout();
+        it.run_str(
+            "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall = currentlinewidth = currentlinecap =",
+        )
+        .unwrap();
+        assert_eq!(
+            it.captured_stdout(),
+            b"3000002\n3.0\n1\n",
+            "{op}: path and state as they were"
+        );
+        drop(it);
+    }
 }
