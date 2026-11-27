@@ -2101,6 +2101,13 @@ renders eight examples in both and compares block-downsampled output).
   deviation stays: tail recursion through a string (`/f [ (f) cvx ] cvx def f`) is
   `execstackoverflow`, where gs loops forever. `tests/exec_strings.rs`;
   `notes/1321-executable-string-gs-parity.md`.
+- **`countexecstack`, `execstack`, `dictstack` (#1468).** The native `Frame` stack is shown as gs
+  10.07.1 shows the same constructs (`frame_shape` / `frame_entries` at the end of `src/interp.rs`:
+  a procedure as its read-only unexecuted rest, a loop as its control values, body and the loop
+  operator standing in for gs's internal `--%..._continue--`, `stopped` as `--stopped--`); show,
+  image, `PostOp`, `Pattern` and `ProfReturn` frames show nothing. A new `Frame` variant must be
+  given a shape there (the matches have no wildcard). Counts differ from gs's by its 38-entry
+  startup, so tests pin differences. `notes/1468-execstack-dictstack.md`, `tests/execstack.rs`.
 - **`currentfilename` and `pscat lib install` (#1056).** `currentfilename` (a pscat
   extension, `- currentfilename string`) answers with the name of the file the error
   report's `Line:` would name: the innermost `run` file's `Lexer::run_name`, else the main
