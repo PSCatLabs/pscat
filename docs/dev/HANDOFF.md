@@ -1351,8 +1351,8 @@ renders eight examples in both and compares block-downsampled output).
    #1444: at a touch-band change within one reach of a `/From` cut the new band's run
    keeps its round start (and the old one its round end), so `dkFrun` (`dkFover`) puts
    the old run's tail before it as an overlap run (flag 16, clipped by `dkZover` to the
-   shared stop's reach on the far side of the cut, drawn only at the levels the whole
-   stroke draws after the new band's faintest): the pieces layer their levels there as
+   shared stop's reach on the far side of the cut, drawn at every level but the
+   faintest; a level is one colour for the whole record, so the brightest level wins): the pieces layer their levels there as
    the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
    Gotcha: `dkZink` reads `dkZp`/`dkZmax` (dkrender's pass) for that, so nothing between
    them may reuse those names.

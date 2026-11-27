@@ -761,16 +761,6 @@
     0 1 2 { /dkFj exch def dkFp0 dkFj get dup dkFp1 dkFj get exch sub dkFf mul add } for
 } bind def
 
-% key -> index   (#1444: where the key is first met among the whole record's
-% runs, dkFkeys; dkrender draws its touch groups in that order in each pass)
-% @internal
-/dkFrank {
-    /dkFq exch def
-    0 1 dkFkeys length 1 sub {
-        dkFkeys 1 index get dkFq eq { exit } if pop
-    } for
-} bind def
-
 % [key stops] -> [key stops'] or nothing   (#1418: the part of one run from
 % dkFa to dkFb of its subpath, along its length, which is the stops' fourth
 % number, 0..1. A cut inside a segment adds a stop there, interpolated, so
@@ -876,9 +866,12 @@
 % branch plus 16, hm cl n its catch statistics; cx cy chw dx dy the cut point
 % and the direction of the stroke there; bx by br the shared stop and its reach
 % (with the faint level's halo); D how many levels down from the top the
-% overlap is drawn: all of them when the whole stroke draws this run's band
-% first in each pass (dkFkeys), else all but the faintest, which the whole
-% stroke draws before this run's; side 1 when the stop is after the cut (the
+% overlap is drawn: all but the faintest (a level is one colour for every
+% run of the record, drawn pass by pass, so a pixel ends the colour of the
+% brightest level any run covers there; the next piece's faintest level lies
+% under the earlier run's brighter ones only if those are drawn again after
+% it; the faintest itself needs no redraw), so none for a record of one
+% level; side 1 when the stop is after the cut (the
 % overlap lies behind the cut, under this run's round start), -1 before it
 % (ahead of the cut, where the earlier piece's round end lies under this
 % run's), 0 at the cut (both).)
@@ -892,7 +885,7 @@
     dkFbr dkFdp add lt
     % (the earlier run holds the cut when this one starts at or after it)
     dkFt0 dkFa 1e-9 sub lt { true } { dkFprev 1 get 0 get 3 get dkFa 1e-9 sub lt } ifelse and {
-        /dkFD dkSlevels dkFk dkFrank dkFprev 2 get dkFrank gt { 2 } { 1 } ifelse sub def
+        /dkFD dkSlevels 2 sub def
         dkFD 0 ge {
             /dkFps dkFprev 1 get def
             dkFps dkFstats /dkFpl exch def /dkFph exch def /dkFpv exch def
@@ -1150,16 +1143,8 @@
         % stroke; cut the runs now, so the stops, the touch bands, the
         % widths and the lanes' chains are the whole stroke's
         /dkFa dkSfrom def /dkFb dkSto def
-        % #1444: the order in which the whole record's touch keys are first
-        % met (dkrender's group order), and the reach margin dkFrun's chain
-        % test allows (the faint level's halo and a device pixel)
-        /dkFkeys dkSrec /runs get length array def /dkFkc 0 def
-        dkSrec /runs get {
-            0 get /dkFq exch def
-            false 0 1 dkFkc 1 sub { dkFkeys exch get dkFq eq { pop true exit } if } for
-            not { dkFkeys dkFkc dkFq put /dkFkc dkFkc 1 add def } if
-        } forall
-        /dkFkeys dkFkeys 0 dkFkc getinterval def
+        % #1444: the reach margin of dkFover's test (the faint level's halo
+        % and a device pixel)
         /dkFhalo dkSrec /halo get def
         /dkFdp 1 0 idtransform dup mul exch dup mul add sqrt def
         /dkFprev null def

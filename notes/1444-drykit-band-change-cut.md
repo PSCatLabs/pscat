@@ -25,10 +25,12 @@ from the run before it, where the stop they share lies within one reach
 (half-width, halo and a device pixel) of the cut. It puts the earlier run's
 tail (three reaches back) before it as an *overlap run*, with flag 16 on its
 stops and `[f hm cl n cx cy chw dx dy bx by br D side]`. `dkZink` draws the
-overlap only at the levels the whole stroke draws after the new band's
-faintest: all but the faintest, or all of them when the new band's group comes
-first in each pass, because the stroke has drawn that band before (`dkFkeys`,
-the order in which `dkrender` meets the whole record's keys). `dkZover` clips
+overlap at every level but the faintest. Each level is one colour for every
+run of a record, drawn pass by pass, so a pixel ends up the colour of the
+brightest level any run covers there, whatever order the bands are drawn in.
+The next piece's faint level lies under the earlier run's brighter ones only
+if those are drawn again after it. A record of one level gets no overlap: its
+pieces already agree. `dkZover` clips
 it to the shared stop's reach on the far side of the cut: behind the cut when
 the stop is after it, under the new run's round start; ahead of the cut when
 the stop is before it, over the old run's round end from the first piece;
@@ -41,7 +43,7 @@ stroke's.
 |---|---|---|
 | rising touch, cut 0.47 / 0.50 | 82/86, 82/90 | 26/0, 26/0 |
 | falling touch, cut 0.47 / 0.50 / 0.53 | 82/186, 82/448, 82/45 | 31/0, 31/0, 31/0 |
-| touch back to a drawn band, cut 0.25 / 0.73 / 0.75 | 82/64, 82/160, 82/170 | 32/0, 29/0, 29/0 |
+| touch back to a drawn band, cut 0.25 / 0.73 / 0.75 | 82/64, 82/160, 82/170 | 32/0, 27/0, 27/0 |
 | `/Levels 3`, cut 0.47 / 0.50 | 110/152, 110/165 | 22/0, 22/0 |
 | curve `/Width 6`, cut 0.47 / 0.50 | 62/5, 82/77 | 28/0, 29/0 |
 | a cut away from any band change (0.25, 0.40, 0.75) | 31 to 32/0 | the same |
@@ -51,6 +53,24 @@ At 144 dpi the same cases go from 54 to 77 levels (6 to 25 pixels over 32) to
 fixture (`/Tilt 75 /Side 8 /Seed 1`, 432 dpi): cut 0.3 goes from 179 pixels
 over 32 to 42. The remaining `/Tilt` residue (worst 71 at most cuts, before and
 after) is #1420's: the lanes overlap and are all cut at once.
+
+**Many pieces** (`/From i/n /To (i+1)/n`, 144 dpi, `/Width 8`, weight against the
+whole / pixels over 32). At a constant touch nothing changes (no shared stops).
+A touch that crosses bands often (`{ 1440 mul sin 0.3 mul 0.5 add }`) is helped
+most: 50 pieces 0.885/706 before, 1.008/51 after; 300 pieces 0.883/1072 before,
+1.028/231 after; 1500 pieces 0.881/1246 before, 1.034/304 after. With one band
+change (rising, falling, returning touch), every piece that ends within a
+reach of the change redraws the overlap, and each redraw adds a little
+anti-aliased rim. Weight rises by 0.005 to 0.03, against a pre-existing 1.10
+to 1.16 for any touch procedure at this width; pixels over 32 are unchanged
+to within 2% (returning: 732 before, 686 after at 300). `/From 0 /To t`
+remains the exact way to grow a stroke.
+
+**psanim's path is byte-identical.** A `/From 0` part never reaches
+`dkFover`. Base and head libraries with one binary give the same PNG for 25
+`/From 0 /To t` frames: `dkstroke` with a rising touch and with a touch
+crossing bands, `dcchalk /Tilt 75`, `dycrayon` and `dhstroke`. The same holds
+for constant-touch `dkstroke` and `dcchalk` halves.
 
 **The second lead in the issue is not a seam.** The lead was `/Width 8 /Touch 0.5
 /Pressure { 0.3 mul 0.85 add }` halves, worst 41 at 432 dpi. At 144 dpi it is
@@ -64,5 +84,4 @@ before this change, and it is proposed as a follow-up.
 part mode, so `scripts/identity_check.sh` is byte-identical for drykit,
 drychalk, drycharcoal and drycrayon. Keys, defaults and errors are unchanged.
 Two band changes within one reach are each matched against the run just
-before them, not layered three ways. In a `dkbatch` the draw order comes from the
-stroke's own keys, not the batch's.
+before them, not layered three ways.
