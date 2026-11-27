@@ -121,6 +121,16 @@ const CASES: &[(&str, &str, &str)] = &[
          @ 70.0 70.0 \n",
     ),
     (
+        "reversing twice drops a trailing lone moveto for good: the current point moves",
+        "newcase 10 10 moveto 50 10 lineto 70 70 moveto reversepath reversepath dump",
+        "m 10.0 10.0 l 50.0 10.0 @ 50.0 10.0 \n",
+    ),
+    (
+        "the same after a closed subpath: the current point is the start again",
+        "newcase 10 10 moveto 50 10 lineto closepath 70 70 moveto reversepath reversepath dump",
+        "m 10.0 10.0 l 50.0 10.0 z @ 10.0 10.0 \n",
+    ),
+    (
         "under a scale (a power of two, exact in device space)",
         "newcase 2 4 scale 10 10 moveto 50 10 lineto 20 30 40 30 50 10 curveto reversepath dump",
         "m 50.0 10.0 c 40.0 30.0 20.0 30.0 50.0 10.0 l 10.0 10.0 @ 10.0 10.0 \n",

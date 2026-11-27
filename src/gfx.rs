@@ -587,7 +587,18 @@ impl PsPath {
             if items.is_empty() && !closed && subs.len() > 1 {
                 continue;
             }
+            // Every segment written counts toward the look at the limits,
+            // the movetos and closes of a path of empty subpaths as much as
+            // its lines (#1266, Codex round 1).
+            let mut wrote = |probe: &crate::limits::LimitProbe| -> Result<(), PsError> {
+                written += 1;
+                if written.is_multiple_of(FLATTEN_POLL) {
+                    probe.check((written / 1024) as u64)?;
+                }
+                Ok(())
+            };
             out.move_to(items.last().and_then(end_of).unwrap_or(sub.start));
+            wrote(probe)?;
             for (j, seg) in items.iter().enumerate().rev() {
                 // The point this segment started from.
                 let from = match j.checked_sub(1) {
@@ -598,13 +609,11 @@ impl PsPath {
                     Seg::Curve(c1, c2, _) => out.curve_to(c2, c1, from),
                     _ => out.line_to(from),
                 }
-                written += 1;
-                if written.is_multiple_of(FLATTEN_POLL) {
-                    probe.check((written / 1024) as u64)?;
-                }
+                wrote(probe)?;
             }
             if closed {
                 out.close();
+                wrote(probe)?;
             }
         }
         probe.check((out.segs.len() / 1024) as u64)?;

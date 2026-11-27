@@ -24,9 +24,13 @@ Semantics, each pinned against gs 10.07.1 in `tests/reversepath.rs` (every
 Implementation: `PsPath::reversed_limited` (src/gfx.rs). It finds the subpaths
 in one pass, then writes the reversed copy through the path builders so
 `current` and `subpath_start` come out as for any built path. Two reversals give
-the original back exactly. Under the limits it is built like `flattenpath`
+the original back, except that a trailing lone `moveto` is gone after the first
+(and so the current point is the last drawn point, or the last closed subpath's
+start, not that `moveto`); gs does the same, and the tests pin it. Under the limits it is built like `flattenpath`
 (#1188): the copy and the subpath table are held against `--max-memory` before
-they are made, the probe is looked at every 4096 segments in both passes, and
+they are made, the probe is looked at every 4096 segments in both passes (the copy counts
+every segment it writes, movetos and closes too: a path of a million empty
+subpaths is two million segments), and
 a step is charged per 1024 segments written. The current path is replaced only
 once the copy is whole, so a limit leaves it as it was.
 
