@@ -44,6 +44,32 @@ const PARITY: &[(&str, &str, &str)] = &[
     ("for", "1 1 1 { pop countexecstack B sub = } for", "6"),
     ("repeat", "1 { countexecstack B sub = } repeat", "4"),
     ("loop", "{ countexecstack B sub = exit } loop", "3"),
+    // The fused conditionals (#864) push and pop their branches as gs does.
+    (
+        "if-mid",
+        "/p { true { countexecstack B sub = } if 0 pop } def p",
+        "2",
+    ),
+    (
+        "if-last",
+        "/p { true { countexecstack B sub = } if } def p",
+        "1",
+    ),
+    (
+        "ifelse-mid",
+        "/p { false { } { countexecstack B sub = } ifelse 0 pop } def p",
+        "2",
+    ),
+    (
+        "ifelse-last",
+        "/p { true { countexecstack B sub = } { } ifelse } def p",
+        "1",
+    ),
+    (
+        "bound",
+        "/p { 1 { true { countexecstack B sub = 0 pop } if } repeat 0 pop } bind def p",
+        "5",
+    ),
     ("type", "countexecstack type =", "integertype"),
     // `countexecstack` sizes an array `execstack` fills exactly.
     (
@@ -413,9 +439,42 @@ fn profiling_does_not_change_the_count() {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        String::from_utf8_lossy(&out.stdout).into_owned()
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
     };
-    assert_eq!(run(&["--profile"]), run(&[]));
+    let (profiled, report) = run(&["--profile"]);
+    // The profiler did run: its report has a row for `q`.
+    assert!(report.lines().any(|l| l.ends_with(" q")), "{report}");
+    assert_eq!(profiled, run(&[]).0);
+}
+
+/// A stack a few frames short of the 10,000 limit is walked and copied
+/// whole under generous caps: the limits refuse a runaway, not a full stack.
+#[test]
+fn a_nearly_full_stack_fits_under_the_caps() {
+    let src = "/r { dup 0 gt { 1 sub r 0 pop } \
+               { pop countexecstack dup array execstack length eq = countexecstack = } ifelse } \
+               def 9990 r";
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args([
+            "--headless",
+            "--max-steps",
+            "10000000",
+            "--max-memory",
+            "256",
+            "-e",
+            src,
+        ])
+        .output_deadline()
+        .expect("run pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(lines(&out.stdout), ["true", "9992"]);
 }
 
 /// A recursion this deep (`r` keeps one frame per level) makes the walk
@@ -533,5 +592,5 @@ fn the_string_copies_are_held_against_max_memory() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(err.contains("limitexceeded (memory)"), "{err}");
-    assert!(err.contains("execstack"), "{err}");
+    assert!(err.contains("OffendingCommand: execstack;"), "{err}");
 }
