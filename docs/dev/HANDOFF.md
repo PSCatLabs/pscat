@@ -831,7 +831,10 @@ renders eight examples in both and compares block-downsampled output).
   `mesh::mesh_layer` for a mesh, #1378), which
   `pattern_source` hands the fill, stroke or stencil as its shader. SVG is
   the gradient itself, or a canvas-sized `<pattern>` with the background,
-  `/BBox` clip or a Type 1 image; PDF a `/PatternType 2` dictionary on the
+  `/BBox` clip or a Type 1 image (cut to the canvas it was made on; a use
+  in another context or on a canvas of another size makes its own image in
+  `Gfx::pattern_source`, #1368, `ShadingPattern::svg_uses`); PDF a
+  `/PatternType 2` dictionary on the
   shading (`PdfRecorder::shading_pattern`). Patterns of both kinds share
   the registry and `PatternColor` as `pattern::PatternRef`.
   SVG's two-circle radial
