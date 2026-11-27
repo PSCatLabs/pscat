@@ -402,7 +402,7 @@ pub(crate) fn forall(it: &mut Interp) -> Result<(), PsError> {
     let src = match &obj.value {
         Value::Array(a) => ForallSrc::Array(a.clone(), 0),
         Value::String(s) => ForallSrc::Str(s.clone(), 0),
-        Value::Dict(d) => ForallSrc::Pairs(d.borrow().pairs(), 0),
+        Value::Dict(d) => ForallSrc::Pairs(d.clone(), d.borrow().pairs(), 0),
         _ => return Err(PsError::Typecheck),
     };
     it.begin_forall(body, src)

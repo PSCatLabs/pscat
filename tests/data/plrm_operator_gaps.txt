@@ -63,9 +63,6 @@ missing	findencoding	#1272	composite fonts
 missing	rootfont	#1272	composite fonts
 missing	undefinefont	#1272	composite fonts
 missing	resourceforall	#1218	resourceforall
-missing	countexecstack	#1468	execution-stack introspection; gs has it
-missing	execstack	#1468	execution-stack introspection; gs has it
-missing	dictstack	#1468	dictionary-stack introspection; gs has it (countdictstack exists)
 omitted	beginbfchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	beginbfrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	begincidchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272

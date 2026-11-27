@@ -205,6 +205,16 @@ impl Lexer {
         self.is_file.then_some(&self.file)
     }
 
+    /// `f` of the text an executable string's scanner has not read yet,
+    /// for `execstack` (#1468); `None` for a file, which shows as itself.
+    pub(crate) fn with_unread<R>(&self, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        if self.is_file {
+            return None;
+        }
+        let file = self.file.borrow();
+        file.bytes_from(file.pos()).map(f)
+    }
+
     /// Bytes consumed so far — the `token` operator's remainder split.
     pub(crate) fn pos(&self) -> usize {
         self.file.borrow().pos()
