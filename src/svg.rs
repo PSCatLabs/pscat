@@ -1114,10 +1114,15 @@ impl SvgRecorder {
                 };
                 // An outer radius of 0 is SVG's "paint the last stop
                 // everywhere", which a cone shrinking to a point would
-                // get; a hair of radius keeps the cone, to a pixel's worth.
+                // get; a hair of radius keeps the cone. The hair moves the
+                // apex along the axis by hair x distance / radius change,
+                // so it is sized for a shift of `CONE_APEX_SHIFT` units
+                // whatever the distance (Codex round 1 on PR #1461: a hair
+                // scaled by the distance moved the apex 100 units for
+                // circles 1e7 apart).
                 let outer_r = if cone && outer_r <= 0.0 {
-                    let reach = r0.max(r1).max(crate::fmath::hypotf(x1 - x0, y1 - y0));
-                    (reach * CONE_APEX_RADIUS).max(1e-4)
+                    let dist = crate::fmath::hypotf(x1 - x0, y1 - y0);
+                    ((r0 - r1).abs() * CONE_APEX_SHIFT / dist).max(1e-5)
                 } else {
                     outer_r
                 };
@@ -1450,9 +1455,10 @@ fn extended_for_svg(
     (kind, out)
 }
 
-/// The radius a cone's outer circle gets in place of 0, as a share of the
-/// cone's reach (`gradient_def`).
-const CONE_APEX_RADIUS: f32 = 1e-5;
+/// How far, in the shading's own units, a cone's apex may move along its axis
+/// when the radius-0 workaround gives its outer circle a hair of radius
+/// (`gradient_def`).
+const CONE_APEX_SHIFT: f32 = 1e-3;
 
 /// Whether `kind` is a radial whose circles are neither inside the other,
 /// so a point can lie on two of them (the test `gradient_parts` makes for

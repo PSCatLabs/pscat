@@ -49,9 +49,21 @@ wrong for every cone.
   with a `/Background` does). Its `<pattern>` is one canvas in size, as the
   Type 1 and `/BBox` cases already are (#1368 is that gap).
 - An outer circle of radius 0 (a cone to a point, or from one, run backwards)
-  would be SVG's "paint the last stop everywhere", so it gets a hair of radius
-  (`CONE_APEX_RADIUS`, 1e-5 of the cone's reach, at least 1e-4); resvg
-  and Chrome keep the cone at that size.
+  would be SVG's "paint the last stop everywhere", so it gets a hair of
+  radius. The hair moves the apex along the axis by hair x distance / radius
+  change, so it is sized for a shift of `CONE_APEX_SHIFT` (1e-3 units),
+  `|r0 - r1| x CONE_APEX_SHIFT / distance`, at least 1e-5. Codex round 1
+  found that sizing it by the cone's reach put the apex 100 units off for
+  circles 1e7 apart (`/Coords [10000000 250 1 160 250 0]`: gs leaves (160,200)
+  gray; the SVG painted a region about 200 wide there). Fixed, resvg against
+  the PNG: `a_cone_to_a_point_with_a_far_circle_keeps_its_apex_in_place`.
+  **Known limit:** Chrome 158 paints the whole page in the last stop for that
+  one program, with any hair from 1e-5 to 1 (its focal circle is 2e7 away and
+  larger than the outer one), where the swapped spelling before this change
+  was right in Chrome. There is no hair that satisfies both: it must be
+  above the viewers' own tolerance and its apex shift is hair x distance /
+  radius change. It needs a cone more than about 1e7 times longer than it
+  is wide, so no follow-up is proposed beyond noting it here.
 
 **gs** (10.07.1, 500x500 at 72 dpi, gray page, C0 red to C1 blue). Pixels
 (250,250), (300,250), (150,250), (330,250), from the PostScript, against our

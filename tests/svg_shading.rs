@@ -431,3 +431,34 @@ fn a_translucent_cone_composites_its_two_roots_as_one() {
         );
     }
 }
+
+/// A cone to a point whose far circle is 1e7 away (Codex round 1 on PR
+/// #1461): the radius-0 workaround must not scale with the centres'
+/// distance. gs leaves (160, 200) gray, as does the PNG; the SVG painted a
+/// region about 200 wide there.
+#[test]
+fn a_cone_to_a_point_with_a_far_circle_keeps_its_apex_in_place() {
+    let dict = "/ShadingType 3 /Coords [10000000 250 1 160 250 0]";
+    for ext in ["false false", "true false"] {
+        let (png, svg) = png_and_svg(&program("far-apex", "", dict, ext));
+        let theirs = resvg_raster(&svg);
+        let mut bad = Vec::new();
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                let (a, b) = (rgb(&png, x, y), rgb(&theirs, x, y));
+                if a.iter().zip(b).any(|(p, q)| p.abs_diff(q) > 24) {
+                    bad.push((x, y, a, b));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "[{ext}] {} pixels differ, first {:?}\n{}",
+            bad.len(),
+            bad.first(),
+            defs(&svg)
+        );
+        assert_eq!(rgb(&png, 160, 200), [128, 128, 128], "[{ext}] PNG");
+        assert_eq!(rgb(&theirs, 160, 200), [128, 128, 128], "[{ext}] SVG");
+    }
+}
