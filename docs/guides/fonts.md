@@ -115,8 +115,11 @@ font, the characters and the line, for any show, `stringwidth` or `charpath` of
 a string that is wholly well-formed UTF-8 with a non-ASCII character in a font
 without the key. It stays quiet for Latin-1 and binary strings (`(caf\351)`), a
 string that mixes UTF-8 with a stray Latin-1 byte, Symbol and ZapfDingbats, user
-Type 3 fonts, a font with `/PSCatUnicode false` (bytes on purpose), and any
-`%lint: allow utf8-in-byte-font` program.
+Type 3 fonts, a font with `/PSCatUnicode false` (bytes on purpose), a font with
+a custom Encoding (anything but StandardEncoding or ISOLatin1Encoding: its
+codes may be assigned on purpose), `kshow` (its proc may change the font),
+strings over 4096 bytes, and any program with a `%lint: allow utf8-in-byte-font`
+comment line.
 
 The key is a pscat extension: Ghostscript ignores it and shows the bytes. The
 four catalog faces for Korean, Japanese and Thai have always been

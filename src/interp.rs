@@ -3760,6 +3760,11 @@ impl Interp {
     /// reached, which is the line that ran the show when a procedure did.
     #[inline(never)]
     fn note_utf8_text(&mut self, ctx: &ShowCtx) {
+        // A kshow proc may switch fonts between characters, so the font at
+        // the start does not say how the string is read.
+        if ctx.has_kshow_proc() {
+            return;
+        }
         let Some(fs) = self.gfx.state().font.as_ref() else {
             return;
         };

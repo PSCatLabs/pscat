@@ -1857,7 +1857,6 @@ mod tests {
             "(\u{2260}) show",
             "(\u{2260}) stringwidth pop pop",
             "(\u{2260}) false charpath",
-            "{ pop pop } (\u{2260}) kshow",
             "1 1 (\u{2260}) ashow",
             "1 0 32 (\u{2260}) widthshow",
             "1 1 32 1 1 (\u{2260}) awidthshow",
@@ -1867,6 +1866,49 @@ mod tests {
             let m = utf8_messages(&format!("{BYTE_FONT}{show}"));
             assert_eq!(m.len(), 1, "{show}: {m:?}");
         }
+    }
+
+    #[test]
+    fn a_custom_encoding_is_not_reported() {
+        // Codes 195 and 169 deliberately assigned to glyphs: the text draws
+        // "AB" through the Encoding, and /PSCatUnicode true would change it.
+        let custom = "/Helvetica findfont dup length dict copy dup /Encoding StandardEncoding \
+            256 array copy put dup /Encoding get dup 195 /A put 169 /B put \
+            /Custom exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert!(utf8_messages(&format!("{custom}(\u{e9}) show")).is_empty());
+        // An unmodified copy of StandardEncoding is still the standard one.
+        let std = "/Helvetica findfont dup length dict copy dup /Encoding StandardEncoding \
+            256 array copy put /Std exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert_eq!(utf8_messages(&format!("{std}(\u{e9}) show")).len(), 1);
+        // A non-array Encoding is not the standard one either.
+        let odd = "/Helvetica findfont dup length dict copy dup /Encoding 1 put \
+            /Odd exch definefont 12 scalefont setfont 5 40 moveto ";
+        assert!(utf8_messages(&format!("{odd}(\u{e9}) show")).is_empty());
+    }
+
+    #[test]
+    fn a_kshow_is_not_checked_because_its_proc_may_change_the_font() {
+        let src = format!(
+            "{UNICODE_COPY} /U currentfont def {BYTE_FONT} \
+             {{ pop pop U setfont }} (a\u{3c0}) kshow"
+        );
+        assert!(utf8_messages(&src).is_empty());
+        // A kshow with a plain proc is a deliberate miss too.
+        assert!(utf8_messages(&format!("{BYTE_FONT}{{ pop pop }} (\u{3c0}) kshow")).is_empty());
+    }
+
+    #[test]
+    fn a_long_string_is_not_examined() {
+        // The scan per show is bounded (the rest of the string is NULs,
+        // which are ASCII): 4096 bytes are examined, 4097 are not.
+        let at = |n: usize| {
+            utf8_messages(&format!(
+                "{BYTE_FONT}{n} string dup 0 195 put dup 1 169 put show"
+            ))
+            .len()
+        };
+        assert_eq!(at(4096), 1);
+        assert_eq!(at(4097), 0);
     }
 
     #[test]

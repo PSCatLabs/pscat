@@ -36,8 +36,18 @@ read: a re-encoded font still gets bytes.
 - the font has no `/PSCatUnicode true` (a `definefont` or `scalefont` copy
   keeps the key, so it is read the way the show reads it, via
   `outline_unicode`) and no explicit `/PSCatUnicode false` (bytes on purpose).
-It reads the font live at the start of the show; a `kshow` proc that switches
-font mid-string is not followed.
+Codex round 1 added three more silences, each reproduced first:
+- a custom Encoding (anything but StandardEncoding or ISOLatin1Encoding, name
+  for name) stays silent: a program that assigns 195 and 169 to glyphs on
+  purpose would be told to add `/PSCatUnicode true`, which changes its output;
+- `kshow` is skipped: its proc may switch font between characters, so the font
+  at the start does not say how the string is read (a correct program was
+  reported);
+- a string over 4096 bytes is not examined. The first version scanned the
+  whole string on every show with no charge: a 16 MiB string shown 1000 times
+  through `cshow` under `--lint --max-steps 100000` took 8.9 s against 0.36 s
+  without `--lint`. The scan is now bounded per show (a miss, never a false
+  positive), so the cost per show is constant and needs no step charge.
 
 **Corpus (head `--lint` over all 264 tracked `.ps`/`.eps` files and 115
 `postscript` blocks in the Markdown docs).** Two hits, both real bugs, both in

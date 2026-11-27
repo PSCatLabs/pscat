@@ -74,9 +74,17 @@ fn outline_unicode(fs: &FontState) -> bool {
 ///   `/PSCatUnicode false` (bytes on purpose) and a `/FontType 0` dict
 ///   (whose codes are the program's own) are left alone.
 ///
-/// The Encoding is not read: a re-encoded font still gets bytes, not UTF-8.
+/// - a font with a custom Encoding (anything but StandardEncoding or
+///   ISOLatin1Encoding, name for name) is left alone: its program may have
+///   assigned codes such as 195 and 169 to glyphs on purpose, and
+///   `/PSCatUnicode true` would change what it draws. A re-encoding to
+///   ISOLatin1Encoding, the idiom for Latin-1 text, is still reported.
+///
+/// A string longer than [`UTF8_SCAN_MAX`] bytes is not examined, so the cost
+/// of the check per show is bounded whatever the program shows, however
+/// often (a miss, never a false positive).
 pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(String, &'a str)> {
-    if fs.fid < 0 || !text.iter().any(|&b| b >= 0x80) {
+    if fs.fid < 0 || text.len() > UTF8_SCAN_MAX || !text.iter().any(|&b| b >= 0x80) {
         return None;
     }
     if outline_unicode(fs) || symbolic_encoding(fs.fid).is_some() {
@@ -96,7 +104,32 @@ pub(crate) fn utf8_in_byte_font<'a>(fs: &FontState, text: &'a [u8]) -> Option<(S
     }
     drop(dict);
     let text = std::str::from_utf8(text).ok()?;
+    if custom_encoding(fs) {
+        return None;
+    }
     Some((font_name(fs), text))
+}
+
+/// The longest string [`utf8_in_byte_font`] examines (#1412).
+const UTF8_SCAN_MAX: usize = 4096;
+
+/// Whether `fs` has an Encoding that is neither StandardEncoding (which a
+/// dict without one gets) nor ISOLatin1Encoding.
+fn custom_encoding(fs: &FontState) -> bool {
+    let enc = fs.dict.borrow().get("Encoding");
+    let Some(enc) = enc else {
+        return false;
+    };
+    let Value::Array(a) = &enc.value else {
+        return true;
+    };
+    let same = |table: [&str; 256]| {
+        a.len() == 256
+            && table.iter().enumerate().all(|(i, want)| {
+                matches!(a.get(i).as_ref().map(|o| &o.value), Some(Value::Name(n)) if &**n == *want)
+            })
+    };
+    !(same(encodings::standard_encoding()) || same(encodings::iso_latin1_encoding()))
 }
 
 /// The `FontName` of a font dict, for a message; `?` when it has none.
@@ -2232,6 +2265,12 @@ impl ShowCtx {
     /// the font's name (at most one per step).
     pub(crate) fn take_missing(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.missing)
+    }
+
+    /// Whether a `kshow` proc runs between characters, and so may change the
+    /// font mid-string (the lint's UTF-8 check skips such a show).
+    pub(crate) fn has_kshow_proc(&self) -> bool {
+        self.kshow_proc.is_some()
     }
 
     /// The string being shown, as given (for the lint's UTF-8 check).
