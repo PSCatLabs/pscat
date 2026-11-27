@@ -702,3 +702,114 @@ fn a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit() {
         assert_eq!(out.status.code(), Some(1), "{program}: {stderr}");
     }
 }
+
+/// The time a run that must stop at its limit may take past it here:
+/// process start, the polling interval, the end-of-run grace and a loaded
+/// machine. Far under the hang guard, so a hang is told from a slow stop.
+const STOP_SLACK: Duration = Duration::from_secs(3);
+
+/// Run `-e program` under `--max-time limit` with `stdout`, and return the
+/// stderr, the exit code and how long the run took.
+fn timed_run(limit: &str, program: &str, stdout: Stdio) -> (String, Option<i32>, Duration) {
+    let started = std::time::Instant::now();
+    let child = spawn(
+        &["--max-time", limit, "-e", program],
+        stdout,
+        Stdio::piped(),
+    );
+    let out = common::wait_with_deadline(child, GUARD);
+    (
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code(),
+        started.elapsed(),
+    )
+}
+
+/// A finished run with a partial line buffered and stdout a stream socket
+/// filled to `EAGAIN`, blocking again, whose reader stays open and never
+/// reads: the run ends at its limit with `limitexceeded (time)` and the line
+/// dropped. It hung at 512fc628 (macOS: the room check called a full socket
+/// roomy and the exit flush waited forever; #1465 confirmation round).
+#[test]
+fn a_full_socket_at_the_end_of_a_run_does_not_outlast_the_limit() {
+    let (mut ours, theirs) = UnixStream::pair().expect("a socket pair");
+    theirs.set_nonblocking(true).expect("non-blocking");
+    let mut prefilled = 0;
+    {
+        let mut theirs = &theirs;
+        for piece in [4096usize, 1] {
+            let chunk = vec![b'#'; piece];
+            while let Ok(k) = theirs.write(&chunk) {
+                prefilled += k;
+            }
+        }
+    }
+    theirs.set_nonblocking(false).expect("blocking again");
+    let (stderr, code, took) = timed_run(
+        "0.2",
+        &format!("{FILES}f (A) writestring"),
+        Stdio::from(OwnedFd::from(theirs)),
+    );
+    assert_stopped_by_time("a full socket at the end", &stderr, code);
+    assert!(took < STOP_SLACK, "took {took:?}");
+    let mut held = Vec::new();
+    ours.read_to_end(&mut held).expect("read the socket");
+    assert_eq!(held.len(), prefilled, "the partial line was dropped");
+    assert!(held.iter().all(|&b| b == b'#'));
+}
+
+/// A Linux pipe whose page slots are all in use, after a partial read of the
+/// first page: `FIONREAD` is 100 bytes under the pipe's size, but no slot is
+/// free and a one-byte write blocks. The run still ends at its limit with
+/// the line dropped (512fc628 called it room, by code reading).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_partly_read_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit() {
+    let (mut reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+    set_nonblocking(&writer, true);
+    let page = vec![b'#'; 4096];
+    let mut prefilled = 0;
+    while let Ok(k) = writer.write(&page) {
+        prefilled += k;
+    }
+    set_nonblocking(&writer, false);
+    let mut first = [0u8; 100];
+    reader.read_exact(&mut first).expect("a partial read");
+    let (stderr, code, took) =
+        timed_run("0.2", &format!("{FILES}f (A) writestring"), writer.into());
+    assert_stopped_by_time("a partly read full pipe at the end", &stderr, code);
+    assert!(took < STOP_SLACK, "took {took:?}");
+    let mut held = Vec::new();
+    reader.read_to_end(&mut held).expect("read the pipe");
+    assert_eq!(held.len(), prefilled - 100, "the partial line was dropped");
+    assert!(held.iter().all(|&b| b == b'#'));
+}
+
+/// A run stopped by its time limit with a partial line buffered still sends
+/// it to a reader that takes it, as an unlimited run's exit flush does: the
+/// send after the deadline gets the end-of-run grace, not nothing.
+#[test]
+fn a_run_stopped_at_its_limit_still_sends_its_last_line_to_a_drained_pipe() {
+    for stdout in ["pipe", "socket"] {
+        let (stdio, reader): (Stdio, Box<dyn Read + Send>) = if stdout == "pipe" {
+            let (reader, writer) = std::io::pipe().expect("a pipe");
+            (writer.into(), Box::new(reader))
+        } else {
+            let (ours, theirs) = UnixStream::pair().expect("a socket pair");
+            (Stdio::from(OwnedFd::from(theirs)), Box::new(ours))
+        };
+        let drained = std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut all = Vec::new();
+            let _ = reader.read_to_end(&mut all);
+            all
+        });
+        let (stderr, code, _) = timed_run(
+            "0.2",
+            &format!("{FILES}f (A) writestring {{ }} loop"),
+            stdio,
+        );
+        assert_stopped_by_time(stdout, &stderr, code);
+        assert_eq!(drained.join().expect("the reader"), b"A", "{stdout}");
+    }
+}

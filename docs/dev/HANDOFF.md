@@ -1791,7 +1791,10 @@ renders eight examples in both and compares block-downsampled output).
     keeps std's `LineWriter` rules exactly in `timed_write::LINE` (1024
     bytes, owned by one `Interp` at a time), so `2>&1` order and the operator
     a write error surfaces in are the plain path's; never flush it at a slice
-    end. Anything else that writes to stdout sends it first with
+    end. At the end of a timed run the owner's bytes go through the same timed
+    writer (a finished run sends them then; a failed one records the deadline
+    for the flush after its error report), never a "has room" prediction
+    (the PR #1465 confirmation round found two that were wrong). Anything else that writes to stdout sends it first with
     `pscat::hand_over_stdout()` and passes its error on (the CLI's
     `stdout_text`/`flush_stdout`, the window prompt, bands; the owner's `Drop`
     sends its own). A

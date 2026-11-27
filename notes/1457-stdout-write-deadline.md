@@ -123,16 +123,40 @@ interval.
 
 **End of a run.** A run that ends (finished, error, `quit`, a limit, found
 in the slice or at its start or end) with bytes in the buffer under a time
-limit checks that stdout has room for them
-(at most 1024 bytes: `poll`, or `fstat` on macOS), waiting within the limit,
-so the exit flush cannot hang. With room nothing is written there (the
-bytes leave when they would without a limit). Without room by the deadline
-the bytes are dropped and the run ends at its limit; a run that had
-finished reports `limitexceeded (time)` with the last operator it ran as
-the offending command, and one that had already failed keeps its own error
-(`undefined`, `limitexceeded (steps)`, ...), which came first
-(`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`). With a host
-interrupt flag and no time limit there is no such wait: the run returns at
+limit sends them through the same timed writer the run's writes use: no
+more than the descriptor takes, asking the deadline before the first byte
+and whenever it waits. Nothing predicts whether there is room (Codex
+confirmation round: a room check said "room" for a full macOS socket, and
+`F_GETPIPE_SZ` less `FIONREAD` does too for a Linux pipe whose first page
+was partly read, and the exit flush then hung). Where the send happens:
+
+- A run that finished (or ran `quit`) sends them at once, at its end.
+  Nothing is written between the end of a run and the CLI's flush, so the
+  order is the same as without a limit. If the deadline passes first, the
+  rest is dropped and the run reports `limitexceeded (time)`, with the last
+  operator it ran as the offending command
+  (`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`,
+  `a_full_socket_at_the_end_of_a_run_does_not_outlast_the_limit`). A send
+  that fails (`EPIPE`) keeps the bytes for the CLI's last flush, so the exit
+  is 141 as without a limit; the run is not failed for it.
+- A run that failed reports its error first, and without a limit its
+  partial line leaves after that report, at the CLI's next flush. So the
+  bytes stay in the buffer with the deadline recorded beside them, and that
+  flush (`send_line`: the CLI's, the owner's plain path or `Drop`) is held
+  to it: past it, the rest is dropped and the run keeps its own error
+  (`undefined`, `limitexceeded (steps)`, `limitexceeded (time)`, ...).
+- An owner dropped in the middle of a timed run records the deadline in its
+  `Drop`, so that send is bounded too.
+
+The deadline is the run's own, but never less than `END_GRACE` (50 ms) from
+the start of the send. With none, a run stopped by its time limit would
+drop its last partial line before the first byte even to a reader that is
+taking it, where an unlimited run (and the base) delivers it
+(`a_run_stopped_at_its_limit_still_sends_its_last_line_to_a_drained_pipe`).
+50 ms is two polling intervals and scheduling slack, enough for a reader
+that is draining to take std's 1024 bytes, and short against any limit: a
+run stopped by its limit ends at most that much later. With a host
+interrupt flag and no time limit there is no such send: the run returns at
 once, and the bytes wait for the exit flush as without the flag (the writes
 themselves still stop when the flag is raised).
 
@@ -180,22 +204,25 @@ path's.
 - Several interpreters in one process writing to one stdout: only the
   owner of the line buffer keeps std's flush points; the others write
   straight through. Another interpreter counts as a second writer: it can
-  fill the room the owner's end-of-run check saw, and the owner's `Drop` then
-  waits for the reader, as std's flush would. The timed path does not hold
+  fill the room between the owner's look and its write, and the owner's send
+  waits for the reader within its deadline. The timed path does not hold
   std's stdout lock, so another thread's line can land between the pieces of
   a long timed write. An owner whose limits are taken off between runs sends
   its partial line at its next (plain) write, earlier than std would; an
   owner dropped after a failed send gives up the buffer and leaves the bytes
   for the next writer and the CLI's last flush.
-- The end-of-run room check reads the room exactly where the system says it
-  (a macOS pipe from `fstat`; a Linux pipe from `F_GETPIPE_SZ` less
-  `FIONREAD`, since `poll` calls a pipe full while its last page still takes
-  a small write; a Linux socket from `SIOCOUTQ` against `SO_SNDBUF`) and
-  otherwise assumes room: on a macOS socket it cannot tell, so the exit flush
-  there may wait on a full socket, as without a limit.
-- Sending the buffer at the CLI's flush points and in the owner's `Drop`
-  waits for the reader as std's flush does; the end-of-run check has made
-  sure it has room for those at most 1024 bytes, for a single writer.
+- The send at the end of a run writes what the timed writer can tell fits.
+  On a macOS stream socket that is `poll`'s word, which calls a socket with
+  less than 2048 bytes free not writable: a finished run whose socket is
+  nearly full and whose reader reads only after the exit now ends at its
+  limit with the line dropped, where an unlimited run's exit flush would
+  fit it. It is the timed path's rule mid-run too. A Linux pipe
+  (`pwritev2(RWF_NOWAIT)`) and a macOS pipe (`fstat`) are exact
+  (`a_nearly_full_pipe_at_the_end_of_a_run_still_takes_the_line`).
+- Bytes still buffered after a timed run are sent at the CLI's flush points
+  and in the owner's `Drop` within the recorded deadline. An owner that
+  never ran under a time limit (an interrupt flag alone) sends them as std's
+  flush does, waiting for the reader.
 - No test drives a panic: the CLI has no trigger for one. The mechanism is
   `Drop for Interp` running while it unwinds, with a lock that tolerates
   poisoning.

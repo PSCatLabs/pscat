@@ -1499,7 +1499,7 @@ impl Interp {
                 Ok(n) => n,
                 Err(e) => {
                     #[cfg(unix)]
-                    let _ = self.stdout_room_at_end();
+                    let _ = self.stdout_at_end(false);
                     self.snapshot_error_chain(&e);
                     self.unwind_all();
                     return Err(e);
@@ -1524,14 +1524,15 @@ impl Interp {
         if limited {
             result = self.after_slice(result);
         }
-        // The run is over: under a time limit, make sure its buffered stdout
-        // cannot hold up the exit (#1457). If that wait runs out, the bytes
-        // are dropped; a run that had finished then reports the time limit,
-        // while one that already failed keeps its own error (`undefined`,
-        // `limitexceeded (steps)`, ...), which came first.
+        // The run is over: under a time limit, its buffered stdout is sent
+        // within the limit, not by a flush that could block (#1457). If the
+        // limit passes first, the rest is dropped; a run that had finished
+        // then reports the time limit, while one that already failed keeps
+        // its own error (`undefined`, `limitexceeded (steps)`, ...), which
+        // came first.
         #[cfg(unix)]
         if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
-            && let Err(e) = self.stdout_room_at_end()
+            && let Err(e) = self.stdout_at_end(result.is_ok())
             && result.is_ok()
         {
             result = Err(e);
@@ -5012,19 +5013,28 @@ impl Interp {
     }
 
     /// A run that ends with program stdout still in the line buffer
-    /// (#1457): the exit flush will send it, and under a time limit it must
-    /// not block there. Wait, within the limit, for the room; past it, the
-    /// bytes are dropped and the run ends at its limit. Nothing is written
-    /// here: with room they leave when they would without a limit. Only
-    /// under a time limit: with an interrupt flag alone there is no deadline
-    /// for the exit flush to outlast, and the host gets its run back at once.
+    /// (#1457): under a time limit, the send of those bytes must not outlast
+    /// it. A run that `finished` sends them now through the timed writer;
+    /// one that failed keeps them for the CLI's flush after its error report
+    /// (where they leave without a limit), held to the same deadline (see
+    /// [`end_of_run`](crate::timed_write::end_of_run)). The deadline is the
+    /// run's, but at least `END_GRACE` (50 ms) from now, so a run stopped at
+    /// its limit still sends its last line to a reader that takes it. Past
+    /// it the bytes are dropped. Only under a time limit: with an interrupt
+    /// flag alone there is no deadline for the exit flush to outlast, and
+    /// the host gets its run back at once.
     #[cfg(unix)]
-    fn stdout_room_at_end(&self) -> Result<(), PsError> {
-        if !crate::timed_write::owned_by(self.host_id) || self.limits.max_time.is_none() {
+    fn stdout_at_end(&self, finished: bool) -> Result<(), PsError> {
+        let Some(max) = self.limits.max_time else {
+            return Ok(());
+        };
+        if !crate::timed_write::owned_by(self.host_id) {
             return Ok(());
         }
-        crate::timed_write::ensure_room_at_end(self.host_id, self.fd_kind(1), &mut || {
-            self.write_look()
+        let used = std::time::Duration::from_millis(self.run_clock.elapsed_ms().max(0) as u64);
+        let deadline = std::time::Instant::now() + max.saturating_sub(used);
+        crate::timed_write::end_of_run(self.host_id, self.fd_kind(1), finished, deadline, &|| {
+            self.interrupted()
         })
     }
 
@@ -5318,12 +5328,14 @@ impl Drop for Interp {
         // dictionary graph would otherwise never be flushed.
         let _ = self.flush_files();
         // Program stdout this interpreter's timed run left in the line
-        // buffer goes now, as std's exit flush would send it (#1457); the
-        // end-of-run check made sure it has room. Another interpreter's
-        // bytes are not touched. A failure keeps them for the CLI's last
-        // flush to report.
+        // buffer goes now, as std's exit flush would send it (#1457). A run
+        // that ended recorded the deadline this send is held to; one
+        // dropped mid-run under a time limit records it here. Another
+        // interpreter's bytes are not touched. A failure keeps them for the
+        // CLI's last flush to report.
         #[cfg(unix)]
         {
+            let _ = self.stdout_at_end(false);
             let _ = crate::timed_write::send_line(Some(self.host_id));
             crate::timed_write::release(self.host_id);
         }

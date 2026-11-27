@@ -42,6 +42,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "linux")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 /// How a descriptor is written.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -379,90 +380,6 @@ fn wait_writable(fd: libc::c_int) -> Ready {
     poll_out(fd, POLL_MS)
 }
 
-/// Whether a plain write of `n` bytes (no more than std's stdout buffer)
-/// would return without waiting, for the end-of-run check. "No" only where
-/// the system says the write would block; where it cannot say exactly, the
-/// answer leans to "yes", which leaves the bytes to the exit flush as
-/// without a limit.
-///
-/// - macOS pipe: `fstat`'s free room, exact, or below 64 KiB (a write that
-///   does not fit grows it).
-/// - Linux pipe: writable by `poll` (a free page slot), or the free bytes
-///   (`F_GETPIPE_SZ` less `FIONREAD`) hold `n`: `poll` alone calls a pipe
-///   full while its last page still takes a small write.
-/// - Linux stream socket: writable by `poll`, or the queued bytes
-///   (`SIOCOUTQ`) are under the send buffer (`SO_SNDBUF`), where a send
-///   still goes in: `poll` calls a Unix socket writable only while at most a
-///   quarter of the buffer is used.
-/// - macOS stream socket: nothing on the writing end says how much its peer
-///   takes (`POLLOUT` needs 2048 bytes free; a 1024-byte send fits in less),
-///   so always "yes": the exit flush may then wait on a full socket, as
-///   without a limit.
-fn has_room(fd: libc::c_int, kind: FdKind, n: usize) -> bool {
-    if poll_out(fd, 0) != Ready::NotYet {
-        // Writable, hung up (the write fails at once) or not pollable.
-        return match fifo_room(fd) {
-            Room::Free(free, grows) if kind == FdKind::Fifo => grows || free >= n,
-            _ => true,
-        };
-    }
-    match kind {
-        FdKind::Fifo => match fifo_room(fd) {
-            Room::Free(free, grows) => grows || free >= n,
-            Room::Grows => true,
-            Room::Full => false,
-            Room::Unknown => linux_pipe_free(fd).is_none_or(|free| free >= n),
-        },
-        FdKind::Socket => linux_socket_has_room(fd).unwrap_or(true),
-        FdKind::Blocking => true,
-    }
-}
-
-/// A Linux pipe's free bytes: its size less what it holds.
-#[cfg(target_os = "linux")]
-fn linux_pipe_free(fd: libc::c_int) -> Option<usize> {
-    // SAFETY: `fcntl` with no argument; `ioctl` writes one `c_int`.
-    let size = unsafe { libc::fcntl(fd, libc::F_GETPIPE_SZ) };
-    let mut held: libc::c_int = 0;
-    let r = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut held) };
-    if size < 0 || r != 0 || held < 0 {
-        return None;
-    }
-    Some((size as usize).saturating_sub(held as usize))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn linux_pipe_free(_fd: libc::c_int) -> Option<usize> {
-    None
-}
-
-/// Whether a Linux stream socket's send queue is under its send buffer.
-/// `None` elsewhere, or when the system does not say.
-#[cfg(target_os = "linux")]
-fn linux_socket_has_room(fd: libc::c_int) -> Option<bool> {
-    let mut queued: libc::c_int = 0;
-    // SAFETY: `ioctl` writes one `c_int`; `getsockopt` one `c_int` and its
-    // length.
-    let r = unsafe { libc::ioctl(fd, libc::TIOCOUTQ, &mut queued) };
-    let mut sndbuf: libc::c_int = 0;
-    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
-    let s = unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_SNDBUF,
-            (&mut sndbuf as *mut libc::c_int).cast(),
-            &mut len,
-        )
-    };
-    (r == 0 && s == 0).then_some(queued < sndbuf)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn linux_socket_has_room(_fd: libc::c_int) -> Option<bool> {
-    None
-}
-
 // ---------------------------------------------------------------------
 // Stdout's line buffer
 // ---------------------------------------------------------------------
@@ -483,15 +400,29 @@ const CAPACITY: usize = 1024;
 /// to the descriptor ([`LineWrite::NotOwner`]), and its `Drop` never touches
 /// it, so one interpreter cannot send another's partial line early, drop it,
 /// or wait on it.
+///
+/// `send_by` is set when a timed run ended with bytes here that are sent
+/// later (a run that failed: they leave after its error report, as without
+/// a limit): the deadline the later send ([`send_line`]) is held to.
 struct Line {
     buf: Vec<u8>,
     owner: u64,
+    send_by: Option<Instant>,
 }
 
 static LINE: Mutex<Line> = Mutex::new(Line {
     buf: Vec::new(),
     owner: 0,
+    send_by: None,
 });
+
+/// The least time a send at or after the end of a run gets, even when the
+/// run's own deadline has passed: a run stopped by its time limit still
+/// sends its last partial line to a reader that is taking it (as the base
+/// and an unlimited run do), and gives up this soon after on one that is
+/// not. Two polling intervals plus scheduling slack: enough for a drained
+/// pipe or socket to take std's 1024-byte buffer, short against any limit.
+pub(crate) const END_GRACE: Duration = Duration::from_millis(50);
 
 /// The owner of [`LINE`], 0 for none: what a reader that must not wait
 /// on the lock (`Drop`, the plain path) looks at first. Written only with
@@ -532,6 +463,7 @@ fn lock_line() -> std::sync::MutexGuard<'static, Line> {
 fn settle(line: &mut Line) {
     if line.buf.is_empty() {
         line.owner = 0;
+        line.send_by = None;
     }
     OWNER.store(line.owner, Ordering::Relaxed);
 }
@@ -574,6 +506,8 @@ pub(crate) fn line_write(
         return Ok(LineWrite::NotOwner);
     }
     line.owner = id;
+    // A run is writing: its own deadline governs the buffer again.
+    line.send_by = None;
     let mut out = LineOut {
         buf: &mut line.buf,
         kind,
@@ -669,12 +603,17 @@ impl LineOut<'_, '_> {
     }
 }
 
-/// Send what the line buffer holds now, with no deadline: what std's flush
-/// does where the CLI flushes its stdout (its own output, the REPL prompt,
-/// the end of `main`), and where the owner is dropped. A write that fails
-/// keeps the bytes not written in the buffer, as std's `flush_buf` does, so
-/// the next flush fails again, and returns the error: a reader that went
-/// away still shows at the CLI's last flush (Codex round 2, R1).
+/// Send what the line buffer holds now: what std's flush does where the CLI
+/// flushes its stdout (its own output, the REPL prompt, the end of `main`),
+/// and where the owner is dropped. A write that fails keeps the bytes not
+/// written in the buffer, as std's `flush_buf` does, so the next flush fails
+/// again, and returns the error: a reader that went away still shows at the
+/// CLI's last flush (Codex round 2, R1).
+///
+/// With no deadline recorded it waits as long as std's flush would. With
+/// one (a timed run that failed and left bytes here, [`end_of_run`]) it
+/// waits until that deadline, but at least [`END_GRACE`] from now, then
+/// drops what is left and returns `Ok`: the run already reported its error.
 ///
 /// `only` limits it to one owner (`Drop`, the plain path); `None` sends
 /// whatever is there (the CLI, which runs one interpreter).
@@ -687,19 +626,30 @@ pub(crate) fn send_line(only: Option<u64>) -> std::io::Result<()> {
         return Ok(());
     }
     let kind = classify(1);
-    let mut never = || Ok(());
-    let r = write_all(1, kind, &line.buf, &mut never);
-    let r = match r {
+    let by = line.send_by.map(|t| t.max(Instant::now() + END_GRACE));
+    let mut look = || match by {
+        Some(t) if Instant::now() >= t => Err(PsError::TimeExceeded),
+        _ => Ok(()),
+    };
+    let r = match write_all(1, kind, &line.buf, &mut look) {
         Ok(()) => {
             line.buf.clear();
             Ok(())
         }
-        Err(s) => {
-            line.buf.drain(..s.written);
-            Err(match s.why {
-                WriteStop::Io(e) => e,
-                WriteStop::Limit(_) => std::io::ErrorKind::Interrupted.into(),
-            })
+        // Past the recorded deadline: what is left is dropped.
+        Err(Stopped {
+            why: WriteStop::Limit(_),
+            ..
+        }) => {
+            line.buf.clear();
+            Ok(())
+        }
+        Err(Stopped {
+            written,
+            why: WriteStop::Io(e),
+        }) => {
+            line.buf.drain(..written);
+            Err(e)
         }
     };
     settle(&mut line);
@@ -721,36 +671,76 @@ pub(crate) fn release(id: u64) {
 }
 
 /// At the end of a run under a time limit, with bytes of `id`'s in the line
-/// buffer: make sure the flush that will send them (the CLI's, or the
-/// interpreter's `Drop`) cannot block. Wait (asking `look`, holding the
-/// buffer so no other interpreter changes it meanwhile) until stdout has room
-/// for them; if `look` stops the wait, drop them and return its error. With
-/// room they stay where they are, as without a limit. Not this interpreter's
-/// buffer: nothing to do.
-pub(crate) fn ensure_room_at_end(
+/// buffer: make sure the flush that sends them cannot outlast the limit. No
+/// room is predicted; the bytes go through the timed writer, which writes no
+/// more than the descriptor takes and asks the deadline before the first
+/// byte and whenever it waits. `deadline` is the run's own, but at least
+/// [`END_GRACE`] from now.
+///
+/// - A run that `finished` sends them now (nothing else is written between
+///   its end and the exit flush, so the order is the same). If the deadline
+///   passes first, what is left is dropped and the error is
+///   `limitexceeded (time)`, or `Interrupted` if `interrupted` says so. A
+///   write that fails keeps the bytes not written for the CLI's last flush
+///   to report (exit 141), and the run is not failed for it, as without a
+///   limit.
+/// - A run that failed reports its error first, and without a limit its
+///   partial line leaves after that report, at the CLI's next flush. So the
+///   bytes stay, and the deadline is recorded for [`send_line`] to hold that
+///   flush to.
+///
+/// Not this interpreter's buffer, or nothing in it: nothing to do.
+pub(crate) fn end_of_run(
     id: u64,
     kind: FdKind,
-    look: &mut dyn FnMut() -> Result<(), PsError>,
+    finished: bool,
+    deadline: Instant,
+    interrupted: &dyn Fn() -> bool,
 ) -> Result<(), PsError> {
     if !owned_by(id) {
         return Ok(());
     }
-    let mut line = lock_within(&LINE, look)?;
+    let deadline = deadline.max(Instant::now() + END_GRACE);
+    let mut look = || {
+        if interrupted() {
+            Err(PsError::Interrupted)
+        } else if Instant::now() >= deadline {
+            Err(PsError::TimeExceeded)
+        } else {
+            Ok(())
+        }
+    };
+    let mut line = lock_within(&LINE, &mut look)?;
     if line.owner != id || line.buf.is_empty() {
         return Ok(());
     }
-    let n = line.buf.len();
-    loop {
-        if has_room(1, kind, n) {
-            return Ok(());
-        }
-        if let Err(e) = look() {
-            line.buf.clear();
-            settle(&mut line);
-            return Err(e);
-        }
-        let _ = wait_writable(1);
+    if !finished {
+        line.send_by = Some(deadline);
+        return Ok(());
     }
+    let r = match write_all(1, kind, &line.buf, &mut look) {
+        Ok(()) => {
+            line.buf.clear();
+            Ok(())
+        }
+        Err(Stopped {
+            why: WriteStop::Limit(e),
+            ..
+        }) => {
+            line.buf.clear();
+            Err(e)
+        }
+        Err(Stopped {
+            written,
+            why: WriteStop::Io(_),
+        }) => {
+            line.buf.drain(..written);
+            line.send_by = Some(deadline);
+            Ok(())
+        }
+    };
+    settle(&mut line);
+    r
 }
 
 /// Write what the line buffer holds for a process about to exit from another
@@ -873,44 +863,60 @@ mod tests {
         }
     }
 
-    /// Whether a plain write of `n` bytes would wait: a non-blocking one is
-    /// refused (`EAGAIN`) or takes only part of it (a blocking one would then
-    /// wait for the rest).
-    fn would_block(fd: libc::c_int, n: usize) -> bool {
-        let data = vec![b'#'; n];
-        // SAFETY: a write of a live buffer.
-        let r = unsafe { libc::write(fd, data.as_ptr().cast(), n) };
-        r < 0 || (r as usize) < n
+    /// Fill `fd` (made non-blocking) until it refuses a byte, then make it
+    /// blocking again, as a child's stdout would be.
+    fn fill_blocking(fd: libc::c_int) {
+        set_nonblocking(fd);
+        let chunk = vec![b'#'; 4096];
+        for n in [4096usize, 1] {
+            // SAFETY: a write of a live buffer.
+            while unsafe { libc::write(fd, chunk.as_ptr().cast(), n) } > 0 {}
+        }
+        // SAFETY: flag change on a descriptor this test owns alone.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+        }
     }
 
-    /// Fill `fd` (non-blocking, owned by the test) in steps; whenever
-    /// `has_room` says no, a write of that size must really be refused.
-    fn room_is_never_denied_wrongly(fd: libc::c_int, kind: FdKind) {
-        set_nonblocking(fd);
-        let chunk = vec![b'#'; 700];
-        for _ in 0..400 {
-            for n in [1, 100, 1024] {
-                if !has_room(fd, kind, n) {
-                    assert!(
-                        would_block(fd, n),
-                        "{kind:?}: no room said for {n} bytes that fit"
-                    );
-                }
-            }
-            // SAFETY: a write of a live buffer.
-            if unsafe { libc::write(fd, chunk.as_ptr().cast(), chunk.len()) } < 0 {
-                break;
+    /// A look that allows the first ask and stops every later one: a write
+    /// that had to wait for room stops at once.
+    fn first_look_only() -> impl FnMut() -> Result<(), PsError> {
+        let mut first = true;
+        move || {
+            if std::mem::take(&mut first) {
+                Ok(())
+            } else {
+                Err(PsError::TimeExceeded)
             }
         }
     }
 
+    /// A full stream socket whose reader never reads stops the write at the
+    /// look (the end of a run on macOS hung here, #1465 confirmation round).
     #[test]
-    fn the_end_of_run_check_never_denies_room_that_is_there() {
-        let (_reader, writer) = std::io::pipe().expect("pipe");
-        room_is_never_denied_wrongly(writer.as_raw_fd(), FdKind::Fifo);
-        let (_a, b) = std::os::unix::net::UnixStream::pair().expect("socket pair");
-        room_is_never_denied_wrongly(b.as_raw_fd(), FdKind::Socket);
-        // The Linux state `poll` miscounts: 15 full pages and part of a 16th.
+    fn a_full_socket_stops_at_the_look() {
+        let (_ours, theirs) = std::os::unix::net::UnixStream::pair().expect("socket pair");
+        let fd = theirs.as_raw_fd();
+        fill_blocking(fd);
+        let r = write_all(fd, FdKind::Socket, b"A", &mut first_look_only());
+        assert!(
+            matches!(
+                r,
+                Err(Stopped {
+                    written: 0,
+                    why: WriteStop::Limit(PsError::TimeExceeded)
+                })
+            ),
+            "{r:?}"
+        );
+    }
+
+    /// A pipe with room left in its last page takes a small write without
+    /// waiting: no false stop at the end of a run. (On Linux `poll` calls
+    /// this state full: 15 full pages and part of a 16th.)
+    #[test]
+    fn a_nearly_full_pipe_takes_a_small_write_at_once() {
         let (_reader, writer) = std::io::pipe().expect("pipe");
         let fd = writer.as_raw_fd();
         set_nonblocking(fd);
@@ -921,8 +927,8 @@ mod tests {
         }
         // SAFETY: as above.
         assert_eq!(unsafe { libc::write(fd, page.as_ptr().cast(), 3000) }, 3000);
-        assert!(has_room(fd, FdKind::Fifo, 1024), "a 1024-byte write fits");
-        assert!(!would_block(fd, 1024));
+        let r = write_all(fd, FdKind::Fifo, &page[..1024], &mut first_look_only());
+        assert!(r.is_ok(), "{r:?}");
     }
 
     #[test]
