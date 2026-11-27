@@ -653,6 +653,10 @@ renders eight examples in both and compares block-downsampled output).
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
   There is no `setdevice`/`currentdevice`, so nothing else can install a
   device.
+- `reversepath` (#1266, `notes/1266-reversepath.md`) matches gs on every
+  `pathforall` trace pinned in `tests/reversepath.rs`; a trailing lone
+  `moveto` is dropped unless it is the whole path (gs does; the PLRM is
+  silent), and it is limit-aware like `flattenpath`.
 - `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
   quarter-pixel tolerance (`setflat` not modeled — chord counts

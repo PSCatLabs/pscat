@@ -494,6 +494,124 @@ impl PsPath {
         Ok((f.out, f.count))
     }
 
+    /// `reversepath` (#1266): the same points walked the other way. Each
+    /// subpath keeps its open or closed state; a curve's control points
+    /// swap; the subpaths come out last first. A lineto or curveto right
+    /// after a `closepath` starts a subpath at the closed one's start, as
+    /// `pathforall` shows it, so it is its own subpath here. A trailing
+    /// lone `moveto` is dropped when any other subpath exists and kept when
+    /// it is the whole path, which is what Ghostscript does. The current
+    /// point is the end of the last subpath written (the start of a closed
+    /// one), as the builders leave it.
+    ///
+    /// Under the limits (#1188's shape): the copy is held against the heap
+    /// cap before it is made, the probe is looked at every
+    /// [`FLATTEN_POLL`] segments in both passes, and a step is charged per
+    /// 1024 segments written (the count is given back for the operator to
+    /// charge). Gives a new path, so a limit that stops it leaves the
+    /// current path as it was.
+    pub(crate) fn reversed_limited(
+        &self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(PsPath, usize), PsError> {
+        /// One subpath: its drawing segments are `segs[lo..hi]`, the last of
+        /// them a `Close` if it is closed; `start` is where it begins.
+        struct Sub {
+            lo: usize,
+            hi: usize,
+            start: DevPoint,
+        }
+        let n = self.segs.len();
+        // A subpath begins at a moveto, or at the first line or curve after
+        // a close (it starts at the subpath that was closed).
+        let begins = |i: usize| match self.segs[i] {
+            Seg::Move(_) => true,
+            Seg::Line(_) | Seg::Curve(..) => i > 0 && matches!(self.segs[i - 1], Seg::Close),
+            Seg::Close => false,
+        };
+        let mut count = 0usize;
+        for i in 0..n {
+            if begins(i) {
+                count += 1;
+            }
+            if i % FLATTEN_POLL == FLATTEN_POLL - 1 {
+                probe.check((i / 1024) as u64)?;
+            }
+        }
+        // The copy has the original's segments, and a moveto more for each
+        // subpath that began without one. Both vectors are held against the
+        // heap cap before either is made.
+        let cap = n.saturating_add(count);
+        probe.check_alloc(
+            count
+                .saturating_mul(std::mem::size_of::<Sub>())
+                .saturating_add(cap.saturating_mul(std::mem::size_of::<Seg>())),
+        )?;
+        let mut subs: Vec<Sub> = Vec::with_capacity(count);
+        let mut start = DevPoint { x: 0.0, y: 0.0 };
+        for i in 0..n {
+            if begins(i) {
+                if let Some(last) = subs.last_mut() {
+                    last.hi = i;
+                }
+                let lo = match self.segs[i] {
+                    Seg::Move(p) => {
+                        start = p;
+                        i + 1
+                    }
+                    _ => i,
+                };
+                subs.push(Sub { lo, hi: n, start });
+            }
+            if i % FLATTEN_POLL == FLATTEN_POLL - 1 {
+                probe.check((i / 1024) as u64)?;
+            }
+        }
+        let end_of = |seg: &Seg| match *seg {
+            Seg::Move(p) | Seg::Line(p) | Seg::Curve(_, _, p) => Some(p),
+            Seg::Close => None,
+        };
+        let mut out = PsPath {
+            segs: Vec::with_capacity(cap),
+            ..PsPath::default()
+        };
+        let mut written = 0usize;
+        for sub in subs.iter().rev() {
+            let body = &self.segs[sub.lo..sub.hi];
+            let closed = matches!(body.last(), Some(Seg::Close));
+            let items = if closed {
+                &body[..body.len() - 1]
+            } else {
+                body
+            };
+            if items.is_empty() && !closed && subs.len() > 1 {
+                continue;
+            }
+            out.move_to(items.last().and_then(end_of).unwrap_or(sub.start));
+            for (j, seg) in items.iter().enumerate().rev() {
+                // The point this segment started from.
+                let from = match j.checked_sub(1) {
+                    Some(k) => end_of(&items[k]).unwrap_or(sub.start),
+                    None => sub.start,
+                };
+                match *seg {
+                    Seg::Curve(c1, c2, _) => out.curve_to(c2, c1, from),
+                    _ => out.line_to(from),
+                }
+                written += 1;
+                if written.is_multiple_of(FLATTEN_POLL) {
+                    probe.check((written / 1024) as u64)?;
+                }
+            }
+            if closed {
+                out.close();
+            }
+        }
+        probe.check((out.segs.len() / 1024) as u64)?;
+        let total = out.segs.len();
+        Ok((out, total))
+    }
+
     /// Build a path from a tiny-skia one (the stroker's output). Goes
     /// through the builders so `current` and `subpath_start` stay right;
     /// quads become the equivalent cubics.
@@ -1767,6 +1885,18 @@ impl Gfx {
         let (flat, chords) = self.state.path.flattened_limited(probe)?;
         self.state.path = flat;
         Ok(chords)
+    }
+
+    /// `reversepath`: the current path walked the other way. The path is
+    /// replaced only once the whole of it is written: a limit that stops it
+    /// leaves the current path as it was. Gives the segment count.
+    pub(crate) fn reverse_path(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<usize, PsError> {
+        let (rev, segments) = self.state.path.reversed_limited(probe)?;
+        self.state.path = rev;
+        Ok(segments)
     }
 
     // --- coordinate plumbing -------------------------------------------
@@ -7226,6 +7356,102 @@ fn sh_kind(kind: crate::shading::ShadingKind, k: f32) -> crate::svg::ShKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pt(x: f32, y: f32) -> DevPoint {
+        DevPoint { x, y }
+    }
+
+    /// One subpath of `n` lines, every point distinct.
+    fn long_path(n: usize) -> PsPath {
+        let mut p = PsPath::default();
+        p.move_to(pt(0.0, 0.0));
+        for i in 1..=n {
+            p.line_to(pt(i as f32, 0.0));
+        }
+        p
+    }
+
+    #[test]
+    fn reversed_limited_with_no_limit_gives_the_count_and_the_other_end() {
+        let p = long_path(10_000);
+        let (r, count) = p
+            .reversed_limited(&crate::limits::LimitProbe::NONE)
+            .expect("no limit");
+        assert_eq!(count, 10_001);
+        assert_eq!(r.current(), Some(pt(0.0, 0.0)));
+        assert!(matches!(r.segs[0], Seg::Move(q) if q == pt(10_000.0, 0.0)));
+    }
+
+    /// #1266: a stop leaves the caller its path (the result is a new one),
+    /// and comes from inside the copy, not after it.
+    #[test]
+    fn reversed_limited_stops_on_the_step_limit_inside_the_copy() {
+        let p = long_path(20_000);
+        let probe = crate::limits::LimitProbe {
+            steps_left: Some(5),
+            ..crate::limits::LimitProbe::NONE
+        };
+        assert_eq!(
+            p.reversed_limited(&probe).err(),
+            Some(PsError::StepsExceeded)
+        );
+        assert_eq!(p.segs.len(), 20_001);
+        // 20,001 segments are 19 steps: a budget of 19 passes, 18 does not.
+        let at = |steps_left| crate::limits::LimitProbe {
+            steps_left: Some(steps_left),
+            ..crate::limits::LimitProbe::NONE
+        };
+        assert!(p.reversed_limited(&at(19)).is_ok());
+        assert_eq!(
+            p.reversed_limited(&at(18)).err(),
+            Some(PsError::StepsExceeded)
+        );
+    }
+
+    #[test]
+    fn reversed_limited_stops_on_the_time_limit() {
+        let p = long_path(10_000);
+        let probe = crate::limits::LimitProbe {
+            deadline_ns: Some(0),
+            ..crate::limits::LimitProbe::NONE
+        };
+        assert_eq!(
+            p.reversed_limited(&probe).err(),
+            Some(PsError::TimeExceeded)
+        );
+    }
+
+    /// The copy is refused before it is made when it cannot fit.
+    #[test]
+    fn reversed_limited_refuses_a_copy_the_heap_cap_cannot_hold() {
+        let p = long_path(10_000);
+        let probe = crate::limits::LimitProbe::memory_only(Some((0, 1000)));
+        assert_eq!(
+            p.reversed_limited(&probe).err(),
+            Some(PsError::MemoryExceeded)
+        );
+        let roomy = crate::limits::LimitProbe::memory_only(Some((0, 64 << 20)));
+        assert!(p.reversed_limited(&roomy).is_ok());
+    }
+
+    /// Many one-segment subpaths: the subpath table is charged too.
+    #[test]
+    fn reversed_limited_handles_many_closed_subpaths() {
+        let mut p = PsPath::default();
+        for i in 0..5000 {
+            p.move_to(pt(i as f32, 0.0));
+            p.line_to(pt(i as f32, 1.0));
+            p.close();
+        }
+        let (r, count) = p
+            .reversed_limited(&crate::limits::LimitProbe::NONE)
+            .expect("no limit");
+        assert_eq!(count, 15_000);
+        let (back, _) = r
+            .reversed_limited(&crate::limits::LimitProbe::NONE)
+            .expect("no limit");
+        assert_eq!(back.to_svg_data(), p.to_svg_data());
+    }
 
     /// The loop `turn_past` replaces (#1176), the reference it must match
     /// bit for bit.

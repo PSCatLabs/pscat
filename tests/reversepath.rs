@@ -257,7 +257,14 @@ fn a_reversed_ring_renders_as_ghostscript_renders_it() {
     let (ps, png) = (dir.join("ring.ps"), dir.join("ring.png"));
     std::fs::write(&ps, format!("{}\nshowpage\n", ring("reversepath", "fill"))).expect("write");
     let out = std::process::Command::new("gs")
-        .args(["-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=png16m", "-r72"])
+        .args([
+            "-q",
+            "-dSAFER",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-sDEVICE=png16m",
+            "-r72",
+        ])
         .arg(format!("-g{SIZE}x{SIZE}"))
         .arg(format!("-sOutputFile={}", png.display()))
         .arg(&ps)
