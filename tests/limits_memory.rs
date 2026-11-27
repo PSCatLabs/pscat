@@ -11,6 +11,34 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
 const MIB: usize = 1 << 20;
 
+/// Run `f` while another thread watches the heap: the most it grew past
+/// where it started, as that thread saw it, and `f`'s result. The tracking
+/// allocator has no peak of its own, and a copy made before a refusal is
+/// freed by the time anyone looks, so this is how a test sees one.
+fn peak_growth<R>(f: impl FnOnce() -> R) -> (usize, R) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let base = pscat::memtrack::live_bytes();
+    let (stop, peak) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let watcher = {
+        let (stop, peak) = (stop.clone(), peak.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let grown = pscat::memtrack::live_bytes().saturating_sub(base);
+                peak.fetch_max(grown, Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+        })
+    };
+    let r = f();
+    stop.store(true, Ordering::Relaxed);
+    watcher.join().expect("watcher");
+    (peak.load(Ordering::Relaxed), r)
+}
+
 fn limited(mib: usize) -> Interp {
     let mut it = Interp::new();
     it.set_limits(Limits::none().with_max_memory(mib * MIB))
@@ -743,6 +771,30 @@ fn memory_growth_is_capped() {
         }
     }
 
+    // `upath` and `uappend` ask the heap cap before they make what they
+    // make (#1264): a million-segment path would be a ten-million-object
+    // array, and a user path of 1.2 million elements 77 MB of path. Both are
+    // refused with the path as it was, and the interpreter runs on.
+    let mut it = Interp::new();
+    it.run_str(
+        "newpath 0 0 moveto 500000 { 1 1 rlineto -1 0 rlineto } repeat \
+         /up 1200005 array def up 0 { 0 0 100 100 setbbox } putinterval \
+         /piece { 1 1 moveto 2 2 lineto } cvlit def \
+         0 1 199999 { 6 mul 5 add up exch piece putinterval } for",
+    )
+    .expect("setup");
+    it.set_limits(Limits::none().with_max_memory(50 * MIB))
+        .expect("the allocator is installed");
+    assert_eq!(it.run_str("false upath pop"), Err(PsError::MemoryExceeded));
+    assert_eq!(it.run_str("up uappend"), Err(PsError::MemoryExceeded));
+    it.set_limits(Limits::none()).expect("no limits");
+    it.capture_stdout();
+    it.run_str(
+        "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } pathforall =",
+    )
+    .expect("the path is still there");
+    assert_eq!(it.captured_stdout(), b"1000001\n");
+
     // `stroke` and `strokepath` drop a zero-length segment of a subpath
     // that has length (#1224), which makes a transient copy of the path. It
     // is held against the cap before it is made (Codex, PR #1454: a path
@@ -783,4 +835,68 @@ fn memory_growth_is_capped() {
         );
         drop(it);
     }
+
+    // Codex round 1 on #1264: the hit tests copy the subpaths that meet the
+    // pixel, and the copies are asked of the heap cap first. Three million
+    // lines meet the pixel: the copy is 84 MB, over a 40 MiB cap, and the
+    // refusal comes before it is made. The state is as it was after.
+    for op in ["infill", "ineofill", "instroke"] {
+        let mut it = Interp::new();
+        it.run_str(
+            "newpath 1 1 moveto 1000000 { 9 2 lineto 1 3 lineto 9 4 lineto } repeat \
+             3 setlinewidth 0 0 20 20 setbbox",
+        )
+        .expect("setup");
+        let state = "matrix currentmatrix { 100 mul round cvi = } forall \
+             currentlinewidth = pathbbox 4 { 100 mul round cvi = } repeat \
+             0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } \
+             pathforall =";
+        it.capture_stdout();
+        it.run_str(state).expect("state");
+        let before = it.captured_stdout().to_vec();
+        it.set_limits(Limits::none().with_max_memory(40 * MIB))
+            .expect("the allocator is installed");
+        let (peak, r) = peak_growth(|| it.run_str(&format!("77 5 3 {op}")));
+        assert_eq!(r, Err(PsError::MemoryExceeded), "{op}");
+        assert!(
+            peak < 40 * MIB + 8 * MIB,
+            "{op}: the heap went {} MiB past its start before the refusal",
+            peak / MIB
+        );
+        it.set_limits(Limits::none()).expect("no limits");
+        it.capture_stdout();
+        it.run_str("count = = = =").expect("operands");
+        assert_eq!(
+            it.captured_stdout(),
+            b"3\n3\n5\n77\n",
+            "{op}: operands kept"
+        );
+        it.capture_stdout();
+        it.run_str(state).expect("state");
+        assert_eq!(it.captured_stdout(), &before[..], "{op}: state as it was");
+        drop(it);
+    }
+
+    // The stroke of a path the price undercuts (one curve of 1e8 under a
+    // pen 1e6 wide: millions of segments for a price of one curve) is
+    // refused before the outline is made into a path, and what the outline
+    // came to is what was charged.
+    let mut it = Interp::new();
+    it.run_str(
+        "1000000 setlinewidth newpath 0 0 moveto 0 100000000 100000000 -100000000 100000000 0 curveto",
+    )
+    .expect("setup");
+    it.set_limits(Limits::none().with_max_memory(60 * MIB))
+        .expect("the allocator is installed");
+    let (peak, r) = peak_growth(|| it.run_str("strokepath"));
+    assert_eq!(r, Err(PsError::MemoryExceeded));
+    eprintln!("wide-pen strokepath peak: {} MiB", peak / MIB);
+    assert!(peak < 60 * MIB + 8 * MIB, "{} MiB", peak / MIB);
+    it.set_limits(Limits::none()).expect("no limits");
+    it.capture_stdout();
+    it.run_str(
+        "0 { pop pop 1 add } { pop pop 1 add } { 6 { pop } repeat 1 add } { 1 add } pathforall =",
+    )
+    .expect("the path is still there");
+    assert_eq!(it.captured_stdout(), b"2\n");
 }

@@ -653,6 +653,14 @@ renders eight examples in both and compares block-downsampled output).
   `copypage` emit no page, the CTM and `defaultmatrix` are identity.
   There is no `setdevice`/`currentdevice`, so nothing else can install a
   device.
+- Hit tests and user paths (#1264, `notes/1264-hit-testing-and-user-paths.md`):
+  `infill ineofill instroke inufill inueofill inustroke uappend upath ufill
+  ueofill ustroke ustrokepath ucache setbbox` match gs on the 182 programs of
+  `tests/upath.rs` (run with stroke adjustment off: with it on gs also hits
+  the pixel a stroke edge only touches). `setbbox` is a path property
+  (`PsPath::bbox`) the path operators enforce; a hit test is the area-coverage
+  rasteriser on one pixel, so it is "would pscat's `fill` paint it". Not done:
+  the forms with a user path where the point goes, and encoded user paths.
 - `reversepath` (#1266, `notes/1266-reversepath.md`) matches gs on every
   `pathforall` trace pinned in `tests/reversepath.rs`; a trailing lone
   `moveto` is dropped unless it is the whole path (gs does; the PLRM is
