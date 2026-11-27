@@ -162,10 +162,11 @@ newpath 40 60 moveto 300 80 lineto
     dust the whole stroke has there, so `/From 0 /To t` with a growing
     `t` grows a stroke without changing the part already drawn (its
     texture and dust stay; behind the pen's last dozen widths no pixel
-    moves between frames; with `/Tilt`, whose lanes drychalk cuts itself,
-    a lane's edge pixels may shift once by up to about 40 of 255 levels).
-    `/To 0.5` plus `/From 0.5` make the whole, to within a few levels at
-    the seam (up to about 110 with `/Tilt`, on a few percent of the ink).
+    moves between frames, with `/Tilt` too: each lane keeps the whole
+    lane's dropouts). `/To 0.5` plus `/From 0.5` make the whole: at the seam
+    a handful of pixels differ, by a few dozen levels, except where the
+    stroke's touch changes band just past the cut, which can leave a faint
+    one-pixel arc across a wide stroke or a `/Tilt` mark.
     A caller that keeps its canvas can draw `/From prev /To now` each
     frame instead: each piece starts flat where the last one ended, so
     pieces down to a fifth of a width keep the stroke's weight, and only

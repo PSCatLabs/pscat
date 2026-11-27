@@ -50,3 +50,5 @@ dcchalk's (a touch/pressure remap) and live in drykit, drycrayon and drycharcoal
 this ticket does not own.
 
 **Update (#1419).** The one-frame edge shift was not the chunk boundary: drykit inks a constant-width run with a round-capped stroke and a varying one as a filled union, and a cut run switched branch when it first reached a change of width. Fixed in drykit, and tip strokes now let drykit cut the whole stroke (`notes/1419-drykit-stable-growing-parts.md`).
+
+**Update (#1420).** `/Tilt` lanes also go to drykit whole with `/From`/`/To` now (`dcpiece` is gone), so a piece's lanes keep the whole lane's dropout chain and the From-mixed seed above is gone too (`notes/1420-drychalk-tilt-whole-lanes.md`).

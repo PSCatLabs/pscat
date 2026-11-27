@@ -867,42 +867,34 @@ fn the_whole_range_is_the_default() {
 /// A growing stroke grows: the part already drawn does not change (only
 /// the pen's last few widths do), and every frame adds ink. Straight
 /// line so the pen's place is known; checked with and without a /Seed, and
-/// with the stick on its side. A tip stroke is cut by drykit from the whole
-/// stroke (#1419), so its drawn part is the same pixel for pixel. A side
-/// stroke's lanes are still cut by drychalk (#1420), and drykit inks a lane
-/// that changes width differently from one that does not, so a few
-/// transitions may move its edge pixels once (up to about 40 levels).
+/// with the stick on its side. drykit cuts every stroke from the whole one,
+/// a tip stroke (#1419) and each lane of a side stroke (#1420), so its drawn
+/// part is the same pixel for pixel.
 #[test]
 fn a_growing_stroke_keeps_what_it_has_drawn() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
     let line = "newpath 10 30 moveto 190 30 lineto";
-    for opts in ["/Seed 4", "", "/Tilt 75 /Side 8 /Seed 2", "/Firm 1"] {
+    for opts in [
+        "/Seed 4",
+        "",
+        "/Tilt 75 /Side 8 /Seed 2",
+        "/Tilt 75 /Side 8",
+        "/Firm 1",
+    ] {
         let tos: Vec<f64> = (0..=15).map(|i| 0.25 + 0.05 * f64::from(i)).collect();
         let frames: Vec<Interp> = tos
             .iter()
             .map(|t| part(line, &format!("/From 0 /To {t} {opts}")))
             .collect();
-        let mut moved = 0;
         for k in 0..tos.len() - 1 {
             let (a, b) = (data(&frames[k]), data(&frames[k + 1]));
             // the pen was at 10 + 180 To: all but its last 12 points agree
             let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as u32;
             let d = diffs(&a, &b, 0, behind);
             let worst = d.iter().copied().max().unwrap();
-            let loud = d.iter().filter(|&&v| v > 16).count();
-            if loud > 0 {
-                moved += 1;
-            }
-            if !opts.contains("Tilt") {
-                assert!(
-                    worst == 0,
-                    "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
-                    k + 1
-                );
-            }
             assert!(
-                loud * 2 < inked(&frames[k], &bare) && worst <= 64,
-                "`{opts}`: frame {k} -> {} changed {loud} pixels of its drawn part (by up to {worst})",
+                worst == 0,
+                "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
                 k + 1
             );
             assert!(
@@ -911,22 +903,23 @@ fn a_growing_stroke_keeps_what_it_has_drawn() {
                 k + 1
             );
         }
-        assert!(
-            moved <= 3,
-            "`{opts}`: {moved} of 15 frames redrew their edges"
-        );
     }
 }
 
 /// Two adjacent pieces are the whole stroke, apart from the seam and the
-/// edge pixels where a band of touch changes a pitch earlier or later.
+/// edge pixels where a band of touch changes a pitch earlier or later. A side
+/// stroke's lanes keep the whole lane's dropouts across the joins (#1420:
+/// each piece used to start its lanes' on-off chains afresh, a seam of up to
+/// ~110 levels).
 #[test]
 fn adjacent_pieces_make_the_whole_stroke() {
     let bare = data(&on_board(PART_W, PART_H, 2.0, ""));
     for (opts, ceiling) in [
         ("/Seed 4", 48u8),
         ("", 48),
-        ("/Tilt 75 /Side 8 /Seed 2", 140),
+        ("/Tilt 75 /Side 8 /Seed 2", 64),
+        ("/Tilt 75 /Side 8 /Seed 1", 64),
+        ("/Tilt 75 /Side 8", 64),
     ] {
         let whole = part(LINE, opts);
         let halves = on_board(
@@ -957,10 +950,8 @@ fn adjacent_pieces_make_the_whole_stroke() {
                 worst <= ceiling,
                 "`{opts}` {name}: differ by {worst} from the whole stroke"
             );
-            // (a side stroke's lanes draw their dropouts afresh in each piece)
-            let share = if opts.contains("Tilt") { 20 } else { 50 };
             assert!(
-                loud * share < ink,
+                loud * 50 < ink,
                 "`{opts}` {name}: {loud} of {ink} inked pixels differ clearly"
             );
         }
@@ -1042,12 +1033,17 @@ fn from_and_to_cut_each_stroke_by_its_own_length() {
             "`{opts}` dot, first half"
         );
     }
-    // an empty range, a bare moveto, an empty path
-    assert_eq!(
-        data(&part(LINE, "/From 0.4 /To 0.4")),
-        bare,
-        "an empty range"
-    );
+    // an empty range (also under /Tilt, whose lanes drykit cuts), a bare
+    // moveto, an empty path
+    for range in ["/From 0.4 /To 0.4", "/From 0 /To 0", "/From 1 /To 1"] {
+        for opts in ["", "/Tilt 75 /Side 8 /Seed 2", "/Tilt 75 /Side 8"] {
+            assert_eq!(
+                data(&part(LINE, &format!("{range} {opts}"))),
+                bare,
+                "an empty range: `{range} {opts}`"
+            );
+        }
+    }
     assert_eq!(
         data(&part("newpath 20 20 moveto", "/To 0.5")),
         bare,
@@ -1096,7 +1092,7 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
         let behind = ((10.0 + 180.0 * 0.5 - 12.0) * 2.0) as u32;
         let worst = diffs(&a, &b, 0, behind).into_iter().max().unwrap();
         assert!(
-            worst <= 8,
+            worst == 0,
             "`{opts}`: a 3% step changed the drawn part by {worst}"
         );
     }
@@ -1126,9 +1122,11 @@ fn a_pen_moving_a_little_each_frame_does_not_shimmer() {
                 .into_iter()
                 .filter(|&v| v > 64)
                 .count();
-            // a side stroke's lanes draw their dropouts afresh in each piece, so
-            // a few pixels differ strongly there; a tip stroke's none do
-            let allowed = if opts.contains("Tilt") { ink / 50 } else { 0 };
+            // a side stroke's lanes overlap, so a few pixels where several
+            // lanes are cut at once differ strongly (#1420: 1 to 4 of ~6700
+            // at 100 pieces; ~50 before, when each piece drew its lanes'
+            // dropouts afresh); a tip stroke's none do
+            let allowed = if opts.contains("Tilt") { ink / 1000 } else { 0 };
             assert!(
                 loud <= allowed,
                 "`{opts}`, {pieces} pieces: {loud} pixels differ strongly from the whole"
