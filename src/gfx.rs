@@ -184,6 +184,17 @@ const SVG_STOP_BYTES: usize = 256;
 /// `shfill_work` counts: a step per 1024.
 const PNG_ENCODE_UNITS: u64 = 32;
 
+/// The heap `encode_png` takes beyond its layer for a `px`-pixel image, at
+/// most, plus the encoder's fixed state (#1368, #1477): the encoder's copy
+/// of the pixels (4 bytes a pixel) and its output, which a vector grows by
+/// doubling (a copy of the old beside the new). Measured, a 1000 x 1000
+/// image of independent random colours, which deflate barely shrinks, took
+/// 11.0 bytes a pixel at its peak (3.4 MB out of 4 MB of pixels), smoother
+/// ones less; 12 leaves room.
+fn png_encode_bytes(px: usize) -> usize {
+    px.saturating_mul(12).saturating_add(4096)
+}
+
 /// Units of work writing that second gradient for `stops` stops is: a tag a
 /// stop, about as much as painting 500 pixels.
 fn svg_second_gradient_work(stops: usize) -> u64 {
@@ -2971,6 +2982,14 @@ impl Gfx {
     ) -> Result<u64, PsError> {
         let canvas = (self.pixmap.width(), self.pixmap.height());
         let Some(key) = sp.svg.as_ref().and_then(|_| sp.svg_use_key(hop, canvas)) else {
+            // The image `makepattern` made serves this mark: the recorder
+            // writes it inline into a `<pattern>` before anything else is
+            // recorded, and the cap is looked at before it does (#1477).
+            if let (Some(svg), Some(img)) =
+                (&self.svg, sp.svg.as_ref().and_then(|v| v.image.as_ref()))
+            {
+                probe.check_alloc(svg.made_image_cost(img.0.len()))?;
+            }
             return Ok(0);
         };
         let Some(svg) = &self.svg else {
@@ -3022,7 +3041,7 @@ impl Gfx {
         let px = (rect.2 as usize).saturating_mul(rect.3 as usize);
         let encode_work = (px as u64).saturating_mul(PNG_ENCODE_UNITS);
         probe.check(work.saturating_add(encode_work) / 1024)?;
-        probe.check_alloc(px.saturating_mul(8).saturating_add(4096))?;
+        probe.check_alloc(png_encode_bytes(px))?;
         // An image embedded in an SVG, not a file pscat writes: no
         // resolution to record (as in `image.rs`).
         #[allow(clippy::disallowed_methods)]
@@ -6129,7 +6148,6 @@ impl Gfx {
         let geom = crate::pattern::geometry(&spec)?;
         crate::pattern::check_fold(&geom)?;
         let (cw, ch) = geom.content;
-        let (pw, ph) = geom.period;
         if self.captures.len() >= crate::pattern::MAX_CAPTURE_DEPTH {
             return Err(PsError::ExecStackOverflow);
         }
@@ -6141,7 +6159,7 @@ impl Gfx {
         if open + crate::pattern::tile_pixels(&geom) > crate::pattern::MAX_NESTED_PIXELS {
             return Err(PsError::Limitcheck);
         }
-        self.budget_allows((cw as usize * ch as usize + pw as usize * ph as usize) * 4)?;
+        self.budget_allows(crate::pattern::cell_bytes(&geom, true))?;
         let content = Pixmap::new(cw, ch).ok_or(PsError::Limitcheck)?;
         let to_gs = crate::pattern::capture_to_gs(&spec, &geom, origin.to_gs);
         let id = lazy.id;
@@ -6323,9 +6341,26 @@ impl Gfx {
     }
 
     /// The `PaintProc` returned: make the tile from what it painted.
+    ///
+    /// The period (and a lattice's oriented cell) are made now, after the
+    /// `PaintProc` has grown the heap since `begin_pattern` looked at it
+    /// (#1477): the heap is looked at again before they are, while the
+    /// capture is still open, and a refusal unwinds it as an error in the
+    /// `PaintProc` does, so the page, the SVG and the PDF are as they were
+    /// and the pattern runs again at its next use.
     pub(crate) fn end_pattern(
         &mut self,
     ) -> Result<std::rc::Rc<crate::pattern::PatternTile>, PsError> {
+        let bytes = self
+            .captures
+            .last()
+            .map(|cap| crate::pattern::cell_bytes(&cap.geom, false));
+        if let Some(bytes) = bytes
+            && let Err(e) = self.budget_allows(bytes)
+        {
+            self.abort_pattern();
+            return Err(e);
+        }
         let (mut cap, content, svg) = self.leave_capture();
         let svg = svg.map(|rec| rec.into_tile());
         // PDF's pattern matrix maps to the default space of the stream that
@@ -6452,10 +6487,32 @@ impl Gfx {
                 Some(rect) => {
                     let (layer, w) = shading_layer(&shading, None, matrix, rect, probe)?;
                     work += w;
+                    // The encoder copies the pixels and writes its output,
+                    // which deflate bounds by about the input: both held
+                    // against the cap while the layer is still live, and the
+                    // encoding's work against the step limit, before it runs
+                    // (#1477, as `svg_use_image` does).
+                    let px = (rect.2 as usize).saturating_mul(rect.3 as usize);
+                    let encode_work = (px as u64).saturating_mul(PNG_ENCODE_UNITS);
+                    probe.check(work.saturating_add(encode_work) / 1024)?;
+                    probe.check_alloc(png_encode_bytes(px))?;
                     // An image embedded in an SVG, not a file pscat writes: no
                     // resolution to record (as in `image.rs`).
                     #[allow(clippy::disallowed_methods)]
                     let png = layer.encode_png().map_err(|_| PsError::Limitcheck)?;
+                    drop(layer);
+                    // What the first mark that paints with it will write, and
+                    // a look at the clock after the encoding, before the
+                    // pattern is made.
+                    let write = self
+                        .svg
+                        .as_ref()
+                        .map_or(0, |svg| svg.made_image_cost(png.len()));
+                    probe.check_alloc(write)?;
+                    work = work
+                        .saturating_add(encode_work)
+                        .saturating_add(write as u64);
+                    probe.check(work / 1024)?;
                     Some((png, rect.2, rect.3, rect.0, rect.1))
                 }
                 None => None,

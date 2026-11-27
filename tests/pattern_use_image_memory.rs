@@ -297,4 +297,42 @@ fn foreign_use_images_never_take_the_heap_past_the_cap() {
         refused > 0 && fitted > 0,
         "the ladder crosses the image's size"
     );
+
+    // #1477: the image `makepattern` made is written inline into the SVG at
+    // the first mark that paints with it, as base64 and then a copy of it
+    // for each group around it. A cap that fits the pattern but not that
+    // write refuses the mark, whole: the page and the SVG as they were.
+    let used = format!("{} grad setpattern 0 0 100 100 rectfill", grad_n(1000, 512));
+    let (_, r, quiet, quiet_px, _) = run_full(1000, "", "", 400 * MIB);
+    assert_eq!(r, Ok(()));
+    let (_, r, svg, _, _) = run_full(1000, "", &used, 400 * MIB);
+    assert_eq!(r, Ok(()), "with room it is painted");
+    assert_eq!(svg.matches("<image ").count(), 1, "the image is written");
+    let (mut refused, mut fitted) = (0, 0);
+    for cap_mib in (16..=48).step_by(2) {
+        let cap = cap_mib * MIB;
+        let (peak, r, svg, px, _) = run_full(1000, "", &used, cap);
+        assert!(
+            peak <= cap + margin,
+            "cap {cap_mib} MiB: the heap grew {:.2} MiB past its start",
+            peak as f64 / MIB as f64
+        );
+        match r {
+            Ok(()) => fitted += 1,
+            Err(PsError::MemoryExceeded) => {
+                refused += 1;
+                if svg != quiet {
+                    // A refusal at the pattern's own making leaves both so;
+                    // one at the mark must too.
+                    panic!("cap {cap_mib} MiB: the SVG is not as it was");
+                }
+                assert!(px == quiet_px, "cap {cap_mib} MiB: the page is as it was");
+            }
+            Err(e) => panic!("cap {cap_mib} MiB: {e:?}"),
+        }
+    }
+    assert!(
+        refused > 0 && fitted > 0,
+        "the ladder crosses the write's size"
+    );
 }

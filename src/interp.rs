@@ -3489,10 +3489,13 @@ impl Interp {
     /// The `PaintProc` returned: make the tile, remember it with the
     /// pattern, and put the operator's operands back as they were.
     fn finish_pattern(&mut self, run: PatternRun) -> Result<(), PsError> {
-        let tile = self.gfx.end_pattern()?;
-        run.lazy.set_tile(tile);
+        let made = self.gfx.end_pattern();
+        // The operands go back whether or not the tile was made (#1477): a
+        // limit that refuses it leaves the marking operator's operands as
+        // they were, as one met inside the `PaintProc` does.
         self.ostack.truncate(run.keep);
         self.ostack.extend(run.saved);
+        run.lazy.set_tile(made?);
         Ok(())
     }
 

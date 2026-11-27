@@ -359,16 +359,17 @@ impl SvgRecorder {
                     Some(_) => None,
                     None => form.image.as_ref(),
                 };
-                let image = |png: &[u8], iw: u32, ih: u32, x: i32, y: i32| {
-                    format!(
+                // Written into `content` as it is encoded, so the base64 is
+                // not a second copy of itself beside the string it joins.
+                if let Some((png, iw, ih, x, y)) = made {
+                    let _ = write!(
+                        content,
                         "<image width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" \
                          transform=\"translate({x} {y})\" \
-                         xlink:href=\"data:image/png;base64,{}\"/>",
-                        base64(png)
-                    )
-                };
-                if let Some((png, iw, ih, x, y)) = made {
-                    content.push_str(&image(png, *iw, *ih, *x, *y));
+                         xlink:href=\"data:image/png;base64,"
+                    );
+                    base64_into(&mut content, png);
+                    content.push_str("\"/>");
                 }
                 if let Some(q) = &form.bbox {
                     let _ = write!(
@@ -431,27 +432,46 @@ impl SvgRecorder {
         if self.image_ids.contains_key(&(Rc::as_ptr(img) as usize)) {
             return 0;
         }
-        let need = img
-            .0
-            .len()
-            .div_ceil(3)
-            .saturating_mul(4)
-            .saturating_add(256);
-        let room = self.defs.capacity() - self.defs.len();
-        let grow = if room >= need {
-            0
-        } else {
-            self.defs
-                .len()
-                .saturating_add(need)
-                .max(self.defs.capacity().saturating_mul(2))
-        };
+        let need = Self::base64_bytes(img.0.len());
+        let grow = self.defs_growth(need);
         let table = if self.image_ids.len() == self.image_ids.capacity() {
             self.image_ids.capacity().max(4).saturating_mul(2 * 96)
         } else {
             0
         };
         need.saturating_add(grow).saturating_add(table)
+    }
+
+    /// The bytes of the base64 text of `png_len` bytes, and the tag around it.
+    fn base64_bytes(png_len: usize) -> usize {
+        png_len.div_ceil(3).saturating_mul(4).saturating_add(256)
+    }
+
+    /// What the defs string takes to grow by `need` bytes: nothing while it
+    /// has the room, else the copy `String` makes when it moves.
+    fn defs_growth(&self, need: usize) -> usize {
+        let room = self.defs.capacity() - self.defs.len();
+        if room >= need {
+            0
+        } else {
+            self.defs
+                .len()
+                .saturating_add(need)
+                .max(self.defs.capacity().saturating_mul(2))
+        }
+    }
+
+    /// The bytes recording a mark that paints with a shading's own image (the
+    /// one `makepattern` made, `png_len` bytes of PNG) would take, at most
+    /// (#1477): the image sits inline in a `<pattern>`, whose content the
+    /// clip and hop groups copy once each (two copies are alive at a time)
+    /// before it goes into the defs. A mark that has the pattern written
+    /// already is charged too, as the recorder does not tell which pen the
+    /// mark has: on purpose conservative.
+    pub(crate) fn made_image_cost(&self, png_len: usize) -> usize {
+        let need = Self::base64_bytes(png_len);
+        need.saturating_mul(2)
+            .saturating_add(self.defs_growth(need))
     }
 
     /// The id of `img`'s `<image>` def, written to the defs on first use.
