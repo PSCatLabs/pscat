@@ -25,9 +25,14 @@ tokenizer that skips comments and strings) and applied by rule, not by hand:
 
 | where | rule |
 |---|---|
-| `lib/paintkit.ps`, `lib/artkit.ps` | every helper procedure with one top-level definition, defined before the use |
+| `lib/paintkit.ps`, `lib/artkit.ps` | every helper procedure with one top-level definition, defined before the use, except paintkit's own public brushes and presets (`@summary` entries such as `pkribbon`, `pkfeather`, `pkflat`, `pigmix`), see below |
 | the other libraries | calls into artkit (and into another library their `@requires` line names) whose name is not that library's private prefix (`frnd`, `walkpath`, `scatter`, `scin`, `screct`, `scpath`, `mix3`, `grain`, `fiber`, `hatch`, `noiseinit`, `axialsh`, `showctr`, `pal`, `tfblock`, `rrect`, ...), plus the generic own helpers of `lib/graph.ps` |
 | left by name | see below |
+
+Load order: a library now needs what its `@requires` line names loaded first
+at load time, not only when a procedure runs (`//name` is scanned then).
+`tests/font_packs.rs` and `tests/libbind.rs` loaded lettering and surfacekit
+without artkit and were changed to load it first.
 
 Files changed: `artkit`, `paintkit`, `pagekit`, `fillkit`, `lettering`,
 `stipplekit`, `surfacekit`, `graph`, `drykit`, `drycrayon`, `drycharcoal`,
@@ -55,8 +60,15 @@ Files changed: `artkit`, `paintkit`, `pagekit`, `fillkit`, `lettering`,
   `sg*`, `rl*`, ...): a caller does not pick those names. Left for a later pass.
 - **The turtle commands** (`fd hop tl tr tpush tpop`), which a program may
   redefine to change what an L-system draws.
-- **`pktrowel`**: `pktrowelplane`'s `%%SelfTest` replaces it with a counter by
-  name to prove an ordering. Kept by name rather than rewriting that seam.
+- **paintkit's public brushes called by other paintkit procedures**
+  (`pkribbon`, `pkfeather`, `pkflat`, `pigmix`, `pkbroad`, ...) and
+  **`pktrowel`**: tests (`tests/paintkit.rs` wraps `pkribbon` to record its
+  calls; `pktrowelplane`'s `%%SelfTest` replaces `pktrowel` by a counter) and
+  programs redefine a public brush by name, and the other brushes built on it
+  follow. Those names carry the `pk` prefix, so a caller's local variable does
+  not hit them.
+- **`frnd`'s one forward reference** was removed by moving the one-line
+  `/frnd` above `/jit`; no other definition moved.
 
 ### A consequence to know
 
