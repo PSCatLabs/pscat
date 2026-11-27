@@ -7862,7 +7862,7 @@ fn canvas_rect(b: [f64; 4], (pw, ph): (u32, u32)) -> Option<(i32, i32, u32, u32)
         b[2].ceil().min(f64::from(pw)),
         b[3].ceil().min(f64::from(ph)),
     );
-    (x1 > x0 && y1 > y0).then(|| (x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32))
+    (x1 > x0 && y1 > y0).then_some((x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32))
 }
 
 fn corners_box(c: [(f64, f64); 4]) -> [f64; 4] {
