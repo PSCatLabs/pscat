@@ -83,6 +83,12 @@ struct PenSpace {
     stretch: f64,
 }
 
+/// [`Gfx::stroke_cost`]'s estimate of what a stroker call will do.
+struct StrokeCost {
+    units: u64,
+    bytes: usize,
+}
+
 /// What `Gfx::stroke` paints: a device path for tiny-skia's stroker, a
 /// pen-space outline to fill mapped by L, or a sub-pixel pen's segments
 /// grouped by device width.
@@ -256,6 +262,26 @@ pub struct PsPath {
     segs: Vec<Seg>,
     current: Option<DevPoint>,
     subpath_start: Option<DevPoint>,
+    /// What `setbbox` set (#1264): the device box every point added to the
+    /// path must lie in, `[x0, y0, x1, y1]`. A path property as in gs, so
+    /// `newpath` forgets it and `grestore` brings the old one back.
+    bbox: Option<[f32; 4]>,
+}
+
+/// How much `setbbox` widens its box on every side, in device pixels:
+/// 3/256, which gs does (`0 0 10 10 setbbox pathbbox` is `-0.0117 -0.0117
+/// 10.0117 10.0117`). The box is looked at in 1/256 steps, gs's own grid.
+const BBOX_RIM: f32 = 3.0 / 256.0;
+
+/// A path as it was, for taking back what an operator that failed part-way
+/// had added ([`PsPath::mark`]). The newest segment is kept because a
+/// `moveto` after a `moveto` overwrites it in place.
+pub(crate) struct PathMark {
+    len: usize,
+    last: Option<Seg>,
+    current: Option<DevPoint>,
+    subpath_start: Option<DevPoint>,
+    bbox: Option<[f32; 4]>,
 }
 
 impl PsPath {
@@ -379,6 +405,191 @@ impl PsPath {
     pub(crate) fn curve_to(&mut self, c1: DevPoint, c2: DevPoint, p: DevPoint) {
         self.segs.push(Seg::Curve(c1, c2, p));
         self.current = Some(p);
+    }
+
+    /// How many segments the path has.
+    pub(crate) fn seg_count(&self) -> usize {
+        self.segs.len()
+    }
+
+    /// Segment `i` as `pathforall` lists it, in device space.
+    pub(crate) fn element_at(&self, i: usize) -> Option<PathElement> {
+        self.segs.get(i).map(|s| match *s {
+            Seg::Move(p) => PathElement::Move(p),
+            Seg::Line(p) => PathElement::Line(p),
+            Seg::Curve(a, b, p) => PathElement::Curve(a, b, p),
+            Seg::Close => PathElement::Close,
+        })
+    }
+
+    /// Where the path stands now, for [`rollback`](Self::rollback).
+    fn mark(&self) -> PathMark {
+        PathMark {
+            len: self.segs.len(),
+            last: self.segs.last().cloned(),
+            current: self.current,
+            subpath_start: self.subpath_start,
+            bbox: self.bbox,
+        }
+    }
+
+    /// Take back everything added since `mark`, including a `moveto` that
+    /// overwrote the newest segment: the path is as it was.
+    fn rollback(&mut self, mark: PathMark) {
+        self.segs.truncate(mark.len);
+        if let (Some(last), Some(slot)) = (mark.last, self.segs.last_mut()) {
+            *slot = last;
+        }
+        self.current = mark.current;
+        self.subpath_start = mark.subpath_start;
+        self.bbox = mark.bbox;
+    }
+
+    /// Whether `p` lies in the `setbbox` box, if there is one. gs compares
+    /// in 1/256 steps (it keeps every path point on that grid), so a
+    /// coordinate a hair past the rim still rounds onto it.
+    fn bbox_allows(&self, p: DevPoint) -> bool {
+        let Some(b) = self.bbox else { return true };
+        let q = |v: f32| (f64::from(v) * 256.0).round();
+        q(p.x) >= q(b[0]) && q(p.x) <= q(b[2]) && q(p.y) >= q(b[1]) && q(p.y) <= q(b[3])
+    }
+
+    /// The points of the segments from `from` on, in a form the `setbbox`
+    /// check can walk (control points included).
+    fn bbox_allows_from(&self, from: usize) -> bool {
+        self.segs[from.min(self.segs.len())..]
+            .iter()
+            .all(|s| match *s {
+                Seg::Move(p) | Seg::Line(p) => self.bbox_allows(p),
+                Seg::Curve(a, b, p) => [a, b, p].into_iter().all(|q| self.bbox_allows(q)),
+                Seg::Close => true,
+            })
+    }
+
+    /// The subpaths of this path whose box (control points included) meets
+    /// `rect`, `[x0, y0, x1, y1]` in device space, each beginning with its
+    /// own `moveto` (#1264). For a fill this is exact, since a subpath is
+    /// closed by a fill and a point outside its box has winding zero for
+    /// it; for a stroke `rect` is the pixel grown by how far a stroke can
+    /// reach. A path of a million subpaths and a pixel that touches three
+    /// of them is then three subpaths' work for everything after this.
+    ///
+    /// One pass, the probe looked at every [`FLATTEN_POLL`] segments with
+    /// the copy's heap growth in view, and the whole count held against the
+    /// step limit at the end (a step per 1024 segments scanned, which the
+    /// operator charges too).
+    pub(crate) fn near(
+        &self,
+        rect: [f32; 4],
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<PsPath, PsError> {
+        const EMPTY: [f32; 4] = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let mut out = PsPath::default();
+        // The subpath being scanned: its segments `lo..i`, its box, and the
+        // point it starts at, which a subpath begun by a lineto after a
+        // closepath takes from the one before it.
+        let (mut lo, mut closed) = (0usize, false);
+        let (mut bb, mut origin, mut implicit) = (EMPTY, None::<DevPoint>, None::<DevPoint>);
+        let mut keep = |segs: &[Seg], bb: [f32; 4], implicit: Option<DevPoint>| {
+            let meets = !(bb[0] > rect[2] || bb[2] < rect[0] || bb[1] > rect[3] || bb[3] < rect[1]);
+            if meets && !segs.is_empty() {
+                out.segs.extend(implicit.map(Seg::Move));
+                out.segs.extend_from_slice(segs);
+            }
+        };
+        let grow = |bb: &mut [f32; 4], p: DevPoint| {
+            bb[0] = bb[0].min(p.x);
+            bb[1] = bb[1].min(p.y);
+            bb[2] = bb[2].max(p.x);
+            bb[3] = bb[3].max(p.y);
+        };
+        for (i, seg) in self.segs.iter().enumerate() {
+            let begins = i > 0
+                && match seg {
+                    Seg::Move(_) => true,
+                    Seg::Line(_) | Seg::Curve(..) => closed,
+                    Seg::Close => false,
+                };
+            if begins {
+                keep(&self.segs[lo..i], bb, implicit);
+                (lo, closed, bb, implicit) = (i, false, EMPTY, None);
+            }
+            if i == lo {
+                // A subpath's first segment: a moveto names its start, any
+                // other segment starts where the subpath before left off.
+                match seg {
+                    Seg::Move(p) => origin = Some(*p),
+                    _ => {
+                        implicit = origin;
+                        if let Some(p) = origin {
+                            grow(&mut bb, p);
+                        }
+                    }
+                }
+            }
+            match *seg {
+                Seg::Move(p) | Seg::Line(p) => grow(&mut bb, p),
+                Seg::Curve(a, b, p) => [a, b, p].into_iter().for_each(|q| grow(&mut bb, q)),
+                Seg::Close => closed = true,
+            }
+            if i % FLATTEN_POLL == FLATTEN_POLL - 1 {
+                probe.check((i / 1024) as u64)?;
+            }
+        }
+        keep(&self.segs[lo..], bb, implicit);
+        probe.check((self.segs.len() / 1024) as u64)?;
+        out.current = self.current;
+        out.subpath_start = self.subpath_start;
+        Ok(out)
+    }
+
+    /// This path cut into pieces of about `max_segs` segments, each a
+    /// whole number of subpaths (a single subpath longer than that is a
+    /// piece of its own). Needs every subpath to begin with a `moveto`, as
+    /// [`near`](Self::near) leaves them.
+    fn groups(&self, max_segs: usize) -> impl Iterator<Item = PsPath> + '_ {
+        let mut at = 0;
+        std::iter::from_fn(move || {
+            if at >= self.segs.len() {
+                return None;
+            }
+            let mut end = at + 1;
+            while end < self.segs.len()
+                && (end - at < max_segs || !matches!(self.segs[end], Seg::Move(_)))
+            {
+                end += 1;
+            }
+            let piece = PsPath {
+                segs: self.segs[at..end].to_vec(),
+                ..PsPath::default()
+            };
+            at = end;
+            Some(piece)
+        })
+    }
+
+    /// [`to_skia`](Self::to_skia) with every point moved by `(-dx, -dy)`:
+    /// the hit tests rasterise the one pixel at `(dx, dy)` as the pixel at
+    /// the origin of a 1 x 1 mask. Subtracting a whole number keeps what
+    /// is near the pixel exact.
+    fn to_skia_shifted(&self, dx: f32, dy: f32) -> Option<tiny_skia::Path> {
+        let mut pb = PathBuilder::new();
+        for seg in &self.segs {
+            match *seg {
+                Seg::Move(p) => pb.move_to(p.x - dx, p.y - dy),
+                Seg::Line(p) => pb.line_to(p.x - dx, p.y - dy),
+                Seg::Curve(a, b, p) => {
+                    pb.cubic_to(a.x - dx, a.y - dy, b.x - dx, b.y - dy, p.x - dx, p.y - dy)
+                }
+                Seg::Close => pb.close(),
+            }
+        }
+        pb.finish()
     }
 
     /// Snapshot for `pathforall` enumeration.
@@ -687,6 +898,7 @@ impl PsPath {
             segs,
             current: self.current.and_then(map),
             subpath_start: self.subpath_start.and_then(map),
+            bbox: None,
         })
     }
 
@@ -1700,6 +1912,10 @@ const ARC_POLL: usize = 4096;
 /// Segments `flattenpath` writes between looks at the limits (#1188).
 const FLATTEN_POLL: usize = 4096;
 
+/// Segments of path one stroker call is given when `instroke` strokes a
+/// path's subpaths a group at a time (#1264).
+const STROKE_GROUP: usize = 4096;
+
 /// `while a2 < a1 { a2 += TAU }` (`up`), or `while a2 > a1 { a2 -= TAU }`,
 /// the bits of the result exactly as that loop leaves them, without its trip
 /// per turn (#1176). Inside one binade (one sign and exponent) every value is
@@ -2173,19 +2389,63 @@ impl Gfx {
         self.state.path.move_to(p);
     }
 
+    /// The path as it stands, to be given to [`path_finish`](Self::path_finish).
+    pub(crate) fn path_mark(&self) -> PathMark {
+        self.state.path.mark()
+    }
+
+    /// Forget the current point, so a user path that begins with a `lineto`
+    /// finds none, as in gs: it is not an extension of the path's last
+    /// subpath. The path itself is untouched.
+    pub(crate) fn path_detach(&mut self) {
+        self.state.path.current = None;
+        self.state.path.subpath_start = None;
+    }
+
+    /// End an operator that added to the path in several steps: on failure
+    /// everything since `mark` is taken back; on success the path keeps what
+    /// it added and goes back to the `setbbox` box it had.
+    pub(crate) fn path_finish(&mut self, mark: PathMark, ok: bool) {
+        if ok {
+            let path = &mut self.state.path;
+            path.bbox = mark.bbox;
+            // A user path that made no point leaves the current point as
+            // it was ([`path_detach`](Self::path_detach)).
+            if path.current.is_none() {
+                path.current = mark.current;
+                path.subpath_start = mark.subpath_start;
+            }
+        } else {
+            self.state.path.rollback(mark);
+        }
+    }
+
+    /// `moveto` as the operator does it: a point outside the box `setbbox`
+    /// set is a `rangecheck` (#1264), and the path is as it was.
+    pub fn moveto_checked(&mut self, x: f64, y: f64) -> Result<(), PsError> {
+        let p = self.user_to_device(x, y);
+        if !self.state.path.bbox_allows(p) {
+            return Err(PsError::Rangecheck);
+        }
+        self.state.path.move_to(p);
+        Ok(())
+    }
+
     pub fn lineto(&mut self, x: f64, y: f64) -> Result<(), PsError> {
         if self.state.path.current().is_none() {
             return Err(PsError::NoCurrentPoint);
         }
         let p = self.user_to_device(x, y);
+        if !self.state.path.bbox_allows(p) {
+            return Err(PsError::Rangecheck);
+        }
         self.state.path.line_to(p);
         Ok(())
     }
 
     pub fn rmoveto(&mut self, dx: f64, dy: f64) -> Result<(), PsError> {
         let (x, y) = self.current_user_point()?;
-        self.moveto(x + dx, y + dy);
-        Ok(())
+        self.moveto_checked(x + dx, y + dy)
     }
 
     pub fn rlineto(&mut self, dx: f64, dy: f64) -> Result<(), PsError> {
@@ -2209,6 +2469,12 @@ impl Gfx {
         let c1 = self.user_to_device(x1, y1);
         let c2 = self.user_to_device(x2, y2);
         let p = self.user_to_device(x3, y3);
+        if ![c1, c2, p]
+            .into_iter()
+            .all(|q| self.state.path.bbox_allows(q))
+        {
+            return Err(PsError::Rangecheck);
+        }
         self.state.path.curve_to(c1, c2, p);
         Ok(())
     }
@@ -2283,11 +2549,13 @@ impl Gfx {
 
         let point_at = |a: f64| (cx + r * fmath::cos(a), cy + r * fmath::sin(a));
         let start = point_at(a1);
+        // What a `setbbox` box refuses is taken back whole at the end.
+        let mark = self.state.path.mark();
         // Arc connects to an existing path with a line, else starts one.
         if self.state.path.current().is_some() {
             self.lineto(start.0, start.1)?;
         } else {
-            self.moveto(start.0, start.1);
+            self.moveto_checked(start.0, start.1)?;
         }
 
         let sweep = a2 - a1;
@@ -2311,6 +2579,12 @@ impl Gfx {
             let p = self.user_to_device(x3, y3);
             self.state.path.curve_to(c1, c2, p);
             a = b;
+        }
+        if self.state.path.bbox.is_some()
+            && !self.state.path.bbox_allows_from(mark.len.saturating_sub(1))
+        {
+            self.state.path.rollback(mark);
+            return Err(PsError::Rangecheck);
         }
         Ok(n)
     }
@@ -3498,7 +3772,9 @@ impl Gfx {
         };
         let mut work = 0;
         let dropped = self.stroke_dropped();
-        let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
+        let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path), &|| {
+            self.state.path.device_length()
+        });
         let (stroke, scaled_dash) = self.stroke_params(pen.as_ref());
         // In pen space (#1196) the outline is made here and filled, mapped
         // by L, which is what tiny-skia's `stroke_path` does for any pen it
@@ -3838,28 +4114,237 @@ impl Gfx {
     /// a lone moveto, a zero-length subpath under butt caps) leaves an
     /// empty path, as in gs.
     pub fn stroke_path(&mut self) {
-        let dropped = self.stroke_dropped();
-        let pen = self.stroke_space(dropped.as_ref().unwrap_or(&self.state.path));
-        let (stroke, _) = self.stroke_params(pen.as_ref());
-        let outline = match &pen {
-            Some(pen) => self
-                .pen_outline(pen, &stroke)
-                .and_then(|o| o.transform(pen.to_device)),
-            None => dropped
-                .as_ref()
-                .unwrap_or(&self.state.path)
-                .to_skia_for_stroke(stroke.width)
-                .and_then(|path| {
-                    let dashed = match &stroke.dash {
-                        Some(d) => path.dash(d, 1.0)?,
-                        None => path,
-                    };
-                    dashed.stroke(&stroke, 1.0)
-                }),
-        };
+        // No limit to exceed, so it cannot fail.
+        let _ = self.stroke_path_limited(&crate::limits::LimitProbe::NONE);
+    }
+
+    /// [`stroke_path`](Self::stroke_path) under the limits (#1264). tiny-skia's
+    /// stroker and dasher cannot be stopped once they run, so what they will
+    /// make is estimated first ([`PsPath::stroke_cost`]) and held against
+    /// the step limit and the heap cap before the call. The path is replaced
+    /// only by a finished outline, so a limit leaves it as it was. Gives the
+    /// work, for the operator to charge a step per 1024 units.
+    ///
+    /// What stays unbounded is the time of one stroker call on one subpath
+    /// of many segments, which the estimate prices but cannot interrupt.
+    pub(crate) fn stroke_path_limited(
+        &mut self,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<u64, PsError> {
+        let path = &self.state.path;
+        let cost = self.stroke_cost(path);
+        probe.check_alloc(cost.bytes)?;
+        probe.check(cost.units / 1024)?;
+        let outline = self.stroke_outline_of(path, &|| path.device_length());
+        let work = cost
+            .units
+            .saturating_add(outline.as_ref().map_or(0, |o| o.len() as u64));
+        probe.check(work / 1024)?;
         self.state.path = outline
             .as_ref()
             .map_or_else(PsPath::default, PsPath::from_skia);
+        Ok(work)
+    }
+
+    /// The corner of the device pixel the device point `d` is in (`None`
+    /// for a point that is not on the device at all).
+    fn hit_pixel(d: DevPoint) -> Option<(f32, f32)> {
+        let (px, py) = (d.x.floor(), d.y.floor());
+        (px.is_finite() && py.is_finite()).then_some((px, py))
+    }
+
+    /// Whether `shifted` (a path made so the pixel under test is the one at
+    /// the origin) puts ink on that pixel: the area-coverage rasteriser fill
+    /// uses, on a 1 x 1 mask, so the answer is whether pscat's own `fill`
+    /// would paint it. Gives the rasteriser's work too.
+    fn pixel_inked(
+        shifted: &tiny_skia::Path,
+        rule: FillRule,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(bool, u64), PsError> {
+        let Some(mut mask) = tiny_skia::Mask::new(1, 1) else {
+            return Ok((false, 0));
+        };
+        let (runs, work) =
+            crate::coverage::rasterize_limited(shifted, rule.into(), &mut mask, None, probe)?;
+        // A pixel the path covers wholly is a solid run, which is not
+        // written into the mask.
+        let inked = mask.data().first().is_some_and(|c| *c > 0) || runs.iter().any(|r| r.solid);
+        Ok((inked, work))
+    }
+
+    /// `infill` / `ineofill` (#1264): whether `fill` (`rule`) of the current
+    /// path would paint the device pixel the device point `at` is in,
+    /// whatever the clip, the page and the paint say. Nothing is painted
+    /// and the path is not touched.
+    ///
+    /// Only the subpaths that meet the pixel are rasterised ([`PsPath::near`]),
+    /// all of it under the limits: the scan is polled and held against the
+    /// heap cap, and the rasteriser looks at the probe as it goes. Gives
+    /// the work (segments scanned plus the rasteriser's), a step per 1024.
+    pub(crate) fn hit_fill(
+        &self,
+        rule: FillRule,
+        at: DevPoint,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(bool, u64), PsError> {
+        let Some((px, py)) = Self::hit_pixel(at) else {
+            return Ok((false, 0));
+        };
+        let scanned = self.state.path.segs.len() as u64;
+        let near = self.state.path.near([px, py, px + 1.0, py + 1.0], probe)?;
+        let Some(shifted) = near.to_skia_shifted(px, py) else {
+            return Ok((false, scanned));
+        };
+        let (inked, work) = Self::pixel_inked(&shifted, rule, probe)?;
+        Ok((inked, scanned.saturating_add(work)))
+    }
+
+    /// `instroke` (#1264): whether `stroke` of the current path would paint
+    /// the pixel the device point `at` is in. The subpaths a stroke can
+    /// reach the pixel from are found first (the pixel grown by half the
+    /// widest the pen is, times the miter limit or a square cap's corner),
+    /// and they are stroked a group at a time, each group priced and held
+    /// against the limits before tiny-skia's stroker runs, the first group
+    /// that inks the pixel ending it. A subpath's dashes and joins do not
+    /// depend on any other subpath, so the strokes of the groups together
+    /// are the stroke of the whole.
+    pub(crate) fn hit_stroke(
+        &self,
+        at: DevPoint,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<(bool, u64), PsError> {
+        // A pen with no area draws nothing, as gs finds.
+        let m = &self.state.ctm;
+        let det = f64::from(m.sx) * f64::from(m.sy) - f64::from(m.kx) * f64::from(m.ky);
+        if !(det.is_finite() && det != 0.0) {
+            return Ok((false, 0));
+        }
+        let Some((px, py)) = Self::hit_pixel(at) else {
+            return Ok((false, 0));
+        };
+        let reach = self.stroke_reach();
+        let rect = [px - reach, py - reach, px + 1.0 + reach, py + 1.0 + reach];
+        let full = &self.state.path;
+        let mut work = full.segs.len() as u64;
+        let near = full.near(rect, probe)?;
+        // The length of the whole path decides the pen for a dashed
+        // anisotropic stroke; found once, on the first group that asks.
+        let length = std::cell::OnceCell::new();
+        let full_len = || *length.get_or_init(|| full.device_length());
+        for group in near.groups(STROKE_GROUP) {
+            let cost = self.stroke_cost(&group);
+            work = work.saturating_add(cost.units);
+            probe.check_alloc(cost.bytes)?;
+            probe.check(work / 1024)?;
+            let Some(outline) = self.stroke_outline_of(&group, &full_len) else {
+                continue;
+            };
+            let Some(shifted) = outline.transform(Transform::from_translate(-px, -py)) else {
+                continue;
+            };
+            work = work.saturating_add(shifted.len() as u64);
+            let (inked, w) = Self::pixel_inked(&shifted, FillRule::Winding, probe)?;
+            work = work.saturating_add(w);
+            if inked {
+                return Ok((true, work));
+            }
+        }
+        Ok((false, work))
+    }
+
+    /// How far, in device pixels, a stroke of the current path can lie from
+    /// the path: half the pen's widest extent (the width times the CTM's
+    /// Frobenius norm, which is never under its larger singular value)
+    /// times the miter limit or a square cap's corner, whichever is larger,
+    /// and two pixels over.
+    fn stroke_reach(&self) -> f32 {
+        let m = &self.state.ctm;
+        let norm = f64::from(m.sx * m.sx + m.kx * m.kx + m.ky * m.ky + m.sy * m.sy).sqrt();
+        let width = if self.state.line_width <= 0.0 {
+            1.0
+        } else {
+            (self.state.line_width * norm).max(0.1)
+        };
+        let miter = f64::from(self.state.miter_limit).max(std::f64::consts::SQRT_2);
+        let reach = width * 0.5 * miter + 2.0;
+        if reach.is_finite() {
+            reach as f32
+        } else {
+            f32::MAX
+        }
+    }
+
+    /// The outline `stroke` would paint for `path` under the current line
+    /// settings and CTM, as a device-space path (`None` for no ink): the
+    /// zero-length subpaths a square cap does not draw left out, then the
+    /// pen either round in device space or, under an anisotropic CTM,
+    /// stroked in pen space and mapped back (#1196). `full_len` is the
+    /// length of the whole path the `path` is a part of, which decides
+    /// whether a dash is long enough to need that pen space.
+    fn stroke_outline_of(
+        &self,
+        path: &PsPath,
+        full_len: &dyn Fn() -> f32,
+    ) -> Option<tiny_skia::Path> {
+        let dropped = self.dropped_of(path);
+        let path = dropped.as_ref().unwrap_or(path);
+        let pen = self.stroke_space(path, full_len);
+        let (stroke, _) = self.stroke_params(pen.as_ref());
+        match &pen {
+            Some(pen) => self
+                .pen_outline(pen, &stroke)
+                .and_then(|o| o.transform(pen.to_device)),
+            None => path.to_skia_for_stroke(stroke.width).and_then(|path| {
+                let dashed = match &stroke.dash {
+                    Some(d) => path.dash(d, 1.0)?,
+                    None => path,
+                };
+                dashed.stroke(&stroke, 1.0)
+            }),
+        }
+    }
+
+    /// What stroking `path` costs, estimated before the stroker runs
+    /// (#1264): units of work (a line 8, a curve 64, a dash 2) and the
+    /// heap the outline may take (a line 256 bytes, a curve 4 KiB, a dash
+    /// 128). A dash pattern is priced by how many dashes the path's
+    /// length makes, since a short pattern on a long path is millions of
+    /// pieces. Generous on purpose: it decides only what a limit refuses.
+    fn stroke_cost(&self, path: &PsPath) -> StrokeCost {
+        let (mut lines, mut curves) = (0u64, 0u64);
+        for seg in &path.segs {
+            match seg {
+                Seg::Line(_) | Seg::Close => lines += 1,
+                Seg::Curve(..) => curves += 1,
+                Seg::Move(_) => {}
+            }
+        }
+        let dashes = match &self.state.dash {
+            Some((pattern, _)) => {
+                let period = pattern.iter().map(|d| d.abs()).sum::<f64>() * self.ctm_scale();
+                if period > 0.0 {
+                    let pieces = f64::from(path.device_length()) / period + 1.0;
+                    (pieces * pattern.len().max(1) as f64).min(1e15) as u64
+                } else {
+                    0
+                }
+            }
+            None => 0,
+        };
+        StrokeCost {
+            units: lines
+                .saturating_mul(8)
+                .saturating_add(curves.saturating_mul(64))
+                .saturating_add(dashes.saturating_mul(2)),
+            bytes: usize::try_from(
+                lines
+                    .saturating_mul(256)
+                    .saturating_add(curves.saturating_mul(4096))
+                    .saturating_add(dashes.saturating_mul(128)),
+            )
+            .unwrap_or(usize::MAX),
+        }
     }
 
     /// The current path without its zero-length subpaths, when they must
@@ -3872,8 +4357,13 @@ impl Gfx {
     /// still makes a dot. Zero-length dashes of a real subpath are not
     /// subpaths and stay.
     fn stroke_dropped(&self) -> Option<PsPath> {
+        self.dropped_of(&self.state.path)
+    }
+
+    /// [`stroke_dropped`](Self::stroke_dropped) for any path.
+    fn dropped_of(&self, path: &PsPath) -> Option<PsPath> {
         if self.state.line_cap == LineCap::Square {
-            self.state.path.without_point_subpaths(true)
+            path.without_point_subpaths(true)
         } else {
             None
         }
@@ -3905,7 +4395,7 @@ impl Gfx {
     /// (`σ²` past 10⁶) or a path so far out that pen space leaves f32
     /// range: those keep the device-space approximation rather than risk
     /// a stroke tiny-skia would silently drop.
-    fn stroke_space(&self, path: &PsPath) -> Option<PenSpace> {
+    fn stroke_space(&self, path: &PsPath, full_len: &dyn Fn() -> f32) -> Option<PenSpace> {
         const MAX_ERROR_PX: f64 = 1.0 / 16.0;
         const MAX_NORM_SQ: f64 = 1e6;
         if self.state.line_width <= 0.0 {
@@ -3938,7 +4428,7 @@ impl Gfx {
             1.0
         });
         let pen_error = excess * self.state.line_width * s / 2.0 * reach;
-        let dash_error = || excess * f64::from(self.state.path.device_length());
+        let dash_error = || excess * f64::from(full_len());
         if pen_error <= MAX_ERROR_PX && (self.state.dash.is_none() || dash_error() <= MAX_ERROR_PX)
         {
             return None;
@@ -6513,16 +7003,73 @@ impl Gfx {
         Some(out)
     }
 
+    /// `setbbox` (PLRM 3rd ed., #1264): the box, in user space, that every
+    /// point later added to the current path must lie in (a `rangecheck`
+    /// otherwise). As in gs it is kept in device space, widened by
+    /// [`BBOX_RIM`], and with `join_path` (the operator) joins whatever the
+    /// path already has: the box a `setbbox` before it set, or else the
+    /// path's own points. A user path's own `setbbox` does not join them:
+    /// its box is exactly what it says. `pathbbox`
+    /// answers it. A path property: `newpath` drops it, `grestore` gives
+    /// back the one `gsave` kept. A box with `llx > urx` or `lly > ury` is
+    /// a `rangecheck`.
+    pub fn set_bbox(
+        &mut self,
+        llx: f64,
+        lly: f64,
+        urx: f64,
+        ury: f64,
+        join_path: bool,
+    ) -> Result<(), PsError> {
+        if !(llx <= urx && lly <= ury) {
+            return Err(PsError::Rangecheck);
+        }
+        let corners = [(llx, lly), (urx, lly), (urx, ury), (llx, ury)]
+            .map(|(x, y)| self.user_to_device(x, y));
+        let mut b = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        for p in corners {
+            b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
+        }
+        b = [
+            b[0] - BBOX_RIM,
+            b[1] - BBOX_RIM,
+            b[2] + BBOX_RIM,
+            b[3] + BBOX_RIM,
+        ];
+        let held = self
+            .state
+            .path
+            .bbox
+            .or_else(|| self.state.path.device_bbox());
+        if let (true, Some(o)) = (join_path, held) {
+            b = [
+                b[0].min(o[0]),
+                b[1].min(o[1]),
+                b[2].max(o[2]),
+                b[3].max(o[3]),
+            ];
+        }
+        self.state.path.bbox = Some(b);
+        Ok(())
+    }
+
     /// `pathbbox`: the user-space box of the path's device-space bounding
     /// box, as Ghostscript computes it (issue #288). The device box is
     /// taken first (control points included), then its four corners are mapped back through the inverse CTM and
     /// min/maxed. Under a rotation or skew that is larger than the tight
     /// user-space box of the path; with an axis-aligned CTM the two agree.
     pub fn path_bbox(&self) -> Result<(f64, f64, f64, f64), PsError> {
+        // The box `setbbox` set is what gs answers, rim and all (#1264).
         let [dlx, dly, dux, duy] = self
             .state
             .path
-            .device_bbox()
+            .bbox
+            .or_else(|| self.state.path.device_bbox())
             .ok_or(PsError::NoCurrentPoint)?;
         let (mut lx, mut ly, mut ux, mut uy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
         for (x, y) in [(dlx, dly), (dux, dly), (dux, duy), (dlx, duy)] {

@@ -5,10 +5,10 @@
 //! and its output is pinned here. `ghostscript_prints_the_pinned_output`
 //! re-checks every case where gs is installed (CI requires it).
 //!
-//! The probes stay clear of the one place gs and pscat differ on purpose:
-//! a stroke's far edge on the page's bottom side, where gs also counts the
-//! pixel the edge touches (`tests/upath.rs`, `DEVIATIONS`, and
-//! `notes/1264-hit-testing-and-user-paths.md`).
+//! gs runs with stroke adjustment off (the prelude says `false
+//! setstrokeadjust`): with it on, gs moves a stroke's edges onto pixel
+//! boundaries and answers `instroke` for a pixel its adjusted edge only
+//! touches, which pscat, that does not adjust, does not.
 
 mod common;
 
@@ -39,6 +39,7 @@ const PRELUDE: &str = r#"/pa { 32 string cvs print ( ) print } def
 /nl { (\n) print } def
 /SQ { 0 0 100 100 setbbox 10 10 moveto 20 10 lineto 20 20 lineto 10 20 lineto closepath } cvlit def
 /q { 256 mul round cvi pa } def
+false setstrokeadjust
 "#;
 
 /// (what, program, gs's output).
@@ -495,8 +496,8 @@ const CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "setbbox: a point on the 3/256 rim",
-        r#"newpath 0 0 10 10 setbbox 10 10 moveto 10.01171875 10 lineto dump"#,
-        "m 10.0 10.0 l 10.0117 10.0 @ 10.0117 10.0 \n",
+        r#"newpath 0 0 10 10 setbbox 10 10 moveto 10.01171875 10 lineto currentpoint q q nl"#,
+        "2560 2563 \n",
     ),
     (
         "setbbox: a point past the 3/256 rim",
@@ -730,9 +731,9 @@ const CASES: &[(&str, &str, &str)] = &[
         "TFTTTFF\n",
     ),
     (
-        "instroke: miter and bevel corners",
-        r#"newpath 10 10 moveto 30 10 lineto 30 30 lineto 4 setlinewidth 31.5 8.5 ps 0 setlinejoin 31.5 8.5 ps 2 setlinejoin 31.5 8.5 ps 31 8 ps nl"#,
-        "TTTF\n",
+        "instroke: miter, round and bevel corners",
+        r#"newpath 10 10 moveto 30 10 lineto 30 30 lineto 4 setlinewidth 31.5 8.5 ps 1 setlinejoin 31.5 8.5 ps 31.9 8.1 ps 2 setlinejoin 31.5 8.5 ps 30.5 9.5 ps 31 8 ps 0 setlinejoin 32 8 ps 32.5 8 ps nl"#,
+        "TTTFTFFF\n",
     ),
     (
         "instroke: a round join",
@@ -923,12 +924,12 @@ const CASES: &[(&str, &str, &str)] = &[
     (
         "ustrokepath at width 2",
         r#"newpath 2 setlinewidth { 0 0 100 100 setbbox 10 10 moveto 20 10 lineto } ustrokepath pb"#,
-        "2560 2176 5120 2688 \n",
+        "2560 2304 5120 2816 \n",
     ),
     (
         "ustrokepath: round caps",
         r#"newpath 2 setlinewidth 1 setlinecap { 0 0 100 100 setbbox 10 10 moveto 20 10 lineto } ustrokepath pb"#,
-        "2304 2176 5376 2688 \n",
+        "2304 2304 5376 2816 \n",
     ),
     (
         "ustrokepath leaves the CTM",
@@ -938,7 +939,7 @@ const CASES: &[(&str, &str, &str)] = &[
     (
         "ustrokepath with a translating matrix",
         r#"newpath 2 setlinewidth { 0 0 100 100 setbbox 10 10 moveto 20 10 lineto } [1 0 0 1 5 7] ustrokepath pb"#,
-        "2560 2176 5120 2688 \n",
+        "2560 2304 5120 2816 \n",
     ),
     (
         "ustrokepath: errors leave the path",
