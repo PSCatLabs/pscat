@@ -92,6 +92,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "pathbbox", pathbbox);
     op(dict, "pathforall", pathforall);
     op(dict, "flattenpath", flattenpath);
+    op(dict, "reversepath", reversepath);
     // Coordinate system (the matrix-operand forms live in ops::matrix)
     op(dict, "translate", translate);
     op(dict, "scale", scale);
@@ -400,6 +401,16 @@ fn flattenpath(it: &mut Interp) -> Result<(), PsError> {
     // A step per 1024 segments (#1188). The probe has already held the
     // whole count against the step limit, before the path was replaced, so
     // this only counts them.
+    it.charge_probed_steps((segments / 1024) as u64);
+    Ok(())
+}
+
+/// `reversepath` (#1266), under the limits as `flattenpath` is: the copy is
+/// held against the heap cap first, the probe is looked at as it is written,
+/// and a step is charged per 1024 segments.
+fn reversepath(it: &mut Interp) -> Result<(), PsError> {
+    let probe = it.limit_probe();
+    let segments = it.gfx.reverse_path(&probe)?;
     it.charge_probed_steps((segments / 1024) as u64);
     Ok(())
 }
