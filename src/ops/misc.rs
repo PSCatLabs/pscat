@@ -99,7 +99,7 @@ fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
             _ => None,
         })
     });
-    let text = command.as_ref().map(|c| c.cvs_text());
+    let text = command.as_ref().map(|c| c.text());
     if let Some(c) = command {
         it.set_error_command(c);
     }
@@ -164,7 +164,7 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
             // An operator (what a failed operator leaves, #1047) by name,
             // as the CLI report gives it.
             d.get("command")
-                .map(|o| cap_text(&o.cvs_text(), ERROR_NAME_LIMIT)),
+                .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
         )
     };
     let line = format!(
@@ -180,34 +180,60 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn print_text(it: &mut Interp) -> Result<(), PsError> {
-    print_top(it, Object::text, true)
+    print_top(it, Form::Text, true)
 }
 
 fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
-    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), true)
+    print_top(it, Form::Syntactic, true)
 }
 
 /// `=only` and `==only` (#1413), Ghostscript extensions outside the PLRM:
 /// exactly `=` and `==` minus the trailing newline. They share
 /// [`print_top`], so the two forms cannot drift apart.
 fn print_text_only(it: &mut Interp) -> Result<(), PsError> {
-    print_top(it, Object::text, false)
+    print_top(it, Form::Text, false)
 }
 
 fn print_syntactic_only(it: &mut Interp) -> Result<(), PsError> {
-    print_top(it, |o| o.repr_bounded(&OPERATOR_LIMITS), false)
+    print_top(it, Form::Syntactic, false)
 }
 
-/// Pop the top operand and print `render` of it, plus a newline when
+/// Which spelling `print_top` writes.
+#[derive(Clone, Copy)]
+enum Form {
+    /// `=`: `Object::text`, but a string's bytes go out as they are.
+    Text,
+    /// `==`: `repr_bounded`, which escapes a string.
+    Syntactic,
+}
+
+/// Pop the top operand and print it in `form`, plus a newline when
 /// `newline` is set. An empty stack raises `stackunderflow` before any
-/// output.
-fn print_top(it: &mut Interp, render: fn(&Object) -> String, newline: bool) -> Result<(), PsError> {
+/// output. A string under `=` is written straight from its own storage:
+/// no byte is decoded (gs writes a byte above 127 raw) and no copy of a
+/// large string is made.
+fn print_top(it: &mut Interp, form: Form, newline: bool) -> Result<(), PsError> {
     let obj = it.pop()?;
-    let mut line = render(&obj);
-    if newline {
-        line.push('\n');
+    match (&obj.value, form) {
+        (Value::String(s), Form::Text) => {
+            let bytes = s.borrow_bytes();
+            out(it, &bytes, false)?;
+            if newline {
+                out(it, b"\n", false)?;
+            }
+            Ok(())
+        }
+        _ => {
+            let mut line = match form {
+                Form::Text => obj.text(),
+                Form::Syntactic => obj.repr_bounded(&OPERATOR_LIMITS),
+            };
+            if newline {
+                line.push('\n');
+            }
+            out(it, line.as_bytes(), false)
+        }
     }
-    out(it, line.as_bytes(), false)
 }
 
 /// Print the whole stack, top first, without disturbing it (PLRM `stack`).
@@ -215,26 +241,27 @@ fn print_top(it: &mut Interp, render: fn(&Object) -> String, newline: bool) -> R
 /// not be expanded into a single buffer first. Bounded (#745): see
 /// `print_stack_bounded`.
 fn stack_dump(it: &mut Interp) -> Result<(), PsError> {
-    print_stack_bounded(it, |o| o.text_bounded(OPERATOR_LIMITS.max_string))
+    print_stack_bounded(it, |o| o.text_bytes_bounded(OPERATOR_LIMITS.max_string))
 }
 
 fn pstack_dump(it: &mut Interp) -> Result<(), PsError> {
-    print_stack_bounded(it, |o| o.repr_bounded(&OPERATOR_LIMITS))
+    print_stack_bounded(it, |o| o.repr_bounded(&OPERATOR_LIMITS).into_bytes())
 }
 
 /// One line per operand, top first, each rendered by `render` (already
 /// bounded per item). Stops after `OPERATOR_STACK_BYTES` with one
 /// `... truncated` line for the items below.
-fn print_stack_bounded(it: &mut Interp, render: fn(&Object) -> String) -> Result<(), PsError> {
+fn print_stack_bounded(it: &mut Interp, render: fn(&Object) -> Vec<u8>) -> Result<(), PsError> {
     let mut used = 0usize;
     for i in (0..it.ostack.len()).rev() {
         if used >= OPERATOR_STACK_BYTES {
             let line = format!("{TRUNCATED}\n");
             return out(it, line.as_bytes(), false);
         }
-        let line = format!("{}\n", render(&it.ostack[i]));
+        let mut line = render(&it.ostack[i]);
+        line.push(b'\n');
         used += line.len();
-        out(it, line.as_bytes(), false)?;
+        out(it, &line, false)?;
     }
     Ok(())
 }
