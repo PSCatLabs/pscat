@@ -278,7 +278,7 @@ fn a_reversed_ring_renders_as_ghostscript_renders_it() {
     for y in 0..SIZE {
         for x in 0..SIZE {
             let (dx, dy) = (f64::from(x) + 0.5 - 50.0, f64::from(y) + 0.5 - 50.0);
-            let r = dx.hypot(dy);
+            let r = (dx * dx + dy * dy).sqrt();
             if (r - 20.0).abs() < 2.0 || (r - 40.0).abs() < 2.0 {
                 continue;
             }
