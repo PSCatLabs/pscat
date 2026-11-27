@@ -47,7 +47,10 @@ Other touches at widths 6 and 8 (40 / 300 pieces): 0.3 gives 1.24 to 1.31 /
 1.84 to 1.89; 0.6 gives 1.06 to 1.08 / 1.14 to 1.15; 0.7 gives 1.03 to 1.04 /
 1.05; 0.9 gives 0.99 / 0.96. The media at their defaults (40 / 300 pieces,
 widths 4 to 12): `dcchalk` 1.00 / 0.955 to 0.962, `dycrayon` 1.01 to 1.02 / 1.045
-to 1.066, `dhstroke` 1.004 / 1.000.
+to 1.066, `dhstroke` 1.004 / 1.000. Under a device pixel (1500 pieces of 0.12 pt):
+`dcchalk` at `/Width` 2 / 3 gives 0.866 / 0.852, `dhstroke` 0.948 (the old guide's
+"about 13%" and "about 10%" light still hold in kind). The head library gives the
+same grid on this line to the third decimal, since its 180 pt does not divide the pitch.
 
 **Where the extra weight is.**
 - Nothing lands outside the whole stroke's ink, `/Fallout 3` included, so the
@@ -70,7 +73,10 @@ to 1.066, `dhstroke` 1.004 / 1.000.
   at `/Touch 0.5` (1.02, 1.03 and 1.04 at 0.8), which matches the pieces.
 - Ghostscript clips hard-edged. The same library there gives 1.011 for the
   stroke drawn twice, and 1.002 and 1.012 for 50 and 300 pieces at
-  `/Touch 0.5`, width 8.
+  `/Touch 0.5`, width 8. Directly: a rectangle filled once and twice
+  through a circular clip at 144 dpi is identical in gs (no partially
+  covered pixel), and differs by up to 64 levels on all 166 rim pixels in
+  pscat.
 
 **Why the library cannot fix it.** There are two shapes of fix, and each breaks
 something the issue keeps:
@@ -98,5 +104,7 @@ scope. `/From 0 /To t` each frame stays the exact way to grow a stroke.
   dropouts on it; `dcchalk /Tilt 75`; `dycrayon`; `dhstroke`. Only the halves
   on the 80 pt line change.
 - Keys, defaults and errors of every procedure are unchanged.
-- Follow-up: pscat's anti-aliased fill of coincident subpaths in one nonzero
-  path over-covers their rim, where gs does not.
+- Follow-ups: pscat's anti-aliased fill of coincident subpaths in one nonzero
+  path over-covers their rim, where gs does not; and pscat's anti-aliased
+  clip mask gains coverage on every repaint (the weight above), a design
+  choice (notes/234 relies on it) for the owner to weigh against gs parity.

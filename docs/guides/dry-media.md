@@ -101,7 +101,10 @@ the stick's contact patch meets raised tooth.
   - `/Touch 0.3` nearly doubles at 300 pieces.
 
   `dcchalk`, `dycrayon` and `dhstroke` at their defaults stay within 7%
-  (300 pieces: chalk 4% light, crayon 5 to 7% heavy). Redraw `/From 0
+  for 40 to 300 pieces (300: chalk 4% light, crayon 5 to 7% heavy). Pieces
+  under a device pixel come out lighter, from the anti-aliased edge at
+  every cut: at 1500 pieces (0.12 pt) charcoal is 5% light and chalk at
+  `/Width` 2 or 3 is 13 to 15% light. Redraw `/From 0
   /To t` each frame where the weight must match (psanim does): it is
   exact.
   The catch and the ink cost in proportion to the part, though the walk
@@ -186,7 +189,9 @@ newpath 40 60 moveto 300 80 lineto
     frame instead: each piece starts flat where the last one ended, so
     40 pieces keep the stroke's weight to within 1%, and 300 pieces
     (0.6 pt each on a 180 pt stroke, widths 4 to 12) come out about 4%
-    lighter; redraw `/From 0 /To t` where it must match exactly. A long stroke's part
+    lighter. Pieces under a device pixel are lighter still (1500 pieces of
+    0.12 pt at `/Width` 2 or 3: 13 to 15%); redraw `/From 0 /To t` where it
+    must match exactly. A long stroke's part
     costs in proportion to its length, so a board written over time pays
     for what each frame adds, not the whole stroke. The stroke's landing
     belongs to the piece that holds `/From 0`, its lift to the one that
