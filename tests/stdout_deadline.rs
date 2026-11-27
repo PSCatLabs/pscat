@@ -385,7 +385,7 @@ fn a_timed_run_merges_stdout_and_stderr_as_an_unlimited_one_does() {
         let file = file.to_str().expect("a UTF-8 path");
         let runs: [(&str, Vec<&str>, Vec<u8>); 3] = [
             ("-e", vec!["-e", program.as_str()], Vec::new()),
-            ("file", vec![file], Vec::new()),
+            ("file", vec!["--headless", file], Vec::new()),
             (
                 "REPL",
                 vec![],
