@@ -290,6 +290,43 @@ fn lint_flags_utf8_text_in_a_byte_font_and_names_the_fix() {
     assert!(!stderr.contains("utf8-in-byte-font"), "{stderr}");
 }
 
+/// #1446: a named main file does not change what the lint says: the line
+/// has no file after it (a main-program line stays bare), a `run` file's
+/// line names the file. The public host check shares the trace, and gives
+/// the main program's name only to the host.
+#[test]
+fn lint_utf8_message_names_run_files_only_even_for_a_named_main_file() {
+    let dir = common::scratch_dir("pscat-cli-utf8-lint");
+    let font = "/Helvetica findfont 30 scalefont setfont 10 30 moveto\n";
+    let main = dir.join("scene.ps");
+    std::fs::write(&main, format!("{font}(aπb) show showpage")).expect("write");
+    let (ok, _out, stderr) = run(&["--lint", main.to_str().unwrap()], "");
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains(
+            "was shown in the font /Helvetica when the program reached line 2; that font"
+        ),
+        "{stderr}"
+    );
+    let inner = dir.join("inner.ps");
+    std::fs::write(&inner, format!("{font}\n(aπb) show")).expect("write");
+    let outer = dir.join("outer.ps");
+    std::fs::write(
+        &outer,
+        format!("({}) run showpage", common::ps_path(&inner)),
+    )
+    .expect("write");
+    let (ok, _out, stderr) = run(&["--lint", outer.to_str().unwrap()], "");
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "when the program reached line 3 ({}); that font",
+            common::ps_path(&inner)
+        )),
+        "{stderr}"
+    );
+}
+
 /// #1109: the finding says where the binding was made, catches a `store`
 /// refused by the read-only systemdict (#1337), and still leaves a variable
 /// kept in a local dictionary alone.

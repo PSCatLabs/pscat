@@ -4,7 +4,7 @@
 //! The rest of the supported API runs a program and reads its pages. This
 //! module is for a host that does more than that: an animation engine that
 //! calls one procedure per frame, an editor that feeds a program live input,
-//! a server that gives programs a few operators of its own. It has seven
+//! a server that gives programs a few operators of its own. It has eight
 //! parts, all methods on [`Interp`]:
 //!
 //! - **Operators.** [`Interp::register_operator`] adds an operator backed by
@@ -32,6 +32,14 @@
 //!   [`Page`](crate::Page) the host holds through the current transformation,
 //!   clip, `setalpha` and `setblendmode`, as `image` paints a program's own
 //!   samples.
+//! - **A check for text in the wrong font mode.**
+//!   [`Interp::set_utf8_text_check`] turns on the `[utf8-in-byte-font]` lint
+//!   for a host that runs programs itself, and [`Interp::utf8_text_findings`]
+//!   reads what it found, with the file and line.
+//!
+//! Like the rest of the crate API, all of it is Experimental
+//! ([`docs/STABILITY.md`](https://github.com/PSCatLabs/pscat/blob/main/docs/STABILITY.md)):
+//! it can change in any release.
 //!
 //! The canvas itself is reached through [`Page`](crate::Page):
 //! [`Interp::swap_canvas`](crate::Interp::swap_canvas) exchanges the raster a
@@ -1270,5 +1278,125 @@ impl Interp {
     /// not registered; the caller charges the copy it makes.
     pub(crate) fn virtual_file(&self, name: &str) -> Option<std::rc::Rc<Vec<u8>>> {
         self.virtual_files.get(name)
+    }
+}
+
+/// Fonts a [`Utf8TextReport`] names, the rest being counted in
+/// [`Utf8TextReport::more_fonts`].
+pub const MAX_UTF8_TEXT_FONTS: usize = crate::lint::UTF8_FONTS_SHOWN;
+
+/// Distinct characters a [`Utf8TextFinding`] names.
+pub const MAX_UTF8_TEXT_CHARS: usize = crate::lint::UTF8_CHARS_SHOWN;
+
+/// The most fonts past [`MAX_UTF8_TEXT_FONTS`] that [`Utf8TextReport::more_fonts`]
+/// counts, so it is a floor ("at least") for a program that uses more.
+pub const MAX_UTF8_TEXT_MORE_FONTS: usize = crate::lint::UTF8_MORE_FONTS_COUNTED;
+
+/// The longest [`Utf8TextFinding::font`], in bytes before a closing `...`
+/// that marks a longer name as cut.
+pub const MAX_UTF8_TEXT_NAME_BYTES: usize = crate::font::UTF8_FONT_NAME_MAX;
+
+/// UTF-8 text that a program showed in a font that reads one character per
+/// byte, the finding behind the `[utf8-in-byte-font]` lint. From
+/// [`Interp::utf8_text_findings`].
+///
+/// `(aπb) show` in Helvetica reads the two bytes of `π` as two codes and
+/// draws stray accents. That is correct PostScript, so nothing fails; a font
+/// with `/PSCatUnicode true` reads the string as UTF-8 instead.
+///
+/// One finding per font, for the first show in it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Utf8TextFinding {
+    /// The font dict's `FontName` (`?` when it has none), cut to
+    /// [`MAX_UTF8_TEXT_NAME_BYTES`] bytes.
+    pub font: String,
+    /// The non-ASCII characters shown, in order of first appearance, at most
+    /// [`MAX_UTF8_TEXT_CHARS`] distinct ones.
+    pub characters: Vec<char>,
+    /// More distinct characters were shown than `characters` holds.
+    pub more_characters: bool,
+    /// The 1-based line of the most recent token scanned from program text
+    /// when the first such show ran: where execution was, as for
+    /// [`ErrorDetails::line`], which for a show inside a procedure is the
+    /// line that called it, not the line that wrote the show. `None` when
+    /// no line is known.
+    pub line: Option<usize>,
+    /// The file `line` is in: the name a `run` file was run under, or, for a
+    /// line of the main program, the name the host gave it with
+    /// [`Interp::set_main_file_name`] when the show ran. `None` when `line`
+    /// is `None` or the main program has no name.
+    pub file: Option<String>,
+}
+
+/// What [`Interp::utf8_text_findings`] found: at most
+/// [`MAX_UTF8_TEXT_FONTS`] findings, so the report is bounded however much
+/// text a program shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Utf8TextReport {
+    /// One finding per font, in the order the fonts were first used.
+    pub fonts: Vec<Utf8TextFinding>,
+    /// Distinct fonts past [`MAX_UTF8_TEXT_FONTS`] that were shown UTF-8 text,
+    /// not named in `fonts` (counted up to [`MAX_UTF8_TEXT_MORE_FONTS`]).
+    pub more_fonts: usize,
+}
+
+impl Interp {
+    /// Turn the check for UTF-8 text shown in a byte-mode font on or off:
+    /// the `[utf8-in-byte-font]` finding of `pscat --lint` (issue #1412), for
+    /// a host that builds its own interpreter. Read what it found with
+    /// [`utf8_text_findings`](Self::utf8_text_findings).
+    ///
+    /// Off by default. While off, a show costs one extra branch and nothing
+    /// else changes; turning it on never changes what a program draws, what
+    /// it leaves on its stacks or how many steps it takes. While on, a show
+    /// of a string with a high byte in a font with no `/PSCatUnicode true`
+    /// looks at the string (at most 4096 bytes, so the work per show is
+    /// bounded; a longer string is not examined) and at the font's name (at
+    /// most [`MAX_UTF8_TEXT_NAME_BYTES`] bytes). It is deliberately narrow, as a false report is worse than
+    /// a miss: it needs a string that is wholly well-formed UTF-8 with a
+    /// non-ASCII character, an outline face that is not Symbol or
+    /// ZapfDingbats, and no custom `Encoding`; `kshow` is not checked, and a
+    /// font with `/PSCatUnicode false` is taken to want bytes. The
+    /// findings it keeps are bounded by [`MAX_UTF8_TEXT_FONTS`] and
+    /// [`MAX_UTF8_TEXT_CHARS`].
+    ///
+    /// The findings belong to the program that ran last: starting the next one
+    /// (`run_str`, `run_source`, `begin_source`) forgets them, so read them after
+    /// each run, including a run that returned an error (the show before the
+    /// error is still reported). Turning the check off forgets them too.
+    ///
+    /// Like the rest of the crate API this is Experimental
+    /// (`docs/STABILITY.md`): it can change in any release.
+    ///
+    /// ```
+    /// let mut interp = pscat::Interp::with_page(100, 100).expect("valid page size");
+    /// interp.set_utf8_text_check(true);
+    /// interp.set_main_file_name(Some("scene.ps"));
+    /// interp.run_str("/Helvetica findfont 12 scalefont setfont 5 40 moveto\n(aπb) show")?;
+    /// let report = interp.utf8_text_findings();
+    /// assert_eq!(report.fonts.len(), 1);
+    /// let finding = &report.fonts[0];
+    /// assert_eq!((finding.font.as_str(), finding.characters.as_slice()), ("Helvetica", ['π'].as_slice()));
+    /// assert_eq!((finding.file.as_deref(), finding.line), (Some("scene.ps"), Some(2)));
+    ///
+    /// // The same text in a font that reads UTF-8 is not reported.
+    /// interp.run_str("/Helvetica findfont dup length dict copy dup /PSCatUnicode true put
+    ///                 /Helvetica-U exch definefont 12 scalefont setfont 5 40 moveto (aπb) show")?;
+    /// assert!(interp.utf8_text_findings().fonts.is_empty());
+    /// # Ok::<(), pscat::PsError>(())
+    /// ```
+    pub fn set_utf8_text_check(&mut self, on: bool) {
+        self.set_utf8_text_trace(on);
+    }
+
+    /// What the check turned on by
+    /// [`set_utf8_text_check`](Self::set_utf8_text_check) found in the
+    /// program that ran last. Empty when the check is off.
+    pub fn utf8_text_findings(&self) -> Utf8TextReport {
+        self.utf8_text_trace()
+            .map(crate::lint::Utf8TextTrace::report)
+            .unwrap_or_default()
     }
 }

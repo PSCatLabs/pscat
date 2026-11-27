@@ -626,8 +626,10 @@ pub(crate) fn spells_name(els: &[Object], name_id: u32) -> bool {
 #[derive(Default)]
 pub(crate) struct Utf8TextTrace {
     fonts: Vec<Utf8Font>,
-    /// Fonts past [`UTF8_FONTS_SHOWN`] that took UTF-8 text.
-    more_fonts: usize,
+    /// Distinct fonts past [`UTF8_FONTS_SHOWN`] that took UTF-8 text, up to
+    /// [`UTF8_MORE_FONTS_COUNTED`]: a set, so a font shown again is not
+    /// counted again (#1446).
+    more_fonts: std::collections::HashSet<Box<str>>,
 }
 
 struct Utf8Font {
@@ -635,25 +637,67 @@ struct Utf8Font {
     chars: Vec<char>,
     /// More distinct characters than are kept.
     more_chars: bool,
-    /// `when the program reached line N`, for the first show in this font.
-    at: Option<String>,
+    /// Where the program was at the first show in this font.
+    site: Utf8Site,
+}
+
+/// Where the scanner was when the program showed UTF-8 text in a byte-mode
+/// font: the line of the last source token scanned, which is the line that
+/// ran the show when a procedure did (the position `ErrorDetails::line`
+/// reports, not where the procedure was written).
+#[derive(Clone, Default)]
+pub(crate) struct Utf8Site {
+    pub(crate) line: Option<usize>,
+    /// The `run` file `line` is in, as the lint names it; `None` for the
+    /// main program.
+    pub(crate) run_file: Option<String>,
+    /// The name the host gave the main program, when `line` is one of its
+    /// lines. Not part of the lint message, which names run files only.
+    pub(crate) main_file: Option<String>,
 }
 
 /// Fonts named by `[utf8-in-byte-font]`; the rest are counted in a closing
 /// finding.
-const UTF8_FONTS_SHOWN: usize = 5;
+pub(crate) const UTF8_FONTS_SHOWN: usize = 5;
 /// Distinct characters named per font.
-const UTF8_CHARS_SHOWN: usize = 6;
+pub(crate) const UTF8_CHARS_SHOWN: usize = 6;
+/// Fonts past [`UTF8_FONTS_SHOWN`] that are counted (by name, so each costs at
+/// most a name's bytes): a program that makes more fonts than this reads
+/// "at least".
+pub(crate) const UTF8_MORE_FONTS_COUNTED: usize = 1024;
 
 impl Utf8TextTrace {
     pub(crate) fn clear(&mut self) {
         self.fonts.clear();
-        self.more_fonts = 0;
+        self.more_fonts.clear();
+    }
+
+    /// What the program showed, for a host that reads it as data
+    /// ([`Interp::utf8_text_findings`]).
+    pub(crate) fn report(&self) -> crate::host::Utf8TextReport {
+        crate::host::Utf8TextReport {
+            fonts: self
+                .fonts
+                .iter()
+                .map(|f| crate::host::Utf8TextFinding {
+                    font: f.name.clone(),
+                    characters: f.chars.clone(),
+                    more_characters: f.more_chars,
+                    line: f.site.line,
+                    file: f
+                        .site
+                        .line
+                        .and(f.site.run_file.clone().or_else(|| f.site.main_file.clone())),
+                })
+                .collect(),
+            more_fonts: self.more_fonts.len(),
+        }
     }
 
     /// Record `text` (well-formed UTF-8 with a non-ASCII character) shown in
-    /// the byte-mode font `font`.
-    pub(crate) fn note(&mut self, font: &str, text: &str, at: Option<String>) {
+    /// the byte-mode font `font`. `site` runs only for a font not seen yet,
+    /// so a loop of shows costs no allocation for where it was.
+    pub(crate) fn note(&mut self, font: &str, text: &str, site: impl FnOnce() -> Utf8Site) {
         let idx = match self.fonts.iter().position(|f| f.name == font) {
             Some(i) => i,
             None if self.fonts.len() < UTF8_FONTS_SHOWN => {
@@ -661,12 +705,16 @@ impl Utf8TextTrace {
                     name: font.to_string(),
                     chars: Vec::new(),
                     more_chars: false,
-                    at,
+                    site: site(),
                 });
                 self.fonts.len() - 1
             }
             None => {
-                self.more_fonts += 1;
+                if self.more_fonts.len() < UTF8_MORE_FONTS_COUNTED
+                    && !self.more_fonts.contains(font)
+                {
+                    self.more_fonts.insert(font.into());
+                }
                 return;
             }
         };
@@ -708,7 +756,11 @@ fn check_utf8_in_byte_font(interp: &Interp, findings: &mut Vec<LintFinding>) {
             .collect::<Vec<_>>()
             .join(", ");
         let more = if f.more_chars { ", ..." } else { "" };
-        let at = f.at.as_ref().map(|a| format!(" {a}")).unwrap_or_default();
+        let at = match (f.site.line, &f.site.run_file) {
+            (Some(line), Some(file)) => format!(" when the program reached line {line} ({file})"),
+            (Some(line), None) => format!(" when the program reached line {line}"),
+            (None, _) => String::new(),
+        };
         findings.push(LintFinding {
             check: "utf8-in-byte-font",
             message: format!(
@@ -717,12 +769,12 @@ fn check_utf8_in_byte_font(interp: &Interp, findings: &mut Vec<LintFinding>) {
             ),
         });
     }
-    if trace.more_fonts > 0 {
+    if !trace.more_fonts.is_empty() {
         findings.push(LintFinding {
             check: "utf8-in-byte-font",
             message: format!(
                 "UTF-8 text was also shown in {} more byte-mode font(s) ({UTF8_FONTS_SHOWN} shown)",
-                trace.more_fonts
+                trace.more_fonts.len()
             ),
         });
     }
@@ -2045,6 +2097,31 @@ mod tests {
         );
         let _ = it.run_str(&format!("{BYTE_FONT}(ascii) show"));
         assert!(!checks(&it, false).contains(&"utf8-in-byte-font"));
+    }
+
+    #[test]
+    fn a_font_past_the_limit_is_counted_once_however_often_it_shows_text() {
+        let fonts = [
+            "Helvetica",
+            "Times-Roman",
+            "Courier",
+            "Palatino-Roman",
+            "Bookman-Light",
+            "AvantGarde-Book",
+            "NewCenturySchlbk-Roman",
+            "AvantGarde-Book",
+            "AvantGarde-Book",
+        ];
+        let src: String = fonts
+            .iter()
+            .map(|f| format!("/{f} findfont 12 scalefont setfont 5 40 moveto (\u{3c0}) show "))
+            .collect();
+        let m = utf8_messages(&src);
+        assert_eq!(m.len(), UTF8_FONTS_SHOWN + 1, "{m:?}");
+        assert!(
+            m.last().unwrap().contains("2 more byte-mode font(s)"),
+            "{m:?}"
+        );
     }
 
     #[test]
