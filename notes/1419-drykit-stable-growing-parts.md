@@ -34,7 +34,7 @@ whole run's width varies; 1 = cut at its start, on the first stop's own copy):
 cutting it with `dcpiece` and remapping `/Touch`/`/Pressure`), so they get all of the above
 and share the whole stroke's stop grid. `/Tilt` side strokes still cut their lanes in
 drychalk: that is #1420's lane (dropout chains), and a growing `/Tilt` stroke can still
-shift a lane's edge once.
+shift a lane's edge once. (Done in #1420: lanes go to drykit whole too.)
 
 **Measured after** (`/From 0 /To t`, 21 frames 3.5% apart, 144 dpi): `dcchalk`, `dkstroke`,
 `dhstroke /compressed` and `dycrayon` keep every pixel behind the pen's last 12 points,
