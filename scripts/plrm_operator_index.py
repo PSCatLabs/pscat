@@ -98,7 +98,7 @@ def detail_entries(doc):
     out = []
     for e in entries:
         sig = " ".join(e["sig"])
-        is_error = "(error)" in sig
+        is_error = "(error)" in sig and e["name"] != "handleerror"  # also a systemdict procedure
         found = re.search(r"\(([^()]*(?:procedure set|serverdict))\)", sig)
         note = found.group(1) if found else ""
         out.append((e["name"], e["page"], note, is_error))

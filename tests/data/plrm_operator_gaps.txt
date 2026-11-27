@@ -1,6 +1,6 @@
 # Operators in tests/data/plrm_operators.txt that pscat's systemdict does not define, and why.
 # Read by tests/plrm_operators.rs. Format, tab separated:
-#   missing  <name>  <#issue | untracked>  <note>   a gap to close; the issue tracks it. `untracked`: no issue names it yet.
+#   missing  <name>  <#issue | untracked>  <note>   a gap to close; the issue tracks it. `untracked`: no issue yet (none today).
 #   omitted  <name>  -                       <why>    a decision not to define it in systemdict (PLRM decides, gs cross-checks).
 # The test fails when a PLRM operator is absent and not listed here (newly missing), and when a listed name is now defined
 # (delete its line; the list must not rot). Level 3 (`languagelevel` 3, #1280) needs every `missing` line gone.
@@ -14,7 +14,7 @@
 #  * Names the PLRM index lacks and so needs no entry: Display PostScript extras and the Level 1 statusdict members
 #    (setpageparams, setpapertray, ...) are not in the PLRM third edition's operator details.
 #  * exitserver is probed in serverdict, where the PLRM and gs put it (see HOME_DICT in the test).
-#  * Not carried over from the PLRM: the 28 error names (typecheck, VMerror, ...) are not operators
+#  * Not carried over from the PLRM: the 27 error names (typecheck, VMerror, ...) are not operators
 #    (handleerror is one of them and is also a systemdict procedure; the test does not check it); DeviceGray, DeviceRGB,
 #    DeviceCMYK and /Font are names inside signatures, not operators.
 missing	currenttransfer	#1267	transfer functions
@@ -63,15 +63,15 @@ missing	findencoding	#1272	composite fonts
 missing	rootfont	#1272	composite fonts
 missing	undefinefont	#1272	composite fonts
 missing	resourceforall	#1218	resourceforall
-missing	countexecstack	untracked	execution-stack introspection; gs has it
-missing	execstack	untracked	execution-stack introspection; gs has it
-missing	dictstack	untracked	dictionary-stack introspection; gs has it (countdictstack exists)
-missing	statusdict	untracked	product-dependent dictionary; many printer prologs test /statusdict where; gs has it
-missing	GlobalFontDirectory	untracked	Font resources defined in global VM; gs has it
-missing	SharedFontDirectory	untracked	same dictionary as GlobalFontDirectory; PLRM compatibility name
-missing	scheck	untracked	same as gcheck (#1159); PLRM compatibility name
-missing	serverdict	untracked	job server dictionary holding exitserver; gs has it
-missing	internaldict	untracked	1183615869 internaldict, used inside Type 1 font programs; gs has it
+missing	countexecstack	#1468	execution-stack introspection; gs has it
+missing	execstack	#1468	execution-stack introspection; gs has it
+missing	dictstack	#1468	dictionary-stack introspection; gs has it (countdictstack exists)
+missing	statusdict	#1469	product-dependent dictionary; many printer prologs test /statusdict where; gs has it
+missing	GlobalFontDirectory	#1469	Font resources defined in global VM; gs has it
+missing	SharedFontDirectory	#1469	same dictionary as GlobalFontDirectory; PLRM compatibility name
+missing	scheck	#1469	same as gcheck (#1159); PLRM compatibility name
+missing	serverdict	#1469	job server dictionary holding exitserver; gs has it
+missing	internaldict	#1469	1183615869 internaldict, used inside Type 1 font programs; gs has it
 omitted	beginbfchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	beginbfrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	begincidchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
