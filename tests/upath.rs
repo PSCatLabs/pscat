@@ -1184,7 +1184,7 @@ fn the_user_path_painters_paint_as_the_path_operators_do() {
 }
 
 #[test]
-fn the_new_operators_are_defined_and_leave_the_graphics_state_alone() {
+fn the_new_operators_are_defined() {
     let mut it = Interp::new();
     it.capture_stdout();
     it.run_str(

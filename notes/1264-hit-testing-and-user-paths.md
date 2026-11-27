@@ -91,12 +91,15 @@ Every loop over user data is polled, charged or priced before it runs
   them is priced first (`Gfx::stroke_cost`: a line 8 units, a curve 64, a
   dash 2, and a dash count made from the path's length over the pattern's
   period, so a tiny pattern on a long path is millions of dashes; the heap
-  the outline can take, 256 bytes a line, 4 KiB a curve, 128 a dash) and held
+  the outline can take, 256 bytes a line, 1 KiB a curve, 128 a dash; measured
+  on 2,000 segments, the finished outline is 64 bytes a line and 210 to 511 a
+  curve, with the stroker's copy before it about as much again) and held
   against the step limit and the heap cap. A group is about 32,768 units.
-  `strokepath` and `ustrokepath` price the whole path the same way
-  (`stroke_path_limited`; `strokepath` had no limit before). What stays
-  open: the time of one stroker call on one subpath of very many segments or
-  curves, which is priced but not interruptible.
+  `strokepath` and `ustrokepath` do the same, a group at a time
+  (`stroke_path_limited`, the outlines joined in order; `strokepath` had no
+  limit before), polling and pricing between groups. What stays open: the
+  time of one stroker call on one subpath of very many segments or curves,
+  which is priced but not interruptible.
 - `uappend` asks the heap cap for 64 bytes an element before it starts, looks
   at the limits every 4096 elements, and charges an arc by its segments
   (`arc_apply`, as `arc` does). `upath` asks for ten objects a segment first

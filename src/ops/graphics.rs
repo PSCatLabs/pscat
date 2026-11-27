@@ -169,14 +169,24 @@ pub(super) fn arc_apply(
     ccw: bool,
 ) -> Result<(), PsError> {
     let probe = it.limit_probe();
-    let segments = it.gfx.arc_limited(x, y, r, ang1, ang2, ccw, &probe)?;
-    // A step per 1024 segments, as a file read is charged per KiB (#1176),
-    // so a step cap bounds a run of huge arcs too. An ordinary arc (four
-    // segments a turn) is not charged and costs no clock read.
-    if segments >= 1024 {
-        it.poll_limits((segments / 1024) as u64)?;
-    }
-    Ok(())
+    // An arc a limit stops is taken back whole (#1264): the path is as it
+    // was, as for every operator that is refused.
+    let mark = it.gfx.path_mark();
+    let done = it
+        .gfx
+        .arc_limited(x, y, r, ang1, ang2, ccw, &probe)
+        .and_then(|segments| {
+            // A step per 1024 segments, as a file read is charged per KiB
+            // (#1176), so a step cap bounds a run of huge arcs too. An
+            // ordinary arc (four segments a turn) is not charged and costs
+            // no clock read.
+            if segments >= 1024 {
+                it.poll_limits((segments / 1024) as u64)?;
+            }
+            Ok(())
+        });
+    it.gfx.path_finish(mark, done.is_ok());
+    done
 }
 
 fn arc(it: &mut Interp) -> Result<(), PsError> {

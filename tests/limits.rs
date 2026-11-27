@@ -1705,6 +1705,46 @@ mod one_operator {
         }
 
         #[test]
+        fn the_plain_arc_operator_is_taken_back_whole_when_a_limit_stops_it() {
+            // The same arc as the user path's, run directly: it used to
+            // leave the ten-thousand-odd segments it had made.
+            let setup = "newpath 5 5 moveto 6 6 lineto";
+            let before = counted(setup);
+            let (err, report, after) = stopped(setup, "50 50 10 0 1e9 arc", 100);
+            assert_eq!(err, PsError::StepsExceeded, "{report}");
+            assert_eq!(after, before, "no partial arc");
+            let (err, _, after) = stopped(setup, "50 50 10 0 -1e9 arcn", 100);
+            assert_eq!(err, PsError::StepsExceeded);
+            assert_eq!(after, before);
+        }
+
+        #[test]
+        fn strokepath_and_ustrokepath_stop_by_the_clock_inside_themselves() {
+            // 100,000 subpaths of a page-sized curve: the stroker is handed
+            // a few hundred at a time and the clock is read between them.
+            stops_inside(
+                "strokepath",
+                HUGE_CURVES.into(),
+                "strokepath",
+                "strokepath",
+                Duration::from_millis(1500),
+            );
+            let setup = format!(
+                "/up {} array def up 0 {{ 0 0 100 100 setbbox }} putinterval \
+                 /piece {{ 1 1 moveto 50 90 20 80 99 10 curveto }} cvlit def \
+                 0 1 99999 {{ 10 mul 5 add up exch piece putinterval }} for",
+                100_000 * 10 + 5
+            );
+            stops_inside(
+                "ustrokepath",
+                setup,
+                "up 1000 1000 scale ustrokepath",
+                "ustrokepath",
+                Duration::from_millis(1500),
+            );
+        }
+
+        #[test]
         fn upath_polls_and_charges_while_it_builds_the_array() {
             for setup in [MANY_LINES, MANY_EMPTIES] {
                 let before = counted(setup);

@@ -393,18 +393,41 @@ impl PsPath {
     /// point, curve control points included (the PLRM allows it, and gs
     /// does it). `None` for an empty path.
     fn device_bbox(&self) -> Option<[f32; 4]> {
-        let mut pts = self.points().into_iter();
-        let first = pts.next()?;
-        let mut b = [first.x, first.y, first.x, first.y];
-        for p in pts {
-            b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
+        let mut b: Option<[f32; 4]> = None;
+        let mut grow = |p: DevPoint| {
+            b = Some(match b {
+                None => [p.x, p.y, p.x, p.y],
+                Some(b) => [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)],
+            });
+        };
+        for seg in &self.segs {
+            match *seg {
+                Seg::Move(p) | Seg::Line(p) => grow(p),
+                Seg::Curve(c1, c2, p) => {
+                    grow(c1);
+                    grow(c2);
+                    grow(p);
+                }
+                Seg::Close => {}
+            }
         }
-        Some(b)
+        b
     }
 
     pub(crate) fn curve_to(&mut self, c1: DevPoint, c2: DevPoint, p: DevPoint) {
         self.segs.push(Seg::Curve(c1, c2, p));
         self.current = Some(p);
+    }
+
+    /// Add `other`'s segments after this path's, the current point being
+    /// where `other` ends.
+    fn append(&mut self, other: PsPath) {
+        if other.segs.is_empty() {
+            return;
+        }
+        self.segs.extend(other.segs);
+        self.current = other.current;
+        self.subpath_start = other.subpath_start;
     }
 
     /// How many segments the path has.
@@ -4134,23 +4157,34 @@ impl Gfx {
     /// work, for the operator to charge a step per 1024 units.
     ///
     /// What stays unbounded is the time of one stroker call on one subpath
-    /// of many segments, which the estimate prices but cannot interrupt.
+    /// of very many segments, which the estimate prices but cannot
+    /// interrupt: the path goes to the stroker a group of subpaths (about
+    /// [`STROKE_GROUP_UNITS`]) at a time, the limits looked at between.
     pub(crate) fn stroke_path_limited(
         &mut self,
         probe: &crate::limits::LimitProbe,
     ) -> Result<u64, PsError> {
-        let path = &self.state.path;
-        let cost = self.stroke_cost(path);
-        probe.check_alloc(cost.bytes)?;
-        probe.check(cost.units / 1024)?;
-        let outline = self.stroke_outline_of(path, &|| path.device_length());
-        let work = cost
-            .units
-            .saturating_add(outline.as_ref().map_or(0, |o| o.len() as u64));
+        let full = &self.state.path;
+        // Every subpath with its own moveto, so they can be stroked in
+        // groups: the stroke of a path is the strokes of its subpaths
+        // (dashes start again in each), joined in order.
+        let all = full.near([-f32::MAX, -f32::MAX, f32::MAX, f32::MAX], probe)?;
+        let length = std::cell::OnceCell::new();
+        let full_len = || *length.get_or_init(|| full.device_length());
+        let mut work = full.segs.len() as u64;
+        let mut out = PsPath::default();
+        for group in all.groups(STROKE_GROUP_UNITS) {
+            let cost = self.stroke_cost(&group);
+            work = work.saturating_add(cost.units);
+            probe.check_alloc(cost.bytes)?;
+            probe.check(work / 1024)?;
+            if let Some(outline) = self.stroke_outline_of(&group, &full_len) {
+                work = work.saturating_add(outline.len() as u64);
+                out.append(PsPath::from_skia(&outline));
+            }
+        }
         probe.check(work / 1024)?;
-        self.state.path = outline
-            .as_ref()
-            .map_or_else(PsPath::default, PsPath::from_skia);
+        self.state.path = out;
         Ok(work)
     }
 
@@ -4315,8 +4349,11 @@ impl Gfx {
 
     /// What stroking `path` costs, estimated before the stroker runs
     /// (#1264): units of work (a line 8, a curve 64, a dash 2) and the
-    /// heap the outline may take (a line 256 bytes, a curve 4 KiB, a dash
-    /// 128). A dash pattern is priced by how many dashes the path's
+    /// heap the outline may take (a line 256 bytes, a curve 1 KiB, a dash
+    /// 128). Measured on 2,000 segments of width 1 and 2: the finished path
+    /// is 64 bytes a line, 210 a small curve and 511 a page-sized one, and
+    /// the stroker's own copy before it about as much again, so the
+    /// estimate is 2 to 4 times the peak. A dash pattern is priced by how many dashes the path's
     /// length makes, since a short pattern on a long path is millions of
     /// pieces. Generous on purpose: it decides only what a limit refuses.
     fn stroke_cost(&self, path: &PsPath) -> StrokeCost {
@@ -4348,7 +4385,7 @@ impl Gfx {
             bytes: usize::try_from(
                 lines
                     .saturating_mul(256)
-                    .saturating_add(curves.saturating_mul(4096))
+                    .saturating_add(curves.saturating_mul(1024))
                     .saturating_add(dashes.saturating_mul(128)),
             )
             .unwrap_or(usize::MAX),
