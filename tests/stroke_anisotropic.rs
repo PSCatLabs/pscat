@@ -1179,3 +1179,215 @@ fn a_lineto_after_closepath_starts_a_subpath_the_square_cap_rule_sees() {
         }
     }
 }
+
+// #1224: a zero-length segment inside a subpath that has length. gs ignores
+// it, so the caps follow the first and last real segments and a join sees
+// the real segments around it. tiny-skia aims a cap at the first segment's
+// default direction, and a join at the direction of rounding noise.
+
+/// (with zero-length segments, the same path without them): a leading, a
+/// trailing and a middle one, a step within gs's 1/256 px grid, a curve
+/// that goes nowhere, and a closed subpath.
+const DEGENERATE_SEGMENTS: [(&str, &str); 14] = [
+    (
+        "25 25 moveto 25 25 lineto 60 40 lineto",
+        "25 25 moveto 60 40 lineto",
+    ),
+    (
+        "25 25 moveto 25 25 lineto 25 25 lineto 60 40 lineto",
+        "25 25 moveto 60 40 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 60 40 lineto",
+        "25 25 moveto 60 40 lineto",
+    ),
+    (
+        "25 25 moveto 25 25 lineto 60 40 lineto 90 20 lineto 90 20 lineto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 60 40 lineto 90 20 lineto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 60.001 40 lineto 90 20 lineto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 90 20 lineto 90.001 20 lineto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 25.001 25 lineto 60 40 lineto",
+        "25 25 moveto 60 40 lineto",
+    ),
+    (
+        "25 25 moveto 25 25 25 25 25 25 curveto 60 40 lineto",
+        "25 25 moveto 60 40 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 90 20 lineto 90 20 90 20 90 20 curveto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 60 40 60 40 60 40 curveto 90 20 lineto",
+        "25 25 moveto 60 40 lineto 90 20 lineto",
+    ),
+    (
+        "25 25 moveto 25 25 lineto 60 40 lineto 90 20 lineto closepath",
+        "25 25 moveto 60 40 lineto 90 20 lineto closepath",
+    ),
+    (
+        "25 25 moveto 60 40 lineto 90 20 lineto 90 20 lineto closepath",
+        "25 25 moveto 60 40 lineto 90 20 lineto closepath",
+    ),
+    // Two subpaths, each with its own.
+    (
+        "25 25 moveto 25 25 lineto 60 40 lineto 20 70 moveto 20 70 lineto 40 80 lineto \
+         40 80 lineto",
+        "25 25 moveto 60 40 lineto 20 70 moveto 40 80 lineto",
+    ),
+];
+
+fn assert_same_bbox(what: &str, a: &[f64], b: &[f64]) {
+    for (x, y) in a.iter().zip(b) {
+        assert!((x - y).abs() < 0.01, "{what}: {a:?} against {b:?}");
+    }
+}
+
+#[test]
+fn zero_length_segments_do_not_aim_a_butt_or_square_stroke_as_in_gs() {
+    // Miter and bevel joins, butt and square caps: the cases gs and pscat
+    // draw the same to within a hundredth of a pixel. Each is pinned against
+    // gs (outline and ink), and against the same path without the segment.
+    for join in [0, 2] {
+        for cap in [0, 2] {
+            for (degenerate, clean) in DEGENERATE_SEGMENTS {
+                let pre = format!("4 setlinewidth {join} setlinejoin {cap} setlinecap");
+                let (d, c) = (format!("{pre} {degenerate}"), format!("{pre} {clean}"));
+                let ours = outline_bbox(&d, false).expect("outline");
+                assert_same_bbox(&d, &ours, &outline_bbox(&c, false).expect("outline"));
+                assert_outline_as_gs(&d);
+                let (ink_d, ink_c) = (
+                    total_ink(&render_pscat(&format!("{d} stroke"))),
+                    total_ink(&render_pscat(&format!("{c} stroke"))),
+                );
+                assert!((ink_d - ink_c).abs() < 1e-3, "{d}: {ink_d} against {ink_c}");
+                if common::gs_available() {
+                    let theirs = total_ink(&render_gs(&format!("{d} stroke"), "zero-seg"));
+                    assert!(
+                        (ink_d - theirs).abs() <= 0.02 * theirs,
+                        "{d}: pscat {ink_d:.3}, gs {theirs:.3}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_length_segments_leave_round_caps_and_joins_as_without_them() {
+    // pscat's round cap and join outlines differ from gs's by about 0.2 px
+    // even on a clean path (tiny-skia's quad circles), so these are pinned
+    // against the same path without the segment, not against gs.
+    for join in [0, 1, 2] {
+        for cap in [0, 1, 2] {
+            for (degenerate, clean) in DEGENERATE_SEGMENTS {
+                let pre = format!("4 setlinewidth {join} setlinejoin {cap} setlinecap");
+                let (d, c) = (format!("{pre} {degenerate}"), format!("{pre} {clean}"));
+                assert_same_bbox(
+                    &d,
+                    &outline_bbox(&d, false).expect("outline"),
+                    &outline_bbox(&c, false).expect("outline"),
+                );
+                let (ink_d, ink_c) = (
+                    total_ink(&render_pscat(&format!("{d} stroke"))),
+                    total_ink(&render_pscat(&format!("{c} stroke"))),
+                );
+                assert!((ink_d - ink_c).abs() < 1e-3, "{d}: {ink_d} against {ink_c}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_issue_example_has_gss_square_cap_outline() {
+    // `strokepath pathbbox` was [23 21.97 62.6 42.6]: a square cap along the
+    // default direction at the start.
+    let program = "4 setlinewidth 2 setlinecap 25 25 moveto 25 25 lineto 60 40 lineto";
+    let ours = outline_bbox(program, false).expect("outline");
+    assert_same_bbox(program, &ours, &[22.38, 22.38, 62.62, 42.62].map(f64::from));
+    assert_outline_as_gs(program);
+}
+
+#[test]
+fn a_hairline_ignores_zero_length_segments_too() {
+    for cap in [0, 2] {
+        for (degenerate, clean) in DEGENERATE_SEGMENTS {
+            let pre = format!("0 setlinewidth {cap} setlinecap");
+            let (d, c) = (
+                format!("{pre} {degenerate} stroke"),
+                format!("{pre} {clean} stroke"),
+            );
+            let (ink_d, ink_c) = (total_ink(&render_pscat(&d)), total_ink(&render_pscat(&c)));
+            assert!((ink_d - ink_c).abs() < 1e-3, "{d}: {ink_d} against {ink_c}");
+        }
+    }
+}
+
+#[test]
+fn zero_length_segments_are_ignored_under_an_anisotropic_pen() {
+    // The pen-space path (#1196) is trimmed too, so a leading zero-length
+    // segment adds no cap there either.
+    for ctm in ["[2 0 0 .5 0 0] concat", "[1 0 10 1 0 0] concat"] {
+        for (degenerate, clean) in DEGENERATE_SEGMENTS {
+            let pre = format!("{ctm} 4 setlinewidth 2 setlinecap");
+            let (d, c) = (format!("{pre} {degenerate}"), format!("{pre} {clean}"));
+            assert_same_bbox(
+                &d,
+                &outline_bbox(&d, false).expect("outline"),
+                &outline_bbox(&c, false).expect("outline"),
+            );
+            assert_outline_as_gs(&d);
+        }
+    }
+}
+
+/// The `d` attributes of an SVG's paths.
+fn svg_path_data(svg: &str) -> Vec<&str> {
+    svg.split(" d=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect()
+}
+
+#[test]
+fn the_svg_and_pdf_strokes_are_written_without_zero_length_segments() {
+    for cap in [0, 1, 2] {
+        for (degenerate, clean) in DEGENERATE_SEGMENTS {
+            let pre = format!("4 setlinewidth {cap} setlinecap");
+            let (d, c) = (
+                format!("{pre} {degenerate} stroke"),
+                format!("{pre} {clean} stroke"),
+            );
+            let (svg_d, svg_c) = (svg_of(&d), svg_of(&c));
+            assert_eq!(svg_path_data(&svg_d), svg_path_data(&svg_c), "{d}");
+            assert!(!svg_path_data(&svg_d).is_empty(), "{d}: {svg_d}");
+            assert_eq!(pdf_strokes(&pdf_of(&d)), pdf_strokes(&pdf_of(&c)), "{d}");
+        }
+    }
+}
+
+#[test]
+fn zero_length_dashes_of_a_subpath_with_a_zero_length_start_still_draw() {
+    // Dashing sees the trimmed path: the dashes fall where they do on the
+    // real line, zero-length ones included (gs paints 7 squares on 20 units).
+    let line = "4 setlinewidth 2 setlinecap [0 6] 0 setdash 25 25 moveto";
+    let (d, c) = (
+        format!("{line} 25 25 lineto 65 25 lineto stroke"),
+        format!("{line} 65 25 lineto stroke"),
+    );
+    let (ink_d, ink_c) = (total_ink(&render_pscat(&d)), total_ink(&render_pscat(&c)));
+    assert!(ink_c > 10.0, "dashes vanished: {ink_c:.3}");
+    assert!((ink_d - ink_c).abs() < 1e-3, "{ink_d} against {ink_c}");
+}

@@ -610,12 +610,24 @@ impl PsPath {
         })
     }
 
-    /// This path without its subpaths that never leave their first point,
-    /// or `None` when it has none (so a caller clones nothing then). With
-    /// `device_units`, points within gs's device grid (1/256 px, which it
-    /// rounds every point to) count as one; without, only identical ones
+    /// This path as a stroke should see it, or `None` when it needs no
+    /// change (so a caller clones nothing then):
+    ///
+    /// * with `drop_points`, without its subpaths that never leave their
+    ///   first point (a zero-length subpath draws nothing under gs's square
+    ///   caps);
+    /// * without the zero-length segments of the other subpaths, at the
+    ///   start, the end and the middle alike (#1224). gs ignores them: the
+    ///   caps and joins follow the first and last real segments. tiny-skia
+    ///   skips only a zero-length `lineto` whose point is bit-identical, and
+    ///   gives the start of a subpath a cap (square, or round at the wrong
+    ///   offset) along the default direction, or a join along a direction
+    ///   made of rounding noise.
+    ///
+    /// With `device_units`, points within gs's device grid (1/256 px, which
+    /// it rounds every point to) count as one; without, only identical ones
     /// (for a path in pen space, whose grid is not that).
-    fn without_point_subpaths(&self, device_units: bool) -> Option<PsPath> {
+    fn without_degenerate_segments(&self, device_units: bool, drop_points: bool) -> Option<PsPath> {
         // gs rounds half-grid ties toward +inf (not away from zero).
         let key = |v: f32| (f64::from(v) * 256.0 + 0.5).floor();
         let same = move |a: DevPoint, b: DevPoint| {
@@ -625,13 +637,39 @@ impl PsPath {
                 a == b
             }
         };
-        if !self.subpaths(same).any(|(_, _, point)| point) {
+        // A segment that ends where it began (a curve: with both control
+        // points there too) has no length and no direction.
+        let empty = move |cur: DevPoint, seg: &Seg| match *seg {
+            Seg::Line(p) => same(cur, p),
+            Seg::Curve(a, b, p) => same(cur, a) && same(cur, b) && same(cur, p),
+            Seg::Move(_) | Seg::Close => false,
+        };
+        // The point the segment before `seg` ended on, for each segment of
+        // `sub` (`start` for the first).
+        let trims = move |sub: &[Seg], start: Option<DevPoint>| {
+            let mut cur = start;
+            sub.iter().any(|seg| {
+                let trim = cur.is_some_and(|c| empty(c, seg));
+                match *seg {
+                    Seg::Move(p) | Seg::Line(p) | Seg::Curve(_, _, p) => cur = Some(p),
+                    Seg::Close => cur = start,
+                }
+                trim
+            })
+        };
+        if !self.subpaths(same).any(|(sub, start, point)| {
+            if point {
+                drop_points
+            } else {
+                trims(sub, start)
+            }
+        }) {
             return None;
         }
         let mut out = PsPath::default();
         let mut dropped = false;
         for (sub, start, point) in self.subpaths(same) {
-            if point {
+            if point && drop_points {
                 dropped = true;
                 continue;
             }
@@ -641,7 +679,20 @@ impl PsPath {
                 out.segs.extend(start.map(Seg::Move));
             }
             dropped = false;
-            out.segs.extend_from_slice(sub);
+            if point || !trims(sub, start) {
+                out.segs.extend_from_slice(sub);
+                continue;
+            }
+            let mut cur = start;
+            for seg in sub {
+                if !cur.is_some_and(|c| empty(c, seg)) {
+                    out.segs.push(seg.clone());
+                }
+                match *seg {
+                    Seg::Move(p) | Seg::Line(p) | Seg::Curve(_, _, p) => cur = Some(p),
+                    Seg::Close => cur = start,
+                }
+            }
         }
         out.current = self.current;
         out.subpath_start = self.subpath_start;
@@ -752,7 +803,9 @@ impl PsPath {
     /// (never stroked): a zero-length `l` to the current point then
     /// contributes no area, so it is omitted (#254). `pkspray` specks
     /// are `m x y l x y` + four `c`, and the `l` is pure overhead there.
-    /// A stroke keeps it: a zero-length segment decides caps and joins.
+    /// A stroke is written from the path `stroke_dropped` leaves, which has
+    /// no zero-length segments of a subpath with length (#1224), so one
+    /// that survives to here is a dot's, and decides its cap.
     ///
     /// Rounding can itself collapse a short real `l` onto the current
     /// point. Such a segment is dropped in strokes too (it would be a
@@ -3723,21 +3776,22 @@ impl Gfx {
             .map_or_else(PsPath::default, PsPath::from_skia);
     }
 
-    /// The current path without its zero-length subpaths, when they must
-    /// not be stroked, and `None` when the path is stroked as it is. gs
-    /// paints nothing for a zero-length subpath under square caps
-    /// (`moveto closepath`, or a `lineto` back to the point, at any
-    /// width, hairline included), and reads none back from a PDF either.
-    /// tiny-skia and SVG would draw the square, so every output stroke
-    /// takes the path through here (#1215), before dashing. A round cap
-    /// still makes a dot. Zero-length dashes of a real subpath are not
-    /// subpaths and stay.
+    /// The current path as it is stroked, when that differs from it, and
+    /// `None` when the path is stroked as it is. gs paints nothing for a
+    /// zero-length subpath under square caps (`moveto closepath`, or a
+    /// `lineto` back to the point, at any width, hairline included), and
+    /// reads none back from a PDF either. tiny-skia and SVG would draw the
+    /// square, so every output stroke takes the path through here (#1215),
+    /// before dashing. A round cap still makes a dot. Zero-length dashes of
+    /// a real subpath are not subpaths and stay.
+    ///
+    /// Under any cap, a zero-length segment of a subpath that has length is
+    /// dropped as well (#1224): gs ignores it, so the caps and joins follow
+    /// the real segments around it, and tiny-skia would aim them wrongly.
     fn stroke_dropped(&self) -> Option<PsPath> {
-        if self.state.line_cap == LineCap::Square {
-            self.state.path.without_point_subpaths(true)
-        } else {
-            None
-        }
+        self.state
+            .path
+            .without_degenerate_segments(true, self.state.line_cap == LineCap::Square)
     }
 
     /// Where `stroke` strokes `path` (the current path, less what
@@ -3807,13 +3861,13 @@ impl Gfx {
         let det = l[0] * l[3] - l[1] * l[2];
         let inverse = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
         let mut path = path.linear_mapped(inverse)?;
-        if self.state.line_cap == LineCap::Square {
-            // Distinct device points can land on one pen-space point once
-            // mapped (f32 rounding); gs, which drops by the mapped point,
-            // draws nothing for those either.
-            if let Some(kept) = path.without_point_subpaths(false) {
-                path = kept;
-            }
+        // Distinct device points can land on one pen-space point once
+        // mapped (f32 rounding); gs, which drops by the mapped point,
+        // draws nothing for those either.
+        if let Some(kept) =
+            path.without_degenerate_segments(false, self.state.line_cap == LineCap::Square)
+        {
+            path = kept;
         }
         let to_device =
             Transform::from_row(l[0] as f32, l[1] as f32, l[2] as f32, l[3] as f32, 0.0, 0.0);
