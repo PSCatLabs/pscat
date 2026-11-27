@@ -256,6 +256,16 @@ struct TailCall {
     parent_pc: usize,
 }
 
+/// Whose `def` is running, for the lint's library-name trace (#1456).
+enum DefOrigin {
+    /// Written in the program's own text, on this line.
+    Program(u32),
+    /// Written in a `run` file.
+    Library,
+    /// Not told at constant cost.
+    Unknown,
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -2573,7 +2583,9 @@ impl Interp {
             }
             let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
             if lint_names {
-                for k in from..to {
+                // The elements up to and including the running one had run
+                // (a procedure's body runs in order); the ones after had not.
+                for k in from..to.min(at + 1) {
                     let id = body
                         .peek(k, |o| match &o.value {
                             Value::Name(n) if o.executable => Some(n.id()),
@@ -3905,7 +3917,7 @@ impl Interp {
             if let Some(scope) = scope {
                 self.note_shadow(name, &obj, scope);
             }
-            self.note_library_name(name, scope == Some(crate::lint::ShadowScope::User));
+            self.note_library_name(name, &obj, scope == Some(crate::lint::ShadowScope::User));
         }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
@@ -4222,107 +4234,86 @@ impl Interp {
             if let Some(scope) = scope {
                 self.note_shadow(name, value, scope);
             }
-            self.note_library_name(name, scope == Some(crate::lint::ShadowScope::User));
+            self.note_library_name(name, value, scope == Some(crate::lint::ShadowScope::User));
         }
     }
 
     /// `def` and `store`'s half of the library-name trace (#1456): `name` is
-    /// being bound; `in_user` is whether in `userdict`.
+    /// being bound to `value`; `in_user` is whether in `userdict`.
     ///
     /// - A library's definition: the innermost source is a `run` file
-    ///   (`last_file`) and the name goes into `userdict`. The first one is kept.
-    /// - The program's: a name a library defines, bound while no `run` file is
-    ///   being read, where the `def` is found to be written in the program
-    ///   itself (a library procedure that `def`s its own state while the program
-    ///   runs is the library's). Noted with its line, once per program, in
-    ///   whatever dictionary it is made (#1225: a local one).
+    ///   (`last_file`) and the name goes into `userdict`; its kind is kept.
+    ///   The program's own `def` run while a library loads (a callback) is not
+    ///   one.
+    /// - While the program runs, a name a library defines: a `def` found to be
+    ///   written in the program's own text sets the line; one found to be in a
+    ///   library's procedure sets the kind the library has now; any other (a
+    ///   callback in tail position, a call through a name) leaves the line
+    ///   unknown. Whether the program's binding is in force is not decided
+    ///   here but when the finding is made.
     ///
     /// Cold and out of line: only a traced (`--lint`) run gets here, and a name
     /// no library defines costs one probe of the table.
     #[inline(never)]
-    fn note_library_name(&mut self, name: &crate::name::PsName, in_user: bool) {
-        use crate::lint::ProgramDef;
+    fn note_library_name(&mut self, name: &crate::name::PsName, value: &Object, in_user: bool) {
         let id = name.id();
         let Some(mut trace) = self.shadow_trace.take() else {
             return;
         };
-        match trace.names.program_def(id) {
-            None => {
-                if in_user && let Some(file) = &self.last_file {
-                    // The name is in `userdict` already only because the program
-                    // put it there before this file was loaded.
-                    let before = self
-                        .dstack
-                        .get(2)
-                        .is_some_and(|u| u.try_borrow().is_ok_and(|d| d.get_id_ref(id).is_some()));
-                    trace.names.library_def(id, file, before);
+        if let Some(file) = &self.last_file {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => {
+                    if trace.names.contains(id) {
+                        trace.names.set_line(id, line);
+                    }
                 }
-            }
-            Some(ProgramDef::No | ProgramDef::Before) if self.last_file.is_none() => {
-                // The same place that was found not to be the program's: a
-                // library procedure keeping its own state, run in a loop.
-                let site = self.def_site();
-                if site.is_some_and(|s| trace.names.is_known_library_site(id, s)) {
-                    self.shadow_trace = Some(trace);
-                    return;
-                }
-                match self.program_def_line(id) {
-                    Some(line) => trace.names.set_program_line(id, line),
-                    None => {
-                        if let Some(site) = site {
-                            trace.names.set_library_site(id, site);
-                        }
+                _ => {
+                    if in_user {
+                        trace
+                            .names
+                            .library_def(id, file, crate::lint::Kind::of(value));
                     }
                 }
             }
-            Some(_) => {}
+        } else if trace.names.contains(id) {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => trace.names.set_line(id, line),
+                DefOrigin::Library => {
+                    trace
+                        .names
+                        .set_library_kind(id, crate::lint::Kind::of(value));
+                }
+                DefOrigin::Unknown => trace.names.set_line(id, 0),
+            }
         }
         self.shadow_trace = Some(trace);
     }
 
-    /// Where the `def` running now was called from: what the frame on top of
-    /// the execution stack is, as a key that is the same each time that call
-    /// site runs, and the generation of the table of lines it is valid for.
-    fn def_site(&self) -> Option<(usize, usize, u32)> {
-        let frame = self
+    /// Whose `def` or `store` of `name_id` is running now, from the frame on top
+    /// of the execution stack, at constant cost: the program's text read
+    /// directly (the token is the `def`), or the procedure frame on top whose
+    /// previous element is a `def` spelling `/name`, found in the table of lines
+    /// to be written in the program's text or in a `run` file. A `def` in tail
+    /// position, whose frame is gone, a callback and the like are `Unknown`.
+    fn def_origin(&self, name_id: u32) -> DefOrigin {
+        let Some(frame) = self
             .estack
             .iter()
             .rev()
-            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))?;
-        let (key, slot) = match frame {
-            Frame::Proc { body, pc } => body.storage_site(*pc),
-            Frame::Scanner(lexer) => (usize::MAX, lexer.token_start()),
-            Frame::Repeat { body, .. }
-            | Frame::Loop { body }
-            | Frame::For { body, .. }
-            | Frame::Forall { body, .. } => (body.storage_site(0).0, usize::MAX),
-            _ => return None,
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))
+        else {
+            return DefOrigin::Unknown;
         };
-        Some((key, slot, self.source_lines.borrow().generation()))
-    }
-
-    /// The line of the program's own text a `def` or `store` of `name_id` that
-    /// is running now is written on; `None` when it is not found to be in the
-    /// program (a library's, a procedure built at run time, a computed name).
-    /// The program's text read directly, and the procedure frame on top whose
-    /// previous element is that `def`, are answered at once; the rest go to
-    /// [`running_def_site`](Self::running_def_site).
-    fn program_def_line(&self, name_id: u32) -> Option<u32> {
-        let frame = self
-            .estack
-            .iter()
-            .rev()
-            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))?;
-        let bodies = self.source_lines.borrow();
         match frame {
-            // The program's own `def`. A scanner on top with another token is a
-            // procedure whose last element, the `def`, has run out of its frame.
             Frame::Scanner(lexer) if lexer.token_is_binding() => {
-                return if lexer.is_main() {
-                    lexer.line().and_then(|l| u32::try_from(l).ok())
+                if lexer.is_main() {
+                    lexer
+                        .line()
+                        .and_then(|l| u32::try_from(l).ok())
+                        .map_or(DefOrigin::Unknown, DefOrigin::Program)
                 } else {
-                    None
-                };
+                    DefOrigin::Library
+                }
             }
             Frame::Proc { body, pc } if *pc > 0 => {
                 let at = *pc - 1;
@@ -4331,17 +4322,16 @@ impl Interp {
                     .is_some_and(|el| crate::lint::is_binding_op(&el))
                     && crate::lint::writes_name(body, at, name_id)
                 {
-                    return match bodies.line_of(body, at)? {
-                        (line, None) => Some(line),
-                        (_, Some(_)) => None,
-                    };
+                    match self.source_lines.borrow().line_of(body, at) {
+                        Some((line, None)) => DefOrigin::Program(line),
+                        Some((_, Some(_))) => DefOrigin::Library,
+                        None => DefOrigin::Unknown,
+                    }
+                } else {
+                    DefOrigin::Unknown
                 }
             }
-            _ => {}
-        }
-        match self.running_def_site(name_id, &bodies)? {
-            (line, None) => Some(line),
-            (_, Some(_)) => None,
+            _ => DefOrigin::Unknown,
         }
     }
 

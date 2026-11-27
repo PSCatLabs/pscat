@@ -200,7 +200,10 @@ fn a_program_definition_after_the_librarys_own_runs_is_still_named() {
          /setit { /tally [9] def } def\n0 1 2 { pop setit } for\nfail\n",
     );
     r.failed_at("add");
-    assert!(r.names("tally", "lib2.ps").contains("line 4"));
+    // The `def` is the last element of `setit`, run through a name, so no line
+    // is claimed for it (a wrong line is worse than none).
+    let line = r.names("tally", "lib2.ps");
+    assert!(!line.contains("set at line"), "{line}");
 }
 
 #[test]
