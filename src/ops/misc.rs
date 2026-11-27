@@ -216,6 +216,9 @@ fn print_top(it: &mut Interp, form: Form, newline: bool) -> Result<(), PsError> 
     let obj = it.pop()?;
     match (&obj.value, form) {
         (Value::String(s), Form::Text) => {
+            // No copy is made, but the write is work in proportion to the
+            // string: a step per KiB, as a file read counts.
+            it.poll_limits((s.len() / 1024) as u64)?;
             let bytes = s.borrow_bytes();
             out(it, &bytes, false)?;
             if newline {
@@ -271,7 +274,10 @@ fn print_string(it: &mut Interp) -> Result<(), PsError> {
     let Value::String(s) = &obj.value else {
         return Err(PsError::Typecheck);
     };
-    let bytes = s.borrow_bytes().to_vec();
+    // Written from the string's own storage: a copy of a large string would
+    // be an allocation the memory cap never saw. A step per KiB is charged.
+    it.poll_limits((s.len() / 1024) as u64)?;
+    let bytes = s.borrow_bytes();
     out(it, &bytes, true)
 }
 

@@ -45,6 +45,24 @@ fn cvs_of_a_large_string_is_preflighted_and_charged() {
         Err(PsError::StepsExceeded)
     );
 
+    // `=` and `print` of a large string write it from its own storage (no
+    // copy) and count it as work, a step per KiB.
+    for show in ["=", "=only", "print"] {
+        let mut it = Interp::new();
+        it.set_limits(
+            Limits::none()
+                .with_max_memory(100 * MIB)
+                .with_max_steps(1000),
+        )
+        .expect("the allocator is installed");
+        it.capture_stdout();
+        assert_eq!(
+            it.run_str(&format!("/s 16777216 string def 100 {{ s {show} }} repeat")),
+            Err(PsError::StepsExceeded),
+            "{show}"
+        );
+    }
+
     // A string too long for its buffer is a rangecheck before any copy, and
     // `s s cvs` (one storage for both operands) still reads its own bytes.
     let mut it = Interp::new();

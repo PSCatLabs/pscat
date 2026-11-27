@@ -33,6 +33,17 @@ installed, runs one program through both interpreters byte for byte.
 The exponent spelling reaches every user of `format_real`: `==`, `pstack`, `cvs`, `repr()`, the MCP
 and host API's printed text. Everything prints and reads back (the scanner accepts `1e+20`).
 
-Resource use: nothing here loops on user data beyond the one pass the printer already made. `=` of a
-string no longer allocates a copy (it did one, lossily); `stack` is bounded as before; `cvs`'s only
-new allocation is the copy of a string already known to fit its buffer.
+Resource use (Codex round 1): a string `cvs` makes a copy of up to its buffer's length, so it is
+asked of the memory cap (`check_alloc`) before it is made and charged a step per KiB
+(`poll_limits`), as a file read is; the too-small-buffer `rangecheck` still comes first, with no
+copy. `=`, `=only` and `print` of a string write straight from its storage (no copy; `print` used
+to `to_vec()` it, an allocation the cap never saw) and charge the same step per KiB. `stack` and
+`pstack` are bounded by constants (4096 bytes a string, 32 KiB in all). `tests/cvs_limits.rs`
+(its own test binary, as the memory limit counts the whole heap). With `--max-memory 24` a 16 MiB
+string's copy is refused by the memory cap before the step cap is looked at; the step cost shows
+with a looser memory cap.
+
+Not changed: gs prints a negative zero as `0.0` everywhere (`-0.0 = == cvs pstack`, and `-1e-50 =`),
+so `-0.0 3 string cvs` works there and is a `rangecheck` here (`-0.0` is four bytes). pscat keeps
+the sign on purpose: `tests/dispatch_semantics.rs` pins `3 -0.0 mul` as `-0.0` and the kernel tests
+tell the zeros apart, so dropping it is more than one line and a visible debugging loss.
