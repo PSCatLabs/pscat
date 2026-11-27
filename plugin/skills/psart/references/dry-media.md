@@ -44,7 +44,7 @@ newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
 - **`dcchalk`** treats each subpath as one stroke. It lands heavy, tires in
   the middle, lifts thin, sheds dust and differs a little from its
   neighbours. `/Tilt` 80-90 with `/Side` gives broad side-of-chalk
-  underlines and shading. `/Hand` 0..1 draws the path freehand: slow drift, a straight run past each end, closed outlines that end a little past or short of the start. 0 (the default) is ruled; 0.5–0.8 reads as a steady hand; strokes under ~4 widths are untouched. `/Corners /separate` draws a box as four strokes that overshoot the corners. `/From a /To b` (0..1) draws only that part of each stroke with the whole stroke's pressure, texture and dust, so `/From 0 /To t` for growing `t` grows a stroke without changing what is already drawn (with /Tilt too), and costs about the part. Two adjacent pieces make the whole: at the seam a handful of pixels differ by a few dozen levels, also where the stroke's touch changes band at or near the cut.
+  underlines and shading. `/Hand` 0..1 draws the path freehand: slow drift, a straight run past each end, closed outlines that end a little past or short of the start. 0 (the default) is ruled; 0.5–0.8 reads as a steady hand; strokes under ~4 widths are untouched. `/Corners /separate` draws a box as four strokes that overshoot the corners. `/From a /To b` (0..1) draws only that part of each stroke with the whole stroke's pressure, texture and dust, so `/From 0 /To t` for growing `t` grows a stroke without changing what is already drawn (with /Tilt too), and costs about the part. Two adjacent pieces make the whole: at the seam a handful of pixels differ by a few dozen levels, also where the stroke's touch changes band at or near the cut. Many small pieces (`/From prev /To now` on a kept canvas) keep chalk's weight to within 4% (300 pieces), but repaint each piece's round end, so a low `dkstroke` `/Touch` comes out heavy (300 pieces: 0.8 within 2%, 0.5 about 30% heavy, 0.3 nearly double); redraw `/From 0 /To t` for an exact match.
 - **`(text) x y opts dctext`** writes chalk lettering. `/Align /left|/center|/right` places it by its measured width, and `/Fit w` sizes it to exactly w points. Other keys go to dcchalk; `/Width` defaults to 0.048 × `/Size`. It needs handscript and strokeglyphs loaded.
 - **`(left) (right) x1 x2 y opts dcleader`** draws a menu, price-list or contents row with dotted leaders. Use `/Pitch` and `/Gap`; `/Leader << dcchalk opts >>` styles the dots. Rows with the same pitch line their dots up.
 - A sign's frame, nails and doodles belong in the piece's own `dcchalk` calls.
@@ -77,7 +77,7 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   scribble fill, 0.9 is nearly solid. A later pass over the same area is
   `/Pass 2`, `3`, ...; `/From 0 /To t` (0..1) draws only the first part of
   each stroke with the whole stroke's pressure and texture, so a stroke grows
-  over frames (`dkstroke` and `dhstroke` take it too); a colour over another takes `/Over [r g b of the one
+  over frames (`dkstroke` and `dhstroke` take it too; redrawing `/From 0 /To t` each frame is exact, while many `/From prev /To now` pieces on a kept canvas come out up to 7% heavy at the defaults); a colour over another takes `/Over [r g b of the one
   beneath]`, which lets it show through. `/Worn` 0 is a new point, 1 a
   worn flat (wider). drykit can't read the page back, so passes and
   layering are declared, not detected.
