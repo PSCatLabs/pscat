@@ -557,6 +557,11 @@ fn gs_row(x0: u32, cells: std::ops::Range<u32>) -> Vec<u32> {
         .collect()
 }
 
+/// What a case of the test below paints and the starts gs gives: its
+/// name, the program, the device row and column looked along, and the
+/// starts there.
+type T2Case = (&'static str, String, u32, u32, Vec<u32>, Vec<u32>);
+
 /// A TilingType 2 pattern painted where it was not made keeps its true
 /// spacing in the PNG, as gs lays it out in the device that paints (#1373):
 /// the page's pattern inside a PaintProc, the same under an outer pattern
@@ -571,7 +576,7 @@ fn gs_row(x0: u32, cells: std::ops::Range<u32>) -> Vec<u32> {
 /// raster of our PDF gives the same lists for all four.
 #[test]
 fn a_type_2_pattern_painted_in_another_context_keeps_its_spacing() {
-    let cases: [(&str, String, u32, u32, Vec<u32>, Vec<u32>); 4] = [
+    let cases: [T2Case; 4] = [
         (
             "page pattern in a PaintProc",
             t2_foreign(),
