@@ -14,13 +14,15 @@ fn run(src: &str) -> String {
     String::from_utf8_lossy(it.captured_stdout()).into_owned()
 }
 
+/// As before the bounds, except an exponent is spelled `1e-07` (#1428; gs
+/// prints `1e-05` for `1e-5`).
 #[test]
 fn scalars_print_exactly_as_before() {
     let src = "1 == -7 == 2.0 == 0.1 == 1e-7 == 1.5e10 == true == false == null == mark == \
                /name == /name1 cvx == 2 dict == 3 4 add ==";
     assert_eq!(
         run(src),
-        "1\n-7\n2.0\n0.1\n1e-7\n15000000000.0\ntrue\nfalse\nnull\n-mark-\n/name\nname1\n-dict-\n7\n"
+        "1\n-7\n2.0\n0.1\n1e-07\n15000000000.0\ntrue\nfalse\nnull\n-mark-\n/name\nname1\n-dict-\n7\n"
     );
 }
 

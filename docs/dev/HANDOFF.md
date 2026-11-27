@@ -2910,7 +2910,10 @@ renders eight examples in both and compares block-downsampled output).
   assertions use 1e-3 tolerances where the pen is f32.
 - **Program output goes through `Interp::write_stdout`** (#252), not
   `println!`. `=`, `==`, `=only`, `==only` (#1413: Ghostscript's newline-less
-  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it; the wasm
+  forms, one shared `print_top` in src/ops/misc.rs), `stack`, `pstack` and `print` call it
+  (#1428: `=`, `stack` and `cvs` print an operator by name and a string's bytes
+  raw, as gs does, and `format_real` spells an exponent `1e+20`/`1e-05`; the
+  digits stay f64, `notes/1428-print-operators-gs-parity.md`); the wasm
   build turns on `capture_stdout` (a wasm32 module has no stdout) and
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
