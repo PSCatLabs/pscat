@@ -15,6 +15,10 @@
 % drykit's `dkbudget`) stay late-bound, so overriding those works as
 % before. tests/libbind.rs fails for any procedure added without `bind`.
 % @requires: (lib/artkit.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/walkpath where { pop } { (paintkit needs (lib/artkit.ps) run first) errordict /undefined get exec } ifelse
 
 % A fifth sibling to graph.ps/dataviz.ps/etching.ps/pagekit.ps, but --
 % like pagekit -- it depends on lib/artkit.ps, specifically walkpath

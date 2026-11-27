@@ -15,6 +15,11 @@
 % drykit's `dkbudget`) stay late-bound, so overriding those works as
 % before. tests/libbind.rs fails for any procedure added without `bind`.
 % @requires: (lib/artkit.ps) run (lib/paintkit.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/walkpath where { pop } { (drykit needs (lib/artkit.ps) run first) errordict /undefined get exec } ifelse
+/pkribbon where { pop } { (drykit needs (lib/paintkit.ps) run first) errordict /undefined get exec } ifelse
 
 % The shared engine under chalk, crayon and charcoal (epic #232). A dry
 % stick deposits pigment only where its contact patch meets raised tooth,

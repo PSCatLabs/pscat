@@ -2916,6 +2916,14 @@ renders eight examples in both and compares block-downsampled output).
   procedure's array in place, `tests/paintkit.rs`'s
   `pre_walkpath_scans_refuse_...`, and only works because the stand-in is never
   meant to return).
+  A library loaded without what its `@requires` line names fails at load, and
+  says which library: `drykit needs (lib/paintkit.ps) run first` (#1455). The
+  check is one line per prerequisite right under the tag (a `where` probe for a
+  name the prerequisite defines, then `errordict /undefined get exec`), so it
+  defines nothing and costs nothing after load. Add the line when you add a
+  prerequisite to a `@requires` line, and a probe name for a new prerequisite
+  library to `SENTINELS` in `tests/lib_requires_check.rs`, which checks every
+  library's lines against its `@requires` line.
   drychalk's `dcscratch` private dictionary still pays once the library is
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest
