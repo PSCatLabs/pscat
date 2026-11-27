@@ -51,7 +51,7 @@ stroke's.
 At 144 dpi the same cases go from 54 to 77 levels (6 to 25 pixels over 32) to
 27 to 32 (none). A constant touch seams at 12 to 21. drychalk on the #1420
 fixture (`/Tilt 75 /Side 8 /Seed 1`, 432 dpi): cut 0.3 goes from 179 pixels
-over 32 to 42. The remaining `/Tilt` residue (worst 71 at most cuts, before and
+over 32 to 39. The remaining `/Tilt` residue (worst 71 at most cuts, before and
 after) is #1420's: the lanes overlap and are all cut at once.
 
 **Many pieces** (`/From i/n /To (i+1)/n`, 144 dpi, `/Width 8`, weight against the
