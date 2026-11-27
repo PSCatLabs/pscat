@@ -485,6 +485,150 @@ fn assert_real_pattern_tiling_type(pdf: &[u8], tiling: u8) {
     assert!(text.contains(&format!("/TilingType {tiling} ")), "{text}");
 }
 
+/// The page's TilingType 2 cell of `TYPE2` (3 pt on 7.3 x 9.7, identity
+/// matrix), painted where it was not made (#1373).
+const T2_CELL: &str = "<< /PatternType 1 /PaintType 1 /TilingType 2
+   /BBox [0 0 3 3] /XStep 7.3 /YStep 9.7
+   /PaintProc { pop 0.1 0.2 0.7 setrgbcolor 0 0 3 3 rectfill } >>";
+
+/// The page's Type 2 pattern painted inside another pattern's PaintProc.
+fn t2_foreign() -> String {
+    format!(
+        "{T2_CELL} matrix makepattern /t2 exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop t2 setpattern 0 0 300 200 rectfill }} >> matrix makepattern /outer exch def
+outer setpattern 0 0 300 200 rectfill"
+    )
+}
+
+/// The same, the page pattern translated and the outer one turned 180
+/// degrees.
+fn t2_foreign_turned() -> String {
+    format!(
+        "{T2_CELL} [1 0 0 1 2.4 1.3] makepattern /t2 exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop t2 setpattern 0 0 300 200 rectfill }} >> [-1 0 0 -1 310.6 205.2] makepattern /outer exch def
+outer setpattern 0 0 400 400 rectfill"
+    )
+}
+
+/// A Type 2 pattern made inside a PaintProc and used on the page.
+fn t2_made_inside() -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop {T2_CELL} matrix makepattern userdict /t2 3 -1 roll put
+     0.9 0.9 0.9 setrgbcolor 0 0 1 1 rectfill }} >> [1 0 0 1 50.4 120.3] makepattern /outer exch def
+outer setpattern 0 0 10 10 rectfill
+t2 setpattern 0 0 300 200 rectfill"
+    )
+}
+
+/// A Type 2 pattern made and used inside the same (y-flipped) PaintProc.
+fn t2_made_and_used_inside() -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1
+   /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop {T2_CELL} matrix makepattern setpattern 0 0 300 200 rectfill }}
+>> [1 0 0 1 50.4 120.3] makepattern /outer exch def
+outer setpattern 0 0 400 400 rectfill"
+    )
+}
+
+/// Where the cells of `TYPE2`'s colour start along device row `y` and down
+/// device column `x`.
+fn t2_starts(png: &Pixmap, y: u32, x: u32) -> (Vec<u32>, Vec<u32>) {
+    let ink = |x: u32, y: u32| {
+        let p = png.pixel(x, y).expect("pixel");
+        p.blue() > 150 && p.red() < 100
+    };
+    let row = (1..SIZE).filter(|&u| ink(u, y) && !ink(u - 1, y)).collect();
+    let col = (1..SIZE).filter(|&v| ink(x, v) && !ink(x, v - 1)).collect();
+    (row, col)
+}
+
+/// gs 10.07.1's starts for a 7.3 px step anchored at `x0`: `x0 + floor(i *
+/// 7.3)` for cells `i` in `cells`.
+fn gs_row(x0: u32, cells: std::ops::Range<u32>) -> Vec<u32> {
+    cells
+        .map(|i| x0 + (f64::from(i) * 7.3 + 1e-6).floor() as u32)
+        .collect()
+}
+
+/// A TilingType 2 pattern painted where it was not made keeps its true
+/// spacing in the PNG, as gs lays it out in the device that paints (#1373):
+/// the page's pattern inside a PaintProc, the same under an outer pattern
+/// turned 180 degrees, and one made inside a PaintProc used on the page.
+/// One made and used inside a y-flipped PaintProc floors its steps in gs's
+/// device space too (the gaps run 9 10 10, not 10 10 9).
+///
+/// Every list is gs's, measured from `gs -q -dNOPAUSE -dBATCH -dSAFER
+/// -dMaxPatternBitmap=1 -sDEVICE=png16m -g400x400 -r72` on the program
+/// with `showpage` (aliased; `-dMaxPatternBitmap=1` because gs crashes on
+/// the made-inside program without it, as with `MADE_INSIDE`), and gs's
+/// raster of our PDF gives the same lists for all four.
+#[test]
+fn a_type_2_pattern_painted_in_another_context_keeps_its_spacing() {
+    let cases: [(&str, String, u32, u32, Vec<u32>, Vec<u32>); 4] = [
+        (
+            "page pattern in a PaintProc",
+            t2_foreign(),
+            394,
+            1,
+            gs_row(0, 1..42),
+            vec![
+                200, 209, 218, 228, 238, 247, 257, 267, 276, 286, 296, 306, 315, 325, 335, 344,
+                354, 364, 373, 383, 393,
+            ],
+        ),
+        (
+            "page pattern in a turned PaintProc",
+            t2_foreign_turned(),
+            388,
+            14,
+            vec![
+                13, 20, 27, 34, 42, 49, 56, 64, 71, 78, 86, 93, 100, 107, 115, 122, 129, 137, 144,
+                151, 159, 166, 173, 180, 188, 195, 202, 210, 217, 224, 232, 239, 246, 253, 261,
+                268, 275, 283, 290, 297, 305,
+            ],
+            vec![
+                195, 203, 212, 222, 232, 241, 251, 261, 270, 280, 290, 300, 309, 319, 329, 338,
+                348, 358, 367, 377, 387,
+            ],
+        ),
+        (
+            "made in a PaintProc, used on the page",
+            t2_made_inside(),
+            392,
+            1,
+            gs_row(0, 1..42),
+            vec![
+                206, 216, 226, 235, 245, 255, 264, 274, 284, 294, 303, 313, 323, 332, 342, 352,
+                361, 371, 381, 391,
+            ],
+        ),
+        (
+            "made and used in a PaintProc",
+            t2_made_and_used_inside(),
+            278,
+            51,
+            gs_row(50, 0..42),
+            vec![
+                83, 92, 102, 112, 121, 131, 141, 150, 160, 170, 180, 189, 199, 209, 218, 228, 238,
+                247, 257, 267, 277,
+            ],
+        ),
+    ];
+    for (what, src, y, x, want_row, want_col) in cases {
+        let out = render(&src);
+        let (row, col) = t2_starts(&out.png, y, x);
+        assert_eq!(row, want_row, "{what}: starts along row {y}");
+        assert_eq!(col, want_col, "{what}: starts down column {x}");
+    }
+}
+
 #[test]
 fn pattern_free_programs_write_no_pattern() {
     let out = render("0 0 1 setrgbcolor 10 10 100 100 rectfill");
