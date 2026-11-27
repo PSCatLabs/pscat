@@ -111,8 +111,8 @@ const PARITY: &[(&str, &str, &str)] = &[
     // Errors leave the operands, in gs's order: type, then size, then access.
     (
         "rangecheck",
-        "7 { 2 array execstack } stopped $error /errorname get 4 array astore == clear",
-        "[7 [null null] true /rangecheck]",
+        "7 { 1 array execstack } stopped $error /errorname get 4 array astore == clear",
+        "[7 [null] true /rangecheck]",
     ),
     (
         "typecheck",
@@ -178,8 +178,8 @@ const PARITY: &[(&str, &str, &str)] = &[
     ),
     (
         "dictstack-rangecheck",
-        "7 { 2 array dictstack } stopped $error /errorname get 4 array astore == clear",
-        "[7 [null null] true /rangecheck]",
+        "7 { 1 array dictstack } stopped $error /errorname get 4 array astore == clear",
+        "[7 [null] true /rangecheck]",
     ),
     (
         "dictstack-typecheck",
@@ -450,7 +450,9 @@ fn the_walk_is_charged_to_max_steps() {
             "{what}: {got:?}"
         );
     }
-    let nest = "100000 { userdict begin } repeat ";
+    // systemdict, so that every name the loop runs is found in the top
+    // dictionary rather than under 100,000 others.
+    let nest = "100000 { systemdict begin } repeat ";
     run_with_steps(
         &format!("{nest}50 {{ countdictstack array pop }} repeat"),
         cap,
@@ -467,41 +469,41 @@ fn the_walk_is_charged_to_max_steps() {
 }
 
 /// A stop leaves the array as it was: the charge comes before the write.
+/// Each case runs once without the operator, to count its steps, then under
+/// a cap a little above that, which the operator's own charge passes. The
+/// recursion ends in `quit`, so no unwinding steps come after the operator.
 #[test]
 fn a_stop_leaves_the_array_unwritten() {
-    for (src, probe) in [
+    for (setup, run, op) in [
         (
-            DEEP.replace('K', "/A 9100 array def A execstack"),
-            "A 0 get type =",
+            "/A 9100 array def /r { dup 0 gt { 1 sub r 0 pop } { pop A OP pop quit } ifelse } def",
+            "9000 r",
+            "execstack",
         ),
         (
-            "/A 100100 array def 100000 { userdict begin } repeat A dictstack".to_string(),
-            "A 0 get type =",
+            "/A 100100 array def",
+            "100000 { systemdict begin } repeat A OP pop",
+            "dictstack",
         ),
     ] {
-        let mut it = Interp::new();
-        // Enough for the setup, not for the operator's charge.
-        let setup = run_steps_needed(&src);
-        it.set_limits(Limits::none().with_max_steps(setup + 100))
-            .expect("set limits");
-        let got = it.run_str(&src);
-        assert!(matches!(got, Err(PsError::StepsExceeded)), "{src}: {got:?}");
-        it.set_limits(Limits::none()).expect("clear limits");
-        it.capture_stdout();
-        it.run_str(probe).expect("probe");
-        assert_eq!(lines(it.captured_stdout()), ["nulltype"], "{src}");
+        let steps = |op: &str, cap: u64| {
+            let mut it = Interp::new();
+            it.run_str(&setup.replace("OP", op)).expect("setup");
+            it.set_limits(Limits::none().with_max_steps(cap))
+                .expect("set limits");
+            let got = it.run_str(&run.replace("OP", op));
+            let used = it.steps_used();
+            it.set_limits(Limits::none()).expect("clear limits");
+            it.capture_stdout();
+            it.run_str("A 0 get type =").expect("probe");
+            (got, used, lines(it.captured_stdout()))
+        };
+        let (got, base, _) = steps("", u64::MAX / 2);
+        got.unwrap_or_else(|e| panic!("{op} baseline: {e:?}"));
+        let (got, _, probe) = steps(op, base + 50);
+        assert!(matches!(got, Err(PsError::StepsExceeded)), "{op}: {got:?}");
+        assert_eq!(probe, ["nulltype"], "{op}");
     }
-}
-
-/// The steps a program takes with its last operator replaced by `pop`.
-fn run_steps_needed(src: &str) -> u64 {
-    let (head, _) = src.rsplit_once(' ').expect("an operator at the end");
-    let mut it = Interp::new();
-    // Steps are counted only under a limit.
-    it.set_limits(Limits::none().with_max_steps(u64::MAX / 2))
-        .expect("set limits");
-    it.run_str(&format!("{head} pop")).expect("setup runs");
-    it.steps_used()
 }
 
 /// `execstack` copies the unread text of every executable string on the
@@ -512,7 +514,7 @@ fn the_string_copies_are_held_against_max_memory() {
     let src = |k: &str| {
         format!(
             "/S 1048576 string def S 0 (r) putinterval S cvx /S exch def /n 0 def \
-             /r {{ /n n 1 add def n 30 lt {{ S exec }} {{ {k} }} ifelse }} def r"
+             /r {{ /n n 1 add def n 30 lt {{ S }} {{ {k} }} ifelse }} def r"
         )
     };
     let run = |k: &str| {

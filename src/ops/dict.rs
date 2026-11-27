@@ -21,6 +21,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "undef", undef);
     op(dict, "currentdict", currentdict);
     op(dict, "countdictstack", countdictstack);
+    op(dict, "dictstack", dictstack);
     op(dict, "cleardictstack", cleardictstack);
     op(dict, "maxlength", maxlength);
     op(dict, ">>", dict_from_mark);
@@ -163,6 +164,26 @@ fn currentdict(it: &mut Interp) -> Result<(), PsError> {
 fn countdictstack(it: &mut Interp) -> Result<(), PsError> {
     it.push(Object::int(it.dict_stack_len() as i64));
     Ok(())
+}
+
+/// `array dictstack subarray` (#1468): the dictionary stack, bottom first
+/// (systemdict, globaldict, userdict, then what `begin` pushed), in the
+/// first slots of `array`. The stack has no depth limit, so the entries
+/// are charged as steps before anything is written: a stop leaves the
+/// array as it was.
+fn dictstack(it: &mut Interp) -> Result<(), PsError> {
+    use super::control::{check_room, push_filled, stack_copy_target};
+    let (a, target) = stack_copy_target(it)?;
+    let entries = it.dict_stack_len();
+    check_room(&target, &a, entries)?;
+    it.poll_limits(entries as u64)?;
+    it.pop_settled();
+    it.journal_array(&a);
+    it.forget_positions(&a);
+    for (i, d) in it.dict_stack().iter().enumerate() {
+        a.put(i, Object::lit(Value::Dict(d.clone())))?;
+    }
+    push_filled(it, &a, target, entries)
 }
 
 fn cleardictstack(it: &mut Interp) -> Result<(), PsError> {

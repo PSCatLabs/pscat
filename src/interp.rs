@@ -327,8 +327,9 @@ pub(crate) enum ForallSrc {
     /// Bytes pushed as integers.
     Str(PsString, usize),
     /// Dict pairs are snapshotted when `forall` starts; the PLRM leaves
-    /// order and mid-loop mutation behavior unspecified.
-    Pairs(Vec<(Object, Object)>, usize),
+    /// order and mid-loop mutation behavior unspecified. The dictionary is
+    /// kept for `execstack` to show (#1468).
+    Pairs(Rc<RefCell<Dict>>, Vec<(Object, Object)>, usize),
 }
 
 pub(crate) struct ForControl {
@@ -365,11 +366,26 @@ impl ForControl {
     }
 
     fn value(&self) -> Object {
+        self.number(self.current)
+    }
+
+    fn number(&self, v: f64) -> Object {
         if self.integral {
-            Object::int(self.current as i64)
+            Object::int(v as i64)
         } else {
-            Object::real(self.current)
+            Object::real(v)
         }
+    }
+
+    /// The next control value, the increment and the limit, as `execstack`
+    /// shows them (gs 10.07.1: `1 2 9 { ... } for` shows `3 2 9` in the
+    /// first pass).
+    fn parts(&self) -> [Object; 3] {
+        [
+            self.number(self.current),
+            self.number(self.increment),
+            self.number(self.limit),
+        ]
     }
 }
 
@@ -2802,7 +2818,7 @@ impl Interp {
                                 Action::IterateWith(Object::int(i64::from(b)), body.clone())
                             }
                         },
-                        ForallSrc::Pairs(pairs, i) => match pairs.get(*i) {
+                        ForallSrc::Pairs(_, pairs, i) => match pairs.get(*i) {
                             None => Action::Pop,
                             Some((k, v)) => {
                                 let (k, v) = (k.clone(), v.clone());
@@ -5316,6 +5332,173 @@ impl Interp {
             self.last_name = Some(crate::name::intern(op.name).id());
             self.error_command = Some(Object::exec(Value::Operator(op)));
         }
+    }
+}
+
+/// The operators `execstack` shows for the loop and `stopped` frames, in
+/// [`LoopOps`] order. gs shows internal continuations there
+/// (`--%repeat_continue--`, `--%stopped_push--`) that have no PostScript
+/// name; the operator that made the frame stands in for each (#1468).
+const LOOP_OPS: [&str; 6] = ["repeat", "loop", "for", "forall", "pathforall", "stopped"];
+type LoopOps = [Object; 6];
+
+/// How many entries `execstack` shows for `frame`, and how many bytes its
+/// copy of an executable string's unread text takes (#1468). The one
+/// definition of a frame's shape: [`frame_entries`] checks that it wrote
+/// exactly this many.
+///
+/// The frames with no PostScript form show nothing: a show (its glyph
+/// procedures and `kshow` procedure run as frames above it, and show), an
+/// image (likewise its data procedures), a tint-transform continuation, a
+/// pattern's `PaintProc` boundary, the profiler's return marker (it exists
+/// only under `--profile`, which must not change what a program sees) and
+/// a procedure that has issued its last element.
+fn frame_shape(frame: &Frame) -> (usize, usize) {
+    match frame {
+        Frame::Scanner(lx) => (1, lx.with_unread(<[u8]>::len).unwrap_or(0)),
+        Frame::Proc { body, pc } => (usize::from(*pc < body.len()), 0),
+        Frame::Repeat { .. } | Frame::Forall { .. } => (3, 0),
+        Frame::Loop { .. } => (2, 0),
+        Frame::For { .. } | Frame::PathForall { .. } => (5, 0),
+        Frame::StopMark => (1, 0),
+        Frame::Show(_)
+        | Frame::Image(_)
+        | Frame::PostOp(_)
+        | Frame::Pattern(_)
+        | Frame::ProfReturn => (0, 0),
+    }
+}
+
+/// Hand `put` what `execstack` shows for `frame`, bottom first, in gs
+/// 10.07.1's order: a file as itself; an executable string as a new string
+/// of its unread text; a procedure as the view of its unexecuted rest; a
+/// loop as its control values, its body and the loop operator; `stopped`
+/// as the operator. A frame does not keep its procedure's access
+/// attributes, so the procedure and array views are read-only (gs gives
+/// them the procedure's own, often writable): `execstack` must not hand
+/// out write access to a read-only procedure.
+fn frame_entries(
+    frame: &Frame,
+    ops: &LoopOps,
+    put: &mut impl FnMut(Object) -> Result<(), PsError>,
+) -> Result<(), PsError> {
+    let proc = |b: &PsArray| Object::exec(Value::Array(b.clone())).into_readonly();
+    // A view of what is left of a sequence a frame walks.
+    let rest = |len: usize, at: usize| (at.min(len), len - at.min(len));
+    match frame {
+        Frame::Scanner(lx) => match lx.file() {
+            Some(f) => put(Object::exec(Value::File(f.clone()))),
+            None => {
+                let text = lx.with_unread(<[u8]>::to_vec).unwrap_or_default();
+                put(Object::exec(Value::String(PsString::from_bytes(text))))
+            }
+        },
+        Frame::Proc { body, pc } => {
+            if *pc >= body.len() {
+                return Ok(());
+            }
+            let (at, len) = rest(body.len(), *pc);
+            put(Object::exec(Value::Array(body.interval(at, len)?)).into_readonly())
+        }
+        Frame::Repeat { body, remaining } => {
+            put(Object::int(*remaining))?;
+            put(proc(body))?;
+            put(ops[0].clone())
+        }
+        Frame::Loop { body } => {
+            put(proc(body))?;
+            put(ops[1].clone())
+        }
+        Frame::For { body, control } => {
+            for part in control.parts() {
+                put(part)?;
+            }
+            put(proc(body))?;
+            put(ops[2].clone())
+        }
+        Frame::Forall { body, src } => {
+            let source = match src {
+                ForallSrc::Array(a, i) => {
+                    let (at, len) = rest(a.len(), *i);
+                    Object::lit(Value::Array(a.interval(at, len)?)).into_readonly()
+                }
+                ForallSrc::Str(s, i) => {
+                    let (at, len) = rest(s.len(), *i);
+                    Object::lit(Value::String(s.interval(at, len)?))
+                }
+                // gs adds its internal slot index after the body.
+                ForallSrc::Pairs(d, _, _) => Object::lit(Value::Dict(d.clone())),
+            };
+            put(source)?;
+            put(proc(body))?;
+            put(ops[3].clone())
+        }
+        // gs shows the four procedures, then its path enumerator, which has
+        // no PostScript form.
+        Frame::PathForall { procs, .. } => {
+            for p in procs.iter() {
+                put(p.clone())?;
+            }
+            put(ops[4].clone())
+        }
+        // gs: `false 1 --%stopped_push--`, an internal error mask and the
+        // continuation.
+        Frame::StopMark => put(ops[5].clone()),
+        Frame::Show(_)
+        | Frame::Image(_)
+        | Frame::PostOp(_)
+        | Frame::Pattern(_)
+        | Frame::ProfReturn => Ok(()),
+    }
+}
+
+/// `countexecstack`, `execstack` and `dictstack` (#1468).
+impl Interp {
+    /// The number of entries `execstack` would write, and the bytes its
+    /// copies of executable strings take. A step per frame, with the limits
+    /// looked at every 1024 frames: a full stack is 10,000 frames.
+    pub(crate) fn exec_stack_shape(&mut self) -> Result<(usize, usize), PsError> {
+        const POLL_EVERY: usize = 1024;
+        let (mut entries, mut bytes) = (0usize, 0usize);
+        let frames = self.estack.len();
+        for i in 0..frames {
+            let (n, b) = frame_shape(&self.estack[i]);
+            entries += n;
+            bytes = bytes.saturating_add(b);
+            if i % POLL_EVERY == POLL_EVERY - 1 {
+                self.poll_limits(POLL_EVERY as u64)?;
+            }
+        }
+        self.poll_limits((frames % POLL_EVERY) as u64)?;
+        Ok((entries, bytes))
+    }
+
+    /// Write the execution stack, bottom first, into the first `entries`
+    /// slots of `a` (`entries` from [`exec_stack_shape`](Self::exec_stack_shape),
+    /// which `a` has room for). Cannot fail once those checks have passed.
+    pub(crate) fn write_exec_stack(&self, a: &PsArray, entries: usize) -> Result<(), PsError> {
+        let ops: LoopOps = {
+            let system = self.dstack[0].borrow();
+            LOOP_OPS.map(|name| system.get(name).unwrap_or_else(|| Object::lit(Value::Null)))
+        };
+        let mut i = 0;
+        for frame in &self.estack {
+            let start = i;
+            frame_entries(frame, &ops, &mut |o| {
+                a.put(i, o)?;
+                i += 1;
+                Ok(())
+            })?;
+            debug_assert_eq!(i - start, frame_shape(frame).0, "a frame's shape drifted");
+        }
+        debug_assert_eq!(i, entries);
+        Ok(())
+    }
+
+    /// The dictionary stack, bottom first: systemdict, globaldict,
+    /// userdict, then what `begin` pushed.
+    pub(crate) fn dict_stack(&self) -> &[Rc<RefCell<Dict>>] {
+        &self.dstack
     }
 }
 

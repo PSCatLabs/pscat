@@ -18,6 +18,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "exit", exit);
     op(dict, "stop", stop);
     op(dict, "stopped", stopped);
+    op(dict, "countexecstack", countexecstack);
+    op(dict, "execstack", execstack);
 }
 
 /// The loop operators require a procedure body specifically (not any
@@ -156,4 +158,64 @@ fn stopped(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     it.begin_stopped()?;
     it.exec_object(obj)
+}
+
+/// `- countexecstack int` (#1468): the length of the array `execstack`
+/// would fill, so `countexecstack array execstack` always fits.
+fn countexecstack(it: &mut Interp) -> Result<(), PsError> {
+    let (entries, _) = it.exec_stack_shape()?;
+    it.push(Object::int(entries as i64));
+    Ok(())
+}
+
+/// `array execstack subarray` (#1468): the execution stack, bottom first,
+/// in the first slots of `array` (`Interp::write_exec_stack` says what each
+/// frame shows). Everything that can fail is checked, and the copies and
+/// the per-entry steps charged, before the operand is taken, so an error
+/// or a stop leaves the stack and the array as they were.
+fn execstack(it: &mut Interp) -> Result<(), PsError> {
+    let (a, target) = stack_copy_target(it)?;
+    let (entries, bytes) = it.exec_stack_shape()?;
+    check_room(&target, &a, entries)?;
+    it.check_alloc(bytes)?;
+    it.poll_limits(entries as u64)?;
+    it.pop_settled();
+    it.journal_array(&a);
+    it.forget_positions(&a);
+    it.write_exec_stack(&a, entries)?;
+    push_filled(it, &a, target, entries)
+}
+
+/// The array operand of `execstack` and `dictstack`, left on the stack:
+/// `stackunderflow`, or `typecheck` for anything but an array.
+pub(crate) fn stack_copy_target(it: &Interp) -> Result<(PsArray, Object), PsError> {
+    let target = it.operand_stack().last().ok_or(PsError::StackUnderflow)?;
+    match &target.value {
+        Value::Array(a) => Ok((a.clone(), target.clone())),
+        _ => Err(PsError::Typecheck),
+    }
+}
+
+/// gs 10.07.1's order: a short array is a `rangecheck` even when it is
+/// also read-only (`1 array readonly execstack`); then `invalidaccess`.
+pub(crate) fn check_room(target: &Object, a: &PsArray, entries: usize) -> Result<(), PsError> {
+    if entries > a.len() {
+        return Err(PsError::Rangecheck);
+    }
+    target.check_writable()
+}
+
+/// Push the filled part of `a`, with the operand's attributes.
+pub(crate) fn push_filled(
+    it: &mut Interp,
+    a: &PsArray,
+    target: Object,
+    entries: usize,
+) -> Result<(), PsError> {
+    let filled = a.interval(0, entries)?;
+    it.push(Object {
+        value: Value::Array(filled),
+        ..target
+    });
+    Ok(())
 }
