@@ -8370,4 +8370,130 @@ mod tests {
             assert!(sum < 96 * 96 * 2, "and on average much closer: {sum}");
         }
     }
+
+    /// A tall, thin canvas: many rows to scan for a few bytes of heap.
+    const TALL: (u32, u32) = (4, 100_000);
+
+    /// A probe whose time limit has already fired, as the interpreter gives
+    /// the groups of a run it stopped.
+    fn expired() -> crate::limits::LimitProbe {
+        crate::limits::LimitProbe {
+            deadline_ns: Some(0),
+            ..crate::limits::LimitProbe::NONE
+        }
+    }
+
+    fn checks() -> u64 {
+        crate::limits::CHECKS.with(std::cell::Cell::get)
+    }
+
+    fn fill_rect(gfx: &mut Gfx, rgb: (f64, f64, f64), x1: f64, y1: f64) {
+        gfx.set_rgb(rgb.0, rgb.1, rgb.2);
+        gfx.moveto(0.0, 0.0);
+        gfx.lineto(x1, 0.0).expect("lineto");
+        gfx.lineto(x1, y1).expect("lineto");
+        gfx.lineto(0.0, y1).expect("lineto");
+        gfx.closepath();
+        gfx.fill(FillRule::Winding);
+    }
+
+    /// #1421: a run stopped on a limit with groups open drops their layers
+    /// at once. A blank layer has no painted row, so the composite loop's
+    /// first look never came and the scan for painted rows ran to its end:
+    /// four nested blank 8000 x 8000 layers were a gigabyte read after the
+    /// stop. The scan looks at the limits itself, so each group costs one
+    /// look and no work.
+    #[test]
+    fn the_abort_cleanup_does_not_scan_the_blank_layers_of_open_groups() {
+        let mut gfx = Gfx::new(TALL.0, TALL.1).expect("canvas");
+        for _ in 0..4 {
+            gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+                .expect("group");
+        }
+        let _ = gfx.take_group_work();
+        let live = gfx.expire_group_probe();
+        let before = checks();
+        gfx.end_open_groups();
+        assert_eq!(checks() - before, 4, "one look at the limits per group");
+        assert_eq!(gfx.take_group_work(), 0, "no layer was scanned");
+        assert!(gfx.groups.is_empty());
+        assert!(!gfx.page_is_displaced());
+        assert_eq!((gfx.pixmap.width(), gfx.pixmap.height()), TALL);
+        gfx.set_group_probe(live);
+    }
+
+    /// The scan for painted rows is polled every `GROUP_POLL_ROWS` rows and
+    /// the pixels it reads are the work.
+    #[test]
+    fn the_painted_row_scan_is_polled_every_64_rows() {
+        let mut gfx = Gfx::new(TALL.0, TALL.1).expect("canvas");
+        gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+            .expect("group");
+        let before = checks();
+        let (work, r) = gfx.end_group(&crate::limits::LimitProbe::NONE);
+        assert!(r.is_ok());
+        assert_eq!(checks() - before, u64::from(TALL.1).div_ceil(64));
+        assert_eq!(work, u64::from(TALL.0) * u64::from(TALL.1));
+    }
+
+    /// A stop in the scan returns the work done so far, not the layer's
+    /// whole size, and closes the group.
+    #[test]
+    fn a_limit_met_in_the_painted_row_scan_stops_it_at_once() {
+        let mut gfx = Gfx::new(TALL.0, TALL.1).expect("canvas");
+        gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+            .expect("group");
+        let (work, r) = gfx.end_group(&expired());
+        assert_eq!(r, Err(PsError::TimeExceeded));
+        assert_eq!(work, 0, "stopped at its first look");
+        assert!(gfx.groups.is_empty() && !gfx.page_is_displaced());
+
+        // Steps: a step per 1024 pixels read, charged as the scan goes.
+        gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+            .expect("group");
+        let few = crate::limits::LimitProbe {
+            steps_left: Some(10),
+            ..crate::limits::LimitProbe::NONE
+        };
+        let (work, r) = gfx.end_group(&few);
+        assert_eq!(r, Err(PsError::StepsExceeded));
+        assert!(
+            work > 0 && work < 20 * 1024 + 64 * u64::from(TALL.0),
+            "work {work}"
+        );
+    }
+
+    /// The list of painted rows is asked of `--max-memory` before it is
+    /// made, and the group still closes.
+    #[test]
+    fn the_painted_row_list_is_refused_before_it_is_made_when_the_cap_cannot_hold_it() {
+        let mut gfx = Gfx::new(TALL.0, TALL.1).expect("canvas");
+        gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+            .expect("group");
+        let before = checks();
+        let tight = crate::limits::LimitProbe::memory_only(Some((0, 1000)));
+        let (work, r) = gfx.end_group(&tight);
+        assert_eq!(r, Err(PsError::MemoryExceeded));
+        assert_eq!(work, 0);
+        assert_eq!(checks() - before, 0, "refused before any row is read");
+        assert!(gfx.groups.is_empty() && !gfx.page_is_displaced());
+    }
+
+    /// A stop leaves the interpreter whole: the page as it was before the
+    /// group (nothing of the group on it), the graphics state restored.
+    #[test]
+    fn a_group_stopped_on_a_limit_leaves_the_page_and_the_state_as_they_were() {
+        let mut gfx = Gfx::new(20, 20).expect("canvas");
+        fill_rect(&mut gfx, (1.0, 0.0, 0.0), 10.0, 20.0);
+        let page = gfx.pixmap.data().to_vec();
+        let saved = gfx.saved.len();
+        gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
+            .expect("group");
+        fill_rect(&mut gfx, (0.0, 0.0, 1.0), 20.0, 10.0);
+        let (_, r) = gfx.end_group(&expired());
+        assert_eq!(r, Err(PsError::TimeExceeded));
+        assert_eq!(gfx.pixmap.data(), &page[..], "no mark of the group");
+        assert_eq!(gfx.saved.len(), saved);
+        assert!(gfx.groups.is_empty());
+    }
 }
