@@ -705,6 +705,10 @@ pub struct Interp {
     /// Set by the CLI's single-run path: dropping this `Interp` leaves the
     /// dictionary graph alone (see `Drop for Interp`).
     keep_dicts_on_drop: bool,
+    /// Set by the CLI: under a time limit, the end of a finished run is a
+    /// flush point for the stdout line buffer (#1457). See
+    /// [`send_stdout_at_run_end`](Interp::send_stdout_at_run_end).
+    send_stdout_at_end: bool,
     /// When set, `=`, `==`, `stack`, `pstack` and `print` append here
     /// instead of writing to the process's stdout (issue #252). The
     /// browser build turns it on, since a wasm32 module has no stdout,
@@ -1020,6 +1024,7 @@ impl Interp {
             resources: Default::default(),
             patterns: Default::default(),
             keep_dicts_on_drop: false,
+            send_stdout_at_end: false,
             stdout_capture: None,
             stdout_truncated: false,
             #[cfg(unix)]
@@ -1579,7 +1584,7 @@ impl Interp {
         // came first.
         #[cfg(unix)]
         if (result.is_err() || matches!(result, Ok(false)) || self.quit_requested)
-            && let Err(e) = self.stdout_at_end(result.is_ok())
+            && let Err(e) = self.stdout_at_end(result.is_ok() && self.send_stdout_at_end)
             && result.is_ok()
         {
             result = Err(e);
@@ -4940,6 +4945,19 @@ impl Interp {
         self.keep_dicts_on_drop = true;
     }
 
+    /// Under a time limit, send a finished run's buffered stdout at the end
+    /// of the run, within the limit, and report `limitexceeded (time)` for
+    /// the run if the limit passes first (#1457). For the `pscat` CLI, where
+    /// nothing is written between a run's end and its next stdout flush, so
+    /// the order is unchanged. Without it (a library user, who may run
+    /// several programs on one `Interp`), the bytes stay buffered as std
+    /// keeps them, and the next flush (a write, `Drop`) is held to the
+    /// run's deadline instead, dropping them silently past it.
+    #[doc(hidden)]
+    pub fn send_stdout_at_run_end(&mut self) {
+        self.send_stdout_at_end = true;
+    }
+
     #[doc(hidden)]
     pub fn last_executed_name(&self) -> Option<String> {
         self.last_name
@@ -5319,9 +5337,10 @@ impl Interp {
 
     /// A run that ends with program stdout still in the line buffer
     /// (#1457): under a time limit, the send of those bytes must not outlast
-    /// it. A run that `finished` sends them now through the timed writer;
-    /// one that failed keeps them for the CLI's flush after its error report
-    /// (where they leave without a limit), held to the same deadline (see
+    /// it. With `finished` (a finished run in the CLI) they are sent now
+    /// through the timed writer; otherwise (a failed run, whose partial line
+    /// leaves after its error report, or a library user's run) they stay
+    /// for the next flush, held to the same deadline (see
     /// [`end_of_run`](crate::timed_write::end_of_run)). The deadline is the
     /// run's, but at least `END_GRACE` (50 ms) from now, so a run stopped at
     /// its limit still sends its last line to a reader that takes it. Past

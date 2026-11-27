@@ -130,9 +130,11 @@ confirmation round: a room check said "room" for a full macOS socket, and
 `F_GETPIPE_SZ` less `FIONREAD` does too for a Linux pipe whose first page
 was partly read, and the exit flush then hung). Where the send happens:
 
-- A run that finished (or ran `quit`) sends them at once, at its end.
-  Nothing is written between the end of a run and the CLI's flush, so the
-  order is the same as without a limit. If the deadline passes first, the
+- In the CLI, a run that finished (or ran `quit`) sends them at once, at
+  its end. Nothing is written between the end of a run and the CLI's next
+  stdout flush (verified with `-e`, a file, the REPL, `--png`, `--profile`,
+  `--lint`), so the order is the same as without a limit. The CLI opts in
+  with `Interp::send_stdout_at_run_end` (doc(hidden)). If the deadline passes first, the
   rest is dropped and the run reports `limitexceeded (time)`, with the last
   operator it ran as the offending command
   (`a_full_pipe_at_the_end_of_a_run_does_not_outlast_the_limit`,
@@ -145,6 +147,12 @@ was partly read, and the exit flush then hung). Where the send happens:
   flush (`send_line`: the CLI's, the owner's plain path or `Drop`) is held
   to it: past it, the rest is dropped and the run keeps its own error
   (`undefined`, `limitexceeded (steps)`, `limitexceeded (time)`, ...).
+- A library user's finished run does the same: its next program on the
+  same `Interp` may write more to the line, and std would keep it buffered
+  until then (`tests/stdout_owner.rs` pins that). Its next flush (a write,
+  `Drop`) is held to the recorded deadline, and past it the rest is dropped
+  silently: only the CLI reports `limitexceeded (time)` for a finished
+  run.
 - An owner dropped in the middle of a timed run records the deadline in its
   `Drop`, so that send is bounded too.
 

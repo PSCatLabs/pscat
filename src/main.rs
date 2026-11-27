@@ -730,6 +730,9 @@ fn run_cli() -> ExitCode {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
+    // Nothing writes between a run's end and the next stdout flush here, so
+    // a timed run may send its last partial line at its end (#1457).
+    interp.send_stdout_at_run_end();
     if options.profile {
         interp.enable_profile();
         if options.profile_graph {

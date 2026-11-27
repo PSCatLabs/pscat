@@ -677,16 +677,18 @@ pub(crate) fn release(id: u64) {
 /// byte and whenever it waits. `deadline` is the run's own, but at least
 /// [`END_GRACE`] from now.
 ///
-/// - A run that `finished` sends them now (nothing else is written between
-///   its end and the exit flush, so the order is the same). If the deadline
+/// - With `finished` (a finished run in the CLI, where nothing else is
+///   written between its end and the next flush, so the order is the same)
+///   they are sent now. If the deadline
 ///   passes first, what is left is dropped and the error is
 ///   `limitexceeded (time)`, or `Interrupted` if `interrupted` says so. A
 ///   write that fails keeps the bytes not written for the CLI's last flush
 ///   to report (exit 141), and the run is not failed for it, as without a
 ///   limit.
-/// - A run that failed reports its error first, and without a limit its
-///   partial line leaves after that report, at the CLI's next flush. So the
-///   bytes stay, and the deadline is recorded for [`send_line`] to hold that
+/// - Otherwise they stay where std would keep them: a run that failed
+///   reports its error first, and its partial line leaves after that report
+///   at the CLI's next flush; a library user's next run or `Drop` sends a
+///   finished run's. The deadline is recorded for [`send_line`] to hold that
 ///   flush to.
 ///
 /// Not this interpreter's buffer, or nothing in it: nothing to do.
