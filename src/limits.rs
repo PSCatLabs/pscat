@@ -175,6 +175,14 @@ pub(crate) struct LimitProbe {
     pub(crate) memory: Option<(usize, usize)>,
 }
 
+/// Looks at the limits this thread made through [`LimitProbe::check`]: a
+/// unit test of a loop's polling counts them (each test runs on its own
+/// thread, so the count is its own).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 impl LimitProbe {
     /// Nothing to look at: `check` always passes.
     pub(crate) const NONE: LimitProbe = LimitProbe {
@@ -198,6 +206,8 @@ impl LimitProbe {
     /// past the heap cap: the errors the interpreter's own check between
     /// slices raises.
     pub(crate) fn check(&self, steps: u64) -> Result<(), crate::PsError> {
+        #[cfg(test)]
+        CHECKS.with(|c| c.set(c.get() + 1));
         if let Some(left) = self.steps_left
             && steps > left
         {

@@ -7434,6 +7434,53 @@ mod tests {
         assert!(p.reversed_limited(&roomy).is_ok());
     }
 
+    /// Looks at the limits `reversed_limited` makes on `path`.
+    fn polls_of(path: &PsPath) -> u64 {
+        let before = crate::limits::CHECKS.with(std::cell::Cell::get);
+        path.reversed_limited(&crate::limits::LimitProbe::NONE)
+            .expect("no limit");
+        crate::limits::CHECKS.with(std::cell::Cell::get) - before
+    }
+
+    /// #1266 round 1: a copy of move/close-only subpaths writes segments
+    /// that no line or curve loop counts, and has to be polled and charged
+    /// all the same. `newpath 1000000 { 0 0 moveto closepath } repeat` is
+    /// this shape: 2,000,000 segments out, none of them a line.
+    #[test]
+    fn reversed_limited_polls_while_it_writes_moves_and_closes() {
+        let mut empties = PsPath::default();
+        for i in 0..10_000 {
+            empties.move_to(pt(i as f32, 0.0));
+            empties.close();
+        }
+        // 20,000 segments in, 20,000 out. Two passes over the input poll
+        // every 4096 (4 each), the copy polls every 4096 written (4), and
+        // one last look at the end.
+        assert_eq!(polls_of(&empties), 4 + 4 + 4 + 1);
+        // The same count of segments as lines polls the same.
+        assert_eq!(polls_of(&long_path(19_999)), 4 + 4 + 4 + 1);
+    }
+
+    /// The step charge for that shape: the whole copy, a step per 1024.
+    #[test]
+    fn reversed_limited_charges_move_and_close_segments() {
+        let mut empties = PsPath::default();
+        for i in 0..10_000 {
+            empties.move_to(pt(i as f32, 0.0));
+            empties.close();
+        }
+        let at = |steps_left| crate::limits::LimitProbe {
+            steps_left: Some(steps_left),
+            ..crate::limits::LimitProbe::NONE
+        };
+        // 20,000 segments are 19 steps.
+        assert!(empties.reversed_limited(&at(19)).is_ok());
+        assert_eq!(
+            empties.reversed_limited(&at(18)).err(),
+            Some(PsError::StepsExceeded)
+        );
+    }
+
     /// Many one-segment subpaths: the subpath table is charged too.
     #[test]
     fn reversed_limited_handles_many_closed_subpaths() {
