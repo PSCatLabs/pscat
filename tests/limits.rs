@@ -1745,6 +1745,32 @@ mod one_operator {
         }
 
         #[test]
+        fn a_stroke_priced_below_its_output_is_charged_what_it_made() {
+            // Codex, PR #1460: a one-curve stroke priced at 68 units makes
+            // 5,119 outline elements (a dash of 1e9 on a curve of 1e6); a
+            // pen 1e6 wide on a curve of 1e8 makes millions for a price of
+            // 64. What the stroker made is charged, in steps, before the
+            // outline is kept; the path stays as it was.
+            let dashed = "1 setlinewidth [1000000000 1000000000] 0 setdash newpath 0 0 moveto \
+                          0 1000000 1000000 -1000000 1000000 0 curveto";
+            let wide = "1000000 setlinewidth newpath 0 0 moveto \
+                        0 100000000 100000000 -100000000 100000000 0 curveto";
+            for (what, setup, left) in [("dashed", dashed, 3), ("wide pen", wide, 100)] {
+                let before = counted(setup);
+                for op in ["strokepath", "30 30 instroke"] {
+                    let (err, report, after) = stopped(setup, op, left);
+                    assert_eq!(err, PsError::StepsExceeded, "{what} {op}: {report}");
+                    assert_eq!(after, before, "{what} {op}: the path is as it was");
+                }
+            }
+            // And with room they are made.
+            let mut it = Interp::new();
+            it.run_str(dashed).expect("setup");
+            it.set_limits(steps(1000)).expect("limits");
+            it.run_str("strokepath").expect("within the limit");
+        }
+
+        #[test]
         fn upath_polls_and_charges_while_it_builds_the_array() {
             for setup in [MANY_LINES, MANY_EMPTIES] {
                 let before = counted(setup);

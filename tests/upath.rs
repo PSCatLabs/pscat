@@ -1300,3 +1300,83 @@ fn the_new_operators_are_defined() {
     .expect("run");
     assert_eq!(it.captured_stdout(), b"done\n");
 }
+
+// --- deliberate differences from gs -----------------------------------------
+
+/// (what, program, what gs prints, what pscat prints). Codex, PR #1460,
+/// round 1: each is a difference the design accepts, documented in
+/// `notes/1264-hit-testing-and-user-paths.md`. pscat's side is pinned here so
+/// it changes only on purpose, and `ghostscript_still_differs_as_documented`
+/// keeps gs's side honest.
+const DEVIATIONS: &[(&str, &str, &str, &str)] = &[
+    (
+        "curved fills are tested against what pscat's fill paints, at its own flatness",
+        "1 setflat newpath 10 10 moveto 20 35 30 5 40 30 curveto closepath 15 19.5 pf nl",
+        "F\n",
+        "T\n",
+    ),
+    (
+        "and setflat is not followed (gs: 0.1 changes its answer)",
+        "0.1 setflat newpath 10 10 moveto 20 35 30 5 40 30 curveto closepath 15 19.5 pf nl",
+        "T\n",
+        "T\n",
+    ),
+    (
+        "a stroked circle likewise",
+        "1 setflat newpath 50 50 20 0 360 arc closepath 2 setlinewidth 43.5 29.5 ps nl",
+        "F\n",
+        "T\n",
+    ),
+    (
+        "and setflat 100 changes gs's answer for it, not ours",
+        "100 setflat newpath 50 50 20 0 360 arc closepath 2 setlinewidth 43.5 29.5 ps nl",
+        "T\n",
+        "T\n",
+    ),
+    (
+        "ustrokepath under a singular matrix: a hairline of 0.1 px, where gs has one pixel",
+        "newpath 2 setlinewidth { 0 0 100 100 setbbox 10 10 moveto 20 10 lineto } [0 0 0 0 0 0] ustrokepath pb",
+        "2560 2432 5120 2688 \n",
+        "2560 2547 5120 2573 \n",
+    ),
+    (
+        "an arc's control points are one 1/256 apart from gs's in two coordinates, in a user path as in the plain operator",
+        "newpath { 0 0 100 100 setbbox 50 50 20 0 90 arc } uappend { q q (m) print } { q q (l) print } { 6 { q } repeat (c) print } { (z) print } pathforall nl",
+        "12800 17920 m17920 12800 17920 15627 15627 17920 c\n",
+        "12800 17920 m17920 12800 17920 15628 15628 17920 c\n",
+    ),
+    (
+        "the plain arc operator is the same",
+        "newpath 50 50 20 0 90 arc { q q (m) print } { q q (l) print } { 6 { q } repeat (c) print } { (z) print } pathforall nl",
+        "12800 17920 m17920 12800 17920 15627 15627 17920 c\n",
+        "12800 17920 m17920 12800 17920 15628 15628 17920 c\n",
+    ),
+];
+
+#[test]
+fn the_deliberate_differences_from_ghostscript_stay_as_documented() {
+    for (what, src, _, pscat) in DEVIATIONS {
+        assert_eq!(&pscat_out(src), pscat, "{what}: {src}");
+    }
+}
+
+#[test]
+fn ghostscript_still_differs_as_documented() {
+    if !common::gs_available() {
+        return;
+    }
+    let dir = common::scratch_dir("pscat-upath-deviations");
+    for (i, (what, src, gs, _)) in DEVIATIONS.iter().enumerate() {
+        let file = dir.join(format!("d{i}.ps"));
+        std::fs::write(&file, format!("{PRELUDE}\n{src}\n")).expect("write");
+        let out = std::process::Command::new("gs")
+            .args(["-q", "-dNOSAFER", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE"])
+            .arg(&file)
+            .stdin(std::process::Stdio::null())
+            .output_deadline()
+            .expect("run gs");
+        let got = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert_eq!(&got, gs, "gs, {what}: {src}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

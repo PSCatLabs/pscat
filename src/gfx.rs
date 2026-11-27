@@ -268,10 +268,12 @@ pub struct PsPath {
     bbox: Option<[f32; 4]>,
 }
 
-/// How much `setbbox` widens its box on every side, in device pixels:
-/// 3/256, which gs does (`0 0 10 10 setbbox pathbbox` is `-0.0117 -0.0117
-/// 10.0117 10.0117`). The box is looked at in 1/256 steps, gs's own grid.
-const BBOX_RIM: f32 = 3.0 / 256.0;
+/// How much `setbbox` widens its box on every side, in 1/256ths of a device
+/// pixel: 3, which gs does (`0 0 10 10 setbbox pathbbox` is `-0.0117 -0.0117
+/// 10.0117 10.0117`), after rounding the box outward onto its grid
+/// (`0.001 0.001 10.001 10.001` is `-3 -3 2564 2564` in 256ths). The box is
+/// looked at in 1/256 steps, gs's own grid.
+const BBOX_RIM: f64 = 3.0;
 
 /// A path as it was, for taking back what an operator that failed part-way
 /// had added ([`PsPath::mark`]). The newest segment is kept because a
@@ -419,6 +421,13 @@ impl PsPath {
         self.current = Some(p);
     }
 
+    /// Whether a `lineto` or `curveto` can continue the path: there is a
+    /// current point and a subpath it belongs to. After a user path took
+    /// away a pending moveto there is the first and not the second.
+    pub(crate) fn can_extend(&self) -> bool {
+        self.current.is_some() && self.subpath_start.is_some()
+    }
+
     /// Add `other`'s segments after this path's, the current point being
     /// where `other` ends.
     fn append(&mut self, other: PsPath) {
@@ -460,8 +469,16 @@ impl PsPath {
     /// overwrote the newest segment: the path is as it was.
     fn rollback(&mut self, mark: PathMark) {
         self.segs.truncate(mark.len);
-        if let (Some(last), Some(slot)) = (mark.last, self.segs.last_mut()) {
-            *slot = last;
+        if let Some(last) = mark.last {
+            // The newest segment as it was: overwritten in place by a
+            // `moveto`, or taken away whole by a user path.
+            if self.segs.len() == mark.len {
+                if let Some(slot) = self.segs.last_mut() {
+                    *slot = last;
+                }
+            } else {
+                self.segs.push(last);
+            }
         }
         self.current = mark.current;
         self.subpath_start = mark.subpath_start;
@@ -518,12 +535,18 @@ impl PsPath {
         // closepath takes from the one before it.
         let (mut lo, mut closed) = (0usize, false);
         let (mut bb, mut origin, mut implicit) = (EMPTY, None::<DevPoint>, None::<DevPoint>);
-        let mut keep = |segs: &[Seg], bb: [f32; 4], implicit: Option<DevPoint>| {
+        let mut keep = |segs: &[Seg],
+                        bb: [f32; 4],
+                        implicit: Option<DevPoint>|
+         -> Result<(), PsError> {
             let meets = !(bb[0] > rect[2] || bb[2] < rect[0] || bb[1] > rect[3] || bb[3] < rect[1]);
             if meets && !segs.is_empty() {
+                // The heap is asked before the copy is made (Codex, PR #1460).
+                probe.check_alloc((segs.len() + 1).saturating_mul(std::mem::size_of::<Seg>()))?;
                 out.segs.extend(implicit.map(Seg::Move));
                 out.segs.extend_from_slice(segs);
             }
+            Ok(())
         };
         let grow = |bb: &mut [f32; 4], p: DevPoint| {
             bb[0] = bb[0].min(p.x);
@@ -539,7 +562,7 @@ impl PsPath {
                     Seg::Close => false,
                 };
             if begins {
-                keep(&self.segs[lo..i], bb, implicit);
+                keep(&self.segs[lo..i], bb, implicit)?;
                 (lo, closed, bb, implicit) = (i, false, EMPTY, None);
             }
             if i == lo {
@@ -564,7 +587,7 @@ impl PsPath {
                 probe.check((i / 1024) as u64)?;
             }
         }
-        keep(&self.segs[lo..], bb, implicit);
+        keep(&self.segs[lo..], bb, implicit)?;
         probe.check((self.segs.len() / 1024) as u64)?;
         out.current = self.current;
         out.subpath_start = self.subpath_start;
@@ -576,7 +599,11 @@ impl PsPath {
     /// whole number of subpaths. A single subpath dearer than that is a
     /// piece of its own. Needs every subpath to begin with a `moveto`, as
     /// [`near`](Self::near) leaves them.
-    fn groups(&self, max_units: u64) -> impl Iterator<Item = PsPath> + '_ {
+    fn groups<'a>(
+        &'a self,
+        max_units: u64,
+        probe: &'a crate::limits::LimitProbe,
+    ) -> impl Iterator<Item = Result<PsPath, PsError>> + 'a {
         let mut at = 0;
         std::iter::from_fn(move || {
             if at >= self.segs.len() {
@@ -594,12 +621,18 @@ impl PsPath {
                 };
                 end += 1;
             }
+            // The piece is a copy: the heap is asked first.
+            let bytes = (end - at).saturating_mul(std::mem::size_of::<Seg>());
+            if let Err(e) = probe.check_alloc(bytes) {
+                at = self.segs.len();
+                return Some(Err(e));
+            }
             let piece = PsPath {
                 segs: self.segs[at..end].to_vec(),
                 ..PsPath::default()
             };
             at = end;
-            Some(piece)
+            Some(Ok(piece))
         })
     }
 
@@ -607,9 +640,26 @@ impl PsPath {
     /// the hit tests rasterise the one pixel at `(dx, dy)` as the pixel at
     /// the origin of a 1 x 1 mask. Subtracting a whole number keeps what
     /// is near the pixel exact.
-    fn to_skia_shifted(&self, dx: f32, dy: f32) -> Option<tiny_skia::Path> {
-        let mut pb = PathBuilder::new();
-        for seg in &self.segs {
+    fn to_skia_shifted(
+        &self,
+        dx: f32,
+        dy: f32,
+        probe: &crate::limits::LimitProbe,
+    ) -> Result<Option<tiny_skia::Path>, PsError> {
+        // The builder is made at its final size, after the heap is asked
+        // for it (a point is 8 bytes, a verb 1).
+        let points: usize = self
+            .segs
+            .iter()
+            .map(|s| match s {
+                Seg::Move(_) | Seg::Line(_) => 1,
+                Seg::Curve(..) => 3,
+                Seg::Close => 0,
+            })
+            .sum();
+        probe.check_alloc(points.saturating_mul(8).saturating_add(self.segs.len()))?;
+        let mut pb = PathBuilder::with_capacity(self.segs.len(), points);
+        for (i, seg) in self.segs.iter().enumerate() {
             match *seg {
                 Seg::Move(p) => pb.move_to(p.x - dx, p.y - dy),
                 Seg::Line(p) => pb.line_to(p.x - dx, p.y - dy),
@@ -618,8 +668,11 @@ impl PsPath {
                 }
                 Seg::Close => pb.close(),
             }
+            if i % FLATTEN_POLL == FLATTEN_POLL - 1 {
+                probe.check((i / 1024) as u64)?;
+            }
         }
-        pb.finish()
+        Ok(pb.finish())
     }
 
     /// Snapshot for `pathforall` enumeration.
@@ -2595,8 +2648,14 @@ impl Gfx {
     /// finds none, as in gs: it is not an extension of the path's last
     /// subpath. The path itself is untouched.
     pub(crate) fn path_detach(&mut self) {
-        self.state.path.current = None;
-        self.state.path.subpath_start = None;
+        let path = &mut self.state.path;
+        // A moveto no segment follows is gs's pending moveto: a user path
+        // takes it away, even a user path of a box alone.
+        if matches!(path.segs.last(), Some(Seg::Move(_))) {
+            path.segs.pop();
+        }
+        path.current = None;
+        path.subpath_start = None;
     }
 
     /// End an operator that added to the path in several steps: on failure
@@ -2610,7 +2669,14 @@ impl Gfx {
             // it was ([`path_detach`](Self::path_detach)).
             if path.current.is_none() {
                 path.current = mark.current;
-                path.subpath_start = mark.subpath_start;
+                // Where a pending moveto was taken away the current point
+                // is kept and no subpath is open: a lineto from it is
+                // `nocurrentpoint`, as in gs ([`PsPath::can_extend`]).
+                path.subpath_start = if matches!(mark.last, Some(Seg::Move(_))) {
+                    None
+                } else {
+                    mark.subpath_start
+                };
             }
         } else {
             self.state.path.rollback(mark);
@@ -2629,7 +2695,7 @@ impl Gfx {
     }
 
     pub fn lineto(&mut self, x: f64, y: f64) -> Result<(), PsError> {
-        if self.state.path.current().is_none() {
+        if !self.state.path.can_extend() {
             return Err(PsError::NoCurrentPoint);
         }
         let p = self.user_to_device(x, y);
@@ -2660,7 +2726,7 @@ impl Gfx {
         x3: f64,
         y3: f64,
     ) -> Result<(), PsError> {
-        if self.state.path.current().is_none() {
+        if !self.state.path.can_extend() {
             return Err(PsError::NoCurrentPoint);
         }
         let c1 = self.user_to_device(x1, y1);
@@ -2749,7 +2815,7 @@ impl Gfx {
         // What a `setbbox` box refuses is taken back whole at the end.
         let mark = self.state.path.mark();
         // Arc connects to an existing path with a line, else starts one.
-        if self.state.path.current().is_some() {
+        if self.state.path.can_extend() {
             self.lineto(start.0, start.1)?;
         } else {
             self.moveto_checked(start.0, start.1)?;
@@ -4346,13 +4412,20 @@ impl Gfx {
         let full_len = || *length.get_or_init(|| full.device_length());
         let mut work = full.segs.len() as u64;
         let mut out = PsPath::default();
-        for group in all.groups(STROKE_GROUP_UNITS) {
+        for group in all.groups(STROKE_GROUP_UNITS, probe) {
+            let group = group?;
             let cost = self.stroke_cost(&group);
             work = work.saturating_add(cost.units);
             probe.check_alloc(cost.bytes)?;
             probe.check(work / 1024)?;
             if let Some(outline) = self.stroke_outline_of(&group, &full_len, probe, &mut work)? {
+                // What the stroker made, not what it was priced at, is what
+                // is charged, in steps and against the heap, before it is
+                // made into a path and kept: a price that undercuts one
+                // curve cannot undercut the sum (Codex, PR #1460).
                 work = work.saturating_add(outline.len() as u64);
+                probe.check(work / 1024)?;
+                probe.check_alloc(outline.len().saturating_mul(std::mem::size_of::<Seg>()))?;
                 out.append(PsPath::from_skia(&outline));
             }
         }
@@ -4408,7 +4481,7 @@ impl Gfx {
         };
         let scanned = self.state.path.segs.len() as u64;
         let near = self.state.path.near([px, py, px + 1.0, py + 1.0], probe)?;
-        let Some(shifted) = near.to_skia_shifted(px, py) else {
+        let Some(shifted) = near.to_skia_shifted(px, py, probe)? else {
             return Ok((false, scanned));
         };
         let (inked, work) = Self::pixel_inked(&shifted, rule, probe)?;
@@ -4447,7 +4520,8 @@ impl Gfx {
         // anisotropic stroke; found once, on the first group that asks.
         let length = std::cell::OnceCell::new();
         let full_len = || *length.get_or_init(|| full.device_length());
-        for group in near.groups(STROKE_GROUP_UNITS) {
+        for group in near.groups(STROKE_GROUP_UNITS, probe) {
+            let group = group?;
             let cost = self.stroke_cost(&group);
             work = work.saturating_add(cost.units);
             probe.check_alloc(cost.bytes)?;
@@ -4455,10 +4529,14 @@ impl Gfx {
             let Some(outline) = self.stroke_outline_of(&group, &full_len, probe, &mut work)? else {
                 continue;
             };
+            // The outline is charged for what it came to, and the shifted
+            // copy of it asked of the heap, before it is made.
+            work = work.saturating_add(outline.len() as u64);
+            probe.check(work / 1024)?;
+            probe.check_alloc(outline.len().saturating_mul(9))?;
             let Some(shifted) = outline.transform(Transform::from_translate(-px, -py)) else {
                 continue;
             };
-            work = work.saturating_add(shifted.len() as u64);
             let (inked, w) = Self::pixel_inked(&shifted, FillRule::Winding, probe)?;
             work = work.saturating_add(w);
             if inked {
@@ -7275,12 +7353,10 @@ impl Gfx {
         for p in corners {
             b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
         }
-        b = [
-            b[0] - BBOX_RIM,
-            b[1] - BBOX_RIM,
-            b[2] + BBOX_RIM,
-            b[3] + BBOX_RIM,
-        ];
+        // Onto gs's 1/256 grid, outward, then the rim (3/256) beyond that.
+        let lo = |v: f32| (((f64::from(v) * 256.0).floor() - BBOX_RIM) / 256.0) as f32;
+        let hi = |v: f32| (((f64::from(v) * 256.0).ceil() + BBOX_RIM) / 256.0) as f32;
+        b = [lo(b[0]), lo(b[1]), hi(b[2]), hi(b[3])];
         let held = self
             .state
             .path
@@ -8599,7 +8675,10 @@ mod tests {
         }
         // A subpath is 24 units (two lines and a close, 8 each, the moveto
         // free); the third, at 72, is past 50.
-        let pieces: Vec<PsPath> = p.groups(50).collect();
+        let pieces: Vec<PsPath> = p
+            .groups(50, &crate::limits::LimitProbe::NONE)
+            .map(|g| g.expect("no limit"))
+            .collect();
         assert_eq!(
             pieces.iter().map(|g| g.segs.len()).collect::<Vec<_>>(),
             [12, 12, 12, 4]
@@ -8611,10 +8690,18 @@ mod tests {
         );
         // One subpath longer than a piece is a piece of its own.
         let long = long_path(50);
-        let pieces: Vec<PsPath> = long.groups(10).collect();
+        let pieces: Vec<PsPath> = long
+            .groups(10, &crate::limits::LimitProbe::NONE)
+            .map(|g| g.expect("no limit"))
+            .collect();
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].segs.len(), 51);
-        assert_eq!(PsPath::default().groups(10).count(), 0);
+        assert_eq!(
+            PsPath::default()
+                .groups(10, &crate::limits::LimitProbe::NONE)
+                .count(),
+            0
+        );
     }
 
     #[test]

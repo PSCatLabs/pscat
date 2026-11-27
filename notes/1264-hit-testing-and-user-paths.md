@@ -23,8 +23,9 @@ is not first, a second `setbbox`, an empty array: `typecheck`. `arcto` is not
 one of them.
 
 `setbbox` is a real operator, as it is in gs: the box is a property of the
-current path (`PsPath::bbox`), kept in device space and widened by 3/256 on
-every side; a point added past it is a `rangecheck`, compared in 1/256 steps
+current path (`PsPath::bbox`), kept in device space, rounded outward onto
+gs's 1/256 grid (`0.001 0.001 10.001 10.001 setbbox pathbbox` is `-3 -3 2564
+2564` in 256ths) and then widened by 3/256 on every side; a point added past it is a `rangecheck`, compared in 1/256 steps
 like gs's fixed-point path; `pathbbox` answers it; `newpath` forgets it and
 `grestore` gives back the one `gsave` kept. The operator joins the path's own
 points and any box already set; a user path's own box does not, so
@@ -35,7 +36,11 @@ Enforced by `moveto`, `lineto`, `rmoveto`, `rlineto`, `curveto`, `rcurveto`,
 
 `uappend` runs the array as those operators, against a path that has lost
 its current point (a user path starting with a `lineto` is a `rangecheck`, not
-`nocurrentpoint`), and keeps the box only while it runs. Any failure, a
+`nocurrentpoint`), and keeps the box only while it runs. It also takes away a
+pending lone `moveto`, as gs does, even for a user path that is a box alone
+(`1 1 moveto { 0 0 10 10 setbbox } uappend` leaves no path element, the
+current point 1, 1, and a `lineto` after it is `nocurrentpoint`;
+`PsPath::can_extend`). Any failure, a
 limit included, takes everything it added back (`PsPath::mark`/`rollback`,
 which also undoes a `moveto` that overwrote a trailing `moveto`).
 
@@ -82,9 +87,14 @@ paints nothing for it either.
 Every loop over user data is polled, charged or priced before it runs
 (`FLATTEN_POLL` = 4096 segments, a step per 1024):
 
-- `near` scans every segment (polled, memory in view through the probe, the
-  whole count against the step limit at the end), and the hit test returns
-  that count as work.
+- `near` scans every segment (polled, the whole count against the step limit
+  at the end), and the hit test returns that count as work. Every copy asks
+  the heap first (Codex, PR #1460): `near` for each subpath it keeps, `groups`
+  for each piece it hands to the stroker, `to_skia_shifted` for the builder it
+  makes (at its final size) and the shifted copy of a stroke outline. A refusal
+  leaves the operands, the path, the CTM, the graphics state and the `setbbox`
+  box as they were (`tests/limits_memory.rs`, which watches the heap while the
+  operator runs).
 - The rasteriser looks at the limits as it flattens and lays edges, as in
   `fill`.
 - tiny-skia's stroker and dasher cannot be stopped. Each group handed to
@@ -95,6 +105,18 @@ Every loop over user data is polled, charged or priced before it runs
   on 2,000 segments, the finished outline is 64 bytes a line and 210 to 511 a
   curve, with the stroker's copy before it about as much again) and held
   against the step limit and the heap cap. A group is about 32,768 units.
+  What a group made, not what it was priced at, is charged as well: the
+  outline's elements in steps and against the heap, before the outline is made
+  into a path and kept (Codex, PR #1460: a curve of 1e6 under a dash of 1e9 is
+  priced at 68 units and makes 5,119 elements, a pen 1e6 wide on a curve of 1e8
+  is priced at 64 and makes millions), so the sum over the groups is bounded
+  though one call may overshoot its estimate. The per-curve price stays fixed:
+  how many elements tiny-skia's stroker makes for one curve depends on the pen
+  width, the curve's extent and the stroker's own limits in ways that do not
+  reduce to a formula this code could trust (the two programs above differ by a
+  factor of 500 in output for the same price), so a better guess would only
+  move the failure. The single call that overshoots has already made its outline
+  by the time it is charged, which is the open part of the limit.
   `strokepath` and `ustrokepath` do the same, a group at a time
   (`stroke_path_limited`, the outlines joined in order; `strokepath` had no
   limit before), polling and pricing between groups. What stays open: the
@@ -112,11 +134,30 @@ subpaths, huge curves, a long user path, a ten-turn arc, the stack and path
 and CTM left alone), and unit tests in `src/gfx.rs` (`near`'s polling over
 move/close-only subpaths, `groups`, rollback, stroke pricing).
 
-### Not changed
+### Deliberate differences from gs
 
-`flattenpath` and `reversepath` do not carry a `setbbox` box over (gs does,
-oddly, for `reversepath`; `flattenpath` is a `rangecheck` there). gs also
-drops a current path that lies outside a user path's box when it is
-appended; pscat appends and ignores the old points. `executeonly` and
-`noaccess` do not exist for arrays here, so gs's `invalidaccess` on a user
-path with them has no counterpart.
+Each program is pinned on both sides in `tests/upath.rs` (`DEVIATIONS`).
+
+- **Curved hit tests (S3).** `newpath 10 10 moveto 20 35 30 5 40 30 curveto
+  closepath 15 19.5 infill` is `true` here and `false` in gs (default
+  flatness); `1 setflat newpath 50 50 20 0 360 arc closepath 2 setlinewidth
+  43.5 29.5 instroke` likewise, and `100 setflat` turns gs's answer to `true`
+  and changes nothing here. gs tests the curve as it flattens it for `setflat`;
+  pscat tests what its own `fill` and `stroke` paint, and does not follow
+  `setflat` (it never has). That agreement is the design.
+- **Singular matrix, `ustrokepath` (S4).** `newpath 2 setlinewidth { 0 0 100
+  100 setbbox 10 10 moveto 20 10 lineto } [0 0 0 0 0 0] ustrokepath pathbbox`:
+  gs gives a one-pixel outline (y 9.5 to 10.5), pscat the hair of 0.1 device
+  pixels every thin stroke gets (y 9.949 to 10.051). The hit tests treat a
+  singular CTM as drawing nothing, as gs does.
+- **Arc control points (S5).** `{ 0 0 100 100 setbbox 50 50 20 0 90 arc }
+  uappend` has two control-point coordinates one 1/256 from gs's (15628, not
+  15627, in 256ths); the plain `arc` operator is the same. gs rounds the path
+  to a 1/256 grid after computing the curve, pscat does not.
+- gs drops a current path that lies outside a user path's box when it is
+  appended; pscat keeps it.
+- `flattenpath` and `reversepath` do not carry a `setbbox` box over (gs does,
+  oddly, for `reversepath`; `flattenpath` is a `rangecheck` there).
+  `rectfill`, `charpath` and the other builders do not enforce the box.
+- `executeonly` and `noaccess` do not exist for arrays here, so gs's
+  `invalidaccess` on a user path with them has no counterpart.
