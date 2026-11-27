@@ -210,14 +210,78 @@ fn foreign_layouts_obey_the_limits() {
     let (_, r) = run(1000, 1000, Limits::none().with_max_steps(1000), &one);
     assert_eq!(r, Ok(()), "foreign: Type 1 control");
 
-    // Time: 200x200 cells on 1.01 px steps over the same capture are some
-    // 240 million pixels, the copies polled against the clock.
-    let inner = program(200, 200, "1.01", "1.01", &[]);
+    // Time: 50x50 cells on 1.1 px steps over the same capture, some 47
+    // million pixels, the copies polled against the clock. A ladder of
+    // clocks, no fixed budget (Codex round 1 on PR #1480, nitpick C): each
+    // run either finishes with the whole page or stops with it blank.
+    let inner = program(50, 50, "1.1", "1.1", &[]);
     let src = foreign(&inner, 1000, 1000, "0 0 1 1", "0 0 1 1");
-    let limits = Limits::none().with_max_time(std::time::Duration::from_millis(50));
-    let (it, r) = run(1000, 1000, limits, &src);
-    assert_eq!(r, Err(PsError::TimeExceeded), "foreign: time");
-    assert!(blank(&it), "foreign: a stop at the clock paints nothing");
+    let (whole, r) = run(1000, 1000, Limits::none(), &src);
+    assert_eq!(r, Ok(()));
+    let (mut stopped, mut finished) = (0, 0);
+    for ms in [1u64, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096] {
+        let limits = Limits::none().with_max_time(std::time::Duration::from_millis(ms));
+        let (it, r) = run(1000, 1000, limits, &src);
+        match r {
+            Ok(()) => {
+                finished += 1;
+                assert!(
+                    it.gfx().pixmap.data() == whole.gfx().pixmap.data(),
+                    "{ms} ms: the whole page"
+                );
+            }
+            Err(PsError::TimeExceeded) => {
+                stopped += 1;
+                assert!(blank(&it), "{ms} ms: a stop at the clock paints nothing");
+            }
+            Err(e) => panic!("{ms} ms: {e:?}"),
+        }
+    }
+    assert!(
+        stopped > 0 && finished > 0,
+        "foreign: time, {stopped} stopped, {finished} finished"
+    );
+
+    // A cell made in a PaintProc (so turned into gs's device to be laid
+    // out) is charged for the turn before it is made (Codex round 1 on PR
+    // #1480, finding B): a 2000 x 2000 cell is some 3,900 steps to turn on
+    // top of what its capture and its layout cost, which a 6,000-step cap
+    // allowed when the turn was free.
+    let turned = |m: &str, canvases: u32| {
+        format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 100 100] /XStep 100 /YStep 100
+   /PaintProc {{ pop
+     << /PatternType 1 /PaintType 1 /TilingType 2 /BBox [0 0 2000 2000] /XStep 4000.3 /YStep 4000.3
+        /PaintProc {{ pop 0 0 1 setrgbcolor 0 0 2000 2000 rectfill }} >> {m} makepattern
+     /inner exch def
+     0 1 {} {{ /n exch def
+       << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 n 100 add 100] /XStep 1000 /YStep 1000
+          /PaintProc {{ pop inner setpattern 0 0 1 1 rectfill }} >> matrix makepattern setpattern
+       0 0 1 1 rectfill }} for
+   }} >> matrix makepattern setpattern
+0 0 1 1 rectfill",
+            canvases - 1
+        )
+    };
+    let src = turned("[1 0 0 1 0 0]", 1);
+    let (it, r) = run(100, 100, Limits::none().with_max_steps(6000), &src);
+    assert_eq!(
+        r,
+        Err(PsError::StepsExceeded),
+        "turned: the turn is charged"
+    );
+    assert!(blank(&it), "turned: a stop paints nothing");
+    let (_, r) = run(100, 100, Limits::none().with_max_steps(20_000), &src);
+    assert_eq!(r, Ok(()), "turned: with room");
+    // With no cell reaching the canvas nothing is turned: five canvases
+    // that each would turn the cell again run under 1,000 steps, and paint
+    // what they paint with no limits.
+    let src = turned("[1 0 0 1 1000 -2900]", 5);
+    let (free, r) = run(100, 100, Limits::none(), &src);
+    assert_eq!(r, Ok(()));
+    let (it, r) = run(100, 100, Limits::none().with_max_steps(1000), &src);
+    assert_eq!(r, Ok(()), "no cell reaches: nothing to turn");
+    assert!(it.gfx().pixmap.data() == free.gfx().pixmap.data());
 
     // Memory: a 2 x 8000 cell makes a 32 MB row for a 1000x10 capture.
     // Under an 8 MiB cap the layout is not made and the cells come from the

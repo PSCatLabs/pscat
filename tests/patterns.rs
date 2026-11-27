@@ -674,6 +674,165 @@ outer setpattern 0 0 400 400 rectfill";
     );
 }
 
+/// Pixels of `png` that are not white.
+fn non_white(png: &Pixmap) -> usize {
+    png.pixels()
+        .iter()
+        .filter(|p| (p.red(), p.green(), p.blue()) != (255, 255, 255))
+        .count()
+}
+
+/// A Type 2 pattern made in a PaintProc far from its origin still paints
+/// (#1373, Codex round 1 on PR #1480, finding A): the cell's turn into gs's
+/// device was composed in f32 from coordinates near 1e8 px, the small
+/// translation cancelled away and the turned cell landed outside its
+/// bitmap, so the page came out blank.
+///
+/// gs 10.07.1 (`-sDEVICE=png16m -g400x400 -r72`, aliased) paints 7,688
+/// non-white pixels for 1e7, 1e8 and -1e8. Past 1e8 gs itself loses cells
+/// (992 at 1e9, 1,364 at -1e9), so there the test only asks for ink.
+#[test]
+fn a_type_2_pattern_far_from_its_origin_in_a_paintproc_still_paints() {
+    let src = |ty: &str| {
+        format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 300 200]
+   /XStep 1000 /YStep 1000
+   /PaintProc {{ pop
+     << /PatternType 1 /PaintType 1 /TilingType 2 /BBox [0 0 3 3] /XStep 7.3 /YStep 9.7
+        /PaintProc {{ pop 0 0 1 setrgbcolor 0 0 3 3 rectfill }} >> [1 0 0 1 0 {ty}] makepattern
+     setpattern 0 0 300 200 rectfill }} >> [1 0 0 1 50.4 120.3] makepattern setpattern
+0 0 400 400 rectfill"
+        )
+    };
+    for ty in ["10000000", "100000000"] {
+        assert_eq!(non_white(&render(&src(ty)).png), 7688, "{ty}: gs's ink");
+    }
+    for ty in ["-100000000", "1000000000"] {
+        assert!(non_white(&render(&src(ty)).png) > 7000, "{ty}: blank");
+    }
+}
+
+/// A Type 2 pattern laid out in another context keeps gs's cell starts for
+/// a 7.35 x 9.65 step, a negative step, overlapping two-colour cells, and
+/// nested two PaintProcs deep (plain and the middle one turned 180
+/// degrees) (#1373, Codex round 1, nitpick C). Every list is gs 10.07.1's
+/// (`-dMaxPatternBitmap=1 -sDEVICE=png16m -g400x400 -r72`, aliased), along
+/// the row and down the column with the most cell starts; for each case
+/// the whole raster matches gs's (no pixel off by more than half the
+/// range). A sub-pixel cell is left out: gs paints it aliased, we paint its
+/// coverage (#1375).
+#[test]
+fn type_2_lattices_in_another_context_keep_gs_starts() {
+    const BLUE: &str = "0.1 0.2 0.7 setrgbcolor";
+    let cell = |b: &str, xs: &str, ys: &str, paint: &str| {
+        format!(
+            "<< /PatternType 1 /PaintType 1 /TilingType 2 /BBox [{b}] /XStep {xs} /YStep {ys}
+   /PaintProc {{ pop {paint} }} >>"
+        )
+    };
+    let in_paintproc = |cell: String| {
+        format!(
+            "{cell} matrix makepattern /t2 exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 300 200] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop t2 setpattern 0 0 300 200 rectfill }} >> [1 0 0 1 50.4 120.3] makepattern setpattern
+0 0 400 400 rectfill"
+        )
+    };
+    let nested = |m: &str, mid: &str| {
+        format!(
+            "{} {m} makepattern /t2 exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 320 220] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop t2 setpattern 0 0 320 220 rectfill }} >> {mid} makepattern /mid exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 340 240] /XStep 1000 /YStep 1000
+   /PaintProc {{ pop mid setpattern 0 0 340 240 rectfill }} >> [1 0 0 1 30.3 40.7] makepattern setpattern
+0 0 400 400 rectfill",
+            cell("0 0 3 3", "7.3", "9.7", &format!("{BLUE} 0 0 3 3 rectfill"))
+        )
+    };
+    // 50 + floor(i * 7.3): the outer origin's 50 px and the 7.3 step.
+    let row73 = gs_row(50, 0..42);
+    let cases: [T2Case; 5] = [
+        (
+            "7.35 x 9.65",
+            in_paintproc(cell(
+                "0 0 3 3",
+                "7.35",
+                "9.65",
+                &format!("{BLUE} 0 0 3 3 rectfill"),
+            )),
+            81,
+            50,
+            vec![
+                50, 57, 64, 72, 79, 86, 94, 101, 108, 116, 123, 130, 138, 145, 152, 160, 167, 174,
+                182, 189, 197, 204, 211, 219, 226, 233, 241, 248, 255, 263, 270, 277, 285, 292,
+                299, 307, 314, 321, 329, 336, 344,
+            ],
+            vec![
+                81, 91, 100, 110, 119, 129, 139, 148, 158, 168, 177, 187, 197, 206, 216, 226, 235,
+                245, 255, 264, 274,
+            ],
+        ),
+        (
+            "negative steps",
+            in_paintproc(cell(
+                "0 0 3 3",
+                "-7.3",
+                "-9.7",
+                &format!("{BLUE} 0 0 3 3 rectfill"),
+            )),
+            80,
+            50,
+            row73.clone(),
+            vec![
+                80, 89, 98, 108, 118, 127, 137, 147, 156, 166, 176, 186, 195, 205, 215, 224, 234,
+                244, 253, 263, 273,
+            ],
+        ),
+        (
+            "overlapping two-colour cells",
+            in_paintproc(cell(
+                "0 0 10 4",
+                "7.3",
+                "9.7",
+                &format!("{BLUE} 0 0 5 4 rectfill 0.8 0.1 0.1 setrgbcolor 5 0 5 4 rectfill"),
+            )),
+            80,
+            50,
+            row73,
+            vec![
+                80, 88, 97, 107, 117, 126, 136, 146, 155, 165, 175, 185, 194, 204, 214, 223, 233,
+                243, 252, 262, 272,
+            ],
+        ),
+        (
+            "nested twice",
+            nested("matrix", "[1 0 0 1 10.6 7.2]"),
+            292,
+            41,
+            gs_row(41, 0..44),
+            vec![292, 301, 310, 320, 330, 339, 349],
+        ),
+        (
+            "nested twice, the middle turned",
+            nested("[1 0 0 1 2.4 1.3]", "[-1 0 0 -1 330.6 227.2]"),
+            292,
+            43,
+            vec![
+                43, 50, 57, 64, 72, 79, 86, 94, 101, 108, 116, 123, 130, 137, 145, 152, 159, 167,
+                174, 181, 189, 196, 203, 210, 218, 225, 232, 240, 247, 254, 262, 269, 276, 283,
+                291, 298, 305, 313, 320, 327, 335, 342, 349, 356,
+            ],
+            vec![292, 300, 309, 319, 329, 338, 348, 358],
+        ),
+    ];
+    for (what, src, y, x, want_row, want_col) in cases {
+        let out = render(&src);
+        let (row, col) = t2_starts(&out.png, y, x);
+        assert_eq!(row, want_row, "{what}: starts along row {y}");
+        assert_eq!(col, want_col, "{what}: starts down column {x}");
+    }
+}
+
 #[test]
 fn pattern_free_programs_write_no_pattern() {
     let out = render("0 0 1 setrgbcolor 10 10 100 100 rectfill");
