@@ -2691,3 +2691,129 @@ fn cells_sit_where_gs_puts_the_bbox_corner() {
         );
     }
 }
+
+// --- the /BBox clip does not count an edge twice (#1375) ---------------------
+
+/// The ink on the red channel's complement, 0 (white) to 255, of a page
+/// painted red on white: the green channel is `255 - ink`.
+fn ink_at(it: &Interp, x: u32, y: u32) -> i32 {
+    255 - i32::from(it.gfx().pixmap.pixel(x, y).expect("pixel").green())
+}
+
+/// A coloured pattern cell whose `PaintProc` fills `rect` in red, painted
+/// over `0 0 40 40`, beside the same rectangle painted on the page at
+/// `(50, 0.35)`: the cell's `/BBox` top sits on row 46 (gs puts it on a
+/// pixel), so the page rectangle starts 0.35 up to cover the same rows.
+fn cell_and_page(tiling: u8, bbox: &str, step: &str, rect: &str, page: &str) -> Interp {
+    let src = format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType {tiling} /BBox [{bbox}] \
+         /XStep {step} /YStep {step} \
+         /PaintProc {{ pop 1 0 0 setrgbcolor {rect} rectfill }} >> matrix makepattern setpattern \
+         0 0 40 40 rectfill 1 0 0 setrgbcolor {page} rectfill"
+    );
+    let mut it = Interp::with_page(80, 50).expect("page");
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    it
+}
+
+/// A `rectfill` that ends where the `/BBox` ends paints its edge pixel
+/// once, at the coverage the page gives it (0.65 of a pixel, 166), not
+/// scaled by the clip's own coverage of the same edge (125 before #1375,
+/// 0.75 x 0.65). gs, rendering at 8x and box-averaged, paints 191 there
+/// (its cells are aliased, so it reads 0.75).
+#[test]
+fn a_rectfill_to_the_bbox_edge_paints_the_coverage_the_page_does() {
+    for (what, tiling) in [("type 2", 2), ("type 1", 1)] {
+        // Type 1 with a whole-pixel step (8) and a cell whose edge is
+        // fractional (3.65): not rescaled, so the clip edge is partial.
+        let it = if tiling == 2 {
+            cell_and_page(
+                2,
+                "0 0 3.65 3.65",
+                "7.3",
+                "0 0 3.65 3.65",
+                "50 0.35 3.65 3.65",
+            )
+        } else {
+            cell_and_page(1, "0 0 3.65 8", "8", "0 0 3.65 8", "50 0 3.65 8")
+        };
+        let (row, rows) = if tiling == 2 {
+            (47, 46..50)
+        } else {
+            (40, 42..50)
+        };
+        for y in rows {
+            for x in 0..4u32 {
+                let (cell, page) = (ink_at(&it, x, y), ink_at(&it, 50 + x, y));
+                assert!(
+                    (cell - page).abs() <= 2,
+                    "{what}: pixel ({x}, {y}) is {cell} in the cell, {page} on the page"
+                );
+            }
+        }
+        // The edge column itself: 0.65 of ink, not 0.49.
+        assert!(
+            (ink_at(&it, 3, row) - 166).abs() <= 2,
+            "{what}: edge column {}",
+            ink_at(&it, 3, row)
+        );
+        if tiling == 2 {
+            // Corner (x 0.65 by y 0.65 of a pixel) and the bottom edge.
+            assert!((ink_at(&it, 3, 49) - 108).abs() <= 2, "corner");
+            assert!((ink_at(&it, 0, 49) - 166).abs() <= 2, "bottom edge");
+        }
+    }
+}
+
+/// A shape that runs past the `/BBox` paints its edge pixel solid, as gs's
+/// aliased cells do, and nothing beyond it: the cell stays four pixels
+/// wide, with the next cell 7 px on.
+#[test]
+fn a_rectfill_past_the_bbox_fills_the_edge_pixel_and_stops() {
+    let it = cell_and_page(
+        2,
+        "0 0 3.65 3.65",
+        "7.3",
+        "-5 -5 20 20",
+        "50 0.35 3.65 3.65",
+    );
+    for y in 46..50 {
+        let row: Vec<i32> = (0..9).map(|x| ink_at(&it, x, y)).collect();
+        assert_eq!(row, [255, 255, 255, 255, 0, 0, 0, 255, 255], "row {y}");
+    }
+    assert_eq!(ink_at(&it, 0, 45), 0);
+}
+
+/// The same holds for a `/BBox` under a pixel wide, and for the far edge
+/// of a long one (the snap touches the mask's edge pixels only).
+#[test]
+fn a_thin_or_long_bbox_keeps_the_shapes_own_edge_coverage() {
+    // 0.4 pt wide: one pixel column at 0.4 coverage, as on the page.
+    let it = cell_and_page(2, "0 0 0.4 5.65", "7.3", "0 0 0.4 5.65", "50 0.35 0.4 5.65");
+    for y in 44..50 {
+        assert!(
+            (ink_at(&it, 0, y) - ink_at(&it, 50, y)).abs() <= 2,
+            "thin cell row {y}: {} against the page's {}",
+            ink_at(&it, 0, y),
+            ink_at(&it, 50, y)
+        );
+    }
+    assert!((ink_at(&it, 0, 47) - 102).abs() <= 2);
+
+    // 2000.65 pt long: its last column is 0.65 of ink, not 0.49.
+    let src = "<< /PatternType 1 /PaintType 1 /TilingType 2 /BBox [0 0 2000.65 6.65] \
+               /XStep 2100 /YStep 7.3 \
+               /PaintProc { pop 1 0 0 setrgbcolor 0 0 2000.65 6.65 rectfill } >> \
+               matrix makepattern setpattern 0 0 2100 20 rectfill";
+    let mut it = Interp::with_page(2100, 50).expect("page");
+    it.run_source(src.as_bytes())
+        .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
+    assert_eq!(ink_at(&it, 1999, 46), 255);
+    assert!(
+        (ink_at(&it, 2000, 46) - 166).abs() <= 2,
+        "{}",
+        ink_at(&it, 2000, 46)
+    );
+    assert_eq!(ink_at(&it, 2001, 46), 0);
+}
