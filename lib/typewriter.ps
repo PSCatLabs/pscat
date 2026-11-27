@@ -81,6 +81,10 @@
 % every library here.
 
 % @requires: (lib/typewriter_outlines.ps) run
+% Prerequisite check (#1455): one line per @requires entry, in order, naming the
+% library to load first. It runs before any `//name` below is scanned and
+% defines nothing. tests/lib_requires_check.rs keeps it in step with that line.
+/TWOutlines where { pop } { (typewriter needs (lib/typewriter_outlines.ps) run first) errordict /undefined get exec } ifelse
 
 % @internal
 /TWState << >> def
