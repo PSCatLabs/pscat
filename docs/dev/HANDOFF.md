@@ -809,6 +809,9 @@ renders eight examples in both and compares block-downsampled output).
   uncoloured pattern whose resources hold a soft mask, so such an outer
   pattern is written PaintType 1 in each colour it is used in
   (`PdfRecorder::colored_variant`);
+  the capture's `/BBox` clip mask is whole pixels on its edge rows and
+  columns, so a shape ending at the `/BBox` paints its edge once
+  (#1375, `Gfx::snap_clip_to_pixels`);
   text output modes keep outlines under a pattern. `imagemask` paints the
   pattern through its stencil (#1299, `Gfx::fill_pattern_stencil`; SVG a
   `<mask>`, PDF the `/ImageMask` after `/Pattern cs`). Anything that reads `gfx.pixmap`
