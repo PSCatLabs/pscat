@@ -642,6 +642,38 @@ fn a_stopped_write_restores_its_operands() {
     assert_eq!(held.len(), prefilled, "the child's bytes got through");
 }
 
+/// A run that finishes with a partial line buffered and a pipe that is
+/// nearly full but still takes it: no limit is reached and the line arrives,
+/// as without a limit. (On Linux `poll` calls this pipe full: 15 full pages
+/// and part of a 16th fill its slots, while its last page takes the byte.)
+#[test]
+fn a_nearly_full_pipe_at_the_end_of_a_run_still_takes_the_line() {
+    let capacity = pipe_capacity();
+    let prefill = capacity - 2000;
+    for flags in [&[][..], &["--max-time", "0.3"][..]] {
+        let (mut reader, mut writer) = std::io::pipe().expect("a pipe for the child's stdout");
+        set_nonblocking(&writer, true);
+        let page = vec![b'#'; 4096];
+        let mut left = prefill;
+        while left > 0 {
+            let n = left.min(4096);
+            writer.write_all(&page[..n]).expect("prefill");
+            left -= n;
+        }
+        set_nonblocking(&writer, false);
+        let mut args = flags.to_vec();
+        let program = format!("{FILES}f (A) writestring");
+        args.extend(["-e", program.as_str()]);
+        let out = common::wait_with_deadline(spawn(&args, writer.into(), Stdio::piped()), GUARD);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{flags:?}: {stderr}");
+        let mut held = Vec::new();
+        reader.read_to_end(&mut held).expect("read the pipe");
+        assert_eq!(held.len(), prefill + 1, "{flags:?}");
+        assert_eq!(held.last(), Some(&b'A'), "{flags:?}");
+    }
+}
+
 /// A run that ends with a partial line in std's buffer and a full pipe:
 /// without a limit the process would wait at exit for a reader; under one the
 /// run ends at its limit (the bytes that cannot be written are dropped), it
