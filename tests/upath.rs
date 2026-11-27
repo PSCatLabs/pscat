@@ -893,13 +893,13 @@ const CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "ustroke with a matrix leaves the CTM and the path",
-        r#"newpath 50 50 moveto 60 60 lineto SQ [2 0 0 1 0 0] ustroke matrix currentmatrix { pa } forall nl dump"#,
-        "1.0 0.0 0.0 -1.0 0.0 792.0 \nm 50.0 50.0 l 60.0 60.0 @ 60.0 60.0 \n",
+        r#"newpath 50 50 moveto 60 60 lineto SQ [2 0 0 1 0 0] ustroke matrix currentmatrix 0 4 getinterval { pa } forall nl dump"#,
+        "1.0 0.0 0.0 -1.0 \nm 50.0 50.0 l 60.0 60.0 @ 60.0 60.0 \n",
     ),
     (
         "ufill leaves the CTM",
-        r#"newpath 2 2 scale SQ ufill matrix currentmatrix { pa } forall nl"#,
-        "2.0 0.0 0.0 -2.0 0.0 792.0 \n",
+        r#"newpath 2 2 scale SQ ufill matrix currentmatrix 0 4 getinterval { pa } forall nl"#,
+        "2.0 0.0 0.0 -2.0 \n",
     ),
     (
         "ufill of the empty path",
@@ -933,8 +933,8 @@ const CASES: &[(&str, &str, &str)] = &[
     ),
     (
         "ustrokepath leaves the CTM",
-        r#"newpath 2 setlinewidth SQ ustrokepath matrix currentmatrix { pa } forall nl"#,
-        "1.0 0.0 0.0 -1.0 0.0 792.0 \n",
+        r#"newpath 2 setlinewidth SQ ustrokepath matrix currentmatrix 0 4 getinterval { pa } forall nl"#,
+        "1.0 0.0 0.0 -1.0 \n",
     ),
     (
         "ustrokepath with a translating matrix",
