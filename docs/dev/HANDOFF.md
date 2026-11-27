@@ -1781,7 +1781,7 @@ renders eight examples in both and compares block-downsampled output).
   - A program's stdout/stderr write can block on a reader (#1457), so under a
     time limit or an interrupt flag `Interp::write_stdout`/`write_stderr` take
     `src/timed_write.rs` for an anonymous pipe or a stream socket: a write no
-    bigger than the room (Linux: `poll` then `PIPE_BUF`; macOS: `fstat`'s free
+    bigger than the room (Linux: `pwritev2(RWF_NOWAIT)`; macOS: `fstat`'s free
     space, letting a full pipe grow 16 -> 64 KiB; `send(MSG_DONTWAIT)` on a
     Linux socket), never `O_NONBLOCK` (the description is shared). Stdout
     keeps std's `LineWriter` rules exactly in `timed_write::BUFFER` (1024

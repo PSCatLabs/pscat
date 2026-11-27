@@ -15,9 +15,14 @@ Under a time limit or a host interrupt flag, `write_stdout`/`write_stderr`
 use it for fd 1/2 when that is one of these (looked at once per run, so a
 host may move the descriptors between runs):
 
-- An anonymous pipe, Linux: `poll(POLLOUT)`, then a blocking `write` of at
-  most `PIPE_BUF` (4096) bytes. A writable pipe has a free page slot, so the
-  write returns at once. Any FIFO on Linux is one.
+- A pipe, Linux (anonymous or named): `pwritev2(..., RWF_NOWAIT)`,
+  non-blocking for that one call, with exactly a plain write's room; `poll`
+  on `EAGAIN`. `poll` alone undercounts the room: it calls a pipe full once
+  its 16 page slots are in use, while a small write still fits in the last
+  page (Linux CI caught an undrained pipe holding 61,400 of 65,536 bytes). A
+  kernel that refuses the flag for pipes falls back to `poll`, then a blocking
+  `write` of at most `PIPE_BUF` (4096) bytes, which a free slot takes at
+  once.
 - An anonymous pipe, macOS: `fstat` on the write end gives the buffer size
   (`st_blksize`) and the bytes in it (`st_size`), so the write takes exactly
   the free room. `poll` alone is not enough there: macOS starts a pipe at

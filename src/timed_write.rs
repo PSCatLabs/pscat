@@ -11,9 +11,10 @@
 //! description, which the parent shell and sibling processes share, and
 //! flipping it under them makes their writes fail with `EAGAIN`. Instead:
 //!
-//! - An anonymous pipe is written no more than it has room for. On Linux that
-//!   is `PIPE_BUF` bytes after `poll` reports it writable (a free page slot);
-//!   on macOS the free space `fstat` reports (`st_blksize - st_size`), which
+//! - An anonymous pipe is written no more than it has room for. On Linux
+//!   with `pwritev2(RWF_NOWAIT)`, non-blocking for that call only (or, on a
+//!   kernel without it for pipes, `PIPE_BUF` bytes after `poll` reports a
+//!   free page slot); on macOS the free space `fstat` reports (`st_blksize - st_size`), which
 //!   also lets a full pipe grow from 16 to 64 KiB as a plain write would.
 //! - A stream socket is written with `send(MSG_DONTWAIT)` on Linux, and on
 //!   macOS (which ignores that flag on a blocking socket) like a pipe, 512
@@ -138,6 +139,50 @@ pub(crate) fn write_all(
     let mut since_look = 0usize;
     while done < bytes.len() {
         let rest = &bytes[done..];
+        #[cfg(target_os = "linux")]
+        if kind == FdKind::Fifo && !NOWAIT_UNSUPPORTED.load(Ordering::Relaxed) {
+            let iov = libc::iovec {
+                iov_base: rest.as_ptr().cast_mut().cast::<libc::c_void>(),
+                iov_len: rest.len(),
+            };
+            // SAFETY: one `iovec` describing the live `rest` slice; `-1` is
+            // the current position, the only offset a pipe takes.
+            let r = unsafe { libc::pwritev2(fd, &iov, 1, -1, libc::RWF_NOWAIT) };
+            if r > 0 {
+                let r = r as usize;
+                done += r;
+                since_look += r;
+                if since_look >= LOOK_EVERY {
+                    look().map_err(|e| stop(done, WriteStop::Limit(e)))?;
+                    since_look = 0;
+                }
+                continue;
+            }
+            if r == 0 {
+                return Err(stop(
+                    done,
+                    WriteStop::Io(std::io::ErrorKind::WriteZero.into()),
+                ));
+            }
+            let err = std::io::Error::last_os_error();
+            match err.raw_os_error() {
+                // No room for this write (a write of up to `PIPE_BUF` bytes
+                // goes in whole or not at all): wait for the reader.
+                Some(e) if e == libc::EAGAIN || e == libc::EINTR => {
+                    if e == libc::EAGAIN {
+                        let _ = wait_writable(fd);
+                    }
+                    look().map_err(|e| stop(done, WriteStop::Limit(e)))?;
+                    since_look = 0;
+                }
+                // A kernel without `RWF_NOWAIT` for pipes: `poll` from now on.
+                Some(e) if e == libc::EOPNOTSUPP || e == libc::EINVAL || e == libc::ENOSYS => {
+                    NOWAIT_UNSUPPORTED.store(true, Ordering::Relaxed);
+                }
+                _ => return Err(stop(done, WriteStop::Io(err))),
+            }
+            continue;
+        }
         let n = match kind {
             FdKind::Fifo => match fifo_room(fd) {
                 Room::Free(free) => rest.len().min(free),
@@ -222,6 +267,14 @@ pub(crate) fn write_all(
     }
     Ok(())
 }
+
+/// Linux pipes take `pwritev2(RWF_NOWAIT)`: non-blocking for that one call,
+/// with exactly a plain write's room. `poll` alone undercounts it: it calls a
+/// pipe full once its 16 page slots are in use, while a small write still
+/// fits in the last page (an undrained pipe held 4 KiB less than without a
+/// limit). Set once a kernel refuses the flag; `poll` then.
+#[cfg(target_os = "linux")]
+static NOWAIT_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
 
 /// `send` without blocking, for this one call, and without `SIGPIPE`, so a
 /// peer that went away is `EPIPE` as a plain `write` is under the Rust
