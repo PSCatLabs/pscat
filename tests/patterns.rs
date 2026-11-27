@@ -3516,19 +3516,6 @@ fn a_function_pattern_reused_on_a_larger_page_paints_past_its_first_canvas_in_sv
     assert!(widest_image(&svg) > 400, "{}", widest_image(&svg));
 }
 
-/// A tile whose `PaintProc` paints one point with `grad`, the page's
-/// 1000 pt Type 1 pattern: a tiny mark in a context other than the page's,
-/// so the only large thing a limit can meet is the SVG image made for the
-/// 1000 x 1000 canvas.
-const USE_FROM_A_TILE: &str = "\
-    << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 1000 1000] /XStep 1000 /YStep 1000 \
-       /PaintProc { pop grad setpattern 0 0 1 1 rectfill } >> [1 0 0 1 -300 -300] makepattern \
-    setpattern 0 0 100 100 rectfill";
-
-fn big_function_pattern() -> String {
-    format!("{} /grad exch def", type1("[1000 0 0 1000 0 -300]"))
-}
-
 /// A tile on a 600 x 600 page, its origin off the page so the page pattern
 /// `grad` (a Type 1 shading over the whole page) is used in another context;
 /// `proc_` is its `PaintProc` body.
@@ -3779,19 +3766,25 @@ fn limited_exports(src: &str, page: &str, limit: [&str; 2]) -> (bool, String, St
 
 /// The SVG image made for a use in another context answers to `--max-memory`
 /// before it is made, and a stop leaves the page and the SVG as they were
-/// (#1368): a mark one point wide in a 1000 x 1000 tile asks for the whole
-/// canvas's image, which a cap that has room for the tile but not for the
-/// image refuses.
+/// (#1368): a Type 1 pattern made in a 100 pt tile has an image of the tile's
+/// own small canvas, and a mark one point wide on the 1000 x 1000 page asks
+/// for the page's, which a cap that has room for the tile but not for that
+/// image refuses. (The pattern is made in a tile since #1477: `makepattern`
+/// holds the room an image of the page's size takes before it makes one, so
+/// a pattern made on the page itself would meet the cap first.)
 #[test]
 fn a_foreign_use_image_answers_to_the_memory_limit() {
     let page = "1 0 0 setrgbcolor 0 0 1000 1000 rectfill\n";
-    let pattern = big_function_pattern();
-    let full = format!("{page}{pattern}\n{USE_FROM_A_TILE}\n");
-    // The same tile painting a flat colour: the cap has room for it.
-    let flat = full.replace(
-        "pop grad setpattern 0 0 1 1 rectfill",
-        "pop 0 0 1 1 rectfill",
+    let tile = format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 100 100] /XStep 100 \
+            /YStep 100 /PaintProc {{ pop 0 0 1 1 rectfill {} /grad exch def }} >> \
+         matrix makepattern setpattern 0 0 1 1 rectfill\n",
+        type1("[2000 0 0 2000 -500 -500]")
     );
+    let before = format!("{page}{tile}");
+    let full = format!("{before}grad setpattern 0 0 1 1 rectfill\n");
+    // The same page painting a flat colour: the cap has room for it.
+    let flat = format!("{before}0 0 1 1 rectfill\n");
     let (ok, out, ..) = limited_exports(&flat, "1000x1000", ["--max-memory", "11"]);
     assert!(ok, "the tile alone fits the cap: {out}");
     let (ok, out, svg, png) = limited_exports(&full, "1000x1000", ["--max-memory", "11"]);
@@ -3799,11 +3792,8 @@ fn a_foreign_use_image_answers_to_the_memory_limit() {
         !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
         "{out}"
     );
-    let (ok, out, before_svg, before_png) = limited_exports(
-        &format!("{page}{pattern}\n"),
-        "1000x1000",
-        ["--max-memory", "0"],
-    );
+    let (ok, out, before_svg, before_png) =
+        limited_exports(&before, "1000x1000", ["--max-memory", "0"]);
     assert!(ok, "the baseline runs: {out}");
     assert_eq!(svg, before_svg, "the SVG is as it was");
     assert!(png == before_png, "the page is as it was");
