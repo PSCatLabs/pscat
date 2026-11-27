@@ -48,11 +48,16 @@ zero-length dashes included (they are cut from a real subpath, not a
 zero-length segment).
 
 **Cost and limits.** One pass over the path's segments per stroke to find a
-zero-length segment (the scan `to_skia_for_stroke` already makes), and a clone
-of the path only when one is found. The path is already held under
-`--max-memory` and its construction charged `--max-steps`; the clone is
-transient and no larger than the path itself, as the point-subpath drop it
-replaces was. Nothing loops on a user-chosen count.
+zero-length segment, and a clone of the path only when one is found (before,
+only a square-capped path with a point subpath was cloned). A stroke already
+copies the whole path into a tiny-skia path (`to_skia_for_stroke`), uncharged
+and the same size, so the clone at most doubles a transient the stroke
+already makes. `--max-memory` is a process-heap count (`src/memtrack.rs`,
+`TrackingAllocator`), so the clone is counted like any allocation and the run
+stops at the next step check if it crosses the cap. `--max-steps` and
+`--max-time` are charged per executed operator, and the pass is linear in a
+path whose segments those operators already paid for; nothing loops on a
+user-chosen count and nothing is quadratic.
 
 **Tests** (`tests/stroke_anisotropic.rs`, last section). Butt and square caps
 with miter and bevel joins are pinned against gs (`strokepath` bbox and the
