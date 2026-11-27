@@ -3199,3 +3199,118 @@ fn a_foreign_use_image_answers_to_the_step_and_time_limits() {
         assert!(px == px_before, "{what}: the page is as it was");
     }
 }
+
+/// [`limited`] on a page of `page`, with the SVG and the PNG the run
+/// leaves (the CLI writes both after a limit stops the program).
+fn limited_exports(src: &str, page: &str, limit: [&str; 2]) -> (bool, String, String, Vec<u8>) {
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_use_limits");
+    let file = dir.join("limited.ps");
+    std::fs::write(&file, src).expect("write source");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--page", page, limit[0], limit[1], "--png"])
+        .arg(dir.join("limited.png"))
+        .arg("--svg")
+        .arg(dir.join("limited.svg"))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    (
+        out.status.success(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        std::fs::read_to_string(dir.join("limited.svg")).unwrap_or_default(),
+        std::fs::read(dir.join("limited.png")).unwrap_or_default(),
+    )
+}
+
+/// The SVG image made for a use in another context answers to `--max-memory`
+/// before it is made, and a stop leaves the page and the SVG as they were
+/// (#1368): a mark one point wide in a 1000 x 1000 tile asks for the whole
+/// canvas's image, which a cap that has room for the tile but not for the
+/// image refuses.
+#[test]
+fn a_foreign_use_image_answers_to_the_memory_limit() {
+    let page = "1 0 0 setrgbcolor 0 0 1000 1000 rectfill\n";
+    let pattern = big_function_pattern();
+    let full = format!("{page}{pattern}\n{USE_FROM_A_TILE}\n");
+    // The same tile painting a flat colour: the cap has room for it.
+    let flat = full.replace(
+        "pop grad setpattern 0 0 1 1 rectfill",
+        "pop 0 0 1 1 rectfill",
+    );
+    let (ok, out, ..) = limited_exports(&flat, "1000x1000", ["--max-memory", "12"]);
+    assert!(ok, "the tile alone fits the cap: {out}");
+    let (ok, out, svg, png) = limited_exports(&full, "1000x1000", ["--max-memory", "12"]);
+    assert!(
+        !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
+        "{out}"
+    );
+    let (_, _, before_svg, before_png) = limited_exports(
+        &format!("{page}{pattern}\n"),
+        "1000x1000",
+        ["--max-memory", "0"],
+    );
+    assert_eq!(svg, before_svg, "the SVG is as it was");
+    assert!(png == before_png, "the page is as it was");
+    let (ok, out, svg, _) = limited_exports(&full, "1000x1000", ["--max-memory", "0"]);
+    assert!(ok && svg.contains("<image "), "no limit: {out}");
+}
+
+/// Images made for many contexts add up in the process's heap, which the
+/// memory limit counts (#1368): sixty tiles each use a page pattern of
+/// noise, and each use writes an image of its own. A cap that holds a few
+/// of them stops the run partway, not at the end.
+#[test]
+fn the_images_of_many_foreign_uses_add_up_against_the_memory_limit() {
+    let mut seed = 5u32;
+    let table: String = (0..64 * 64 * 3)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            format!("{:02x}", seed >> 24)
+        })
+        .collect();
+    let src = format!(
+        "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB \
+         /Matrix [1000 0 0 1000 0 0] /Function << /FunctionType 0 /Domain [0 1 0 1] \
+         /Range [0 1 0 1 0 1] /Size [64 64] /BitsPerSample 8 /DataSource <{table}> >> >> >> \
+         matrix makepattern /grad exch def \
+         /tile {{ /i exch def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 300 300] \
+            /XStep 300 /YStep 300 /PaintProc {{ pop grad setpattern 0 0 1 1 rectfill }} >> \
+            [1 0 0 1 i 0] makepattern setpattern 0 0 1 1 rectfill }} def \
+         0 1 59 {{ tile }} for\n"
+    );
+    let (ok, out, all, _) = limited_exports(&src, "400x400", ["--max-memory", "0"]);
+    assert!(ok, "{out}");
+    assert_eq!(all.matches("<image ").count(), 60, "one image per context");
+    let (ok, out, some, _) = limited_exports(&src, "400x400", ["--max-memory", "40"]);
+    assert!(
+        !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
+        "{out}"
+    );
+    let n = some.matches("<image ").count();
+    assert!(
+        (1..60).contains(&n),
+        "the cap stopped it after {n} images, not at the first or the last"
+    );
+}
+
+/// A tile that paints with a page function pattern many times makes its
+/// image once (#1368): a mark does not make a new one.
+#[test]
+fn many_marks_in_one_context_share_one_image() {
+    let src = format!(
+        "{} /grad exch def \
+         << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+            /PaintProc {{ pop grad setpattern 0 1 599 {{ 0 exch 3 1 rectfill }} for \
+               grad setpattern 20 setlinewidth 0 0 moveto 600 600 lineto stroke }} >> \
+         [1 0 0 1 -300 -100] makepattern setpattern 0 0 400 400 rectfill",
+        type1("[600 0 0 600 0 -200]")
+    );
+    let out = render(&src);
+    assert_eq!(out.svg.matches("<image ").count(), 1, "{}", out.svg);
+}
