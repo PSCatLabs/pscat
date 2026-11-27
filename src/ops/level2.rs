@@ -301,10 +301,30 @@ fn slot_index(idx: &Object) -> Result<i64, PsError> {
     }
 }
 
+/// What the memory limit is asked for each table slot of a userdict
+/// snapshot: the entry, its key and a control byte, doubled for the load
+/// factor. An estimate, as the snapshot is a `HashMap` clone.
+const DICT_SLOT_BYTES: usize = 2 * (std::mem::size_of::<Object>() + 8 + 1);
+
+/// Refuse work before any of it is done: `bytes` of new heap against
+/// `--max-memory` and `slots` slots copied or initialised against
+/// `--max-steps` (one step per 64) and `--max-time`. It runs ahead of every
+/// mutation and install, so a refusal leaves `UserObjects`, userdict and
+/// (through the operand ledger) the operand stack as they were.
+fn preflight(it: &mut Interp, bytes: usize, slots: usize) -> Result<(), PsError> {
+    if bytes == 0 && slots == 0 {
+        return Ok(());
+    }
+    it.check_alloc(bytes)?;
+    it.poll_limits((slots / COPY_PER_STEP + 1) as u64)
+}
+
 /// An array of `n` nulls with `slot` set to `value` when it is in range,
-/// refused before it is made if `n` would pass the memory limit, and with
-/// the copy of `copied` existing slots charged to the step limit. Nothing
-/// is changed when this fails.
+/// holding the first `n` slots of `old` in front. The memory it takes, the
+/// first snapshot of userdict that installing it makes inside a `save`, and
+/// the slots copied and initialised are all refused here, before the array
+/// is made. It is made at its final capacity in one allocation (a copy
+/// that was then resized would take up to twice the room it was checked for).
 fn new_user_objects(
     it: &mut Interp,
     old: Option<&crate::object::PsArray>,
@@ -312,10 +332,17 @@ fn new_user_objects(
     slot: i64,
     value: &Object,
 ) -> Result<Object, PsError> {
-    it.check_alloc(n.saturating_mul(std::mem::size_of::<Object>()))?;
-    let copied = old.map_or(0, |a| a.len().min(n));
-    it.poll_limits((copied / COPY_PER_STEP + 1) as u64)?;
-    let mut items = old.map_or_else(Vec::new, crate::object::PsArray::snapshot);
+    let dict_slots = it.dict_snapshot_slots(&it.userdict());
+    preflight(
+        it,
+        n.saturating_mul(std::mem::size_of::<Object>())
+            .saturating_add(dict_slots.saturating_mul(DICT_SLOT_BYTES)),
+        n.saturating_add(dict_slots),
+    )?;
+    let mut items = Vec::with_capacity(n);
+    if let Some(a) = old {
+        a.with_slice(|s| items.extend_from_slice(&s[..s.len().min(n)]));
+    }
     items.resize(n, Object::lit(Value::Null));
     if let Ok(s) = usize::try_from(slot)
         && s < n
@@ -332,16 +359,21 @@ fn install_user_objects(it: &mut Interp, array: Object) {
     userdict.borrow_mut().put(USER_OBJECTS.into(), array);
 }
 
-/// The first write to the array at a save level snapshots all of it (the
-/// journal's design), a copy of up to 131070 slots a loop can repeat with
-/// `save ... restore`. Refused against the memory limit before it is made
-/// and charged to the step limit; free with no save live.
+/// The first write to the array's backing store at a save level
+/// snapshots all of it (the journal's design), however small the view the
+/// program holds: up to 655350 slots, copied again by every
+/// `save ... restore` round. Refused against the limits before it is made;
+/// free with no save live and for a store already journalled at this level.
 fn charge_snapshot(it: &mut Interp, a: &crate::object::PsArray) -> Result<(), PsError> {
-    if it.save_level() == 0 {
+    let slots = it.array_snapshot_slots(a);
+    if slots == 0 {
         return Ok(());
     }
-    it.check_alloc(a.len().saturating_mul(std::mem::size_of::<Object>()))?;
-    it.poll_limits((a.len() / COPY_PER_STEP + 1) as u64)
+    preflight(
+        it,
+        slots.saturating_mul(std::mem::size_of::<Object>()),
+        slots,
+    )
 }
 
 /// index obj defineuserobject → –
@@ -389,8 +421,15 @@ fn defineuserobject(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let Some(i) = slot else {
-        // Whether it would grow or put, a real index is a typecheck with
-        // the array untouched.
+        // A real index is a `typecheck`, the array untouched, whether it
+        // would grow or put. The one exception is a put into a read-only
+        // array, which Ghostscript refuses first: `0.0`, `-1.0` and `2.0`
+        // on three slots are `invalidaccess`, `3.0` (a growth) `typecheck`.
+        if let Value::Real(r) = idx.value
+            && r < a.len() as f64
+        {
+            existing.check_writable()?;
+        }
         return Err(PsError::Typecheck);
     };
     let len = a.len() as i64;

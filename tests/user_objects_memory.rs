@@ -72,7 +72,7 @@ fn state_after(it: &mut Interp) -> (usize, String, usize) {
     it.set_limits(Limits::none()).expect("no limit");
     it.capture_stdout();
     it.run_str(
-        "count 8 string cvs print ( ) print count 0 gt { dup type 16 string cvs print } if \
+        "count 8 string cvs print ( ) print count 0 gt { dup type 16 string cvs print } { (-) print } ifelse \
          ( ) print userdict /UserObjects known { userdict /UserObjects get length } { 0 } ifelse \
          8 string cvs print",
     )

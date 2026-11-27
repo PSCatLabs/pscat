@@ -411,6 +411,51 @@ const CASES: &[(&str, &str, &str)] = &[
         r#"0 {0 execuserobject 1} defineuserobject 0 execuserobject"#,
         "!execstackoverflow execuserobject",
     ),
+    (
+        "a read-only array, real index 0.0",
+        r#"userdict /UserObjects 3 array readonly put 0.0 42 defineuserobject"#,
+        "!invalidaccess defineuserobject",
+    ),
+    (
+        "a read-only array, real index -1.0",
+        r#"userdict /UserObjects 3 array readonly put -1.0 42 defineuserobject"#,
+        "!invalidaccess defineuserobject",
+    ),
+    (
+        "a read-only array, real index 2.0",
+        r#"userdict /UserObjects 3 array readonly put 2.0 42 defineuserobject"#,
+        "!invalidaccess defineuserobject",
+    ),
+    (
+        "a read-only array, real index 3.0",
+        r#"userdict /UserObjects 3 array readonly put 3.0 42 defineuserobject"#,
+        "!typecheck defineuserobject",
+    ),
+    (
+        "a read-only array, real index 5.0",
+        r#"userdict /UserObjects 3 array readonly put 5.0 42 defineuserobject"#,
+        "!typecheck defineuserobject",
+    ),
+    (
+        "a writable array, real index 2.0",
+        r#"userdict /UserObjects 3 array put 2.0 42 defineuserobject"#,
+        "!typecheck defineuserobject",
+    ),
+    (
+        "replacing UserObjects while an object runs",
+        r#"0 {/UserObjects [99] def 42} defineuserobject 0 execuserobject 0 execuserobject b b"#,
+        "99 42",
+    ),
+    (
+        "an integer object",
+        r#"0 123 defineuserobject 0 execuserobject b"#,
+        "123",
+    ),
+    (
+        "an array object",
+        r#"0 [1 2] defineuserobject 0 execuserobject dup length b type b"#,
+        "2 arraytype",
+    ),
 ];
 
 /// Plain PostScript, valid in pscat and in gs.
@@ -425,7 +470,8 @@ fn program() -> String {
     for (name, body, _) in CASES {
         src.push_str(&format!(
             "({name}: ) print {{ userdict /UserObjects undef {body} }} stopped \
-             {{ (!) print $error /errorname get b cmd b }} if clear (\\n) print\n"
+             {{ (!) print $error /errorname get b cmd b }} if clear \
+             {{ countdictstack 3 le {{ exit }} if end }} loop (\\n) print\n"
         ));
     }
     src
@@ -529,4 +575,59 @@ fn a_restored_first_define_starts_over() {
          userdict /UserObjects get length ==",
     );
     assert_eq!(out.trim(), "10");
+}
+
+/// After an error inside a stored object, gs leaves the operand stack as
+/// it was when the (PostScript) operator was entered: `0 { 1 0 idiv }
+/// defineuserobject { 5 0 execuserobject } stopped pop count` is `2` there
+/// (`5 1`), and `{ 10 20 (x) add }` leaves `5 10`. pscat, like `exec`,
+/// leaves what the failing operator left: `3` (`5 1 0`) and `5 10 20 (x)`.
+/// (A plain `5 1 0 idiv` leaves `5 1 0` in both.) Deliberate: the same
+/// cause as the offending-command difference above.
+#[test]
+fn the_operand_stack_after_an_error_inside_the_object_is_what_exec_leaves() {
+    let out = printed(
+        "0 { 1 0 idiv } defineuserobject { 5 0 execuserobject } stopped pop \
+         count 8 string cvs print ( ) print clear \
+         0 { 10 20 (x) add } defineuserobject { 5 0 execuserobject } stopped pop \
+         count 8 string cvs print",
+    );
+    assert_eq!(out.trim(), "3 4");
+}
+
+/// gs 10.07.1 accepts a `UserObjects` a program replaced with a string or a
+/// dict: `userdict /UserObjects (abc) put 1 execuserobject` is 98 and
+/// `<< 1 33 >>` gives 33; `1 undefineuserobject` on the dict gives null, on
+/// the string `typecheck`; a define is `typecheck` on both. pscat gives
+/// `typecheck` for all of them: only a program that overwrites the name
+/// can see a non-array here.
+#[test]
+fn a_replaced_userobjects_that_is_not_an_array_is_a_typecheck() {
+    for src in [
+        "(abc) put { 1 execuserobject } stopped",
+        "(abc) put { 1 undefineuserobject } stopped",
+        "(abc) put { 1 (x) defineuserobject } stopped",
+        "<< 1 33 >> put { 1 execuserobject } stopped",
+        "<< 1 33 >> put { 1 undefineuserobject } stopped",
+        "<< 1 33 >> put { 1 44 defineuserobject } stopped",
+    ] {
+        let out = printed(&format!(
+            "userdict /UserObjects {src} pop $error /errorname get 16 string cvs print"
+        ));
+        assert_eq!(out, "typecheck", "{src}");
+    }
+}
+
+/// Two more differences, both inherited from plain `exec` (`0 null cvx exec`
+/// pushes null here and does nothing in gs) or from access being modelled
+/// on arrays only (#1189): an executable null in a slot is pushed, and a
+/// `noaccess` array is read from. In gs the first runs it (count 0) and the
+/// second is `invalidaccess`.
+#[test]
+fn an_executable_null_and_a_noaccess_array_follow_exec_and_the_access_model() {
+    let out = printed(
+        "0 null cvx defineuserobject 0 execuserobject count 8 string cvs print ( ) print clear \
+         userdict /UserObjects 3 array noaccess put 0 execuserobject count 8 string cvs print",
+    );
+    assert_eq!(out, "1 1");
 }

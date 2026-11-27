@@ -4236,6 +4236,37 @@ impl Interp {
         }
     }
 
+    /// Slots the next [`journal_array`](Self::journal_array) of `a` would
+    /// copy: the whole backing store, whatever view `a` is, or 0 with no
+    /// live save or when the store is already journalled at this level. For
+    /// an operator to refuse the copy against the limits before it makes it.
+    pub(crate) fn array_snapshot_slots(&self, a: &PsArray) -> usize {
+        let Some(rec) = self.save_stack.last() else {
+            return 0;
+        };
+        if rec.seen.contains(&(Rc::as_ptr(a.data_rc()) as usize)) {
+            return 0;
+        }
+        a.storage_len()
+    }
+
+    /// The dict counterpart of [`array_snapshot_slots`](Self::array_snapshot_slots):
+    /// the table slots the next [`journal_dict`](Self::journal_dict) would
+    /// copy (entries plus the empty slots the table keeps).
+    pub(crate) fn dict_snapshot_slots(&self, d: &Rc<RefCell<Dict>>) -> usize {
+        if Rc::ptr_eq(d, &self.globaldict) {
+            return 0;
+        }
+        let Some(rec) = self.save_stack.last() else {
+            return 0;
+        };
+        if rec.seen.contains(&(Rc::as_ptr(d) as usize)) {
+            return 0;
+        }
+        let d = d.borrow();
+        d.len().saturating_add(d.slot_overhead())
+    }
+
     /// The `gstate` counterpart of [`journal_array`]: `currentgstate`
     /// and `copy` overwrite a gstate object's contents, which `restore`
     /// rolls back, as gs does.
