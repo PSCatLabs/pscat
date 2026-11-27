@@ -58,15 +58,21 @@ or records anything.
   of a pattern is one context, so many marks in it share one image.
 - The image never exceeds the canvas it is for, whatever the shading's Domain
   (a box of 1e30 is cut to the canvas).
+- Each limit case in `tests/patterns.rs` has a control, the same tile painting
+  a flat colour under the same limit, which finishes; with the image disabled
+  the steps and time cases no longer stop, so they are about the image. The
+  memory caps sit midway between the flat tile's threshold (9 MiB) and the
+  foreign use's (13 MiB).
 
 **Known limit.** The image is in the using context's pixels, which is what the
 PNG paints, but a viewer that scales a tile's `<pattern>` up resamples it. That
 holds for every image in a pattern and is unchanged.
 
-**Identity.** PNG: all tracked examples, gallery pieces and drivers render byte
-for byte alike with the base binary and this branch's, and the three pictures
-above too (`scripts/identity_check.sh` with `--base-bin/--head-bin`; the change
-has no PNG-visible behaviour, so it has no PNG control: the two binaries are
-told apart by the SVG of the pictures above instead). SVG: of the tracked
-programs only `examples/shading_patterns.ps` uses shading patterns, and its SVG
-is byte for byte the same (it has no foreign use).
+**Identity.** PNG: all 173 tracked examples, gallery pieces and drivers (212 page
+renders, 4 files skipped that fail identically in both trees) render byte for
+byte alike with the base binary and this branch's, and the three pictures above
+too (`scripts/identity_check.sh` with `--base-bin/--head-bin`). The change has
+no PNG-visible behaviour, so there is no PNG control: the two binaries are told
+apart by the SVG of the pictures above instead (same PNG, different SVG). SVG:
+of the tracked programs only `examples/shading_patterns.ps` uses shading
+patterns, and its SVG is byte for byte the same (it has no foreign use).
