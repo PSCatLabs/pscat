@@ -23,6 +23,9 @@ million values cost a few entries (test: `a_big_aload_keeps_the_trace_small`).
 
 ## What it says, and does not
 
+(Superseded for loops and calls by #1366, `notes/1366-stack-leak-own-line.md`: the line is now the leaking
+element's own, and the bottom-item witness below is replaced by tracking the lowest depth.)
+
 The line is the one the scanner had reached, like #1109's. A leak made inside a loop or a
 procedure is credited to the line of the token that ran it: the closing `} for` for a loop (the
 whole `{ ... }` is one token), the call site for a procedure (not the `def`). That narrows a 150-line program to one statement. Without the trace (a library caller of `lint::check`) the message is the old one plus

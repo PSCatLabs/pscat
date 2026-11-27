@@ -62,6 +62,7 @@
 //! Colour operators in the `PaintProc` are ignored, as in gs.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
@@ -1025,6 +1026,13 @@ pub(crate) struct ShadingPattern {
     pub(crate) to_gs: Transform,
     /// Present when SVG was being recorded at `makepattern`.
     pub(crate) svg: Option<SvgShading>,
+    /// The SVG images made for uses in other contexts (#1368), by
+    /// [`SvgUseKey`]. `None` is a use the shading does not reach. Held here
+    /// so the mark that needs one makes it under its limits
+    /// ([`Gfx::pattern_source`](crate::gfx::Gfx::pattern_source)) and the
+    /// recorder only reads it; the bytes are the process's heap, which the
+    /// memory limit counts.
+    pub(crate) svg_uses: RefCell<HashMap<SvgUseKey, Option<Rc<SvgImage>>>>,
     /// The PDF recorder's pattern index, when PDF was being recorded and
     /// the shading paints anything.
     pub(crate) pdf: Option<usize>,
@@ -1042,11 +1050,51 @@ pub(crate) struct SvgShading {
     /// stops and `/Extend`; `None` for a Type 1 shading and for one that
     /// paints nothing.
     pub(crate) gradient: Option<SvgGradient>,
-    /// A Type 1 shading's layer: PNG, size, and its top-left pixel.
-    pub(crate) image: Option<(Vec<u8>, u32, u32, i32, i32)>,
+    /// A Type 1 or mesh shading's layer, over the canvas it was made on.
+    pub(crate) image: Option<SvgImage>,
+    /// The canvas `image` was cut to: a mark on another canvas, or in
+    /// another context, needs an image of its own (`svg_uses`).
+    pub(crate) canvas: (u32, u32),
+    /// Where a Type 1 or mesh shading paints: its box in device space
+    /// `[x0, y0, x1, y1]`, cut to the `/BBox`, before any canvas cuts it.
+    /// `None` for a gradient (which SVG draws itself) and a shading that
+    /// paints nothing.
+    pub(crate) shape: Option<[f64; 4]>,
     /// The `/BBox` corners in device space.
     pub(crate) bbox: Option<[(f32, f32); 4]>,
     pub(crate) background: Option<(f32, f32, f32)>,
+}
+
+/// A Type 1 or mesh shading's layer as SVG embeds it: the PNG, its size and
+/// its top-left pixel, in the device space of the canvas it was made for.
+pub(crate) type SvgImage = (Vec<u8>, u32, u32, i32, i32);
+
+/// Which image a use in another context needs (#1368): the bits of the map
+/// from the shading's context to the painting one, and the painting
+/// canvas's size.
+pub(crate) type SvgUseKey = ([u32; 6], u32, u32);
+
+impl ShadingPattern {
+    /// The key of the SVG image a mark on `canvas`, with the context map
+    /// `hop` (`None` for the context the pattern was made in), needs, when
+    /// the image made at `makepattern` is not it: the use is in another
+    /// context or on a canvas of another size, and the shading has an image
+    /// to make. Computed here for both the mark that makes the image and
+    /// the recorder that writes it, so they cannot disagree.
+    pub(crate) fn svg_use_key(
+        &self,
+        hop: Option<Transform>,
+        canvas: (u32, u32),
+    ) -> Option<SvgUseKey> {
+        let svg = self.svg.as_ref()?;
+        svg.shape?;
+        let hop = hop.unwrap_or_default();
+        if hop.is_identity() && canvas == svg.canvas {
+            return None;
+        }
+        let bits = [hop.sx, hop.ky, hop.kx, hop.sy, hop.tx, hop.ty].map(f32::to_bits);
+        Some((bits, canvas.0, canvas.1))
+    }
 }
 
 /// An axial or radial shading as SVG writes it: geometry, its own space to

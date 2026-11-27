@@ -72,4 +72,4 @@ gives the same single finding before and after: `gallery/hundred_lines.ps`, `/ln
 
 - `store` and `def` only; `put` into systemdict still has no line of its own.
 - A tail `def` reached through `exec` of a procedure the program built at run time reports the caller's line.
-- #1081's `[stack-leak]` line has the same limit (a leak made inside a loop is credited to the closing `} for`).
+- #1081's `[stack-leak]` line had the same limit; #1366 (`notes/1366-stack-leak-own-line.md`) lifted it.

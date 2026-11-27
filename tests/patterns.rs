@@ -2867,3 +2867,601 @@ fn a_sub_pixel_bbox_keeps_an_edge_on_rectfill_s_own_coverage() {
         }
     }
 }
+
+// --- #1368: a pattern's SVG image in a context it was not made in ---------
+
+/// A 2 x 2 table Type 1 shading, `m` its matrix: a smooth colour square.
+fn type1(m: &str) -> String {
+    format!(
+        "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB /Matrix {m} \
+         /Function << /FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [2 2] \
+         /BitsPerSample 8 /DataSource <ff0000 00ff00 0000ff ffffff> >> >> >> matrix makepattern"
+    )
+}
+
+/// A Type 4 mesh (one triangle) as a pattern, over the area a 600 pt tile
+/// reaches and past the 400 pt page.
+const MESH_TRIANGLE: &str = "<< /PatternType 2 /Shading << /ShadingType 4 \
+    /ColorSpace /DeviceRGB /DataSource [0 -100 -100 1 0 0  0 700 -100 0 1 0  0 300 800 0 0 1] \
+    >> >> matrix makepattern";
+
+/// A page pattern `grad` used inside a 600 pt cell's `PaintProc`, in a tile
+/// whose origin puts its right half on the page: the shading the page sees
+/// there is the cell's, painted past the page's own 400 pt canvas.
+fn page_pattern_in_a_big_tile(pattern: &str) -> String {
+    format!(
+        "{pattern} /grad exch def \
+         << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+            /PaintProc {{ pop grad setpattern 0 0 600 600 rectfill }} >> \
+         [1 0 0 1 -300 -100] makepattern setpattern 0 0 400 400 rectfill"
+    )
+}
+
+/// A pattern made in a small `PaintProc` and used on the page (`/inner`),
+/// whose shading reaches past the tile's own 80 pt canvas.
+fn tile_pattern_used_on_the_page(pattern: &str) -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 80 80] /XStep 400 /YStep 400 \
+            /PaintProc {{ pop 1 0 0 setrgbcolor 0 0 5 5 rectfill {pattern} \
+              userdict /inner 3 -1 roll put }} >> \
+         [1 0 0 1 4.3 7.6] makepattern /outer exch def \
+         outer setpattern 0 0 30 30 rectfill inner setpattern 50 50 300 300 rectfill"
+    )
+}
+
+/// The widest `<image>` in `svg`, in pixels (0 when it has none).
+fn widest_image(svg: &str) -> u32 {
+    svg.split("<image ")
+        .skip(1)
+        .filter_map(|s| s.split(" width=\"").nth(1)?.split('"').next()?.parse().ok())
+        .max()
+        .unwrap_or(0)
+}
+
+/// A Type 1 or mesh shading pattern's SVG image is made over the canvas it
+/// is painted on, not only the one `makepattern` ran in (#1368): used in
+/// another context, the SVG showed nothing past the made canvas where the
+/// PNG, the PDF and gs paint it.
+#[test]
+fn a_function_or_mesh_pattern_used_in_another_context_paints_in_svg_as_in_the_png() {
+    let cases = [
+        (
+            "type 1 in a bigger tile",
+            page_pattern_in_a_big_tile(&type1("[600 0 0 600 0 -200]")),
+            400,
+            &[][..],
+        ),
+        (
+            "mesh in a bigger tile",
+            page_pattern_in_a_big_tile(MESH_TRIANGLE),
+            400,
+            &[][..],
+        ),
+        (
+            "type 1 made in a tile, used on the page",
+            tile_pattern_used_on_the_page(&type1("[400 0 0 400 -10 -300]")),
+            80,
+            &["-dMaxPatternBitmap=1"][..],
+        ),
+    ];
+    // Every case is run and every miss reported, not only the first.
+    let misses = std::cell::RefCell::new(Vec::new());
+    let close = |what: String, ours: &Pixmap, theirs: &Pixmap| {
+        let diff = mean_block_diff(ours, theirs);
+        eprintln!("{what}: mean block diff {diff:.3}");
+        if diff > 3.0 {
+            misses
+                .borrow_mut()
+                .push(format!("{what}: mean block diff {diff:.2} > 3"));
+        }
+    };
+    for (name, src, made, gs_flags) in cases {
+        let out = render(&src);
+        let painted = out
+            .png
+            .pixels()
+            .iter()
+            .filter(|p| p.red() < 250 || p.green() < 250 || p.blue() < 250)
+            .count();
+        assert!(painted > 20_000, "{name}: only {painted} pixels painted");
+        close(
+            format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+        );
+        // The structural check: the image is wider than the canvas the
+        // pattern was made on, so a lookup that missed (and fell back to
+        // the made image) fails here and not only in the pixels.
+        if widest_image(&out.svg) <= made {
+            misses.borrow_mut().push(format!(
+                "{name}: the SVG image is {} wide, no wider than the {made} px canvas it was made on",
+                widest_image(&out.svg)
+            ));
+        }
+        close(
+            format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+        );
+        if common::gs_available() {
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            close(
+                format!("{name}: the program in gs"),
+                &out.png,
+                &gs_png_with(ps.as_bytes(), "ps", name, 1, gs_flags),
+            );
+            close(
+                format!("{name}: our PDF via gs"),
+                &out.png,
+                &gs_png(&out.pdf, "pdf", name),
+            );
+        }
+    }
+    let misses = misses.into_inner();
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
+
+/// Every kind of mark, a `/BBox` with a `/Background`, a turned and a
+/// scaled outer cell and an uncoloured one (#1368): each reads the image
+/// made for its own canvas (so every one's image is wider than the page's
+/// 400 px the pattern was made on, unless the box cuts it narrower).
+#[test]
+fn every_mark_and_cell_reads_the_image_made_for_its_canvas() {
+    let page_pattern = |extra: &str| {
+        type1("[600 0 0 600 0 -200]").replace(
+            "/Matrix [600 0 0 600 0 -200]",
+            &format!("/Matrix [600 0 0 600 0 -200] {extra}"),
+        )
+    };
+    let tile = |pattern: &str, paint: &str, outer: &str| {
+        format!(
+            "{pattern} /grad exch def \
+             << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+                /PaintProc {{ pop {paint} }} >> {outer} makepattern setpattern 0 0 400 400 rectfill"
+        )
+    };
+    let mid = "[1 0 0 1 -300 -100]";
+    let cases = [
+        (
+            "bbox and background",
+            tile(
+                &page_pattern("/BBox [50 100 580 450] /Background [0.2 0.7 0.3]"),
+                "grad setpattern 0 0 600 600 rectfill",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "pen-space stroke",
+            tile(
+                &page_pattern(""),
+                "grad setpattern gsave 1 3 scale 30 setlinewidth 50 20 moveto 500 150 lineto stroke grestore",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "imagemask",
+            tile(
+                &page_pattern(""),
+                "grad setpattern gsave 100 100 translate 400 400 scale 1 1 true [1 0 0 1 0 0] <80> imagemask grestore",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "text",
+            tile(
+                &page_pattern(""),
+                "grad setpattern /Helvetica-Bold findfont 300 scalefont setfont 20 100 moveto (Ag) show",
+                mid,
+            ),
+            400,
+        ),
+        (
+            "turned outer cell",
+            tile(
+                &page_pattern(""),
+                "grad setpattern 0 0 600 600 rectfill",
+                "[0.866 0.5 -0.5 0.866 -100 -100]",
+            ),
+            400,
+        ),
+        (
+            "scaled outer cell",
+            tile(
+                &page_pattern(""),
+                "grad setpattern 0 0 600 600 rectfill",
+                "[0.5 0 0 0.5 0 0]",
+            ),
+            200,
+        ),
+        (
+            "uncoloured outer cell",
+            format!(
+                "{} /grad exch def \
+                 << /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 600 600] /XStep 600 \
+                    /YStep 600 /PaintProc {{ pop grad setpattern 0 0 600 600 rectfill }} >> \
+                 {mid} makepattern /unc exch def \
+                 [/Pattern /DeviceRGB] setcolorspace 0.2 0.5 0.1 unc setcolor 0 0 400 400 rectfill",
+                page_pattern("")
+            ),
+            400,
+        ),
+    ];
+    for (name, src, made) in cases {
+        let out = render(&src);
+        assert_close(
+            &format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+            3.0,
+        );
+        assert!(
+            widest_image(&out.svg) > made,
+            "{name}: the SVG image is {} wide, no wider than {made}",
+            widest_image(&out.svg)
+        );
+        assert_close(
+            &format!("{name}: PDF via hayro"),
+            &out.png,
+            &hayro_png(&out.pdf),
+            3.0,
+        );
+    }
+}
+
+/// A pattern made on one page and used on a later page of another size
+/// (`setpagedevice`) is a use on another canvas, with no change of
+/// context: its image is made for the new page (#1368).
+#[test]
+fn a_function_pattern_reused_on_a_larger_page_paints_past_its_first_canvas_in_svg() {
+    let src = format!(
+        "%!PS\n<< /PageSize [400 400] >> setpagedevice {} /grad exch def \
+         grad setpattern 0 0 400 400 rectfill showpage \
+         << /PageSize [600 600] >> setpagedevice grad setpattern 0 0 600 600 rectfill showpage\n",
+        type1("[600 0 0 600 0 0]")
+    );
+    // The CLI, which changes the page size as `setpagedevice` asks.
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_larger_page");
+    let ps = dir.join("pages.ps");
+    std::fs::write(&ps, src).expect("write ps");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--png")
+        .arg(dir.join("pages.png"))
+        .arg("--svg")
+        .arg(dir.join("pages.svg"))
+        .arg(&ps)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let png = Pixmap::decode_png(&std::fs::read(dir.join("pages-002.png")).expect("page 2"))
+        .expect("decode");
+    assert_eq!((png.width(), png.height()), (600, 600));
+    let svg = std::fs::read_to_string(dir.join("pages-002.svg")).expect("svg page 2");
+    let opts = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: Box::new(png_as_svg),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &opts).expect("SVG");
+    let mut pm = resvg::tiny_skia::Pixmap::new(600, 600).expect("pixmap");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            600.0 / tree.size().width(),
+            600.0 / tree.size().height(),
+        ),
+        &mut pm.as_mut(),
+    );
+    let mut theirs = Pixmap::new(600, 600).expect("pixmap");
+    theirs.data_mut().copy_from_slice(pm.data());
+    assert_close("larger page: SVG via resvg", &png, &theirs, 3.0);
+    assert!(widest_image(&svg) > 400, "{}", widest_image(&svg));
+}
+
+/// A tile whose `PaintProc` paints one point with `grad`, the page's
+/// 1000 pt Type 1 pattern: a tiny mark in a context other than the page's,
+/// so the only large thing a limit can meet is the SVG image made for the
+/// 1000 x 1000 canvas.
+const USE_FROM_A_TILE: &str = "\
+    << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 1000 1000] /XStep 1000 /YStep 1000 \
+       /PaintProc { pop grad setpattern 0 0 1 1 rectfill } >> [1 0 0 1 -300 -300] makepattern \
+    setpattern 0 0 100 100 rectfill";
+
+fn big_function_pattern() -> String {
+    format!("{} /grad exch def", type1("[1000 0 0 1000 0 -300]"))
+}
+
+/// A tile on a 600 x 600 page, its origin off the page so the page pattern
+/// `grad` (a Type 1 shading over the whole page) is used in another context;
+/// `proc_` is its `PaintProc` body.
+fn tile_using_grad(proc_: &str) -> String {
+    format!(
+        "<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 600 600] /XStep 600 /YStep 600 \
+            /PaintProc {{ pop {proc_} }} >> [1 0 0 1 -150 -150] makepattern setpattern \
+         0 0 100 100 rectfill"
+    )
+}
+
+fn grad_600() -> String {
+    format!("{} /grad exch def", type1("[600 0 0 600 0 0]"))
+}
+
+/// What a run on a 600 x 600 page leaves, after the setup, `grad_600()` and
+/// then `src` under `limits`.
+fn run_600(src: &str, limits: pscat::Limits) -> (Result<(), pscat::PsError>, Vec<String>, Vec<u8>) {
+    let mut it = Interp::with_page(600, 600).expect("page");
+    it.gfx_mut().enable_svg();
+    it.run_source(format!("1 0 0 setrgbcolor 0 0 600 600 rectfill {}", grad_600()).as_bytes())
+        .expect("setup");
+    it.set_limits(limits).expect("limits");
+    let r = it.run_source(src.as_bytes());
+    (
+        r,
+        it.gfx().svg_pages().expect("svg on"),
+        it.gfx().pixmap.data().to_vec(),
+    )
+}
+
+/// The fewest steps under which `src` finishes (a binary search).
+fn fewest_steps(src: &str) -> u64 {
+    let ok = |n: u64| run_600(src, pscat::Limits::none().with_max_steps(n)).0 == Ok(());
+    let (mut lo, mut hi) = (1u64, 1u64 << 26);
+    assert!(ok(hi), "it finishes under 64 M steps");
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if ok(mid) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo
+}
+
+/// A mark that is one point wide but in another context asks for the whole
+/// canvas's image, which is charged to the step limit and polled against the
+/// clock before anything is painted or recorded (#1368). A limit it meets
+/// leaves the page and the SVG as they were; the same tile painting a flat
+/// colour finishes under the same limit, so it is the image that meets it.
+#[test]
+fn a_foreign_use_image_answers_to_the_step_limit() {
+    let tile = tile_using_grad("grad setpattern 0 0 1 1 rectfill");
+    let flat = tile_using_grad("0 0 1 1 rectfill");
+    let steps = |n: u64| pscat::Limits::none().with_max_steps(n);
+    let (ok, svg_ok, _) = run_600(&tile, steps(5_000_000));
+    assert_eq!(ok, Ok(()));
+    assert_eq!(svg_ok[0].matches("<image ").count(), 1, "{}", svg_ok[0]);
+    let need = fewest_steps(&tile);
+    assert!(need > 1_000, "the image is charged: {need} steps");
+    let (control, ..) = run_600(&flat, steps(need / 2));
+    assert_eq!(control, Ok(()), "the tile alone fits half of that");
+    let (_, svg_before, px_before) = run_600("", pscat::Limits::none());
+    let (r, svg, px) = run_600(&tile, steps(need / 2));
+    assert_eq!(r, Err(pscat::PsError::StepsExceeded));
+    assert_eq!(svg, svg_before, "the SVG is as it was");
+    assert!(px == px_before, "the page is as it was");
+}
+
+/// A mark's own layer and the SVG image of its context are one cost, held
+/// against what the step limit has left (Codex round 1 on PR #1475, R1): a
+/// full-cell fill whose layer and image each fit the budget, though not both,
+/// stops with the page, the SVG and the image cache as they were.
+#[test]
+fn a_foreign_fill_is_held_to_its_layer_and_its_image_together() {
+    let page = "grad setpattern 0 0 600 600 rectfill";
+    let own = fewest_steps(page);
+    assert!(own > 1_000, "{own}");
+    let fill = tile_using_grad(page);
+    let steps = |n: u64| pscat::Limits::none().with_max_steps(n);
+    // Layer and image are about the same size, so 1.5 times the one is not
+    // enough for the two.
+    let (_, svg_before, px_before) = run_600("", pscat::Limits::none());
+    let budget = own + own / 2;
+    let (r, svg, px) = run_600(&fill, steps(budget));
+    assert_eq!(
+        r,
+        Err(pscat::PsError::StepsExceeded),
+        "{budget} steps hold one layer ({own}), not two"
+    );
+    assert_eq!(svg, svg_before, "the SVG is as it was");
+    assert!(px == px_before, "the page is as it was");
+    // With room for both it paints, and the image is written once.
+    let (r, svg, _) = run_600(&fill, steps(own * 3));
+    assert_eq!(r, Ok(()));
+    assert_eq!(svg[0].matches("<image ").count(), 1);
+}
+
+/// Marks in one context rasterise its image once (Codex round 1, nitpick):
+/// sixty of them finish under the steps one needs, plus a margin that is
+/// nothing beside a second image.
+#[test]
+fn many_marks_in_one_context_rasterise_the_image_once() {
+    let one = tile_using_grad("grad setpattern 0 0 1 1 rectfill");
+    let many = tile_using_grad(
+        "grad setpattern 0 1 59 { 0 exch 3 1 rectfill } for \
+         grad setpattern 2 setlinewidth 0 0 moveto 4 3 lineto stroke",
+    );
+    let need = fewest_steps(&one);
+    let (r, svg, _) = run_600(&many, pscat::Limits::none().with_max_steps(need + need / 5));
+    assert_eq!(r, Ok(()), "sixty marks within {} steps of one", need / 5);
+    assert_eq!(svg[0].matches("<image ").count(), 1);
+}
+
+/// Strokes under many pen matrices in one context share one image in the SVG
+/// (Codex round 1, R3): each pen gives its own `<pattern>`, but the image is
+/// the context's, written once.
+#[test]
+fn pen_variants_of_one_context_write_one_image() {
+    let strokes: String = (2..14)
+        .map(|k| {
+            format!(
+                "gsave 1 {k} scale 8 setlinewidth 50 {} moveto 500 {} lineto stroke grestore ",
+                20 + k,
+                20 + k
+            )
+        })
+        .collect();
+    let tile = tile_using_grad(&format!("grad setpattern {strokes}"));
+    let (r, svg, _) = run_600(&tile, pscat::Limits::none());
+    assert_eq!(r, Ok(()));
+    let one = tile_using_grad("grad setpattern 8 setlinewidth 50 22 moveto 500 22 lineto stroke");
+    let (_, svg_one, _) = run_600(&one, pscat::Limits::none());
+    assert_eq!(
+        svg[0].matches("<image ").count(),
+        1,
+        "one image, not one per pen"
+    );
+    // Twelve pens are twelve small `<pattern>`s, not twelve copies of the PNG.
+    assert!(
+        svg[0].len() < svg_one[0].len() + 12 * 4_000,
+        "{} bytes against {} for one pen",
+        svg[0].len(),
+        svg_one[0].len()
+    );
+}
+
+/// A refused or finished run of the image's making leaves the page and the
+/// SVG as one of two states, whenever the clock stops it (Codex round 1,
+/// nitpick: no fixed budget): a ladder of clocks, each run either finishes or
+/// leaves everything as it was.
+#[test]
+fn the_clock_leaves_a_foreign_use_all_or_nothing() {
+    let tile = tile_using_grad("grad setpattern 0 0 600 600 rectfill");
+    let (_, svg_before, px_before) = run_600("", pscat::Limits::none());
+    let (mut stopped, mut finished) = (0, 0);
+    for ms in [1u64, 2, 4, 8, 16, 32, 64, 128, 256, 512, 2048] {
+        let limits = pscat::Limits::none().with_max_time(std::time::Duration::from_millis(ms));
+        let (r, svg, px) = run_600(&tile, limits);
+        match r {
+            Ok(()) => {
+                finished += 1;
+                assert_eq!(svg[0].matches("<image ").count(), 1, "{ms} ms");
+            }
+            Err(pscat::PsError::TimeExceeded) => {
+                stopped += 1;
+                assert_eq!(svg, svg_before, "{ms} ms: the SVG is as it was");
+                assert!(px == px_before, "{ms} ms: the page is as it was");
+            }
+            Err(e) => panic!("{ms} ms: {e:?}"),
+        }
+    }
+    assert!(
+        stopped > 0 && finished > 0,
+        "{stopped} stopped, {finished} finished"
+    );
+}
+
+/// [`limited`] on a page of `page`, with the SVG and the PNG the run
+/// leaves (the CLI writes both after a limit stops the program). Both must
+/// be there and decode: an export that is missing or empty is a failure of
+/// the harness, not a run that "left the page as it was".
+fn limited_exports(src: &str, page: &str, limit: [&str; 2]) -> (bool, String, String, Vec<u8>) {
+    use common::CommandDeadline as _;
+    let dir = common::scratch_dir("pscat_shading_use_limits");
+    let file = dir.join("limited.ps");
+    std::fs::write(&file, src).expect("write source");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .args(["--page", page, limit[0], limit[1], "--png"])
+        .arg(dir.join("limited.png"))
+        .arg("--svg")
+        .arg(dir.join("limited.svg"))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    let log = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let svg = std::fs::read_to_string(dir.join("limited.svg"))
+        .unwrap_or_else(|e| panic!("no SVG written: {e}\n{log}"));
+    assert!(svg.contains("<svg"), "not an SVG: {svg:.200}\n{log}");
+    let png = std::fs::read(dir.join("limited.png"))
+        .unwrap_or_else(|e| panic!("no PNG written: {e}\n{log}"));
+    let decoded = Pixmap::decode_png(&png).unwrap_or_else(|e| panic!("PNG: {e}\n{log}"));
+    assert!(decoded.width() > 0, "empty PNG\n{log}");
+    (out.status.success(), log, svg, png)
+}
+
+/// The SVG image made for a use in another context answers to `--max-memory`
+/// before it is made, and a stop leaves the page and the SVG as they were
+/// (#1368): a mark one point wide in a 1000 x 1000 tile asks for the whole
+/// canvas's image, which a cap that has room for the tile but not for the
+/// image refuses.
+#[test]
+fn a_foreign_use_image_answers_to_the_memory_limit() {
+    let page = "1 0 0 setrgbcolor 0 0 1000 1000 rectfill\n";
+    let pattern = big_function_pattern();
+    let full = format!("{page}{pattern}\n{USE_FROM_A_TILE}\n");
+    // The same tile painting a flat colour: the cap has room for it.
+    let flat = full.replace(
+        "pop grad setpattern 0 0 1 1 rectfill",
+        "pop 0 0 1 1 rectfill",
+    );
+    let (ok, out, ..) = limited_exports(&flat, "1000x1000", ["--max-memory", "11"]);
+    assert!(ok, "the tile alone fits the cap: {out}");
+    let (ok, out, svg, png) = limited_exports(&full, "1000x1000", ["--max-memory", "11"]);
+    assert!(
+        !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
+        "{out}"
+    );
+    let (ok, out, before_svg, before_png) = limited_exports(
+        &format!("{page}{pattern}\n"),
+        "1000x1000",
+        ["--max-memory", "0"],
+    );
+    assert!(ok, "the baseline runs: {out}");
+    assert_eq!(svg, before_svg, "the SVG is as it was");
+    assert!(png == before_png, "the page is as it was");
+    let (ok, out, svg, _) = limited_exports(&full, "1000x1000", ["--max-memory", "0"]);
+    assert!(ok && svg.contains("<image "), "no limit: {out}");
+}
+
+/// Images made for many contexts add up in the process's heap, which the
+/// memory limit counts (#1368): sixty tiles each use a page pattern of
+/// noise, and each use writes an image of its own. A cap that holds a few
+/// of them stops the run partway, not at the end.
+#[test]
+fn the_images_of_many_foreign_uses_add_up_against_the_memory_limit() {
+    let mut seed = 5u32;
+    let table: String = (0..64 * 64 * 3)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            format!("{:02x}", seed >> 24)
+        })
+        .collect();
+    let src = format!(
+        "<< /PatternType 2 /Shading << /ShadingType 1 /ColorSpace /DeviceRGB \
+         /Matrix [1000 0 0 1000 0 0] /Function << /FunctionType 0 /Domain [0 1 0 1] \
+         /Range [0 1 0 1 0 1] /Size [64 64] /BitsPerSample 8 /DataSource <{table}> >> >> >> \
+         matrix makepattern /grad exch def \
+         /tile {{ /i exch def << /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 300 300] \
+            /XStep 300 /YStep 300 /PaintProc {{ pop grad setpattern 0 0 1 1 rectfill }} >> \
+            [1 0 0 1 i 0] makepattern setpattern 0 0 1 1 rectfill }} def \
+         0 1 59 {{ tile }} for\n"
+    );
+    let (ok, out, all, _) = limited_exports(&src, "400x400", ["--max-memory", "0"]);
+    assert!(ok, "{out}");
+    assert_eq!(all.matches("<image ").count(), 60, "one image per context");
+    let (ok, out, some, _) = limited_exports(&src, "400x400", ["--max-memory", "30"]);
+    assert!(
+        !ok && out.contains("limitexceeded (memory)") && out.contains("OffendingCommand: rectfill"),
+        "{out}"
+    );
+    let n = some.matches("<image ").count();
+    assert!(
+        (1..60).contains(&n),
+        "the cap stopped it after {n} images, not at the first or the last"
+    );
+}
