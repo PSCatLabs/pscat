@@ -5842,11 +5842,19 @@ impl Gfx {
     /// goes to [`take_group_work`](Self::take_group_work), and the
     /// composite looks at the time and memory limits as it goes. A limit
     /// met here stops the composite (the group still closes); the
-    /// interpreter's next look at its limits raises it.
+    /// interpreter's next look at its limits raises it (a memory refusal
+    /// is latched for that look).
     fn finish_group_uncharged(&mut self, restore: bool) {
         let probe = self.group_probe;
-        let (work, _) = self.finish_group(restore, &probe);
+        let (work, outcome) = self.finish_group(restore, &probe);
         self.group_work = self.group_work.saturating_add(work);
+        // A time limit stays past on the interpreter's next look, but a
+        // memory refusal does not: the layer is dropped, or the list of
+        // painted rows was only asked for (#1421). Latch it, as for the PDF
+        // recorder's, so the run stops as `endgroup` stops it.
+        if outcome == Err(PsError::MemoryExceeded) {
+            self.mem_refused = true;
+        }
     }
 
     /// The limits for a group closed with no operator to charge it: time and
@@ -8492,21 +8500,33 @@ mod tests {
         assert!(gfx.groups.is_empty() && !gfx.page_is_displaced());
     }
 
-    /// A stop leaves the interpreter whole: the page as it was before the
-    /// group (nothing of the group on it), the graphics state restored.
+    /// A guard on the cleanup, not on the scan (it passes with the scan
+    /// unpolled too: the composite loop's first look stops it): a stop
+    /// leaves the page as it was before the group, with nothing of the
+    /// group on it, and the graphics state (colour, line width, saved
+    /// stack) restored to the one `begingroup` found.
     #[test]
     fn a_group_stopped_on_a_limit_leaves_the_page_and_the_state_as_they_were() {
         let mut gfx = Gfx::new(20, 20).expect("canvas");
         fill_rect(&mut gfx, (1.0, 0.0, 0.0), 10.0, 20.0);
+        gfx.set_rgb(0.0, 1.0, 0.0);
+        gfx.state.line_width = 3.0;
         let page = gfx.pixmap.data().to_vec();
         let saved = gfx.saved.len();
         gfx.begin_group(None, None, &crate::limits::LimitProbe::NONE)
             .expect("group");
+        gfx.state.line_width = 7.0;
         fill_rect(&mut gfx, (0.0, 0.0, 1.0), 20.0, 10.0);
         let (_, r) = gfx.end_group(&expired());
         assert_eq!(r, Err(PsError::TimeExceeded));
         assert_eq!(gfx.pixmap.data(), &page[..], "no mark of the group");
         assert_eq!(gfx.saved.len(), saved);
         assert!(gfx.groups.is_empty());
+        assert_eq!(
+            gfx.state.rgb,
+            (0.0, 1.0, 0.0),
+            "the colour before the group"
+        );
+        assert_eq!(gfx.state.line_width, 3.0, "the line width before the group");
     }
 }
