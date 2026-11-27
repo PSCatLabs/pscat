@@ -33,9 +33,13 @@ pub struct LintFinding {
 /// ran before the error: `/sub (hello) def` and a later `5 3 sub` is a
 /// `typecheck` that never mentions `sub`, and this finding names the cause.
 ///
+/// `shadowed-library-name` (#1456) is made only for a run that ended in an
+/// error: it names a name a library defines that the program has replaced with
+/// a value of another kind and that a library procedure ran before the error.
+///
 /// `pscat-mcp`'s `split_lint_findings` (this crate's `mcp_server`) uses the
 /// same list, so the two cannot drift.
-pub const ERROR_EXPLAINING_CHECKS: &[&str] = &["shadowed-operator"];
+pub const ERROR_EXPLAINING_CHECKS: &[&str] = &["shadowed-operator", "shadowed-library-name"];
 
 /// Whether `check` (a [`LintFinding::check`] slug) is in
 /// [`ERROR_EXPLAINING_CHECKS`].
@@ -74,6 +78,7 @@ pub fn check_with_pages(
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, render_checks, &mut findings);
     check_shadowed_operators(interp, &mut findings);
+    check_shadowed_library_names(interp, &mut findings);
     check_utf8_in_byte_font(interp, &mut findings);
     findings
 }
@@ -92,6 +97,7 @@ pub fn check_band(interp: &Interp, declared_pages: &DeclaredPages) -> Vec<LintFi
     check_gsave_balance(interp, &mut findings);
     check_stack_leaks(interp, true, &mut findings);
     check_shadowed_operators(interp, &mut findings);
+    check_shadowed_library_names(interp, &mut findings);
     check_utf8_in_byte_font(interp, &mut findings);
     findings
 }
@@ -329,13 +335,15 @@ fn string_preview(s: &PsString) -> String {
 }
 
 /// The checks a program silences for itself with a `%lint: allow NAME`
-/// comment line (issue #1052). Only the two heuristics that can be wrong
-/// about a deliberate choice can be silenced: `shadowed-operator` and
-/// `utf8-in-byte-font` (#1412). The other checks are what `--lint-strict`
-/// drivers depend on, and a program has no business turning them off.
+/// comment line (issue #1052). Only the heuristics that can be wrong about a
+/// deliberate choice can be silenced: `shadowed-operator`,
+/// `shadowed-library-name` (#1456) and `utf8-in-byte-font` (#1412). The other
+/// checks are what `--lint-strict` drivers depend on, and a program has no
+/// business turning them off.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LintAllows {
     shadowed_operator: bool,
+    shadowed_library_name: bool,
     utf8_in_byte_font: bool,
 }
 
@@ -360,6 +368,7 @@ pub fn scan_lint_allows(source: &[u8]) -> LintAllows {
         for name in names.split(|c: char| c.is_whitespace() || c == ',') {
             match name {
                 "shadowed-operator" => allows.shadowed_operator = true,
+                "shadowed-library-name" => allows.shadowed_library_name = true,
                 "utf8-in-byte-font" => allows.utf8_in_byte_font = true,
                 _ => {}
             }
@@ -373,6 +382,9 @@ impl LintAllows {
     pub fn filter(&self, mut findings: Vec<LintFinding>) -> Vec<LintFinding> {
         if self.shadowed_operator {
             findings.retain(|f| f.check != "shadowed-operator");
+        }
+        if self.shadowed_library_name {
+            findings.retain(|f| f.check != "shadowed-library-name");
         }
         if self.utf8_in_byte_font {
             findings.retain(|f| f.check != "utf8-in-byte-font");
@@ -821,6 +833,8 @@ pub(crate) struct ShadowTrace {
     /// was made, as `when the program reached line N` (` (file)` for a
     /// `run` file), `None` when the scanner's line is unknown.
     sites: std::collections::HashMap<(u32, ShadowScope), Option<String>>,
+    /// The names libraries define and the program also does (#1456).
+    pub(crate) names: NameClashes,
 }
 
 impl ShadowTrace {
@@ -861,6 +875,173 @@ impl ShadowTrace {
     pub(crate) fn forget_system(&mut self) {
         self.sites
             .retain(|(_, scope), _| *scope != ShadowScope::System);
+    }
+}
+
+/// Most names the table of library definitions holds. The libraries in `lib/`
+/// define about 1300 distinct names among them; the table is allocated whole
+/// when tracing starts (3584 is the most a table of 4096 buckets keeps without
+/// growing), so a definition never grows it. Past the cap a name is not
+/// followed, which is a silent miss: the finding is not made for it. The same
+/// holds for the 64th file.
+pub(crate) const MAX_LIBRARY_NAMES: usize = 3584;
+/// Most distinct `run` files whose names are followed.
+const MAX_LIBRARY_FILES: usize = 64;
+/// Most `shadowed-library-name` findings for one run.
+const CLASHES_SHOWN: usize = 5;
+
+/// What a binding is, as far as "the program replaced the library's value by a
+/// different sort of value" goes. A hook set to another value of the same kind
+/// (a number by a number, a procedure by a procedure, a name by a name) is the
+/// deliberate way to configure a library, and is never reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Procedure,
+    Array,
+    Number,
+    /// A name, literal or executable.
+    Name,
+    /// Any other type, by its type name.
+    Other(&'static str),
+}
+
+impl Kind {
+    pub(crate) fn of(o: &Object) -> Kind {
+        match &o.value {
+            Value::Array(_) if o.executable => Kind::Procedure,
+            Value::Array(_) => Kind::Array,
+            Value::Integer(_) | Value::Real(_) => Kind::Number,
+            Value::Name(_) => Kind::Name,
+            _ => Kind::Other(o.type_name()),
+        }
+    }
+
+    /// With its article, for a message.
+    fn phrase(self) -> String {
+        match self {
+            Kind::Procedure => "a procedure".to_string(),
+            Kind::Array => "an array".to_string(),
+            Kind::Number => "a number".to_string(),
+            Kind::Name => "a name".to_string(),
+            Kind::Other(t) => {
+                let t = t.strip_suffix("type").unwrap_or(t);
+                format!("{} {t}", article(t))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LibraryName {
+    /// An index into [`NameClashes::files`]: the file that defined it last.
+    file: u16,
+    /// What the library defined it as, when it was loaded.
+    kind: Kind,
+    /// The line of the program's last `def` or `store` of the name that was
+    /// found to be written in the program's own text, `0` when the last one
+    /// was not (a callback, a call through a name): then no line is claimed.
+    line: u32,
+}
+
+/// The names libraries define, noted as the program ran when
+/// [`Interp::trace_operator_shadows`] turned tracing on (issue #1456), so that
+/// `[shadowed-library-name]` can say, after an error, that a library procedure
+/// ran a name the program had replaced.
+///
+/// A library's name is one a `run` file defines in `userdict` while it is the
+/// innermost source being read, with the kind of what it defined. That is all
+/// that is kept of a definition: whether the program's own binding is in force
+/// is decided when the finding is made, by looking the name up through the
+/// dictionary stack as it stands, so an ended dictionary, a restore, a
+/// definition made before the library loaded or one made by a callback need no
+/// tracking. The one thing noted per program is the line of the last `def` of
+/// the name that is certainly in the program's text.
+///
+/// Bounded: [`MAX_LIBRARY_NAMES`] names and [`MAX_LIBRARY_FILES`] files, in
+/// tables allocated when tracing starts (a fixed overhead of about 70 KiB; it
+/// is not charged to `--max-memory`, which the CLI sets after tracing starts).
+/// A `def` costs a probe of one table in the traced run; a plain run is not
+/// traced at all.
+pub(crate) struct NameClashes {
+    names: std::collections::HashMap<u32, LibraryName, crate::name::IdHashBuilder>,
+    files: Vec<Rc<str>>,
+    /// The names that library procedures had run when the last run failed:
+    /// the executable names before (and at) the running element of each
+    /// procedure frame that was written in a `run` file.
+    read: Vec<u32>,
+}
+
+impl Default for NameClashes {
+    fn default() -> Self {
+        NameClashes {
+            names: std::collections::HashMap::with_capacity_and_hasher(
+                MAX_LIBRARY_NAMES,
+                crate::name::IdHashBuilder,
+            ),
+            files: Vec::with_capacity(MAX_LIBRARY_FILES),
+            read: Vec::new(),
+        }
+    }
+}
+
+impl NameClashes {
+    /// `file`, loaded by `run`, defined `name` as a `kind`. The latest
+    /// definition counts (a `restore` may have taken an earlier one away).
+    pub(crate) fn library_def(&mut self, name: u32, file: &Rc<str>, kind: Kind) {
+        if self.names.len() >= MAX_LIBRARY_NAMES && !self.names.contains_key(&name) {
+            return;
+        }
+        let index = match self.files.iter().position(|f| **f == **file) {
+            Some(i) => i,
+            None if self.files.len() < MAX_LIBRARY_FILES => {
+                self.files.push(file.clone());
+                self.files.len() - 1
+            }
+            None => return,
+        };
+        self.names.insert(
+            name,
+            LibraryName {
+                file: index as u16,
+                kind,
+                line: 0,
+            },
+        );
+    }
+
+    pub(crate) fn contains(&self, name: u32) -> bool {
+        self.names.contains_key(&name)
+    }
+
+    /// The last `def` of `name` while the program ran was `line` of the
+    /// program's text, or (`0`) of a place that is not known to be.
+    pub(crate) fn set_line(&mut self, name: u32, line: u32) {
+        if let Some(n) = self.names.get_mut(&name) {
+            n.line = line;
+        }
+    }
+
+    /// A library procedure, run while the program ran, `def`ined `name` as a
+    /// `kind`: what the library has is that now.
+    pub(crate) fn set_library_kind(&mut self, name: u32, kind: Kind) {
+        if let Some(n) = self.names.get_mut(&name) {
+            n.kind = kind;
+            n.line = 0;
+        }
+    }
+
+    /// A new program is starting: the lines of the last one are not this
+    /// one's (the libraries it loaded are still loaded).
+    pub(crate) fn begin_program(&mut self) {
+        for n in self.names.values_mut() {
+            n.line = 0;
+        }
+        self.read.clear();
+    }
+
+    /// The names library procedures had run where the run failed.
+    pub(crate) fn set_read(&mut self, names: Vec<u32>) {
+        self.read = names;
     }
 }
 
@@ -1161,6 +1342,91 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
             message: format!(
                 "{} more operator name(s) redefined as plain values ({SHADOWED_SHOWN} shown, in name order)",
                 shadowed.len() - SHADOWED_SHOWN
+            ),
+        });
+    }
+}
+
+/// A name a library defines that the program has replaced with something of a
+/// different kind, when a library procedure ran that name before the run failed
+/// (issue #1456, after #1225): a program that keeps a colour in a local
+/// `/shade` while a library procedure calls `shade` by name gets an error from
+/// deep inside the library that never mentions the program's `/shade`.
+///
+/// Made only for a run that ended in an error, and only when it can be shown:
+///
+/// - the name is one a `run` file defined in `userdict` (the table of
+///   [`NameClashes`]), and a procedure frame written in a `run` file had run it,
+///   by the elements up to and including the running one in its context lines
+///   (not the ones after it, which had not run);
+/// - looked up now, through the dictionary stack as the error left it, the name
+///   is something of another kind than the library's own definition (a
+///   procedure replaced by an array or a number). A hook set to a value of the
+///   same kind is deliberate (`sfworld`, `spmetal`, `ty.max-height`, `showctr`),
+///   and an ended `begin`, a `restore` or a definition the library then replaced
+///   leave the library's own binding in force;
+///
+/// The text says "may": the error can still be the library's own. A program
+/// that works gets nothing, and `pscat lint` without an error has nothing to
+/// say either: the sweep over `lib/`, `gallery/` and `examples/` found 7 of the
+/// 124 programs that load a library define a name a library defines, every one
+/// on purpose and working (notes/1456-lint-library-name-clash.md).
+fn check_shadowed_library_names(interp: &Interp, findings: &mut Vec<LintFinding>) {
+    let Some(trace) = interp.shadow_trace() else {
+        return;
+    };
+    let names = &trace.names;
+    let mut hits: Vec<(String, Kind, Kind, u32, &str)> = Vec::new();
+    for &id in &names.read {
+        let Some(lib) = names.names.get(&id) else {
+            continue;
+        };
+        let Some(now) = interp.load_id(id) else {
+            continue;
+        };
+        // An operator of that name is not a program's definition.
+        if matches!(now.value, Value::Operator(_)) {
+            continue;
+        }
+        let now_kind = Kind::of(&now);
+        if now_kind == lib.kind {
+            continue;
+        }
+        let file = names
+            .files
+            .get(usize::from(lib.file))
+            .map_or("a library", |f| &**f);
+        hits.push((
+            crate::name::resolve(id).to_string(),
+            lib.kind,
+            now_kind,
+            lib.line,
+            file,
+        ));
+    }
+    hits.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, lib_kind, now_kind, line, file) in hits.iter().take(CLASHES_SHOWN) {
+        let file = crate::interp::report_name(file);
+        let set = if *line > 0 {
+            format!(" (set at line {line})")
+        } else {
+            String::new()
+        };
+        findings.push(LintFinding {
+            check: "shadowed-library-name",
+            message: format!(
+                "`{name}` is {} in {file}, but your program's `{name}`{set} is now {}, and a library procedure ran `{name}` before the error, so it may have used yours instead of the library's. If the error looks unrelated to your code, that is why: rename yours to a name the library does not define. (`//{name}` captures the binding visible when the program is scanned, so it helps your own code only if it is scanned before yours is defined, and it cannot recover a library definition you replaced.)",
+                lib_kind.phrase(),
+                now_kind.phrase()
+            ),
+        });
+    }
+    if hits.len() > CLASHES_SHOWN {
+        findings.push(LintFinding {
+            check: "shadowed-library-name",
+            message: format!(
+                "{} more name(s) a library defines were replaced by the program and run by a library procedure before the error ({CLASHES_SHOWN} shown, in name order)",
+                hits.len() - CLASHES_SHOWN
             ),
         });
     }

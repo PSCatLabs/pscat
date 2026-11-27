@@ -256,6 +256,16 @@ struct TailCall {
     parent_pc: usize,
 }
 
+/// Whose `def` is running, for the lint's library-name trace (#1456).
+enum DefOrigin {
+    /// Written in the program's own text, on this line.
+    Program(u32),
+    /// Written in a `run` file.
+    Library,
+    /// Not told at constant cost.
+    Unknown,
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -1493,6 +1503,7 @@ impl Interp {
         self.refused_system_stores.clear();
         if let Some(trace) = self.shadow_trace.as_mut() {
             trace.forget_system();
+            trace.names.begin_program();
         }
         // The text the last program showed is that program's (#1412).
         if let Some(trace) = self.utf8_text_trace.as_mut() {
@@ -2559,6 +2570,9 @@ impl Interp {
         });
         let mut trace = Vec::new();
         let mut bodies: Vec<&PsArray> = Vec::new();
+        // For a `--lint` run (#1456): the names the excerpts show, by frame.
+        let lint_names = self.shadow_trace.is_some();
+        let mut read: Vec<(usize, u32)> = Vec::new();
         for (body, at) in tail
             .map(|t| (&t.body, t.body.len().saturating_sub(1)))
             .into_iter()
@@ -2568,6 +2582,21 @@ impl Interp {
                 break;
             }
             let (from, to) = (at.saturating_sub(BEFORE), (at + AFTER + 1).min(body.len()));
+            if lint_names {
+                // The elements up to and including the running one had run
+                // (a procedure's body runs in order); the ones after had not.
+                for k in from..to.min(at + 1) {
+                    let id = body
+                        .peek(k, |o| match &o.value {
+                            Value::Name(n) if o.executable => Some(n.id()),
+                            _ => None,
+                        })
+                        .flatten();
+                    if let Some(id) = id {
+                        read.push((trace.len(), id));
+                    }
+                }
+            }
             let mut excerpt = String::new();
             if from > 0 {
                 excerpt.push_str("... ");
@@ -2637,13 +2666,32 @@ impl Interp {
         // Where each element was written: one binary search per frame, in a
         // table the scanner kept (#1405).
         let lines = self.source_lines.borrow();
-        for (frame, body) in trace.iter_mut().zip(&bodies) {
+        // Which frames were written in a `run` file: `file` is also set for
+        // the main program when the host names it, as the CLI does.
+        let mut library = vec![false; if lint_names { trace.len() } else { 0 }];
+        for (i, (frame, body)) in trace.iter_mut().zip(&bodies).enumerate() {
             if let Some(p) = lines.position(body, frame.element) {
                 frame.line = Some(p.line as usize);
                 frame.file = p.file.as_deref().map(report_name);
             }
+            if lint_names {
+                library[i] = lines
+                    .line_of(body, frame.element)
+                    .is_some_and(|(_, file)| file.is_some());
+            }
         }
         drop(lines);
+        // The names the library procedures on the stack read by name (#1456):
+        // those of a frame written in a `run` file, once each.
+        if let Some(lint) = self.shadow_trace.as_mut() {
+            let mut names: Vec<u32> = Vec::new();
+            for (frame, id) in read {
+                if library[frame] && !names.contains(&id) {
+                    names.push(id);
+                }
+            }
+            lint.names.set_read(names);
+        }
         self.error_trace = trace;
     }
 
@@ -3864,11 +3912,12 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
-        if self.shadow_trace.is_some()
-            && let Some(top) = self.dstack.last()
-            && let Some(scope) = self.shadow_scope_of(top)
-        {
-            self.note_shadow(name, &obj, scope);
+        if self.shadow_trace.is_some() {
+            let scope = self.dstack.last().and_then(|top| self.shadow_scope_of(top));
+            if let Some(scope) = scope {
+                self.note_shadow(name, &obj, scope);
+            }
+            self.note_library_name(name, &obj, scope == Some(crate::lint::ShadowScope::User));
         }
         // With no save open there is nothing to journal, so the top dict
         // is borrowed where it is, without an `Rc` clone (#863).
@@ -4180,9 +4229,109 @@ impl Interp {
     ) {
         if self.shadow_trace.is_some()
             && let Value::Name(name) = &key.value
-            && let Some(scope) = self.shadow_scope_of(dict)
         {
-            self.note_shadow(name, value, scope);
+            let scope = self.shadow_scope_of(dict);
+            if let Some(scope) = scope {
+                self.note_shadow(name, value, scope);
+            }
+            self.note_library_name(name, value, scope == Some(crate::lint::ShadowScope::User));
+        }
+    }
+
+    /// `def` and `store`'s half of the library-name trace (#1456): `name` is
+    /// being bound to `value`; `in_user` is whether in `userdict`.
+    ///
+    /// - A library's definition: the innermost source is a `run` file
+    ///   (`last_file`) and the name goes into `userdict`; its kind is kept.
+    ///   The program's own `def` run while a library loads (a callback) is not
+    ///   one.
+    /// - While the program runs, a name a library defines: a `def` found to be
+    ///   written in the program's own text sets the line; one found to be in a
+    ///   library's procedure sets the kind the library has now; any other (a
+    ///   callback in tail position, a call through a name) leaves the line
+    ///   unknown. Whether the program's binding is in force is not decided
+    ///   here but when the finding is made.
+    ///
+    /// Cold and out of line: only a traced (`--lint`) run gets here, and a name
+    /// no library defines costs one probe of the table.
+    #[inline(never)]
+    fn note_library_name(&mut self, name: &crate::name::PsName, value: &Object, in_user: bool) {
+        let id = name.id();
+        let Some(mut trace) = self.shadow_trace.take() else {
+            return;
+        };
+        if let Some(file) = &self.last_file {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => {
+                    if trace.names.contains(id) {
+                        trace.names.set_line(id, line);
+                    }
+                }
+                _ => {
+                    if in_user {
+                        trace
+                            .names
+                            .library_def(id, file, crate::lint::Kind::of(value));
+                    }
+                }
+            }
+        } else if trace.names.contains(id) {
+            match self.def_origin(id) {
+                DefOrigin::Program(line) => trace.names.set_line(id, line),
+                DefOrigin::Library => {
+                    trace
+                        .names
+                        .set_library_kind(id, crate::lint::Kind::of(value));
+                }
+                DefOrigin::Unknown => trace.names.set_line(id, 0),
+            }
+        }
+        self.shadow_trace = Some(trace);
+    }
+
+    /// Whose `def` or `store` of `name_id` is running now, from the frame on top
+    /// of the execution stack, at constant cost: the program's text read
+    /// directly (the token is the `def`), or the procedure frame on top whose
+    /// previous element is a `def` spelling `/name`, found in the table of lines
+    /// to be written in the program's text or in a `run` file. A `def` in tail
+    /// position, whose frame is gone, a callback and the like are `Unknown`.
+    fn def_origin(&self, name_id: u32) -> DefOrigin {
+        let Some(frame) = self
+            .estack
+            .iter()
+            .rev()
+            .find(|f| !matches!(f, Frame::StopMark | Frame::ProfReturn))
+        else {
+            return DefOrigin::Unknown;
+        };
+        match frame {
+            Frame::Scanner(lexer) if lexer.token_is_binding() => {
+                if lexer.is_main() {
+                    lexer
+                        .line()
+                        .and_then(|l| u32::try_from(l).ok())
+                        .map_or(DefOrigin::Unknown, DefOrigin::Program)
+                } else {
+                    DefOrigin::Library
+                }
+            }
+            Frame::Proc { body, pc } if *pc > 0 => {
+                let at = *pc - 1;
+                if body
+                    .get(at)
+                    .is_some_and(|el| crate::lint::is_binding_op(&el))
+                    && crate::lint::writes_name(body, at, name_id)
+                {
+                    match self.source_lines.borrow().line_of(body, at) {
+                        Some((line, None)) => DefOrigin::Program(line),
+                        Some((_, Some(_))) => DefOrigin::Library,
+                        None => DefOrigin::Unknown,
+                    }
+                } else {
+                    DefOrigin::Unknown
+                }
+            }
+            _ => DefOrigin::Unknown,
         }
     }
 

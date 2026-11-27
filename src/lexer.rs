@@ -249,6 +249,19 @@ impl Lexer {
         String::from_utf8(rest[..len].to_vec()).ok()
     }
 
+    /// Whether the last-returned token is the word `def` or `store`, read back
+    /// from an in-memory source without a copy (#1456); `false` for a source
+    /// that is not in memory.
+    pub(crate) fn token_is_binding(&self) -> bool {
+        let file = self.file.borrow();
+        let Some(rest) = file.bytes_from(self.token_start_pos) else {
+            return false;
+        };
+        let word =
+            |w: &[u8]| rest.starts_with(w) && rest.get(w.len()).is_none_or(|&b| !is_regular(b));
+        word(b"def") || word(b"store")
+    }
+
     /// Whether the source between byte offsets `from` and `to` is only white
     /// space and comments (#1338); `false` for a source not in memory.
     pub(crate) fn blank_between(&self, from: usize, to: usize) -> bool {
