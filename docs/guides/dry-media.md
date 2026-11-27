@@ -100,8 +100,8 @@ the stick's contact patch meets raised tooth.
   where their place is within the range, so none falls ahead of the pen.
   `dcchalk` has the same two keys: it shapes the polyline first, then
   hands drykit the whole stroke with the range, so a tip stroke is cut
-  exactly as here (a `/Tilt` side stroke's lanes are still cut by
-  drychalk itself).
+  exactly as here, and so is each lane of a `/Tilt` side stroke (its
+  chance dropouts are the whole lane's).
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
