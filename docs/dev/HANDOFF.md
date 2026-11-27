@@ -2968,8 +2968,8 @@ renders eight examples in both and compares block-downsampled output).
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to
   `web/pscat.js` ships in the package too: keep `npm/renderer.js` and
   `npm/index.d.ts` in step (the step cap is `maxSteps` / `frameMaxSteps` /
-  `stepsUsed`, #1223: `begin()` always re-arms the module's process-wide cap, 0
-  when the option is absent, so a cap never leaks into the next program), and run the `npm` workflow's steps
+  `stepsUsed`, #1223: `begin()` always re-arms the module instance's cap (kept
+  across programs), 0 when the option is absent, so a cap never leaks into the next program), and run the `npm` workflow's steps
   (`build_npm.sh --pack`, `npm test` in `npm/`, `cargo test --test wasm`,
   `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
   Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond

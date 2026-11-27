@@ -60,8 +60,9 @@ export interface PageOptions {
    *
    * The module has no clock, so a step cap is the only limit that stops an
    * endless loop, or one operator draining a decompression bomb, in a call to
-   * render() or step(). It is a bound on work, not a deadline: a step takes
-   * microseconds, except a bomb's, which take about 11 us a KiB. To bound each
+   * render() or step(). It is a bound on work, not a deadline: an ordinary step
+   * takes tens of nanoseconds, a bomb's KiB step about 11 microseconds (so a cap
+   * that lets a heavy program finish still lets a bomb run for minutes). To bound each
    * frame of a stepped page instead of the whole program, see
    * FrameOptions.frameMaxSteps.
    */

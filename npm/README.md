@@ -205,7 +205,9 @@ try {
   long program runs while no one `step(budget)` call is over the cap: that call is
   what freezes a tab, and a whole-program cap that lets a heavy piece finish
   (hundreds of millions of steps) lets a bomb drain for hours. It replaces
-  `maxSteps` (give one; both is a `TypeError`).
+  `maxSteps` (give one; both is a `TypeError`), and `render()` and `begin()` refuse
+  it (`TypeError`) rather than run uncapped. If you leave a `frames()` loop early
+  and keep calling `step()`, the last frame's cap stays armed until the next `begin`.
 - **`stepsUsed`** is the count since the cap was armed: the whole program under
   `maxSteps`, the latest frame under `frameMaxSteps`. It counts only while a cap
   is set (0 without one), trails the true figure by up to a few thousand, and

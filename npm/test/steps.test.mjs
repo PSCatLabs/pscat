@@ -156,6 +156,10 @@ test('a bad maxSteps is refused before the interpreter or the previous program i
   assert.equal(r.output, '5\nkept');
   // The largest exact cap is accepted.
   assert.equal(r.render('', { ...page, maxSteps: Number.MAX_SAFE_INTEGER }).width, 20);
+  // frameMaxSteps belongs to frames(): render() and begin() refuse it rather than run uncapped.
+  assert.throws(() => r.render(FINITE, { ...page, frameMaxSteps: 1000 }), TypeError);
+  assert.throws(() => r.begin(FINITE, { ...page, frameMaxSteps: 1000 }), TypeError);
+  assert.equal(r.render('', { ...page, frameMaxSteps: undefined }).width, 20);
   // A frame cap replaces the program cap, so asking for both is refused.
   assert.throws(() => r.frames('', { ...page, maxSteps: 10, frameMaxSteps: 10 }).next(), TypeError);
 });

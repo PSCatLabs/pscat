@@ -113,6 +113,10 @@ function pageOf(options = {}) {
   if (options.pdfText === true && options.pdf !== true) {
     throw new TypeError('pscat: pdfText needs pdf: true');
   }
+  if (options.frameMaxSteps !== undefined && options.frameMaxSteps !== null) {
+    // Not ignored: a caller who passed it believes the run is bounded.
+    throw new TypeError('pscat: frameMaxSteps applies to frames() only; use maxSteps to cap render() or begin()');
+  }
   return {
     width,
     height,
@@ -193,7 +197,7 @@ export class Renderer {
       // Re-arming the cap each frame restarts its count, so the two cannot both hold.
       throw new TypeError('pscat: frameMaxSteps replaces maxSteps (it re-arms the cap every frame); give one');
     }
-    this.begin(source, options);
+    this.begin(source, { ...options, frameMaxSteps: undefined });
     for (let n = 0; ; n++) {
       if (frameMaxSteps > 0) this.#ps.maxSteps = frameMaxSteps;
       const more = this.step(budget);
