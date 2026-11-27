@@ -166,6 +166,58 @@ fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u3
 /// never go below them, and `countdictstack` is 3 at the start, as in gs.
 pub(crate) const PERMANENT_DICTS: usize = 3;
 
+/// The dictionaries behind four PLRM names (#1469): `statusdict`,
+/// `serverdict`, `GlobalFontDirectory` (also named `SharedFontDirectory`)
+/// and the one `1183615869 internaldict` returns. Each is empty at start, so
+/// an `Interp` pays four small allocations and no table memory until a
+/// program writes into one. None is on the dictionary stack.
+///
+/// A program can make any of them hold itself, and only `systemdict` points
+/// at three of them, so `Drop for Interp` empties them like the permanent
+/// dictionaries.
+pub(crate) struct PlrmDicts {
+    statusdict: Rc<RefCell<Dict>>,
+    serverdict: Rc<RefCell<Dict>>,
+    /// Global VM in gs (`gcheck` true), and `eq` to `SharedFontDirectory`.
+    pub(crate) global_fonts: Rc<RefCell<Dict>>,
+    /// Not reachable by any name: only `internaldict` hands it out.
+    pub(crate) internal: Rc<RefCell<Dict>>,
+}
+
+impl PlrmDicts {
+    fn new() -> Self {
+        let new = || Rc::new(RefCell::new(Dict::new()));
+        PlrmDicts {
+            statusdict: new(),
+            serverdict: new(),
+            global_fonts: new(),
+            internal: new(),
+        }
+    }
+
+    /// Bind the names in `systemdict`.
+    fn install(&self, system: &mut Dict) {
+        for (name, dict) in [
+            ("statusdict", &self.statusdict),
+            ("serverdict", &self.serverdict),
+            ("GlobalFontDirectory", &self.global_fonts),
+            ("SharedFontDirectory", &self.global_fonts),
+        ] {
+            system.put(name.into(), Object::lit(Value::Dict(dict.clone())));
+        }
+    }
+
+    fn all(&self) -> impl Iterator<Item = &Rc<RefCell<Dict>>> {
+        [
+            &self.statusdict,
+            &self.serverdict,
+            &self.global_fonts,
+            &self.internal,
+        ]
+        .into_iter()
+    }
+}
+
 /// The most bytes of a procedure's name a backtrace frame keeps
 /// ([`crate::host::TraceFrame::procedure`]).
 const TRACE_NAME_BYTES: usize = 256;
@@ -484,6 +536,9 @@ pub struct Interp {
     /// `globaldict` (#1159): the dictionary that stands in for global VM.
     /// Always on the dictionary stack, under userdict; `restore` never rolls it back.
     pub(crate) globaldict: Rc<RefCell<Dict>>,
+    /// The dictionaries pscat defines for PLRM names (#1469), kept here so
+    /// `Drop` can empty them and `gcheck` can recognise the global one.
+    pub(crate) plrm_dicts: PlrmDicts,
     pub(crate) quit_requested: bool,
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
@@ -887,6 +942,8 @@ impl Interp {
             "globaldict".into(),
             Object::lit(Value::Dict(globaldict.clone())),
         );
+        let plrm_dicts = PlrmDicts::new();
+        plrm_dicts.install(&mut system.borrow_mut());
         Some(Interp {
             ostack: Vec::new(),
             host_ops: Vec::new(),
@@ -902,6 +959,7 @@ impl Interp {
             save_stack: Vec::new(),
             vm_mode: Default::default(),
             globaldict,
+            plrm_dicts,
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
@@ -5129,7 +5187,12 @@ impl Drop for Interp {
         // a `borrow()` of it must not turn a drop into a panic (a second
         // panic while unwinding aborts the process). That dictionary is
         // simply left alone, as it was before #625.
-        for dict in self.dstack.iter().take(PERMANENT_DICTS) {
+        for dict in self
+            .dstack
+            .iter()
+            .take(PERMANENT_DICTS)
+            .chain(self.plrm_dicts.all())
+        {
             let contents = dict.try_borrow_mut().map(|mut d| std::mem::take(&mut *d));
             drop(contents);
         }
@@ -5531,7 +5594,12 @@ mod tests {
              userdict /nested get /a get
              FontDirectory
              errordict
-             $error",
+             $error
+             statusdict dup /me exch put
+             serverdict dup /me exch put
+             GlobalFontDirectory dup /me exch put
+             1183615869 internaldict dup /me exch put
+             statusdict serverdict GlobalFontDirectory 1183615869 internaldict",
         )
         .expect("probe program runs");
         let mut weaks = vec![
@@ -5539,7 +5607,17 @@ mod tests {
             ("globaldict", std::rc::Rc::downgrade(&it.dstack[1])),
             ("userdict", std::rc::Rc::downgrade(&it.dstack[2])),
         ];
-        for name in ["$error", "errordict", "FontDirectory", "nested /a", "held"] {
+        for name in [
+            "internaldict",
+            "GlobalFontDirectory",
+            "serverdict",
+            "statusdict",
+            "$error",
+            "errordict",
+            "FontDirectory",
+            "nested /a",
+            "held",
+        ] {
             match it.pop().expect("dict on the operand stack").value {
                 Value::Dict(d) => weaks.push((name, std::rc::Rc::downgrade(&d))),
                 _ => panic!("{name}: expected a dict on the operand stack"),

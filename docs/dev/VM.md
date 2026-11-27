@@ -148,6 +148,14 @@ gs keeps it whichever mode the `save` was made in). `gcheck` is true for
 simple objects, `systemdict` and `globaldict`, false for every other
 composite; gs also says true for a composite made while the mode was global.
 
+`scheck`, `GlobalFontDirectory` and `SharedFontDirectory` (#1469): `scheck` is `gcheck`
+under its PLRM name (gs answers identically); `GlobalFontDirectory` and
+`SharedFontDirectory` are one empty dictionary in systemdict that `gcheck` and `scheck`
+report global. `statusdict`, `serverdict` and the dictionary `1183615869 internaldict`
+returns are empty local dictionaries (rolled back by `restore`), off the dictionary stack;
+`Interp::plrm_dicts` holds them so `Drop` can empty them. Contents and deviations:
+`notes/1469-statusdict-internaldict-scheck.md`.
+
 ## Deliberate deviations (all safe under Rc)
 
 - **No invalidrestore stack scan.** gs errors when the operand/dict/

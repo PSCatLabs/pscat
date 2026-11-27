@@ -46,7 +46,7 @@ missing	setcacheparams	#1270	parameter, cache, job-control, overprint and smooth
 missing	currentcacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	setucacheparams	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	startjob	#1270	parameter, cache, job-control, overprint and smoothness operators
-missing	exitserver	#1270	PLRM puts it in serverdict (probed there by the test), and gs has no systemdict exitserver either; needs serverdict (below) as well
+missing	exitserver	#1270	PLRM puts it in serverdict (probed there by the test), and gs has no systemdict exitserver either; serverdict now exists (#1469) but holds no exitserver
 missing	vmreclaim	#1270	parameter, cache, job-control, overprint and smoothness operators
 missing	setshared	#1270	same as setglobal; PLRM compatibility name
 missing	currentshared	#1270	same as currentglobal; PLRM compatibility name
@@ -63,12 +63,6 @@ missing	findencoding	#1272	composite fonts
 missing	rootfont	#1272	composite fonts
 missing	undefinefont	#1272	composite fonts
 missing	resourceforall	#1218	resourceforall
-missing	statusdict	#1469	product-dependent dictionary; many printer prologs test /statusdict where; gs has it
-missing	GlobalFontDirectory	#1469	Font resources defined in global VM; gs has it
-missing	SharedFontDirectory	#1469	same dictionary as GlobalFontDirectory; PLRM compatibility name
-missing	scheck	#1469	same as gcheck (#1159); PLRM compatibility name
-missing	serverdict	#1469	job server dictionary holding exitserver; gs has it
-missing	internaldict	#1469	1183615869 internaldict, used inside Type 1 font programs; gs has it
 omitted	beginbfchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	beginbfrange	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
 omitted	begincidchar	-	member of the CIDInit procedure set (CMap file syntax), not a systemdict name; pscat has no ProcSet resources and gs's absence from systemdict agrees. Loading CMaps belongs with #1272
