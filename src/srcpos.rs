@@ -271,6 +271,12 @@ impl Table {
 /// program's, unnamed, which end with it.
 #[derive(Default)]
 pub(crate) struct BodyLines {
+    /// Changes whenever an entry is added or dropped, so a site (a body's
+    /// address and a slot) taken at one value of it is answered for only
+    /// while the value is the same: an address freed and given to another body
+    /// is a different body, and the table has changed in between (#1366).
+    /// Shared with the interpreter, which reads it per step.
+    generation: Rc<std::cell::Cell<u32>>,
     named: Table,
     anon: Table,
     /// The names `named`'s entries refer to, by index: a handful of files
@@ -390,6 +396,7 @@ impl BodyLines {
                 },
             );
         }
+        self.generation.set(self.generation.get().wrapping_add(1));
         table.entries.insert(
             key,
             BodyEntry {
@@ -411,6 +418,7 @@ impl BodyLines {
             return;
         }
         let key = body.storage_site(0).0;
+        self.generation.set(self.generation.get().wrapping_add(1));
         for t in [&mut self.anon, &mut self.named] {
             t.entries.remove(&key);
             t.lint.remove(&key);
@@ -434,6 +442,7 @@ impl BodyLines {
         }
         check_alloc(table.runs.len() * std::mem::size_of::<(u32, u32)>())?;
         charge(work)?;
+        self.generation.set(self.generation.get().wrapping_add(1));
         if named {
             self.named.sweep();
             self.collect_sources();
@@ -501,6 +510,7 @@ impl BodyLines {
     /// named ones: what the lint wants, which matches positions in one
     /// text.
     pub(crate) fn begin_program(&mut self, forget_all: bool) {
+        self.generation.set(self.generation.get().wrapping_add(1));
         // Replaced, not cleared: a map that once held a large program keeps
         // its capacity, which `clear` would memset on every program.
         if !self.anon.entries.is_empty() {
@@ -540,6 +550,36 @@ impl BodyLines {
             line: t.line(e, at),
             file: self.source_of(e).and_then(|s| s.name.clone()),
         })
+    }
+
+    /// The value [`BodyLines`]' generation has now (see the field).
+    pub(crate) fn generation(&self) -> u32 {
+        self.generation.get()
+    }
+
+    /// A shared handle on the generation, for the interpreter's per-step
+    /// reads without borrowing the table.
+    pub(crate) fn generation_handle(&self) -> Rc<std::cell::Cell<u32>> {
+        self.generation.clone()
+    }
+
+    /// The line and source name of the element at `site`, a
+    /// [`PsArray::storage_site`]: what the stack-leak trace kept of the
+    /// element that ran, without holding the body (#1366). The name is as in
+    /// [`position`](Self::position): a `run` file's, or the main program's when
+    /// the host named it. `None` when the body has no entry (or it was swept
+    /// since). A swept body's address could be taken by a body scanned later,
+    /// which would give a wrong line of a real source: the worst a message
+    /// can suffer.
+    pub(crate) fn position_at(&self, site: (usize, usize)) -> Option<(u32, Option<&Rc<str>>)> {
+        let (key, at) = site;
+        let (t, e) = [&self.anon, &self.named]
+            .into_iter()
+            .find_map(|t| t.entries.get(&key).map(|e| (t, e)))?;
+        Some((
+            t.line(e, at),
+            self.source_of(e).and_then(|s| s.name.as_ref()),
+        ))
     }
 
     /// The line (and `run` file) element `i` of `body` was written on, as
