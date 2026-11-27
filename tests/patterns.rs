@@ -1755,8 +1755,8 @@ fn pen_space_strokes_and_a_type1_background_agree_with_gs() {
 /// A radial whose circles are not nested and whose end does not extend,
 /// cut to a `/BBox`: the raster paints a point's smaller root where its
 /// larger one is past the end (`two_root_layer`), as gs and PDF do. SVG
-/// cannot ask for the smaller root (the gap `shfill` has too), so only the
-/// raster and the PDF are held against gs.
+/// has only the larger root, so it paints the smaller one from a second
+/// gradient beneath (#1370).
 const SHADED_TWO_ROOTS: &str = "
 << /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [160 200 20 260 200 60]
    /Function ramp /Extend [true false] /BBox [60 60 340 340] >> >> matrix makepattern setpattern
@@ -1768,6 +1768,12 @@ fn a_radial_pattern_paints_its_smaller_root_as_gs_does() {
     let src = format!("{RAMP}{SHADED_TWO_ROOTS}");
     let out = render(&src);
     assert!(pdf_text(&out.pdf).contains("/PatternType 2 "));
+    assert_close(
+        "two roots: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
     if common::gs_available() {
         let ps = format!("%!PS\n{src}\nshowpage\n");
         let program = gs_png(ps.as_bytes(), "ps", "two roots");
@@ -1779,6 +1785,33 @@ fn a_radial_pattern_paints_its_smaller_root_as_gs_does() {
             3.0,
         );
     }
+}
+
+/// The same radial with no `/BBox` and no `/Background`: the pattern is
+/// the gradient itself in SVG for an ordinary one, but a cone needs both
+/// roots, so it is a `<pattern>` over the canvas (#1370).
+#[test]
+fn a_radial_pattern_without_a_bbox_paints_its_smaller_root_in_svg() {
+    let src = format!(
+        "{RAMP}<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB \
+         /Coords [160 200 20 260 200 60] /Function ramp /Extend [true false] >> >> \
+         matrix makepattern setpattern 20 20 360 360 rectfill"
+    );
+    let out = render(&src);
+    assert_close(
+        "two roots, no box: SVG via resvg",
+        &out.png,
+        &resvg_png(&out.svg),
+        3.0,
+    );
+    // A nested radial (no second root) stays the gradient itself.
+    let nested = format!(
+        "{RAMP}<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB \
+         /Coords [200 200 20 200 200 100] /Function ramp /Extend [true false] >> >> \
+         matrix makepattern setpattern 20 20 360 360 rectfill"
+    );
+    let out = render(&nested);
+    assert!(!out.svg.contains("<pattern "), "{}", out.svg);
 }
 
 #[test]
@@ -1844,6 +1877,76 @@ fn a_page_shading_pattern_paints_inside_a_paintproc_as_gs_places_it() {
             &gs_png(ps.as_bytes(), "ps", "shaded across"),
             3.0,
         );
+    }
+}
+
+/// A cone (circles not nested, end not extended) with no `/BBox` and no
+/// `/Background` is a `<pattern>` over the canvas in SVG, not the gradient
+/// itself (#1370), so the branches that routing now enters are held against
+/// the PNG here: a pen-space stroke (`patternTransform`), and a pattern
+/// inside a tiling pattern's PaintProc (the context hop). The SVG, the PDF
+/// through gs and hayro, and gs on the program.
+const CONE_PEN: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [60 100 10 260 160 60]
+   /Function ramp /Extend [true false] >> >> matrix makepattern /cone exch def
+gsave 1 3 scale cone setpattern 14 setlinewidth 150 40 moveto 340 40 lineto stroke grestore
+cone setpattern 150 100 200 120 rectfill
+";
+
+const CONE_ACROSS: &str = "
+<< /PatternType 2 /Shading << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [40 360 5 140 360 95]
+   /Function ramp /Extend [true false] >> >> matrix makepattern /cone exch def
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 80 80] /XStep 100 /YStep 100
+   /PaintProc { pop cone setpattern 10 10 60 60 rectfill }
+>> [1 0 0 1 10 10] makepattern setpattern
+0 0 400 400 rectfill
+";
+
+#[test]
+fn a_cone_pattern_with_no_bbox_agrees_in_a_pen_stroke_and_a_paintproc() {
+    for (name, body, hayro, least) in [
+        ("cone pen", CONE_PEN, true, 2000),
+        ("cone across", CONE_ACROSS, false, 2000),
+    ] {
+        let src = format!("{RAMP}{body}");
+        let out = render(&src);
+        assert!(pdf_text(&out.pdf).contains("/PatternType 2 "), "{name}");
+        let painted = out
+            .png
+            .pixels()
+            .iter()
+            .filter(|p| p.red() < 250 || p.green() < 250 || p.blue() < 250)
+            .count();
+        assert!(painted > least, "{name}: only {painted} pixels painted");
+        assert_close(
+            &format!("{name}: SVG via resvg"),
+            &out.png,
+            &resvg_png(&out.svg),
+            3.0,
+        );
+        if hayro {
+            assert_close(
+                &format!("{name}: PDF via hayro"),
+                &out.png,
+                &hayro_png(&out.pdf),
+                3.0,
+            );
+        }
+        if common::gs_available() {
+            let ps = format!("%!PS\n{src}\nshowpage\n");
+            assert_close(
+                &format!("{name}: the program in gs"),
+                &out.png,
+                &gs_png(ps.as_bytes(), "ps", name),
+                3.0,
+            );
+            assert_close(
+                &format!("{name}: our PDF via gs"),
+                &out.png,
+                &gs_png(&out.pdf, "pdf", name),
+                3.0,
+            );
+        }
     }
 }
 

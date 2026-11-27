@@ -278,8 +278,12 @@ impl SvgRecorder {
         let as_row = |t: tiny_skia::Transform| [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty];
         let prefix = self.prefix.clone();
         let paint = match (&form.gradient, &form.image) {
+            // A cone's smaller root is a second gradient (#1370), which
+            // takes the canvas `<pattern>` below, not one `url(#…)`.
             (Some((kind, ctm, stops, extend)), _)
-                if form.bbox.is_none() && form.background.is_none() =>
+                if form.bbox.is_none()
+                    && form.background.is_none()
+                    && !needs_smaller_root(kind, *extend) =>
             {
                 match self.gradient_def(kind, as_row(to_here.pre_concat(*ctm)), stops, *extend) {
                     Some(id) => format!("url(#{prefix}g{id})"),
@@ -324,13 +328,14 @@ impl SvgRecorder {
                         Self::color(rgb)
                     );
                 }
-                if let Some((kind, ctm, stops, extend)) = &form.gradient
-                    && let Some(id) = self.gradient_def(kind, as_row(*ctm), stops, *extend)
-                {
-                    let _ = write!(
-                        content,
-                        "<path d=\"{region}\" fill=\"url(#{prefix}g{id})\"/>"
-                    );
+                if let Some((kind, ctm, stops, extend)) = &form.gradient {
+                    let ids = self.gradient_defs(kind, as_row(*ctm), stops, *extend);
+                    for id in ids {
+                        let _ = write!(
+                            content,
+                            "<path d=\"{region}\" fill=\"url(#{prefix}g{id})\"/>"
+                        );
+                    }
                 }
                 if let Some((png, iw, ih, x, y)) = &form.image {
                     let _ = write!(
@@ -919,9 +924,8 @@ impl SvgRecorder {
     /// runs on past it (`extended_for_svg`) and is transparent there, so the
     /// padding beyond is transparent too. SVG paints only a point's larger
     /// root, so a radial whose circles are not nested, its end not extended,
-    /// leaves a point whose larger root is past the end unpainted where the
-    /// raster and PDF paint its smaller root (the circles-not-nested gap
-    /// below already applies to such a radial).
+    /// is two gradients (`gradient_defs`, #1370): the smaller root's under
+    /// the larger's, as the raster's two-root layer is.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shfill(
         &mut self,
@@ -934,16 +938,70 @@ impl SvgRecorder {
         chain: &Chain,
     ) {
         self.flush_text();
-        let Some(id) = self.gradient_def(kind, ctm, stops, extend) else {
+        let ids = self.gradient_defs(kind, ctm, stops, extend);
+        if ids.is_empty() {
             return;
-        };
+        }
         let (open, close, leftover) = self.clip_wrappers(chain, Self::blend_style(comp.blend));
-        let _ = write!(
-            self.body,
-            "{open}<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>{close}",
-            self.prefix,
-            Self::opacity_attr(comp, false),
-        );
+        // The smaller root's gradient, when there is one, is painted first
+        // and the larger over it (#1370). Both go in one group that carries
+        // the mark's opacity and blend, so a translucent mark composites
+        // once, as the raster's two-root layer does, not twice where the
+        // roots overlap.
+        let mut paths = String::new();
+        match ids[..] {
+            [under, over] => {
+                let opacity = if comp.alpha >= 1.0 {
+                    String::new()
+                } else {
+                    format!(" opacity=\"{}\"", fmt_f32(comp.alpha))
+                };
+                let _ = write!(
+                    paths,
+                    "<g{opacity}{leftover}><path d=\"{region_d}\" fill=\"url(#{p}g{under})\"/>\
+                     <path d=\"{region_d}\" fill=\"url(#{p}g{over})\"/></g>",
+                    p = self.prefix,
+                );
+            }
+            [id] => {
+                let _ = write!(
+                    paths,
+                    "<path d=\"{region_d}\" fill=\"url(#{}g{id})\"{}{leftover}/>",
+                    self.prefix,
+                    Self::opacity_attr(comp, false),
+                );
+            }
+            _ => {}
+        }
+        let _ = write!(self.body, "{open}{paths}{close}");
+    }
+
+    /// The gradients `shfill` paints, in paint order (#1370): one, or for a
+    /// radial whose circles are not nested and whose end does not extend,
+    /// the smaller root's gradient first and the ordinary one over it.
+    /// SVG paints only the largest of its own `t` that a point's circles
+    /// reach, which is PostScript's larger `t`; where that one is past the
+    /// end the raster, PDF and gs paint the smaller, so it is a second
+    /// gradient, the same circles run backwards. Empty when the numbers
+    /// have no SVG spelling (nothing is written, as for `gradient_def`).
+    fn gradient_defs(
+        &mut self,
+        kind: &ShKind,
+        ctm: [f32; 6],
+        stops: &[(f32, f32, f32, f32)],
+        extend: [bool; 2],
+    ) -> Vec<usize> {
+        let Some(main) = self.gradient_def(kind, ctm, stops, extend) else {
+            return Vec::new();
+        };
+        if !needs_smaller_root(kind, extend) {
+            return vec![main];
+        }
+        let (back_kind, back_stops, back_extend) = run_backwards(kind, stops, extend);
+        match self.gradient_def(&back_kind, ctm, &back_stops, back_extend) {
+            Some(under) => vec![under, main],
+            None => vec![main],
+        }
     }
 
     /// `shfill`'s gradient def (#20), its id number (`{prefix}g{id}`), or
@@ -960,6 +1018,7 @@ impl SvgRecorder {
         // number. Then it is done at an eighth of the size, the transform
         // multiplying it back (a power of two, so exact); if even that is
         // not finite, nothing is written, as the PDF writes nothing.
+        let cone = is_cone(kind);
         let mut ctm = ctm;
         let mut extended = extended_for_svg(kind, stops, extend);
         if !sh_finite(&extended.0) {
@@ -1029,31 +1088,43 @@ impl SvgRecorder {
                 // which would need fr > r to represent directly and
                 // gets silently clamped/degenerated by SVG if emitted
                 // that way. Swap which circle is "outer" vs "focal"
-                // when that happens, and reverse the stops to
+                // when that happens (nested circles; a cone is below),
+                // and reverse the stops to
                 // compensate (offset' = 1 - offset, order reversed so
                 // they stay non-decreasing) — caught by a Codex
                 // review; every hand-tested example here only grows.
                 //
-                // Documented gap SVG's model can't fully absorb even
-                // with that swap: SVG's cone construction only renders
-                // *faithfully* when the focal circle is entirely
-                // inside the outer one (distance(centers) + focal_r <=
-                // outer_r) — an off-center two-circle shading that
-                // fails that (a real, valid ShadingType 3; PostScript
-                // has no such constraint) isn't detected or worked
-                // around here, so its SVG export can visibly diverge
-                // from the raster (browsers vary in how they degrade
-                // it). Caught by a Codex review pointing out this
-                // file's *own* two-circle test/example geometry was
-                // itself uncontained — both were replaced with a
-                // contained one; a genuinely faithful fallback for the
-                // uncontained case (e.g. rasterizing just that
-                // gradient into an embedded PNG, the way `image`
-                // already embeds bitmap content) is out of scope here.
-                let (outer_x, outer_y, outer_r, focal_x, focal_y, focal_r, shrinking) = if r0 > r1 {
+                // A cone (circles not nested, #1370: neither circle inside
+                // the other, which SVG 1.1 has no gradient for) is not
+                // swapped: SVG paints the largest of its own `t` a point's
+                // circles reach, so which circle is the focal one decides
+                // which of a point's two roots shows (the larger
+                // PostScript `t` with the start as focal; `gradient_defs`
+                // adds the other for an end that does not extend). That
+                // takes `fr > r` for a shrinking cone, which Chrome 158
+                // and resvg both draw as a canvas gradient does; checked
+                // against the PNG for every `/Extend`, `tests/svg_shading.rs`.
+                // A viewer that clamps `fr` to `r` would show the cone
+                // wrong, as it did before this.
+                let swap = r0 > r1 && !cone;
+                let (outer_x, outer_y, outer_r, focal_x, focal_y, focal_r, shrinking) = if swap {
                     (x0, y0, r0, x1, y1, r1, true)
                 } else {
                     (x1, y1, r1, x0, y0, r0, false)
+                };
+                // An outer radius of 0 is SVG's "paint the last stop
+                // everywhere", which a cone shrinking to a point would
+                // get; a hair of radius keeps the cone. The hair moves the
+                // apex along the axis by hair x distance / radius change,
+                // so it is sized for a shift of `CONE_APEX_SHIFT` units
+                // whatever the distance (Codex round 1 on PR #1461: a hair
+                // scaled by the distance moved the apex 100 units for
+                // circles 1e7 apart).
+                let outer_r = if cone && outer_r <= 0.0 {
+                    let dist = crate::fmath::hypotf(x1 - x0, y1 - y0);
+                    ((r0 - r1).abs() * CONE_APEX_SHIFT / dist).max(1e-5)
+                } else {
+                    outer_r
                 };
                 let tags = if shrinking {
                     let mut reversed: Vec<SvgStop> = stops
@@ -1382,6 +1453,77 @@ fn extended_for_svg(
         },
     };
     (kind, out)
+}
+
+/// How far, in the shading's own units, a cone's apex may move along its axis
+/// when the radius-0 workaround gives its outer circle a hair of radius
+/// (`gradient_def`).
+const CONE_APEX_SHIFT: f32 = 1e-3;
+
+/// Whether `kind` is a radial whose circles are neither inside the other,
+/// so a point can lie on two of them (the test `gradient_parts` makes for
+/// the raster).
+fn is_cone(kind: &ShKind) -> bool {
+    match *kind {
+        ShKind::Axial { .. } => false,
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => crate::fmath::hypotf(x1 - x0, y1 - y0) > (r1 - r0).abs(),
+    }
+}
+
+/// Whether the SVG needs a second gradient for `kind` under `extend`: a
+/// cone whose end does not extend, where a point's larger root can fall
+/// past the end and its smaller one is painted (`gradient_parts`).
+pub(crate) fn needs_smaller_root(kind: &ShKind, extend: [bool; 2]) -> bool {
+    !extend[1] && is_cone(kind)
+}
+
+/// A shading's geometry, stops and `/Extend`.
+type BackwardShading = (ShKind, Vec<(f32, f32, f32, f32)>, [bool; 2]);
+
+/// The same shading run the other way: its circles swapped, the stops
+/// mirrored and the ends exchanged. Its larger root is the original's
+/// smaller one.
+fn run_backwards(
+    kind: &ShKind,
+    stops: &[(f32, f32, f32, f32)],
+    extend: [bool; 2],
+) -> BackwardShading {
+    let kind = match *kind {
+        ShKind::Axial { x0, y0, x1, y1 } => ShKind::Axial {
+            x0: x1,
+            y0: y1,
+            x1: x0,
+            y1: y0,
+        },
+        ShKind::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+        } => ShKind::Radial {
+            x0: x1,
+            y0: y1,
+            r0: r1,
+            x1: x0,
+            y1: y0,
+            r1: r0,
+        },
+    };
+    let stops = stops
+        .iter()
+        .rev()
+        .map(|&(t, r, g, b)| (1.0 - t, r, g, b))
+        .collect();
+    (kind, stops, [extend[1], extend[0]])
 }
 
 /// Whether every number of `kind` is finite.

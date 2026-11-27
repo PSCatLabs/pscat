@@ -1524,6 +1524,40 @@ mod one_operator {
             assert_eq!(px, (255, 0, 0), "the page is untouched");
         }
 
+        /// The SVG of a cone holds a second gradient of every stop (#1370),
+        /// which a tiny page's pixels do not pay for: 8190 stops of a
+        /// 4095-leg ramp are charged to the step limit before anything is
+        /// painted or recorded, so a refused one leaves the page and the SVG
+        /// as they were. The nested radial of the same ramp has no second
+        /// gradient and runs under the same limit.
+        #[test]
+        fn a_cones_second_svg_gradient_is_charged_to_the_step_limit() {
+            let setup = ramp_setup().replace("<< /PageSize [2550 3300] >> setpagedevice", "");
+            for (coords, refused) in [("2 4 1 6 4 3", true), ("4 4 1 4 4 3", false)] {
+                let mut it = Interp::with_page(8, 8).expect("page");
+                it.enable_svg();
+                it.run_str(&setup).expect("setup");
+                it.run_str("1 0 0 setrgbcolor 0 0 8 8 rectfill")
+                    .expect("red");
+                it.set_limits(steps(2000)).expect("limits");
+                let src = format!(
+                    "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{coords}] \
+                     /Function << /FunctionType 3 /Domain [0 1] /Functions fns \
+                     /Bounds bounds /Encode encode >> >> shfill"
+                );
+                let r = it.run_str(&src);
+                let red = it.gfx().pixmap.pixel(4, 4).expect("pixel").red();
+                let svg = it.svg_pages().unwrap_or_default().concat();
+                if refused {
+                    assert_eq!(r, Err(PsError::StepsExceeded), "{coords}");
+                    assert_eq!(red, 255, "{coords}: the page is untouched");
+                    assert!(!svg.contains("Gradient"), "{coords}: nothing recorded");
+                } else {
+                    assert_eq!(r, Ok(()), "{coords}");
+                }
+            }
+        }
+
         #[test]
         fn type1_subroutines_decrypt_only_the_bytes_a_glyph_can_reach() {
             // One glyph calls a 16 MB subroutine (about 25 ms to decrypt in
