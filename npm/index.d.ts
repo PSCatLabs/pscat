@@ -78,8 +78,16 @@ export interface FrameOptions extends PageOptions {
    * while no one frame is over it. This is what keeps a tab responsive, since
    * the work that freezes it is one call, and it is how the site's playground
    * bounds a frame (500,000 steps). Same values and errors as `maxSteps`,
-   * which it replaces: give one or the other (TypeError otherwise).
-   * stepsUsed then reads the latest frame's count.
+   * which it replaces: both non-zero is a TypeError (one of them 0, null or
+   * undefined is fine). stepsUsed then reads the latest frame's count.
+   *
+   * The cap is coarse. The runtime counts in slices of up to 4096 steps and
+   * enforces the cap between slices, so a frame may end over it, by less than
+   * one slice, without an error: the overrun is only noticed by the next call,
+   * and each frame restarts the count first. A frame that runs far over the cap
+   * (a runaway loop, a decompression bomb) is stopped with `limitexceeded`; a
+   * cap below one slice can let many small frames each overrun it. Pick a cap
+   * well above 4096, as the playground's 500,000 is.
    */
   frameMaxSteps?: number | null;
 }
@@ -160,9 +168,10 @@ export class Renderer {
   /**
    * Steps run since the cap was last armed: begin() under `maxSteps`, or the
    * start of the latest frame under `frameMaxSteps`. Counted only while a cap
-   * is set (0 without one) and 0 before begin(); it trails the true figure by
-   * up to a slice of a few thousand. Readable after a PostScriptError, a
-   * `limitexceeded` one included, where it is at least the cap.
+   * is set (0 without one) and 0 before begin(). Readable after the run
+   * finishes, after a PostScriptError and after a `limitexceeded` stop. It is
+   * not clipped to the cap: a run can end over it by up to one slice of the
+   * runtime's counting (less than 4096 steps; 1997 was seen for a cap of 1000).
    */
   readonly stepsUsed: number;
   /** A copy of the page as RGBA bytes. */

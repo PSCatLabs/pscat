@@ -139,7 +139,10 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   the whole program may run, and `frameMaxSteps: N` in `frames()` caps each
   frame, as the playground does. Over the cap the run throws a
   `PostScriptError` with `errorName` `'limitexceeded'`; `r.stepsUsed` reads the
-  count (0 with no cap). Both are off by default. The module has no clock, so
+  count (0 with no cap). Both are off by default. A cap is coarse: it is
+  enforced between slices of up to 4096 steps, so a run or a frame can end
+  over it by less than a slice, and a `frameMaxSteps` below 4096 can let small
+  frames each overrun it without an error. The module has no clock, so
   steps, which include a step per KiB of decoded filter data, are the only
   limit that stops an endless loop or a decompression bomb
   (`npm/README.md`, "Limiting a run", #1223).

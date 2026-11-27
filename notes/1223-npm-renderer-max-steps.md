@@ -33,6 +33,19 @@ copy; the page options (`width`, `dpi`, `svg`, ...) are the model.
   or negative is a `RangeError`, a non-number a `TypeError`. A refused `begin()`
   leaves the program in progress alone.
 
+### The cap is coarse (Codex round 1)
+
+The runtime counts in slices of up to 4096 steps and enforces the cap between
+slices; a full slice's overrun is deferred to the next call. `frames()` re-arms
+(restarting the count) before that call, which erases a pending overrun. So
+`r.frames('1 pop '.repeat(100), { budget: 11, frameMaxSteps: 10 })` finishes
+with no error (19 frames, `stepsUsed` up to 11), while a runaway loop or a
+bomb in a frame is stopped. Not changed on the Rust side; the contract is
+documented (README, index.d.ts, browser guide) and the reproducer pinned in
+`npm/test/steps.test.mjs`. `stepsUsed` is not clipped to the cap (1997 seen for
+a cap of 1000). Both non-zero `maxSteps` and `frameMaxSteps` conflict; one of
+them 0 is accepted.
+
 ### Deferred
 
 - A `maxMemory` option (the Rust side has `Limits::max_memory`; whether it can be enforced inside the wasm module is not checked here).

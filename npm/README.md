@@ -205,13 +205,20 @@ try {
   long program runs while no one `step(budget)` call is over the cap: that call is
   what freezes a tab, and a whole-program cap that lets a heavy piece finish
   (hundreds of millions of steps) lets a bomb drain for hours. It replaces
-  `maxSteps` (give one; both is a `TypeError`), and `render()` and `begin()` refuse
+  `maxSteps` (both non-zero is a `TypeError`), and `render()` and `begin()` refuse
   it (`TypeError`) rather than run uncapped. If you leave a `frames()` loop early
   and keep calling `step()`, the last frame's cap stays armed until the next `begin`.
+  **The cap is coarse.** The runtime counts in slices of up to 4096 steps and
+  enforces the cap between slices, so a frame may end over it, by less than one
+  slice, with no error (the overrun is noticed by the next call, and each frame
+  restarts the count first). A runaway frame is stopped with `limitexceeded`, but
+  a cap below one slice can let many small frames each overrun it: pick one well
+  above 4096.
 - **`stepsUsed`** is the count since the cap was armed: the whole program under
   `maxSteps`, the latest frame under `frameMaxSteps`. It counts only while a cap
-  is set (0 without one), trails the true figure by up to a few thousand, and
-  stays readable after an error.
+  is set (0 without one), and stays readable after the run finishes, after an
+  error and after a limit stop. It is not clipped to the cap: a run can end over
+  it by up to one slice (less than 4096 steps; 1997 was seen for a cap of 1000).
 
 ## API
 
@@ -222,7 +229,7 @@ try {
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
 | `frames(source, { budget, frameMaxSteps, ...page }?)` | A generator of `begin` plus one `step` per iteration. `frameMaxSteps: N` caps the steps of each frame instead of the whole program. |
-| `stepsUsed` | Steps run since the cap was last armed (`begin`, or the latest frame under `frameMaxSteps`). 0 when no cap is set. Readable after an error. |
+| `stepsUsed` | Steps run since the cap was last armed (`begin`, or the latest frame under `frameMaxSteps`). 0 when no cap is set. Readable after the run, an error or a limit stop; can exceed the cap by less than 4096. |
 | `width`, `height` | The page size in pixels. |
 | `output` | What the program has printed since `begin`. |
 | `pixels()` | A copy of the page as RGBA bytes. |

@@ -123,16 +123,26 @@ test('frameMaxSteps caps each frame, not the program', async () => {
   assert.throws(() => { for (const frame of r.frames(bomb, { ...page, frameMaxSteps: 1000 })) void frame; }, limitStop);
   assert.ok(r.stepsUsed >= 1000 && r.stepsUsed <= 1400, `stepsUsed ${r.stepsUsed}`);
 
-  // A program of 100,000 loop passes in frames of 1000: far over the cap in all,
-  // far under it in any one frame, so it finishes (a whole-program cap would not).
-  let frames = 0;
-  for (const n of r.frames(FINITE, { ...page, budget: 1000, frameMaxSteps: 5000 })) frames = n + 1;
-  assert.ok(frames > 20, `${frames} frames`);
-  // stepsUsed is the last frame's, since each frame re-arms the count.
-  assert.ok(r.stepsUsed > 0 && r.stepsUsed <= 5000, `stepsUsed ${r.stepsUsed}`);
-  assert.throws(() => r.render(FINITE, { ...page, maxSteps: 5000 }), limitStop);
+  // A runaway loop in frames of 5000: stopped, though each frame re-arms the count.
+  assert.throws(() => { for (const frame of r.frames(ENDLESS, { ...page, budget: 5000, frameMaxSteps: 1000 })) void frame; }, limitStop);
+  assert.ok(r.stepsUsed >= 1000, `stepsUsed ${r.stepsUsed}`);
 
-  // The frame cap does not outlive frames(): the next render is uncapped.
+  // The cap is coarse, not exact (the contract in index.d.ts): the runtime counts
+  // in slices and defers a full slice's overrun to the next call, and frames()
+  // re-arms (restarts the count) before that call. Pinned reproducer: 100 cheap
+  // objects in frames of 11 under a cap of 10 finish with no error, and a frame
+  // ends over the cap by less than one slice (4096 steps).
+  let frames = 0;
+  let highest = 0;
+  for (const n of r.frames('1 pop '.repeat(100), { ...page, budget: 11, frameMaxSteps: 10 })) {
+    frames = n + 1;
+    highest = Math.max(highest, r.stepsUsed);
+  }
+  assert.ok(frames > 10, `${frames} frames`);
+  assert.ok(highest > 10 && highest < 10 + 4096, `highest stepsUsed ${highest}`);
+
+  // Abandoning a frames() loop leaves its cap armed (stepsUsed keeps counting)
+  // until the next begin(); the next render() clears it.
   r.render(FINITE, page);
   assert.equal(r.stepsUsed, 0);
 });
@@ -149,11 +159,19 @@ test('a bad maxSteps is refused before the interpreter or the previous program i
     assert.throws(() => r.render('', { ...page, maxSteps }), TypeError, `maxSteps ${String(maxSteps)}`);
     assert.throws(() => r.frames('', { ...page, frameMaxSteps: maxSteps }).next(), TypeError);
   }
-  // A program in progress is untouched by a refused begin().
-  r.begin('1 1 add 2 3 add == (kept) print', page);
+  // A program in progress, stepped and capped, is untouched by a refused begin():
+  // same output, count and SVG before and after, and it runs on to its end.
+  r.begin('(kept) print 0 1 5000 { pop } for 0 0 5 5 rectfill', { ...page, svg: true, maxSteps: 1_000_000 });
+  assert.equal(r.step(100), true);
+  const before = { output: r.output, used: r.stepsUsed, svg: r.svg(0) };
+  assert.equal(before.output, 'kept');
   assert.throws(() => r.begin('', { ...page, maxSteps: -1 }), RangeError);
+  assert.throws(() => r.begin('', { ...page, svg: false, frameMaxSteps: 5 }), TypeError);
+  assert.deepEqual({ output: r.output, used: r.stepsUsed, svg: r.svg(0) }, before);
   while (r.step(1000));
-  assert.equal(r.output, '5\nkept');
+  assert.equal(r.output, 'kept');
+  assert.ok(r.stepsUsed >= 5000, `stepsUsed ${r.stepsUsed}`);
+  assert.match(r.svg(0), /<path|<rect/);
   // The largest exact cap is accepted.
   assert.equal(r.render('', { ...page, maxSteps: Number.MAX_SAFE_INTEGER }).width, 20);
   // frameMaxSteps belongs to frames(): render() and begin() refuse it rather than run uncapped.
