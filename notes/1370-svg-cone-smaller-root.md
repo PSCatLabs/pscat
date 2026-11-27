@@ -25,7 +25,7 @@ because nothing compared a shrinking cone; it now is (`cone-shrink`, all four
 **Does `fr > r` draw?** Probed before relying on it. Chrome 158 draws it as
 canvas `createRadialGradient` does (0 pixels differ over the whole cone),
 and so does resvg. SVG 1.1 has no `fr` at all, so a viewer without SVG 2
-radial gradients was already wrong for these cones. Safari (`qlmanage`
+radial gradients was already wrong for these cones. WebKit (`qlmanage`
 thumbnail) differs from the PNG only on the cone's edge pixels.
 
 **The fix** (`src/svg.rs`).

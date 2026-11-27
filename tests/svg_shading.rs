@@ -370,8 +370,7 @@ fn each_degenerate_case_writes_what_the_png_paints() {
 /// need it, with its end extended, is one gradient as before.
 #[test]
 fn a_cone_with_its_end_not_extended_paints_its_smaller_root_first() {
-    for case in 13..=16 {
-        let (name, pre, dict) = CASES[case];
+    for &(name, pre, dict) in &CASES[13..] {
         for ext in ["false false", "true false"] {
             let (_, svg) = png_and_svg(&program(name, pre, dict, ext));
             assert_eq!(

@@ -1478,6 +1478,9 @@ pub(crate) fn needs_smaller_root(kind: &ShKind, extend: [bool; 2]) -> bool {
     !extend[1] && is_cone(kind)
 }
 
+/// A shading's geometry, stops and `/Extend`.
+type BackwardShading = (ShKind, Vec<(f32, f32, f32, f32)>, [bool; 2]);
+
 /// The same shading run the other way: its circles swapped, the stops
 /// mirrored and the ends exchanged. Its larger root is the original's
 /// smaller one.
@@ -1485,7 +1488,7 @@ fn run_backwards(
     kind: &ShKind,
     stops: &[(f32, f32, f32, f32)],
     extend: [bool; 2],
-) -> (ShKind, Vec<(f32, f32, f32, f32)>, [bool; 2]) {
+) -> BackwardShading {
     let kind = match *kind {
         ShKind::Axial { x0, y0, x1, y1 } => ShKind::Axial {
             x0: x1,
