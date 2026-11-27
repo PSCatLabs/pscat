@@ -57,6 +57,8 @@ fn stdout_is_closed() -> bool {
 
 /// Flush stdout, noting a reader that has gone like [`stdout_text`].
 fn flush_stdout() {
+    // A timed run's held-back stdout first, into std's buffer (#1457).
+    pscat::hand_over_stdout();
     if let Err(e) = io::stdout().flush()
         && e.kind() == io::ErrorKind::BrokenPipe
     {
@@ -88,6 +90,9 @@ fn stdout_text(args: std::fmt::Arguments<'_>) {
     if STDOUT_CLOSED.load(Relaxed) {
         return;
     }
+    // Program stdout a timed run held back comes before the CLI's own
+    // (#1457), as it does without a limit.
+    pscat::hand_over_stdout();
     if let Err(e) = io::stdout().lock().write_fmt(args) {
         if e.kind() != io::ErrorKind::BrokenPipe {
             panic!("failed printing to stdout: {e}");
@@ -963,6 +968,9 @@ fn exit_with_parent(parent: u32) {
                     // that just died, and a failed write would panic this
                     // thread instead of ending the process.
                     let _ = writeln!(io::stderr(), "pscat: the parent process is gone; stopping");
+                    // What a timed run held back of stdout: as much as goes
+                    // out at once (std's exit flush does its own buffer).
+                    pscat::drain_stdout_now();
                     std::process::exit(1);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));

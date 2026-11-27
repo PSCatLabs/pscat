@@ -506,6 +506,9 @@ impl App {
             }
             return;
         }
+        // Program stdout a timed run held back goes ahead of the prompt
+        // (#1457).
+        crate::hand_over_stdout();
         if state.eof {
             println!();
             event_loop.exit();

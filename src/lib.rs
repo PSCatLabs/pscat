@@ -276,6 +276,26 @@ pub mod write_roots;
 
 pub use error::PsError;
 pub use interp::Interp;
+
+/// Hand program stdout a timed run left in its line buffer over to std's
+/// own stdout buffer (#1457), before writing to stdout yourself: the CLI
+/// calls it ahead of its own output and prompts, so the two keep the order
+/// they have without a time limit. No I/O while std's buffer is empty;
+/// a no-op off unix and when nothing is held.
+#[doc(hidden)]
+pub fn hand_over_stdout() {
+    #[cfg(unix)]
+    let _ = timed_write::hand_over();
+}
+
+/// Write what a timed run left in its stdout line buffer without waiting
+/// or taking a lock (#1457), for a thread about to `process::exit` while
+/// the interpreter may be blocked; what does not fit at once is dropped.
+#[doc(hidden)]
+pub fn drain_stdout_now() {
+    #[cfg(unix)]
+    timed_write::drain_now();
+}
 pub use limits::{Limit, Limits, LimitsError};
 pub use memtrack::TrackingAllocator;
 #[doc(hidden)]
