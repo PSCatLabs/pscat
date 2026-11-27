@@ -2654,10 +2654,18 @@ impl Interp {
         // Where each element was written: one binary search per frame, in a
         // table the scanner kept (#1405).
         let lines = self.source_lines.borrow();
-        for (frame, body) in trace.iter_mut().zip(&bodies) {
+        // Which frames were written in a `run` file: `file` is also set for
+        // the main program when the host names it, as the CLI does.
+        let mut library = vec![false; if lint_names { trace.len() } else { 0 }];
+        for (i, (frame, body)) in trace.iter_mut().zip(&bodies).enumerate() {
             if let Some(p) = lines.position(body, frame.element) {
                 frame.line = Some(p.line as usize);
                 frame.file = p.file.as_deref().map(report_name);
+            }
+            if lint_names {
+                library[i] = lines
+                    .line_of(body, frame.element)
+                    .is_some_and(|(_, file)| file.is_some());
             }
         }
         drop(lines);
@@ -2666,7 +2674,7 @@ impl Interp {
         if let Some(lint) = self.shadow_trace.as_mut() {
             let mut names: Vec<u32> = Vec::new();
             for (frame, id) in read {
-                if trace[frame].file.is_some() && !names.contains(&id) {
+                if library[frame] && !names.contains(&id) {
                     names.push(id);
                 }
             }
@@ -4246,7 +4254,7 @@ impl Interp {
                     let before = self
                         .dstack
                         .get(2)
-                        .is_some_and(|u| u.borrow().get_id_ref(id).is_some());
+                        .is_some_and(|u| u.try_borrow().is_ok_and(|d| d.get_id_ref(id).is_some()));
                     trace.names.library_def(id, file, before);
                 }
             }

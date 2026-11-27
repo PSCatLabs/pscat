@@ -1335,8 +1335,8 @@ fn check_shadowed_operators(interp: &Interp, findings: &mut Vec<LintFinding>) {
 /// show), and this reports those the program also defined. A program that
 /// shadows a library name and works is not reported. `pscat lint` without an
 /// error has nothing to say here: the sweep over `lib/`, `gallery/` and
-/// `examples/` found 7% of the programs that load a library define a name the
-/// library defines (`shade`, `tx`, `w`, `pal`, `showctr`), every one on
+/// `examples/` found 7 of the 124 programs that load a library define a name a
+/// library defines (`shade`, `showctr`, `sfworld`, `spmetal`, ...), every one on
 /// purpose and working, so a static note would be noise
 /// (notes/1456-lint-library-name-clash.md).
 fn check_shadowed_library_names(interp: &Interp, findings: &mut Vec<LintFinding>) {

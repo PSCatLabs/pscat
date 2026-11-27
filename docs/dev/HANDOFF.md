@@ -2007,7 +2007,7 @@ renders eight examples in both and compares block-downsampled output).
   defined the same name on, in any dictionary; `snapshot_error_trace` keeps the names shown around
   each library frame's running element, and the check reports the ones in both. The static
   alternative (a note on every program that defines a library's name) was swept and rejected:
-  correct programs do it (`shade`, `tx`, `w`).
+  7 of 124 library-loading programs do it, correctly (`shade`, `showctr`, `sfworld`, ...).
   `[shadowed-operator]` (#1052, #1109, `notes/1109-shadowed-operator-line-and-systemdict.md`)
   reads the finished `userdict`/`systemdict`; `Interp::trace_operator_shadows` (on
   under `--lint`, via `Options::new_interp`) makes `def`/`store` record the scanner
