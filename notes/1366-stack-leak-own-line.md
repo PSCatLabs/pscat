@@ -67,8 +67,11 @@ has dropped its caller's frame anyway.
 
 - The oldest item is credited to the element that pushed the item at the low point of
   the token's run. An item replaced in place (`7` then `2 mul`) keeps the line of the
-  value it came from. A loop's index that the body does not consume is the oldest item
-  of its loop and is credited to the `} for` token (its own push).
+  value it came from. A loop's index that the body does not consume is the loop's own
+  push, made in the same step that runs the body's first element, so it is credited to
+  that element's line (`0 1 9 {` / `1 pop` / `} for` names line 2); a loop with an empty
+  body has no element and names the `} for` token (an own line of 0, what an empty
+  body's table entry holds, is treated as unknown).
 - A bottom-item witness (#1081) is gone: the low point does what it did, for a token that
   consumed the stack and left another. What it also did, crediting an accumulator
   (`0` on line 1, `1 add` on line 2) to the last token that changed it, is not done: it

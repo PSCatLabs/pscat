@@ -4068,17 +4068,21 @@ impl Interp {
             };
             t.ran(top, estack.len())
         });
-        let (site, tentative) = match estack.last() {
-            Some(Frame::Proc { body, pc }) if next => (body.storage_site(*pc), false),
-            Some(
-                Frame::Repeat { body, .. }
-                | Frame::Loop { body }
-                | Frame::For { body, .. }
-                | Frame::Forall { body, .. },
-            ) if next => (body.storage_site(0), true),
-            _ => ((0, 0), false),
-        };
-        trace.set_pending(site, tentative, estack.len());
+        // Nothing reads the element if an item is already found at the low
+        // point (the next sample only moves the low point, which needs none).
+        if trace.wants_pending() {
+            let (site, tentative) = match estack.last() {
+                Some(Frame::Proc { body, pc }) if next => (body.storage_site(*pc), false),
+                Some(
+                    Frame::Repeat { body, .. }
+                    | Frame::Loop { body }
+                    | Frame::For { body, .. }
+                    | Frame::Forall { body, .. },
+                ) if next && !body.is_empty() => (body.storage_site(0), true),
+                _ => ((0, 0), false),
+            };
+            trace.set_pending(site, tentative, estack.len());
+        }
     }
 
     pub(crate) fn shadow_trace(&self) -> Option<&crate::lint::ShadowTrace> {

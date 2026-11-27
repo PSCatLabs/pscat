@@ -500,6 +500,13 @@ impl StackTrace {
         }
     }
 
+    /// Whether the next sample will read the element the step about to run
+    /// executes: only when no item has been found at the low point yet.
+    #[inline(always)]
+    pub(crate) fn wants_pending(&self) -> bool {
+        !self.item_set
+    }
+
     /// The procedure element the step about to run executes (`(0, 0)` for
     /// none), and whether that is only the guess for a loop's first element.
     #[inline(always)]
@@ -561,6 +568,9 @@ impl StackTrace {
         }
         self.low = depth;
         self.item_set = false;
+        // A boundary step runs a scanned token, no procedure element.
+        self.pending = (0, 0);
+        self.tentative = false;
     }
 
     #[cfg(test)]
@@ -592,7 +602,8 @@ impl StackTrace {
             .flatten()
             .filter(|(_, name)| name.map(|n| &**n) == at.source.as_deref())
             .map(|(line, _)| line);
-        let line = match own {
+        // Line 0 is what a body with no element has: no answer.
+        let line = match own.filter(|l| *l > 0) {
             Some(line) => usize::try_from(line).ok()?,
             None => at.line?,
         };
@@ -1738,6 +1749,36 @@ mod tests {
         let m = leak_message(src);
         assert!(
             m.contains("the oldest, 9, was left when the program reached line 5"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn an_empty_loop_body_names_the_loop_not_line_0() {
+        // Nothing in the body to name: the loop's own push is the loop's.
+        for src in [
+            "0 1 9 { } for\n",
+            "0 1 100000 {\n} for\n",
+            "[1 2 3] {\n} forall\n",
+        ] {
+            let m = leak_message(src);
+            assert!(m.contains("was left when the program reached line "), "{m}");
+            assert!(!m.contains("line 0"), "{m}");
+        }
+        let m = leak_message("0 1 9 {\n} for\n");
+        assert!(
+            m.contains("the oldest, 0, was left when the program reached line 2"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_loop_index_the_body_does_not_pop_is_credited_to_the_first_element() {
+        // The step that starts an iteration pushes the index and runs the first
+        // element, so the index is the first element's.
+        let m = leak_message("0 1 9 {\n  1 pop\n} for\n");
+        assert!(
+            m.contains("the oldest, 0, was left when the program reached line 2"),
             "{m}"
         );
     }
