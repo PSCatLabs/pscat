@@ -2255,7 +2255,7 @@ impl Interp {
             return None;
         }
         let name = errorname?;
-        let text = command.as_ref().map(Object::cvs_text);
+        let text = command.as_ref().map(Object::text);
         let rebuilt = PsError::from_name(&name, text.clone())?;
         // Rebuilt from `$error` for everything `$error` can express,
         // which is everything but `syntaxerror`'s detail — matching the
@@ -2279,7 +2279,7 @@ impl Interp {
     /// run on is the offending command, for `$error /command` and for
     /// the report of an error nothing catches.
     pub(crate) fn set_error_command(&mut self, obj: Object) {
-        self.last_name = Some(crate::name::intern(&obj.cvs_text()).id());
+        self.last_name = Some(crate::name::intern(&obj.text()).id());
         self.error_command = Some(obj);
     }
 

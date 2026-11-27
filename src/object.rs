@@ -466,8 +466,11 @@ impl Object {
     }
 
     /// Text form, as the `=` operator prints it: the "natural" rendering
-    /// for scalars and string contents, `--nostringval--` for everything
-    /// that has no string value.
+    /// for scalars and string contents, an operator's name (as in
+    /// Ghostscript, which `cvs` and `$error /command` also give), and
+    /// `--nostringval--` for everything else that has no string value.
+    /// A string's bytes above 127 come out as U+FFFD here; `=` and `cvs`
+    /// use [`Object::text_bytes`], which keeps them.
     pub fn text(&self) -> String {
         match &self.value {
             Value::Integer(i) => i.to_string(),
@@ -475,24 +478,42 @@ impl Object {
             Value::Boolean(b) => b.to_string(),
             Value::Name(n) => n.to_string(),
             Value::String(s) => s.text(),
+            Value::Operator(op) => op.name.to_string(),
             Value::Mark
             | Value::Null
             | Value::Array(_)
             | Value::Dict(_)
-            | Value::Operator(_)
             | Value::File(_)
             | Value::Save(_)
             | Value::GState(_) => "--nostringval--".to_string(),
         }
     }
 
-    /// What `cvs` writes: `text()`, except that an operator gives its name,
-    /// as in the PLRM and Ghostscript (`=` still prints `--nostringval--`).
-    /// Also how an operator in `$error /command` is named in a report.
-    pub(crate) fn cvs_text(&self) -> String {
+    /// `text()` as the bytes `=`, `cvs` and `stack` write: a string's own
+    /// bytes, unchanged (Ghostscript writes a byte above 127 raw), the
+    /// `text()` of everything else.
+    pub(crate) fn text_bytes(&self) -> Vec<u8> {
         match &self.value {
-            Value::Operator(op) => op.name.to_string(),
-            _ => self.text(),
+            Value::String(s) => s.borrow_bytes().to_vec(),
+            _ => self.text().into_bytes(),
+        }
+    }
+
+    /// `text_bounded` as bytes: a string is cut to `max` bytes (then
+    /// ` ... truncated`) without decoding it.
+    pub(crate) fn text_bytes_bounded(&self, max: usize) -> Vec<u8> {
+        match &self.value {
+            Value::String(s) => {
+                let bytes = s.borrow_bytes();
+                let shown = &bytes[..bytes.len().min(max)];
+                let mut out = shown.to_vec();
+                if shown.len() < bytes.len() {
+                    out.push(b' ');
+                    out.extend_from_slice(TRUNCATED.as_bytes());
+                }
+                out
+            }
+            _ => self.text_bounded(max).into_bytes(),
         }
     }
 
@@ -772,8 +793,22 @@ fn is_container(o: &Object) -> bool {
 
 /// `{:?}` rather than `{}` so whole reals keep their decimal point
 /// (`2.0`, not `2`) — the type distinction is meaningful in PostScript.
+/// An exponent is spelled as Ghostscript's `=` and `==` both spell it, with
+/// a sign and at least two digits (`1e+20`, `1e-05`; Rust gives `1e20`,
+/// `1e-5`). Only the spelling follows gs (#1428): pscat keeps all of an f64's
+/// digits and its own point of switching to an exponent (1e16), where gs
+/// prints a float32 and its two printers disagree with each other.
 pub(crate) fn format_real(r: f64) -> String {
-    format!("{r:?}")
+    let s = format!("{r:?}");
+    let Some(e) = s.find('e') else {
+        return s;
+    };
+    let (mantissa, exp) = (&s[..e], &s[e + 1..]);
+    let (sign, digits) = match exp.strip_prefix('-') {
+        Some(d) => ('-', d),
+        None => ('+', exp),
+    };
+    format!("{mantissa}e{sign}{digits:0>2}")
 }
 
 pub(crate) fn escape_string(bytes: &[u8]) -> String {

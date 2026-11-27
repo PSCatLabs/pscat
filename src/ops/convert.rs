@@ -98,8 +98,21 @@ fn cvs(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let any = it.pop()?;
-    let text = any.cvs_text();
-    buf.write_at(0, text.as_bytes())?;
+    // A string is copied as its bytes, not decoded (gs keeps a byte above
+    // 127). One too long for the buffer is refused before the copy. The copy
+    // that is made (a string as long as its buffer, which may be 16 MiB) is
+    // asked of the memory cap first and counted as work, a step per KiB as a
+    // file read is, before it is made. `s s cvs` (one storage for both
+    // operands) reads its copy, never the live borrow.
+    if let Value::String(src) = &any.value {
+        if src.len() > buf.len() {
+            return Err(PsError::Rangecheck);
+        }
+        it.check_alloc(src.len())?;
+        it.poll_limits((src.len() / 1024) as u64)?;
+    }
+    let text = any.text_bytes();
+    buf.write_at(0, &text)?;
     it.push(Object::lit(Value::String(buf.interval(0, text.len())?)));
     Ok(())
 }
