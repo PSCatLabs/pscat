@@ -2166,15 +2166,17 @@ fn a_flat_start_leaves_no_notch_at_a_corner() {
 /// the second piece used to paint it over the first piece's finished ink, a
 /// darker arc (up to 82 levels on 21 to 90 pixels at 216 dpi). Touch rising,
 /// falling, and coming back to a band the stroke has already drawn (which
-/// dkrender draws first in each pass), at the band change (0.5 or 0.75) and
-/// just before it: now no pixel differs by more than an ordinary seam's.
+/// dkrender draws first in each pass), with three levels, at the band change
+/// (0.5 or 0.75), just before it and just after it: now no pixel differs by
+/// more than an ordinary seam's.
 #[test]
 fn a_cut_at_a_touch_band_change_leaves_no_ring() {
     let line = "newpath 10 20 moveto 90 20 lineto";
     for (touch, cuts) in [
-        ("{ 0.4 mul 0.3 add }", ["0.5", "0.47"]),
-        ("{ 0.4 mul 0.7 exch sub }", ["0.5", "0.47"]),
-        ("{ 0.5 sub abs 0.8 mul 0.3 add }", ["0.75", "0.73"]),
+        ("{ 0.4 mul 0.3 add }", &["0.5", "0.47"][..]),
+        ("{ 0.4 mul 0.3 add } /Levels 3", &["0.5", "0.47"][..]),
+        ("{ 0.4 mul 0.7 exch sub }", &["0.5", "0.47", "0.53"][..]),
+        ("{ 0.5 sub abs 0.8 mul 0.3 add }", &["0.75", "0.73"][..]),
     ] {
         let opts = format!("/Width 8 /Touch {touch} /Seed 3");
         let whole = data(&board(

@@ -1354,8 +1354,8 @@ renders eight examples in both and compares block-downsampled output).
    shared stop's reach on the far side of the cut, drawn at every level but the
    faintest; a level is one colour for the whole record, so the brightest level wins): the pieces layer their levels there as
    the whole stroke does (ring of up to 82 levels gone; `notes/1444-drykit-band-change-cut.md`).
-   Gotcha: `dkZink` reads `dkZp`/`dkZmax` (dkrender's pass) for that, so nothing between
-   them may reuse those names.
+   Gotcha: `dkrender` leaves an overlap out of the passes it lacks by `dkZp`/`dkZmax`, so
+   nothing it calls before that filter may reuse those names.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

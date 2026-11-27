@@ -84,4 +84,8 @@ before this change, and it is proposed as a follow-up.
 part mode, so `scripts/identity_check.sh` is byte-identical for drykit,
 drychalk, drycharcoal and drycrayon. Keys, defaults and errors are unchanged.
 Two band changes within one reach are each matched against the run just
-before them, not layered three ways.
+before them, not layered three ways. A lone `/From a` piece with nothing drawn
+before it also gets the overlap: the earlier band's brighter levels inside the
+shared stop's reach behind the cut, where its own round start already spills.
+The "within one reach" test is a straight-line distance, so on a tight curve a
+band change further along the path can pass it; the disc clip bounds the effect.
