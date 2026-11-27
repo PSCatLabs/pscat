@@ -186,6 +186,8 @@ const SEND_FLAGS: libc::c_int = libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL;
 const SEND_FLAGS: libc::c_int = 0;
 
 /// How much a pipe takes without blocking, where the system says.
+// Only macOS says; elsewhere every pipe is `Unknown`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(PartialEq, Eq, Debug)]
 enum Room {
     /// This many bytes are free: a write of no more returns at once.
