@@ -387,13 +387,15 @@
         dcdot {
             dcPfrom 0.5 le dcPto 0.5 gt and { dcpts dcpolypath dcSo dkstroke } if
         } {
-            dcpts dcpiece /dcpts exch def
-            dcpts length 0 gt {
-                dcSo /Touch { dcPspan mul dcPfrom add dctouchat } put
-                dcSo /Pressure { dcPspan mul dcPfrom add dcpressat } put
-                dcpts dcpolypath
-                dcSo dkstroke
-            } if
+            % drykit cuts the whole stroke (#1419): its stops, widths and
+            % ink branch are the whole stroke's, so a growing /To keeps
+            % what is drawn, and a piece after another starts flat
+            dcSo /From dcPfrom put
+            dcSo /To dcPto put
+            dcpts dcpolypath
+            dcSo dkstroke
+            dcSo /From undef
+            dcSo /To undef
         } ifelse
     } {
         dcpts dcpolypath

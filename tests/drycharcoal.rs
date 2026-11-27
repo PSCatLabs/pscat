@@ -682,9 +682,11 @@ fn diffs(a: &[u8], b: &[u8], x1: usize) -> u8 {
 }
 
 /// The part keys are the whole stroke's when left out or whole, and a
-/// growing `/From 0 /To t` keeps the part already drawn: the medium's
-/// flicked lift (`/Pressure`) and its lanes' dropouts belong to the whole
-/// stroke, so the lift appears only when the stroke is finished.
+/// growing `/From 0 /To t` keeps the part already drawn, pixel for pixel:
+/// the medium's flicked lift (`/Pressure`), its lanes' dropouts and each
+/// run's ink branch belong to the whole stroke, so the lift appears only
+/// when the stroke is finished. (Before #1419 about one frame in 14 moved
+/// a few hundred pixels of the drawn part, by up to ~80 levels.)
 #[test]
 fn a_growing_charcoal_stroke_keeps_what_it_has_drawn() {
     for opts in [
@@ -700,25 +702,15 @@ fn a_growing_charcoal_stroke_keeps_what_it_has_drawn() {
             .iter()
             .map(|t| data(&part(&format!("{opts} /From 0 /To {t}"))))
             .collect();
-        // now and then (measured: one frame of 14) a few hundred texture
-        // pixels of the drawn part change, as drykit draws a longer run
-        let mut moved = 0;
         for k in 0..tos.len() - 1 {
             let behind = ((10.0 + 180.0 * tos[k] - 12.0) * 2.0) as usize;
             let worst = diffs(&frames[k], &frames[k + 1], behind);
             assert!(
-                worst <= 110,
+                worst == 0,
                 "`{opts}`: frame {k} -> {} changed its drawn part by up to {worst}",
                 k + 1
             );
-            if worst > 24 {
-                moved += 1;
-            }
         }
-        assert!(
-            moved <= 3,
-            "`{opts}`: {moved} of 14 frames redrew their texture"
-        );
         assert_eq!(frames[14], whole, "`{opts}` at t = 1");
         // two halves on one canvas make the whole, up to the seam
         let halves = render(
