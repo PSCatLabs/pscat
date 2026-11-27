@@ -132,7 +132,7 @@ difference against our PNG, out of 255; the bound is 3.
 | imagemask with a shading pattern | 0.11 | 0.33 | 0.42 (8x) | | 0.000 |
 | page shading pattern inside a tiling PaintProc | 0.54 | | 0.38 (8x) | 0.27 | |
 | pen-space strokes (direct gradient and `<pattern>`), radial + BBox, Type 1 Background outside its Domain | 0.04 | 0.02 | 0.93 | 0.93 | 0.002 |
-| radial with circles not nested (two roots) | (SVG gap) | | 0.21 | 0.21 | |
+| radial with circles not nested (two roots) | 0.1 (#1370; was a gap) | | 0.21 | 0.21 | |
 | `setalpha 0.5` fill | 0.14 | (hayro ignores `ca`) | 0.38 | (`setalpha` is pscat's) | |
 
 **Text.** gs paints text under a shading pattern without anti-aliasing,
@@ -151,8 +151,9 @@ only in gs's aliased edges.
 
 - **Foreign SVG.** A Type 1 pattern's SVG image covers the made context's
   canvas only. Used in another context, it shows nothing past that.
-- **Not-nested radials in SVG.** A radial whose circles are not nested
-  keeps `shfill`'s SVG gap: SVG has no smaller root.
+- **Not-nested radials in SVG.** Closed by #1370
+  (`notes/1370-svg-cone-smaller-root.md`): the SVG has a second gradient
+  for the smaller root.
 - **Text output.** `--svg-text` and `--pdf-text` keep glyph outlines under
   a shading pattern, as under a tiling one.
 - **Mesh shadings.** Types 4–7 are not implemented, so neither are their

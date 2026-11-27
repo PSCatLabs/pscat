@@ -734,7 +734,8 @@ renders eight examples in both and compares block-downsampled output).
   transparent stop costs tiny-skia its opaque fast path. A radial whose
   circles are not nested, end unextended, paints from a two-gradient
   layer (`two_root_layer`) so a point takes its smaller root as gs does,
-  and a degenerate radial paints gs's disk. SVG export gets
+  and a degenerate radial paints gs's disk. SVG gets the same two roots as
+  two gradients (#1370, `notes/1370-svg-cone-smaller-root.md`). SVG export gets
   real `<linearGradient>`/`<radialGradient>`, lengthened past an
   unextended end with a transparent run (`extended_for_svg`); PDF export writes a real
   `sh` on a `/Shading` resource (#1028: before, a flat fill in the
