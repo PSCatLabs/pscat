@@ -761,6 +761,16 @@
     0 1 2 { /dkFj exch def dkFp0 dkFj get dup dkFp1 dkFj get exch sub dkFf mul add } for
 } bind def
 
+% key -> index   (#1444: where the key is first met among the whole record's
+% runs, dkFkeys; dkrender draws its touch groups in that order in each pass)
+% @internal
+/dkFrank {
+    /dkFq exch def
+    0 1 dkFkeys length 1 sub {
+        dkFkeys 1 index get dkFq eq { exit } if pop
+    } for
+} bind def
+
 % [key stops] -> [key stops'] or nothing   (#1418: the part of one run from
 % dkFa to dkFb of its subpath, along its length, which is the stops' fourth
 % number, 0..1. A cut inside a segment adds a stop there, interpolated, so
@@ -772,7 +782,14 @@
 % 2 on every stop when the WHOLE run's width varies, so the part is inked as
 % the whole run is (a filled union) even where the part alone is constant;
 % 1 more on the first stop when the run was cut there (dkFa inside it), so
-% that end is flat and does not paint back over the piece before it.)
+% that end is flat and does not paint back over the piece before it.
+% #1444: a run that carries on from the one before it (a touch band change:
+% the two share their stop) and starts at the /From cut or within one reach
+% after it gets 4 on its first stop and the cut, flags [... cx cy chw dx dy],
+% so dkZink clips its round start behind the cut as well (dkZbehind), and 8
+% more when its band is first drawn after the cut band's (dkFkeys), so its top
+% level, which the whole stroke paints over the cut band's, is left whole.
+% dkSrecord sets dkFcut and dkFlast to null before the record's runs.)
 % @internal
 /dkFrun {
     aload pop /dkFs exch def /dkFk exch def
@@ -780,11 +797,35 @@
     dkFs 0 get 3 get /dkFt0 exch def
     dkFs dkFn 1 sub get 3 get /dkFt1 exch def
     dkFt1 dkFt0 sub 1e-9 le {
+        /dkFcut null def /dkFlast null def
         dkFt0 dkFa ge dkFt0 dkFb lt dkFb 1 ge or and {
             dkFk [ 0 1 dkFn 1 sub { dkFat 3 array astore } for ] 2 array astore
         } if
     } {
-        dkFt0 dkFb lt dkFt1 dkFa gt and {
+        % #1444: does this run hold the cut (after its start, up to its end)?
+        /dkFhold dkFa 0 gt dkFt0 dkFa 1e-9 sub lt and dkFt1 dkFa 1e-9 sub ge and def
+        % or carry on from the run that did, starting within one reach of the
+        % cut? (its first stop is that run's last, the same object: a band
+        % change) Then that run's tail comes first, for the overlap (dkZover).
+        dkFcut null ne { dkFs 0 get dkFlast eq dkFt0 dkFb lt and } { false } ifelse {
+            dkFs 0 get dup 0 get dkFcut 0 get sub dup mul
+            exch 1 get dkFcut 1 get sub dup mul add sqrt
+            dkFs 0 get 2 get dkFhalo add dkFdp add lt {
+                % the overlap's levels: the whole stroke draws the cut band's
+                % top levels after this band's first, or all of them when
+                % this band's group is drawn first in each pass
+                /dkFD dkSlevels dkFk dkFrank dkFcut 5 get gt { 2 } { 1 } ifelse sub def
+                dkFD 0 ge {
+                    /dkFF [ dkFcut 7 get 16 add dkFcut 8 get dkFcut 9 get dkFcut 10 get
+                            dkFcut 0 5 getinterval aload pop
+                            dkFs 0 get 0 3 getinterval aload pop dkFhalo add dkFD ] def
+                    dkFcut 11 get [ dkFcut 6 get { aload pop pop dkFF 4 array astore } forall ]
+                    2 array astore
+                } if
+            } if
+        } if
+        /dkFcut null def
+        dkFt0 dkFb lt dkFt1 dkFa gt and dkFhold or {
             % the whole run's ink branch, decided once for every part of it
             /dkFvar 0 def /dkFhm 0 def
             dkFs {
@@ -804,6 +845,39 @@
                 } if
                 /dkFpx dkFcx def /dkFpy dkFcy def
             } for
+        } if
+        dkFhold {
+            % the cut point, its segment, and the run's tail behind it far
+            % enough that its ink covers whatever the next run's round start
+            % reaches behind the cut
+            0 1 dkFn 2 sub {
+                /dkFi exch def
+                dkFs dkFi 1 add get 3 get dkFa 1e-9 sub ge { exit } if
+            } for
+            dkFs dkFi 1 add get 3 get dkFa 1e-9 add le
+                { dkFi 1 add dkFat } { dkFa dkFcutat } ifelse
+            /dkFch exch def /dkFcy exch def /dkFcx exch def
+            /dkFlim dkFhm dkFhalo add 3 mul dkFdp 2 mul add def
+            /dkFj dkFi def /dkFd 0 def
+            {
+                dkFj 0 le dkFd dkFlim ge or { exit } if
+                dkFs dkFj get dup 0 get exch 1 get
+                dkFj dkFi eq { dkFcy } { dkFs dkFj 1 add get 1 get } ifelse sub dup mul exch
+                dkFj dkFi eq { dkFcx } { dkFs dkFj 1 add get 0 get } ifelse sub dup mul add sqrt
+                dkFd add /dkFd exch def
+                /dkFj dkFj 1 sub def
+            } loop
+            /dkFcut [
+                dkFcx dkFcy dkFch
+                dkFs dkFi 1 add get 0 get dkFs dkFi get 0 get sub
+                dkFs dkFi 1 add get 1 get dkFs dkFi get 1 get sub
+                dkFk dkFrank
+                dkFs dkFj dkFn dkFj sub getinterval
+                dkFvar dkFhm dkFcl dkFn dkFk
+            ] def
+        } if
+        /dkFlast dkFs dkFn 1 sub get def
+        dkFt0 dkFb lt dkFt1 dkFa gt and {
             /dkFref [ dkFvar dkFhm dkFcl dkFn ] def
             /dkFopen false def
             [
@@ -1058,6 +1132,19 @@
         % stroke; cut the runs now, so the stops, the touch bands, the
         % widths and the lanes' chains are the whole stroke's
         /dkFa dkSfrom def /dkFb dkSto def
+        % #1444: the order in which the whole record's touch keys are first
+        % met (dkrender's group order), and the reach margin dkFrun's chain
+        % test allows (the faint level's halo and a device pixel)
+        /dkFkeys dkSrec /runs get length array def /dkFkc 0 def
+        dkSrec /runs get {
+            0 get /dkFq exch def
+            false 0 1 dkFkc 1 sub { dkFkeys exch get dkFq eq { pop true exit } if } for
+            not { dkFkeys dkFkc dkFq put /dkFkc dkFkc 1 add def } if
+        } forall
+        /dkFkeys dkFkeys 0 dkFkc getinterval def
+        /dkFhalo dkSrec /halo get def
+        /dkFdp 1 0 idtransform dup mul exch dup mul add sqrt def
+        /dkFcut null def /dkFlast null def
         dkSrec /runs [ dkSrec /runs get { dkFrun } forall ] put
         dkSrec /from dkSfrom put
         dkSrec /to dkSto put
@@ -1499,6 +1586,36 @@ systemdict /.sameclip known /dkPsameok exch def
     eoclip newpath
 } bind def
 
+% -   (#1444: clips to where the run after a /From cut, starting within one
+% reach after it at a touch band change, reaches back behind the cut: its first
+% stop's disc (with the faint level's halo and a device pixel), on the far side of the
+% line across the cut point, square to the cut segment. dkZov is the overlap's
+% flags [f hm cl n cx cy chw dx dy bx by br D], br that stop's half-width and halo (dkFrun's 16). The cut band's
+% tail is drawn there again at the levels the whole stroke draws over the next
+% band's start, so the next piece's round start sits between the levels as it
+% does in the whole stroke instead of over the earlier piece's finished ink.)
+% @internal
+/dkZover {
+    /dkZox dkZov 4 get def /dkZoy dkZov 5 get def
+    dkZov 7 get dup mul dkZov 8 get dup mul add sqrt /dkZoq exch def
+    dkZoq 0 gt
+        { /dkZoux dkZov 7 get dkZoq div def /dkZouy dkZov 8 get dkZoq div def }
+        { /dkZoux 1 def /dkZouy 0 def } ifelse
+    /dkZor dkZov 11 get 1 0 idtransform dup mul exch dup mul add sqrt add def
+    /dkZoB dkZov 9 get dkZox sub dup mul dkZov 10 get dkZoy sub dup mul add sqrt
+        dkZor add 2 mul 10 add def
+    newpath
+    dkZov 9 get dkZor add dkZov 10 get moveto
+    dkZov 9 get dkZov 10 get dkZor 0 360 arc closepath
+    clip newpath
+    % the half-plane behind the cut, as a square of side 2 dkZoB
+    dkZox dkZouy dkZoB mul sub dkZoy dkZoux dkZoB mul add moveto
+    dkZoux dkZoB mul -2 mul dkZouy dkZoB mul -2 mul rlineto
+    dkZouy dkZoB mul 2 mul dkZoux dkZoB mul -2 mul rlineto
+    dkZoux dkZoB mul 2 mul dkZouy dkZoB mul 2 mul rlineto
+    closepath clip newpath
+} bind def
+
 % run -   (paints one run's ink, in the current (the run's own) space)
 % A run of one stop is a dot. Otherwise a constant-width run is a
 % round-capped stroke, and a varying one is the union of a disc at every
@@ -1513,16 +1630,24 @@ systemdict /.sameclip known /dkPsameok exch def
 % @internal
 /dkZink {
     /dkZir exch def
-    /dkZflat false def
+    /dkZflat false def /dkZov null def /dkZskip false def
     dkZir 0 get length 3 gt {
         /dkZvar false def
         dkZir { dup length 3 gt { 3 get 0 get cvi 2 and 0 ne { /dkZvar true def } if } { pop } ifelse } forall
         /dkZflat dkZir 0 get 3 get 0 get cvi 1 and 0 ne def
+        % #1444: the overlap of a cut band's tail (dkFrun's 16), only at the
+        % levels it has there and only inside dkZover's region
+        dkZir 0 get 3 get dup 0 get cvi 16 and 0 ne {
+            /dkZov exch def
+            dkZmax dkZp sub dkZov 12 get gt { /dkZskip true def } if
+        } { pop } ifelse
         /dkZir [ dkZir { 0 3 getinterval } forall ] def
     } { /dkZvar false def } ifelse
     /dkZconst dkZvar not def
     dkZir { 2 get dkZir 0 get 2 get ne { /dkZconst false def } if } forall
+    dkZskip not {
     dkZflat { gsave dkZbehind } if
+    dkZov null ne { gsave dkZover } if
     dkZir length 1 eq dkZconst not or {
         newpath
         dkZir {
@@ -1557,7 +1682,9 @@ systemdict /.sameclip known /dkPsameok exch def
             stroke
         } { pop } ifelse
     } ifelse
+    dkZov null ne { grestore } if
     dkZflat { grestore } if
+    } if
 } bind def
 
 % entries -   (dkZdraw in chunks whose estimated cells fit dkbudget)
