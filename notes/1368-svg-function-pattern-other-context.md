@@ -45,24 +45,45 @@ tile bigger than the page, or the other direction, leaves the image short.
   keep going through the hop group. The `ShadingKey` carries the canvas size.
 
 **Limits.** The image is made under the mark's own probe, before the mark paints
-or records anything.
-- Work is `shading_layer`'s (a step per 1024 units, held against `--max-steps`
-  and polled against `--max-time` while it paints); its memory is held against
-  `--max-memory` before the layer is allocated, and the encoded PNG against it
-  twice (what the entry keeps, and the base64 the recorder writes).
-- A stop leaves no entry, and the SVG and the page as they were.
+or records anything, and Codex round 1 on PR #1475 (R1 to R3) tightened what is
+looked at before the entry is made:
+- **One cost with the mark's layer (R1).** The image is held to the steps the
+  limit has left after the mark's own layer, not to the whole budget again, so a
+  full-cell fill whose layer and image each fit but not both stops with the page,
+  the SVG and the cache as they were.
+- **The encoding (R2).** tiny-skia's PNG encoder copies the pixels and writes its
+  output, which deflate bounds by about the input. Both are held against
+  `--max-memory` (8 bytes a pixel, with the layer still live) and the encoding is
+  charged to `--max-steps` (`PNG_ENCODE_UNITS` a pixel) before it runs; the clock
+  and the cap are polled after it, before the entry is kept.
+- **The serialization (R3).** The recorder writes an image as an `<image>` def of
+  its own, once per recorder (`SvgRecorder::image_def`, by the image's address),
+  and each `<pattern>` (one per pen, per placement) shows it with `<use>`. Before,
+  every `ShadingKey` wrote its own base64 copy, and the base64 was copied twice
+  more on its way into the defs. The base64 is appended to the defs directly,
+  reserved once. What the def will take (its base64, the growth of the defs
+  string, the id table) is `SvgRecorder::image_cost`, held against the cap before
+  the mark is recorded, on a cache hit too when this recorder has not written the
+  image yet, and charged as work. The cache's own growth is checked the same way,
+  `None` entries included.
 - The entries live on the pattern for the run. That is the process's heap, so
-  `--max-memory` counts them: sixty tiles each using a noise-table page pattern
-  write sixty images, and a 40 MiB cap stops the run partway
-  (`the_images_of_many_foreign_uses_add_up_against_the_memory_limit`). A tile
-  of a pattern is one context, so many marks in it share one image.
+  `--max-memory` counts them: twelve 1000 pt cells each using a noise-table page
+  pattern write twelve images, and caps of 32 and 48 MiB stop the run partway
+  with the heap no more than 3 MiB past the cap, which is the cell machinery's own
+  (a period and a mask a cell makes, unchecked before this change). Before, the
+  same run overshot by 3.4 MiB at 48 MiB.
 - The image never exceeds the canvas it is for, whatever the shading's Domain
   (a box of 1e30 is cut to the canvas).
-- Each limit case in `tests/patterns.rs` has a control, the same tile painting
-  a flat colour under the same limit, which finishes; with the image disabled
-  the steps and time cases no longer stop, so they are about the image. The
-  memory caps sit midway between the flat tile's threshold (9 MiB) and the
-  foreign use's (13 MiB).
+- **Tests.** `tests/patterns.rs`: a step budget found by binary search (the
+  fewest steps the page-level fill needs), against which a foreign full-cell fill
+  must stop at 1.5 times it; sixty marks finish within a fifth of one image's
+  steps of one (the image is rasterised once); pen variants write one image;
+  the clock, at every budget of a ladder, leaves a use finished or untouched.
+  `tests/pattern_use_image_memory.rs` (a binary of its own: the cap counts the
+  process): the heap's peak, as a sampler thread sees it, against the cap, for a
+  16 MB image (R2), twelve contexts and eight pens (R3). With the image disabled
+  the step cases no longer stop. The memory caps of the earlier test sit midway
+  between the flat tile's threshold (9 MiB) and the foreign use's (13 MiB).
 
 **Known limit.** The image is in the using context's pixels, which is what the
 PNG paints, but a viewer that scales a tile's `<pattern>` up resamples it. That

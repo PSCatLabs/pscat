@@ -26,7 +26,7 @@ use std::rc::Rc;
 use tiny_skia::FillRule;
 
 use crate::gfx::{BlendMode, ClipNode, Composite};
-use crate::pattern::{Ink, PatternTile, ShadingPattern, SvgTile};
+use crate::pattern::{Ink, PatternTile, ShadingPattern, SvgImage, SvgTile};
 use crate::textrun::{GlyphText, Placement, TextRun};
 
 /// How SVG output writes text set in the standard fonts (#1119).
@@ -98,6 +98,11 @@ pub struct SvgRecorder {
     /// Shading pattern paints on this page (#1298), by pattern identity,
     /// placement and pen; the `Rc` keeps the address from being reused.
     shading_ids: HashMap<ShadingKey, (Rc<ShadingPattern>, String)>,
+    /// Images written to this page's defs for uses in another context
+    /// (#1368), by the image's address (the `Rc` keeps it from being
+    /// reused): the id each is `<use>`d by. An image is written once however
+    /// many `<pattern>`s (one per pen, per placement) show it.
+    image_ids: HashMap<usize, (Rc<SvgImage>, String)>,
     /// Coverage masks in an uncoloured tile (#1340), by the paint they
     /// take the alpha of: the mask's id.
     coverage_ids: HashMap<String, String>,
@@ -152,6 +157,7 @@ impl SvgRecorder {
             next_pattern: 0,
             imported: Vec::new(),
             shading_ids: HashMap::new(),
+            image_ids: HashMap::new(),
             coverage_ids: HashMap::new(),
             groups: Vec::new(),
         }
@@ -378,9 +384,10 @@ impl SvgRecorder {
                 }
                 if let Some(Some(img)) = &foreign {
                     // Outside the hop group, cut to the `/BBox`'s corners as
-                    // this recorder sees them.
-                    let (png, iw, ih, x, y) = &**img;
-                    let tag = image(png, *iw, *ih, *x, *y);
+                    // this recorder sees them. The image is a def of its own,
+                    // written once, that each `<pattern>` shows.
+                    let id = self.image_def(img);
+                    let tag = format!("<use xlink:href=\"#{id}\"/>");
                     match &form.bbox {
                         Some(q) => {
                             let mut pts = q.map(|(x, y)| tiny_skia::Point::from_xy(x, y));
@@ -413,6 +420,59 @@ impl SvgRecorder {
         };
         self.shading_ids.insert(key, (sp.clone(), paint.clone()));
         paint
+    }
+
+    /// The bytes writing `img`'s def would take, at most, and 0 when this
+    /// recorder already holds it (#1368): its base64, the tag, the growth of
+    /// the defs string (a copy of it when it must move) and of the id table.
+    /// The mark asks before it is recorded, so a cap that cannot hold the def
+    /// refuses the mark whole.
+    pub(crate) fn image_cost(&self, img: &Rc<SvgImage>) -> usize {
+        if self.image_ids.contains_key(&(Rc::as_ptr(img) as usize)) {
+            return 0;
+        }
+        let need = img
+            .0
+            .len()
+            .div_ceil(3)
+            .saturating_mul(4)
+            .saturating_add(256);
+        let room = self.defs.capacity() - self.defs.len();
+        let grow = if room >= need {
+            0
+        } else {
+            self.defs
+                .len()
+                .saturating_add(need)
+                .max(self.defs.capacity().saturating_mul(2))
+        };
+        let table = if self.image_ids.len() == self.image_ids.capacity() {
+            self.image_ids.capacity().max(4).saturating_mul(2 * 96)
+        } else {
+            0
+        };
+        need.saturating_add(grow).saturating_add(table)
+    }
+
+    /// The id of `img`'s `<image>` def, written to the defs on first use.
+    fn image_def(&mut self, img: &Rc<SvgImage>) -> String {
+        let key = Rc::as_ptr(img) as usize;
+        if let Some((_, id)) = self.image_ids.get(&key) {
+            return id.clone();
+        }
+        // Ids share the gradients' counter: the letter keeps them apart.
+        let id = format!("{}i{}", self.prefix, self.next_grad);
+        self.next_grad += 1;
+        let (png, iw, ih, x, y) = &**img;
+        let _ = write!(
+            self.defs,
+            "<image id=\"{id}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" \
+             transform=\"translate({x} {y})\" xlink:href=\"data:image/png;base64,"
+        );
+        base64_into(&mut self.defs, png);
+        self.defs.push_str("\"/>");
+        self.image_ids.insert(key, (img.clone(), id.clone()));
+        id
     }
 
     /// `url(#…)` of `tile`'s `<pattern>` (in `rgb`, if uncoloured).
@@ -1231,6 +1291,7 @@ impl SvgRecorder {
         self.pattern_ids.clear();
         self.tile_groups.clear();
         self.shading_ids.clear();
+        self.image_ids.clear();
         self.coverage_ids.clear();
         self.groups.clear();
     }
@@ -1613,8 +1674,16 @@ fn fmt_precise(v: f32) -> String {
 
 /// Standard base64, no external dependency needed for one use.
 fn base64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    base64_into(&mut out, data);
+    out
+}
+
+/// [`base64`] appended to `out`, which is reserved once, so the encoding is
+/// never a second copy of itself beside the string it joins.
+fn base64_into(out: &mut String, data: &[u8]) {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    out.reserve(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b = [
             chunk[0],
@@ -1635,7 +1704,6 @@ fn base64(data: &[u8]) -> String {
             '='
         });
     }
-    out
 }
 
 #[cfg(test)]
